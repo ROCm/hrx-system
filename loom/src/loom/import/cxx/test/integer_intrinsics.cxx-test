@@ -18,7 +18,7 @@ CHECK: *scalar.ctpopi %value : i64
 // ====
 // RUN: verify
 // Bit counts do not admit floating-point permissions or implicit width changes.
-// ERROR@+1: LOWERING/059 "intrinsic has an unsupported fast-math flag"
+// ERROR@+1: LOWERING/059 "intrinsic has an unsupported math flag"
 [[loom::op("scalar.cttzi", "afn")]] unsigned count(unsigned);
 
 // ====

@@ -8,7 +8,7 @@
 #define AMDF_CTS_GPU_AQL_BARRIER_OR_PAYLOAD_FIXTURE_H_
 
 #include <cstdint>
-#include <string>
+#include <span>
 
 #include "libamdf/cts/gpu/aql/dispatch_fixture.h"
 
@@ -19,10 +19,11 @@ struct OrPayloadCase {
   uint32_t ready_slot;
 };
 
-class AqlOrPayloadTest : public AqlDispatchTest,
-                         public ::testing::WithParamInterface<OrPayloadCase> {};
-
-std::string OrPayloadCaseName(
-    const ::testing::TestParamInfo<OrPayloadCase>& info);
+class AqlOrPayloadTest : public AqlDispatchTest {
+ protected:
+  // Runs independent readiness cases through one queue topology. Each case
+  // resets mutable workload state after all prior work completes and retires.
+  void RunCases(std::span<const OrPayloadCase> cases);
+};
 
 #endif  // AMDF_CTS_GPU_AQL_BARRIER_OR_PAYLOAD_FIXTURE_H_

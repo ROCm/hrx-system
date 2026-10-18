@@ -514,9 +514,7 @@ iree_status_t loom_serve_residency_try_admit(
   }
   IREE_RETURN_IF_ERROR(
       loom_serve_residency_acquire_parameters(residency, out_admission));
-  if (*out_admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
-    loom_serve_residency_cancel_admission(residency);
-  } else {
+  if (*out_admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     loom_serve_residency_queue_admission(residency);
     if (loom_serve_residency_cache_is_reclaiming(cache)) {
       *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;

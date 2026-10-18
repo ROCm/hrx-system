@@ -210,9 +210,12 @@ iree_status_t loom_amdgpu_collective_payload_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     uint32_t register_count, loom_value_id_t low_value, uint32_t register_index,
     loom_type_t lane_type, loom_value_id_t* out_register) {
-  return loom_amdgpu_extract_low_register_unit(context, source_op, low_value,
-                                               register_count, register_index,
-                                               lane_type, out_register);
+  loom_value_id_t low_register = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
+      context, source_op, low_value, register_count, register_index, lane_type,
+      &low_register));
+  return loom_amdgpu_materialize_full_low_vgpr_b32(context, source_op,
+                                                   low_register, out_register);
 }
 
 iree_status_t loom_amdgpu_collective_bind_payload_result(

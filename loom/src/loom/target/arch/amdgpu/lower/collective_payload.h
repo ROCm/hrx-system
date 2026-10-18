@@ -87,7 +87,9 @@ iree_status_t loom_amdgpu_collective_lookup_payload(
     loom_value_id_t value, loom_amdgpu_subgroup_payload_kind_t payload_kind,
     const void* materialization, loom_value_id_t* out_low_value);
 
-// Extracts one 32-bit payload register from a scalar or vector low value.
+// Extracts one fully defined 32-bit payload register from a scalar or vector
+// low value. Narrow scalar producers define only the low register part and are
+// widened before use by full-register cross-lane packets.
 iree_status_t loom_amdgpu_collective_payload_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     uint32_t register_count, loom_value_id_t low_value, uint32_t register_index,

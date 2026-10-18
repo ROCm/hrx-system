@@ -265,13 +265,41 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    workgroup_collective_legalization
+  HDRS
+    "workgroup_collective_legalization.h"
+  SRCS
+    "workgroup_collective_legalization.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::atomic
+    loom::ops::buffer
+    loom::ops::combining
+    loom::ops::index
+    loom::ops::kernel
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::vector
+    loom::ops::view
+    loom::rewrite::rewriter
+    loom::target::launch
+    loom::target::legalization
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     target_legalization
   HDRS
     "target_legalization.h"
   SRCS
     "target_legalization.c"
   DEPS
+    ::workgroup_collective_legalization
     iree::base
+    loom::analysis::control_uniformity
     loom::ir
     loom::ops::combining
     loom::ops::index

@@ -206,9 +206,9 @@ check.scenario @subgroup_float_reduction_values {
   check.return
 }
 
-// Eight-lane clusters exercise partial subgroups. All floating additions are
-// exact in F16/F32/F64; BF16 rounds the final sum. Integer narrowing happens
-// before the collective, so byte sums also exercise modular overflow.
+// Eight-lane clusters exercise partial subgroups. The generated integer range
+// keeps every floating addition exact in BF16/F16/F32/F64 while the byte sum
+// still exercises modular overflow.
 kernel.def @subgroup_extended_reductions() {
   %unit = index.constant 1 : index
   %items = index.constant 64 : index
@@ -328,7 +328,7 @@ func.def @subgroup_extended_reductions_oracle(%input: buffer, %output: buffer) {
 check.scenario @subgroup_extended_reduction_values {
   check.trial[8](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
-    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<64xi32>
+    %input = check.generate.random.uniform seed(%seed) range(-32 to 31) : tensor<64xi32>
     %output = check.generate.fill value(123) : tensor<64x9xi64>
     check.compare<@subgroup_extended_reductions, @subgroup_extended_reductions_oracle>(%input, %output) : (tensor<64xi32>, tensor<64x9xi64>) -> () {
       check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>

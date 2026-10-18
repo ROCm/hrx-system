@@ -1,0 +1,261 @@
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+// A vector wider than one native load retains separate ownership for both
+// packets. Each fallback copy precedes its EXEC envelope, and each load owns
+// that copy explicitly. The caller also observes the original fallback.
+func.def @split_packed_load(%input: buffer, %condition: i1, %old: vector<20xi8>) -> (vector<20xi8>, vector<20xi8>) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<20xi8>
+  %mask = vector.splat %condition : vector<20xi1>
+  %value = vector.load.mask %source[0], %mask, %old : view<20xi8>, vector<20xi1>, vector<20xi8>
+  func.return %value, %old : vector<20xi8>, vector<20xi8>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @split_packed_load(%condition: reg<amdgpu.sgpr x2>, %old: reg<amdgpu.vgpr x5>) -> (reg<amdgpu.vgpr x5>, reg<amdgpu.vgpr x5>) asm {
+  %source = resource<hal_binding> {extent = 20, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = slice %old[0] : reg<amdgpu.vgpr x5> -> reg<amdgpu.vgpr x4>
+  %15 = copy %14 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %16 = v_mov_b32 0
+  %17, %18 = s_and_saveexec_b64 %condition
+  %19 = global_load_b128_saddr_preserve %15, %16, %source
+  s_mov_b64_exec %17
+  %20 = slice %old[4] : reg<amdgpu.vgpr x5> -> reg<amdgpu.vgpr>
+  %21 = copy %20 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %22 = v_mov_b32 0
+  %23, %24 = s_and_saveexec_b64 %condition
+  %25 = global_load_b32_saddr_preserve %21, %22, %source {offset = 16}
+  s_mov_b64_exec %23
+  %value = concat(%19, %25) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x5>
+  return %value, %old
+}
+
+// ====
+
+// Halfword and byte packets need zero upper bits before packed assembly.
+func.def @packed_tail(%input: buffer, %condition: i1, %old: vector<3xi8>) -> (vector<3xi8>, vector<3xi8>) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<3xi8>
+  %mask = vector.splat %condition : vector<3xi1>
+  %value = vector.load.mask %source[0], %mask, %old : view<3xi8>, vector<3xi1>, vector<3xi8>
+  func.return %value, %old : vector<3xi8>, vector<3xi8>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @packed_tail(%condition: reg<amdgpu.sgpr x2>, %old: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %source = resource<hal_binding> {extent = 3, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %15 = v_bfe_u32_offset_width_inline %old {offset = 0, width = 16}
+  %16 = copy %15 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %17 = v_mov_b32 0
+  %18, %19 = s_and_saveexec_b64 %condition
+  %20 = global_load_u16_saddr_preserve %16, %17, %source
+  s_mov_b64_exec %18
+  %22 = v_bfe_u32_offset_width_inline %old {offset = 16, width = 8}
+  %23 = copy %22 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %24 = v_mov_b32 0
+  %25, %26 = s_and_saveexec_b64 %condition
+  %27 = global_load_u8_saddr_preserve %23, %24, %source {offset = 2}
+  s_mov_b64_exec %25
+  %28 = v_lshlrev_b32_src0_inline %27, 16
+  %value = v_or_b32 %20, %28
+  return %value, %old
+}
+
+// ====
+
+// An immutable uniform address still needs lane-predicated vector memory.
+func.def @uniform_address(%input: buffer, %condition: i1, %old: vector<4xi32>) -> (vector<4xi32>) {
+  %base = index.constant 0 : offset
+  %constant_input = buffer.assume.memory_space<constant> %input : buffer
+  %source = buffer.view %constant_input[%base] : buffer -> view<4xi32>
+  %mask = vector.splat %condition : vector<4xi1>
+  %value = vector.load.mask %source[0], %mask, %old : view<4xi32>, vector<4xi1>, vector<4xi32>
+  func.return %value : vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @uniform_address(%condition: reg<amdgpu.sgpr x2>, %old: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %source = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = copy %old : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %15 = v_mov_b32 0
+  %16, %17 = s_and_saveexec_b64 %condition
+  %value = global_load_b128_saddr_preserve %14, %15, %source
+  s_mov_b64_exec %16
+  return %value
+}
+
+// ====
+
+// A narrow floating carrier keeps its native low-half register contract.
+func.def @generic_half(%input: buffer, %condition: i1, %old: vector<1xf16>) -> (vector<1xf32>) {
+  %base = index.constant 0 : offset
+  %generic = buffer.assume.memory_space<generic> %input : buffer
+  %source = buffer.view %generic[%base] : buffer -> view<1xf16>
+  %mask = vector.splat %condition : vector<1xi1>
+  %value = vector.load.mask %source[0], %mask, %old : view<1xf16>, vector<1xi1>, vector<1xf16>
+  %wide = vector.extf %value : vector<1xf16> to vector<1xf32>
+  func.return %wide : vector<1xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @generic_half(%condition: reg<amdgpu.sgpr x2>, %old: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %source = resource<hal_binding> {extent = 2, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %15 = v_bfe_u32_offset_width_inline %old {offset = 0, width = 16}
+  %16 = copy %15 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %17 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = v_mov_b32_copy %17
+  %20 = v_mov_b32_copy %18
+  %21 = concat(%19, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %22, %23 = s_and_saveexec_b64 %condition
+  %value = flat_load_u16_preserve %16, %21
+  s_mov_b64_exec %22
+  %wide = v_cvt_f32_f16 %value
+  return %wide
+}
+
+// ====
+
+// Narrow LDS loads use unsigned carriers; sign repair runs after EXEC is
+// restored so inactive fallback lanes participate in the repair too.
+func.def @lds_signed_half(%condition: i1, %initial: vector<1xi16>, %old: vector<1xi16>) -> (vector<1xi32>) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 2 : offset
+  %storage = buffer.alloca<workgroup> align(2) %bytes : buffer
+  %source = buffer.view %storage[%base] : buffer -> view<1xi16>
+  vector.store %initial, %source[0] : vector<1xi16>, view<1xi16>
+  %mask = vector.splat %condition : vector<1xi1>
+  %value = vector.load.mask %source[0], %mask, %old : view<1xi16>, vector<1xi1>, vector<1xi16>
+  %wide = vector.extsi %value : vector<1xi16> to vector<1xi32>
+  func.return %wide : vector<1xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @lds_signed_half(%condition: reg<amdgpu.sgpr x2>, %initial: reg<amdgpu.vgpr>, %old: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %15 = storage {byte_alignment = 2, byte_length = 2} : low.storage<workgroup>
+  %17 = v_mov_b32 0
+  ds_write_b16 %17, %initial
+  %19 = v_bfe_i32_offset_width_inline %old {offset = 0, width = 16}
+  %20 = copy %19 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %22, %23 = s_and_saveexec_b64 %condition
+  %24 = ds_read_u16_preserve %20, %17
+  s_mov_b64_exec %22
+  %value = v_bfe_i32_offset_width_inline %24 {offset = 0, width = 16}
+  %wide = v_bfe_i32_offset_width_inline %value {offset = 0, width = 16}
+  return %wide
+}
+
+// ====
+
+func.def @lds_signed_byte(%condition: i1, %initial: vector<1xi8>, %old: vector<1xi8>) -> (vector<1xi32>) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 1 : offset
+  %storage = buffer.alloca<workgroup> align(1) %bytes : buffer
+  %source = buffer.view %storage[%base] : buffer -> view<1xi8>
+  vector.store %initial, %source[0] : vector<1xi8>, view<1xi8>
+  %mask = vector.splat %condition : vector<1xi1>
+  %value = vector.load.mask %source[0], %mask, %old : view<1xi8>, vector<1xi1>, vector<1xi8>
+  %wide = vector.extsi %value : vector<1xi8> to vector<1xi32>
+  func.return %wide : vector<1xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @lds_signed_byte(%condition: reg<amdgpu.sgpr x2>, %initial: reg<amdgpu.vgpr>, %old: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %15 = storage {byte_alignment = 1, byte_length = 1} : low.storage<workgroup>
+  %17 = v_mov_b32 0
+  ds_write_b8 %17, %initial
+  %19 = v_bfe_i32_offset_width_inline %old {offset = 0, width = 8}
+  %20 = copy %19 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %22, %23 = s_and_saveexec_b64 %condition
+  %24 = ds_read_u8_preserve %20, %17
+  s_mov_b64_exec %22
+  %value = v_bfe_i32_offset_width_inline %24 {offset = 0, width = 8}
+  %wide = v_bfe_i32_offset_width_inline %value {offset = 0, width = 8}
+  return %wide
+}
+
+// ====
+
+// Private packets share the same fallback ownership contract as global/LDS.
+func.def @private_words(%condition: i1, %initial: vector<2xi32>, %old: vector<2xi32>) -> (vector<2xi32>) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %storage = buffer.alloca<private> align(8) %bytes : buffer
+  %source = buffer.view %storage[%base] : buffer -> view<2xi32>
+  vector.store %initial, %source[0] : vector<2xi32>, view<2xi32>
+  %mask = vector.splat %condition : vector<2xi1>
+  %value = vector.load.mask %source[0], %mask, %old : view<2xi32>, vector<2xi1>, vector<2xi32>
+  func.return %value : vector<2xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @private_words(%condition: reg<amdgpu.sgpr x2>, %initial: reg<amdgpu.vgpr x2>, %old: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %14 = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  %16 = v_mov_b32 0
+  scratch_store_b64_vaddr %16, %initial
+  %18 = copy %old : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr x2>
+  %20, %21 = s_and_saveexec_b64 %condition
+  %value = scratch_load_b64_vaddr_preserve %18, %16
+  s_mov_b64_exec %20
+  return %value
+}
+
+// ====
+
+// Descriptor construction remains outside the lane mask, and its off-zero
+// operand form retains the tied fallback without encoding it as an address.
+func.def @descriptor_words(%input: buffer, %condition: i1, %old: vector<4xi32>) -> (vector<4xi32>) {
+  %base = index.constant 0 : offset
+  %descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %source = buffer.view %descriptor[%base] : buffer -> view<4xi32>
+  %mask = vector.splat %condition : vector<4xi1>
+  %value = vector.load.mask %source[0], %mask, %old : view<4xi32>, vector<4xi1>, vector<4xi32>
+  func.return %value : vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @descriptor_words(%condition: reg<amdgpu.sgpr x2>, %old: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %source = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = copy %old : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %19 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = s_mov_b32 65535
+  %22 = s_and_b32 %20, %21
+  %23 = concat(%19, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %24 = s_mov_b32 16
+  %25 = s_mov_b32 822173696
+  %26 = concat(%23, %24, %25) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %16, %17 = s_and_saveexec_b64 %condition
+  %value = buffer_load_b128_off_zero_preserve %14, %26
+  s_mov_b64_exec %16
+  return %value
+}
+
+// ====
+
+// Paired LDS addresses retain both offset fields and one two-register fallback.
+func.def @lds_strided_pair(%condition: i1, %initial: vector<2xi32>, %old: vector<2xi32>) -> (vector<2xi32>) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 16 : offset
+  %layout = encoding.layout.strided [4, 2] : encoding<layout>
+  %storage = buffer.alloca<workgroup> align(8) %bytes : buffer
+  %source = buffer.view %storage[%base] : buffer -> view<1x2xi32, %layout>
+  vector.store %initial, %source[0, 0] : vector<2xi32>, view<1x2xi32, %layout>
+  %mask = vector.splat %condition : vector<2xi1>
+  %value = vector.load.mask %source[0, 0], %mask, %old : view<1x2xi32, %layout>, vector<2xi1>, vector<2xi32>
+  func.return %value : vector<2xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @lds_strided_pair(%condition: reg<amdgpu.sgpr x2>, %initial: reg<amdgpu.vgpr x2>, %old: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %15 = storage {byte_alignment = 8, byte_length = 16} : low.storage<workgroup>
+  %17 = v_mov_b32 0
+  %18 = slice %initial[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = slice %initial[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  ds_write2_b32 %17, %18, %19 {offset1 = 2}
+  %21 = copy %old : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr x2>
+  %23, %24 = s_and_saveexec_b64 %condition
+  %value = ds_read2_b32_preserve %21, %17 {offset1 = 2}
+  s_mov_b64_exec %23
+  return %value
+}

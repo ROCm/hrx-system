@@ -5,16 +5,16 @@ func.def @trigonometry_f8e4m3(%input: buffer, %output: buffer) {
   %source = buffer.view %input[%origin] : buffer -> view<8xf8E4M3>
   %destination = buffer.view %output[%origin] : buffer -> view<64xf32>
   %values = vector.load %source[0] : view<8xf8E4M3> -> vector<8xf8E4M3>
-  %sinturnsf = vector.sinturnsf<afn> %values : vector<8xf8E4M3>
+  %sinturnsf = vector.sinturnsf<afn|preserve> %values : vector<8xf8E4M3>
   %sinturnsf_wide = vector.extf %sinturnsf : vector<8xf8E4M3> to vector<8xf32>
   vector.store %sinturnsf_wide, %destination[0] : vector<8xf32>, view<64xf32>
-  %costurnsf = vector.costurnsf<afn> %values : vector<8xf8E4M3>
+  %costurnsf = vector.costurnsf<afn|preserve> %values : vector<8xf8E4M3>
   %costurnsf_wide = vector.extf %costurnsf : vector<8xf8E4M3> to vector<8xf32>
   vector.store %costurnsf_wide, %destination[8] : vector<8xf32>, view<64xf32>
-  %sinf = vector.sinf<afn> %values : vector<8xf8E4M3>
+  %sinf = vector.sinf<afn|preserve> %values : vector<8xf8E4M3>
   %sinf_wide = vector.extf %sinf : vector<8xf8E4M3> to vector<8xf32>
   vector.store %sinf_wide, %destination[16] : vector<8xf32>, view<64xf32>
-  %cosf = vector.cosf<afn> %values : vector<8xf8E4M3>
+  %cosf = vector.cosf<afn|preserve> %values : vector<8xf8E4M3>
   %cosf_wide = vector.extf %cosf : vector<8xf8E4M3> to vector<8xf32>
   vector.store %cosf_wide, %destination[24] : vector<8xf32>, view<64xf32>
   %begin = index.constant 0 : index
@@ -22,22 +22,22 @@ func.def @trigonometry_f8e4m3(%input: buffer, %output: buffer) {
   %step = index.constant 1 : index
   scf.for %position = [%begin to %end step %step] {
     %value = view.load %source[%position] : view<8xf8E4M3> -> f8E4M3
-    %scalar_sinturnsf = scalar.sinturnsf<afn> %value : f8E4M3
+    %scalar_sinturnsf = scalar.sinturnsf<afn|preserve> %value : f8E4M3
     %scalar_sinturnsf_wide = scalar.extf %scalar_sinturnsf : f8E4M3 to f32
     %base0 = index.constant 32 : index
     %offset0 = index.add %base0, %position : index
     view.store %scalar_sinturnsf_wide, %destination[%offset0] : f32, view<64xf32>
-    %scalar_costurnsf = scalar.costurnsf<afn> %value : f8E4M3
+    %scalar_costurnsf = scalar.costurnsf<afn|preserve> %value : f8E4M3
     %scalar_costurnsf_wide = scalar.extf %scalar_costurnsf : f8E4M3 to f32
     %base1 = index.constant 40 : index
     %offset1 = index.add %base1, %position : index
     view.store %scalar_costurnsf_wide, %destination[%offset1] : f32, view<64xf32>
-    %scalar_sinf = scalar.sinf<afn> %value : f8E4M3
+    %scalar_sinf = scalar.sinf<afn|preserve> %value : f8E4M3
     %scalar_sinf_wide = scalar.extf %scalar_sinf : f8E4M3 to f32
     %base2 = index.constant 48 : index
     %offset2 = index.add %base2, %position : index
     view.store %scalar_sinf_wide, %destination[%offset2] : f32, view<64xf32>
-    %scalar_cosf = scalar.cosf<afn> %value : f8E4M3
+    %scalar_cosf = scalar.cosf<afn|preserve> %value : f8E4M3
     %scalar_cosf_wide = scalar.extf %scalar_cosf : f8E4M3 to f32
     %base3 = index.constant 56 : index
     %offset3 = index.add %base3, %position : index
@@ -56,7 +56,7 @@ func.def @trigonometry_f8e4m3_oracle(%input: buffer, %output: buffer) {
   scf.for %position = [%begin to %end step %step] {
     %value = view.load %source[%position] : view<8xf8E4M3> -> f8E4M3
     %wide = scalar.extf %value : f8E4M3 to f32
-    %sinturnsf = scalar.sinturnsf<afn> %wide : f32
+    %sinturnsf = scalar.sinturnsf<afn|preserve> %wide : f32
     %sinturnsf_rounded = scalar.fptrunc %sinturnsf : f32 to f8E4M3
     %sinturnsf_observed = scalar.extf %sinturnsf_rounded : f8E4M3 to f32
     %vector_base0 = index.constant 0 : index
@@ -65,7 +65,7 @@ func.def @trigonometry_f8e4m3_oracle(%input: buffer, %output: buffer) {
     %scalar_offset0 = index.add %scalar_base0, %position : index
     view.store %sinturnsf_observed, %destination[%vector_offset0] : f32, view<64xf32>
     view.store %sinturnsf_observed, %destination[%scalar_offset0] : f32, view<64xf32>
-    %costurnsf = scalar.costurnsf<afn> %wide : f32
+    %costurnsf = scalar.costurnsf<afn|preserve> %wide : f32
     %costurnsf_rounded = scalar.fptrunc %costurnsf : f32 to f8E4M3
     %costurnsf_observed = scalar.extf %costurnsf_rounded : f8E4M3 to f32
     %vector_base1 = index.constant 8 : index
@@ -74,7 +74,7 @@ func.def @trigonometry_f8e4m3_oracle(%input: buffer, %output: buffer) {
     %scalar_offset1 = index.add %scalar_base1, %position : index
     view.store %costurnsf_observed, %destination[%vector_offset1] : f32, view<64xf32>
     view.store %costurnsf_observed, %destination[%scalar_offset1] : f32, view<64xf32>
-    %sinf = scalar.sinf<afn> %wide : f32
+    %sinf = scalar.sinf<afn|preserve> %wide : f32
     %sinf_rounded = scalar.fptrunc %sinf : f32 to f8E4M3
     %sinf_observed = scalar.extf %sinf_rounded : f8E4M3 to f32
     %vector_base2 = index.constant 16 : index
@@ -83,7 +83,7 @@ func.def @trigonometry_f8e4m3_oracle(%input: buffer, %output: buffer) {
     %scalar_offset2 = index.add %scalar_base2, %position : index
     view.store %sinf_observed, %destination[%vector_offset2] : f32, view<64xf32>
     view.store %sinf_observed, %destination[%scalar_offset2] : f32, view<64xf32>
-    %cosf = scalar.cosf<afn> %wide : f32
+    %cosf = scalar.cosf<afn|preserve> %wide : f32
     %cosf_rounded = scalar.fptrunc %cosf : f32 to f8E4M3
     %cosf_observed = scalar.extf %cosf_rounded : f8E4M3 to f32
     %vector_base3 = index.constant 24 : index

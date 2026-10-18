@@ -46,7 +46,7 @@ float entry(float x) { return broken(x, x); }
 
 // ====
 // Generated intrinsic signatures are checked.
-// ERROR@+1: LOWERING/059 "intrinsic has an unsupported fast-math flag"
+// ERROR@+1: LOWERING/059 "intrinsic has an unsupported math flag"
 [[loom::op("scalar.expf", "surprise")]] float broken(float);
 float entry(float x) { return broken(x); }
 

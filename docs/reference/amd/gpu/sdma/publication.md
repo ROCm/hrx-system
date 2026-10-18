@@ -12,6 +12,11 @@ IB queues have different publication owners. [ROCr publication][blit-publish]
 the selected MQD, loader and scheduler. Its family tables distinguish the
 legacy 32-bit pointer consumers from the modern 64-bit producer below.
 
+[Windows native rings](windows.md) use a different publication protocol:
+kernel-submitted byte frontiers, an `AmdQueueT` read-pointer page, and a
+reserved progress-fence epilogue. A direct KFD doorbell store does not supply
+that transport.
+
 [Device-generated commands](device-publication.md) use these same native byte
 frontiers with a shader as publisher. That path adds GPUVM notification reach,
 shader command visibility, lane progress and downstream payload credits to the

@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "loom/analysis/control_uniformity.h"
 #include "loom/ops/combining.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
@@ -17,6 +18,7 @@
 #include "loom/ops/vector/combining.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/transforms/kernel/workgroup_collective_legalization.h"
 
 #define LOOM_KERNEL_SCAN_MAX_SELECTOR_LEVELS 6u
 
@@ -333,16 +335,22 @@ typedef struct loom_kernel_scan_selector_level_t {
 typedef struct loom_kernel_scan_state_t {
   loom_builder_t* builder;
   loom_location_id_t location;
-  loom_type_t result_type;
+  // Authored collective value and result type.
+  loom_type_t logical_type;
+  // Type carried through shuffle and combine operations.
+  loom_type_t value_type;
   loom_type_t i1_type;
   loom_type_t i32_type;
   loom_type_t mask_type;
   loom_combining_kind_t kind;
   uint32_t subgroup_size;
   uint32_t mask_bit_count;
+  bool direct_physical_lanes;
   loom_value_id_t zero_mask;
   loom_value_id_t one_mask;
   loom_value_id_t subgroup_size_i32;
+  loom_value_id_t cluster_width_i32;
+  loom_value_id_t lane_i32;
   loom_value_id_t cluster_active_mask;
   loom_value_id_t rank;
   loom_value_id_t cluster_active_count;
@@ -351,9 +359,27 @@ typedef struct loom_kernel_scan_state_t {
   uint32_t selector_level_count;
 } loom_kernel_scan_state_t;
 
-static bool loom_kernel_scan_cluster_from_op(
-    const loom_target_legalization_context_t* context, const loom_op_t* op,
-    loom_kernel_scan_cluster_t* out_cluster) {
+// Returns whether authored participation already follows physical subgroup
+// lanes. A subgroup-uniform operation executes in every hardware-active lane;
+// contiguous clusters can therefore use direct up/down shuffles without the
+// active-rank selection network required by sparse or strided participation.
+static bool loom_kernel_scan_has_direct_physical_lanes(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    const loom_kernel_scan_cluster_t* cluster) {
+  if (cluster->stride != 1 || context->fact_table == NULL) {
+    return false;
+  }
+  loom_control_uniformity_info_t control_uniformity;
+  loom_control_uniformity_info_initialize(context->module, context->fact_table,
+                                          context->arena, &control_uniformity);
+  return loom_control_uniformity_prove_execution(
+      &control_uniformity, op, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP, NULL);
+}
+
+static bool loom_kernel_scan_cluster_from_attributes(
+    const loom_target_legalization_context_t* context, bool has_cluster_size,
+    int64_t cluster_size_attr, bool has_cluster_stride,
+    int64_t cluster_stride_attr, loom_kernel_scan_cluster_t* out_cluster) {
   const loom_target_bundle_t* bundle =
       loom_target_legalization_context_bundle(context);
   if (bundle == NULL || bundle->snapshot == NULL ||
@@ -363,13 +389,9 @@ static bool loom_kernel_scan_cluster_from_op(
   }
   const uint32_t subgroup_size = bundle->snapshot->subgroup_size;
   const uint32_t cluster_size =
-      loom_kernel_subgroup_scan_has_cluster_size(op)
-          ? (uint32_t)loom_kernel_subgroup_scan_cluster_size(op)
-          : subgroup_size;
+      has_cluster_size ? (uint32_t)cluster_size_attr : subgroup_size;
   const uint32_t cluster_stride =
-      loom_kernel_subgroup_scan_has_cluster_stride(op)
-          ? (uint32_t)loom_kernel_subgroup_scan_cluster_stride(op)
-          : 1u;
+      has_cluster_stride ? (uint32_t)cluster_stride_attr : 1u;
   const uint64_t cluster_span =
       (uint64_t)cluster_size * (uint64_t)cluster_stride;
   if (cluster_size == 0 || cluster_stride == 0 ||
@@ -383,12 +405,49 @@ static bool loom_kernel_scan_cluster_from_op(
   return true;
 }
 
+static bool loom_kernel_scan_cluster_from_op(
+    const loom_target_legalization_context_t* context, const loom_op_t* op,
+    loom_kernel_scan_cluster_t* out_cluster) {
+  const bool has_cluster_size = loom_kernel_subgroup_scan_has_cluster_size(op);
+  const bool has_cluster_stride =
+      loom_kernel_subgroup_scan_has_cluster_stride(op);
+  return loom_kernel_scan_cluster_from_attributes(
+      context, has_cluster_size,
+      has_cluster_size ? loom_kernel_subgroup_scan_cluster_size(op) : 0,
+      has_cluster_stride,
+      has_cluster_stride ? loom_kernel_subgroup_scan_cluster_stride(op) : 0,
+      out_cluster);
+}
+
+static bool loom_kernel_reduce_cluster_from_op(
+    const loom_target_legalization_context_t* context, const loom_op_t* op,
+    loom_kernel_scan_cluster_t* out_cluster) {
+  const bool has_cluster_size =
+      loom_kernel_subgroup_reduce_has_cluster_size(op);
+  const bool has_cluster_stride =
+      loom_kernel_subgroup_reduce_has_cluster_stride(op);
+  return loom_kernel_scan_cluster_from_attributes(
+      context, has_cluster_size,
+      has_cluster_size ? loom_kernel_subgroup_reduce_cluster_size(op) : 0,
+      has_cluster_stride,
+      has_cluster_stride ? loom_kernel_subgroup_reduce_cluster_stride(op) : 0,
+      out_cluster);
+}
+
 static bool loom_kernel_match_subgroup_scan(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
   (void)entry;
   loom_kernel_scan_cluster_t cluster = {0};
   return loom_kernel_scan_cluster_from_op(context, op, &cluster);
+}
+
+static bool loom_kernel_match_subgroup_reduce(
+    const loom_target_legalizer_entry_t* entry,
+    const loom_target_legalization_context_t* context, const loom_op_t* op) {
+  (void)entry;
+  loom_kernel_scan_cluster_t cluster = {0};
+  return loom_kernel_reduce_cluster_from_op(context, op, &cluster);
 }
 
 static iree_status_t loom_kernel_scan_build_integer_constant(
@@ -398,6 +457,50 @@ static iree_status_t loom_kernel_scan_build_integer_constant(
   IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
       state->builder, loom_attr_i64(value), type, state->location, &constant));
   *out_value = loom_scalar_constant_result(constant);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_scan_build_transport_value(
+    loom_kernel_scan_state_t* state, loom_value_id_t logical_value,
+    loom_value_id_t* out_value) {
+  if (loom_type_equal(state->logical_type, state->value_type)) {
+    *out_value = logical_value;
+    return iree_ok_status();
+  }
+  loom_op_t* extend_op = NULL;
+  if (loom_type_is_scalar(state->logical_type)) {
+    IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
+        state->builder, logical_value, state->logical_type, state->value_type,
+        state->location, &extend_op));
+    *out_value = loom_scalar_extui_result(extend_op);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_extui_build(
+        state->builder, logical_value, state->logical_type, state->value_type,
+        state->location, &extend_op));
+    *out_value = loom_vector_extui_result(extend_op);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_scan_build_logical_value(
+    loom_kernel_scan_state_t* state, loom_value_id_t value,
+    loom_value_id_t* out_logical_value) {
+  if (loom_type_equal(state->logical_type, state->value_type)) {
+    *out_logical_value = value;
+    return iree_ok_status();
+  }
+  loom_op_t* truncate_op = NULL;
+  if (loom_type_is_scalar(state->logical_type)) {
+    IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(
+        state->builder, value, state->value_type, state->logical_type,
+        state->location, &truncate_op));
+    *out_logical_value = loom_scalar_trunci_result(truncate_op);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_trunci_build(
+        state->builder, value, state->value_type, state->logical_type,
+        state->location, &truncate_op));
+    *out_logical_value = loom_vector_trunci_result(truncate_op);
+  }
   return iree_ok_status();
 }
 
@@ -437,6 +540,7 @@ static iree_status_t loom_kernel_scan_build_cluster_state(
       state->builder, loom_kernel_subgroup_lane_id_result(lane_id_op),
       index_type, state->i32_type, state->location, &lane_i32_op));
   const loom_value_id_t lane_i32 = loom_index_cast_result(lane_i32_op);
+  state->lane_i32 = lane_i32;
 
   loom_value_id_t lane_mask = lane_i32;
   if (state->mask_bit_count == 64) {
@@ -541,9 +645,83 @@ static iree_status_t loom_kernel_scan_build_cluster_state(
   return iree_ok_status();
 }
 
+static iree_status_t loom_kernel_scan_build_direct_state(
+    loom_kernel_scan_state_t* state, const loom_kernel_scan_cluster_t* cluster,
+    bool need_active_count) {
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
+      state, state->i32_type, cluster->size, &state->cluster_width_i32));
+  if (!need_active_count) {
+    return iree_ok_status();
+  }
+
+  loom_op_t* active_mask_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_kernel_subgroup_active_mask_build(
+      state->builder, state->mask_type, state->location, &active_mask_op));
+  state->cluster_active_mask =
+      loom_kernel_subgroup_active_mask_mask(active_mask_op);
+  if (cluster->size != state->subgroup_size) {
+    loom_op_t* lane_id_op = NULL;
+    const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+    IREE_RETURN_IF_ERROR(loom_kernel_subgroup_lane_id_build(
+        state->builder, index_type, state->location, &lane_id_op));
+    loom_op_t* lane_i32_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_cast_build(
+        state->builder, loom_kernel_subgroup_lane_id_result(lane_id_op),
+        index_type, state->i32_type, state->location, &lane_i32_op));
+    state->lane_i32 = loom_index_cast_result(lane_i32_op);
+
+    loom_op_t* cluster_index_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_divui_build(
+        state->builder, state->lane_i32, state->cluster_width_i32,
+        state->i32_type, state->location, &cluster_index_op));
+    loom_op_t* cluster_base_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_muli_build(
+        state->builder, 0, loom_scalar_divui_result(cluster_index_op),
+        state->cluster_width_i32, state->i32_type, state->location,
+        &cluster_base_op));
+    loom_value_id_t cluster_base = loom_scalar_muli_result(cluster_base_op);
+    if (state->mask_bit_count == 64) {
+      loom_op_t* extend_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
+          state->builder, cluster_base, state->i32_type, state->mask_type,
+          state->location, &extend_op));
+      cluster_base = loom_scalar_extui_result(extend_op);
+    }
+
+    const uint64_t cluster_pattern =
+        cluster->size == 64 ? UINT64_MAX : (UINT64_C(1) << cluster->size) - 1u;
+    const int64_t signed_pattern =
+        state->mask_bit_count == 32
+            ? (int64_t)(int32_t)(uint32_t)cluster_pattern
+            : (int64_t)cluster_pattern;
+    loom_value_id_t cluster_pattern_value = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
+        state, state->mask_type, signed_pattern, &cluster_pattern_value));
+    loom_op_t* cluster_mask_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_shli_build(
+        state->builder, 0, cluster_pattern_value, cluster_base,
+        state->mask_type, state->location, &cluster_mask_op));
+    IREE_RETURN_IF_ERROR(loom_kernel_scan_build_and(
+        state, state->cluster_active_mask,
+        loom_scalar_shli_result(cluster_mask_op), state->mask_type,
+        &state->cluster_active_mask));
+  }
+
+  loom_op_t* count_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_ctpopi_build(state->builder, state->cluster_active_mask,
+                               state->mask_type, state->location, &count_op));
+  state->cluster_active_count = loom_scalar_ctpopi_result(count_op);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_kernel_scan_build_selector_constants(
     loom_kernel_scan_state_t* state) {
-  for (uint32_t half = state->mask_bit_count / 2; half != 0; half >>= 1) {
+  uint32_t first_half = state->subgroup_size > 1 ? 1u : 0u;
+  while ((first_half << 1) < state->subgroup_size) {
+    first_half <<= 1;
+  }
+  for (uint32_t half = first_half; half != 0; half >>= 1) {
     loom_kernel_scan_selector_level_t* level =
         &state->selector_levels[state->selector_level_count++];
     IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
@@ -556,8 +734,8 @@ static iree_status_t loom_kernel_scan_build_selector_constants(
 }
 
 // Maps one compact active-lane rank to its physical subgroup lane. The fixed
-// depth selection network costs log2(mask width) steps for every target and
-// avoids a data-dependent loop over sparse participation masks.
+// depth selection network costs ceil(log2(subgroup size)) steps and avoids a
+// data-dependent loop over sparse participation masks.
 static iree_status_t loom_kernel_scan_build_physical_lane(
     loom_kernel_scan_state_t* state, loom_value_id_t desired_rank,
     loom_value_id_t* out_lane_i32) {
@@ -660,31 +838,51 @@ static iree_status_t loom_kernel_scan_build_shuffle(
   loom_op_t* shuffle_op = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_subgroup_shuffle_build(
       state->builder, LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_INDEX, value,
-      source_lane, state->subgroup_size_i32, state->result_type,
-      state->location, &shuffle_op));
+      source_lane, state->subgroup_size_i32, state->value_type, state->location,
+      &shuffle_op));
   *out_value = loom_kernel_subgroup_shuffle_result(shuffle_op);
   return loom_kernel_scan_build_and(
       state, source_rank_valid, loom_kernel_subgroup_shuffle_valid(shuffle_op),
       state->i1_type, out_valid);
 }
 
+static iree_status_t loom_kernel_scan_build_direct_shuffle(
+    loom_kernel_scan_state_t* state, loom_value_id_t value,
+    loom_kernel_subgroup_scan_direction_t direction, uint32_t distance,
+    loom_value_id_t* out_value, loom_value_id_t* out_valid) {
+  loom_value_id_t offset = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
+      state, state->i32_type, distance, &offset));
+  loom_op_t* shuffle_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_kernel_subgroup_shuffle_build(
+      state->builder,
+      direction == LOOM_KERNEL_SUBGROUP_SCAN_DIRECTION_FORWARD
+          ? LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_UP
+          : LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_DOWN,
+      value, offset, state->cluster_width_i32, state->value_type,
+      state->location, &shuffle_op));
+  *out_value = loom_kernel_subgroup_shuffle_result(shuffle_op);
+  *out_valid = loom_kernel_subgroup_shuffle_valid(shuffle_op);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_kernel_scan_build_combine(
     loom_kernel_scan_state_t* state, loom_value_id_t lhs, loom_value_id_t rhs,
     loom_value_id_t* out_result) {
-  if (loom_type_is_scalar(state->result_type)) {
+  if (loom_type_is_scalar(state->value_type)) {
     return loom_scalar_combining_build(
         state->builder, state->kind, /*fastmath_flags=*/0, lhs, rhs,
-        state->result_type, state->location, out_result);
+        state->value_type, state->location, out_result);
   }
   return loom_vector_combining_build(
       state->builder, state->kind, /*fastmath_flags=*/0, lhs, rhs,
-      state->result_type, state->location, out_result);
+      state->value_type, state->location, out_result);
 }
 
 static iree_status_t loom_kernel_scan_build_seed(
     loom_kernel_scan_state_t* state, loom_value_id_t* out_seed) {
   const loom_scalar_type_t element_type =
-      loom_type_element_type(state->result_type);
+      loom_type_element_type(state->value_type);
   loom_attribute_t seed_attr = loom_attr_absent();
   if (loom_scalar_type_is_integer(element_type)) {
     int64_t seed = 0;
@@ -707,15 +905,199 @@ static iree_status_t loom_kernel_scan_build_seed(
   IREE_RETURN_IF_ERROR(
       loom_scalar_constant_build(state->builder, seed_attr, element_value_type,
                                  state->location, &scalar_seed_op));
-  if (loom_type_is_scalar(state->result_type)) {
+  if (loom_type_is_scalar(state->value_type)) {
     *out_seed = loom_scalar_constant_result(scalar_seed_op);
     return iree_ok_status();
   }
   loom_op_t* vector_seed_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_splat_build(
       state->builder, loom_scalar_constant_result(scalar_seed_op),
-      state->result_type, state->location, &vector_seed_op));
+      state->value_type, state->location, &vector_seed_op));
   *out_seed = loom_vector_splat_result(vector_seed_op);
+  return iree_ok_status();
+}
+
+static bool loom_kernel_scan_math_is_supported(loom_combining_kind_t kind,
+                                               uint8_t math_flags) {
+  // Ordinary arithmetic support does not establish source-format
+  // preservation. Extrema retain their fixed semantics independently of the
+  // arithmetic mode.
+  return math_flags == 0 ||
+         (kind != LOOM_COMBINING_KIND_ADDF && kind != LOOM_COMBINING_KIND_MULF);
+}
+
+static iree_status_t loom_kernel_scan_state_initialize(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    loom_value_id_t source_value, loom_combining_kind_t kind,
+    const loom_kernel_scan_cluster_t* cluster, bool need_active_count,
+    loom_kernel_scan_state_t* out_state) {
+  const loom_target_bundle_t* bundle =
+      loom_target_legalization_context_bundle(context);
+  const uint32_t subgroup_size = bundle->snapshot->subgroup_size;
+  const loom_type_t logical_type =
+      loom_module_value_type(context->module, source_value);
+  loom_type_t value_type = logical_type;
+  loom_combining_kind_t value_kind = kind;
+  if (loom_type_element_type(logical_type) == LOOM_SCALAR_TYPE_I1) {
+    const bool has_i1_equivalent =
+        loom_combining_kind_i1_equivalent(kind, &value_kind);
+    IREE_ASSERT(has_i1_equivalent);
+    value_type.header = loom_type_make_header(
+        loom_type_kind(logical_type), LOOM_SCALAR_TYPE_I32,
+        loom_type_rank(logical_type), loom_type_flags(logical_type));
+  }
+  *out_state = (loom_kernel_scan_state_t){
+      .builder = &context->rewriter->builder,
+      .location = op->location,
+      .logical_type = logical_type,
+      .value_type = value_type,
+      .i1_type = loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+      .i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      .mask_type = loom_type_scalar(subgroup_size <= 32 ? LOOM_SCALAR_TYPE_I32
+                                                        : LOOM_SCALAR_TYPE_I64),
+      .kind = value_kind,
+      .subgroup_size = subgroup_size,
+      .mask_bit_count = subgroup_size <= 32 ? 32u : 64u,
+      .direct_physical_lanes =
+          loom_kernel_scan_has_direct_physical_lanes(context, op, cluster),
+  };
+  if (out_state->direct_physical_lanes) {
+    if (need_active_count) {
+      IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
+          out_state, out_state->mask_type, 1, &out_state->one_mask));
+    }
+    return loom_kernel_scan_build_direct_state(out_state, cluster,
+                                               need_active_count);
+  }
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
+      out_state, out_state->mask_type, 0, &out_state->zero_mask));
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
+      out_state, out_state->mask_type, 1, &out_state->one_mask));
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
+      out_state, out_state->i32_type, subgroup_size,
+      &out_state->subgroup_size_i32));
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_scan_build_cluster_state(out_state, cluster));
+  return loom_kernel_scan_build_selector_constants(out_state);
+}
+
+static iree_status_t loom_kernel_scan_build_inclusive(
+    loom_kernel_scan_state_t* state, loom_value_id_t source_value,
+    const loom_kernel_scan_cluster_t* cluster,
+    loom_kernel_subgroup_scan_direction_t direction,
+    loom_value_id_t* out_result) {
+  loom_value_id_t accumulator = source_value;
+  for (uint32_t distance = 1; distance < cluster->size; distance <<= 1) {
+    loom_value_id_t peer = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t peer_valid = LOOM_VALUE_ID_INVALID;
+    if (state->direct_physical_lanes) {
+      IREE_RETURN_IF_ERROR(loom_kernel_scan_build_direct_shuffle(
+          state, accumulator, direction, distance, &peer, &peer_valid));
+    } else {
+      loom_value_id_t source_rank = LOOM_VALUE_ID_INVALID;
+      loom_value_id_t source_rank_valid = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_kernel_scan_build_source_rank(
+          state, direction, distance, &source_rank, &source_rank_valid));
+      IREE_RETURN_IF_ERROR(loom_kernel_scan_build_shuffle(
+          state, accumulator, source_rank, source_rank_valid, &peer,
+          &peer_valid));
+    }
+    loom_value_id_t combined = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_kernel_scan_build_combine(state, peer, accumulator, &combined));
+    IREE_RETURN_IF_ERROR(
+        loom_kernel_scan_build_select(state, peer_valid, combined, accumulator,
+                                      state->value_type, &accumulator));
+  }
+  *out_result = accumulator;
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_target_legalize_subgroup_reduce(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL &&
+      context->policy != LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
+  const loom_combining_kind_t kind = loom_kernel_subgroup_reduce_kind(op);
+  if (!loom_kernel_scan_math_is_supported(
+          kind, loom_kernel_subgroup_reduce_math(op))) {
+    return iree_ok_status();
+  }
+  loom_kernel_scan_cluster_t cluster = {0};
+  if (!loom_kernel_reduce_cluster_from_op(context, op, &cluster)) {
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  const loom_value_id_t source_value = loom_kernel_subgroup_reduce_value(op);
+  loom_kernel_scan_state_t state;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_state_initialize(
+      context, op, source_value, kind, &cluster,
+      /*need_active_count=*/true, &state));
+  loom_value_id_t transport_source = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_transport_value(
+      &state, source_value, &transport_source));
+  loom_value_id_t inclusive = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_inclusive(
+      &state, transport_source, &cluster,
+      LOOM_KERNEL_SUBGROUP_SCAN_DIRECTION_FORWARD, &inclusive));
+
+  loom_value_id_t reduction = LOOM_VALUE_ID_INVALID;
+  if (state.direct_physical_lanes) {
+    loom_op_t* last_offset_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_subi_build(
+        state.builder, 0, state.cluster_active_count, state.one_mask,
+        state.mask_type, state.location, &last_offset_op));
+    loom_value_id_t last_offset = loom_scalar_subi_result(last_offset_op);
+    if (state.mask_bit_count == 64) {
+      loom_op_t* truncate_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(
+          state.builder, last_offset, state.mask_type, state.i32_type,
+          state.location, &truncate_op));
+      last_offset = loom_scalar_trunci_result(truncate_op);
+    }
+    loom_op_t* shuffle_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_kernel_subgroup_shuffle_build(
+        state.builder, LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_INDEX, inclusive,
+        last_offset, state.cluster_width_i32, state.value_type, state.location,
+        &shuffle_op));
+    reduction = loom_kernel_subgroup_shuffle_result(shuffle_op);
+  } else {
+    loom_op_t* last_rank_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_subi_build(
+        state.builder, 0, state.cluster_active_count, state.one_mask,
+        state.mask_type, state.location, &last_rank_op));
+    loom_op_t* valid_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_cmpi_build(state.builder, LOOM_SCALAR_CMPI_PREDICATE_UGT,
+                               state.cluster_active_count, state.zero_mask,
+                               state.location, &valid_op));
+    loom_value_id_t reduction_valid = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_kernel_scan_build_shuffle(
+        &state, inclusive, loom_scalar_subi_result(last_rank_op),
+        loom_scalar_cmpi_result(valid_op), &reduction, &reduction_valid));
+  }
+
+  loom_value_id_t logical_reduction = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_logical_value(
+      &state, reduction, &logical_reduction));
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &logical_reduction, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, &logical_reduction, 1));
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+  };
   return iree_ok_status();
 }
 
@@ -736,10 +1118,8 @@ iree_status_t loom_kernel_target_legalize_subgroup_scan(
     return iree_ok_status();
   }
   const loom_combining_kind_t kind = loom_kernel_subgroup_scan_kind(op);
-  // Ordinary arithmetic support does not establish source-format preservation.
-  // Extrema retain their fixed semantics independently of arithmetic mode.
-  if (loom_kernel_subgroup_scan_math(op) != 0 &&
-      (kind == LOOM_COMBINING_KIND_ADDF || kind == LOOM_COMBINING_KIND_MULF)) {
+  if (!loom_kernel_scan_math_is_supported(kind,
+                                          loom_kernel_subgroup_scan_math(op))) {
     return iree_ok_status();
   }
   loom_kernel_scan_cluster_t cluster = {0};
@@ -748,78 +1128,53 @@ iree_status_t loom_kernel_target_legalize_subgroup_scan(
   if (!has_cluster) {
     return iree_ok_status();
   }
-  const loom_target_bundle_t* bundle =
-      loom_target_legalization_context_bundle(context);
-  const uint32_t subgroup_size = bundle->snapshot->subgroup_size;
-
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
   const loom_value_id_t source_value = loom_kernel_subgroup_scan_value(op);
-  const loom_type_t result_type =
-      loom_module_value_type(context->module, source_value);
-  loom_kernel_scan_state_t state = {
-      .builder = &rewriter->builder,
-      .location = op->location,
-      .result_type = result_type,
-      .i1_type = loom_type_scalar(LOOM_SCALAR_TYPE_I1),
-      .i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-      .mask_type = loom_type_scalar(subgroup_size <= 32 ? LOOM_SCALAR_TYPE_I32
-                                                        : LOOM_SCALAR_TYPE_I64),
-      .kind = kind,
-      .subgroup_size = subgroup_size,
-      .mask_bit_count = subgroup_size <= 32 ? 32u : 64u,
-  };
-  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
-      &state, state.mask_type, 0, &state.zero_mask));
-  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
-      &state, state.mask_type, 1, &state.one_mask));
-  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
-      &state, state.i32_type, subgroup_size, &state.subgroup_size_i32));
-  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_cluster_state(&state, &cluster));
-  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_selector_constants(&state));
+  loom_kernel_scan_state_t state;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_state_initialize(
+      context, op, source_value, kind, &cluster,
+      /*need_active_count=*/false, &state));
+  loom_value_id_t transport_source = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_transport_value(
+      &state, source_value, &transport_source));
 
   const loom_kernel_subgroup_scan_direction_t direction =
       loom_kernel_subgroup_scan_direction(op);
-  loom_value_id_t accumulator = source_value;
-  for (uint32_t distance = 1; distance < cluster.size; distance <<= 1) {
-    loom_value_id_t source_rank = LOOM_VALUE_ID_INVALID;
-    loom_value_id_t source_rank_valid = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_kernel_scan_build_source_rank(
-        &state, direction, distance, &source_rank, &source_rank_valid));
-    loom_value_id_t peer = LOOM_VALUE_ID_INVALID;
-    loom_value_id_t peer_valid = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(
-        loom_kernel_scan_build_shuffle(&state, accumulator, source_rank,
-                                       source_rank_valid, &peer, &peer_valid));
-    loom_value_id_t combined = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(
-        loom_kernel_scan_build_combine(&state, peer, accumulator, &combined));
-    IREE_RETURN_IF_ERROR(loom_kernel_scan_build_select(
-        &state, peer_valid, combined, accumulator, result_type, &accumulator));
-  }
+  loom_value_id_t accumulator = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_inclusive(
+      &state, transport_source, &cluster, direction, &accumulator));
 
   if (loom_kernel_subgroup_scan_mode(op) ==
       LOOM_KERNEL_SUBGROUP_SCAN_MODE_EXCLUSIVE) {
-    loom_value_id_t source_rank = LOOM_VALUE_ID_INVALID;
-    loom_value_id_t source_rank_valid = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_kernel_scan_build_source_rank(
-        &state, direction, 1, &source_rank, &source_rank_valid));
     loom_value_id_t shifted = LOOM_VALUE_ID_INVALID;
     loom_value_id_t shifted_valid = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_kernel_scan_build_shuffle(
-        &state, accumulator, source_rank, source_rank_valid, &shifted,
-        &shifted_valid));
+    if (state.direct_physical_lanes) {
+      IREE_RETURN_IF_ERROR(loom_kernel_scan_build_direct_shuffle(
+          &state, accumulator, direction, 1, &shifted, &shifted_valid));
+    } else {
+      loom_value_id_t source_rank = LOOM_VALUE_ID_INVALID;
+      loom_value_id_t source_rank_valid = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_kernel_scan_build_source_rank(
+          &state, direction, 1, &source_rank, &source_rank_valid));
+      IREE_RETURN_IF_ERROR(loom_kernel_scan_build_shuffle(
+          &state, accumulator, source_rank, source_rank_valid, &shifted,
+          &shifted_valid));
+    }
     loom_value_id_t seed = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_kernel_scan_build_seed(&state, &seed));
     IREE_RETURN_IF_ERROR(loom_kernel_scan_build_select(
-        &state, shifted_valid, shifted, seed, result_type, &accumulator));
+        &state, shifted_valid, shifted, seed, state.value_type, &accumulator));
   }
 
+  loom_value_id_t logical_result = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_logical_value(&state, accumulator,
+                                                            &logical_result));
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
-      rewriter, op, &accumulator, 1, checkpoint));
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &accumulator, 1));
+      rewriter, op, &logical_result, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, &logical_result, 1));
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
   };
@@ -837,11 +1192,31 @@ static const loom_target_legalizer_rule_t kKernelLegalizerRules[] = {
     },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_REDUCE,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
+        .match = loom_kernel_match_subgroup_reduce,
+        .legalize = loom_kernel_target_legalize_subgroup_reduce,
+    },
+    {
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_SCAN,
         .first_operand_element_types =
             LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
         .match = loom_kernel_match_subgroup_scan,
         .legalize = loom_kernel_target_legalize_subgroup_scan,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_WORKGROUP_REDUCE,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
+        .legalize = loom_kernel_target_legalize_workgroup_reduce,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_WORKGROUP_SCAN,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
+        .legalize = loom_kernel_target_legalize_workgroup_scan,
     },
 };
 

@@ -134,6 +134,39 @@ bool loom_combining_kind_is_idempotent(loom_combining_kind_t kind) {
                           LOOM_COMBINING_PROPERTY_FLAG_IDEMPOTENT);
 }
 
+bool loom_combining_kind_i1_equivalent(loom_combining_kind_t kind,
+                                       loom_combining_kind_t* out_kind) {
+  if (out_kind == NULL) {
+    return false;
+  }
+  switch (kind) {
+    case LOOM_COMBINING_KIND_ADDI:
+    case LOOM_COMBINING_KIND_XORI:
+      *out_kind = LOOM_COMBINING_KIND_XORI;
+      return true;
+    case LOOM_COMBINING_KIND_MULI:
+    case LOOM_COMBINING_KIND_MAXSI:
+    case LOOM_COMBINING_KIND_MINUI:
+    case LOOM_COMBINING_KIND_ANDI:
+      *out_kind = LOOM_COMBINING_KIND_ANDI;
+      return true;
+    case LOOM_COMBINING_KIND_MINSI:
+    case LOOM_COMBINING_KIND_MAXUI:
+    case LOOM_COMBINING_KIND_ORI:
+      *out_kind = LOOM_COMBINING_KIND_ORI;
+      return true;
+    case LOOM_COMBINING_KIND_ADDF:
+    case LOOM_COMBINING_KIND_MULF:
+    case LOOM_COMBINING_KIND_MINIMUMF:
+    case LOOM_COMBINING_KIND_MAXIMUMF:
+    case LOOM_COMBINING_KIND_MINNUMF:
+    case LOOM_COMBINING_KIND_MAXNUMF:
+    case LOOM_COMBINING_KIND_COUNT_:
+      return false;
+  }
+  return false;
+}
+
 bool loom_combining_kind_integer_identity(loom_combining_kind_t kind,
                                           loom_scalar_type_t element_type,
                                           int64_t* out_identity) {

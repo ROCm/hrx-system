@@ -102,7 +102,7 @@ typedef uint32_t loom_amdgpu_memory_access_rejection_flags_t;
   ((uint32_t)1u << 20)
 #define LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_LOW16_DESCRIPTOR_MISSING \
   ((uint32_t)1u << 21)
-#define LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_SIGNED_I16_REPAIR_DESCRIPTOR_MISSING \
+#define LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_SIGNED_NARROW_REPAIR_DESCRIPTOR_MISSING \
   ((uint32_t)1u << 22)
 #define LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_PRIVATE_ROOT ((uint32_t)1u << 23)
 
@@ -132,6 +132,27 @@ typedef struct loom_amdgpu_memory_access_diagnostic_t {
   // First dynamic address term involved in dynamic-address diagnostics.
   uint32_t dynamic_term_index;
 } loom_amdgpu_memory_access_diagnostic_t;
+
+// Returns the source integer width that an unsigned LDS load must sign-extend
+// to satisfy its narrow signed payload contract, or zero when no repair is
+// required. Packed byte vectors use the unsigned payload format and therefore
+// never repair individual packet fragments.
+static inline uint32_t
+loom_amdgpu_memory_access_signed_narrow_lds_repair_bit_count(
+    const loom_amdgpu_memory_access_t* access) {
+  if (access->source->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP ||
+      access->source->operation_kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD) {
+    return 0;
+  }
+  switch (access->payload_format) {
+    case LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_8BIT_INTEGER:
+      return 8;
+    case LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_16BIT_INTEGER:
+      return 16;
+    default:
+      return 0;
+  }
+}
 
 typedef uint32_t loom_amdgpu_memory_cache_policy_attr_flags_t;
 

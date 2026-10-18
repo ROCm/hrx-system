@@ -29,6 +29,13 @@ submission, and fills WKMI private data for the selected transport.
 [ROCr software submission][software-submit]
 [ROCr hardware submission][hardware-submit]
 
+ROCr's [native SDMA ring path](sdma/windows.md) uses the hardware-queue call
+with a distinct private protocol: `CommandBuffer` is the persistent ring
+base, and the private data carries a 64-bit byte frontier. Its
+`CommandLength` field contains the low 32 bits of that frontier. It also
+reserves an inline progress-fence epilogue. The independent command-buffer
+length interpretation in the table above does not describe this ring path.
+
 ROCr's pre-submit path also queues a paging-fence dependency when the observed
 paging value is behind its required value. `WaitPagingFence` calls `GpuWait`;
 it does not synchronously wait on the submitting CPU. Mappings and residency

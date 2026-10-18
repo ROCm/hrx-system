@@ -64,7 +64,7 @@ class ClientTest(unittest.TestCase):
     def check_completion(self, result, text, finish, inputs, outputs):
         self.assertTrue(result["id"].startswith("loom-"))
         self.assertEqual(result["object"], "chat.completion")
-        self.assertGreater(result["created"], 0)
+        self.assertIs(type(result["created"]), int)
         self.assertEqual(result["model"], "text")
         self.assertEqual(
             result["choices"],
@@ -90,7 +90,7 @@ class ClientTest(unittest.TestCase):
         for event in events:
             self.assertEqual(event["id"], events[0]["id"])
             self.assertEqual(event["created"], events[0]["created"])
-            self.assertGreater(event["created"], 0)
+            self.assertIs(type(event["created"]), int)
             self.assertEqual(event["model"], "text")
             self.assertEqual(event["object"], "chat.completion.chunk")
         for chunk in chunks:
@@ -159,6 +159,12 @@ class ClientTest(unittest.TestCase):
                     ):
                         result = self.request(address, self.body(**options))
                         self.check_completion(result, "bx", "length", 4, 2)
+                    # A completed inference proves model readiness; the bound
+                    # listener alone does not publish a usable model.
+                    models = control(address, "GET", "/v1/models", 200)["data"]
+                    self.assertEqual(len(models), 1)
+                    registered = models[0]["created"]
+                    self.assertIs(type(registered), int)
                     result = self.request(address, self.body(max_tokens=16))
                     self.check_completion(result, "bxaaaxb", "stop", 4, 8)
                     result = self.request(
@@ -258,6 +264,9 @@ class ClientTest(unittest.TestCase):
                             address, self.body(**options), expected=400
                         )
                         self.assertIn("message", error["error"])
+
+                    models = control(address, "GET", "/v1/models", 200)["data"]
+                    self.assertEqual(models[0]["created"], registered)
 
                     # A source package can fail while interpreting completed
                     # output. The native service must encode that real failure

@@ -25,6 +25,30 @@ func.def public @alignment() -> (i32) {
 
 // ====
 // INPUT: cxx
+#include "aligned_layout.h"
+AlignedWord add_aligned(AlignedWord lhs, AlignedWord rhs) { return lhs + rhs; }
+unsigned typedef_alignment() { return alignof(AlignedWord); }
+unsigned typedef_member_offset() { return __builtin_offsetof(TypedefAlignedMember, value); }
+// ----
+func.def public @add_aligned(%lhs: i32, %rhs: i32) -> (i32) {
+  %3 = scalar.addi %lhs, %rhs : i32
+  func.return %3 : i32
+}
+
+func.def public @typedef_alignment() -> (i32) {
+  %5 = scalar.constant 16 : i64
+  %6 = scalar.trunci %5 : i64 to i32
+  func.return %6 : i32
+}
+
+func.def public @typedef_member_offset() -> (i32) {
+  %8 = scalar.constant 16 : i64
+  %9 = scalar.trunci %8 : i64 to i32
+  func.return %9 : i32
+}
+
+// ====
+// INPUT: cxx
 [[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
 void aligned_array(unsigned* output) {
   [[loom::workgroup]] unsigned __attribute__((aligned(32))) values[4];

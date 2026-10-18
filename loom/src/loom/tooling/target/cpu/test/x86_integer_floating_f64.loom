@@ -1,0 +1,85 @@
+// Direct vector conversions to f64 cover the native i32 path, the exact AVX2
+// unsigned-i32 composition, and native or scalarized i64 paths. The oracle
+// converts every lane independently.
+kernel.def @double_integer_floating_shapes() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%signed_input: buffer, %unsigned_input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %signed_words = buffer.view %signed_input[%base] : buffer -> view<8xi32>
+  %unsigned_words = buffer.view %unsigned_input[%base] : buffer -> view<8xi32>
+  %signed_wide = buffer.view %signed_input[%base] : buffer -> view<8xi64>
+  %unsigned_wide = buffer.view %unsigned_input[%base] : buffer -> view<8xi64>
+  %result = buffer.view %output[%base] : buffer -> view<32xf64>
+  %signed_words8 = vector.load %signed_words[0] : view<8xi32> -> vector<8xi32>
+  %unsigned_words8 = vector.load %unsigned_words[0] : view<8xi32> -> vector<8xi32>
+  %signed_wide8 = vector.load %signed_wide[0] : view<8xi64> -> vector<8xi64>
+  %unsigned_wide8 = vector.load %unsigned_wide[0] : view<8xi64> -> vector<8xi64>
+  %signed_words_f64 = vector.sitofp %signed_words8 : vector<8xi32> to vector<8xf64>
+  %unsigned_words_f64 = vector.uitofp %unsigned_words8 : vector<8xi32> to vector<8xf64>
+  %signed_wide_f64 = vector.sitofp %signed_wide8 : vector<8xi64> to vector<8xf64>
+  %unsigned_wide_f64 = vector.uitofp %unsigned_wide8 : vector<8xi64> to vector<8xf64>
+  vector.store %signed_words_f64, %result[0] : vector<8xf64>, view<32xf64>
+  vector.store %unsigned_words_f64, %result[8] : vector<8xf64>, view<32xf64>
+  vector.store %signed_wide_f64, %result[16] : vector<8xf64>, view<32xf64>
+  vector.store %unsigned_wide_f64, %result[24] : vector<8xf64>, view<32xf64>
+  kernel.return
+}
+
+func.def @double_integer_floating_shapes_oracle(%signed_input: buffer, %unsigned_input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %signed_words = buffer.view %signed_input[%base] : buffer -> view<8xi32>
+  %unsigned_words = buffer.view %unsigned_input[%base] : buffer -> view<8xi32>
+  %signed_wide = buffer.view %signed_input[%base] : buffer -> view<8xi64>
+  %unsigned_wide = buffer.view %unsigned_input[%base] : buffer -> view<8xi64>
+  %result = buffer.view %output[%base] : buffer -> view<32xf64>
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %word_unsigned_base = index.constant 8 : index
+  %wide_signed_base = index.constant 16 : index
+  %wide_unsigned_base = index.constant 24 : index
+  scf.for %i = [%begin to %end step %step] {
+    %signed_word = view.load %signed_words[%i] : view<8xi32> -> i32
+    %unsigned_word = view.load %unsigned_words[%i] : view<8xi32> -> i32
+    %signed_value = view.load %signed_wide[%i] : view<8xi64> -> i64
+    %unsigned_value = view.load %unsigned_wide[%i] : view<8xi64> -> i64
+    %signed_word_f64 = scalar.sitofp %signed_word : i32 to f64
+    %unsigned_word_f64 = scalar.uitofp %unsigned_word : i32 to f64
+    %signed_wide_f64 = scalar.sitofp %signed_value : i64 to f64
+    %unsigned_wide_f64 = scalar.uitofp %unsigned_value : i64 to f64
+    %unsigned_word_position = index.add %word_unsigned_base, %i : index
+    %signed_wide_position = index.add %wide_signed_base, %i : index
+    %unsigned_wide_position = index.add %wide_unsigned_base, %i : index
+    view.store %signed_word_f64, %result[%i] : f64, view<32xf64>
+    view.store %unsigned_word_f64, %result[%unsigned_word_position] : f64, view<32xf64>
+    view.store %signed_wide_f64, %result[%signed_wide_position] : f64, view<32xf64>
+    view.store %unsigned_wide_f64, %result[%unsigned_wide_position] : f64, view<32xf64>
+  }
+  func.return
+}
+
+check.scenario @double_integer_floating_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %signed = check.generate.iota offset(9007199254740991) step(1) : tensor<8xi64>
+    %unsigned = check.generate.iota offset(-9223372036854775808) step(2049) : tensor<8xi64>
+    %storage = check.generate.fill value(-123.0) : tensor<36xf64>
+    %output = check.tensor.view %storage offset(2) : tensor<36xf64> -> tensor<32xf64>
+    check.compare<@double_integer_floating_shapes, @double_integer_floating_shapes_oracle>(%signed, %unsigned, %output) : (tensor<8xi64>, tensor<8xi64>, tensor<32xf64>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<36xf64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %unsigned_entropy = check.entropy.fork %entropy name("unsigned") : check.entropy
+    %signed_seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %unsigned_seed = check.entropy.read %unsigned_entropy[%trial] : check.entropy -> i64
+    %signed = check.generate.random.uniform seed(%signed_seed) range(-9223372036854775808 to 9223372036854775807) : tensor<8xi64>
+    %unsigned = check.generate.random.uniform seed(%unsigned_seed) range(-9223372036854775808 to 9223372036854775807) : tensor<8xi64>
+    %storage = check.generate.fill value(-123.0) : tensor<36xf64>
+    %output = check.tensor.view %storage offset(2) : tensor<36xf64> -> tensor<32xf64>
+    check.compare<@double_integer_floating_shapes, @double_integer_floating_shapes_oracle>(%signed, %unsigned, %output) : (tensor<8xi64>, tensor<8xi64>, tensor<32xf64>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<36xf64>
+    }
+  }
+  check.return
+}

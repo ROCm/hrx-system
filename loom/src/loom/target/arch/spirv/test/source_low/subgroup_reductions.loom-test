@@ -245,18 +245,19 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
 // ====
 // RUN: emit source-low target=spirv:vulkan1.3+bda+subgroup32+reductions+hal output=none
 
-kernel.def @unsupported_cluster_shapes() {
+// Cluster shapes that the native SPIR-V group operations cannot represent fall
+// through to the shared shuffle implementation. A cluster cannot be wider than
+// the physical subgroup.
+kernel.def @cluster_shape_fallbacks() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
 } launch(%output: buffer) {
   %lane = kernel.workitem.id<x> : index
   %value = index.cast %lane : index to i32
-  // ERROR@+1: TARGET/003 {subject_role="field", subject_name="cluster_size", constraint_key="target_whole_subgroup"}
   %non_power_of_two = kernel.subgroup.reduce<addi> %value {cluster_size = 3} : i32
   // ERROR@+1: TARGET/003 {subject_role="field", subject_name="cluster_size", constraint_key="target_whole_subgroup"}
   %too_wide = kernel.subgroup.reduce<addi> %value {cluster_size = 64} : i32
-  // ERROR@+1: TARGET/003 {subject_role="field", subject_name="cluster_size", constraint_key="target_whole_subgroup"}
   %strided = kernel.subgroup.reduce<addi> %value {cluster_size = 8, cluster_stride = 2} : i32
   kernel.return
 }

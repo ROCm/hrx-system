@@ -76,7 +76,9 @@ void loom_serve_memory_pool_set_observer(loom_serve_memory_pool_t* pool,
                                          void (*wake)(void* user_data),
                                          void* user_data);
 
-// Collects completed operations and reports remaining native borrowers.
+// Collects completed operations and observes remaining native borrowers. True
+// requires another owner pass even if its capacity wake has already arrived;
+// one native capacity change does not establish that every release retired.
 bool loom_serve_memory_pool_is_pending(loom_serve_memory_pool_t* pool);
 
 // Outer-thread join of accepted native operations, not device work or logical

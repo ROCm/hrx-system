@@ -1191,3 +1191,65 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %40
   return
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @subgroup_shuffle_narrow_scalar_transport() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %item = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x2xf32>
+  %value = view.load %input_view[%item] : view<64xf32> -> f32
+  %half = scalar.fptrunc %value : f32 to f16
+  %bfloat = scalar.fptrunc %value : f32 to bf16
+  %offset = scalar.constant 1 : i32
+  %subgroup_width = scalar.constant 32 : i32
+  %half_peer, %half_valid = kernel.subgroup.shuffle<up> %half, %offset, %subgroup_width : f16, i32, i32
+  %bfloat_peer, %bfloat_valid = kernel.subgroup.shuffle<up> %bfloat, %offset, %subgroup_width : bf16, i32, i32
+  %half_wide = scalar.extf %half_peer : f16 to f32
+  %bfloat_wide = scalar.extf %bfloat_peer : bf16 to f32
+  %result = vector.from_elements %half_wide, %bfloat_wide : vector<2xf32>
+  vector.store %result, %output_view[%item, 0] : vector<2xf32>, view<64x2xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_narrow_scalar_transport() asm {
+  %item = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %28 = v_lshlrev_b32_src0_inline %item, 2
+  %value = global_load_b32_saddr %28, %input_view
+  %half = v_cvt_f16_f32 %value
+  %31 = v_lshrrev_b32_src0_inline %value, 16
+  %32 = v_and_b32_lit %31, 1
+  %33 = v_add_u32_lit %32, 32767
+  %34 = v_add_u32 %value, %33
+  %35 = v_lshrrev_b32_src0_inline %34, 16
+  %36 = v_cmp_u_f32 %value, %value
+  %37 = v_or_b32_lit %31, 64
+  %bfloat = v_cndmask_b32 %35, %37, %36
+  %39 = v_and_b32_src0_inline %item, 31
+  %40 = v_mov_b32 1
+  %41 = v_sub_nc_u32 %39, %40
+  %42 = v_lshlrev_b32_src0_inline %41, 2
+  %43 = v_bfe_u32_offset_0_width_inline_low16 %half
+  %half_peer = ds_bpermute_b32 %42, %43
+  %45 = v_and_b32_src0_inline %item, 31
+  %46 = v_mov_b32 1
+  %47 = v_sub_nc_u32 %45, %46
+  %48 = v_lshlrev_b32_src0_inline %47, 2
+  %bfloat_peer = ds_bpermute_b32 %48, %bfloat
+  %half_wide = v_cvt_f32_f16 %half_peer
+  %bfloat_wide = v_lshlrev_b32_src0_16_low16 %bfloat_peer
+  %result = concat(%half_wide, %bfloat_wide) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %53 = v_lshlrev_b32_src0_inline %item, 3
+  global_store_b64_saddr %53, %result, %output_view
+  return
+}

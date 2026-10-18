@@ -200,7 +200,8 @@ uint32_t FindFreeLocationWithPlacement(
     loom_value_id_t candidate_value, loom_value_id_t counterpart_value,
     uint32_t max_units, loom_low_placement_relation_t* relation,
     const loom_low_descriptor_set_t* physical_descriptor_set = nullptr,
-    const loom_low_allocation_assignment_t* retained_assignment = nullptr) {
+    const loom_low_allocation_assignment_t* retained_assignment = nullptr,
+    loom_target_residency_view_t residency = {}) {
   loom_module_value_ordinal_scratch_acquire(module);
   loom_module_value_ordinal_scratch_set(module, candidate_value,
                                         /*ordinal=*/0);
@@ -315,6 +316,7 @@ uint32_t FindFreeLocationWithPlacement(
       .placement = &placement,
       .active_set = &active_set,
       .storage_leases = &storage_leases,
+      .residency = residency,
   };
   const loom_low_allocation_assignment_t* retained_assignments[] = {
       retained_assignment, &assignments[0]};
@@ -658,6 +660,40 @@ TEST_F(LowAllocationSearchTest, ExplicitCandidateOrderAndSoftPreference) {
                 module, &arena_, candidate_value, counterpart_value,
                 /*max_units=*/4, /*relation=*/nullptr, &descriptor_set),
             2u);
+  const iree_string_view_t resource_names[] = {IREE_SVL("register")};
+  const loom_target_residency_cliff_t cliffs[] = {{0, 3, 4, 2}};
+  const loom_target_residency_cliff_range_t cliff_ranges[] = {{0, 1}};
+  const loom_target_residency_model_t residency_model = {
+      .best_tier = 4,
+      .direct_resources =
+          {
+              .names = resource_names,
+              .cliffs = cliffs,
+              .cliff_count = IREE_ARRAYSIZE(cliffs),
+              .cliff_ranges = cliff_ranges,
+              .resource_count = IREE_ARRAYSIZE(resource_names),
+          },
+  };
+  // Candidate order is a packing preference, not permission to lower the
+  // attainable residency tier when a lower-pressure semantic ordinal is free.
+  allocation_ordinals[0] = 2;
+  allocation_ordinals[1] = 3;
+  allocation_ordinals[2] = 0;
+  allocation_ordinals[3] = 1;
+  EXPECT_EQ(FindFreeLocationWithPlacement(
+                module, &arena_, candidate_value, counterpart_value,
+                /*max_units=*/4, /*relation=*/nullptr, &descriptor_set),
+            0u);
+  EXPECT_EQ(FindFreeLocationWithPlacement(
+                module, &arena_, candidate_value, counterpart_value,
+                /*max_units=*/4, /*relation=*/nullptr, &descriptor_set,
+                /*retained_assignment=*/nullptr,
+                loom_target_residency_view(&residency_model, 4)),
+            2u);
+  allocation_ordinals[0] = 0;
+  allocation_ordinals[1] = 1;
+  allocation_ordinals[2] = 2;
+  allocation_ordinals[3] = 3;
   loom_low_placement_relation_t relation = LocationRelation(
       /*result_ordinal=*/0, /*source_ordinal=*/1,
       LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE, /*location_mask=*/0);
@@ -816,6 +852,26 @@ TEST_F(LowAllocationSearchTest,
   EXPECT_TRUE(loom_low_allocation_search_find_free_location(
       &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
   EXPECT_EQ(location_base, 4u);
+
+  const iree_string_view_t resource_names[] = {IREE_SVL("register")};
+  const loom_target_residency_cliff_t cliffs[] = {{0, 5, 4, 2}};
+  const loom_target_residency_cliff_range_t cliff_ranges[] = {{0, 1}};
+  const loom_target_residency_model_t residency_model = {
+      .best_tier = 4,
+      .direct_resources =
+          {
+              .names = resource_names,
+              .cliffs = cliffs,
+              .cliff_count = IREE_ARRAYSIZE(cliffs),
+              .cliff_ranges = cliff_ranges,
+              .resource_count = IREE_ARRAYSIZE(resource_names),
+          },
+  };
+  context.residency = loom_target_residency_view(&residency_model, 4);
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+  EXPECT_EQ(location_base, 3u);
+  context.residency = {};
 
   // The opposite packing direction is local to scalars whose own live range
   // overlaps a wide value.

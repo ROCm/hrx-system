@@ -392,10 +392,6 @@ loom_execution_test(
     cxx_collective_scans_test_execute_spirv_vulkan_hardware_test
   MODULE
     "loom::import::cxx::test::collective_scans_module"
-  ARGS
-    "--xfail=@scan_u32_values=TARGET/032"
-    "--xfail=@scan_u64_values=TARGET/032"
-    "--xfail=@scan_f32_values=TARGET/032"
   RUNNER_ARGS
     "--device=vulkan"
     "--vulkan_validation_layers=false"

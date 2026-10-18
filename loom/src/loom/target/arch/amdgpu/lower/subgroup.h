@@ -100,6 +100,13 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_reduce_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_subgroup_reduce_plan_t* out_plan, bool* out_selected);
 
+// Returns whether the source subgroup-reduction shape can use the native
+// AMDGPU tree. Payload, combining, participation, and descriptor support are
+// independent selection dimensions.
+bool loom_amdgpu_subgroup_reduce_shape_is_native(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle, const loom_op_t* op);
+
 // Lowers a source subgroup reduce using selected cross-lane tree steps and
 // native VGPR combining packets.
 iree_status_t loom_amdgpu_lower_kernel_subgroup_reduce(
@@ -116,6 +123,13 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_reduce(
 iree_status_t loom_amdgpu_select_kernel_subgroup_scan_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_subgroup_scan_plan_t* out_plan, bool* out_selected);
+
+// Returns whether the source subgroup-scan shape can use the native AMDGPU
+// full-wave tree. Payload, combining, participation, and descriptor support
+// are independent selection dimensions.
+bool loom_amdgpu_subgroup_scan_shape_is_native(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle, const loom_op_t* op);
 
 // Lowers a source subgroup scan using DS bpermute prefix steps, native VGPR
 // combining packets, and per-step lane-bound masks.

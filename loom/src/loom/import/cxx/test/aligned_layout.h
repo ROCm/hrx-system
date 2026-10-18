@@ -34,6 +34,52 @@ struct [[gnu::aligned(2)]] NaturalAlignment {
 };
 static_assert(alignof(NaturalAlignment) == alignof(unsigned));
 
+typedef unsigned AlignedWord __attribute__((aligned(16)));
+typedef AlignedWord InheritedAlignedWord;
+typedef AlignedWord ReducedAlignedWord __attribute__((aligned(2)));
+typedef const AlignedWord ConstAlignedWord;
+using UsingAlignedWord [[gnu::aligned(32)]] = unsigned;
+using SuffixAlignedWord = unsigned __attribute__((aligned(32)));
+typedef unsigned* AlignedPointer __attribute__((aligned(16)));
+typedef unsigned& IgnoredAlignedReference __attribute__((aligned(16)));
+
+static_assert(sizeof(AlignedWord) == sizeof(unsigned));
+static_assert(alignof(AlignedWord) == 16);
+static_assert(alignof(InheritedAlignedWord) == 16);
+static_assert(alignof(ReducedAlignedWord) == 2);
+static_assert(alignof(ConstAlignedWord) == 16);
+static_assert(alignof(UsingAlignedWord) == 32);
+static_assert(alignof(SuffixAlignedWord) == alignof(unsigned));
+static_assert(alignof(AlignedPointer) == 16);
+static_assert(alignof(IgnoredAlignedReference) == alignof(unsigned));
+static_assert(__is_same(AlignedWord, unsigned));
+
+struct TypedefAlignedMember {
+  unsigned char tag;
+  AlignedWord value;
+  unsigned char tail;
+};
+static_assert(__builtin_offsetof(TypedefAlignedMember, value) == 16);
+static_assert(__builtin_offsetof(TypedefAlignedMember, tail) == 20);
+static_assert(sizeof(TypedefAlignedMember) == 32);
+static_assert(alignof(TypedefAlignedMember) == 16);
+
+struct [[gnu::packed]] PackedTypedefAlignedMember {
+  unsigned char tag;
+  AlignedWord value;
+};
+static_assert(__builtin_offsetof(PackedTypedefAlignedMember, value) == 1);
+static_assert(sizeof(PackedTypedefAlignedMember) == 5);
+static_assert(alignof(PackedTypedefAlignedMember) == 1);
+
+template <typename T>
+struct TemplateTypeAlignment {
+  static constexpr unsigned value = alignof(T);
+};
+static_assert(TemplateTypeAlignment<AlignedWord>::value == alignof(unsigned));
+static_assert(__is_same(TemplateTypeAlignment<AlignedWord>,
+                        TemplateTypeAlignment<unsigned>));
+
 struct [[gnu::aligned(8), gnu::aligned(16)]] RepeatedAlignment {
   alignas(8) unsigned first __attribute__((aligned(32), aligned(16)));
 };

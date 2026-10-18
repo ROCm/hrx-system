@@ -170,3 +170,66 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
   %result = select.gpr32 %15, %16, %13
   return %result
 }
+
+// ====
+
+func.def @convert_word_packets(%single_words: vector<8xi32>, %double_words: vector<4xi32>) -> (vector<8xf32>, vector<8xf32>, vector<4xf64>, vector<4xf64>) {
+  %signed_single = vector.sitofp %single_words : vector<8xi32> to vector<8xf32>
+  %unsigned_single = vector.uitofp %single_words : vector<8xi32> to vector<8xf32>
+  %signed_double = vector.sitofp %double_words : vector<4xi32> to vector<4xf64>
+  %unsigned_double = vector.uitofp %double_words : vector<4xi32> to vector<4xf64>
+  func.return %signed_single, %unsigned_single, %signed_double, %unsigned_double : vector<8xf32>, vector<8xf32>, vector<4xf64>, vector<4xf64>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<8xi32>, vector<4xi32>) -> (vector<8xf32>, vector<8xf32>, vector<4xf64>, vector<4xf64>)}) @convert_word_packets(%single_words: reg<x86.ymm>, %double_words: reg<x86.xmm>) -> (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) asm {
+  %signed_single = vcvtdq2ps.ymm.ymm %single_words
+  %17 = vpsrld.ymm %single_words, 1
+  %18 = vpslld.ymm %single_words, 31
+  %19 = vpsrld.ymm %18, 31
+  %20 = vpor.ymm %17, %19
+  %22 = vcvtdq2ps.ymm.ymm %20
+  %23 = vaddps.ymm %22, %22
+  %unsigned_single = vblendvps.ymm %signed_single, %23, %single_words
+  %signed_double = vcvtdq2pd.ymm.xmm %double_words
+  %26 = vpmovzxdq.ymm %double_words
+  %27 = avx2.vmovdqu.rodata.ymm @__low_rodata_a3e49c3f
+  %28 = vpor.ymm %26, %27
+  %unsigned_double = vsubpd.ymm %28, %27
+  return %signed_single, %unsigned_single, %signed_double, %unsigned_double
+}
+
+// ====
+
+func.def @convert_narrow_packet(%input: vector<4xi16>) -> (vector<4xf64>) {
+  %result = vector.uitofp %input : vector<4xi16> to vector<4xf64>
+  func.return %result : vector<4xf64>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi16>) -> (vector<4xf64>)}) @convert_narrow_packet(%input: reg<x86.xmm>) -> (reg<x86.ymm>) asm {
+  %7 = vpmovzxwd.xmm %input
+  %8 = vpmovzxdq.ymm %7
+  %9 = avx2.vmovdqu.rodata.ymm @__low_rodata_a3e49c3f
+  %10 = vpor.ymm %8, %9
+  %result = vsubpd.ymm %10, %9
+  return %result
+}
+
+// ====
+
+func.def @convert_wide_packet(%input: vector<2xi64>) -> (vector<2xf32>) {
+  %result = vector.sitofp %input : vector<2xi64> to vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>) -> (vector<2xf32>)}) @convert_wide_packet(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %10 = vpextrq.xmm %input, 0
+  %11 = vxorps.zero.xmm
+  %12 = vcvtsi2ss.xmm.gpr64 %11, %10
+  %13 = vpextrq.xmm %input, 1
+  %15 = vcvtsi2ss.xmm.gpr64 %11, %13
+  %result = vinsertps.xmm %12, %15, 16
+  return %result
+}

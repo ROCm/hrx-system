@@ -15,6 +15,7 @@ loom_check_test_suite(
   SRCS
     "grouped_product_evaluation.loom-test"
     "legalize.loom-test"
+    "trigonometry.loom-test"
     "widen_f32_round.loom-test"
 )
 

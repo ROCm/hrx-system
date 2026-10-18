@@ -90,14 +90,15 @@ func.def @fastmath_finite_instruments_inputs_and_result(%x: f32, %y: f32) -> (f3
 // ----
 func.def @fastmath_finite_instruments_inputs_and_result(%x: f32, %y: f32) -> (f32) {
   %4, %5 = sanitizer.assert.value %x, %y [finite(%x), finite(%y)] : f32, f32
-  %sum$3 = scalar.addf<nnan|ninf> %4, %5 : f32
+  %sum$3 = scalar.addf %4, %5 : f32
   %sum$6 = sanitizer.assert.value %sum$3 [finite(%sum$3)] : f32
   func.return %sum$6 : f32
 }
 
 // ====
 
-// ninf without nnan maps to not_inf, not finite.
+// ninf without nnan maps to not_inf, not finite. Negation preserves that
+// checked input fact, so the result needs no additional runtime assertion.
 func.def @fastmath_ninf_instruments_not_inf(%x: f32) -> (f32) {
   %neg = scalar.negf<ninf> %x : f32
   func.return %neg : f32
@@ -106,8 +107,40 @@ func.def @fastmath_ninf_instruments_not_inf(%x: f32) -> (f32) {
 // ----
 func.def @fastmath_ninf_instruments_not_inf(%x: f32) -> (f32) {
   %3 = sanitizer.assert.value %x [not_inf(%x)] : f32
-  %neg = scalar.negf<ninf> %3 : f32
+  %neg = scalar.negf %3 : f32
   func.return %neg : f32
+}
+
+// ====
+
+// Runtime checks must not prove themselves from the promise they validate.
+// Other arithmetic permissions survive the checked-promise transformation.
+// RUN: pass sanitizer-insert-assertions{checks=value},sanitizer-materialize-assertions,canonicalize
+kernel.def @fastmath_checked_result_survives_cleanup() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%left: f32, %right: f32) {
+  %product = scalar.mulf<nnan|ninf|contract> %left, %right : f32
+  test.use %product : f32
+  kernel.return
+}
+
+// ----
+kernel.def @fastmath_checked_result_survives_cleanup() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%left: f32, %right: f32) {
+  %9 = scalar.isfinitef %left : f32
+  %10 = scalar.isfinitef %right : f32
+  %11 = scalar.andi %9, %10 : i1
+  kernel.assert %11 : i1
+  %12, %13 = scalar.assume %left, %right [finite(%left), finite(%right)] : f32, f32
+  %product$3 = scalar.mulf<contract> %12, %13 : f32
+  %7 = scalar.isfinitef %product$3 : f32
+  kernel.assert %7 : i1
+  %product$8 = scalar.assume %product$3 [finite(%product$3)] : f32
+  test.use %product$8 : f32
+  kernel.return
 }
 
 // ====
@@ -671,6 +704,6 @@ func.def @assertion_site_payload_locations(%n: index, %x: f32) -> (index, f32) {
 func.def @assertion_site_payload_locations(%n: index, %x: f32) -> (index, f32) {
   %bounded = sanitizer.assert.value %n [range(%n, 0, 1024)] : index loc(tagged<sanitizer_site, "0002030201010000", "sanitizer.loom":2:1>)
   %6 = sanitizer.assert.value %x [not_inf(%x)] : f32 loc(tagged<sanitizer_site, "00020a0601010000", "sanitizer.loom":3:1>)
-  %neg = scalar.negf<ninf> %6 : f32 loc("sanitizer.loom":3:1)
+  %neg = scalar.negf %6 : f32 loc("sanitizer.loom":3:1)
   func.return %bounded, %neg : index, f32 loc("sanitizer.loom":4:1)
 } loc("sanitizer.loom":1:1 to 5:1)

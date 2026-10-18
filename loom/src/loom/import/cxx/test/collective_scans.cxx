@@ -13,7 +13,12 @@ using loom::kernel::scan_mode;
 // Three independent workgroups each end in a partial physical subgroup.
 // Five columns observe every prefix mode and the workgroup reduction. Input
 // and output guards are compared along with the payload after native execution.
-#define DEFINE_SCAN_VALUES(Name, Type, Kind, Seed, Offset, Step)               \
+#define EXPECT_BITWISE_OUTPUT(Actual, Expected) \
+  loom::check::expect_bitwise(Actual, Expected)
+#define EXPECT_NATIVE_FLOAT_OUTPUT(Actual, Expected) \
+  loom::check::expect_close(Actual, Expected, 0.0, 0.0)
+
+#define DEFINE_SCAN_VALUES(Name, Type, Kind, Seed, Offset, Step, ExpectOutput) \
   [[loom::kernel, loom::workgroup_count(3, 1, 1),                              \
     loom::workgroup_size(80, 1, 1)]]                                           \
   void Name(const Type* input, Type* output) {                                 \
@@ -66,16 +71,23 @@ using loom::kernel::scan_mode;
               loom::check::fill<1202, Type>(static_cast<Type>(37));            \
           loom::check::compare<Name, Name##_oracle>(input, output, [&] {       \
             loom::check::expect_bitwise(input, input);                         \
-            loom::check::expect_bitwise(output, output);                       \
+            ExpectOutput(output, output);                                      \
           });                                                                  \
         });                                                                    \
   }
 
-DEFINE_SCAN_VALUES(scan_u32, unsigned, addi, 0u, 0x60000000u, 0x123456u)
+DEFINE_SCAN_VALUES(scan_u32, unsigned, addi, 0u, 0x60000000u, 0x123456u,
+                   EXPECT_BITWISE_OUTPUT)
 DEFINE_SCAN_VALUES(scan_u64, unsigned long long, addi, 0ull,
-                   0x6000000000000000ull, 0x123456789abull)
+                   0x6000000000000000ull, 0x123456789abull,
+                   EXPECT_BITWISE_OUTPUT)
 // Exact quarter increments keep all FP32 reference sums exactly representable;
-// these assertions check source projection independently of reassociation.
-DEFINE_SCAN_VALUES(scan_f32, float, addf, -0.0f, -1.0f, 0.25f)
+// native collective arithmetic may choose either zero sign for an empty
+// exclusive prefix, so floating outputs use an otherwise exact numerical
+// comparison.
+DEFINE_SCAN_VALUES(scan_f32, float, addf, -0.0f, -1.0f, 0.25f,
+                   EXPECT_NATIVE_FLOAT_OUTPUT)
 
 #undef DEFINE_SCAN_VALUES
+#undef EXPECT_NATIVE_FLOAT_OUTPUT
+#undef EXPECT_BITWISE_OUTPUT

@@ -6,6 +6,19 @@
 
 #include "loom/codegen/low/schedule/completion_wait.h"
 
+bool loom_low_descriptor_set_has_completion_wait(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  if (descriptor_set == NULL) {
+    return false;
+  }
+  for (uint32_t i = 0; i < descriptor_set->hazard_count; ++i) {
+    if (descriptor_set->hazards[i].kind == LOOM_LOW_HAZARD_KIND_WAIT_COUNTER) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool loom_low_schedule_class_query_completion_wait(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_schedule_class_t* schedule_class,

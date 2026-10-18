@@ -299,7 +299,7 @@ TEST_P(Aie2pDmaSequenceTest, QueueAndRingBoundariesPreserveEveryRecord) {
         continue;
       }
       for (uint32_t count : {1u, 63u, 64u, 65u, 255u, 256u, 257u, 1023u, 1024u,
-                             1025u, 3360u, 3361u, 4294u, 5190u}) {
+                             1025u, 3360u, 3361u, 4294u, 5190u, 5632u}) {
         SCOPED_TRACE(::testing::Message()
                      << "direction=" << direction << " capacity=" << capacity
                      << " count=" << count);
@@ -318,11 +318,38 @@ TEST_P(Aie2pDmaSequenceTest, QueueAndRingBoundariesPreserveEveryRecord) {
   }
 }
 
+TEST_P(Aie2pDmaSequenceTest, RepeatedAlignedSuffixUsesTheSmallerChain) {
+  const auto words = descriptor_template();
+  const auto direction = LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY;
+  loom_aie2p_native_dma_sequence_t sequence = {};
+  iree_string_view_t reason;
+  bool valid = false;
+  IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
+      dma(), layout(), first_descriptor(), bank_size() - 2, direction, 5632, 1,
+      128, 64, words.data(), &sequence, &reason, &valid, &arena_));
+  ASSERT_TRUE(valid);
+  ASSERT_EQ(sequence.descriptor_count, 6);
+  ASSERT_EQ(sequence.task_count, 4);
+  const uint32_t full_chain =
+      loom_xdna_register_field_encode_admitted(start_field(direction),
+                                               sequence.descriptor) |
+      loom_xdna_register_field_encode_admitted(repeat_field(direction), 255);
+  EXPECT_EQ(sequence.tasks[0], full_chain);
+  EXPECT_EQ(sequence.tasks[1], full_chain);
+  EXPECT_EQ(sequence.tasks[2], full_chain);
+  EXPECT_EQ(sequence.tasks[3],
+            loom_xdna_register_field_encode_admitted(start_field(direction),
+                                                     sequence.descriptor + 2) |
+                loom_xdna_register_field_encode_admitted(
+                    repeat_field(direction), 255));
+  ExpectExecution(sequence, direction, 5632, 1);
+}
+
 TEST_P(Aie2pDmaSequenceTest, FiniteChainRetainsExactTailAndTaskEncodings) {
   const uint32_t capacity = layout() ? 3 : 1;
   // 3361 = 6 * (256 + 256 + 48) + 1 for local rings, and
-  //        5 * (256 + 256 + 160) + 1 for a fixed external address.
-  const uint32_t chain_length = layout() ? 6 : 5;
+  //        4 * (256 + 256 + 254) + 3 * 99 for a fixed external address.
+  const uint32_t chain_length = layout() ? 6 : 4;
   const auto words = descriptor_template();
   const auto direction = LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM;
   loom_aie2p_native_dma_sequence_t sequence = {};
@@ -335,10 +362,11 @@ TEST_P(Aie2pDmaSequenceTest, FiniteChainRetainsExactTailAndTaskEncodings) {
   ASSERT_EQ(sequence.descriptor_count, chain_length + (layout() ? 1 : 0));
   ASSERT_EQ(sequence.task_count, 4);
   EXPECT_FALSE(sequence.rewind_iteration);
-  const uint32_t cycles[] = {256, 256, layout() ? 48u : 160u, 1};
+  const uint32_t cycles[] = {256, 256, layout() ? 48u : 254u,
+                             layout() ? 1u : 99u};
   for (uint32_t task = 0; task < 4; ++task) {
-    const uint32_t tail = layout() ? chain_length : chain_length - 1;
-    const uint32_t head = sequence.descriptor + (task == 3 ? tail : 0);
+    const uint32_t final_head = layout() ? chain_length : 1;
+    const uint32_t head = sequence.descriptor + (task == 3 ? final_head : 0);
     EXPECT_EQ(
         sequence.tasks[task],
         loom_xdna_register_field_encode_admitted(start_field(direction), head) |

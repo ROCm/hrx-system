@@ -814,6 +814,7 @@ class AmdgpuMemoryPayloadRegisterClass(CEnum):
 class AmdgpuMemoryPayloadFormat(CEnum):
     GENERIC = "LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_GENERIC"
     LOW_16BIT_FLOAT = "LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_LOW_16BIT_FLOAT"
+    SIGNED_8BIT_INTEGER = "LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_8BIT_INTEGER"
     SIGNED_16BIT_INTEGER = "LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_16BIT_INTEGER"
     UNSIGNED_8BIT_INTEGER = "LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_UNSIGNED_8BIT_INTEGER"
 
@@ -873,6 +874,8 @@ class AmdgpuMemoryDescriptorCandidate:
     payload_format: AmdgpuMemoryPayloadFormat
     payload_register_count: int
     descriptor_key: str
+    # Tied destination form for lane-predicated loads; absent for stores/SMEM.
+    preserving_descriptor_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

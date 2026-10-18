@@ -481,6 +481,21 @@ void loom_value_facts_drop_float_range(loom_value_facts_t* facts) {
   facts->flags &= ~LOOM_VALUE_FACT_EXACT;
 }
 
+void loom_value_facts_assume_float_class(loom_value_facts_t* facts,
+                                         bool not_nan, bool not_inf) {
+  if ((!not_nan && !not_inf) ||
+      (facts->flags & (LOOM_VALUE_FACT_NAN | LOOM_VALUE_FACT_INF))) {
+    return;
+  }
+  facts->flags |= LOOM_VALUE_FACT_FLOAT |
+                  (not_nan ? LOOM_VALUE_FACT_NOT_NAN : 0) |
+                  (not_inf ? LOOM_VALUE_FACT_NOT_INF : 0);
+  if (loom_value_facts_is_not_nan(*facts) &&
+      loom_value_facts_is_not_inf(*facts)) {
+    facts->flags |= LOOM_VALUE_FACT_FINITE;
+  }
+}
+
 float loom_float_logistic_f32(float input) {
   if (input >= 0.0f) {
     const float exponent = expf(-input);

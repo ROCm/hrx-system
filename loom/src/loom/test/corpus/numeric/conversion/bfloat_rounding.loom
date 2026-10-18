@@ -109,3 +109,69 @@ check.scenario @bfloat_rounding_all_bins {
   }
   check.return
 }
+
+// The products are finite but not necessarily representable in BF16. Ties
+// still round to even, and nnan/ninf do not permit changing a zero's sign.
+func.def @finite_bfloat_products(%even_tie: f32, %odd_tie: f32, %signed_zero: f32) -> (i16, i16, i16, i16) {
+  %half = scalar.constant 0.5 : f32
+  %scalar_product = scalar.mulf<nnan|ninf> %even_tie, %half : f32
+  %scalar_narrow = scalar.fptrunc %scalar_product : f32 to bf16
+  %scalar_bits = scalar.bitcast %scalar_narrow : bf16 to i16
+  %inputs = vector.from_elements %even_tie, %odd_tie, %signed_zero : vector<3xf32>
+  %halves = vector.constant 0.5 : vector<3xf32>
+  %products = vector.mulf<nnan|ninf> %inputs, %halves : vector<3xf32>
+  %narrow = vector.fptrunc %products : vector<3xf32> to vector<3xbf16>
+  %bits = vector.bitcast %narrow : vector<3xbf16> to vector<3xi16>
+  %even = vector.extract %bits[0] : vector<3xi16> -> i16
+  %odd = vector.extract %bits[1] : vector<3xi16> -> i16
+  %zero = vector.extract %bits[2] : vector<3xi16> -> i16
+  func.return %scalar_bits, %even, %odd, %zero : i16, i16, i16, i16
+}
+
+// These trials use ties whose rounded magnitudes are 1.0 and 1.015625. The
+// oracle supplies those encodings directly and carries only the input sign;
+// it does not share floating arithmetic or narrowing with the subject.
+func.def @finite_bfloat_products_oracle(%even_tie: f32, %odd_tie: f32, %signed_zero: f32) -> (i16, i16, i16, i16) {
+  %inputs = vector.from_elements %even_tie, %odd_tie, %signed_zero : vector<3xf32>
+  %bits = vector.bitcast %inputs : vector<3xf32> to vector<3xi32>
+  %shift = vector.constant 16 : vector<3xi32>
+  %high = vector.shrui %bits, %shift : vector<3xi32>
+  %words = vector.trunci %high : vector<3xi32> to vector<3xi16>
+  %sign_mask = vector.constant -32768 : vector<3xi16>
+  %signs = vector.andi %words, %sign_mask : vector<3xi16>
+  %even_bits = scalar.constant 16256 : i16
+  %odd_bits = scalar.constant 16258 : i16
+  %c0 = scalar.constant 0 : i16
+  %magnitudes = vector.from_elements %even_bits, %odd_bits, %c0 : vector<3xi16>
+  %expected = vector.ori %signs, %magnitudes : vector<3xi16>
+  %even = vector.extract %expected[0] : vector<3xi16> -> i16
+  %odd = vector.extract %expected[1] : vector<3xi16> -> i16
+  %zero = vector.extract %expected[2] : vector<3xi16> -> i16
+  func.return %even, %even, %odd, %zero : i16, i16, i16, i16
+}
+
+check.scenario @finite_bfloat_product_rounding {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %even_tie = check.literal value(2.0078125) : f32
+    %odd_tie = check.literal value(2.0234375) : f32
+    %zero = check.literal value(0.0) : f32
+    check.compare<@finite_bfloat_products, @finite_bfloat_products_oracle>(%even_tie, %odd_tie, %zero) : (f32, f32, f32) -> [actual(%scalar: i16, %even: i16, %odd: i16, %signed_zero: i16), expected(%oracle_scalar: i16, %oracle_even: i16, %oracle_odd: i16, %oracle_zero: i16)] {
+      check.expect.bitwise actual(%scalar) expected(%oracle_scalar) : i16
+      check.expect.bitwise actual(%even) expected(%oracle_even) : i16
+      check.expect.bitwise actual(%odd) expected(%oracle_odd) : i16
+      check.expect.bitwise actual(%signed_zero) expected(%oracle_zero) : i16
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %even_tie = check.literal value(-2.0078125) : f32
+    %odd_tie = check.literal value(-2.0234375) : f32
+    %zero = check.literal value(-0.0) : f32
+    check.compare<@finite_bfloat_products, @finite_bfloat_products_oracle>(%even_tie, %odd_tie, %zero) : (f32, f32, f32) -> [actual(%scalar: i16, %even: i16, %odd: i16, %signed_zero: i16), expected(%oracle_scalar: i16, %oracle_even: i16, %oracle_odd: i16, %oracle_zero: i16)] {
+      check.expect.bitwise actual(%scalar) expected(%oracle_scalar) : i16
+      check.expect.bitwise actual(%even) expected(%oracle_even) : i16
+      check.expect.bitwise actual(%odd) expected(%oracle_odd) : i16
+      check.expect.bitwise actual(%signed_zero) expected(%oracle_zero) : i16
+    }
+  }
+  check.return
+}

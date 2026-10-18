@@ -61,6 +61,18 @@ static bool loom_amdgpu_subgroup_full_wave_workgroups(
          (flat_workgroup_size % wavefront_size) == 0;
 }
 
+bool loom_amdgpu_subgroup_scan_shape_is_native(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle, const loom_op_t* op) {
+  if (loom_amdgpu_subgroup_scan_has_cluster_attrs(op)) {
+    return false;
+  }
+  const uint32_t wavefront_size = loom_amdgpu_target_wavefront_size(bundle);
+  return loom_amdgpu_wavefront_size_is_valid(wavefront_size) &&
+         loom_amdgpu_subgroup_full_wave_workgroups(module, function, bundle,
+                                                   wavefront_size);
+}
+
 typedef struct loom_amdgpu_scan_mode_rule_t {
   // Subgroup scan mode used by lowering plans.
   loom_kernel_subgroup_scan_mode_t subgroup_mode;

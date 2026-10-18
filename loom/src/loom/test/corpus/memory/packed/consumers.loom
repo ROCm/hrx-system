@@ -375,3 +375,79 @@ check.scenario @masked_byte_tail_values {
   }
   check.return
 }
+
+// Each workitem preserves a packed vector spanning more than one memory packet.
+// Publishing the old bytes separately keeps their storage live across the load.
+// Runtime trial values select empty, half-full, and full workitem populations.
+kernel.def @masked_packed_snapshot() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%population: index, %input_arg: buffer, %previous_arg: buffer, %output_arg: buffer) {
+  %input, %previous, %output = buffer.assume.noalias %input_arg, %previous_arg, %output_arg : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %packet_width = index.constant 20 : index
+  %half_width = index.constant 16 : index
+  %old_offset = index.constant 640 : index
+  %thread = kernel.workitem.id<x> : index
+  %active_count = index.mul %population, %half_width : index
+  %active = index.cmp ult, %thread, %active_count : index
+  %mask = vector.splat %active : vector<20xi1>
+  %position = index.mul %thread, %packet_width : index
+  %old_position = index.add %position, %old_offset : index
+  %source = buffer.view %input[%base] : buffer -> view<640xi8>
+  %fallback = buffer.view %previous[%base] : buffer -> view<640xi8>
+  %destination = buffer.view %output[%base] : buffer -> view<1280xi32>
+  %old = vector.load %fallback[%position] : view<640xi8> -> vector<20xi8>
+  %loaded = vector.load.mask %source[%position], %mask, %old : view<640xi8>, vector<20xi1>, vector<20xi8>
+  %wide = vector.extsi %loaded : vector<20xi8> to vector<20xi32>
+  %retained = vector.extsi %old : vector<20xi8> to vector<20xi32>
+  vector.store %wide, %destination[%position] : vector<20xi32>, view<1280xi32>
+  vector.store %retained, %destination[%old_position] : vector<20xi32>, view<1280xi32>
+  kernel.return
+}
+
+func.def @masked_packed_snapshot_oracle(%population: index, %input: buffer, %previous: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 640 : index
+  %step = index.constant 1 : index
+  %population_elements = index.constant 320 : index
+  %active_elements = index.mul %population, %population_elements : index
+  %source = buffer.view %input[%base] : buffer -> view<640xi8>
+  %fallback = buffer.view %previous[%base] : buffer -> view<640xi8>
+  %destination = buffer.view %output[%base] : buffer -> view<1280xi32>
+  scf.for %position = [%begin to %end step %step] {
+    %old = view.load %fallback[%position] : view<640xi8> -> i8
+    %active = index.cmp ult, %position, %active_elements : index
+    %value = scf.if %active -> (i8) {
+      %loaded = view.load %source[%position] : view<640xi8> -> i8
+      scf.yield %loaded : i8
+    } else {
+      scf.yield %old : i8
+    }
+    %wide = scalar.extsi %value : i8 to i32
+    %retained = scalar.extsi %old : i8 to i32
+    %old_position = index.add %position, %end : index
+    view.store %wide, %destination[%position] : i32, view<1280xi32>
+    view.store %retained, %destination[%old_position] : i32, view<1280xi32>
+  }
+  func.return
+}
+
+check.scenario @masked_packed_snapshot_values {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %old_entropy = check.entropy.fork %entropy name("fallback") : check.entropy
+    %old_seed = check.entropy.read %old_entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<640xi8>
+    %previous = check.generate.random.uniform seed(%old_seed) range(-128 to 127) : tensor<640xi8>
+    %output = check.generate.fill value(-9999) : tensor<1280xi32>
+    check.compare<@masked_packed_snapshot, @masked_packed_snapshot_oracle>(%trial, %input, %previous, %output) : (index, tensor<640xi8>, tensor<640xi8>, tensor<1280xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<640xi8>
+      check.expect.bitwise actual(%previous) expected(%previous) : tensor<640xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1280xi32>
+    }
+  }
+  check.return
+}

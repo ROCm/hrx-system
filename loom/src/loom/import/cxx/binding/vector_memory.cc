@@ -181,7 +181,7 @@ std::optional<VectorMemoryIntrinsic> VectorMemoryIntrinsic::resolve(
       break;
     case Operation::Store:
       if (parameters.size() != 3 ||
-          signature->returnType()->kind() != cxx::TypeKind::kVoid) {
+          !unit.typeTraits().is_void(signature->returnType())) {
         diagnostics.reject(
             unit, owner,
             "vector.store requires a value, view, and full-rank origin");
@@ -208,7 +208,7 @@ std::optional<VectorMemoryIntrinsic> VectorMemoryIntrinsic::resolve(
     case Operation::StoreMask:
     case Operation::StoreCompress:
       if (parameters.size() != 4 ||
-          signature->returnType()->kind() != cxx::TypeKind::kVoid) {
+          !unit.typeTraits().is_void(signature->returnType())) {
         diagnostics.reject(unit, owner,
                            "masked vector store requires a value, view, "
                            "full-rank origin, and mask");
@@ -246,7 +246,7 @@ std::optional<VectorMemoryIntrinsic> VectorMemoryIntrinsic::resolve(
     const auto& mask = require_native_vector(unit, diagnostics, types,
                                              parameters[mask_index], owner);
     if (!unit.typeTraits().is_integral(mask.elementType()) ||
-        mask.elementType()->kind() == cxx::TypeKind::kBool) {
+        types.unqualified(mask.elementType())->kind() == cxx::TypeKind::kBool) {
       diagnostics.reject(unit, owner,
                          "vector memory mask requires integer lanes");
     }

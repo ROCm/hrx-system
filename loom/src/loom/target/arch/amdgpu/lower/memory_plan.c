@@ -114,17 +114,45 @@ static iree_status_t loom_amdgpu_select_memory_plan(
     return iree_ok_status();
   }
 
+  const loom_module_t* source_module = loom_low_lower_context_module(context);
+  const loom_memory_access_t source_access =
+      loom_memory_access_cast(source_module, source_op);
+  const loom_value_id_t mask = loom_memory_access_mask(source_access);
+  loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+  if (mask != LOOM_VALUE_ID_INVALID &&
+      !loom_value_fact_table_query_uniform_element_origin(
+          loom_low_lower_context_fact_table(context), source_module, mask,
+          &condition)) {
+    return iree_ok_status();
+  }
+
   IREE_ASSERT_GT(selection.packet_count, 0u);
   iree_host_size_t plan_byte_length = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(loom_amdgpu_memory_access_plan_t), &plan_byte_length,
       IREE_STRUCT_FIELD_FAM(selection.packet_count,
                             loom_amdgpu_memory_packet_plan_t)));
+  const bool has_mask = condition != LOOM_VALUE_ID_INVALID;
+  if (has_mask) {
+    plan_byte_length += sizeof(loom_amdgpu_memory_mask_plan_t);
+  }
   loom_amdgpu_memory_access_plan_t* retained_plan = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
       context, plan_byte_length, (void**)&retained_plan));
   retained_plan->source = selection.source;
   retained_plan->packet_count = selection.packet_count;
+  retained_plan->has_mask = has_mask;
+  if (has_mask) {
+    loom_amdgpu_memory_mask_plan_t* retained_mask =
+        (loom_amdgpu_memory_mask_plan_t*)(retained_plan->packets +
+                                          retained_plan->packet_count);
+    *retained_mask = (loom_amdgpu_memory_mask_plan_t){
+        .condition = condition,
+        .passthrough = loom_memory_access_passthrough(source_access),
+    };
+    IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_native_i1_mask(
+        context, condition, &retained_mask->condition_plan));
+  }
   loom_module_t* module = loom_low_lower_context_module(context);
   const loom_memory_access_t memory_access =
       loom_memory_access_cast(module, source_op);

@@ -10,6 +10,37 @@
 
 typedef loom_math_evaluation_value_t loom_math_value_t;
 
+iree_status_t loom_math_build_preserved_trigonometric(
+    loom_target_math_op_t math_op, loom_math_evaluation_t* evaluation,
+    loom_math_value_t* out_value) {
+  const bool is_cosine = math_op == LOOM_TARGET_MATH_OP_COSF ||
+                         math_op == LOOM_TARGET_MATH_OP_COSTURNSF;
+  const bool is_turns = math_op == LOOM_TARGET_MATH_OP_SINTURNSF ||
+                        math_op == LOOM_TARGET_MATH_OP_COSTURNSF;
+  const loom_math_evaluation_unary_op_t native_op =
+      is_turns ? (is_cosine ? LOOM_MATH_EVALUATION_UNARY_COSTURNSF
+                            : LOOM_MATH_EVALUATION_UNARY_SINTURNSF)
+               : (is_cosine ? LOOM_MATH_EVALUATION_UNARY_COSF
+                            : LOOM_MATH_EVALUATION_UNARY_SINF);
+  loom_math_value_t result;
+  IREE_RETURN_IF_ERROR(loom_math_evaluation_build_unary(
+      evaluation, native_op, &evaluation->input, &result));
+  loom_math_value_t zero;
+  IREE_RETURN_IF_ERROR(
+      loom_math_evaluation_build_constant(evaluation, 0.0, &zero));
+  loom_value_id_t is_zero;
+  IREE_RETURN_IF_ERROR(loom_math_evaluation_build_ordered_equal(
+      evaluation, &result, &zero, &is_zero));
+  loom_math_value_t signed_zero = zero;
+  if (!is_cosine) {
+    IREE_RETURN_IF_ERROR(loom_math_evaluation_build_binary(
+        evaluation, LOOM_MATH_EVALUATION_BINARY_COPYSIGNF, &zero,
+        &evaluation->input, &signed_zero));
+  }
+  return loom_math_evaluation_build_select(evaluation, is_zero, &signed_zero,
+                                           &result, out_value);
+}
+
 static iree_status_t loom_math_trigonometric_select_cardinal(
     loom_math_evaluation_t* evaluation, const loom_math_value_t* magnitude,
     double cardinal, const loom_math_value_t* cardinal_value,

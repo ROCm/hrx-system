@@ -1,0 +1,188 @@
+// RUN: pass vector-memory-footprint
+
+// A uniform mask selects an entire packet. Its inactive origin is outside the
+// view, but both accesses use the selected origin only when the mask is true.
+func.def @selected_packet(%view: view<4xi32>, %active: i1, %fallback: vector<4xi32>) {
+  %c0 = index.constant 0 : index
+  %end = index.constant 4 : index
+  %origin = scf.select %active, %c0, %end : index
+  %mask = vector.splat %active : vector<4xi1>
+  %loaded = vector.load.mask %view[%origin], %mask, %fallback : view<4xi32>, vector<4xi1>, vector<4xi32>
+  vector.store.mask %loaded, %view[%origin], %mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  %expanded = vector.load.expand %view[%origin], %mask, %fallback : view<4xi32>, vector<4xi1>, vector<4xi32>
+  vector.store.compress %expanded, %view[%origin], %mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  func.return
+}
+
+// ====
+
+// The assumption cannot justify a packet extending beyond the view while active.
+func.def @active_packet_overruns(%view: view<4xi32>, %active: i1, %fallback: vector<4xi32>) {
+  %c1 = index.constant 1 : index
+  %end = index.constant 4 : index
+  %origin = scf.select %active, %c1, %end : index
+  %mask = vector.splat %active : vector<4xi1>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load.mask", vector_extent="4", view_bound="4"}
+  %loaded = vector.load.mask %view[%origin], %mask, %fallback : view<4xi32>, vector<4xi1>, vector<4xi32>
+  test.use %loaded : vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Reusing a mask for adjacent accesses must not make its truth available to an
+// unmasked access, including one in a subsequent region.
+func.def @mask_scope_ends_at_access(%view: view<4xi32>, %active: i1, %enter: i1, %fallback: vector<4xi32>) {
+  %c0 = index.constant 0 : index
+  %end = index.constant 4 : index
+  %origin = scf.select %active, %c0, %end : index
+  %mask = vector.splat %active : vector<4xi1>
+  %loaded = vector.load.mask %view[%origin], %mask, %fallback : view<4xi32>, vector<4xi1>, vector<4xi32>
+  vector.store.mask %loaded, %view[%origin], %mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="4", view_bound="4"}
+  %unmasked = vector.load %view[%origin] : view<4xi32> -> vector<4xi32>
+  test.use %unmasked : vector<4xi32>
+  vector.store.mask %loaded, %view[%origin], %mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  scf.if %enter {
+    // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="4", view_bound="4"}
+    %nested = vector.load %view[%origin] : view<4xi32> -> vector<4xi32>
+    test.use %nested : vector<4xi32>
+  }
+  func.return
+}
+
+// ====
+
+// Replacing the cached predicate must discard expressions proved under the old
+// predicate, even when both derivations reuse the same scope storage.
+func.def @different_masks_have_different_facts(%view: view<4xi32>, %first: i1, %second: i1, %lanes: vector<4xi1>, %fallback: vector<4xi32>) {
+  %c0 = index.constant 0 : index
+  %end = index.constant 4 : index
+  %origin = scf.select %first, %c0, %end : index
+  %first_mask = vector.splat %first : vector<4xi1>
+  %second_mask = vector.splat %second : vector<4xi1>
+  %loaded = vector.load.mask %view[%origin], %first_mask, %fallback : view<4xi32>, vector<4xi1>, vector<4xi32>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.store.mask", vector_extent="4", view_bound="4"}
+  vector.store.mask %loaded, %view[%origin], %second_mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  vector.store.mask %loaded, %view[%origin], %first_mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.store.mask", vector_extent="4", view_bound="4"}
+  vector.store.mask %loaded, %view[%origin], %lanes : vector<4xi32>, view<4xi32>, vector<4xi1>
+  func.return
+}
+
+// ====
+
+// The same access domain bounds the linearized footprint of every indexed
+// memory operation, including read/modify/write and resultless atomics.
+func.def @indexed_packets(%view: view<4xi32>, %active: i1, %fallback: vector<4xi32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %end = index.constant 4 : index
+  %origin = scf.select %active, %c0, %end : index
+  %mask = vector.splat %active : vector<4xi1>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  %loaded = vector.gather.mask %view[%origin][%offsets], %mask, %fallback : view<4xi32>, vector<4xindex>, vector<4xi1>, vector<4xi32>
+  vector.scatter.mask %loaded, %view[%origin][%offsets], %mask : vector<4xi32>, view<4xi32>, vector<4xindex>, vector<4xi1>
+  vector.atomic.reduce.mask<addi> %loaded, %view[%origin][%offsets], %mask {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<4xi32>, vector<4xindex>, vector<4xi1>
+  %previous = vector.atomic.rmw.mask<xchgi> %loaded, %view[%origin][%offsets], %mask, %fallback {ordering = acq_rel, scope = workgroup} : vector<4xi32>, view<4xi32>, vector<4xindex>, vector<4xi1>, vector<4xi32>
+  test.use %previous : vector<4xi32>
+  %bad_offsets = vector.iota %c1 step %c1 : vector<4xindex>
+  // ERROR@+1: SUBRANGE/016 {op_name="vector.gather.mask"}
+  %overrun = vector.gather.mask %view[%origin][%bad_offsets], %mask, %fallback : view<4xi32>, vector<4xindex>, vector<4xi1>, vector<4xi32>
+  test.use %overrun : vector<4xi32>
+  func.return
+}
+
+// ====
+
+// An affine packet origin is refined from the predicate's scalar coordinates.
+func.def @affine_packet_origin(%view: view<64xi32>, %raw: index, %fallback: vector<4xi32>) {
+  %thread = index.assume %raw [range(%raw, 0, 31)] : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %c17 = index.constant 17 : index
+  %origin = index.mul %thread, %c4 : index
+  %active = index.cmp ult, %thread, %c16 : index
+  %mask = vector.splat %active : vector<4xi1>
+  %loaded = vector.load.mask %view[%origin], %mask, %fallback : view<64xi32>, vector<4xi1>, vector<4xi32>
+  test.use %loaded : vector<4xi32>
+  %too_many = index.cmp ult, %thread, %c17 : index
+  %bad_mask = vector.splat %too_many : vector<4xi1>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.store.mask", vector_extent="4", view_bound="64"}
+  vector.store.mask %loaded, %view[%origin], %bad_mask : vector<4xi32>, view<64xi32>, vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Uniformity applies across the entire mask shape, not just its last dimension.
+func.def @multidimensional_packet(%view: view<4x8xi32>, %active: i1, %fallback: vector<2x4xi32>) {
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %row = scf.select %active, %c2, %c4 : index
+  %column = scf.select %active, %c4, %c8 : index
+  %mask = vector.splat %active : vector<2x4xi1>
+  %loaded = vector.load.mask %view[%row, %column], %mask, %fallback : view<4x8xi32>, vector<2x4xi1>, vector<2x4xi32>
+  vector.store.mask %loaded, %view[%row, %column], %mask : vector<2x4xi32>, view<4x8xi32>, vector<2x4xi1>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.store.mask", view_axis="0", vector_extent="2", view_bound="4"}
+  vector.store.mask %loaded, %view[%column, %row], %mask : vector<2x4xi32>, view<4x8xi32>, vector<2x4xi1>
+  func.return
+}
+
+// ====
+
+// Conjunction retains the dynamic full-packet bound. Disjunction with an
+// independent predicate cannot promise that the packet fits.
+func.def @dynamic_packet_guard(%storage: buffer, %base: offset, %raw: index, %bound_raw: index, %enabled: i1, %fallback: vector<4xi32>) {
+  %origin = index.assume %raw [range(%raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  %c4 = index.constant 4 : index
+  %end = index.add %origin, %c4 : index
+  %fits = index.cmp ule, %end, %bound : index
+  %active = scalar.andi %fits, %enabled : i1
+  %mask = vector.splat %active : vector<4xi1>
+  %loaded = vector.load.mask %view[%origin], %mask, %fallback : view<[%bound]xi32>, vector<4xi1>, vector<4xi32>
+  test.use %loaded : vector<4xi32>
+  %either = scalar.ori %fits, %enabled : i1
+  %unsafe_mask = vector.splat %either : vector<4xi1>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.store.mask", vector_extent="4"}
+  vector.store.mask %loaded, %view[%origin], %unsafe_mask : vector<4xi32>, view<[%bound]xi32>, vector<4xi1>
+  func.return
+}
+
+// ====
+
+// The same predicate is known true, known false, and unknown in three scopes.
+// An inactive access needs no bound, even for a wholly out-of-range packet.
+func.def @mask_truth_depends_on_parent(%view: view<4xi32>, %active: i1, %fallback: vector<4xi32>) {
+  %c0 = index.constant 0 : index
+  %end = index.constant 4 : index
+  %origin = scf.select %active, %c0, %end : index
+  %mask = vector.splat %active : vector<4xi1>
+  scf.if %active {
+    vector.store.mask %fallback, %view[%origin], %mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  } else {
+    vector.store.mask %fallback, %view[%end], %mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  }
+  vector.store.mask %fallback, %view[%origin], %mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Uniform-element provenance survives CFG forwarding. The access consumes that
+// fact without following the incoming mask producer itself.
+func.def @forwarded_packet_mask(%view: view<4xi32>, %active: i1, %fallback: vector<4xi32>) {
+  %c0 = index.constant 0 : index
+  %end = index.constant 4 : index
+  %origin = scf.select %active, %c0, %end : index
+  %mask = vector.splat %active : vector<4xi1>
+  cfg.br ^access(%mask: vector<4xi1>, %active: i1)
+^access(%forwarded: vector<4xi1>, %condition: i1):
+  %loaded = vector.load.mask %view[%origin], %forwarded, %fallback : view<4xi32>, vector<4xi1>, vector<4xi32>
+  %recreated = vector.splat %condition : vector<4xi1>
+  vector.store.mask %loaded, %view[%origin], %recreated : vector<4xi32>, view<4xi32>, vector<4xi1>
+  func.return
+}

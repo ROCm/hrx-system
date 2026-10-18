@@ -1,6 +1,6 @@
 // RUN: verify
 template <class Float>
-// ERROR@+1: LOWERING/059 "intrinsic has an unsupported fast-math flag"
+// ERROR@+1: LOWERING/059 "intrinsic has an unsupported math flag"
 [[loom::op("scalar.expf", "surprise")]] Float unused(Float);
 
 // ====
@@ -37,3 +37,14 @@ static_assert(HasMultiply<__bf16, __bf16>);
 static_assert(HasMultiply<float, float>);
 static_assert(!HasMultiply<float, double>);
 static_assert(!HasMultiply<_Float16, __bf16>);
+
+// ====
+template <class Float>
+// ERROR@+1: LOWERING/059 "intrinsic has an unsupported math flag"
+[[loom::op("scalar.expf", "preserve")]] Float unrelated(Float);
+
+// ====
+// ERROR@+1: LOWERING/059 "fastmath has an unsupported permission"
+[[loom::fastmath("preserve")]] float requirement_is_not_permission(float value) {
+  return value;
+}

@@ -126,7 +126,7 @@ enum {
   LOOM_OP_SCALAR_COUNT_ = 104,
 };
 
-// IEEE 754 fast-math relaxation flags for float operations.
+// IEEE 754 fast-math relaxation flags for float operations. nnan and ninf are independent author promises, not runtime checks or requests to clamp results. Together they guarantee finite floating-point results, but do not imply exact representability in a narrower type or absence of subnormals. Behavior outside an authored promise is not constrained by the operation's ordinary special-value contract. Flags do not refine unrelated uses of an operand.
 #define LOOM_SCALAR_FASTMATHFLAGS_REASSOC ((uint8_t)1)
 #define LOOM_SCALAR_FASTMATHFLAGS_NNAN ((uint8_t)2)
 #define LOOM_SCALAR_FASTMATHFLAGS_NINF ((uint8_t)4)
@@ -135,6 +135,17 @@ enum {
 #define LOOM_SCALAR_FASTMATHFLAGS_CONTRACT ((uint8_t)32)
 #define LOOM_SCALAR_FASTMATHFLAGS_AFN ((uint8_t)64)
 #define LOOM_SCALAR_FASTMATHFLAGS_FAST ((uint8_t)127)
+
+// Trigonometric math permissions and requirements. AFN permits native approximation with target-dependent zero signs unless preserve is requested. Other fast-math permissions retain their meanings; preserve does not require correctly rounded nonzero approximations.
+#define LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_REASSOC ((uint8_t)1)
+#define LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_NNAN ((uint8_t)2)
+#define LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_NINF ((uint8_t)4)
+#define LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_NSZ ((uint8_t)8)
+#define LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_ARCP ((uint8_t)16)
+#define LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_CONTRACT ((uint8_t)32)
+#define LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_AFN ((uint8_t)64)
+#define LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_FAST ((uint8_t)127)
+#define LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_PRESERVE ((uint8_t)128)
 
 // Independent DAZ and FTZ permissions for floating-point conversions.
 #define LOOM_SCALAR_FLOATCONVERSIONFLAGS_DAZ ((uint8_t)1)
@@ -949,12 +960,12 @@ iree_status_t loom_scalar_cbrtf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_SINF: Sine.
+// LOOM_OP_SCALAR_SINF: Sine in radians. AFN permits native approximation with target-dependent zero signs; preserve requires source-defined zero signs.
 // %result = scalar.sinf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_sinf_isa, LOOM_OP_SCALAR_SINF)
 LOOM_DEFINE_OPERAND(loom_scalar_sinf_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_sinf_result, 0)
-LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_sinf_fastmath)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_sinf_math)
 iree_status_t loom_scalar_sinf_build(
     loom_builder_t* builder, uint8_t instance_flags,
     loom_value_id_t input, loom_type_t result_type,
@@ -965,12 +976,12 @@ iree_status_t loom_scalar_sinf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_COSF: Cosine.
+// LOOM_OP_SCALAR_COSF: Cosine in radians. AFN permits native approximation with target-dependent zero signs; preserve requires source-defined zero signs.
 // %result = scalar.cosf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_cosf_isa, LOOM_OP_SCALAR_COSF)
 LOOM_DEFINE_OPERAND(loom_scalar_cosf_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_cosf_result, 0)
-LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_cosf_fastmath)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_cosf_math)
 iree_status_t loom_scalar_cosf_build(
     loom_builder_t* builder, uint8_t instance_flags,
     loom_value_id_t input, loom_type_t result_type,
@@ -981,12 +992,12 @@ iree_status_t loom_scalar_cosf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_SINTURNSF: Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
+// LOOM_OP_SCALAR_SINTURNSF: Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinal values. Non-finite inputs produce NaN. AFN permits target-dependent zero signs; preserve requires the input sign at zero and integer or half-integer turns.
 // %result = scalar.sinturnsf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_sinturnsf_isa, LOOM_OP_SCALAR_SINTURNSF)
 LOOM_DEFINE_OPERAND(loom_scalar_sinturnsf_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_sinturnsf_result, 0)
-LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_sinturnsf_fastmath)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_sinturnsf_math)
 iree_status_t loom_scalar_sinturnsf_build(
     loom_builder_t* builder, uint8_t instance_flags,
     loom_value_id_t input, loom_type_t result_type,
@@ -997,12 +1008,12 @@ iree_status_t loom_scalar_sinturnsf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_COSTURNSF: Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
+// LOOM_OP_SCALAR_COSTURNSF: Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinal values. Non-finite inputs produce NaN. AFN permits target-dependent zero signs; preserve requires positive zero at odd quarter-turns.
 // %result = scalar.costurnsf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_costurnsf_isa, LOOM_OP_SCALAR_COSTURNSF)
 LOOM_DEFINE_OPERAND(loom_scalar_costurnsf_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_costurnsf_result, 0)
-LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_costurnsf_fastmath)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_costurnsf_math)
 iree_status_t loom_scalar_costurnsf_build(
     loom_builder_t* builder, uint8_t instance_flags,
     loom_value_id_t input, loom_type_t result_type,

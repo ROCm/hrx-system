@@ -720,7 +720,7 @@ class CheckBody {
       fail(source, "check subjects require a fixed function signature");
     }
     std::vector<loom_type_t> results;
-    if (signature->returnType()->kind() != cxx::TypeKind::kVoid) {
+    if (!unit_.typeTraits().is_void(signature->returnType())) {
       if (is_kernel(function)) {
         fail(source, "check kernels cannot return values");
       }

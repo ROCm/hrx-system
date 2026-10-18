@@ -1,0 +1,152 @@
+// RUN: pass target-legalize{mode=eager,policy=reference-only}
+
+test.target<low_core> @target {subgroup_size = 8}
+
+kernel.def target(@target) @sparse_clustered_wide_reduce() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c1, %c1) : index
+} launch(%value: i64) {
+  %lane = kernel.subgroup.lane.id : index
+  %c7 = index.constant 7 : index
+  %participates = index.cmp ult, %lane, %c7 : index
+  %result = scf.if %participates -> (i64) {
+    %total = kernel.subgroup.reduce<addi> %value {cluster_size = 4, cluster_stride = 2} : i64
+    scf.yield %total : i64
+  } else {
+    scf.yield %value : i64
+  }
+  test.use %result : i64
+  kernel.return
+}
+
+// ----
+test.target<low_core> @target {subgroup_size = 8}
+
+kernel.def target(@target) @sparse_clustered_wide_reduce() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c1, %c1) : index
+} launch(%value: i64) {
+  %lane = kernel.subgroup.lane.id : index
+  %c7 = index.constant 7 : index
+  %participates = index.cmp ult, %lane, %c7 : index
+  %result = scf.if %participates -> (i64) {
+    %8 = scalar.constant 0 : i32
+    %9 = scalar.constant 1 : i32
+    %10 = scalar.constant 8 : i32
+    %11 = kernel.subgroup.lane.id : index
+    %12 = index.cast %11 : index to i32
+    %13 = scalar.constant 85 : i32
+    %14 = scalar.constant 8 : i32
+    %15 = scalar.divui %12, %14 : i32
+    %16 = scalar.muli %15, %14 : i32
+    %17 = scalar.constant 2 : i32
+    %18 = scalar.remui %12, %17 : i32
+    %19 = scalar.addi %16, %18 : i32
+    %20 = scalar.shli %13, %19 : i32
+    %21 = kernel.subgroup.active.mask : i32
+    %22 = scalar.andi %21, %20 : i32
+    %23 = scalar.shli %9, %12 : i32
+    %24 = scalar.subi %23, %9 : i32
+    %25 = scalar.andi %22, %24 : i32
+    %26 = scalar.ctpopi %25 : i32
+    %27 = scalar.ctpopi %22 : i32
+    %28 = scalar.constant 4 : i32
+    %29 = scalar.constant 15 : i32
+    %30 = scalar.constant 2 : i32
+    %31 = scalar.constant 3 : i32
+    %32 = scalar.constant 1 : i32
+    %33 = scalar.constant 1 : i32
+    %34 = scalar.constant 1 : i32
+    %35 = scalar.subi %26, %34 : i32
+    %36 = scalar.cmpi uge, %26, %34 : i32
+    %37 = scalar.andi %22, %29 : i32
+    %38 = scalar.ctpopi %37 : i32
+    %39 = scalar.cmpi uge, %35, %38 : i32
+    %40 = scalar.subi %35, %38 : i32
+    %41 = scf.select %39, %40, %35 : i32
+    %42 = scalar.shrui %22, %28 : i32
+    %43 = scf.select %39, %42, %22 : i32
+    %44 = scalar.addi %8, %28 : i32
+    %45 = scf.select %39, %44, %8 : i32
+    %46 = scalar.andi %43, %31 : i32
+    %47 = scalar.ctpopi %46 : i32
+    %48 = scalar.cmpi uge, %41, %47 : i32
+    %49 = scalar.subi %41, %47 : i32
+    %50 = scf.select %48, %49, %41 : i32
+    %51 = scalar.shrui %43, %30 : i32
+    %52 = scf.select %48, %51, %43 : i32
+    %53 = scalar.addi %45, %30 : i32
+    %54 = scf.select %48, %53, %45 : i32
+    %55 = scalar.andi %52, %33 : i32
+    %56 = scalar.ctpopi %55 : i32
+    %57 = scalar.cmpi uge, %50, %56 : i32
+    %62 = scalar.addi %54, %32 : i32
+    %63 = scf.select %57, %62, %54 : i32
+    %64, %65 = kernel.subgroup.shuffle<index> %value, %63, %10 : i64, i32, i32
+    %66 = scalar.andi %36, %65 : i1
+    %67 = scalar.addi %64, %value : i64
+    %68 = scf.select %66, %67, %value : i64
+    %69 = scalar.constant 2 : i32
+    %70 = scalar.subi %26, %69 : i32
+    %71 = scalar.cmpi uge, %26, %69 : i32
+    %72 = scalar.andi %22, %29 : i32
+    %73 = scalar.ctpopi %72 : i32
+    %74 = scalar.cmpi uge, %70, %73 : i32
+    %75 = scalar.subi %70, %73 : i32
+    %76 = scf.select %74, %75, %70 : i32
+    %77 = scalar.shrui %22, %28 : i32
+    %78 = scf.select %74, %77, %22 : i32
+    %79 = scalar.addi %8, %28 : i32
+    %80 = scf.select %74, %79, %8 : i32
+    %81 = scalar.andi %78, %31 : i32
+    %82 = scalar.ctpopi %81 : i32
+    %83 = scalar.cmpi uge, %76, %82 : i32
+    %84 = scalar.subi %76, %82 : i32
+    %85 = scf.select %83, %84, %76 : i32
+    %86 = scalar.shrui %78, %30 : i32
+    %87 = scf.select %83, %86, %78 : i32
+    %88 = scalar.addi %80, %30 : i32
+    %89 = scf.select %83, %88, %80 : i32
+    %90 = scalar.andi %87, %33 : i32
+    %91 = scalar.ctpopi %90 : i32
+    %92 = scalar.cmpi uge, %85, %91 : i32
+    %97 = scalar.addi %89, %32 : i32
+    %98 = scf.select %92, %97, %89 : i32
+    %99, %100 = kernel.subgroup.shuffle<index> %68, %98, %10 : i64, i32, i32
+    %101 = scalar.andi %71, %100 : i1
+    %102 = scalar.addi %99, %68 : i64
+    %103 = scf.select %101, %102, %68 : i64
+    %104 = scalar.subi %27, %9 : i32
+    %106 = scalar.andi %22, %29 : i32
+    %107 = scalar.ctpopi %106 : i32
+    %108 = scalar.cmpi uge, %104, %107 : i32
+    %109 = scalar.subi %104, %107 : i32
+    %110 = scf.select %108, %109, %104 : i32
+    %111 = scalar.shrui %22, %28 : i32
+    %112 = scf.select %108, %111, %22 : i32
+    %113 = scalar.addi %8, %28 : i32
+    %114 = scf.select %108, %113, %8 : i32
+    %115 = scalar.andi %112, %31 : i32
+    %116 = scalar.ctpopi %115 : i32
+    %117 = scalar.cmpi uge, %110, %116 : i32
+    %118 = scalar.subi %110, %116 : i32
+    %119 = scf.select %117, %118, %110 : i32
+    %120 = scalar.shrui %112, %30 : i32
+    %121 = scf.select %117, %120, %112 : i32
+    %122 = scalar.addi %114, %30 : i32
+    %123 = scf.select %117, %122, %114 : i32
+    %124 = scalar.andi %121, %33 : i32
+    %125 = scalar.ctpopi %124 : i32
+    %126 = scalar.cmpi uge, %119, %125 : i32
+    %131 = scalar.addi %123, %32 : i32
+    %132 = scf.select %126, %131, %123 : i32
+    %total, %134 = kernel.subgroup.shuffle<index> %103, %132, %10 : i64, i32, i32
+    scf.yield %total : i64
+  } else {
+    scf.yield %value : i64
+  }
+  test.use %result : i64
+  kernel.return
+}

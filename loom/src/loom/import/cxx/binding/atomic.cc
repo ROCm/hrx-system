@@ -547,7 +547,7 @@ std::optional<FenceIntrinsic> FenceIntrinsic::resolve(
                    loom_buffer_fence_ordering_diagnostic_ref(), selectors[0]);
   auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
   if (signature->isVariadic() || !signature->parameterTypes().empty() ||
-      signature->returnType()->kind() != cxx::TypeKind::kVoid) {
+      !unit.typeTraits().is_void(signature->returnType())) {
     diagnostics.reject(unit, owner, "buffer.fence requires void()");
   }
   return FenceIntrinsic(static_cast<loom_atomic_ordering_t>(selectors[0]),

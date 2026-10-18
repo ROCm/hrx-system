@@ -15,7 +15,7 @@ from loom.assembly import (
     TemplateParamFlags,
     TypeOf,
 )
-from loom.dialect.scalar import FastMathFlags, GeluVariant, scalar_ops
+from loom.dialect.scalar import FastMathFlags, GeluVariant, TrigonometryMathFlags, scalar_ops
 from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_F64,
@@ -38,6 +38,7 @@ __all__ = ["ALL_MATH_OPS"]
 
 # All math ops are FLOAT and PURE with optional FastMathFlags unless noted.
 _FM = ("fastmath", FastMathFlags)
+_TRIG_MATH = ("math", TrigonometryMathFlags)
 
 # ============================================================================
 # Exponential / logarithm
@@ -191,8 +192,8 @@ scalar_sinf = unary_op(
     group=scalar_ops,
     phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
-    doc="Sine.",
-    flags=_FM,
+    doc="Sine in radians. AFN permits native approximation with target-dependent zero signs; preserve requires source-defined zero signs.",
+    flags=_TRIG_MATH,
     facts="loom_scalar_sinf_facts",
     examples=["%result = scalar.sinf %input : f32"],
     traits=[SAFE_TO_SPECULATE],
@@ -203,8 +204,8 @@ scalar_cosf = unary_op(
     group=scalar_ops,
     phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
-    doc="Cosine.",
-    flags=_FM,
+    doc="Cosine in radians. AFN permits native approximation with target-dependent zero signs; preserve requires source-defined zero signs.",
+    flags=_TRIG_MATH,
     facts="loom_scalar_cosf_facts",
     examples=["%result = scalar.cosf %input : f32"],
     traits=[SAFE_TO_SPECULATE],
@@ -215,8 +216,10 @@ scalar_sinturnsf = unary_op(
     group=scalar_ops,
     phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
-    doc=("Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
-    flags=_FM,
+    doc=(
+        "Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinal values. Non-finite inputs produce NaN. AFN permits target-dependent zero signs; preserve requires the input sign at zero and integer or half-integer turns."
+    ),
+    flags=_TRIG_MATH,
     facts="loom_scalar_sinturnsf_facts",
     examples=["%result = scalar.sinturnsf %input : f32"],
     traits=[SAFE_TO_SPECULATE],
@@ -227,8 +230,10 @@ scalar_costurnsf = unary_op(
     group=scalar_ops,
     phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
-    doc=("Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
-    flags=_FM,
+    doc=(
+        "Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinal values. Non-finite inputs produce NaN. AFN permits target-dependent zero signs; preserve requires positive zero at odd quarter-turns."
+    ),
+    flags=_TRIG_MATH,
     facts="loom_scalar_costurnsf_facts",
     examples=["%result = scalar.costurnsf %input : f32"],
     traits=[SAFE_TO_SPECULATE],

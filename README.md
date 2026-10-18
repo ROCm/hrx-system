@@ -31,9 +31,12 @@ layer as `lib/libamdhip64.so`.
 
 ## Building
 
+The following builds the HRX GPU runtime and installable packages. For runtime
+or compiler-only builds, start with the [build guide](BUILDING.md).
+
 Use a ROCm installation or unpacked ROCm build environment that provides HSA,
-AQL profile headers, and a ROCm LLVM toolchain. The CI path uses ROCm clang and
-forces libraries into `lib`.
+AQL profile headers, and a ROCm LLVM toolchain. These commands select ROCm Clang
+and install libraries under `lib`.
 
 The blessed local command path uses `dev.py` to keep setup, hook configuration,
 and build-lane selection consistent:
@@ -96,9 +99,9 @@ Useful options:
 |--------|---------|---------|
 | `IREE_DEPENDENCY_MODE` | `pinned` | Controls dependency resolution: `pinned`, `package`, or `auto`. |
 | `LIBHRX_BUILD` | ON | Build libhrx and compatibility targets. |
-| `LIBHRX_BUILD_CTS` | `${IREE_BUILD_TESTS}` | Build libhrx CTS binaries. |
+| `LIBHRX_BUILD_CTS` | `ON` when libhrx and tests are enabled | Build libhrx CTS binaries. |
 | `LIBHRX_BUILD_HIP_BINDING` | ON | Build the HIP runtime API compatibility DLL. |
-| `LIBHRX_BUILD_PASSTHROUGH` | ON | Build HIP passthrough/interception tools. |
+| `LIBHRX_BUILD_PASSTHROUGH` | `ON` on Linux, `OFF` elsewhere | Build HIP passthrough/interception tools. |
 | `IREE_BUILD_TESTS` | ON | Build IREE runtime tests and CTS targets. |
 | `HRX_INSTALL_TESTS` | `${IREE_BUILD_TESTS}` | Install a relocatable CTest tree. |
 | `IREE_HAL_DRIVER_AMDGPU` | ON | Build the AMDGPU runtime HAL driver. |

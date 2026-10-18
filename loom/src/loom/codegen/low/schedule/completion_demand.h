@@ -9,7 +9,7 @@
 #ifndef LOOM_CODEGEN_LOW_SCHEDULE_COMPLETION_DEMAND_H_
 #define LOOM_CODEGEN_LOW_SCHEDULE_COMPLETION_DEMAND_H_
 
-#include "loom/codegen/low/schedule/dependency_index.h"
+#include "loom/codegen/low/schedule/dependency_incoming.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/util/index_set.h"
 
@@ -42,10 +42,10 @@ typedef enum loom_low_schedule_completion_selection_kind_e {
 // visited at most once per selection kind and domain. All storage belongs to
 // the scheduling scratch arena and is fixed at creation.
 typedef struct loom_low_schedule_completion_demand_t {
-  // Incoming same-block scheduling prerequisites, with a terminal sentinel.
-  uint32_t* incoming_starts;
-  // Producer nodes grouped by consumer in incoming_starts.
-  uint32_t* producers;
+  // Forward dependency groups borrowed for producer lookup.
+  const loom_low_schedule_dependency_index_t* dependencies;
+  // Same-block consumer index borrowed for reverse dependency traversal.
+  const loom_low_schedule_dependency_incoming_index_t* incoming_dependencies;
   // Fixed traversal stack with one entry per schedule node.
   uint32_t* worklist;
   // Monotone demand bits, laid out by selection kind then domain.
@@ -74,12 +74,13 @@ typedef struct loom_low_schedule_completion_demand_t {
   } nominations;
 } loom_low_schedule_completion_demand_t;
 
-// Builds the reverse same-block dependency index and empty domain demand sets.
-// Every dependency kind constrains readiness, including non-value ordering.
+// Binds the shared same-block dependency indexes and builds empty domain demand
+// sets. Every dependency kind constrains readiness, including non-value
+// ordering.
 iree_status_t loom_low_schedule_completion_demand_initialize(
     const loom_low_schedule_dependency_index_t* index,
-    const loom_low_schedule_node_t* nodes, uint16_t domain_count,
-    iree_arena_allocator_t* arena,
+    const loom_low_schedule_dependency_incoming_index_t* incoming_index,
+    uint16_t domain_count, iree_arena_allocator_t* arena,
     loom_low_schedule_completion_demand_t* out_demand);
 
 // Nominates a completion of |kind| in |domain|. Several values may nominate the

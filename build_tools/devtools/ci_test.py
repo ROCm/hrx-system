@@ -465,9 +465,72 @@ class CiTest(unittest.TestCase):
             planned[1].test_results,
             ci.bazel_test_results.BazelTestResultsCapture(
                 build_event_path=event_path,
-                output_dir=result_dir,
+                output_dir=result_dir / "test-example",
             ),
         )
+
+    def test_repeated_test_phases_preserve_each_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result_dir = root / "results"
+            ci.bazel_test_results.prepare_output_directory(result_dir)
+            source = root / "testlogs" / "example" / "test.xml"
+            source.parent.mkdir(parents=True)
+            steps = ci.add_bazel_test_results(
+                [
+                    ci.bazel_test_step("First", ("//example:test",)),
+                    ci.bazel_test_step("Second", ("//example:test",)),
+                ],
+                result_dir,
+            )
+            event = {
+                "testResult": {
+                    "testActionOutput": [{"name": "test.xml", "uri": source.as_uri()}]
+                }
+            }
+            for step, payload in zip(steps, ("first result", "second result")):
+                source.write_text(payload)
+                capture = step.test_results
+                capture.build_event_path.write_text(json.dumps(event) + "\n")
+                self.assertEqual(
+                    ci.bazel_test_results.stage(
+                        capture.build_event_path, capture.output_dir
+                    ),
+                    1,
+                )
+            self.assertEqual(
+                sorted(path.read_text() for path in result_dir.rglob("test.xml")),
+                ["first result", "second result"],
+            )
+
+    def test_native_gpu_ci_requires_explicit_windows_target(self):
+        with mock.patch.object(ci.sys, "platform", "win32"):
+            args = ci.parse_arguments(["iree-bazel-amdgpu-native"])
+            with self.assertRaisesRegex(ValueError, "exact --amdgpu-target"):
+                ci.steps_from_args(args)
+        with mock.patch.object(ci.sys, "platform", "linux"):
+            args = ci.parse_arguments(
+                ["iree-bazel-amdgpu-native", "--amdgpu-target", "gfx1201"]
+            )
+            with self.assertRaisesRegex(ValueError, "requires Windows"):
+                ci.steps_from_args(args)
+
+    def test_native_gpu_ci_forwards_target_override_and_sanitizer(self):
+        args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu-native-asan",
+                "--amdgpu-target",
+                "gfx1201",
+                "--target",
+                "//example:custom",
+            ]
+        )
+        with (
+            mock.patch.object(ci.sys, "platform", "win32"),
+            mock.patch.object(ci, "amdgpu_windows_steps", return_value=[]) as plan,
+        ):
+            ci.steps_from_args(args)
+        plan.assert_called_once_with(("//example:custom",), "gfx1201", "asan")
 
     def test_bazel_profile_names_must_be_unique(self):
         duplicate_steps = [

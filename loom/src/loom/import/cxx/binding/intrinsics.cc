@@ -304,12 +304,16 @@ Intrinsics::ScalarOperation Intrinsics::resolve_scalar_operation(
     cxx::AST* owner) {
   ScalarOperation result{scalar};
   for (size_t index = 1; index < attribute.arguments.size(); ++index) {
+    const auto name = view(attribute.arguments[index]->name());
+    if (scalar->preserve_flag &&
+        iree_string_view_equal(name, IREE_SV("preserve"))) {
+      result.flags |= scalar->preserve_flag;
+      continue;
+    }
     uint8_t flag;
-    if (!scalar->has_fastmath ||
-        !loom_cxx_fastmath_flag_parse(view(attribute.arguments[index]->name()),
-                                      &flag)) {
+    if (!scalar->has_fastmath || !loom_cxx_fastmath_flag_parse(name, &flag)) {
       diagnostics_.reject(unit_, owner,
-                          "intrinsic has an unsupported fast-math flag");
+                          "intrinsic has an unsupported math flag");
     }
     result.flags |= flag;
   }
@@ -320,7 +324,7 @@ Intrinsics::ScalarBinding Intrinsics::resolve_scalar(
     ScalarOperation operation, const cxx::FunctionType* signature,
     cxx::AST* owner) {
   const auto& traits = unit_.typeTraits();
-  const auto* return_type = traits.remove_cv(signature->returnType());
+  const auto* return_type = types_.unqualified(signature->returnType());
   if (operation.scalar->category == LOOM_CXX_SCALAR_CATEGORY_INTEGER) {
     if (!traits.is_integral(return_type) ||
         return_type->kind() == cxx::TypeKind::kBool) {
@@ -339,7 +343,7 @@ Intrinsics::ScalarBinding Intrinsics::resolve_scalar(
                         "intrinsic declaration has the wrong operand count");
   }
   for (const auto* parameter : signature->parameterTypes()) {
-    if (traits.remove_cv(parameter) != return_type) {
+    if (types_.unqualified(parameter) != return_type) {
       diagnostics_.reject(unit_, owner,
                           "intrinsic operands must have the result's type");
     }

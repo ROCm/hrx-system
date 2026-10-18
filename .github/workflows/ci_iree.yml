@@ -388,7 +388,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-test-results-amd-client-linux-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/bazel-testlogs
+          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/**/bazel-testlogs/**
           if-no-files-found: warn
           retention-days: 7
 
@@ -519,10 +519,18 @@ jobs:
             runner: azure-windows-scale-rocm
           - name: Clang CL / Fastbuild / AMD gfx1151 NPU5
             kind: amd_client
+            command: iree-bazel-amd-client
             host_toolchain: clang-cl
             runner: windows-gfx1151-gpu-rocm
+            xdna: true
+          - name: Clang CL / ASAN / AMD gfx1201
+            kind: amdgpu
+            command: iree-bazel-amdgpu-native-asan
+            host_toolchain: clang-cl
+            runner: windows-gfx1201-gpu-rocm
+            target_selector: gfx1201
     concurrency:
-      group: iree-bazel-windows-${{ matrix.kind }}-${{ matrix.host_toolchain }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      group: iree-bazel-windows-${{ matrix.kind }}-${{ matrix.host_toolchain }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.kind == 'amd_client' && 45 || 60 }}
@@ -673,13 +681,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Check native accelerator and GPU access
-        if: matrix.kind == 'amd_client'
+      - name: Check native GPU and accelerator access
+        if: matrix.kind == 'amd_client' || matrix.kind == 'amdgpu'
         shell: powershell
         run: |
           Get-CimInstance Win32_OperatingSystem -ErrorAction Stop |
             Format-List Caption, Version, BuildNumber
-          $accelerators = @(Get-PnpDevice -Class ComputeAccelerator -PresentOnly -ErrorAction Stop)
+          $accelerators = @()
+          if ("${{ matrix.xdna }}" -eq 'true') {
+            $accelerators = @(Get-PnpDevice -Class ComputeAccelerator -PresentOnly -ErrorAction Stop)
+            if (-not ($accelerators | Where-Object Status -eq 'OK')) {
+              throw 'This runner requires a healthy native compute accelerator.'
+            }
+          }
           $gpus = @(Get-PnpDevice -Class Display -PresentOnly -ErrorAction Stop |
             Where-Object InstanceId -Like 'PCI\VEN_1002&*')
           $devices = $accelerators + $gpus
@@ -690,14 +704,13 @@ jobs:
               DEVPKEY_Device_DriverVersion, DEVPKEY_Device_DriverDate, DEVPKEY_Device_DriverInfPath |
               Format-Table KeyName, Data -AutoSize
           }
-          if (-not ($accelerators | Where-Object Status -eq 'OK')) {
-            throw 'The AMD client runner requires a healthy native compute accelerator.'
-          }
           if (-not ($gpus | Where-Object Status -eq 'OK')) {
-            throw 'The AMD client runner requires a healthy AMD GPU.'
+            throw 'This runner requires a healthy AMD GPU.'
           }
-          (Get-Item (Join-Path $env:SystemRoot 'System32\vulkan-1.dll') -ErrorAction Stop).VersionInfo |
-            Format-List FileName, FileVersion, ProductVersion
+          if ("${{ matrix.kind }}" -eq 'amd_client') {
+            (Get-Item (Join-Path $env:SystemRoot 'System32\vulkan-1.dll') -ErrorAction Stop).VersionInfo |
+              Format-List FileName, FileVersion, ProductVersion
+          }
 
       - name: Run IREE Bazel CI
         if: matrix.kind == 'repository'
@@ -733,8 +746,8 @@ jobs:
             --bazel-profile-dir "$env:RUNNER_TEMP\bazel-profiles" --keep-going
           exit $LASTEXITCODE
 
-      - name: Build and test the AMD client
-        if: matrix.kind == 'amd_client'
+      - name: Build and test native AMD devices
+        if: matrix.kind == 'amd_client' || matrix.kind == 'amdgpu'
         id: client_ci
         shell: powershell
         run: |
@@ -753,7 +766,11 @@ jobs:
           $env:CXX = $env:CC
           $env:AR = Join-Path $env:BAZEL_LLVM 'bin\llvm-lib.exe'
           $nativeResultsDir = Join-Path $env:RUNNER_TEMP "native-test-results-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          python build_tools/devtools/ci.py iree-bazel-amd-client `
+          $targetArgs = @()
+          if ("${{ matrix.target_selector }}") {
+            $targetArgs += @('--amdgpu-target', '${{ matrix.target_selector }}')
+          }
+          python build_tools/devtools/ci.py '${{ matrix.command }}' @targetArgs `
             --bazel-profile-dir "$env:RUNNER_TEMP\bazel-profiles" `
             --bazel-test-results-dir $nativeResultsDir
           exit $LASTEXITCODE
@@ -802,11 +819,12 @@ jobs:
           retention-days: 7
 
       - name: Upload native test results
+        continue-on-error: true
         if: ${{ always() && steps.client_ci.outcome != 'skipped' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: native-test-results-amd-client-windows-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/bazel-testlogs
+          name: native-test-results-${{ matrix.kind }}-windows-${{ matrix.target_selector }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/**/bazel-testlogs/**
           if-no-files-found: warn
           retention-days: 7
 

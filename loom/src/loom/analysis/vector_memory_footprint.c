@@ -69,6 +69,9 @@ typedef struct loom_vector_memory_footprint_state_t {
   // Per-function symbolic expression context sharing the fact table above.
   loom_symbolic_expr_context_t expression_context;
 
+  // Latest access-local mask derivation; allocated lazily in arena.
+  loom_vector_memory_mask_scope_t* mask_scope;
+
   // Lazily initialized dominance info for CFG path-sensitive checks.
   loom_dominance_info_t dominance;
 
@@ -1432,14 +1435,13 @@ static bool loom_vector_memory_footprint_access_is_scalar_element(
 
 static iree_status_t loom_vector_memory_footprint_check_access(
     loom_vector_memory_footprint_state_t* state,
-    const loom_vector_memory_footprint_access_t* access) {
+    const loom_vector_memory_footprint_access_t* access,
+    const loom_condition_fact_scope_t* lexical_scope) {
   state->current_access_failed = false;
   loom_vector_memory_mask_bounds_t mask_bounds = {0};
-  if (access->mask != LOOM_VALUE_ID_INVALID) {
-    IREE_RETURN_IF_ERROR(loom_vector_memory_mask_bounds_analyze(
-        state->module, state->fact_table, &state->expression_context,
-        access->mask, &mask_bounds));
-  }
+  IREE_RETURN_IF_ERROR(loom_vector_memory_mask_bounds_analyze(
+      &state->expression_context, lexical_scope, access->mask,
+      &state->mask_scope, &mask_bounds));
   if (loom_vector_memory_footprint_access_empty(access) ||
       mask_bounds.definitely_empty) {
     ++state->result->skipped_op_count;
@@ -1913,19 +1915,21 @@ static iree_status_t loom_vector_memory_footprint_check_with_stack(
       continue;
     }
     frame->block.op = op->next_op;
-    loom_vector_memory_footprint_activate_condition_scope(
-        state, frame->condition_scope);
 
     loom_vector_memory_footprint_access_t access = {0};
     if (loom_vector_memory_footprint_describe_op(state, op, &access)) {
-      IREE_RETURN_IF_ERROR(
-          loom_vector_memory_footprint_check_access(state, &access));
+      IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_check_access(
+          state, &access, frame->condition_scope));
       if (loom_vector_memory_footprint_should_suppress_error(state)) {
         continue;
       }
     }
-    IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_push_op_regions(
-        state, &stack, op, frame->condition_scope, frame->participant_zeros));
+    if (op->region_count) {
+      loom_vector_memory_footprint_activate_condition_scope(
+          state, frame->condition_scope);
+      IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_push_op_regions(
+          state, &stack, op, frame->condition_scope, frame->participant_zeros));
+    }
   }
   return iree_ok_status();
 }

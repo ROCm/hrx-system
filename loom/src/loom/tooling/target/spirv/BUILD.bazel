@@ -151,11 +151,6 @@ loom_test(
 
 loom_test(
     name = "cxx_collective_scans_test",
-    args = [
-        "--xfail=@scan_u32_values=TARGET/032",
-        "--xfail=@scan_u64_values=TARGET/032",
-        "--xfail=@scan_f32_values=TARGET/032",
-    ],
     execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
     module = "//loom/src/loom/import/cxx/test:collective_scans_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),

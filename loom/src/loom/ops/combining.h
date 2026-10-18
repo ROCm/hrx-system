@@ -70,6 +70,12 @@ bool loom_combining_kind_accepts_float(loom_combining_kind_t kind);
 // with copies of authored values instead of materializing an identity.
 bool loom_combining_kind_is_idempotent(loom_combining_kind_t kind);
 
+// Returns the bitwise operation exactly equivalent to |kind| for normalized
+// i1 operands. Integer arithmetic and extrema collapse to Boolean algebra at
+// one bit; floating-point kinds have no equivalent and return false.
+bool loom_combining_kind_i1_equivalent(loom_combining_kind_t kind,
+                                       loom_combining_kind_t* out_kind);
+
 // Returns the exact fixed-width integer identity for |kind| and
 // |element_type|. The returned signed value carries the identity bit pattern;
 // i1 identities are normalized to zero or one. Returns false for non-integer

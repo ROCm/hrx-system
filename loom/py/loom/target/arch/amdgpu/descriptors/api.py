@@ -52,6 +52,7 @@ from .categories import *
 from .cluster import _gfx125x_cluster_descriptors
 from .common import *
 from .control import _s_delay_alu_descriptor, _s_wait_xcnt_descriptor
+from .memory_predication import with_preserving_memory_loads
 from .rdna4m import (
     _RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS,
     _RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS,
@@ -1645,7 +1646,9 @@ def _build_amdgpu_core_descriptor_set_from_spec(
     descriptor_set = _with_overlay_descriptors(
         builder.base,
         spec,
-        builder.project_overlay_descriptors(materialized_overlay_descriptors),
+        with_preserving_memory_loads(
+            builder.project_overlay_descriptors(materialized_overlay_descriptors)
+        ),
         builder.extra_descriptors,
     )
     is_gfx125x = bool(builder.flags & _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X)

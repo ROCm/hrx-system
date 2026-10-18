@@ -252,6 +252,8 @@ iree_py_library(
     "descriptors/memory.py"
     "descriptors/memory_assembly.py"
     "descriptors/memory_banks.py"
+    "descriptors/memory_candidates.py"
+    "descriptors/memory_predication.py"
     "descriptors/rdna3.py"
     "descriptors/rdna35.py"
     "descriptors/rdna4.py"

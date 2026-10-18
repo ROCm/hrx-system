@@ -103,9 +103,6 @@ _MODULES = [
 ]
 
 _XFAILS = {
-    "collective_scans": {
-        "@scan_u64_values": "AMDGPU/023",
-    },
     "vector_values": {},
 }
 

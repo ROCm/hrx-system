@@ -74,7 +74,7 @@ def _extended_math_rule(
             ),
             Guard.value_type("result", source_type),
             *(
-                Guard.instance_flags_has_all("fastmath", fastmath_flag)
+                Guard.instance_flags_has_all(source_op.attrs[0].name, fastmath_flag)
                 for fastmath_flag in instruction.operation.required_fastmath_flags
             ),
             *descriptor_feature_guards(descriptor),

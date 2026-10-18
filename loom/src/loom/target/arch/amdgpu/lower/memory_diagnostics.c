@@ -408,9 +408,9 @@ static const loom_amdgpu_memory_access_rejection_key_t
         },
         {
             .rejection_bit =
-                LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_SIGNED_I16_REPAIR_DESCRIPTOR_MISSING,
-            .constraint_key =
-                IREE_SVL("memory_access.signed_i16_repair_descriptor_missing"),
+                LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_SIGNED_NARROW_REPAIR_DESCRIPTOR_MISSING,
+            .constraint_key = IREE_SVL(
+                "memory_access.signed_narrow_repair_descriptor_missing"),
         },
         {
             .rejection_bit =

@@ -519,7 +519,7 @@ class Translator final : private Initialization::Evaluation {
 
   std::vector<const cxx::Type*> function_result_sources() {
     std::vector<const cxx::Type*> sources;
-    if (current_function_.return_type->kind() != cxx::TypeKind::kVoid) {
+    if (!unit_.typeTraits().is_void(current_function_.return_type)) {
       sources.push_back(current_function_.return_type);
     }
     auto parameters = current_function_.source->symbol->parameters();
@@ -678,7 +678,7 @@ class Translator final : private Initialization::Evaluation {
         if (sequence.continuation) {
           return return_sequence(*sequence.continuation);
         }
-        if (current_function_.return_type->kind() != cxx::TypeKind::kVoid) {
+        if (!unit_.typeTraits().is_void(current_function_.return_type)) {
           fail(current_function_.source,
                "non-void function can reach its end without returning a value");
         }
@@ -841,14 +841,14 @@ class Translator final : private Initialization::Evaluation {
     ast = selected_statement(ast);
     if (auto* ret = cxx::ast_cast<cxx::ReturnStatementAST>(ast)) {
       bool returns_void =
-          current_function_.return_type->kind() == cxx::TypeKind::kVoid;
+          unit_.typeTraits().is_void(current_function_.return_type);
       if (!ret->expression) {
         if (!returns_void) {
           fail(ast, "non-void return requires a value");
         }
         return complete_return({{}, ret});
       }
-      if (ret->expression->type->kind() == cxx::TypeKind::kVoid) {
+      if (unit_.typeTraits().is_void(ret->expression->type)) {
         if (!returns_void) {
           fail(ast, "non-void return requires a value");
         }
@@ -1335,7 +1335,7 @@ class Translator final : private Initialization::Evaluation {
         expression(argument).append_to(arguments);
       }
       loom_op_t* op;
-      if (signature->returnType()->kind() == cxx::TypeKind::kVoid) {
+      if (unit_.typeTraits().is_void(signature->returnType())) {
         check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee,
                                    arguments.data(), arguments.size(), nullptr,
                                    0, nullptr, 0, source, &op));
@@ -1407,7 +1407,7 @@ class Translator final : private Initialization::Evaluation {
     require_nonoverlapping_references(std::move(origins), call);
 
     const bool returns_void =
-        signature->returnType()->kind() == cxx::TypeKind::kVoid;
+        unit_.typeTraits().is_void(signature->returnType());
     std::vector<const cxx::Type*> result_sources;
     result_sources.reserve(!returns_void + writebacks.size());
     size_t ordinary_result_count = 0;

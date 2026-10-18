@@ -788,6 +788,14 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_low_legality_verify_memory,
                 LOOM_AMDGPU_STORAGE_MEMORY_PLAN,
                 LOOM_AMDGPU_REPORT_MEMORY_PACKETS),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_LOAD_MASK)] =
+            LOOM_AMDGPU_MEMORY_DATA_STORAGE_REPORT_ROW(
+                LOOM_OP_VECTOR_LOAD_MASK, loom_amdgpu_memory_access_plan_t,
+                loom_amdgpu_select_memory_load_dispatch,
+                loom_amdgpu_emit_memory_load_dispatch,
+                loom_amdgpu_low_legality_verify_memory,
+                LOOM_AMDGPU_STORAGE_MEMORY_PLAN,
+                LOOM_AMDGPU_REPORT_MEMORY_PACKETS),
 };
 
 static const loom_amdgpu_lower_dispatch_row_t

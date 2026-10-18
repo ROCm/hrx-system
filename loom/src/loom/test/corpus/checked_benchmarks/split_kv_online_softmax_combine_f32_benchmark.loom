@@ -1,8 +1,8 @@
 // Matched split-KV stage-two benchmark workloads.
 //
-// These roots exercise production decode shapes through the shared serial
-// and controlled-pipeline kernels. Correctness and access-sensitive cases
-// remain with the kernel source so sanitizer qualification does not expand
+// These trials exercise production decode shapes through the shared serial and
+// controlled-pipeline kernels. Correctness and access-sensitive cases remain
+// with the kernel source so sanitizer qualification does not expand
 // production-scale benchmark grids.
 
 kernel.decl @split_kv_stage2_serial_mgc16(%workload_sequence_count: index, %workload_head_count: index) launch(%launch_sequence_count: index, %launch_head_count: index, %total_query_count: index, %maximum_split_count: index, %partial_output: buffer, %partial_lse: buffer, %output: buffer, %query_offsets: buffer, %kv_offsets: buffer, %split_offsets: buffer, %valid_split_count: buffer, %partial_batch_stride: index, %partial_head_stride: index, %partial_split_stride: index, %output_batch_stride: index, %output_head_stride: index)
@@ -13,110 +13,108 @@ kernel.decl @split_kv_stage2_serial_mgc64(%workload_sequence_count: index, %work
 
 kernel.decl @split_kv_stage2_pipelined_mgc64(%workload_sequence_count: index, %workload_head_count: index) launch(%launch_sequence_count: index, %launch_head_count: index, %total_query_count: index, %maximum_split_count: index, %partial_output: buffer, %partial_lse: buffer, %output: buffer, %query_offsets: buffer, %kv_offsets: buffer, %split_offsets: buffer, %valid_split_count: buffer, %partial_batch_stride: index, %partial_head_stride: index, %partial_split_stride: index, %output_batch_stride: index, %output_head_stride: index)
 
-check.case public @split_kv_stage2_serial_time {
-  %tokens = check.param.choice values([1, 16, 128, 256]) name("tokens") : index
-  %heads = check.literal value(16) : index
-  %splits = check.literal value(8) : index
-  %partial_batch_stride = check.literal value(128) : index
-  %partial_head_stride = check.literal value(1) : index
-  %partial_split_stride = check.literal value(16) : index
-  %output_batch_stride = check.literal value(8192) : index
-  %output_head_stride = check.literal value(512) : index
-  %partial_output = check.generate.fill value(1.0) : tensor<[%tokens]x8x16x512xf32>
-  %partial_lse = check.generate.fill value(0.0) : tensor<[%tokens]x8x16xf32>
-  %query_offsets = check.generate.iota offset(0) step(1) : tensor<257xi32>
-  %kv_offsets = check.generate.iota offset(0) step(512) : tensor<257xi32>
-  %split_offsets = check.generate.iota offset(0) step(8) : tensor<257xi32>
-  %valid_split_count = check.generate.fill value(8) : tensor<[%tokens]xi32>
-  %output = check.generate.fill value(nan) : tensor<[%tokens]x16x512xbf16>
-  %expected = check.generate.fill value(1.0) : tensor<[%tokens]x16x512xbf16>
-  kernel.launch @split_kv_stage2_serial_mgc64[%tokens, %heads](%tokens, %heads, %tokens, %splits, %partial_output, %partial_lse, %output, %query_offsets, %kv_offsets, %split_offsets, %valid_split_count, %partial_batch_stride, %partial_head_stride, %partial_split_stride, %output_batch_stride, %output_head_stride) : [index, index](index, index, index, index, tensor<[%tokens]x8x16x512xf32>, tensor<[%tokens]x8x16xf32>, tensor<[%tokens]x16x512xbf16>, tensor<257xi32>, tensor<257xi32>, tensor<257xi32>, tensor<[%tokens]xi32>, index, index, index, index, index)
-  check.expect.equal actual(%output) expected(%expected) : tensor<[%tokens]x16x512xbf16>
+func.def @split_kv_stage2_benchmark_token_count(%trial: index) -> (index) {
+  %tokens = scf.switch %trial -> (index) {
+    case 0 {
+      %value = index.constant 1 : index
+      scf.yield %value : index
+    }
+    case 1 {
+      %value = index.constant 16 : index
+      scf.yield %value : index
+    }
+    case 2 {
+      %value = index.constant 128 : index
+      scf.yield %value : index
+    }
+    default {
+      %value = index.constant 256 : index
+      scf.yield %value : index
+    }
+  }
+  func.return %tokens : index
+}
+
+check.scenario @split_kv_stage2_serial_benchmark {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %tokens = check.generate<@split_kv_stage2_benchmark_token_count>(%trial) : (index) -> (index)
+    %heads = check.literal value(16) : index
+    %splits = check.literal value(8) : index
+    %partial_batch_stride = check.literal value(128) : index
+    %partial_head_stride = check.literal value(1) : index
+    %partial_split_stride = check.literal value(16) : index
+    %output_batch_stride = check.literal value(8192) : index
+    %output_head_stride = check.literal value(512) : index
+    %partial_output = check.generate.fill value(1.0) : tensor<[%tokens]x8x16x512xf32>
+    %partial_lse = check.generate.fill value(0.0) : tensor<[%tokens]x8x16xf32>
+    %query_offsets = check.generate.iota offset(0) step(1) : tensor<257xi32>
+    %kv_offsets = check.generate.iota offset(0) step(512) : tensor<257xi32>
+    %split_offsets = check.generate.iota offset(0) step(8) : tensor<257xi32>
+    %valid_split_count = check.generate.fill value(8) : tensor<[%tokens]xi32>
+    %output = check.generate.fill value(nan) : tensor<[%tokens]x16x512xbf16>
+    check.invoke<@split_kv_stage2_serial_mgc64>[%tokens, %heads](%tokens, %heads, %tokens, %splits, %partial_output, %partial_lse, %output, %query_offsets, %kv_offsets, %split_offsets, %valid_split_count, %partial_batch_stride, %partial_head_stride, %partial_split_stride, %output_batch_stride, %output_head_stride) : [index, index](index, index, index, index, tensor<[%tokens]x8x16x512xf32>, tensor<[%tokens]x8x16xf32>, tensor<[%tokens]x16x512xbf16>, tensor<257xi32>, tensor<257xi32>, tensor<257xi32>, tensor<[%tokens]xi32>, index, index, index, index, index) -> ()
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %tokens = check.literal value(16) : index
+    %heads = check.literal value(128) : index
+    %splits = check.literal value(8) : index
+    %partial_batch_stride = check.literal value(1024) : index
+    %partial_head_stride = check.literal value(1) : index
+    %partial_split_stride = check.literal value(128) : index
+    %output_batch_stride = check.literal value(65536) : index
+    %output_head_stride = check.literal value(512) : index
+    %partial_output = check.generate.fill value(1.0) : tensor<16x8x128x512xf32>
+    %partial_lse = check.generate.fill value(0.0) : tensor<16x8x128xf32>
+    %query_offsets = check.generate.iota offset(0) step(1) : tensor<17xi32>
+    %kv_offsets = check.generate.iota offset(0) step(128) : tensor<17xi32>
+    %split_offsets = check.generate.iota offset(0) step(8) : tensor<17xi32>
+    %valid_split_count = check.generate.fill value(8) : tensor<16xi32>
+    %output = check.generate.fill value(nan) : tensor<16x128x512xbf16>
+    check.invoke<@split_kv_stage2_serial_mgc16>[%tokens, %heads](%tokens, %heads, %tokens, %splits, %partial_output, %partial_lse, %output, %query_offsets, %kv_offsets, %split_offsets, %valid_split_count, %partial_batch_stride, %partial_head_stride, %partial_split_stride, %output_batch_stride, %output_head_stride) : [index, index](index, index, index, index, tensor<16x8x128x512xf32>, tensor<16x8x128xf32>, tensor<16x128x512xbf16>, tensor<17xi32>, tensor<17xi32>, tensor<17xi32>, tensor<16xi32>, index, index, index, index, index) -> ()
+  }
   check.return
 }
 
-check.case public @split_kv_stage2_pipelined_time {
-  %tokens = check.param.choice values([1, 16, 128, 256]) name("tokens") : index
-  %heads = check.literal value(16) : index
-  %splits = check.literal value(8) : index
-  %partial_batch_stride = check.literal value(128) : index
-  %partial_head_stride = check.literal value(1) : index
-  %partial_split_stride = check.literal value(16) : index
-  %output_batch_stride = check.literal value(8192) : index
-  %output_head_stride = check.literal value(512) : index
-  %partial_output = check.generate.fill value(1.0) : tensor<[%tokens]x8x16x512xf32>
-  %partial_lse = check.generate.fill value(0.0) : tensor<[%tokens]x8x16xf32>
-  %query_offsets = check.generate.iota offset(0) step(1) : tensor<257xi32>
-  %kv_offsets = check.generate.iota offset(0) step(512) : tensor<257xi32>
-  %split_offsets = check.generate.iota offset(0) step(8) : tensor<257xi32>
-  %valid_split_count = check.generate.fill value(8) : tensor<[%tokens]xi32>
-  %output = check.generate.fill value(nan) : tensor<[%tokens]x16x512xbf16>
-  %expected = check.generate.fill value(1.0) : tensor<[%tokens]x16x512xbf16>
-  kernel.launch @split_kv_stage2_pipelined_mgc64[%tokens, %heads](%tokens, %heads, %tokens, %splits, %partial_output, %partial_lse, %output, %query_offsets, %kv_offsets, %split_offsets, %valid_split_count, %partial_batch_stride, %partial_head_stride, %partial_split_stride, %output_batch_stride, %output_head_stride) : [index, index](index, index, index, index, tensor<[%tokens]x8x16x512xf32>, tensor<[%tokens]x8x16xf32>, tensor<[%tokens]x16x512xbf16>, tensor<257xi32>, tensor<257xi32>, tensor<257xi32>, tensor<[%tokens]xi32>, index, index, index, index, index)
-  check.expect.equal actual(%output) expected(%expected) : tensor<[%tokens]x16x512xbf16>
+check.benchmark<@split_kv_stage2_serial_benchmark> @split_kv_stage2_serial_workloads
+
+check.scenario @split_kv_stage2_pipelined_benchmark {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %tokens = check.generate<@split_kv_stage2_benchmark_token_count>(%trial) : (index) -> (index)
+    %heads = check.literal value(16) : index
+    %splits = check.literal value(8) : index
+    %partial_batch_stride = check.literal value(128) : index
+    %partial_head_stride = check.literal value(1) : index
+    %partial_split_stride = check.literal value(16) : index
+    %output_batch_stride = check.literal value(8192) : index
+    %output_head_stride = check.literal value(512) : index
+    %partial_output = check.generate.fill value(1.0) : tensor<[%tokens]x8x16x512xf32>
+    %partial_lse = check.generate.fill value(0.0) : tensor<[%tokens]x8x16xf32>
+    %query_offsets = check.generate.iota offset(0) step(1) : tensor<257xi32>
+    %kv_offsets = check.generate.iota offset(0) step(512) : tensor<257xi32>
+    %split_offsets = check.generate.iota offset(0) step(8) : tensor<257xi32>
+    %valid_split_count = check.generate.fill value(8) : tensor<[%tokens]xi32>
+    %output = check.generate.fill value(nan) : tensor<[%tokens]x16x512xbf16>
+    check.invoke<@split_kv_stage2_pipelined_mgc64>[%tokens, %heads](%tokens, %heads, %tokens, %splits, %partial_output, %partial_lse, %output, %query_offsets, %kv_offsets, %split_offsets, %valid_split_count, %partial_batch_stride, %partial_head_stride, %partial_split_stride, %output_batch_stride, %output_head_stride) : [index, index](index, index, index, index, tensor<[%tokens]x8x16x512xf32>, tensor<[%tokens]x8x16xf32>, tensor<[%tokens]x16x512xbf16>, tensor<257xi32>, tensor<257xi32>, tensor<257xi32>, tensor<[%tokens]xi32>, index, index, index, index, index) -> ()
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %tokens = check.literal value(16) : index
+    %heads = check.literal value(128) : index
+    %splits = check.literal value(8) : index
+    %partial_batch_stride = check.literal value(1024) : index
+    %partial_head_stride = check.literal value(1) : index
+    %partial_split_stride = check.literal value(128) : index
+    %output_batch_stride = check.literal value(65536) : index
+    %output_head_stride = check.literal value(512) : index
+    %partial_output = check.generate.fill value(1.0) : tensor<16x8x128x512xf32>
+    %partial_lse = check.generate.fill value(0.0) : tensor<16x8x128xf32>
+    %query_offsets = check.generate.iota offset(0) step(1) : tensor<17xi32>
+    %kv_offsets = check.generate.iota offset(0) step(128) : tensor<17xi32>
+    %split_offsets = check.generate.iota offset(0) step(8) : tensor<17xi32>
+    %valid_split_count = check.generate.fill value(8) : tensor<16xi32>
+    %output = check.generate.fill value(nan) : tensor<16x128x512xbf16>
+    check.invoke<@split_kv_stage2_pipelined_mgc16>[%tokens, %heads](%tokens, %heads, %tokens, %splits, %partial_output, %partial_lse, %output, %query_offsets, %kv_offsets, %split_offsets, %valid_split_count, %partial_batch_stride, %partial_head_stride, %partial_split_stride, %output_batch_stride, %output_head_stride) : [index, index](index, index, index, index, tensor<16x8x128x512xf32>, tensor<16x8x128xf32>, tensor<16x128x512xbf16>, tensor<17xi32>, tensor<17xi32>, tensor<17xi32>, tensor<16xi32>, index, index, index, index, index) -> ()
+  }
   check.return
 }
 
-check.case public @split_kv_stage2_serial_t16_h128_time {
-  %tokens = check.literal value(16) : index
-  %heads = check.literal value(128) : index
-  %splits = check.literal value(8) : index
-  %partial_batch_stride = check.literal value(1024) : index
-  %partial_head_stride = check.literal value(1) : index
-  %partial_split_stride = check.literal value(128) : index
-  %output_batch_stride = check.literal value(65536) : index
-  %output_head_stride = check.literal value(512) : index
-  %partial_output = check.generate.fill value(1.0) : tensor<16x8x128x512xf32>
-  %partial_lse = check.generate.fill value(0.0) : tensor<16x8x128xf32>
-  %query_offsets = check.generate.iota offset(0) step(1) : tensor<17xi32>
-  %kv_offsets = check.generate.iota offset(0) step(128) : tensor<17xi32>
-  %split_offsets = check.generate.iota offset(0) step(8) : tensor<17xi32>
-  %valid_split_count = check.generate.fill value(8) : tensor<16xi32>
-  %output = check.generate.fill value(nan) : tensor<16x128x512xbf16>
-  %expected = check.generate.fill value(1.0) : tensor<16x128x512xbf16>
-  kernel.launch @split_kv_stage2_serial_mgc16[%tokens, %heads](%tokens, %heads, %tokens, %splits, %partial_output, %partial_lse, %output, %query_offsets, %kv_offsets, %split_offsets, %valid_split_count, %partial_batch_stride, %partial_head_stride, %partial_split_stride, %output_batch_stride, %output_head_stride) : [index, index](index, index, index, index, tensor<16x8x128x512xf32>, tensor<16x8x128xf32>, tensor<16x128x512xbf16>, tensor<17xi32>, tensor<17xi32>, tensor<17xi32>, tensor<16xi32>, index, index, index, index, index)
-  check.expect.equal actual(%output) expected(%expected) : tensor<16x128x512xbf16>
-  check.return
-}
-
-check.case public @split_kv_stage2_pipelined_t16_h128_time {
-  %tokens = check.literal value(16) : index
-  %heads = check.literal value(128) : index
-  %splits = check.literal value(8) : index
-  %partial_batch_stride = check.literal value(1024) : index
-  %partial_head_stride = check.literal value(1) : index
-  %partial_split_stride = check.literal value(128) : index
-  %output_batch_stride = check.literal value(65536) : index
-  %output_head_stride = check.literal value(512) : index
-  %partial_output = check.generate.fill value(1.0) : tensor<16x8x128x512xf32>
-  %partial_lse = check.generate.fill value(0.0) : tensor<16x8x128xf32>
-  %query_offsets = check.generate.iota offset(0) step(1) : tensor<17xi32>
-  %kv_offsets = check.generate.iota offset(0) step(128) : tensor<17xi32>
-  %split_offsets = check.generate.iota offset(0) step(8) : tensor<17xi32>
-  %valid_split_count = check.generate.fill value(8) : tensor<16xi32>
-  %output = check.generate.fill value(nan) : tensor<16x128x512xbf16>
-  %expected = check.generate.fill value(1.0) : tensor<16x128x512xbf16>
-  kernel.launch @split_kv_stage2_pipelined_mgc16[%tokens, %heads](%tokens, %heads, %tokens, %splits, %partial_output, %partial_lse, %output, %query_offsets, %kv_offsets, %split_offsets, %valid_split_count, %partial_batch_stride, %partial_head_stride, %partial_split_stride, %output_batch_stride, %output_head_stride) : [index, index](index, index, index, index, tensor<16x8x128x512xf32>, tensor<16x8x128xf32>, tensor<16x128x512xbf16>, tensor<17xi32>, tensor<17xi32>, tensor<17xi32>, tensor<16xi32>, index, index, index, index, index)
-  check.expect.equal actual(%output) expected(%expected) : tensor<16x128x512xbf16>
-  check.return
-}
-
-check.benchmark<@split_kv_stage2_serial_time> @split_kv_stage2_serial_t1_h16_n8 {tokens = 1}
-
-check.benchmark<@split_kv_stage2_serial_time> @split_kv_stage2_serial_t16_h16_n8 {tokens = 16}
-
-check.benchmark<@split_kv_stage2_serial_t16_h128_time> @split_kv_stage2_serial_t16_h128_n8
-
-check.benchmark<@split_kv_stage2_serial_time> @split_kv_stage2_serial_t128_h16_n8 {tokens = 128}
-
-check.benchmark<@split_kv_stage2_serial_time> @split_kv_stage2_serial_t256_h16_n8 {tokens = 256}
-
-check.benchmark<@split_kv_stage2_pipelined_time> @split_kv_stage2_pipelined_t1_h16_n8 {tokens = 1}
-
-check.benchmark<@split_kv_stage2_pipelined_time> @split_kv_stage2_pipelined_t16_h16_n8 {tokens = 16}
-
-check.benchmark<@split_kv_stage2_pipelined_t16_h128_time> @split_kv_stage2_pipelined_t16_h128_n8
-
-check.benchmark<@split_kv_stage2_pipelined_time> @split_kv_stage2_pipelined_t128_h16_n8 {tokens = 128}
-
-check.benchmark<@split_kv_stage2_pipelined_time> @split_kv_stage2_pipelined_t256_h16_n8 {tokens = 256}
+check.benchmark<@split_kv_stage2_pipelined_benchmark> @split_kv_stage2_pipelined_workloads

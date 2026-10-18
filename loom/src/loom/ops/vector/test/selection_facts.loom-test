@@ -1,0 +1,139 @@
+// RUN: pass canonicalize
+
+// The probability chain retains its numeric envelope through an unknown mask
+// and a fragment boundary. Finite does not imply exact BF16 representability.
+func.def @probability_narrowing(%input: vector<8xf32>, %valid: vector<8xi1>) -> (i1, vector<8xbf16>) {
+  %exponential = vector.exp2f<nnan|ninf|afn> %input : vector<8xf32>
+  %masked_value = vector.constant 0.0 : vector<8xf32>
+  %probability = vector.select %valid, %exponential, %masked_value : vector<8xf32>
+  %extent = index.constant 16 : index
+  %fragment = vector.fragment<result> %probability shape [%extent, %extent] : vector<8xf32>
+  %element = vector.extract %fragment[0] : vector<8xf32> -> f32
+  %finite = scalar.isfinitef %element : f32
+  %rounded = vector.fptrunc %fragment : vector<8xf32> to vector<8xbf16>
+  func.return %finite, %rounded : i1, vector<8xbf16>
+}
+
+// ----
+func.def @probability_narrowing(%input: vector<8xf32>, %valid: vector<8xi1>) -> (i1, vector<8xbf16>) {
+  %exponential = vector.exp2f<nnan|ninf|afn> %input : vector<8xf32>
+  %masked_value = vector.constant 0.0 : vector<8xf32>
+  %probability = vector.select %valid, %exponential, %masked_value : vector<8xf32>
+  %extent = index.constant 16 : index
+  %fragment = vector.fragment<result> %probability shape [%extent, %extent] : vector<8xf32>
+  %finite = scalar.constant true : i1
+  %rounded = vector.fptrunc %fragment : vector<8xf32> to vector<8xbf16>
+  func.return %finite, %rounded : i1, vector<8xbf16>
+}
+
+// ====
+
+// A wide selection intersects each alternative's exact-format guarantees;
+// selecting BF16 or F16 values cannot promise either narrow format.
+func.def @wide_formats(%left: vector<32xbf16>, %right: vector<32xbf16>, %half: vector<32xf16>, %mask: vector<32xi1>, %lane: index) -> (i64, i64) {
+  %wide_left = vector.extf %left : vector<32xbf16> to vector<32xf32>
+  %wide_right = vector.extf %right : vector<32xbf16> to vector<32xf32>
+  %wide_half = vector.extf %half : vector<32xf16> to vector<32xf32>
+  %bfloat = vector.select %mask, %wide_left, %wide_right : vector<32xf32>
+  %mixed = vector.select %mask, %wide_left, %wide_half : vector<32xf32>
+  %bfloat_element = vector.extract %bfloat[%lane] : vector<32xf32> -> f32
+  %mixed_element = vector.extract %mixed[%lane] : vector<32xf32> -> f32
+  %bfloat_formats = test.fact_exact_float_types %bfloat_element : f32 -> i64
+  %mixed_formats = test.fact_exact_float_types %mixed_element : f32 -> i64
+  func.return %bfloat_formats, %mixed_formats : i64, i64
+}
+
+// ----
+func.def @wide_formats(%left: vector<32xbf16>, %right: vector<32xbf16>, %half: vector<32xf16>, %mask: vector<32xi1>, %lane: index) -> (i64, i64) {
+  %bfloat_formats = scalar.constant 14336 : i64
+  %mixed_formats = scalar.constant 12288 : i64
+  func.return %bfloat_formats, %mixed_formats : i64, i64
+}
+
+// ====
+
+// No lane count or per-component storage is needed for a common guarantee.
+func.def @dynamic_promises(%length: index, %input: vector<[%length]xf32>, %other: vector<[%length]xf32>, %mask: vector<[%length]xi1>) -> (i1) {
+  %left = vector.exp2f<nnan|ninf> %input : vector<[%length]xf32>
+  %right = vector.logf<nnan|ninf> %other : vector<[%length]xf32>
+  %selected = vector.select %mask, %left, %right : vector<[%length]xf32>
+  %finite = test.fact_finite %selected : vector<[%length]xf32> -> i1
+  func.return %finite : i1
+}
+
+// ----
+func.def @dynamic_promises(%length: index, %input: vector<[%length]xf32>, %other: vector<[%length]xf32>, %mask: vector<[%length]xi1>) -> (i1) {
+  %finite = scalar.constant true : i1
+  func.return %finite : i1
+}
+
+// ====
+
+// A partial mask retains finer known choices without inventing a guarantee
+// for the opposite choice or for a lane whose choice remains unknown.
+func.def @partial_mask(%input: vector<4xf32>, %other: vector<4xf32>, %choice: i1) -> (i1, i1, i1, i1) {
+  %left = vector.exp2f<nnan|ninf> %input : vector<4xf32>
+  %yes = scalar.constant true : i1
+  %no = scalar.constant false : i1
+  %mask = vector.from_elements %yes, %no, %choice, %yes : vector<4xi1>
+  %selected = vector.select %mask, %left, %other : vector<4xf32>
+  %first = vector.extract %selected[0] : vector<4xf32> -> f32
+  %second = vector.extract %selected[1] : vector<4xf32> -> f32
+  %third = vector.extract %selected[2] : vector<4xf32> -> f32
+  %fourth = vector.extract %selected[3] : vector<4xf32> -> f32
+  %first_finite = scalar.isfinitef %first : f32
+  %second_finite = scalar.isfinitef %second : f32
+  %third_finite = scalar.isfinitef %third : f32
+  %fourth_finite = scalar.isfinitef %fourth : f32
+  func.return %first_finite, %second_finite, %third_finite, %fourth_finite : i1, i1, i1, i1
+}
+
+// ----
+func.def @partial_mask(%input: vector<4xf32>, %other: vector<4xf32>, %choice: i1) -> (i1, i1, i1, i1) {
+  %left = vector.exp2f<nnan|ninf> %input : vector<4xf32>
+  %yes = scalar.constant true : i1
+  %no = scalar.constant false : i1
+  %mask = vector.from_elements %yes, %no, %choice, %yes : vector<4xi1>
+  %selected = vector.select %mask, %left, %other : vector<4xf32>
+  %second = vector.extract %selected[1] : vector<4xf32> -> f32
+  %third = vector.extract %selected[2] : vector<4xf32> -> f32
+  %first_finite = scalar.constant true : i1
+  %second_finite = scalar.isfinitef %second : f32
+  %third_finite = scalar.isfinitef %third : f32
+  %fourth_finite = scalar.constant true : i1
+  func.return %first_finite, %second_finite, %third_finite, %fourth_finite : i1, i1, i1, i1
+}
+
+// ====
+
+// Different promises do not combine into finiteness across a selection.
+func.def @independent_classes(%input: vector<32xf32>, %mask: vector<32xi1>) -> (i1) {
+  %not_nan = vector.exp2f<nnan> %input : vector<32xf32>
+  %not_inf = vector.exp2f<ninf> %input : vector<32xf32>
+  %selected = vector.select %mask, %not_nan, %not_inf : vector<32xf32>
+  %finite = test.fact_finite %selected : vector<32xf32> -> i1
+  func.return %finite : i1
+}
+
+// ----
+func.def @independent_classes(%input: vector<32xf32>, %mask: vector<32xi1>) -> (i1) {
+  %finite = scalar.constant false : i1
+  func.return %finite : i1
+}
+
+// ====
+
+// A known mask can choose a finite alternative even if the other is unknown.
+func.def @known_choice(%input: vector<32xf32>, %other: vector<32xf32>) -> (vector<32xi1>) {
+  %left = vector.exp2f<nnan|ninf> %input : vector<32xf32>
+  %mask = vector.constant true : vector<32xi1>
+  %selected = vector.select %mask, %left, %other : vector<32xf32>
+  %finite = vector.isfinitef %selected : vector<32xf32> -> vector<32xi1>
+  func.return %finite : vector<32xi1>
+}
+
+// ----
+func.def @known_choice(%input: vector<32xf32>, %other: vector<32xf32>) -> (vector<32xi1>) {
+  %finite = vector.constant true : vector<32xi1>
+  func.return %finite : vector<32xi1>
+}

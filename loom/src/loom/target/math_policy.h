@@ -107,6 +107,14 @@ typedef enum loom_target_math_fastmath_flag_bits_e {
 } loom_target_math_fastmath_flag_bits_t;
 typedef uint8_t loom_target_math_fastmath_flags_t;
 
+// Positive source requirements, independent of fast-math permissions. The bit
+// layout matches scalar/vector TrigonometryMathFlags in the existing flag byte.
+typedef uint8_t loom_target_math_requirement_flags_t;
+enum loom_target_math_requirement_flag_bits_e {
+  // Preserve the source-defined signs of trigonometric zero results.
+  LOOM_TARGET_MATH_REQUIREMENT_FLAG_PRESERVE = 1u << 7,
+};
+
 // Mirrors the scalar/vector FloatConversionFlags bit layout so target-selected
 // evaluation policies can be projected into generated conversion ops.
 typedef enum loom_target_math_float_conversion_flag_bits_e {
@@ -151,11 +159,12 @@ enum loom_target_math_recipe_e {
   LOOM_TARGET_MATH_RECIPE_RSQRT_NEWTON_ONE = 22,
   LOOM_TARGET_MATH_RECIPE_RSQRT_NEWTON_TWO = 23,
   LOOM_TARGET_MATH_RECIPE_TRIGONOMETRIC_F32 = 24,
+  LOOM_TARGET_MATH_RECIPE_PRESERVE_TRIGONOMETRIC_ZEROS = 25,
 };
 
 // Number of recipe ordinals available to recipe-indexed metadata tables.
 #define LOOM_TARGET_MATH_RECIPE_COUNT \
-  ((int)LOOM_TARGET_MATH_RECIPE_TRIGONOMETRIC_F32 + 1)
+  ((int)LOOM_TARGET_MATH_RECIPE_PRESERVE_TRIGONOMETRIC_ZEROS + 1)
 
 // Packed policy-table sentinel selecting REJECT instead of KEEP or REWRITE.
 #define LOOM_TARGET_MATH_POLICY_RECIPE_REJECT UINT8_C(31)
@@ -210,6 +219,8 @@ typedef struct loom_target_math_query_t {
   loom_scalar_type_t element_type;
   // Fast-math permission bits projected into the target-neutral bit layout.
   loom_target_math_fastmath_flags_t fastmath_flags;
+  // Positive requirements retained independently of approximation permissions.
+  loom_target_math_requirement_flags_t requirement_flags;
 } loom_target_math_query_t;
 
 typedef struct loom_target_math_policy_decision_t {

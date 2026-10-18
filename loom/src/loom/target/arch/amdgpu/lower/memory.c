@@ -390,6 +390,12 @@ void loom_amdgpu_mark_memory_access_plan_storage_demands(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_memory_access_plan_t* plan) {
   IREE_ASSERT_GT(plan->packet_count, 0u);
+  const loom_amdgpu_memory_mask_plan_t* mask =
+      loom_amdgpu_memory_access_mask_plan(plan);
+  if (mask) {
+    loom_low_lower_require_source_value_storage(context, mask->condition);
+    loom_low_lower_require_source_value_storage(context, mask->passthrough);
+  }
   for (uint32_t packet_index = 0; packet_index < plan->packet_count;
        ++packet_index) {
     const loom_amdgpu_memory_access_t* access =
@@ -653,6 +659,15 @@ static bool loom_amdgpu_memory_access_selects_low16_float_descriptor(
   return !loom_value_has_no_uses(result_value);
 }
 
+static bool loom_amdgpu_memory_access_selects_signed_i8_descriptor(
+    const loom_op_t* source_op, loom_low_source_memory_operation_kind_t kind,
+    loom_type_t vector_type) {
+  return kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD &&
+         source_op->result_count == 1 &&
+         loom_amdgpu_static_vector_lane_count(vector_type, LOOM_SCALAR_TYPE_I8,
+                                              1) == 1;
+}
+
 static bool loom_amdgpu_memory_access_selects_signed_i16_descriptor(
     const loom_op_t* source_op, loom_low_source_memory_operation_kind_t kind,
     loom_type_t vector_type) {
@@ -879,6 +894,9 @@ bool loom_amdgpu_memory_access_plan_select(
   loom_amdgpu_memory_dynamic_term_materialization_plan_build(
       module, fact_table, view_regions, analysis, selected_source,
       &materialization_plan);
+  const bool preserve_inactive =
+      loom_memory_access_mask(loom_memory_access_cast(module, source_op)) !=
+      LOOM_VALUE_ID_INVALID;
   const loom_amdgpu_memory_packet_selection_context_t selection_context = {
       .module = module,
       .fact_table = fact_table,
@@ -892,7 +910,7 @@ bool loom_amdgpu_memory_access_plan_select(
           module, fact_table, view_regions, analysis,
           selected_source->root_value_id),
       .requires_scalar_payload =
-          source_op->result_count != 0 &&
+          !preserve_inactive && source_op->result_count != 0 &&
           !loom_amdgpu_analyzed_source_value_prefers_vgpr(
               module, fact_table, view_regions, analysis,
               loom_op_const_results(source_op)[0]),
@@ -900,6 +918,7 @@ bool loom_amdgpu_memory_access_plan_select(
 
   loom_amdgpu_memory_access_t access =
       loom_amdgpu_memory_access_from_source(selected_source);
+  access.preserve_inactive = preserve_inactive;
   const loom_type_t vector_type =
       loom_amdgpu_memory_access_source_vector_type(module, source_op);
   loom_amdgpu_memory_access_try_record_vector_width_diagnostic(
@@ -916,6 +935,11 @@ bool loom_amdgpu_memory_access_plan_select(
       loom_amdgpu_memory_access_selects_low16_float_descriptor(
           module, source_op, kind, vector_type)) {
     access.payload_format = LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_LOW_16BIT_FLOAT;
+  }
+  if (loom_amdgpu_memory_access_selects_signed_i8_descriptor(source_op, kind,
+                                                             vector_type)) {
+    access.payload_format =
+        LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_8BIT_INTEGER;
   }
   if (loom_amdgpu_memory_access_selects_signed_i16_descriptor(source_op, kind,
                                                               vector_type)) {

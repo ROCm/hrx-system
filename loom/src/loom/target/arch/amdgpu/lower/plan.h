@@ -1021,8 +1021,9 @@ typedef enum loom_amdgpu_memory_payload_register_class_e {
 typedef enum loom_amdgpu_memory_payload_format_e {
   LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_GENERIC = 0,
   LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_LOW_16BIT_FLOAT = 1,
-  LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_16BIT_INTEGER = 2,
-  LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_UNSIGNED_8BIT_INTEGER = 3,
+  LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_8BIT_INTEGER = 2,
+  LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_16BIT_INTEGER = 3,
+  LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_UNSIGNED_8BIT_INTEGER = 4,
   LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_COUNT_,
 } loom_amdgpu_memory_payload_format_t;
 
@@ -1051,6 +1052,8 @@ typedef struct loom_amdgpu_memory_access_t {
   const loom_low_source_memory_access_plan_t* source;
   // Number of source vector lanes moved by this physical packet.
   uint32_t vector_lane_count;
+  // The selected load keeps its tied destination in inactive SIMD lanes.
+  bool preserve_inactive;
   // Effective static byte offset of this physical packet.
   int64_t static_byte_offset;
   // Optional view-derived descriptor bound; explicit resource extents win.
@@ -1133,16 +1136,37 @@ typedef struct loom_amdgpu_memory_packet_plan_t {
   const uint32_t* constant_words;
 } loom_amdgpu_memory_packet_plan_t;
 
+// Allocated only for masked accesses, after the retained packet array.
+typedef struct loom_amdgpu_memory_mask_plan_t {
+  // Scalar predicate shared by every vector element in one workitem.
+  loom_value_id_t condition;
+  // Source value retained in inactive SIMD lanes.
+  loom_value_id_t passthrough;
+  // Retained native mask materialization recipe; NULL uses its source carrier.
+  const void* condition_plan;
+} loom_amdgpu_memory_mask_plan_t;
+
 // Immutable function-retained direct-memory packet plan.
 typedef struct loom_amdgpu_memory_access_plan_t {
   // Canonical source access shared by all physical packet views.
   loom_low_source_memory_access_plan_t source;
   // Number of populated packet plans.
   uint32_t packet_count;
+  // A mask plan follows the packets; ordinary loads/stores allocate no tail.
+  bool has_mask;
   // Direct memory packets emitted in increasing payload-byte order. The
   // function-retained allocation contains exactly |packet_count| entries.
   loom_amdgpu_memory_packet_plan_t packets[];
 } loom_amdgpu_memory_access_plan_t;
+
+static inline const loom_amdgpu_memory_mask_plan_t*
+loom_amdgpu_memory_access_mask_plan(
+    const loom_amdgpu_memory_access_plan_t* plan) {
+  return plan->has_mask
+             ? (const loom_amdgpu_memory_mask_plan_t*)(plan->packets +
+                                                       plan->packet_count)
+             : NULL;
+}
 
 typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
   // Adjacent-lane f32 result values are packed into one BF16 store packet.

@@ -86,6 +86,35 @@ TEST(CombiningTest, IntegerAlgebraicPropertiesCoverEveryKind) {
   EXPECT_TRUE(loom_combining_kind_is_idempotent(LOOM_COMBINING_KIND_MAXNUMF));
 }
 
+TEST(CombiningTest, I1EquivalentsCoverEveryIntegerKind) {
+  constexpr struct {
+    loom_combining_kind_t kind;
+    loom_combining_kind_t equivalent;
+  } kCases[] = {
+      {LOOM_COMBINING_KIND_ADDI, LOOM_COMBINING_KIND_XORI},
+      {LOOM_COMBINING_KIND_MULI, LOOM_COMBINING_KIND_ANDI},
+      {LOOM_COMBINING_KIND_MINSI, LOOM_COMBINING_KIND_ORI},
+      {LOOM_COMBINING_KIND_MAXSI, LOOM_COMBINING_KIND_ANDI},
+      {LOOM_COMBINING_KIND_MINUI, LOOM_COMBINING_KIND_ANDI},
+      {LOOM_COMBINING_KIND_MAXUI, LOOM_COMBINING_KIND_ORI},
+      {LOOM_COMBINING_KIND_ANDI, LOOM_COMBINING_KIND_ANDI},
+      {LOOM_COMBINING_KIND_ORI, LOOM_COMBINING_KIND_ORI},
+      {LOOM_COMBINING_KIND_XORI, LOOM_COMBINING_KIND_XORI},
+  };
+  for (const auto& test_case : kCases) {
+    loom_combining_kind_t equivalent = LOOM_COMBINING_KIND_COUNT_;
+    ASSERT_TRUE(loom_combining_kind_i1_equivalent(test_case.kind, &equivalent));
+    EXPECT_EQ(equivalent, test_case.equivalent);
+  }
+  for (const loom_combining_kind_t kind :
+       {LOOM_COMBINING_KIND_ADDF, LOOM_COMBINING_KIND_MULF,
+        LOOM_COMBINING_KIND_MINIMUMF, LOOM_COMBINING_KIND_MAXIMUMF,
+        LOOM_COMBINING_KIND_MINNUMF, LOOM_COMBINING_KIND_MAXNUMF}) {
+    loom_combining_kind_t equivalent = LOOM_COMBINING_KIND_COUNT_;
+    EXPECT_FALSE(loom_combining_kind_i1_equivalent(kind, &equivalent));
+  }
+}
+
 TEST(CombiningTest, FloatingIdentitiesCoverArithmeticKinds) {
   double identity = 0.0;
   ASSERT_TRUE(

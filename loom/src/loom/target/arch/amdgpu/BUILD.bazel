@@ -628,6 +628,10 @@ loom_check_test_suite(
             "//loom/target/amdgpu:" + target
             for target in LOOM_AMDGPU_SUPPORTED_TARGETS
         ],
+        "test/source_low/trigonometry.loom-test": [
+            "//loom/target/amdgpu:" + target
+            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+        ],
         "test/source_low/uniform_packed_memory.loom-test": [
             "//loom/target/amdgpu:" + target
             for target in LOOM_AMDGPU_SUPPORTED_TARGETS

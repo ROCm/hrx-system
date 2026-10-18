@@ -29,6 +29,8 @@ class ScheduleCompletionWaitTest : public ::testing::Test {
 };
 
 TEST_F(ScheduleCompletionWaitTest, MissingTargetModelHasNoCompletionWait) {
+  EXPECT_FALSE(loom_low_descriptor_set_has_completion_wait(nullptr));
+
   uint16_t wait_cycles = 7;
   EXPECT_FALSE(loom_low_schedule_class_query_completion_wait(
       nullptr, &schedule_class_, &wait_cycles));
@@ -50,6 +52,7 @@ TEST_F(ScheduleCompletionWaitTest,
   hazards_[1].distance = 5;
   schedule_class_.hazard_count = 2;
 
+  EXPECT_FALSE(loom_low_descriptor_set_has_completion_wait(&descriptor_set_));
   uint16_t wait_cycles = 7;
   EXPECT_FALSE(loom_low_schedule_class_query_completion_wait(
       &descriptor_set_, &schedule_class_, &wait_cycles));
@@ -62,6 +65,7 @@ TEST_F(ScheduleCompletionWaitTest, ZeroCostCounterStillRequiresCompletion) {
   hazards_[0].distance = 0;
   schedule_class_.hazard_count = 1;
 
+  EXPECT_TRUE(loom_low_descriptor_set_has_completion_wait(&descriptor_set_));
   uint16_t wait_cycles = 7;
   EXPECT_TRUE(loom_low_schedule_class_query_completion_wait(
       &descriptor_set_, &schedule_class_, &wait_cycles));

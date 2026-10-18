@@ -255,8 +255,8 @@ static inline loom_value_facts_t loom_rewriter_value_facts(
 }
 
 // Returns the retained SSA identity without changing the facts attached to
-// |value_id|. This is an indexed lookup; identity chains are resolved by value
-// analysis. Without analysis, the value is its own identity.
+// |value_id|. This is an indexed lookup through rank-bounded retained handles,
+// not an IR walk. Without analysis, the value is its own identity.
 static inline loom_value_id_t loom_rewriter_value_identity(
     const loom_rewriter_t* rewriter, loom_value_id_t value_id) {
   return loom_value_fact_table_query_identity(rewriter->fact_table, value_id);
@@ -385,7 +385,9 @@ iree_status_t loom_rewriter_replace_all_uses_and_erase(
     const loom_value_id_t* replacements, uint16_t count);
 
 // Replaces all uses and type uses of one value with another value and adds
-// affected users to the worklist. Does not erase the defining op.
+// affected users to the worklist. Retained SSA identities are retargeted before
+// returning, independently of deferred numeric inference. Does not erase the
+// defining op; later uses of the old value retain its original meaning.
 iree_status_t loom_rewriter_replace_all_uses_with(loom_rewriter_t* rewriter,
                                                   loom_value_id_t old_value,
                                                   loom_value_id_t new_value);
@@ -413,6 +415,24 @@ iree_status_t loom_rewriter_erase(loom_rewriter_t* rewriter, loom_op_t* op);
 iree_status_t loom_rewriter_erase_closed_set(loom_rewriter_t* rewriter,
                                              loom_op_t* const* ops,
                                              iree_host_size_t count);
+
+// Removes a verified closed set of blocks, withdrawing retained SSA references
+// before their definitions are retired. The mask covers the region's blocks.
+// The caller refreshes CFG structure after completing its structural edits.
+iree_status_t loom_rewriter_remove_blocks(loom_rewriter_t* rewriter,
+                                          loom_region_t* region,
+                                          const bool* remove_blocks,
+                                          uint16_t remove_block_count,
+                                          iree_arena_allocator_t* scratch_arena,
+                                          uint16_t* out_removed_count);
+
+// Removes selected unused arguments and their retained SSA references. The
+// mask covers the block's arguments. The caller repairs branch payloads and
+// refreshes CFG structure after completing the structural edit.
+uint16_t loom_rewriter_remove_block_args(loom_rewriter_t* rewriter,
+                                         loom_block_t* block,
+                                         const bool* remove_args,
+                                         uint16_t remove_arg_count);
 
 // Moves |op| before |before_op|, preserving operands/results/regions while
 // retargeting ancestry, worklist membership, and region effect summaries.

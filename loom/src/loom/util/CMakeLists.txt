@@ -291,6 +291,7 @@ loom_cc_library(
     fact_table_api
   HDRS
     "fact_extensions.h"
+    "fact_identity.h"
     "fact_layout.h"
     "fact_table.h"
   DEPS
@@ -323,6 +324,7 @@ loom_cc_library(
   HDRS
     "fact_cfg.h"
     "fact_extensions.h"
+    "fact_identity.h"
     "fact_induction.h"
     "fact_layout.h"
     "fact_loop.h"
@@ -334,6 +336,7 @@ loom_cc_library(
   SRCS
     "fact_cfg.c"
     "fact_extensions.c"
+    "fact_identity.c"
     "fact_induction.c"
     "fact_layout.c"
     "fact_loop.c"
@@ -422,6 +425,18 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir::facts
+)
+
+loom_cc_test(
+  NAME
+    fact_identity_test
+  SRCS
+    "fact_identity_test.cc"
+  DEPS
+    ::fact_table
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

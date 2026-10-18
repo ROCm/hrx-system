@@ -8,6 +8,7 @@
 
 #include <malloc.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -21,7 +22,19 @@ constexpr D3DKMT_HANDLE kContext = 0x20;
 constexpr D3DKMT_HANDLE kQueue = 0x30;
 constexpr D3DKMT_HANDLE kFence = 0x40;
 
+struct FakeScheduler {
+  // Native node ordinal, or negative when this engine is absent.
+  int engine_ordinal;
+  // Whether Windows hardware scheduling is enabled for this engine.
+  bool hardware_scheduling;
+};
+
 struct FakeNativeState {
+  // Native engines indexed by scheduler ID; only compute 0 exists by default.
+  std::array<FakeScheduler, 4> schedulers = {
+      FakeScheduler{0, true}, {-1, false}, {-1, false}, {-1, false}};
+  // Scheduler selected for context creation.
+  uint32_t expected_scheduler = 0;
   // Native result selected for context construction.
   NTSTATUS create_context_status = STATUS_SUCCESS;
   // Native result selected for queue construction.
@@ -108,6 +121,11 @@ extern "C" NTSTATUS APIENTRY
 D3DKMTCreateContextVirtual(D3DKMT_CREATECONTEXTVIRTUAL* create) {
   ++current_state->context_create_count;
   ExpectDependency(create->hDevice == kDevice);
+  ExpectDependency(
+      create->NodeOrdinal ==
+      static_cast<uint32_t>(
+          current_state->schedulers[current_state->expected_scheduler]
+              .engine_ordinal));
   ExpectDependency(create->Flags.HwQueueSupported == 1);
   ExpectDependency(create->pPrivateDriverData != nullptr);
   ExpectDependency(create->PrivateDriverDataSize == 16);
@@ -160,24 +178,38 @@ D3DKMTSubmitCommandToHwQueue(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
 
 namespace Wkmi {
 
-int EngineOrdinal(int, DeviceInfo*) { return 0; }
-bool GetHwsEnabled(int, DeviceInfo*) { return true; }
+int EngineOrdinal(int scheduler, DeviceInfo*) {
+  if (scheduler < 0 ||
+      static_cast<size_t>(scheduler) >= current_state->schedulers.size()) {
+    return -1;
+  }
+  return current_state->schedulers[scheduler].engine_ordinal;
+}
+bool GetHwsEnabled(int scheduler, DeviceInfo*) {
+  return scheduler >= 0 &&
+         static_cast<size_t>(scheduler) < current_state->schedulers.size() &&
+         current_state->schedulers[scheduler].hardware_scheduling;
+}
 int GetContextPrivDataSize() { return 16; }
 int GetHwQueuePrivDataSize() { return 32; }
 int GetSubmitPrivDataSize() { return 48; }
 
-void FillinContextPrivData(void* private_data, bool, uint32_t, uint64_t) {
+void FillinContextPrivData(void* private_data, bool, uint32_t scheduler,
+                           uint64_t debugger_data, bool rocr_client) {
   ExpectDependency(private_data != nullptr);
+  ExpectDependency(scheduler == current_state->expected_scheduler);
+  ExpectDependency(debugger_data == 0 && !rocr_client);
 }
 
-void FillinHwQueuePrivData(void* private_data, bool, SchedLevel, bool aql,
-                           uint64_t queue_address, uint64_t queue_size,
-                           uint64_t write_pointer, uint64_t read_pointer,
-                           D3DKMT_HANDLE descriptor, uint32_t** doorbell) {
+void FillinHwQueuePrivData(void* private_data, bool, SchedLevel,
+                           HwQueueKind kind, uint64_t queue_address,
+                           uint64_t queue_size, uint64_t write_pointer,
+                           uint64_t read_pointer, D3DKMT_HANDLE descriptor,
+                           uint32_t** doorbell, D3DKMT_HANDLE cwsr_memory) {
   ExpectDependency(private_data != nullptr);
-  ExpectDependency(!aql && queue_address == 0 && queue_size == 0 &&
-                   write_pointer == 0 && read_pointer == 0 && descriptor == 0 &&
-                   doorbell == nullptr);
+  ExpectDependency(kind == kHwQueuePm4 && queue_address == 0 &&
+                   queue_size == 0 && write_pointer == 0 && read_pointer == 0 &&
+                   descriptor == 0 && doorbell == nullptr && cwsr_memory == 0);
 }
 
 void FillinSubmitPrivData(void* private_data, D3DKMT_HANDLE queue,
@@ -190,6 +222,74 @@ void FillinSubmitPrivData(void* private_data, D3DKMT_HANDLE queue,
 }  // namespace Wkmi
 
 namespace {
+
+bool NativeSchedulerSelectionPreservesCommandRepresentation() {
+  bool passed = true;
+  FakeNativeState state;
+  current_state = &state;
+  Wkmi::DeviceInfo device_info = {};
+  device_info.compute_schedid = 1;
+  device_info.pm4_compute_schedid = 0;
+  device_info.sdma_schedid = {-1, 2, 3};
+  state.schedulers = {FakeScheduler{4, true}, {5, true}, {6, false}, {7, true}};
+  uint32_t scheduler = UINT32_MAX;
+  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+      device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
+  AMDF_EXPECT(scheduler == 0);
+  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+      device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
+  AMDF_EXPECT(scheduler == 3);
+
+  // A valid AQL engine cannot substitute for an unavailable PM4 engine.
+  for (const auto unavailable : {FakeScheduler{-1, true}, {4, false}}) {
+    state.schedulers[0] = unavailable;
+    scheduler = UINT32_MAX;
+    AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+        device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
+    AMDF_EXPECT(scheduler == UINT32_MAX);
+  }
+  // Native-ring support alone cannot supply an eligible HWS engine.
+  device_info.hwsInfo.hwsMask.sdma_queue = 1;
+  state.schedulers[3].engine_ordinal = -1;
+  scheduler = UINT32_MAX;
+  AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+      device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
+  AMDF_EXPECT(scheduler == UINT32_MAX);
+  current_state = nullptr;
+  return passed;
+}
+
+bool ContextUsesPm4SchedulerWhenAqlSchedulerDiffers() {
+  bool passed = true;
+  FakeNativeState state;
+  state.schedulers = {
+      FakeScheduler{4, true}, {5, true}, {-1, false}, {-1, false}};
+  current_state = &state;
+  amdf_wkmi_bridge_gpu_adapter_t adapter;
+  adapter.host_allocator = {&state, Allocate, nullptr, Free};
+  adapter.device_info.compute_schedid = 1;
+  adapter.device_info.pm4_compute_schedid = 0;
+  const auto create = MakeCreateInfo();
+  amdf_wkmi_bridge_gpu_kernel_queue_t* queue = nullptr;
+  amdf_wkmi_bridge_gpu_kernel_queue_info_t info = {};
+  uint32_t native_status = 0;
+  AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(&adapter, &create, &queue,
+                                                      &info, &native_status) ==
+              AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+  if (queue != nullptr) {
+    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(queue, 0x2000, 64, 7,
+                                                        &native_status) ==
+                AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueDestroy(
+                    queue, &native_status) == AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+  }
+  AMDF_EXPECT(state.context_create_count == 1);
+  AMDF_EXPECT(state.submit_count == 1);
+  AMDF_EXPECT(state.live_allocation_count == 0);
+  AMDF_EXPECT(state.dependency_failure_count == 0);
+  current_state = nullptr;
+  return passed;
+}
 
 bool AllocationFailureLeavesNoNativeOwnership() {
   bool passed = true;
@@ -352,6 +452,10 @@ int main() {
     bool (*run)();
   };
   const TestCase cases[] = {
+      {"NativeSchedulerSelectionPreservesCommandRepresentation",
+       NativeSchedulerSelectionPreservesCommandRepresentation},
+      {"ContextUsesPm4SchedulerWhenAqlSchedulerDiffers",
+       ContextUsesPm4SchedulerWhenAqlSchedulerDiffers},
       {"AllocationFailureLeavesNoNativeOwnership",
        AllocationFailureLeavesNoNativeOwnership},
       {"NativeFailureLeavesNoAdapterCleanupObligation",

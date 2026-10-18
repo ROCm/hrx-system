@@ -13,6 +13,8 @@
 
 // Fixed scalar projections of the canonical Loom operation contracts.
 // The approximate namespace explicitly permits AFN and no other flags.
+// Its preserved trigonometry retains source-defined zero signs even
+// when the calling scope permits NSZ. Nonzero results remain approximate.
 namespace loom::scalar {
 
 // Floating-point absolute value.
@@ -63,7 +65,8 @@ template <class Float> requires (__is_floating_point(Float))
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.copysignf")]] Float copysignf(Float lhs, Float rhs);
 
-// Cosine.
+// Cosine in radians. AFN permits native approximation with target-dependent
+// zero signs; preserve requires source-defined zero signs.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.cosf")]] Float cosf(Float input);
 
@@ -72,7 +75,9 @@ template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.coshf")]] Float coshf(Float input);
 
 // Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and
-// exact quarter-turn cardinals. Non-finite inputs produce NaN.
+// exact quarter-turn cardinal values. Non-finite inputs produce NaN. AFN
+// permits target-dependent zero signs; preserve requires positive zero at odd
+// quarter-turns.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.costurnsf")]] Float costurnsf(Float input);
 
@@ -193,7 +198,8 @@ template <class Float> requires (__is_floating_point(Float))
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.siluf")]] Float siluf(Float input);
 
-// Sine.
+// Sine in radians. AFN permits native approximation with target-dependent zero
+// signs; preserve requires source-defined zero signs.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.sinf")]] Float sinf(Float input);
 
@@ -202,7 +208,9 @@ template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.sinhf")]] Float sinhf(Float input);
 
 // Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact
-// quarter-turn cardinals. Non-finite inputs produce NaN.
+// quarter-turn cardinal values. Non-finite inputs produce NaN. AFN permits
+// target-dependent zero signs; preserve requires the input sign at zero and
+// integer or half-integer turns.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.sinturnsf")]] Float sinturnsf(Float input);
 
@@ -280,7 +288,8 @@ template <class Float> requires (__is_floating_point(Float))
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.copysignf", "afn")]] Float copysignf(Float lhs, Float rhs);
 
-// Cosine.
+// Cosine in radians. AFN permits native approximation with target-dependent
+// zero signs; preserve requires source-defined zero signs.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.cosf", "afn")]] Float cosf(Float input);
 
@@ -289,7 +298,9 @@ template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.coshf", "afn")]] Float coshf(Float input);
 
 // Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and
-// exact quarter-turn cardinals. Non-finite inputs produce NaN.
+// exact quarter-turn cardinal values. Non-finite inputs produce NaN. AFN
+// permits target-dependent zero signs; preserve requires positive zero at odd
+// quarter-turns.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.costurnsf", "afn")]] Float costurnsf(Float input);
 
@@ -394,7 +405,8 @@ template <class Float> requires (__is_floating_point(Float))
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.siluf", "afn")]] Float siluf(Float input);
 
-// Sine.
+// Sine in radians. AFN permits native approximation with target-dependent zero
+// signs; preserve requires source-defined zero signs.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.sinf", "afn")]] Float sinf(Float input);
 
@@ -403,7 +415,9 @@ template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.sinhf", "afn")]] Float sinhf(Float input);
 
 // Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact
-// quarter-turn cardinals. Non-finite inputs produce NaN.
+// quarter-turn cardinal values. Non-finite inputs produce NaN. AFN permits
+// target-dependent zero signs; preserve requires the input sign at zero and
+// integer or half-integer turns.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.sinturnsf", "afn")]] Float sinturnsf(Float input);
 
@@ -432,6 +446,34 @@ template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.truncf", "afn")]] Float truncf(Float input);
 
 }  // namespace approximate
+
+namespace approximate::preserved {
+
+// Cosine in radians. AFN permits native approximation with target-dependent
+// zero signs; preserve requires source-defined zero signs.
+template <class Float> requires (__is_floating_point(Float))
+[[loom::op("scalar.cosf", "afn", "preserve")]] Float cosf(Float input);
+
+// Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and
+// exact quarter-turn cardinal values. Non-finite inputs produce NaN. AFN
+// permits target-dependent zero signs; preserve requires positive zero at odd
+// quarter-turns.
+template <class Float> requires (__is_floating_point(Float))
+[[loom::op("scalar.costurnsf", "afn", "preserve")]] Float costurnsf(Float input);
+
+// Sine in radians. AFN permits native approximation with target-dependent zero
+// signs; preserve requires source-defined zero signs.
+template <class Float> requires (__is_floating_point(Float))
+[[loom::op("scalar.sinf", "afn", "preserve")]] Float sinf(Float input);
+
+// Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact
+// quarter-turn cardinal values. Non-finite inputs produce NaN. AFN permits
+// target-dependent zero signs; preserve requires the input sign at zero and
+// integer or half-integer turns.
+template <class Float> requires (__is_floating_point(Float))
+[[loom::op("scalar.sinturnsf", "afn", "preserve")]] Float sinturnsf(Float input);
+
+}  // namespace approximate::preserved
 
 }  // namespace loom::scalar
 

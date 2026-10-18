@@ -120,9 +120,11 @@ typedef enum loom_serve_text_chat_boundary_e {
 // Frames and encodes the rendered prompt suffix beginning at prompt_offset in
 // the shared source VM. Source receives the exact checked marker plan and
 // returns token IDs plus one logical input span per included image. On success,
-// copies at most capacity IDs into tokens and allocates any media spans; on
-// failure all outputs are empty and tokens is untouched. input_shift accounts
-// for a retained prediction prepended by native code. No VM reference escapes.
+// copies at most capacity IDs into out_tokens and allocates any media spans.
+// A null out_tokens validates and counts the same input without copying IDs.
+// On failure all outputs are empty and out_tokens is untouched. input_shift
+// accounts for a retained prediction prepended by native code. No VM reference
+// escapes.
 iree_status_t loom_serve_text_chat_prepare_input(
     const loom_serve_text_chat_t* chat, iree_host_size_t prompt_offset,
     loom_serve_text_chat_input_format_t format,
@@ -315,8 +317,8 @@ typedef struct loom_serve_text_chat_response_t {
   iree_string_view_t model_name;
   // Server-assigned request identity shared by every chunk and tool call.
   uint64_t request_id;
-  // Wall-clock admission time in nanoseconds; the wire uses whole seconds.
-  iree_time_t creation_time;
+  // Wall-clock Unix seconds at response creation, shared by all chunks.
+  int64_t created_unix_seconds;
   // Validated request output options.
   loom_serve_text_chat_flags_t flags;
   // Complete client transcript accounting, independent of output format.

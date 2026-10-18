@@ -226,7 +226,7 @@ typedef struct loom_serve_weight_preparation_t {
   loomc_config_options_t config;
   // CPU policy/indexing outcome, consumed by the initial task destructor.
   iree_status_t status;
-  // Fixed-root allocation readiness joined after CPU/JIT ownership retires.
+  // Joins the already-queued fixed root allocation before publication.
   iree_async_semaphore_timepoint_t backing_timepoint;
   // Terminal ownership transfer, invoked after all job storage is released.
   loom_serve_weights_completion_fn_t completion;
@@ -360,20 +360,6 @@ static iree_status_t loom_serve_weight_prepare_policy(
   return status;
 }
 
-static void loom_serve_weight_preparation_complete(
-    loom_serve_weight_preparation_t* job, iree_status_t status) {
-  const loom_serve_weights_completion_fn_t completion = job->completion;
-  void* user_data = job->user_data;
-  iree_allocator_free(job->weights->host_allocator, job);
-  completion(user_data, status);
-}
-
-static void loom_serve_weight_preparation_backing_ready(
-    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
-    iree_status_t status) {
-  loom_serve_weight_preparation_complete(user_data, status);
-}
-
 static void loom_serve_weight_preparation_finish(
     loom_serve_weight_preparation_t* job, iree_status_t status) {
   loom_serve_weights_t* weights = job->weights;
@@ -393,21 +379,16 @@ static void loom_serve_weight_preparation_finish(
   }
   iree_allocator_free(host_allocator, job->preparers);
   iree_allocator_free(host_allocator, job->span_preparers);
-  if (iree_status_is_ok(status) && weights->activation.backing_ready) {
-    // Reusable commands capture committed fixed roots. Policy/JIT completion
-    // alone does not establish the preceding allocation's completion frontier.
-    job->backing_timepoint.callback =
-        loom_serve_weight_preparation_backing_ready;
-    job->backing_timepoint.user_data = job;
-    status = iree_async_semaphore_acquire_timepoint(
-        (iree_async_semaphore_t*)weights->activation.backing_ready, 1,
-        &job->backing_timepoint);
-    // An inline callback may already have destroyed job. Rejection retains it.
-    if (iree_status_is_ok(status)) {
-      return;
-    }
-  }
-  loom_serve_weight_preparation_complete(job, status);
+  const loom_serve_weights_completion_fn_t completion = job->completion;
+  void* user_data = job->user_data;
+  iree_allocator_free(host_allocator, job);
+  completion(user_data, status);
+}
+
+static void loom_serve_weight_preparation_backing_ready(
+    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
+    iree_status_t status) {
+  loom_serve_weight_preparation_finish(user_data, status);
 }
 
 // Each native completion submits the next preparer without a worker join.
@@ -417,7 +398,20 @@ static void loom_serve_weight_preparation_compiled(
 static void loom_serve_weight_preparation_next(
     loom_serve_weight_preparation_t* job) {
   if (job->preparer_index == job->preparer_count) {
-    loom_serve_weight_preparation_finish(job, iree_ok_status());
+    iree_hal_semaphore_t* backing = job->weights->activation.backing_ready;
+    if (!backing) {
+      loom_serve_weight_preparation_finish(job, iree_ok_status());
+      return;
+    }
+    job->backing_timepoint.callback =
+        loom_serve_weight_preparation_backing_ready;
+    job->backing_timepoint.user_data = job;
+    // Completion may run inline and release job before acceptance returns.
+    iree_status_t status = iree_async_semaphore_acquire_timepoint(
+        (iree_async_semaphore_t*)backing, 1, &job->backing_timepoint);
+    if (!iree_status_is_ok(status)) {
+      loom_serve_weight_preparation_finish(job, status);
+    }
     return;
   }
   const iree_string_view_t root =

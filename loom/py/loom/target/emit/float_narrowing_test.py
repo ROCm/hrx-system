@@ -12,7 +12,9 @@ from loom.target.contracts import (
 )
 from loom.target.emit.float_narrowing import (
     F8E4M3_FORMAT,
+    F16_FORMAT,
     F16_SOURCE_FORMAT,
+    F64_FORMAT,
     FloatNarrowingDescriptors,
     IntegerNarrowingDescriptors,
     IntegerNarrowingImmediateForms,
@@ -44,6 +46,13 @@ _I32 = Immediate(
     signed_min=-(2**31),
     unsigned_max=(2**31) - 1,
 )
+_I64 = Immediate(
+    "value",
+    ImmediateKind.SIGNED,
+    bit_width=64,
+    signed_min=-(2**63),
+    unsigned_max=(2**63) - 1,
+)
 _SHIFT = Immediate(
     "shift",
     ImmediateKind.UNSIGNED,
@@ -53,11 +62,15 @@ _SHIFT = Immediate(
 
 
 def _integer_descriptors(
-    *, immediate_forms: IntegerNarrowingImmediateForms | None = None
+    *,
+    integer_bit_width: int = 32,
+    immediate_forms: IntegerNarrowingImmediateForms | None = None,
 ) -> IntegerNarrowingDescriptors:
     return IntegerNarrowingDescriptors(
-        integer_bit_width=32,
-        integer_constant=_descriptor("test.constant", _I32),
+        integer_bit_width=integer_bit_width,
+        integer_constant=_descriptor(
+            "test.constant", _I64 if integer_bit_width == 64 else _I32
+        ),
         integer_add=_descriptor("test.add"),
         integer_subtract=_descriptor("test.subtract"),
         integer_shift_left=_descriptor("test.shift_left"),
@@ -118,6 +131,23 @@ def test_empty_immediate_forms_preserve_the_recipe() -> None:
     )
 
     assert empty == baseline
+
+
+def test_immediate_folding_preserves_wide_carrier_values() -> None:
+    emits = build_integer_bits_to_narrow_float_emits(
+        _integer_descriptors(integer_bit_width=64, immediate_forms=_immediate_forms()),
+        F64_FORMAT,
+        F16_FORMAT,
+        ValueRef.operand("input"),
+        ValueRef.result("result"),
+        subnormal_rounding=NarrowFloatSubnormalRounding.INTEGER,
+    )
+
+    is_nan = next(
+        emit for emit in emits if emit.results == {"dst": ValueRef.temporary("is_nan")}
+    )
+    assert is_nan.descriptor.key == "test.greater_than"
+    assert is_nan.operands["rhs"] == ValueRef.temporary("source_infinity_bits")
 
 
 def test_f32_bits_entry_point_matches_the_float_recipe_tail() -> None:

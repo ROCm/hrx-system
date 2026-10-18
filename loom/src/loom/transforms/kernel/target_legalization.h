@@ -30,6 +30,15 @@ iree_status_t loom_kernel_target_legalize_subgroup_shuffle(
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result);
 
+// Rewrites a subgroup reduction into the shared active-rank shuffle tree.
+// Target legalizers retain native cells by accepting them before this
+// reference provider runs. Logical cluster attributes and sparse active lanes
+// are preserved by the same rank mapping used for subgroup scans.
+iree_status_t loom_kernel_target_legalize_subgroup_reduce(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result);
+
 // Rewrites a subgroup scan into portable subgroup primitives. Target
 // legalizers may call this when an otherwise legal scan violates a native
 // implementation precondition. Unsupported cluster shapes are left unchanged

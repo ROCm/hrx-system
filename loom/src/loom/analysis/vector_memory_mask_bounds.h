@@ -32,12 +32,26 @@ typedef struct loom_vector_memory_mask_bounds_t {
   loom_symbolic_expr_t upper_bound;
 } loom_vector_memory_mask_bounds_t;
 
-// Analyzes one vector memory mask using the active path facts in
-// |expression_context|.
+// Reusable condition derivation for the latest uniform predicate and lexical
+// scope. Allocated lazily in the symbolic context's arena and valid while its
+// module and value facts are unchanged.
+typedef struct loom_vector_memory_mask_scope_t loom_vector_memory_mask_scope_t;
+
+// Analyzes one vector memory mask and activates the access's condition scope in
+// |expression_context|, invalidating symbolic memoization when its facts
+// change. A uniform mask contributes its scalar predicate only for this access.
+// An invalid mask selects |lexical_scope| without adding facts. The caller
+// restores that lexical scope before analyzing nested control flow.
+//
+// |inout_mask_scope| starts NULL and retains only the latest predicate's
+// complete derivation, reusing its high-water storage across subsequent
+// queries. Returned bounds and the active scope remain valid until the next
+// query or scope change.
 iree_status_t loom_vector_memory_mask_bounds_analyze(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_symbolic_expr_context_t* expression_context,
+    const loom_condition_fact_scope_t* lexical_scope,
     loom_value_id_t mask_value_id,
+    loom_vector_memory_mask_scope_t** inout_mask_scope,
     loom_vector_memory_mask_bounds_t* out_bounds);
 
 // Returns the exclusive tail end when |bounds| describes a unit-step prefix

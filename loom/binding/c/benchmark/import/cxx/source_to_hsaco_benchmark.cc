@@ -414,6 +414,10 @@ constexpr CxxKernel kRmsNorm = {"llama_rms_norm.cxx", "llama_rms_norm",
                                 "gfx1151"};
 constexpr CxxKernel kSwiGlu = {"aiter_swiglu_f16.cxx", "aiter_swiglu_f16",
                                "gfx1151"};
+constexpr CxxKernel kCollectiveScanNativeU32 = {"collective_scans.cxx",
+                                                "scan_u32", "gfx1151"};
+constexpr CxxKernel kCollectiveScanFallbackU64 = {"collective_scans.cxx",
+                                                  "scan_u64", "gfx1151"};
 constexpr CxxKernel kMxfp4 = {"mxfp_group_dot.cxx", "mxfp4_decode_dot",
                               "gfx1250"};
 constexpr CxxKernel kMxfp8 = {"mxfp_group_dot.cxx", "mxfp8_decode_dot",
@@ -531,6 +535,12 @@ BENCHMARK_CAPTURE(SourceToHsaco, FlashAttention, &kFlashAttention)
 BENCHMARK_CAPTURE(SourceToHsaco, RmsNorm, &kRmsNorm)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToHsaco, SwiGluF16, &kSwiGlu)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToHsaco, CollectiveScanNativeU32,
+                  &kCollectiveScanNativeU32)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToHsaco, CollectiveScanFallbackU64,
+                  &kCollectiveScanFallbackU64)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToHsaco, Mxfp4Gfx1250, &kMxfp4)
     ->Unit(::benchmark::kMicrosecond);

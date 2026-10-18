@@ -55,13 +55,14 @@ class ScheduleCompletionDemandTest : public ::testing::Test {
 
   void Initialize(uint16_t domain_count) {
     std::vector<uint32_t> indegrees(nodes_.size());
-    loom_low_schedule_dependency_index_t index;
     loom_low_schedule_dependency_detail_index_t details;
     IREE_ASSERT_OK(loom_low_schedule_dependency_index_initialize(
         &graph_, static_cast<uint32_t>(nodes_.size()), &scratch_arena_, &arena_,
-        indegrees.data(), &index, &details));
+        indegrees.data(), &index_, &details));
+    IREE_ASSERT_OK(loom_low_schedule_dependency_incoming_index_initialize(
+        &index_, nodes_.data(), &arena_, &incoming_index_));
     IREE_ASSERT_OK(loom_low_schedule_completion_demand_initialize(
-        &index, nodes_.data(), domain_count, &arena_, &demand_));
+        &index_, &incoming_index_, domain_count, &arena_, &demand_));
   }
 
   void Nominate(uint16_t domain, uint32_t consumer,
@@ -137,6 +138,8 @@ class ScheduleCompletionDemandTest : public ::testing::Test {
   iree_arena_allocator_t arena_;
   iree_arena_allocator_t scratch_arena_;
   loom_low_schedule_dependency_graph_t graph_;
+  loom_low_schedule_dependency_index_t index_;
+  loom_low_schedule_dependency_incoming_index_t incoming_index_;
   loom_low_schedule_completion_demand_t demand_;
   std::vector<loom_low_schedule_node_t> nodes_;
 };
@@ -286,7 +289,8 @@ TEST_F(ScheduleCompletionDemandTest, RechecksFinalsWhenTransactionChanges) {
 TEST_F(ScheduleCompletionDemandTest, EmptyDomainsHaveNoDemandStorage) {
   SetNodes(4);
   Initialize(0);
-  EXPECT_EQ(demand_.incoming_starts, nullptr);
+  EXPECT_EQ(demand_.dependencies, nullptr);
+  EXPECT_EQ(demand_.incoming_dependencies, nullptr);
   EXPECT_EQ(demand_.demanded_bits, nullptr);
   EXPECT_EQ(demand_.worklist, nullptr);
   EXPECT_EQ(demand_.domain_states, nullptr);

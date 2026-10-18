@@ -247,7 +247,7 @@ def _tool_runfiles(ctx, tool, files):
 def _shell_quote(value):
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
-def _tool_environment(tool):
+def _tool_environment_exports(tool, indent = ""):
     # The launcher has entered the workspace runfiles directory. Resolve only
     # graph-proven path spans so each child receives its own runtime policy.
     entries = []
@@ -258,8 +258,8 @@ def _tool_environment(tool):
             value = value.replace(RUNFILES_PATH_END, "\"'")
         else:
             value = _shell_quote(value)
-        entries.append(name + "=" + value)
-    return "env " + " ".join(entries) + " " if entries else ""
+        entries.append(indent + "export " + name + "=" + value + "\n")
+    return "".join(entries)
 
 def _write_test_launcher(ctx, tool, input_file, tool_args):
     output = ctx.actions.declare_file(ctx.label.name + ".sh")
@@ -272,11 +272,12 @@ def _write_test_launcher(ctx, tool, input_file, tool_args):
         "set -euo pipefail\n" +
         "RUNFILES=\"${{RUNFILES_DIR:-$0.runfiles}}\"\n" +
         "cd \"${{RUNFILES}}/{workspace}\"\n" +
-        "exec {environment}\"${{PWD}}/{tool}\" \"${{PWD}}/{input}\"{args} \"$@\"\n"
+        "{environment}" +
+        "exec \"${{PWD}}/{tool}\" \"${{PWD}}/{input}\"{args} \"$@\"\n"
     ).format(
         workspace = ctx.workspace_name,
         tool = tool.executable.short_path,
-        environment = _tool_environment(tool),
+        environment = _tool_environment_exports(tool),
         input = input_file.short_path,
         args = command_args,
     )
@@ -303,23 +304,37 @@ def _write_execution_test_launcher(
         " \\\n  %s" % _shell_quote(arg)
         for arg in benchmark_runner_args
     ])
-    test_command = (
-        "{exec_prefix}{test_environment}\"${{PWD}}/{test_tool}\" " +
-        "\"${{PWD}}/{module}\"{test_args} \"$@\"\n"
-    ).format(
-        exec_prefix = "" if benchmark_tool != None else "exec ",
-        module = module.short_path,
-        test_args = test_args,
-        test_environment = _tool_environment(test_tool),
-        test_tool = test_tool.executable.short_path,
-    )
+    if benchmark_tool != None:
+        test_command = (
+            "(\n" +
+            "{test_environment}" +
+            "  exec \"${{PWD}}/{test_tool}\" " +
+            "\"${{PWD}}/{module}\"{test_args} \"$@\"\n" +
+            ")\n"
+        ).format(
+            module = module.short_path,
+            test_args = test_args,
+            test_environment = _tool_environment_exports(test_tool, indent = "  "),
+            test_tool = test_tool.executable.short_path,
+        )
+    else:
+        test_command = (
+            "{test_environment}" +
+            "exec \"${{PWD}}/{test_tool}\" " +
+            "\"${{PWD}}/{module}\"{test_args} \"$@\"\n"
+        ).format(
+            module = module.short_path,
+            test_args = test_args,
+            test_environment = _tool_environment_exports(test_tool),
+            test_tool = test_tool.executable.short_path,
+        )
     benchmark_command = ""
     if benchmark_tool != None:
         # Both tools own the execution options, except these correctness-only
         # inputs. Keep shared overrides in order and let each real parser reject
         # unsupported arguments; the launcher does not parse option values.
         benchmark_command = (
-            "benchmark_command=({benchmark_environment}\"${{PWD}}/{benchmark_tool}\" " +
+            "benchmark_command=(\"${{PWD}}/{benchmark_tool}\" " +
             "\"${{PWD}}/{module}\"{benchmark_args})\n" +
             "for argument in \"$@\"; do\n" +
             "  case \"${{argument%%=*}}\" in\n" +
@@ -327,10 +342,11 @@ def _write_execution_test_launcher(
             "    *) benchmark_command+=(\"$argument\") ;;\n" +
             "  esac\n" +
             "done\n" +
+            "{benchmark_environment}" +
             "exec \"${{benchmark_command[@]}}\"\n"
         ).format(
             benchmark_args = benchmark_args,
-            benchmark_environment = _tool_environment(benchmark_tool),
+            benchmark_environment = _tool_environment_exports(benchmark_tool),
             benchmark_tool = benchmark_tool.executable.short_path,
             module = module.short_path,
         )

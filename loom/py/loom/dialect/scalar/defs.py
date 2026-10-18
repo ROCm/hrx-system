@@ -74,15 +74,38 @@ FastMathFlags = EnumDef(
     "FastMathFlags",
     [
         EnumCase("reassoc", 1, doc="Allow reassociation."),
-        EnumCase("nnan", 2, doc="Assume no NaNs."),
-        EnumCase("ninf", 4, doc="Assume no infinities."),
-        EnumCase("nsz", 8, doc="Assume no signed zeros."),
+        EnumCase("nnan", 2, doc="Assume floating-point operands and results are not NaN, independently for every vector element."),
+        EnumCase("ninf", 4, doc="Assume floating-point operands and results are not infinite, independently for every vector element."),
+        EnumCase("nsz", 8, doc="Permit treating positive and negative zero as interchangeable; this does not exclude zero results."),
         EnumCase("arcp", 16, doc="Allow reciprocal approximation."),
         EnumCase("contract", 32, doc="Allow contractions (FMA)."),
         EnumCase("afn", 64, doc="Approximate functions."),
         EnumCase("fast", 127, doc="All of the above."),
     ],
-    doc="IEEE 754 fast-math relaxation flags for float operations.",
+    doc=(
+        "IEEE 754 fast-math relaxation flags for float operations. nnan and "
+        "ninf are independent author promises, not runtime checks or requests "
+        "to clamp results. Together they guarantee finite floating-point "
+        "results, but do not imply exact representability in a narrower type "
+        "or absence of subnormals. Behavior outside an authored promise is "
+        "not constrained by the operation's ordinary special-value contract. "
+        "Flags do not refine unrelated uses of an operand."
+    ),
+)
+
+TrigonometryMathFlags = EnumDef(
+    "TrigonometryMathFlags",
+    [
+        *FastMathFlags.cases,
+        EnumCase(
+            "preserve",
+            128,
+            doc=("Require source-defined signs of zero results, independently of AFN approximation permission. This positive requirement overrides NSZ and is not included in fast."),
+        ),
+    ],
+    doc=(
+        "Trigonometric math permissions and requirements. AFN permits native approximation with target-dependent zero signs unless preserve is requested. Other fast-math permissions retain their meanings; preserve does not require correctly rounded nonzero approximations."
+    ),
 )
 
 FloatConversionFlags = EnumDef(

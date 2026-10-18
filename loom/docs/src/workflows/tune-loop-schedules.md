@@ -715,11 +715,13 @@ Save the example, check it, and compare the same workload and input-reuse policy
 ```shell
 iree-test-loom cooperative-paged-attention.loom --device=amdgpu --sanitizer=access
 
-iree-benchmark-loom cooperative-paged-attention.loom \
-  --compare=@cooperative_paged_attention_serial_n128_i256,@cooperative_paged_attention_pipelined_n128_i256 \
-  --device=amdgpu --measure=dispatch_complete --batch-size=8 \
-  --iterations=16 --warmup-iterations=3 --input-ring-count=1 \
-  --interleave=ABABA --repetitions=2 --output=cooperative-comparison.json
+for policy in serial pipelined; do
+  iree-benchmark-loom cooperative-paged-attention.loom \
+    --benchmark="@cooperative_paged_attention_${policy}_workloads" --sample=2 \
+    --device=amdgpu --measure=dispatch_complete --batch-size=8 \
+    --iterations=16 --warmup-iterations=3 \
+    --output="cooperative-${policy}.json"
+done
 
 loom-compile cooperative-paged-attention.loom \
   --root=@cooperative_paged_attention_pipelined --target=amdgpu:gfx1151 \
@@ -729,8 +731,13 @@ loom-compile-report show cooperative.report.json
 loom-compile-report suggest cooperative.report.json
 ```
 
-The benchmark names cover 128 or 1024 tokens (`n128`, `n1024`) and one, sixteen
-or 256 queries (`i1`, `i16`, `i256`). Each timing case launches one kernel.
+Each workload group generates six samples: 128-token prefixes at 1, 16, and
+256 queries, followed by 1024-token prefixes at the same query counts.
+`--sample=2` selects 128 tokens and 256 queries for both policies. Each sample
+launches one kernel, with input generation outside the measured invocation.
+Scenario policies run in separate invocations; keep machine conditions matched
+when comparing the saved measurements.
+
 Independent analytic checks cover the scalar state and all output channels;
 varied-input comparisons exercise distinct queries and ragged lengths over
 shared pages. Minimal backing allocations expose accidental reads from absent

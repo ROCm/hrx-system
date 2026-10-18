@@ -242,10 +242,35 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "workgroup_collective_legalization",
+    srcs = ["workgroup_collective_legalization.c"],
+    hdrs = ["workgroup_collective_legalization.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:atomic",
+        "//loom/src/loom/ops:combining",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:launch",
+        "//loom/src/loom/target:legalization",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "target_legalization",
     srcs = ["target_legalization.c"],
     hdrs = ["target_legalization.h"],
     deps = [
+        ":workgroup_collective_legalization",
+        "//loom/src/loom/analysis:control_uniformity",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:combining",
         "//loom/src/loom/ops/index",

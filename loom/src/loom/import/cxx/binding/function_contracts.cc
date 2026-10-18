@@ -227,7 +227,7 @@ std::vector<loom_predicate_t> FunctionContracts::bind(
   }
   const size_t result_offset = component_count;
   const bool returns_void =
-      function_type->returnType()->kind() == cxx::TypeKind::kVoid;
+      unit_.typeTraits().is_void(function_type->returnType());
   if (!returns_void && signature == FunctionContractSignature::Flattened) {
     component_count +=
         types.partition(types.unqualified(function_type->returnType()), owner)

@@ -115,7 +115,9 @@ arguments are target names, so `python dev.py cmake build hrx` maps to
 `cmake --build ... --target hrx`. The first CMake configure uses `build/cmake`
 unless `--cmake-build-dir` or `IREE_CMAKE_BUILD_DIR` selects another tree, and
 the selected tree is recorded for later CMake wrapper invocations. Source-build
-and embedding configuration options are documented in `BUILDING.md`.
+and embedding configuration options are documented in [Building](BUILDING.md).
+To reproduce a workflow failure with its compiler, features, and test resources,
+see [Reproducing CI Jobs](build_tools/ci/README.md).
 
 ## Before Commit
 

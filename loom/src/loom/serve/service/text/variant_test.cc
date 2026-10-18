@@ -554,6 +554,34 @@ TEST_F(ReconfigurationTextServiceTest,
 }
 
 TEST_F(ReconfigurationTextServiceTest,
+       SelectionWaitsForTheInputCountingSourceBorrow) {
+  loom_serve_variant_id_t id = 0;
+  ASSERT_NO_FATAL_FAILURE(Stage(directory_ + "/advance.loom", original_, &id));
+  ASSERT_NO_FATAL_FAILURE(AwaitCandidates());
+  const int client = Send(Request(Message("user", "abxa")), "",
+                          "/v1/chat/completions/input_tokens");
+  loom_serve_http_connection_t* connection = nullptr;
+  const loom_serve_http_request_t* request = nullptr;
+  IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
+  loom_serve::testing::text::OwnerTurn::Run(
+      loom_serve_host_executor(host_), [&] {
+        IREE_ASSERT_OK(
+            interface_.accept(interface_.self, connection, request, 0));
+        ASSERT_NO_FATAL_FAILURE(Select(id));
+        bool progress = false;
+        IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+        EXPECT_FALSE(selection_.called);
+        EXPECT_EQ(configuration_.selected(configuration_.self), original_);
+      });
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
+  ASSERT_TRUE(selection_.called);
+  IREE_ASSERT_OK(TakeSelectionStatus());
+  EXPECT_EQ(selection_.id, id);
+  EXPECT_NE(Read(client).find("{\"input_tokens\":4}"), std::string::npos);
+  EXPECT_EQ(loom_serve_text_model_weight_activity(model_).activations, 0u);
+}
+
+TEST_F(ReconfigurationTextServiceTest,
        StopCancelsSelectionButJoinsAcceptedCompilerBorrow) {
   loom_serve_variant_id_t id = 0;
   loom_serve::testing::text::OwnerTurn::Run(

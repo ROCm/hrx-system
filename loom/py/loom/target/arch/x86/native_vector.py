@@ -430,7 +430,7 @@ VBLENDVPS = _instruction(
     _VEX_BLENDV,
     _OPERANDS_17,
     _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_3, 1, 0, 0x4A, (256,)),
+    _encoding(_VEX, _MAP_3, 1, 0, 0x4A, (128, 256)),
 )
 VBROADCASTSD = _instruction(
     "vbroadcastsd",

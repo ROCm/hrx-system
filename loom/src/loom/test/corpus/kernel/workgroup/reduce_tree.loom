@@ -200,7 +200,8 @@ check.scenario @workgroup_tree_vector_all_values {
 }
 
 // Six components cross the native packet boundary while retaining one
-// workgroup collective. The scalar oracle accumulates each component in F32.
+// workgroup collective. The scalar F32 oracle provides the numerical reference;
+// native reduction association and intermediate precision may differ.
 kernel.def @workgroup_tree_bfloat_vector() {
   %unit = index.constant 1 : index
   %width = index.constant 67 : index
@@ -245,7 +246,7 @@ check.scenario @workgroup_tree_bfloat_vector_values {
     %input = check.generate.iota offset(0.5) step(0.5) : tensor<67x6xbf16>
     %output = check.generate.fill value(-1.0) : tensor<67x6xbf16>
     check.compare<@workgroup_tree_bfloat_vector, @workgroup_tree_bfloat_vector_oracle>(%input, %output) : (tensor<67x6xbf16>, tensor<67x6xbf16>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<67x6xbf16>
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(0.01) nan(same) : tensor<67x6xbf16>
     }
   }
   check.return

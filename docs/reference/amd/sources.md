@@ -11,6 +11,7 @@ specific definition, builder, caller, or resource owner that supports a claim.
 | [Mesa][mesa] | `0ba4b08edc65075e9346d20d5310261939aaaf48` | RADV/radeonsi command composition, memory policy, synchronization, MEC predicate normalization and guarded command extents, and native submission. |
 | [Mesa counter, barrier and shader policy][mesa-counter-barriers] | `44cc4ca677a4752a10c14194289bde5a6468675e` | GFX12 performance-query admission, event selection and SQG sample ordering; consumer-stage selection for graphics PWS waits; compiler-selected MEM_ORDERED mode, linked-program requirements and per-SA compute affinity. |
 | [ROCm systems][rocm] | `8d57824901ffa7d961c00a37d055a108723b93ca` | ROCr queue/signal/copy protocols, HIP/CLR consumers, native queue construction, and profiling. |
+| [ROCr Windows SDMA][rocr-windows-sdma] | `6b7847ef03b76c004f57b8cf40cdef9621ee6f53` | Native HWS SDMA admission, persistent-ring setup, byte-frontier submission, conditional progress interrupts, and host dependency policy. |
 | [Archived AMD Compute ABI][legacy-compute-abi] | `572ac3831ac5d30ac82f743d489a90bffba14a59` | Historical native signal object fields, used only where current ROCr representation and behavior corroborate them. The document is obsolete for current compiler and code-object ABI. |
 | [ROCm sampling readback][rocm-sampling] | `e53154361af6ec17954c64c020e7c66701669ef4` | PC-sampling DMA chunk bounds, aggregate and record extents, profiler-selected buffer sizes, circular-buffer publication and the shared command-buffer owner. |
 | [ROCm profiling protocols][rocm-profiling] | `eab38980a6f5cc0e4b17ec5437345e7680bbc936` | Dispatch-log stream ABI v4 consumer, kept separate from the version-3 native driver below; PC-sampling phase, command ownership, atomic scope, and record validity; SPM interval clocks, producer/collector ordering, and drain policy; SQTT replacement, overflow, and per-XCC anchors; repeated native clock sampling, counter power policy, GFX11 counter reads, separate observation queues, and result reuse. |
@@ -115,6 +116,7 @@ executes. The corresponding chapter identifies those boundaries.
 [mesa]: https://gitlab.freedesktop.org/mesa/mesa/-/tree/0ba4b08edc65075e9346d20d5310261939aaaf48
 [mesa-counter-barriers]: https://gitlab.freedesktop.org/mesa/mesa/-/tree/44cc4ca677a4752a10c14194289bde5a6468675e
 [rocm]: https://github.com/ROCm/rocm-systems/tree/8d57824901ffa7d961c00a37d055a108723b93ca
+[rocr-windows-sdma]: https://github.com/ROCm/rocm-systems/tree/6b7847ef03b76c004f57b8cf40cdef9621ee6f53
 [legacy-compute-abi]: https://github.com/ROCm/ROCm-ComputeABI-Doc/blob/572ac3831ac5d30ac82f743d489a90bffba14a59/AMDGPU-ABI.md
 [rocm-sampling]: https://github.com/ROCm/rocm-systems/tree/e53154361af6ec17954c64c020e7c66701669ef4
 [rocm-profiling]: https://github.com/ROCm/rocm-systems/tree/eab38980a6f5cc0e4b17ec5437345e7680bbc936

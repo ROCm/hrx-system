@@ -15,6 +15,11 @@
 extern "C" {
 #endif
 
+// Returns true when any target schedule class may open a counter-tracked
+// completion wait.
+bool loom_low_descriptor_set_has_completion_wait(
+    const loom_low_descriptor_set_t* descriptor_set);
+
 // Queries the target-provided issue cost for resolving a schedule class's
 // wait-counter hazard. Returns false when the class is not counter tracked.
 bool loom_low_schedule_class_query_completion_wait(

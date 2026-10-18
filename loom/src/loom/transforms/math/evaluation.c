@@ -362,7 +362,7 @@ iree_status_t loom_math_evaluation_initialize(
       .secondary_input = loom_math_evaluation_value_invalid(),
       .source_result_type = source_result_type,
       .value_type = source_result_type,
-      .fastmath_flags = op->instance_flags,
+      .fastmath_flags = query->fastmath_flags,
       .recipe_fastmath_flags =
           decision->recipe_fastmath_flags & LOOM_TARGET_MATH_FASTMATH_FLAG_FAST,
       .location = op->location,

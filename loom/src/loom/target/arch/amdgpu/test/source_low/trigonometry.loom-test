@@ -1,0 +1,130 @@
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+kernel.def @sine_zero_sign() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<1xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<3xf32>
+  %input = view.load %source_view[0] : view<1xf32> -> f32
+  %sine = scalar.sinturnsf<afn|preserve> %input : f32
+  %relaxed = scalar.sinturnsf<afn> %input : f32
+  %cosine = scalar.costurnsf<afn|preserve> %input : f32
+  view.store %sine, %destination[0] : f32, view<3xf32>
+  view.store %relaxed, %destination[1] : f32, view<3xf32>
+  view.store %cosine, %destination[2] : f32, view<3xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @sine_zero_sign() asm {
+  %source_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = v_mov_b32 0
+  %input = global_load_b32_saddr %21, %source_view
+  %23 = v_sin_f32 %input
+  %25 = v_cmp_eq_f32_src1_inline %23 {rhs = "f32_0_0"}
+  %26 = v_bfi_b32_src0_lit %21, %input, 2147483647
+  %sine = v_cndmask_b32 %23, %26, %25
+  %28 = v_cos_f32 %input
+  %29 = v_cmp_eq_f32_src1_inline %28 {rhs = "f32_0_0"}
+  %cosine = v_cndmask_b32_src1_inline %28, %29 {true_value = 0}
+  global_store_b32_saddr %21, %sine, %destination
+  global_store_b32_saddr %21, %23, %destination {offset = 4}
+  global_store_b32_saddr %21, %cosine, %destination {offset = 8}
+  return
+}
+
+// ====
+
+kernel.def @sine_lane_signs() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<3xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<9xf32>
+  %input = vector.load %source_view[0] : view<3xf32> -> vector<3xf32>
+  %sine = vector.sinturnsf<nsz|afn|preserve> %input : vector<3xf32>
+  %relaxed = vector.sinturnsf<afn> %input : vector<3xf32>
+  %cosine = vector.costurnsf<afn|preserve> %input : vector<3xf32>
+  vector.store %sine, %destination[0] : vector<3xf32>, view<9xf32>
+  vector.store %relaxed, %destination[3] : vector<3xf32>, view<9xf32>
+  vector.store %cosine, %destination[6] : vector<3xf32>, view<9xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @sine_lane_signs() asm {
+  %source_view = resource<hal_binding> {extent = 12, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 36, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = v_mov_b32 0
+  %input = global_load_b96_saddr %21, %source_view
+  %23 = slice %input[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %24 = v_sin_f32 %23
+  %25 = slice %input[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %26 = v_sin_f32 %25
+  %27 = slice %input[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %28 = v_sin_f32 %27
+  %29 = concat(%24, %26, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %35 = v_cmp_eq_f32_src1_inline %24 {rhs = "f32_0_0"}
+  %37 = v_cmp_eq_f32_src1_inline %26 {rhs = "f32_0_0"}
+  %39 = v_cmp_eq_f32_src1_inline %28 {rhs = "f32_0_0"}
+  %43 = v_bfi_b32_src0_lit %21, %23, 2147483647
+  %46 = v_bfi_b32_src0_lit %21, %25, 2147483647
+  %49 = v_bfi_b32_src0_lit %21, %27, 2147483647
+  %54 = v_cndmask_b32 %24, %43, %35
+  %58 = v_cndmask_b32 %26, %46, %37
+  %62 = v_cndmask_b32 %28, %49, %39
+  %sine = concat(%54, %58, %62) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %65 = v_cos_f32 %23
+  %67 = v_cos_f32 %25
+  %69 = v_cos_f32 %27
+  %72 = v_cmp_eq_f32_src1_inline %65 {rhs = "f32_0_0"}
+  %74 = v_cmp_eq_f32_src1_inline %67 {rhs = "f32_0_0"}
+  %76 = v_cmp_eq_f32_src1_inline %69 {rhs = "f32_0_0"}
+  %80 = v_cndmask_b32_src1_inline %65, %72 {true_value = 0}
+  %83 = v_cndmask_b32_src1_inline %67, %74 {true_value = 0}
+  %86 = v_cndmask_b32_src1_inline %69, %76 {true_value = 0}
+  %cosine = concat(%80, %83, %86) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  global_store_b96_saddr %21, %sine, %destination
+  global_store_b96_saddr %21, %29, %destination {offset = 12}
+  global_store_b96_saddr %21, %cosine, %destination {offset = 24}
+  return
+}
+
+// ====
+
+// Uniform scalar arguments and their vector splats use scalar register inputs.
+kernel.def @uniform_sine() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: f32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %destination = buffer.view %output[%base] : buffer -> view<4xf32>
+  %sine = scalar.sinturnsf<afn|preserve> %input : f32
+  %inputs = vector.splat %input : vector<3xf32>
+  %sines = vector.sinturnsf<afn|preserve> %inputs : vector<3xf32>
+  view.store %sine, %destination[0] : f32, view<4xf32>
+  vector.store %sines, %destination[1] : vector<3xf32>, view<4xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_sine(%input: reg<amdgpu.sgpr>) asm {
+  %destination = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %20 = v_sin_f32 %input
+  %21 = v_mov_b32 0
+  %22 = v_cmp_eq_f32_src1_inline %20 {rhs = "f32_0_0"}
+  %23 = v_mov_b32_copy %input
+  %24 = v_bfi_b32_src0_lit %21, %23, 2147483647
+  %sine = v_cndmask_b32 %20, %24, %22
+  %29 = v_sin_f32 %23
+  %40 = v_cmp_eq_f32_src1_inline %29 {rhs = "f32_0_0"}
+  %59 = v_cndmask_b32 %29, %24, %40
+  %sines = concat(%59, %59, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  global_store_b32_saddr %21, %sine, %destination
+  global_store_b96_saddr %21, %sines, %destination {offset = 4}
+  return
+}

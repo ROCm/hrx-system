@@ -25,8 +25,8 @@ constexpr auto kExhaustiveOrPayloadCases = [] {
   return cases;
 }();
 
-INSTANTIATE_TEST_SUITE_P(ExhaustiveLiveSlots, AqlOrPayloadTest,
-                         ::testing::ValuesIn(kExhaustiveOrPayloadCases),
-                         OrPayloadCaseName);
+TEST_F(AqlOrPayloadTest, ReadsReadyPayloadWhileOtherProducersRemainPending) {
+  RunCases(kExhaustiveOrPayloadCases);
+}
 
 }  // namespace

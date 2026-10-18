@@ -17,11 +17,13 @@
 
 #include <d3dkmthk.h>
 
+#include <mutex>
+
 // The pinned WKMI archive retains ROCr's inline DxcoreLoader singleton but not
-// its constructor. The archive allocates exactly 0x130 bytes for this private
-// object: 38 procedure pointers with D3DKMTQueryAdapterInfo at slot 8. Keep
-// module ownership out of the object because newer ROCr source declarations
-// have a larger tail that is not present in the distributed archive.
+// its constructor. Its private object contains 38 procedure pointers followed
+// by a module handle and initialization flag, totaling 0x140 bytes. Only
+// D3DKMTQueryAdapterInfo at slot 8 is used by the archive; the shim binds it
+// directly and leaves the dynamic loader state unused.
 namespace wsl::thunk::dxcore {
 
 using Procedure = NTSTATUS(WINAPI*)(void* arguments);
@@ -30,6 +32,10 @@ class DxcoreLoader {
  public:
   // Procedure slots in the order fixed by the pinned ROCr declaration.
   Procedure procedures[38];
+  // Native loader module slot; no dynamic module is owned by this shim.
+  void* module_handle = nullptr;
+  // Native loader initialization state, retained for the archive's object ABI.
+  std::once_flag initialization;
 
  private:
   friend struct DxcoreLoaderCleanup;
@@ -40,7 +46,7 @@ class DxcoreLoader {
 
 static_assert(sizeof(Procedure) == sizeof(void*),
               "WKMI procedure slots must have pointer width");
-static_assert(sizeof(DxcoreLoader) == 0x130,
+static_assert(sizeof(DxcoreLoader) == 0x140,
               "WKMI loader must match the pinned archive allocation");
 
 static DxcoreLoader* active_loader = nullptr;

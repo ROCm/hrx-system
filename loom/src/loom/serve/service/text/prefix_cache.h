@@ -68,17 +68,21 @@ loom_serve_text_prefix_entry_t* loom_serve_text_prefix_cache_find(
 void loom_serve_text_prefix_cache_touch(loom_serve_text_prefix_cache_t* cache,
                                         loom_serve_text_prefix_entry_t* entry);
 
-// Captures a natural intermediate prefill frontier unless an ancestor with the
-// same complete request media already represents it. The whole-request media
-// key prevents a partial frontier from aliasing differently placed media. The
-// row has completed accepted work; its active completion reservation survives
-// capture. A full table evicts its oldest unprotected entry. Capacity denial is
-// ordinary: a zero frontier means no submitted pin. Any returned frontier must
+// Captures a natural intermediate prefill frontier. A matching ancestor may
+// extend into an empty record once count reaches extension_start, unless that
+// ancestor already reaches it. The caller derives extension_start from the
+// prompt length and maximum scheduled prefill window. Descendants never evict
+// an entry; new branches use ordinary LRU. The whole-request media key prevents
+// a partial frontier from aliasing differently placed media. The row has
+// completed accepted work; its active completion reservation survives capture.
+// A new branch in a full table evicts its oldest unprotected entry. Capacity
+// denial is ordinary: a zero frontier means no submitted pin. Any frontier must
 // retire before lookup, eviction or further model mutation. Failure leaves
 // accepted native ownership with the outer model.
 iree_status_t loom_serve_text_prefix_cache_submit(
     loom_serve_text_prefix_cache_t* cache, const loom_serve_text_chat_t* chat,
     loom_serve_text_row_t* row, iree_host_size_t count, const int32_t* tokens,
+    iree_host_size_t extension_start,
     const loom_serve_text_prefix_entry_t* protected_entry, bool* out_evicted,
     loom_serve_execution_frontier_t* out_frontier);
 

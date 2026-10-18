@@ -283,7 +283,8 @@ low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 0, direct_
   %30 = s_mov_b32_m0_imm 0
   global_load_lds_dwordx4_saddr %29, %input, %30
   s_waitcnt {vmcnt = 0}
-  %first = ds_read_u8 %29
+  %32 = ds_read_u8 %29
+  %first = v_bfe_i32_offset_width_inline %32 {offset = 0, width = 8}
   global_store_b8_saddr %lane, %first, %results
   return
 }

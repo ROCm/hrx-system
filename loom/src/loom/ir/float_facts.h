@@ -83,6 +83,15 @@ bool loom_value_facts_from_float_bits(loom_scalar_type_t scalar_type,
 // payload, such as signaling NaNs discovered through integer bitcasts.
 loom_value_facts_t loom_value_facts_known_nan(void);
 
+// Adds authored non-NaN/non-infinite result promises to floating-point facts.
+// The two promises are independent; together they imply FINITE but say nothing
+// about exact destination formats, signed zeros, or subnormals. Existing
+// numeric payloads and execution distribution remain unchanged. Known
+// nonfinite answers retain their ordinary classification even if a promise
+// is violated, so the fact lattice never contains conflicting class bits.
+void loom_value_facts_assume_float_class(loom_value_facts_t* facts,
+                                         bool not_nan, bool not_inf);
+
 // Evaluates a floating-width conversion under |policy|. Each policy field adds
 // the flushed value to the permitted result set; it does not require flushing.
 // All other rounding and special-value behavior remains exact.

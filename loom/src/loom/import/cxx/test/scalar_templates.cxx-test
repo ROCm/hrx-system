@@ -61,3 +61,64 @@ func.def public @wide(%lhs: f64, %rhs: f64) -> (f64) {
   %7 = scalar.divf<arcp|afn> %lhs, %rhs : f64
   func.return %7 : f64
 }
+
+// ====
+#include <loomcxx/scalar.h>
+
+float native_turns(float value) {
+  return loom::scalar::approximate::sinturnsf(value);
+}
+
+[[loom::fastmath]] float preserved_turns(float value) {
+  return loom::scalar::approximate::preserved::sinturnsf(value) +
+         loom::scalar::approximate::preserved::costurnsf(value);
+}
+
+_Float16 preserved_sine(_Float16 value) {
+  return loom::scalar::approximate::preserved::sinf(value);
+}
+
+__bf16 preserved_cosine(__bf16 value) {
+  return loom::scalar::approximate::preserved::cosf(value);
+}
+
+[[loom::force_inline]] static float preserved_helper(float value) {
+  return loom::scalar::approximate::preserved::sinturnsf(value);
+}
+
+[[loom::fastmath]] float relaxed_caller(float value) {
+  return preserved_helper(value);
+}
+
+// ----
+func.def public @native_turns(%value: f32) -> (f32) {
+  %2 = scalar.sinturnsf<afn> %value : f32
+  func.return %2 : f32
+}
+
+func.def public @preserved_turns(%value: f32) -> (f32) {
+  %5 = scalar.sinturnsf<reassoc|nnan|ninf|nsz|arcp|contract|afn|preserve> %value : f32
+  %6 = scalar.costurnsf<reassoc|nnan|ninf|nsz|arcp|contract|afn|preserve> %value : f32
+  %7 = scalar.addf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %5, %6 : f32
+  func.return %7 : f32
+}
+
+func.def public @preserved_sine(%value: f16) -> (f16) {
+  %10 = scalar.sinf<afn|preserve> %value : f16
+  func.return %10 : f16
+}
+
+func.def public @preserved_cosine(%value: bf16) -> (bf16) {
+  %13 = scalar.cosf<afn|preserve> %value : bf16
+  func.return %13 : bf16
+}
+
+func.def public @relaxed_caller(%value: f32) -> (f32) {
+  %16 = func.call pure @preserved_helper(%value) : (f32) -> (f32)
+  func.return %16 : f32
+}
+
+func.def inline @preserved_helper(%value: f32) -> (f32) {
+  %19 = scalar.sinturnsf<afn|preserve> %value : f32
+  func.return %19 : f32
+}

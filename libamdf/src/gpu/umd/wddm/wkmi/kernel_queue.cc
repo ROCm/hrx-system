@@ -81,7 +81,7 @@ bool SelectGpuHardwareQueueScheduler(
     amdf_wkmi_bridge_gpu_queue_command_type_t command_type,
     uint32_t* out_scheduler) {
   if (command_type == AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4) {
-    const uint32_t scheduler = device_info.compute_schedid;
+    const uint32_t scheduler = device_info.pm4_compute_schedid;
     if (Wkmi::EngineOrdinal(scheduler, &device_info) < 0 ||
         !Wkmi::GetHwsEnabled(scheduler, &device_info)) {
       return false;
@@ -167,7 +167,7 @@ amdf_wkmi_bridge_result_t CreateNativeQueue(
   if (native_status == STATUS_SUCCESS) {
     Wkmi::FillinHwQueuePrivData(queue_private.data(),
                                 device_info.state_shadowing_by_cpfw,
-                                Wkmi::kNormal, false);
+                                Wkmi::kNormal, Wkmi::kHwQueuePm4);
     create_queue.hHwContext = queue->context;
     // Retain the operating-system watchdog. Disabling it requires an explicit
     // queue contract rather than an implicit device-profile side effect.

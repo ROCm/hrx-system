@@ -139,6 +139,20 @@ static bool loom_amdgpu_subgroup_reduce_resolve_shape(
   return true;
 }
 
+bool loom_amdgpu_subgroup_reduce_shape_is_native(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle, const loom_op_t* op) {
+  const uint32_t wavefront_size = loom_amdgpu_target_wavefront_size(bundle);
+  if (!loom_amdgpu_wavefront_size_is_valid(wavefront_size)) {
+    return false;
+  }
+  loom_amdgpu_subgroup_reduce_shape_t shape = {0};
+  loom_amdgpu_subgroup_reduce_shape_failure_t failure =
+      LOOM_AMDGPU_SUBGROUP_REDUCE_SHAPE_FAILURE_NONE;
+  return loom_amdgpu_subgroup_reduce_resolve_shape(
+      module, function, bundle, op, wavefront_size, &shape, &failure);
+}
+
 static iree_string_view_t loom_amdgpu_subgroup_reduce_shape_failure_key(
     loom_amdgpu_subgroup_reduce_shape_failure_t failure) {
   switch (failure) {

@@ -57,6 +57,7 @@ omit `loom.endpoint`; HTTP inference requests to them return 404. Management and
 tokenizer utilities remain available according to their normal capabilities.
 Text also reports configured `context_length` and
 `limits.max_output_tokens`, not training context or total cache-pool capacity.
+`loom.input_tokens:true` advertises exact prepared-chat input counting.
 Capabilities do not establish learned quality or support for every optional field.
 
 Residency controls default to `component:"primary"`. A text deployment with an
@@ -286,6 +287,14 @@ An idle row advances in place; retaining an older branch point requires an
 explicit checkpoint. `session_cache_capacity` retains additional named
 histories beyond execution rows, while `prefix_cache_capacity` captures shared
 intermediate input prefixes. Both remain separately configured limits.
+
+Prefix caching retains exact state at natural prefill boundaries. An unused
+cache slot can also retain a later boundary near the prompt's end, reducing
+replay when a client drops generated reasoning or changes a later message.
+This extension never evicts another prefix. New branches and memory pressure
+can still reclaim entries, and a one-slot cache retains its first matching
+ancestor. Reuse depends on exact token and media identity, not message labels;
+`cached_tokens` reports the prefix actually used.
 
 `X-Loom-Checkpoint: NAME` requests an explicit immutable endpoint for the
 destination session. It is not best effort: an unknown name returns 404 and a
@@ -703,6 +712,39 @@ source input tokens and zero output tokens: this is finite evaluation, not
 autoregressive generation. Schema/source-input failures return 422. Strict JSON
 is required; comments, trailing commas, malformed Unicode, duplicate decoded
 IDs, unknown fields and image-input extensions reject.
+
+## Count a chat before generating
+
+`POST /v1/chat/completions/input_tokens` accepts the same JSON body as chat
+completions and returns one `{"input_tokens":N}` response. It applies the
+deployment's source-defined chat template, tool catalog, thinking options,
+generation framing, and image-position accounting. It counts the complete
+fresh input, including positions that a later generation might reuse from cache.
+
+With a Chat Completions body saved as `request.json`, use the same bytes for
+counting and generation:
+
+```sh
+curl http://localhost:8080/v1/chat/completions/input_tokens \
+  -H 'Content-Type: application/json' --data-binary @request.json
+```
+
+The count runs on shared CPU workers without loading weights, reserving an
+execution row or KV capacity, projecting images, or changing retained history.
+It can progress while every generation row is occupied. It shares the model's
+source-policy invocation, so it waits for an existing CPU borrower to retire;
+it does not create another VM or block a worker waiting for model capacity.
+The normal model routing and drain policy still applies.
+
+The request's generation fields remain validated, but `stream:true` still
+returns one JSON count and no output budget is reserved. Source input is bounded
+by the deployment's context capacity; an oversized input rejects instead of
+returning a truncated count. A successful count is not a promise that input plus
+the requested completion budget will fit, or that execution memory is available.
+Omit `X-Loom-Session` and `X-Loom-Checkpoint`: this stateless endpoint rejects
+them rather than selecting cached history. The count queue uses
+`pending_capacity`; a full queue returns 503. Utility requests appear in request
+inspection and outcome counters, but never increment inference-token counters.
 
 ## Raw tokenization
 

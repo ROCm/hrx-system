@@ -81,6 +81,13 @@ static loom_scalar_type_t loom_scalar_result_element_type(
       loom_module_value_type(module, loom_op_const_results(op)[0]));
 }
 
+static void loom_scalar_assume_fast_math_facts(const loom_op_t* op,
+                                               loom_value_facts_t* facts) {
+  loom_value_facts_assume_float_class(
+      facts, op->instance_flags & LOOM_SCALAR_FASTMATHFLAGS_NNAN,
+      op->instance_flags & LOOM_SCALAR_FASTMATHFLAGS_NINF);
+}
+
 #define FLOAT_BINARY_FACTS(name, f32_fn, f64_fn)                        \
   iree_status_t name(loom_fact_context_t* context,                      \
                      const loom_module_t* module, const loom_op_t* op,  \
@@ -89,6 +96,7 @@ static loom_scalar_type_t loom_scalar_result_element_type(
     loom_value_facts_eval_float_binary(                                 \
         loom_scalar_result_element_type(module, op), &operand_facts[0], \
         &operand_facts[1], f32_fn, f64_fn, &result_facts[0]);           \
+    loom_scalar_assume_fast_math_facts(op, &result_facts[0]);           \
     return iree_ok_status();                                            \
   }
 
@@ -100,6 +108,7 @@ static loom_scalar_type_t loom_scalar_result_element_type(
     loom_value_facts_eval_float_unary(                                  \
         loom_scalar_result_element_type(module, op), &operand_facts[0], \
         f32_fn, f64_fn, &result_facts[0]);                              \
+    loom_scalar_assume_fast_math_facts(op, &result_facts[0]);           \
     return iree_ok_status();                                            \
   }
 
@@ -241,6 +250,7 @@ iree_status_t loom_scalar_negf_facts(loom_fact_context_t* context,
   loom_value_facts_eval_float_negate(
       loom_scalar_result_element_type(module, op), &operand_facts[0],
       &result_facts[0]);
+  loom_scalar_assume_fast_math_facts(op, &result_facts[0]);
   return iree_ok_status();
 }
 
@@ -251,6 +261,7 @@ iree_status_t loom_scalar_absf_facts(loom_fact_context_t* context,
                                      loom_value_facts_t* result_facts) {
   loom_value_facts_eval_float_abs(loom_scalar_result_element_type(module, op),
                                   &operand_facts[0], &result_facts[0]);
+  loom_scalar_assume_fast_math_facts(op, &result_facts[0]);
   return iree_ok_status();
 }
 
@@ -262,6 +273,7 @@ iree_status_t loom_scalar_absf_facts(loom_fact_context_t* context,
     loom_value_facts_eval_float_minmax(                                       \
         loom_scalar_result_element_type(module, op), kind, &operand_facts[0], \
         &operand_facts[1], &result_facts[0]);                                 \
+    loom_scalar_assume_fast_math_facts(op, &result_facts[0]);                 \
     return iree_ok_status();                                                  \
   }
 
@@ -277,6 +289,7 @@ iree_status_t loom_scalar_copysignf_facts(
   loom_value_facts_eval_float_copysign(
       loom_scalar_result_element_type(module, op), &operand_facts[0],
       &operand_facts[1], &result_facts[0]);
+  loom_scalar_assume_fast_math_facts(op, &result_facts[0]);
   return iree_ok_status();
 }
 
@@ -303,6 +316,7 @@ iree_status_t loom_scalar_clampf_facts(loom_fact_context_t* context,
   loom_value_facts_eval_float_clamp(loom_scalar_result_element_type(module, op),
                                     kind, &operand_facts[0], &operand_facts[1],
                                     &operand_facts[2], &result_facts[0]);
+  loom_scalar_assume_fast_math_facts(op, &result_facts[0]);
   return iree_ok_status();
 }
 
@@ -330,6 +344,7 @@ static iree_status_t loom_scalar_turnsf_facts(
     loom_float_turns_kind_t kind) {
   loom_value_facts_eval_float_turns(loom_scalar_result_element_type(module, op),
                                     kind, &operand_facts[0], &result_facts[0]);
+  loom_scalar_assume_fast_math_facts(op, &result_facts[0]);
   return iree_ok_status();
 }
 
@@ -378,16 +393,16 @@ iree_status_t loom_scalar_geluf_facts(loom_fact_context_t* context,
       loom_value_facts_eval_float_unary(scalar_type, &operand_facts[0],
                                         gelu_erf_f32, gelu_erf_f64,
                                         &result_facts[0]);
-      return iree_ok_status();
+      break;
     case LOOM_SCALAR_GELUF_VARIANT_TANH:
       loom_value_facts_eval_float_unary(scalar_type, &operand_facts[0],
                                         gelu_tanh_f32, gelu_tanh_f64,
                                         &result_facts[0]);
-      return iree_ok_status();
+      break;
     case LOOM_SCALAR_GELUF_VARIANT_LOGISTIC: {
       if (!loom_scalar_geluf_has_scale(op)) {
         result_facts[0] = loom_value_facts_unknown();
-        return iree_ok_status();
+        break;
       }
       const double scale = loom_scalar_geluf_scale(op);
       double input = 0.0;
@@ -403,12 +418,13 @@ iree_status_t loom_scalar_geluf_facts(loom_fact_context_t* context,
       }
       loom_value_facts_propagate_unary_distribution(operand_facts[0],
                                                     &result_facts[0]);
-      return iree_ok_status();
+      break;
     }
     case LOOM_SCALAR_GELUF_VARIANT_COUNT_:
+      result_facts[0] = loom_value_facts_unknown();
       break;
   }
-  result_facts[0] = loom_value_facts_unknown();
+  loom_scalar_assume_fast_math_facts(op, &result_facts[0]);
   return iree_ok_status();
 }
 
@@ -421,6 +437,7 @@ iree_status_t loom_scalar_fmaf_facts(loom_fact_context_t* context,
   loom_value_facts_eval_float_fma(loom_scalar_result_element_type(module, op),
                                   &operand_facts[0], &operand_facts[1],
                                   &operand_facts[2], &result_facts[0]);
+  loom_scalar_assume_fast_math_facts(op, &result_facts[0]);
   return iree_ok_status();
 }
 

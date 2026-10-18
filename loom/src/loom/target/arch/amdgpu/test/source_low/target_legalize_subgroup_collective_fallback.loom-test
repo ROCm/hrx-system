@@ -1,0 +1,91 @@
+// RUN: with-checks pass target-legalize{mode=complete,policy=prefer-native}
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+
+kernel.def target(@target) @typed_reference_family() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%wide: i64, %bytes: vector<4xi8>, %float: f32, %double: f64) {
+  %wide_sum = kernel.subgroup.reduce<addi> %wide : i64
+  %byte_sum = kernel.subgroup.reduce<addi> %bytes : vector<4xi8>
+  %float_min = kernel.subgroup.reduce<minimumf> %float : f32
+  %byte_prefix = kernel.subgroup.scan<addi> %bytes {direction = forward, mode = inclusive} : vector<4xi8>
+  %float_prefix = kernel.subgroup.scan<minimumf> %float {direction = forward, mode = inclusive} : f32
+  %double_prefix = kernel.subgroup.scan<addf> %double {direction = forward, mode = inclusive} : f64
+  test.use %wide_sum : i64
+  test.use %byte_sum : vector<4xi8>
+  test.use %float_min : f32
+  test.use %byte_prefix : vector<4xi8>
+  test.use %float_prefix : f32
+  test.use %double_prefix : f64
+  kernel.return
+}
+
+// ----
+CHECK: * = scalar.addi * : i64
+CHECK: * = vector.addi * : vector<4xi8>
+CHECK: * = scalar.minnumf * : f32
+CHECK: * = scalar.cmpf uno, * : f32
+CHECK: * = scalar.addf * : f64
+CHECK-NOT: * = kernel.subgroup.reduce<*>
+CHECK-NOT: * = kernel.subgroup.scan<*>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+
+kernel.def target(@target) @strided_reduce_uses_reference_lowering() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: i32) {
+  %sum = kernel.subgroup.reduce<addi> %value {cluster_size = 16, cluster_stride = 2} : i32
+  test.use %sum : i32
+  kernel.return
+}
+
+// ----
+CHECK: * = kernel.subgroup.active.mask : i32
+CHECK: *, * = kernel.subgroup.shuffle<index> * : i32, i32, i32
+CHECK-NOT: * = kernel.subgroup.reduce<*>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+
+kernel.def target(@target) @non_power_of_two_reduce_uses_reference_lowering() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: i32) {
+  %sum = kernel.subgroup.reduce<addi> %value {cluster_size = 24} : i32
+  test.use %sum : i32
+  kernel.return
+}
+
+// ----
+CHECK: * = kernel.subgroup.active.mask : i32
+CHECK: *, * = kernel.subgroup.shuffle<index> * : i32, i32, i32
+CHECK-NOT: * = kernel.subgroup.reduce<*>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+
+kernel.def target(@target) @partial_wave_collectives_use_reference_lowering() {
+  %unit = index.constant 1 : index
+  %width = index.constant 48 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: i32) {
+  %sum = kernel.subgroup.reduce<addi> %value : i32
+  %prefix = kernel.subgroup.scan<addi> %value {direction = forward, mode = inclusive} : i32
+  test.use %sum : i32
+  test.use %prefix : i32
+  kernel.return
+}
+
+// ----
+CHECK: *, * = kernel.subgroup.shuffle<up> * : i32, i32, i32
+CHECK-NOT: * = kernel.subgroup.reduce<*>
+CHECK-NOT: * = kernel.subgroup.scan<*>

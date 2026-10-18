@@ -31,6 +31,7 @@ from loom.dialect.scalar.defs import (  # isort: split
     FloatConversionFlags,
     GeluVariant,
     IntOverflowFlags,
+    TrigonometryMathFlags,
     scalar_ops,
 )
 
@@ -59,6 +60,7 @@ __all__ = [
     "FloatConversionFlags",
     "GeluVariant",
     "IntOverflowFlags",
+    "TrigonometryMathFlags",
     "ALL_SCALAR_OPS",
 ]
 

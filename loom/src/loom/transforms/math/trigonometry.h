@@ -20,6 +20,12 @@ iree_status_t loom_math_build_trigonometric(
     loom_target_math_op_t math_op, loom_math_evaluation_t* evaluation,
     loom_math_evaluation_value_t* out_value);
 
+// Consumes an explicit zero-sign preservation requirement around the ordinary
+// sine/cosine operation. Approximation and target selection remain independent.
+iree_status_t loom_math_build_preserved_trigonometric(
+    loom_target_math_op_t math_op, loom_math_evaluation_t* evaluation,
+    loom_math_evaluation_value_t* out_value);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

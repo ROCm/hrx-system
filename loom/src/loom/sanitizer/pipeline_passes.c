@@ -1555,6 +1555,13 @@ static iree_status_t loom_sanitizer_try_instrument_fastmath_op(
                                               &predicate_kind)) {
     return iree_ok_status();
   }
+  // Checked aliases carry these guarantees after the runtime assertions.
+  // Leaving them on the producer would let its own promise prove the result
+  // check, both here and when the assertions are materialized later.
+  IREE_RETURN_IF_ERROR(loom_rewriter_set_instance_flags(
+      rewriter, op,
+      fastmath_flags &
+          ~(LOOM_SCALAR_FASTMATHFLAGS_NNAN | LOOM_SCALAR_FASTMATHFLAGS_NINF)));
   bool inputs_changed = false;
   IREE_RETURN_IF_ERROR(loom_sanitizer_instrument_fastmath_inputs(
       pass, module, rewriter, op, predicate_kind, &inputs_changed));

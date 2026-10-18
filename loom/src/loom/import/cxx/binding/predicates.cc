@@ -471,8 +471,9 @@ void append_helper_predicate(cxx::TranslationUnit& unit,
     projected.argument_types[argument_index] = expression->type;
     if (auto* value = std::get_if<PredicateValue>(&operand)) {
       if (argument_index > 0 &&
-          unit.typeTraits().remove_cv(value->source->type) !=
-              unit.typeTraits().remove_cv(carrier_type)) {
+          !unit.typeTraits().is_same(
+              unit.typeTraits().remove_cv(value->source->type),
+              unit.typeTraits().remove_cv(carrier_type))) {
         diagnostics.reject(
             unit, value->source,
             "retained predicate values must use the first operand's type");

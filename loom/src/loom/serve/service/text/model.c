@@ -1267,7 +1267,11 @@ iree_status_t loom_serve_text_row_submit_reserve(
 
 bool loom_serve_text_row_complete_reserve(loom_serve_text_row_t* row) {
   const bool admitted = loom_serve_text_state_row_complete_reserve(row->state);
-  if (!admitted) {
+  if (admitted) {
+    loom_serve_residency_cancel_admission(row->model->residency);
+  } else {
+    // Activation retired, but this request still owns its FIFO turn while
+    // waiting for mutable backing. A younger model must not steal that turn.
     loom_serve_residency_release(row->model->residency);
   }
   return admitted;

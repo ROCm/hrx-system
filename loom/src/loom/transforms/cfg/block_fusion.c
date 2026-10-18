@@ -126,8 +126,8 @@ iree_status_t loom_cfg_fuse_single_predecessor_blocks(
     IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, predecessor_br));
   }
   uint16_t removed_count = 0;
-  IREE_RETURN_IF_ERROR(loom_region_remove_blocks(
-      rewriter->module, (loom_region_t*)graph->region, remove_blocks,
+  IREE_RETURN_IF_ERROR(loom_rewriter_remove_blocks(
+      rewriter, (loom_region_t*)graph->region, remove_blocks,
       graph->block_count, arena, &removed_count));
   *out_fused_count = removed_count;
   return iree_ok_status();

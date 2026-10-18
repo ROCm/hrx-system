@@ -901,16 +901,19 @@ iree_status_t loom_rewriter_try_set_derived_value_name(
 // Mini-DCE
 //===----------------------------------------------------------------------===//
 
-// SSA materializations borrow live definitions, unlike numeric facts that
-// remain meaningful after their producer is removed. The erasing mutation
+// SSA identities and materializations borrow live definitions, unlike facts
+// that remain meaningful after their producer is removed. The erasing mutation
 // owns withdrawal for the complete removed subtree.
-static void loom_rewriter_erase_partition_values(loom_rewriter_t* rewriter,
-                                                 loom_op_t* op) {
-  if (!rewriter->fact_table || !rewriter->fact_table->vector_partitions) {
+static void loom_rewriter_erase_value_facts(loom_rewriter_t* rewriter,
+                                            loom_op_t* op) {
+  if (!rewriter->fact_table || (!rewriter->fact_table->identities.nodes &&
+                                !rewriter->fact_table->vector_partitions)) {
     return;
   }
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
+    loom_value_fact_table_erase_identity_value(rewriter->fact_table,
+                                               results[i]);
     loom_value_fact_table_invalidate_vector_partition_value(
         rewriter->fact_table, results[i]);
   }
@@ -922,11 +925,13 @@ static void loom_rewriter_erase_partition_values(loom_rewriter_t* rewriter,
     loom_block_t* block = NULL;
     loom_region_for_each_block(region, block) {
       for (uint16_t j = 0; j < block->arg_count; ++j) {
+        loom_value_fact_table_erase_identity_value(rewriter->fact_table,
+                                                   block->arg_ids[j]);
         loom_value_fact_table_invalidate_vector_partition_value(
             rewriter->fact_table, block->arg_ids[j]);
       }
       for (loom_op_t* child = block->first_op; child; child = child->next_op) {
-        loom_rewriter_erase_partition_values(rewriter, child);
+        loom_rewriter_erase_value_facts(rewriter, child);
       }
     }
   }
@@ -1241,7 +1246,7 @@ iree_status_t loom_rewriter_replace_all_uses_and_erase(
       loom_rewriter_add_subtree_providers_to_worklist(rewriter, op));
   IREE_RETURN_IF_ERROR(
       loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, op));
-  loom_rewriter_erase_partition_values(rewriter, op);
+  loom_rewriter_erase_value_facts(rewriter, op);
   IREE_RETURN_IF_ERROR(loom_op_erase(rewriter->module, op));
   ++rewriter->erased_op_count;
   rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
@@ -1263,6 +1268,10 @@ iree_status_t loom_rewriter_replace_all_uses_with(loom_rewriter_t* rewriter,
       rewriter, old_value, LOOM_REWRITER_USER_CHANGE_FLAG_REPLACED));
   IREE_RETURN_IF_ERROR(
       loom_value_replace_all_uses_with(rewriter->module, old_value, new_value));
+  if (rewriter->fact_table) {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_replace_identity_value(
+        rewriter->fact_table, old_value, new_value));
+  }
   if (rewriter->fact_table && rewriter->fact_table->vector_partitions) {
     if (loom_type_equal(loom_module_value_type(rewriter->module, old_value),
                         loom_module_value_type(rewriter->module, new_value))) {
@@ -1333,7 +1342,7 @@ iree_status_t loom_rewriter_erase(loom_rewriter_t* rewriter, loom_op_t* op) {
       loom_rewriter_add_subtree_providers_to_worklist(rewriter, op));
   IREE_RETURN_IF_ERROR(
       loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, op));
-  loom_rewriter_erase_partition_values(rewriter, op);
+  loom_rewriter_erase_value_facts(rewriter, op);
   IREE_RETURN_IF_ERROR(loom_op_erase(rewriter->module, op));
   ++rewriter->erased_op_count;
   rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
@@ -1348,7 +1357,7 @@ iree_status_t loom_rewriter_erase_closed_set(loom_rewriter_t* rewriter,
         loom_rewriter_add_subtree_providers_to_worklist(rewriter, ops[i]));
     IREE_RETURN_IF_ERROR(
         loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, ops[i]));
-    loom_rewriter_erase_partition_values(rewriter, ops[i]);
+    loom_rewriter_erase_value_facts(rewriter, ops[i]);
   }
   loom_op_erase_closed_set(rewriter->module, ops, count);
   rewriter->erased_op_count += count;
@@ -1356,6 +1365,61 @@ iree_status_t loom_rewriter_erase_closed_set(loom_rewriter_t* rewriter,
     rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_rewriter_remove_blocks(loom_rewriter_t* rewriter,
+                                          loom_region_t* region,
+                                          const bool* remove_blocks,
+                                          uint16_t remove_block_count,
+                                          iree_arena_allocator_t* scratch_arena,
+                                          uint16_t* out_removed_count) {
+  if (rewriter->fact_table) {
+    for (uint16_t i = 0; i < remove_block_count; ++i) {
+      if (!remove_blocks[i]) {
+        continue;
+      }
+      loom_block_t* block = region->blocks[i];
+      for (uint16_t j = 0; j < block->arg_count; ++j) {
+        loom_value_fact_table_erase_identity_value(rewriter->fact_table,
+                                                   block->arg_ids[j]);
+        loom_value_fact_table_invalidate_vector_partition_value(
+            rewriter->fact_table, block->arg_ids[j]);
+      }
+      loom_op_t* op = NULL;
+      loom_block_for_each_op(block, op) {
+        loom_rewriter_erase_value_facts(rewriter, op);
+      }
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_region_remove_blocks(
+      rewriter->module, region, remove_blocks, remove_block_count,
+      scratch_arena, out_removed_count));
+  if (*out_removed_count) {
+    rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
+  }
+  return iree_ok_status();
+}
+
+uint16_t loom_rewriter_remove_block_args(loom_rewriter_t* rewriter,
+                                         loom_block_t* block,
+                                         const bool* remove_args,
+                                         uint16_t remove_arg_count) {
+  if (rewriter->fact_table) {
+    for (uint16_t i = 0; i < remove_arg_count; ++i) {
+      if (remove_args[i]) {
+        loom_value_fact_table_erase_identity_value(rewriter->fact_table,
+                                                   block->arg_ids[i]);
+        loom_value_fact_table_invalidate_vector_partition_value(
+            rewriter->fact_table, block->arg_ids[i]);
+      }
+    }
+  }
+  const uint16_t removed = loom_block_remove_args(
+      rewriter->module, block, remove_args, remove_arg_count);
+  if (removed) {
+    rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
+  }
+  return removed;
 }
 
 static bool loom_rewriter_op_is_ancestor_of(const loom_op_t* ancestor,

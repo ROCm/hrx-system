@@ -500,7 +500,7 @@ def _trig_rule(
         guards=(
             Guard.value_type("input", _F32),
             Guard.value_type("result", _F32),
-            Guard.instance_flags_has_all("fastmath", "afn"),
+            Guard.instance_flags_has_all("math", "afn"),
         ),
         emit=_trig_emits(operation),
         report_key=f"native_bf16_mac_{operation.value}",

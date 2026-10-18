@@ -13,6 +13,13 @@ package(
 )
 
 loom_cc_library(
+    name = "clock",
+    srcs = ["clock.c"],
+    hdrs = ["clock.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
     name = "host",
     srcs = ["host.c"],
     hdrs = ["host.h"],

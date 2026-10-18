@@ -36,12 +36,14 @@ from loom.target.contracts import (
     ValueRef,
 )
 from loom.target.emit.float_narrowing import (
+    BF16_FORMAT,
     BF16_SOURCE_FORMAT,
     F8E4M3_FORMAT,
     F8E5M2_FORMAT,
     F16_FORMAT,
     F16_SOURCE_FORMAT,
     F32_FORMAT,
+    F64_FORMAT,
     BinaryFloatFormat,
     IntegerNarrowingDescriptors,
     IntegerNarrowingImmediateForms,
@@ -60,6 +62,13 @@ _F8E5M2 = Scalar("f8E5M2")
 _F16 = Scalar("f16")
 _BF16 = Scalar("bf16")
 _F32 = Scalar("f32")
+_F64 = Scalar("f64")
+
+_VARIABLE_SHIFT_DESCRIPTOR_KEYS = frozenset(
+    f"x86.scalar.{operation}.cl.gpr{bit_width}"
+    for operation in ("shl", "shr")
+    for bit_width in (32, 64)
+)
 
 
 def _packed_f32_to_bf16_rule(
@@ -221,43 +230,48 @@ def packed_bfloat_narrowing_rules(
 
 def _integer_narrowing_descriptors(
     descriptor_lookup: _DescriptorLookup,
+    integer_bit_width: int,
 ) -> IntegerNarrowingDescriptors:
+    register_suffix = f"gpr{integer_bit_width}"
+
+    def descriptor(operation: str) -> Descriptor:
+        return descriptor_lookup(f"x86.scalar.{operation}.{register_suffix}")
+
     return IntegerNarrowingDescriptors(
-        integer_bit_width=32,
-        integer_constant=descriptor_lookup("x86.scalar.movimm.gpr32"),
-        integer_add=descriptor_lookup("x86.scalar.add.gpr32"),
-        integer_subtract=descriptor_lookup("x86.scalar.sub.gpr32"),
-        integer_shift_left=descriptor_lookup("x86.scalar.shl.cl.gpr32"),
-        integer_shift_right_logical=descriptor_lookup("x86.scalar.shr.cl.gpr32"),
-        integer_bitwise_and=descriptor_lookup("x86.scalar.and.gpr32"),
-        integer_bitwise_or=descriptor_lookup("x86.scalar.or.gpr32"),
-        integer_less_than_nonnegative=descriptor_lookup("x86.scalar.cmp.slt.gpr32"),
-        integer_greater_than_equal_nonnegative=descriptor_lookup(
-            "x86.scalar.cmp.sge.gpr32"
-        ),
-        integer_greater_than_nonnegative=descriptor_lookup("x86.scalar.cmp.sgt.gpr32"),
-        integer_select=descriptor_lookup("x86.scalar.select.gpr32"),
+        integer_bit_width=integer_bit_width,
+        integer_constant=descriptor("movimm"),
+        integer_add=descriptor("add"),
+        integer_subtract=descriptor("sub"),
+        integer_shift_left=descriptor("shl.cl"),
+        integer_shift_right_logical=descriptor("shr.cl"),
+        integer_bitwise_and=descriptor("and"),
+        integer_bitwise_or=descriptor("or"),
+        integer_less_than_nonnegative=descriptor("cmp.slt"),
+        integer_greater_than_equal_nonnegative=descriptor("cmp.sge"),
+        integer_greater_than_nonnegative=descriptor("cmp.sgt"),
+        integer_select=descriptor("select"),
         immediate_forms=IntegerNarrowingImmediateForms(
-            add=descriptor_lookup("x86.scalar.add.imm.gpr32"),
-            subtract=descriptor_lookup("x86.scalar.sub.imm.gpr32"),
-            shift_left=descriptor_lookup("x86.scalar.shl.imm.gpr32"),
-            shift_right_logical=descriptor_lookup("x86.scalar.shr.imm.gpr32"),
-            bitwise_and=descriptor_lookup("x86.scalar.and.imm.gpr32"),
-            bitwise_or=descriptor_lookup("x86.scalar.or.imm.gpr32"),
-            less_than_nonnegative=descriptor_lookup("x86.scalar.cmp.slt.imm.gpr32"),
-            greater_than_equal_nonnegative=descriptor_lookup(
-                "x86.scalar.cmp.sge.imm.gpr32"
+            add=descriptor("add.imm"),
+            subtract=descriptor("sub.imm"),
+            shift_left=descriptor("shl.imm"),
+            shift_right_logical=descriptor("shr.imm"),
+            bitwise_and=descriptor("and.imm"),
+            bitwise_or=descriptor("or.imm"),
+            less_than_nonnegative=(
+                descriptor("cmp.slt.imm") if integer_bit_width == 32 else None
             ),
-            greater_than_nonnegative=descriptor_lookup("x86.scalar.cmp.sgt.imm.gpr32"),
+            greater_than_equal_nonnegative=descriptor("cmp.sge.imm"),
+            greater_than_nonnegative=descriptor("cmp.sgt.imm"),
         ),
     )
 
 
-def _f32_bits_emit(
-    descriptor_lookup: _DescriptorLookup,
+def _float_bits_emit(
+    descriptor_lookup: _DescriptorLookup, source_bit_width: int
 ) -> EmitDescriptorOp:
+    mnemonic = {32: "vmovd", 64: "vmovq"}[source_bit_width]
     return EmitDescriptorOp(
-        descriptor=descriptor_lookup("x86.avx2.vmovd.gpr32.xmm"),
+        descriptor=descriptor_lookup(f"x86.avx2.{mnemonic}.gpr{source_bit_width}.xmm"),
         operands={"input": ValueRef.operand("input")},
         results={"dst": ValueRef.temporary("input_bits")},
         result_types={"dst": DescriptorResultType()},
@@ -277,7 +291,7 @@ def _rule(
     # GPR value for its other uses.
     emits = tuple(
         replace(emit, copy_operands=("rhs",))
-        if emit.descriptor.key in ("x86.scalar.shl.cl.gpr32", "x86.scalar.shr.cl.gpr32")
+        if emit.descriptor.key in _VARIABLE_SHIFT_DESCRIPTOR_KEYS
         else emit
         for emit in emits
     )
@@ -299,7 +313,7 @@ def _f32_to_bf16_rule(
     descriptors: IntegerNarrowingDescriptors,
 ) -> DescriptorRule:
     emits = (
-        _f32_bits_emit(descriptor_lookup),
+        _float_bits_emit(descriptor_lookup, 32),
         *build_f32_bits_to_bf16_emits(
             descriptors,
             ValueRef.temporary("input_bits"),
@@ -316,7 +330,7 @@ def _representable_f32_to_bf16_rule(
     preserve_nan: bool,
 ) -> DescriptorRule:
     emits = (
-        _f32_bits_emit(descriptor_lookup),
+        _float_bits_emit(descriptor_lookup, 32),
         *build_representable_f32_bits_to_bf16_emits(
             descriptors,
             ValueRef.temporary("input_bits"),
@@ -345,7 +359,7 @@ def _f32_to_narrow_rule(
     result_name: str,
 ) -> DescriptorRule:
     emits = (
-        _f32_bits_emit(descriptor_lookup),
+        _float_bits_emit(descriptor_lookup, 32),
         *build_integer_bits_to_narrow_float_emits(
             descriptors,
             F32_FORMAT,
@@ -356,6 +370,34 @@ def _f32_to_narrow_rule(
         ),
     )
     return _rule(_F32, result_type, emits, f"exact_binary32_to_{result_name}")
+
+
+def _f64_to_narrow_rule(
+    descriptor_lookup: _DescriptorLookup,
+    descriptors: IntegerNarrowingDescriptors,
+    result_type: TypePattern,
+    result_format: NarrowFloatFormat,
+    result_name: str,
+) -> DescriptorRule:
+    carrier = ValueRef.temporary("carrier")
+    truncate = descriptor_lookup("x86.scalar.mov.trunc.gpr32.gpr64")
+    emits = (
+        _float_bits_emit(descriptor_lookup, 64),
+        *build_integer_bits_to_narrow_float_emits(
+            descriptors,
+            F64_FORMAT,
+            result_format,
+            ValueRef.temporary("input_bits"),
+            carrier,
+            subnormal_rounding=NarrowFloatSubnormalRounding.INTEGER,
+        ),
+        emit_descriptor_op(
+            descriptor=truncate,
+            operands={"src": carrier},
+            results={"dst": ValueRef.result("result")},
+        ),
+    )
+    return _rule(_F64, result_type, emits, f"exact_binary64_to_{result_name}")
 
 
 def _integer_carrier_to_float8_rule(
@@ -395,39 +437,40 @@ def x86_float_narrowing_rules(
 ) -> tuple[DescriptorRule, ...]:
     """Returns the exact narrow-float matrix supported by x86 carriers."""
 
-    descriptors = _integer_narrowing_descriptors(descriptor_lookup)
+    i32_descriptors = _integer_narrowing_descriptors(descriptor_lookup, 32)
+    i64_descriptors = _integer_narrowing_descriptors(descriptor_lookup, 64)
     return (
         _representable_f32_to_bf16_rule(
-            descriptor_lookup, descriptors, preserve_nan=False
+            descriptor_lookup, i32_descriptors, preserve_nan=False
         ),
         _representable_f32_to_bf16_rule(
-            descriptor_lookup, descriptors, preserve_nan=True
+            descriptor_lookup, i32_descriptors, preserve_nan=True
         ),
-        _f32_to_bf16_rule(descriptor_lookup, descriptors),
+        _f32_to_bf16_rule(descriptor_lookup, i32_descriptors),
         _f32_to_narrow_rule(
             descriptor_lookup,
-            descriptors,
+            i32_descriptors,
             _F16,
             F16_FORMAT,
             "binary16",
         ),
         _f32_to_narrow_rule(
             descriptor_lookup,
-            descriptors,
+            i32_descriptors,
             _F8E4M3,
             F8E4M3_FORMAT,
             "float8_e4m3",
         ),
         _f32_to_narrow_rule(
             descriptor_lookup,
-            descriptors,
+            i32_descriptors,
             _F8E5M2,
             F8E5M2_FORMAT,
             "float8_e5m2",
         ),
         *(
             _integer_carrier_to_float8_rule(
-                descriptors,
+                i32_descriptors,
                 source_type,
                 source_format,
                 source_name,
@@ -440,6 +483,21 @@ def x86_float_narrowing_rules(
                 (_BF16, BF16_SOURCE_FORMAT, "bfloat16"),
             )
             for result_type, result_format, result_name in (
+                (_F8E4M3, F8E4M3_FORMAT, "float8_e4m3"),
+                (_F8E5M2, F8E5M2_FORMAT, "float8_e5m2"),
+            )
+        ),
+        *(
+            _f64_to_narrow_rule(
+                descriptor_lookup,
+                i64_descriptors,
+                result_type,
+                result_format,
+                result_name,
+            )
+            for result_type, result_format, result_name in (
+                (_F16, F16_FORMAT, "binary16"),
+                (_BF16, BF16_FORMAT, "bfloat16"),
                 (_F8E4M3, F8E4M3_FORMAT, "float8_e4m3"),
                 (_F8E5M2, F8E5M2_FORMAT, "float8_e5m2"),
             )

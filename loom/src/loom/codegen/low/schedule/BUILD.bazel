@@ -106,8 +106,11 @@ loom_cc_library(
         "call_pressure.h",
         "candidate_policy.c",
         "candidate_policy.h",
+        "completion_cost.c",
+        "completion_cost.h",
         "completion_demand.c",
         "context.h",
+        "dependency_incoming.c",
         "descriptor_rows.c",
         "descriptor_rows.h",
         "diagnostics.c",
@@ -141,7 +144,9 @@ loom_cc_library(
         "target_pressure.h",
     ],
     hdrs = [
+        "completion_cost.h",
         "completion_demand.h",
+        "dependency_incoming.h",
         "diagnostics.h",
         "json.h",
         "run.h",
@@ -288,6 +293,19 @@ loom_cc_test(
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "completion_cost_test",
+    srcs = ["completion_cost_test.cc"],
+    deps = [
+        ":dependencies",
+        ":dependency_index",
+        ":schedule",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

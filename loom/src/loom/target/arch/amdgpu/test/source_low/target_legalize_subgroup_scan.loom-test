@@ -55,8 +55,8 @@ kernel.def target(@target) @clustered_scan_uses_reference_lowering() {
 }
 
 // ----
-CHECK: * = kernel.subgroup.active.mask : i32
-CHECK: *, * = kernel.subgroup.shuffle<index> * : i32, i32, i32
+CHECK: *, * = kernel.subgroup.shuffle<up> * : i32, i32, i32
+CHECK-NOT: * = kernel.subgroup.active.mask *
 CHECK-NOT: * = kernel.subgroup.scan<addi> *
 
 // ====

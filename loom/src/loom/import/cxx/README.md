@@ -2328,6 +2328,29 @@ For example, `loom::scalar::expf(x)` imports `scalar.expf`;
 the same checked binding. Incorrect arity, types, flags, or attribute arguments
 produce source diagnostics.
 
+Approximate sine and cosine use the target's native zero-sign convention.
+`loom::scalar::approximate::preserved::{sinf,cosf,sinturnsf,costurnsf}` adds an
+explicit zero-sign requirement while keeping nonzero results approximate.
+For example, native `sinturnsf(-1.0f)` may return positive zero; its preserved
+form returns negative zero. This matters to sign-bit or reciprocal consumers.
+The requirement survives lexical `fastmath`, including `nsz`, and is retained
+when a separately defined helper is inlined. It is a positive operation
+requirement, so it is absent from `fast` and cannot be named in `fastmath`.
+
+```cpp
+float twiddle(float turns) {
+  return loom::scalar::approximate::sinturnsf(turns);
+}
+
+float signed_cardinal(float turns) {
+  return loom::scalar::approximate::preserved::sinturnsf(turns);
+}
+```
+
+The equivalent IR is `scalar.sinturnsf<afn>` and
+`scalar.sinturnsf<afn|preserve>`. Scalar and vector sine/cosine share this
+contract; other operations retain their own numerical permissions.
+
 Deduced scalar calls accept `_Float16`, `__bf16`, `float`, or `double`, with
 matching operand types. An explicit template argument requests conversion:
 `loom::scalar::mulf<__bf16>(value, 5.0f)` converts the second operand to BF16

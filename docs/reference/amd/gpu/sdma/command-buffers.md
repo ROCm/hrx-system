@@ -15,6 +15,10 @@ here. The [Windows submission chapter](../wddm.md) separately describes WDDM
 command addresses, completion publication and native retirement; those native
 contracts are not supplied by the Linux ring wrapper below.
 
+[Windows native SDMA rings](windows.md) publish a persistent ring frontier and
+append their own progress epilogue. That public producer supplies no Windows
+IB context-save operands or external-command retirement protocol.
+
 [Conditional execution](conditional.md) describes `COND_EXE` ranges and the
 native submission condition surrounding an IB. A copy predicate and a
 driver-owned preemption condition have different storage and completion owners.

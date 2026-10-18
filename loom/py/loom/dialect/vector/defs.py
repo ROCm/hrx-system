@@ -47,6 +47,7 @@ from loom.dialect.scalar import (
     FloatConversionFlags,
     GeluVariant,
     IntOverflowFlags,
+    TrigonometryMathFlags,
 )
 from loom.dialect.scalar.comparison import CmpFPredicate, CmpIPredicate
 from loom.dsl import (
@@ -2611,6 +2612,7 @@ vector_cmpf = Op(
 # ============================================================================
 
 _VF = ("fastmath", FastMathFlags)
+_TRIG_MATH = ("math", TrigonometryMathFlags)
 
 vector_addf = _lanewise_binary(
     "vector.addf",
@@ -3336,8 +3338,8 @@ vector_cbrtf = _lanewise_unary(
 vector_sinf = _lanewise_unary(
     "vector.sinf",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise sine."),
-    flags=_VF,
+    doc=("Lanewise sine in radians, with the same math contract as scalar.sinf."),
+    flags=_TRIG_MATH,
     facts="loom_vector_sinf_facts",
     canonicalize="loom_vector_uniform_result_canonicalize",
     traits=[SAFE_TO_SPECULATE],
@@ -3347,8 +3349,8 @@ vector_sinf = _lanewise_unary(
 vector_cosf = _lanewise_unary(
     "vector.cosf",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise cosine."),
-    flags=_VF,
+    doc=("Lanewise cosine in radians, with the same math contract as scalar.cosf."),
+    flags=_TRIG_MATH,
     facts="loom_vector_cosf_facts",
     canonicalize="loom_vector_uniform_result_canonicalize",
     traits=[SAFE_TO_SPECULATE],
@@ -3358,8 +3360,8 @@ vector_cosf = _lanewise_unary(
 vector_sinturnsf = _lanewise_unary(
     "vector.sinturnsf",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
-    flags=_VF,
+    doc=("Lanewise sine over turns, with the same math contract as scalar.sinturnsf."),
+    flags=_TRIG_MATH,
     facts="loom_vector_sinturnsf_facts",
     canonicalize="loom_vector_uniform_result_canonicalize",
     traits=[SAFE_TO_SPECULATE],
@@ -3369,8 +3371,8 @@ vector_sinturnsf = _lanewise_unary(
 vector_costurnsf = _lanewise_unary(
     "vector.costurnsf",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
-    flags=_VF,
+    doc=("Lanewise cosine over turns, with the same math contract as scalar.costurnsf."),
+    flags=_TRIG_MATH,
     facts="loom_vector_costurnsf_facts",
     canonicalize="loom_vector_uniform_result_canonicalize",
     traits=[SAFE_TO_SPECULATE],

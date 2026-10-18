@@ -1,0 +1,297 @@
+// RUN: pass canonicalize
+
+// Every floating arithmetic/math producer publishes authored result promises.
+// Independent arguments prevent algebraic identities from hiding a missing
+// transfer. Integer-result comparisons and conversion flags are separate.
+
+func.def @finite_1_operand_results(%input: f32) -> (i1) {
+  %negf = scalar.negf<nnan|ninf> %input : f32
+  %negf_finite = scalar.isfinitef %negf : f32
+  %absf = scalar.absf<nnan|ninf> %input : f32
+  %absf_finite = scalar.isfinitef %absf : f32
+  %all_absf = scalar.andi %negf_finite, %absf_finite : i1
+  %expf = scalar.expf<nnan|ninf> %input : f32
+  %expf_finite = scalar.isfinitef %expf : f32
+  %all_expf = scalar.andi %all_absf, %expf_finite : i1
+  %exp2f = scalar.exp2f<nnan|ninf> %input : f32
+  %exp2f_finite = scalar.isfinitef %exp2f : f32
+  %all_exp2f = scalar.andi %all_expf, %exp2f_finite : i1
+  %expm1f = scalar.expm1f<nnan|ninf> %input : f32
+  %expm1f_finite = scalar.isfinitef %expm1f : f32
+  %all_expm1f = scalar.andi %all_exp2f, %expm1f_finite : i1
+  %logf = scalar.logf<nnan|ninf> %input : f32
+  %logf_finite = scalar.isfinitef %logf : f32
+  %all_logf = scalar.andi %all_expm1f, %logf_finite : i1
+  %log2f = scalar.log2f<nnan|ninf> %input : f32
+  %log2f_finite = scalar.isfinitef %log2f : f32
+  %all_log2f = scalar.andi %all_logf, %log2f_finite : i1
+  %log10f = scalar.log10f<nnan|ninf> %input : f32
+  %log10f_finite = scalar.isfinitef %log10f : f32
+  %all_log10f = scalar.andi %all_log2f, %log10f_finite : i1
+  %log1pf = scalar.log1pf<nnan|ninf> %input : f32
+  %log1pf_finite = scalar.isfinitef %log1pf : f32
+  %all_log1pf = scalar.andi %all_log10f, %log1pf_finite : i1
+  %sqrtf = scalar.sqrtf<nnan|ninf> %input : f32
+  %sqrtf_finite = scalar.isfinitef %sqrtf : f32
+  %all_sqrtf = scalar.andi %all_log1pf, %sqrtf_finite : i1
+  %rsqrtf = scalar.rsqrtf<nnan|ninf> %input : f32
+  %rsqrtf_finite = scalar.isfinitef %rsqrtf : f32
+  %all_rsqrtf = scalar.andi %all_sqrtf, %rsqrtf_finite : i1
+  %cbrtf = scalar.cbrtf<nnan|ninf> %input : f32
+  %cbrtf_finite = scalar.isfinitef %cbrtf : f32
+  %all_cbrtf = scalar.andi %all_rsqrtf, %cbrtf_finite : i1
+  %sinf = scalar.sinf<nnan|ninf> %input : f32
+  %sinf_finite = scalar.isfinitef %sinf : f32
+  %all_sinf = scalar.andi %all_cbrtf, %sinf_finite : i1
+  %cosf = scalar.cosf<nnan|ninf> %input : f32
+  %cosf_finite = scalar.isfinitef %cosf : f32
+  %all_cosf = scalar.andi %all_sinf, %cosf_finite : i1
+  %sinturnsf = scalar.sinturnsf<nnan|ninf> %input : f32
+  %sinturnsf_finite = scalar.isfinitef %sinturnsf : f32
+  %all_sinturnsf = scalar.andi %all_cosf, %sinturnsf_finite : i1
+  %costurnsf = scalar.costurnsf<nnan|ninf> %input : f32
+  %costurnsf_finite = scalar.isfinitef %costurnsf : f32
+  %all_costurnsf = scalar.andi %all_sinturnsf, %costurnsf_finite : i1
+  %tanf = scalar.tanf<nnan|ninf> %input : f32
+  %tanf_finite = scalar.isfinitef %tanf : f32
+  %all_tanf = scalar.andi %all_costurnsf, %tanf_finite : i1
+  %asinf = scalar.asinf<nnan|ninf> %input : f32
+  %asinf_finite = scalar.isfinitef %asinf : f32
+  %all_asinf = scalar.andi %all_tanf, %asinf_finite : i1
+  %acosf = scalar.acosf<nnan|ninf> %input : f32
+  %acosf_finite = scalar.isfinitef %acosf : f32
+  %all_acosf = scalar.andi %all_asinf, %acosf_finite : i1
+  %atanf = scalar.atanf<nnan|ninf> %input : f32
+  %atanf_finite = scalar.isfinitef %atanf : f32
+  %all_atanf = scalar.andi %all_acosf, %atanf_finite : i1
+  %sinhf = scalar.sinhf<nnan|ninf> %input : f32
+  %sinhf_finite = scalar.isfinitef %sinhf : f32
+  %all_sinhf = scalar.andi %all_atanf, %sinhf_finite : i1
+  %coshf = scalar.coshf<nnan|ninf> %input : f32
+  %coshf_finite = scalar.isfinitef %coshf : f32
+  %all_coshf = scalar.andi %all_sinhf, %coshf_finite : i1
+  %tanhf = scalar.tanhf<nnan|ninf> %input : f32
+  %tanhf_finite = scalar.isfinitef %tanhf : f32
+  %all_tanhf = scalar.andi %all_coshf, %tanhf_finite : i1
+  %asinhf = scalar.asinhf<nnan|ninf> %input : f32
+  %asinhf_finite = scalar.isfinitef %asinhf : f32
+  %all_asinhf = scalar.andi %all_tanhf, %asinhf_finite : i1
+  %acoshf = scalar.acoshf<nnan|ninf> %input : f32
+  %acoshf_finite = scalar.isfinitef %acoshf : f32
+  %all_acoshf = scalar.andi %all_asinhf, %acoshf_finite : i1
+  %atanhf = scalar.atanhf<nnan|ninf> %input : f32
+  %atanhf_finite = scalar.isfinitef %atanhf : f32
+  %all_atanhf = scalar.andi %all_acoshf, %atanhf_finite : i1
+  %erff = scalar.erff<nnan|ninf> %input : f32
+  %erff_finite = scalar.isfinitef %erff : f32
+  %all_erff = scalar.andi %all_atanhf, %erff_finite : i1
+  %erfcf = scalar.erfcf<nnan|ninf> %input : f32
+  %erfcf_finite = scalar.isfinitef %erfcf : f32
+  %all_erfcf = scalar.andi %all_erff, %erfcf_finite : i1
+  %logisticf = scalar.logisticf<nnan|ninf> %input : f32
+  %logisticf_finite = scalar.isfinitef %logisticf : f32
+  %all_logisticf = scalar.andi %all_erfcf, %logisticf_finite : i1
+  %siluf = scalar.siluf<nnan|ninf> %input : f32
+  %siluf_finite = scalar.isfinitef %siluf : f32
+  %all_siluf = scalar.andi %all_logisticf, %siluf_finite : i1
+  %softplusf = scalar.softplusf<nnan|ninf> %input : f32
+  %softplusf_finite = scalar.isfinitef %softplusf : f32
+  %all_softplusf = scalar.andi %all_siluf, %softplusf_finite : i1
+  %geluf = scalar.geluf<erf, nnan|ninf> %input : f32
+  %geluf_finite = scalar.isfinitef %geluf : f32
+  %all_geluf = scalar.andi %all_softplusf, %geluf_finite : i1
+  %ceilf = scalar.ceilf<nnan|ninf> %input : f32
+  %ceilf_finite = scalar.isfinitef %ceilf : f32
+  %all_ceilf = scalar.andi %all_geluf, %ceilf_finite : i1
+  %floorf = scalar.floorf<nnan|ninf> %input : f32
+  %floorf_finite = scalar.isfinitef %floorf : f32
+  %all_floorf = scalar.andi %all_ceilf, %floorf_finite : i1
+  %roundf = scalar.roundf<nnan|ninf> %input : f32
+  %roundf_finite = scalar.isfinitef %roundf : f32
+  %all_roundf = scalar.andi %all_floorf, %roundf_finite : i1
+  %roundevenf = scalar.roundevenf<nnan|ninf> %input : f32
+  %roundevenf_finite = scalar.isfinitef %roundevenf : f32
+  %all_roundevenf = scalar.andi %all_roundf, %roundevenf_finite : i1
+  %truncf = scalar.truncf<nnan|ninf> %input : f32
+  %truncf_finite = scalar.isfinitef %truncf : f32
+  %all_truncf = scalar.andi %all_roundevenf, %truncf_finite : i1
+  func.return %all_truncf : i1
+}
+
+// ----
+func.def @finite_1_operand_results(%input: f32) -> (i1) {
+  %all_truncf = scalar.constant true : i1
+  func.return %all_truncf : i1
+}
+
+// ====
+
+func.def @finite_2_operand_results(%input: f32, %other: f32) -> (i1) {
+  %addf = scalar.addf<nnan|ninf> %input, %other : f32
+  %addf_finite = scalar.isfinitef %addf : f32
+  %subf = scalar.subf<nnan|ninf> %input, %other : f32
+  %subf_finite = scalar.isfinitef %subf : f32
+  %all_subf = scalar.andi %addf_finite, %subf_finite : i1
+  %mulf = scalar.mulf<nnan|ninf> %input, %other : f32
+  %mulf_finite = scalar.isfinitef %mulf : f32
+  %all_mulf = scalar.andi %all_subf, %mulf_finite : i1
+  %divf = scalar.divf<nnan|ninf> %input, %other : f32
+  %divf_finite = scalar.isfinitef %divf : f32
+  %all_divf = scalar.andi %all_mulf, %divf_finite : i1
+  %remf = scalar.remf<nnan|ninf> %input, %other : f32
+  %remf_finite = scalar.isfinitef %remf : f32
+  %all_remf = scalar.andi %all_divf, %remf_finite : i1
+  %minimumf = scalar.minimumf<nnan|ninf> %input, %other : f32
+  %minimumf_finite = scalar.isfinitef %minimumf : f32
+  %all_minimumf = scalar.andi %all_remf, %minimumf_finite : i1
+  %maximumf = scalar.maximumf<nnan|ninf> %input, %other : f32
+  %maximumf_finite = scalar.isfinitef %maximumf : f32
+  %all_maximumf = scalar.andi %all_minimumf, %maximumf_finite : i1
+  %minnumf = scalar.minnumf<nnan|ninf> %input, %other : f32
+  %minnumf_finite = scalar.isfinitef %minnumf : f32
+  %all_minnumf = scalar.andi %all_maximumf, %minnumf_finite : i1
+  %maxnumf = scalar.maxnumf<nnan|ninf> %input, %other : f32
+  %maxnumf_finite = scalar.isfinitef %maxnumf : f32
+  %all_maxnumf = scalar.andi %all_minnumf, %maxnumf_finite : i1
+  %copysignf = scalar.copysignf<nnan|ninf> %input, %other : f32
+  %copysignf_finite = scalar.isfinitef %copysignf : f32
+  %all_copysignf = scalar.andi %all_maxnumf, %copysignf_finite : i1
+  %powf = scalar.powf<nnan|ninf> %input, %other : f32
+  %powf_finite = scalar.isfinitef %powf : f32
+  %all_powf = scalar.andi %all_copysignf, %powf_finite : i1
+  %atan2f = scalar.atan2f<nnan|ninf> %input, %other : f32
+  %atan2f_finite = scalar.isfinitef %atan2f : f32
+  %all_atan2f = scalar.andi %all_powf, %atan2f_finite : i1
+  func.return %all_atan2f : i1
+}
+
+// ----
+func.def @finite_2_operand_results(%input: f32, %other: f32) -> (i1) {
+  %all_atan2f = scalar.constant true : i1
+  func.return %all_atan2f : i1
+}
+
+// ====
+
+func.def @finite_3_operand_results(%input: f32, %other: f32, %third: f32) -> (i1) {
+  %clampf = scalar.clampf<ordered, nnan|ninf> %input, %other, %third : f32
+  %clampf_finite = scalar.isfinitef %clampf : f32
+  %fmaf = scalar.fmaf<nnan|ninf> %input, %other, %third : f32
+  %fmaf_finite = scalar.isfinitef %fmaf : f32
+  %all_fmaf = scalar.andi %clampf_finite, %fmaf_finite : i1
+  func.return %all_fmaf : i1
+}
+
+// ----
+func.def @finite_3_operand_results(%input: f32, %other: f32, %third: f32) -> (i1) {
+  %all_fmaf = scalar.constant true : i1
+  func.return %all_fmaf : i1
+}
+
+// ====
+
+// Each class promise is independent. Neither changes the operand's other
+// uses, and unrelated permissions do not establish a floating-point class.
+func.def @independent_promises(%input: f32) -> (i1, i1, i1, i1, i1, i1) {
+  %not_nan = scalar.exp2f<nnan> %input : f32
+  %not_inf = scalar.exp2f<ninf> %input : f32
+  %relaxed = scalar.exp2f<reassoc|nsz|arcp|contract|afn> %input : f32
+  %nan = scalar.isnanf %not_nan : f32
+  %inf = scalar.isinff %not_inf : f32
+  %possibly_inf = scalar.isinff %not_nan : f32
+  %possibly_nan = scalar.isnanf %not_inf : f32
+  %possibly_nonfinite = scalar.isfinitef %relaxed : f32
+  %input_nan = scalar.isnanf %input : f32
+  func.return %nan, %inf, %possibly_inf, %possibly_nan, %possibly_nonfinite, %input_nan : i1, i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @independent_promises(%input: f32) -> (i1, i1, i1, i1, i1, i1) {
+  %not_nan = scalar.exp2f<nnan> %input : f32
+  %not_inf = scalar.exp2f<ninf> %input : f32
+  %relaxed = scalar.exp2f<reassoc|nsz|arcp|contract|afn> %input : f32
+  %nan = scalar.constant false : i1
+  %inf = scalar.constant false : i1
+  %possibly_inf = scalar.isinff %not_nan : f32
+  %possibly_nan = scalar.isnanf %not_inf : f32
+  %possibly_nonfinite = scalar.isfinitef %relaxed : f32
+  %input_nan = scalar.isnanf %input : f32
+  func.return %nan, %inf, %possibly_inf, %possibly_nan, %possibly_nonfinite, %input_nan : i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+// Fast includes both class promises. Finiteness alone cannot remove rounding
+// to a narrower format or classify an unflagged operation as finite.
+func.def @finite_is_not_exact(%input: f32) -> (bf16, i1, i1) {
+  %fast = scalar.exp2f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %input : f32
+  %finite = scalar.isfinitef %fast : f32
+  %rounded = scalar.fptrunc %fast : f32 to bf16
+  %strict = scalar.exp2f %input : f32
+  %strict_finite = scalar.isfinitef %strict : f32
+  func.return %rounded, %finite, %strict_finite : bf16, i1, i1
+}
+
+// ----
+func.def @finite_is_not_exact(%input: f32) -> (bf16, i1, i1) {
+  %fast = scalar.exp2f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %input : f32
+  %finite = scalar.constant true : i1
+  %rounded = scalar.fptrunc %fast : f32 to bf16
+  %strict = scalar.exp2f %input : f32
+  %strict_finite = scalar.isfinitef %strict : f32
+  func.return %rounded, %finite, %strict_finite : bf16, i1, i1
+}
+
+// ====
+
+// The class contract is independent of representation width.
+func.def @all_float_types(%e4: f8E4M3, %e5: f8E5M2, %half: f16, %bfloat: bf16, %single: f32, %double: f64) -> (i1, i1, i1, i1, i1, i1) {
+  %e4_result = scalar.exp2f<nnan|ninf> %e4 : f8E4M3
+  %e5_result = scalar.exp2f<nnan|ninf> %e5 : f8E5M2
+  %half_result = scalar.exp2f<nnan|ninf> %half : f16
+  %bfloat_result = scalar.exp2f<nnan|ninf> %bfloat : bf16
+  %single_result = scalar.exp2f<nnan|ninf> %single : f32
+  %double_result = scalar.exp2f<nnan|ninf> %double : f64
+  %e4_finite = scalar.isfinitef %e4_result : f8E4M3
+  %e5_finite = scalar.isfinitef %e5_result : f8E5M2
+  %half_finite = scalar.isfinitef %half_result : f16
+  %bfloat_finite = scalar.isfinitef %bfloat_result : bf16
+  %single_finite = scalar.isfinitef %single_result : f32
+  %double_finite = scalar.isfinitef %double_result : f64
+  func.return %e4_finite, %e5_finite, %half_finite, %bfloat_finite, %single_finite, %double_finite : i1, i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @all_float_types(%e4: f8E4M3, %e5: f8E5M2, %half: f16, %bfloat: bf16, %single: f32, %double: f64) -> (i1, i1, i1, i1, i1, i1) {
+  %e4_finite = scalar.constant true : i1
+  %e5_finite = scalar.constant true : i1
+  %half_finite = scalar.constant true : i1
+  %bfloat_finite = scalar.constant true : i1
+  %single_finite = scalar.constant true : i1
+  %double_finite = scalar.constant true : i1
+  func.return %e4_finite, %e5_finite, %half_finite, %bfloat_finite, %single_finite, %double_finite : i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+// Variant attributes do not change the class promises on custom math ops.
+func.def @math_variants(%input: f32, %lower: f32, %upper: f32) -> (i1, i1, i1, i1) {
+  %number = scalar.clampf<number, nnan|ninf> %input, %lower, %upper : f32
+  %ieee = scalar.clampf<ieee, nnan|ninf> %input, %lower, %upper : f32
+  %tanh = scalar.geluf<tanh, nnan|ninf> %input : f32
+  %logistic = scalar.geluf<logistic, nnan|ninf> %input {scale = 1.702} : f32
+  %number_finite = scalar.isfinitef %number : f32
+  %ieee_finite = scalar.isfinitef %ieee : f32
+  %tanh_finite = scalar.isfinitef %tanh : f32
+  %logistic_finite = scalar.isfinitef %logistic : f32
+  func.return %number_finite, %ieee_finite, %tanh_finite, %logistic_finite : i1, i1, i1, i1
+}
+
+// ----
+func.def @math_variants(%input: f32, %lower: f32, %upper: f32) -> (i1, i1, i1, i1) {
+  %number_finite = scalar.constant true : i1
+  %ieee_finite = scalar.constant true : i1
+  %tanh_finite = scalar.constant true : i1
+  %logistic_finite = scalar.constant true : i1
+  func.return %number_finite, %ieee_finite, %tanh_finite, %logistic_finite : i1, i1, i1, i1
+}

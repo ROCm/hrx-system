@@ -1,0 +1,419 @@
+// RUN: pass canonicalize
+
+// Every floating arithmetic/math producer publishes authored result promises.
+// Independent arguments prevent algebraic identities from hiding a missing
+// transfer. Integer-result comparisons and conversion flags are separate.
+
+func.def @finite_1_operand_results(%input: vector<8xf32>) -> (vector<8xi1>) {
+  %negf = vector.negf<nnan|ninf> %input : vector<8xf32>
+  %negf_finite = vector.isfinitef %negf : vector<8xf32> -> vector<8xi1>
+  %absf = vector.absf<nnan|ninf> %input : vector<8xf32>
+  %absf_finite = vector.isfinitef %absf : vector<8xf32> -> vector<8xi1>
+  %all_absf = vector.andi %negf_finite, %absf_finite : vector<8xi1>
+  %expf = vector.expf<nnan|ninf> %input : vector<8xf32>
+  %expf_finite = vector.isfinitef %expf : vector<8xf32> -> vector<8xi1>
+  %all_expf = vector.andi %all_absf, %expf_finite : vector<8xi1>
+  %exp2f = vector.exp2f<nnan|ninf> %input : vector<8xf32>
+  %exp2f_finite = vector.isfinitef %exp2f : vector<8xf32> -> vector<8xi1>
+  %all_exp2f = vector.andi %all_expf, %exp2f_finite : vector<8xi1>
+  %expm1f = vector.expm1f<nnan|ninf> %input : vector<8xf32>
+  %expm1f_finite = vector.isfinitef %expm1f : vector<8xf32> -> vector<8xi1>
+  %all_expm1f = vector.andi %all_exp2f, %expm1f_finite : vector<8xi1>
+  %logf = vector.logf<nnan|ninf> %input : vector<8xf32>
+  %logf_finite = vector.isfinitef %logf : vector<8xf32> -> vector<8xi1>
+  %all_logf = vector.andi %all_expm1f, %logf_finite : vector<8xi1>
+  %log2f = vector.log2f<nnan|ninf> %input : vector<8xf32>
+  %log2f_finite = vector.isfinitef %log2f : vector<8xf32> -> vector<8xi1>
+  %all_log2f = vector.andi %all_logf, %log2f_finite : vector<8xi1>
+  %log10f = vector.log10f<nnan|ninf> %input : vector<8xf32>
+  %log10f_finite = vector.isfinitef %log10f : vector<8xf32> -> vector<8xi1>
+  %all_log10f = vector.andi %all_log2f, %log10f_finite : vector<8xi1>
+  %log1pf = vector.log1pf<nnan|ninf> %input : vector<8xf32>
+  %log1pf_finite = vector.isfinitef %log1pf : vector<8xf32> -> vector<8xi1>
+  %all_log1pf = vector.andi %all_log10f, %log1pf_finite : vector<8xi1>
+  %sqrtf = vector.sqrtf<nnan|ninf> %input : vector<8xf32>
+  %sqrtf_finite = vector.isfinitef %sqrtf : vector<8xf32> -> vector<8xi1>
+  %all_sqrtf = vector.andi %all_log1pf, %sqrtf_finite : vector<8xi1>
+  %rsqrtf = vector.rsqrtf<nnan|ninf> %input : vector<8xf32>
+  %rsqrtf_finite = vector.isfinitef %rsqrtf : vector<8xf32> -> vector<8xi1>
+  %all_rsqrtf = vector.andi %all_sqrtf, %rsqrtf_finite : vector<8xi1>
+  %cbrtf = vector.cbrtf<nnan|ninf> %input : vector<8xf32>
+  %cbrtf_finite = vector.isfinitef %cbrtf : vector<8xf32> -> vector<8xi1>
+  %all_cbrtf = vector.andi %all_rsqrtf, %cbrtf_finite : vector<8xi1>
+  %sinf = vector.sinf<nnan|ninf> %input : vector<8xf32>
+  %sinf_finite = vector.isfinitef %sinf : vector<8xf32> -> vector<8xi1>
+  %all_sinf = vector.andi %all_cbrtf, %sinf_finite : vector<8xi1>
+  %cosf = vector.cosf<nnan|ninf> %input : vector<8xf32>
+  %cosf_finite = vector.isfinitef %cosf : vector<8xf32> -> vector<8xi1>
+  %all_cosf = vector.andi %all_sinf, %cosf_finite : vector<8xi1>
+  %sinturnsf = vector.sinturnsf<nnan|ninf> %input : vector<8xf32>
+  %sinturnsf_finite = vector.isfinitef %sinturnsf : vector<8xf32> -> vector<8xi1>
+  %all_sinturnsf = vector.andi %all_cosf, %sinturnsf_finite : vector<8xi1>
+  %costurnsf = vector.costurnsf<nnan|ninf> %input : vector<8xf32>
+  %costurnsf_finite = vector.isfinitef %costurnsf : vector<8xf32> -> vector<8xi1>
+  %all_costurnsf = vector.andi %all_sinturnsf, %costurnsf_finite : vector<8xi1>
+  %tanf = vector.tanf<nnan|ninf> %input : vector<8xf32>
+  %tanf_finite = vector.isfinitef %tanf : vector<8xf32> -> vector<8xi1>
+  %all_tanf = vector.andi %all_costurnsf, %tanf_finite : vector<8xi1>
+  %asinf = vector.asinf<nnan|ninf> %input : vector<8xf32>
+  %asinf_finite = vector.isfinitef %asinf : vector<8xf32> -> vector<8xi1>
+  %all_asinf = vector.andi %all_tanf, %asinf_finite : vector<8xi1>
+  %acosf = vector.acosf<nnan|ninf> %input : vector<8xf32>
+  %acosf_finite = vector.isfinitef %acosf : vector<8xf32> -> vector<8xi1>
+  %all_acosf = vector.andi %all_asinf, %acosf_finite : vector<8xi1>
+  %atanf = vector.atanf<nnan|ninf> %input : vector<8xf32>
+  %atanf_finite = vector.isfinitef %atanf : vector<8xf32> -> vector<8xi1>
+  %all_atanf = vector.andi %all_acosf, %atanf_finite : vector<8xi1>
+  %sinhf = vector.sinhf<nnan|ninf> %input : vector<8xf32>
+  %sinhf_finite = vector.isfinitef %sinhf : vector<8xf32> -> vector<8xi1>
+  %all_sinhf = vector.andi %all_atanf, %sinhf_finite : vector<8xi1>
+  %coshf = vector.coshf<nnan|ninf> %input : vector<8xf32>
+  %coshf_finite = vector.isfinitef %coshf : vector<8xf32> -> vector<8xi1>
+  %all_coshf = vector.andi %all_sinhf, %coshf_finite : vector<8xi1>
+  %tanhf = vector.tanhf<nnan|ninf> %input : vector<8xf32>
+  %tanhf_finite = vector.isfinitef %tanhf : vector<8xf32> -> vector<8xi1>
+  %all_tanhf = vector.andi %all_coshf, %tanhf_finite : vector<8xi1>
+  %asinhf = vector.asinhf<nnan|ninf> %input : vector<8xf32>
+  %asinhf_finite = vector.isfinitef %asinhf : vector<8xf32> -> vector<8xi1>
+  %all_asinhf = vector.andi %all_tanhf, %asinhf_finite : vector<8xi1>
+  %acoshf = vector.acoshf<nnan|ninf> %input : vector<8xf32>
+  %acoshf_finite = vector.isfinitef %acoshf : vector<8xf32> -> vector<8xi1>
+  %all_acoshf = vector.andi %all_asinhf, %acoshf_finite : vector<8xi1>
+  %atanhf = vector.atanhf<nnan|ninf> %input : vector<8xf32>
+  %atanhf_finite = vector.isfinitef %atanhf : vector<8xf32> -> vector<8xi1>
+  %all_atanhf = vector.andi %all_acoshf, %atanhf_finite : vector<8xi1>
+  %erff = vector.erff<nnan|ninf> %input : vector<8xf32>
+  %erff_finite = vector.isfinitef %erff : vector<8xf32> -> vector<8xi1>
+  %all_erff = vector.andi %all_atanhf, %erff_finite : vector<8xi1>
+  %erfcf = vector.erfcf<nnan|ninf> %input : vector<8xf32>
+  %erfcf_finite = vector.isfinitef %erfcf : vector<8xf32> -> vector<8xi1>
+  %all_erfcf = vector.andi %all_erff, %erfcf_finite : vector<8xi1>
+  %logisticf = vector.logisticf<nnan|ninf> %input : vector<8xf32>
+  %logisticf_finite = vector.isfinitef %logisticf : vector<8xf32> -> vector<8xi1>
+  %all_logisticf = vector.andi %all_erfcf, %logisticf_finite : vector<8xi1>
+  %siluf = vector.siluf<nnan|ninf> %input : vector<8xf32>
+  %siluf_finite = vector.isfinitef %siluf : vector<8xf32> -> vector<8xi1>
+  %all_siluf = vector.andi %all_logisticf, %siluf_finite : vector<8xi1>
+  %softplusf = vector.softplusf<nnan|ninf> %input : vector<8xf32>
+  %softplusf_finite = vector.isfinitef %softplusf : vector<8xf32> -> vector<8xi1>
+  %all_softplusf = vector.andi %all_siluf, %softplusf_finite : vector<8xi1>
+  %geluf = vector.geluf<erf, nnan|ninf> %input : vector<8xf32>
+  %geluf_finite = vector.isfinitef %geluf : vector<8xf32> -> vector<8xi1>
+  %all_geluf = vector.andi %all_softplusf, %geluf_finite : vector<8xi1>
+  %ceilf = vector.ceilf<nnan|ninf> %input : vector<8xf32>
+  %ceilf_finite = vector.isfinitef %ceilf : vector<8xf32> -> vector<8xi1>
+  %all_ceilf = vector.andi %all_geluf, %ceilf_finite : vector<8xi1>
+  %floorf = vector.floorf<nnan|ninf> %input : vector<8xf32>
+  %floorf_finite = vector.isfinitef %floorf : vector<8xf32> -> vector<8xi1>
+  %all_floorf = vector.andi %all_ceilf, %floorf_finite : vector<8xi1>
+  %roundf = vector.roundf<nnan|ninf> %input : vector<8xf32>
+  %roundf_finite = vector.isfinitef %roundf : vector<8xf32> -> vector<8xi1>
+  %all_roundf = vector.andi %all_floorf, %roundf_finite : vector<8xi1>
+  %roundevenf = vector.roundevenf<nnan|ninf> %input : vector<8xf32>
+  %roundevenf_finite = vector.isfinitef %roundevenf : vector<8xf32> -> vector<8xi1>
+  %all_roundevenf = vector.andi %all_roundf, %roundevenf_finite : vector<8xi1>
+  %truncf = vector.truncf<nnan|ninf> %input : vector<8xf32>
+  %truncf_finite = vector.isfinitef %truncf : vector<8xf32> -> vector<8xi1>
+  %all_truncf = vector.andi %all_roundevenf, %truncf_finite : vector<8xi1>
+  func.return %all_truncf : vector<8xi1>
+}
+
+// ----
+func.def @finite_1_operand_results(%input: vector<8xf32>) -> (vector<8xi1>) {
+  %all_truncf = vector.constant true : vector<8xi1>
+  func.return %all_truncf : vector<8xi1>
+}
+
+// ====
+
+func.def @finite_2_operand_results(%input: vector<8xf32>, %other: vector<8xf32>) -> (vector<8xi1>) {
+  %addf = vector.addf<nnan|ninf> %input, %other : vector<8xf32>
+  %addf_finite = vector.isfinitef %addf : vector<8xf32> -> vector<8xi1>
+  %subf = vector.subf<nnan|ninf> %input, %other : vector<8xf32>
+  %subf_finite = vector.isfinitef %subf : vector<8xf32> -> vector<8xi1>
+  %all_subf = vector.andi %addf_finite, %subf_finite : vector<8xi1>
+  %mulf = vector.mulf<nnan|ninf> %input, %other : vector<8xf32>
+  %mulf_finite = vector.isfinitef %mulf : vector<8xf32> -> vector<8xi1>
+  %all_mulf = vector.andi %all_subf, %mulf_finite : vector<8xi1>
+  %divf = vector.divf<nnan|ninf> %input, %other : vector<8xf32>
+  %divf_finite = vector.isfinitef %divf : vector<8xf32> -> vector<8xi1>
+  %all_divf = vector.andi %all_mulf, %divf_finite : vector<8xi1>
+  %remf = vector.remf<nnan|ninf> %input, %other : vector<8xf32>
+  %remf_finite = vector.isfinitef %remf : vector<8xf32> -> vector<8xi1>
+  %all_remf = vector.andi %all_divf, %remf_finite : vector<8xi1>
+  %minimumf = vector.minimumf<nnan|ninf> %input, %other : vector<8xf32>
+  %minimumf_finite = vector.isfinitef %minimumf : vector<8xf32> -> vector<8xi1>
+  %all_minimumf = vector.andi %all_remf, %minimumf_finite : vector<8xi1>
+  %maximumf = vector.maximumf<nnan|ninf> %input, %other : vector<8xf32>
+  %maximumf_finite = vector.isfinitef %maximumf : vector<8xf32> -> vector<8xi1>
+  %all_maximumf = vector.andi %all_minimumf, %maximumf_finite : vector<8xi1>
+  %minnumf = vector.minnumf<nnan|ninf> %input, %other : vector<8xf32>
+  %minnumf_finite = vector.isfinitef %minnumf : vector<8xf32> -> vector<8xi1>
+  %all_minnumf = vector.andi %all_maximumf, %minnumf_finite : vector<8xi1>
+  %maxnumf = vector.maxnumf<nnan|ninf> %input, %other : vector<8xf32>
+  %maxnumf_finite = vector.isfinitef %maxnumf : vector<8xf32> -> vector<8xi1>
+  %all_maxnumf = vector.andi %all_minnumf, %maxnumf_finite : vector<8xi1>
+  %copysignf = vector.copysignf<nnan|ninf> %input, %other : vector<8xf32>
+  %copysignf_finite = vector.isfinitef %copysignf : vector<8xf32> -> vector<8xi1>
+  %all_copysignf = vector.andi %all_maxnumf, %copysignf_finite : vector<8xi1>
+  %powf = vector.powf<nnan|ninf> %input, %other : vector<8xf32>
+  %powf_finite = vector.isfinitef %powf : vector<8xf32> -> vector<8xi1>
+  %all_powf = vector.andi %all_copysignf, %powf_finite : vector<8xi1>
+  %atan2f = vector.atan2f<nnan|ninf> %input, %other : vector<8xf32>
+  %atan2f_finite = vector.isfinitef %atan2f : vector<8xf32> -> vector<8xi1>
+  %all_atan2f = vector.andi %all_powf, %atan2f_finite : vector<8xi1>
+  func.return %all_atan2f : vector<8xi1>
+}
+
+// ----
+func.def @finite_2_operand_results(%input: vector<8xf32>, %other: vector<8xf32>) -> (vector<8xi1>) {
+  %all_atan2f = vector.constant true : vector<8xi1>
+  func.return %all_atan2f : vector<8xi1>
+}
+
+// ====
+
+func.def @finite_3_operand_results(%input: vector<8xf32>, %other: vector<8xf32>, %third: vector<8xf32>) -> (vector<8xi1>) {
+  %clampf = vector.clampf<ordered, nnan|ninf> %input, %other, %third : vector<8xf32>
+  %clampf_finite = vector.isfinitef %clampf : vector<8xf32> -> vector<8xi1>
+  %fmaf = vector.fmaf<nnan|ninf> %input, %other, %third : vector<8xf32>
+  %fmaf_finite = vector.isfinitef %fmaf : vector<8xf32> -> vector<8xi1>
+  %all_fmaf = vector.andi %clampf_finite, %fmaf_finite : vector<8xi1>
+  func.return %all_fmaf : vector<8xi1>
+}
+
+// ----
+func.def @finite_3_operand_results(%input: vector<8xf32>, %other: vector<8xf32>, %third: vector<8xf32>) -> (vector<8xi1>) {
+  %all_fmaf = vector.constant true : vector<8xi1>
+  func.return %all_fmaf : vector<8xi1>
+}
+
+// ====
+
+// Flags are result-class promises, not exact-format or subnormal promises.
+// The same instance bit used by nnan means FTZ on conversions instead.
+func.def @independent_promises(%input: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xbf16>) {
+  %not_nan = vector.exp2f<nnan> %input : vector<4xf32>
+  %not_inf = vector.exp2f<ninf> %input : vector<4xf32>
+  %fast = vector.exp2f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %input : vector<4xf32>
+  %nan = vector.isnanf %not_nan : vector<4xf32> -> vector<4xi1>
+  %inf = vector.isinff %not_inf : vector<4xf32> -> vector<4xi1>
+  %possibly_inf = vector.isinff %not_nan : vector<4xf32> -> vector<4xi1>
+  %possibly_nan = vector.isnanf %not_inf : vector<4xf32> -> vector<4xi1>
+  %finite = vector.isfinitef %fast : vector<4xf32> -> vector<4xi1>
+  %flush = vector.fptrunc<ftz> %input : vector<4xf32> to vector<4xbf16>
+  %flush_nan = vector.isnanf %flush : vector<4xbf16> -> vector<4xi1>
+  %rounded = vector.fptrunc %fast : vector<4xf32> to vector<4xbf16>
+  func.return %nan, %inf, %possibly_inf, %possibly_nan, %finite, %flush_nan, %rounded : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xbf16>
+}
+
+// ----
+func.def @independent_promises(%input: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xbf16>) {
+  %not_nan = vector.exp2f<nnan> %input : vector<4xf32>
+  %not_inf = vector.exp2f<ninf> %input : vector<4xf32>
+  %fast = vector.exp2f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %input : vector<4xf32>
+  %nan = vector.constant false : vector<4xi1>
+  %inf = vector.constant false : vector<4xi1>
+  %possibly_inf = vector.isinff %not_nan : vector<4xf32> -> vector<4xi1>
+  %possibly_nan = vector.isnanf %not_inf : vector<4xf32> -> vector<4xi1>
+  %finite = vector.constant true : vector<4xi1>
+  %flush = vector.fptrunc<ftz> %input : vector<4xf32> to vector<4xbf16>
+  %flush_nan = vector.isnanf %flush : vector<4xbf16> -> vector<4xi1>
+  %rounded = vector.fptrunc %fast : vector<4xf32> to vector<4xbf16>
+  func.return %nan, %inf, %possibly_inf, %possibly_nan, %finite, %flush_nan, %rounded : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xbf16>
+}
+
+// ====
+
+// Unknown components within a retained lane summary receive the promise before
+// that summary is interned. A later precise extraction cannot discard it.
+func.def @component_facts(%left: f32, %right: f32, %lane: index) -> (i1, i1, i1, f32) {
+  %unit = scalar.constant 1.0 : f32
+  %components = vector.from_elements %left, %right, %unit : vector<3xf32>
+  %exponentials = vector.exp2f<nnan|ninf> %components : vector<3xf32>
+  %first = vector.extract %exponentials[0] : vector<3xf32> -> f32
+  %dynamic = vector.extract %exponentials[%lane] : vector<3xf32> -> f32
+  %constant = vector.extract %exponentials[2] : vector<3xf32> -> f32
+  %splat = vector.splat %left : vector<32xf32>
+  %uniform = vector.exp2f<nnan|ninf> %splat : vector<32xf32>
+  %uniform_element = vector.extract %uniform[3] : vector<32xf32> -> f32
+  %first_finite = scalar.isfinitef %first : f32
+  %dynamic_finite = scalar.isfinitef %dynamic : f32
+  %uniform_finite = scalar.isfinitef %uniform_element : f32
+  func.return %first_finite, %dynamic_finite, %uniform_finite, %constant : i1, i1, i1, f32
+}
+
+// ----
+func.def @component_facts(%left: f32, %right: f32, %lane: index) -> (i1, i1, i1, f32) {
+  %constant = scalar.constant 2.0 : f32
+  %first_finite = scalar.constant true : i1
+  %dynamic_finite = scalar.constant true : i1
+  %uniform_finite = scalar.constant true : i1
+  func.return %first_finite, %dynamic_finite, %uniform_finite, %constant : i1, i1, i1, f32
+}
+
+// ====
+
+// Shared unary/binary/ternary transfers retain promises for uniform and
+// mixed components, including the path where only one operand has lane facts.
+func.def @arithmetic_components(%left: f32, %right: f32, %third: f32, %unknown: vector<2xf32>) -> (i1, i1, i1, i1) {
+  %pair = vector.from_elements %left, %right : vector<2xf32>
+  %splat_left = vector.splat %left : vector<2xf32>
+  %splat_right = vector.splat %right : vector<2xf32>
+  %splat_third = vector.splat %third : vector<2xf32>
+  %sum = vector.addf<nnan|ninf> %pair, %splat_third : vector<2xf32>
+  %product = vector.mulf<nnan|ninf> %splat_left, %splat_right : vector<2xf32>
+  %fused = vector.fmaf<nnan|ninf> %pair, %splat_left, %splat_third : vector<2xf32>
+  %mixed = vector.divf<nnan|ninf> %pair, %unknown : vector<2xf32>
+  %sum_element = vector.extract %sum[1] : vector<2xf32> -> f32
+  %product_element = vector.extract %product[1] : vector<2xf32> -> f32
+  %fused_element = vector.extract %fused[1] : vector<2xf32> -> f32
+  %mixed_element = vector.extract %mixed[1] : vector<2xf32> -> f32
+  %sum_finite = scalar.isfinitef %sum_element : f32
+  %product_finite = scalar.isfinitef %product_element : f32
+  %fused_finite = scalar.isfinitef %fused_element : f32
+  %mixed_finite = scalar.isfinitef %mixed_element : f32
+  func.return %sum_finite, %product_finite, %fused_finite, %mixed_finite : i1, i1, i1, i1
+}
+
+// ----
+func.def @arithmetic_components(%left: f32, %right: f32, %third: f32, %unknown: vector<2xf32>) -> (i1, i1, i1, i1) {
+  %sum_finite = scalar.constant true : i1
+  %product_finite = scalar.constant true : i1
+  %fused_finite = scalar.constant true : i1
+  %mixed_finite = scalar.constant true : i1
+  func.return %sum_finite, %product_finite, %fused_finite, %mixed_finite : i1, i1, i1, i1
+}
+
+// ====
+
+// Reductions and contractions publish the same promises on scalar results.
+func.def @reductions(%input: vector<8xf32>, %other: vector<8xf32>, %initial: f32) -> (i1, i1, i1) {
+  %sum = vector.reduce<addf, nnan|ninf> %input, %initial : vector<8xf32>, f32
+  %axes = vector.reduce.axes<maximumf, nnan|ninf> %input, %initial axes [0] : vector<8xf32>, f32
+  %dot = vector.dotf<nnan|ninf> %input, %other, %initial : vector<8xf32>, vector<8xf32>, f32
+  %sum_finite = scalar.isfinitef %sum : f32
+  %axes_finite = scalar.isfinitef %axes : f32
+  %dot_finite = scalar.isfinitef %dot : f32
+  func.return %sum_finite, %axes_finite, %dot_finite : i1, i1, i1
+}
+
+// ----
+func.def @reductions(%input: vector<8xf32>, %other: vector<8xf32>, %initial: f32) -> (i1, i1, i1) {
+  %sum_finite = scalar.constant true : i1
+  %axes_finite = scalar.constant true : i1
+  %dot_finite = scalar.constant true : i1
+  func.return %sum_finite, %axes_finite, %dot_finite : i1, i1, i1
+}
+
+// ====
+
+// Partial-axis reductions retain both the dense guarantee and component facts.
+func.def @partial_axes(%input: vector<2x4xf32>, %initial: vector<4xf32>, %scalar: f32) -> (vector<4xi1>, i1, i1) {
+  %result = vector.reduce.axes<addf, nnan|ninf> %input, %initial axes [0] : vector<2x4xf32>, vector<4xf32>
+  %finite = vector.isfinitef %result : vector<4xf32> -> vector<4xi1>
+  %broadcast = vector.splat %scalar : vector<2x4xf32>
+  %initial_sums = vector.constant 0.0 : vector<4xf32>
+  %uniform = vector.reduce.axes<addf, nnan|ninf> %broadcast, %initial_sums axes [0] : vector<2x4xf32>, vector<4xf32>
+  %element = vector.extract %uniform[1] : vector<4xf32> -> f32
+  %uniform_finite = scalar.isfinitef %element : f32
+  %empty = vector.constant 0.0 : vector<0xf32>
+  %empty_sum = vector.reduce<addf, nnan|ninf> %empty, %scalar : vector<0xf32>, f32
+  %empty_finite = scalar.isfinitef %empty_sum : f32
+  func.return %finite, %uniform_finite, %empty_finite : vector<4xi1>, i1, i1
+}
+
+// ----
+func.def @partial_axes(%input: vector<2x4xf32>, %initial: vector<4xf32>, %scalar: f32) -> (vector<4xi1>, i1, i1) {
+  %finite = vector.constant true : vector<4xi1>
+  %uniform_finite = scalar.constant true : i1
+  %empty_finite = scalar.constant true : i1
+  func.return %finite, %uniform_finite, %empty_finite : vector<4xi1>, i1, i1
+}
+
+// ====
+
+// Empty reductions return their initializer, with the result promises retained
+// in uniform component facts. Without flags the initializer stays unknown.
+func.def @empty_uniform(%scalar: f32) -> (vector<4xi1>, i1, i1) {
+  %initial = vector.splat %scalar : vector<4xf32>
+  %empty = vector.empty : vector<0x4xf32>
+  %sum = vector.reduce.axes<addf, nnan|ninf> %empty, %initial axes [0] : vector<0x4xf32>, vector<4xf32>
+  %finite = vector.isfinitef %sum : vector<4xf32> -> vector<4xi1>
+  %element = vector.extract %sum[1] : vector<4xf32> -> f32
+  %element_finite = scalar.isfinitef %element : f32
+  %unflagged = vector.reduce.axes<addf> %empty, %initial axes [0] : vector<0x4xf32>, vector<4xf32>
+  %unflagged_element = vector.extract %unflagged[1] : vector<4xf32> -> f32
+  %unflagged_finite = scalar.isfinitef %unflagged_element : f32
+  func.return %finite, %element_finite, %unflagged_finite : vector<4xi1>, i1, i1
+}
+
+// ----
+func.def @empty_uniform(%scalar: f32) -> (vector<4xi1>, i1, i1) {
+  %initial = vector.splat %scalar : vector<4xf32>
+  %empty = vector.empty : vector<0x4xf32>
+  %finite = vector.constant true : vector<4xi1>
+  %element_finite = scalar.constant true : i1
+  %unflagged = vector.reduce.axes<addf> %empty, %initial axes [0] : vector<0x4xf32>, vector<4xf32>
+  %unflagged_element = vector.extract %unflagged[1] : vector<4xf32> -> f32
+  %unflagged_finite = scalar.isfinitef %unflagged_element : f32
+  func.return %finite, %element_finite, %unflagged_finite : vector<4xi1>, i1, i1
+}
+
+// ====
+
+// Mixed initializer lanes gain the promise without losing exact values.
+func.def @empty_components(%initial_value: f32) -> (vector<2xi1>, i1, f32) {
+  %unit = scalar.constant 1.0 : f32
+  %initial = vector.from_elements %initial_value, %unit : vector<2xf32>
+  %empty = vector.empty : vector<0x2xf32>
+  %sum = vector.reduce.axes<addf, nnan|ninf> %empty, %initial axes [0] : vector<0x2xf32>, vector<2xf32>
+  %finite = vector.isfinitef %sum : vector<2xf32> -> vector<2xi1>
+  %first = vector.extract %sum[0] : vector<2xf32> -> f32
+  %second = vector.extract %sum[1] : vector<2xf32> -> f32
+  %first_finite = scalar.isfinitef %first : f32
+  func.return %finite, %first_finite, %second : vector<2xi1>, i1, f32
+}
+
+// ----
+func.def @empty_components(%initial_value: f32) -> (vector<2xi1>, i1, f32) {
+  %finite = vector.constant true : vector<2xi1>
+  %second = scalar.constant 1.0 : f32
+  %first_finite = scalar.constant true : i1
+  func.return %finite, %first_finite, %second : vector<2xi1>, i1, f32
+}
+
+// ====
+
+// Refining an empty reduction's components must retain the initializer's
+// execution distribution; the unused empty operand carries no such facts.
+kernel.def @empty_distribution() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch(%left: f32, %right: f32) {
+  %uniform_initial = vector.splat %left : vector<2xf32>
+  %mixed_initial = vector.from_elements %left, %right : vector<2xf32>
+  %empty = vector.empty : vector<0x2xf32>
+  %uniform_sum = vector.reduce.axes<addf, nnan|ninf> %empty, %uniform_initial axes [0] : vector<0x2xf32>, vector<2xf32>
+  %mixed_sum = vector.reduce.axes<addf, nnan|ninf> %empty, %mixed_initial axes [0] : vector<0x2xf32>, vector<2xf32>
+  %unflagged = vector.reduce.axes<addf> %empty, %mixed_initial axes [0] : vector<0x2xf32>, vector<2xf32>
+  %uniform_distribution = test.fact_cluster_uniform %uniform_sum : vector<2xf32> -> i1
+  %mixed_distribution = test.fact_cluster_uniform %mixed_sum : vector<2xf32> -> i1
+  %unflagged_distribution = test.fact_cluster_uniform %unflagged : vector<2xf32> -> i1
+  test.use %uniform_distribution, %mixed_distribution, %unflagged_distribution : i1, i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @empty_distribution() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch(%left: f32, %right: f32) {
+  %uniform_distribution = scalar.constant true : i1
+  %mixed_distribution = scalar.constant true : i1
+  %unflagged_distribution = scalar.constant true : i1
+  test.use %uniform_distribution, %mixed_distribution, %unflagged_distribution : i1, i1, i1
+  kernel.return
+}

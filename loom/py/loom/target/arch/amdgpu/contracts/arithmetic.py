@@ -145,6 +145,7 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_exp_f32",
     "amdgpu.v_log_f32",
     "amdgpu.v_sin_f32",
+    "amdgpu.v_cmp_oeq_f32.src0_inline",
     "amdgpu.v_cos_f32",
     "amdgpu.v_floor_f32",
     "amdgpu.v_floor_f64",

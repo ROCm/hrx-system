@@ -119,6 +119,64 @@ static double EvaluateTurns(loom_scalar_type_t scalar_type,
                          loom_value_facts_exact_float(scalar_type, input)));
 }
 
+TEST(FloatFacts, IndependentFloatClassPromises) {
+  for (bool not_nan : {false, true}) {
+    for (bool not_inf : {false, true}) {
+      auto facts = loom_value_facts_unknown();
+      loom_value_facts_mark_subgroup_uniform(&facts);
+      const auto before = facts;
+      loom_value_facts_assume_float_class(&facts, not_nan, not_inf);
+      EXPECT_EQ(loom_value_facts_is_not_nan(facts), not_nan);
+      EXPECT_EQ(loom_value_facts_is_not_inf(facts), not_inf);
+      EXPECT_EQ(loom_value_facts_is_finite(facts), not_nan && not_inf);
+      EXPECT_EQ(loom_value_facts_is_float(facts), not_nan || not_inf);
+      EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(facts));
+      EXPECT_FALSE(loom_value_facts_is_exact(facts));
+      EXPECT_FALSE(loom_value_facts_is_not_subnormal(facts));
+      EXPECT_EQ(loom_value_facts_exact_float_types(facts),
+                LOOM_SCALAR_TYPE_SET_NONE);
+      EXPECT_EQ(facts.range_lo, before.range_lo);
+      EXPECT_EQ(facts.range_hi, before.range_hi);
+    }
+  }
+  auto facts = loom_value_facts_unknown();
+  loom_value_facts_assume_float_class(&facts, true, false);
+  loom_value_facts_assume_float_class(&facts, false, true);
+  EXPECT_TRUE(loom_value_facts_is_finite(facts));
+}
+
+TEST(FloatFacts, FloatClassPromisesPreserveNumericPayloads) {
+  for (loom_scalar_type_t type = LOOM_SCALAR_TYPE_F8E4M3;
+       type <= LOOM_SCALAR_TYPE_F64; ++type) {
+    for (double value : {-0.0, 0.0, 1.125, 0x1p-7}) {
+      const auto expected = loom_value_facts_exact_float(type, value);
+      auto facts = expected;
+      loom_value_facts_assume_float_class(&facts, true, true);
+      EXPECT_TRUE(loom_value_facts_equal(facts, expected));
+    }
+    const auto expected = loom_value_facts_make_float_range(type, -2.5, 7.5);
+    auto facts = expected;
+    loom_value_facts_assume_float_class(&facts, true, true);
+    EXPECT_TRUE(loom_value_facts_equal(facts, expected));
+  }
+}
+
+TEST(FloatFacts, FloatClassPromisesKeepNonfiniteFactsConsistent) {
+  for (double value : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+    const auto expected =
+        loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, value);
+    for (bool not_nan : {false, true}) {
+      for (bool not_inf : {false, true}) {
+        auto facts = expected;
+        loom_value_facts_assume_float_class(&facts, not_nan, not_inf);
+        EXPECT_TRUE(loom_value_facts_equal(facts, expected));
+      }
+    }
+  }
+}
+
 TEST(FloatFacts, RetainsRoundedFiniteIntervals) {
   const loom_value_facts_t range =
       loom_value_facts_make_float_range(LOOM_SCALAR_TYPE_F32, -128.1, 127.1);

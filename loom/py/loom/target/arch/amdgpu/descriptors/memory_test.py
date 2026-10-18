@@ -8,6 +8,7 @@ from dataclasses import replace
 
 import pytest
 
+from loom.target.arch.amdgpu.descriptor_overlay import _asm_forms_for_overlay
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
     _validate_native_asm_values,
@@ -21,6 +22,13 @@ from loom.target.arch.amdgpu.descriptors.common import (
 from loom.target.arch.amdgpu.descriptors.contracts import (
     _amdgpu_contract_descriptor_from_overlay,
 )
+from loom.target.arch.amdgpu.descriptors.memory_candidates import (
+    _MEMORY_DESCRIPTOR_CANDIDATES,
+    preserved_memory_descriptor_key,
+)
+from loom.target.arch.amdgpu.descriptors.memory_predication import (
+    with_preserving_memory_loads,
+)
 from loom.target.arch.amdgpu.descriptors.rdna4 import (
     _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
 )
@@ -29,7 +37,68 @@ from loom.target.arch.amdgpu.descriptors.sets import (
     _gfx12_core_overlays,
     _gfx125x_core_overlays,
 )
-from loom.target.low_descriptors import EffectKind, NativeAsmValueKind
+from loom.target.low_descriptors import (
+    Constraint,
+    ConstraintKind,
+    EffectKind,
+    NativeAsmValueKind,
+    OperandFlag,
+    OperandRole,
+)
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_preserving_loads_retain_native_contract_and_address_forms(target: str) -> None:
+    originals = tuple(
+        replace(
+            _amdgpu_contract_descriptor_from_overlay(overlay),
+            asm_forms=_asm_forms_for_overlay(overlay),
+        )
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    )
+    expanded = with_preserving_memory_loads(originals)
+    assert expanded[: len(originals)] == originals
+    by_key = {descriptor.key: descriptor for descriptor in expanded}
+    native_by_key = {descriptor.key: descriptor for descriptor in originals}
+    for candidate in _MEMORY_DESCRIPTOR_CANDIDATES:
+        if candidate.descriptor_key not in native_by_key:
+            continue
+        key = preserved_memory_descriptor_key(candidate.descriptor_key)
+        assert (key in by_key) == (candidate.preserving_descriptor_key is not None)
+    for preserved in expanded[len(originals) :]:
+        original = native_by_key[preserved.key.removesuffix("_preserve")]
+        result, fallback = preserved.operands[:2]
+        assert result == original.operands[0]
+        assert fallback == replace(
+            result,
+            field_name="fallback",
+            role=OperandRole.OPERAND,
+            flags=(OperandFlag.IMPLICIT,),
+        )
+        assert preserved.operands[2:] == original.operands[1:]
+        assert Constraint(ConstraintKind.TIED, 0, 1) in preserved.constraints
+        assert preserved.effects == original.effects
+        assert preserved.schedule_class == original.schedule_class
+        assert preserved.feature_mask_words == original.feature_mask_words
+        assert preserved.immediates == original.immediates
+        for source_form, form in zip(
+            original.operand_forms, preserved.operand_forms, strict=True
+        ):
+            assert form.replacement_descriptor == preserved_memory_descriptor_key(
+                source_form.replacement_descriptor
+            )
+            assert form.replacement_descriptor in by_key
+            assert form.matches == source_form.matches
+            assert form.immediate_action == source_form.immediate_action
+        for source_form, form in zip(
+            original.asm_forms, preserved.asm_forms, strict=True
+        ):
+            assert form.operands == ("fallback", *source_form.operands)
+            assert all(
+                value.field_name != "fallback" for value in form.native_assembly_values
+            )
+            if source_form.native_assembly_values:
+                assert form.native_assembly_values == source_form.native_assembly_values
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)

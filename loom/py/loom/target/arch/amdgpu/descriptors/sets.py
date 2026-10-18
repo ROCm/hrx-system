@@ -40,6 +40,10 @@ from .integer_multiply import *
 from .matrix import *
 from .memory import *
 from .memory_banks import _with_accumulator_memory_banks
+from .memory_candidates import (
+    preserved_memory_descriptor_key,
+    preserving_memory_descriptor_keys,
+)
 from .rdna3 import *
 from .rdna4 import *
 from .rdna4m import *
@@ -2927,6 +2931,11 @@ def _amdgpu_descriptor_ref_key_set() -> set[str]:
         _gfx125x_core_overlays(),
     ):
         keys.update(overlay.descriptor_key for overlay in overlays)
+        forms = {overlay.descriptor_key: overlay.operand_forms for overlay in overlays}
+        keys.update(
+            preserved_memory_descriptor_key(key)
+            for key in preserving_memory_descriptor_keys(forms)
+        )
     return keys
 
 

@@ -424,6 +424,18 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     return {program, root, &buffers_[stage_index][root.fixed_buffer_index]};
   }
 
+  iree_status_t CreateRoots(iree_host_size_t shared_count,
+                            iree_host_size_t root_count,
+                            const loom_serve_weight_root_t* roots,
+                            std::initializer_list<std::string> paths) {
+    auto** plan = &plans_[plan_count_++];
+    IREE_RETURN_IF_ERROR(loom_serve_weights_allocate(
+        device_, transfer_, dispatch_,
+        loom_serve_device_storage_pool(device_owner_), pool_, shared_count,
+        root_count, roots, host_allocator_, plan));
+    return Prepare(*plan, paths);
+  }
+
   iree_status_t Prepare(loom_serve_weights_t* plan,
                         std::initializer_list<std::string> paths) {
     const std::string policy = directory_ + "/policy.loom";
@@ -444,18 +456,6 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     EXPECT_EQ(after.committed_bytes, before.committed_bytes);
     EXPECT_EQ(loom_serve_weights_activity(plan).activations, 0u);
     return status;
-  }
-
-  iree_status_t CreateRoots(iree_host_size_t shared_count,
-                            iree_host_size_t root_count,
-                            const loom_serve_weight_root_t* roots,
-                            std::initializer_list<std::string> paths) {
-    auto** plan = &plans_[plan_count_++];
-    IREE_RETURN_IF_ERROR(loom_serve_weights_allocate(
-        device_, transfer_, dispatch_,
-        loom_serve_device_storage_pool(device_owner_), pool_, shared_count,
-        root_count, roots, host_allocator_, plan));
-    return Prepare(*plan, paths);
   }
 
   iree_status_t LoadRoots(iree_host_size_t shared_count,
@@ -699,6 +699,51 @@ TEST_P(WeightsTest, CanonicalWeightsNeedNoPreparationOrLeadingSharedGroup) {
   Run(0, 90);
 }
 
+TEST_P(WeightsTest, PreparationPublishesOnlyRecordableRootAddresses) {
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  const auto root = Root(0, 0);
+  auto allocate = [&] {
+    return loom_serve_weights_allocate(
+        device_, transfer_, dispatch_,
+        loom_serve_device_storage_pool(device_owner_), pool_, 0, 1, &root,
+        host_allocator_, &plans_[plan_count_++]);
+  };
+  if (!pool_) {
+    // Allocation is accepted while its native dependency is held. Its later
+    // failure belongs to preparation completion, before consumer recording.
+    auto& allocator =
+        loom_serve::testing::NativeAllocator::ForDevice(device_owner_);
+    allocator.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC,
+                                 /*native_only=*/true);
+    loom_serve::testing::ScopedNativeHold hold(device_owner_);
+    IREE_ASSERT_OK(allocate());
+    hold.WaitEntered();
+  } else {
+    IREE_ASSERT_OK(allocate());
+  }
+  auto status = Prepare(plans_[0], {path_.path()});
+  if (!pool_) {
+    IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    // Failed backing belongs to this plan; the shared compiler and execution
+    // queues remain usable by another parameter owner.
+    IREE_ASSERT_OK(Compile(1, "target"));
+    const auto peer = Root(1, 0);
+    IREE_ASSERT_OK(LoadRoots(0, 1, &peer, {path_.path()}));
+    Run(1, 70);
+  } else {
+    // Elastic roots already have stable virtual addresses. Recording needs
+    // no physical allocation, file read, or parameter activation.
+    IREE_ASSERT_OK(status);
+    IREE_ASSERT_OK(loom_serve_jit_stage_record(
+        compiled_[0], iree_hal_queue_family(dispatch_),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[0].data(),
+        &commands_[0]));
+    EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+    EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 0u);
+    EXPECT_EQ(loom_serve_weights_activity(plans_[0]).read_bytes, 0u);
+  }
+}
+
 TEST_P(WeightsTest, SeparateCheckpointDomainsRetainSharedBaseStorage) {
   WriteCheckpoint(adapter_path_.path(), 100);
   IREE_ASSERT_OK(Compile(0, "raw"));
@@ -770,45 +815,6 @@ TEST_P(WeightsTest, InitialBackingRetirementMatchesAcceptedWork) {
   }
   loom_serve_weights_await_retirement(plans_[0]);
   EXPECT_TRUE(loom_serve_weights_is_retired(plans_[0]));
-}
-
-TEST_P(WeightsTest, PreparedRootsRecordConsumersBeforeActivation) {
-  IREE_ASSERT_OK(Compile(0, "target"));
-  const auto root = Root(0, 0);
-  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
-  IREE_ASSERT_OK(loom_serve_jit_stage_record(
-      compiled_[0], iree_hal_queue_family(dispatch_),
-      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[0].data(),
-      &commands_[0]));
-  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
-  IREE_ASSERT_OK(loom_serve_weights_await(plans_[0]));
-  Run(0, 70);
-}
-
-TEST_P(WeightsTest, FailedInitialBackingFailsPreparationAndPreservesPeer) {
-  if (pool_) {
-    GTEST_SKIP() << "Elastic roots allocate physical backing during activation";
-  }
-  IREE_ASSERT_OK(Compile(0, "target"));
-  const auto root = Root(0, 0);
-  {
-    loom_serve::testing::ScopedNativeHold hold(device_owner_);
-    loom_serve::testing::NativeAllocator::ForDevice(device_owner_)
-        .FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC, true);
-    // Hold the actual native dependency until allocation has accepted its
-    // handles. The later failure belongs to readiness, not submission.
-    IREE_ASSERT_OK(loom_serve_weights_allocate(
-        device_, transfer_, dispatch_,
-        loom_serve_device_storage_pool(device_owner_), pool_, 0, 1, &root,
-        host_allocator_, &plans_[plan_count_++]));
-    hold.WaitEntered();
-  }
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        Prepare(plans_[0], {path_.path()}));
-  IREE_ASSERT_OK(Compile(1, "target"));
-  const auto peer = Root(1, 0);
-  IREE_ASSERT_OK(LoadRoots(0, 1, &peer, {path_.path()}));
-  Run(1, 70);
 }
 
 TEST_P(WeightsTest, MissingFileParameterFailsTheLoad) {
@@ -1105,6 +1111,7 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
   loom_serve_activation_free(activation);
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_serve_residency_cancel_admission(residencies_[0]);
   loom_serve_residency_release(residencies_[0]);
   loom_serve_residency_release(residencies_[0]);
   // A new operation can now reclaim the unpinned peer and finish normally.
@@ -1301,6 +1308,7 @@ TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
   loom_serve_residency_release(residencies_[0]);
   ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(1));
+  loom_serve_residency_cancel_admission(residencies_[1]);
   const auto admitted = loom_serve_residency_snapshot(residencies_[1]);
   EXPECT_FALSE(admitted.admission.waiting);
   EXPECT_EQ(admitted.admission.count, 2u);
@@ -1313,12 +1321,88 @@ TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
   EXPECT_EQ(loom_serve_residency_snapshot(residencies_[0]).admission.count, 2u);
   loom_serve_residency_release(residencies_[1]);
   ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(0));
+  loom_serve_residency_cancel_admission(residencies_[0]);
   ASSERT_NO_FATAL_FAILURE(Run(0, 90));
   loom_serve_residency_release(residencies_[0]);
   EXPECT_EQ(loom_serve_residency_snapshot(residencies_[0]).pin_count, 0u);
   EXPECT_EQ(
       loom_serve_residency_snapshot(residencies_[1]).admission.duration_ns,
       admitted.admission.duration_ns);
+}
+
+TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
+  if (!GetParam()) {
+    return;
+  }
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+  }
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool_, 2 * kSlabBytes, 256, &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+  loom_serve_residency_release(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(1));
+  IREE_ASSERT_OK(loom_serve_residency_await(residencies_[1]));
+
+  // Parameters fit, but a retired mutable-state slab still consumes physical
+  // capacity until its native return. The new row needs a different slab.
+  const loom_serve_memory_range_t next = {state_, kSlabBytes, kSlabBytes};
+  bool admitted = false;
+  {
+    loom_serve::testing::ScopedNativeHold gate(device_owner_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
+    loom_serve_virtual_buffer_begin_trim(state_);
+    loom_serve_memory_operation_t* operation = nullptr;
+    IREE_ASSERT_OK(loom_serve_memory_pool_trim_async(pool_, 1, &state_, nullptr,
+                                                     0, &operation));
+    gate.WaitEntered();
+    loom_serve_memory_operation_await(operation);
+    IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
+    loom_serve_memory_operation_free(operation);
+    EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
+              kSlabBytes);
+    IREE_ASSERT_OK(
+        loom_serve_memory_pool_try_commit(pool_, 1, &next, &admitted));
+    EXPECT_FALSE(admitted);
+    // No row was admitted, and activation has retired. Releasing that pin
+    // must not surrender this request's turn to the younger parameter waiter.
+    loom_serve_residency_release(residencies_[1]);
+    EXPECT_TRUE(
+        loom_serve_residency_snapshot(residencies_[1]).admission.waiting);
+    IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+    EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+    EXPECT_TRUE(loom_serve_residency_snapshot(residencies_[1]).active);
+    EXPECT_EQ(loom_serve_weights_activity(plans_[1]).deactivations, 0u);
+  }
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool_, 1, &next, &admitted));
+  ASSERT_TRUE(admitted);
+  loom_serve_residency_cancel_admission(residencies_[1]);
+  const auto completed = loom_serve_residency_snapshot(residencies_[1]);
+  EXPECT_FALSE(completed.admission.waiting);
+  EXPECT_EQ(completed.admission.count, 1u);
+  EXPECT_EQ(completed.pin_count, 1u);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[1]).activations, 1u);
+  ASSERT_NO_FATAL_FAILURE(Run(1, 70));
+  loom_serve_residency_release(residencies_[1]);
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(0));
+  loom_serve_residency_cancel_admission(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  loom_serve_residency_release(residencies_[0]);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).peak_bytes,
+            2 * kSlabBytes);
 }
 
 TEST_P(WeightsTest, NewAdmissionsCoexistWithoutPhysicalPressure) {

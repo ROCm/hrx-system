@@ -31,6 +31,7 @@ iree_c_embed_data(
     srcs = [
         ":nvfp4_matrix_benchmark.cxx",
         "//loom/src/loom/import/cxx/test:aiter_swiglu_f16.cxx",
+        "//loom/src/loom/import/cxx/test:collective_scans.cxx",
         "//loom/src/loom/import/cxx/test:configured_workgroup_storage.cxx",
         "//loom/src/loom/import/cxx/test:flash_attention.cxx",
         "//loom/src/loom/import/cxx/test:llama_rms_norm.cxx",

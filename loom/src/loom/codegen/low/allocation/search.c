@@ -118,21 +118,17 @@ loom_low_allocation_search_location_query(
     const loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate) {
   loom_low_allocation_search_location_query_t query = {0};
-  if (context->placement == NULL) {
-    return query;
+  if (context->placement != NULL) {
+    loom_value_ordinal_t ordinal = LOOM_VALUE_ORDINAL_INVALID;
+    if (loom_low_allocation_assignment_map_value_ordinal_for_value(
+            context->assignment_map, candidate->value_id, &ordinal)) {
+      query.preferences = loom_low_allocation_preference_prepare(
+          context->preferences, context->placement, context->assignment_map,
+          context->target_constraints, ordinal, LOOM_VALUE_ORDINAL_INVALID,
+          context->preference_workspace);
+    }
   }
-  loom_value_ordinal_t ordinal = LOOM_VALUE_ORDINAL_INVALID;
-  if (!loom_low_allocation_assignment_map_value_ordinal_for_value(
-          context->assignment_map, candidate->value_id, &ordinal)) {
-    return query;
-  }
-  query.preferences = loom_low_allocation_preference_prepare(
-      context->preferences, context->placement, context->assignment_map,
-      context->target_constraints, ordinal, LOOM_VALUE_ORDINAL_INVALID,
-      context->preference_workspace);
-  if ((query.preferences.use_count != 0 ||
-       query.preferences.structural.placement != NULL) &&
-      !loom_target_residency_model_is_empty(context->residency.model)) {
+  if (!loom_target_residency_model_is_empty(context->residency.model)) {
     const uint16_t reg_class = candidate->descriptor_reg_class_id;
     const uint32_t* extents =
         context->target_constraints->max_assigned_location_end_by_reg_class;
@@ -467,11 +463,10 @@ static bool loom_low_allocation_search_consider_linear_location(
       loom_low_allocation_search_location_preference_penalty(context, query,
                                                              &candidate);
   const uint32_t tier =
-      query->preferences.structural.placement != NULL ||
-              query->preferences.use_count != 0
+      query->tier_limit != 0
           ? loom_low_allocation_search_assignment_residency_tier(context,
                                                                  &candidate)
-          : query->tier_limit;
+          : 0;
   if (out_choice->found &&
       (tier < out_choice->residency_tier ||
        (tier == out_choice->residency_tier &&
@@ -864,11 +859,10 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
         loom_low_allocation_search_location_preference_penalty(context, query,
                                                                &candidate);
     const uint32_t tier =
-        query->preferences.structural.placement != NULL ||
-                query->preferences.use_count != 0
+        query->tier_limit != 0
             ? loom_low_allocation_search_assignment_residency_tier(context,
                                                                    &candidate)
-            : query->tier_limit;
+            : 0;
     const uint32_t first_candidate_ordinal =
         out_choice->found
             ? iree_min(out_choice->first_candidate_ordinal, candidate_ordinal)

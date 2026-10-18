@@ -17,6 +17,7 @@ loom_check_test_suite(
     "arithmetici.loom-test"
     "bitwisei.loom-test"
     "conversioni.loom-test"
+    "fast_math.loom-test"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

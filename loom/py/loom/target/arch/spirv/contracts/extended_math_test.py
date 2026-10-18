@@ -68,7 +68,8 @@ def test_extended_math_contract_covers_scalar_and_native_vector_shapes() -> None
             for guard in rule.guards
             if guard.kind == GuardKind.INSTANCE_FLAGS_HAS_ALL
         ]
-        assert all(guard.field == "fastmath" for guard in flag_guards)
+        flag_field = "math" if operation_key in ("sinf", "cosf") else "fastmath"
+        assert all(guard.field == flag_field for guard in flag_guards)
         assert tuple(guard.enum_keyword for guard in flag_guards) == (
             operation.required_fastmath_flags
         )

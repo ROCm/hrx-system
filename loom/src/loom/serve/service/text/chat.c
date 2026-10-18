@@ -668,8 +668,10 @@ iree_status_t loom_serve_text_chat_prepare_input(
         &parsed_span_count);
   }
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < (iree_host_size_t)count; ++i) {
-      out_tokens[i] = (int32_t)iree_unaligned_load_le_u32(bytes.data + i * 4);
+    if (out_tokens) {
+      for (iree_host_size_t i = 0; i < (iree_host_size_t)count; ++i) {
+        out_tokens[i] = (int32_t)iree_unaligned_load_le_u32(bytes.data + i * 4);
+      }
     }
     *out_count = (iree_host_size_t)count;
     *out_media_spans = parsed_spans;
@@ -1606,7 +1608,7 @@ static iree_status_t loom_serve_text_chat_response_begin(
       output,
       "{\"id\":\"loom-%" PRIu64 "\",\"object\":\"%s\",\"created\":%" PRId64
       ",\"model\":",
-      response->request_id, object, response->creation_time / 1000000000));
+      response->request_id, object, response->created_unix_seconds));
   return loom_serve_text_chat_quote(output, response->model_name);
 }
 

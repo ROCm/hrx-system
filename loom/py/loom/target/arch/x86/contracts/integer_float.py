@@ -4,19 +4,28 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Scalar integer-to-F32/F64 rules, including AVX2 unsigned composition."""
+"""Complete x86 integer-to-F32/F64 conversion contracts."""
 
 from loom.dialect.scalar import conversion
+from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.arch.x86.contracts.rule_builders import (
     DescriptorLookup,
     emit_descriptor_op,
 )
-from loom.target.arch.x86.vector_families import FLOAT_ELEMENTS
+from loom.target.arch.x86.native_conversion import vector_integer_float_mnemonic
+from loom.target.arch.x86.vector_families import (
+    AVX2_INTEGER_FLOAT_I32_FORMS,
+    AVX512_INTEGER_FLOAT_I32_FORMS,
+    AVX512_INTEGER_FLOAT_I64_FORMS,
+    FLOAT_ELEMENTS,
+    IntegerFloatVectorForm,
+)
 from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
+    ReadOnlyDataLiteral,
     Scalar,
     ValueRef,
     Vector,
@@ -24,6 +33,7 @@ from loom.target.contracts import (
 
 _I32 = Scalar("i32")
 _I64 = Scalar("i64")
+_REGISTER_SUFFIXES = {128: "xmm", 256: "ymm", 512: "zmm"}
 
 
 def _normalize_integer(
@@ -226,3 +236,257 @@ def avx512_integer_float_rules(
         for width in (32, 64)
         for element in FLOAT_ELEMENTS
     )
+
+
+def _vector_descriptor_key(
+    form: IntegerFloatVectorForm,
+    *,
+    unsigned: bool,
+    evex: bool,
+) -> str:
+    feature = "avx512" if evex else "avx2"
+    mnemonic = vector_integer_float_mnemonic(
+        form.source.bit_width,
+        form.result.bit_width,
+        unsigned=unsigned,
+    )
+    result_suffix = _REGISTER_SUFFIXES[max(128, form.result_vector_bit_width)]
+    source_suffix = _REGISTER_SUFFIXES[max(128, form.source_vector_bit_width)]
+    return f"x86.{feature}.{mnemonic}.{result_suffix}.{source_suffix}"
+
+
+def _vector_guards(form: IntegerFloatVectorForm) -> tuple[Guard, ...]:
+    return (
+        Guard.value_type("input", Vector(form.source.name, lanes=form.lane_count)),
+        Guard.value_type("result", Vector(form.result.name, lanes=form.lane_count)),
+        Guard.value_static_element_count_eq("input", "result"),
+    )
+
+
+def _vector_direct_rule(
+    source_op: Op,
+    form: IntegerFloatVectorForm,
+    *,
+    unsigned: bool,
+    evex: bool,
+    priority: int,
+    descriptor_lookup: DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup(
+        _vector_descriptor_key(form, unsigned=unsigned, evex=evex)
+    )
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=_vector_guards(form),
+        emit=(
+            emit_descriptor_op(
+                descriptor=descriptor,
+                operands={"input": ValueRef.operand("input")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+        priority=priority,
+    )
+
+
+def _avx2_unsigned_i32_f32_rule(
+    form: IntegerFloatVectorForm,
+    descriptor_lookup: DescriptorLookup,
+) -> DescriptorRule:
+    register_suffix = _REGISTER_SUFFIXES[max(128, form.source_vector_bit_width)]
+    integer_type = Vector("i32", lanes=form.lane_count)
+    float_type = Vector("f32", lanes=form.lane_count)
+    convert = descriptor_lookup(
+        _vector_descriptor_key(form, unsigned=False, evex=False)
+    )
+    shift_right = descriptor_lookup(f"x86.avx2.vpsrld.{register_suffix}")
+    shift_left = descriptor_lookup(f"x86.avx2.vpslld.{register_suffix}")
+    bitwise_or = descriptor_lookup(f"x86.avx2.vpor.{register_suffix}")
+    add = descriptor_lookup(f"x86.avx2.vaddps.{register_suffix}")
+    select = descriptor_lookup(f"x86.avx2.vblendvps.{register_suffix}")
+    return DescriptorRule(
+        source_op=vector.vector_uitofp,
+        descriptor=convert,
+        guards=_vector_guards(form),
+        emit=(
+            emit_descriptor_op(
+                descriptor=shift_right,
+                operands={"source": ValueRef.operand("input")},
+                results={"dst": ValueRef.temporary("half")},
+                result_types={"dst": integer_type},
+                immediates={"shift": 1},
+            ),
+            emit_descriptor_op(
+                descriptor=shift_left,
+                operands={"source": ValueRef.operand("input")},
+                results={"dst": ValueRef.temporary("sticky_shifted")},
+                result_types={"dst": integer_type},
+                immediates={"shift": 31},
+            ),
+            emit_descriptor_op(
+                descriptor=shift_right,
+                operands={"source": ValueRef.temporary("sticky_shifted")},
+                results={"dst": ValueRef.temporary("sticky")},
+                result_types={"dst": integer_type},
+                immediates={"shift": 31},
+            ),
+            emit_descriptor_op(
+                descriptor=bitwise_or,
+                operands={
+                    "lhs": ValueRef.temporary("half"),
+                    "rhs": ValueRef.temporary("sticky"),
+                },
+                results={"dst": ValueRef.temporary("jammed")},
+                result_types={"dst": integer_type},
+            ),
+            emit_descriptor_op(
+                descriptor=convert,
+                operands={"input": ValueRef.operand("input")},
+                results={"dst": ValueRef.temporary("direct")},
+                result_types={"dst": float_type},
+            ),
+            emit_descriptor_op(
+                descriptor=convert,
+                operands={"input": ValueRef.temporary("jammed")},
+                results={"dst": ValueRef.temporary("converted_half")},
+                result_types={"dst": float_type},
+            ),
+            emit_descriptor_op(
+                descriptor=add,
+                operands={
+                    "lhs": ValueRef.temporary("converted_half"),
+                    "rhs": ValueRef.temporary("converted_half"),
+                },
+                results={"dst": ValueRef.temporary("doubled")},
+                result_types={"dst": float_type},
+            ),
+            emit_descriptor_op(
+                descriptor=select,
+                operands={
+                    "false_value": ValueRef.temporary("direct"),
+                    "true_value": ValueRef.temporary("doubled"),
+                    "mask": ValueRef.operand("input"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _avx2_unsigned_i32_f64_rule(
+    form: IntegerFloatVectorForm,
+    descriptor_lookup: DescriptorLookup,
+) -> DescriptorRule:
+    result_bit_width = max(128, form.result_vector_bit_width)
+    result_suffix = _REGISTER_SUFFIXES[result_bit_width]
+    integer_type = Vector("i64", lanes=form.lane_count)
+    float_type = Vector("f64", lanes=form.lane_count)
+    widen = descriptor_lookup(f"x86.avx2.vpmovzxdq.{result_suffix}.xmm")
+    load = descriptor_lookup(f"x86.avx2.vmovdqu.rodata.{result_suffix}")
+    bitwise_or = descriptor_lookup(f"x86.avx2.vpor.{result_suffix}")
+    subtract = descriptor_lookup(f"x86.avx2.vsubpd.{result_suffix}")
+    exponent_bits = 0x4330000000000000
+    exponent = exponent_bits.to_bytes(8, "little") * (result_bit_width // 64)
+    return DescriptorRule(
+        source_op=vector.vector_uitofp,
+        descriptor=widen,
+        guards=_vector_guards(form),
+        emit=(
+            emit_descriptor_op(
+                descriptor=widen,
+                operands={"source": ValueRef.operand("input")},
+                results={"dst": ValueRef.temporary("wide")},
+                result_types={"dst": integer_type},
+            ),
+            emit_descriptor_op(
+                descriptor=load,
+                results={"dst": ValueRef.temporary("exponent")},
+                result_types={"dst": integer_type},
+                immediates={"data": ReadOnlyDataLiteral(exponent)},
+            ),
+            emit_descriptor_op(
+                descriptor=bitwise_or,
+                operands={
+                    "lhs": ValueRef.temporary("wide"),
+                    "rhs": ValueRef.temporary("exponent"),
+                },
+                results={"dst": ValueRef.temporary("biased")},
+                result_types={"dst": float_type},
+            ),
+            emit_descriptor_op(
+                descriptor=subtract,
+                operands={
+                    "lhs": ValueRef.temporary("biased"),
+                    "rhs": ValueRef.temporary("exponent"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def avx2_vector_integer_float_rules(
+    descriptor_lookup: DescriptorLookup,
+) -> tuple[DescriptorRule, ...]:
+    rules: list[DescriptorRule] = []
+    for form in AVX2_INTEGER_FLOAT_I32_FORMS:
+        rules.append(
+            _vector_direct_rule(
+                vector.vector_sitofp,
+                form,
+                unsigned=False,
+                evex=False,
+                priority=0,
+                descriptor_lookup=descriptor_lookup,
+            )
+        )
+        rules.append(
+            _avx2_unsigned_i32_f32_rule(form, descriptor_lookup)
+            if form.result.bit_width == 32
+            else _avx2_unsigned_i32_f64_rule(form, descriptor_lookup)
+        )
+    return tuple(rules)
+
+
+def avx512_vector_integer_float_rules(
+    descriptor_lookup: DescriptorLookup,
+) -> tuple[DescriptorRule, ...]:
+    rules = [
+        _vector_direct_rule(
+            vector.vector_sitofp,
+            form,
+            unsigned=False,
+            evex=True,
+            priority=1,
+            descriptor_lookup=descriptor_lookup,
+        )
+        for form in AVX512_INTEGER_FLOAT_I32_FORMS[-2:]
+    ]
+    rules.extend(
+        _vector_direct_rule(
+            vector.vector_uitofp,
+            form,
+            unsigned=True,
+            evex=True,
+            priority=1,
+            descriptor_lookup=descriptor_lookup,
+        )
+        for form in AVX512_INTEGER_FLOAT_I32_FORMS
+    )
+    rules.extend(
+        _vector_direct_rule(
+            source_op,
+            form,
+            unsigned=unsigned,
+            evex=True,
+            priority=1,
+            descriptor_lookup=descriptor_lookup,
+        )
+        for form in AVX512_INTEGER_FLOAT_I64_FORMS
+        for source_op, unsigned in (
+            (vector.vector_sitofp, False),
+            (vector.vector_uitofp, True),
+        )
+    )
+    return tuple(rules)

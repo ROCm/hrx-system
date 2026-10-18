@@ -422,7 +422,9 @@ bool loom_target_math_policy_prefers_fma(
     "inverse-hyperbolic-f32")                                                  \
   _(RSQRT_NEWTON_ONE, recipe_rsqrt_newton_one, "rsqrt-newton-one")             \
   _(RSQRT_NEWTON_TWO, recipe_rsqrt_newton_two, "rsqrt-newton-two")             \
-  _(TRIGONOMETRIC_F32, recipe_trigonometric_f32, "trigonometric-f32")
+  _(TRIGONOMETRIC_F32, recipe_trigonometric_f32, "trigonometric-f32")          \
+  _(PRESERVE_TRIGONOMETRIC_ZEROS, recipe_preserve_trigonometric_zeros,         \
+    "preserve-trigonometric-zeros")
 
 typedef struct loom_target_math_name_strings_t {
 #define LOOM_TARGET_MATH_NAME_FIELD(name, field, value) \

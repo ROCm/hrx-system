@@ -1,0 +1,75 @@
+// RUN: pass target=amd.xdna.aie2p:core legalize-math
+
+// The shared requirement is consumed before the target-native polynomial.
+// It does not grant NSZ to the repair, including inside a fast source scope.
+func.def @scalar_zero_signs(%input: f32) -> (f32, f32, f32, f32, f32) {
+  %native = scalar.sinturnsf<afn> %input : f32
+  %sine = scalar.sinf<reassoc|nnan|ninf|nsz|arcp|contract|afn|preserve> %input : f32
+  %cosine = scalar.cosf<afn|preserve> %input : f32
+  %turn_sine = scalar.sinturnsf<afn|preserve> %input : f32
+  %turn_cosine = scalar.costurnsf<afn|preserve> %input : f32
+  func.return %native, %sine, %cosine, %turn_sine, %turn_cosine : f32, f32, f32, f32, f32
+}
+
+// ----
+func.def @scalar_zero_signs(%input: f32) -> (f32, f32, f32, f32, f32) {
+  %native = scalar.sinturnsf<afn> %input : f32
+  %24 = scalar.sinf<reassoc|nnan|ninf|arcp|contract|afn> %input : f32
+  %25 = scalar.constant 0.0 : f32
+  %26 = scalar.cmpf<reassoc|nnan|ninf|arcp|contract|afn> oeq, %24, %25 : f32
+  %27 = scalar.copysignf<reassoc|nnan|ninf|arcp|contract|afn> %25, %input : f32
+  %sine = scf.select %26, %27, %24 : f32
+  %20 = scalar.cosf<afn> %input : f32
+  %21 = scalar.constant 0.0 : f32
+  %22 = scalar.cmpf<afn> oeq, %20, %21 : f32
+  %cosine = scf.select %22, %21, %20 : f32
+  %15 = scalar.sinturnsf<afn> %input : f32
+  %16 = scalar.constant 0.0 : f32
+  %17 = scalar.cmpf<afn> oeq, %15, %16 : f32
+  %18 = scalar.copysignf<afn> %16, %input : f32
+  %turn_sine = scf.select %17, %18, %15 : f32
+  %11 = scalar.costurnsf<afn> %input : f32
+  %12 = scalar.constant 0.0 : f32
+  %13 = scalar.cmpf<afn> oeq, %11, %12 : f32
+  %turn_cosine = scf.select %13, %12, %11 : f32
+  func.return %native, %sine, %cosine, %turn_sine, %turn_cosine : f32, f32, f32, f32, f32
+}
+
+// ====
+// RUN: pass target=amdgpu:gfx1151 legalize-math
+
+// A radian rewrite retains the required sign of the original source input.
+func.def @vector_zero_signs(%input: vector<3xf32>) -> (vector<3xf32>, vector<3xf32>, vector<3xf32>, vector<3xf32>) {
+  %sine = vector.sinf<nsz|afn|preserve> %input : vector<3xf32>
+  %cosine = vector.cosf<afn|preserve> %input : vector<3xf32>
+  %turn_sine = vector.sinturnsf<afn|preserve> %input : vector<3xf32>
+  %turn_cosine = vector.costurnsf<afn|preserve> %input : vector<3xf32>
+  func.return %sine, %cosine, %turn_sine, %turn_cosine : vector<3xf32>, vector<3xf32>, vector<3xf32>, vector<3xf32>
+}
+
+// ----
+func.def @vector_zero_signs(%input: vector<3xf32>) -> (vector<3xf32>, vector<3xf32>, vector<3xf32>, vector<3xf32>) {
+  %30 = vector.constant 0.15915494309189535 : vector<3xf32>
+  %31 = vector.mulf<afn> %input, %30 : vector<3xf32>
+  %32 = vector.sinturnsf<afn> %31 : vector<3xf32>
+  %26 = vector.constant 0.0 : vector<3xf32>
+  %27 = vector.cmpf<afn> oeq, %32, %26 : vector<3xf32> -> vector<3xi1>
+  %28 = vector.copysignf<afn> %26, %input : vector<3xf32>
+  %sine = vector.select %27, %28, %32 : vector<3xf32>
+  %22 = vector.constant 0.15915494309189535 : vector<3xf32>
+  %23 = vector.mulf<afn> %input, %22 : vector<3xf32>
+  %24 = vector.costurnsf<afn> %23 : vector<3xf32>
+  %19 = vector.constant 0.0 : vector<3xf32>
+  %20 = vector.cmpf<afn> oeq, %24, %19 : vector<3xf32> -> vector<3xi1>
+  %cosine = vector.select %20, %19, %24 : vector<3xf32>
+  %13 = vector.sinturnsf<afn> %input : vector<3xf32>
+  %14 = vector.constant 0.0 : vector<3xf32>
+  %15 = vector.cmpf<afn> oeq, %13, %14 : vector<3xf32> -> vector<3xi1>
+  %16 = vector.copysignf<afn> %14, %input : vector<3xf32>
+  %turn_sine = vector.select %15, %16, %13 : vector<3xf32>
+  %9 = vector.costurnsf<afn> %input : vector<3xf32>
+  %10 = vector.constant 0.0 : vector<3xf32>
+  %11 = vector.cmpf<afn> oeq, %9, %10 : vector<3xf32> -> vector<3xi1>
+  %turn_cosine = vector.select %11, %10, %9 : vector<3xf32>
+  func.return %sine, %cosine, %turn_sine, %turn_cosine : vector<3xf32>, vector<3xf32>, vector<3xf32>, vector<3xf32>
+}

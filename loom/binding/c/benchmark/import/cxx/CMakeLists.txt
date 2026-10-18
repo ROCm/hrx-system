@@ -16,6 +16,7 @@ iree_c_embed_data(
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/benchmark/import/cxx/nvfp4_matrix_benchmark.cxx"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/aiter_swiglu_f16.cxx"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/collective_scans.cxx"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/configured_workgroup_storage.cxx"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/flash_attention.cxx"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/llama_rms_norm.cxx"

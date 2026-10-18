@@ -1,62 +1,289 @@
 # Building
 
-This repository has two supported build systems:
+Bazel is the source-tree build system and the source of truth for generated
+CMake build files. CMake supports package installation and embedding in other
+projects. `dev.py` prepares the developer tools and delegates to either build
+system; both can also be used directly.
 
-- Bazel is the source-tree build and the source of truth for generated CMake
-  build graph structure.
-- CMake is the package, install, and embedding build.
-
-`dev.py` is a command router. It prepares local tools and delegates to Bazel,
-CMake, CTest, and project scripts. Anything `dev.py` does must also be possible
-with the underlying tools directly.
-
-Build-system integration follows the same ownership boundary. Tests that
-configure or drive CMake are registered only in CTest; the Bazel build and test
-graphs neither invoke CMake nor require it to be installed. Bazel-to-CMake
-conversion is an explicit source-generation and presubmit step.
+- [Prerequisites and quick start](#quick-start)
+- [Build and test commands](#build-and-test-commands)
+- [Build configuration](#build-configuration)
+- [Platform builds and cross-compilation](#platform-builds-and-cross-compilation)
+- [Shared project configuration](#shared-project-configuration)
+- [Installation and embedding](#installation-and-embedding)
+- [Troubleshooting](#troubleshooting)
 
 ## Quick Start
 
-Developer environment setup selects Python 3.12, shared by the tested tool
-and importer environments. Install that interpreter before setup. Setup rejects
-an incompatible populated environment; move it aside or choose a new
-`--tool-root` before retrying.
+Install Python 3.12 with `venv` support and a C/C++ compiler, linker, and system
+headers. The base build uses C11 and C++20. Linux supports Clang and GCC;
+macOS uses Xcode or Command Line Tools. Windows requires the [MSVC ABI tools
+and Windows SDK](#native-windows), including when compiling with clang-cl.
+The optional [C/C++ importer](loom/src/loom/import/cxx/README.md) additionally
+requires a C++23 compiler and standard library with `std::expected` support.
 
-Bazel source-tree build:
+Run the following commands from the repository root. Setup creates a managed
+`.venv` with the pinned build tools; it does not install a native compiler or
+platform SDK. These examples build Loom and exercise CPU tests without
+requiring GPU or NPU hardware.
+
+### Bazel
 
 ```bash
 python dev.py bazel setup
 python dev.py bazel configure
-python dev.py bazel test
+python dev.py bazel build //loom/src/loom/tools/loom-compile
+python dev.py bazel test //runtime/src/iree/base/... --config=asan
 ```
 
-CMake package build with AMDGPU enabled:
+Bazel does not require CMake. Generated CMake files are checked in, so neither
+build requires a manual Bazel-to-CMake conversion.
+
+### CMake
 
 ```bash
 python dev.py cmake setup
-python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON
-python dev.py cmake build
-python dev.py cmake test
+python dev.py cmake configure -DLIBHRX_BUILD=OFF
+python dev.py cmake build loom-compile
+python dev.py cmake test -R '^iree/base/'
 ```
 
-New CMake build trees default to Ninja. Existing trees retain their configured
-generator; explicit `-G`, `CMAKE_GENERATOR`, and preset selections are honored.
+`LIBHRX_BUILD=OFF` selects a runtime/compiler build. Building the HRX GPU
+runtime instead uses `LIBHRX_BUILD=ON` and its AMDGPU dependencies; see
+[ROCm configuration](#rocm) and the [HRX package build](README.md#building).
 
-Install Git hooks for the build system you use for commits:
+The default build tree is `build/cmake`. Select another with
+`python dev.py --cmake-build-dir /path/to/build cmake configure ...`; subsequent
+wrapper commands remember that tree. New trees default to Ninja and a Release
+build. Existing trees retain their configuration, and explicit `-G`,
+`CMAKE_GENERATOR`, and preset selections are honored. System-tool builds need
+CMake 3.26 or newer; [shared Loom tools](#shared-loom-tool-bundles) need 3.27.
+
+### Tool environment
+
+Activate `.venv` to put the managed tools and `iree-bazel-*` / `iree-cmake-*`
+aliases on `PATH`:
 
 ```bash
-python dev.py bazel hook
+source .venv/bin/activate
 ```
 
-or:
+In PowerShell, use `.venv\Scripts\Activate.ps1`. Activation is optional when
+invoking `python dev.py`, which locates the managed environment itself.
+
+An embedding project can use `python dev.py bazel setup --system` to check
+already-installed tools, or `--tool-root /path/to/tools` to keep a managed
+environment outside the source tree. The same options work for CMake.
+[Contributing](CONTRIBUTING.md) covers Git hooks and development checks;
+source archive builds do not need Git hooks.
+
+## Build and Test Commands
+
+Put wrapper execution and tool-environment options before the build-system
+command:
 
 ```bash
-python dev.py cmake hook
+python dev.py --dry-run bazel build //runtime/...
+python dev.py --system bazel configure
+python dev.py --verbose cmake test -R hrx
 ```
 
-## Command Shape
+Put build-system options and target names after `<build-system> <command>`:
 
-### Bazel target selection
+```bash
+python dev.py bazel build //runtime/...
+python dev.py cmake configure -DCMAKE_BUILD_TYPE=Debug
+python dev.py cmake build hrx --parallel 8
+python dev.py cmake test -R hrx
+```
+
+After setup and environment activation, aliases use the same arguments:
+
+```bash
+iree-bazel-build //runtime/...
+iree-bazel-cquery 'kind(cc_library, //runtime/...)'
+iree-bazel-info execution_root
+iree-bazel-run //runtime/src/iree/base:allocator_benchmark
+iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
+iree-cmake-test -R hrx
+```
+
+CMake build and run commands also accept a unique executable output name, such
+as `loom-compile`. If two packages emit the same filename, use the qualified
+generated alias so the selection remains explicit.
+
+`iree-cmake-test` builds the selected tests and their dependencies before
+running them. A filtered test run therefore needs no separate matching
+`iree-cmake-build` invocation; source-only tests need no build.
+
+`iree-bazel-run`, `iree-bazel-try`, and `iree-bazel-fuzz` build first and then
+run the resolved executable directly, so Bazel does not hold its server lock
+while a benchmark, tool, or fuzzer is running.
+
+`iree-bazel-build` and `iree-bazel-test` without targets select `//runtime/...`
+and `//libhrx/...`. Name `//loom/...` or another package explicitly to include it.
+`iree-bazel-test` builds the selected tests before running them. Hardware tests
+need the matching driver, device access, and runtime libraries; compiling a
+backend does not provide those execution dependencies.
+
+Bazel outputs are available under `bazel-bin/`; test logs are under
+`bazel-testlogs/`. CMake places outputs in the selected build tree. Use
+`iree-bazel-run TARGET -- ARGS...` or `iree-cmake-run TARGET -- ARGS...` to
+build and run a tool with its runtime dependencies.
+
+### Using Bazel and CMake directly
+
+The wrappers select the tool environment and forward build arguments. With the
+same tools on `PATH`, the basic build commands are equivalent:
+
+```bash
+python dev.py bazel build //runtime/src/iree/base/...
+bazel build //runtime/src/iree/base/...
+
+python dev.py cmake configure -DLIBHRX_BUILD=OFF
+cmake -S . -B build/cmake -GNinja -DLIBHRX_BUILD=OFF
+
+python dev.py cmake build loom-compile
+cmake --build build/cmake --target loom_tools_loom-compile_loom-compile
+```
+
+The CMake wrapper resolves unique executable names such as `loom-compile` to
+their generated target names. Raw CTest runs tests that are already built;
+`iree-cmake-test` also builds the selected tests and their dependencies. After
+a full `cmake --build build/cmake`, run them directly with:
+
+```bash
+ctest --test-dir build/cmake --output-on-failure -R '^iree/base/'
+```
+
+## Build Configuration
+
+### Optimized builds
+
+Ordinary Bazel commands use `fastbuild` without link-time optimization. This is
+the intended mode for edit/build/test iteration. Use the checked-in optimized
+profile when producing release artifacts or performance measurements:
+
+```bash
+iree-bazel-build --config=opt //loom/src/loom/tools/loom-compile
+```
+
+`--config=opt` selects optimized compilation for target and host tools and
+ThinLTO for target links. Windows ThinLTO requires clang-cl. Native MSVC users
+can select `-c opt` for optimization without ThinLTO.
+
+The profile excludes `-march=native`, which would select the build machine's
+CPU and could make the output unusable on another host. Select an explicit
+architecture when producing binaries for a particular deployment CPU.
+
+CMake uses its native optimization settings:
+
+```bash
+iree-cmake-configure -DCMAKE_BUILD_TYPE=Release -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+```
+
+This enables interprocedural optimization for targets throughout the build,
+except components with explicit exclusions such as the mimalloc adapter.
+
+### Sanitizers
+
+Bazel selects sanitizer instrumentation with named configurations:
+
+| Config | Meaning |
+| --- | --- |
+| `--config=asan` | AddressSanitizer with use-after-scope checks. |
+| `--config=ubsan` | UndefinedBehaviorSanitizer with the function and vptr checks disabled to match the runtime's type-erased dispatch and `-fno-rtti` C++ mode. |
+| `--config=tsan` | ThreadSanitizer. |
+| `--config=msan` | MemorySanitizer; execution also requires instrumented native dependencies. |
+| `--config=fuzzer` | libFuzzer build mode with ASAN enabled. |
+
+Examples:
+
+```bash
+python dev.py bazel test //runtime/... --config=asan
+python dev.py bazel test //runtime/src/iree/async/... --config=tsan
+```
+
+CMake exposes `IREE_ENABLE_ASAN`, `IREE_ENABLE_UBSAN`, `IREE_ENABLE_TSAN`,
+and `IREE_ENABLE_MSAN`. Use a separate build tree for each configuration:
+
+```bash
+python dev.py --cmake-build-dir build/asan cmake configure \
+  -DLIBHRX_BUILD=OFF -DIREE_ENABLE_ASAN=ON
+python dev.py --cmake-build-dir build/asan cmake test -R '^iree/base/'
+```
+
+Availability depends on the selected compiler and platform. Native Windows
+clang-cl supports ASAN; cross-built sanitizer runtimes are described in the
+[Windows](#windows-from-linux) and [macOS](#macos) sections.
+
+Tests and tools inherit sanitizer suppressions from the runtime libraries they
+use, including combined sets when they use multiple APIs. Bazel run/test, the
+`iree-bazel-*` launch wrappers, and CTest supply the required files and
+environment. Launching a raw executable outside these wrappers requires setting
+up that sanitizer environment separately.
+
+### Shared Loom tool bundles
+
+Loom tools link statically by default. Release bundles can share the compiler
+and runtime used by `loom-compile`, `loom-opt`, and `loom-import-cxx`:
+
+```bash
+iree-bazel-build --config=opt --//loom/config:shared_tools \
+  //loom/src/loom/tools/loom-compile \
+  //loom/src/loom/tools/loom-opt \
+  //loom/src/loom/tools/loom-serve
+iree-cmake-configure -DLOOM_LINK_SHARED_TOOLS=ON
+```
+
+The shared mode packages one `libloomc` and one `libiree` alongside the compiler
+tools. `loom-serve` keeps its compiler and runtime statically linked in either
+mode, retaining whole-program optimization and standalone deployment.
+The IREE companion includes the configured HAL drivers. Deploy all files from
+the same build; these companion libraries have no independent ABI version.
+Shared compiler tools trade some cross-library optimization for a smaller
+bundle. Local development and benchmarks retain the default static mode.
+
+CMake shared tools require CMake 3.27 or newer and static component libraries
+(`BUILD_SHARED_LIBS=OFF`). This option controls final tool composition separately
+from the component sharing used for in-tree development. Each selected tool's
+install component includes both libraries, with relative loader paths for
+`bin/` and `lib/` installs or a single-directory bundle. The installed LoomC SDK
+exports the same configured bindings in either mode.
+Windows CMake builds place the shared tools and both DLLs together under the
+build tree's `bin/` directory so the tools also run directly from the build tree.
+
+### Python runtime symbols
+
+Bazel's Linux x86-64 glibc Python runtime omits interpreter C debug information
+by default. Python source debugging and tracebacks are unaffected. To debug
+inside CPython, select the matching runtime with native debug symbols:
+
+```bash
+iree-bazel-build --config=python-runtime-debug //loom/py/loom/tools:loom-compile-report
+```
+
+This composes with `--config=asan` and `--config=opt` without changing project
+optimization or C/C++ debug information.
+
+### Default allocator
+
+IREE uses libc for `iree_allocator_system()` by default. Native builds can
+select the repository-pinned mimalloc provider for the shared default:
+
+```bash
+iree-bazel-build --config=mimalloc //runtime/src/iree/base:allocator_mimalloc_test
+iree-cmake-configure -DIREE_ALLOCATOR_SYSTEM=mimalloc
+```
+
+Explicit allocator arguments retain their caller-selected implementation. The
+mimalloc configuration composes with ASAN, MSAN, TSAN, and UBSAN. Sanitizer
+instrumentation owns the process allocation boundary in those builds, so the
+effective shared default remains libc and global C++ allocation is not replaced.
+
+## Platform Builds and Cross-Compilation
+
+### Destination and compiler selection
 
 Bazel builds for the host by default. Destination and compiler choices are
 independent:
@@ -84,168 +311,117 @@ build host. Native builds do not require either cross SDK installation. SDK
 acquisition is separate from Bazel configuration; the sections below describe
 the inputs for each destination.
 
-Linux cross builds use stable execution-root-relative compiler and SDK paths.
-Compiler and linker actions declare separate file sets, including LLVM's
-resolved non-glibc shared libraries; the host supplies its Linux loader and
-glibc. Native Windows retains upstream `local_config_cc` discovery and its
-installation paths. Shared remote caching and execution additionally require
-a specified execution environment; these local configurations do not define one.
-
-### Optimized builds
-
-Ordinary Bazel commands use `fastbuild` without link-time optimization. This is
-the intended mode for edit/build/test iteration. Use the checked-in optimized
-profile when producing release artifacts or performance measurements:
-
-```bash
-iree-bazel-build --config=opt //loom/src/loom/tools/loom-compile
-```
-
-`--config=opt` selects Bazel's optimized compilation mode, speed optimization
-for target and host tools, and ThinLTO for target links as one reproducible
-configuration. Toolchains own the driver spellings: Clang uses `-O3`, while
-clang-cl uses `/clang:-O3`. ELF toolchains distribute ThinLTO indexing and
-backend actions through Bazel; COFF, Mach-O, and WebAssembly toolchains perform
-ThinLTO within their link actions. Hosted WASI executables retain this profile
-while removing native sanitizer and driver-specific options.
-
-Use this profile instead of spelling those options independently so builds
-share action and test cache entries across worktrees and agents. Windows
-ThinLTO requires clang-cl. Native MSVC users can select ordinary `-c opt`
-without ThinLTO; it is a different optimization profile.
-
-The profile deliberately excludes `-march=native`. A binary compiled that way
-describes the CPU of the selected compiler worker, which need not be the CPU
-that executes it. Target platforms and toolchains own portable ISA selection;
-local benchmark runs may add an explicit architecture flag only when the build
-and execution machine are intentionally the same.
-
-### Shared Loom tool bundles
-
-Loom tools link statically by default. Release bundles can share the compiler
-and runtime used by `loom-compile`, `loom-opt`, and `loom-import-cxx`:
-
-```bash
-iree-bazel-build --config=opt --//loom/config:shared_tools \
-  //loom/src/loom/tools/loom-compile \
-  //loom/src/loom/tools/loom-opt \
-  //loom/src/loom/tools/loom-serve
-iree-cmake-configure -DLOOM_LINK_SHARED_TOOLS=ON
-```
-
-The shared mode packages one `libloomc` and one `libiree` alongside the compiler
-tools. `loom-serve` keeps its compiler and runtime statically linked in either
-mode, retaining whole-program optimization and standalone deployment.
-The IREE companion includes the configured HAL drivers and owns runtime state
-used by both tools and compiler discovery. All files in this bundle come from
-the same build; the companion is not an independently versioned IREE ABI.
-Shared compiler tools trade some cross-library optimization for a smaller
-bundle. Local development and benchmarks retain the default static mode.
-
-CMake shared tools require CMake 3.27 or newer and static component libraries
-(`BUILD_SHARED_LIBS=OFF`). This option controls final tool composition separately
-from the component sharing used for in-tree development. Each selected tool's
-install component includes both libraries, with relative loader paths for
-`bin/` and `lib/` installs or a single-directory bundle. The installed LoomC SDK
-exports the same configured bindings in either mode.
-Windows CMake builds place the shared tools and both DLLs together under the
-build tree's `bin/` directory so the tools also run directly from the build tree.
-
-### Default allocator
-
-IREE uses libc for `iree_allocator_system()` by default. Native builds can
-select the repository-pinned mimalloc provider for the shared default:
-
-```bash
-iree-bazel-build --config=mimalloc //runtime/src/iree/base:allocator_mimalloc_test
-iree-cmake-configure -DIREE_ALLOCATOR_SYSTEM=mimalloc
-```
-
-Explicit allocator arguments retain their caller-selected implementation. The
-mimalloc configuration composes with ASAN, MSAN, TSAN, and UBSAN. Sanitizer
-instrumentation owns the process allocation boundary in those builds, so the
-effective shared default remains libc and global C++ allocation is not replaced.
-
 Cross-built executables run on their destination OS. Transfer the executable,
-dependent libraries, debug artifacts, and consumer runfiles to that host.
-Linux `bazel run` and `bazel test` cannot execute Windows or macOS binaries.
-The Windows destination preset permits building test wrappers without a Windows
-executor; `bazel test` retains execution-platform qualification. This separates
-artifact production from execution without registering a remote executor or
-changing the host toolchain used by generators.
+dependent libraries, debug artifacts, and runfiles to that host. The Windows
+and macOS destination presets allow `bazel build` to produce test artifacts
+without a destination executor. `bazel test` still requires a matching execution
+platform; a Linux host cannot execute Windows or macOS binaries itself.
 
-Other destination presets retain Bazel's requirement for a matching test
-execution platform even during wrapper build analysis. Their source binary
-targets can be built independently. For example,
-`//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test_binary`
-is the artifact target for the `:elf_module_test` wrapper.
+Cross-compilation does not configure remote execution. Shared remote caching
+and execution additionally need a compatible execution environment for the
+selected host tools.
 
-### Serving image inputs
+### Native Windows
 
-Loom serving image input is enabled by default on Linux, macOS, and Windows.
-PAM images have a built-in decoder with no third-party dependencies. PNG, JPEG,
-GIF, and WebP have independent providers, all enabled by default. A minimal
-build can retain image input with only PAM, select optional codecs, or disable
-image input entirely:
+Windows builds require an x64 MSVC ABI environment even when `clang-cl` is the
+host compiler. Install Python 3.12, Visual Studio 2022 Build Tools with the x64
+C++ tools and a Windows SDK, and Git for Windows. Bazel uses the Bash supplied
+by Git for Windows; the developer wrapper discovers it automatically. The
+managed developer environment installs Ninja and CMake. Install LLVM separately
+when building with `clang-cl`.
 
-```bash
-iree-bazel-configure -DLOOM_SERVE_IMAGE_CODECS=
-iree-cmake-configure -DLOOM_SERVE_IMAGE_CODECS=
+Start from an x64 Visual Studio developer shell so `INCLUDE`, `LIB`, the SDK
+tools, and the MSVC linker are available. Git for Windows also ships a Unix
+program named `link.exe`, so check which executable comes first on `PATH`:
 
-iree-bazel-configure '-DLOOM_SERVE_IMAGE_CODECS=png;jpeg'
-iree-cmake-configure '-DLOOM_SERVE_IMAGE_CODECS=png;jpeg'
-
-iree-bazel-configure -DLOOM_SERVE_IMAGE_INPUT=OFF
-iree-cmake-configure -DLOOM_SERVE_IMAGE_INPUT=OFF
+```powershell
+where.exe cl
+where.exe link
 ```
 
-The native Bazel options are `--//loom/config/serve:image_input=false` and
-`--//loom/config/serve:image_codecs=png,jpeg`; an empty codec list retains PAM.
-Only selected optional providers enter the source-fetch and link graphs.
-Disabled formats return an explicit error; other serving modalities do not
-depend on codec availability. Other operating systems exclude image providers
-by default.
+The first `link.exe` must be the MSVC linker, not Git's `usr\bin\link.exe`.
+Create the repository tool environment and check it:
 
-### Serving audio inputs
-
-WAV, MP3, and FLAC transcription inputs are enabled by default on Linux, macOS,
-and Windows. They use a pinned miniaudio decoder with device IO, private threads,
-resource management, encoding, and runtime library loading disabled. Container
-decoding, channel conversion, and resampling run on the serving application's
-shared CPU executor.
-
-One codec list selects a subset or removes the dependency entirely:
-
-```bash
-iree-bazel-configure '-DLOOM_SERVE_AUDIO_CODECS=wav;flac'
-iree-cmake-configure '-DLOOM_SERVE_AUDIO_CODECS=wav;flac'
-
-iree-bazel-configure -DLOOM_SERVE_AUDIO_CODECS=
-iree-cmake-configure -DLOOM_SERVE_AUDIO_CODECS=
+```powershell
+python dev.py cmake setup --venv
+python dev.py cmake doctor
 ```
 
-The native Bazel spelling is `--//loom/config/serve:audio_codecs=wav,flac`.
-An empty list excludes miniaudio from the server's configured dependency graph;
-raw PCM16LE transcription and PCM speech synthesis remain available. Disabled
-encoded formats return an explicit error. This option selects input decoding;
-it does not add compressed speech output formats. Other operating systems
-exclude encoded-audio providers by default.
+Keep source and build paths short, and use a separate CMake tree for each
+compiler. Bazel's Python runfiles require symbolic links: enable Windows
+Developer Mode or grant the account the Create symbolic links user right.
+`python dev.py bazel configure` and `python dev.py bazel doctor` check that
+the current process can create one. The Windows long-path policy can help tools
+that support it, but does not remove path limits from every tool.
 
-### Windows targets
+Windows Bazel builds use `clang-cl` by default and require `BAZEL_LLVM` to name
+the LLVM installation root. The MSVC ABI tools and SDK still come from the
+active Visual Studio developer environment. Configure once, then build the
+normal Loom tool surface:
 
-The selected C/C++ toolchain also supplies the MASM assembler and sanitizer
-runtimes. Native Windows uses the tools discovered in its Visual Studio/LLVM
-environment. Linux cross builds use clang-cl, lld-link, and llvm-ml from the
-selected Linux LLVM installation.
+```powershell
+$env:BAZEL_LLVM = 'C:\Program Files\LLVM'
+python dev.py bazel setup --venv
+python dev.py bazel configure
+python dev.py bazel build `
+  //loom/src/loom/tools/iree-run-loom `
+  //loom/src/loom/tools/loom-compile `
+  //loom/binding/c:loomc
+```
 
-Clang's compiler runtime supplies helpers for operations such as 128-bit
-arithmetic. Bazel and CMake resolve it from the selected compiler and link it
-into executables and shared libraries that need those helpers.
+Use `--config=windows-msvc` to compile with MSVC. It changes the Windows
+compiler choice while preserving the configured features and dependencies.
+`--config=windows-clang-cl` explicitly selects the default compiler.
+Neither native command needs `--config=windows-x86_64`:
 
-#### Cross-compilation from Linux
+```powershell
+python dev.py bazel build `
+  //loom/src/loom/tools/iree-run-loom `
+  //loom/src/loom/tools/loom-compile `
+  //loom/binding/c:loomc `
+  --config=windows-msvc
+```
 
-Provide a Linux LLVM installation with the x86-64 Windows compiler runtime and
-a Windows SDK/MSVC sysroot. The LLVM resource directory must contain
+For a fresh CMake build limited to Loom's VM and x86 compiler targets, use:
+
+```powershell
+$baseOptions = @(
+  '-GNinja'
+  '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
+  '-DLIBHRX_BUILD=OFF'
+  '-DLOOM_TARGET_DEFAULTS=OFF'
+  '-DLOOM_TARGET_VM=ON'
+  '-DLOOM_TARGET_X86=ON'
+)
+
+$llvmBin = 'C:\Program Files\LLVM\bin'
+$env:PATH = "$llvmBin;$env:PATH"
+$env:CC = "$llvmBin\clang-cl.exe"
+$env:CXX = "$llvmBin\clang-cl.exe"
+$env:AR = "$llvmBin\llvm-lib.exe"
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake configure @baseOptions
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake build loom-compile --parallel 8
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake test -R '^iree/base/' -j 8
+```
+
+To use MSVC, select its tools and configure a separate build tree. CMake caches
+the compiler selection, so changing shell variables does not switch an already
+configured tree:
+
+```powershell
+$env:CC = 'cl.exe'
+$env:CXX = 'cl.exe'
+$env:AR = 'lib.exe'
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake configure @baseOptions
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake build loom-compile --parallel 8
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake test -R '^iree/base/' -j 8
+```
+
+### Windows from Linux
+
+Provide a Linux LLVM installation with clang-cl, lld-link, llvm-ml, and the
+x86-64 Windows compiler runtime, plus a Windows SDK/MSVC sysroot. The LLVM
+resource directory must contain
 `lib/windows/clang_rt.builtins-x86_64.lib`; the compiler can emit calls to
 these helpers for ordinary C and C++ operations. The Bazel repository reads
 `LLVM_ROOT` and `WINSDK_ROOT` from the environment or explicit `--repo_env`
@@ -295,11 +471,9 @@ The SDK's `VC/Tools/MSVC/<version>/lib/x64` directory must also contain
 it in the matching Visual Studio ASAN component; xwin's desktop CRT package may
 omit it. Native Windows obtains sanitizer artifacts from the selected LLVM or
 Visual Studio installation automatically. Both dynamic and static CRT builds
-deploy the sanitizer DLL beside each instrumented executable. Bazel supplies
-these runtimes to library and executable link actions, including third-party
-`cc_library`, `cc_binary`, and `cc_test` targets.
+need the sanitizer DLL beside each instrumented executable.
 
-### macOS targets
+### macOS
 
 Native builds use the Xcode or Command Line Tools selected by `xcode-select`
 or `DEVELOPER_DIR`. They ignore the Linux cross-toolchain environment variables.
@@ -307,7 +481,7 @@ Linux builds use Clang, `ld64.lld`, and `llvm-libtool-darwin` from `LLVM_ROOT`.
 Both paths support C, C++, Objective-C, Objective-C++, static libraries, and
 Mach-O executables and dylibs.
 The default minimum deployment version is macOS 11.0, independent of the SDK
-version; the `macos_toolchain_repository` declaration owns that policy.
+version.
 
 Export an SDK on a Mac with Xcode or Command Line Tools installed:
 
@@ -330,39 +504,25 @@ iree-bazel-build --config=macos-x86_64 -c opt \
 These paths can also be supplied with `--repo_env=LLVM_ROOT=...` and
 `--repo_env=MACOS_SDK_ROOT=...`.
 
-Framework consumers use ordinary dependencies such as
-`@iree_macos_toolchain//:Foundation` and `@iree_macos_toolchain//:Metal`.
-These provide public headers and framework link interfaces for the selected SDK.
-`objc_library` from `@rules_cc//cc:objc_library.bzl` handles `.m` and `.mm`
-sources, including ARC; its `CcInfo` also works with normal C/C++ rules.
-Framework dependencies carry the SDK files as well as link flags, so consumers
-do not need separate `sdk_frameworks` entries. The repository currently exposes
-CoreFoundation, CoreGraphics, Foundation, and Metal. Adding another framework
-to its explicit framework list inventories that framework's dependency closure.
+The toolchain exposes framework dependencies such as
+`@iree_macos_toolchain//:Foundation` and `@iree_macos_toolchain//:Metal`, plus
+CoreFoundation and CoreGraphics. These supply both headers and link interfaces.
+Use `objc_library` from `@rules_cc//cc:objc_library.bzl` for `.m` and `.mm`
+sources, including ARC.
 
-Compiler inputs include system headers and Clang resource headers. Framework
-headers enter through their dependencies; linker inputs include the SDK stubs
-actually opened by the selected linker, including re-exports. The full SDK and
-LLVM installation are not compiler or linker inputs. Both native and cross
-macOS actions use paths relative to the execution root, and the tool projection
-includes non-system loader libraries.
-
-The integration test embeds MSL with a host-built generator, compiles C and both
-Objective-C language modes, and dispatches and verifies a Metal compute kernel:
+Metal programs can compile MSL through the runtime API, so they do not require
+an offline Apple shader compiler. To build the Metal compute example on Linux
+and transfer it to a Mac:
 
 ```bash
-# On Linux, build and transfer the executable to a Mac for execution.
 iree-bazel-build --config=macos-arm64 //build_tools/macos/tests:metal_test
-
-# On a Mac with a Metal device, build and execute natively.
-iree-bazel-test //build_tools/macos/tests:metal_test
 ```
 
-Metal compiles this source through its runtime API; no offline Apple shader
-compiler is required. Command-line programs using `MTLCreateSystemDefaultDevice`
-also link CoreGraphics, as required by
-[Apple's API contract](https://developer.apple.com/documentation/metal/mtlcreatesystemdefaultdevice%28%29?language=objc).
-Metal compute execution works over SSH without a desktop login.
+On a Mac with a Metal device, build and run it with:
+
+```bash
+iree-bazel-test //build_tools/macos/tests:metal_test
+```
 
 The toolchain adds `@loader_path` to the runtime library search path so deployed
 dylibs can sit beside their consumer. Preserve the library names in the
@@ -378,264 +538,18 @@ support the destination architecture; the SDK itself does not provide it.
 Missing sanitizer artifacts fail during analysis. Bazel includes the runtime
 in native test runfiles; deploy the dylib beside cross-built executables.
 
-### Wrapper arguments
-
-Put wrapper execution and tool-environment options before the build-system
-command:
-
-```bash
-python dev.py --dry-run bazel build //runtime/...
-python dev.py --system bazel configure
-python dev.py --verbose cmake test -R hrx
-```
-
-Arguments after `<build-system> <command>` belong to the underlying tool:
-
-```bash
-python dev.py bazel build //runtime/... --config=presubmit
-python dev.py cmake configure -DCMAKE_BUILD_TYPE=Debug
-python dev.py cmake build hrx --parallel 8
-python dev.py cmake test -R hrx
-```
-
-After setup, generated aliases follow the same shape. They are the stable
-spelling for docs, scripts, and agent instructions:
-
-```bash
-iree-bazel-build //runtime/... --config=presubmit
-iree-bazel-cquery 'kind(cc_library, //runtime/...)'
-iree-bazel-info execution_root
-iree-bazel-run //runtime/src/iree/base:allocator_benchmark
-iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
-iree-cmake-test -R hrx
-```
-
-Link-time optimization uses CMake's native setting:
-
-```bash
-iree-cmake-configure -DCMAKE_BUILD_TYPE=Release -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
-```
-
-This enables IPO for targets throughout the build. The mimalloc allocator and
-its C++ allocation adapter retain their explicit IPO exclusions.
-
-CMake build and run commands also accept a unique executable output name, such
-as `loom-compile`. If two packages emit the same filename, use the qualified
-generated alias so the selection remains explicit.
-
-`iree-cmake-test` asks CTest for the exact selected records, builds the
-concrete CMake roots declared by those records, and then runs the same
-selection. A filtered test run therefore needs no separate matching
-`iree-cmake-build` invocation, and source-only selections perform no build.
-
-PATH aliases are also the stable spelling for launcher-backed commands:
-
-```bash
-iree-bazel-query 'rdeps(//runtime/..., //runtime/src/iree/base)'
-iree-bazel-cquery --output=files //runtime/src/iree/base
-iree-bazel-try -e 'int main() { return 0; }'
-```
-
-`iree-bazel-run`, `iree-bazel-try`, and `iree-bazel-fuzz` build first and then
-run the resolved executable directly, so Bazel does not hold its server lock
-while a benchmark, tool, or fuzzer is running.
-
-## Bazel Sanitizers
-
-Bazel has native sanitizer configs for source-tree development and CI:
-
-| Config | Meaning |
-| --- | --- |
-| `--config=asan` | AddressSanitizer with use-after-scope checks. |
-| `--config=ubsan` | UndefinedBehaviorSanitizer with the function and vptr checks disabled to match the runtime's type-erased dispatch and `-fno-rtti` C++ mode. |
-| `--config=tsan` | ThreadSanitizer. |
-| `--config=msan` | MemorySanitizer. MSAN builds are useful before the host dependency stack is fully instrumented; MSAN test failures can be dependency-instrumentation failures rather than runtime bugs. |
-| `--config=fuzzer` | libFuzzer build mode with ASAN enabled. |
-
-Examples:
-
-```bash
-python dev.py bazel test //runtime/... --config=asan
-python dev.py bazel test //runtime/src/iree/async/... --config=tsan
-```
-
-External runtime integrations declare `sanitizer_suppressions` on their owning
-library. C/C++ tests and tools inherit those sets through their configured
-dependencies; multiple files for the same sanitizer are concatenated into one
-file. For example, a tool with both Vulkan and HSA integrations receives both
-sets in its `LSAN_OPTIONS`. SDK headers alone carry no driver suppression policy.
-
-Bazel run/test, the `iree-bazel-*` launch wrappers, Loom test launchers, and CTest
-supply this environment and the required files. Installed CTest suites package
-and relocate the files with their tests. A raw executable launched outside these
-runners requires its own sanitizer environment. Suppression metadata selects
-runtime policy; the build configuration still selects instrumentation.
-
-## IREE CI Reproduction
-
-Test jobs declare the execution resources assigned to their runner. Every
-`iree-run-requirement=...` on a test must be available; matching one participant
-does not admit a mixed test. The CI helpers derive exclusions from the owners'
-requirement declarations and reject unknown IDs before executing a test phase.
-CTest builds the concrete roots of the selected tests after filtering.
-
-Hardware tests sharing the assigned device use `GPU_DEVICE_RESOURCE_GROUP`
-from `build_tools/bazel/test_resources.bzl`. CTest uses the shared `gpu-device`
-lock; Bazel uses local exclusivity. The group is explicit and independent of
-API selection and run requirements, so CPU mock tests need no device lock.
-Separate invocations or jobs require exclusive device assignment by the runner.
-
-IREE source-tree CI is run through the repo-local CI command script so GitHub
-workflow failures have copyable local commands. This is the script-backed
-surface; ordinary build/test docs use the `iree-bazel-*` and `iree-cmake-*`
-PATH aliases above. Command names are
-`iree-<build-system>-<target-group>[-<configuration>]`. Bazel jobs take explicit
-target patterns. CMake jobs use generated CTest names and labels directly.
-
-The CI compiler matrix assigns each compiler a deliberate role. Host compiler
-selection is explicit through `CC`, `CXX`, and `AR`; fetching ROCm never changes
-the host compiler through `PATH`. AMDGPU device actions receive the ROCm LLVM
-root independently through build configuration.
-
-| Workflow surface | Host compiler | AMDGPU device compiler | Coverage intent |
-| --- | --- | --- | --- |
-| Presubmit | Fetched ROCm Clang | None | Runs repository policy checks and clang-tidy with the newest supported LLVM APIs. |
-| IREE Bazel CPU Fastbuild/TSAN/UBSAN and CMake Sanitizer Smoke | Ubuntu Clang 18 | None | Preserves source build, test, and sanitizer coverage with the system compiler. |
-| IREE Bazel CPU ASAN and CMake CPU RelWithDebInfo | Fetched ROCm Clang | None | Exercises static and shared compiler tools, including the C++23 importer. |
-| IREE Bazel/CMake Vulkan | System GCC | None | Vulkan source build and execution coverage on self-hosted runners. |
-| IREE Bazel/CMake AMDGPU | Fetched ROCm Clang | Fetched ROCm Clang | Compiles and runs AMDGPU host and device code in the ROCm toolchain environment. |
-| IREE Bazel/CMake repository build | GCC 13 system toolchain | Fetched ROCm Clang | Builds every supported Linux HAL driver, Loom target/importer, and build-compatible target. |
-| libHRX Bazel | Fetched ROCm Clang | Fetched ROCm Clang | Validates the source HRX product against its shipping ROCm compiler environment. |
-| Installed CMake/package CI | Fetched ROCm Clang | Fetched ROCm Clang | Builds, installs, packages, and tests the composed HRX distribution. |
-
-The importer requires C++23 library facilities, including `std::expected`.
-Ubuntu Clang 18 with the runner's libstdc++ does not expose that facility, so
-the importer qualification jobs select the fetched ROCm host compiler explicitly.
-
-The `platform_coverage` rows in `.github/workflows/ci_iree.yml` are the shared
-representative set for portable optional dependencies: Linux Bazel Clang ASAN,
-Linux Bazel GCC repository build, Windows Bazel clang-cl repository integration,
-and Linux CMake Clang CPU. They cover both dependency-fetch mechanisms and the
-host compiler/platform boundaries without repeating dependency builds across
-every hardware or sanitizer configuration.
-
-These rows pass `IREE_CI_PLATFORM_COVERAGE=1` to the CI command script, enabling
-all optional image and audio codecs and the explicit compile-coverage phase for their
-configured graph. Other test-capable source-tree jobs invoke only their tests:
-Bazel and `dev.py cmake test` build the exact selected test closure before
-execution. Build-only sanitizer configurations and focused non-test integration
-witnesses retain explicit build phases. Other source-tree CI jobs retain
-image-serving tests through the built-in PAM provider and audio serving through
-raw PCM. Ordinary build/test commands and release packaging retain the normal
-codec defaults. Additional
-portable optional dependencies share this representative set; hardware execution
-remains governed by its own resource requirements.
-
-Windows Bazel also uses `platform_coverage` to select its single Python test
-run. Interpreter coverage remains once per OS/build system: ordinary Linux CPU
-and Windows CMake CPU jobs keep their Python tests, and hardware jobs keep
-Python drivers that exercise their assigned devices.
-
-The repository-wide GCC lane intentionally uses the complete `//...` pattern,
-not a hand-maintained project list or exclusions. Platform-incompatible targets
-remain incompatible through their declared Bazel constraints. The lane does
-not override GCC's linker selection; Bazel uses the GNU binutils provided by
-the system toolchain. The copyable build-shape command is:
-
-```bash
-CC=gcc CXX=g++ AR=ar \
-  python build_tools/devtools/ci.py iree-bazel-repository-build --keep-going
-```
-
-```bash
-python build_tools/devtools/ci.py iree-bazel-cpu --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-cpu-sanitizers --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-vulkan --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu --amdgpu-target gfx942 --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-asan --amdgpu-target gfx942 --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-ubsan --amdgpu-target gfx942 --keep-going
-python build_tools/devtools/ci.py iree-bazel-xdna-asan
-python build_tools/devtools/ci.py iree-bazel-amd-client-asan
-
-python build_tools/devtools/ci.py iree-cmake-cpu --keep-going
-python build_tools/devtools/ci.py iree-cmake-cpu-sanitizers --keep-going
-python build_tools/devtools/ci.py iree-cmake-vulkan --keep-going
-python build_tools/devtools/ci.py iree-cmake-vulkan-sanitizers --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu --amdgpu-target gfx942 --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --amdgpu-target gfx942 --keep-going
-python build_tools/devtools/ci.py iree-cmake-xdna-asan
-```
-
-AMDGPU commands default to `gfx942`. `--amdgpu-target` accepts an exact target
-or family selector and applies it to both the runtime HAL target set and Loom's
-`iree_hal`-derived compiler target set. Bazel AMDGPU commands build both source
-trees, then run the union of tests that require the AMDGPU HAL at build time or
-an AMD GPU at execution time.
-
-XDNA commands configure an XDNA-only libamdf and include its CTS, the XDNA HAL
-CTS, and Loom's native execution corpus. They need the native XDNA driver and
-access to the assigned NPU, but not ROCr, XRT, or an AMDGPU device compiler.
-Both Bazel and CMake select the existing XDNA resource metadata and serialize
-native tests through the shared AMD resource group. The commands without the
-`-asan` suffix use the ordinary host configuration, including on Windows.
-These commands do not provision devices or assign a cross-job hardware lease;
-the runner supplies those before invoking them. A run that skips every native
-test is not hardware qualification.
-
-The Linux and Windows **AMD RDNA+XDNA** Bazel workflows exercise the native
-client configuration through `iree-bazel-amd-client[-asan]`. Both libamdf
-families are compiled, including their tests. Both workflows run libamdf's
-host-only coverage and XDNA CTS from `//libamdf/...`, HAL coverage from
-`//runtime/src/iree/hal/drivers/amd/...`, and Loom execution coverage from
-`//loom/target/amd/xdna/...` and `//loom/src/loom/tooling/target/amd/xdna/...`.
-Loom's shared semantic scenarios and target-specific channel, DMA, and fold
-cases execute through the production HAL.
-
-Linux runs with ASAN on the gfx1150 NPU pool and requires access to the assigned
-`/dev/accel/accel0`. XDNA is its only admitted hardware test resource; GPU tests
-remain compiled but are excluded by their resource requirement.
-
-Windows runs natively with clang-cl on the gfx1151 pool and also admits native
-libamdf GPU, D3D12, and Vulkan device resources. This includes the libamdf
-D3D12 and GPU/XDNA memory interop matrices, Vulkan HAL CTS under
-`//runtime/src/iree/hal/drivers/vulkan/...`, and Loom Vulkan execution tests
-under `//loom/binding/c/test/target/spirv/...` and
-`//loom/src/loom/tooling/target/spirv/...`. The runner requires healthy AMD GPU
-and NPU drivers plus a Vulkan loader and compatible device. Hardware tests use
-the shared GPU resource group, and the runner supplies exclusive device access.
-The unsuffixed command is the Windows reproduction form; `--target` replaces
-the default package selection while preserving device admission.
-
-These jobs enable neither the ROCr-backed AMDGPU HAL nor its Loom execution
-suites and require neither ROCr nor a GPU target selector. CDNA, WASM, and
-optional importers are disabled. SPIR-V and the Vulkan HAL are enabled for the
-Windows API tests; the repository-wide CPU and libhrx suites remain outside
-the test scope.
-
-AMDGPU Bazel sanitizer configurations are separate CI jobs so they build and
-test independently. Aggregate CPU Bazel and CMake commands remain available as
-local batch commands. Individual sanitizer commands are the targeted
-reproduction form:
-
-```bash
-python build_tools/devtools/ci.py iree-bazel-cpu-asan --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 --keep-going
-python build_tools/devtools/ci.py iree-cmake-cpu-ubsan --keep-going
-python build_tools/devtools/ci.py iree-cmake-vulkan-ubsan --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu-tsan --amdgpu-target gfx942 --keep-going
-```
-
-AMDGPU Bazel CI tests ASAN, UBSAN, and TSAN. It does not publish an MSAN lane:
-the CI host dependency stack is not MSAN-instrumented enough for execution to
-produce useful runtime signal. CPU Bazel and CMake retain their explicit
-build-only MSAN configurations.
-
 ## Shared Project Configuration
 
-Shared project options use CMake-style `-DNAME=VALUE` spelling. These options
-are a small published configuration API, not a universal compatibility layer
-between Bazel and CMake.
+Shared project options use CMake-style `-DNAME=VALUE` spelling with
+`iree-bazel-configure` or `iree-cmake-configure`. Only the options documented as
+portable have a Bazel translation.
+
+Bazel configure regenerates `.bazelrc.configured` from defaults and the supplied
+options: include all desired overrides in the same invocation. CMake updates
+its existing cache. Bazel-native overrides not handled by configure belong in
+`.bazelrc.local` or on an individual build command.
+
+### Runtime libraries and drivers
 
 | Option | Values | CMake | Bazel portable | Bazel native |
 | --- | --- | --- | --- | --- |
@@ -676,12 +590,15 @@ dependency stack:
 
 ```bash
 python dev.py bazel configure -DAMDF_BUILD=ON
-iree-bazel-test //libamdf/cts/...
+iree-bazel-build //libamdf:all
 
 iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
 iree-cmake-build libamdf/all
-iree-cmake-test -R '^libamdf/'
 ```
+
+The [libamdf test guide](libamdf/cts/README.md) describes device execution
+requirements. Kernel-based tests also need Loom enabled to compile their test
+programs; the library itself does not.
 
 The native family setting is a complete list. For example, an XDNA-only source
 configuration uses `--//libamdf/config:families=xdna`; the portable equivalent
@@ -690,10 +607,293 @@ sets `AMDF_FAMILY_RDNA=OFF` and `AMDF_FAMILY_CDNA=OFF`.
 Vulkan and D3D12 API selections control client compilation separately from
 device execution. They do not enable a HAL driver or shader compiler. Vulkan
 HAL selection also makes Vulkan available, so excluding all Vulkan clients
-requires disabling both requests. Each API owns its build and run requirements;
-mixed tests declare every participant they need. See the [Vulkan client
-guide](build_tools/vulkan/README.md) and [D3D12 client
-guide](build_tools/d3d12/README.md) for examples and dependency boundaries.
+requires disabling both requests. Running API tests also requires a loader,
+driver, and compatible device.
+See the [Vulkan client guide](build_tools/vulkan/README.md) and
+[D3D12 client guide](build_tools/d3d12/README.md) for details.
+
+### Dependency resolution
+
+`IREE_DEPENDENCY_MODE` is the shared dependency policy:
+
+| Value | Meaning |
+| --- | --- |
+| `pinned` | Uses checked-in source locks. This is the repository default. |
+| `package` | Requires dependencies to be provided as packages or parent-project targets. |
+| `auto` | Tries packages first, then falls back to pinned source dependencies. |
+
+CMake consumes this as a cache variable. Bazel consumes the same values through
+`--repo_env=IREE_DEPENDENCY_MODE=...`; `dev.py bazel configure` writes that
+repo environment into `.bazelrc.configured`. ROCm header facades also support
+`IREE_ROCM_DEPENDENCY_MODE`. When it is empty, `IREE_ROCM_PATH` selects ROCm
+package mode; without a ROCm path it inherits the global mode. To consume a
+ROCm or TheRock SDK while keeping other source dependencies pinned, set
+`IREE_ROCM_PATH` and leave `IREE_DEPENDENCY_MODE=pinned`.
+
+### ROCm
+
+Pinned mode is the default. It lets AMDGPU host-side code compile without a
+ROCm/TheRock root; Bazel writes `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none` when no
+ROCm path is configured:
+
+```bash
+python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
+```
+
+Package mode consumes headers from a configured ROCm/TheRock root. Setting
+`IREE_ROCM_PATH` selects ROCm package header mode by default:
+
+```bash
+python dev.py bazel configure \
+  -DIREE_HAL_DRIVER_AMDGPU=ON \
+  -DIREE_ROCM_PATH=/opt/rocm
+```
+
+When a ROCm path is only needed for device tooling and the headers should still
+come from pinned sources, set `IREE_ROCM_DEPENDENCY_MODE=pinned` explicitly.
+
+Bazel configuration also accepts `IREE_ROCM_PATH` from the environment when
+the AMDGPU HAL is enabled:
+
+```bash
+IREE_ROCM_PATH=/opt/rocm python dev.py bazel configure \
+  -DIREE_HAL_DRIVER_AMDGPU=ON \
+  -DIREE_ROCM_DEPENDENCY_MODE=pinned
+```
+
+Host compiler selection is independent of the ROCm device toolchain. Set
+`CC`, `CXX`, and `AR` before configuring to choose the host compiler. A
+successful host build with pinned headers does not install ROCr; executing
+ROCr-backed AMDGPU programs still needs the runtime and access to a GPU.
+See the [AMDGPU build tools guide](build_tools/amdgpu/README.md) for device
+compiler selection and runtime target selectors.
+
+### Loom compiler targets and execution
+
+Loom target options select compiler backends: `LOOM_TARGET_AMDGPU=ON` enables
+compilation for AMDGPU. Executing the compiled programs is controlled separately
+by Loom execution support and the runtime `IREE_HAL_DRIVER_*` options.
+
+The default dependency-satisfied Loom target set is
+`amdgpu,spirv,vm,xdna,x86`. VM compilation and function execution provide the
+standard evaluator for `check.case` and `check.benchmark`. AMDGPU and SPIR-V
+target compilation use pinned source dependencies by default and do not enable
+the matching runtime HAL drivers. WebAssembly is opt-in. The default execution
+substrate is `iree_hal`; execution still needs a
+matching runtime HAL driver such as `IREE_HAL_DRIVER_VULKAN` or
+`IREE_HAL_DRIVER_AMDGPU`.
+
+CMake exposes `LOOM_TARGET_DEFAULTS` and `LOOM_EXECUTE_DEFAULTS` to set the
+default value for dependency-satisfied target and execution options before the
+individual `LOOM_TARGET_*` and `LOOM_EXECUTE_*` overrides are evaluated. Bazel
+configuration writes complete native lists instead, so portable `-D...=OFF`
+options remove entries from the default set.
+
+AMDGPU has an additional compiler target selector list. `LOOM_TARGET_AMDGPU=ON`
+enables the backend; `LOOM_TARGET_AMDGPU_TARGETS` selects which AMDGPU
+processors it supports. The default selector is `loom_defaults`, which includes
+all of the following:
+
+| Architecture family | Processor targets |
+| --- | --- |
+| CDNA 2 | `gfx90a` |
+| CDNA 3 | `gfx940`, `gfx941`, `gfx942` |
+| CDNA 4 | `gfx950` |
+| Generic CDNA 3/4 | `gfx9-4-generic` |
+| RDNA 3 | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103` |
+| RDNA 3.5 | `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153` |
+| Generic GFX11 | `gfx11-generic` |
+| RDNA 4m | `gfx1170`, `gfx1171`, `gfx1172` |
+| RDNA 4 | `gfx1200`, `gfx1201` |
+| Generic GFX12 | `gfx12-generic` |
+| GFX12.5 | `gfx1250`, `gfx1251` |
+| Generic GFX12.5 | `gfx12-5-generic` |
+
+Generic targets compile code for a compatible group of processors. Exact
+processors allow target-specific features. `gfx1170`–`gfx1172` require exact
+target selection; no generic selector covers them in the pinned toolchain.
+
+The Loom AMDGPU selector accepts:
+
+- Source selectors: `loom_defaults`, `iree_hal`.
+- Exact processors listed in the table above.
+- Generic compiler targets: `gfx9-4-generic`, `gfx11-generic`,
+  `gfx12-generic`, `gfx12-5-generic`.
+- Fully covered family selectors: `gfx90a-dcgpu`, `gfx94X-all`, `gfx94X-dcgpu`,
+  `gfx950-all`, `gfx950-dcgpu`, `gfx110X-all`, `gfx110X-dgpu`,
+  `gfx110X-igpu`, `gfx115X-all`, `gfx115X-igpu`, `gfx117X-all`,
+  `gfx120X-all`, `gfx125X-all`.
+
+Runtime AMDGPU selectors such as `gfx9-generic`, `gfx908`,
+`gfx10-1-generic`, and `gfx10-3-generic` are not supported by the Loom compiler.
+The `iree_hal` selector narrows Loom to the supported subset requested by
+`IREE_HAL_AMDGPU_TARGETS`. Use it for a JIT build targeting the same processors
+as the runtime; `loom_defaults` keeps the compiler's full target set.
+
+| Option | Values | CMake | Bazel portable | Bazel native |
+| --- | --- | --- | --- | --- |
+| `LOOM_TARGET_AMDGPU` | `ON`, `OFF` | Builds Loom AMDGPU target support and production AMDGPU emission. | Adds or removes `amdgpu` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
+| `LOOM_TARGET_AMDGPU_TARGETS` | AMDGPU selectors | Selects descriptor-backed AMDGPU processors compiled into Loom AMDGPU target support. | Not exposed as a portable `-D` option. | `--//loom/config/target/amdgpu:targets=<complete-selector-list>` |
+| `LOOM_TARGET_SPIRV` | `ON`, `OFF` | Builds Loom SPIR-V target support and production SPIR-V emission. | Adds or removes `spirv` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
+| `LOOM_TARGET_VM` | `ON`, `OFF` | Builds Loom VM compilation and function execution. | Adds or removes `vm` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
+| `LOOM_TARGET_WASM` | `ON`, `OFF` | Builds Loom WebAssembly target support and production Wasm emission. | Adds or removes `wasm` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
+| `LOOM_TARGET_XDNA` | `ON`, `OFF` | Builds Loom XDNA target support and production XDNA emission. | Adds or removes `xdna` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
+| `LOOM_TARGET_X86` | `ON`, `OFF` | Builds Loom x86 target support. | Adds or removes `x86` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
+| `LOOM_EXECUTE_IREE_HAL` | `ON`, `OFF` | Builds Loom execution providers that run through IREE HAL when a matching runtime HAL driver is enabled. | Adds or removes `iree_hal` from the Loom execute substrate set. | `--//loom/config/execute:enable=<complete-execute-list>` |
+
+The native Loom target flag is a complete list. The default target set is
+`amdgpu,spirv,vm,xdna,x86`, and the default execution substrate set is
+`iree_hal`:
+
+```bash
+python dev.py bazel configure \
+  --//loom/config/target:enable=amdgpu,spirv,vm,xdna,x86
+```
+
+AMDGPU compiler target selection is also a complete list. Bazel uses
+comma-separated list values; CMake uses normal semicolon-separated CMake lists:
+
+```bash
+python dev.py bazel configure \
+  -DLOOM_TARGET_AMDGPU=ON \
+  --//loom/config/target/amdgpu:targets=gfx942,gfx120X-all,gfx12-5-generic
+
+python dev.py cmake configure \
+  -DLOOM_TARGET_AMDGPU=ON \
+  -DLOOM_TARGET_AMDGPU_TARGETS='gfx942;gfx120X-all;gfx12-5-generic'
+```
+
+To select Loom targets from the runtime's processor set:
+
+```bash
+python dev.py cmake configure \
+  -DLOOM_TARGET_AMDGPU=ON \
+  -DLOOM_TARGET_AMDGPU_TARGETS=iree_hal \
+  -DIREE_HAL_AMDGPU_TARGETS='gfx942;gfx1201'
+```
+
+To disable one of the default compiler backends:
+
+```bash
+python dev.py bazel configure -DLOOM_TARGET_SPIRV=OFF
+```
+
+Execution options describe the runtime substrate available to Loom tools, not a
+compilation target by themselves. For example, AMDGPU execution needs the
+AMDGPU Loom target, the IREE HAL execution substrate, and the AMDGPU runtime
+HAL driver:
+
+```bash
+python dev.py bazel configure \
+  -DLOOM_TARGET_AMDGPU=ON \
+  -DLOOM_EXECUTE_IREE_HAL=ON \
+  -DIREE_HAL_DRIVER_AMDGPU=ON \
+  --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx942 \
+  --//loom/config/target/amdgpu:targets=gfx942 \
+  -DIREE_ROCM_PATH=/opt/rocm
+```
+
+Compiling for AMDGPU does not require a GPU. Enable the runtime HAL only when
+execution support is needed. Advanced embedders can select architecture,
+emitter, and execution slices separately through `//loom/config/target/arch`,
+`//loom/config/emit`, and `//loom/config/execute`; ordinary builds use the
+`LOOM_TARGET_*` options above.
+
+### Loom importers
+
+Importers are optional. The native [C/C++ importer](loom/src/loom/import/cxx/README.md)
+uses `--config=loom-importer-cxx` with Bazel or `-DLOOM_IMPORT_CXX=ON` with
+CMake. The [Python importer guide](loom/py/loom/importers/README.md) covers
+TileLang and MLIR, including their separate managed Python environments:
+
+```bash
+python dev.py importers setup mlir
+iree-bazel-test --importer-env mlir //loom/py/loom/importers/mlir:mlir_test
+```
+
+### Serving image inputs
+
+Loom serving image input is enabled by default on Linux, macOS, and Windows.
+PAM images have a built-in decoder with no third-party dependencies. PNG, JPEG,
+GIF, and WebP have independent providers, all enabled by default. A minimal
+build can retain image input with only PAM, select optional codecs, or disable
+image input entirely:
+
+```bash
+iree-bazel-configure -DLOOM_SERVE_IMAGE_CODECS=
+iree-cmake-configure -DLOOM_SERVE_IMAGE_CODECS=
+
+iree-bazel-configure '-DLOOM_SERVE_IMAGE_CODECS=png;jpeg'
+iree-cmake-configure '-DLOOM_SERVE_IMAGE_CODECS=png;jpeg'
+
+iree-bazel-configure -DLOOM_SERVE_IMAGE_INPUT=OFF
+iree-cmake-configure -DLOOM_SERVE_IMAGE_INPUT=OFF
+```
+
+The native Bazel options are `--//loom/config/serve:image_input=false` and
+`--//loom/config/serve:image_codecs=png,jpeg`; an empty codec list retains PAM.
+Only selected optional providers enter the source-fetch and link graphs.
+Disabled formats return an explicit error; other serving modalities do not
+depend on codec availability. Other operating systems exclude image providers
+by default.
+
+### Serving audio inputs
+
+WAV, MP3, and FLAC transcription inputs are enabled by default on Linux, macOS,
+and Windows. They use the pinned miniaudio decoder; no system audio library is
+required.
+
+One codec list selects a subset or removes the dependency entirely:
+
+```bash
+iree-bazel-configure '-DLOOM_SERVE_AUDIO_CODECS=wav;flac'
+iree-cmake-configure '-DLOOM_SERVE_AUDIO_CODECS=wav;flac'
+
+iree-bazel-configure -DLOOM_SERVE_AUDIO_CODECS=
+iree-cmake-configure -DLOOM_SERVE_AUDIO_CODECS=
+```
+
+The native Bazel spelling is `--//loom/config/serve:audio_codecs=wav,flac`.
+An empty list excludes miniaudio from the server's configured dependency graph;
+raw PCM16LE transcription and PCM speech synthesis remain available. Disabled
+encoded formats return an explicit error. This option selects input decoding;
+it does not add compressed speech output formats. Other operating systems
+exclude encoded-audio providers by default.
+
+### CMake project selection
+
+CMake has project availability options because it configures a package build
+tree. Bazel project availability is currently expressed by target selection.
+
+| Option | Default | Build system | Meaning |
+| --- | --- | --- | --- |
+| `LIBHRX_BUILD` | `ON` | CMake | Builds libhrx and HRX compatibility targets. `ON` requires AMDGPU support; CMake enables `IREE_HAL_DRIVER_AMDGPU` by default when libhrx is built. |
+| `LIBHRX_BUILD_CTS` | `ON` when libhrx and tests are enabled | CMake | Builds libhrx CTS binaries. |
+| `LIBHRX_BUILD_PASSTHROUGH` | `ON` on Linux, `OFF` elsewhere | CMake | Builds HIP passthrough and interception developer tools. |
+| `LOOM_BUILD` | `ON` | CMake | Builds Loom libraries, tools, bindings, and tests. |
+| `IREE_BUILD_TESTS` | `ON` | CMake | Builds runtime tests and CTS targets. |
+| `HRX_INSTALL_TESTS` | `${IREE_BUILD_TESTS}` | CMake | Installs a relocatable CTest tree. |
+
+## Installation and Embedding
+
+CMake installs into the prefix selected by `cmake --install`. Build the desired
+products first. With the managed environment activated, a full install uses:
+
+```bash
+python dev.py cmake build
+cmake --install build/cmake --prefix build/install
+```
+
+Replace `build/cmake` with the configured build tree. HRX's `HrxPublicDist` and
+`HrxTestsDist` install components allow separate runtime and test packages;
+see the [HRX package instructions](README.md#building). Public HRX packaging
+uses `BUILD_SHARED_LIBS=OFF` so private runtime components are incorporated into
+`libhrx`. Shared Loom tool bundles have their own
+[linkage option](#shared-loom-tool-bundles).
+
+An embedding CMake project can set project/dependency options before
+`add_subdirectory`. Bazel consumers use normal Bzlmod dependencies or overrides.
+External HAL drivers can be composed into either build as described below.
 
 ### External HAL drivers
 
@@ -774,443 +974,33 @@ add_subdirectory("${HRX_SOURCE_DIR}" hrx)
 Selecting an unknown driver, omitting its target, or failing to configure its
 dependencies is a configuration error rather than an optional fallback.
 
-Pinned mode is the default. It lets AMDGPU host-side code compile without a
-ROCm/TheRock root; Bazel writes `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none` when no
-ROCm path is configured:
+## Troubleshooting
+
+Check the tools visible to the wrapper and print a command plan without running
+it:
 
 ```bash
-python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
-```
-
-Package mode intentionally tests a configured ROCm/TheRock root. Setting
-`IREE_ROCM_PATH` selects ROCm package header mode by default:
-
-```bash
-python dev.py bazel configure \
-  -DIREE_HAL_DRIVER_AMDGPU=ON \
-  -DIREE_ROCM_PATH=/opt/rocm
-```
-
-When a ROCm path is only needed for device tooling and the headers should still
-come from pinned sources, set `IREE_ROCM_DEPENDENCY_MODE=pinned` explicitly.
-
-When a ROCm path is needed, Bazel configuration also accepts `IREE_ROCM_PATH`
-from the inherited environment. This keeps CI reproduction commands independent
-of machine-local SDK paths:
-
-```bash
-IREE_ROCM_PATH=/opt/rocm python dev.py bazel configure \
-  -DIREE_HAL_DRIVER_AMDGPU=ON \
-  -DIREE_ROCM_DEPENDENCY_MODE=pinned
-```
-
-Loom target options describe product compiler capability: `LOOM_TARGET_AMDGPU=ON`
-means Loom can compile for AMDGPU, including the target architecture metadata and
-canonical artifact formats registered for that target family. Runtime execution
-remains a separate concern controlled by Loom execution support and the runtime
-`IREE_HAL_DRIVER_*` options.
-
-The default dependency-satisfied Loom target set is
-`amdgpu,spirv,vm,xdna,x86`. VM compilation and function execution provide the
-standard evaluator for `check.case` and `check.benchmark`. AMDGPU and SPIR-V
-target compilation use pinned source dependencies by default and do not enable
-the matching runtime HAL drivers. WebAssembly remains opt-in until the WASI SDK
-repository is available in this checkout. The default execution substrate set
-is `iree_hal`; HAL execution providers still require a matching runtime HAL
-driver such as
-`IREE_HAL_DRIVER_VULKAN` or `IREE_HAL_DRIVER_AMDGPU`.
-
-CMake exposes `LOOM_TARGET_DEFAULTS` and `LOOM_EXECUTE_DEFAULTS` to set the
-default value for dependency-satisfied target and execution options before the
-individual `LOOM_TARGET_*` and `LOOM_EXECUTE_*` overrides are evaluated. Bazel
-configuration writes complete native lists instead, so portable `-D...=OFF`
-options remove entries from the default set.
-
-AMDGPU has an additional compiler target selector list. `LOOM_TARGET_AMDGPU=ON`
-selects the product capability; `LOOM_TARGET_AMDGPU_TARGETS` selects which
-descriptor-backed AMDGPU processors are compiled into that capability. The
-default selector is `loom_defaults`, which expands to every descriptor-backed
-processor Loom currently supports:
-
-| Descriptor set | Processor targets |
-| --- | --- |
-| `amdgpu.cdna3.core` | `gfx940`, `gfx941`, `gfx942` |
-| `amdgpu.cdna4.core` | `gfx950` |
-| `amdgpu.gfx9_4.generic.core` | `gfx9-4-generic` |
-| `amdgpu.rdna3.core` | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103` |
-| `amdgpu.rdna3_5.core` | `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153` |
-| `amdgpu.gfx11.generic.core` | `gfx11-generic` |
-| `amdgpu.rdna4m.core` | `gfx1170`, `gfx1171`, `gfx1172` |
-| `amdgpu.rdna4.core` | `gfx1200`, `gfx1201` |
-| `amdgpu.gfx12.generic.core` | `gfx12-generic` |
-| `amdgpu.rdna4.gfx125x.core` | `gfx1250`, `gfx1251` |
-| `amdgpu.gfx12_5.generic.core` | `gfx12-5-generic` |
-
-Every generic processor is a compiler target in its own right with a distinct
-descriptor and encoding contract. A generic contract may share immutable
-generated storage with an exact-family contract when their current contents
-match, but it never selects that exact contract as an implementation alias.
-`gfx11-generic` is the common GFX11 surface validated against both the RDNA 3
-and RDNA 3.5 ISA descriptions, and its code objects cover `gfx1100`-`gfx1103`
-and `gfx1150`-`gfx1153`. The `gfx1170`-`gfx1172` targets remain exact-only
-because the pinned device toolchain does not yet expose LLVM's distinct
-`gfx11-7-generic` code-object target.
-`gfx9-4-generic` is the common CDNA 3/CDNA 4 surface for `gfx940`, `gfx941`,
-`gfx942`, and `gfx950`; its instruction, matrix, resource, scheduling, ABI,
-limit, and occupancy facts are portable member intersections.
-
-The accepted Loom AMDGPU selector vocabulary is the intersection of the shared
-AMDGPU target map and Loom's descriptor-backed compiler support. It accepts:
-
-- Source selectors: `loom_defaults`, `iree_hal`.
-- Exact processors listed in the descriptor-set table above.
-- Generic compiler targets: `gfx9-4-generic`, `gfx11-generic`,
-  `gfx12-generic`, `gfx12-5-generic`.
-- Fully covered family selectors: `gfx94X-all`, `gfx94X-dcgpu`,
-  `gfx950-all`, `gfx950-dcgpu`, `gfx110X-all`, `gfx110X-dgpu`,
-  `gfx110X-igpu`, `gfx115X-all`, `gfx115X-igpu`, `gfx117X-all`,
-  `gfx120X-all`, `gfx125X-all`.
-
-Older shared selectors such as `gfx9-generic`, `gfx90a`, `gfx908`,
-`gfx10-1-generic`, and
-`gfx10-3-generic` are still valid for runtime-side AMDGPU tooling, but they are
-not Loom compiler targets until matching Loom descriptor sets exist. The
-`iree_hal` source selector narrows Loom AMDGPU support to the descriptor-backed
-subset requested by the runtime `IREE_HAL_AMDGPU_TARGETS` setting. That is
-useful for runtime-integrated JIT builds that want Loom linked with exactly the
-runtime HAL target horizon, while normal compiler and `loom-compile` builds
-should usually keep `loom_defaults`.
-
-| Option | Values | CMake | Bazel portable | Bazel native |
-| --- | --- | --- | --- | --- |
-| `LOOM_TARGET_AMDGPU` | `ON`, `OFF` | Builds Loom AMDGPU target support and production AMDGPU emission. | Adds or removes `amdgpu` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
-| `LOOM_TARGET_AMDGPU_TARGETS` | AMDGPU selectors | Selects descriptor-backed AMDGPU processors compiled into Loom AMDGPU target support. | Not exposed as a portable `-D` option. | `--//loom/config/target/amdgpu:targets=<complete-selector-list>` |
-| `LOOM_TARGET_SPIRV` | `ON`, `OFF` | Builds Loom SPIR-V target support and production SPIR-V emission. | Adds or removes `spirv` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
-| `LOOM_TARGET_VM` | `ON`, `OFF` | Builds Loom VM compilation and function execution. | Adds or removes `vm` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
-| `LOOM_TARGET_WASM` | `ON`, `OFF` | Builds Loom WebAssembly target support and production Wasm emission. | Adds or removes `wasm` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
-| `LOOM_TARGET_XDNA` | `ON`, `OFF` | Builds Loom XDNA target support and production XDNA emission. | Adds or removes `xdna` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
-| `LOOM_TARGET_X86` | `ON`, `OFF` | Builds Loom x86 target support. | Adds or removes `x86` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
-| `LOOM_EXECUTE_IREE_HAL` | `ON`, `OFF` | Builds Loom execution providers that run through IREE HAL when a matching runtime HAL driver is enabled. | Adds or removes `iree_hal` from the Loom execute substrate set. | `--//loom/config/execute:enable=<complete-execute-list>` |
-
-The native Loom target flag is a complete list. The default target set is
-`amdgpu,spirv,vm,xdna,x86`, and the default execution substrate set is
-`iree_hal`:
-
-```bash
-python dev.py bazel configure \
-  --//loom/config/target:enable=amdgpu,spirv,vm,xdna,x86
-```
-
-AMDGPU compiler target selection is also a complete list. Bazel uses
-comma-separated list values; CMake uses normal semicolon-separated CMake lists:
-
-```bash
-python dev.py bazel configure \
-  -DLOOM_TARGET_AMDGPU=ON \
-  --//loom/config/target/amdgpu:targets=gfx942,gfx120X-all,gfx12-5-generic
-
-python dev.py cmake configure \
-  -DLOOM_TARGET_AMDGPU=ON \
-  -DLOOM_TARGET_AMDGPU_TARGETS='gfx942;gfx120X-all;gfx12-5-generic'
-```
-
-Use the shared runtime selector only when Loom should intentionally match the
-runtime HAL target horizon:
-
-```bash
-python dev.py cmake configure \
-  -DLOOM_TARGET_AMDGPU=ON \
-  -DLOOM_TARGET_AMDGPU_TARGETS=iree_hal \
-  -DIREE_HAL_AMDGPU_TARGETS='gfx942;gfx1201'
-```
-
-The portable spelling can disable a default target without exposing the
-internal target-architecture and emitter slices:
-
-```bash
-python dev.py bazel configure -DLOOM_TARGET_SPIRV=OFF
-```
-
-Execution options describe the runtime substrate available to Loom tools, not a
-compilation target by themselves. For example, AMDGPU execution needs the
-AMDGPU Loom target, the IREE HAL execution substrate, and the AMDGPU runtime
-HAL driver:
-
-```bash
-python dev.py bazel configure \
-  -DLOOM_TARGET_AMDGPU=ON \
-  -DLOOM_EXECUTE_IREE_HAL=ON \
-  -DIREE_HAL_DRIVER_AMDGPU=ON \
-  --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx942 \
-  --//loom/config/target/amdgpu:targets=gfx942 \
-  -DIREE_ROCM_PATH=/opt/rocm
-```
-
-CPU-only broad compiler validation should use the dedicated Loom AMDGPU compile
-slices. These do not enable the AMDGPU runtime HAL driver or require matching
-hardware:
-
-```bash
-python build_tools/devtools/ci.py iree-bazel-loom-amdgpu
-python build_tools/devtools/ci.py iree-cmake-loom-amdgpu
-```
-
-The raw `//loom/config/target/arch:enable=...`,
-`//loom/config/emit:enable=...`, and `//loom/config/execute:enable=...` values
-are advanced source-embedding and CI-audit surfaces. They exist to build narrow
-slices deliberately; the published portable API is the `LOOM_TARGET_*` product
-target set plus explicit emitters and execution substrates.
-
-Other Bazel-native overrides belong in `.bazelrc.local`.
-
-## Optional Local NativeLink Execution
-
-NativeLink can provide one shared Bazel action cache and execution limit across
-multiple local worktrees. The repository provides an inert named Bazel config
-and a loopback-only local server configuration; ordinary builds remain
-unchanged until `--config=nativelink` is selected. See the
-[local NativeLink guide](build_tools/nativelink/README.md) for installation,
-startup, verification, capacity, and trust-boundary details.
-
-## Loom Importers
-
-Importer frontends are optional dependency lanes. Start with the importer-local
-docs instead of expanding the root build surface:
-
-```bash
-ls loom/py/loom/importers
-```
-
-The entry point is `loom/py/loom/importers/README.md`. It explains importer
-build selection, managed importer Python environments, and the current
-TileLang/MLIR split. Managed importer environments are selected with
-`python dev.py importers setup <name>` and consumed by Bazel/CMake through
-`--importer-env <name>`.
-
-## Project Availability
-
-CMake has project availability options because it configures a package build
-tree. Bazel project availability is currently expressed by target selection.
-
-| Option | Default | Lane | Meaning |
-| --- | --- | --- | --- |
-| `LIBHRX_BUILD` | `ON` | CMake | Builds libhrx and HRX compatibility targets. `ON` requires AMDGPU support; CMake enables `IREE_HAL_DRIVER_AMDGPU` by default when libhrx is built. |
-| `LIBHRX_BUILD_CTS` | `${IREE_BUILD_TESTS}` | CMake | Builds libhrx CTS binaries. |
-| `LIBHRX_BUILD_PASSTHROUGH` | `ON` | CMake | Builds HIP passthrough and interception developer tools. |
-| `IREE_BUILD_TESTS` | `ON` | CMake | Builds runtime tests and CTS targets. |
-| `HRX_INSTALL_TESTS` | `${IREE_BUILD_TESTS}` | CMake | Installs a relocatable CTest tree. |
-
-## Dependency Resolution
-
-`IREE_DEPENDENCY_MODE` is the shared dependency policy:
-
-| Value | Meaning |
-| --- | --- |
-| `pinned` | Uses checked-in source locks. This is the repository default. |
-| `package` | Requires dependencies to be provided as packages or parent-project targets. |
-| `auto` | Tries packages first, then falls back to pinned source dependencies. |
-
-CMake consumes this as a cache variable. Bazel consumes the same values through
-`--repo_env=IREE_DEPENDENCY_MODE=...`; `dev.py bazel configure` writes that
-repo environment into `.bazelrc.configured`. ROCm header facades also support
-`IREE_ROCM_DEPENDENCY_MODE`. When it is empty, `IREE_ROCM_PATH` selects ROCm
-package mode; without a ROCm path it inherits the global mode. libhrx TheRock
-validation should set `IREE_ROCM_PATH` while leaving ordinary source
-dependencies pinned.
-
-## Raw Tool Equivalents
-
-The `dev.py` commands are intentionally thin. These pairs are equivalent in
-normal local checkouts:
-
-The CMake raw equivalents below use the default `build/cmake` tree; replace it
-with the path selected by `--cmake-build-dir` or `IREE_CMAKE_BUILD_DIR` when
-using a different tree.
-
-```bash
-python dev.py bazel build //runtime/...
-bazel build //runtime/...
-```
-
-```bash
-python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
-cmake -S . -B build/cmake -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
-```
-
-```bash
-python dev.py cmake build hrx
-cmake --build build/cmake --target hrx
-```
-
-```bash
-python dev.py cmake test -R hrx
-ctest --test-dir build/cmake -R hrx --show-only=json-v1
-cmake --build build/cmake --target selected-root-a selected-root-b
-ctest --test-dir build/cmake --output-on-failure -R hrx
-```
-
-In the raw pipeline, `selected-root-a selected-root-b` stands for the stable
-union produced by joining the selected CTest names with the validated
-`iree_ctest_build_targets.json` catalog generated beside the CTest files.
-The wrapper refreshes that graph before selecting tests. With Unix Makefiles,
-it combines the selected roots into one native dependency traversal, so tests
-sharing a compiler or runner share its build preparation too. Normal source,
-generated-input, and missing-output checks still run for every selected root.
-
-## Platform-Specific Host Builds
-
-### Windows
-
-Windows builds require an x64 MSVC ABI environment even when `clang-cl` is the
-host compiler. Install Python 3.12, Visual Studio 2022 Build Tools with the x64
-C++ tools and a Windows SDK, and Git for Windows. Bazel uses the Bash supplied
-by Git for Windows; the developer wrapper discovers it automatically. The
-managed developer environment installs Ninja and the CI-pinned CMake 3.31.6.
-Install LLVM separately when building with `clang-cl`.
-
-Start from an x64 Visual Studio developer shell so `INCLUDE`, `LIB`, the SDK
-tools, and the MSVC linker are available. Git for Windows also ships a Unix
-program named `link.exe`, so compiler activation order is load-bearing:
-
-```powershell
-where.exe cl
-where.exe link
-```
-
-The first `link.exe` must be the MSVC linker, not Git's `usr\bin\link.exe`.
-Create the repository tool environment and check it:
-
-```powershell
-python dev.py cmake setup --venv
+python dev.py bazel doctor
 python dev.py cmake doctor
+python dev.py --dry-run bazel build //loom/src/loom/tools/loom-compile
 ```
 
-Setup, configure, build, test, and doctor also work from an exported source
-snapshot. Setup and doctor omit Git-specific checks when `.git` is absent;
-installing hooks and running Git-based presubmit require a checkout. This lets
-a Windows build host consume source synchronized from another machine while
-Git operations remain on the source machine.
+- **Tool environment cannot be reused:** setup requires Python 3.12. Preserve
+  the old environment and choose a new `--tool-root` if it contains a different
+  interpreter or incomplete installation.
+- **Compiler or SDK is missing:** setup installs build utilities, not a native
+  compiler. Check the selected compiler's system headers and SDK, and the
+  [platform-specific requirements](#platform-builds-and-cross-compilation).
+- **A requested Bazel target is incompatible:** check the enabled projects,
+  compiler targets, and destination platform. Building a backend and running
+  tests on its hardware are separate selections.
+- **A Windows link selects the wrong linker:** in an x64 Visual Studio developer
+  shell, `where.exe link` must list MSVC's linker before Git's `link.exe`.
+- **A cross-built executable cannot start:** run it on the destination OS and
+  deploy its runtime libraries and runfiles. ASAN builds also need the matching
+  sanitizer runtime.
 
-Keep Windows build trees short and keep one tree per compiler. The `C:\b` CMake
-trees below remain within the legacy Win32 path limit and do not require the
-machine-wide `LongPathsEnabled` policy. Bazel's managed Python runfiles use
-symbolic links, so Windows Bazel hosts require Developer Mode or an equivalent
-symbolic-link policy. Provision that capability in the base image for CI runners
-that cannot elevate during a job. `python dev.py bazel configure` and
-`python dev.py bazel doctor` verify that the current process can create a
-symbolic link.
-
-The Bazel host check does not require `LongPathsEnabled`. Deep build and runfiles
-paths can still exceed the legacy limit in tools that use ordinary Win32 paths;
-those failures are reported by the affected build or test command. Enabling the
-policy allows tools that opt into long paths to access them.
-
-Windows Firewall displays an interactive approval prompt when a newly built
-executable begins listening for inbound connections. Approving one executable
-is not durable because build output paths change across configurations and
-rebuilds. On an unattended development or CI host, disable listening
-notifications for every network profile from a normal PowerShell session with
-one elevated command:
-
-```powershell
-Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command','Set-NetFirewallProfile -Profile Domain,Private,Public -NotifyOnListen False'
-```
-
-This leaves Windows Firewall enabled and does not add an inbound allow rule;
-remote connections remain subject to the active firewall policy. Verify the
-effective setting with:
-
-```powershell
-Get-NetFirewallProfile | Select-Object Name, Enabled, NotifyOnListen
-```
-
-Restore the interactive notifications with the same command and
-`-NotifyOnListen True`.
-
-Windows Bazel builds use `clang-cl` by default and require `BAZEL_LLVM` to name
-the LLVM installation root. The MSVC ABI tools and SDK still come from the
-active Visual Studio developer environment. Configure once, then build the
-normal Loom tool surface:
-
-```powershell
-$env:BAZEL_LLVM = 'C:\Program Files\LLVM'
-python dev.py bazel setup --venv
-python dev.py bazel configure
-python dev.py bazel build `
-  //loom/src/loom/tools/iree-run-loom `
-  //loom/src/loom/tools/loom-compile `
-  //loom/binding/c:loomc
-```
-
-Use `--config=windows-msvc` when checking the MSVC compiler. It changes the
-Windows compiler choice while preserving the configured feature and dependency
-graph. `--config=windows-clang-cl` explicitly selects the default compiler.
-Neither native command needs `--config=windows-x86_64`:
-
-```powershell
-python dev.py bazel build `
-  //loom/src/loom/tools/iree-run-loom `
-  //loom/src/loom/tools/loom-compile `
-  //loom/binding/c:loomc `
-  --config=windows-msvc
-```
-
-The following is the host-only Loom baseline: it builds the VM and x86 target
-paths without requiring ROCm, Vulkan, WebGPU, or libHRX.
-
-```powershell
-$baseOptions = @(
-  '-GNinja'
-  '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
-  '-DIREE_BUILD_TESTS=ON'
-  '-DIREE_BUILD_BENCHMARKS=ON'
-  '-DLIBHRX_BUILD=OFF'
-  '-DIREE_DEPENDENCY_MODE=pinned'
-  '-DIREE_HAL_DRIVER_AMDGPU=OFF'
-  '-DIREE_HAL_DRIVER_VULKAN=OFF'
-  '-DIREE_HAL_DRIVER_WEBGPU=OFF'
-  '-DLOOM_TARGET_AMDGPU=OFF'
-  '-DLOOM_TARGET_SPIRV=OFF'
-  '-DLOOM_TARGET_WASM=OFF'
-)
-
-$llvmBin = 'C:\Program Files\LLVM\bin'
-$env:PATH = "$llvmBin;$env:PATH"
-$env:CC = "$llvmBin\clang-cl.exe"
-$env:CXX = "$llvmBin\clang-cl.exe"
-$env:AR = "$llvmBin\llvm-lib.exe"
-python dev.py --cmake-build-dir C:\b\hrx-clang cmake configure @baseOptions
-python dev.py --cmake-build-dir C:\b\hrx-clang cmake build `
-  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
-  iree-test-loom iree-benchmark-loom --parallel 8
-python dev.py --cmake-build-dir C:\b\hrx-clang cmake test `
-  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
-```
-
-Reset the compiler selection for the distinct MSVC tree. The separate build
-directory, rather than shell state, keeps compiler identities from leaking
-across configurations:
-
-```powershell
-$env:CC = 'cl.exe'
-$env:CXX = 'cl.exe'
-$env:AR = 'lib.exe'
-python dev.py --cmake-build-dir C:\b\hrx-msvc cmake configure @baseOptions
-python dev.py --cmake-build-dir C:\b\hrx-msvc cmake build `
-  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
-  iree-test-loom iree-benchmark-loom --parallel 8
-python dev.py --cmake-build-dir C:\b\hrx-msvc cmake test `
-  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
-```
-
-Repository-wide Loom hygiene has a broader compiler-capability contract than
-the host-only smoke: `loom-format` verifies every tracked standalone module
-with the AMDGPU, IREE VM, SPIR-V, Wasm, XDNA, and x86 target descriptors. A CMake
-tree used for `cmake precommit` therefore needs AMDGPU and SPIR-V target support
-even when their HAL drivers remain disabled:
-
-```powershell
-python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake configure `
-  @baseOptions -DLOOM_TARGET_AMDGPU=ON -DLOOM_TARGET_SPIRV=ON
-python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake precommit
-```
+For a shared local Bazel cache and executor, see the optional
+[NativeLink setup](build_tools/nativelink/README.md). Remote execution needs
+compatible host tools and declared runtime dependencies; selecting a destination
+config alone does not provide an executor.

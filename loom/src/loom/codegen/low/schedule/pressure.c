@@ -11,6 +11,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptor_traits.h"
+#include "loom/codegen/low/schedule/completion_cost.h"
 #include "loom/codegen/low/schedule/completion_wait.h"
 #include "loom/codegen/low/schedule/pressure_lifetime.h"
 #include "loom/codegen/low/schedule/ready_frontier.h"
@@ -1070,13 +1071,15 @@ static void loom_low_schedule_select_candidate_schedule_class(
     loom_low_schedule_candidate_score_t* score) {
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
-  // Completion waits are fixed by the node's incoming effect dependencies.
+  // Completion cost follows unresolved incoming effect producers. Scheduling a
+  // consumer pays that modeled cost for later siblings sharing those producers.
   // Alternative schedule classes may change only hazard and resource pricing.
   score->completion_wait_cycles = 0;
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
-      state->node_completion_wait_cycles != NULL) {
-    score->completion_wait_cycles =
-        state->node_completion_wait_cycles[node_index];
+      state->node_completion_cost_cycles != NULL) {
+    score->completion_wait_cycles = loom_low_schedule_completion_cost_query(
+        state->node_completion_cost_cycles, &state->dependency_index,
+        &state->dependency_incoming_index, node_index);
   }
   const uint32_t source_descriptor_ordinal = node->source_descriptor_ordinal;
   score->selected_descriptor_ordinal = source_descriptor_ordinal;

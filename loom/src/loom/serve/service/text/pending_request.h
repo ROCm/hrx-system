@@ -55,7 +55,7 @@ iree_status_t loom_serve_text_pending_request_prepare(
 
 // Terminal request ownership, after CPU borrows retire and projector jobs have
 // detached. Both paths release host/image state before the consumer receipt.
-// Queue ordering and checkpoint pending counts remain with the service owner.
+// Queue ordering and checkpoint pending counts remain with the pending queue.
 void loom_serve_text_pending_request_cancel(
     loom_serve_text_pending_request_t* request,
     loom_serve_text_telemetry_t* telemetry, iree_allocator_t host_allocator);

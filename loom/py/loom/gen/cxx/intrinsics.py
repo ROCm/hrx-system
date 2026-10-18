@@ -13,7 +13,7 @@ import textwrap
 from collections.abc import Sequence
 from pathlib import Path
 
-from loom.dialect.scalar import FastMathFlags
+from loom.dialect.scalar import FastMathFlags, TrigonometryMathFlags
 from loom.dsl import ATTR_TYPE_FLAGS, FLOAT, INTEGER, Op
 from loom.gen import bootstrap
 from loom.gen.ops.model import load_dialect_generation
@@ -36,7 +36,9 @@ def validate_scalar_projection(op: Op) -> None:
     category = op.results[0].type_constraint
     if category not in (FLOAT, INTEGER) or any(field.variadic or field.type_constraint != category for field in fields) or any(operand.optional for operand in op.operands):
         raise ValueError(f"{op.name}: requires fixed values in one scalar category")
-    if (category == INTEGER and op.attrs) or any(attr.name != "fastmath" or attr.attr_type != ATTR_TYPE_FLAGS or attr.enum_def != FastMathFlags for attr in op.attrs):
+    if (category == INTEGER and op.attrs) or any(
+        attr.attr_type != ATTR_TYPE_FLAGS or (attr.name, attr.enum_def) not in (("fastmath", FastMathFlags), ("math", TrigonometryMathFlags)) for attr in op.attrs
+    ):
         raise ValueError(f"{op.name}: requires an explicit attribute projection")
     if not any(trait.name == "Pure" for trait in op.traits):
         raise ValueError(f"{op.name}: requires a pure scalar operation")
@@ -59,7 +61,7 @@ def scalar_projections() -> tuple[Op, ...]:
             continue
         if any(field.type_constraint != FLOAT for field in (*op.operands, *op.results)):
             continue
-        if any(attr.name != "fastmath" for attr in op.attrs):
+        if any(attr.name not in ("fastmath", "math") for attr in op.attrs):
             continue
         names = {field.name for field in (*op.operands, *op.results)}
         if not any(constraint.name == "SameType" and set(constraint.args) == names for constraint in op.constraints):
@@ -84,16 +86,22 @@ def generate_header(ops: Sequence[Op]) -> str:
         "",
         "// Fixed scalar projections of the canonical Loom operation contracts.",
         "// The approximate namespace explicitly permits AFN and no other flags.",
+        "// Its preserved trigonometry retains source-defined zero signs even",
+        "// when the calling scope permits NSZ. Nonzero results remain approximate.",
         "namespace loom::scalar {",
     ]
-    for namespace in (None, "approximate"):
+    for namespace in (None, "approximate", "approximate::preserved"):
         if namespace:
             lines.extend(["", f"namespace {namespace} {{"])
         for op in ops:
             if namespace and not op.attrs:
                 continue
+            if namespace == "approximate::preserved" and op.attrs[0].enum_def != TrigonometryMathFlags:
+                continue
             name = op.name.removeprefix("scalar.")
             flags = ', "afn"' if namespace else ""
+            if namespace == "approximate::preserved":
+                flags += ', "preserve"'
             lines.append("")
             lines.extend("// " + line for line in textwrap.wrap(op.doc, 76))
             if op.results[0].type_constraint == INTEGER:
@@ -141,7 +149,8 @@ def generate_source(ops: Sequence[Op]) -> str:
     lines.append("static const loom_cxx_scalar_binding_t bindings[] = {")
     for op in ops:
         category = "INTEGER" if op.results[0].type_constraint == INTEGER else "FLOAT"
-        lines.append(f'    {{"{op.name}", LOOM_CXX_SCALAR_CATEGORY_{category}, {len(op.operands)}, {str(bool(op.attrs)).lower()}, {op.name.replace(".", "_")}}},')
+        preserve_flag = next((case.value for attr in op.attrs for case in attr.enum_def.cases if case.keyword == "preserve"), 0)
+        lines.append(f'    {{"{op.name}", LOOM_CXX_SCALAR_CATEGORY_{category}, {len(op.operands)}, {str(bool(op.attrs)).lower()}, {preserve_flag}, {op.name.replace(".", "_")}}},')
     lines.extend(
         [
             "};",

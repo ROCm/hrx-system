@@ -197,8 +197,8 @@ typedef struct loom_serve_registered_model_t {
   loom_serve_compilation_report_t compilation;
   // Monotonic registration identity; zero denotes an externally owned service.
   uint64_t incarnation;
-  // Wall-clock registration time, retained until this deployment retires.
-  iree_time_t registration_time;
+  // Wall-clock Unix seconds at registration, fixed until deployment retirement.
+  int64_t registered_unix_seconds;
 } loom_serve_registered_model_t;
 
 typedef struct loom_serve_registry_t loom_serve_registry_t;

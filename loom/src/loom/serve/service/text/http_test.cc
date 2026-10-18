@@ -125,7 +125,7 @@ class TextHttpTest : public ::testing::TestWithParam<bool> {
   loom_serve_text_chat_response_t response_ = {
       .model_name = IREE_SV("text"),
       .request_id = 7,
-      .creation_time = 12000000000,
+      .created_unix_seconds = 12,
       .usage = {.input_tokens = 6, .cached_tokens = 4, .output_tokens = 2},
   };
   // Completed answer storage borrowed by the adapter.

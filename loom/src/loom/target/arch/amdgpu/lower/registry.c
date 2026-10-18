@@ -1815,6 +1815,7 @@ static iree_status_t loom_amdgpu_finalize_plan(
     case LOOM_OP_VIEW_LOAD:
     case LOOM_OP_VIEW_STORE:
     case LOOM_OP_VECTOR_LOAD:
+    case LOOM_OP_VECTOR_LOAD_MASK:
     case LOOM_OP_VECTOR_STORE:
       return loom_amdgpu_finalize_memory_plan(
           context, (loom_amdgpu_memory_access_plan_t*)plan.target_data);

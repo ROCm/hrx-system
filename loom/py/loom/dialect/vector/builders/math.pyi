@@ -135,7 +135,7 @@ class VectorMathMixin:
     def sinf(
         self,
         *,
-        fastmath: str = ...,
+        math: str = ...,
         input: ValueRef,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
@@ -146,7 +146,7 @@ class VectorMathMixin:
     def cosf(
         self,
         *,
-        fastmath: str = ...,
+        math: str = ...,
         input: ValueRef,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
@@ -157,7 +157,7 @@ class VectorMathMixin:
     def sinturnsf(
         self,
         *,
-        fastmath: str = ...,
+        math: str = ...,
         input: ValueRef,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
@@ -168,7 +168,7 @@ class VectorMathMixin:
     def costurnsf(
         self,
         *,
-        fastmath: str = ...,
+        math: str = ...,
         input: ValueRef,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,

@@ -195,8 +195,8 @@ constexpr std::array<OrPayloadCase, 15> kPresubmitOrPayloadCases = {{
     {31, 4},
 }};
 
-INSTANTIATE_TEST_SUITE_P(LiveSlots, AqlOrPayloadTest,
-                         ::testing::ValuesIn(kPresubmitOrPayloadCases),
-                         OrPayloadCaseName);
+TEST_F(AqlOrPayloadTest, ReadsReadyPayloadWhileOtherProducersRemainPending) {
+  RunCases(kPresubmitOrPayloadCases);
+}
 
 }  // namespace

@@ -365,7 +365,7 @@ bool Functions::admit_declaration(
         if (found || annotated(function, "kernel") ||
             annotated(function, "device") || annotated(function, "op") ||
             signature->isVariadic() ||
-            signature->returnType()->kind() != cxx::TypeKind::kVoid) {
+            !unit_.typeTraits().is_void(signature->returnType())) {
           diagnostics_.reject(
               unit_, owner,
               "check declarations require one check annotation on a "
@@ -789,8 +789,7 @@ BoundSignature Functions::bind_callable_signature(
   std::vector<const cxx::Type*> sources;
   auto parameters = symbol->parameters();
   auto references = reference_parameters(symbol);
-  const bool returns_void =
-      signature->returnType()->kind() == cxx::TypeKind::kVoid;
+  const bool returns_void = unit_.typeTraits().is_void(signature->returnType());
   sources.reserve(parameters.size() + !returns_void + references.size());
   size_t argument_count = 0;
   std::vector<size_t> argument_offsets;
@@ -954,7 +953,7 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
     diagnostics_.reject(unit_, definition,
                         "variadic functions are not admitted");
   }
-  bool returns_void = signature->returnType()->kind() == cxx::TypeKind::kVoid;
+  bool returns_void = unit_.typeTraits().is_void(signature->returnType());
   bool has_predicates = function_contracts_.has_predicates(symbol);
   bool has_requirements = function_contracts_.has_requirements(symbol);
   if ((check_case || check_scenario) && has_predicates) {

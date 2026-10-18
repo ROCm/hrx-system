@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/x86/legalization.h"
 
+#include "loom/codegen/low/descriptors.h"
 #include "loom/ir/module.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/ops.h"
@@ -19,6 +20,25 @@ static bool loom_x86_legalizer_descriptor_set_is_x86(
     const loom_low_descriptor_set_t* descriptor_set) {
   return descriptor_set != NULL &&
          descriptor_set->target_stable_id == LOOM_X86_TARGET_STABLE_ID;
+}
+
+static bool loom_x86_descriptor_features_available(
+    const loom_target_legalization_context_t* context,
+    const loom_low_descriptor_t* descriptor) {
+  const loom_low_descriptor_set_t* descriptor_set = context->descriptor_set;
+  const loom_low_descriptor_layout_t* layout =
+      loom_low_descriptor_layout(descriptor_set, descriptor);
+  const uint64_t feature_bits = loom_target_legalization_context_bundle(context)
+                                    ->config->contract_feature_bits;
+  for (uint16_t i = 0; i < layout->feature_mask_word_count; ++i) {
+    const uint64_t required_bits =
+        descriptor_set->feature_mask_words[layout->feature_mask_word_start + i];
+    const uint64_t available_bits = i == 0 ? feature_bits : 0;
+    if ((required_bits & ~available_bits) != 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 static iree_status_t loom_x86_retain_native_vector_op(
@@ -78,7 +98,7 @@ static iree_status_t loom_x86_legalize_float8_to_bfloat_extension(
   return iree_ok_status();
 }
 
-static iree_status_t loom_x86_legalize_vector_narrow_float_conversion(
+static iree_status_t loom_x86_legalize_vector_conversion(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
@@ -87,6 +107,19 @@ static iree_status_t loom_x86_legalize_vector_narrow_float_conversion(
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
   if (!loom_x86_legalizer_descriptor_set_is_x86(context->descriptor_set)) {
+    return iree_ok_status();
+  }
+
+  // A legal query can retain an unavailable primary descriptor so Low
+  // verification reports its precise missing features. Scalarize only that
+  // fallback; contracts executable on this target remain native.
+  const loom_target_contract_query_result_t* contract_result =
+      context->contract_query_result;
+  if (contract_result != NULL &&
+      contract_result->outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL &&
+      (contract_result->selected_descriptor == NULL ||
+       loom_x86_descriptor_features_available(
+           context, contract_result->selected_descriptor))) {
     return iree_ok_status();
   }
 
@@ -194,14 +227,28 @@ static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
         .first_operand_element_types =
             LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2,
         .match = loom_x86_match_vector_float8_extension,
-        .legalize = loom_x86_legalize_vector_narrow_float_conversion,
+        .legalize = loom_x86_legalize_vector_conversion,
     },
     {
         .root_kind = LOOM_OP_VECTOR_FPTRUNC,
         .first_operand_element_types =
             LOOM_SCALAR_TYPE_SET_16BIT_FLOAT | LOOM_SCALAR_TYPE_SET_F32,
         .match = loom_x86_match_vector_narrow_float_truncation,
-        .legalize = loom_x86_legalize_vector_narrow_float_conversion,
+        .legalize = loom_x86_legalize_vector_conversion,
+    },
+    {
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
+        .root_kind = LOOM_OP_VECTOR_SITOFP,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I32 | LOOM_SCALAR_TYPE_SET_I64,
+        .legalize = loom_x86_legalize_vector_conversion,
+    },
+    {
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
+        .root_kind = LOOM_OP_VECTOR_UITOFP,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I32 | LOOM_SCALAR_TYPE_SET_I64,
+        .legalize = loom_x86_legalize_vector_conversion,
     },
     {
         .root_kind = LOOM_OP_VECTOR_DIVREMSI,

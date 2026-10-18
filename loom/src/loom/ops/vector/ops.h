@@ -180,7 +180,7 @@ enum {
   LOOM_OP_VECTOR_COUNT_ = 155,
 };
 
-// IEEE 754 fast-math relaxation flags for float operations.
+// IEEE 754 fast-math relaxation flags for float operations. nnan and ninf are independent author promises, not runtime checks or requests to clamp results. Together they guarantee finite floating-point results, but do not imply exact representability in a narrower type or absence of subnormals. Behavior outside an authored promise is not constrained by the operation's ordinary special-value contract. Flags do not refine unrelated uses of an operand.
 #define LOOM_VECTOR_FASTMATHFLAGS_REASSOC ((uint8_t)1)
 #define LOOM_VECTOR_FASTMATHFLAGS_NNAN ((uint8_t)2)
 #define LOOM_VECTOR_FASTMATHFLAGS_NINF ((uint8_t)4)
@@ -189,6 +189,17 @@ enum {
 #define LOOM_VECTOR_FASTMATHFLAGS_CONTRACT ((uint8_t)32)
 #define LOOM_VECTOR_FASTMATHFLAGS_AFN ((uint8_t)64)
 #define LOOM_VECTOR_FASTMATHFLAGS_FAST ((uint8_t)127)
+
+// Trigonometric math permissions and requirements. AFN permits native approximation with target-dependent zero signs unless preserve is requested. Other fast-math permissions retain their meanings; preserve does not require correctly rounded nonzero approximations.
+#define LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_REASSOC ((uint8_t)1)
+#define LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_NNAN ((uint8_t)2)
+#define LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_NINF ((uint8_t)4)
+#define LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_NSZ ((uint8_t)8)
+#define LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_ARCP ((uint8_t)16)
+#define LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_CONTRACT ((uint8_t)32)
+#define LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_AFN ((uint8_t)64)
+#define LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_FAST ((uint8_t)127)
+#define LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_PRESERVE ((uint8_t)128)
 
 // Independent DAZ and FTZ permissions for floating-point conversions.
 #define LOOM_VECTOR_FLOATCONVERSIONFLAGS_DAZ ((uint8_t)1)
@@ -2367,12 +2378,12 @@ iree_status_t loom_vector_cbrtf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_SINF: Lanewise sine.
+// LOOM_OP_VECTOR_SINF: Lanewise sine in radians, with the same math contract as scalar.sinf.
 // vector.sinf
 LOOM_DEFINE_ISA(loom_vector_sinf_isa, LOOM_OP_VECTOR_SINF)
 LOOM_DEFINE_OPERAND(loom_vector_sinf_input, 0)
 LOOM_DEFINE_RESULT(loom_vector_sinf_result, 0)
-LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_sinf_fastmath)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_sinf_math)
 iree_status_t loom_vector_sinf_build(
     loom_builder_t* builder, uint8_t instance_flags,
     loom_value_id_t input, loom_type_t result_type,
@@ -2383,12 +2394,12 @@ iree_status_t loom_vector_sinf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_COSF: Lanewise cosine.
+// LOOM_OP_VECTOR_COSF: Lanewise cosine in radians, with the same math contract as scalar.cosf.
 // vector.cosf
 LOOM_DEFINE_ISA(loom_vector_cosf_isa, LOOM_OP_VECTOR_COSF)
 LOOM_DEFINE_OPERAND(loom_vector_cosf_input, 0)
 LOOM_DEFINE_RESULT(loom_vector_cosf_result, 0)
-LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_cosf_fastmath)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_cosf_math)
 iree_status_t loom_vector_cosf_build(
     loom_builder_t* builder, uint8_t instance_flags,
     loom_value_id_t input, loom_type_t result_type,
@@ -2399,12 +2410,12 @@ iree_status_t loom_vector_cosf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_SINTURNSF: Lanewise sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
+// LOOM_OP_VECTOR_SINTURNSF: Lanewise sine over turns, with the same math contract as scalar.sinturnsf.
 // vector.sinturnsf
 LOOM_DEFINE_ISA(loom_vector_sinturnsf_isa, LOOM_OP_VECTOR_SINTURNSF)
 LOOM_DEFINE_OPERAND(loom_vector_sinturnsf_input, 0)
 LOOM_DEFINE_RESULT(loom_vector_sinturnsf_result, 0)
-LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_sinturnsf_fastmath)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_sinturnsf_math)
 iree_status_t loom_vector_sinturnsf_build(
     loom_builder_t* builder, uint8_t instance_flags,
     loom_value_id_t input, loom_type_t result_type,
@@ -2415,12 +2426,12 @@ iree_status_t loom_vector_sinturnsf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_COSTURNSF: Lanewise cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
+// LOOM_OP_VECTOR_COSTURNSF: Lanewise cosine over turns, with the same math contract as scalar.costurnsf.
 // vector.costurnsf
 LOOM_DEFINE_ISA(loom_vector_costurnsf_isa, LOOM_OP_VECTOR_COSTURNSF)
 LOOM_DEFINE_OPERAND(loom_vector_costurnsf_input, 0)
 LOOM_DEFINE_RESULT(loom_vector_costurnsf_result, 0)
-LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_costurnsf_fastmath)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_costurnsf_math)
 iree_status_t loom_vector_costurnsf_build(
     loom_builder_t* builder, uint8_t instance_flags,
     loom_value_id_t input, loom_type_t result_type,

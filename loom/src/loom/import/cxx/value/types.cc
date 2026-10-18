@@ -159,12 +159,12 @@ loom_value_id_t TensorPartition::tensor_value(
 }
 
 const cxx::Type* Types::unqualified(const cxx::Type* type) {
-  return unit_.typeTraits().remove_cv(type);
+  return cxx::unaligned_type(unit_.typeTraits().remove_cv(type));
 }
 
 const cxx::Type* Types::unqualified_value(const cxx::Type* type) {
   auto traits = unit_.typeTraits();
-  return traits.remove_cv(traits.remove_reference(type));
+  return cxx::unaligned_type(traits.remove_cv(traits.remove_reference(type)));
 }
 
 const cxx::VectorType* Types::native_vector(const cxx::Type* type) {

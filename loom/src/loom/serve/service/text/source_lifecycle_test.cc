@@ -117,6 +117,7 @@ TEST_F(SourceTextServiceTest, FirstOutputExcludesFramingAndEmptyCompletions) {
 TEST_F(SourceTextServiceTest, DiscoveryReportsConfiguredSessionCapacity) {
   Start();
   const auto models = Read(Send("", "", "/v1/models", "GET"));
+  EXPECT_NE(models.find(R"("input_tokens":true)"), std::string::npos) << models;
   EXPECT_NE(
       models.find(
           R"("input_modalities":["text"],"output_modalities":["text"],"context_length":96,"limits":{"max_output_tokens":96})"),

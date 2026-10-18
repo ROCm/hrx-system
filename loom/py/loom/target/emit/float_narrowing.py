@@ -232,7 +232,10 @@ class _ScalarRecipe:
 
     @staticmethod
     def _try_constant_immediate(
-        descriptor: Descriptor, value: int
+        descriptor: Descriptor,
+        value: int,
+        *,
+        carrier_bit_width: int | None = None,
     ) -> dict[str, int] | None:
         (immediate,) = descriptor.immediates
         modulus = 1 << immediate.bit_width
@@ -241,6 +244,13 @@ class _ScalarRecipe:
             encoded_value -= modulus
         if not immediate.signed_min <= encoded_value <= immediate.unsigned_max:
             return None
+        if carrier_bit_width is not None:
+            # An instruction immediate may be narrower than its integer
+            # carrier. Its signed value must reproduce the original carrier
+            # bits instead of silently truncating a wide literal.
+            carrier_mask = (1 << carrier_bit_width) - 1
+            if (encoded_value & carrier_mask) != (value & carrier_mask):
+                return None
         if encoded_value % immediate.value_step:
             return None
         return {immediate.field_name: encoded_value}
@@ -357,7 +367,9 @@ class _ScalarRecipe:
                 literal = lhs
                 value = rhs
             immediates = self._try_constant_immediate(
-                immediate_descriptor, constant_values[literal.field]
+                immediate_descriptor,
+                constant_values[literal.field],
+                carrier_bit_width=self.descriptors.integer_bit_width,
             )
             if immediates is None:
                 rewritten_emits.append(emit)

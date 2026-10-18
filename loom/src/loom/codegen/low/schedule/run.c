@@ -13,6 +13,7 @@
 #include "loom/codegen/low/schedule/block.h"
 #include "loom/codegen/low/schedule/call_pressure.h"
 #include "loom/codegen/low/schedule/candidate_policy.h"
+#include "loom/codegen/low/schedule/completion_cost.h"
 #include "loom/codegen/low/schedule/completion_wait.h"
 #include "loom/codegen/low/schedule/context.h"
 #include "loom/codegen/low/schedule/descriptor_rows.h"
@@ -215,19 +216,22 @@ static iree_status_t loom_low_schedule_initialize_storage(
     memset(state->node_ready_issue_cycles, 0,
            node_count * sizeof(*state->node_ready_issue_cycles));
     if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->scratch_arena, node_count,
-          sizeof(*state->node_completion_wait_cycles),
-          (void**)&state->node_completion_wait_cycles));
-      memset(state->node_completion_wait_cycles, 0,
-             node_count * sizeof(*state->node_completion_wait_cycles));
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->scratch_arena, node_count,
-          sizeof(*state->node_opened_completion_latency_cycles),
-          (void**)&state->node_opened_completion_latency_cycles));
-      memset(
-          state->node_opened_completion_latency_cycles, 0,
-          node_count * sizeof(*state->node_opened_completion_latency_cycles));
+      if (loom_low_descriptor_set_has_completion_wait(
+              state->target.descriptor_set)) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            state->scratch_arena, node_count,
+            sizeof(*state->node_completion_cost_cycles),
+            (void**)&state->node_completion_cost_cycles));
+        memset(state->node_completion_cost_cycles, 0,
+               node_count * sizeof(*state->node_completion_cost_cycles));
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            state->scratch_arena, node_count,
+            sizeof(*state->node_opened_completion_latency_cycles),
+            (void**)&state->node_opened_completion_latency_cycles));
+        memset(
+            state->node_opened_completion_latency_cycles, 0,
+            node_count * sizeof(*state->node_opened_completion_latency_cycles));
+      }
       IREE_RETURN_IF_ERROR(
           iree_arena_allocate_array(state->scratch_arena, node_count,
                                     sizeof(*state->node_critical_path_cycles),
@@ -1457,9 +1461,15 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
   }
   iree_arena_deinitialize(&dependency_scratch_arena);
   IREE_RETURN_IF_ERROR(dependency_index_status);
+  if (state->pressure_limits.unspillable_completion_domain_count != 0 ||
+      state->node_completion_cost_cycles != NULL) {
+    IREE_RETURN_IF_ERROR(loom_low_schedule_dependency_incoming_index_initialize(
+        &state->dependency_index, state->nodes, state->scratch_arena,
+        &state->dependency_incoming_index));
+  }
   if (loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
     IREE_RETURN_IF_ERROR(loom_low_schedule_completion_demand_initialize(
-        &state->dependency_index, state->nodes,
+        &state->dependency_index, &state->dependency_incoming_index,
         state->pressure_limits.unspillable_completion_domain_count,
         state->scratch_arena, &pressure_state.unspillable_completion_demand));
     IREE_RETURN_IF_ERROR(loom_low_schedule_pressure_initialize_unlock_summaries(
@@ -1557,7 +1567,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       uint32_t completion_ready_issue_cycle = producer_available_issue_cycle;
       bool has_wait_counter_hazard = false;
       uint16_t completion_wait_cycles = 0;
-      if (state->node_completion_wait_cycles != NULL) {
+      if (state->node_completion_cost_cycles != NULL) {
         const loom_low_schedule_class_t* schedule_class =
             state->nodes[chosen_node].schedule_class;
         has_wait_counter_hazard = loom_low_schedule_class_query_completion_wait(
@@ -1566,6 +1576,10 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         completion_ready_issue_cycle = iree_math_saturating_add_u32(
             producer_available_issue_cycle,
             schedule_class != NULL ? schedule_class->latency_cycles : 0);
+        loom_low_schedule_completion_cost_note_node_scheduled(
+            state->node_completion_cost_cycles, &state->dependency_index,
+            &state->dependency_incoming_index, chosen_node,
+            has_wait_counter_hazard ? completion_wait_cycles : 0);
       }
       const uint32_t group_begin =
           loom_low_schedule_dependency_index_group_begin(
@@ -1594,7 +1608,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
             loom_low_schedule_add_signed_issue_separation(
                 producer_available_issue_cycle,
                 group->minimum_issue_separation_cycles);
-        if (state->node_completion_wait_cycles != NULL) {
+        if (state->node_completion_cost_cycles != NULL) {
           // Memory effects only require completion latency when the target
           // identifies the producer as counter-tracked. Other effect edges
           // order issue but do not imply a completion wait.
@@ -1603,9 +1617,12 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
                   &state->dependency_index, group_index)) {
             consumer_ready_issue_cycle = iree_max(consumer_ready_issue_cycle,
                                                   completion_ready_issue_cycle);
-            state->node_completion_wait_cycles[consumer_node] =
-                iree_max(state->node_completion_wait_cycles[consumer_node],
-                         completion_wait_cycles);
+            if (chosen->block_index !=
+                state->nodes[consumer_node].block_index) {
+              loom_low_schedule_completion_cost_publish_cross_block(
+                  state->node_completion_cost_cycles, consumer_node,
+                  completion_wait_cycles);
+            }
           }
         }
         if (consumer_ready_issue_cycle >

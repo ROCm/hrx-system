@@ -3,8 +3,9 @@
 kernel.def @integer_floating_shapes() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
-} launch(%uniform_bits: i64, %scale: f32, %input: buffer, %output: buffer) {
+} launch(%uniform_bits: i64, %input: buffer, %output: buffer) {
   %uniform = scalar.trunci %uniform_bits : i64 to i32
+  %scale = scalar.constant 1.5 : f32
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
   %bytes = buffer.view %aligned[%base] : buffer -> view<16xi8>
@@ -51,8 +52,9 @@ kernel.def @integer_floating_shapes() {
   kernel.return
 }
 
-func.def @integer_floating_shapes_oracle(%uniform_bits: i64, %scale: f32, %input: buffer, %output: buffer) {
+func.def @integer_floating_shapes_oracle(%uniform_bits: i64, %input: buffer, %output: buffer) {
   %uniform = scalar.trunci %uniform_bits : i64 to i32
+  %scale = scalar.constant 1.5 : f32
   %base = index.constant 0 : offset
   %bytes = buffer.view %input[%base] : buffer -> view<16xi8>
   %halves = buffer.view %input[%base] : buffer -> view<8xi16>
@@ -125,11 +127,10 @@ func.def @integer_floating_shapes_oracle(%uniform_bits: i64, %scale: f32, %input
 check.scenario @integer_floating_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %uniform = check.literal value(-2147483648) : i64
-    %scale = check.literal value(1.5) : f32
     %input = check.generate.iota offset(16777215) step(1) : tensor<4xi32>
     %storage = check.generate.fill value(-123.0) : tensor<40xf32>
     %output = check.tensor.view %storage offset(16) : tensor<40xf32> -> tensor<32xf32>
-    check.compare<@integer_floating_shapes, @integer_floating_shapes_oracle>(%uniform, %scale, %input, %output) : (i64, f32, tensor<4xi32>, tensor<32xf32>) -> () {
+    check.compare<@integer_floating_shapes, @integer_floating_shapes_oracle>(%uniform, %input, %output) : (i64, tensor<4xi32>, tensor<32xf32>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xf32>
     }
   }
@@ -137,11 +138,10 @@ check.scenario @integer_floating_values {
     %uniform_entropy = check.entropy.fork %entropy name("uniform") : check.entropy
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
     %uniform = check.entropy.read %uniform_entropy[%trial] : check.entropy -> i64
-    %scale = check.literal value(-0.5) : f32
     %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<4xi32>
     %storage = check.generate.fill value(-123.0) : tensor<40xf32>
     %output = check.tensor.view %storage offset(16) : tensor<40xf32> -> tensor<32xf32>
-    check.compare<@integer_floating_shapes, @integer_floating_shapes_oracle>(%uniform, %scale, %input, %output) : (i64, f32, tensor<4xi32>, tensor<32xf32>) -> () {
+    check.compare<@integer_floating_shapes, @integer_floating_shapes_oracle>(%uniform, %input, %output) : (i64, tensor<4xi32>, tensor<32xf32>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xf32>
     }
   }

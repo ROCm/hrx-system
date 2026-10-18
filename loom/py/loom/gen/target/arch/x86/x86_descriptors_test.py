@@ -387,19 +387,21 @@ def test_integer_comparisons_use_width_parametric_predicates() -> None:
     branch_descriptors = {descriptor.key: descriptor for descriptor in x86_descriptor_data.X86_SCALAR_DESCRIPTOR_SET.descriptors if descriptor.key.startswith("x86.scalar.cmp.branch.")}
     dynamic_keys = {f"x86.scalar.cmp.{form_name}gpr{bit_count}" for bit_count in (8, 16, 32, 64) for form_name in ("", "imm.")}
     branch_keys = {f"x86.scalar.cmp.branch.{form_name}gpr{bit_count}" for bit_count in (8, 16, 32, 64) for form_name in ("", "imm.")}
-    fixed_recipe_keys = {f"x86.scalar.cmp.{predicate}.gpr32" for predicate in ("slt", "sge", "sgt")} | {
-        f"x86.scalar.cmp.{predicate}.imm.gpr{bit_count}"
-        for bit_count, predicate in (
-            (32, "eq"),
-            (32, "slt"),
-            (32, "sge"),
-            (32, "sgt"),
-            (32, "uge"),
-            (64, "eq"),
-        )
-    }
-    assert set(predicate_descriptors) == dynamic_keys | fixed_recipe_keys
+    assert {key for key, descriptor in predicate_descriptors.items() if descriptor.encoding_format_id in (Form.COMPARE_PREDICATE, Form.COMPARE_IMMEDIATE_PREDICATE)} == dynamic_keys
     assert set(branch_descriptors) == branch_keys
+
+    # Closed descriptor recipes bind their comparison identity directly and
+    # therefore have no source predicate attribute to project. Validate that
+    # representation without duplicating the recipe inventory here.
+    for key, descriptor in predicate_descriptors.items():
+        if key in dynamic_keys:
+            continue
+        match = re.fullmatch(r"x86\.scalar\.cmp\.([a-z0-9_]+)\.(imm\.)?gpr(\d+)", key)
+        assert match is not None, key
+        predicate, immediate_marker, bit_count = match.groups()
+        assert descriptor.encoding_format_id == (Form.COMPARE_IMMEDIATE if immediate_marker else Form.COMPARE)
+        assert descriptor.semantic_tag == f"integer.cmp.{predicate}.i{bit_count}"
+        assert all(immediate.enum_domain is None for immediate in descriptor.immediates)
 
     width_flags = {
         8: Flag.BYTE,

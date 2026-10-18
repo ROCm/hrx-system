@@ -1,0 +1,804 @@
+// RUN: pass target-legalize{mode=eager,policy=reference-only}
+
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @hierarchical_variadic_reduce() {
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c3, %c1, %c1) : index
+} launch(%wide: i64, %pair: vector<2xi32>, %flag: i1) {
+  %wide_sum, %pair_sum, %flag_sum = kernel.workgroup.reduce<addi> %wide, %pair, %flag : i64, vector<2xi32>, i1
+  test.use %wide_sum : i64
+  test.use %pair_sum : vector<2xi32>
+  test.use %flag_sum : i1
+  kernel.return
+}
+
+// ----
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @hierarchical_variadic_reduce() {
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c3, %c1, %c1) : index
+} launch(%wide: i64, %pair: vector<2xi32>, %flag: i1) {
+  %8 = index.constant 0 : index
+  %9 = kernel.subgroup.id : index
+  %10 = index.assume %9 [range(%9, 0, 1)] : index
+  %11 = kernel.subgroup.lane.id : index
+  %12 = index.cmp eq, %11, %8 : index
+  %280 = scalar.constant 1 : i32
+  %281 = scalar.constant 2 : i32
+  %282 = kernel.subgroup.active.mask : i32
+  %283 = scalar.ctpopi %282 : i32
+  %284 = scalar.constant 1 : i32
+  %292 = scalar.constant 0 : i32
+  %293 = scalar.constant 1 : i32
+  %294 = scalar.constant 2 : i32
+  %295 = scalar.cmpi ne, %281, %292 : i32
+  %296 = scalar.cmpi ule, %281, %294 : i32
+  %297 = scalar.andi %295, %296 : i1
+  %298 = scf.select %297, %281, %293 : i32
+  %299 = scalar.cmpi ult, %284, %298 : i32
+  %300 = scalar.andi %297, %299 : i1
+  %301 = scf.select %300, %284, %292 : i32
+  %302 = kernel.subgroup.lane.id : index
+  %303 = index.cast %302 : index to i32
+  %304 = scalar.divui %303, %298 : i32
+  %306 = scalar.subi %303, %301 : i32
+  %307 = scalar.divui %306, %298 : i32
+  %308 = scalar.cmpi eq, %307, %304 : i32
+  %309 = scalar.cmpi ult, %306, %294 : i32
+  %310 = scalar.andi %300, %308 : i1
+  %311 = scalar.andi %310, %309 : i1
+  %312 = scf.select %311, %306, %303 : i32
+  %313 = scalar.remui %312, %294 : i32
+  %314, %315 = kernel.subgroup.shuffle<index> %wide, %313, %294 : i64, i32, i32
+  %316 = scalar.andi %311, %315 : i1
+  %287 = scalar.addi %314, %wide : i64
+  %288 = scf.select %316, %287, %wide : i64
+  %289 = scalar.subi %283, %280 : i32
+  %290, %291 = kernel.subgroup.shuffle<index> %288, %289, %281 : i64, i32, i32
+  %14 = index.constant 16 : offset
+  %15 = buffer.alloca<workgroup> align(8) %14 : buffer
+  %16 = index.constant 0 : offset
+  %17 = buffer.view %15[%16] : buffer -> view<2xi64>
+  %230 = scalar.constant 1 : i32
+  %231 = scalar.constant 2 : i32
+  %232 = kernel.subgroup.active.mask : i32
+  %233 = scalar.ctpopi %232 : i32
+  %234 = scalar.constant 1 : i32
+  %255 = scalar.constant 0 : i32
+  %256 = scalar.constant 1 : i32
+  %257 = scalar.constant 2 : i32
+  %258 = scalar.cmpi ne, %231, %255 : i32
+  %259 = scalar.cmpi ule, %231, %257 : i32
+  %260 = scalar.andi %258, %259 : i1
+  %261 = scf.select %260, %231, %256 : i32
+  %262 = scalar.cmpi ult, %234, %261 : i32
+  %263 = scalar.andi %260, %262 : i1
+  %264 = scf.select %263, %234, %255 : i32
+  %265 = kernel.subgroup.lane.id : index
+  %266 = index.cast %265 : index to i32
+  %267 = scalar.divui %266, %261 : i32
+  %269 = scalar.subi %266, %264 : i32
+  %270 = scalar.divui %269, %261 : i32
+  %271 = scalar.cmpi eq, %270, %267 : i32
+  %272 = scalar.cmpi ult, %269, %257 : i32
+  %273 = scalar.andi %263, %271 : i1
+  %274 = scalar.andi %273, %272 : i1
+  %275 = scf.select %274, %269, %266 : i32
+  %276 = scalar.remui %275, %257 : i32
+  %277, %278 = kernel.subgroup.shuffle<index> %pair, %276, %257 : vector<2xi32>, i32, i32
+  %279 = scalar.andi %274, %278 : i1
+  %242 = vector.extract %277[0] : vector<2xi32> -> i32
+  %243 = vector.extract %pair[0] : vector<2xi32> -> i32
+  %244 = scalar.addi %242, %243 : i32
+  %245 = vector.extract %pair[0] : vector<2xi32> -> i32
+  %246 = scf.select %279, %244, %245 : i32
+  %247 = vector.extract %277[1] : vector<2xi32> -> i32
+  %248 = vector.extract %pair[1] : vector<2xi32> -> i32
+  %249 = scalar.addi %247, %248 : i32
+  %250 = vector.extract %pair[1] : vector<2xi32> -> i32
+  %251 = scf.select %279, %249, %250 : i32
+  %253 = vector.splat %246 : vector<2xi32>
+  %254 = vector.insert %251 into %253[1] : i32, vector<2xi32>
+  %239 = scalar.subi %233, %230 : i32
+  %240, %241 = kernel.subgroup.shuffle<index> %254, %239, %231 : vector<2xi32>, i32, i32
+  %19 = index.constant 16 : offset
+  %20 = buffer.alloca<workgroup> align(4) %19 : buffer
+  %21 = index.constant 0 : offset
+  %22 = buffer.view %20[%21] : buffer -> view<4xi32>
+  %188 = scalar.constant 1 : i32
+  %189 = scalar.constant 2 : i32
+  %190 = kernel.subgroup.active.mask : i32
+  %191 = scalar.ctpopi %190 : i32
+  %227 = scalar.constant 1 : i32
+  %228 = scalar.constant 0 : i32
+  %229 = scf.select %flag, %227, %228 : i32
+  %193 = scalar.constant 1 : i32
+  %202 = scalar.constant 0 : i32
+  %203 = scalar.constant 1 : i32
+  %204 = scalar.constant 2 : i32
+  %205 = scalar.cmpi ne, %189, %202 : i32
+  %206 = scalar.cmpi ule, %189, %204 : i32
+  %207 = scalar.andi %205, %206 : i1
+  %208 = scf.select %207, %189, %203 : i32
+  %209 = scalar.cmpi ult, %193, %208 : i32
+  %210 = scalar.andi %207, %209 : i1
+  %211 = scf.select %210, %193, %202 : i32
+  %212 = kernel.subgroup.lane.id : index
+  %213 = index.cast %212 : index to i32
+  %214 = scalar.divui %213, %208 : i32
+  %216 = scalar.subi %213, %211 : i32
+  %217 = scalar.divui %216, %208 : i32
+  %218 = scalar.cmpi eq, %217, %214 : i32
+  %219 = scalar.cmpi ult, %216, %204 : i32
+  %220 = scalar.andi %210, %218 : i1
+  %221 = scalar.andi %220, %219 : i1
+  %222 = scf.select %221, %216, %213 : i32
+  %223 = scalar.remui %222, %204 : i32
+  %224, %225 = kernel.subgroup.shuffle<index> %229, %223, %204 : i32, i32, i32
+  %226 = scalar.andi %221, %225 : i1
+  %196 = scalar.xori %224, %229 : i32
+  %197 = scf.select %226, %196, %229 : i32
+  %198 = scalar.subi %191, %188 : i32
+  %199, %200 = kernel.subgroup.shuffle<index> %197, %198, %189 : i32, i32, i32
+  %201 = scalar.trunci %199 : i32 to i1
+  %24 = index.constant 2 : offset
+  %25 = buffer.alloca<workgroup> align(1) %24 : buffer
+  %26 = index.constant 0 : offset
+  %27 = buffer.view %25[%26] : buffer -> view<2xi8>
+  scf.if %12 {
+    view.store %290, %17[%10] : i64, view<2xi64>
+    %28 = index.constant 2 : index
+    %29 = index.mul %10, %28 : index
+    vector.store %240, %22[%29] : vector<2xi32>, view<4xi32>
+    %185 = scalar.constant 1 : i8
+    %186 = scalar.constant 0 : i8
+    %187 = scf.select %201, %185, %186 : i8
+    view.store %187, %27[%10] : i8, view<2xi8>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %31 = index.cmp eq, %10, %8 : index
+  %32 = index.constant 2 : index
+  %33 = index.cmp ult, %11, %32 : index
+  %34 = scf.select %33, %11, %8 : index
+  scf.if %31 {
+    %35 = view.load %17[%34] : view<2xi64> -> i64
+    %148 = scalar.constant 1 : i32
+    %149 = scalar.constant 2 : i32
+    %150 = kernel.subgroup.active.mask : i32
+    %151 = scalar.ctpopi %150 : i32
+    %152 = scalar.constant 1 : i32
+    %160 = scalar.constant 0 : i32
+    %161 = scalar.constant 1 : i32
+    %162 = scalar.constant 2 : i32
+    %163 = scalar.cmpi ne, %149, %160 : i32
+    %164 = scalar.cmpi ule, %149, %162 : i32
+    %165 = scalar.andi %163, %164 : i1
+    %166 = scf.select %165, %149, %161 : i32
+    %167 = scalar.cmpi ult, %152, %166 : i32
+    %168 = scalar.andi %165, %167 : i1
+    %169 = scf.select %168, %152, %160 : i32
+    %170 = kernel.subgroup.lane.id : index
+    %171 = index.cast %170 : index to i32
+    %172 = scalar.divui %171, %166 : i32
+    %174 = scalar.subi %171, %169 : i32
+    %175 = scalar.divui %174, %166 : i32
+    %176 = scalar.cmpi eq, %175, %172 : i32
+    %177 = scalar.cmpi ult, %174, %162 : i32
+    %178 = scalar.andi %168, %176 : i1
+    %179 = scalar.andi %178, %177 : i1
+    %180 = scf.select %179, %174, %171 : i32
+    %181 = scalar.remui %180, %162 : i32
+    %182, %183 = kernel.subgroup.shuffle<index> %35, %181, %162 : i64, i32, i32
+    %184 = scalar.andi %179, %183 : i1
+    %155 = scalar.addi %182, %35 : i64
+    %156 = scf.select %184, %155, %35 : i64
+    %157 = scalar.subi %151, %148 : i32
+    %158, %159 = kernel.subgroup.shuffle<index> %156, %157, %149 : i64, i32, i32
+    %37 = index.constant 2 : index
+    %38 = index.mul %34, %37 : index
+    %39 = vector.load %22[%38] : view<4xi32> -> vector<2xi32>
+    %98 = scalar.constant 1 : i32
+    %99 = scalar.constant 2 : i32
+    %100 = kernel.subgroup.active.mask : i32
+    %101 = scalar.ctpopi %100 : i32
+    %102 = scalar.constant 1 : i32
+    %123 = scalar.constant 0 : i32
+    %124 = scalar.constant 1 : i32
+    %125 = scalar.constant 2 : i32
+    %126 = scalar.cmpi ne, %99, %123 : i32
+    %127 = scalar.cmpi ule, %99, %125 : i32
+    %128 = scalar.andi %126, %127 : i1
+    %129 = scf.select %128, %99, %124 : i32
+    %130 = scalar.cmpi ult, %102, %129 : i32
+    %131 = scalar.andi %128, %130 : i1
+    %132 = scf.select %131, %102, %123 : i32
+    %133 = kernel.subgroup.lane.id : index
+    %134 = index.cast %133 : index to i32
+    %135 = scalar.divui %134, %129 : i32
+    %137 = scalar.subi %134, %132 : i32
+    %138 = scalar.divui %137, %129 : i32
+    %139 = scalar.cmpi eq, %138, %135 : i32
+    %140 = scalar.cmpi ult, %137, %125 : i32
+    %141 = scalar.andi %131, %139 : i1
+    %142 = scalar.andi %141, %140 : i1
+    %143 = scf.select %142, %137, %134 : i32
+    %144 = scalar.remui %143, %125 : i32
+    %145, %146 = kernel.subgroup.shuffle<index> %39, %144, %125 : vector<2xi32>, i32, i32
+    %147 = scalar.andi %142, %146 : i1
+    %110 = vector.extract %145[0] : vector<2xi32> -> i32
+    %111 = vector.extract %39[0] : vector<2xi32> -> i32
+    %112 = scalar.addi %110, %111 : i32
+    %113 = vector.extract %39[0] : vector<2xi32> -> i32
+    %114 = scf.select %147, %112, %113 : i32
+    %115 = vector.extract %145[1] : vector<2xi32> -> i32
+    %116 = vector.extract %39[1] : vector<2xi32> -> i32
+    %117 = scalar.addi %115, %116 : i32
+    %118 = vector.extract %39[1] : vector<2xi32> -> i32
+    %119 = scf.select %147, %117, %118 : i32
+    %121 = vector.splat %114 : vector<2xi32>
+    %122 = vector.insert %119 into %121[1] : i32, vector<2xi32>
+    %107 = scalar.subi %101, %98 : i32
+    %108, %109 = kernel.subgroup.shuffle<index> %122, %107, %99 : vector<2xi32>, i32, i32
+    %41 = view.load %27[%34] : view<2xi8> -> i8
+    %42 = scalar.trunci %41 : i8 to i1
+    %56 = scalar.constant 1 : i32
+    %57 = scalar.constant 2 : i32
+    %58 = kernel.subgroup.active.mask : i32
+    %59 = scalar.ctpopi %58 : i32
+    %95 = scalar.constant 1 : i32
+    %96 = scalar.constant 0 : i32
+    %97 = scf.select %42, %95, %96 : i32
+    %61 = scalar.constant 1 : i32
+    %70 = scalar.constant 0 : i32
+    %71 = scalar.constant 1 : i32
+    %72 = scalar.constant 2 : i32
+    %73 = scalar.cmpi ne, %57, %70 : i32
+    %74 = scalar.cmpi ule, %57, %72 : i32
+    %75 = scalar.andi %73, %74 : i1
+    %76 = scf.select %75, %57, %71 : i32
+    %77 = scalar.cmpi ult, %61, %76 : i32
+    %78 = scalar.andi %75, %77 : i1
+    %79 = scf.select %78, %61, %70 : i32
+    %80 = kernel.subgroup.lane.id : index
+    %81 = index.cast %80 : index to i32
+    %82 = scalar.divui %81, %76 : i32
+    %84 = scalar.subi %81, %79 : i32
+    %85 = scalar.divui %84, %76 : i32
+    %86 = scalar.cmpi eq, %85, %82 : i32
+    %87 = scalar.cmpi ult, %84, %72 : i32
+    %88 = scalar.andi %78, %86 : i1
+    %89 = scalar.andi %88, %87 : i1
+    %90 = scf.select %89, %84, %81 : i32
+    %91 = scalar.remui %90, %72 : i32
+    %92, %93 = kernel.subgroup.shuffle<index> %97, %91, %72 : i32, i32, i32
+    %94 = scalar.andi %89, %93 : i1
+    %64 = scalar.xori %92, %97 : i32
+    %65 = scf.select %94, %64, %97 : i32
+    %66 = scalar.subi %59, %56 : i32
+    %67, %68 = kernel.subgroup.shuffle<index> %65, %66, %57 : i32, i32, i32
+    %69 = scalar.trunci %67 : i32 to i1
+    scf.if %12 {
+      view.store %158, %17[%8] : i64, view<2xi64>
+      %44 = index.constant 2 : index
+      %45 = index.mul %8, %44 : index
+      vector.store %108, %22[%45] : vector<2xi32>, view<4xi32>
+      %53 = scalar.constant 1 : i8
+      %54 = scalar.constant 0 : i8
+      %55 = scf.select %69, %53, %54 : i8
+      view.store %55, %27[%8] : i8, view<2xi8>
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %wide_sum = view.load %17[%8] : view<2xi64> -> i64
+  %48 = index.constant 2 : index
+  %49 = index.mul %8, %48 : index
+  %pair_sum = vector.load %22[%49] : view<4xi32> -> vector<2xi32>
+  %51 = view.load %27[%8] : view<2xi8> -> i8
+  %flag_sum = scalar.trunci %51 : i8 to i1
+  test.use %wide_sum : i64
+  test.use %pair_sum : vector<2xi32>
+  test.use %flag_sum : i1
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @hierarchical_reverse_exclusive_scan() {
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c3, %c1, %c1) : index
+} launch(%value: i64) {
+  %prefix = kernel.workgroup.scan<addi> %value {direction = reverse, mode = exclusive} : i64
+  test.use %prefix : i64
+  kernel.return
+}
+
+// ----
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @hierarchical_reverse_exclusive_scan() {
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c3, %c1, %c1) : index
+} launch(%value: i64) {
+  %4 = index.constant 0 : index
+  %5 = kernel.subgroup.id : index
+  %6 = index.assume %5 [range(%5, 0, 1)] : index
+  %7 = kernel.subgroup.lane.id : index
+  %8 = index.cmp eq, %7, %4 : index
+  %121 = scalar.constant 2 : i32
+  %122 = scalar.constant 1 : i32
+  %157 = scalar.constant 0 : i32
+  %158 = scalar.constant 1 : i32
+  %159 = scalar.constant 2 : i32
+  %160 = scalar.cmpi ne, %121, %157 : i32
+  %161 = scalar.cmpi ule, %121, %159 : i32
+  %162 = scalar.andi %160, %161 : i1
+  %163 = scf.select %162, %121, %158 : i32
+  %164 = scalar.cmpi ult, %122, %163 : i32
+  %165 = scalar.andi %162, %164 : i1
+  %166 = scf.select %165, %122, %157 : i32
+  %167 = kernel.subgroup.lane.id : index
+  %168 = index.cast %167 : index to i32
+  %169 = scalar.divui %168, %163 : i32
+  %171 = scalar.addi %168, %166 : i32
+  %172 = scalar.divui %171, %163 : i32
+  %173 = scalar.cmpi eq, %172, %169 : i32
+  %174 = scalar.cmpi ult, %171, %159 : i32
+  %175 = scalar.andi %165, %173 : i1
+  %176 = scalar.andi %175, %174 : i1
+  %177 = scf.select %176, %171, %168 : i32
+  %178 = scalar.remui %177, %159 : i32
+  %179, %180 = kernel.subgroup.shuffle<index> %value, %178, %159 : i64, i32, i32
+  %181 = scalar.andi %176, %180 : i1
+  %125 = scalar.addi %179, %value : i64
+  %126 = scf.select %181, %125, %value : i64
+  %127 = scalar.constant 1 : i32
+  %132 = scalar.constant 0 : i32
+  %133 = scalar.constant 1 : i32
+  %134 = scalar.constant 2 : i32
+  %135 = scalar.cmpi ne, %121, %132 : i32
+  %136 = scalar.cmpi ule, %121, %134 : i32
+  %137 = scalar.andi %135, %136 : i1
+  %138 = scf.select %137, %121, %133 : i32
+  %139 = scalar.cmpi ult, %127, %138 : i32
+  %140 = scalar.andi %137, %139 : i1
+  %141 = scf.select %140, %127, %132 : i32
+  %142 = kernel.subgroup.lane.id : index
+  %143 = index.cast %142 : index to i32
+  %144 = scalar.divui %143, %138 : i32
+  %146 = scalar.addi %143, %141 : i32
+  %147 = scalar.divui %146, %138 : i32
+  %148 = scalar.cmpi eq, %147, %144 : i32
+  %149 = scalar.cmpi ult, %146, %134 : i32
+  %150 = scalar.andi %140, %148 : i1
+  %151 = scalar.andi %150, %149 : i1
+  %152 = scf.select %151, %146, %143 : i32
+  %153 = scalar.remui %152, %134 : i32
+  %154, %155 = kernel.subgroup.shuffle<index> %126, %153, %134 : i64, i32, i32
+  %156 = scalar.andi %151, %155 : i1
+  %130 = scalar.constant 0 : i64
+  %131 = scf.select %156, %154, %130 : i64
+  %84 = scalar.constant 1 : i32
+  %85 = scalar.constant 2 : i32
+  %86 = kernel.subgroup.active.mask : i32
+  %87 = scalar.ctpopi %86 : i32
+  %88 = scalar.constant 1 : i32
+  %96 = scalar.constant 0 : i32
+  %97 = scalar.constant 1 : i32
+  %98 = scalar.constant 2 : i32
+  %99 = scalar.cmpi ne, %85, %96 : i32
+  %100 = scalar.cmpi ule, %85, %98 : i32
+  %101 = scalar.andi %99, %100 : i1
+  %102 = scf.select %101, %85, %97 : i32
+  %103 = scalar.cmpi ult, %88, %102 : i32
+  %104 = scalar.andi %101, %103 : i1
+  %105 = scf.select %104, %88, %96 : i32
+  %106 = kernel.subgroup.lane.id : index
+  %107 = index.cast %106 : index to i32
+  %108 = scalar.divui %107, %102 : i32
+  %110 = scalar.subi %107, %105 : i32
+  %111 = scalar.divui %110, %102 : i32
+  %112 = scalar.cmpi eq, %111, %108 : i32
+  %113 = scalar.cmpi ult, %110, %98 : i32
+  %114 = scalar.andi %104, %112 : i1
+  %115 = scalar.andi %114, %113 : i1
+  %116 = scf.select %115, %110, %107 : i32
+  %117 = scalar.remui %116, %98 : i32
+  %118, %119 = kernel.subgroup.shuffle<index> %value, %117, %98 : i64, i32, i32
+  %120 = scalar.andi %115, %119 : i1
+  %91 = scalar.addi %118, %value : i64
+  %92 = scf.select %120, %91, %value : i64
+  %93 = scalar.subi %87, %84 : i32
+  %94, %95 = kernel.subgroup.shuffle<index> %92, %93, %85 : i64, i32, i32
+  %11 = index.constant 16 : offset
+  %12 = buffer.alloca<workgroup> align(8) %11 : buffer
+  %13 = index.constant 0 : offset
+  %14 = buffer.view %12[%13] : buffer -> view<2xi64>
+  scf.if %8 {
+    view.store %94, %14[%6] : i64, view<2xi64>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %15 = index.cmp eq, %6, %4 : index
+  %16 = index.constant 2 : index
+  %17 = index.cmp ult, %7, %16 : index
+  %18 = scf.select %17, %7, %4 : index
+  scf.if %15 {
+    %19 = view.load %14[%18] : view<2xi64> -> i64
+    %23 = scalar.constant 2 : i32
+    %24 = scalar.constant 1 : i32
+    %59 = scalar.constant 0 : i32
+    %60 = scalar.constant 1 : i32
+    %61 = scalar.constant 2 : i32
+    %62 = scalar.cmpi ne, %23, %59 : i32
+    %63 = scalar.cmpi ule, %23, %61 : i32
+    %64 = scalar.andi %62, %63 : i1
+    %65 = scf.select %64, %23, %60 : i32
+    %66 = scalar.cmpi ult, %24, %65 : i32
+    %67 = scalar.andi %64, %66 : i1
+    %68 = scf.select %67, %24, %59 : i32
+    %69 = kernel.subgroup.lane.id : index
+    %70 = index.cast %69 : index to i32
+    %71 = scalar.divui %70, %65 : i32
+    %73 = scalar.addi %70, %68 : i32
+    %74 = scalar.divui %73, %65 : i32
+    %75 = scalar.cmpi eq, %74, %71 : i32
+    %76 = scalar.cmpi ult, %73, %61 : i32
+    %77 = scalar.andi %67, %75 : i1
+    %78 = scalar.andi %77, %76 : i1
+    %79 = scf.select %78, %73, %70 : i32
+    %80 = scalar.remui %79, %61 : i32
+    %81, %82 = kernel.subgroup.shuffle<index> %19, %80, %61 : i64, i32, i32
+    %83 = scalar.andi %78, %82 : i1
+    %27 = scalar.addi %81, %19 : i64
+    %28 = scf.select %83, %27, %19 : i64
+    %29 = scalar.constant 1 : i32
+    %34 = scalar.constant 0 : i32
+    %35 = scalar.constant 1 : i32
+    %36 = scalar.constant 2 : i32
+    %37 = scalar.cmpi ne, %23, %34 : i32
+    %38 = scalar.cmpi ule, %23, %36 : i32
+    %39 = scalar.andi %37, %38 : i1
+    %40 = scf.select %39, %23, %35 : i32
+    %41 = scalar.cmpi ult, %29, %40 : i32
+    %42 = scalar.andi %39, %41 : i1
+    %43 = scf.select %42, %29, %34 : i32
+    %44 = kernel.subgroup.lane.id : index
+    %45 = index.cast %44 : index to i32
+    %46 = scalar.divui %45, %40 : i32
+    %48 = scalar.addi %45, %43 : i32
+    %49 = scalar.divui %48, %40 : i32
+    %50 = scalar.cmpi eq, %49, %46 : i32
+    %51 = scalar.cmpi ult, %48, %36 : i32
+    %52 = scalar.andi %42, %50 : i1
+    %53 = scalar.andi %52, %51 : i1
+    %54 = scf.select %53, %48, %45 : i32
+    %55 = scalar.remui %54, %36 : i32
+    %56, %57 = kernel.subgroup.shuffle<index> %28, %55, %36 : i64, i32, i32
+    %58 = scalar.andi %53, %57 : i1
+    %32 = scalar.constant 0 : i64
+    %33 = scf.select %58, %56, %32 : i64
+    scf.if %17 {
+      view.store %33, %14[%7] : i64, view<2xi64>
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %21 = view.load %14[%6] : view<2xi64> -> i64
+  %prefix = scalar.addi %131, %21 : i64
+  test.use %prefix : i64
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @linear_vector_scan() {
+  %c1 = index.constant 1 : index
+  %c5 = index.constant 5 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c5, %c1, %c1) : index
+} launch(%value: vector<2xi32>) {
+  %prefix = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : vector<2xi32>
+  test.use %prefix : vector<2xi32>
+  kernel.return
+}
+
+// ----
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @linear_vector_scan() {
+  %c1 = index.constant 1 : index
+  %c5 = index.constant 5 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c5, %c1, %c1) : index
+} launch(%value: vector<2xi32>) {
+  %4 = index.constant 0 : index
+  %5 = kernel.subgroup.id : index
+  %6 = index.assume %5 [range(%5, 0, 2)] : index
+  %7 = kernel.subgroup.lane.id : index
+  %8 = index.cmp eq, %7, %4 : index
+  %149 = scalar.constant 2 : i32
+  %150 = scalar.constant 1 : i32
+  %168 = scalar.constant 0 : i32
+  %169 = scalar.constant 1 : i32
+  %170 = scalar.constant 2 : i32
+  %171 = scalar.cmpi ne, %149, %168 : i32
+  %172 = scalar.cmpi ule, %149, %170 : i32
+  %173 = scalar.andi %171, %172 : i1
+  %174 = scf.select %173, %149, %169 : i32
+  %175 = scalar.cmpi ult, %150, %174 : i32
+  %176 = scalar.andi %173, %175 : i1
+  %177 = scf.select %176, %150, %168 : i32
+  %178 = kernel.subgroup.lane.id : index
+  %179 = index.cast %178 : index to i32
+  %180 = scalar.divui %179, %174 : i32
+  %182 = scalar.subi %179, %177 : i32
+  %183 = scalar.divui %182, %174 : i32
+  %184 = scalar.cmpi eq, %183, %180 : i32
+  %185 = scalar.cmpi ult, %182, %170 : i32
+  %186 = scalar.andi %176, %184 : i1
+  %187 = scalar.andi %186, %185 : i1
+  %188 = scf.select %187, %182, %179 : i32
+  %189 = scalar.remui %188, %170 : i32
+  %190, %191 = kernel.subgroup.shuffle<index> %value, %189, %170 : vector<2xi32>, i32, i32
+  %192 = scalar.andi %187, %191 : i1
+  %155 = vector.extract %190[0] : vector<2xi32> -> i32
+  %156 = vector.extract %value[0] : vector<2xi32> -> i32
+  %157 = scalar.addi %155, %156 : i32
+  %158 = vector.extract %value[0] : vector<2xi32> -> i32
+  %159 = scf.select %192, %157, %158 : i32
+  %160 = vector.extract %190[1] : vector<2xi32> -> i32
+  %161 = vector.extract %value[1] : vector<2xi32> -> i32
+  %162 = scalar.addi %160, %161 : i32
+  %163 = vector.extract %value[1] : vector<2xi32> -> i32
+  %164 = scf.select %192, %162, %163 : i32
+  %166 = vector.splat %159 : vector<2xi32>
+  %167 = vector.insert %164 into %166[1] : i32, vector<2xi32>
+  %99 = scalar.constant 1 : i32
+  %100 = scalar.constant 2 : i32
+  %101 = kernel.subgroup.active.mask : i32
+  %102 = scalar.ctpopi %101 : i32
+  %103 = scalar.constant 1 : i32
+  %124 = scalar.constant 0 : i32
+  %125 = scalar.constant 1 : i32
+  %126 = scalar.constant 2 : i32
+  %127 = scalar.cmpi ne, %100, %124 : i32
+  %128 = scalar.cmpi ule, %100, %126 : i32
+  %129 = scalar.andi %127, %128 : i1
+  %130 = scf.select %129, %100, %125 : i32
+  %131 = scalar.cmpi ult, %103, %130 : i32
+  %132 = scalar.andi %129, %131 : i1
+  %133 = scf.select %132, %103, %124 : i32
+  %134 = kernel.subgroup.lane.id : index
+  %135 = index.cast %134 : index to i32
+  %136 = scalar.divui %135, %130 : i32
+  %138 = scalar.subi %135, %133 : i32
+  %139 = scalar.divui %138, %130 : i32
+  %140 = scalar.cmpi eq, %139, %136 : i32
+  %141 = scalar.cmpi ult, %138, %126 : i32
+  %142 = scalar.andi %132, %140 : i1
+  %143 = scalar.andi %142, %141 : i1
+  %144 = scf.select %143, %138, %135 : i32
+  %145 = scalar.remui %144, %126 : i32
+  %146, %147 = kernel.subgroup.shuffle<index> %value, %145, %126 : vector<2xi32>, i32, i32
+  %148 = scalar.andi %143, %147 : i1
+  %111 = vector.extract %146[0] : vector<2xi32> -> i32
+  %112 = vector.extract %value[0] : vector<2xi32> -> i32
+  %113 = scalar.addi %111, %112 : i32
+  %114 = vector.extract %value[0] : vector<2xi32> -> i32
+  %115 = scf.select %148, %113, %114 : i32
+  %116 = vector.extract %146[1] : vector<2xi32> -> i32
+  %117 = vector.extract %value[1] : vector<2xi32> -> i32
+  %118 = scalar.addi %116, %117 : i32
+  %119 = vector.extract %value[1] : vector<2xi32> -> i32
+  %120 = scf.select %148, %118, %119 : i32
+  %122 = vector.splat %115 : vector<2xi32>
+  %123 = vector.insert %120 into %122[1] : i32, vector<2xi32>
+  %108 = scalar.subi %102, %99 : i32
+  %109, %110 = kernel.subgroup.shuffle<index> %123, %108, %100 : vector<2xi32>, i32, i32
+  %11 = index.constant 24 : offset
+  %12 = buffer.alloca<workgroup> align(4) %11 : buffer
+  %13 = index.constant 0 : offset
+  %14 = buffer.view %12[%13] : buffer -> view<6xi32>
+  scf.if %8 {
+    %15 = index.constant 2 : index
+    %16 = index.mul %6, %15 : index
+    vector.store %109, %14[%16] : vector<2xi32>, view<6xi32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %17 = index.constant 0 : index
+  %18 = index.cmp ult, %17, %6 : index
+  %19 = index.constant 2 : index
+  %20 = index.mul %17, %19 : index
+  %21 = vector.load %14[%20] : view<6xi32> -> vector<2xi32>
+  %24 = index.constant 1 : index
+  %25 = index.cmp ult, %24, %6 : index
+  %26 = index.constant 2 : index
+  %27 = index.mul %24, %26 : index
+  %28 = vector.load %14[%27] : view<6xi32> -> vector<2xi32>
+  %31 = index.constant 2 : index
+  %32 = index.cmp ult, %31, %6 : index
+  %33 = index.constant 2 : index
+  %34 = index.mul %31, %33 : index
+  %35 = vector.load %14[%34] : view<6xi32> -> vector<2xi32>
+  %38 = vector.extract %35[0] : vector<2xi32> -> i32
+  %39 = vector.extract %28[0] : vector<2xi32> -> i32
+  %40 = vector.extract %21[0] : vector<2xi32> -> i32
+  %41 = vector.extract %167[0] : vector<2xi32> -> i32
+  %42 = scalar.addi %40, %41 : i32
+  %43 = vector.extract %167[0] : vector<2xi32> -> i32
+  %44 = scf.select %18, %42, %43 : i32
+  %45 = scalar.addi %39, %44 : i32
+  %46 = vector.extract %21[0] : vector<2xi32> -> i32
+  %47 = vector.extract %167[0] : vector<2xi32> -> i32
+  %48 = scalar.addi %46, %47 : i32
+  %49 = vector.extract %167[0] : vector<2xi32> -> i32
+  %50 = scf.select %18, %48, %49 : i32
+  %51 = scf.select %25, %45, %50 : i32
+  %52 = scalar.addi %38, %51 : i32
+  %53 = vector.extract %28[0] : vector<2xi32> -> i32
+  %54 = vector.extract %21[0] : vector<2xi32> -> i32
+  %55 = vector.extract %167[0] : vector<2xi32> -> i32
+  %56 = scalar.addi %54, %55 : i32
+  %57 = vector.extract %167[0] : vector<2xi32> -> i32
+  %58 = scf.select %18, %56, %57 : i32
+  %59 = scalar.addi %53, %58 : i32
+  %60 = vector.extract %21[0] : vector<2xi32> -> i32
+  %61 = vector.extract %167[0] : vector<2xi32> -> i32
+  %62 = scalar.addi %60, %61 : i32
+  %63 = vector.extract %167[0] : vector<2xi32> -> i32
+  %64 = scf.select %18, %62, %63 : i32
+  %65 = scf.select %25, %59, %64 : i32
+  %66 = scf.select %32, %52, %65 : i32
+  %67 = vector.extract %35[1] : vector<2xi32> -> i32
+  %68 = vector.extract %28[1] : vector<2xi32> -> i32
+  %69 = vector.extract %21[1] : vector<2xi32> -> i32
+  %70 = vector.extract %167[1] : vector<2xi32> -> i32
+  %71 = scalar.addi %69, %70 : i32
+  %72 = vector.extract %167[1] : vector<2xi32> -> i32
+  %73 = scf.select %18, %71, %72 : i32
+  %74 = scalar.addi %68, %73 : i32
+  %75 = vector.extract %21[1] : vector<2xi32> -> i32
+  %76 = vector.extract %167[1] : vector<2xi32> -> i32
+  %77 = scalar.addi %75, %76 : i32
+  %78 = vector.extract %167[1] : vector<2xi32> -> i32
+  %79 = scf.select %18, %77, %78 : i32
+  %80 = scf.select %25, %74, %79 : i32
+  %81 = scalar.addi %67, %80 : i32
+  %82 = vector.extract %28[1] : vector<2xi32> -> i32
+  %83 = vector.extract %21[1] : vector<2xi32> -> i32
+  %84 = vector.extract %167[1] : vector<2xi32> -> i32
+  %85 = scalar.addi %83, %84 : i32
+  %86 = vector.extract %167[1] : vector<2xi32> -> i32
+  %87 = scf.select %18, %85, %86 : i32
+  %88 = scalar.addi %82, %87 : i32
+  %89 = vector.extract %21[1] : vector<2xi32> -> i32
+  %90 = vector.extract %167[1] : vector<2xi32> -> i32
+  %91 = scalar.addi %89, %90 : i32
+  %92 = vector.extract %167[1] : vector<2xi32> -> i32
+  %93 = scf.select %18, %91, %92 : i32
+  %94 = scf.select %25, %88, %93 : i32
+  %95 = scf.select %32, %81, %94 : i32
+  %97 = vector.splat %66 : vector<2xi32>
+  %prefix = vector.insert %95 into %97[1] : i32, vector<2xi32>
+  test.use %prefix : vector<2xi32>
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @target {subgroup_size = 4}
+
+kernel.def target(@target) @single_subgroup_reduce() {
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c3, %c1, %c1) : index
+} launch(%value: i64) {
+  %sum = kernel.workgroup.reduce<addi> %value : i64
+  test.use %sum : i64
+  kernel.return
+}
+
+// ----
+test.target<low_core> @target {subgroup_size = 4}
+
+kernel.def target(@target) @single_subgroup_reduce() {
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c3, %c1, %c1) : index
+} launch(%value: i64) {
+  %5 = scalar.constant 1 : i32
+  %6 = scalar.constant 4 : i32
+  %7 = kernel.subgroup.active.mask : i32
+  %8 = scalar.ctpopi %7 : i32
+  %9 = scalar.constant 1 : i32
+  %47 = scalar.constant 0 : i32
+  %48 = scalar.constant 1 : i32
+  %49 = scalar.constant 4 : i32
+  %50 = scalar.cmpi ne, %6, %47 : i32
+  %51 = scalar.cmpi ule, %6, %49 : i32
+  %52 = scalar.andi %50, %51 : i1
+  %53 = scf.select %52, %6, %48 : i32
+  %54 = scalar.cmpi ult, %9, %53 : i32
+  %55 = scalar.andi %52, %54 : i1
+  %56 = scf.select %55, %9, %47 : i32
+  %57 = kernel.subgroup.lane.id : index
+  %58 = index.cast %57 : index to i32
+  %59 = scalar.divui %58, %53 : i32
+  %61 = scalar.subi %58, %56 : i32
+  %62 = scalar.divui %61, %53 : i32
+  %63 = scalar.cmpi eq, %62, %59 : i32
+  %64 = scalar.cmpi ult, %61, %49 : i32
+  %65 = scalar.andi %55, %63 : i1
+  %66 = scalar.andi %65, %64 : i1
+  %67 = scf.select %66, %61, %58 : i32
+  %68 = scalar.remui %67, %49 : i32
+  %69, %70 = kernel.subgroup.shuffle<index> %value, %68, %49 : i64, i32, i32
+  %71 = scalar.andi %66, %70 : i1
+  %12 = scalar.addi %69, %value : i64
+  %13 = scf.select %71, %12, %value : i64
+  %14 = scalar.constant 2 : i32
+  %22 = scalar.constant 0 : i32
+  %23 = scalar.constant 1 : i32
+  %24 = scalar.constant 4 : i32
+  %25 = scalar.cmpi ne, %6, %22 : i32
+  %26 = scalar.cmpi ule, %6, %24 : i32
+  %27 = scalar.andi %25, %26 : i1
+  %28 = scf.select %27, %6, %23 : i32
+  %29 = scalar.cmpi ult, %14, %28 : i32
+  %30 = scalar.andi %27, %29 : i1
+  %31 = scf.select %30, %14, %22 : i32
+  %32 = kernel.subgroup.lane.id : index
+  %33 = index.cast %32 : index to i32
+  %34 = scalar.divui %33, %28 : i32
+  %36 = scalar.subi %33, %31 : i32
+  %37 = scalar.divui %36, %28 : i32
+  %38 = scalar.cmpi eq, %37, %34 : i32
+  %39 = scalar.cmpi ult, %36, %24 : i32
+  %40 = scalar.andi %30, %38 : i1
+  %41 = scalar.andi %40, %39 : i1
+  %42 = scf.select %41, %36, %33 : i32
+  %43 = scalar.remui %42, %24 : i32
+  %44, %45 = kernel.subgroup.shuffle<index> %13, %43, %24 : i64, i32, i32
+  %46 = scalar.andi %41, %45 : i1
+  %17 = scalar.addi %44, %13 : i64
+  %18 = scf.select %46, %17, %13 : i64
+  %19 = scalar.subi %8, %5 : i32
+  %sum, %21 = kernel.subgroup.shuffle<index> %18, %19, %6 : i64, i32, i32
+  test.use %sum : i64
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @preserved_sum_stays_explicit() {
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c3, %c1, %c1) : index
+} launch(%value: f32) {
+  %prefix = kernel.workgroup.scan<addf, preserve> %value {direction = forward, mode = inclusive} : f32
+  test.use %prefix : f32
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @target {subgroup_size = 4}
+
+kernel.def target(@target) @single_subgroup_preserved_sums_stay_explicit() {
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c3, %c1, %c1) : index
+} launch(%value: f32) {
+  %reduction = kernel.workgroup.reduce<addf, preserve> %value : f32
+  %prefix = kernel.workgroup.scan<addf, preserve> %value {direction = forward, mode = inclusive} : f32
+  test.use %reduction, %prefix : f32, f32
+  kernel.return
+}

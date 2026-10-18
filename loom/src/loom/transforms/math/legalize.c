@@ -99,11 +99,20 @@ LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, FAST);
 
 #undef LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT
 
+static_assert(LOOM_SCALAR_TRIGONOMETRYMATHFLAGS_PRESERVE ==
+                      LOOM_TARGET_MATH_REQUIREMENT_FLAG_PRESERVE &&
+                  LOOM_VECTOR_TRIGONOMETRYMATHFLAGS_PRESERVE ==
+                      LOOM_TARGET_MATH_REQUIREMENT_FLAG_PRESERVE,
+              "trigonometric preservation must match target math");
+
 static loom_target_math_fastmath_flags_t loom_math_legalize_fastmath_flags(
     uint8_t source_flags) {
-  return (
-      loom_target_math_fastmath_flags_t)(source_flags &
-                                         LOOM_TARGET_MATH_FASTMATH_FLAG_FAST);
+  uint8_t permissions = source_flags & LOOM_TARGET_MATH_FASTMATH_FLAG_FAST;
+  if (iree_any_bit_set(source_flags,
+                       LOOM_TARGET_MATH_REQUIREMENT_FLAG_PRESERVE)) {
+    permissions &= ~LOOM_TARGET_MATH_FASTMATH_FLAG_NSZ;
+  }
+  return permissions;
 }
 
 static iree_status_t loom_math_legalize_parse_option(void* user_data,
@@ -180,6 +189,8 @@ static bool loom_math_legalize_scalar_result_query(
       .value_type = result_type,
       .element_type = loom_type_element_type(result_type),
       .fastmath_flags = fastmath_flags,
+      .requirement_flags =
+          op->instance_flags & LOOM_TARGET_MATH_REQUIREMENT_FLAG_PRESERVE,
   };
   return true;
 }
@@ -198,6 +209,8 @@ static bool loom_math_legalize_vector_result_query(
       .value_type = result_type,
       .element_type = loom_type_element_type(result_type),
       .fastmath_flags = fastmath_flags,
+      .requirement_flags =
+          op->instance_flags & LOOM_TARGET_MATH_REQUIREMENT_FLAG_PRESERVE,
   };
   return true;
 }
@@ -556,15 +569,25 @@ static iree_status_t loom_math_legalize_rewrite(
     IREE_BUILTIN_UNREACHABLE();
   }
 
-  if (decision.action == LOOM_TARGET_MATH_POLICY_ACTION_KEEP) {
-    return iree_ok_status();
-  }
   if (decision.action == LOOM_TARGET_MATH_POLICY_ACTION_REJECT) {
     IREE_RETURN_IF_ERROR(loom_math_legalize_record_report_row(
         state, op, &query, &decision,
         LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REJECTED,
         /*created_op_count=*/0, /*erased_op_count=*/0));
     return loom_math_legalize_emit_rejected(state, op, &query, &decision);
+  }
+
+  // Realize the positive source requirement around an otherwise ordinary
+  // trigonometric op. Its native evaluation is selected by the same policy
+  // after this requirement has been consumed, without target-specific repairs.
+  if (iree_any_bit_set(query.requirement_flags,
+                       LOOM_TARGET_MATH_REQUIREMENT_FLAG_PRESERVE)) {
+    decision = (loom_target_math_policy_decision_t){
+        .action = LOOM_TARGET_MATH_POLICY_ACTION_REWRITE,
+        .recipe = LOOM_TARGET_MATH_RECIPE_PRESERVE_TRIGONOMETRIC_ZEROS,
+    };
+  } else if (decision.action == LOOM_TARGET_MATH_POLICY_ACTION_KEEP) {
+    return iree_ok_status();
   }
 
   const loom_math_legalize_recipe_context_t context = {

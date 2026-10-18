@@ -206,12 +206,13 @@ void loom_serve_finite_model_set_observer(loom_serve_finite_model_t* model,
 iree_status_t loom_serve_finite_model_advance_batch(
     loom_serve_finite_model_t* model, bool cancel, bool* out_complete);
 
-// Scheduler-only submission after residency_try_acquire succeeds. Acquires
-// input/output roots from the shared queue pool, uploads and invokes source,
-// then releases input after work. Success transfers a device result that can
-// be composed before host completion by importing its ready frontier. Results
-// retain neither model parameters nor command programs. Failure is terminal;
-// payload and parameter protection remain until actual producer retirement.
+// Scheduler-only submission after residency_try_admit/acquire succeeds. Ends
+// this cohort's admission interest without releasing its parameter pin.
+// Acquires input/output roots from the shared queue pool, uploads and invokes
+// source, then releases input after work. Success transfers a device result
+// that can be composed before host completion by importing its ready frontier.
+// Results retain neither model parameters nor command programs. Failure is
+// terminal; payload and parameter protection remain until producer retirement.
 iree_status_t loom_serve_finite_model_submit(
     loom_serve_finite_model_t* model, loom_serve_finite_result_t** out_result,
     loom_serve_execution_frontier_t* out_frontier);

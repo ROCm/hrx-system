@@ -99,6 +99,8 @@ BAZEL_COMMANDS = {
     "iree-bazel-amdgpu-asan": ("amdgpu", "asan"),
     "iree-bazel-amdgpu-tsan": ("amdgpu", "tsan"),
     "iree-bazel-amdgpu-ubsan": ("amdgpu", "ubsan"),
+    "iree-bazel-amdgpu-native": ("amdgpu-native", None),
+    "iree-bazel-amdgpu-native-asan": ("amdgpu-native", "asan"),
     "iree-bazel-loom-amdgpu": ("loom-amdgpu", None),
     "iree-bazel-vulkan": ("vulkan", None),
 }
@@ -811,6 +813,63 @@ def amdgpu_test_steps(
     ]
 
 
+def amdgpu_windows_steps(
+    targets: tuple[str, ...], target_selector: str, config: str | None
+) -> list[CiStep]:
+    options = ci_config.AMDGPU_WINDOWS_BAZEL_OPTIONS
+    config_name = f" / {config.upper()}" if config is not None else ""
+    # A required finite PM4 copy establishes the exact GPU and usable native
+    # transport. SDMA remains capability-admitted; its skip is not a proof.
+    queue_options = options + (
+        f"--test_arg=--amdf_gpu_target={target_selector}",
+        "--test_arg=--amdf_require_test=Pm4KernelQueueTest.ExecutesMaterializedCopyData",
+        "--test_arg=--gtest_fail_fast=1",
+    )
+    steps = [
+        bazel_configure_step(extra_options=options),
+        bazel_run_step(
+            "Enumerate Windows GPU queue families",
+            "//libamdf/examples:enumerate",
+            bazel_options=options
+            + ((f"--config={config}",) if config is not None else ()),
+        ),
+    ]
+    for lifetime in ("process", "instance"):
+        steps.append(
+            bazel_test_step(
+                f"Check Windows GPU finite copies / {lifetime}{config_name}",
+                (ci_config.AMDGPU_WINDOWS_QUEUE_TARGET,),
+                config=config,
+                available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
+                bazel_options=queue_options
+                + (
+                    f"--test_arg=--amdf_native_lifetime={lifetime}",
+                    "--test_filter=" + ci_config.AMDGPU_WINDOWS_COPY_FILTER,
+                ),
+            )
+        )
+    steps.append(
+        bazel_test_step(
+            f"Test IREE / Windows AMDGPU{config_name}",
+            targets or ci_config.AMDGPU_WINDOWS_BAZEL_TARGETS,
+            config=config,
+            available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
+            bazel_options=options + ("--test_arg=--gtest_fail_fast=1",),
+        )
+    )
+    steps.append(
+        bazel_test_step(
+            f"Test Windows GPU queues / instance{config_name}",
+            (ci_config.AMDGPU_WINDOWS_QUEUE_TARGET,),
+            config=config,
+            available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
+            bazel_options=queue_options
+            + ("--test_arg=--amdf_native_lifetime=instance",),
+        )
+    )
+    return steps
+
+
 def amdgpu_steps(
     targets: tuple[str, ...],
     target_selector: str,
@@ -1316,6 +1375,7 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
     cmake_target_group = CMAKE_COMMANDS.get(args.command, (None, None))[0]
     amdgpu_target_bazel_groups = (
         "amdgpu",
+        "amdgpu-native",
         "repository-integration",
     )
     accepts_amdgpu_target = (
@@ -1369,6 +1429,14 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         return amd_client_steps(
             tuple(args.target or ()),
             sanitizer,
+        )
+    if bazel_target == "amdgpu-native":
+        if sys.platform != "win32":
+            raise ValueError("Native kernel-queue CI requires Windows")
+        if args.amdgpu_target is None:
+            raise ValueError("Windows GPU CI requires an exact --amdgpu-target")
+        return amdgpu_windows_steps(
+            tuple(args.target or ()), amdgpu_target_selector, sanitizer
         )
     if bazel_target == "xdna":
         return xdna_steps(
@@ -1498,7 +1566,7 @@ def add_bazel_test_results(steps: list[CiStep], output_dir: Path) -> list[CiStep
                 + step.argv[4:],
                 test_results=bazel_test_results.BazelTestResultsCapture(
                     build_event_path=event_path,
-                    output_dir=output_dir,
+                    output_dir=output_dir / event_stem,
                 ),
             )
         )

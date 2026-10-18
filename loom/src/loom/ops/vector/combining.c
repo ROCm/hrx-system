@@ -76,6 +76,11 @@ iree_status_t loom_vector_combining_build(
     loom_builder_t* builder, loom_combining_kind_t kind, uint8_t fastmath_flags,
     loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t result_type,
     loom_location_id_t location, loom_value_id_t* out_result) {
+  if (loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_I1) {
+    const bool has_i1_equivalent =
+        loom_combining_kind_i1_equivalent(kind, &kind);
+    IREE_ASSERT(has_i1_equivalent);
+  }
   loom_vector_flagged_binary_builder_t flagged_builder = NULL;
   loom_vector_binary_builder_t builder_without_flags = NULL;
   uint8_t instance_flags = 0;

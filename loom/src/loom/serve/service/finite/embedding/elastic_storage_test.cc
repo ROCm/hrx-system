@@ -328,6 +328,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   IREE_ASSERT_OK(
       loom_serve_residency_try_admit(retained_residency, &admission));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_serve_residency_cancel_admission(retained_residency);
   loom_serve_residency_release(retained_residency);
   const auto cancelled_state = interface_.snapshot(interface_.self);
   EXPECT_EQ(cancelled_state.oldest_queued_age, 0);

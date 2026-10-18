@@ -60,8 +60,9 @@ _MEMORY_PAYLOAD_REGISTER_CLASS_INDEX = {
 _MEMORY_PAYLOAD_FORMAT_INDEX = {
     AmdgpuMemoryPayloadFormat.GENERIC: 0,
     AmdgpuMemoryPayloadFormat.LOW_16BIT_FLOAT: 1,
-    AmdgpuMemoryPayloadFormat.SIGNED_16BIT_INTEGER: 2,
-    AmdgpuMemoryPayloadFormat.UNSIGNED_8BIT_INTEGER: 3,
+    AmdgpuMemoryPayloadFormat.SIGNED_8BIT_INTEGER: 2,
+    AmdgpuMemoryPayloadFormat.SIGNED_16BIT_INTEGER: 3,
+    AmdgpuMemoryPayloadFormat.UNSIGNED_8BIT_INTEGER: 4,
 }
 
 _MEMORY_DESCRIPTOR_CANDIDATE_PACKET_BYTE_COUNT_MAX = 31
@@ -117,7 +118,7 @@ def _range_key_packed_value(
         | (packet_byte_count << 7)
         | (_MEMORY_PAYLOAD_REGISTER_CLASS_INDEX[payload_register_class] << 12)
         | (_MEMORY_PAYLOAD_FORMAT_INDEX[payload_format] << 13)
-        | (payload_register_count << 15)
+        | (payload_register_count << 16)
     )
 
 
@@ -187,6 +188,7 @@ def _candidate_ranges(
 
 def _candidate_initializer(candidate: AmdgpuMemoryDescriptorCandidate) -> str:
     descriptor_ref = descriptor_ref_constant_name(candidate.descriptor_key)
+    preserving_ref = descriptor_ref_constant_name(candidate.preserving_descriptor_key) if candidate.preserving_descriptor_key is not None else "LOOM_AMDGPU_DESCRIPTOR_REF_NONE"
     return "\n".join(
         [
             "LOOM_AMDGPU_MEMORY_DESCRIPTOR_CANDIDATE(",
@@ -194,7 +196,7 @@ def _candidate_initializer(candidate: AmdgpuMemoryDescriptorCandidate) -> str:
             f"    {candidate.operation_kind.c_name}, {candidate.packet_byte_count},",
             f"    {candidate.payload_register_class.c_name},",
             f"    {candidate.payload_format.c_name}, {candidate.payload_register_count},",
-            f"    {descriptor_ref})",
+            f"    {descriptor_ref}, {preserving_ref})",
         ]
     )
 

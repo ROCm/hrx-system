@@ -383,6 +383,12 @@ builders above do not select it. It is distinct from ROCr's suboperation-2
 FENCE_64B and the explicit FENCE32/TRAP sequences.
 [Suboperation][pal-conditional-op] [Complete layout][pal-conditional-layout]
 
+ROCr's [Windows native SDMA epilogue](windows.md#progress-epilogue-and-notification)
+provides a concrete consumer: a 64-bit queue progress write, comparison against
+the same address, and the queue's native interrupt context. That transport
+uses the packet with an accompanying WDDM progress ID; it does not generalize
+the packet to arbitrary event objects.
+
 ## Complete transfer handoff
 
 A CPU-observed transfer composes the packet with its ownership protocol:
