@@ -57,10 +57,13 @@ TEST_P(CpuDeviceTest, LaterUriFailureReleasesBorrowedWorkers) {
           .driver = loom_serve_host_task_driver(host_),
           .uri = IREE_SV("task://missing"),
       }};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_NOT_FOUND,
+  iree::Status status =
       loom_serve_device_group_allocate(host_, IREE_ARRAYSIZE(options), options,
-                                       iree_allocator_system(), &group_));
+                                       iree_allocator_system(), &group_);
+  EXPECT_EQ(status.code(), iree::StatusCode::kNotFound);
+  EXPECT_THAT(
+      status.ToString(),
+      ::testing::HasSubstr("creating serving device 1 (task://missing)"));
   EXPECT_EQ(group_, nullptr);
   IREE_ASSERT_OK(loom_serve_device_group_allocate(
       host_, 1, options, iree_allocator_system(), &group_));
