@@ -10,8 +10,8 @@
 // metadata. The complete-image row index recovers the same base across epoch
 // boundaries, including tall grids whose later rows advance the frontier again.
 func.def @image_source_frontier(%consumed: i32, %width: i32) -> (i32) {
-  %one = scalar.constant 1 : i32
-  %bias = scalar.subi %width, %one : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %bias = scalar.subi %width, %c1_i32 : i32
   %rounded = scalar.addi %consumed, %bias : i32
   %height_frontier = scalar.divui %rounded, %width : i32
   %width_frontier = scalar.minui %consumed, %width : i32
