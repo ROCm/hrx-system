@@ -5,8 +5,8 @@ speech over one WebSocket connection. Recognition, text, and speech use their
 native services inside the same process. Each deployment keeps its own device,
 residency policy, and compatible numerical batches.
 
-This workflow uses explicit turn boundaries: the client commits an utterance and
-requests a response. It requires three registered model packages: a recognition
+Turns can be committed by the client or detected automatically. The explicit
+workflow requires three registered model packages: a recognition
 model, a retained-text model, and a speech model accepting continuing text input.
 The text deployment needs retained-session storage and two checkpoint slots per
 live conversation, with sufficient shared cache storage for those prefixes.
@@ -89,6 +89,56 @@ output modality, or token budget at an idle response boundary. Selecting
 The [Realtime profile](../http-profiles.md#realtime-conversations) defines the
 supported event and settings surface.
 
+## Detect turns automatically
+
+Register an activity-capable model and add `"activity":"detector"` to the
+assistant document, using that deployment's registered name. Include its model
+document with another `--model=detector/model.json` argument. The detector can
+use a different device and sample rate from recognition, text, and speech.
+
+Enable automatic turns after connecting:
+
+```json
+{
+  "type": "session.update",
+  "session": {
+    "audio": {
+      "input": {
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.5,
+          "prefix_padding_ms": 300,
+          "silence_duration_ms": 500,
+          "create_response": true,
+          "interrupt_response": true
+        }
+      }
+    }
+  }
+}
+```
+
+Continue sending microphone appends. Speech onset emits
+`input_audio_buffer.speech_started`; enough consecutive silence emits
+`input_audio_buffer.speech_stopped` and commits the detected interval. The
+transcript and response then arrive without explicit commit or response commands.
+The detector stays continuous while earlier transcripts finish. Another onset
+cancels an active answer when `interrupt_response` is enabled.
+
+For a client that orchestrates responses, set `create_response:false`. It still
+receives onset, stop, and final transcription, and can explicitly request the
+answer. With `interrupt_response:false`, an ongoing answer finishes before a
+pending automatic answer begins. A newer onset replaces pending automatic
+response intent, so the next answer includes the latest committed speech.
+
+The assistant's optional `input_capacity` bounds retained original-rate PCM in
+frames; its default is 48000 frames, or two seconds at 24 kHz. This covers
+pre-roll and pipeline storage, rather than limiting utterance duration. Larger
+source windows can require a larger capacity. Quiet audio older than pre-roll
+is discarded. Commit or clear establishes an empty microphone boundary before
+changing turn policy or transcription hints. Explicit commit never requests
+an automatic response. Setting `turn_detection:null` selects manual turns again.
+
 ## Interrupt and reconcile playback
 
 Send `response.cancel` to stop future generation. Its optional `response_id`
@@ -102,6 +152,11 @@ removes the item's entire transcript from model-visible history. It does not
 guess which words correspond to the playback cursor. A compatible checkpoint
 before that turn preserves prefix reuse for the next response. Changing only
 the voice also preserves text history.
+
+Automatic interruption already removes the cancelled audio response's unaligned
+text. A later playback report for that item is idempotent, including while a
+successor response runs. The server cannot infer queued client playback for an
+already completed response; the client's reported cursor remains authoritative.
 
 `input_audio_buffer.clear` discards the uncommitted microphone item.
 `conversation.item.delete` removes a committed item after its response ownership

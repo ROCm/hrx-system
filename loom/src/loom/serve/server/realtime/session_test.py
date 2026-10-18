@@ -14,6 +14,7 @@ import struct
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 from loom_serve_testing.http_harness import running_server
 
@@ -31,15 +32,15 @@ from loom.src.loom.serve.server.catalog_test_util import (
 class Client:
     """Independent RFC 6455 client with a durable ordered event transcript."""
 
-    def __init__(self, address, trace):
+    def __init__(self, address, trace, model="assistant"):
         host, port = address.rsplit(":", 1)
         self.socket = socket.create_connection((host, int(port)))
         self.input = self.socket.makefile("rb")
         self.trace = trace
         self.events = set()
         self.socket.sendall(
-            b"GET /v1/realtime?model=assistant HTTP/1.1\r\n"
-            b"Host: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            f"GET /v1/realtime?model={quote(model, safe='')} HTTP/1.1\r\n".encode()
+            + b"Host: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
             b"Sec-WebSocket-Version: 13\r\n"
             b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
         )
@@ -330,6 +331,288 @@ def pipelined_microphone_items(address, trace):
         client.close()
 
 
+def automatic_microphone(address, trace, *, partitioned, create_response):
+    client = Client(address, trace)
+    try:
+        assert client.receive()["type"] == "session.created"
+        for invalid in (
+            {"type": "semantic_vad"},
+            {"type": "server_vad", "threshold": 1.1},
+            {"type": "server_vad", "prefix_padding_ms": 2000},
+            {"type": "server_vad", "silence_duration_ms": -1},
+            {"type": "server_vad", "idle_timeout_ms": 1000},
+        ):
+            client.send(
+                "session.update",
+                session={"audio": {"input": {"turn_detection": invalid}}},
+            )
+            assert client.receive(allow_error=True)["type"] == "error", invalid
+        policy = {
+            "type": "server_vad",
+            "threshold": 0.5,
+            "prefix_padding_ms": 1,
+            "silence_duration_ms": 1,
+            "create_response": create_response,
+            "interrupt_response": True,
+        }
+        client.send(
+            "session.update", session={"audio": {"input": {"turn_detection": policy}}}
+        )
+        updated = client.until("session.updated")[-1]["session"]
+        assert updated["audio"]["input"]["turn_detection"] == policy, updated
+        samples = [0] * 96 + [64] * 192 + [0] * 480
+        if not create_response:
+            samples *= 2
+        raw = struct.pack(f"<{len(samples)}h", *samples)
+        position = 0
+        parts = [1, 7, 93] if partitioned else [len(samples)]
+        while position < len(raw):
+            count = parts.pop(0) if parts else 137
+            payload = raw[position : position + count * 2]
+            client.send(
+                "input_audio_buffer.append", audio=base64.b64encode(payload).decode()
+            )
+            position += len(payload)
+        count = 1 if create_response else 2
+        starts, stops, transcripts, done, events = {}, {}, {}, set(), []
+        response_done = False
+        while len(done) != count or (create_response and not response_done):
+            event = client.receive()
+            events.append(event)
+            kind = event["type"]
+            response_done |= kind == "response.done"
+            if kind == "input_audio_buffer.speech_started":
+                starts[event["item_id"]] = event["audio_start_ms"]
+            elif kind == "input_audio_buffer.speech_stopped":
+                stops[event["item_id"]] = event["audio_end_ms"]
+            elif kind == "conversation.item.input_audio_transcription.completed":
+                transcripts[event["item_id"]] = event
+            elif kind == "conversation.item.done" and event["item"]["role"] == "user":
+                done.add(event["item"]["id"])
+        assert len(starts) == len(stops) == len(transcripts) == count, events
+        intervals = []
+        for identity, begin in starts.items():
+            end = stops[identity]
+            assert 0 <= begin < end, events
+            assert transcripts[identity]["transcript"] == "A", events
+            intervals.append((begin, end, transcripts[identity]["usage"]["seconds"]))
+        assert all(
+            left[1] <= right[0] for left, right in zip(intervals, intervals[1:])
+        ), intervals
+        messages = [{"role": "user", "content": "A"}] * count
+        if create_response:
+            text = "".join(
+                e["delta"]
+                for e in events
+                if e["type"] == "response.output_audio_transcript.delta"
+            )
+            assert text == complete(messages, 2)[0], events
+            audio = b"".join(
+                base64.b64decode(e["delta"])
+                for e in events
+                if e["type"] == "response.output_audio.delta"
+            )
+            check_pcm(audio, text, 42)
+        else:
+            assert not any(e["type"] == "response.created" for e in events), events
+            client.respond(messages)
+        # Changing classified input policy requires an explicit ordered cut.
+        client.send(
+            "session.update", session={"audio": {"input": {"turn_detection": None}}}
+        )
+        assert client.receive(allow_error=True)["type"] == "error"
+        client.send("input_audio_buffer.clear")
+        client.until("input_audio_buffer.cleared")
+        client.send(
+            "session.update", session={"audio": {"input": {"turn_detection": None}}}
+        )
+        updated = client.until("session.updated")[-1]["session"]
+        assert updated["audio"]["input"]["turn_detection"] is None, updated
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+        return intervals
+    finally:
+        client.close()
+
+
+def automatic_explicit_boundaries(address, trace):
+    client = Client(address, trace)
+    try:
+        assert client.receive()["type"] == "session.created"
+        client.send(
+            "session.update",
+            session={
+                "audio": {
+                    "input": {
+                        "turn_detection": {
+                            "type": "server_vad",
+                            # Retain the full quiet interval for explicit commit
+                            # regardless of concurrent detector progress.
+                            "prefix_padding_ms": 20,
+                            "silence_duration_ms": 100,
+                            "create_response": True,
+                        }
+                    }
+                }
+            },
+        )
+        client.until("session.updated")
+        raw = struct.pack("<288h", *([64] * 192 + [0] * 96))
+        client.send("input_audio_buffer.append", audio=base64.b64encode(raw).decode())
+        started = client.until("input_audio_buffer.speech_started")[-1]
+        assert started["audio_start_ms"] == 0, started
+        client.send("input_audio_buffer.commit")
+        client.send("input_audio_buffer.append", audio=base64.b64encode(raw).decode())
+        client.send("input_audio_buffer.clear")
+        client.send(
+            "input_audio_buffer.append", audio=base64.b64encode(bytes(960)).decode()
+        )
+        client.send("input_audio_buffer.commit")
+        transcripts, events, done = [], [], set()
+        while len(done) != 2:
+            event = client.receive()
+            events.append(event)
+            if event["type"] == "conversation.item.input_audio_transcription.completed":
+                transcripts.append(event)
+            elif event["type"] == "conversation.item.done":
+                done.add(event["item"]["id"])
+        assert sorted(e["usage"]["seconds"] for e in transcripts) == [0.012, 0.02], (
+            transcripts
+        )
+        assert all(e["transcript"] == "A" for e in transcripts), transcripts
+        assert not any(e["type"] == "response.created" for e in events), events
+        client.send(
+            "session.update", session={"audio": {"input": {"turn_detection": None}}}
+        )
+        client.until("session.updated")
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def automatic_response_policy(address, trace, *, interrupt):
+    client = Client(address, trace)
+    admin = HttpClient(address)
+    drained = False
+    try:
+        assert client.receive()["type"] == "session.created"
+        client.send(
+            "session.update",
+            session={
+                "audio": {
+                    "input": {
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "prefix_padding_ms": 1,
+                            "silence_duration_ms": 1,
+                            "create_response": not interrupt,
+                            "interrupt_response": interrupt,
+                        }
+                    }
+                }
+            },
+        )
+        client.until("session.updated")
+        client.message("before", "a")
+        admin.request("/v1/models/drain", {"model": "speech"})
+        drained = True
+        client.send("response.create")
+        response = client.until("response.created")[-1]["response"]
+        raw = struct.pack("<768h", *([0] * 96 + [64] * 192 + [0] * 480))
+        client.send("input_audio_buffer.append", audio=base64.b64encode(raw).decode())
+        events = client.until("conversation.item.input_audio_transcription.completed")
+        assert events[-1]["transcript"] == "A", events
+        assert any(e["type"] == "input_audio_buffer.speech_started" for e in events), (
+            events
+        )
+        if interrupt:
+            while not any(e["type"] == "response.done" for e in events):
+                events.append(client.receive())
+            cancelled = next(
+                e["response"] for e in events if e["type"] == "response.done"
+            )
+            assert (
+                cancelled["id"] == response["id"] and cancelled["status"] == "cancelled"
+            ), events
+            item = cancelled["output"][0]
+            assert item["content"][0]["transcript"] is None, item
+            client.send("response.create")
+            client.until("response.created")
+            # The old unaligned text is already absent. A late playback report
+            # cannot cancel or invalidate the correctly composed successor.
+            client.send(
+                "conversation.item.truncate",
+                item_id=item["id"],
+                content_index=0,
+                audio_end_ms=0,
+            )
+            client.until("conversation.item.truncated")
+        else:
+            assert not any(
+                e["type"] in ("response.done", "response.created") for e in events
+            ), events
+        admin.request("/v1/models/undrain", {"model": "speech"})
+        drained = False
+        messages = [{"role": "user", "content": "a"}]
+        if not interrupt:
+            first = client.until("response.done")
+            assert first[-1]["response"]["id"] == response["id"], first
+            assert first[-1]["response"]["status"] == "incomplete", first
+            text = first[-1]["response"]["output"][0]["content"][0]["transcript"]
+            assert text == complete(messages, 2)[0], first
+            messages.append({"role": "assistant", "content": text})
+        messages.append({"role": "user", "content": "A"})
+        second = client.until("response.done")
+        response = second[-1]["response"]
+        assert response["status"] in ("completed", "incomplete"), response
+        text = response["output"][0]["content"][0]["transcript"]
+        assert text == complete(messages, 2)[0], response
+        audio = b"".join(
+            base64.b64decode(e["delta"])
+            for e in second
+            if e["type"] == "response.output_audio.delta"
+        )
+        check_pcm(audio, text, 42)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        if drained:
+            admin.request("/v1/models/undrain", {"model": "speech"})
+        client.close()
+
+
+def rejected_activity_geometry(address, trace):
+    client = Client(address, trace, model="bounded")
+    try:
+        assert client.receive()["session"]["model"] == "bounded"
+        client.send(
+            "session.update",
+            session={
+                "audio": {
+                    "input": {
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "prefix_padding_ms": 0,
+                        }
+                    }
+                }
+            },
+        )
+        client.until("session.updated")
+        client.send("input_audio_buffer.append", audio="AAAAAA==")
+        failure = client.receive(allow_error=True)
+        assert failure["type"] == "error", failure
+        assert failure["error"]["type"] == "server_error", failure
+        assert "input_capacity" in failure["error"]["message"], failure
+        assert client.read_frame() == (8, struct.pack(">H", 1011))
+        assert client.input.read(1) == b""
+        status = HttpClient(address).request("/v1/status")
+        assert len(status["data"]) == 3, status
+    finally:
+        client.close()
+
+
 def rejected_capture(address, trace):
     client = Client(address, trace)
     try:
@@ -379,10 +662,21 @@ def main():
                     "name": "assistant",
                     "text": "fixture-text",
                     "recognition": "recognition",
+                    "activity": "recognition",
                     "speech": "speech",
                     "voice": "positive",
                     "max_output_tokens": 2,
                     "seed": 42,
+                }
+            )
+        )
+        bounded = directory / "bounded.json"
+        bounded.write_text(
+            json.dumps(
+                {
+                    **json.loads(profile.read_text()),
+                    "name": "bounded",
+                    "input_capacity": 4096,
                 }
             )
         )
@@ -394,6 +688,7 @@ def main():
             "--listen=127.0.0.1:0",
             "--heartbeat_ms=0",
             f"--realtime_assistant={profile}",
+            f"--realtime_assistant={bounded}",
         ]
         with running_server(command, artifacts / "server.log") as (process, address):
             assert address is not None, process.poll()
@@ -401,6 +696,20 @@ def main():
                 conversation(address, trace)
                 cancellation(address, trace)
                 pipelined_microphone_items(address, trace)
+                packed = automatic_microphone(
+                    address, trace, partitioned=False, create_response=False
+                )
+                partitioned = automatic_microphone(
+                    address, trace, partitioned=True, create_response=False
+                )
+                assert packed == partitioned, (packed, partitioned)
+                automatic_microphone(
+                    address, trace, partitioned=True, create_response=True
+                )
+                automatic_explicit_boundaries(address, trace)
+                automatic_response_policy(address, trace, interrupt=True)
+                automatic_response_policy(address, trace, interrupt=False)
+                rejected_activity_geometry(address, trace)
         text["definition"].update(session_cache_capacity=0, checkpoint_capacity=0)
         write_startup(flags, catalog)
         with running_server(command, artifacts / "rejection-server.log") as (

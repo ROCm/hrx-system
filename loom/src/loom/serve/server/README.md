@@ -91,6 +91,15 @@ interval and receives EOF after that interval's final PCM span. Clearing an item
 releases its interval while later appends keep their original positions. Later
 controls remain readable while earlier input work borrows its receipt or samples.
 
+[Turn detection](realtime/turn.h) keeps an independently converted activity
+stream across automatic utterance boundaries. Priming publishes a retention
+bound derived from the source window and converter before receiving PCM. Original
+samples feed finite STT intervals with fresh conversion history, while the
+continuous detector preserves its own history. Quiet pre-roll, pending activity,
+STT readers, and accepted CPU loans jointly determine bounded raw retention.
+The session owns speech events, independent response intent, and cancellation;
+activity probabilities never encode playback or conversation policy.
+
 [Generation](realtime/generation.h) feeds native text content spans into the
 continuing speech interface under bounded output credit. Its finite output task
 borrows the native waveform block until actual task release. Generated samples,
@@ -103,10 +112,14 @@ The real CLI socket witness lives in [session_test.py](realtime/session_test.py)
 with physical execution registered by CPU, AMDGPU, and SPIR-V providers. It checks
 commit without later audio, exact text/PCM, voice changes, truncation with cache
 reuse, cancellation before native admission, cleanup through drain, and capture
-failure isolation. [Capture lifetime tests](realtime/capture_test.cc) cover ring
+failure isolation. Automatic cases cover partition invariance, independent
+transcripts, explicit commit/clear, response creation and interruption controls,
+and late client truncation during a successor. [Capture lifetime tests](realtime/capture_test.cc) cover ring
 wrap, ordered marks, out-of-order loan release, and accepted decoding across
-cancellation and peer disconnect. [Input lifetime tests](realtime/input_test.cc) retain borrowed
-PCM through conversion release and independently flush finite utterances. The
+cancellation and peer disconnect. [Input lifetime tests](realtime/input_test.cc)
+retain borrowed PCM through conversion release, prime without audio, preserve
+activity coverage with a stalled consumer, and independently flush finite
+utterances. The
 [generation lifetime test](realtime/generation_test.cc) cancels an accepted
 conversion job while it borrows a real native waveform block. Numerical audio
 tests cover rate conversion, downmixing, packet boundaries, EOF, and saturation.
