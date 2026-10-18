@@ -51,6 +51,7 @@ iree_runtime_cc_library(
         ":socket_completion",
         ":sparse_table",
         ":uring",
+        ":uring_registration",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:types",
         "//runtime/src/iree/async/platform/linux:signal",
@@ -199,9 +200,12 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "uring_registration_test",
     srcs = ["uring_registration_test.cc"],
+    resource_group = "io_uring",
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
+        ":defs",
         ":uring",
+        ":uring_registration",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -262,6 +266,7 @@ iree_runtime_cc_test(
     deps = [
         ":io_uring",
         "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_thread",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

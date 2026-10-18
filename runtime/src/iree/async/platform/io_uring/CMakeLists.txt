@@ -39,6 +39,7 @@ iree_cc_library(
     ::socket_completion
     ::sparse_table
     ::uring
+    ::uring_registration
     iree::async
     iree::async::platform::linux::signal
     iree::async::platform::linux::socket_options
@@ -216,10 +217,14 @@ iree_cc_test(
   SRCS
     "uring_registration_test.cc"
   DEPS
+    ::defs
     ::uring
+    ::uring_registration
     iree::base::threading
     iree::testing::gtest
     iree::testing::gtest_main
+  RESOURCE_GROUP
+    io_uring
 )
 endif()
 
@@ -286,6 +291,7 @@ iree_cc_test(
   DEPS
     ::io_uring
     iree::async
+    iree::async::util::proactor_thread
     iree::testing::gtest
     iree::testing::gtest_main
   RESOURCE_GROUP

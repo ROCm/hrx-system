@@ -1132,9 +1132,13 @@ void iree_async_cancel_request_complete(iree_async_cancel_request_t* request);
 // operations at region->buffer_size boundaries preserves that property. No
 // socket receive ring is created. Other backends retain metadata only.
 //
-// This is cold, synchronous setup and may block while pinning pages. Backends
-// with a bound registration owner execute the call on that owner. Registration
-// does not guarantee zero-copy I/O: buffered files still use the OS page cache.
+// This is cold, synchronous setup and may block while pinning pages. io_uring
+// pins on the caller; a different bound polling owner only attaches the
+// retained pins. That cross-thread path requires kernel CLONE_BUFFERS range
+// replacement and fails with UNIMPLEMENTED when unavailable. Registering before
+// polling starts, or from the polling task itself, uses ordinary buffer
+// registration. Registration does not guarantee zero-copy I/O: buffered files
+// still use the OS page cache.
 //
 // Buffer lifetime:
 //   The memory referenced by |buffer| must remain valid and at a stable
@@ -1153,6 +1157,7 @@ void iree_async_cancel_request_complete(iree_async_cancel_request_t* request);
 //   IREE_STATUS_RESOURCE_EXHAUSTED: Pinning or slot resources exhausted.
 //   IREE_STATUS_INVALID_ARGUMENT: Invalid range, access, or pinning source.
 //   IREE_STATUS_ALREADY_EXISTS: Legacy singleton buffer table already in use.
+//   IREE_STATUS_UNIMPLEMENTED: Kernel cannot attach pins across owner tasks.
 //
 // See also: iree_async_proactor_unregister_buffer()
 static inline iree_status_t iree_async_proactor_register_buffer(

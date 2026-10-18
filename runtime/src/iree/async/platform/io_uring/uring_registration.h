@@ -9,6 +9,8 @@
 #ifndef IREE_ASYNC_PLATFORM_IO_URING_URING_REGISTRATION_H_
 #define IREE_ASYNC_PLATFORM_IO_URING_URING_REGISTRATION_H_
 
+#include <sys/uio.h>
+
 #include "iree/async/platform/io_uring/defs.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
@@ -116,6 +118,22 @@ int iree_io_uring_registration_enable(
 int iree_io_uring_registration_execute(
     iree_io_uring_registration_t* registration, uint32_t opcode, void* arg,
     uint32_t argument_count);
+
+// Pins |buffers| on the caller and installs them at |offset| in the existing
+// fixed-buffer table. The caller owns these empty destination slots and keeps
+// every backing range alive until unregistration and accepted I/O complete.
+//
+// When the caller is not the bound SINGLE_ISSUER owner, a temporary ring pins
+// the pages before the owner attaches them with CLONE_BUFFERS. Only that
+// attachment is dispatched to the owner. Source-ring teardown leaves the
+// destination's references intact. No additional thread is created.
+//
+// Returns the installed count (possibly a prefix on the direct update path)
+// or a negated errno. -EOPNOTSUPP means the kernel cannot attach existing pins;
+// it never falls back to pinning on another task's progress loop.
+int iree_io_uring_registration_update_buffers(
+    iree_io_uring_registration_t* registration, uint32_t offset,
+    const struct iovec* buffers, uint32_t count);
 
 // Returns true when requests are waiting for the owner task.
 static inline bool iree_io_uring_registration_has_pending(

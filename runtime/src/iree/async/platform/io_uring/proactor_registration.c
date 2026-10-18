@@ -21,6 +21,7 @@
 #include "iree/async/platform/io_uring/buffer_ring.h"
 #include "iree/async/platform/io_uring/defs.h"
 #include "iree/async/platform/io_uring/proactor.h"
+#include "iree/async/platform/io_uring/uring_registration.h"
 #include "iree/base/internal/memory.h"
 
 //===----------------------------------------------------------------------===//
@@ -38,7 +39,7 @@ typedef struct iree_async_io_uring_fixed_buffers_t {
 
 static iree_status_t iree_async_io_uring_fixed_buffers_register(
     iree_async_proactor_io_uring_t* proactor, iree_byte_span_t contents,
-    iree_host_size_t buffer_size, bool allow_unpinned,
+    iree_host_size_t buffer_size, bool allow_unpinned, bool pin_on_caller,
     iree_async_io_uring_fixed_buffers_t* out_buffers);
 static iree_status_t iree_async_io_uring_fixed_buffers_unregister(
     iree_async_proactor_io_uring_t* proactor,
@@ -278,7 +279,7 @@ iree_status_t iree_async_proactor_io_uring_register_buffer(
       iree_async_proactor_io_uring_cast(base_proactor);
   iree_status_t status = iree_async_io_uring_fixed_buffers_register(
       proactor, buffer, buffer_size, /*allow_unpinned=*/false,
-      &registration->fixed_buffers);
+      /*pin_on_caller=*/true, &registration->fixed_buffers);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(base_proactor->allocator, registration);
     IREE_TRACE_ZONE_END(z0);
@@ -630,7 +631,7 @@ static iree_status_t iree_async_io_uring_fixed_buffers_unregister(
 // region on ENOMEM; required registrations propagate the native failure.
 static iree_status_t iree_async_io_uring_fixed_buffers_register(
     iree_async_proactor_io_uring_t* proactor, iree_byte_span_t contents,
-    iree_host_size_t buffer_size, bool allow_unpinned,
+    iree_host_size_t buffer_size, bool allow_unpinned, bool pin_on_caller,
     iree_async_io_uring_fixed_buffers_t* out_buffers) {
   *out_buffers = (iree_async_io_uring_fixed_buffers_t){0};
   const iree_host_size_t buffer_count =
@@ -685,9 +686,15 @@ static iree_status_t iree_async_io_uring_fixed_buffers_register(
             .nr = remaining_count,
             .resv2 = 0,
         };
-        register_result = iree_io_uring_ring_register(
-            &proactor->ring, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update,
-            sizeof(update));
+        if (pin_on_caller) {
+          register_result = iree_io_uring_registration_update_buffers(
+              &proactor->ring.registration, update.offset,
+              &iovecs[registered_count], remaining_count);
+        } else {
+          register_result = iree_io_uring_ring_register(
+              &proactor->ring, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update,
+              sizeof(update));
+        }
         if (register_result <= 0) {
           break;
         }
@@ -886,7 +893,8 @@ iree_status_t iree_async_proactor_io_uring_register_slab(
     iree_status_t status = iree_async_io_uring_fixed_buffers_register(
         proactor,
         iree_make_byte_span(base_ptr, iree_async_slab_total_size(slab)),
-        buffer_size, /*allow_unpinned=*/true, &slab_region->fixed_buffers);
+        buffer_size, /*allow_unpinned=*/true, /*pin_on_caller=*/false,
+        &slab_region->fixed_buffers);
     if (!iree_status_is_ok(status)) {
       iree_allocator_free(base_proactor->allocator, slab_region);
       IREE_TRACE_ZONE_END(z0);

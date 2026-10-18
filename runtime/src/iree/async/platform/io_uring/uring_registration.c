@@ -40,13 +40,13 @@ struct iree_io_uring_registration_request_t {
 
 // Executes an io_uring_register syscall, retrying interrupted calls and
 // encoding failures as negated errno values.
-static int iree_io_uring_registration_syscall(
-    iree_io_uring_registration_t* registration, uint32_t opcode, void* arg,
-    uint32_t argument_count) {
+static int iree_io_uring_registration_syscall(int ring_fd, uint32_t opcode,
+                                              void* arg,
+                                              uint32_t argument_count) {
   long result = 0;
   do {
-    result = syscall(IREE_IO_URING_SYSCALL_REGISTER, registration->ring_fd,
-                     opcode, arg, argument_count);
+    result = syscall(IREE_IO_URING_SYSCALL_REGISTER, ring_fd, opcode, arg,
+                     argument_count);
   } while (result < 0 && errno == EINTR);
   return result < 0 ? -errno : (int)result;
 }
@@ -77,7 +77,8 @@ static void iree_io_uring_registration_drain_locked(
     }
 
     int result = iree_io_uring_registration_syscall(
-        registration, request->opcode, request->arg, request->argument_count);
+        registration->ring_fd, request->opcode, request->arg,
+        request->argument_count);
     iree_io_uring_registration_request_complete(request, result);
   }
   iree_atomic_store(&registration->has_pending, 0, iree_memory_order_release);
@@ -133,7 +134,7 @@ int iree_io_uring_registration_enable(
   }
 
   int result = iree_io_uring_registration_syscall(
-      registration, IREE_IORING_REGISTER_ENABLE_RINGS, NULL, 0);
+      registration->ring_fd, IREE_IORING_REGISTER_ENABLE_RINGS, NULL, 0);
   if (result >= 0) {
     registration->owner_tid = (int32_t)syscall(__NR_gettid);
     registration->state = IREE_IO_URING_REGISTRATION_STATE_BOUND;
@@ -161,8 +162,8 @@ int iree_io_uring_registration_execute(
   switch (registration->state) {
     case IREE_IO_URING_REGISTRATION_STATE_DIRECT:
     case IREE_IO_URING_REGISTRATION_STATE_UNBOUND:
-      result = iree_io_uring_registration_syscall(registration, opcode, arg,
-                                                  argument_count);
+      result = iree_io_uring_registration_syscall(registration->ring_fd, opcode,
+                                                  arg, argument_count);
       iree_slim_mutex_unlock(&registration->mutex);
       break;
     case IREE_IO_URING_REGISTRATION_STATE_BOUND:
@@ -170,8 +171,8 @@ int iree_io_uring_registration_execute(
         // Preserve FIFO ordering when the owner enters registration directly
         // while requests from other tasks are already queued.
         iree_io_uring_registration_drain_locked(registration);
-        result = iree_io_uring_registration_syscall(registration, opcode, arg,
-                                                    argument_count);
+        result = iree_io_uring_registration_syscall(
+            registration->ring_fd, opcode, arg, argument_count);
         iree_slim_mutex_unlock(&registration->mutex);
         break;
       }
@@ -212,6 +213,71 @@ int iree_io_uring_registration_execute(
   }
 
   iree_notification_deinitialize(&request.notification);
+  return result;
+}
+
+int iree_io_uring_registration_update_buffers(
+    iree_io_uring_registration_t* registration, uint32_t offset,
+    const struct iovec* buffers, uint32_t count) {
+  const int32_t current_tid = (int32_t)syscall(__NR_gettid);
+  iree_slim_mutex_lock(&registration->mutex);
+  if (registration->state == IREE_IO_URING_REGISTRATION_STATE_CLOSED ||
+      (registration->state == IREE_IO_URING_REGISTRATION_STATE_BOUND &&
+       registration->owner_tid != current_tid &&
+       !registration->wake_callback.fn)) {
+    iree_slim_mutex_unlock(&registration->mutex);
+    return -ESHUTDOWN;
+  }
+  if (registration->state != IREE_IO_URING_REGISTRATION_STATE_BOUND ||
+      registration->owner_tid == current_tid) {
+    // Keep owner binding serialized with this decision: an UNBOUND ring can
+    // become owned by another task as soon as the mutex is released.
+    iree_io_uring_registration_drain_locked(registration);
+    iree_io_uring_rsrc_update2_t update = {
+        .offset = offset,
+        .data = (uint64_t)(uintptr_t)buffers,
+        .nr = count,
+    };
+    int result = iree_io_uring_registration_syscall(
+        registration->ring_fd, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update,
+        sizeof(update));
+    iree_slim_mutex_unlock(&registration->mutex);
+    return result;
+  }
+  iree_slim_mutex_unlock(&registration->mutex);
+
+  // No SQ/CQ mapping or submissions are needed: this descriptor only owns
+  // pins until the destination takes its references. It must not use
+  // SINGLE_ISSUER, as the destination owner imports it from a different task.
+  iree_io_uring_params_t parameters = {0};
+  long source_fd = 0;
+  do {
+    source_fd = syscall(IREE_IO_URING_SYSCALL_SETUP, 1, &parameters);
+  } while (source_fd < 0 && errno == EINTR);
+  if (source_fd < 0) {
+    return -errno;
+  }
+
+  int result = iree_io_uring_registration_syscall(
+      (int)source_fd, IREE_IORING_REGISTER_BUFFERS, (void*)buffers, count);
+  if (result >= 0) {
+    iree_io_uring_clone_buffers_t clone = {
+        .src_fd = (uint32_t)source_fd,
+        .flags = IREE_IORING_REGISTER_DST_REPLACE,
+        .dst_off = offset,
+        .nr = count,
+    };
+    result = iree_io_uring_registration_execute(
+        registration, IREE_IORING_REGISTER_CLONE_BUFFERS, &clone, 1);
+    if (result >= 0) {
+      result = (int)count;
+    } else if (result == -EINVAL) {
+      // The ranges and flags are internally established. Older kernels reject
+      // the opcode or lack range replacement; neither permits owner-side pins.
+      result = -EOPNOTSUPP;
+    }
+  }
+  close((int)source_fd);
   return result;
 }
 

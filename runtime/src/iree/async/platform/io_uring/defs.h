@@ -291,6 +291,26 @@ extern "C" {
 #define IREE_IORING_UNREGISTER_PBUF_RING 23
 #define IREE_IORING_REGISTER_SYNC_CANCEL 24
 #define IREE_IORING_REGISTER_FILE_ALLOC_RANGE 25
+#define IREE_IORING_REGISTER_CLONE_BUFFERS 30
+
+// Preserve destination slots outside the cloned range.
+#define IREE_IORING_REGISTER_DST_REPLACE (1U << 1)
+
+// Shares retained page pins from another ring without importing user pointers.
+typedef struct iree_io_uring_clone_buffers {
+  // File descriptor of the source ring (without SINGLE_ISSUER restrictions).
+  uint32_t src_fd;
+  // IREE_IORING_REGISTER_DST_REPLACE, etc.
+  uint32_t flags;
+  // First source fixed-buffer slot.
+  uint32_t src_off;
+  // First destination fixed-buffer slot.
+  uint32_t dst_off;
+  // Number of slots to clone.
+  uint32_t nr;
+  // Reserved; must be zero.
+  uint32_t pad[3];
+} iree_io_uring_clone_buffers_t;
 
 // Sparse resource table flag for IORING_REGISTER_BUFFERS2/FILES2.
 // When set, creates an empty table of the specified size. Slots are populated

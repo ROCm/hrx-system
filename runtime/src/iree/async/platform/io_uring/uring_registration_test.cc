@@ -4,11 +4,17 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/async/platform/io_uring/uring_registration.h"
+
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <thread>
 
+#include "iree/async/platform/io_uring/defs.h"
 #include "iree/async/platform/io_uring/uring.h"
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
@@ -155,7 +161,21 @@ TEST_F(IoUringRegistrationTest,
   DeinitializeTestNotification(&owner_ready);
 }
 
-TEST_F(IoUringRegistrationTest, OwnerRetirementReleasesPendingCallers) {
+class IoUringRegistrationShutdownTest
+    : public IoUringRegistrationTest,
+      public ::testing::WithParamInterface<bool> {};
+
+TEST_P(IoUringRegistrationShutdownTest, ReleasesPendingCaller) {
+  iree_io_uring_rsrc_register_t table = {
+      .nr = 8,
+      .flags = IREE_IORING_RSRC_REGISTER_SPARSE,
+  };
+  ASSERT_EQ(iree_io_uring_ring_register(&ring_, IREE_IORING_REGISTER_BUFFERS2,
+                                        &table, sizeof(table)),
+            0);
+  uint8_t backing[4096] = {};
+  struct iovec buffer = {backing, sizeof(backing)};
+
   TestNotification owner_ready;
   TestNotification request_queued;
   TestNotification close_requested;
@@ -187,10 +207,12 @@ TEST_F(IoUringRegistrationTest, OwnerRetirementReleasesPendingCallers) {
   }
   std::thread caller([&] {
     ProbeStorage probe_storage = {};
-    request_result.store(
-        iree_io_uring_ring_register(&ring_, IREE_IORING_REGISTER_PROBE,
-                                    probe_storage.probe(), kProbeOpcodeCount),
-        std::memory_order_release);
+    int result = GetParam() ? iree_io_uring_registration_update_buffers(
+                                  &ring_.registration, 0, &buffer, 1)
+                            : iree_io_uring_ring_register(
+                                  &ring_, IREE_IORING_REGISTER_PROBE,
+                                  probe_storage.probe(), kProbeOpcodeCount);
+    request_result.store(result, std::memory_order_release);
   });
 
   AwaitTestNotification(&request_queued);
@@ -199,14 +221,65 @@ TEST_F(IoUringRegistrationTest, OwnerRetirementReleasesPendingCallers) {
   caller.join();
   EXPECT_EQ(request_result.load(std::memory_order_acquire), -ESHUTDOWN);
 
-  ProbeStorage probe_storage = {};
-  EXPECT_EQ(
-      iree_io_uring_ring_register(&ring_, IREE_IORING_REGISTER_PROBE,
-                                  probe_storage.probe(), kProbeOpcodeCount),
-      -ESHUTDOWN);
+  EXPECT_EQ(iree_io_uring_registration_update_buffers(&ring_.registration, 0,
+                                                      &buffer, 1),
+            -ESHUTDOWN);
 
   DeinitializeTestNotification(&close_requested);
   DeinitializeTestNotification(&request_queued);
+  DeinitializeTestNotification(&owner_ready);
+}
+
+INSTANTIATE_TEST_SUITE_P(Operation, IoUringRegistrationShutdownTest,
+                         ::testing::Bool(),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                           return info.param ? "PreparedPins" : "Probe";
+                         });
+
+TEST_F(IoUringRegistrationTest, PinFailureDoesNotRequestOwnerProgress) {
+  TestNotification owner_ready;
+  TestNotification close_requested;
+  InitializeTestNotification(&owner_ready);
+  InitializeTestNotification(&close_requested);
+  std::atomic<int> wake_count{0};
+  iree_io_uring_ring_set_registration_wake_callback(
+      &ring_, {+[](void* value) {
+                 static_cast<std::atomic<int>*>(value)->fetch_add(1);
+               },
+               &wake_count});
+  std::atomic<int> enable_code{IREE_STATUS_UNKNOWN};
+  std::thread owner([&] {
+    iree_status_t status = iree_io_uring_ring_enable(&ring_);
+    enable_code.store(iree_status_code(status), std::memory_order_release);
+    iree_status_free(status);
+    SignalTestNotification(&owner_ready);
+    AwaitTestNotification(&close_requested);
+    iree_io_uring_ring_end_polling(&ring_);
+  });
+
+  AwaitTestNotification(&owner_ready);
+  int result = -EINPROGRESS;
+  const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  void* memory =
+      mmap(nullptr, page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (enable_code.load(std::memory_order_acquire) == IREE_STATUS_OK &&
+      memory != MAP_FAILED) {
+    // The caller cannot pin an inaccessible mapping. The owner deliberately
+    // does not drain registrations: failure must precede any owner handoff.
+    struct iovec buffer = {memory, page_size};
+    result = iree_io_uring_registration_update_buffers(&ring_.registration, 0,
+                                                       &buffer, 1);
+  }
+  SignalTestNotification(&close_requested);
+  owner.join();
+  EXPECT_EQ(enable_code.load(std::memory_order_acquire), IREE_STATUS_OK);
+  EXPECT_NE(memory, MAP_FAILED);
+  EXPECT_EQ(result, -EFAULT);
+  EXPECT_EQ(wake_count.load(), 0);
+  if (memory != MAP_FAILED) {
+    EXPECT_EQ(munmap(memory, page_size), 0);
+  }
+  DeinitializeTestNotification(&close_requested);
   DeinitializeTestNotification(&owner_ready);
 }
 

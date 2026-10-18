@@ -11,15 +11,19 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #include "iree/async/buffer_pool.h"
 #include "iree/async/file.h"
 #include "iree/async/operations/file.h"
 #include "iree/async/operations/net.h"
+#include "iree/async/operations/scheduling.h"
 #include "iree/async/platform/io_uring/api.h"
 #include "iree/async/slab.h"
+#include "iree/async/util/proactor_thread.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -221,13 +225,37 @@ TEST_F(SlabRegistrationTest, PinLimitReleasesPartialRegistration) {
   ASSERT_NO_FATAL_FAILURE(RegisterAtFirstSlot());
 }
 
-class FileRegistrationTest : public SlabRegistrationTest,
-                             public ::testing::WithParamInterface<bool> {
+enum class FileRegistrationKind {
+  kIndexedSlab,
+  kHostBuffer,
+  kHostBufferCrossThread,
+};
+
+class FileRegistrationTest
+    : public SlabRegistrationTest,
+      public ::testing::WithParamInterface<FileRegistrationKind> {
  protected:
   void SetUp() override {
     SlabRegistrationTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
       return;
+    }
+
+    if (GetParam() == FileRegistrationKind::kHostBufferCrossThread) {
+      iree_async_proactor_release(proactor_);
+      proactor_ = nullptr;
+      auto options = iree_async_proactor_options_default();
+      options.threading_mode = IREE_ASYNC_PROACTOR_THREADING_CROSS_THREAD;
+      IREE_ASSERT_OK(iree_async_proactor_create_io_uring(
+          options, iree_allocator_system(), &proactor_));
+      IREE_ASSERT_OK(iree_async_proactor_thread_create(
+          proactor_, iree_async_proactor_thread_options_default(),
+          iree_allocator_system(), &proactor_thread_));
+      // Prove owner binding before registration: merely starting the thread
+      // would race setup and accidentally exercise the unbound direct path.
+      iree_async_nop_operation_t nop = {};
+      nop.base.type = IREE_ASYNC_OPERATION_TYPE_NOP;
+      ASSERT_NO_FATAL_FAILURE(Run(&nop.base));
     }
 
     // Shared backing preserves the registered pages when CPU translations are
@@ -240,14 +268,20 @@ class FileRegistrationTest : public SlabRegistrationTest,
                     MAP_SHARED, backing_fd_, 0);
     ASSERT_NE(mapping_, MAP_FAILED);
     ASSERT_EQ(madvise(mapping_, mapping_length_, MADV_NOHUGEPAGE), 0);
-    if (GetParam()) {
+    if (GetParam() != FileRegistrationKind::kIndexedSlab) {
       iree_async_buffer_registration_entry_t* entry = nullptr;
-      IREE_ASSERT_OK(iree_async_proactor_register_buffer(
+      iree_status_t status = iree_async_proactor_register_buffer(
           proactor_, &registration_state_,
           iree_make_byte_span(mapping_, mapping_length_),
           IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
               IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-          &entry));
+          &entry);
+      if (GetParam() == FileRegistrationKind::kHostBufferCrossThread &&
+          iree_status_is_unimplemented(status)) {
+        iree_status_free(status);
+        GTEST_SKIP() << "kernel cannot attach retained pins across owner tasks";
+      }
+      IREE_ASSERT_OK(status);
       region_ = entry->region;
       iree_async_region_retain(region_);
       EXPECT_EQ(region_->handles.iouring.buffer_group_id, -1);
@@ -284,6 +318,15 @@ class FileRegistrationTest : public SlabRegistrationTest,
       EXPECT_EQ(close(pagemap_fd_), 0);
     }
     iree_async_buffer_registration_state_deinitialize(&registration_state_);
+    ResetSlab();
+    if (proactor_thread_) {
+      iree_async_proactor_thread_request_stop(proactor_thread_);
+      IREE_EXPECT_OK(iree_async_proactor_thread_join(proactor_thread_,
+                                                     IREE_DURATION_INFINITE));
+      IREE_EXPECT_OK(
+          iree_async_proactor_thread_consume_status(proactor_thread_));
+      iree_async_proactor_thread_release(proactor_thread_);
+    }
     SlabRegistrationTest::TearDown();
     if (backing_fd_ >= 0) {
       EXPECT_EQ(close(backing_fd_), 0);
@@ -308,30 +351,52 @@ class FileRegistrationTest : public SlabRegistrationTest,
     }
   }
 
-  void Run(iree_async_operation_t* operation) {
-    struct Completion {
-      // Published by the terminal callback on this polling thread.
-      bool done = false;
-      // Terminal result consumed after polling completes.
-      iree::Status status;
-    } completion;
-    operation->completion_fn =
-        +[](void* user_data, iree_async_operation_t*, iree_status_t status,
-            iree_async_completion_flags_t flags) {
-          auto& completion = *static_cast<Completion*>(user_data);
-          EXPECT_EQ(flags & IREE_ASYNC_COMPLETION_FLAG_MORE, 0u);
-          completion.status = std::move(status);
-          completion.done = true;
-        };
-    operation->user_data = &completion;
-    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, operation));
-    while (!completion.done) {
-      IREE_ASSERT_OK(iree_async_proactor_poll(
-          proactor_, iree_infinite_timeout(), /*out_completed_count=*/nullptr));
+  struct Completion {
+    // Serializes callback publication and notification teardown with the wait.
+    std::mutex mutex;
+    // Wakes the caller when another task polls the proactor.
+    std::condition_variable condition;
+    // Set under |mutex| after the terminal result is published.
+    bool done = false;
+    // Terminal result consumed after the completion callback has returned.
+    iree::Status status;
+
+    static void Record(void* user_data, iree_async_operation_t*,
+                       iree_status_t status,
+                       iree_async_completion_flags_t flags) {
+      auto& completion = *static_cast<Completion*>(user_data);
+      std::lock_guard<std::mutex> lock(completion.mutex);
+      EXPECT_EQ(flags & IREE_ASYNC_COMPLETION_FLAG_MORE, 0u);
+      completion.status = std::move(status);
+      completion.done = true;
+      completion.condition.notify_one();
+    }
+  };
+
+  void Wait(Completion& completion) {
+    if (proactor_thread_) {
+      std::unique_lock<std::mutex> lock(completion.mutex);
+      completion.condition.wait(lock, [&] { return completion.done; });
+    } else {
+      while (!completion.done) {
+        IREE_ASSERT_OK(
+            iree_async_proactor_poll(proactor_, iree_infinite_timeout(),
+                                     /*out_completed_count=*/nullptr));
+      }
     }
     IREE_ASSERT_OK(completion.status.release());
   }
 
+  void Run(iree_async_operation_t* operation) {
+    Completion completion;
+    operation->completion_fn = Completion::Record;
+    operation->user_data = &completion;
+    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, operation));
+    ASSERT_NO_FATAL_FAILURE(Wait(completion));
+  }
+
+  // Present only when a separate task owns polling and registration attachment.
+  iree_async_proactor_thread_t* proactor_thread_ = nullptr;
   // Registration owner whose references may retire before accepted I/O.
   iree_async_buffer_registration_state_t registration_state_ = {};
   // Shared physical backing retained until all registrations are released.
@@ -391,6 +456,46 @@ TEST_P(FileRegistrationTest, ReadWriteWithoutCpuTranslations) {
   }
 }
 
+TEST_P(FileRegistrationTest, AttachmentPreservesOtherRegisteredRanges) {
+  if (!iree_any_bit_set(iree_async_proactor_query_capabilities(proactor_),
+                        IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT)) {
+    GTEST_SKIP() << "kernel predates multiple fixed buffer registrations";
+  }
+  for (int iteration = 0; iteration < 3; ++iteration) {
+    iree_async_buffer_registration_entry_t* entry = nullptr;
+    IREE_ASSERT_OK(iree_async_proactor_register_buffer(
+        proactor_, &registration_state_,
+        iree_make_byte_span(static_cast<uint8_t*>(mapping_) + page_size_,
+                            page_size_),
+        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &entry));
+    EXPECT_NE(entry->region->handles.iouring.base_buffer_index,
+              region_->handles.iouring.base_buffer_index);
+    const iree_async_span_t spans[] = {
+        iree_async_span_make(region_, 0, page_size_),
+        iree_async_span_make(entry->region, 0, page_size_),
+    };
+    memset(mapping_, 0x37, page_size_);
+    memset(static_cast<uint8_t*>(mapping_) + page_size_, 0xA9, page_size_);
+    ASSERT_NO_FATAL_FAILURE(DiscardCpuTranslations());
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(spans); ++i) {
+      iree_async_file_write_operation_t write = {};
+      write.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_WRITE;
+      write.file = file_;
+      write.buffer = spans[i];
+      ASSERT_NO_FATAL_FAILURE(Run(&write.base));
+      ASSERT_EQ(write.bytes_written, page_size_);
+      ASSERT_NO_FATAL_FAILURE(ExpectNoCpuTranslations());
+      std::vector<uint8_t> actual(page_size_);
+      ASSERT_EQ(
+          pread(file_->primitive.value.fd, actual.data(), actual.size(), 0),
+          actual.size());
+      EXPECT_EQ(actual, std::vector<uint8_t>(page_size_, i ? 0xA9 : 0x37));
+    }
+    iree_async_proactor_unregister_buffer(proactor_, entry,
+                                          &registration_state_);
+  }
+}
+
 TEST_P(FileRegistrationTest, RawAndCrossSlotSpansPreserveByteRanges) {
   // The first span crosses indexed slab slots but fits within a host buffer's
   // fixed slot. Both representations preserve exact bytes, as do raw pointers
@@ -428,21 +533,10 @@ TEST_P(FileRegistrationTest, AcceptedFileWriteRetainsRegistration) {
   std::vector<uint8_t> expected(page_size_, 0xB7);
   memcpy(mapping_, expected.data(), expected.size());
   ASSERT_NO_FATAL_FAILURE(DiscardCpuTranslations());
-  struct Completion {
-    // Published by the terminal callback on this polling thread.
-    bool done = false;
-    // Terminal result consumed after polling completes.
-    iree::Status status;
-  } completion;
+  Completion completion;
   iree_async_file_write_operation_t write = {};
   write.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_WRITE;
-  write.base.completion_fn =
-      +[](void* user_data, iree_async_operation_t*, iree_status_t status,
-          iree_async_completion_flags_t) {
-        auto& completion = *static_cast<Completion*>(user_data);
-        completion.status = std::move(status);
-        completion.done = true;
-      };
+  write.base.completion_fn = Completion::Record;
   write.base.user_data = &completion;
   write.file = file_;
   write.buffer = iree_async_span_make(region_, 0, page_size_);
@@ -453,11 +547,7 @@ TEST_P(FileRegistrationTest, AcceptedFileWriteRetainsRegistration) {
   iree_async_buffer_registration_state_deinitialize(&registration_state_);
   iree_async_region_release(region_);
   region_ = nullptr;
-  while (!completion.done) {
-    IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_infinite_timeout(),
-                                            /*out_completed_count=*/nullptr));
-  }
-  IREE_ASSERT_OK(completion.status.release());
+  ASSERT_NO_FATAL_FAILURE(Wait(completion));
   EXPECT_EQ(write.bytes_written, expected.size());
   ASSERT_NO_FATAL_FAILURE(ExpectNoCpuTranslations());
   std::vector<uint8_t> actual(expected.size());
@@ -474,11 +564,22 @@ TEST_P(FileRegistrationTest, AcceptedFileWriteRetainsRegistration) {
   EXPECT_EQ(entry->region->handles.iouring.base_buffer_index, 0);
 }
 
-INSTANTIATE_TEST_SUITE_P(RegistrationKind, FileRegistrationTest,
-                         ::testing::Bool(),
-                         [](const ::testing::TestParamInfo<bool>& info) {
-                           return info.param ? "HostBuffer" : "IndexedSlab";
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    RegistrationKind, FileRegistrationTest,
+    ::testing::Values(FileRegistrationKind::kIndexedSlab,
+                      FileRegistrationKind::kHostBuffer,
+                      FileRegistrationKind::kHostBufferCrossThread),
+    [](const ::testing::TestParamInfo<FileRegistrationKind>& info) {
+      switch (info.param) {
+        case FileRegistrationKind::kIndexedSlab:
+          return "IndexedSlab";
+        case FileRegistrationKind::kHostBuffer:
+          return "HostBuffer";
+        case FileRegistrationKind::kHostBufferCrossThread:
+          return "HostBufferCrossThread";
+      }
+      return "";
+    });
 
 class ReceiveSlabRegistrationTest : public SlabRegistrationTest {
  protected:
