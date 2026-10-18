@@ -1,6 +1,6 @@
-// RUN: with-checks emit source-low target=vm:core output=low
+// RUN: emit source-low target=vm:core output=low
 
-// Packed byte accesses retain their byte alignment when split into words.
+// Byte-aligned vector accesses retain every byte offset through scalarization.
 kernel.def @byte_origin() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -17,14 +17,106 @@ kernel.def @byte_origin() {
 }
 
 // ----
-CHECK: %110 = constant.i64 1
-CHECK: %111 = buffer.load %source_view, %110, %110, 0, "i8.x1" : reg<vm.value : i8>
-CHECK: %172 = constant.i64 32
-CHECK: %173 = buffer.load %source_view, %172, %172, 0, "i8.x1" : reg<vm.value : i8>
-CHECK: %174 = constant.i64 0
-CHECK: buffer.store %destination_view, %174, %174, %111, 0, "i8.x1"
-CHECK: %170 = constant.i64 31
-CHECK: buffer.store %destination_view, %170, %170, %173, 0, "i8.x1"
+low.kernel.def target<vm.core> workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @byte_origin(%source_view: reg<vm.ref : buffer>, %destination_view: reg<vm.ref : buffer>) asm {
+  %78 = constant.i64 1
+  %79 = buffer.load %source_view, %78, %78, 0, "i8.x1" : reg<vm.value : i8>
+  %80 = constant.i64 2
+  %81 = buffer.load %source_view, %80, %80, 0, "i8.x1" : reg<vm.value : i8>
+  %82 = constant.i64 3
+  %83 = buffer.load %source_view, %82, %82, 0, "i8.x1" : reg<vm.value : i8>
+  %84 = constant.i64 4
+  %85 = buffer.load %source_view, %84, %84, 0, "i8.x1" : reg<vm.value : i8>
+  %86 = constant.i64 5
+  %87 = buffer.load %source_view, %86, %86, 0, "i8.x1" : reg<vm.value : i8>
+  %88 = constant.i64 6
+  %89 = buffer.load %source_view, %88, %88, 0, "i8.x1" : reg<vm.value : i8>
+  %90 = constant.i64 7
+  %91 = buffer.load %source_view, %90, %90, 0, "i8.x1" : reg<vm.value : i8>
+  %92 = constant.i64 8
+  %93 = buffer.load %source_view, %92, %92, 0, "i8.x1" : reg<vm.value : i8>
+  %94 = constant.i64 9
+  %95 = buffer.load %source_view, %94, %94, 0, "i8.x1" : reg<vm.value : i8>
+  %96 = constant.i64 10
+  %97 = buffer.load %source_view, %96, %96, 0, "i8.x1" : reg<vm.value : i8>
+  %98 = constant.i64 11
+  %99 = buffer.load %source_view, %98, %98, 0, "i8.x1" : reg<vm.value : i8>
+  %100 = constant.i64 12
+  %101 = buffer.load %source_view, %100, %100, 0, "i8.x1" : reg<vm.value : i8>
+  %102 = constant.i64 13
+  %103 = buffer.load %source_view, %102, %102, 0, "i8.x1" : reg<vm.value : i8>
+  %104 = constant.i64 14
+  %105 = buffer.load %source_view, %104, %104, 0, "i8.x1" : reg<vm.value : i8>
+  %106 = constant.i64 15
+  %107 = buffer.load %source_view, %106, %106, 0, "i8.x1" : reg<vm.value : i8>
+  %108 = constant.i64 16
+  %109 = buffer.load %source_view, %108, %108, 0, "i8.x1" : reg<vm.value : i8>
+  %110 = constant.i64 17
+  %111 = buffer.load %source_view, %110, %110, 0, "i8.x1" : reg<vm.value : i8>
+  %112 = constant.i64 18
+  %113 = buffer.load %source_view, %112, %112, 0, "i8.x1" : reg<vm.value : i8>
+  %114 = constant.i64 19
+  %115 = buffer.load %source_view, %114, %114, 0, "i8.x1" : reg<vm.value : i8>
+  %116 = constant.i64 20
+  %117 = buffer.load %source_view, %116, %116, 0, "i8.x1" : reg<vm.value : i8>
+  %118 = constant.i64 21
+  %119 = buffer.load %source_view, %118, %118, 0, "i8.x1" : reg<vm.value : i8>
+  %120 = constant.i64 22
+  %121 = buffer.load %source_view, %120, %120, 0, "i8.x1" : reg<vm.value : i8>
+  %122 = constant.i64 23
+  %123 = buffer.load %source_view, %122, %122, 0, "i8.x1" : reg<vm.value : i8>
+  %124 = constant.i64 24
+  %125 = buffer.load %source_view, %124, %124, 0, "i8.x1" : reg<vm.value : i8>
+  %126 = constant.i64 25
+  %127 = buffer.load %source_view, %126, %126, 0, "i8.x1" : reg<vm.value : i8>
+  %128 = constant.i64 26
+  %129 = buffer.load %source_view, %128, %128, 0, "i8.x1" : reg<vm.value : i8>
+  %130 = constant.i64 27
+  %131 = buffer.load %source_view, %130, %130, 0, "i8.x1" : reg<vm.value : i8>
+  %132 = constant.i64 28
+  %133 = buffer.load %source_view, %132, %132, 0, "i8.x1" : reg<vm.value : i8>
+  %134 = constant.i64 29
+  %135 = buffer.load %source_view, %134, %134, 0, "i8.x1" : reg<vm.value : i8>
+  %136 = constant.i64 30
+  %137 = buffer.load %source_view, %136, %136, 0, "i8.x1" : reg<vm.value : i8>
+  %138 = constant.i64 31
+  %139 = buffer.load %source_view, %138, %138, 0, "i8.x1" : reg<vm.value : i8>
+  %140 = constant.i64 32
+  %141 = buffer.load %source_view, %140, %140, 0, "i8.x1" : reg<vm.value : i8>
+  %142 = constant.i64 0
+  buffer.store %destination_view, %142, %142, %79, 0, "i8.x1"
+  buffer.store %destination_view, %78, %78, %81, 0, "i8.x1"
+  buffer.store %destination_view, %80, %80, %83, 0, "i8.x1"
+  buffer.store %destination_view, %82, %82, %85, 0, "i8.x1"
+  buffer.store %destination_view, %84, %84, %87, 0, "i8.x1"
+  buffer.store %destination_view, %86, %86, %89, 0, "i8.x1"
+  buffer.store %destination_view, %88, %88, %91, 0, "i8.x1"
+  buffer.store %destination_view, %90, %90, %93, 0, "i8.x1"
+  buffer.store %destination_view, %92, %92, %95, 0, "i8.x1"
+  buffer.store %destination_view, %94, %94, %97, 0, "i8.x1"
+  buffer.store %destination_view, %96, %96, %99, 0, "i8.x1"
+  buffer.store %destination_view, %98, %98, %101, 0, "i8.x1"
+  buffer.store %destination_view, %100, %100, %103, 0, "i8.x1"
+  buffer.store %destination_view, %102, %102, %105, 0, "i8.x1"
+  buffer.store %destination_view, %104, %104, %107, 0, "i8.x1"
+  buffer.store %destination_view, %106, %106, %109, 0, "i8.x1"
+  buffer.store %destination_view, %108, %108, %111, 0, "i8.x1"
+  buffer.store %destination_view, %110, %110, %113, 0, "i8.x1"
+  buffer.store %destination_view, %112, %112, %115, 0, "i8.x1"
+  buffer.store %destination_view, %114, %114, %117, 0, "i8.x1"
+  buffer.store %destination_view, %116, %116, %119, 0, "i8.x1"
+  buffer.store %destination_view, %118, %118, %121, 0, "i8.x1"
+  buffer.store %destination_view, %120, %120, %123, 0, "i8.x1"
+  buffer.store %destination_view, %122, %122, %125, 0, "i8.x1"
+  buffer.store %destination_view, %124, %124, %127, 0, "i8.x1"
+  buffer.store %destination_view, %126, %126, %129, 0, "i8.x1"
+  buffer.store %destination_view, %128, %128, %131, 0, "i8.x1"
+  buffer.store %destination_view, %130, %130, %133, 0, "i8.x1"
+  buffer.store %destination_view, %132, %132, %135, 0, "i8.x1"
+  buffer.store %destination_view, %134, %134, %137, 0, "i8.x1"
+  buffer.store %destination_view, %136, %136, %139, 0, "i8.x1"
+  buffer.store %destination_view, %138, %138, %141, 0, "i8.x1"
+  return
+}
 
 // ====
 
@@ -45,14 +137,58 @@ kernel.def @halfword_origin() {
 }
 
 // ----
-CHECK: %62 = constant.i64 2
-CHECK: %63 = buffer.load %source_view, %62, %62, 0, "i16.x1" : reg<vm.value : i16>
-CHECK: %92 = constant.i64 32
-CHECK: %93 = buffer.load %source_view, %92, %92, 0, "i16.x1" : reg<vm.value : i16>
-CHECK: %94 = constant.i64 0
-CHECK: buffer.store %destination_view, %94, %94, %63, 0, "i16.x1"
-CHECK: %90 = constant.i64 30
-CHECK: buffer.store %destination_view, %90, %90, %93, 0, "i16.x1"
+low.kernel.def target<vm.core> workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @halfword_origin(%source_view: reg<vm.ref : buffer>, %destination_view: reg<vm.ref : buffer>) asm {
+  %46 = constant.i64 2
+  %47 = buffer.load %source_view, %46, %46, 0, "i16.x1" : reg<vm.value : i16>
+  %48 = constant.i64 4
+  %49 = buffer.load %source_view, %48, %48, 0, "i16.x1" : reg<vm.value : i16>
+  %50 = constant.i64 6
+  %51 = buffer.load %source_view, %50, %50, 0, "i16.x1" : reg<vm.value : i16>
+  %52 = constant.i64 8
+  %53 = buffer.load %source_view, %52, %52, 0, "i16.x1" : reg<vm.value : i16>
+  %54 = constant.i64 10
+  %55 = buffer.load %source_view, %54, %54, 0, "i16.x1" : reg<vm.value : i16>
+  %56 = constant.i64 12
+  %57 = buffer.load %source_view, %56, %56, 0, "i16.x1" : reg<vm.value : i16>
+  %58 = constant.i64 14
+  %59 = buffer.load %source_view, %58, %58, 0, "i16.x1" : reg<vm.value : i16>
+  %60 = constant.i64 16
+  %61 = buffer.load %source_view, %60, %60, 0, "i16.x1" : reg<vm.value : i16>
+  %62 = constant.i64 18
+  %63 = buffer.load %source_view, %62, %62, 0, "i16.x1" : reg<vm.value : i16>
+  %64 = constant.i64 20
+  %65 = buffer.load %source_view, %64, %64, 0, "i16.x1" : reg<vm.value : i16>
+  %66 = constant.i64 22
+  %67 = buffer.load %source_view, %66, %66, 0, "i16.x1" : reg<vm.value : i16>
+  %68 = constant.i64 24
+  %69 = buffer.load %source_view, %68, %68, 0, "i16.x1" : reg<vm.value : i16>
+  %70 = constant.i64 26
+  %71 = buffer.load %source_view, %70, %70, 0, "i16.x1" : reg<vm.value : i16>
+  %72 = constant.i64 28
+  %73 = buffer.load %source_view, %72, %72, 0, "i16.x1" : reg<vm.value : i16>
+  %74 = constant.i64 30
+  %75 = buffer.load %source_view, %74, %74, 0, "i16.x1" : reg<vm.value : i16>
+  %76 = constant.i64 32
+  %77 = buffer.load %source_view, %76, %76, 0, "i16.x1" : reg<vm.value : i16>
+  %78 = constant.i64 0
+  buffer.store %destination_view, %78, %78, %47, 0, "i16.x1"
+  buffer.store %destination_view, %46, %46, %49, 0, "i16.x1"
+  buffer.store %destination_view, %48, %48, %51, 0, "i16.x1"
+  buffer.store %destination_view, %50, %50, %53, 0, "i16.x1"
+  buffer.store %destination_view, %52, %52, %55, 0, "i16.x1"
+  buffer.store %destination_view, %54, %54, %57, 0, "i16.x1"
+  buffer.store %destination_view, %56, %56, %59, 0, "i16.x1"
+  buffer.store %destination_view, %58, %58, %61, 0, "i16.x1"
+  buffer.store %destination_view, %60, %60, %63, 0, "i16.x1"
+  buffer.store %destination_view, %62, %62, %65, 0, "i16.x1"
+  buffer.store %destination_view, %64, %64, %67, 0, "i16.x1"
+  buffer.store %destination_view, %66, %66, %69, 0, "i16.x1"
+  buffer.store %destination_view, %68, %68, %71, 0, "i16.x1"
+  buffer.store %destination_view, %70, %70, %73, 0, "i16.x1"
+  buffer.store %destination_view, %72, %72, %75, 0, "i16.x1"
+  buffer.store %destination_view, %74, %74, %77, 0, "i16.x1"
+  return
+}
 
 // ====
 
@@ -73,11 +209,106 @@ kernel.def @word_origin() {
 }
 
 // ----
-CHECK: %110 = constant.i64 4
-CHECK: %111 = buffer.load %source_view, %110, %110, 0, "i8.x1" : reg<vm.value : i8>
-CHECK: %172 = constant.i64 35
-CHECK: %173 = buffer.load %source_view, %172, %172, 0, "i8.x1" : reg<vm.value : i8>
-CHECK: %174 = constant.i64 0
-CHECK: buffer.store %destination_view, %174, %174, %111, 0, "i8.x1"
-CHECK: %164 = constant.i64 31
-CHECK: buffer.store %destination_view, %164, %164, %173, 0, "i8.x1"
+low.kernel.def target<vm.core> workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @word_origin(%source_view: reg<vm.ref : buffer>, %destination_view: reg<vm.ref : buffer>) asm {
+  %78 = constant.i64 4
+  %79 = buffer.load %source_view, %78, %78, 0, "i8.x1" : reg<vm.value : i8>
+  %80 = constant.i64 5
+  %81 = buffer.load %source_view, %80, %80, 0, "i8.x1" : reg<vm.value : i8>
+  %82 = constant.i64 6
+  %83 = buffer.load %source_view, %82, %82, 0, "i8.x1" : reg<vm.value : i8>
+  %84 = constant.i64 7
+  %85 = buffer.load %source_view, %84, %84, 0, "i8.x1" : reg<vm.value : i8>
+  %86 = constant.i64 8
+  %87 = buffer.load %source_view, %86, %86, 0, "i8.x1" : reg<vm.value : i8>
+  %88 = constant.i64 9
+  %89 = buffer.load %source_view, %88, %88, 0, "i8.x1" : reg<vm.value : i8>
+  %90 = constant.i64 10
+  %91 = buffer.load %source_view, %90, %90, 0, "i8.x1" : reg<vm.value : i8>
+  %92 = constant.i64 11
+  %93 = buffer.load %source_view, %92, %92, 0, "i8.x1" : reg<vm.value : i8>
+  %94 = constant.i64 12
+  %95 = buffer.load %source_view, %94, %94, 0, "i8.x1" : reg<vm.value : i8>
+  %96 = constant.i64 13
+  %97 = buffer.load %source_view, %96, %96, 0, "i8.x1" : reg<vm.value : i8>
+  %98 = constant.i64 14
+  %99 = buffer.load %source_view, %98, %98, 0, "i8.x1" : reg<vm.value : i8>
+  %100 = constant.i64 15
+  %101 = buffer.load %source_view, %100, %100, 0, "i8.x1" : reg<vm.value : i8>
+  %102 = constant.i64 16
+  %103 = buffer.load %source_view, %102, %102, 0, "i8.x1" : reg<vm.value : i8>
+  %104 = constant.i64 17
+  %105 = buffer.load %source_view, %104, %104, 0, "i8.x1" : reg<vm.value : i8>
+  %106 = constant.i64 18
+  %107 = buffer.load %source_view, %106, %106, 0, "i8.x1" : reg<vm.value : i8>
+  %108 = constant.i64 19
+  %109 = buffer.load %source_view, %108, %108, 0, "i8.x1" : reg<vm.value : i8>
+  %110 = constant.i64 20
+  %111 = buffer.load %source_view, %110, %110, 0, "i8.x1" : reg<vm.value : i8>
+  %112 = constant.i64 21
+  %113 = buffer.load %source_view, %112, %112, 0, "i8.x1" : reg<vm.value : i8>
+  %114 = constant.i64 22
+  %115 = buffer.load %source_view, %114, %114, 0, "i8.x1" : reg<vm.value : i8>
+  %116 = constant.i64 23
+  %117 = buffer.load %source_view, %116, %116, 0, "i8.x1" : reg<vm.value : i8>
+  %118 = constant.i64 24
+  %119 = buffer.load %source_view, %118, %118, 0, "i8.x1" : reg<vm.value : i8>
+  %120 = constant.i64 25
+  %121 = buffer.load %source_view, %120, %120, 0, "i8.x1" : reg<vm.value : i8>
+  %122 = constant.i64 26
+  %123 = buffer.load %source_view, %122, %122, 0, "i8.x1" : reg<vm.value : i8>
+  %124 = constant.i64 27
+  %125 = buffer.load %source_view, %124, %124, 0, "i8.x1" : reg<vm.value : i8>
+  %126 = constant.i64 28
+  %127 = buffer.load %source_view, %126, %126, 0, "i8.x1" : reg<vm.value : i8>
+  %128 = constant.i64 29
+  %129 = buffer.load %source_view, %128, %128, 0, "i8.x1" : reg<vm.value : i8>
+  %130 = constant.i64 30
+  %131 = buffer.load %source_view, %130, %130, 0, "i8.x1" : reg<vm.value : i8>
+  %132 = constant.i64 31
+  %133 = buffer.load %source_view, %132, %132, 0, "i8.x1" : reg<vm.value : i8>
+  %134 = constant.i64 32
+  %135 = buffer.load %source_view, %134, %134, 0, "i8.x1" : reg<vm.value : i8>
+  %136 = constant.i64 33
+  %137 = buffer.load %source_view, %136, %136, 0, "i8.x1" : reg<vm.value : i8>
+  %138 = constant.i64 34
+  %139 = buffer.load %source_view, %138, %138, 0, "i8.x1" : reg<vm.value : i8>
+  %140 = constant.i64 35
+  %141 = buffer.load %source_view, %140, %140, 0, "i8.x1" : reg<vm.value : i8>
+  %142 = constant.i64 0
+  buffer.store %destination_view, %142, %142, %79, 0, "i8.x1"
+  %143 = constant.i64 1
+  buffer.store %destination_view, %143, %143, %81, 0, "i8.x1"
+  %144 = constant.i64 2
+  buffer.store %destination_view, %144, %144, %83, 0, "i8.x1"
+  %145 = constant.i64 3
+  buffer.store %destination_view, %145, %145, %85, 0, "i8.x1"
+  buffer.store %destination_view, %78, %78, %87, 0, "i8.x1"
+  buffer.store %destination_view, %80, %80, %89, 0, "i8.x1"
+  buffer.store %destination_view, %82, %82, %91, 0, "i8.x1"
+  buffer.store %destination_view, %84, %84, %93, 0, "i8.x1"
+  buffer.store %destination_view, %86, %86, %95, 0, "i8.x1"
+  buffer.store %destination_view, %88, %88, %97, 0, "i8.x1"
+  buffer.store %destination_view, %90, %90, %99, 0, "i8.x1"
+  buffer.store %destination_view, %92, %92, %101, 0, "i8.x1"
+  buffer.store %destination_view, %94, %94, %103, 0, "i8.x1"
+  buffer.store %destination_view, %96, %96, %105, 0, "i8.x1"
+  buffer.store %destination_view, %98, %98, %107, 0, "i8.x1"
+  buffer.store %destination_view, %100, %100, %109, 0, "i8.x1"
+  buffer.store %destination_view, %102, %102, %111, 0, "i8.x1"
+  buffer.store %destination_view, %104, %104, %113, 0, "i8.x1"
+  buffer.store %destination_view, %106, %106, %115, 0, "i8.x1"
+  buffer.store %destination_view, %108, %108, %117, 0, "i8.x1"
+  buffer.store %destination_view, %110, %110, %119, 0, "i8.x1"
+  buffer.store %destination_view, %112, %112, %121, 0, "i8.x1"
+  buffer.store %destination_view, %114, %114, %123, 0, "i8.x1"
+  buffer.store %destination_view, %116, %116, %125, 0, "i8.x1"
+  buffer.store %destination_view, %118, %118, %127, 0, "i8.x1"
+  buffer.store %destination_view, %120, %120, %129, 0, "i8.x1"
+  buffer.store %destination_view, %122, %122, %131, 0, "i8.x1"
+  buffer.store %destination_view, %124, %124, %133, 0, "i8.x1"
+  buffer.store %destination_view, %126, %126, %135, 0, "i8.x1"
+  buffer.store %destination_view, %128, %128, %137, 0, "i8.x1"
+  buffer.store %destination_view, %130, %130, %139, 0, "i8.x1"
+  buffer.store %destination_view, %132, %132, %141, 0, "i8.x1"
+  return
+}
