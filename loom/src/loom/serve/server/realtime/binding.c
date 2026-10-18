@@ -7,8 +7,8 @@
 #include "loom/serve/server/realtime/binding.h"
 
 iree_status_t loom_serve_realtime_binding_resolve(
-    loom_serve_registry_t* registry, iree_string_view_t name,
-    loom_serve_model_kind_t kind, loom_serve_realtime_binding_t* out_binding) {
+    loom_serve_registry_t* registry, iree_string_view_t name, uint32_t kinds,
+    loom_serve_realtime_binding_t* out_binding) {
   for (iree_host_size_t i = 0; i < loom_serve_registry_capacity(registry);
        ++i) {
     const loom_serve_registered_model_t* model =
@@ -16,11 +16,11 @@ iree_status_t loom_serve_realtime_binding_resolve(
     if (!iree_string_view_equal(model->service.name, name)) {
       continue;
     }
-    if (model->service.kind != kind) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "realtime deployment '%.*s' must have kind %s",
-                              (int)name.size, name.data,
-                              loom_serve_model_kind_name(kind));
+    if (!(kinds & (1u << model->service.kind))) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "realtime deployment '%.*s' has incompatible kind %s", (int)name.size,
+          name.data, loom_serve_model_kind_name(model->service.kind));
     }
     *out_binding = (loom_serve_realtime_binding_t){i, model->incarnation, name};
     return iree_ok_status();

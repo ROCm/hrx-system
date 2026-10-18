@@ -45,6 +45,10 @@ struct loom_serve_realtime_input_item_t {
   loom_serve_realtime_input_packet_t* last;
   // Source geometry, copied after admission and immutable while work is active.
   loom_serve_recognition_format_t format;
+  // Immutable retention facts computed by the priming worker.
+  loom_serve_realtime_input_geometry_t geometry;
+  // Priming has released; geometry is now safe for the serialized owner.
+  bool primed;
   // Independent numerical history borrowing the owner's immutable filter.
   loom_serve_audio_resampler_t resampler;
   // Owned bounded F32LE staging, written by the worker and read after release.
@@ -170,6 +174,25 @@ static iree_status_t loom_serve_realtime_input_convert(
     }
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(
         input->host_allocator, staging_bytes, (void**)&item->samples));
+    const uint64_t window =
+        loom_serve_recognition_stream_input_capacity(item->stream);
+    if (window > (UINT64_MAX - LOOM_SERVE_REALTIME_INPUT_FRAMES) / 2) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "recognition window exceeds microphone clock");
+    }
+    const uint64_t normalized = window * 2 + LOOM_SERVE_REALTIME_INPUT_FRAMES;
+    const uint64_t whole = normalized / item->format.sample_rate;
+    const uint64_t remainder = (normalized % item->format.sample_rate * 24000 +
+                                item->format.sample_rate - 1) /
+                               item->format.sample_rate;
+    if (whole > (UINT64_MAX - remainder - item->resampler.capacity) / 24000) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "recognition retention exceeds microphone clock");
+    }
+    item->geometry = (loom_serve_realtime_input_geometry_t){
+        .sample_rate = item->format.sample_rate,
+        .retention_frames =
+            whole * 24000 + remainder + item->resampler.capacity};
   }
   item->frame_count = 0;
   item->frame_offset = 0;
@@ -360,6 +383,8 @@ static void loom_serve_realtime_input_collect(
     item->complete = iree_status_is_ok(item->status);
     loom_serve_recognition_stream_close(item->stream);
     item->stream = NULL;
+  } else if (iree_status_is_ok(item->status)) {
+    item->primed = true;
   }
   input->working = NULL;
   input->packet = NULL;
@@ -407,7 +432,18 @@ static iree_status_t loom_serve_realtime_input_item_advance(
   // monotonic textual deltas.
   for (iree_host_size_t i = 0;
        i < 16 && loom_serve_recognition_stream_peek(item->stream); ++i) {
+    if (loom_serve_recognition_stream_peek(item->stream)->kind ==
+        LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY) {
+      break;
+    }
     loom_serve_recognition_stream_consume(item->stream);
+    *out_progress = true;
+  }
+  if (!(item->request.outputs & LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT) &&
+      loom_serve_recognition_stream_is_complete(item->stream)) {
+    item->complete = true;
+    loom_serve_recognition_stream_close(item->stream);
+    item->stream = NULL;
     *out_progress = true;
   }
   return iree_ok_status();
@@ -451,8 +487,8 @@ void loom_serve_realtime_input_advance(loom_serve_realtime_input_t* input,
       continue;
     }
     const bool format = loom_serve_recognition_stream_is_complete(item->stream);
-    if (!format && (item->converted ||
-                    (!item->first && !item->committed && !item->buffered))) {
+    if (!format && (item->converted || (item->primed && !item->first &&
+                                        !item->committed && !item->buffered))) {
       continue;
     }
     input->working = item;
@@ -471,6 +507,30 @@ void loom_serve_realtime_input_advance(loom_serve_realtime_input_t* input,
     *out_progress = true;
     break;
   }
+}
+
+const loom_serve_realtime_input_geometry_t* loom_serve_realtime_input_geometry(
+    const loom_serve_realtime_input_item_t* item) {
+  return item->primed ? &item->geometry : NULL;
+}
+
+const loom_serve_recognition_activity_t* loom_serve_realtime_input_activity(
+    const loom_serve_realtime_input_item_t* item) {
+  const loom_serve_recognition_event_t* event =
+      item->stream ? loom_serve_recognition_stream_peek(item->stream) : NULL;
+  return event && event->kind == LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY
+             ? &event->activity
+             : NULL;
+}
+
+void loom_serve_realtime_input_consume_activity(
+    loom_serve_realtime_input_item_t* item) {
+  loom_serve_recognition_stream_consume(item->stream);
+}
+
+bool loom_serve_realtime_input_complete(
+    const loom_serve_realtime_input_item_t* item) {
+  return item->complete;
 }
 
 const iree_string_builder_t* loom_serve_realtime_input_transcript(
