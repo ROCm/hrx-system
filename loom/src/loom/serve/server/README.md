@@ -76,6 +76,33 @@ Log readers retain copied identity and cursor state, not model resources or
 producer ring slots. A slow reader can miss overwritten records; model removal
 does not wait for it.
 
+## Native Realtime conversations
+
+The [Realtime owner](realtime/server.h) binds an assistant composition to the
+original registration identities and keeps its upgraded HTTP claim through
+retirement. [Input conversion](realtime/input.h) holds detached WebSocket
+receipts while shared-worker tasks decode and resample PCM. Explicit commit is
+semantic EOF for one independently owned utterance. Later controls remain
+readable while earlier input work borrows its receipt.
+
+[Generation](realtime/generation.h) feeds native text content spans into the
+continuing speech interface under bounded output credit. Its finite output task
+borrows the native waveform block until actual task release. Generated samples,
+transport-admitted samples, and client-reported playback remain distinct.
+[Conversation history](realtime/conversation.h) owns canonical text, while
+[checkpoint ownership](realtime/history.h) retains the current completed prefix
+and its predecessor for interruption. No component copies entire KV histories.
+
+The real CLI socket witness lives in [session_test.py](realtime/session_test.py),
+with physical execution registered by CPU, AMDGPU, and SPIR-V providers. It checks
+commit without later audio, exact text/PCM, voice changes, truncation with cache
+reuse, cancellation before native admission, cleanup through drain, and capture
+failure isolation. [Input lifetime tests](realtime/input_test.cc) hold every
+shared worker across cancellation and peer disconnect. The
+[generation lifetime test](realtime/generation_test.cc) cancels an accepted
+conversion job while it borrows a real native waveform block. Numerical audio
+tests cover rate conversion, downmixing, packet boundaries, EOF, and saturation.
+
 ## Native executable management
 
 The [variant handler](http/variants.h) exposes discovery, staging, selection and
