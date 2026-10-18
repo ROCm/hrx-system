@@ -52,8 +52,6 @@ static iree_status_t loom_serve_text_request_check_report(
       &object, IREE_SV("model"), chat->policy->name));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("prompt"), iree_string_builder_view(&chat->prompt)));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      &object, IREE_SV("declared_tool_count"), chat->tool_count));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("tokens")));
   loom_json_array_writer_t array;
