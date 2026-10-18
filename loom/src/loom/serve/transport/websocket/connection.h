@@ -25,9 +25,9 @@ typedef enum loom_serve_websocket_message_type_e {
 typedef struct loom_serve_websocket_limits_t {
   // Maximum complete data message, including all of its fragments, in bytes.
   iree_host_size_t message_byte_capacity;
-  // Maximum allocated payload bytes across incomplete and queued messages.
+  // Allocated payload bound across incomplete, queued, and taken messages.
   iree_host_size_t retained_byte_capacity;
-  // Maximum allocated message records, including incomplete data and control.
+  // Record bound including incomplete data/control and application receipts.
   iree_host_size_t message_capacity;
 } loom_serve_websocket_limits_t;
 
@@ -36,6 +36,7 @@ typedef struct loom_serve_websocket_limits_t {
 loom_serve_websocket_limits_t loom_serve_websocket_limits_default(void);
 
 typedef struct loom_serve_websocket_t loom_serve_websocket_t;
+typedef struct loom_serve_websocket_message_t loom_serve_websocket_message_t;
 
 // Installs a bounded RFC 6455 server receiver on a claimed HTTP connection.
 // The caller has validated its handshake and sends 101 only after this call.
@@ -49,16 +50,22 @@ iree_status_t loom_serve_websocket_upgrade(
     loom_serve_websocket_limits_t limits, iree_allocator_t host_allocator,
     loom_serve_websocket_t** out_socket);
 
-// Borrows the oldest complete message until consume or connection release.
-// Text and close reasons are validated UTF-8. Empty messages still return true.
-// The serialized application owner may keep a view across turns or accepted CPU
-// work; later receives cannot move or mutate it. Control frames are published
-// immediately even during a fragmented data message. The owner sends pong/close
-// replies through its ordinary output stream, preserving one send producer.
-bool loom_serve_websocket_peek(loom_serve_websocket_t* socket,
-                               loom_serve_websocket_message_type_t* out_type,
-                               iree_const_byte_span_t* out_payload);
-void loom_serve_websocket_consume(loom_serve_websocket_t* socket);
+// Takes the oldest complete message, or returns NULL when none is available.
+// The receipt and its immutable views survive subsequent receives and takes;
+// all allocated bytes and record credit remain charged until message_release.
+// A CPU job can borrow an earlier receipt while the serialized application
+// consumes later controls. Text and close reasons are validated UTF-8. Empty
+// messages still return a receipt. Interleaved controls publish immediately.
+// The application retains its HTTP claim until all receipts and their CPU
+// borrowers retire. It sends pong/close through its ordinary output stream,
+// preserving one send producer. No reference counting or payload copy occurs.
+loom_serve_websocket_message_t* loom_serve_websocket_take(
+    loom_serve_websocket_t* socket,
+    loom_serve_websocket_message_type_t* out_type,
+    iree_const_byte_span_t* out_payload);
+// Consumes a non-NULL receipt after all its borrowers retire, returning credit.
+void loom_serve_websocket_message_release(
+    loom_serve_websocket_t* socket, loom_serve_websocket_message_t* message);
 
 // True once a valid peer close was received, independently of queued messages.
 bool loom_serve_websocket_peer_closed(loom_serve_websocket_t* socket);
