@@ -396,3 +396,59 @@ pipeline.def public target(@device32) @run32() run(%output: channel<tile<1xi32>>
 pipeline.def public target(@device64) @run64() run(%output: channel<tile<1xi32>>) {
   pipeline.compose @publish_width_spec0(%output) : (channel<tile<1xi32>>)
 }
+
+// ====
+
+// Outlined workers have distinct retained contexts even when their target
+// facts are equivalent. Low calls preserve that exact context because their
+// register ABI and allocation products belong to the worker, while a repeated
+// specialization pass reuses the projected helper versions.
+// RUN: pass outline-pipeline-strands,specialize-target-callgraph,specialize-target-callgraph
+test.target<low_core> @core
+
+low.func.def noinline target<test.low.core>(@core) @identity(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+pipeline.def public target(@core) @run() run(%value: i32) {
+  pipeline.strand workers([0], [1], [1]) {
+    %result = low.invoke noinline @identity(%value) : (i32) -> (i32)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    %result = low.invoke noinline @identity(%value) : (i32) -> (i32)
+  }
+}
+
+// ----
+test.target<low_core> @core
+
+low.func.def noinline target<test.low.core>(@core) @identity(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+low.func.def noinline target<test.low.core>(@core) @identity_spec0(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+pipeline.def public target(@core) @run() run(%value: i32) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @__pipeline_strand_1(%value) : (i32)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @__pipeline_strand_0(%value) : (i32)
+  }
+}
+
+func.def inline @__pipeline_strand_0(%value: i32) {
+  cfg.br ^_bb1
+^_bb1:
+  %result = low.invoke noinline @identity(%value) : (i32) -> (i32)
+  func.return
+}
+
+func.def inline @__pipeline_strand_1(%value: i32) {
+  cfg.br ^_bb1
+^_bb1:
+  %result = low.invoke noinline @identity_spec0(%value) : (i32) -> (i32)
+  func.return
+}

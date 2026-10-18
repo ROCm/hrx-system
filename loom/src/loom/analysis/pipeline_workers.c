@@ -6,6 +6,7 @@
 
 #include "loom/analysis/pipeline_workers.h"
 
+#include "loom/analysis/storage_access.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/cfg/ops.h"
@@ -14,7 +15,6 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/ops/type_registry.h"
-#include "loom/util/adaptive_sort.h"
 #include "loom/util/fact_cfg.h"
 #include "loom/util/fact_extensions.h"
 
@@ -479,32 +479,64 @@ static iree_status_t loom_pipeline_worker_build(
   return iree_ok_status();
 }
 
-static bool loom_pipeline_root_less(const loom_value_id_t* left,
-                                    const loom_value_id_t* right) {
-  return *left < *right;
+typedef struct loom_pipeline_storage_reference_t {
+  // Canonical backing identity in the pipeline construction scope.
+  loom_value_id_t root_value_id;
+  // Comparable noalias partition, or NONE when roots may alias.
+  loom_value_fact_alias_scope_id_t alias_scope_id;
+  // Target-independent storage space of the backing allocation.
+  loom_value_fact_memory_space_t memory_space;
+} loom_pipeline_storage_reference_t;
+
+static loom_pipeline_storage_reference_t
+loom_pipeline_storage_reference_from_facts(const loom_value_fact_table_t* facts,
+                                           loom_value_id_t value_id) {
+  loom_pipeline_storage_reference_t reference = {
+      .root_value_id = value_id,
+      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
+  };
+  const loom_value_facts_t value_facts =
+      loom_value_fact_table_lookup(facts, value_id);
+  loom_value_fact_buffer_reference_t buffer;
+  if (loom_value_facts_query_buffer_reference(&facts->context, value_facts,
+                                              &buffer)) {
+    reference.root_value_id =
+        loom_value_fact_buffer_reference_resolve_root_value(buffer, value_id);
+    reference.alias_scope_id = buffer.alias_scope_id;
+    reference.memory_space = buffer.memory_space;
+    return reference;
+  }
+  loom_value_fact_view_reference_t view;
+  if (loom_value_facts_query_view_reference(&facts->context, value_facts,
+                                            &view)) {
+    reference.root_value_id =
+        loom_value_fact_view_reference_resolve_root_value(view, value_id);
+    reference.alias_scope_id = view.alias_scope_id;
+    reference.memory_space = view.memory_space;
+  }
+  return reference;
 }
 
-LOOM_DEFINE_ADAPTIVE_SORT(loom_pipeline_sort_roots, loom_value_id_t,
-                          loom_pipeline_root_less)
-
-static bool loom_pipeline_root_written(const loom_value_id_t* roots,
-                                       iree_host_size_t count,
-                                       loom_value_id_t root) {
-  iree_host_size_t begin = 0, end = count;
-  while (begin < end) {
-    const iree_host_size_t middle = begin + (end - begin) / 2;
-    if (roots[middle] < root) {
-      begin = middle + 1;
-    } else {
-      end = middle;
-    }
+static bool loom_pipeline_storage_references_may_alias(
+    const loom_view_region_t* source,
+    const loom_pipeline_storage_reference_t* access) {
+  if (source->root_value_id == access->root_value_id) {
+    return true;
   }
-  return begin < count && roots[begin] == root;
+  if (loom_view_memory_spaces_are_disjoint(source->memory_space,
+                                           access->memory_space)) {
+    return false;
+  }
+  return source->alias_scope_id == LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE ||
+         access->alias_scope_id == LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE ||
+         source->alias_scope_id == access->alias_scope_id;
 }
 
 static iree_status_t loom_pipeline_workers_prove_transport_sources(
-    const loom_pipeline_resources_t* resources, iree_host_size_t incoming_count,
-    iree_arena_allocator_t* arena, loom_pipeline_worker_t* workers) {
+    loom_module_t* module, const loom_pipeline_resources_t* resources,
+    iree_host_size_t incoming_count, iree_arena_allocator_t* arena,
+    loom_pipeline_worker_t* workers) {
   if (incoming_count || resources->composition_count) {
     return iree_ok_status();
   }
@@ -515,11 +547,12 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
   if (!repeated_transport) {
     return iree_ok_status();
   }
-  // Closed channel membership and admitted local async streams account for
-  // communication acquisition through the complete execution's writes. Other
-  // synchronization and unknown effects still preclude early external reads.
-  uint32_t interference = 0;
-  iree_host_size_t capacity = 0;
+  const loom_storage_access_function_t** accesses = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, resources->strand_count, sizeof(*accesses), (void**)&accesses));
+  loom_storage_access_scope_t access_scope;
+  loom_storage_access_scope_initialize(module, arena, &access_scope);
+  iree_host_size_t modifying_capacity = 0;
   for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
     loom_pipeline_worker_t* worker = &workers[i];
     loom_movement_analysis_t* movement = &worker->asynchronous.movement;
@@ -533,25 +566,53 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
       loom_local_value_domain_release(&worker->value_domain);
       IREE_RETURN_IF_ERROR(status);
     }
-    interference |= movement->view_regions.interference_memory_spaces;
-    capacity += worker->value_domain.value_count;
-  }
-  loom_value_id_t* written_roots;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, capacity, sizeof(*written_roots), (void**)&written_roots));
-  iree_host_size_t written_count = 0;
-  for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
-    const loom_pipeline_worker_t* worker = &workers[i];
-    const uint8_t* access = worker->asynchronous.movement.view_regions
-                                .storage_flags_by_value_ordinal;
-    for (loom_value_ordinal_t j = 0; j < worker->value_domain.value_count;
-         ++j) {
-      if (iree_any_bit_set(access[j], LOOM_VIEW_ACCESS_WRITE)) {
-        written_roots[written_count++] = worker->value_domain.value_ids[j];
+    loom_local_value_domain_restore(&worker->value_domain);
+    iree_status_t status = loom_storage_access_require_function(
+        &access_scope, worker->function, &worker->value_domain, &accesses[i]);
+    loom_local_value_domain_release(&worker->value_domain);
+    IREE_RETURN_IF_ERROR(status);
+    for (const loom_storage_access_use_t* use = accesses[i]->uses; use;
+         use = use->next_in_function) {
+      ++modifying_capacity;
+    }
+    if (accesses[i]->has_unknown_memory_access) {
+      for (const loom_storage_reference_t* reference = accesses[i]->references;
+           reference; reference = reference->next) {
+        ++modifying_capacity;
       }
     }
   }
-  loom_pipeline_sort_roots(written_roots, written_count);
+  loom_pipeline_storage_reference_t* modifying = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, modifying_capacity, sizeof(*modifying), (void**)&modifying));
+  iree_host_size_t modifying_count = 0;
+  for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
+    const loom_pipeline_worker_t* worker = &workers[i];
+    const loom_storage_access_function_t* access = accesses[i];
+    for (const loom_storage_access_use_t* use = access->uses; use;
+         use = use->next_in_function) {
+      const loom_storage_access_effects_t effects =
+          loom_storage_access_use_effects(use);
+      if (iree_any_bit_set(effects, LOOM_STORAGE_ACCESS_WRITE |
+                                        LOOM_STORAGE_ACCESS_ESCAPE)) {
+        modifying[modifying_count++] =
+            loom_pipeline_storage_reference_from_facts(&worker->facts,
+                                                       use->value_id);
+      }
+    }
+    if (!access->has_unknown_memory_access) {
+      continue;
+    }
+    for (const loom_storage_reference_t* reference = access->references;
+         reference; reference = reference->next) {
+      modifying[modifying_count++] = loom_pipeline_storage_reference_from_facts(
+          &worker->facts, reference->value_id);
+    }
+  }
+  // Closed channel membership and admitted local async streams account for
+  // their own accesses and completion. A source is safe to read ahead only
+  // when every other write or unbounded reference use is disjoint by storage
+  // space or by the construction's retained noalias partition.
   for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
     loom_pipeline_worker_t* worker = &workers[i];
     if (!worker->transport.induction) {
@@ -570,11 +631,13 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
             source->alias_scope_id == LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE ||
             loom_local_value_domain_ordinal(&worker->value_domain,
                                             source->root_value_id) <
-                worker->value_domain.definition_count ||
-            (interference & (1u << source->memory_space)) ||
-            loom_pipeline_root_written(written_roots, written_count,
-                                       source->root_value_id)) {
+                worker->value_domain.definition_count) {
           stable = false;
+          continue;
+        }
+        for (iree_host_size_t l = 0; stable && l < modifying_count; ++l) {
+          stable = !loom_pipeline_storage_references_may_alias(source,
+                                                               &modifying[l]);
         }
       }
     }
@@ -608,7 +671,7 @@ iree_status_t loom_pipeline_workers_build(
     }
   }
   IREE_RETURN_IF_ERROR(loom_pipeline_workers_prove_transport_sources(
-      resources, incoming_count, arena, workers));
+      module, resources, incoming_count, arena, workers));
   *out_workers = workers;
   *out_valid = true;
   return iree_ok_status();

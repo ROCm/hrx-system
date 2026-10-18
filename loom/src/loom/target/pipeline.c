@@ -673,8 +673,13 @@ static iree_status_t loom_target_pipeline_build_realized_lexical_workers(
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
       builder, IREE_SV("source"), loom_target_pipeline_build_lexical_workers,
       user_data, &for_op));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("outline-pipeline-strands")));
+  // Outlining gives every spatial worker its own target context. Reproject
+  // retained helper closures into those contexts before target-aware worker
+  // lowering observes their call edges.
   return loom_target_pipeline_build_run(builder,
-                                        IREE_SV("outline-pipeline-strands"));
+                                        IREE_SV("specialize-target-callgraph"));
 }
 
 static iree_status_t loom_target_pipeline_build_source_low_body(
@@ -703,6 +708,8 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   // available for legalization. Outlining registers their target versions.
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("outline-pipeline-strands")));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("specialize-target-callgraph")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
       builder, context,
       LOOM_TARGET_PIPELINE_PHASE_SOURCE_EXECUTION_REALIZATION));

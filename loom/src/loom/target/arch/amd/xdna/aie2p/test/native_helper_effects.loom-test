@@ -1,0 +1,66 @@
+// RUN: with-checks emit aie2p-xdna input=source-low output=pipeline-report
+
+// A retained helper mutates only the local payload passed to it. Its bounded
+// effect cannot invalidate a separately scoped external input, so repeated
+// ingress remains DMA-owned while the compute strand remains a core worker.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def noinline target<amd.xdna.aie2p.core> @write_local(%storage: reg<aie2p.ep>) asm {
+  %value = mov.i32 7
+  st %value, %storage, 0
+  return
+}
+
+pipeline.def<kernel> public retain target(@device) @helper_local_effect() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 4} : buffer, buffer
+  %sram = pipeline.memory<workgroup>[0, 1] : pool
+  %core = pipeline.memory<workgroup>[0, 3] : pool
+  %bytes = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = index.constant 8 : index
+  %record_bytes = index.constant 4 : index
+  %sram_storage = buffer.alloca<workgroup> pool(%sram) align(4) %bytes : buffer
+  %sram_slots = buffer.view %sram_storage[%origin] : buffer -> view<1x1xi32>
+  %incoming = channel.bind<fifo> %sram_slots, %c1 : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %core_storage = buffer.alloca<workgroup> pool(%core) align(4) %bytes : buffer
+  %core_slots = buffer.view %core_storage[%origin] : buffer -> view<1x1xi32>
+  %local = channel.bind<fifo> %core_slots, %c1 : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %count step %c1] {
+      %byte_index = index.mul %record, %record_bytes : index
+      %offset = index.cast %byte_index : index to offset
+      %external = buffer.view %input[%offset] : buffer -> view<1xi32>
+      %write, %payload = channel.reserve %incoming : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<1xi32> to view<1xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<1xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %count step %c1] {
+      %read, %source = channel.acquire %incoming : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+      %write, %destination = channel.reserve %local : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      channel.copy %read -> %write : read<tile<1xi32>>, write<tile<1xi32>>
+    }
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %count step %c1] {
+      %read, %payload = channel.acquire<mutable> %local : channel<tile<1xi32>> -> (read<tile<1xi32>, mutable>, view<1xi32>)
+      low.invoke @write_local(%core_storage) : (buffer)
+      %byte_index = index.mul %record, %record_bytes : index
+      %offset = index.cast %byte_index : index to offset
+      %external = buffer.view %output[%offset] : buffer -> view<1xi32>
+      %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<1xi32> to view<1xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<1xi32>, mutable>
+    }
+  }
+}
+
+// ----
+CHECK: COMPILE-REPORT: pipeline root=helper_local_effect realization=resident-configuration workers=1 *

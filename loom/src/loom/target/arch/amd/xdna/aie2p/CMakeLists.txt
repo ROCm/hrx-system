@@ -1013,6 +1013,7 @@ loom_check_test_suite(
     "test/native_dma_completions.loom-test"
     "test/native_dma_descriptors.loom-test"
     "test/native_endpoint_addresses.loom-test"
+    "test/native_helper_effects.loom-test"
     "test/native_local_buffers.loom-test"
     "test/native_repetition.loom-test"
     "test/native_strands.loom-test"

@@ -1010,6 +1010,7 @@ loom_cc_library(
     ::kernel_synchronization_legality
     ::movement
     ::pipeline_resources
+    ::storage_access
     iree::base
     iree::base::internal::arena
     loom::error::emitter
@@ -1022,7 +1023,6 @@ loom_cc_library(
     loom::ops::kernel
     loom::ops::pipeline
     loom::ops::type_registry
-    loom::util::adaptive_sort
     loom::util::cfg_graph
     loom::util::fact_table
   PUBLIC

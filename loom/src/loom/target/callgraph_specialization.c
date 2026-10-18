@@ -660,18 +660,26 @@ static iree_status_t loom_target_callgraph_derive_context(
 
 static loom_target_callgraph_row_id_t loom_target_callgraph_find_row(
     const loom_target_callgraph_state_t* state, loom_symbol_id_t source_symbol,
-    const loom_target_callgraph_context_t* context) {
+    const loom_target_callgraph_context_t* context,
+    loom_call_like_kind_t call_kind) {
+  const bool exact_context = call_kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE ||
+                             call_kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL;
   loom_target_callgraph_row_id_t row_id =
       state->symbols[source_symbol].first_row_id;
   while (row_id != LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID) {
     const loom_target_callgraph_row_t* row = &state->rows[row_id];
+    const bool matching_context =
+        exact_context ? row->context->target_context_ordinal ==
+                            context->target_context_ordinal
+                      : row->context->resolved_target.facts ==
+                                context->resolved_target.facts ||
+                            (row->existing_version != NULL &&
+                             loom_target_facts_are_equivalent(
+                                 row->context->resolved_target.facts,
+                                 context->resolved_target.facts));
     if (row->context->resolved_target.provider ==
             context->resolved_target.provider &&
-        (row->context->resolved_target.facts ==
-             context->resolved_target.facts ||
-         (row->existing_version != NULL &&
-          loom_target_facts_are_equivalent(row->context->resolved_target.facts,
-                                           context->resolved_target.facts)))) {
+        matching_context) {
       return row_id;
     }
     row_id = row->next_symbol_row_id;
@@ -889,7 +897,6 @@ static iree_status_t loom_target_callgraph_plan_reachable_rows(
         IREE_RETURN_IF_ERROR(loom_target_callgraph_execution_context(
             state, caller_context, edge->execution_scope, &execution_context));
       }
-
       const loom_symbol_id_t callee_symbol_id = edge->target_symbol_id;
       IREE_RETURN_IF_ERROR(
           loom_target_callgraph_prepare_symbol(state, callee_symbol_id));
@@ -935,7 +942,8 @@ static iree_status_t loom_target_callgraph_plan_reachable_rows(
       }
       loom_target_callgraph_row_id_t callee_row_id =
           loom_target_callgraph_find_row(state, callee_symbol_id,
-                                         callee_context);
+                                         callee_context,
+                                         loom_call_like_kind(call));
       if (callee_row_id == LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID) {
         IREE_RETURN_IF_ERROR(loom_target_callgraph_append_row(
             state, callee_symbol_id, callee_context, /*existing_version=*/NULL,
