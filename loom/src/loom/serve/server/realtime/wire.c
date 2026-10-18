@@ -49,12 +49,23 @@ static void loom_serve_realtime_wire_message_free(
 }
 
 void loom_serve_realtime_wire_clear(loom_serve_realtime_wire_t* wire) {
-  while (wire->first) {
-    loom_serve_realtime_wire_message_t* message = wire->first;
-    wire->first = message->next;
-    loom_serve_realtime_wire_message_free(wire, message);
+  loom_serve_realtime_wire_rewind(wire, NULL);
+}
+
+void loom_serve_realtime_wire_rewind(loom_serve_realtime_wire_t* wire,
+                                     loom_serve_realtime_wire_message_t* tail) {
+  loom_serve_realtime_wire_message_t* message = tail ? tail->next : wire->first;
+  if (tail) {
+    tail->next = NULL;
+  } else {
+    wire->first = NULL;
   }
-  wire->last = NULL;
+  wire->last = tail;
+  while (message) {
+    loom_serve_realtime_wire_message_t* next = message->next;
+    loom_serve_realtime_wire_message_free(wire, message);
+    message = next;
+  }
 }
 
 void loom_serve_realtime_wire_deinitialize(loom_serve_realtime_wire_t* wire) {
@@ -74,8 +85,15 @@ iree_status_t loom_serve_realtime_wire_begin(loom_serve_realtime_wire_t* wire,
 iree_status_t loom_serve_realtime_wire_commit(loom_serve_realtime_wire_t* wire,
                                               uint64_t response,
                                               bool publication) {
-  if (wire->count == 64 || wire->scratch.size > 512 * 1024 ||
-      wire->scratch.capacity > 1024 * 1024 - wire->bytes) {
+  if (wire->scratch.size > 512 * 1024) {
+    // A rejected large event must not retain construction capacity that would
+    // prevent the following small diagnostic from entering the bounded queue.
+    iree_string_builder_deinitialize(&wire->scratch);
+    iree_string_builder_initialize(wire->host_allocator, &wire->scratch);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "realtime event exceeds the 512 KiB message limit");
+  }
+  if (wire->count == 64 || wire->scratch.capacity > 1024 * 1024 - wire->bytes) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "realtime output credit exhausted");
   }
