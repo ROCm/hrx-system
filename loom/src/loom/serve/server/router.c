@@ -88,6 +88,8 @@ typedef struct loom_serve_router_t {
   loom_serve_registry_t* registry;
   // Cold executable management, retired before registry and transport owners.
   loom_serve_http_variants_t* variants;
+  // Native realtime conversations, including disconnected CPU/pin borrowers.
+  loom_serve_realtime_server_t* realtime;
   // Immutable borrowed resource view, outliving the outer routing call.
   loom_serve_resources_t resources;
   // Shared-proactor expiry, joined before this owner's wake target disappears.
@@ -793,7 +795,8 @@ static iree_status_t loom_serve_router_logs(
   }
   if (streaming) {
     if (router->logs.count + router->held.count +
-            loom_serve_http_variants_claims(router->variants) ==
+            loom_serve_http_variants_claims(router->variants) +
+            loom_serve_realtime_server_claims(router->realtime) ==
         router->logs.capacity) {
       return loom_serve_http_response_reject(
           router->server, connection, 429, "Too Many Requests",
@@ -1186,10 +1189,20 @@ static iree_status_t loom_serve_router_accept(
       loom_serve_registry_count(router->registry);
   iree_string_builder_t* output = &router->output;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
+  if (loom_serve_realtime_server_handles(request->target)) {
+    const bool allow_wait =
+        router->held.count + router->logs.count +
+            loom_serve_http_variants_claims(router->variants) +
+            loom_serve_realtime_server_claims(router->realtime) <
+        router->logs.capacity;
+    return loom_serve_realtime_server_accept(router->realtime, connection,
+                                             request, allow_wait, output);
+  }
   if (loom_serve_http_variants_handles(request->target)) {
     const bool allow_wait =
         router->held.count + router->logs.count +
-            loom_serve_http_variants_claims(router->variants) <
+            loom_serve_http_variants_claims(router->variants) +
+            loom_serve_realtime_server_claims(router->realtime) <
         router->logs.capacity;
     return loom_serve_http_variants_accept(router->variants, connection,
                                            request, allow_wait, output);
@@ -1427,7 +1440,8 @@ static iree_status_t loom_serve_router_accept(
           state->phase != LOOM_SERVE_REGISTRATION_READY) {
         if (router->held.count == router->held.capacity ||
             router->held.count + router->logs.count +
-                    loom_serve_http_variants_claims(router->variants) ==
+                    loom_serve_http_variants_claims(router->variants) +
+                    loom_serve_realtime_server_claims(router->realtime) ==
                 router->logs.capacity) {
           return loom_serve_http_response_reject(
               router->server, connection, 429, "Too Many Requests",
@@ -1470,6 +1484,10 @@ static void loom_serve_router_advance(loom_serve_router_t* router,
                        loom_serve_http_server_is_stopping(router->server);
     *out_progress = true;
   }
+  router->status = iree_status_join(
+      router->status, loom_serve_realtime_server_advance(
+                          router->realtime, router->stopping, out_progress));
+  router->stopping |= !iree_status_is_ok(router->status);
   for (iree_host_size_t i = 0; i < router->capacity; ++i) {
     const iree_host_size_t index = (router->cursor + i) % router->capacity;
     loom_serve_registered_model_t* model =
@@ -1536,6 +1554,7 @@ static void loom_serve_router_advance(loom_serve_router_t* router,
   }
   bool pending = router->tokenizations != NULL || router->held.count != 0 ||
                  router->logs.count != 0 ||
+                 loom_serve_realtime_server_claims(router->realtime) != 0 ||
                  loom_serve_http_variants_pending(router->variants);
   pending |= loom_serve_resources_is_pending(&router->resources);
   pending |= loom_serve_maintenance_is_pending(&router->maintenance);
@@ -1645,7 +1664,14 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
     status = loom_serve_http_variants_allocate(server, registry, host_allocator,
                                                &router.variants);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_realtime_server_allocate(
+        executor, server, registry, options.realtime,
+        (loom_serve_wake_callback_t){loom_serve_router_wake, &router},
+        host_allocator, &router.realtime);
+  }
   if (!iree_status_is_ok(status)) {
+    loom_serve_http_variants_free(router.variants);
     loom_serve_maintenance_deinitialize(&router.maintenance);
     iree_allocator_free(host_allocator, router.logs.values);
     iree_allocator_free(host_allocator, router.held.values);
@@ -1683,6 +1709,7 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
   iree_string_builder_deinitialize(&router.output);
   loom_serve_maintenance_deinitialize(&router.maintenance);
   loom_serve_http_variants_free(router.variants);
+  loom_serve_realtime_server_free(router.realtime);
   iree_allocator_free(host_allocator, router.logs.values);
   iree_allocator_free(host_allocator, router.held.values);
   iree_notification_deinitialize(&router.retirement.notification);

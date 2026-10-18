@@ -381,7 +381,10 @@ func.def public @prepare_input(%text: buffer, %markers: buffer, %marker_count: i
   }
   %input_length = buffer.length %input
   scf.for %i = [%c0 to %input_length step %c1] {
-    %byte = buffer.load.i8.u %input[%i]
+    %raw = buffer.load.i8.u %input[%i]
+    // The tokenizer normalizes case; validate the same bounded alphabet here.
+    %case_bit = scalar.constant 32 : i32
+    %byte = scalar.ori %raw, %case_bit : i32
     %a = scalar.constant 97 : i32
     %b = scalar.constant 98 : i32
     %x = scalar.constant 120 : i32

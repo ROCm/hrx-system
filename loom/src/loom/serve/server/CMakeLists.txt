@@ -52,6 +52,7 @@ loom_cc_library(
     loom::serve::server::http::response
     loom::serve::server::http::tokenization
     loom::serve::server::http::variants
+    loom::serve::server::realtime::server
     loom::serve::service
     loom::serve::service::inspection
     loom::serve::service::kind

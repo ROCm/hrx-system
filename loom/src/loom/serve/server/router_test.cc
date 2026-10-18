@@ -584,7 +584,7 @@ TEST_P(HttpRouterTest, ShutdownReleasesHeldClaimsWithoutAdmittingThem) {
 }
 
 TEST_P(HttpRouterTest, RejectsAQuotaThatCouldExcludeEveryControlConnection) {
-  for (const auto options : {
+  for (const auto& options : {
            loom_serve_router_options_t{
                .request_quota = 0,
                .holding_capacity = 0,
