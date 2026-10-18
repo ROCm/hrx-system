@@ -57,14 +57,14 @@ void loom_serve_recognition_events_free(
 
 static iree_status_t loom_serve_recognition_event_parse_transcript(
     iree_const_byte_span_t packet, uint64_t input_end,
-    loom_serve_recognition_event_t* out_event) {
+    uint64_t* activity_position, loom_serve_recognition_event_t* out_event) {
   return loom_serve_recognition_transcript_parse(packet, input_end,
                                                  &out_event->transcript);
 }
 
 static iree_status_t loom_serve_recognition_event_parse_activity(
     iree_const_byte_span_t packet, uint64_t input_end,
-    loom_serve_recognition_event_t* out_event) {
+    uint64_t* activity_position, loom_serve_recognition_event_t* out_event) {
   if (packet.data_length != 20) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "source activity payload must contain 20 bytes");
@@ -81,35 +81,45 @@ static iree_status_t loom_serve_recognition_event_parse_activity(
         IREE_STATUS_OUT_OF_RANGE,
         "source activity interval or probability is invalid");
   }
+  if (activity.begin != *activity_position) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "source activity does not continue input coverage");
+  }
+  *activity_position = activity.end;
   out_event->activity = activity;
   return iree_ok_status();
 }
 
 iree_status_t loom_serve_recognition_events_parse(
     loom_serve_recognition_events_t* events, iree_const_byte_span_t packet,
-    uint64_t input_end, loom_serve_recognition_output_flags_t allowed_outputs) {
+    uint64_t input_begin, uint64_t input_end,
+    loom_serve_recognition_output_flags_t allowed_outputs) {
   static iree_status_t (*const parsers[])(iree_const_byte_span_t, uint64_t,
+                                          uint64_t*,
                                           loom_serve_recognition_event_t*) = {
       [LOOM_SERVE_RECOGNITION_EVENT_TRANSCRIPT] =
           loom_serve_recognition_event_parse_transcript,
       [LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY] =
           loom_serve_recognition_event_parse_activity};
   events->count = 0;
-  if (!packet.data_length) {
-    return iree_ok_status();
-  }
-  if (packet.data_length < 4 || packet.data_length > events->byte_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "source event packet exceeds its byte bounds");
-  }
-  const iree_host_size_t count = iree_unaligned_load_le_u32(packet.data);
-  if (!count || count > events->event_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "source event count exceeds its declared capacity");
-  }
   uint8_t* storage = (uint8_t*)(events->values + events->event_capacity);
-  memcpy(storage, packet.data, packet.data_length);
-  iree_host_size_t offset = 4;
+  iree_host_size_t count = 0;
+  iree_host_size_t offset = 0;
+  if (packet.data_length) {
+    if (packet.data_length < 4 || packet.data_length > events->byte_capacity) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "source event packet exceeds its byte bounds");
+    }
+    count = iree_unaligned_load_le_u32(packet.data);
+    if (!count || count > events->event_capacity) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "source event count exceeds its declared capacity");
+    }
+    memcpy(storage, packet.data, packet.data_length);
+    offset = 4;
+  }
+  uint64_t activity_position = input_begin;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     const iree_host_size_t remaining = packet.data_length - offset;
@@ -132,7 +142,7 @@ iree_status_t loom_serve_recognition_events_parse(
         events->values[i].kind = (loom_serve_recognition_event_kind_t)kind;
         status =
             parsers[kind](iree_make_const_byte_span(storage + offset, length),
-                          input_end, &events->values[i]);
+                          input_end, &activity_position, &events->values[i]);
         offset += length;
       }
     }
@@ -140,6 +150,14 @@ iree_status_t loom_serve_recognition_events_parse(
   if (iree_status_is_ok(status) && offset != packet.data_length) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source event packet has trailing bytes");
+  }
+  if (iree_status_is_ok(status) &&
+      iree_any_bit_set(allowed_outputs,
+                       LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY) &&
+      activity_position != input_end) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "source activity does not cover acknowledged input");
   }
   if (iree_status_is_ok(status)) {
     events->count = count;
