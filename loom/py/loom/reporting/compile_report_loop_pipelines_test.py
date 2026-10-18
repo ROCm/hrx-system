@@ -277,14 +277,57 @@ def test_rejects_inconsistent_schedule_records(corruption: str) -> None:
         build_compile_report_show(parse_compile_report(report))
 
 
-def test_rejects_repeated_stage_without_guarded_partition() -> None:
+@pytest.mark.parametrize(
+    ("operation", "partition"), [("index.add", None), ("scf.if", "guarded")]
+)
+def test_preserves_operations_executed_in_both_stages(
+    operation: str, partition: str | None
+) -> None:
     report = _report()
     stages = report["source_low"]["loop_pipelines"]["stages"]
-    del stages[1]["partition"]
-    del stages[2]["partition"]
+    for stage in stages[1:3]:
+        stage["op"] = operation
+        if partition is None:
+            del stage["partition"]
+
+    document = parse_compile_report(report)
+    view = build_compile_report_show(document)
+    assert view["loop_pipelines"]["rows"][0]["stages"][1:3] == [
+        {key: value for key, value in stage.items() if key not in ("function", "loop")}
+        for stage in stages[1:3]
+    ]
+    text = format_compile_report_show_text(view)
+    suffix = " partition=guarded" if partition else ""
+    assert f"1: {operation}{suffix} producer iteration_lookahead=2" in text
+    assert f"1: {operation}{suffix} consumer iteration_lookahead=0" in text
+    assert len(suggest_loop_pipelines(document)) == 1
+
+
+@pytest.mark.parametrize("partition", [None, "guarded"])
+@pytest.mark.parametrize("corruption", ["operation", "partition", "stage", "third"])
+def test_rejects_mismatched_repeated_stages(
+    partition: str | None, corruption: str
+) -> None:
+    report = _report()
+    stages = report["source_low"]["loop_pipelines"]["stages"]
+    for stage in stages[1:3]:
+        if partition is None:
+            del stage["partition"]
+    if corruption == "operation":
+        stages[2]["op"] = "index.add"
+    elif corruption == "partition":
+        if partition is None:
+            stages[2]["partition"] = "guarded"
+        else:
+            del stages[2]["partition"]
+    elif corruption == "stage":
+        stages[2]["stage"] = "producer"
+        stages[2]["iteration_lookahead"] = 2
+    else:
+        stages.insert(3, stages[2].copy())
 
     with pytest.raises(
         CompileReportError,
-        match="repeated position is not a guarded stage pair",
+        match="repeated position is not a matching stage pair",
     ):
         build_compile_report_show(parse_compile_report(report))
