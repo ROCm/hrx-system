@@ -14,25 +14,6 @@
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/utils/memory_file.h"
 
-struct iree_hal_amd_fabric_file_host_range_t {
-  // Native view borrowing the application's installed physical source.
-  amdf_host_mapping_t* mapping;
-  // Borrowed retained registration, or NULL for an ordinary buffered view.
-  iree_async_region_t* region;
-  // Host bytes corresponding exactly to this portion of the file operation.
-  iree_byte_span_t contents;
-  // Source-relative position in the whole-memory native host view.
-  uint64_t mapping_offset;
-  // Transfer-relative first byte, independent of file and buffer offsets.
-  uint64_t offset;
-  // Ordinary views are owned; registered views remain owned by their slab.
-  bool owns_mapping;
-  // Exact pair requires host invalidation before accessing device-written data.
-  bool invalidate;
-  // Exact pair requires host publication after native file reads.
-  bool flush;
-};
-
 static void iree_hal_amd_fabric_file_transfer_release_host(
     iree_hal_amd_fabric_file_transfer_t* transfer) {
   for (iree_host_size_t i = 0; i < transfer->host.count; ++i) {
@@ -51,7 +32,9 @@ static void iree_hal_amd_fabric_file_transfer_release_host(
                                   status, "host_mapping_destroy");
     }
   }
-  iree_allocator_free(transfer->host_allocator, transfer->host.ranges);
+  if (transfer->host.ranges != &transfer->host.inline_range) {
+    iree_allocator_free(transfer->host_allocator, transfer->host.ranges);
+  }
   memset(&transfer->host, 0, sizeof(transfer->host));
 }
 
@@ -269,11 +252,12 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare_ranges(
   }
   transfer->host.api = api;
   transfer->host.event_sink = event_sink;
+  transfer->host.ranges = &transfer->host.inline_range;
   const iree_hal_memory_access_t queue_access = iree_hal_buffer_usage_access(
       iree_hal_buffer_family_usage(transfer->buffer, family));
   bool available = transfer->async.file != NULL;
   iree_hal_memory_effects_t before = {0}, after = {0};
-  iree_host_size_t capacity = 0;
+  iree_host_size_t capacity = 1;
   iree_status_t status = iree_ok_status();
   // Qualify every mapped source even if an earlier source requires a GPU
   // transfer. A hole or denied suffix must reject the whole operation before
@@ -304,10 +288,21 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare_ranges(
     }
     if (iree_status_is_ok(status) && available &&
         transfer->host.count == capacity) {
-      status = iree_allocator_grow_array(
-          transfer->host_allocator, iree_max(transfer->host.count + 1, 4),
-          sizeof(*transfer->host.ranges), &capacity,
-          (void**)&transfer->host.ranges);
+      if (transfer->host.ranges == &transfer->host.inline_range) {
+        iree_hal_amd_fabric_file_host_range_t* ranges = NULL;
+        status = iree_allocator_grow_array(transfer->host_allocator, 4,
+                                           sizeof(*ranges), &capacity,
+                                           (void**)&ranges);
+        if (iree_status_is_ok(status)) {
+          ranges[0] = transfer->host.inline_range;
+          transfer->host.ranges = ranges;
+        }
+      } else {
+        status = iree_allocator_grow_array(
+            transfer->host_allocator, transfer->host.count + 1,
+            sizeof(*transfer->host.ranges), &capacity,
+            (void**)&transfer->host.ranges);
+      }
     }
     if (iree_status_is_ok(status) && available) {
       iree_hal_amd_fabric_file_host_range_t* range =

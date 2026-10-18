@@ -25,8 +25,26 @@ typedef struct iree_hal_amd_fabric_file_transfer_callback_t {
   void* user_data;
 } iree_hal_amd_fabric_file_transfer_callback_t;
 
-typedef struct iree_hal_amd_fabric_file_host_range_t
-    iree_hal_amd_fabric_file_host_range_t;
+// One contiguous physical source of a file operation. A registered source
+// borrows its persistent mapping; an ordinary view owns its temporary mapping.
+typedef struct iree_hal_amd_fabric_file_host_range_t {
+  // Native view borrowing the application's installed physical source.
+  amdf_host_mapping_t* mapping;
+  // Borrowed retained registration, or NULL for an ordinary buffered view.
+  iree_async_region_t* region;
+  // Host bytes corresponding exactly to this portion of the file operation.
+  iree_byte_span_t contents;
+  // Source-relative position in the whole-memory native host view.
+  uint64_t mapping_offset;
+  // Transfer-relative first byte, independent of file and buffer offsets.
+  uint64_t offset;
+  // Ordinary views are owned; registered views remain owned by their slab.
+  bool owns_mapping;
+  // Exact pair requires host invalidation before accessing device-written data.
+  bool invalidate;
+  // Exact pair requires host publication after native file reads.
+  bool flush;
+} iree_hal_amd_fabric_file_host_range_t;
 
 // Placed state for a file transfer through a host execution binding or an
 // engine's native buffer copy. The engine owns dependency resolution, staging,
@@ -52,8 +70,8 @@ typedef struct iree_hal_amd_fabric_file_transfer_t {
   iree_byte_span_t file_contents;
   // Host execution view resolved only after producer dependencies complete.
   iree_byte_span_t buffer_contents;
-  // Private views of physical sources underlying an execution-only virtual
-  // buffer. These views borrow the application's installed backing lifetimes.
+  // Private views of physical backing, including sources installed in an
+  // execution-only virtual buffer. These views borrow the backing lifetimes.
   struct {
     // Borrowed native API, dominated by the engine's retained device.
     const amdf_api_t* api;
@@ -66,6 +84,8 @@ typedef struct iree_hal_amd_fabric_file_transfer_t {
     iree_host_size_t count;
     // Current I/O range; advances only after its complete extent retires.
     iree_host_size_t index;
+    // Single-source operations use placed metadata without a heap allocation.
+    iree_hal_amd_fabric_file_host_range_t inline_range;
   } host;
   // Platform I/O state, unused for memory files.
   struct {
