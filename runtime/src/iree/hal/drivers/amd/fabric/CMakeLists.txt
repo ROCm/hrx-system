@@ -68,7 +68,7 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
-    asan
+    asan_support
   HDRS
     "asan.h"
   SRCS
@@ -93,7 +93,7 @@ iree_cc_test(
   SRCS
     "asan_test.cc"
   DEPS
-    ::asan
+    ::asan_support
     ::slab_provider
     amdf::headers
     iree::base
@@ -178,7 +178,7 @@ iree_cc_library(
     "allocation_queue.c"
     "slab_provider.c"
   DEPS
-    ::asan
+    ::asan_support
     ::buffer
     ::memory
     amdf::headers
@@ -284,7 +284,7 @@ iree_cc_library(
     "memory_backend.c"
     "virtual_buffer.c"
   DEPS
-    ::asan
+    ::asan_support
     ::memory
     ::memory_transition
     ::slab_provider

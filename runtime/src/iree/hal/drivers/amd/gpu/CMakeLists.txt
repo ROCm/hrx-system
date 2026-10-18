@@ -61,7 +61,7 @@ iree_cc_library(
     iree::base::threading
     iree::base::threading::thread
     iree::hal
-    iree::hal::drivers::amd::fabric::asan
+    iree::hal::drivers::amd::fabric::asan_support
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::fabric::memory_backend
     iree::hal::drivers::amd::gpu::queue::allocation
@@ -99,7 +99,7 @@ iree_cc_library(
     iree::base::internal
     iree::base::threading
     iree::hal
-    iree::hal::drivers::amd::fabric::asan
+    iree::hal::drivers::amd::fabric::asan_support
     iree::hal::drivers::amd::fabric::buffer
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::fabric::memory_transition

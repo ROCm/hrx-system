@@ -54,8 +54,10 @@ iree_runtime_cc_library(
     ],
 )
 
+# compiler-rt identifies libasan.so anywhere in a loaded library name, so a
+# library named asan is mistaken for a second sanitizer runtime.
 iree_runtime_cc_library(
-    name = "asan",
+    name = "asan_support",
     srcs = ["asan.c"],
     hdrs = ["asan.h"],
     deps = [
@@ -74,7 +76,7 @@ iree_runtime_cc_test(
     name = "asan_test",
     srcs = ["asan_test.cc"],
     deps = [
-        ":asan",
+        ":asan_support",
         ":slab_provider",
         "//libamdf:headers",
         "//runtime/src/iree/base",
@@ -142,7 +144,7 @@ iree_runtime_cc_library(
         "slab_provider.h",
     ],
     deps = [
-        ":asan",
+        ":asan_support",
         ":buffer",
         ":memory",
         "//libamdf:headers",
@@ -227,7 +229,7 @@ iree_runtime_cc_library(
         "virtual_buffer.h",
     ],
     deps = [
-        ":asan",
+        ":asan_support",
         ":memory",
         ":memory_transition",
         ":slab_provider",
