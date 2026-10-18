@@ -101,12 +101,16 @@ bool loom_serve_text_prefix_cache_evict(
 iree_status_t loom_serve_text_prefix_cache_submit(
     loom_serve_text_prefix_cache_t* cache, const loom_serve_text_chat_t* chat,
     loom_serve_text_row_t* row, iree_host_size_t count, const int32_t* tokens,
+    iree_host_size_t extension_start,
     const loom_serve_text_prefix_entry_t* protected_entry, bool* out_evicted,
     loom_serve_execution_frontier_t* out_frontier) {
   *out_evicted = false;
   *out_frontier = (loom_serve_execution_frontier_t){0};
   // Include equality when checking ancestors; admission itself is strict.
-  if (loom_serve_text_prefix_cache_find(cache, chat, count + 1, tokens)) {
+  const loom_serve_text_prefix_entry_t* ancestor =
+      loom_serve_text_prefix_cache_find(cache, chat, count + 1, tokens);
+  if (ancestor && (cache->count == cache->capacity || count < extension_start ||
+                   ancestor->count >= extension_start)) {
     return iree_ok_status();
   }
   loom_serve_text_prefix_entry_t* entry = NULL;

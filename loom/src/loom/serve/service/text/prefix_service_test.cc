@@ -39,6 +39,19 @@ class RegisteredPrefixServiceTest : public PrefixServiceTest {
   bool NeedsStandaloneModel() const override { return false; }
 };
 
+class SinglePrefixServiceTest : public PrefixServiceTest {
+ protected:
+  loom_serve_text_service_options_t ServiceOptions() const override {
+    auto options = PrefixServiceTest::ServiceOptions();
+    options.prefix_cache_capacity = 1;
+    return options;
+  }
+};
+
+class PrefixCaptureRetirementTest
+    : public PrefixServiceTest,
+      public ::testing::WithParamInterface<iree_host_size_t> {};
+
 TEST_F(PrefixServiceTest, SharesActiveSourceWithIndependentDivergentRequests) {
   Start(4);
   StalledClient source;
@@ -101,6 +114,48 @@ TEST_F(PrefixServiceTest, LruEvictionKeepsRecentlyUsedAncestor) {
   run("baxaxb", 0);
 }
 
+TEST_F(PrefixServiceTest, SpareEndpointRetainsSharedAndLateFrontiers) {
+  Start(4);
+  const std::string initial = "abxabbxaxabbax";
+  ExpectResponse(Read(Send(Request(Message("user", initial), 2))), initial, 2,
+                 0);
+  // The natural four-token frontier serves an earlier divergent request,
+  // while the twelve-token frontier skips replay on the longer branch.
+  const std::string short_branch = "abxaxbb";
+  ExpectResponse(Read(Send(Request(Message("user", short_branch), 2))),
+                 short_branch, 2, 4);
+  const std::string long_branch = "abxabbxaxabbxx";
+  ExpectResponse(Read(Send(Request(Message("user", long_branch), 2))),
+                 long_branch, 2, 12);
+}
+
+TEST_F(PrefixServiceTest, DescendantsDoNotEvictCoveredBranches) {
+  Start(4);
+  const std::pair<std::string, size_t> cases[] = {
+      {"abxabbxaxabbax", 0},
+      {"baxaxabbxabbax", 0},
+      {"abxabbxaxabbxx", 12},
+      {"baxaxabbxabbxx", 4},
+  };
+  for (const auto& [prompt, cached] : cases) {
+    ExpectResponse(Read(Send(Request(Message("user", prompt), 2))), prompt, 2,
+                   cached);
+  }
+}
+
+TEST_F(SinglePrefixServiceTest, KeepsSharedAncestorWithoutSpareCapacity) {
+  Start(4);
+  const std::pair<std::string, size_t> cases[] = {
+      {"abxabbxaxabbax", 0},
+      {"abxabbxaxabbxx", 4},
+      {"abxaxbb", 4},
+  };
+  for (const auto& [prompt, cached] : cases) {
+    ExpectResponse(Read(Send(Request(Message("user", prompt), 2))), prompt, 2,
+                   cached);
+  }
+}
+
 TEST_F(PrefixServiceTest, PressureReplaysWhenSelectedPrefixCannotFit) {
   IREE_ASSERT_OK(loom_serve_text_model_free(model_));
   model_ = nullptr;
@@ -142,7 +197,8 @@ TEST_F(RegisteredPrefixServiceTest,
   }
 }
 
-TEST_F(PrefixServiceTest, StopRetiresAcceptedCaptureBeforeReleasingOwners) {
+TEST_P(PrefixCaptureRetirementTest,
+       StopRetiresAcceptedCaptureBeforeReleasingOwners) {
   auto options = ServiceOptions();
   options.chunk_size = 4;
   loom_serve_text_service_t* service = nullptr;
@@ -153,10 +209,12 @@ TEST_F(PrefixServiceTest, StopRetiresAcceptedCaptureBeforeReleasingOwners) {
   const int client = Send(Request(Message("user", "abxabbxaxa"), 12));
   loom_serve_http_connection_t* connection = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(client, interface, &connection));
-  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+  const auto capture_accepted = [&] {
     return std::string(interface.snapshot(interface.self).phase) ==
-           "prefix_capture";
-  }));
+               "prefix_capture" &&
+           interface.telemetry.counters->input_tokens == GetParam();
+  };
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, capture_accepted));
   EXPECT_TRUE(interface.is_pending(interface.self));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       interface,
@@ -166,7 +224,7 @@ TEST_F(PrefixServiceTest, StopRetiresAcceptedCaptureBeforeReleasingOwners) {
       },
       LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
   EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
-  EXPECT_EQ(interface.telemetry.counters->input_tokens, 4u);
+  EXPECT_EQ(interface.telemetry.counters->input_tokens, GetParam());
   EXPECT_EQ(interface.telemetry.counters->output_tokens, 0u);
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).pending, 0u);
   interface.set_observer(interface.self, {});
@@ -178,5 +236,8 @@ TEST_F(PrefixServiceTest, StopRetiresAcceptedCaptureBeforeReleasingOwners) {
   const auto pool = loom_serve_text_model_pool_usage(model_);
   EXPECT_EQ(pool.available, pool.capacity);
 }
+
+INSTANTIATE_TEST_SUITE_P(NaturalFrontiers, PrefixCaptureRetirementTest,
+                         ::testing::Values(4, 8));
 
 }  // namespace

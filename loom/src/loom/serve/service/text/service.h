@@ -111,8 +111,9 @@ iree_status_t loom_serve_text_service_allocate(
 // includes missing prefix pages and preserves the selected row until its
 // replacement fits. Host image bytes are reported separately from device pages.
 // prefix_cache_capacity enables exact consumed-token reuse across fresh named
-// and untagged requests. Natural intermediate prefill frontiers are retained
-// once per distinct prefix; an existing ancestor suppresses descendant copies.
+// and untagged requests. Natural intermediate prefill frontiers cover new
+// branches. Spare records can retain a descendant near the prompt's end;
+// extending an existing branch never evicts another endpoint.
 // Lookup leaves at least one known input to establish selection normally.
 // Automatic prefixes yield before idle histories under admission pressure,
 // including replaying a selected prefix if keeping it prevents admission.

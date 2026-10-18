@@ -1439,11 +1439,22 @@ static iree_status_t loom_serve_text_capture_prefix(
         loom_serve_http_connection_failed(session->request.connection)) {
       continue;
     }
+    // A later checkpoint uses spare capacity near the prompt's end without
+    // forcing a new epoch boundary or replacing an already useful ancestor.
+    const iree_host_size_t window =
+        iree_min(service->scheduling.chunk_size,
+                 loom_serve_text_model_prefill_capacity(service->model)) *
+        service->scheduling.continuation_epochs;
+    const iree_host_size_t input_count =
+        session->request.input_origin + session->request.input_count;
+    const iree_host_size_t extension_start =
+        input_count - iree_min(input_count, window);
     bool evicted = false;
     loom_serve_execution_frontier_t frontier;
     status = loom_serve_text_prefix_cache_submit(
         &service->prefixes, &session->request.chat, session->row, count,
-        session->tokens, service->pending.prepared.prefix, &evicted, &frontier);
+        session->tokens, extension_start, service->pending.prepared.prefix,
+        &evicted, &frontier);
     service->pool.trim.pending |= evicted;
     if (iree_status_is_ok(status) && frontier.semaphores[0]) {
       service->completion.frontier = frontier;

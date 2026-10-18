@@ -284,6 +284,14 @@ explicit checkpoint. `session_cache_capacity` retains additional named
 histories beyond execution rows, while `prefix_cache_capacity` captures shared
 intermediate input prefixes. Both remain separately configured limits.
 
+Prefix caching retains exact state at natural prefill boundaries. An unused
+cache slot can also retain a later boundary near the prompt's end, reducing
+replay when a client drops generated reasoning or changes a later message.
+This extension never evicts another prefix. New branches and memory pressure
+can still reclaim entries, and a one-slot cache retains its first matching
+ancestor. Reuse depends on exact token and media identity, not message labels;
+`cached_tokens` reports the prefix actually used.
+
 `X-Loom-Checkpoint: NAME` requests an explicit immutable endpoint for the
 destination session. It is not best effort: an unknown name returns 404 and a
 history mismatch returns 400 before replacing the destination continuation.
