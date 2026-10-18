@@ -134,8 +134,8 @@ kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_merger_up() {
         %converted = vector.fptrunc %loaded : vector<4xf32> to vector<4xf16>
         scf.yield %converted : vector<4xf16>
       } else {
-        %zero = vector.constant 0.0 : vector<4xf16>
-        scf.yield %zero : vector<4xf16>
+        %padding = vector.constant 0.0 : vector<4xf16>
+        scf.yield %padding : vector<4xf16>
       }
       vector.store %values, %input_stage_view[%input_stage_row, %input_stage_column] : vector<4xf16>, view<64x64xf16>
     }
@@ -319,8 +319,8 @@ kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_merger_down() {
         %loaded = vector.load %activation_view[%global_input_row, %global_input_column] : view<[%rows]x4608xf16> -> vector<4xf16>
         scf.yield %loaded : vector<4xf16>
       } else {
-        %zero = vector.constant 0.0 : vector<4xf16>
-        scf.yield %zero : vector<4xf16>
+        %padding = vector.constant 0.0 : vector<4xf16>
+        scf.yield %padding : vector<4xf16>
       }
       vector.store %values, %input_stage_view[%input_stage_row, %input_stage_column] : vector<4xf16>, view<64x64xf16>
     }
