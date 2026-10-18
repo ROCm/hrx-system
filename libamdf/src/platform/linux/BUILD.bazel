@@ -46,8 +46,10 @@ amdf_cc_library(
     deps = [
         ":file",
         ":host_cache",
+        ":host_reservation",
         "//libamdf/src:allocator",
         "//libamdf/src/platform:host_memory",
+        "//libamdf/src/platform:host_reservation",
     ],
 )
 
@@ -149,6 +151,22 @@ amdf_cc_library(
     deps = [
         ":endpoint",
         ":instance",
+    ],
+)
+
+amdf_cc_test(
+    name = "host_memory_test",
+    srcs = ["host_memory_test.cc"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    deps = [
+        ":host_memory",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform:host_memory",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
     ],
 )
 

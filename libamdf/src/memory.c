@@ -350,7 +350,8 @@ static amdf_status_t amdf_memory_prepare(
   const uint32_t backing = plan->backing_access_ordinal;
   if (backing == plan->access_count) {
     amdf_status_t status = amdf_host_memory_prepare(
-        memory, &plan->native_profiles[backing], create_info, &memory->info);
+        memory, &plan->native_profiles[backing],
+        plan->shared_external_type != 0, create_info, &memory->info);
     amdf_memory_create_info_t registration = *create_info;
     if (amdf_status_is_ok(status)) {
       registration.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;

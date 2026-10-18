@@ -26,6 +26,15 @@ typedef struct amdf_platform_host_backing_t {
 amdf_status_t amdf_platform_host_backing_create(
     uint64_t byte_length, amdf_platform_host_backing_t* out_backing);
 
+// Materializes fresh backing and its writable host translations before the
+// first native export. Applies explicit NUMA placement before allocating any
+// pages. Large Linux extents use synchronous huge-folio preparation; native
+// admission failures propagate without changing page policy. Failure leaves
+// the backing owned by its unpublished constructor for rollback.
+amdf_status_t amdf_platform_host_backing_prepare(
+    const amdf_platform_host_backing_t* backing, uint64_t byte_length,
+    amdf_memory_placement_t placement, amdf_allocator_t host_allocator);
+
 // Removes the persistent view before releasing its source. A failed removal
 // retains native ownership; callers may discard metadata at terminal teardown.
 amdf_status_t amdf_platform_host_backing_destroy(

@@ -14,13 +14,53 @@
 #include <sys/syscall.h>
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/platform/host_reservation.h"
 #include "libamdf/src/platform/linux/file.h"
 #include "libamdf/src/platform/linux/host_cache.h"
 
 // Stable Linux UAPI value, available at runtime since Linux 5.14. Naming it
 // locally lets builds use older sysroot headers without changing admission on
 // kernels that do not support fallible writable population.
-enum { AMDF_LINUX_MADV_POPULATE_WRITE = 23 };
+enum {
+  AMDF_LINUX_MADV_POPULATE_WRITE = 23,
+  // Synchronous huge-folio construction, available since Linux 6.1.
+  AMDF_LINUX_MADV_COLLAPSE = 25,
+  // PMD geometry on the supported Linux x86-64 host platform.
+  AMDF_LINUX_HOST_FOLIO_SIZE = 2u << 20,
+};
+
+static amdf_status_t amdf_linux_host_backing_map(int descriptor,
+                                                 uint64_t byte_length,
+                                                 void** out_pointer) {
+  if (byte_length < AMDF_LINUX_HOST_FOLIO_SIZE) {
+    void* pointer = mmap(NULL, (size_t)byte_length, PROT_READ | PROT_WRITE,
+                         MAP_SHARED, descriptor, 0);
+    if (pointer == MAP_FAILED) {
+      return amdf_linux_error(errno);
+    }
+    *out_pointer = pointer;
+    return AMDF_STATUS_OK;
+  }
+  void* pointer = NULL;
+  amdf_status_t status = amdf_platform_host_reservation_create(
+      byte_length, AMDF_LINUX_HOST_FOLIO_SIZE, &pointer);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_platform_host_reservation_replace(
+      pointer, byte_length, 0, (uintptr_t)descriptor, 0,
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+  if (amdf_status_is_ok(status)) {
+    *out_pointer = pointer;
+  } else {
+    const amdf_status_t cleanup =
+        amdf_platform_host_reservation_destroy(pointer, byte_length);
+    if (!amdf_status_is_ok(cleanup)) {
+      status = cleanup;
+    }
+  }
+  return status;
+}
 
 amdf_status_t amdf_platform_host_backing_create(
     uint64_t byte_length, amdf_platform_host_backing_t* out_backing) {
@@ -36,11 +76,7 @@ amdf_status_t amdf_platform_host_backing_create(
                    F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
     status = amdf_linux_error(errno);
   } else {
-    pointer = mmap(NULL, (size_t)byte_length, PROT_READ | PROT_WRITE,
-                   MAP_SHARED, descriptor, 0);
-    if (pointer == MAP_FAILED) {
-      status = amdf_linux_error(errno);
-    }
+    status = amdf_linux_host_backing_map(descriptor, byte_length, &pointer);
   }
   if (amdf_status_is_ok(status)) {
     *out_backing = (amdf_platform_host_backing_t){
@@ -86,10 +122,9 @@ amdf_memory_placement_kinds_t amdf_platform_host_memory_placement_kinds(void) {
   return UINT32_C(1) << AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA;
 }
 
-amdf_status_t amdf_platform_host_memory_place(void* pointer,
-                                              uint64_t byte_length,
-                                              amdf_memory_placement_t placement,
-                                              amdf_allocator_t host_allocator) {
+static amdf_status_t amdf_linux_host_memory_bind(
+    void* pointer, uint64_t byte_length, amdf_memory_placement_t placement,
+    amdf_allocator_t host_allocator) {
   const uint64_t bit_count = (uint64_t)placement.node + 1;
   const long page_size = sysconf(_SC_PAGESIZE);
   if (page_size <= 0) {
@@ -114,13 +149,63 @@ amdf_status_t amdf_platform_host_memory_place(void* pointer,
               MPOL_BIND | MPOL_F_STATIC_NODES, nodes,
               (unsigned long)bit_count + 1, 0UL) != 0) {
     status = amdf_linux_error(errno);
-  } else if (madvise(pointer, (size_t)byte_length,
-                     AMDF_LINUX_MADV_POPULATE_WRITE) != 0) {
+  }
+  amdf_free(host_allocator, nodes);
+  return status;
+}
+
+amdf_status_t amdf_platform_host_memory_place(void* pointer,
+                                              uint64_t byte_length,
+                                              amdf_memory_placement_t placement,
+                                              amdf_allocator_t host_allocator) {
+  amdf_status_t status = amdf_linux_host_memory_bind(pointer, byte_length,
+                                                     placement, host_allocator);
+  if (amdf_status_is_ok(status) &&
+      madvise(pointer, (size_t)byte_length, AMDF_LINUX_MADV_POPULATE_WRITE) !=
+          0) {
     // Population has an error channel; ordinary first-touch stores could
     // instead fault the process when the selected node cannot supply pages.
     status = amdf_linux_error(errno);
   }
-  amdf_free(host_allocator, nodes);
+  return status;
+}
+
+amdf_status_t amdf_platform_host_backing_prepare(
+    const amdf_platform_host_backing_t* backing, uint64_t byte_length,
+    amdf_memory_placement_t placement, amdf_allocator_t host_allocator) {
+  amdf_status_t status = AMDF_STATUS_OK;
+  if (placement.kind != AMDF_MEMORY_PLACEMENT_KIND_NONE) {
+    status = amdf_linux_host_memory_bind(backing->pointer, byte_length,
+                                         placement, host_allocator);
+  }
+  const uint64_t folio_length =
+      byte_length & ~((uint64_t)AMDF_LINUX_HOST_FOLIO_SIZE - 1);
+  const long page_size = sysconf(_SC_PAGESIZE);
+  if (amdf_status_is_ok(status) && page_size <= 0) {
+    status = amdf_linux_error(EINVAL);
+  }
+  // Collapse needs a resident page in each folio. Seeding only one base page
+  // avoids constructing and then replacing every base-page allocation. NUMA
+  // binding precedes both the seeds and the folios built from them.
+  for (uint64_t offset = 0; amdf_status_is_ok(status) && offset < folio_length;
+       offset += AMDF_LINUX_HOST_FOLIO_SIZE) {
+    if (madvise((uint8_t*)backing->pointer + offset, (size_t)page_size,
+                AMDF_LINUX_MADV_POPULATE_WRITE) != 0) {
+      status = amdf_linux_error(errno);
+    }
+  }
+  if (amdf_status_is_ok(status) && folio_length != 0 &&
+      madvise(backing->pointer, (size_t)folio_length,
+              AMDF_LINUX_MADV_COLLAPSE) != 0) {
+    status = amdf_linux_error(errno);
+  }
+  // Install writable CPU translations for the entire extent, including any
+  // sub-folio tail, before export pins pages and cache publication reads them.
+  if (amdf_status_is_ok(status) &&
+      madvise(backing->pointer, (size_t)byte_length,
+              AMDF_LINUX_MADV_POPULATE_WRITE) != 0) {
+    status = amdf_linux_error(errno);
+  }
   return status;
 }
 

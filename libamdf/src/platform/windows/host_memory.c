@@ -49,6 +49,17 @@ amdf_status_t amdf_platform_host_backing_destroy(
              : amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
 }
 
+amdf_status_t amdf_platform_host_backing_prepare(
+    const amdf_platform_host_backing_t* backing, uint64_t byte_length,
+    amdf_memory_placement_t placement, amdf_allocator_t host_allocator) {
+  (void)backing;
+  (void)byte_length;
+  (void)placement;
+  (void)host_allocator;
+  // Platform-owned host exports are unavailable; WDDM owns its file backing.
+  return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+}
+
 amdf_status_t amdf_platform_host_memory_allocate(uint64_t byte_length,
                                                  void** out_pointer) {
   void* pointer = VirtualAlloc(NULL, (SIZE_T)byte_length,

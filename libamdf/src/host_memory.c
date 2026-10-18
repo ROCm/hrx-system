@@ -178,8 +178,16 @@ amdf_status_t amdf_host_memory_export(
   const amdf_platform_host_backing_t* backing =
       memory->accesses[memory->backing_access_ordinal].native;
   amdf_external_memory_t exported = {0};
-  amdf_status_t status = amdf_platform_host_export_memory(
-      service, backing, memory->info.byte_length, &exported);
+  amdf_status_t status = AMDF_STATUS_OK;
+  if (first_export) {
+    status = amdf_platform_host_backing_prepare(
+        backing, memory->info.native_allocation_byte_length,
+        memory->info.placement, memory->host_allocator);
+  }
+  if (amdf_status_is_ok(status)) {
+    status = amdf_platform_host_export_memory(
+        service, backing, memory->info.byte_length, &exported);
+  }
   if (amdf_status_is_ok(status) && first_export) {
     // Export has pinned/populated every page. Retire CPU initialization once
     // before any attachment can install a device-writable alias.
@@ -202,7 +210,7 @@ amdf_status_t amdf_host_memory_export(
 
 amdf_status_t amdf_host_memory_prepare(
     amdf_memory_t* memory, const amdf_memory_native_profile_t* profile,
-    const amdf_memory_create_info_t* create_info,
+    bool export_backing, const amdf_memory_create_info_t* create_info,
     amdf_memory_info_t* out_info) {
   const bool registration =
       (profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0;
@@ -259,7 +267,8 @@ amdf_status_t amdf_host_memory_prepare(
         .native_allocation_granularity = granularity,
         .placement = create_info->placement,
     };
-    if (create_info->placement.kind != AMDF_MEMORY_PLACEMENT_KIND_NONE) {
+    if (!export_backing &&
+        create_info->placement.kind != AMDF_MEMORY_PLACEMENT_KIND_NONE) {
       status = amdf_platform_host_memory_place(
           amdf_host_memory_pointer(memory), native_length,
           create_info->placement, memory->host_allocator);

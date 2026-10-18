@@ -4,8 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <linux/mempolicy.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <array>
+#include <climits>
 #include <cstring>
 #include <string>
 #include <type_traits>
@@ -39,7 +44,9 @@ class GpuFilePoolTest : public DispatchTest {
  protected:
   static constexpr amdf_memory_access_t kReadWrite =
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
-  static constexpr uint32_t kUnit = 64 * 1024;
+  static constexpr uint32_t kUnit = 256 * 1024;
+  // One full large folio plus a guarded base-page tail.
+  static constexpr uint32_t kPoolUnitCount = 9;
   static constexpr uint32_t kWordCount = kUnit / sizeof(uint32_t);
   static constexpr uint32_t kGenerationCount = 4;
   static constexpr uint32_t kGuard = 0x6bd783e5u;
@@ -74,7 +81,8 @@ class GpuFilePoolTest : public DispatchTest {
     }
   }
 
-  void PreparePool(bool default_address) {
+  void PreparePool(bool default_address,
+                   amdf_memory_placement_t placement = {}) {
     const amdf_memory_device_access_t access = {
         this->device_,
         {
@@ -126,7 +134,7 @@ class GpuFilePoolTest : public DispatchTest {
             .memory_profile_ordinal = ordinal,
             .access_count = 1,
             .required_flags = flags,
-            .byte_length = 8 * kUnit,
+            .byte_length = kPoolUnitCount * kUnit,
             .minimum_alignment = profile.allocation.minimum_alignment,
             .accesses = &access,
         };
@@ -137,7 +145,7 @@ class GpuFilePoolTest : public DispatchTest {
         EXPECT_EQ(reinterpret_cast<uintptr_t>(output), uintptr_t{1});
         continue;
       }
-      ASSERT_LE(8 * kUnit, profile.allocation.maximum_byte_length);
+      ASSERT_LE(kPoolUnitCount * kUnit, profile.allocation.maximum_byte_length);
       ASSERT_EQ(kUnit % profile.allocation.byte_length_granularity, 0u);
       selected = ordinal;
       minimum_alignment = profile.allocation.minimum_alignment;
@@ -153,15 +161,29 @@ class GpuFilePoolTest : public DispatchTest {
         .memory_profile_ordinal = selected,
         .access_count = 1,
         .required_flags = flags,
-        .byte_length = 8 * kUnit,
+        .byte_length = kPoolUnitCount * kUnit,
         .minimum_alignment = minimum_alignment,
         .accesses = &access,
+        .placement = placement,
     };
     ASSERT_NO_FATAL_FAILURE(
         pool_.Initialize(this->api_, this->system_scope_, create));
     EXPECT_EQ(pool_.host.cacheability, AMDF_HOST_CACHEABILITY_WRITE_BACK);
     ASSERT_NE(pool_.host.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
     EXPECT_EQ(pool_.device_address != 0, default_address);
+    if (placement.kind == AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA) {
+      const long page_size = sysconf(_SC_PAGESIZE);
+      ASSERT_GT(page_size, 0);
+      for (uint64_t offset = 0; offset < pool_.info.byte_length;
+           offset += page_size) {
+        int node = -1;
+        ASSERT_EQ(syscall(SYS_get_mempolicy, &node, nullptr, 0,
+                          static_cast<uint8_t*>(pool_.host.pointer) + offset,
+                          MPOL_F_NODE | MPOL_F_ADDR),
+                  0);
+        ASSERT_EQ(node, static_cast<int>(placement.node)) << offset;
+      }
+    }
 
     const amdf_memory_reservation_access_t projection = {this->device_, 0,
                                                          kReadWrite, 0};
@@ -353,8 +375,9 @@ class GpuFilePoolTest : public DispatchTest {
     }
   }
 
-  void Run(bool direct, bool default_address) {
-    ASSERT_NO_FATAL_FAILURE(PreparePool(default_address));
+  void Run(bool direct, bool default_address,
+           amdf_memory_placement_t placement = {}) {
+    ASSERT_NO_FATAL_FAILURE(PreparePool(default_address, placement));
     if (this->IsSkipped()) {
       return;
     }
@@ -370,7 +393,7 @@ class GpuFilePoolTest : public DispatchTest {
     if (this->IsSkipped()) {
       return;
     }
-    std::vector<uint32_t> expected_pool(8 * kWordCount, kGuard);
+    std::vector<uint32_t> expected_pool(kPoolUnitCount * kWordCount, kGuard);
     std::memcpy(pool_.host.pointer, expected_pool.data(),
                 pool_.info.byte_length);
     ASSERT_EQ(this->api_->host_mapping_cache_control(
@@ -468,6 +491,26 @@ class GpuFilePoolTest : public DispatchTest {
     this->RecordProperty("completed_generations", kGenerationCount);
   }
 
+  void RunPlaced() {
+    const long page_size = sysconf(_SC_PAGESIZE);
+    ASSERT_GT(page_size, 0);
+    constexpr size_t kWordBits = sizeof(unsigned long) * CHAR_BIT;
+    std::vector<unsigned long> allowed(page_size / sizeof(unsigned long));
+    const size_t node_count = allowed.size() * kWordBits;
+    ASSERT_EQ(syscall(SYS_get_mempolicy, nullptr, allowed.data(),
+                      node_count + 1, nullptr, MPOL_F_MEMS_ALLOWED),
+              0);
+    uint32_t selected_node = UINT32_MAX;
+    for (uint32_t node = 0; node < node_count; ++node) {
+      if ((allowed[node / kWordBits] & (1UL << (node % kWordBits))) != 0) {
+        selected_node = node;
+        break;
+      }
+    }
+    ASSERT_NE(selected_node, UINT32_MAX);
+    Run(false, false, {AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA, selected_node});
+  }
+
   void RunSharedAttachments() {
     ASSERT_NO_FATAL_FAILURE(PreparePool(true));
     if (this->IsSkipped()) {
@@ -532,7 +575,7 @@ class GpuFilePoolTest : public DispatchTest {
     ASSERT_EQ(this->api_->host_mapping_query_info(shared_mapping_, &host),
               AMDF_STATUS_OK);
     ASSERT_NE(host.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
-    std::vector<uint32_t> expected(8 * kWordCount, kGuard);
+    std::vector<uint32_t> expected(kPoolUnitCount * kWordCount, kGuard);
     for (uint32_t i = 0; i < kWordCount; ++i) {
       expected[i] = 0x81e35b07u + i * 0x9e3779b9u;
     }
@@ -541,7 +584,7 @@ class GpuFilePoolTest : public DispatchTest {
                   shared_mapping_, AMDF_HOST_CACHE_OPERATION_FLUSH, 0,
                   host.byte_length),
               AMDF_STATUS_OK);
-    std::vector<uint32_t> expected_pool(8 * kWordCount, kGuard);
+    std::vector<uint32_t> expected_pool(kPoolUnitCount * kWordCount, kGuard);
     std::memcpy(pool_.host.pointer, expected_pool.data(),
                 pool_.info.byte_length);
     ASSERT_EQ(this->api_->host_mapping_cache_control(
@@ -662,6 +705,7 @@ TYPED_TEST(GpuFilePoolTest, BufferedSourceOnly) { this->Run(false, false); }
 TYPED_TEST(GpuFilePoolTest, DirectSourceOnly) { this->Run(true, false); }
 TYPED_TEST(GpuFilePoolTest, BufferedDefaultAddress) { this->Run(false, true); }
 TYPED_TEST(GpuFilePoolTest, DirectDefaultAddress) { this->Run(true, true); }
+TYPED_TEST(GpuFilePoolTest, ExplicitHostPlacement) { this->RunPlaced(); }
 TYPED_TEST(GpuFilePoolTest, IndependentAttachmentsSharePages) {
   this->RunSharedAttachments();
 }

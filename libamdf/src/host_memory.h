@@ -21,17 +21,21 @@ amdf_status_t amdf_host_memory_query_description(
 
 // Prepares system backing in the resource's private host backing slot.
 // Borrowed pages remain caller-owned; allocation owns only the host VM range.
+// When export_backing is true, the first export materializes physical pages
+// with the requested placement before any native attachment is published.
 amdf_status_t amdf_host_memory_prepare(
     amdf_memory_t* memory, const amdf_memory_native_profile_t* profile,
-    const amdf_memory_create_info_t* create_info, amdf_memory_info_t* out_info);
+    bool export_backing, const amdf_memory_create_info_t* create_info,
+    amdf_memory_info_t* out_info);
 
 // Returns the persistent range of prepared platform-owned host backing.
 // The caller holds the memory resource and has already prepared its host slot.
 void* amdf_host_memory_pointer(const amdf_memory_t* memory);
 
 // Exports the already prepared immutable host source once for one attachment.
-// The first export also makes the newly pinned pages ready for device writers;
-// subsequent exports reuse that readiness within the unpublished transaction.
+// The first export also prepares physical pages and makes them ready for
+// writers; subsequent exports reuse that readiness within the unpublished
+// transaction.
 amdf_status_t amdf_host_memory_export(
     amdf_memory_t* memory, const amdf_platform_host_export_t* service,
     bool first_export, amdf_external_memory_t* out_memory);
