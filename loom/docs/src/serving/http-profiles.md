@@ -229,7 +229,11 @@ renders the model's framing. Reasoning-aware models return `reasoning_content`
 separately from answer `content`, in both SSE deltas and complete messages.
 
 `tools` accepts up to 4096 function declarations. Omitted `tool_choice` or
-`"auto"` is supported; other choices reject. `store` may be omitted or false.
+`"auto"` allows tool calls. `"none"` disables tools for the current response,
+including when a client retains its tool catalog and prior tool calls while
+requesting a conversation summary. Supplied declarations are still validated;
+source rendering and output parsing receive an empty effective catalog.
+Required or named tool choices reject. `store` may be omitted or false.
 The source policy owns tool grammar, safe output boundaries and canonical
 history. Generated calls become structured `tool_calls`; the server never runs
 the tools. Invalid generated tool syntax fails rather than publishing a

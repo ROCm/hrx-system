@@ -1077,12 +1077,22 @@ static iree_status_t loom_serve_text_chat_request_render(
   if (fields[2].value.data && fields[2].type == IREE_JSON_VALUE_TYPE_TRUE) {
     history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_STREAM;
   }
-  if ((fields[8].value.data && fields[8].type != IREE_JSON_VALUE_TYPE_FALSE) ||
-      (fields[9].value.data &&
-       !iree_string_view_equal(fields[9].value, IREE_SV("auto")))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "only store=false and automatic tools are supported");
+  if (fields[8].value.data && fields[8].type != IREE_JSON_VALUE_TYPE_FALSE) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "only store=false is supported");
+  }
+  bool tools_enabled = true;
+  if (fields[9].value.data) {
+    iree_string_builder_reset(&history->scratch);
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_append_decoded(&history->scratch,
+                                                             fields[9].value));
+    const iree_string_view_t choice =
+        iree_string_builder_view(&history->scratch);
+    tools_enabled = iree_string_view_equal(choice, IREE_SV("auto"));
+    if (!tools_enabled && !iree_string_view_equal(choice, IREE_SV("none"))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "tool_choice must be auto or none");
+    }
   }
   if (fields[4].value.data && fields[5].value.data) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1117,6 +1127,12 @@ static iree_status_t loom_serve_text_chat_request_render(
       fields[3].value.data ? fields[3].value : IREE_SV("[]");
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_tools_parse(
       history->chat->tool_schemas, history->chat));
+  if (!tools_enabled) {
+    // Validate supplied declarations even when this turn disables their use.
+    // Historical calls and source options still receive the original request.
+    history->chat->tool_schemas = IREE_SV("[]");
+    history->chat->tool_count = 0;
+  }
   const iree_string_view_t inputs[] = {body, history->chat->tool_schemas};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_render(
       history->chat->policy, history->chat->policy->chat_begin,
@@ -1661,6 +1677,8 @@ typedef struct loom_serve_text_chat_completion_tools_t {
   uint64_t request_id;
   // Transport options controlling whether calls carry streaming indexes.
   loom_serve_text_chat_flags_t flags;
+  // Whether the effective request catalog permits structured tool output.
+  bool tools_enabled;
   // Number of fully parsed calls.
   iree_host_size_t count;
   // Standard tool-call array destination.
@@ -1673,6 +1691,11 @@ static iree_status_t loom_serve_text_chat_completion_tool(
     void* user_data, iree_host_size_t index, iree_json_value_type_t type,
     iree_string_view_t value) {
   loom_serve_text_chat_completion_tools_t* tools = user_data;
+  if (!tools->tools_enabled) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source returned a tool call without enabled tools");
+  }
   if (type != IREE_JSON_VALUE_TYPE_OBJECT ||
       index >= LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1764,6 +1787,7 @@ iree_status_t loom_serve_text_chat_complete(
       .policy = chat->policy,
       .request_id = request_id,
       .flags = chat->flags,
+      .tools_enabled = chat->tool_count != 0,
       .output = tool_calls,
       .scratch = scratch};
   iree_status_t status = loom_serve_text_chat_render(

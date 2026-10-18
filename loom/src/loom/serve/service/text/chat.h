@@ -183,11 +183,11 @@ typedef struct loom_serve_text_chat_t {
   iree_host_size_t max_tokens;
   // Validated transport and usage options; inference is independent of these.
   loom_serve_text_chat_flags_t flags;
-  // Original tool declarations borrowing the HTTP body, or the literal [].
+  // Effective tool declarations borrowing the HTTP body, or [] when disabled.
   iree_string_view_t tool_schemas;
   // Host allocator owning the tool descriptor array.
   iree_allocator_t host_allocator;
-  // Number of populated tool descriptors.
+  // Number of enabled tool descriptors; zero when tool_choice is none.
   iree_host_size_t tool_count;
   // Allocated descriptor capacity.
   iree_host_size_t tool_capacity;
