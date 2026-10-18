@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 
+#include "loom/serve/server/realtime/context.h"
 #include "loom/serve/server/realtime/generation.h"
 #include "loom/serve/server/realtime/output.h"
 #include "loom/serve/service/text/tool_calls.h"
@@ -60,6 +61,10 @@ typedef struct loom_serve_realtime_response_t {
   iree_string_builder_t checkpoint;
   // Immutable response settings, captured when response.create is accepted.
   loom_serve_realtime_response_settings_t settings;
+  // Immutable accepted input, including retained pending transcription results.
+  loom_serve_realtime_context_t context;
+  // Default context and output permit native checkpoint selection/capture.
+  bool uses_history;
   // Native composition, including a separately retiring output CPU borrower.
   loom_serve_realtime_generation_t* generation;
   // First terminal cause withdrawing generation, independent of retirement.
@@ -108,13 +113,12 @@ struct loom_serve_realtime_responses_t {
   loom_serve_realtime_history_t* history;
   // Ordered, bounded event admission and network credit.
   loom_serve_realtime_wire_t* wire;
-  // One default writer plus one cancelled response whose CPU borrower retires.
-  loom_serve_realtime_response_t responses[2];
+  // Bounded default/independent requests, including accepted retiring work.
+  loom_serve_realtime_response_t responses[4];
+  // Rotating first claimant of shared connection publication credit.
+  iree_host_size_t cursor;
   // Immutable speech coefficients shared by independently owned audio cursors.
   loom_serve_realtime_generation_filter_t filter;
-  // Current earliest unfinished committed input, supplied by transcription
-  // owner.
-  uint64_t earliest_input;
   // Session close has withdrawn all responses and suppresses further delivery.
   bool closing;
 };
@@ -123,7 +127,7 @@ static loom_serve_realtime_response_t* loom_serve_realtime_active_response(
     loom_serve_realtime_responses_t* owner) {
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(owner->responses); ++i) {
     loom_serve_realtime_response_t* response = &owner->responses[i];
-    if (response->group && !response->stop &&
+    if (response->group && !response->settings.independent && !response->stop &&
         response->finish != LOOM_SERVE_REALTIME_FINISH_RETIRED) {
       return response;
     }
@@ -139,6 +143,7 @@ static void loom_serve_realtime_response_stop(
     response->stop = stop;
   }
   response->captured = true;
+  loom_serve_realtime_context_deinitialize(&response->context);
   if (!response->finish) {
     response->finish = response->item ? LOOM_SERVE_REALTIME_FINISH_TEXT
                                       : LOOM_SERVE_REALTIME_FINISH_RESPONSE;
@@ -166,8 +171,10 @@ static void loom_serve_realtime_response_stop(
   }
   // A capture already accepted for this response must still be observed and
   // released. Its predecessor remains valid until a conversation edit says so.
-  loom_serve_realtime_history_invalidate(owner->history,
-                                         response->group->sequence);
+  if (response->uses_history) {
+    loom_serve_realtime_history_invalidate(owner->history,
+                                           response->group->sequence);
+  }
 }
 
 static void loom_serve_realtime_response_fail(
@@ -208,6 +215,7 @@ static iree_status_t loom_serve_realtime_response_fields(
 }
 
 static loom_serve_realtime_output_t loom_serve_realtime_response_view(
+    const loom_serve_realtime_responses_t* owner,
     const loom_serve_realtime_response_t* response, bool done) {
   static const loom_serve_realtime_output_state_t stopped[] = {
       LOOM_SERVE_REALTIME_OUTPUT_GENERATING,
@@ -216,6 +224,7 @@ static loom_serve_realtime_output_t loom_serve_realtime_response_view(
       LOOM_SERVE_REALTIME_OUTPUT_FAILED};
   return (loom_serve_realtime_output_t){
       .id = iree_string_builder_view(&response->id),
+      .conversation_id = response->settings.independent ? 0 : owner->session_id,
       .first = done && response->announced ? response->group->first : NULL,
       .last = done ? response->announced : NULL,
       .metadata = iree_string_builder_view(&response->settings.metadata),
@@ -237,7 +246,7 @@ static iree_status_t loom_serve_realtime_response_event(
   IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_begin(
       owner->wire, done ? "response.done" : "response.created"));
   const loom_serve_realtime_output_t view =
-      loom_serve_realtime_response_view(response, done);
+      loom_serve_realtime_response_view(owner, response, done);
   loom_output_stream_t output;
   loom_output_stream_for_builder(&owner->wire->scratch, &output);
   IREE_RETURN_IF_ERROR(loom_serve_realtime_output_write(&view, &output));
@@ -289,9 +298,12 @@ static iree_status_t loom_serve_realtime_response_message(
       LOOM_SERVE_REALTIME_ASSISTANT, response->settings.output.audio,
       &response->item));
   loom_serve_realtime_wire_message_t* tail = owner->wire->last;
-  iree_status_t status = loom_serve_realtime_item_event(
-      owner->wire, "conversation.item.added", response->item,
-      loom_serve_realtime_conversation_previous(response->group));
+  iree_status_t status = iree_ok_status();
+  if (!response->settings.independent) {
+    status = loom_serve_realtime_item_event(
+        owner->wire, "conversation.item.added", response->item,
+        loom_serve_realtime_conversation_previous(response->group));
+  }
   if (iree_status_is_ok(status)) {
     status = loom_serve_realtime_response_item_event(
         owner, response, response->item, 0, false,
@@ -322,17 +334,20 @@ static iree_status_t loom_serve_realtime_response_call_advance(
   }
   switch (response->call_phase) {
     case LOOM_SERVE_REALTIME_CALL_CONVERSATION_ADDED: {
-      IREE_RETURN_IF_ERROR(loom_serve_realtime_item_event(
-          owner->wire, "conversation.item.added", call,
-          call->previous
-              ? call->previous
-              : loom_serve_realtime_conversation_previous(call->group)));
+      if (!response->settings.independent) {
+        IREE_RETURN_IF_ERROR(loom_serve_realtime_item_event(
+            owner->wire, "conversation.item.added", call,
+            call->previous
+                ? call->previous
+                : loom_serve_realtime_conversation_previous(call->group)));
+      }
       response->announced = call;
       break;
     }
     case LOOM_SERVE_REALTIME_CALL_OUTPUT_ADDED: {
       IREE_RETURN_IF_ERROR(loom_serve_realtime_response_item_event(
           owner, response, call, response->call_index, false, call->status));
+      response->announced = call;
       break;
     }
     case LOOM_SERVE_REALTIME_CALL_ARGUMENTS_DELTA:
@@ -364,11 +379,15 @@ static iree_status_t loom_serve_realtime_response_call_advance(
       break;
     }
     case LOOM_SERVE_REALTIME_CALL_CONVERSATION_DONE: {
-      IREE_RETURN_IF_ERROR(loom_serve_realtime_item_event(
-          owner->wire, "conversation.item.done", call, NULL));
+      if (!response->settings.independent) {
+        IREE_RETURN_IF_ERROR(loom_serve_realtime_item_event(
+            owner->wire, "conversation.item.done", call, NULL));
+      }
       response->call = call->next;
       ++response->call_index;
-      response->call_phase = LOOM_SERVE_REALTIME_CALL_CONVERSATION_ADDED;
+      response->call_phase = response->settings.independent
+                                 ? LOOM_SERVE_REALTIME_CALL_OUTPUT_ADDED
+                                 : LOOM_SERVE_REALTIME_CALL_CONVERSATION_ADDED;
       return iree_ok_status();
     }
   }
@@ -425,8 +444,10 @@ static iree_status_t loom_serve_realtime_response_finish(
       break;
     }
     case LOOM_SERVE_REALTIME_FINISH_CONVERSATION_ITEM: {
-      IREE_RETURN_IF_ERROR(loom_serve_realtime_item_event(
-          owner->wire, "conversation.item.done", response->item, NULL));
+      if (!response->settings.independent) {
+        IREE_RETURN_IF_ERROR(loom_serve_realtime_item_event(
+            owner->wire, "conversation.item.done", response->item, NULL));
+      }
       break;
     }
     case LOOM_SERVE_REALTIME_FINISH_CALLS: {
@@ -449,18 +470,18 @@ static iree_status_t loom_serve_realtime_response_finish(
 static bool loom_serve_realtime_response_ready(
     const loom_serve_realtime_responses_t* owner,
     const loom_serve_realtime_response_t* response) {
+  if (response->settings.independent) {
+    return true;
+  }
   if (loom_serve_realtime_history_capturing(owner->history)) {
     return false;
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(owner->responses); ++i) {
     const loom_serve_realtime_response_t* other = &owner->responses[i];
-    if (other != response && other->generation && !other->stop &&
-        !other->captured) {
+    if (other != response && !other->settings.independent &&
+        other->generation && !other->stop && !other->captured) {
       return false;
     }
-  }
-  if (owner->earliest_input < response->group->sequence) {
-    return false;
   }
   return true;
 }
@@ -469,14 +490,9 @@ static iree_status_t loom_serve_realtime_response_start(
     loom_serve_realtime_responses_t* owner,
     loom_serve_realtime_response_t* response) {
   loom_serve_text_request_t request = {0};
-  iree_string_builder_initialize(owner->host_allocator, &request.body);
-  iree_status_t status = loom_serve_realtime_conversation_request(
-      owner->conversation, response->group, owner->text.name,
-      iree_string_builder_view(&response->settings.output.instructions),
-      loom_serve_realtime_output_settings_tools(&response->settings.output),
-      response->settings.output.max_output_tokens, owner->profile->seed,
-      &request.body);
-  if (iree_status_is_ok(status) &&
+  iree_status_t status =
+      loom_serve_realtime_context_take(&response->context, &request.body);
+  if (iree_status_is_ok(status) && response->uses_history &&
       loom_serve_realtime_output_settings_text_equal(
           &response->settings.output, &owner->settings->output)) {
     status = iree_string_builder_append_string(
@@ -484,7 +500,9 @@ static iree_status_t loom_serve_realtime_response_start(
         loom_serve_realtime_history_checkpoint(owner->history));
   }
   if (iree_status_is_ok(status)) {
-    request.session = iree_string_builder_view(&response->id);
+    if (response->uses_history) {
+      request.session = iree_string_builder_view(&response->id);
+    }
     request.checkpoint = iree_string_builder_view(&response->checkpoint);
     status = loom_serve_realtime_generation_allocate(
         owner->executor, owner->registry, owner->text, owner->speech, &request,
@@ -530,7 +548,7 @@ static iree_status_t loom_serve_realtime_response_complete(
   }
   if (iree_status_is_ok(status) && result->calls->count) {
     loom_serve_realtime_output_t view =
-        loom_serve_realtime_response_view(response, true);
+        loom_serve_realtime_response_view(owner, response, true);
     view.first = response->group->first;
     view.last = response->group->last;
     status = loom_serve_realtime_output_admit(owner->session_id, &view);
@@ -543,6 +561,9 @@ static iree_status_t loom_serve_realtime_response_complete(
   response->call =
       response->item ? response->item->next : response->group->first;
   response->call_index = response->item ? 1 : 0;
+  response->call_phase = response->settings.independent
+                             ? LOOM_SERVE_REALTIME_CALL_OUTPUT_ADDED
+                             : LOOM_SERVE_REALTIME_CALL_CONVERSATION_ADDED;
   response->finish = response->item   ? LOOM_SERVE_REALTIME_FINISH_TEXT
                      : response->call ? LOOM_SERVE_REALTIME_FINISH_CALLS
                                       : LOOM_SERVE_REALTIME_FINISH_RESPONSE;
@@ -557,11 +578,17 @@ static iree_status_t loom_serve_realtime_response_advance(
   }
   if (!response->generation && !response->stop &&
       loom_serve_realtime_response_ready(owner, response)) {
-    iree_status_t status = loom_serve_realtime_response_start(owner, response);
+    bool ready = false;
+    iree_status_t status =
+        loom_serve_realtime_context_ready(&response->context, &ready);
+    if (iree_status_is_ok(status) && ready) {
+      status = loom_serve_realtime_response_start(owner, response);
+      *out_progress = true;
+    }
     if (!iree_status_is_ok(status)) {
       loom_serve_realtime_response_fail(owner, response, status);
+      *out_progress = true;
     }
-    *out_progress = true;
   }
   if (response->generation) {
     iree_status_t status = loom_serve_realtime_generation_advance(
@@ -634,7 +661,7 @@ static iree_status_t loom_serve_realtime_response_advance(
       }
       if (!response->stop && !response->captured &&
           response->finish >= LOOM_SERVE_REALTIME_FINISH_RESPONSE) {
-        if (response->group->first &&
+        if (response->uses_history && response->group->first &&
             loom_serve_realtime_output_settings_text_equal(
                 &response->settings.output, &owner->settings->output)) {
           IREE_RETURN_IF_ERROR(loom_serve_realtime_history_capture(
@@ -660,6 +687,7 @@ static iree_status_t loom_serve_realtime_response_advance(
       loom_serve_realtime_generation_cancel(response->generation);
       loom_serve_realtime_generation_free(response->generation);
     }
+    loom_serve_realtime_context_deinitialize(&response->context);
     iree_string_builder_deinitialize(&response->id);
     iree_string_builder_deinitialize(&response->checkpoint);
     loom_serve_realtime_response_settings_deinitialize(&response->settings);
@@ -673,11 +701,10 @@ static iree_status_t loom_serve_realtime_response_advance(
 }
 
 iree_status_t loom_serve_realtime_responses_create(
-    loom_serve_realtime_responses_t* owner, iree_string_view_t overrides) {
-  if (loom_serve_realtime_active_response(owner)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "cancel the active response before creating another");
+    loom_serve_realtime_responses_t* owner, iree_string_view_t overrides,
+    bool* out_default) {
+  if (out_default) {
+    *out_default = false;
   }
   loom_serve_realtime_response_t* response = NULL;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(owner->responses); ++i) {
@@ -687,16 +714,33 @@ iree_status_t loom_serve_realtime_responses_create(
     }
   }
   if (!response) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "cancelled response work is still retiring");
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "realtime response capacity is full, including retiring work");
   }
   iree_string_builder_initialize(owner->host_allocator, &response->id);
   iree_string_builder_initialize(owner->host_allocator, &response->checkpoint);
+  iree_string_view_t input;
   iree_status_t status = loom_serve_realtime_response_settings_initialize(
-      owner->settings, overrides, &response->settings);
+      owner->settings, overrides, &response->settings, &input);
+  if (iree_status_is_ok(status) && !response->settings.independent &&
+      loom_serve_realtime_active_response(owner)) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cancel the active default response before creating another");
+  }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_realtime_conversation_begin(owner->conversation,
-                                                    &response->group);
+    response->uses_history = !response->settings.independent && !input.data;
+    status = loom_serve_realtime_context_initialize(
+        owner->conversation, input, owner->text.name,
+        iree_string_builder_view(&response->settings.output.instructions),
+        loom_serve_realtime_output_settings_tools(&response->settings.output),
+        response->settings.output.max_output_tokens, owner->profile->seed,
+        &response->context);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_realtime_conversation_begin(
+        owner->conversation, response->settings.independent, &response->group);
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_format(
@@ -712,10 +756,14 @@ iree_status_t loom_serve_realtime_responses_create(
                                                response->group);
     }
     loom_serve_realtime_response_settings_deinitialize(&response->settings);
+    loom_serve_realtime_context_deinitialize(&response->context);
     iree_string_builder_deinitialize(&response->id);
     iree_string_builder_deinitialize(&response->checkpoint);
     *response = (loom_serve_realtime_response_t){0};
     return status;
+  }
+  if (out_default) {
+    *out_default = !response->settings.independent;
   }
   return iree_ok_status();
 }
@@ -746,8 +794,7 @@ iree_status_t loom_serve_realtime_responses_allocate(
                                              .settings = settings,
                                              .conversation = conversation,
                                              .history = history,
-                                             .wire = wire,
-                                             .earliest_input = UINT64_MAX};
+                                             .wire = wire};
   *out_owner = owner;
   return iree_ok_status();
 }
@@ -787,11 +834,22 @@ bool loom_serve_realtime_responses_pending(
 
 iree_status_t loom_serve_realtime_responses_cancel(
     loom_serve_realtime_responses_t* owner, iree_string_view_t encoded_id) {
-  loom_serve_realtime_response_t* response =
-      loom_serve_realtime_active_response(owner);
-  if (!response || (encoded_id.data &&
-                    !loom_serve_realtime_string_is(
-                        encoded_id, iree_string_builder_view(&response->id)))) {
+  loom_serve_realtime_response_t* response = NULL;
+  if (encoded_id.data) {
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(owner->responses); ++i) {
+      loom_serve_realtime_response_t* candidate = &owner->responses[i];
+      if (candidate->group && !candidate->stop &&
+          candidate->finish != LOOM_SERVE_REALTIME_FINISH_RETIRED &&
+          loom_serve_realtime_string_is(
+              encoded_id, iree_string_builder_view(&candidate->id))) {
+        response = candidate;
+        break;
+      }
+    }
+  } else {
+    response = loom_serve_realtime_active_response(owner);
+  }
+  if (!response) {
     return iree_make_status(IREE_STATUS_NOT_FOUND, "response is not active");
   }
   loom_serve_realtime_response_stop(owner, response,
@@ -835,7 +893,9 @@ iree_status_t loom_serve_realtime_responses_edit(
           IREE_STATUS_FAILED_PRECONDITION,
           "response item remains owned until cancellation retires");
     }
-    if (changes_history && response->group && !response->stop &&
+    if (changes_history &&
+        item->group->owner == &owner->conversation->history &&
+        !response->settings.independent && response->group && !response->stop &&
         response->finish != LOOM_SERVE_REALTIME_FINISH_RETIRED &&
         (response->item != item || !truncate)) {
       return iree_make_status(
@@ -855,15 +915,16 @@ iree_status_t loom_serve_realtime_responses_edit(
 }
 
 iree_status_t loom_serve_realtime_responses_advance(
-    loom_serve_realtime_responses_t* owner, bool closing,
-    uint64_t earliest_input, bool* out_progress) {
-  owner->earliest_input = earliest_input;
+    loom_serve_realtime_responses_t* owner, bool closing, bool* out_progress) {
   owner->closing = closing;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(owner->responses) && iree_status_is_ok(status); ++i) {
-    status = loom_serve_realtime_response_advance(owner, &owner->responses[i],
-                                                  out_progress);
+    const iree_host_size_t index =
+        (owner->cursor + i) % IREE_ARRAYSIZE(owner->responses);
+    status = loom_serve_realtime_response_advance(
+        owner, &owner->responses[index], out_progress);
   }
+  owner->cursor = (owner->cursor + 1) % IREE_ARRAYSIZE(owner->responses);
   return status;
 }

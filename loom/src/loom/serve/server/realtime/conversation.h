@@ -26,6 +26,15 @@ typedef enum loom_serve_realtime_item_status_e {
 } loom_serve_realtime_item_status_t;
 
 typedef struct loom_serve_realtime_group_t loom_serve_realtime_group_t;
+typedef struct loom_serve_realtime_input_item_t
+    loom_serve_realtime_input_item_t;
+
+typedef struct loom_serve_realtime_groups_t {
+  // First native-message position in this independently ordered list.
+  loom_serve_realtime_group_t* first;
+  // Append frontier, including retained responses without output yet.
+  loom_serve_realtime_group_t* last;
+} loom_serve_realtime_groups_t;
 
 typedef enum loom_serve_realtime_item_kind_e {
   LOOM_SERVE_REALTIME_ITEM_MESSAGE,
@@ -36,6 +45,9 @@ typedef enum loom_serve_realtime_item_kind_e {
 typedef struct loom_serve_realtime_item_t {
   // Canonical native-message position; NULL while the identity is reserved.
   loom_serve_realtime_group_t* group;
+  // Borrowed unfinished microphone receipt; its producer clears this before
+  // closing. Accepted response snapshots retain their own result interests.
+  loom_serve_realtime_input_item_t* input;
   // Earlier member of the same native message, or NULL for its first item.
   struct loom_serve_realtime_item_t* previous;
   // Later member of the same native message, or NULL for its last item.
@@ -69,6 +81,8 @@ typedef struct loom_serve_realtime_item_t {
 // One native-message position, reserved before a response has a wire item.
 // The response retains this position until accepted native/CPU work retires.
 struct loom_serve_realtime_group_t {
+  // Owning default-history or detached-output list, stable through unlink.
+  loom_serve_realtime_groups_t* owner;
   // Earlier native-message position, including retained empty responses.
   loom_serve_realtime_group_t* previous;
   // Later native-message position, independent of item publication order.
@@ -96,9 +110,9 @@ typedef struct loom_serve_realtime_conversation_t {
   // Last generated item identity; abandoned reservations are never reused.
   uint64_t identity;
   // Ordered canonical native messages, without model or task ownership.
-  loom_serve_realtime_group_t* first;
-  // Append frontier, including responses that have not produced content yet.
-  loom_serve_realtime_group_t* last;
+  loom_serve_realtime_groups_t history;
+  // Session-visible independent output, excluded from default model context.
+  loom_serve_realtime_groups_t detached;
   // Identity ownership includes committed items and microphone reservations.
   loom_serve_realtime_item_t* items[128];
   // Allocated items plus retained empty groups, bounded by the identity index.
@@ -157,10 +171,11 @@ iree_status_t loom_serve_realtime_conversation_function(
 // entered the wire queue. Input items use this before canonical insertion.
 void loom_serve_realtime_item_complete(loom_serve_realtime_item_t* item);
 
-// Reserves a response's append frontier and capacity for its first real item.
+// Reserves a response position and capacity for its first real item.
+// Independent output joins the detached list instead of default history.
 // The caller releases the group after all native and CPU references retire.
 iree_status_t loom_serve_realtime_conversation_begin(
-    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_conversation_t* conversation, bool independent,
     loom_serve_realtime_group_t** out_group);
 void loom_serve_realtime_conversation_release(
     loom_serve_realtime_conversation_t* conversation,
@@ -195,15 +210,6 @@ void loom_serve_realtime_conversation_remove(
 void loom_serve_realtime_conversation_truncate(
     loom_serve_realtime_conversation_t* conversation,
     loom_serve_realtime_item_t* item);
-
-// Composes one source-defined native text request from completed conversation
-// groups preceding exclude. Truncated assistant audio has no trustworthy text
-// and is omitted. Source rendering/tokenization retains its own ownership.
-iree_status_t loom_serve_realtime_conversation_request(
-    const loom_serve_realtime_conversation_t* conversation,
-    const loom_serve_realtime_group_t* exclude, iree_string_view_t model,
-    iree_string_view_t instructions, iree_string_view_t tools,
-    uint32_t max_tokens, uint64_t seed, iree_string_builder_t* output);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -83,6 +83,8 @@ typedef struct loom_serve_realtime_response_settings_t {
   loom_serve_realtime_output_settings_t output;
   // Owned canonical JSON object; empty storage denotes null metadata.
   iree_string_builder_t metadata;
+  // Output remains session-visible but is excluded from default history.
+  bool independent;
 } loom_serve_realtime_response_settings_t;
 
 iree_status_t loom_serve_realtime_settings_initialize(
@@ -112,12 +114,15 @@ iree_string_view_t loom_serve_realtime_output_settings_tools(
 // overrides is empty or a complete JSON object. Input policy and session type
 // are not response settings. Metadata has at most 16 distinct keys, 64 Unicode
 // codepoints per key, and string values of at most 512 codepoints. The result
-// owns every selected byte before the command receipt is released, and remains
+// owns every policy byte before the command receipt is released, and remains
 // deinitializable after failure. No model work or session mutation occurs.
+// out_input borrows the explicit input array through the caller's immediate
+// context capture; an absent array returns a null view.
 iree_status_t loom_serve_realtime_response_settings_initialize(
     const loom_serve_realtime_settings_t* defaults,
     iree_string_view_t overrides,
-    loom_serve_realtime_response_settings_t* settings);
+    loom_serve_realtime_response_settings_t* settings,
+    iree_string_view_t* out_input);
 void loom_serve_realtime_response_settings_deinitialize(
     loom_serve_realtime_response_settings_t* settings);
 

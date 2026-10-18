@@ -57,9 +57,17 @@ iree_status_t loom_serve_realtime_input_append(
 // without requiring another append. The caller has validated semantic commit.
 void loom_serve_realtime_input_finish(loom_serve_realtime_input_item_t* item);
 
-// Ends publication interest immediately. Accepted conversion retains the item
-// and its PCM loans until release. A completed item also retires through this
-// call; the caller must discard its pointer immediately.
+// Retains a read-only result interest independently of the PCM producer. All
+// accesses belong to the serialized owner. The producer still supplies PCM and
+// EOF; a reader never takes ownership of those delivery obligations.
+void loom_serve_realtime_input_retain(loom_serve_realtime_input_item_t* item);
+void loom_serve_realtime_input_release(loom_serve_realtime_input_item_t* item);
+bool loom_serve_realtime_input_has_readers(
+    const loom_serve_realtime_input_item_t* item);
+
+// Ends producer interest immediately. Accepted conversion and retained readers
+// keep the receipt alive through actual retirement. Closing before completion
+// publishes cancellation to readers. The producer discards its pointer.
 void loom_serve_realtime_input_close(loom_serve_realtime_input_item_t* item);
 
 // Advances bounded admission, conversion, and native input/output consumption.
