@@ -16,6 +16,7 @@ iree_py_library(
   SRCS
     "client_test_util.py"
     "independent_test.py"
+    "registration_test.py"
   DEPS
     loom::serve::server::catalog_test_util
 )

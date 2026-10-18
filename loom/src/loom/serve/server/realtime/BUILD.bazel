@@ -21,6 +21,7 @@ loom_py_library(
     srcs = [
         "client_test_util.py",
         "independent_test.py",
+        "registration_test.py",
     ],
     deps = ["//loom/src/loom/serve/server:catalog_test_util"],
 )
