@@ -332,8 +332,8 @@ uint32_t iree_hal_amd_xdna_operation_execute_host(
         operation->status =
             iree_hal_amd_fabric_file_transfer_finish(operation->file.transfer);
         operation->file.io_completed =
-            operation->file.transfer->async.bytes_transferred ==
-            operation->file.transfer->length;
+            iree_hal_amd_fabric_file_transfer_bytes_transferred(
+                operation->file.transfer) == operation->file.transfer->length;
       }
       if (iree_status_is_ok(operation->status) &&
           !operation->file.io_completed) {

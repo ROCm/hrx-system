@@ -502,7 +502,8 @@ static void iree_hal_amd_xdna_host_worker_execute(
   }
   if (operation->kind == IREE_HAL_AMD_XDNA_OPERATION_FILE &&
       !operation->file.io_completed &&
-      !operation->file.transfer->async.bytes_transferred) {
+      !iree_hal_amd_fabric_file_transfer_bytes_transferred(
+          operation->file.transfer)) {
     iree_hal_memory_effects_t before = {0}, after = {0};
     operation->status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
         operation->file.transfer, queue->context->api, queue->base.queue_family,
@@ -781,7 +782,8 @@ static void iree_hal_amd_xdna_queue_file_complete(
   if (iree_status_is_ok(operation->status) &&
       (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ ||
        transfer->async.staging.data ||
-       transfer->async.bytes_transferred < transfer->length)) {
+       iree_hal_amd_fabric_file_transfer_bytes_transferred(transfer) <
+           transfer->length)) {
     iree_hal_amd_xdna_queue_service_enqueue(&operation->queue->host_worker,
                                             &operation->service_item);
   } else {
@@ -820,8 +822,8 @@ static void iree_hal_amd_xdna_host_worker_complete(
         &operation->continuation, IREE_ASYNC_OPERATION_TYPE_NOP,
         IREE_ASYNC_OPERATION_FLAG_NONE, iree_hal_amd_xdna_queue_file_complete,
         operation);
-    operation->status = iree_hal_amd_fabric_file_transfer_submit(
-        operation->file.transfer,
+    operation->status = iree_hal_amd_fabric_file_request_submit(
+        &operation->file.transfer->async.request,
         (iree_hal_amd_fabric_file_transfer_callback_t){
             .fn = iree_hal_amd_xdna_operation_resume,
             .user_data = operation,

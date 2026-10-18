@@ -63,7 +63,7 @@ struct FileProvider {
   static void Destroy(iree_hal_file_t* file) {
     auto* self = iree_containerof(reinterpret_cast<iree_hal_resource_t*>(file),
                                   FileProvider, resource);
-    EXPECT_EQ(self->pending, nullptr);
+    EXPECT_TRUE(self->pending.empty());
     ++self->release_count;
   }
 
@@ -78,20 +78,20 @@ struct FileProvider {
                               iree_async_operation_list_t operations) {
     auto* self = iree_containerof(proactor, FileProvider, proactor);
     EXPECT_EQ(operations.count, 1u);
-    EXPECT_EQ(self->pending, nullptr);
     if (self->submit_code != IREE_STATUS_OK) {
       return iree_make_status(self->submit_code, "platform submission failed");
     }
-    self->pending = operations.values[0];
-    if (self->pending->type == IREE_ASYNC_OPERATION_TYPE_FILE_READ) {
+    auto* operation = operations.values[0];
+    self->pending.push_back(operation);
+    if (operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_READ) {
       auto* read =
-          reinterpret_cast<iree_async_file_read_operation_t*>(self->pending);
+          reinterpret_cast<iree_async_file_read_operation_t*>(operation);
       self->requests.push_back({read->offset, read->buffer.length,
                                 read->buffer.region, read->buffer.offset});
     } else {
-      EXPECT_EQ(self->pending->type, IREE_ASYNC_OPERATION_TYPE_FILE_WRITE);
+      EXPECT_EQ(operation->type, IREE_ASYNC_OPERATION_TYPE_FILE_WRITE);
       auto* write =
-          reinterpret_cast<iree_async_file_write_operation_t*>(self->pending);
+          reinterpret_cast<iree_async_file_write_operation_t*>(operation);
       self->requests.push_back({write->offset, write->buffer.length,
                                 write->buffer.region, write->buffer.offset});
     }
@@ -100,9 +100,14 @@ struct FileProvider {
 
   void Complete(iree_host_size_t byte_count,
                 iree_status_code_t code = IREE_STATUS_OK) {
-    ASSERT_NE(pending, nullptr);
-    auto* operation = pending;
-    pending = nullptr;
+    CompleteAt(0, byte_count, code);
+  }
+
+  void CompleteAt(size_t index, iree_host_size_t byte_count,
+                  iree_status_code_t code = IREE_STATUS_OK) {
+    ASSERT_LT(index, pending.size());
+    auto* operation = pending[index];
+    pending.erase(pending.begin() + index);
     if (code == IREE_STATUS_OK) {
       if (operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_READ) {
         auto* read =
@@ -143,8 +148,8 @@ struct FileProvider {
   iree_async_file_requirements_t requirements = {{1, 1, 1}, {1, 1, 1}};
   // Platform file bytes.
   std::array<uint8_t, 128> contents;
-  // Accepted request awaiting an explicit completion.
-  iree_async_operation_t* pending = nullptr;
+  // Accepted requests, independently completed in any order by the platform.
+  std::vector<iree_async_operation_t*> pending;
   // Observed platform requests in submission order.
   std::vector<Request> requests;
   // External failure returned by the next submission, or OK.
@@ -193,6 +198,20 @@ struct BufferStorage {
   amdf_status_t cache_status = AMDF_STATUS_OK;
   // Number of final backing-view releases.
   size_t release_count = 0;
+};
+
+struct RequestCompletion {
+  static void Complete(void* user_data, iree_status_t status) {
+    auto* self = static_cast<RequestCompletion*>(user_data);
+    ++self->count;
+    self->code = iree_status_code(status);
+    iree_status_free(status);
+  }
+
+  // Number of terminal callbacks for this request.
+  size_t count = 0;
+  // Most recent terminal result, or UNKNOWN before completion.
+  iree_status_code_t code = IREE_STATUS_UNKNOWN;
 };
 
 static_assert(offsetof(BufferStorage, binding_facts) ==
@@ -250,7 +269,7 @@ class FileTransferTest : public ::testing::TestWithParam<
   void TearDown() override {
     // A failed assertion must retire accepted mock I/O before placed state is
     // released, just as a platform completion would do in production.
-    if (provider_.pending) {
+    while (!provider_.pending.empty()) {
       provider_.Complete(0, IREE_STATUS_CANCELLED);
     }
     if (initialized_) {
@@ -275,14 +294,45 @@ class FileTransferTest : public ::testing::TestWithParam<
   }
 
   iree_status_t Submit() {
-    return iree_hal_amd_fabric_file_transfer_submit(
-        &transfer_, {+[](void* user_data, iree_status_t status) {
-                       auto* self = static_cast<FileTransferTest*>(user_data);
-                       ++self->completion_count_;
-                       self->completion_code_ = iree_status_code(status);
-                       iree_status_free(status);
-                     },
-                     this});
+    return iree_hal_amd_fabric_file_request_submit(
+        &transfer_.async.request,
+        {+[](void* user_data, iree_status_t status) {
+           auto* self = static_cast<FileTransferTest*>(user_data);
+           ++self->completion_count_;
+           self->completion_code_ = iree_status_code(status);
+           iree_status_free(status);
+         },
+         this});
+  }
+
+  void PrepareIndependentRequests() {
+    ASSERT_NO_FATAL_FAILURE(Initialize());
+    request_region_ = {
+        .proactor = &provider_.proactor,
+        .base_ptr = storage_.contents.data() + kNativeOffset,
+        .length = kLength,
+        .buffer_size = kLength / 2,
+    };
+    for (size_t i = 0; i < requests_.size(); ++i) {
+      const size_t offset = i * request_region_.buffer_size;
+      IREE_ASSERT_OK(iree_hal_amd_fabric_file_request_prepare(
+          &transfer_, offset,
+          iree_async_span_make(&request_region_, offset, kLength - offset),
+          &requests_[i]));
+      EXPECT_EQ(requests_[i].span.length, request_region_.buffer_size);
+    }
+    // Only the enclosing transfer owns the file and buffer. Native requests
+    // borrow them until that owner has joined every accepted request.
+    iree_hal_buffer_release(buffer_);
+    buffer_ = nullptr;
+    iree_hal_file_release(provider_.file());
+    file_owned_ = false;
+  }
+
+  iree_status_t SubmitRequest(size_t index) {
+    return iree_hal_amd_fabric_file_request_submit(
+        &requests_[index],
+        {RequestCompletion::Complete, &request_completions_[index]});
   }
 
   // Tested file-relative range, distinct from the buffer-relative range.
@@ -305,6 +355,12 @@ class FileTransferTest : public ::testing::TestWithParam<
   std::array<uint32_t, 4> access_ordinals_ = {};
   // Shared production operation under test.
   iree_hal_amd_fabric_file_transfer_t transfer_ = {};
+  // Borrowed registration surviving every accepted independent request.
+  iree_async_region_t request_region_ = {};
+  // Independent placed requests retired by teardown even on an assertion exit.
+  std::array<iree_hal_amd_fabric_file_request_t, 2> requests_ = {};
+  // Terminal observations independent of submission/completion order.
+  std::array<RequestCompletion, 2> request_completions_ = {};
   // True after operand capture owns references.
   bool initialized_ = false;
   // True while the fixture owns its initial file reference.
@@ -448,8 +504,9 @@ TEST_P(FileTransferTest, ZeroProgressFailsTheExactRange) {
   provider_.Complete(0);
   EXPECT_EQ(completion_count_, 1u);
   EXPECT_EQ(completion_code_, IREE_STATUS_OUT_OF_RANGE);
-  EXPECT_EQ(transfer_.async.bytes_transferred, 7u);
-  EXPECT_EQ(provider_.pending, nullptr);
+  EXPECT_EQ(iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer_),
+            7u);
+  EXPECT_TRUE(provider_.pending.empty());
 }
 
 TEST_P(FileTransferTest, RegisteredChunksPreserveSlotsAndShortIoOffsets) {
@@ -467,8 +524,8 @@ TEST_P(FileTransferTest, RegisteredChunksPreserveSlotsAndShortIoOffsets) {
     IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_chunk(
         &transfer_,
         iree_async_span_make(&region, region_offset, kLength - offset)));
-    EXPECT_EQ(transfer_.async.chunk.span.length, chunk_length);
-    EXPECT_EQ(transfer_.async.chunk.span.region, &region);
+    EXPECT_EQ(transfer_.async.request.span.length, chunk_length);
+    EXPECT_EQ(transfer_.async.request.span.region, &region);
     const size_t first_request = provider_.requests.size();
     IREE_ASSERT_OK(Submit());
     const size_t prefix = std::min(chunk_length, size_t{7});
@@ -483,12 +540,80 @@ TEST_P(FileTransferTest, RegisteredChunksPreserveSlotsAndShortIoOffsets) {
     EXPECT_EQ(provider_.requests[first_request].buffer_offset, region_offset);
     EXPECT_EQ(completion_code_, IREE_STATUS_OK);
     offset += chunk_length;
-    EXPECT_EQ(transfer_.async.bytes_transferred, offset);
+    EXPECT_EQ(iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer_),
+              offset);
   }
   EXPECT_EQ(storage_.contents, expected_buffer_);
   EXPECT_EQ(provider_.contents, expected_file_);
   EXPECT_TRUE(storage_.cache_operations.empty());
   EXPECT_EQ(transfer_.async.staging.data, nullptr);
+}
+
+TEST_P(FileTransferTest, IndependentRequestsCompleteOutOfOrder) {
+  ASSERT_NO_FATAL_FAILURE(PrepareIndependentRequests());
+  IREE_ASSERT_OK(SubmitRequest(0));
+  IREE_ASSERT_OK(SubmitRequest(1));
+  ASSERT_EQ(provider_.pending.size(), 2u);
+  provider_.CompleteAt(1, 7);
+  EXPECT_EQ(requests_[0].bytes_transferred, 0u);
+  EXPECT_EQ(requests_[1].bytes_transferred, 7u);
+  EXPECT_EQ(provider_.requests.back().offset, kFileOffset + 16 + 7);
+  EXPECT_EQ(provider_.requests.back().buffer_offset, 16u + 7u);
+  EXPECT_EQ(provider_.requests.back().region, &request_region_);
+  provider_.CompleteAt(1, 9);
+  EXPECT_EQ(request_completions_[0].count, 0u);
+  EXPECT_EQ(request_completions_[1].count, 1u);
+  EXPECT_EQ(request_completions_[1].code, IREE_STATUS_OK);
+  EXPECT_EQ(provider_.release_count, 0u);
+  EXPECT_EQ(storage_.release_count, 0u);
+  provider_.Complete(5);
+  EXPECT_EQ(provider_.requests.back().offset, kFileOffset + 5);
+  EXPECT_EQ(provider_.requests.back().buffer_offset, 5u);
+  provider_.Complete(11);
+  EXPECT_TRUE(provider_.pending.empty());
+  EXPECT_EQ(request_completions_[0].count, 1u);
+  EXPECT_EQ(request_completions_[0].code, IREE_STATUS_OK);
+  // Native requests never mutate the parent's serial cursor or cache state.
+  EXPECT_EQ(iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer_),
+            0u);
+  EXPECT_TRUE(storage_.cache_operations.empty());
+  EXPECT_EQ(storage_.contents, expected_buffer_);
+  EXPECT_EQ(provider_.contents, expected_file_);
+  iree_hal_amd_fabric_file_transfer_deinitialize(&transfer_);
+  initialized_ = false;
+  EXPECT_EQ(provider_.release_count, 1u);
+  EXPECT_EQ(storage_.release_count, 1u);
+}
+
+TEST_P(FileTransferTest, FailedRequestDoesNotRetireAnotherAcceptedRequest) {
+  ASSERT_NO_FATAL_FAILURE(PrepareIndependentRequests());
+  const auto original_buffer = storage_.contents;
+  const auto original_file = provider_.contents;
+  IREE_ASSERT_OK(SubmitRequest(0));
+  IREE_ASSERT_OK(SubmitRequest(1));
+  provider_.Complete(7);
+  provider_.CompleteAt(1, 0, IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(request_completions_[0].count, 1u);
+  EXPECT_EQ(request_completions_[0].code, IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(requests_[0].bytes_transferred, 7u);
+  EXPECT_EQ(request_completions_[1].count, 0u);
+  ASSERT_EQ(provider_.pending.size(), 1u);
+  EXPECT_EQ(provider_.release_count, 0u);
+  EXPECT_EQ(storage_.release_count, 0u);
+  provider_.Complete(16);
+  EXPECT_EQ(request_completions_[1].count, 1u);
+  EXPECT_EQ(request_completions_[1].code, IREE_STATUS_OK);
+  if (file_access() == IREE_HAL_MEMORY_ACCESS_READ) {
+    memcpy(expected_buffer_.data() + kNativeOffset + 7,
+           original_buffer.data() + kNativeOffset + 7, 9);
+  } else {
+    memcpy(expected_file_.data() + kFileOffset + 7,
+           original_file.data() + kFileOffset + 7, 9);
+  }
+  EXPECT_EQ(storage_.contents, expected_buffer_);
+  EXPECT_EQ(provider_.contents, expected_file_);
+  EXPECT_EQ(iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer_),
+            0u);
 }
 
 TEST_P(FileTransferTest, EngineStagingDoesNotRequireOrTouchAHostBufferView) {
@@ -503,14 +628,16 @@ TEST_P(FileTransferTest, EngineStagingDoesNotRequireOrTouchAHostBufferView) {
     }
     IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_chunk(
         &transfer_, iree_async_span_from_ptr(staging.data(), staging.size())));
-    EXPECT_EQ(transfer_.async.chunk.offset, offset);
-    EXPECT_EQ(iree_async_span_ptr(transfer_.async.chunk.span), staging.data());
+    EXPECT_EQ(transfer_.async.request.offset, offset);
+    EXPECT_EQ(iree_async_span_ptr(transfer_.async.request.span),
+              staging.data());
     IREE_ASSERT_OK(Submit());
     provider_.Complete(7);
     provider_.Complete(9);
     EXPECT_EQ(completion_count_, offset / staging.size() + 1);
     EXPECT_EQ(completion_code_, IREE_STATUS_OK);
-    EXPECT_EQ(transfer_.async.bytes_transferred, offset + staging.size());
+    EXPECT_EQ(iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer_),
+              offset + staging.size());
     if (file_access() == IREE_HAL_MEMORY_ACCESS_READ) {
       memcpy(gathered.data() + offset, staging.data(), staging.size());
     }
@@ -559,8 +686,9 @@ TEST_P(FileTransferTest, UnalignedPartialCompletionDoesNotResubmit) {
   IREE_ASSERT_OK(Submit());
   provider_.Complete(4);
   EXPECT_EQ(provider_.requests.size(), 1u);
-  EXPECT_EQ(provider_.pending, nullptr);
-  EXPECT_EQ(transfer_.async.bytes_transferred, 4u);
+  EXPECT_TRUE(provider_.pending.empty());
+  EXPECT_EQ(iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer_),
+            4u);
   EXPECT_EQ(completion_count_, 1u);
   EXPECT_EQ(completion_code_, IREE_STATUS_INVALID_ARGUMENT);
 }
@@ -574,7 +702,7 @@ TEST_P(FileTransferTest, UnalignedInitialRequestKeepsCallerOwnership) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_amd_fabric_file_transfer_prepare(&transfer_));
   EXPECT_TRUE(provider_.requests.empty());
-  EXPECT_EQ(provider_.pending, nullptr);
+  EXPECT_TRUE(provider_.pending.empty());
   EXPECT_EQ(completion_count_, 0u);
 }
 
@@ -586,7 +714,8 @@ TEST_P(FileTransferTest, PlatformFailureAfterPartialProgressIsTerminal) {
   provider_.Complete(0, IREE_STATUS_DATA_LOSS);
   EXPECT_EQ(completion_count_, 1u);
   EXPECT_EQ(completion_code_, IREE_STATUS_DATA_LOSS);
-  EXPECT_EQ(transfer_.async.bytes_transferred, 7u);
+  EXPECT_EQ(iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer_),
+            7u);
 }
 
 TEST_P(FileTransferTest, ResubmissionFailureIsTerminal) {
@@ -597,7 +726,7 @@ TEST_P(FileTransferTest, ResubmissionFailureIsTerminal) {
   provider_.Complete(7);
   EXPECT_EQ(completion_count_, 1u);
   EXPECT_EQ(completion_code_, IREE_STATUS_RESOURCE_EXHAUSTED);
-  EXPECT_EQ(provider_.pending, nullptr);
+  EXPECT_TRUE(provider_.pending.empty());
 }
 
 TEST_P(FileTransferTest, RejectedSubmissionRetainsCallerOwnership) {
@@ -606,7 +735,7 @@ TEST_P(FileTransferTest, RejectedSubmissionRetainsCallerOwnership) {
   provider_.submit_code = IREE_STATUS_RESOURCE_EXHAUSTED;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Submit());
   EXPECT_EQ(completion_count_, 0u);
-  EXPECT_EQ(provider_.pending, nullptr);
+  EXPECT_TRUE(provider_.pending.empty());
 }
 
 TEST_P(FileTransferTest, CacheFailurePropagatesAtItsExecutionBoundary) {
@@ -634,8 +763,8 @@ TEST_P(FileTransferTest, NativeIoUsesOnlyItsPreparedBacking) {
   IREE_ASSERT_OK(Submit());
   void* native_pointer =
       file_access() == IREE_HAL_MEMORY_ACCESS_READ
-          ? iree_async_span_ptr(transfer_.async.read.buffer)
-          : iree_async_span_ptr(transfer_.async.write.buffer);
+          ? iree_async_span_ptr(transfer_.async.request.read.buffer)
+          : iree_async_span_ptr(transfer_.async.request.write.buffer);
   if (is_direct()) {
     EXPECT_EQ(native_pointer, transfer_.async.staging.data);
     EXPECT_NE(native_pointer, storage_.contents.data() + kNativeOffset);

@@ -181,8 +181,8 @@ static void iree_hal_amd_gpu_file_transfer_issue(
     iree_hal_amd_gpu_file_transfer_t* operation) {
   operation->resume = iree_hal_amd_gpu_file_transfer_io_complete;
   iree_atomic_store(&operation->pending, 2, iree_memory_order_relaxed);
-  iree_status_t status = iree_hal_amd_fabric_file_transfer_submit(
-      &operation->transfer,
+  iree_status_t status = iree_hal_amd_fabric_file_request_submit(
+      &operation->transfer.async.request,
       (iree_hal_amd_fabric_file_transfer_callback_t){
           .fn = iree_hal_amd_gpu_file_transfer_step_complete,
           .user_data = operation,
@@ -210,12 +210,12 @@ static void iree_hal_amd_gpu_file_transfer_copy(
   const iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
   const iree_byte_span_t contents =
       transfer->async.file
-          ? iree_async_span_data(transfer->async.chunk.span)
+          ? iree_async_span_data(transfer->async.request.span)
           : iree_make_byte_span(
                 transfer->file_contents.data + transfer->file_offset,
                 (iree_host_size_t)transfer->length);
   const iree_device_size_t offset =
-      transfer->buffer_offset + transfer->async.chunk.offset;
+      transfer->buffer_offset + transfer->async.request.offset;
   iree_hal_transfer_operation_t copy = {0};
   if (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
     copy.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
@@ -232,7 +232,7 @@ static void iree_hal_amd_gpu_file_transfer_copy(
   }
   iree_hal_amd_gpu_file_transfer_submit_native(
       operation, &copy,
-      transfer->async.chunk.offset == 0 && !transfer->sources.host_count
+      transfer->async.request.offset == 0 && !transfer->sources.host_count
           ? operation->before
           : NULL,
       NULL, iree_hal_amd_gpu_file_transfer_copy_complete);
@@ -241,7 +241,8 @@ static void iree_hal_amd_gpu_file_transfer_copy(
 static void iree_hal_amd_gpu_file_transfer_advance(
     iree_hal_amd_gpu_file_transfer_t* operation) {
   iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
-  if (transfer->async.bytes_transferred == transfer->length) {
+  if (iree_hal_amd_fabric_file_transfer_bytes_transferred(transfer) ==
+      transfer->length) {
     iree_status_t status = iree_ok_status();
     if (transfer->sources.host_count &&
         transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
@@ -261,9 +262,10 @@ static void iree_hal_amd_gpu_file_transfer_advance(
   } else {
     iree_host_size_t capacity = transfer->async.staging.data_length;
     if (range) {
-      capacity =
-          iree_min(capacity, range->offset + range->contents.data_length -
-                                 transfer->async.bytes_transferred);
+      capacity = iree_min(
+          capacity,
+          range->offset + range->contents.data_length -
+              iree_hal_amd_fabric_file_transfer_bytes_transferred(transfer));
     }
     status = iree_hal_amd_fabric_file_transfer_prepare_chunk(
         transfer,
