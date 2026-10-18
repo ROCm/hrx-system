@@ -4,54 +4,200 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Normalization reduces each packed activation independently. Parameter
-// strides are zero for shared weights; origins also support packed archives.
+// A 128-workitem group owns one packed request and one or four time columns.
+// Each lane retains its assigned channels through both F64 moment reductions
+// and F32 output, without reloading inputs or creating a global intermediate.
+// Affine/plain paths center population moments; variance scaling uses sample
+// variance and preserves the input mean. Parameter origins and strides remain
+// independent, and an inactive packed row leaves the whole workgroup idle.
 template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
 
 template.decl pure @pocket.batch.origin(%row: index, %offset: offset, %stride: offset) -> (offset)
 
-template.decl @pocket.normalization_affine.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset, %bias_origin: offset)
+// A partial bank is reusable only after every lane has copied its final sum.
+template.decl @pocket.batch.normalization_reduce(%storage: buffer, %columns: index, %lanes: index, %rounds: index, %lane: index, %value: f64) -> (f64)
+
+template.def<@pocket.batch.normalization_reduce> device @pocket_batch_normalization_reduce(%storage: buffer, %columns: index, %lanes: index, %rounds: index, %lane: index, %value: f64) -> (f64) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %column = index.rem %lane, %columns : index
+  %channel_lane = index.div %lane, %columns : index
+  %partials = buffer.view %storage[%origin] : buffer -> view<128xf64>
+  view.store %value, %partials[%lane] : f64, view<128xf64>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %half = index.div %lanes, %two : index
+  %unused = scf.for %round = [%zero to %rounds step %one](%width_value = %half : index) -> (index) {
+    // The five- or seven-level tree reaches one on its final iteration.
+    %width = index.assume %width_value [ge(%width_value, 1), le(%width_value, 64)] : index
+    %active = index.cmp ult, %channel_lane, %width : index
+    scf.if %active {
+      %distance = index.mul %width, %columns : index
+      %peer_value = index.add %lane, %distance : index
+      // The active lower half reads the disjoint upper half of the same bank.
+      %peer = index.assume %peer_value [ge(%peer_value, 0), lt(%peer_value, 128)] : index
+      %left = view.load %partials[%lane] : view<128xf64> -> f64
+      %right = view.load %partials[%peer] : view<128xf64> -> f64
+      %sum = scalar.addf %left, %right : f64
+      view.store %sum, %partials[%lane] : f64, view<128xf64>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %next = index.div %width, %two : index
+    scf.yield %next : index
+  }
+  %result = view.load %partials[%column] : view<128xf64> -> f64
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  template.return %result : f64
+}
+
+template.decl @pocket.batch.normalization_panel(%membership: buffer, %center: i1, %scaled: i1, %biased: i1, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %input: buffer, %output: buffer, %scale: buffer, %bias: buffer, %input_offset: offset, %input_stride: offset, %output_offset: offset, %output_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset)
+
+template.def<@pocket.batch.normalization_panel> device @pocket_batch_normalization_panel(%membership: buffer, %center: i1, %scaled: i1, %biased: i1, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %input: buffer, %output: buffer, %scale: buffer, %bias: buffer, %input_offset: offset, %input_stride: offset, %output_offset: offset, %output_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %zero = index.constant 0 : index
+    %one = index.constant 1 : index
+    %four = index.constant 4 : index
+    %five = index.constant 5 : index
+    %seven = index.constant 7 : index
+    %threads = index.constant 128 : index
+    %has_panel = index.cmp uge, %times, %four : index
+    %columns = scf.select %has_panel, %four, %one : index
+    %rounds = scf.select %has_panel, %five, %seven : index
+    %lanes = index.div %threads, %columns : index
+    %lane = kernel.workitem.id<x> : index
+    %channel_lane = index.div %lane, %columns : index
+    %column = index.rem %lane, %columns : index
+    %group = kernel.workgroup.id<x> : index
+    %time = index.madd %group, %columns, %column : index
+    %time_live = index.cmp ult, %time, %elements : index
+    %tail = index.sub %lanes, %one : index
+    %rounded = index.add %channels, %tail : index
+    %slots_value = index.div %rounded, %lanes : index
+    %slots = index.assume %slots_value [ge(%slots_value, 1), le(%slots_value, 32)] : index
+    %partial_bytes = index.constant 1024 : offset
+    %partials = buffer.alloca<workgroup> align(16) %partial_bytes : buffer
+    %input_origin = template.apply<@pocket.batch.origin>(%packed, %input_offset, %input_stride) pure : (index, offset, offset) -> (offset)
+    %output_origin = template.apply<@pocket.batch.origin>(%packed, %output_offset, %output_stride) pure : (index, offset, offset) -> (offset)
+    %scale_origin = template.apply<@pocket.batch.origin>(%packed, %scale_offset, %scale_stride) pure : (index, offset, offset) -> (offset)
+    %bias_origin = template.apply<@pocket.batch.origin>(%packed, %bias_offset, %bias_stride) pure : (index, offset, offset) -> (offset)
+    %input_view = buffer.view %input[%input_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %output_view = buffer.view %output[%output_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %scale_view = buffer.view %scale[%scale_origin] : buffer -> view<[%channels]xbf16>
+    %bias_view = buffer.view %bias[%bias_origin] : buffer -> view<[%channels]xbf16>
+    %zero32 = scalar.constant 0.0 : f32
+    %zero64 = scalar.constant 0.0 : f64
+    %empty = vector.constant 0.0 : vector<32xf32>
+    %samples, %partial_sum = scf.for %slot = [%zero to %slots step %one](%values = %empty : vector<32xf32>, %sum = %zero64 : f64) -> (vector<32xf32>, f64) unroll {
+      %channel = index.madd %slot, %lanes, %channel_lane : index
+      %channel_live = index.cmp ult, %channel, %channels : index
+      %live = scalar.andi %channel_live, %time_live : i1
+      %sample = scf.if %live -> (f32) {
+        %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %channels)] : index
+        %bounded_time = index.assume %time [ge(%time, 0), lt(%time, %times)] : index
+        %value = view.load %input_view[%bounded_channel, %bounded_time] : view<[%channels]x[%times]xf32> -> f32
+        scf.yield %value : f32
+      } else {
+        scf.yield %zero32 : f32
+      }
+      %next_values = vector.insert %sample into %values[%slot] : f32, vector<32xf32>
+      %wide = scalar.extf %sample : f32 to f64
+      %next_sum = scalar.addf %sum, %wide : f64
+      scf.yield %next_values, %next_sum : vector<32xf32>, f64
+    }
+    %total = template.apply<@pocket.batch.normalization_reduce>(%partials, %columns, %lanes, %rounds, %lane, %partial_sum) : (buffer, index, index, index, index, f64) -> (f64)
+    %mean_wide = scalar.divf %total, %divisor : f64
+    %mean = scalar.fptrunc %mean_wide : f64 to f32
+    %partial_squared = scf.for %slot = [%zero to %slots step %one](%sum = %zero64 : f64) -> (f64) unroll {
+      %channel = index.madd %slot, %lanes, %channel_lane : index
+      %channel_live = index.cmp ult, %channel, %channels : index
+      %live = scalar.andi %channel_live, %time_live : i1
+      %next = scf.if %live -> (f64) {
+        %sample = vector.extract %samples[%slot] : vector<32xf32> -> f32
+        %centered = scalar.subf %sample, %mean : f32
+        %wide = scalar.extf %centered : f32 to f64
+        %value = scalar.fmaf %wide, %wide, %sum : f64
+        scf.yield %value : f64
+      } else {
+        scf.yield %sum : f64
+      }
+      scf.yield %next : f64
+    }
+    %squared = template.apply<@pocket.batch.normalization_reduce>(%partials, %columns, %lanes, %rounds, %lane, %partial_squared) : (buffer, index, index, index, index, f64) -> (f64)
+    %variance_wide = scalar.divf %squared, %variance_divisor : f64
+    %variance = scalar.fptrunc %variance_wide : f64 to f32
+    %stabilized = scalar.addf %variance, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %stabilized : f32
+    scf.for %slot = [%zero to %slots step %one] unroll {
+      %channel = index.madd %slot, %lanes, %channel_lane : index
+      %channel_live = index.cmp ult, %channel, %channels : index
+      %live = scalar.andi %channel_live, %time_live : i1
+      scf.if %live {
+        %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %channels)] : index
+        %bounded_time = index.assume %time [ge(%time, 0), lt(%time, %times)] : index
+        %sample = vector.extract %samples[%slot] : vector<32xf32> -> f32
+        %result = scf.if %center -> (f32) {
+          %centered = scalar.subf %sample, %mean : f32
+          %normalized = scalar.mulf %centered, %inverse : f32
+          %result = scf.if %scaled -> (f32) {
+            %stored = view.load %scale_view[%bounded_channel] : view<[%channels]xbf16> -> bf16
+            %factor = scalar.extf %stored : bf16 to f32
+            %value = scalar.mulf %normalized, %factor : f32
+            scf.yield %value : f32
+          } else {
+            scf.yield %normalized : f32
+          }
+          scf.yield %result : f32
+        } else {
+          %stored = view.load %scale_view[%bounded_channel] : view<[%channels]xbf16> -> bf16
+          %factor = scalar.extf %stored : bf16 to f32
+          %multiplier = scalar.mulf %factor, %inverse : f32
+          %result = scalar.mulf %sample, %multiplier : f32
+          scf.yield %result : f32
+        }
+        %shifted = scf.if %biased -> (f32) {
+          %stored = view.load %bias_view[%bounded_channel] : view<[%channels]xbf16> -> bf16
+          %shift = scalar.extf %stored : bf16 to f32
+          %value = scalar.addf %result, %shift : f32
+          scf.yield %value : f32
+        } else {
+          scf.yield %result : f32
+        }
+        view.store %shifted, %output_view[%bounded_channel, %bounded_time] : f32, view<[%channels]x[%times]xf32>
+      }
+    }
+  }
+  template.return
+}
 
 template.decl @pocket.batch.normalization_affine(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset)
 
 template.def<@pocket.batch.normalization_affine> device @pocket_batch_normalization_affine(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset) {
-  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
-  scf.if %active {
-    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
-    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
-    %scale_origin = template.apply<@pocket.batch.origin>(%packed, %scale_offset, %scale_stride) pure : (index, offset, offset) -> (offset)
-    %bias_origin = template.apply<@pocket.batch.origin>(%packed, %bias_offset, %bias_stride) pure : (index, offset, offset) -> (offset)
-    template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %x_origin, %y_origin, %scale_origin, %bias_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
-  }
+  %center = scalar.constant true : i1
+  %scaled = scalar.constant true : i1
+  %biased = scalar.constant true : i1
+  template.apply<@pocket.batch.normalization_panel>(%membership, %center, %scaled, %biased, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %x_offset, %x_stride, %y_offset, %y_stride, %scale_offset, %scale_stride, %bias_offset, %bias_stride) : (buffer, i1, i1, i1, index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
   template.return
 }
-
-template.decl @pocket.normalization_variance.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset)
 
 template.decl @pocket.batch.normalization_variance(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset)
 
 template.def<@pocket.batch.normalization_variance> device @pocket_batch_normalization_variance(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset) {
-  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
-  scf.if %active {
-    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
-    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
-    %scale_origin = template.apply<@pocket.batch.origin>(%packed, %scale_offset, %scale_stride) pure : (index, offset, offset) -> (offset)
-    template.apply<@pocket.normalization_variance.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %x_origin, %y_origin, %scale_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, offset, offset, offset)
-  }
+  %center = scalar.constant false : i1
+  %scaled = scalar.constant true : i1
+  %biased = scalar.constant false : i1
+  template.apply<@pocket.batch.normalization_panel>(%membership, %center, %scaled, %biased, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %x_storage, %x_offset, %x_stride, %y_offset, %y_stride, %scale_offset, %scale_stride, %x_offset, %x_stride) : (buffer, i1, i1, i1, index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
   template.return
 }
-
-template.decl @pocket.normalization_plain.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
 
 template.decl @pocket.batch.normalization_plain(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
 
 template.def<@pocket.batch.normalization_plain> device @pocket_batch_normalization_plain(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
-  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
-  scf.if %active {
-    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
-    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
-    template.apply<@pocket.normalization_plain.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %x_origin, %y_origin) : (index, index, index, f64, f64, f32, buffer, buffer, offset, offset)
-  }
+  %center = scalar.constant true : i1
+  %scaled = scalar.constant false : i1
+  %biased = scalar.constant false : i1
+  template.apply<@pocket.batch.normalization_panel>(%membership, %center, %scaled, %biased, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %x_storage, %x_storage, %x_offset, %x_stride, %y_offset, %y_stride, %x_offset, %x_stride, %x_offset, %x_stride) : (buffer, i1, i1, i1, index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
   template.return
 }
 
@@ -68,12 +214,9 @@ target.decl @pocket
 config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
 
 kernel.def target(@pocket) @pocket.batch.normalization_affine_1024x1_e1em05_kernel() {
-  %elements = index.constant 1 : index
-  %threads = config.get @pocket.threads : index
   %one = index.constant 1 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %elements, %tail : index
-  %groups = index.div %rounded, %threads : index
+  %groups = index.constant 1 : index
+  %threads = index.constant 128 : index
   %batch_capacity = config.get @pocket.batch_capacity : index
   kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
 } launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset) {
@@ -88,12 +231,9 @@ kernel.def target(@pocket) @pocket.batch.normalization_affine_1024x1_e1em05_kern
 }
 
 kernel.def target(@pocket) @pocket.batch.normalization_affine_512x1_e1em06_kernel() {
-  %elements = index.constant 1 : index
-  %threads = config.get @pocket.threads : index
   %one = index.constant 1 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %elements, %tail : index
-  %groups = index.div %rounded, %threads : index
+  %groups = index.constant 1 : index
+  %threads = index.constant 128 : index
   %batch_capacity = config.get @pocket.batch_capacity : index
   kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
 } launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset) {
@@ -108,12 +248,9 @@ kernel.def target(@pocket) @pocket.batch.normalization_affine_512x1_e1em06_kerne
 }
 
 kernel.def target(@pocket) @pocket.batch.normalization_affine_512x16_e1em05_kernel() {
-  %elements = index.constant 16 : index
-  %threads = config.get @pocket.threads : index
   %one = index.constant 1 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %elements, %tail : index
-  %groups = index.div %rounded, %threads : index
+  %groups = index.constant 4 : index
+  %threads = index.constant 128 : index
   %batch_capacity = config.get @pocket.batch_capacity : index
   kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
 } launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset) {
@@ -162,12 +299,9 @@ kernel.def target(@pocket) @pocket.batch.softmax_128x265_kernel() {
 }
 
 kernel.def target(@pocket) @pocket.batch.normalization_variance_512x1_e1em05_kernel() {
-  %elements = index.constant 1 : index
-  %threads = config.get @pocket.threads : index
   %one = index.constant 1 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %elements, %tail : index
-  %groups = index.div %rounded, %threads : index
+  %groups = index.constant 1 : index
+  %threads = index.constant 128 : index
   %batch_capacity = config.get @pocket.batch_capacity : index
   kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
 } launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset) {
@@ -182,12 +316,9 @@ kernel.def target(@pocket) @pocket.batch.normalization_variance_512x1_e1em05_ker
 }
 
 kernel.def target(@pocket) @pocket.batch.normalization_plain_512x1_e1em06_kernel() {
-  %elements = index.constant 1 : index
-  %threads = config.get @pocket.threads : index
   %one = index.constant 1 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %elements, %tail : index
-  %groups = index.div %rounded, %threads : index
+  %groups = index.constant 1 : index
+  %threads = index.constant 128 : index
   %batch_capacity = config.get @pocket.batch_capacity : index
   kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
 } launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
