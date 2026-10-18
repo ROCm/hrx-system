@@ -12,7 +12,7 @@ kernel.decl @moonshine.normalization.input() launch(%x: view<4x320x1xf32>, %y: v
 
 kernel.decl @moonshine.normalization.encoder() launch(%x: view<4x320x1xf32>, %y: view<4x320x1xf32>, %scale: view<320xf32>, %state: buffer, %cohort: view<5xi32>, %gate: offset)
 
-kernel.decl @moonshine.normalization.decoder() launch(%x: view<4x320x1xf32>, %y: view<4x320x1xf32>, %scale: view<320xf32>, %cohort: view<5xi32>)
+kernel.decl @moonshine.normalization.decoder() launch(%x: view<16x320x1xf32>, %y: view<16x320x1xf32>, %scale: view<320xf32>, %cohort: view<17xi32>)
 
 // Packed rows select residents 1 and 0. Packed input row 0 is ready, while
 // resident encoder row 0 is ready: their enabled packed rows must differ.
@@ -33,9 +33,9 @@ func.def @initialize_reduction_rows(%cohort: buffer, %gates: buffer) {
 // The arithmetic input has centered value (channel - 159.5)/8 and population
 // variance (320^2 - 1)/(12*64). This closed form is independent of both moment
 // reductions and includes the checkpoint's epsilon and scale convention.
-func.def @normalization_expected(%output: buffer, %first: index, %last: index, %factor: f64) where [ge(%first, 0), le(%first, %last), le(%last, 4)] {
+func.def inline @normalization_expected(%rows: index, %output: buffer, %first: index, %last: index, %factor: f64) where [ge(%first, 0), le(%first, %last), le(%last, %rows)] {
   %origin = index.constant 0 : offset
-  %view = buffer.view %output[%origin] : buffer -> view<4x320x1xf32>
+  %view = buffer.view %output[%origin] : buffer -> view<[%rows]x320x1xf32>
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %channels = index.constant 320 : index
@@ -51,17 +51,18 @@ func.def @normalization_expected(%output: buffer, %first: index, %last: index, %
       %normalized = scalar.mulf %centered, %inverse : f64
       %scaled = scalar.mulf %normalized, %factor : f64
       %result = scalar.fptrunc %scaled : f64 to f32
-      view.store %result, %view[%row, %channel, 0] : f32, view<4x320x1xf32>
+      view.store %result, %view[%row, %channel, 0] : f32, view<[%rows]x320x1xf32>
     }
   }
   func.return
 }
 
 func.def @input_expected(%x: buffer, %y: buffer, %scale: buffer, %gates: buffer, %cohort: buffer, %gate: offset) {
+  %extent = index.constant 4 : index
   %first = index.constant 0 : index
   %last = index.constant 1 : index
   %factor = scalar.constant 1.75 : f64
-  func.call @normalization_expected(%y, %first, %last, %factor) : (buffer, index, index, f64)
+  func.call @normalization_expected(%extent, %y, %first, %last, %factor) : (index, buffer, index, index, f64)
   func.return
 }
 
@@ -83,10 +84,11 @@ check.scenario public @input_row_normalization {
 }
 
 func.def @encoder_expected(%x: buffer, %y: buffer, %scale: buffer, %gates: buffer, %cohort: buffer, %gate: offset) {
+  %extent = index.constant 4 : index
   %first = index.constant 1 : index
   %last = index.constant 2 : index
   %factor = scalar.constant 1.75 : f64
-  func.call @normalization_expected(%y, %first, %last, %factor) : (buffer, index, index, f64)
+  func.call @normalization_expected(%extent, %y, %first, %last, %factor) : (index, buffer, index, index, f64)
   func.return
 }
 
@@ -107,25 +109,51 @@ check.scenario public @encoder_row_normalization {
   check.return
 }
 
+// Cover an isolated row, an inactive tail, and a full decoder batch.
+func.def @initialize_decoder_rows(%trial: index, %cohort: buffer) {
+  %origin = index.constant 0 : offset
+  %members = buffer.view %cohort[%origin] : buffer -> view<17xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %one32 = scalar.constant 1 : i32
+  %fifteen32 = scalar.constant 15 : i32
+  %sixteen32 = scalar.constant 16 : i32
+  %first = index.cmp eq, %trial, %zero : index
+  %second = index.cmp eq, %trial, %one : index
+  %wide = scf.select %second, %fifteen32, %sixteen32 : i32
+  %count = scf.select %first, %one32, %wide : i32
+  view.store %count, %members[0] : i32, view<17xi32>
+  func.return
+}
+
+func.def inline @decoder_count(%cohort: buffer) -> (%rows: index) where [range(%rows, 0, 16)] {
+  %origin = index.constant 0 : offset
+  %members = buffer.view %cohort[%origin] : buffer -> view<17xi32>
+  %count = view.load %members[0] : view<17xi32> -> i32
+  %bounded = scalar.assume %count [range(%count, 0, 16)] : i32
+  %rows = index.cast %bounded : i32 to index
+  func.return %rows : index
+}
+
 func.def @decoder_expected(%x: buffer, %y: buffer, %scale: buffer, %cohort: buffer) {
+  %extent = index.constant 16 : index
   %first = index.constant 0 : index
-  %last = index.constant 2 : index
+  %last = func.call @decoder_count(%cohort) : (buffer) -> (index)
   %factor = scalar.constant 0.75 : f64
-  func.call @normalization_expected(%y, %first, %last, %factor) : (buffer, index, index, f64)
+  func.call @normalization_expected(%extent, %y, %first, %last, %factor) : (index, buffer, index, index, f64)
   func.return
 }
 
 check.scenario public @decoder_row_normalization {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  check.trial[1](%trial: index, %entropy: check.entropy) {
-    %cohort = check.generate.fill value(0) : view<5xi32>
-    %gates = check.generate.fill value(0) : tensor<5xi32>
-    check.generate<@initialize_reduction_rows>(%cohort, %gates) : (view<5xi32>, tensor<5xi32>) -> ()
-    %input = check.generate.iota offset(0.25) step(0.125) : view<4x320x1xf32>
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    check.generate<@initialize_decoder_rows>(%trial, %cohort) : (index, view<17xi32>) -> ()
+    %input = check.generate.iota offset(0.25) step(0.125) : view<16x320x1xf32>
     %scale = check.generate.fill value(0.75) : view<320xf32>
-    %output = check.generate.fill value(-123.0) : view<4x320x1xf32>
-    check.compare<@moonshine.normalization.decoder, @decoder_expected>(%input, %output, %scale, %cohort) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, view<5xi32>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(1.9999999999999999e-06) rtol(1.9999999999999999e-06) nan(different) : view<4x320x1xf32>
+    %output = check.generate.fill value(-123.0) : view<16x320x1xf32>
+    check.compare<@moonshine.normalization.decoder, @decoder_expected>(%input, %output, %scale, %cohort) : (view<16x320x1xf32>, view<16x320x1xf32>, view<320xf32>, view<17xi32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(1.9999999999999999e-06) rtol(1.9999999999999999e-06) nan(different) : view<16x320x1xf32>
     }
   }
   check.return
@@ -134,23 +162,23 @@ check.scenario public @decoder_row_normalization {
 // The active rows have distinct valid lengths, including a single position and
 // tails across workgroup boundaries. A large common score offset exercises max
 // subtraction. Three repeating scores give a closed-form softmax denominator.
-func.def @softmax_data(%width: index, %probabilities: i1, %storage: buffer) where [ge(%width, 1)] {
+func.def @softmax_data(%width: index, %rows: index, %probabilities: i1, %storage: buffer) where [ge(%width, 1), range(%rows, 0, 16)] {
   %origin = index.constant 0 : offset
-  %view = buffer.view %storage[%origin] : buffer -> view<4x8x[%width]xf32>
+  %view = buffer.view %storage[%origin] : buffer -> view<16x8x[%width]xf32>
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
   %three = index.constant 3 : index
   %eight = index.constant 8 : index
   %seven = index.constant 7 : index
-  %stride = index.constant 193 : index
+  %stride = index.constant 29 : index
   %offset = scalar.constant 1000.0 : f32
   %masked = scalar.constant -1e+30 : f32
   %f0 = scalar.constant 0.0 : f64
   %f1 = scalar.constant 1.0 : f64
   %e1 = scalar.constant 2.7182818284590451 : f64
   %e2 = scalar.constant 7.3890560989306504 : f64
-  scf.for %row = [%zero to %two step %one] {
+  scf.for %row = [%zero to %rows step %one] {
     scf.for %head = [%zero to %eight step %one] {
       %base = index.madd %head, %seven, %one : index
       %short_length = index.madd %row, %stride, %base : index
@@ -185,76 +213,74 @@ func.def @softmax_data(%width: index, %probabilities: i1, %storage: buffer) wher
         %expected = scf.select %live, %probability, %f0 : f64
         %rounded = scalar.fptrunc %expected : f64 to f32
         %result = scf.select %probabilities, %rounded, %stored : f32
-        view.store %result, %view[%row, %head, %position] : f32, view<4x8x[%width]xf32>
+        view.store %result, %view[%row, %head, %position] : f32, view<16x8x[%width]xf32>
       }
     }
   }
   func.return
 }
 
-kernel.decl @moonshine.decoder_attention.self_softmax() launch(%x: view<4x8x512xf32>, %y: view<4x8x512xf32>, %cohort: view<5xi32>)
+kernel.decl @moonshine.decoder_attention.self_softmax() launch(%x: view<16x8x512xf32>, %y: view<16x8x512xf32>, %cohort: view<17xi32>)
 
-func.def @self_data(%input: buffer, %cohort: buffer) {
+func.def @self_data(%trial: index, %input: buffer, %cohort: buffer) {
   %width = index.constant 512 : index
+  %rows = index.constant 16 : index
   %probabilities = scalar.constant false : i1
-  func.call @softmax_data(%width, %probabilities, %input) : (index, i1, buffer)
-  %origin = index.constant 0 : offset
-  %members = buffer.view %cohort[%origin] : buffer -> view<5xi32>
-  %count = scalar.constant 2 : i32
-  view.store %count, %members[0] : i32, view<5xi32>
+  func.call @softmax_data(%width, %rows, %probabilities, %input) : (index, index, i1, buffer)
+  func.call @initialize_decoder_rows(%trial, %cohort) : (index, buffer)
   func.return
 }
 
 func.def @self_expected(%input: buffer, %output: buffer, %cohort: buffer) {
   %width = index.constant 512 : index
+  %rows = func.call @decoder_count(%cohort) : (buffer) -> (index)
   %probabilities = scalar.constant true : i1
-  func.call @softmax_data(%width, %probabilities, %output) : (index, i1, buffer)
+  func.call @softmax_data(%width, %rows, %probabilities, %output) : (index, index, i1, buffer)
   func.return
 }
 
 check.scenario public @self_row_softmax {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  check.trial[1](%trial: index, %entropy: check.entropy) {
-    %cohort = check.generate.fill value(0) : view<5xi32>
-    %input = check.generate.fill value(0.0) : view<4x8x512xf32>
-    %output = check.generate.fill value(-123.0) : view<4x8x512xf32>
-    check.generate<@self_data>(%input, %cohort) : (view<4x8x512xf32>, view<5xi32>) -> ()
-    check.compare<@moonshine.decoder_attention.self_softmax, @self_expected>(%input, %output, %cohort) : (view<4x8x512xf32>, view<4x8x512xf32>, view<5xi32>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-08) rtol(1.9999999999999999e-06) nan(different) : view<4x8x512xf32>
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    %input = check.generate.fill value(0.0) : view<16x8x512xf32>
+    %output = check.generate.fill value(-123.0) : view<16x8x512xf32>
+    check.generate<@self_data>(%trial, %input, %cohort) : (index, view<16x8x512xf32>, view<17xi32>) -> ()
+    check.compare<@moonshine.decoder_attention.self_softmax, @self_expected>(%input, %output, %cohort) : (view<16x8x512xf32>, view<16x8x512xf32>, view<17xi32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-08) rtol(1.9999999999999999e-06) nan(different) : view<16x8x512xf32>
     }
   }
   check.return
 }
 
-kernel.decl @moonshine.decoder_attention.cross_softmax() launch(%x: view<4x8x2048xf32>, %y: view<4x8x2048xf32>, %cohort: view<5xi32>)
+kernel.decl @moonshine.decoder_attention.cross_softmax() launch(%x: view<16x8x2048xf32>, %y: view<16x8x2048xf32>, %cohort: view<17xi32>)
 
-func.def @cross_data(%input: buffer, %cohort: buffer) {
+func.def @cross_data(%trial: index, %input: buffer, %cohort: buffer) {
   %width = index.constant 2048 : index
+  %rows = index.constant 16 : index
   %probabilities = scalar.constant false : i1
-  func.call @softmax_data(%width, %probabilities, %input) : (index, i1, buffer)
-  %origin = index.constant 0 : offset
-  %members = buffer.view %cohort[%origin] : buffer -> view<5xi32>
-  %count = scalar.constant 2 : i32
-  view.store %count, %members[0] : i32, view<5xi32>
+  func.call @softmax_data(%width, %rows, %probabilities, %input) : (index, index, i1, buffer)
+  func.call @initialize_decoder_rows(%trial, %cohort) : (index, buffer)
   func.return
 }
 
 func.def @cross_expected(%input: buffer, %output: buffer, %cohort: buffer) {
   %width = index.constant 2048 : index
+  %rows = func.call @decoder_count(%cohort) : (buffer) -> (index)
   %probabilities = scalar.constant true : i1
-  func.call @softmax_data(%width, %probabilities, %output) : (index, i1, buffer)
+  func.call @softmax_data(%width, %rows, %probabilities, %output) : (index, index, i1, buffer)
   func.return
 }
 
 check.scenario public @cross_row_softmax {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  check.trial[1](%trial: index, %entropy: check.entropy) {
-    %cohort = check.generate.fill value(0) : view<5xi32>
-    %input = check.generate.fill value(0.0) : view<4x8x2048xf32>
-    %output = check.generate.fill value(-123.0) : view<4x8x2048xf32>
-    check.generate<@cross_data>(%input, %cohort) : (view<4x8x2048xf32>, view<5xi32>) -> ()
-    check.compare<@moonshine.decoder_attention.cross_softmax, @cross_expected>(%input, %output, %cohort) : (view<4x8x2048xf32>, view<4x8x2048xf32>, view<5xi32>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-08) rtol(1.9999999999999999e-06) nan(different) : view<4x8x2048xf32>
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    %input = check.generate.fill value(0.0) : view<16x8x2048xf32>
+    %output = check.generate.fill value(-123.0) : view<16x8x2048xf32>
+    check.generate<@cross_data>(%trial, %input, %cohort) : (index, view<16x8x2048xf32>, view<17xi32>) -> ()
+    check.compare<@moonshine.decoder_attention.cross_softmax, @cross_expected>(%input, %output, %cohort) : (view<16x8x2048xf32>, view<16x8x2048xf32>, view<17xi32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-08) rtol(1.9999999999999999e-06) nan(different) : view<16x8x2048xf32>
     }
   }
   check.return

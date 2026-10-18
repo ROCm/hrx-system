@@ -419,16 +419,16 @@ kernel.def target(@moonshine) @moonshine.projection.encoder_down() {
   kernel.return
 }
 
-// Sixteen outputs share a 128-channel input panel across all four packed
+// Sixteen outputs share a 128-channel input panel across all sixteen packed
 // rows. Eight lanes cooperate on each output; each loaded weight feeds every
-// live row. The fifth shared-memory column pads the stride to avoid bank
+// live row. The seventeenth shared-memory column pads the stride to avoid bank
 // conflicts. Panel storage is reused for the final eight-lane partial sums.
-template.decl @moonshine.projection.rows(%inputs: index, %outputs: index, %x: view<4x[%inputs]x1xf32>, %w: view<[%outputs]x[%inputs]xf32>, %count: index) -> (index, vector<4xf32>)
+template.decl @moonshine.projection.rows(%inputs: index, %outputs: index, %x: view<16x[%inputs]x1xf32>, %w: view<[%outputs]x[%inputs]xf32>, %count: index) -> (index, vector<16xf32>)
 
-template.def<@moonshine.projection.rows> device @moonshine_projection_rows(%inputs: index, %outputs: index, %x: view<4x[%inputs]x1xf32>, %w: view<[%outputs]x[%inputs]xf32>, %count: index) -> (index, vector<4xf32>) {
+template.def<@moonshine.projection.rows> device @moonshine_projection_rows(%inputs: index, %outputs: index, %x: view<16x[%inputs]x1xf32>, %w: view<[%outputs]x[%inputs]xf32>, %count: index) -> (index, vector<16xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %rows = index.constant 4 : index
+  %rows = index.constant 16 : index
   %eight = index.constant 8 : index
   %sixteen = index.constant 16 : index
   %panel = index.constant 128 : index
@@ -439,12 +439,12 @@ template.def<@moonshine.projection.rows> device @moonshine_projection_rows(%inpu
   %output_lane = index.div %lane, %eight : index
   %output_value = index.madd %group, %sixteen, %output_lane : index
   %output = index.assume %output_value [ge(%output_value, 0), lt(%output_value, %outputs)] : index
-  %stage_bytes = index.constant 2560 : offset
+  %stage_bytes = index.constant 8704 : offset
   %storage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
-  %stage = buffer.view %storage[%origin] : buffer -> view<128x5xf32>
+  %stage = buffer.view %storage[%origin] : buffer -> view<128x17xf32>
   %zero32 = scalar.constant 0.0 : f32
-  %empty = vector.constant 0.0 : vector<4xf32>
-  %total = scf.for %begin = [%zero to %inputs step %panel](%accumulators = %empty : vector<4xf32>) -> (vector<4xf32>) {
+  %empty = vector.constant 0.0 : vector<16xf32>
+  %total = scf.for %begin = [%zero to %inputs step %panel](%accumulators = %empty : vector<16xf32>) -> (vector<16xf32>) {
     %load_channel = index.add %begin, %lane : index
     %channel_live = index.cmp ult, %load_channel, %inputs : index
     scf.for %row = [%zero to %rows step %one] unroll {
@@ -452,15 +452,15 @@ template.def<@moonshine.projection.rows> device @moonshine_projection_rows(%inpu
       %load_live = scalar.andi %row_live, %channel_live : i1
       %loaded = scf.if %load_live -> (f32) {
         %channel = index.assume %load_channel [ge(%load_channel, 0), lt(%load_channel, %inputs)] : index
-        %value = view.load %x[%row, %channel, 0] : view<4x[%inputs]x1xf32> -> f32
+        %value = view.load %x[%row, %channel, 0] : view<16x[%inputs]x1xf32> -> f32
         scf.yield %value : f32
       } else {
         scf.yield %zero32 : f32
       }
-      view.store %loaded, %stage[%lane, %row] : f32, view<128x5xf32>
+      view.store %loaded, %stage[%lane, %row] : f32, view<128x17xf32>
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    %next = scf.for %round = [%zero to %sixteen step %one](%sums = %accumulators : vector<4xf32>) -> (vector<4xf32>) {
+    %next = scf.for %round = [%zero to %sixteen step %one](%sums = %accumulators : vector<16xf32>) -> (vector<16xf32>) {
       %local_channel = index.madd %round, %eight, %channel_lane : index
       %channel = index.add %begin, %local_channel : index
       %within = index.cmp ult, %channel, %inputs : index
@@ -471,57 +471,51 @@ template.def<@moonshine.projection.rows> device @moonshine_projection_rows(%inpu
       } else {
         scf.yield %zero32 : f32
       }
-      %updated = scf.for %row = [%zero to %rows step %one](%values = %sums : vector<4xf32>) -> (vector<4xf32>) unroll {
-        %live = index.cmp ult, %row, %count : index
-        %sum = vector.extract %values[%row] : vector<4xf32> -> f32
-        %value = scf.if %live -> (f32) {
-          %input = view.load %stage[%local_channel, %row] : view<128x5xf32> -> f32
-          %product = scalar.fmaf %input, %weight, %sum : f32
-          scf.yield %product : f32
-        } else {
-          scf.yield %sum : f32
-        }
-        %next_values = vector.insert %value into %values[%row] : f32, vector<4xf32>
-        scf.yield %next_values : vector<4xf32>
+      %updated = scf.for %row = [%zero to %rows step %one](%values = %sums : vector<16xf32>) -> (vector<16xf32>) unroll {
+        %sum = vector.extract %values[%row] : vector<16xf32> -> f32
+        %input = view.load %stage[%local_channel, %row] : view<128x17xf32> -> f32
+        %value = scalar.fmaf %input, %weight, %sum : f32
+        %next_values = vector.insert %value into %values[%row] : f32, vector<16xf32>
+        scf.yield %next_values : vector<16xf32>
       }
-      scf.yield %updated : vector<4xf32>
+      scf.yield %updated : vector<16xf32>
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    scf.yield %next : vector<4xf32>
+    scf.yield %next : vector<16xf32>
   }
   scf.for %row = [%zero to %rows step %one] unroll {
-    %partial = vector.extract %total[%row] : vector<4xf32> -> f32
-    view.store %partial, %stage[%lane, %row] : f32, view<128x5xf32>
+    %partial = vector.extract %total[%row] : vector<16xf32> -> f32
+    view.store %partial, %stage[%lane, %row] : f32, view<128x17xf32>
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %first = index.cmp eq, %channel_lane, %zero : index
-  %result = scf.if %first -> (vector<4xf32>) {
+  %result = scf.if %first -> (vector<16xf32>) {
     %partial_base = index.assume %lane [range(%lane, 0, 120)] : index
-    %reduced = scf.for %row = [%zero to %rows step %one](%values = %empty : vector<4xf32>) -> (vector<4xf32>) unroll {
+    %reduced = scf.for %row = [%zero to %rows step %one](%values = %empty : vector<16xf32>) -> (vector<16xf32>) unroll {
       %offset0 = index.constant 0 : index
       %partial_lane0 = index.add %partial_base, %offset0 : index
-      %part0 = view.load %stage[%partial_lane0, %row] : view<128x5xf32> -> f32
+      %part0 = view.load %stage[%partial_lane0, %row] : view<128x17xf32> -> f32
       %offset1 = index.constant 1 : index
       %partial_lane1 = index.add %partial_base, %offset1 : index
-      %part1 = view.load %stage[%partial_lane1, %row] : view<128x5xf32> -> f32
+      %part1 = view.load %stage[%partial_lane1, %row] : view<128x17xf32> -> f32
       %offset2 = index.constant 2 : index
       %partial_lane2 = index.add %partial_base, %offset2 : index
-      %part2 = view.load %stage[%partial_lane2, %row] : view<128x5xf32> -> f32
+      %part2 = view.load %stage[%partial_lane2, %row] : view<128x17xf32> -> f32
       %offset3 = index.constant 3 : index
       %partial_lane3 = index.add %partial_base, %offset3 : index
-      %part3 = view.load %stage[%partial_lane3, %row] : view<128x5xf32> -> f32
+      %part3 = view.load %stage[%partial_lane3, %row] : view<128x17xf32> -> f32
       %offset4 = index.constant 4 : index
       %partial_lane4 = index.add %partial_base, %offset4 : index
-      %part4 = view.load %stage[%partial_lane4, %row] : view<128x5xf32> -> f32
+      %part4 = view.load %stage[%partial_lane4, %row] : view<128x17xf32> -> f32
       %offset5 = index.constant 5 : index
       %partial_lane5 = index.add %partial_base, %offset5 : index
-      %part5 = view.load %stage[%partial_lane5, %row] : view<128x5xf32> -> f32
+      %part5 = view.load %stage[%partial_lane5, %row] : view<128x17xf32> -> f32
       %offset6 = index.constant 6 : index
       %partial_lane6 = index.add %partial_base, %offset6 : index
-      %part6 = view.load %stage[%partial_lane6, %row] : view<128x5xf32> -> f32
+      %part6 = view.load %stage[%partial_lane6, %row] : view<128x17xf32> -> f32
       %offset7 = index.constant 7 : index
       %partial_lane7 = index.add %partial_base, %offset7 : index
-      %part7 = view.load %stage[%partial_lane7, %row] : view<128x5xf32> -> f32
+      %part7 = view.load %stage[%partial_lane7, %row] : view<128x17xf32> -> f32
       %pair0 = scalar.addf %part0, %part1 : f32
       %pair1 = scalar.addf %part2, %part3 : f32
       %pair2 = scalar.addf %part4, %part5 : f32
@@ -529,14 +523,14 @@ template.def<@moonshine.projection.rows> device @moonshine_projection_rows(%inpu
       %half0 = scalar.addf %pair0, %pair1 : f32
       %half1 = scalar.addf %pair2, %pair3 : f32
       %sum = scalar.addf %half0, %half1 : f32
-      %next_values = vector.insert %sum into %values[%row] : f32, vector<4xf32>
-      scf.yield %next_values : vector<4xf32>
+      %next_values = vector.insert %sum into %values[%row] : f32, vector<16xf32>
+      scf.yield %next_values : vector<16xf32>
     }
-    scf.yield %reduced : vector<4xf32>
+    scf.yield %reduced : vector<16xf32>
   } else {
-    scf.yield %empty : vector<4xf32>
+    scf.yield %empty : vector<16xf32>
   }
-  template.return %output, %result : index, vector<4xf32>
+  template.return %output, %result : index, vector<16xf32>
 }
 
 kernel.def target(@moonshine) @moonshine.projection.decoder() {
@@ -544,28 +538,28 @@ kernel.def target(@moonshine) @moonshine.projection.decoder() {
   %one = index.constant 1 : index
   %threads = index.constant 128 : index
   kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%x: view<4x320x1xf32>, %w: view<320x320xf32>, %y: view<4x320x1xf32>, %cohort: view<5xi32>) {
+} launch(%x: view<16x320x1xf32>, %w: view<320x320xf32>, %y: view<16x320x1xf32>, %cohort: view<17xi32>) {
   %inputs = index.constant 320 : index
   %outputs = index.constant 320 : index
-  %count32 = view.load %cohort[0] : view<5xi32> -> i32
-  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count32 = view.load %cohort[0] : view<17xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 16)] : i32
   %count = index.cast %bounded_count : i32 to index
-  %input = view.refine %x : view<4x320x1xf32> -> view<4x[%inputs]x1xf32>
+  %input = view.refine %x : view<16x320x1xf32> -> view<16x[%inputs]x1xf32>
   %weights = view.refine %w : view<320x320xf32> -> view<[%outputs]x[%inputs]xf32>
-  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<4x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<4xf32>)
+  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<16x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<16xf32>)
   %lane = kernel.workitem.id<x> : index
   %eight = index.constant 8 : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %rows = index.constant 4 : index
+  %rows = index.constant 16 : index
   %channel_lane = index.rem %lane, %eight : index
   %writer = index.cmp eq, %channel_lane, %zero : index
   scf.if %writer {
     scf.for %row = [%zero to %rows step %one] unroll {
       %live = index.cmp ult, %row, %count : index
       scf.if %live {
-        %value = vector.extract %values[%row] : vector<4xf32> -> f32
-        view.store %value, %y[%row, %output, 0] : f32, view<4x320x1xf32>
+        %value = vector.extract %values[%row] : vector<16xf32> -> f32
+        view.store %value, %y[%row, %output, 0] : f32, view<16x320x1xf32>
       }
     }
   }
@@ -577,20 +571,20 @@ kernel.def target(@moonshine) @moonshine.projection.decoder_up() {
   %one = index.constant 1 : index
   %threads = index.constant 128 : index
   kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%x: view<4x320x1xf32>, %w: view<2560x320xf32>, %y: view<4x2560x1xf32>, %b: view<2560xf32>, %cohort: view<5xi32>) {
+} launch(%x: view<16x320x1xf32>, %w: view<2560x320xf32>, %y: view<16x2560x1xf32>, %b: view<2560xf32>, %cohort: view<17xi32>) {
   %inputs = index.constant 320 : index
   %outputs = index.constant 2560 : index
-  %count32 = view.load %cohort[0] : view<5xi32> -> i32
-  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count32 = view.load %cohort[0] : view<17xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 16)] : i32
   %count = index.cast %bounded_count : i32 to index
-  %input = view.refine %x : view<4x320x1xf32> -> view<4x[%inputs]x1xf32>
+  %input = view.refine %x : view<16x320x1xf32> -> view<16x[%inputs]x1xf32>
   %weights = view.refine %w : view<2560x320xf32> -> view<[%outputs]x[%inputs]xf32>
-  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<4x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<4xf32>)
+  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<16x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<16xf32>)
   %lane = kernel.workitem.id<x> : index
   %eight = index.constant 8 : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %rows = index.constant 4 : index
+  %rows = index.constant 16 : index
   %channel_lane = index.rem %lane, %eight : index
   %writer = index.cmp eq, %channel_lane, %zero : index
   scf.if %writer {
@@ -598,9 +592,9 @@ kernel.def target(@moonshine) @moonshine.projection.decoder_up() {
     scf.for %row = [%zero to %rows step %one] unroll {
       %live = index.cmp ult, %row, %count : index
       scf.if %live {
-        %value = vector.extract %values[%row] : vector<4xf32> -> f32
+        %value = vector.extract %values[%row] : vector<16xf32> -> f32
         %result = scalar.addf %value, %bias : f32
-        view.store %result, %y[%row, %output, 0] : f32, view<4x2560x1xf32>
+        view.store %result, %y[%row, %output, 0] : f32, view<16x2560x1xf32>
       }
     }
   }
@@ -612,20 +606,20 @@ kernel.def target(@moonshine) @moonshine.projection.decoder_down() {
   %one = index.constant 1 : index
   %threads = index.constant 128 : index
   kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%x: view<4x1280x1xf32>, %w: view<320x1280xf32>, %y: view<4x320x1xf32>, %b: view<320xf32>, %cohort: view<5xi32>) {
+} launch(%x: view<16x1280x1xf32>, %w: view<320x1280xf32>, %y: view<16x320x1xf32>, %b: view<320xf32>, %cohort: view<17xi32>) {
   %inputs = index.constant 1280 : index
   %outputs = index.constant 320 : index
-  %count32 = view.load %cohort[0] : view<5xi32> -> i32
-  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count32 = view.load %cohort[0] : view<17xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 16)] : i32
   %count = index.cast %bounded_count : i32 to index
-  %input = view.refine %x : view<4x1280x1xf32> -> view<4x[%inputs]x1xf32>
+  %input = view.refine %x : view<16x1280x1xf32> -> view<16x[%inputs]x1xf32>
   %weights = view.refine %w : view<320x1280xf32> -> view<[%outputs]x[%inputs]xf32>
-  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<4x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<4xf32>)
+  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<16x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<16xf32>)
   %lane = kernel.workitem.id<x> : index
   %eight = index.constant 8 : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %rows = index.constant 4 : index
+  %rows = index.constant 16 : index
   %channel_lane = index.rem %lane, %eight : index
   %writer = index.cmp eq, %channel_lane, %zero : index
   scf.if %writer {
@@ -633,9 +627,9 @@ kernel.def target(@moonshine) @moonshine.projection.decoder_down() {
     scf.for %row = [%zero to %rows step %one] unroll {
       %live = index.cmp ult, %row, %count : index
       scf.if %live {
-        %value = vector.extract %values[%row] : vector<4xf32> -> f32
+        %value = vector.extract %values[%row] : vector<16xf32> -> f32
         %result = scalar.addf %value, %bias : f32
-        view.store %result, %y[%row, %output, 0] : f32, view<4x320x1xf32>
+        view.store %result, %y[%row, %output, 0] : f32, view<16x320x1xf32>
       }
     }
   }
@@ -647,28 +641,28 @@ kernel.def target(@moonshine) @moonshine.projection.logits() {
   %one = index.constant 1 : index
   %threads = index.constant 128 : index
   kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%x: view<4x320x1xf32>, %w: view<32768x320xf32>, %y: view<4x32768x1xf32>, %cohort: view<5xi32>) {
+} launch(%x: view<16x320x1xf32>, %w: view<32768x320xf32>, %y: view<16x32768x1xf32>, %cohort: view<17xi32>) {
   %inputs = index.constant 320 : index
   %outputs = index.constant 32768 : index
-  %count32 = view.load %cohort[0] : view<5xi32> -> i32
-  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count32 = view.load %cohort[0] : view<17xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 16)] : i32
   %count = index.cast %bounded_count : i32 to index
-  %input = view.refine %x : view<4x320x1xf32> -> view<4x[%inputs]x1xf32>
+  %input = view.refine %x : view<16x320x1xf32> -> view<16x[%inputs]x1xf32>
   %weights = view.refine %w : view<32768x320xf32> -> view<[%outputs]x[%inputs]xf32>
-  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<4x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<4xf32>)
+  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<16x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<16xf32>)
   %lane = kernel.workitem.id<x> : index
   %eight = index.constant 8 : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %rows = index.constant 4 : index
+  %rows = index.constant 16 : index
   %channel_lane = index.rem %lane, %eight : index
   %writer = index.cmp eq, %channel_lane, %zero : index
   scf.if %writer {
     scf.for %row = [%zero to %rows step %one] unroll {
       %live = index.cmp ult, %row, %count : index
       scf.if %live {
-        %value = vector.extract %values[%row] : vector<4xf32> -> f32
-        view.store %value, %y[%row, %output, 0] : f32, view<4x32768x1xf32>
+        %value = vector.extract %values[%row] : vector<16xf32> -> f32
+        view.store %value, %y[%row, %output, 0] : f32, view<16x32768x1xf32>
       }
     }
   }

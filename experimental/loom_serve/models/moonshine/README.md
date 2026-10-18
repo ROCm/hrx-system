@@ -8,9 +8,12 @@ the final text for dictation clients such as Open WebUI.
 
 Four requests can be resident at once. Ready encoder quanta batch together, as do
 ready decoder tokens, even when requests have different input lengths, encoder
-positions, or decoder positions. Each row owns its convolution history, encoder
-rings, attention memory, and decoder cache. A short recording can finish while
-a longer recording continues. Cancellation and output credit remain independent.
+positions, or decoder positions. A decoder batch can verify sixteen token
+positions across those requests, using each request's previous hypothesis as a
+proposal for the next revision. Each resident owns its convolution history,
+encoder rings, attention memory, and decoder cache. A short recording can finish
+while a longer recording continues. Cancellation and output credit remain
+independent.
 
 Native consumers select transcript output and receive ordered revision events.
 Each event describes a replacement hypothesis at the model's input clock; the
@@ -104,6 +107,7 @@ preparation rather than silently leaving the source geometry unchanged.
 | Input | 16 kHz, mono F32 inside the service |
 | Numerical input quantum | 320 samples, or 20 ms |
 | Resident requests / maximum compatible cohort | 4 / 4 |
+| Decoder activation capacity | 16 token positions, up to 4 per request |
 | Input bound | 655,360 samples, or 40.96 seconds |
 | Encoder positions | 2,048 |
 | Decoder hypothesis capacity | 512 tokens, including EOS |
@@ -125,12 +129,28 @@ each, totaling 240 ms of model lookahead. EOF drains those layers while preservi
 the real input clock, including a final partial quantum.
 
 Published encoder memory and cross-attention projections are immutable. Each
-hypothesis starts its own greedy decoder prefix over the available memory.
-Decoder rows carry separate positions and valid lengths; batch membership never
-substitutes a neighboring row's cursor. Work packets map packed activation rows
-to resident histories. The accepted mapping stays alive through actual device
-retirement, including after cancellation, so completion uses the original
-ordinal even when another request has left.
+new hypothesis recomputes its decoder prefix against the available memory,
+including all decoder layers and their KV. The previous hypothesis supplies
+token proposals; its higher-layer decoder KV cannot be reused after the encoder
+memory changes.
+
+Each request offers up to four consecutive token positions. The decoder computes
+their causal predictions together, accepts matching proposals and the first
+replacement token, and advances that request's accepted cache frontier. After a
+correction, the remaining suffix gets another verification opportunity against
+the corrected prefix. Two consecutive mismatches abandon the suffix; a verified
+match restores the retry allowance. Every accepted token is therefore a fresh
+greedy prediction. Rejected KV stays allocated beyond the accepted frontier and
+is overwritten before continuation can read it. No history copy or allocation
+is needed when a proposal fails.
+
+Decoder activation rows carry separate positions and valid lengths. Several
+rows may refer to one resident history without giving another request that
+history's cursor. Work packets map packed activation rows to resident histories;
+the CPU completion plan also retains each original request's first activation
+and activation count. Both mappings stay alive through actual device retirement,
+including after cancellation, so completion uses the original ordinal even when
+another request has left. Reset and encoder phases retain their four-row shape.
 
 Layer normalization assigns one workgroup to each packed row; decoder softmax
 assigns one to each attention head. Lanes retain their input values through the
@@ -139,11 +159,13 @@ through device memory. Encoder readiness still follows resident identities,
 while activations and decoder work follow the accepted packed mapping.
 
 Decoder projections share one input panel across sixteen output channels and
-reuse each weight across all active packed rows. Eight lanes cooperate on each
-output, retaining separate F32 accumulators and the same balanced reduction
-order for every request. This covers attention projections, the feed-forward
-layers, and the vocabulary head without copying resident histories. Input and
-encoder projections retain their individual readiness gates.
+reuse each weight across sixteen packed token positions. Eight lanes cooperate
+on each output, retaining separate F32 accumulators and the same balanced
+reduction order for every position. Inactive panel rows are zero-filled, so the
+inner arithmetic needs no per-row branch; only live outputs are stored. This
+covers attention projections, the feed-forward layers, and the vocabulary head
+without copying resident histories. Input and encoder projections retain their
+individual readiness gates.
 
 `control.loom` runs request policy and tokenizer decoding on the shared CPU
 executor. `encoder.loom`, `decoder.loom`, and `reset.loom` compose the numerical
@@ -157,8 +179,11 @@ does not reserve compute for voice or establish a latency guarantee.
 Checkpoint-free tests cover frame and layer normalization, masked decoder
 softmax, every decoder projection shape, and independent lookahead/EOF with
 reordered resident identities. Closed-form numerical references check one
-through four projection rows, bias, inactive outputs, and unready encoder rows.
-Projection tests also instrument shared-memory access and synchronization:
+through sixteen projection rows, bias, inactive outputs, and unready encoder
+rows. Decoder-state tests cover repeated resident identities at different causal
+positions, the last cache position, embedding selection, and greedy tie breaking.
+Projection, reduction, and decoder-state tests also instrument memory access
+and synchronization:
 
 ```sh
 iree-bazel-test --config=asan //experimental/loom_serve/models/moonshine/...

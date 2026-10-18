@@ -66,7 +66,10 @@ func.def @event(%text: buffer, %length64: i64, %revision: i32, %end: i32, %final
 
 // CPU state is independent of device residency: phase, published features,
 // encoder EOF, decoder position, revision, last hypothesis sample, and consumed
-// sample end occupy words 0..6. Words 7..15 pad the 512-token buffer to 64 bytes.
+// sample end occupy words 0..6. Word 7 is the reusable draft length; the
+// next word records a suffix retry after a mismatch. Matching predictions
+// restore that allowance; a second mismatch abandons the remaining draft.
+// The remaining words pad the 512-token buffer to 64 bytes.
 // Phases 0/1/2 select reset/encode/decode; the phase is also the compatibility tag.
 func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
   %language_length = buffer.length %language
@@ -121,7 +124,6 @@ func.def public @prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %pos
   %zero = scalar.constant 0 : i32
   %one = scalar.constant 1 : i32
   %c0 = scalar.constant 0 : i64
-  %c1 = scalar.constant 1 : i64
   %c4 = scalar.constant 4 : i64
   %quantum = scalar.constant 320 : i64
   %length = buffer.length %pcm
@@ -136,7 +138,23 @@ func.def public @prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %pos
   %input_ready = scalar.ori %full, %final_input : i1
   %not_encode = scalar.cmpi ne, %phase, %one : i32
   %ready = scalar.ori %not_encode, %input_ready : i1
-  %units = scf.select %ready, %c1, %c0 : i64
+  %two = scalar.constant 2 : i32
+  %decoding = scalar.cmpi eq, %phase, %two : i32
+  %draft_length = view.load %fields[7] : view<16xi32> -> i32
+  %has_draft = scalar.cmpi uge, %draft_length, %decode_position : i32
+  %remaining = scalar.subi %draft_length, %decode_position : i32
+  %with_bonus = scalar.addi %remaining, %one : i32
+  %available = scf.select %has_draft, %with_bonus, %one : i32
+  %four = scalar.constant 4 : i32
+  %fits = scalar.cmpi ult, %available, %four : i32
+  %chunk = scf.select %fits, %available, %four : i32
+  %limit = scalar.constant 512 : i32
+  %room = scalar.subi %limit, %decode_position : i32
+  %fits_room = scalar.cmpi ult, %chunk, %room : i32
+  %bounded_chunk = scf.select %fits_room, %chunk, %room : i32
+  %rows32 = scf.select %decoding, %bounded_chunk, %one : i32
+  %rows64 = scalar.extui %rows32 : i32 to i64
+  %units = scf.select %ready, %rows64, %c0 : i64
   %any = scalar.cmpi ne, %count64, %c0 : i64
   %valid32 = scalar.extui %any : i1 to i32
   %all = scalar.cmpi eq, %count64, %frames : i64
@@ -179,12 +197,32 @@ func.def public @prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %pos
   %copy_bytes = index.cast %bounded_bytes : i64 to offset
   %audio_offset = index.constant 32 : offset
   func.call @copy(%pcm, %origin, %work, %audio_offset, %copy_bytes) : (buffer, offset, buffer, offset, offset)
+  scf.if %decoding {
+    // Decoder offers use the otherwise unused PCM area for their token draft.
+    view.store %rows32, %words[8] : i32, view<328xi32>
+    %bounded_rows = scalar.assume %rows32 [range(%rows32, 1, 4)] : i32
+    %rows = index.cast %bounded_rows : i32 to index
+    %tokens_offset = index.constant 64 : offset
+    %tokens = buffer.view %state[%tokens_offset] : buffer -> view<512xi32>
+    %eight = index.constant 8 : index
+    scf.for %row = [%step to %rows step %step] {
+      %row32 = index.cast %row : index to i32
+      %next_position = scalar.addi %decode_position, %row32 : i32
+      %previous32 = scalar.subi %next_position, %one : i32
+      %bounded_previous = scalar.assume %previous32 [range(%previous32, 0, 510)] : i32
+      %previous = index.cast %bounded_previous : i32 to index
+      %id = view.load %tokens[%previous] : view<512xi32> -> i32
+      %slot = index.add %eight, %row : index
+      view.store %id, %words[%slot] : i32, view<328xi32>
+    }
+  }
   %tag = scalar.extui %phase : i32 to i64
   func.return %work, %units, %tag : buffer, i64, i64
 }
 
-// The cohort header maps packed ordinals to resident identities. An accepted
-// plan retains that mapping through completion, even if a member is cancelled.
+// The device cohort maps token activations to resident identities. The CPU
+// plan keeps each original request's header, first activation, and row count.
+// Both survive actual retirement, independently of cancellation and membership.
 func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
   %origin = index.constant 0 : offset
   %length = buffer.length %ranges
@@ -194,38 +232,85 @@ func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %
   %bounded_count = scalar.assume %count64 [range(%count64, 1, 4)] : i64
   %count = index.cast %bounded_count : i64 to index
   %records = buffer.view %ranges[%origin] : buffer -> view<[%count]x3xi64>
-  %capacity = index.constant 5280 : offset
+  %capacity = index.constant 21072 : offset
   %payload = buffer.alloca<private> align(8) %capacity : buffer
-  %header = buffer.view %payload[%origin] : buffer -> view<5xi32>
-  %count32 = scalar.trunci %count64 : i64 to i32
-  view.store %count32, %header[0] : i32, view<5xi32>
+  %header = buffer.view %payload[%origin] : buffer -> view<17xi32>
+  %plan_bytes = index.constant 160 : offset
+  %plan = buffer.alloca<private> align(8) %plan_bytes : buffer
+  %plan_stride = index.constant 40 : offset
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %stride = index.constant 1312 : offset
   %header_length = index.constant 32 : offset
-  scf.for %i = [%begin to %count step %step] {
-    %source64 = view.load %records[%i, 1] : view<[%count]x3xi64> -> i64
+  %one32 = scalar.constant 1 : i32
+  %two32 = scalar.constant 2 : i32
+  %eight = index.constant 8 : index
+  %total = scf.for %ordinal = [%begin to %count step %step](%first = %begin : index) -> (index) {
+    %source64 = view.load %records[%ordinal, 1] : view<[%count]x3xi64> -> i64
     %bounded_source = scalar.assume %source64 [range(%source64, 0, 3936)] : i64
     %source_offset = index.cast %bounded_source : i64 to offset
-    %scaled = index.scale %i, %stride : index, offset -> offset
-    %target_offset = index.add %scaled, %header_length : offset
-    func.call @copy(%packed, %source_offset, %payload, %target_offset, %stride) : (buffer, offset, buffer, offset, offset)
-    %row = view.load %records[%i, 0] : view<[%count]x3xi64> -> i64
-    %row32 = scalar.trunci %row : i64 to i32
-    %member = index.add %i, %step : index
-    view.store %row32, %header[%member] : i32, view<5xi32>
+    %input = buffer.view %packed[%source_offset] : buffer -> view<328xi32>
+    %phase = view.load %input[6] : view<328xi32> -> i32
+    %decoding = scalar.cmpi eq, %phase, %two32 : i32
+    %rows32 = scf.if %decoding -> (i32) {
+      %offered = view.load %input[8] : view<328xi32> -> i32
+      scf.yield %offered : i32
+    } else {
+      scf.yield %one32 : i32
+    }
+    %bounded_rows = scalar.assume %rows32 [range(%rows32, 1, 4)] : i32
+    %rows = index.cast %bounded_rows : i32 to index
+    %plan_offset = index.scale %ordinal, %plan_stride : index, offset -> offset
+    func.call @copy(%packed, %source_offset, %plan, %plan_offset, %header_length) : (buffer, offset, buffer, offset, offset)
+    %planned = buffer.view %plan[%plan_offset] : buffer -> view<10xi32>
+    %first32 = index.cast %first : index to i32
+    view.store %first32, %planned[8] : i32, view<10xi32>
+    view.store %rows32, %planned[9] : i32, view<10xi32>
+    %resident64 = view.load %records[%ordinal, 0] : view<[%count]x3xi64> -> i64
+    %resident32 = scalar.trunci %resident64 : i64 to i32
+    %position32 = view.load %input[1] : view<328xi32> -> i32
+    %token32 = view.load %input[0] : view<328xi32> -> i32
+    %copy_length = scf.select %decoding, %header_length, %stride : offset
+    %decoder_prefix = index.constant 80 : offset
+    %packet_base = scf.select %decoding, %decoder_prefix, %header_length : offset
+    scf.for %row = [%begin to %rows step %step] {
+      %activation_value = index.add %first, %row : index
+      %activation = index.assume %activation_value [range(%activation_value, 0, 15)] : index
+      %scaled = index.scale %activation, %stride : index, offset -> offset
+      %target_offset = index.add %scaled, %packet_base : offset
+      func.call @copy(%packed, %source_offset, %payload, %target_offset, %copy_length) : (buffer, offset, buffer, offset, offset)
+      %packet = buffer.view %payload[%target_offset] : buffer -> view<8xi32>
+      %first_token = index.cmp eq, %row, %begin : index
+      %id = scf.if %first_token -> (i32) {
+        scf.yield %token32 : i32
+      } else {
+        %slot = index.add %eight, %row : index
+        %draft = view.load %input[%slot] : view<328xi32> -> i32
+        scf.yield %draft : i32
+      }
+      %row32 = index.cast %row : index to i32
+      %position = scalar.addi %position32, %row32 : i32
+      view.store %id, %packet[0] : i32, view<8xi32>
+      view.store %position, %packet[1] : i32, view<8xi32>
+      %member = index.add %activation, %step : index
+      view.store %resident32, %header[%member] : i32, view<17xi32>
+    }
+    %next = index.add %first, %rows : index
+    scf.yield %next : index
   }
-  func.return %payload, %payload : buffer, buffer
+  %total32 = index.cast %total : index to i32
+  view.store %total32, %header[0] : i32, view<17xi32>
+  func.return %payload, %plan : buffer, buffer
 }
 
 func.def public @generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
-  %phase_offset = index.constant 56 : offset
+  %phase_offset = index.constant 24 : offset
   %phase_view = buffer.view %plan[%phase_offset] : buffer -> view<1xi32>
   %phase = view.load %phase_view[0] : view<1xi32> -> i32
   %execution = func.call @execute_5(%phase, %work, %requests, %conditioning, %streams, %output) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
   %zero = scalar.constant 0 : i32
   %origin = scalar.constant 0 : i64
-  %length = scalar.constant 64 : i64
+  %length = scalar.constant 256 : i64
   %feedback = func.call @feedback(%zero, %output, %origin, %length) : (i32, hal.buffer, i64, i64) -> (i64)
   func.return
 }
@@ -262,6 +347,12 @@ func.def @encoded(%state: buffer, %work: buffer, %feedback: buffer, %output_offs
     %nonempty = scalar.cmpi ne, %features, %zero : i32
     %decode = scalar.andi %trigger, %nonempty : i1
     scf.if %decode {
+      %previous_length = view.load %fields[3] : view<16xi32> -> i32
+      %has_previous = scalar.cmpi ugt, %previous_length, %zero : i32
+      %without_eos = scalar.subi %previous_length, %one : i32
+      %draft_length = scf.select %has_previous, %without_eos, %zero : i32
+      view.store %draft_length, %fields[7] : i32, view<16xi32>
+      view.store %zero, %fields[8] : i32, view<16xi32>
       view.store %two, %fields[0] : i32, view<16xi32>
       view.store %zero, %fields[3] : i32, view<16xi32>
     }
@@ -271,7 +362,7 @@ func.def @encoded(%state: buffer, %work: buffer, %feedback: buffer, %output_offs
   func.return %count64, %packet, %complete : i64, buffer, i32
 }
 
-func.def @decoded(%state: buffer, %feedback: buffer, %output_offset: offset) -> (buffer, i32) {
+func.def @decoded_token(%state: buffer, %feedback: buffer, %output_offset: offset) -> (buffer, i32) {
   %origin = index.constant 0 : offset
   %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
   %output = buffer.view %feedback[%output_offset] : buffer -> view<1xi32>
@@ -319,14 +410,78 @@ func.def @decoded(%state: buffer, %feedback: buffer, %output_offset: offset) -> 
   func.return %packet, %complete : buffer, i32
 }
 
+// Predictions are compared before overwriting the old draft. The first
+// mismatch contributes its replacement token; later computed KV stays allocated
+// but lies beyond the next accepted position and is never read by continuation.
+// A retained token suffix is only a proposal: it is recomputed against the
+// corrected prefix, and two consecutive mismatches retire that proposal.
+func.def @decoded(%state: buffer, %feedback: buffer, %output_offset: offset, %count: index) -> (buffer, i32) {
+  %origin = index.constant 0 : offset
+  %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
+  %token_offset = index.constant 64 : offset
+  %tokens = buffer.view %state[%token_offset] : buffer -> view<512xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %zero32 = scalar.constant 0 : i32
+  %eos = scalar.constant 2 : i32
+  %stride = index.constant 16 : offset
+  %true = scalar.constant true : i1
+  %empty = global.load @empty : buffer
+  %ignored, %packet, %complete = scf.for %row = [%zero to %count step %one](%accepting = %true : i1, %event = %empty : buffer, %done = %zero32 : i32) -> (i1, buffer, i32) {
+    %next_accepting, %next_event, %next_done = scf.if %accepting -> (i1, buffer, i32) {
+      %scaled = index.scale %row, %stride : index, offset -> offset
+      %offset = index.add %output_offset, %scaled : offset
+      %output = buffer.view %feedback[%offset] : buffer -> view<1xi32>
+      %token = view.load %output[0] : view<1xi32> -> i32
+      %position32 = view.load %fields[3] : view<16xi32> -> i32
+      %draft_length = view.load %fields[7] : view<16xi32> -> i32
+      %in_draft = scalar.cmpi ult, %position32, %draft_length : i32
+      %matches = scf.if %in_draft -> (i1) {
+        %bounded_position = scalar.assume %position32 [range(%position32, 0, 510)] : i32
+        %position = index.cast %bounded_position : i32 to index
+        %expected = view.load %tokens[%position] : view<512xi32> -> i32
+        %equal = scalar.cmpi eq, %token, %expected : i32
+        scf.yield %equal : i1
+      } else {
+        %false = scalar.constant false : i1
+        scf.yield %false : i1
+      }
+      %retry32 = view.load %fields[8] : view<16xi32> -> i32
+      %retry_available = scalar.cmpi eq, %retry32, %zero32 : i32
+      %useful = scalar.ori %matches, %retry_available : i1
+      %retained = scalar.andi %in_draft, %useful : i1
+      %still_draft = scf.select %retained, %draft_length, %zero32 : i32
+      view.store %still_draft, %fields[7] : i32, view<16xi32>
+      %mismatch = scalar.xori %matches, %true : i1
+      %retrying = scalar.andi %retained, %mismatch : i1
+      %next_retry = scalar.extui %retrying : i1 to i32
+      view.store %next_retry, %fields[8] : i32, view<16xi32>
+      %text, %finished = func.call @decoded_token(%state, %feedback, %offset) : (buffer, buffer, offset) -> (buffer, i32)
+      %not_eos = scalar.cmpi ne, %token, %eos : i32
+      %more = scalar.andi %matches, %not_eos : i1
+      scf.yield %more, %text, %finished : i1, buffer, i32
+    } else {
+      scf.yield %accepting, %event, %done : i1, buffer, i32
+    }
+    scf.yield %next_accepting, %next_event, %next_done : i1, buffer, i32
+  }
+  func.return %packet, %complete : buffer, i32
+}
+
 func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32) {
   %origin = index.constant 0 : offset
   %bounded_ordinal = scalar.assume %ordinal [range(%ordinal, 0, 3)] : i64
   %ordinal_index = index.cast %bounded_ordinal : i64 to index
-  %stride = index.constant 1312 : offset
+  %stride = index.constant 40 : offset
   %header_length = index.constant 32 : offset
-  %scaled = index.scale %ordinal_index, %stride : index, offset -> offset
-  %work_offset = index.add %scaled, %header_length : offset
+  %work_offset = index.scale %ordinal_index, %stride : index, offset -> offset
+  %planned = buffer.view %plan[%work_offset] : buffer -> view<10xi32>
+  %first32 = view.load %planned[8] : view<10xi32> -> i32
+  %count32 = view.load %planned[9] : view<10xi32> -> i32
+  %bounded_first = scalar.assume %first32 [range(%first32, 0, 15)] : i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 1, 4)] : i32
+  %first = index.cast %bounded_first : i32 to index
+  %count_rows = index.cast %bounded_count : i32 to index
   %work = buffer.alloca<private> align(8) %header_length : buffer
   func.call @copy(%plan, %work_offset, %work, %origin, %header_length) : (buffer, offset, buffer, offset, offset)
   %input = buffer.view %work[%origin] : buffer -> view<8xi32>
@@ -336,7 +491,7 @@ func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordina
   %zero64 = scalar.constant 0 : i64
   %empty = global.load @empty : buffer
   %output_stride = index.constant 16 : offset
-  %output_offset = index.scale %ordinal_index, %output_stride : index, offset -> offset
+  %output_offset = index.scale %first, %output_stride : index, offset -> offset
   %initializing = scalar.cmpi eq, %phase, %zero : i32
   %count, %packet, %complete = scf.if %initializing -> (i64, buffer, i32) {
     %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
@@ -348,7 +503,7 @@ func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordina
       %frames, %transcript, %finished = func.call @encoded(%state, %work, %feedback, %output_offset) : (buffer, buffer, buffer, offset) -> (i64, buffer, i32)
       scf.yield %frames, %transcript, %finished : i64, buffer, i32
     } else {
-      %transcript, %finished = func.call @decoded(%state, %feedback, %output_offset) : (buffer, buffer, offset) -> (buffer, i32)
+      %transcript, %finished = func.call @decoded(%state, %feedback, %output_offset, %count_rows) : (buffer, buffer, offset, index) -> (buffer, i32)
       scf.yield %zero64, %transcript, %finished : i64, buffer, i32
     }
     scf.yield %consumed, %event, %done : i64, buffer, i32

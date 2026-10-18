@@ -59,13 +59,15 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   func.call @parameter(%encode, %zero32, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
   func.call @parameter(%decode, %zero32, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
   func.call @parameter(%decode, %one32, %directory, %rotary, %policy) : (i32, i32, buffer, buffer, buffer)
-  // Four resident histories and four packed rows. State includes convolution
-  // tails, encoder rings, immutable cross-attention memory, and decoder KV.
+  // Four resident histories and sixteen packed decoder activations. State
+  // includes convolution tails, encoder rings, immutable cross-attention
+  // memory, and decoder KV.
   %requests = scalar.constant 4 : i64
+  %batch_units = scalar.constant 16 : i64
   %small = scalar.constant 16 : i64
   %state = scalar.constant 40320208 : i64
-  %work = scalar.constant 5280 : i64
-  %output = scalar.constant 64 : i64
+  %work = scalar.constant 21072 : i64
+  %output = scalar.constant 256 : i64
   // A 20 ms input quantum yields one encoder position. The source owns the
   // 2048-position bound (40.96 seconds) and 512-token hypothesis capacity.
   %input_frames = scalar.constant 320 : i64
@@ -75,5 +77,5 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %tokenizer = global.load @tokenizer : buffer
   %name = global.load @name : buffer
   %empty = global.load @empty : buffer
-  func.return %requests, %requests, %small, %small, %state, %work, %output, %output, %input_frames, %frame_limit, %event_bytes, %rate, %c1, %c1, %one32, %tokenizer, %name, %empty, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer
+  func.return %requests, %batch_units, %small, %small, %state, %work, %output, %output, %input_frames, %frame_limit, %event_bytes, %rate, %c1, %c1, %one32, %tokenizer, %name, %empty, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer
 }

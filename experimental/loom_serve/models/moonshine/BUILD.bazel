@@ -80,5 +80,20 @@ loom_test(
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
+        AMDGPU_TSAN_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "decoder_state_test",
+    srcs = [
+        "decoder_state.loom",
+        "tests/decoder_state.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        AMDGPU_TSAN_PROFILE,
     ],
 )

@@ -10,18 +10,18 @@ config.def @moonshine.threads = 128 : index
 
 func.def @projection_members(%trial: index, %storage: buffer) {
   %origin = index.constant 0 : offset
-  %members = buffer.view %storage[%origin] : buffer -> view<5xi32>
+  %members = buffer.view %storage[%origin] : buffer -> view<17xi32>
   %trial32 = index.cast %trial : index to i32
   %one = scalar.constant 1 : i32
   %zero = scalar.constant 0 : i32
   %two = scalar.constant 2 : i32
   %three = scalar.constant 3 : i32
   %count = scalar.addi %trial32, %one : i32
-  view.store %count, %members[0] : i32, view<5xi32>
-  view.store %three, %members[1] : i32, view<5xi32>
-  view.store %one, %members[2] : i32, view<5xi32>
-  view.store %zero, %members[3] : i32, view<5xi32>
-  view.store %two, %members[4] : i32, view<5xi32>
+  view.store %count, %members[0] : i32, view<17xi32>
+  view.store %three, %members[1] : i32, view<17xi32>
+  view.store %one, %members[2] : i32, view<17xi32>
+  view.store %zero, %members[3] : i32, view<17xi32>
+  view.store %two, %members[4] : i32, view<17xi32>
   func.return
 }
 
@@ -32,10 +32,10 @@ func.def @projection_integral(%storage: buffer, %cohort: buffer, %input_count: i
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %columns = index.cast %output_count : i32 to index
-  %output = buffer.view %storage[%origin] : buffer -> view<4x[%columns]x1xf32>
-  %members = buffer.view %cohort[%origin] : buffer -> view<5xi32>
-  %count32 = view.load %members[0] : view<5xi32> -> i32
-  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %output = buffer.view %storage[%origin] : buffer -> view<16x[%columns]x1xf32>
+  %members = buffer.view %cohort[%origin] : buffer -> view<17xi32>
+  %count32 = view.load %members[0] : view<17xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 16)] : i32
   %rows = index.cast %bounded_count : i32 to index
   %k = scalar.sitofp %input_count : i32 to f64
   %one64 = scalar.constant 1.0 : f64
@@ -88,13 +88,13 @@ func.def @projection_integral(%storage: buffer, %cohort: buffer, %input_count: i
         scf.yield %dot : f64
       }
       %value = scalar.fptrunc %result : f64 to f32
-      view.store %value, %output[%row, %column, 0] : f32, view<4x[%columns]x1xf32>
+      view.store %value, %output[%row, %column, 0] : f32, view<16x[%columns]x1xf32>
     }
   }
   func.return
 }
 
-kernel.decl @moonshine.projection.decoder() launch(%x: view<4x320x1xf32>, %w: view<320x320xf32>, %y: view<4x320x1xf32>, %cohort: view<5xi32>)
+kernel.decl @moonshine.projection.decoder() launch(%x: view<16x320x1xf32>, %w: view<320x320xf32>, %y: view<16x320x1xf32>, %cohort: view<17xi32>)
 
 func.def @decoder_reference(%input: buffer, %weight: buffer, %output: buffer, %cohort: buffer) {
   %inputs = scalar.constant 320 : i32
@@ -106,20 +106,20 @@ func.def @decoder_reference(%input: buffer, %weight: buffer, %output: buffer, %c
 
 check.scenario public @decoder_independent_rows {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  check.trial[4](%trial: index, %entropy: check.entropy) {
-    %cohort = check.generate.fill value(0) : view<5xi32>
-    check.generate<@projection_members>(%trial, %cohort) : (index, view<5xi32>) -> ()
-    %input = check.generate.iota offset(0.25) step(0.125) : view<4x320x1xf32>
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    check.generate<@projection_members>(%trial, %cohort) : (index, view<17xi32>) -> ()
+    %input = check.generate.iota offset(0.25) step(0.125) : view<16x320x1xf32>
     %weight = check.generate.iota offset(-0.5) step(0.0009765625) : view<320x320xf32>
-    %output = check.generate.fill value(-123.0) : view<4x320x1xf32>
-    check.compare<@moonshine.projection.decoder, @decoder_reference>(%input, %weight, %output, %cohort) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, view<5xi32>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.001) rtol(1.9999999999999999e-06) nan(different) : view<4x320x1xf32>
+    %output = check.generate.fill value(-123.0) : view<16x320x1xf32>
+    check.compare<@moonshine.projection.decoder, @decoder_reference>(%input, %weight, %output, %cohort) : (view<16x320x1xf32>, view<320x320xf32>, view<16x320x1xf32>, view<17xi32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.001) rtol(1.9999999999999999e-06) nan(different) : view<16x320x1xf32>
     }
   }
   check.return
 }
 
-kernel.decl @moonshine.projection.decoder_up() launch(%x: view<4x320x1xf32>, %w: view<2560x320xf32>, %y: view<4x2560x1xf32>, %b: view<2560xf32>, %cohort: view<5xi32>)
+kernel.decl @moonshine.projection.decoder_up() launch(%x: view<16x320x1xf32>, %w: view<2560x320xf32>, %y: view<16x2560x1xf32>, %b: view<2560xf32>, %cohort: view<17xi32>)
 
 func.def @decoder_up_reference(%input: buffer, %weight: buffer, %output: buffer, %bias: buffer, %cohort: buffer) {
   %inputs = scalar.constant 320 : i32
@@ -131,21 +131,21 @@ func.def @decoder_up_reference(%input: buffer, %weight: buffer, %output: buffer,
 
 check.scenario public @decoder_up_independent_rows {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  check.trial[4](%trial: index, %entropy: check.entropy) {
-    %cohort = check.generate.fill value(0) : view<5xi32>
-    check.generate<@projection_members>(%trial, %cohort) : (index, view<5xi32>) -> ()
-    %input = check.generate.iota offset(0.25) step(0.125) : view<4x320x1xf32>
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    check.generate<@projection_members>(%trial, %cohort) : (index, view<17xi32>) -> ()
+    %input = check.generate.iota offset(0.25) step(0.125) : view<16x320x1xf32>
     %weight = check.generate.iota offset(-0.5) step(0.0009765625) : view<2560x320xf32>
-    %output = check.generate.fill value(-123.0) : view<4x2560x1xf32>
+    %output = check.generate.fill value(-123.0) : view<16x2560x1xf32>
     %bias = check.generate.iota offset(-64.0) step(16.0) : view<2560xf32>
-    check.compare<@moonshine.projection.decoder_up, @decoder_up_reference>(%input, %weight, %output, %bias, %cohort) : (view<4x320x1xf32>, view<2560x320xf32>, view<4x2560x1xf32>, view<2560xf32>, view<5xi32>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.001) rtol(1.9999999999999999e-06) nan(different) : view<4x2560x1xf32>
+    check.compare<@moonshine.projection.decoder_up, @decoder_up_reference>(%input, %weight, %output, %bias, %cohort) : (view<16x320x1xf32>, view<2560x320xf32>, view<16x2560x1xf32>, view<2560xf32>, view<17xi32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.001) rtol(1.9999999999999999e-06) nan(different) : view<16x2560x1xf32>
     }
   }
   check.return
 }
 
-kernel.decl @moonshine.projection.decoder_down() launch(%x: view<4x1280x1xf32>, %w: view<320x1280xf32>, %y: view<4x320x1xf32>, %b: view<320xf32>, %cohort: view<5xi32>)
+kernel.decl @moonshine.projection.decoder_down() launch(%x: view<16x1280x1xf32>, %w: view<320x1280xf32>, %y: view<16x320x1xf32>, %b: view<320xf32>, %cohort: view<17xi32>)
 
 func.def @decoder_down_reference(%input: buffer, %weight: buffer, %output: buffer, %bias: buffer, %cohort: buffer) {
   %inputs = scalar.constant 1280 : i32
@@ -157,21 +157,21 @@ func.def @decoder_down_reference(%input: buffer, %weight: buffer, %output: buffe
 
 check.scenario public @decoder_down_independent_rows {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  check.trial[4](%trial: index, %entropy: check.entropy) {
-    %cohort = check.generate.fill value(0) : view<5xi32>
-    check.generate<@projection_members>(%trial, %cohort) : (index, view<5xi32>) -> ()
-    %input = check.generate.iota offset(0.25) step(0.125) : view<4x1280x1xf32>
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    check.generate<@projection_members>(%trial, %cohort) : (index, view<17xi32>) -> ()
+    %input = check.generate.iota offset(0.25) step(0.125) : view<16x1280x1xf32>
     %weight = check.generate.iota offset(-0.5) step(0.0009765625) : view<320x1280xf32>
-    %output = check.generate.fill value(-123.0) : view<4x320x1xf32>
+    %output = check.generate.fill value(-123.0) : view<16x320x1xf32>
     %bias = check.generate.iota offset(-64.0) step(16.0) : view<320xf32>
-    check.compare<@moonshine.projection.decoder_down, @decoder_down_reference>(%input, %weight, %output, %bias, %cohort) : (view<4x1280x1xf32>, view<320x1280xf32>, view<4x320x1xf32>, view<320xf32>, view<5xi32>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.001) rtol(1.9999999999999999e-06) nan(different) : view<4x320x1xf32>
+    check.compare<@moonshine.projection.decoder_down, @decoder_down_reference>(%input, %weight, %output, %bias, %cohort) : (view<16x1280x1xf32>, view<320x1280xf32>, view<16x320x1xf32>, view<320xf32>, view<17xi32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.001) rtol(1.9999999999999999e-06) nan(different) : view<16x320x1xf32>
     }
   }
   check.return
 }
 
-kernel.decl @moonshine.projection.logits() launch(%x: view<4x320x1xf32>, %w: view<32768x320xf32>, %y: view<4x32768x1xf32>, %cohort: view<5xi32>)
+kernel.decl @moonshine.projection.logits() launch(%x: view<16x320x1xf32>, %w: view<32768x320xf32>, %y: view<16x32768x1xf32>, %cohort: view<17xi32>)
 
 func.def @logits_reference(%input: buffer, %weight: buffer, %output: buffer, %cohort: buffer) {
   %inputs = scalar.constant 320 : i32
@@ -183,14 +183,14 @@ func.def @logits_reference(%input: buffer, %weight: buffer, %output: buffer, %co
 
 check.scenario public @logits_independent_rows {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  check.trial[4](%trial: index, %entropy: check.entropy) {
-    %cohort = check.generate.fill value(0) : view<5xi32>
-    check.generate<@projection_members>(%trial, %cohort) : (index, view<5xi32>) -> ()
-    %input = check.generate.iota offset(0.25) step(0.125) : view<4x320x1xf32>
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    check.generate<@projection_members>(%trial, %cohort) : (index, view<17xi32>) -> ()
+    %input = check.generate.iota offset(0.25) step(0.125) : view<16x320x1xf32>
     %weight = check.generate.iota offset(-0.5) step(0.0009765625) : view<32768x320xf32>
-    %output = check.generate.fill value(-123.0) : view<4x32768x1xf32>
-    check.compare<@moonshine.projection.logits, @logits_reference>(%input, %weight, %output, %cohort) : (view<4x320x1xf32>, view<32768x320xf32>, view<4x32768x1xf32>, view<5xi32>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.001) rtol(1.9999999999999999e-06) nan(different) : view<4x32768x1xf32>
+    %output = check.generate.fill value(-123.0) : view<16x32768x1xf32>
+    check.compare<@moonshine.projection.logits, @logits_reference>(%input, %weight, %output, %cohort) : (view<16x320x1xf32>, view<32768x320xf32>, view<16x32768x1xf32>, view<17xi32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.001) rtol(1.9999999999999999e-06) nan(different) : view<16x32768x1xf32>
     }
   }
   check.return

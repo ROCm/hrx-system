@@ -1,0 +1,293 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx11-generic> @moonshine {subgroup_size = 32}
+
+config.def @moonshine.threads = 128 : index
+
+kernel.decl @moonshine.decoder_state.embedding() launch(%work: buffer, %weights: view<32768x320xf32>, %output: view<16x320x1xf32>, %cohort: view<17xi32>, %packet: offset)
+
+kernel.decl @moonshine.decoder_state.rotary_cache() launch(%query: view<16x320x1xf32>, %key: view<16x320x1xf32>, %value: view<16x320x1xf32>, %work: buffer, %frequencies: view<16xf32>, %state: buffer, %output: view<16x320x1xf32>, %cohort: view<17xi32>, %packet: offset, %keys: offset, %values: offset)
+
+kernel.decl @moonshine.decoder_state.greedy() launch(%logits: view<16x32768x1xf32>, %feedback: buffer, %cohort: view<17xi32>, %output: offset)
+
+// Packed rows repeatedly visit residents 3, 2, 1, 0, each at four distinct
+// causal positions. The final resident-3 position is the 511 cache boundary.
+func.def inline @decoder_coordinates(%row: index) -> (%result_resident: index, %result_position: index, %result_token: index) where [range(%row, 0, 15), range(%result_resident, 0, 3), range(%result_position, 0, 511), range(%result_token, 13, 3178)] {
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %stride = index.constant 169 : index
+  %token_stride = index.constant 211 : index
+  %token_base = index.constant 13 : index
+  %slot = index.rem %row, %four : index
+  %resident = index.sub %three, %slot : index
+  %step = index.div %row, %four : index
+  %position = index.madd %resident, %stride, %step : index
+  %last = index.cmp eq, %resident, %three : index
+  %edge = index.add %position, %one : index
+  %cursor = scf.select %last, %edge, %position : index
+  %token = index.madd %row, %token_stride, %token_base : index
+  func.return %resident, %cursor, %token : index, index, index
+}
+
+func.def @decoder_members(%trial: index, %work: buffer, %cohort: buffer) {
+  %origin = index.constant 0 : offset
+  %words = buffer.view %work[%origin] : buffer -> view<5268xi32>
+  %members = buffer.view %cohort[%origin] : buffer -> view<17xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %fifteen = index.constant 15 : index
+  %sixteen = index.constant 16 : index
+  %first = index.cmp eq, %trial, %zero : index
+  %second = index.cmp eq, %trial, %one : index
+  %wide = scf.select %second, %fifteen, %sixteen : index
+  %count = scf.select %first, %one, %wide : index
+  %count32 = index.cast %count : index to i32
+  view.store %count32, %members[0] : i32, view<17xi32>
+  %prefix = index.constant 20 : index
+  %stride = index.constant 328 : index
+  scf.for %row = [%zero to %sixteen step %one] {
+    %resident, %position, %token = func.call @decoder_coordinates(%row) : (index) -> (index, index, index)
+    %resident32 = index.cast %resident : index to i32
+    %position32 = index.cast %position : index to i32
+    %token32 = index.cast %token : index to i32
+    %member = index.add %row, %one : index
+    view.store %resident32, %members[%member] : i32, view<17xi32>
+    %packet = index.madd %row, %stride, %prefix : index
+    %cursor = index.add %packet, %one : index
+    view.store %token32, %words[%packet] : i32, view<5268xi32>
+    view.store %position32, %words[%cursor] : i32, view<5268xi32>
+  }
+  func.return
+}
+
+func.def inline @decoder_count(%cohort: buffer) -> (%result_count: index) where [range(%result_count, 0, 16)] {
+  %origin = index.constant 0 : offset
+  %members = buffer.view %cohort[%origin] : buffer -> view<17xi32>
+  %count = view.load %members[0] : view<17xi32> -> i32
+  %bounded = scalar.assume %count [range(%count, 0, 16)] : i32
+  %rows = index.cast %bounded : i32 to index
+  func.return %rows : index
+}
+
+// The weight tensor is an exact binary ramp, so the selected embedding has a
+// closed form independent of the device's packet indexing and weight lookup.
+func.def @embedding_expected(%work: buffer, %weights: buffer, %output: buffer, %cohort: buffer, %packet: offset) {
+  %origin = index.constant 0 : offset
+  %result = buffer.view %output[%origin] : buffer -> view<16x320x1xf32>
+  %rows = func.call @decoder_count(%cohort) : (buffer) -> (index)
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %channels = index.constant 320 : index
+  %offset = scalar.constant 0.25 : f64
+  %scale = scalar.constant 0.0009765625 : f64
+  scf.for %row = [%zero to %rows step %one] {
+    %resident, %position, %token = func.call @decoder_coordinates(%row) : (index) -> (index, index, index)
+    scf.for %channel = [%zero to %channels step %one] {
+      %linear = index.madd %token, %channels, %channel : index
+      %word = index.cast %linear : index to i32
+      %number = scalar.uitofp %word : i32 to f64
+      %product = scalar.mulf %number, %scale : f64
+      %value = scalar.addf %product, %offset : f64
+      %stored = scalar.fptrunc %value : f64 to f32
+      view.store %stored, %result[%row, %channel, 0] : f32, view<16x320x1xf32>
+    }
+  }
+  func.return
+}
+
+// Compute the complex rotation in F64. The binary frequency and integral
+// position make the angle exact; all unaddressed resident history stays zero.
+// The F32 turns conversion permits at most 2*u*64 radians of phase error
+// (u=2^-24). Two inputs below 20 amplify that by at most 40; 0.00032
+// includes the resulting 0.000306 bound plus trig and arithmetic rounding.
+func.def @rotary_expected(%query: buffer, %key: buffer, %value: buffer, %work: buffer, %frequencies: buffer, %state: buffer, %output: buffer, %cohort: buffer, %packet: offset, %keys: offset, %values: offset) {
+  %origin = index.constant 0 : offset
+  %queries = buffer.view %query[%origin] : buffer -> view<16x320x1xf32>
+  %key_inputs = buffer.view %key[%origin] : buffer -> view<16x320x1xf32>
+  %value_inputs = buffer.view %value[%origin] : buffer -> view<16x320x1xf32>
+  %result = buffer.view %output[%origin] : buffer -> view<16x320x1xf32>
+  %rows = func.call @decoder_count(%cohort) : (buffer) -> (index)
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %channels = index.constant 320 : index
+  %head = index.constant 40 : index
+  %rotary = index.constant 32 : index
+  %resident_bytes = index.constant 40320208 : offset
+  // Binary64 sin/cos of position * 0.125 for the sixteen packed rows.
+  %cosine0 = scalar.constant 0.78497105106801801 : f64
+  %cosine1 = scalar.constant -0.16079968049764676 : f64
+  %cosine2 = scalar.constant -0.64776551293749551 : f64
+  %cosine3 = scalar.constant 1.0 : f64
+  %cosine4 = scalar.constant 0.70160640345150149 : f64
+  %cosine5 = scalar.constant -0.036492718932740413 : f64
+  %cosine6 = scalar.constant -0.73769360147211716 : f64
+  %cosine7 = scalar.constant 0.99219766722932901 : f64
+  %cosine8 = scalar.constant 0.60729342256746044 : f64
+  %cosine9 = scalar.constant 0.088383699305805544 : f64
+  %cosine10 = scalar.constant -0.81611022808377842 : f64
+  %cosine11 = scalar.constant 0.96891242171064473 : f64
+  %cosine12 = scalar.constant 0.50350383093879736 : f64
+  %cosine13 = scalar.constant 0.21188091947737789 : f64
+  %cosine14 = scalar.constant -0.88179172754132418 : f64
+  %cosine15 = scalar.constant 0.93050762191231429 : f64
+  %cosine_table = vector.from_elements %cosine0, %cosine1, %cosine2, %cosine3, %cosine4, %cosine5, %cosine6, %cosine7, %cosine8, %cosine9, %cosine10, %cosine11, %cosine12, %cosine13, %cosine14, %cosine15 : vector<16xf64>
+  %sine0 = scalar.constant 0.61953244385195116 : f64
+  %sine1 = scalar.constant -0.98698706311271112 : f64
+  %sine2 = scalar.constant 0.76183977334399089 : f64
+  %sine3 = scalar.constant 0.0 : f64
+  %sine4 = scalar.constant 0.71256470206981837 : f64
+  %sine5 = scalar.constant -0.99933391890043244 : f64
+  %sine6 = scalar.constant 0.67513565329280101 : f64
+  %sine7 = scalar.constant 0.12467473338522769 : f64
+  %sine8 = scalar.constant 0.79447762643532005 : f64
+  %sine9 = scalar.constant -0.99608650311959401 : f64
+  %sine10 = scalar.constant 0.57789626717694165 : f64
+  %sine11 = scalar.constant 0.24740395925452294 : f64
+  %sine12 = scalar.constant 0.86399299316021938 : f64
+  %sine13 = scalar.constant -0.97729549060732956 : f64
+  %sine14 = scalar.constant 0.47163900309419615 : f64
+  %sine15 = scalar.constant 0.36627252908604757 : f64
+  %sine_table = vector.from_elements %sine0, %sine1, %sine2, %sine3, %sine4, %sine5, %sine6, %sine7, %sine8, %sine9, %sine10, %sine11, %sine12, %sine13, %sine14, %sine15 : vector<16xf64>
+  scf.for %row = [%zero to %rows step %one] {
+    %resident, %position, %token = func.call @decoder_coordinates(%row) : (index) -> (index, index, index)
+    %base = index.scale %resident, %resident_bytes : index, offset -> offset
+    %key_offset = index.add %base, %keys : offset
+    %value_offset = index.add %base, %values : offset
+    %key_history = buffer.view %state[%key_offset] : buffer -> view<320x512xf32>
+    %value_history = buffer.view %state[%value_offset] : buffer -> view<320x512xf32>
+    %cosine = vector.extract %cosine_table[%row] : vector<16xf64> -> f64
+    %sine = vector.extract %sine_table[%row] : vector<16xf64> -> f64
+    scf.for %channel = [%zero to %channels step %one] {
+      %query32 = view.load %queries[%row, %channel, 0] : view<16x320x1xf32> -> f32
+      %key32 = view.load %key_inputs[%row, %channel, 0] : view<16x320x1xf32> -> f32
+      %dimension = index.rem %channel, %head : index
+      %rotates = index.cmp ult, %dimension, %rotary : index
+      %query_result, %key_result = scf.if %rotates -> (f32, f32) {
+        %parity = index.rem %channel, %two : index
+        %pair = index.div %channel, %two : index
+        %other_parity = index.sub %one, %parity : index
+        %other = index.madd %pair, %two, %other_parity : index
+        %other_query32 = view.load %queries[%row, %other, 0] : view<16x320x1xf32> -> f32
+        %other_key32 = view.load %key_inputs[%row, %other, 0] : view<16x320x1xf32> -> f32
+        %query64 = scalar.extf %query32 : f32 to f64
+        %key64 = scalar.extf %key32 : f32 to f64
+        %other_query64 = scalar.extf %other_query32 : f32 to f64
+        %other_key64 = scalar.extf %other_key32 : f32 to f64
+        %real = index.cmp eq, %parity, %zero : index
+        %negative = scalar.negf %sine : f64
+        %signed = scf.select %real, %negative, %sine : f64
+        %query_cos = scalar.mulf %query64, %cosine : f64
+        %query_sin = scalar.mulf %other_query64, %signed : f64
+        %key_cos = scalar.mulf %key64, %cosine : f64
+        %key_sin = scalar.mulf %other_key64, %signed : f64
+        %rotated_query = scalar.addf %query_cos, %query_sin : f64
+        %rotated_key = scalar.addf %key_cos, %key_sin : f64
+        %stored_query = scalar.fptrunc %rotated_query : f64 to f32
+        %stored_key = scalar.fptrunc %rotated_key : f64 to f32
+        scf.yield %stored_query, %stored_key : f32, f32
+      } else {
+        scf.yield %query32, %key32 : f32, f32
+      }
+      %stored_value = view.load %value_inputs[%row, %channel, 0] : view<16x320x1xf32> -> f32
+      view.store %query_result, %result[%row, %channel, 0] : f32, view<16x320x1xf32>
+      view.store %key_result, %key_history[%channel, %position] : f32, view<320x512xf32>
+      view.store %stored_value, %value_history[%channel, %position] : f32, view<320x512xf32>
+    }
+  }
+  func.return
+}
+
+// Three equal maxima exercise both lane-local and workgroup tie breaking.
+func.def @greedy_data(%logits: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %logits[%origin] : buffer -> view<16x32768x1xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %rows = index.constant 16 : index
+  %lane_stride = index.constant 128 : index
+  %maximum = scalar.constant 2.0 : f32
+  scf.for %row = [%zero to %rows step %one] {
+    %resident, %position, %token = func.call @decoder_coordinates(%row) : (index) -> (index, index, index)
+    %other_lane = index.add %token, %one : index
+    %same_lane = index.add %token, %lane_stride : index
+    view.store %maximum, %view[%row, %token, 0] : f32, view<16x32768x1xf32>
+    view.store %maximum, %view[%row, %other_lane, 0] : f32, view<16x32768x1xf32>
+    view.store %maximum, %view[%row, %same_lane, 0] : f32, view<16x32768x1xf32>
+  }
+  func.return
+}
+
+func.def @greedy_expected(%logits: buffer, %feedback: buffer, %cohort: buffer, %offset: offset) {
+  %output = buffer.view %feedback[%offset] : buffer -> view<16x4xi32>
+  %rows = func.call @decoder_count(%cohort) : (buffer) -> (index)
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %row = [%zero to %rows step %one] {
+    %resident, %position, %token = func.call @decoder_coordinates(%row) : (index) -> (index, index, index)
+    %token32 = index.cast %token : index to i32
+    view.store %token32, %output[%row, 0] : i32, view<16x4xi32>
+  }
+  func.return
+}
+
+check.scenario public @packed_embedding_tokens {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %work = check.generate.fill value(0) : tensor<5268xi32>
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    check.generate<@decoder_members>(%trial, %work, %cohort) : (index, tensor<5268xi32>, view<17xi32>) -> ()
+    %weights = check.generate.iota offset(0.25) step(0.0009765625) : view<32768x320xf32>
+    %output = check.generate.fill value(-123.0) : view<16x320x1xf32>
+    %packet = check.literal value(80) : offset
+    check.compare<@moonshine.decoder_state.embedding, @embedding_expected>(%work, %weights, %output, %cohort, %packet) : (tensor<5268xi32>, view<32768x320xf32>, view<16x320x1xf32>, view<17xi32>, offset) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : view<16x320x1xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @independent_causal_cache_positions {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %work = check.generate.fill value(0) : tensor<5268xi32>
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    check.generate<@decoder_members>(%trial, %work, %cohort) : (index, tensor<5268xi32>, view<17xi32>) -> ()
+    %query = check.generate.iota offset(0.25) step(0.001953125) : view<16x320x1xf32>
+    %key = check.generate.iota offset(-0.5) step(0.00390625) : view<16x320x1xf32>
+    %value = check.generate.iota offset(0.125) step(0.0009765625) : view<16x320x1xf32>
+    %frequencies = check.generate.fill value(0.125) : view<16xf32>
+    %state = check.generate.fill value(0.0) : tensor<40320208xf32>
+    %output = check.generate.fill value(-123.0) : view<16x320x1xf32>
+    %packet = check.literal value(80) : offset
+    %keys = check.literal value(0) : offset
+    %values = check.literal value(655360) : offset
+    check.compare<@moonshine.decoder_state.rotary_cache, @rotary_expected>(%query, %key, %value, %work, %frequencies, %state, %output, %cohort, %packet, %keys, %values) : (view<16x320x1xf32>, view<16x320x1xf32>, view<16x320x1xf32>, tensor<5268xi32>, view<16xf32>, tensor<40320208xf32>, view<16x320x1xf32>, view<17xi32>, offset, offset, offset) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.00032000000000000003) rtol(1.9999999999999999e-06) nan(different) : view<16x320x1xf32>
+      check.expect.close actual(%state) expected(%state) atol(0.00032000000000000003) rtol(1.9999999999999999e-06) nan(different) : tensor<40320208xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @packed_feedback_and_ties {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %work = check.generate.fill value(0) : tensor<5268xi32>
+    %cohort = check.generate.fill value(0) : view<17xi32>
+    check.generate<@decoder_members>(%trial, %work, %cohort) : (index, tensor<5268xi32>, view<17xi32>) -> ()
+    %logits = check.generate.fill value(-1.0) : view<16x32768x1xf32>
+    check.generate<@greedy_data>(%logits) : (view<16x32768x1xf32>) -> ()
+    %feedback = check.generate.fill value(-123) : tensor<64xi32>
+    %offset = check.literal value(0) : offset
+    check.compare<@moonshine.decoder_state.greedy, @greedy_expected>(%logits, %feedback, %cohort, %offset) : (view<16x32768x1xf32>, tensor<64xi32>, view<17xi32>, offset) -> () {
+      check.expect.bitwise actual(%feedback) expected(%feedback) : tensor<64xi32>
+    }
+  }
+  check.return
+}
