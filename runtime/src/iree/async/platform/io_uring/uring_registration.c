@@ -43,12 +43,16 @@ struct iree_io_uring_registration_request_t {
 static int iree_io_uring_registration_syscall(int ring_fd, uint32_t opcode,
                                               void* arg,
                                               uint32_t argument_count) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, opcode);
   long result = 0;
   do {
     result = syscall(IREE_IO_URING_SYSCALL_REGISTER, ring_fd, opcode, arg,
                      argument_count);
   } while (result < 0 && errno == EINTR);
-  return result < 0 ? -errno : (int)result;
+  const int register_result = result < 0 ? -errno : (int)result;
+  IREE_TRACE_ZONE_END(z0);
+  return register_result;
 }
 
 // Returns true after a request result has been published.
@@ -251,11 +255,14 @@ int iree_io_uring_registration_update_buffers(
   // SINGLE_ISSUER, as the destination owner imports it from a different task.
   iree_io_uring_params_t parameters = {0};
   long source_fd = 0;
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_setup, "io_uring_setup");
   do {
     source_fd = syscall(IREE_IO_URING_SYSCALL_SETUP, 1, &parameters);
   } while (source_fd < 0 && errno == EINTR);
+  const int setup_error = source_fd < 0 ? errno : 0;
+  IREE_TRACE_ZONE_END(z_setup);
   if (source_fd < 0) {
-    return -errno;
+    return -setup_error;
   }
 
   int result = iree_io_uring_registration_syscall(
@@ -277,7 +284,9 @@ int iree_io_uring_registration_update_buffers(
       result = -EOPNOTSUPP;
     }
   }
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_close, "io_uring_close");
   close((int)source_fd);
+  IREE_TRACE_ZONE_END(z_close);
   return result;
 }
 
