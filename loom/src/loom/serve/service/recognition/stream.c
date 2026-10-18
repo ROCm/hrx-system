@@ -29,6 +29,8 @@ struct loom_serve_recognition_stream_t {
   iree_allocator_t host_allocator;
   // Immutable normalized input geometry, independent of model lifetime.
   loom_serve_recognition_format_t format;
+  // Immutable source input-window capacity, independent of execution storage.
+  iree_host_size_t input_capacity;
   // Maximum cumulative input frames accepted from the caller.
   uint64_t frame_limit;
   // Stable resident index, independent of a packed execution ordinal.
@@ -709,6 +711,7 @@ iree_status_t loom_serve_recognition_stream_service_try_open(
       service->host_allocator, sizeof(*row) + request_size, (void**)&row));
   row->host_allocator = service->host_allocator;
   row->format = service->generator.format;
+  row->input_capacity = service->generator.input_capacity;
   row->frame_limit = service->generator.frame_limit;
   row->index = index;
   iree_status_t status = loom_serve_recognition_input_initialize(
@@ -753,6 +756,11 @@ iree_status_t loom_serve_recognition_stream_service_try_open(
 loom_serve_recognition_format_t loom_serve_recognition_stream_format(
     const loom_serve_recognition_stream_t* stream) {
   return stream->format;
+}
+
+iree_host_size_t loom_serve_recognition_stream_input_capacity(
+    const loom_serve_recognition_stream_t* stream) {
+  return stream->input_capacity;
 }
 
 iree_status_t loom_serve_recognition_stream_write(
