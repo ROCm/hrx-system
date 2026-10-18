@@ -60,10 +60,12 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/models/undrain \
 ```
 
 Drain closes admission when the owner processes the request. Accepted model
-work, including queued requests, continues. New inference, tokenizer and text
-checkpoint requests wait outside the model within the holding budget. Control
-and observation routes remain available. A successful drain response means the
-gate changed; `admission:"drained"` confirms accepted work has finished.
+work, including queued requests, continues. New inference, tokenizer, checkpoint
+pinning, and checkpoint suspension requests wait outside the model within the
+holding budget. Checkpoint deletion remains available so clients can release
+retained history while inference is drained. Control and observation routes
+remain available. A successful drain response means the gate changed;
+`admission:"drained"` confirms accepted work has finished.
 
 Drain is reversible and does not evict weights, erase sessions or remove the
 registration. Undrain reopens admission; held requests enter that modality's
