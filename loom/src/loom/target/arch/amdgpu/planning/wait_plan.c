@@ -160,10 +160,6 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   loom_amdgpu_wait_xcnt_group_t xcnt_group;
   // Outstanding packet count per wait counter.
   uint32_t outstanding_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT];
-  // LDS-producing packets issued after the latest applied LDS bound.
-  uint32_t lds_issued_since_bound_count;
-  // Whether every such packet advances only the LDS counter.
-  bool lds_issued_since_bound_are_lds_only;
   // Outstanding packet count per wait counter for memory writes.
   uint32_t outstanding_write_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT];
   // Outstanding packet count per wait counter for workgroup memory accesses.
@@ -1623,10 +1619,6 @@ static void loom_amdgpu_wait_plan_apply_counter_progress(
     builder->completed_position_counts[slot] = completed_position_count;
   }
   builder->outstanding_counts[slot] = target_count;
-  if (counter_id == LOOM_AMDGPU_WAIT_COUNTER_LDS) {
-    builder->lds_issued_since_bound_count = 0;
-    builder->lds_issued_since_bound_are_lds_only = true;
-  }
   builder->outstanding_write_counts[slot] =
       iree_min(builder->outstanding_write_counts[slot], (uint32_t)target_count);
   builder->outstanding_workgroup_access_counts[slot] =
@@ -2681,20 +2673,6 @@ static iree_status_t loom_amdgpu_wait_plan_handle_consumer(
     if ((active_counter_mask & counter_mask) == 0) {
       continue;
     }
-    if (builder->lds_issued_since_bound_count != 0 &&
-        builder->lds_issued_since_bound_are_lds_only &&
-        active_reasons[slot] == LOOM_AMDGPU_WAIT_PLAN_REASON_SSA_USE &&
-        loom_amdgpu_wait_counter_id_from_slot(slot) ==
-            LOOM_AMDGPU_WAIT_COUNTER_LDS &&
-        builder->classification.completion_nodes[active_producers[slot]]
-                .producer_counter_mask == counter_mask) {
-      // The preceding bound already divided this ordered queue into an older
-      // prefix and the producers issued afterward. Complete that old prefix
-      // together instead of advancing by one result at every adjacent use;
-      // the younger suffix remains available to overlap with computation.
-      target_counts[slot] = (uint16_t)iree_min(
-          (uint32_t)target_counts[slot], builder->lds_issued_since_bound_count);
-    }
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_wait_counter(
         builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED, /*flags=*/0,
         active_reasons[slot], node_index, active_producers[slot],
@@ -3035,12 +3013,6 @@ static iree_status_t loom_amdgpu_wait_plan_note_producer(
   }
   loom_amdgpu_wait_plan_increment_outstanding_counts(
       builder->outstanding_counts, counter_mask);
-  if (iree_any_bit_set(counter_mask, LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS)) {
-    builder->lds_issued_since_bound_are_lds_only &=
-        counter_mask == LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS;
-    IREE_ASSERT_NE(builder->lds_issued_since_bound_count, UINT32_MAX);
-    ++builder->lds_issued_since_bound_count;
-  }
   loom_amdgpu_wait_plan_increment_outstanding_counts(
       builder->outstanding_write_counts, completion_node->write_counter_mask);
   loom_amdgpu_wait_plan_increment_outstanding_counts(
@@ -3315,8 +3287,6 @@ static iree_status_t loom_amdgpu_wait_plan_build_actions(
     memset(builder->retirement_ordinals, 0,
            sizeof(builder->retirement_ordinals));
     memset(builder->outstanding_counts, 0, sizeof(builder->outstanding_counts));
-    builder->lds_issued_since_bound_count = 0;
-    builder->lds_issued_since_bound_are_lds_only = true;
     memset(builder->outstanding_write_counts, 0,
            sizeof(builder->outstanding_write_counts));
     memset(builder->outstanding_workgroup_access_counts, 0,
