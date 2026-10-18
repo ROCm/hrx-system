@@ -26,6 +26,8 @@ typedef struct loom_serve_recognition_work_t {
 
 typedef struct loom_serve_recognition_result_t {
   // Acknowledged prefix of the accepted input snapshot, excluding padding.
+  // Requested activity observations partition this prefix exactly; lookahead
+  // remains unconsumed until its probability is established.
   iree_host_size_t consumed_frames;
   // No further work or output events remain for this request.
   bool complete;
@@ -40,7 +42,7 @@ typedef struct loom_serve_recognition_generator_t {
   void* self;
   // Fixed normalized input geometry, independent of browser/audio containers.
   loom_serve_recognition_format_t format;
-  // Maximum PCM frames in one source input snapshot.
+  // Maximum PCM frames in one source input snapshot, including lookahead.
   iree_host_size_t input_capacity;
   // Maximum total input frames in an admitted request.
   uint64_t frame_limit;

@@ -383,9 +383,15 @@ even when several revise the same transcript segment. Consuming the entire packe
 returns that request's output credit. Final events can outlive model removal.
 
 An activity event covers a positive interval of actual input and supplies a finite
-speech probability in `[0,1]`. Its coverage is not an exact onset, offset, or word
-boundary. Turn thresholds and hangover belong to the caller's policy; source code
-owns lookahead, numerical state, and EOF handling.
+speech probability in `[0,1]`. When activity is requested, each completion's
+observations partition its acknowledged input prefix in order, without gaps or
+overlap. Source programs retain future context as unconsumed input until its
+observation is established; intermediate numerical phases can acknowledge zero
+frames. The declared input window includes that lookahead. This lets callers
+retain bounded pre-roll while the source chooses its own numerical work.
+Coverage is not an exact onset, offset, or word boundary. Turn thresholds and
+hangover belong to the caller's policy; source code owns numerical state and
+EOF handling.
 
 Each transcript segment has a stable request-local identity, increasing revision,
 covered sample interval and replacement UTF-8 text. Finalizing a segment makes
