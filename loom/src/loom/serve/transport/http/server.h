@@ -22,10 +22,23 @@ extern "C" {
 // HTTP connection owner independent of socket listeners and process signals.
 // Raw ordered carriers deliver bytes using the shared proactor pool while the
 // application claims requests on serialized scheduler turns. Each connection
-// carries one request and a close-delimited response. This layer knows neither
-// model rows nor chat/SSE semantics and creates no private workers.
+// carries one request and a close-delimited response or an explicitly upgraded
+// protocol. This layer knows neither model rows nor chat/SSE semantics and
+// creates no private workers.
 typedef struct loom_serve_http_server_t loom_serve_http_server_t;
 typedef struct loom_serve_http_connection_t loom_serve_http_connection_t;
+
+// Owned protocol receiver installed after claiming an upgrade request. Carrier
+// handlers and connection ownership remain with HTTP through I/O retirement.
+typedef struct loom_serve_http_protocol_t {
+  // Receives ordered borrowed bytes; an empty span denotes peer EOF. Callbacks
+  // for this connection never overlap and may not wait for application work.
+  iree_status_t (*receive)(void* user_data, iree_const_byte_span_t bytes);
+  // Releases the receiver exactly once after application and I/O retirement.
+  void (*release)(void* user_data);
+  // Owned context outliving all receive callbacks and the application claim.
+  void* user_data;
+} loom_serve_http_protocol_t;
 
 // Releases resources borrowed by an accepted carrier after HTTP joins its I/O
 // and releases the carrier. The HTTP receiver never retains receive leases.
@@ -134,6 +147,15 @@ loom_serve_http_connection_t* loom_serve_http_server_take_request(
     loom_serve_http_server_t* server,
     const loom_serve_http_request_t** out_request);
 
+// Transfers |protocol| to this claimed connection, once, before sending the
+// upgrade response. Joins any previous HTTP receive callback without replacing
+// active carrier handlers. The request stays borrowed until finish/abort. Each
+// successful protocol receive posts the ordinary application wake; errors use
+// the existing peer failure path. A peer failure does not revoke ownership.
+void loom_serve_http_connection_upgrade(
+    loom_serve_http_connection_t* connection,
+    loom_serve_http_protocol_t protocol);
+
 // A failed peer cannot accept more output. Cancellation of model work belongs
 // to the application and occurs at its safe stage boundary.
 bool loom_serve_http_connection_failed(
@@ -149,6 +171,14 @@ bool loom_serve_http_connection_can_send(
 // accepts no bytes and must be handled by the application.
 iree_status_t loom_serve_http_connection_send(
     loom_serve_http_connection_t* connection, iree_string_view_t bytes);
+
+// Generates bytes directly into admitted transport storage. The writer runs
+// synchronously, at most once, before this call returns; none of its context is
+// borrowed afterward. Uses the same single producer and send credit as send.
+// This preserves connection-owned completion while allowing framed protocols
+// to avoid an intermediate header/payload copy.
+iree_status_t loom_serve_http_connection_send_generated(
+    loom_serve_http_connection_t* connection, iree_net_send_prefix_t prefix);
 
 // Relinquishes the connection and all request views. Finish drains every
 // accepted send before closing; abort cancels outstanding network work. Neither
