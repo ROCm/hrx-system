@@ -1217,6 +1217,44 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(summary_report.schedule_band_summary_rows.count, 7u);
   loom_target_compile_report_deinitialize(&summary_report);
 
+  // The two global-load forms merged above share an origin, but must stay
+  // separate across blocks. Block order and each origin's first occurrence
+  // survive grouping, including an empty block and a larger subsequent block.
+  const loom_low_schedule_block_t split_blocks[] = {
+      {.node_count = 2, .scheduled_node_count = 2},
+      {.node_start = 2, .scheduled_node_start = 2},
+      {
+          .node_start = 2,
+          .node_count = 6,
+          .scheduled_node_start = 2,
+          .scheduled_node_count = 6,
+      },
+  };
+  loom_low_emission_frame_t split_frame = frame;
+  split_frame.schedule.blocks = split_blocks;
+  split_frame.schedule.block_count = IREE_ARRAYSIZE(split_blocks);
+  loom_target_compile_report_initialize(&summary_report,
+                                        iree_allocator_system());
+  summary_report.requested_detail_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS;
+  IREE_ASSERT_OK(loom_target_compile_report_record_low_emission_frame(
+      &summary_report, &split_frame));
+  ASSERT_EQ(summary_report.schedule_band_summary_rows.count, 8u);
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    const auto* row = CompileReportRowAt<
+        loom_target_compile_report_schedule_band_summary_row_t>(
+        summary_report.schedule_band_summary_rows, i);
+    ASSERT_NE(row, nullptr);
+    EXPECT_EQ(row->block_index, i < 2 ? 0u : 2u);
+    EXPECT_EQ(row->first_packet_index, i);
+    EXPECT_EQ(row->band_count, 1u);
+    EXPECT_EQ(row->node_count, 1u);
+    EXPECT_TRUE(iree_string_view_equal(row->semantic_tag,
+                                       schedule_band_rows[i].semantic_tag));
+  }
+  EXPECT_EQ(summary_report.schedule_band_rows.count, 0u);
+  loom_target_compile_report_deinitialize(&summary_report);
+
   loom_target_compile_report_t allocation_report = {};
   loom_target_compile_report_initialize(&allocation_report,
                                         iree_allocator_system());

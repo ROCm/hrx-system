@@ -19,6 +19,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
 #include "loom/target/reporting/low_names.h"
+#include "loom/util/adaptive_sort.h"
 
 typedef struct loom_target_compile_report_pressure_origin_info_t {
   // Structured pressure origin kind.
@@ -282,24 +283,28 @@ static void loom_target_compile_report_accumulate_schedule_band_node(
       schedule->module, liveness, node, row);
 }
 
-static bool loom_target_compile_report_schedule_band_summary_matches(
-    const loom_target_compile_report_schedule_band_summary_row_t* summary,
-    const loom_target_compile_report_schedule_band_row_t* band) {
-  return summary->block_index == band->block_index &&
-         iree_string_view_equal(summary->block_name, band->block_name) &&
-         summary->origin_kind == band->origin_kind &&
-         iree_string_view_equal(summary->origin_operation_name,
-                                band->origin_operation_name) &&
-         iree_string_view_equal(summary->semantic_tag, band->semantic_tag);
+// A block is collected and flushed as one unit. Its identity is therefore
+// implicit in these keys; descriptor identity is not, since multiple forms
+// can share the same reported origin and semantic tag.
+static int loom_target_compile_report_compare_schedule_band_keys(
+    const loom_target_compile_report_schedule_band_summary_row_t* lhs,
+    const loom_target_compile_report_schedule_band_summary_row_t* rhs) {
+  if (lhs->origin_kind != rhs->origin_kind) {
+    return lhs->origin_kind < rhs->origin_kind ? -1 : 1;
+  }
+  const int order = iree_string_view_compare(lhs->origin_operation_name,
+                                             rhs->origin_operation_name);
+  return order ? order
+               : iree_string_view_compare(lhs->semantic_tag, rhs->semantic_tag);
 }
 
 static void loom_target_compile_report_accumulate_schedule_band_summary(
     loom_target_compile_report_schedule_band_summary_row_t* summary,
-    const loom_target_compile_report_schedule_band_row_t* band) {
-  ++summary->band_count;
+    const loom_target_compile_report_schedule_band_summary_row_t* band) {
+  summary->band_count += band->band_count;
   summary->node_count += band->node_count;
   summary->max_band_node_count =
-      iree_max(summary->max_band_node_count, band->node_count);
+      iree_max(summary->max_band_node_count, band->max_band_node_count);
   if (iree_string_view_is_empty(summary->sample_value_name)) {
     summary->sample_value_name = band->sample_value_name;
   }
@@ -324,22 +329,11 @@ static void loom_target_compile_report_accumulate_schedule_band_summary(
   summary->result_unit_count += band->result_unit_count;
 }
 
-static iree_status_t loom_target_compile_report_add_schedule_band_summary(
+static iree_status_t loom_target_compile_report_record_schedule_band(
+    loom_target_compile_report_t* report,
     loom_target_compile_report_schedule_band_summary_row_t* summaries,
-    iree_host_size_t summary_capacity, iree_host_size_t* summary_count,
+    iree_host_size_t* summary_count, bool wants_band_rows,
     const loom_target_compile_report_schedule_band_row_t* band) {
-  for (iree_host_size_t i = 0; i < *summary_count; ++i) {
-    if (loom_target_compile_report_schedule_band_summary_matches(&summaries[i],
-                                                                 band)) {
-      loom_target_compile_report_accumulate_schedule_band_summary(&summaries[i],
-                                                                  band);
-      return iree_ok_status();
-    }
-  }
-  if (*summary_count >= summary_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low schedule band summary capacity exceeded");
-  }
   loom_target_compile_report_schedule_band_summary_row_t* summary =
       &summaries[(*summary_count)++];
   *summary = (loom_target_compile_report_schedule_band_summary_row_t){
@@ -348,34 +342,79 @@ static iree_status_t loom_target_compile_report_add_schedule_band_summary(
       .block_name = band->block_name,
       .block_index = band->block_index,
       .first_packet_index = band->first_packet_index,
+      .band_count = 1,
+      .node_count = band->node_count,
+      .max_band_node_count = band->node_count,
       .origin_kind = band->origin_kind,
       .origin_operation_name = band->origin_operation_name,
       .semantic_tag = band->semantic_tag,
       .sample_value_name = band->sample_value_name,
+      .static_instruction_mix = band->static_instruction_mix,
+      .dynamic_instruction_mix = band->dynamic_instruction_mix,
+      .result_value_count = band->result_value_count,
+      .result_unit_count = band->result_unit_count,
   };
-  loom_target_compile_report_accumulate_schedule_band_summary(summary, band);
-  return iree_ok_status();
+  return wants_band_rows
+             ? loom_target_compile_report_record_schedule_band_row(report, band)
+             : iree_ok_status();
 }
 
-typedef uint32_t loom_target_compile_report_schedule_band_emit_flags_t;
+static bool loom_target_compile_report_schedule_band_key_less(
+    const loom_target_compile_report_schedule_band_summary_row_t* summaries,
+    const uint32_t* lhs, const uint32_t* rhs) {
+  const int order = loom_target_compile_report_compare_schedule_band_keys(
+      &summaries[*lhs], &summaries[*rhs]);
+  // Equal keys retain first-occurrence order, including the first named result.
+  return order < 0 || (order == 0 && summaries[*lhs].first_packet_index <
+                                         summaries[*rhs].first_packet_index);
+}
 
-enum {
-  LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_EMIT_ROWS = 1u << 0,
-};
+static bool loom_target_compile_report_schedule_band_order_less(
+    const loom_target_compile_report_schedule_band_summary_row_t* summaries,
+    const uint32_t* lhs, const uint32_t* rhs) {
+  return summaries[*lhs].first_packet_index <
+         summaries[*rhs].first_packet_index;
+}
 
-static iree_status_t loom_target_compile_report_record_schedule_band(
+LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(
+    loom_target_compile_report_sort_schedule_band_keys, uint32_t,
+    const loom_target_compile_report_schedule_band_summary_row_t*,
+    loom_target_compile_report_schedule_band_key_less)
+LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(
+    loom_target_compile_report_sort_schedule_band_order, uint32_t,
+    const loom_target_compile_report_schedule_band_summary_row_t*,
+    loom_target_compile_report_schedule_band_order_less)
+
+static iree_status_t loom_target_compile_report_flush_schedule_band_summaries(
     loom_target_compile_report_t* report,
     loom_target_compile_report_schedule_band_summary_row_t* summaries,
-    iree_host_size_t summary_capacity, iree_host_size_t* summary_count,
-    loom_target_compile_report_schedule_band_emit_flags_t flags,
-    const loom_target_compile_report_schedule_band_row_t* band) {
-  if (iree_any_bit_set(flags,
-                       LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_EMIT_ROWS)) {
-    IREE_RETURN_IF_ERROR(
-        loom_target_compile_report_record_schedule_band_row(report, band));
+    uint32_t* indices, iree_host_size_t summary_count) {
+  for (iree_host_size_t i = 0; i < summary_count; ++i) {
+    indices[i] = (uint32_t)i;
   }
-  return loom_target_compile_report_add_schedule_band_summary(
-      summaries, summary_capacity, summary_count, band);
+  loom_target_compile_report_sort_schedule_band_keys(summaries, indices,
+                                                     summary_count);
+  iree_host_size_t group_count = 0;
+  for (iree_host_size_t i = 0; i < summary_count; ++i) {
+    loom_target_compile_report_schedule_band_summary_row_t* next =
+        &summaries[indices[i]];
+    loom_target_compile_report_schedule_band_summary_row_t* group =
+        group_count ? &summaries[indices[group_count - 1]] : NULL;
+    if (group && loom_target_compile_report_compare_schedule_band_keys(
+                     group, next) == 0) {
+      loom_target_compile_report_accumulate_schedule_band_summary(group, next);
+    } else {
+      indices[group_count++] = indices[i];
+    }
+  }
+  loom_target_compile_report_sort_schedule_band_order(summaries, indices,
+                                                      group_count);
+  for (iree_host_size_t i = 0; i < group_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_record_schedule_band_summary_row(
+            report, &summaries[indices[i]]));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_target_compile_report_record_schedule_band_rows(
@@ -402,51 +441,40 @@ static iree_status_t loom_target_compile_report_record_schedule_band_rows(
       schedule->block_count == 0 || iree_allocator_is_null(report->allocator)) {
     return iree_ok_status();
   }
-  if (schedule->scheduled_node_indices == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low schedule band rows require scheduled nodes");
-  }
   const loom_module_t* module = schedule->module;
   const loom_low_descriptor_set_t* descriptor_set =
       schedule->target.descriptor_set;
-  const loom_target_compile_report_schedule_band_emit_flags_t band_flags =
-      wants_band_rows ? LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_EMIT_ROWS : 0;
-  iree_host_size_t summary_bytes = 0;
-  if (!iree_host_size_checked_mul(
-          schedule->scheduled_node_count,
-          sizeof(loom_target_compile_report_schedule_band_summary_row_t),
-          &summary_bytes)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low schedule band summary scratch is too large");
-  }
+  // Reuse one block's band rows and a compact sortable projection. Whole
+  // function output lives in the report's owned row lists, not this scratch.
+  iree_host_size_t summary_capacity = 0;
   loom_target_compile_report_schedule_band_summary_row_t* summaries = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(report->allocator, summary_bytes,
-                                             (void**)&summaries));
-  memset(summaries, 0, summary_bytes);
   iree_status_t status = iree_ok_status();
-  iree_host_size_t summary_count = 0;
   for (iree_host_size_t block_index = 0;
        iree_status_is_ok(status) && block_index < schedule->block_count;
        ++block_index) {
     const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
+    if (block->scheduled_node_count == 0) {
+      continue;
+    }
+    if (block->scheduled_node_count > summary_capacity) {
+      status = iree_allocator_grow_array(report->allocator,
+                                         block->scheduled_node_count,
+                                         sizeof(*summaries) + sizeof(uint32_t),
+                                         &summary_capacity, (void**)&summaries);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+    }
+    uint32_t* indices = (uint32_t*)(summaries + summary_capacity);
+    iree_host_size_t summary_count = 0;
     bool has_band = false;
     loom_target_compile_report_schedule_band_row_t band = {0};
     for (uint32_t i = 0;
          iree_status_is_ok(status) && i < block->scheduled_node_count; ++i) {
       const iree_host_size_t packet_index =
           (iree_host_size_t)block->scheduled_node_start + (iree_host_size_t)i;
-      if (packet_index >= schedule->scheduled_node_count) {
-        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                  "low schedule band packet index is invalid");
-        break;
-      }
       const uint32_t node_index =
           schedule->scheduled_node_indices[packet_index];
-      if (node_index >= schedule->node_count) {
-        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                  "low schedule band node index is invalid");
-        break;
-      }
       const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
       const loom_target_compile_report_pressure_origin_info_t info =
           loom_target_compile_report_pressure_origin_from_node(
@@ -455,8 +483,7 @@ static iree_status_t loom_target_compile_report_record_schedule_band_rows(
           !loom_target_compile_report_schedule_band_matches(&band, &info)) {
         if (has_band) {
           status = loom_target_compile_report_record_schedule_band(
-              report, summaries, schedule->scheduled_node_count, &summary_count,
-              band_flags, &band);
+              report, summaries, &summary_count, wants_band_rows, &band);
           if (!iree_status_is_ok(status)) {
             break;
           }
@@ -484,14 +511,12 @@ static iree_status_t loom_target_compile_report_record_schedule_band_rows(
     }
     if (iree_status_is_ok(status) && has_band) {
       status = loom_target_compile_report_record_schedule_band(
-          report, summaries, schedule->scheduled_node_count, &summary_count,
-          band_flags, &band);
+          report, summaries, &summary_count, wants_band_rows, &band);
     }
-  }
-  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < summary_count;
-       ++i) {
-    status = loom_target_compile_report_record_schedule_band_summary_row(
-        report, &summaries[i]);
+    if (iree_status_is_ok(status)) {
+      status = loom_target_compile_report_flush_schedule_band_summaries(
+          report, summaries, indices, summary_count);
+    }
   }
   iree_allocator_free(report->allocator, summaries);
   return status;
