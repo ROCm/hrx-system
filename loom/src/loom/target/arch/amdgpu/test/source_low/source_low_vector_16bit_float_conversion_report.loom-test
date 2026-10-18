@@ -9,7 +9,20 @@ func.def target(@target) @report_exact_i8_to_bf16_pack(%input: vector<3xi8>) -> 
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] function=report_exact_i8_to_bf16_pack source_op=vector.fptrunc selection=plan plan_key=amdgpu.vector_16bit_float_conversion.strategy.f32_to_packed_bf16_exact_pack *
+CHECK: COMPILE-REPORT: source_low[*] function=report_exact_i8_to_bf16_pack source_op=vector.fptrunc selection=plan plan_key=amdgpu.vector_16bit_float_conversion.strategy.f32_to_packed_bf16_exact_permute *
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @report_exact_i8_to_bf16_pack_without_literal_permute(%input: vector<3xi8>) -> (vector<3xbf16>) {
+  %wide = vector.sitofp %input : vector<3xi8> to vector<3xf32>
+  %narrow = vector.fptrunc %wide : vector<3xf32> to vector<3xbf16>
+  func.return %narrow : vector<3xbf16>
+}
+
+// ----
+CHECK: COMPILE-REPORT: source_low[*] function=report_exact_i8_to_bf16_pack_without_literal_permute source_op=vector.fptrunc selection=plan plan_key=amdgpu.vector_16bit_float_conversion.strategy.f32_to_packed_bf16_exact_pack *
 
 // ====
 
@@ -36,6 +49,31 @@ func.def target(@target) @report_native_exact_i8_to_bf16_pack(%input: vector<3xi
 
 // ----
 CHECK: COMPILE-REPORT: source_low[*] function=report_native_exact_i8_to_bf16_pack source_op=vector.fptrunc selection=plan plan_key=amdgpu.vector_16bit_float_conversion.strategy.f32_to_packed_bf16_native *
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @report_exact_i8_to_f16_pack(%input: vector<3xi8>) -> (vector<3xf16>) {
+  %wide = vector.sitofp %input : vector<3xi8> to vector<3xf32>
+  %narrow = vector.fptrunc %wide : vector<3xf32> to vector<3xf16>
+  func.return %narrow : vector<3xf16>
+}
+
+// ----
+CHECK: COMPILE-REPORT: source_low[*] function=report_exact_i8_to_f16_pack source_op=vector.fptrunc selection=plan plan_key=amdgpu.vector_16bit_float_conversion.strategy.f32_to_packed_f16_exact_native *
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @report_unknown_f32_to_f16_pack(%input: vector<2xf32>) -> (vector<2xf16>) {
+  %narrow = vector.fptrunc %input : vector<2xf32> to vector<2xf16>
+  func.return %narrow : vector<2xf16>
+}
+
+// ----
+CHECK: COMPILE-REPORT: source_low[*] function=report_unknown_f32_to_f16_pack source_op=vector.fptrunc selection=plan plan_key=amdgpu.vector_16bit_float_conversion.strategy.f32_to_packed_f16 *
 
 // ====
 

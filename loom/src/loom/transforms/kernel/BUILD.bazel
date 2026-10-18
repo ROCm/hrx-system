@@ -280,6 +280,7 @@ loom_cc_library(
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:legalization",
+        "//loom/src/loom/transforms/vector:packet_legalization",
         "//runtime/src/iree/base",
     ],
 )

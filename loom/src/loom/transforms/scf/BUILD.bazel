@@ -48,6 +48,7 @@ loom_cc_library(
     srcs = ["scf_memory.c"],
     hdrs = ["scf_memory.h"],
     deps = [
+        "//loom/src/loom/ir",
         "//loom/src/loom/rewrite:remap",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

@@ -9,6 +9,7 @@
 
 #include <cxx/ast_fwd.h>
 #include <cxx/symbols_fwd.h>
+#include <cxx/types_fwd.h>
 
 namespace loom::cxx_import {
 
@@ -26,6 +27,15 @@ bool is_current_object(cxx::ExpressionAST* expression);
 // Returns the directly named function called by |call|, or null for indirect
 // calls and other callable expressions.
 cxx::FunctionSymbol* direct_callee(cxx::CallExpressionAST* call);
+
+// Returns the cv-qualified implicit object type of a non-static member
+// function, or null when the function has no implicit object parameter.
+const cxx::Type* implicit_object_type(cxx::TranslationUnit& unit,
+                                      cxx::FunctionSymbol* function);
+
+// Whether a call may replace value components of its implicit object. Const
+// functions only qualify when their record declares mutable fields.
+bool implicit_object_may_mutate(cxx::FunctionSymbol* function);
 
 // Returns the declaration syntax beneath a condition's contextual conversion,
 // or null when the condition is an ordinary expression.

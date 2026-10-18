@@ -526,10 +526,10 @@ static iree_status_t loom_scf_pipeline_plan_partition(
     plan->stages[i] = LOOM_SCF_PIPELINE_STAGE_CONSUMER;
     if (guarded_partition) {
       if (ordered_memory && plan->body.accesses.units[i].effects !=
-                                LOOM_SCF_BODY_MEMORY_GLOBAL_LOAD) {
+                                LOOM_SCF_BODY_MEMORY_READ_AHEAD_LOAD) {
         *rejection = (loom_scf_pipeline_rejection_t){
             operation->op,
-            IREE_SV("separate global load and workgroup consumer units")};
+            IREE_SV("separate read-ahead load and workgroup consumer units")};
         return iree_ok_status();
       }
       plan->stages[i] =
@@ -543,7 +543,7 @@ static iree_status_t loom_scf_pipeline_plan_partition(
         continue;
       }
       if (plan->body.accesses.units[i].effects ==
-              LOOM_SCF_BODY_MEMORY_GLOBAL_LOAD &&
+              LOOM_SCF_BODY_MEMORY_READ_AHEAD_LOAD &&
           operation->effects == LOOM_SCF_BODY_EFFECT_READ) {
         plan->stages[i] = LOOM_SCF_PIPELINE_STAGE_PRODUCER;
         plan->read_count += operation->load_count;
@@ -551,7 +551,7 @@ static iree_status_t loom_scf_pipeline_plan_partition(
       }
       *rejection = (loom_scf_pipeline_rejection_t){
           operation->op,
-          IREE_SV("separate global load and workgroup consumer units")};
+          IREE_SV("separate read-ahead load and workgroup consumer units")};
       return iree_ok_status();
     }
     if (operation->effects == 0) {

@@ -70,13 +70,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "ir_provider",
+    srcs = ["ir_provider.c"],
+    hdrs = ["ir_provider.h"],
+    visibility = ["//loom/src/loom/testing:__pkg__"],
+    deps = [
+        ":target_record_table",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
+        "//loom/src/loom/target:provider",
+    ],
+)
+
+loom_cc_library(
     name = "provider",
     srcs = ["provider.c"],
     hdrs = ["provider.h"],
-    visibility = [
-        "//loom/src/loom/tools/loom-check:__pkg__",
-        "//loom/src/loom/tools/loom-format:__pkg__",
-    ],
+    visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
         ":lower",
         ":target_record_table",

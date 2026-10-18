@@ -12,22 +12,14 @@ func.def @partial_i8x15(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @partial_i8x15(%input: reg<wasm.i32>, %output: reg<wasm.i32>) asm {
-  %53 = i64.load %input
-  %54 = i64x2.splat %53
-  %55 = i32.load %input {offset = 8}
-  %56 = i32x4.splat %55
+  %55 = i64.load %input
+  %56 = i32.load %input {offset = 8}
   %57 = i32.load16_u %input {offset = 12}
-  %58 = i16x8.splat %57
-  %59 = i32.load8_u %input {offset = 14}
-  %60 = i8x16.splat %59
-  %61 = i8x16.shuffle %54, %56, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 0, 0, 0, 0
-  %62 = i8x16.shuffle %58, %60, 0, 1, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-  %value = i8x16.shuffle %61, %62, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 18, 0
-  i64.store %output, %53
-  i32.store %output, %55 {offset = 8}
+  %58 = i32.load8_u %input {offset = 14}
+  i64.store %output, %55
+  i32.store %output, %56 {offset = 8}
   i32.store16 %output, %57 {offset = 12}
-  %64 = i8x16.extract_lane_u %value, 14
-  i32.store8 %output, %64 {offset = 14}
+  i32.store8 %output, %58 {offset = 14}
   return
 }
 
@@ -45,18 +37,12 @@ func.def @partial_i16x7(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @partial_i16x7(%input: reg<wasm.i32>, %output: reg<wasm.i32>) asm {
-  %42 = i64.load %input
-  %43 = i64x2.splat %42
+  %43 = i64.load %input
   %44 = i32.load %input {offset = 8}
-  %45 = i32x4.splat %44
-  %46 = i32.load16_u %input {offset = 12}
-  %47 = i16x8.splat %46
-  %48 = i8x16.shuffle %43, %45, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 0, 0, 0, 0
-  %value = i8x16.shuffle %48, %47, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 0, 0
-  i64.store %output, %42
+  %45 = i32.load16_u %input {offset = 12}
+  i64.store %output, %43
   i32.store %output, %44 {offset = 8}
-  %50 = i16x8.extract_lane_u %value, 6
-  i32.store16 %output, %50 {offset = 12}
+  i32.store16 %output, %45 {offset = 12}
   return
 }
 

@@ -10,6 +10,7 @@
 #define LOOM_TRANSFORMS_SCF_SCF_MEMORY_H_
 
 #include "iree/base/internal/arena.h"
+#include "loom/ir/memory_space.h"
 #include "loom/rewrite/remap.h"
 
 #ifdef __cplusplus
@@ -42,6 +43,13 @@ typedef struct loom_scf_memory_t {
   // Power-of-two table capacity, or zero before the first insertion.
   iree_host_size_t capacity;
 } loom_scf_memory_t;
+
+// Returns true when ordinary loads from |space| can form the read-ahead side
+// of a workgroup-ordered pipeline. These concrete global-like spaces cannot
+// alias workgroup storage; unknown and target-generic storage remain
+// conservative.
+bool loom_scf_memory_space_is_read_ahead_source(
+    loom_value_fact_memory_space_t space);
 
 // Inserts one distinct operation. Original operations are collected once;
 // emitted clones have distinct identities and retain their source space.

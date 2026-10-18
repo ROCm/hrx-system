@@ -309,6 +309,7 @@ loom_cc_library(
     loom::ops::vector
     loom::rewrite::rewriter
     loom::target::legalization
+    loom::transforms::vector::packet_legalization
   PUBLIC
 )
 

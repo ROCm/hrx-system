@@ -192,6 +192,100 @@ TEST(ModuleTest, VerifiesModuleWithDefaultAndVersionedOptions) {
   }
 }
 
+TEST(ModuleTest, TextLocationsAreOptionalAndBytecodePreservesThem) {
+  auto context = CreateContext();
+  auto workspace = CreateWorkspace();
+  auto source = CreateTextSource("locations.loom", R"(
+func.def @entry() {
+  func.return loc("authored.loom":7:3)
+}
+)");
+  auto module =
+      DeserializeTextModule(context.get(), workspace.get(), source.get());
+  for (auto presentation : {LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
+                            LOOMC_MODULE_TEXT_PRESENTATION_GENERIC}) {
+    for (bool print_locations : {false, true}) {
+      const loomc_module_serialize_options_t options = {
+          .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+          .structure_size = sizeof(options),
+          .text_presentation = presentation,
+          .print_locations = print_locations,
+      };
+      loomc_source_t* raw_output = nullptr;
+      LOOMC_ASSERT_OK(loomc_module_serialize_text_to_source(
+          module.get(), &options, loomc_allocator_system(), &raw_output));
+      SourcePtr output(raw_output);
+      auto contents = loomc_source_contents(output.get());
+      std::string text(reinterpret_cast<const char*>(contents.data),
+                       contents.data_length);
+      EXPECT_EQ(text.find("loc(\"authored.loom\":7:3)") != std::string::npos,
+                print_locations);
+    }
+  }
+  struct SerializeOptionsPrefix {
+    // Structure discriminator in the original prefix.
+    loomc_structure_type_t type;
+    // Caller-provided prefix size.
+    loomc_host_size_t structure_size;
+    // Original extension chain.
+    const void* next;
+    // Original output format.
+    loomc_source_format_t format;
+    // Original output source identity.
+    loomc_string_view_t identifier;
+    // Last member before the appended location control.
+    loomc_module_text_presentation_t text_presentation;
+  } prefix;
+  static_assert(sizeof(prefix) <=
+                offsetof(loomc_module_serialize_options_t, print_locations));
+  memset(&prefix, 0xFF, sizeof(prefix));
+  prefix.type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS;
+  prefix.structure_size = sizeof(prefix);
+  prefix.next = nullptr;
+  prefix.format = LOOMC_SOURCE_FORMAT_TEXT;
+  prefix.identifier = loomc_string_view_empty();
+  prefix.text_presentation = LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT;
+  loomc_source_t* raw_output = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_serialize_text_to_source(
+      module.get(),
+      reinterpret_cast<const loomc_module_serialize_options_t*>(&prefix),
+      loomc_allocator_system(), &raw_output));
+  SourcePtr output(raw_output);
+  auto contents = loomc_source_contents(output.get());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(contents.data),
+                        contents.data_length)
+                .find("loc("),
+            std::string::npos);
+
+  LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+      module.get(), nullptr, loomc_allocator_system(), &raw_output));
+  output.reset(raw_output);
+  loomc_module_t* raw_module = nullptr;
+  loomc_result_t* raw_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_deserialize_bytecode_from_source(
+      context.get(), workspace.get(), output.get(), nullptr,
+      loomc_allocator_system(), &raw_module, &raw_result));
+  ResultPtr result(raw_result);
+  ExpectSucceededResult(result.get());
+  module.reset(raw_module);
+  const loomc_module_serialize_options_t options = {
+      .structure_size = sizeof(options),
+      .print_locations = true,
+  };
+  LOOMC_ASSERT_OK(loomc_module_serialize_text_to_source(
+      module.get(), &options, loomc_allocator_system(), &raw_output));
+  output.reset(raw_output);
+  module.reset();
+  source.reset();
+  workspace.reset();
+  context.reset();
+  contents = loomc_source_contents(output.get());
+  EXPECT_NE(std::string(reinterpret_cast<const char*>(contents.data),
+                        contents.data_length)
+                .find("loc(\"authored.loom\":7:3)"),
+            std::string::npos);
+}
+
 TEST(ModuleTest, VerificationBoundsAndRetainsDiagnostics) {
   auto context = CreateContext();
   auto workspace = CreateWorkspace();
@@ -231,7 +325,11 @@ TEST(ModuleTest, VerificationRejectsInvalidArgumentsAndAllocationFailure) {
   auto module = CreateFunctionModule(context.get(), workspace.get());
   const loomc_module_verify_options_t invalid_options[] = {
       {.type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS},
-      {.structure_size = sizeof(loomc_module_verify_options_t) - 1},
+      {.structure_size = offsetof(loomc_module_verify_options_t, reserved) - 1},
+      {
+          .structure_size = sizeof(loomc_module_verify_options_t),
+          .scope = static_cast<loomc_module_verify_scope_t>(99),
+      },
   };
   for (const auto& options : invalid_options) {
     loomc_result_t* result = reinterpret_cast<loomc_result_t*>(0x1);

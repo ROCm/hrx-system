@@ -104,8 +104,12 @@ bool is_address_unit(cxx::TranslationUnit& unit,
 }  // namespace
 
 ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-                         Types& types, cxx::StatementAST* body)
-    : unit_(unit), diagnostics_(diagnostics), types_(types) {
+                         Types& types, cxx::StatementAST* body,
+                         cxx::FunctionSymbol* function)
+    : unit_(unit),
+      diagnostics_(diagnostics),
+      types_(types),
+      function_(function) {
   accept(body);
 }
 
@@ -344,6 +348,7 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
   if (!function) {
     return;
   }
+  record_implicit_object_call(ast, function);
   auto parameters = function->parameters();
   auto* argument = ast->expressionList;
   auto traits = unit_.typeTraits();
@@ -459,11 +464,52 @@ void ControlFlow::record(cxx::ExpressionAST* expression) {
   if (!target) {
     return;
   }
+  record(target->binding);
+}
+
+void ControlFlow::record(cxx::Symbol* binding) {
   for (auto* owner : owners_) {
     auto& writes = writes_[owner];
-    if (std::ranges::find(writes, target->binding) == writes.end()) {
-      writes.push_back(target->binding);
+    if (std::ranges::find(writes, binding) == writes.end()) {
+      writes.push_back(binding);
     }
+  }
+}
+
+void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
+                                              cxx::FunctionSymbol* callee) {
+  if (!callee->isImplicitObjectMemberFunction()) {
+    return;
+  }
+  auto* base = unwrap_expression(call->baseExpression);
+  if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base)) {
+    auto* receiver = member->baseExpression;
+    if (!is_current_object(receiver)) {
+      if (member->accessOp == cxx::TokenKind::T_DOT &&
+          receiver->valueCategory == cxx::ValueCategory::kLValue) {
+        if (implicit_object_may_mutate(callee)) {
+          record(receiver);
+        } else {
+          retain_destination(receiver);
+        }
+      }
+      return;
+    }
+  }
+  if (!implicit_object_may_mutate(callee)) {
+    return;
+  }
+  auto* object_type = implicit_object_type(unit_, function_);
+  auto* receiver = object_type
+                       ? types_.record(types_.unqualified(object_type), call)
+                       : nullptr;
+  if (!receiver) {
+    diagnostics_.reject(unit_, call,
+                        "implicit member call requires a current record "
+                        "object");
+  }
+  for (const auto& member : receiver->members) {
+    record(member.field);
   }
 }
 

@@ -128,7 +128,7 @@ TEST_F(FunctionsTest,
   EXPECT_EQ(definition.region, loom_kernel_def_body(definition.operation));
   EXPECT_EQ(definition.return_type->kind(), cxx::TypeKind::kVoid);
   EXPECT_EQ(loom_region_entry_arg_count(definition.region), 1u);
-  EXPECT_EQ(definition.source->symbol, functions.pending()[0]);
+  EXPECT_EQ(definition.source->symbol, functions.pending()[0].symbol);
 }
 
 TEST_F(FunctionsTest, ConfiguredScenarioRetainsItsNativeRegionSignature) {

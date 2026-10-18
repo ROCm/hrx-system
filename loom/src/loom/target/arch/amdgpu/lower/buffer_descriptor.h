@@ -28,6 +28,14 @@ iree_status_t loom_amdgpu_plan_buffer_extent(
     const loom_low_source_memory_access_plan_t* source,
     const loom_amdgpu_buffer_extent_plan_t** out_plan);
 
+// Selects an exactly representable root-relative source-view end and makes it
+// the descriptor range even when the ABI resource carries a broader extent.
+// NULL means the view end cannot be represented by the target descriptor.
+iree_status_t loom_amdgpu_plan_buffer_view_extent(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_source_memory_access_plan_t* source,
+    const loom_amdgpu_buffer_extent_plan_t** out_plan);
+
 // Emits a buffer descriptor from a Low resource and its retained view bound.
 // Resource extent/control attributes are the ABI contract; source analysis is
 // never consulted. Only allocation can fail while executing the recipe.

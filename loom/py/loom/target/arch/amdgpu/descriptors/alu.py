@@ -6515,6 +6515,40 @@ def _v_cvt_pk_u16_u32_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_cvt_pkrtz_f16_f32_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_cvt_pk_rtz_f16_f32",
+        instruction_name="V_CVT_PKRTZ_F16_F32",
+        mnemonic="v_cvt_pkrtz_f16_f32",
+        encoding_name="ENC_VOP3",
+        semantic_tag="convert.float.f32x2.f16x2.rtz",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("low")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("high")),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_cvt_pk_rtz_f16_f32_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_cvt_pk_rtz_f16_f32",
+        instruction_name="V_CVT_PK_RTZ_F16_F32",
+        mnemonic="v_cvt_pk_rtz_f16_f32",
+        encoding_name="ENC_VOP2",
+        semantic_tag="convert.float.f32x2.f16x2.rtz",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("low")),
+            AmdgpuOperandOverlay("VSRC1", _vgpr_operand("high")),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_cvt_pk_dpp16_overlay(
     *,
     descriptor_key: str,
@@ -8175,6 +8209,8 @@ __all__ = (
     "_v_cvt_i32_f32_overlay",
     "_v_cvt_pk_bf16_f32_dpp16_overlay",
     "_v_cvt_pk_bf16_f32_overlay",
+    "_v_cvt_pk_rtz_f16_f32_overlay",
+    "_v_cvt_pkrtz_f16_f32_overlay",
     "_v_cvt_f16_packed8_byte_overlays",
     "_v_cvt_pk_f16_packed8_overlays",
     "_v_cvt_pk_packed8_from_f16_overlays",

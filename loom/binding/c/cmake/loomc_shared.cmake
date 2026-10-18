@@ -42,7 +42,10 @@ endfunction()
 
 # The generated BUILD inventory is also the installed SDK's binding inventory.
 macro(loomc_shared_libraries)
-  cmake_parse_arguments(_LOOMC "" "NAME" "COMPONENTS;RUNTIME_DEPS" ${ARGN})
+  cmake_parse_arguments(_LOOMC "" "NAME" "COMPONENTS;RUNTIME_DEPS;TOOL_COMPONENTS" ${ARGN})
+  if(LOOM_LINK_SHARED_TOOLS)
+    list(APPEND _LOOMC_COMPONENTS ${_LOOMC_TOOL_COMPONENTS})
+  endif()
   list(TRANSFORM _LOOMC_COMPONENTS REPLACE "^::" "loom::binding::c::")
   if(NOT IREE_TARGET_HAS_THREADS)
     list(REMOVE_ITEM _LOOMC_COMPONENTS

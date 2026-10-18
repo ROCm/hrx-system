@@ -453,6 +453,7 @@ func_call = Op(
     verify="loom_func_call_verify",
     canonicalize="loom_func_call_canonicalize",
     effective_traits="loom_func_call_effective_traits",
+    facts="loom_func_call_facts",
     format=[
         OptionalGroup([Attr("effect_contract")], anchor="effect_contract"),
         OptionalGroup([Attr("temperature")], anchor="temperature"),

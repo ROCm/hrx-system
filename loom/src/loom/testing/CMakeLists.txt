@@ -47,12 +47,71 @@ loom_cc_library(
     ::test_file
     iree::base
     iree::base::internal::arena
+    loom::error::error_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    test_diagnostic_native
+  HDRS
+    "test_diagnostic_native.h"
+  SRCS
+    "test_diagnostic_native.c"
+  DEPS
+    ::test_diagnostic
+    iree::base
+    iree::base::internal::arena
     loom::error::diagnostic
     loom::error::renderer
     loom::format::text::printer
     loom::ir
     loom::util::stream
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    test_diagnostic_loomc
+  HDRS
+    "test_diagnostic_loomc.h"
+  SRCS
+    "test_diagnostic_loomc.c"
+  DEPS
+    ::test_diagnostic
+    iree::base
+    iree::base::internal::arena
+    loom::binding::c::loomc
+    loom::error::error_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    target_environment
+  HDRS
+    "target_environment.h"
+  SRCS
+    "target_environment.c"
+  DEPS
+    loom::binding::c::loomc
+    loom::target::provider
+    loom::target::test::ir_provider
+  ALWAYSLINK
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    target_environment_test
+  SRCS
+    "target_environment_test.cc"
+  DEPS
+    ::target_environment
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::binding::c::test::test_util
 )
 
 loom_cc_test(
@@ -62,6 +121,7 @@ loom_cc_test(
     "test_diagnostic_test.cc"
   DEPS
     ::test_diagnostic
+    ::test_diagnostic_native
     iree::base
     iree::base::internal::arena
     iree::testing::gtest
@@ -78,15 +138,11 @@ loom_cc_library(
     "test_file_format.c"
   DEPS
     ::test_diagnostic
+    ::test_diagnostic_loomc
     ::test_file
     iree::base
     iree::base::internal::arena
-    loom::error::source
-    loom::format::text::low_asm
-    loom::format::text::parser
-    loom::format::text::printer
-    loom::ir
-    loom::verify
+    loom::binding::c::loomc
   PUBLIC
 )
 
@@ -96,14 +152,13 @@ loom_cc_test(
   SRCS
     "test_file_format_test.cc"
   DEPS
-    ::context
+    ::target_environment
     ::test_file_format
     iree::base
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::codegen::low::text_asm
-    loom::target::test::descriptors
+    loom::binding::c::loomc
 )
 
 loom_cc_library(

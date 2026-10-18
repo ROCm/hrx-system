@@ -19,7 +19,7 @@ from loom.tools import compile_report
 
 
 class NativeReportTest(unittest.TestCase):
-    def check_report(self, source, roots, expected_exports, helper):
+    def check_report(self, source, target, roots, expected_exports, helper):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             documents = {}
@@ -29,7 +29,7 @@ class NativeReportTest(unittest.TestCase):
                 command = [
                     compiler,
                     source,
-                    "--target=x86:scalar",
+                    "--target=" + target,
                     "--output=" + str(artifact),
                 ] + ["--root=" + root for root in roots]
                 if mode != "none":
@@ -70,14 +70,24 @@ class NativeReportTest(unittest.TestCase):
 
     def test_callable_and_private_helper(self):
         self.check_report(
-            callable_source, ["call_pair"], {"call_pair"}, "draw_arguments"
+            callable_source,
+            "x86:scalar",
+            ["call_pair"],
+            {"call_pair"},
+            "draw_arguments",
         )
 
     def test_task_entries_and_callable_helper(self):
         self.check_report(
             task_source,
+            "x86:avx2",
             [],
-            {"grid", "fill_byte", "iree_hal_executable_library_query"},
+            {
+                "grid",
+                "fill_byte",
+                "constant_carriers",
+                "iree_hal_executable_library_query",
+            },
             "mix",
         )
 

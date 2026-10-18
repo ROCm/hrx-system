@@ -1,0 +1,63 @@
+// Native argument slots may contain arbitrary bytes outside their payloads.
+// Observe scalar truth, signed and unsigned extension, floating conversion,
+// and the final elements of partially occupied packed vectors.
+kernel.def export("argument_payloads") @argument_payloads() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer, %flag: i1, %byte: i8, %half: i16, %tiny4: f8E4M3, %tiny5: f8E5M2, %narrow: f16, %brain: bf16, %predicates: vector<3xi1>, %bytes: vector<5xi8>, %halves: vector<3xi16>, %wide: i32, %tail: i1) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_word = index.cast %lane : index to i32
+  %base = index.constant 0 : offset
+  %out = buffer.view %output[%base] : buffer -> view<64x19xi32>
+  %true = scalar.constant true : i1
+  %negated = scalar.xori %flag, %true : i1
+  %flag_word = scalar.extui %flag : i1 to i32
+  %negated_word = scalar.extui %negated : i1 to i32
+  %fallback = scalar.constant -17 : i32
+  %selected = scf.select %tail, %lane_word, %fallback : i32
+  %byte_signed = scalar.extsi %byte : i8 to i32
+  %byte_unsigned = scalar.extui %byte : i8 to i32
+  %half_signed = scalar.extsi %half : i16 to i32
+  %half_unsigned = scalar.extui %half : i16 to i32
+  %tiny4_float = scalar.extf %tiny4 : f8E4M3 to f32
+  %tiny5_float = scalar.extf %tiny5 : f8E5M2 to f32
+  %narrow_float = scalar.extf %narrow : f16 to f32
+  %brain_float = scalar.extf %brain : bf16 to f32
+  %tiny4_word = scalar.bitcast %tiny4_float : f32 to i32
+  %tiny5_word = scalar.bitcast %tiny5_float : f32 to i32
+  %narrow_word = scalar.bitcast %narrow_float : f32 to i32
+  %brain_word = scalar.bitcast %brain_float : f32 to i32
+  %predicate0 = vector.extract %predicates[0] : vector<3xi1> -> i1
+  %predicate1 = vector.extract %predicates[1] : vector<3xi1> -> i1
+  %predicate2 = vector.extract %predicates[2] : vector<3xi1> -> i1
+  %predicate0_word = scalar.extui %predicate0 : i1 to i32
+  %predicate1_word = scalar.extui %predicate1 : i1 to i32
+  %predicate2_word = scalar.extui %predicate2 : i1 to i32
+  %last_byte = vector.extract %bytes[4] : vector<5xi8> -> i8
+  %last_byte_signed = scalar.extsi %last_byte : i8 to i32
+  %last_byte_unsigned = scalar.extui %last_byte : i8 to i32
+  %last_half = vector.extract %halves[2] : vector<3xi16> -> i16
+  %last_half_signed = scalar.extsi %last_half : i16 to i32
+  %last_half_unsigned = scalar.extui %last_half : i16 to i32
+  view.store %flag_word, %out[%lane, 0] : i32, view<64x19xi32>
+  view.store %negated_word, %out[%lane, 1] : i32, view<64x19xi32>
+  view.store %selected, %out[%lane, 2] : i32, view<64x19xi32>
+  view.store %byte_signed, %out[%lane, 3] : i32, view<64x19xi32>
+  view.store %byte_unsigned, %out[%lane, 4] : i32, view<64x19xi32>
+  view.store %half_signed, %out[%lane, 5] : i32, view<64x19xi32>
+  view.store %half_unsigned, %out[%lane, 6] : i32, view<64x19xi32>
+  view.store %tiny4_word, %out[%lane, 7] : i32, view<64x19xi32>
+  view.store %tiny5_word, %out[%lane, 8] : i32, view<64x19xi32>
+  view.store %narrow_word, %out[%lane, 9] : i32, view<64x19xi32>
+  view.store %brain_word, %out[%lane, 10] : i32, view<64x19xi32>
+  view.store %predicate0_word, %out[%lane, 11] : i32, view<64x19xi32>
+  view.store %predicate1_word, %out[%lane, 12] : i32, view<64x19xi32>
+  view.store %predicate2_word, %out[%lane, 13] : i32, view<64x19xi32>
+  view.store %last_byte_signed, %out[%lane, 14] : i32, view<64x19xi32>
+  view.store %last_byte_unsigned, %out[%lane, 15] : i32, view<64x19xi32>
+  view.store %last_half_signed, %out[%lane, 16] : i32, view<64x19xi32>
+  view.store %last_half_unsigned, %out[%lane, 17] : i32, view<64x19xi32>
+  view.store %wide, %out[%lane, 18] : i32, view<64x19xi32>
+  kernel.return
+}

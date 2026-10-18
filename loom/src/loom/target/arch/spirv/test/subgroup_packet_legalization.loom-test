@@ -1,0 +1,276 @@
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// Native packets keep component order and the reduction's cluster contract.
+kernel.def @native_packet_reduction() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%left: i64, %right: i64) {
+  %values = vector.from_elements %left, %right, %left, %right, %left, %right : vector<6xi64>
+  %result = kernel.subgroup.reduce<addi> %values {cluster_size = 8, cluster_stride = 1} : vector<6xi64>
+  test.use %result : vector<6xi64>
+  kernel.return
+}
+
+// ----
+kernel.def @native_packet_reduction() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%left: i64, %right: i64) {
+  %values = vector.from_elements %left, %right, %left, %right, %left, %right : vector<6xi64>
+  %6 = vector.slice %values[0] : vector<6xi64> -> vector<4xi64>
+  %7 = kernel.subgroup.reduce<addi> %6 {cluster_size = 8, cluster_stride = 1} : vector<4xi64>
+  %8 = vector.slice %values[4] : vector<6xi64> -> vector<2xi64>
+  %9 = kernel.subgroup.reduce<addi> %8 {cluster_size = 8, cluster_stride = 1} : vector<2xi64>
+  %result = vector.concat<0> %7, %9 : vector<4xi64>, vector<2xi64> -> vector<6xi64>
+  test.use %result : vector<6xi64>
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// A one-component tail retains the authored scan mode and direction.
+kernel.def @native_packet_scan() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%left: i16, %right: i16) {
+  %values = vector.from_elements %left, %right, %left, %right, %left : vector<5xi16>
+  %result = kernel.subgroup.scan<addi> %values {direction = forward, mode = exclusive} : vector<5xi16>
+  test.use %result : vector<5xi16>
+  kernel.return
+}
+
+// ----
+kernel.def @native_packet_scan() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%left: i16, %right: i16) {
+  %values = vector.from_elements %left, %right, %left, %right, %left : vector<5xi16>
+  %6 = vector.slice %values[0] : vector<5xi16> -> vector<4xi16>
+  %7 = kernel.subgroup.scan<addi> %6 {direction = forward, mode = exclusive} : vector<4xi16>
+  %8 = vector.slice %values[4] : vector<5xi16> -> vector<1xi16>
+  %9 = kernel.subgroup.scan<addi> %8 {direction = forward, mode = exclusive} : vector<1xi16>
+  %result = vector.concat<0> %7, %9 : vector<4xi16>, vector<1xi16> -> vector<5xi16>
+  test.use %result : vector<5xi16>
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// Validity is a scalar property of the shared source lane. Both packets keep
+// dynamic addressing and consume the captured value, not a load replayed after
+// the aliasing write.
+kernel.def @packet_shuffle_validity() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %replacement: i32, %source_lane: i32, %width: i32) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<32x7xi32>
+  %captured = vector.load %source[%item, 0] : view<32x7xi32> -> vector<7xi32>
+  %replacement_values = vector.splat %replacement : vector<7xi32>
+  vector.store %replacement_values, %source[%item, 0] : vector<7xi32>, view<32x7xi32>
+  %result, %valid = kernel.subgroup.shuffle<index> %captured, %source_lane, %width : vector<7xi32>, i32, i32
+  test.use %result, %valid : vector<7xi32>, i1
+  kernel.return
+}
+
+// ----
+kernel.def @packet_shuffle_validity() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %replacement: i32, %source_lane: i32, %width: i32) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<32x7xi32>
+  %45 = index.constant 0 : index
+  %46 = view.load %source[%item, %45] : view<32x7xi32> -> i32
+  %47 = index.constant 1 : index
+  %48 = view.load %source[%item, %47] : view<32x7xi32> -> i32
+  %49 = index.constant 2 : index
+  %50 = view.load %source[%item, %49] : view<32x7xi32> -> i32
+  %51 = index.constant 3 : index
+  %52 = view.load %source[%item, %51] : view<32x7xi32> -> i32
+  %53 = index.constant 4 : index
+  %54 = view.load %source[%item, %53] : view<32x7xi32> -> i32
+  %55 = index.constant 5 : index
+  %56 = view.load %source[%item, %55] : view<32x7xi32> -> i32
+  %57 = index.constant 6 : index
+  %58 = view.load %source[%item, %57] : view<32x7xi32> -> i32
+  %captured = vector.from_elements %46, %48, %50, %52, %54, %56, %58 : vector<7xi32>
+  %replacement_values = vector.splat %replacement : vector<7xi32>
+  vector.store %replacement_values, %source[%item, 0] : vector<7xi32>, view<32x7xi32>
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.constant 1 : i32
+  %15 = scalar.constant 32 : i32
+  %16 = scalar.cmpi ne, %width, %13 : i32
+  %17 = scalar.cmpi ule, %width, %15 : i32
+  %18 = scalar.andi %16, %17 : i1
+  %19 = scf.select %18, %width, %14 : i32
+  %20 = scalar.cmpi ult, %source_lane, %19 : i32
+  %21 = scalar.andi %18, %20 : i1
+  %22 = scf.select %21, %source_lane, %13 : i32
+  %23 = kernel.subgroup.lane.id : index
+  %24 = index.cast %23 : index to i32
+  %25 = scalar.divui %24, %19 : i32
+  %26 = scalar.muli %25, %19 : i32
+  %27 = scalar.addi %26, %22 : i32
+  %28 = scalar.divui %27, %19 : i32
+  %29 = scalar.cmpi eq, %28, %25 : i32
+  %30 = scalar.cmpi ult, %27, %15 : i32
+  %31 = scalar.andi %21, %29 : i1
+  %32 = scalar.andi %31, %30 : i1
+  %33 = scf.select %32, %27, %24 : i32
+  %60 = scalar.constant 31 : i32
+  %61 = scalar.andi %33, %60 : i32
+  %38 = vector.slice %captured[0] : vector<7xi32> -> vector<4xi32>
+  %39, %40 = kernel.subgroup.shuffle<index> %38, %61, %15 : vector<4xi32>, i32, i32
+  %41 = vector.slice %captured[4] : vector<7xi32> -> vector<3xi32>
+  %42, %43 = kernel.subgroup.shuffle<index> %41, %61, %15 : vector<3xi32>, i32, i32
+  %result = vector.concat<0> %39, %42 : vector<4xi32>, vector<3xi32> -> vector<7xi32>
+  %valid = scalar.andi %32, %40 : i1
+  test.use %result, %valid : vector<7xi32>, i1
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// Unsupported arithmetic remains an authored requirement, not an excuse to
+// discard preserve or expand a separate reference tree for each packet.
+kernel.def @preserved_arithmetic() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%left: f32, %right: f32) {
+  %values = vector.from_elements %left, %right, %left, %right, %left : vector<5xf32>
+  %result = kernel.subgroup.scan<addf, preserve> %values {cluster_size = 4, cluster_stride = 2, direction = reverse, mode = exclusive} : vector<5xf32>
+  test.use %result : vector<5xf32>
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// Extrema retain preservation flags while their native packet contracts
+// implement the exact NaN and signed-zero semantics.
+kernel.def @preserved_packet_extremum() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%left: f32, %right: f32) {
+  %values = vector.from_elements %left, %right, %left, %right, %left, %right, %left : vector<7xf32>
+  %result = kernel.subgroup.reduce<minnumf, preserve> %values {cluster_size = 8, cluster_stride = 1} : vector<7xf32>
+  test.use %result : vector<7xf32>
+  kernel.return
+}
+
+// ----
+kernel.def @preserved_packet_extremum() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%left: f32, %right: f32) {
+  %values = vector.from_elements %left, %right, %left, %right, %left, %right, %left : vector<7xf32>
+  %6 = vector.slice %values[0] : vector<7xf32> -> vector<4xf32>
+  %7 = kernel.subgroup.reduce<minnumf, preserve> %6 {cluster_size = 8, cluster_stride = 1} : vector<4xf32>
+  %8 = vector.slice %values[4] : vector<7xf32> -> vector<3xf32>
+  %9 = kernel.subgroup.reduce<minnumf, preserve> %8 {cluster_size = 8, cluster_stride = 1} : vector<3xf32>
+  %result = vector.concat<0> %7, %9 : vector<4xf32>, vector<3xf32> -> vector<7xf32>
+  test.use %result : vector<7xf32>
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// Legal native carriers are not split, including a four-component F64 value.
+kernel.def @native_carriers() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%single: f32, %wide: vector<4xf64>) {
+  %single_result = kernel.subgroup.reduce<addf> %single : f32
+  %wide_result = kernel.subgroup.scan<addf> %wide {direction = forward, mode = inclusive} : vector<4xf64>
+  test.use %single_result, %wide_result : f32, vector<4xf64>
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=final},canonicalize,dce
+
+// A two-lane reverse scan requires one shared shuffle stage. Preserve packed
+// arithmetic through the scalar observer rather than replaying every lane.
+kernel.def @packet_reference_arithmetic() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer, %left: f32, %right: f32) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %destination = buffer.view %output[%base] : buffer -> view<32x2xf32>
+  %values = vector.from_elements %left, %right, %left, %right, %left, %right : vector<6xf32>
+  %prefix = kernel.subgroup.scan<addf> %values {cluster_size = 2, direction = reverse, mode = inclusive} : vector<6xf32>
+  %head = vector.extract %prefix[3] : vector<6xf32> -> f32
+  %observed = vector.extract %prefix[5] : vector<6xf32> -> f32
+  view.store %head, %destination[%item, 0] : f32, view<32x2xf32>
+  view.store %observed, %destination[%item, 1] : f32, view<32x2xf32>
+  kernel.return
+}
+
+// ----
+kernel.def @packet_reference_arithmetic() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer, %left: f32, %right: f32) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %destination = buffer.view %output[%base] : buffer -> view<32x2xf32>
+  %46 = scalar.constant 32 : i32
+  %90 = scalar.constant 1 : i32
+  %54 = kernel.subgroup.lane.id : index
+  %55 = index.cast %54 : index to i32
+  %88 = scalar.constant 1 : i32
+  %89 = scalar.shrui %55, %88 : i32
+  %58 = scalar.addi %55, %90 : i32
+  %86 = scalar.constant 1 : i32
+  %87 = scalar.shrui %58, %86 : i32
+  %60 = scalar.cmpi eq, %87, %89 : i32
+  %61 = scalar.cmpi ult, %58, %46 : i32
+  %63 = scalar.andi %60, %61 : i1
+  %64 = scf.select %63, %58, %55 : i32
+  %84 = scalar.constant 31 : i32
+  %85 = scalar.andi %64, %84 : i32
+  %83 = vector.from_elements %left, %right, %left, %right : vector<4xf32>
+  %70, %71 = kernel.subgroup.shuffle<index> %83, %85, %46 : vector<4xf32>, i32, i32
+  %82 = vector.from_elements %left, %right : vector<2xf32>
+  %73, %74 = kernel.subgroup.shuffle<index> %82, %85, %46 : vector<2xf32>, i32, i32
+  %68 = scalar.andi %63, %71 : i1
+  %38 = vector.from_elements %left, %right, %left, %right : vector<4xf32>
+  %18 = vector.addf %70, %38 : vector<4xf32>
+  %34 = vector.from_elements %left, %right : vector<2xf32>
+  %21 = vector.addf %73, %34 : vector<2xf32>
+  %33 = vector.from_elements %left, %right, %left, %right : vector<4xf32>
+  %25 = scf.select %68, %18, %33 : vector<4xf32>
+  %32 = vector.from_elements %left, %right : vector<2xf32>
+  %28 = scf.select %68, %21, %32 : vector<2xf32>
+  %head = vector.extract %25[3] : vector<4xf32> -> f32
+  %observed = vector.extract %28[1] : vector<2xf32> -> f32
+  view.store %head, %destination[%item, 0] : f32, view<32x2xf32>
+  view.store %observed, %destination[%item, 1] : f32, view<32x2xf32>
+  kernel.return
+}

@@ -9,6 +9,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/pipeline/legalizer_registry.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/codegen/pass_environment.h"
 #include "loom/format/text/printer.h"
 #include "loom/target/function_version.h"
@@ -34,6 +35,9 @@ typedef struct loomc_target_pass_environment_t {
 
   // Target-low descriptor registry used by target-low passes and emitters.
   loom_target_low_descriptor_registry_t low_descriptor_registry;
+
+  // Parser support borrowing this environment's target diagnostic providers.
+  loom_low_descriptor_text_asm_environment_storage_t text_asm_storage;
 
   // Canonical target-aware type printer options for diagnostics.
   loom_text_print_options_t diagnostic_type_print_options;

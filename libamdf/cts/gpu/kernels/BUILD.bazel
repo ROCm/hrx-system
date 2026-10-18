@@ -22,6 +22,7 @@ package(
 
 exports_files([
     "README.md",
+    "argument_payloads.loom",
     "byte_copy_unaligned.loom",
     "completed_tick.cxx",
     "completed_tick.loom",
@@ -174,6 +175,14 @@ amdf_cc_library(
     name = "transform",
     testonly = True,
     hdrs = ["transform.h"],
+)
+
+amdf_cts_gpu_kernel_set(
+    name = "argument_payloads_kernels",
+    srcs = ["argument_payloads.loom"],
+    entry_point = "argument_payloads",
+    namespace = "kernels::argument_payloads",
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
 )
 
 amdf_cc_library(

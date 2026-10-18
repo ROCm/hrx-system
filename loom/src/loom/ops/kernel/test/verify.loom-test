@@ -135,6 +135,159 @@ kernel.def @view_backed_workgroup_count(%counts: buffer) {
 
 // ====
 
+// Required-inline helpers retain explicit workload provenance and numeric
+// facts across the authored call boundary.
+func.def inline @load_workgroup_count(%counts: buffer) -> (i32) {
+  %count_byte_offset = index.constant 0 : offset
+  %loaded = buffer.load.i8.u %counts[%count_byte_offset]
+  func.return %loaded : i32
+}
+
+kernel.def @helper_backed_workgroup_count(%counts: buffer) {
+  %loaded = func.call readonly @load_workgroup_count(%counts) : (buffer) -> (i32)
+  %count = index.cast %loaded : i32 to index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%counts: buffer) {
+  kernel.return
+}
+
+// ====
+
+// Nested helpers preserve the exact reference arguments selected by the
+// returned buffer. The unused hidden argument must not taint the read origin.
+func.decl pure @helper_hidden_storage() -> (buffer)
+
+func.def inline @select_workload_storage(%choose_left: i1, %left: buffer, %right: buffer, %unused: buffer) -> (buffer) {
+  %selected = scf.select %choose_left, %left, %right : buffer
+  func.return %selected : buffer
+}
+
+func.def inline @load_selected_workgroup_count(%choose_left: i1, %left: buffer, %right: buffer, %unused: buffer) -> (i32) {
+  %selected = func.call pure @select_workload_storage(%choose_left, %left, %right, %unused) : (i1, buffer, buffer, buffer) -> (buffer)
+  %count_byte_offset = index.constant 0 : offset
+  %loaded = buffer.load.i8.u %selected[%count_byte_offset]
+  func.return %loaded : i32
+}
+
+kernel.def @nested_helper_backed_workgroup_count(%choose_left: i1, %left: buffer, %right: buffer) {
+  %hidden = func.call pure @helper_hidden_storage() : () -> (buffer)
+  %loaded = func.call readonly @load_selected_workgroup_count(%choose_left, %left, %right, %hidden) : (i1, buffer, buffer, buffer) -> (i32)
+  %count = index.cast %loaded : i32 to index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%choose_left: i1, %left: buffer, %right: buffer) {
+  kernel.return
+}
+
+// ====
+
+// A helper result that can select hidden storage does not inherit the visible
+// workload argument's origin.
+func.decl pure @helper_hidden_storage() -> (buffer)
+
+func.def inline @load_maybe_hidden_workgroup_count(%choose_workload: i1, %workload: buffer, %hidden: buffer) -> (i32) {
+  %selected = scf.select %choose_workload, %workload, %hidden : buffer
+  %count_byte_offset = index.constant 0 : offset
+  %loaded = buffer.load.i8.u %selected[%count_byte_offset]
+  func.return %loaded : i32
+}
+
+kernel.def @mixed_origin_helper_workgroup_count(%choose_workload: i1, %workload: buffer) {
+  %hidden = func.call pure @helper_hidden_storage() : () -> (buffer)
+  // ERROR@+1: STRUCTURE/060 {op_name="func.call"}
+  %loaded = func.call readonly @load_maybe_hidden_workgroup_count(%choose_workload, %workload, %hidden) : (i1, buffer, buffer) -> (i32)
+  %count = index.cast %loaded : i32 to index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%choose_workload: i1, %workload: buffer) {
+  kernel.return
+}
+
+// ====
+
+// A nested helper cannot erase a hidden source from a returned reference.
+func.decl pure @nested_helper_hidden_storage() -> (buffer)
+
+func.def inline @select_maybe_hidden_storage(%choose_workload: i1, %workload: buffer) -> (buffer) {
+  %hidden = func.call pure @nested_helper_hidden_storage() : () -> (buffer)
+  %selected = scf.select %choose_workload, %workload, %hidden : buffer
+  func.return %selected : buffer
+}
+
+func.def inline @load_nested_maybe_hidden_workgroup_count(%choose_workload: i1, %workload: buffer) -> (i32) {
+  %selected = func.call pure @select_maybe_hidden_storage(%choose_workload, %workload) : (i1, buffer) -> (buffer)
+  %count_byte_offset = index.constant 0 : offset
+  // ERROR@+1: STRUCTURE/060 {op_name="buffer.load.i8.u"}
+  %loaded = buffer.load.i8.u %selected[%count_byte_offset]
+  func.return %loaded : i32
+}
+
+kernel.def @nested_mixed_origin_helper_workgroup_count(%choose_workload: i1, %workload: buffer) {
+  %loaded = func.call readonly @load_nested_maybe_hidden_workgroup_count(%choose_workload, %workload) : (i1, buffer) -> (i32)
+  %count = index.cast %loaded : i32 to index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%choose_workload: i1, %workload: buffer) {
+  kernel.return
+}
+
+// ====
+
+// Storage dependence crosses the helper boundary and remains forbidden for a
+// required workgroup size.
+func.def inline @load_workgroup_size(%counts: buffer) -> (i32) {
+  %count_byte_offset = index.constant 0 : offset
+  %loaded = buffer.load.i8.u %counts[%count_byte_offset]
+  func.return %loaded : i32
+}
+
+kernel.def @helper_backed_workgroup_size(%counts: buffer) {
+  %loaded = func.call readonly @load_workgroup_size(%counts) : (buffer) -> (i32)
+  %size = index.cast %loaded : i32 to index
+  %c1 = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/061 {field_name="workgroup_size[x]"}
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%size, %c1, %c1) : index
+} launch(%counts: buffer) {
+  kernel.return
+}
+
+// ====
+
+func.def inline @load_unbounded_workgroup_count(%counts: buffer) -> (i32) {
+  %count_byte_offset = index.constant 0 : offset
+  %view = buffer.view %counts[%count_byte_offset] : buffer -> view<1xi32>
+  %loaded = view.load %view[0] : view<1xi32> -> i32
+  func.return %loaded : i32
+}
+
+kernel.def @helper_backed_unbounded_workgroup_count(%counts: buffer) {
+  %loaded = func.call readonly @load_unbounded_workgroup_count(%counts) : (buffer) -> (i32)
+  %count = index.cast %loaded : i32 to index
+  %c1 = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/062 {field_name="workgroup_count[x]", range_lower="-2147483648", range_upper="2147483647"}
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%counts: buffer) {
+  kernel.return
+}
+
+// ====
+
+func.def inline @launch_subgroup_size() -> (index) {
+  %width = target.subgroup.size : index
+  func.return %width : index
+}
+
+kernel.def @helper_backed_target_query() {
+  %width = func.call pure @launch_subgroup_size() : () -> (index)
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
 // Atomic loads remain independently observable even with relaxed ordering.
 kernel.def @atomic_workgroup_count(%counts: buffer) {
   %count_byte_offset = index.constant 0 : offset

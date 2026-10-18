@@ -61,6 +61,7 @@ static iree_status_t loom_low_task_entry_parameters_prepare(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function,
     const loom_task_parameter_layout_t* abi,
     const loom_low_task_entry_lowering_t* lowering,
+    const loom_low_task_entry_builder_t* builder,
     loom_low_task_entry_parameters_t* out_parameters) {
   *out_parameters = (loom_low_task_entry_parameters_t){0};
   out_parameters->arguments =
@@ -87,8 +88,8 @@ static iree_status_t loom_low_task_entry_parameters_prepare(
     const loom_type_t type =
         loom_module_value_type(module, out_parameters->arguments[i]);
     out_parameters->types[i] = type;
-    const iree_string_view_t constraint =
-        lowering->parameter_constraint(type, size);
+    const iree_string_view_t constraint = lowering->parameter_constraint(
+        builder, abi->parameter_types[i], type, size);
     if (!iree_string_view_is_empty(constraint)) {
       const loom_diagnostic_param_t params[] = {
           loom_param_i64(i),
@@ -130,6 +131,7 @@ static iree_status_t loom_low_task_entry_build_parameter_imports(
     const uint8_t size =
         binding ? LOOM_TASK_ABI64_POINTER_SIZE : parameter->size;
     const loom_low_task_parameter_access_t access = {
+        .source_type = abi->parameter_types[i],
         .carrier_type = types[i],
         .table_offset = binding ? LOOM_TASK_ABI64_BINDINGS_OFFSET
                                 : LOOM_TASK_ABI64_CONSTANTS_OFFSET,
@@ -257,7 +259,7 @@ iree_status_t loom_low_task_materialize_kernel(
   }
   loom_low_task_entry_parameters_t parameter_plan;
   IREE_RETURN_IF_ERROR(loom_low_task_entry_parameters_prepare(
-      pass, module, function, &abi, lowering, &parameter_plan));
+      pass, module, function, &abi, lowering, &builder, &parameter_plan));
   if (loom_pass_has_error_diagnostics(pass)) {
     return iree_ok_status();
   }

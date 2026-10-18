@@ -200,7 +200,8 @@ loomc_status_t loomc_module_validate_serialize_options(
           "module serialize options have an unknown structure type");
     }
     if (options->structure_size != 0 &&
-        options->structure_size < sizeof(*options)) {
+        options->structure_size <
+            offsetof(loomc_module_serialize_options_t, text_presentation)) {
       return loomc_make_status(
           LOOMC_STATUS_INVALID_ARGUMENT,
           "module serialize options structure_size is too small");
@@ -262,6 +263,9 @@ static loomc_status_t loomc_module_resolve_serialize_options(
   out_options->format = required_format;
   out_options->identifier = identifier;
   out_options->text_presentation = text_presentation;
+  out_options->print_locations =
+      LOOMC_MODULE_SERIALIZE_OPTIONS_HAS_FIELD(options, print_locations) &&
+      options->print_locations;
   return loomc_ok_status();
 }
 
@@ -637,7 +641,7 @@ loomc_status_t loomc_module_admit_structural(loomc_module_t* module,
     return loomc_ok_status();
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loomc_result_verify_loom_module(module->module,
+      z0, loomc_result_verify_loom_module(module->context, module->module,
                                           loomc_module_source_resolver(module),
                                           /*max_errors=*/0, result));
   if (loomc_result_succeeded(result)) {
@@ -728,7 +732,8 @@ loomc_status_t loomc_module_verify(loomc_module_t* module,
           "module verify options have an unknown structure type");
     }
     if (options->structure_size != 0 &&
-        options->structure_size < sizeof(*options)) {
+        options->structure_size <
+            offsetof(loomc_module_verify_options_t, reserved)) {
       return loomc_make_status(
           LOOMC_STATUS_INVALID_ARGUMENT,
           "module verify options structure_size is too small");
@@ -737,6 +742,17 @@ loomc_status_t loomc_module_verify(loomc_module_t* module,
     LOOMC_RETURN_IF_ERROR(loomc_option_chain_resolve(
         options->next, /*allowed_options=*/0, &option_chain));
   }
+  const loomc_module_verify_scope_t scope =
+      options && options->structure_size >=
+                     offsetof(loomc_module_verify_options_t, scope) +
+                         sizeof(options->scope)
+          ? options->scope
+          : LOOMC_MODULE_VERIFY_SCOPE_DEFAULT;
+  if (scope != LOOMC_MODULE_VERIFY_SCOPE_DEFAULT &&
+      scope != LOOMC_MODULE_VERIFY_SCOPE_STRUCTURAL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "module verification scope is not supported");
+  }
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(
       LOOMC_STATUS_OK, loomc_context_source_retention(module->context),
@@ -744,12 +760,15 @@ loomc_status_t loomc_module_verify(loomc_module_t* module,
   const uint32_t max_errors = options ? options->max_errors : 0;
   loomc_module_invalidate_verification(module);
   loomc_status_t status = loomc_result_verify_loom_module(
-      module->module, loomc_module_source_resolver(module), max_errors, result);
+      module->context, module->module, loomc_module_source_resolver(module),
+      max_errors, result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     module->verification.structural = true;
-    status = loomc_module_verify_target_into_result(
-        module, loomc_context_target_environment(module->context), max_errors,
-        result);
+    if (scope == LOOMC_MODULE_VERIFY_SCOPE_DEFAULT) {
+      status = loomc_module_verify_target_into_result(
+          module, loomc_context_target_environment(module->context), max_errors,
+          result);
+    }
   }
   if (loomc_status_is_ok(status)) {
     *out_result = result;

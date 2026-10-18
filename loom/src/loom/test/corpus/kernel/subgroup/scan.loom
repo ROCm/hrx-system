@@ -585,3 +585,125 @@ check.scenario @subgroup_scan_exact_narrowing_values {
   }
   check.return
 }
+
+// Runtime inputs vary independently by invocation and vector component. An
+// independent serial fold uses recorded topology, not subgroup arithmetic.
+kernel.def @subgroup_scan_wide_sums() {
+  %unit = index.constant 1 : index
+  %items = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %lane = kernel.subgroup.lane.id : index
+  %subgroup = kernel.subgroup.id : index
+  %lane_i32 = index.cast %lane : index to i32
+  %subgroup_i32 = index.cast %subgroup : index to i32
+  %topology_bytes = index.constant 536 : offset
+  %scratch = buffer.alloca<workgroup> align(4) %topology_bytes : buffer
+  %topology = buffer.view %scratch[%base] : buffer -> view<67x2xi32>
+  %result_bytes = index.constant 8040 : offset
+  %results = buffer.alloca<workgroup> align(4) %result_bytes : buffer
+  %actual = buffer.view %results[%base] : buffer -> view<67x5x6xf32>
+  view.store %lane_i32, %topology[%item, 0] : i32, view<67x2xi32>
+  view.store %subgroup_i32, %topology[%item, 1] : i32, view<67x2xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %source = buffer.view %input[%base] : buffer -> view<67x6xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<67xi32>
+  %value = vector.load %source[%item, 0] : view<67x6xf32> -> vector<6xf32>
+  %c3 = scalar.constant 3 : i32
+  %c1 = scalar.constant 1 : i32
+  %lane_class = scalar.remui %lane_i32, %c3 : i32
+  %active = scalar.cmpi ne, %lane_class, %c1 : i32
+  %none = scalar.constant 0 : i32
+  %difference = scf.if %active -> (i32) {
+    %total = kernel.subgroup.reduce<addf> %value : vector<6xf32>
+    %through = kernel.subgroup.scan<addf> %value {direction = forward, mode = inclusive} : vector<6xf32>
+    %before = kernel.subgroup.scan<addf> %value {direction = forward, mode = exclusive} : vector<6xf32>
+    %from = kernel.subgroup.scan<addf> %value {direction = reverse, mode = inclusive} : vector<6xf32>
+    %after = kernel.subgroup.scan<addf> %value {direction = reverse, mode = exclusive} : vector<6xf32>
+    vector.store %total, %actual[%item, 0, 0] : vector<6xf32>, view<67x5x6xf32>
+    vector.store %through, %actual[%item, 1, 0] : vector<6xf32>, view<67x5x6xf32>
+    vector.store %before, %actual[%item, 2, 0] : vector<6xf32>, view<67x5x6xf32>
+    vector.store %from, %actual[%item, 3, 0] : vector<6xf32>, view<67x5x6xf32>
+    vector.store %after, %actual[%item, 4, 0] : vector<6xf32>, view<67x5x6xf32>
+    %begin = index.constant 0 : index
+    %end = index.constant 67 : index
+    %components = index.constant 6 : index
+    %step = index.constant 1 : index
+    %sum_identity = scalar.constant 0.0 : f32
+    %mismatches = scf.for %component = [%begin to %components step %step](%previous = %none : i32) -> (i32) {
+      %sum, %forward_inclusive, %forward_exclusive, %reverse_inclusive, %reverse_exclusive = scf.for %other = [%begin to %end step %step](%sum_acc = %sum_identity : f32, %through_acc = %sum_identity : f32, %before_acc = %sum_identity : f32, %from_acc = %sum_identity : f32, %after_acc = %sum_identity : f32) -> (f32, f32, f32, f32, f32) {
+        %other_lane = view.load %topology[%other, 0] : view<67x2xi32> -> i32
+        %other_subgroup = view.load %topology[%other, 1] : view<67x2xi32> -> i32
+        %other_value = view.load %source[%other, %component] : view<67x6xf32> -> f32
+        %same_subgroup = scalar.cmpi eq, %subgroup_i32, %other_subgroup : i32
+        %other_class = scalar.remui %other_lane, %c3 : i32
+        %other_active = scalar.cmpi ne, %other_class, %c1 : i32
+        %include = scalar.andi %same_subgroup, %other_active : i1
+        %contribution = scf.select %include, %other_value, %sum_identity : f32
+        %at_or_before = scalar.cmpi ule, %other_lane, %lane_i32 : i32
+        %earlier = scalar.cmpi ult, %other_lane, %lane_i32 : i32
+        %at_or_after = scalar.cmpi uge, %other_lane, %lane_i32 : i32
+        %later = scalar.cmpi ugt, %other_lane, %lane_i32 : i32
+        %through_value = scf.select %at_or_before, %contribution, %sum_identity : f32
+        %before_value = scf.select %earlier, %contribution, %sum_identity : f32
+        %from_value = scf.select %at_or_after, %contribution, %sum_identity : f32
+        %after_value = scf.select %later, %contribution, %sum_identity : f32
+        %next_sum = scalar.addf %sum_acc, %contribution : f32
+        %next_through = scalar.addf %through_acc, %through_value : f32
+        %next_before = scalar.addf %before_acc, %before_value : f32
+        %next_from = scalar.addf %from_acc, %from_value : f32
+        %next_after = scalar.addf %after_acc, %after_value : f32
+        scf.yield %next_sum, %next_through, %next_before, %next_from, %next_after : f32, f32, f32, f32, f32
+      }
+      %actual_sum = view.load %actual[%item, 0, %component] : view<67x5x6xf32> -> f32
+      %actual_through = view.load %actual[%item, 1, %component] : view<67x5x6xf32> -> f32
+      %actual_before = view.load %actual[%item, 2, %component] : view<67x5x6xf32> -> f32
+      %actual_from = view.load %actual[%item, 3, %component] : view<67x5x6xf32> -> f32
+      %actual_after = view.load %actual[%item, 4, %component] : view<67x5x6xf32> -> f32
+      %sum_matches = scalar.cmpf oeq, %actual_sum, %sum : f32
+      %through_matches = scalar.cmpf oeq, %actual_through, %forward_inclusive : f32
+      %before_matches = scalar.cmpf oeq, %actual_before, %forward_exclusive : f32
+      %from_matches = scalar.cmpf oeq, %actual_from, %reverse_inclusive : f32
+      %after_matches = scalar.cmpf oeq, %actual_after, %reverse_exclusive : f32
+      %forward_matches = scalar.andi %through_matches, %before_matches : i1
+      %reverse_matches = scalar.andi %from_matches, %after_matches : i1
+      %scans_match = scalar.andi %forward_matches, %reverse_matches : i1
+      %matches = scalar.andi %sum_matches, %scans_match : i1
+      %failed = scf.select %matches, %none, %c1 : i32
+      %next = scalar.ori %previous, %failed : i32
+      scf.yield %next : i32
+    }
+    scf.yield %mismatches : i32
+  } else {
+    scf.yield %none : i32
+  }
+  view.store %difference, %destination[%item] : i32, view<67xi32>
+  kernel.return
+}
+
+func.def @subgroup_scan_wide_sums_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 67 : index
+  %step = index.constant 1 : index
+  %no_mismatch = scalar.constant 0 : i32
+  %destination = buffer.view %output[%base] : buffer -> view<67xi32>
+  scf.for %item = [%begin to %end step %step] {
+    view.store %no_mismatch, %destination[%item] : i32, view<67xi32>
+  }
+  func.return
+}
+
+check.scenario @subgroup_scan_wide_sum_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32.0) step(0.25) : tensor<67x6xf32>
+    %output = check.generate.fill value(-1) : tensor<67xi32>
+    check.compare<@subgroup_scan_wide_sums, @subgroup_scan_wide_sums_oracle>(%input, %output) : (tensor<67x6xf32>, tensor<67xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<67x6xf32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67xi32>
+    }
+  }
+  check.return
+}

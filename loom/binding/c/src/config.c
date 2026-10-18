@@ -61,7 +61,8 @@ loomc_status_t loomc_config_apply_module(
   loom_config_application_result_t materialize_result = {0};
   loomc_status_t status = loomc_ok_status();
   if (options->config_module != NULL) {
-    status = loomc_result_verify_loom_module(options->config_module,
+    status = loomc_result_verify_loom_module(options->context,
+                                             options->config_module,
                                              options->config_source_resolver,
                                              /*max_errors=*/0, options->result);
   }
@@ -73,7 +74,8 @@ loomc_status_t loomc_config_apply_module(
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(options->result) &&
       materialize_result.materialized_count != 0) {
-    status = loomc_result_verify_loom_module(options->target_module,
+    status = loomc_result_verify_loom_module(options->context,
+                                             options->target_module,
                                              options->target_source_resolver,
                                              /*max_errors=*/0, options->result);
   }

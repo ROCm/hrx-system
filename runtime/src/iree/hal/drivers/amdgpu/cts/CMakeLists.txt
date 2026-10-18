@@ -95,6 +95,7 @@ iree_amdgpu_hal_cts_testdata(
     "testdata/executable_test.c"
     "testdata/execution_queue_mask_test.c"
     "testdata/hostcall_buffer_test.c"
+    "testdata/indirect_dispatch_geometry_test.c"
   TESTONLY
 )
 endif()

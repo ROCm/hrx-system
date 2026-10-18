@@ -8,6 +8,7 @@
 #define LOOM_IMPORT_CXX_SYMBOL_FUNCTIONS_H_
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -41,6 +42,36 @@ enum class FunctionKind {
   CheckScenario,
 };
 
+// Native transport selected for a reached C++ implicit-object function. One
+// source method may have both private instances when callers own the object in
+// different representations.
+enum class ImplicitObjectABI {
+  // Namespace, static-member, or explicit-object function.
+  None,
+  // Flattened record components with functional writeback when mutable.
+  Value,
+  // Original pointer root and byte offset with in-place storage effects.
+  Storage,
+};
+
+// One reachable source function under its native implicit-object transport.
+// The symbol is the concrete definition identity, including template
+// substitution; receiver ABI only specializes non-static member functions.
+struct FunctionInstance {
+  cxx::FunctionSymbol* symbol;
+  ImplicitObjectABI receiver_abi;
+};
+
+// Admitted implicit object bound ahead of every explicit source parameter.
+struct ImplicitObjectParameter {
+  // Native transport selected by the call site's owned representation.
+  ImplicitObjectABI abi;
+  // Cv-qualified complete source object type governing member observations.
+  const cxx::Type* object_type;
+  // Whether a value receiver returns its possibly replaced components.
+  bool mutable_access;
+};
+
 // One source lvalue-reference parameter projected through Loom's value ABI.
 // Parameters remain in source order and are indexed by semantic ordinal so
 // redeclarations need not share parameter symbol identities.
@@ -70,6 +101,8 @@ struct FunctionBody {
   std::span<const ParameterContract> parameter_contracts;
   // Admitted non-escaping value references in source parameter order.
   std::span<const ValueReferenceParameter> reference_parameters;
+  // Implicit object transport for a reached non-static member definition.
+  std::optional<ImplicitObjectParameter> implicit_object;
 };
 
 // Native definition and any source-owned launch configuration body that must
@@ -112,8 +145,9 @@ class Functions {
   void select(std::span<const iree_string_view_t> roots);
   // Retains one identity and queues a newly reached source definition or
   // bodyless namespace declaration exactly once.
-  loom_symbol_ref_t declare(cxx::FunctionSymbol* function,
-                            cxx::AST* owner = nullptr);
+  loom_symbol_ref_t declare(
+      cxx::FunctionSymbol* function, cxx::AST* owner = nullptr,
+      ImplicitObjectABI receiver_abi = ImplicitObjectABI::None);
   // Returns the concrete definition retained for a semantic declaration, or
   // the frontend-owned definition of a reached concrete template instance.
   cxx::FunctionSymbol* definition(cxx::FunctionSymbol* function) const;
@@ -128,10 +162,10 @@ class Functions {
   void build_benchmarks(Locations& locations, loom_builder_t* builder);
   // Discovery order grows as declare reaches helpers. Spans are invalidated by
   // growth; consumers obtain the next indexed entry after each body finishes.
-  std::span<cxx::FunctionSymbol* const> pending() const { return pending_; }
+  std::span<const FunctionInstance> pending() const { return pending_; }
   // Builds the selected native definition and launch contract at the caller's
   // module insertion point. The caller then enters and fills the returned body.
-  DefinedFunction define(cxx::FunctionSymbol* symbol, Types& types,
+  DefinedFunction define(FunctionInstance instance, Types& types,
                          Locations& locations, loom_builder_t* builder);
   // Returns the retained value-reference ABI for a reached function.
   std::span<const ValueReferenceParameter> reference_parameters(
@@ -145,13 +179,12 @@ class Functions {
                          cxx::AST* owner, DeclarationScope scope);
   void admit_symbol(cxx::Symbol* symbol,
                     cxx::List<cxx::AttributeSpecifierAST*>* attributes);
-  loom_symbol_ref_t create_symbol(cxx::FunctionSymbol* function,
-                                  cxx::AST* source);
-  loom_symbol_ref_t retain(cxx::FunctionSymbol* function, cxx::AST* owner);
+  loom_symbol_ref_t create_symbol(FunctionInstance instance, cxx::AST* source);
+  loom_symbol_ref_t retain(FunctionInstance instance, cxx::AST* owner);
   void admit_reference_parameters(cxx::FunctionSymbol* symbol,
                                   cxx::AST* source);
   BoundSignature bind_callable_signature(
-      cxx::FunctionSymbol* symbol, cxx::AST* source, Types& types,
+      FunctionInstance instance, cxx::AST* source, Types& types,
       loom_builder_t* builder, std::vector<loom_type_t>& arguments,
       std::vector<loom_type_t>& results,
       std::vector<loom_tied_result_t>& tied_results,
@@ -162,6 +195,22 @@ class Functions {
   void collect(cxx::DeclarationAST* declaration, DeclarationScope scope,
                std::vector<cxx::FunctionSymbol*>& definitions);
   const std::string& qualified_name(cxx::FunctionSymbol* symbol);
+  std::optional<ImplicitObjectParameter> implicit_object(
+      FunctionInstance instance, cxx::AST* source) const;
+
+  struct FunctionInstanceHash {
+    size_t operator()(const FunctionInstance& instance) const {
+      return std::hash<cxx::FunctionSymbol*>{}(instance.symbol) ^
+             (static_cast<size_t>(instance.receiver_abi) << 1);
+    }
+  };
+  struct FunctionInstanceEqual {
+    bool operator()(const FunctionInstance& left,
+                    const FunctionInstance& right) const {
+      return left.symbol == right.symbol &&
+             left.receiver_abi == right.receiver_abi;
+    }
+  };
 
   // Source declarations, semantic identities and namespace relationships.
   cxx::TranslationUnit& unit_;
@@ -228,9 +277,11 @@ class Functions {
   std::unordered_map<cxx::FunctionSymbol*, std::vector<ValueReferenceParameter>>
       reference_parameters_;
   // Each reached source function receives one native identity.
-  std::unordered_map<cxx::FunctionSymbol*, loom_symbol_ref_t> callees_;
+  std::unordered_map<FunctionInstance, loom_symbol_ref_t, FunctionInstanceHash,
+                     FunctionInstanceEqual>
+      callees_;
   // Reachable worklist in deterministic discovery order.
-  std::vector<cxx::FunctionSymbol*> pending_;
+  std::vector<FunctionInstance> pending_;
   // Reachable bodyless declarations in deterministic discovery order.
   std::vector<FunctionDeclaration> pending_declarations_;
   // Canonical declarations inherit one exact name borrowed from source text.

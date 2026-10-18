@@ -23,7 +23,6 @@
 #include "loom/target/arch/x86/descriptors/avx_vnni_int8_descriptors.h"
 #include "loom/target/arch/x86/descriptors/packed_dot_descriptors.h"
 #include "loom/target/arch/x86/descriptors/scalar_descriptors.h"
-#include "loom/target/arch/x86/descriptors/simd128_descriptors.h"
 #include "loom/target/arch/x86/feature_bits.h"
 
 namespace loom {
@@ -116,7 +115,6 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
   };
   const Case cases[] = {
       {loom_x86_scalar_core_descriptor_set(), {16, 16, 0, 0, 0, 0}},
-      {loom_x86_simd128_core_descriptor_set(), {16, 16, 16, 0, 0, 0}},
       {loom_x86_avx2_core_descriptor_set(), {16, 16, 16, 16, 0, 0}},
       {loom_x86_avx512_core_descriptor_set(), {16, 16, 32, 32, 32, 8}},
       {loom_x86_avx512_features_core_descriptor_set(), {16, 16, 32, 32, 32, 8}},
@@ -180,7 +178,6 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
 TEST(X86RegisterClassesTest, CountClassesAliasTheSamePhysicalRegister) {
   for (const auto* descriptor_set : {
            loom_x86_scalar_core_descriptor_set(),
-           loom_x86_simd128_core_descriptor_set(),
            loom_x86_avx2_core_descriptor_set(),
            loom_x86_avx512_core_descriptor_set(),
            loom_x86_avx512_features_core_descriptor_set(),

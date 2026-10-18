@@ -98,10 +98,11 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1
   %extended_view = resource<hal_binding> {extent = 516, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %18 = v_mov_b32_copy %value
   %signed_value = v_bfe_i32_offset_width_inline %18 {offset = 0, width = 8}
+  %unsigned_value = v_and_b32_lit %18, 255
   global_store_b8_saddr %lane, %18, %raw_view {offset = 1}
-  %22 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %22, %signed_value, %extended_view {offset = 4}
-  global_store_b32_saddr %22, %18, %extended_view {offset = 260}
+  %23 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %23, %signed_value, %extended_view {offset = 4}
+  global_store_b32_saddr %23, %unsigned_value, %extended_view {offset = 260}
   return
 }
 
@@ -136,11 +137,12 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1
   %extended_view = resource<hal_binding> {extent = 516, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %18 = v_mov_b32_copy %value
   %signed_value = v_bfe_i32_offset_width_inline %18 {offset = 0, width = 16}
-  %22 = v_lshlrev_b32_src0_inline %lane, 1
-  global_store_short_saddr %22, %18, %raw_view {offset = 2}
-  %23 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %23, %signed_value, %extended_view {offset = 4}
-  global_store_b32_saddr %23, %18, %extended_view {offset = 260}
+  %unsigned_value = v_and_b32_lit %18, 65535
+  %23 = v_lshlrev_b32_src0_inline %lane, 1
+  global_store_short_saddr %23, %18, %raw_view {offset = 2}
+  %24 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %24, %signed_value, %extended_view {offset = 4}
+  global_store_b32_saddr %24, %unsigned_value, %extended_view {offset = 260}
   return
 }
 

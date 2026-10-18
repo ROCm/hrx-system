@@ -700,6 +700,7 @@ class CiTest(unittest.TestCase):
         )
         self.assertIn("--//loom/config:shared_tools", steps[6].argv)
         self.assertIn("//loom/src/loom/tools/loom-opt:execution_test", steps[6].argv)
+        self.assertIn("//loom/src/loom/tools/loom-format:execution_test", steps[6].argv)
         self.assertIn("//loom/src/loom/tooling/target/cpu/serve:all", steps[6].argv)
         for step in steps[:6]:
             self.assertNotIn("--//loom/config:shared_tools", step.argv)
@@ -1634,6 +1635,8 @@ fi
         self.assertIn("-DLOOM_LINK_SHARED_TOOLS=ON", steps[configure_index].argv)
         self.assertIn("-DLOOM_IMPORT_CXX=ON", steps[configure_index].argv)
         self.assertIn("loom-import-cxx", steps[configure_index + 1].argv)
+        self.assertIn("loom-format", steps[configure_index + 1].argv)
+        self.assertIn("loom-format", steps[-1].argv[steps[-1].argv.index("-R") + 1])
         self.assertIn(
             "loom_tooling_target_cpu_serve_loom-serve-test-tool",
             steps[configure_index + 1].argv,

@@ -10,6 +10,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -1041,7 +1042,11 @@ static iree_status_t loom_vector_static_shape_concat_rewrite(
 iree_status_t loom_vector_static_shape_rewrite_op(
     loom_target_legalization_context_t* context, loom_op_t* op,
     bool* out_rewritten) {
-  *out_rewritten = false;
+  IREE_RETURN_IF_ERROR(loom_vector_project_regular_partition(
+      op, context->rewriter, out_rewritten));
+  if (*out_rewritten) {
+    return iree_ok_status();
+  }
   switch (op->kind) {
     case LOOM_OP_VECTOR_BROADCAST:
       return loom_vector_static_shape_broadcast_rewrite(context, op,

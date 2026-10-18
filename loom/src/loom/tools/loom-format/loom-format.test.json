@@ -201,6 +201,59 @@
       ]
     },
     {
+      "name": "preserves annotated invalid fixtures through compiler results",
+      "steps": [
+        {
+          "name": "write-test-container",
+          "write": {
+            "path": "{tmp}/invalid.loom-test",
+            "text": "// RUN: verify\n\n// ERROR@+1: TYPE/003 {operand_name=\"predicates[0].arg[0]\", actual_type=\"f32\", expected_constraint=\"integer, index, or offset scalar\"}\nfunc.def @invalid(%value: f32) where [eq(%value, 4)] {\n  func.return\n}\n"
+          }
+        },
+        {
+          "name": "check",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--check", "{tmp}/invalid.loom-test"]
+          },
+          "stdout": {"empty": true},
+          "stderr": {"empty": true}
+        }
+      ]
+    },
+    {
+      "name": "round trips synthetic target assembly through bytecode",
+      "steps": [
+        {
+          "name": "write-expected",
+          "write": {
+            "path": "{tmp}/expected.loom",
+            "text": "test.target<low_core> @target\n\nlow.func.def target<test.low.core>(@target) @identity(%value: reg<test.i32>) -> (reg<test.i32>) asm {\n  return %value\n}\n"
+          }
+        },
+        {
+          "name": "encode",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--to=bc", "--output={tmp}/target.loombc"]
+          },
+          "stdin": {
+            "text": "test.target<low_core> @target\n\nlow.func.def target<test.low.core>(@target) @identity(%value: reg<test.i32>) -> (reg<test.i32>) asm {\n  return %value\n}\n"
+          }
+        },
+        {
+          "name": "decode",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--to=text", "{tmp}/target.loombc"]
+          },
+          "stdout": {"save": "{tmp}/actual.loom"},
+          "stderr": {"empty": true},
+          "files": [{"path": "{tmp}/actual.loom", "equals": "{tmp}/expected.loom"}]
+        }
+      ]
+    },
+    {
       "name": "checks portable command low IR",
       "run": {
         "tool": "loom-format",

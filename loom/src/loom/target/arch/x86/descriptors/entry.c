@@ -11,30 +11,68 @@
 #include "loom/target/arch/x86/descriptors/avx512_descriptors.h"
 #include "loom/target/arch/x86/descriptors/avx512_features_descriptors.h"
 #include "loom/target/arch/x86/descriptors/scalar_descriptors.h"
-#include "loom/target/arch/x86/descriptors/simd128_descriptors.h"
 
-#define LOOM_X86_ENTRY_DESCRIPTORS(prefix)                                    \
+#define LOOM_X86_ENTRY_BASE_FIELDS(prefix)                             \
+  .load_u8 = prefix##_DESCRIPTOR_REF_SCALAR_MOVZX_LOAD_U8_GPR32,       \
+  .load_u16 = prefix##_DESCRIPTOR_REF_SCALAR_MOVZX_LOAD_U16_GPR32,     \
+  .load_u32 = prefix##_DESCRIPTOR_REF_SCALAR_MOV_LOAD_GPR32,           \
+  .load_u64 = prefix##_DESCRIPTOR_REF_SCALAR_MOV_LOAD_GPR64,           \
+  .widen_u32 = prefix##_DESCRIPTOR_REF_SCALAR_MOVZX_GPR64_GPR32,       \
+  .constant_u32 = prefix##_DESCRIPTOR_REF_SCALAR_MOVIMM_GPR32,         \
+  .constant_u64 = prefix##_DESCRIPTOR_REF_SCALAR_MOVIMM_GPR64,         \
+  .compare_uge_u32 = prefix##_DESCRIPTOR_REF_SCALAR_CMP_UGE_IMM_GPR32, \
+  .symbol_address = prefix##_DESCRIPTOR_REF_SCALAR_LEA_SYMBOL_GPR64,
+
+#define LOOM_X86_ENTRY_AVX2_FIELDS(prefix)                            \
+  .move_u32_xmm = prefix##_DESCRIPTOR_REF_AVX2_VMOVD_XMM_GPR32,       \
+  .load_32_xmm = prefix##_DESCRIPTOR_REF_AVX2_VMOVSS_LOAD_XMM,        \
+  .load_64_xmm = prefix##_DESCRIPTOR_REF_AVX2_VMOVSD_LOAD_XMM,        \
+  .load_128_xmm = prefix##_DESCRIPTOR_REF_AVX2_VMOVDQU32_LOAD_XMM,    \
+  .load_256_ymm = prefix##_DESCRIPTOR_REF_AVX2_VMOVDQU32_LOAD_YMM,    \
+  .zero_xmm = prefix##_DESCRIPTOR_REF_AVX2_VXORPS_ZERO_XMM,           \
+  .zero_ymm = prefix##_DESCRIPTOR_REF_AVX2_VXORPS_ZERO_YMM,           \
+  .subtract_i8_xmm = prefix##_DESCRIPTOR_REF_AVX2_VPSUBB_XMM,         \
+  .subtract_i8_ymm = prefix##_DESCRIPTOR_REF_AVX2_VPSUBB_YMM,         \
+  .widen_i8_i64_xmm = prefix##_DESCRIPTOR_REF_AVX2_VPMOVSXBQ_XMM_XMM, \
+  .widen_i8_i32_xmm = prefix##_DESCRIPTOR_REF_AVX2_VPMOVSXBD_XMM_XMM, \
+  .widen_i8_i16_xmm = prefix##_DESCRIPTOR_REF_AVX2_VPMOVSXBW_XMM_XMM,
+
+#define LOOM_X86_ENTRY_AVX512_FIELDS(prefix)                         \
+  .load_512_zmm = prefix##_DESCRIPTOR_REF_AVX512_VMOVDQU32_LOAD_ZMM, \
+  .zero_zmm = prefix##_DESCRIPTOR_REF_AVX512_VXORPS_ZERO_ZMM,        \
+  .subtract_i8_zmm = prefix##_DESCRIPTOR_REF_AVX512_VPSUBB_ZMM,
+
+#define LOOM_X86_ENTRY_SCALAR(prefix)                                         \
   [prefix##_DESCRIPTOR_SET_ORDINAL] = &(const loom_x86_entry_descriptors_t) { \
-    .load_u8 = prefix##_DESCRIPTOR_REF_SCALAR_MOVZX_LOAD_U8_GPR32,            \
-    .load_u16 = prefix##_DESCRIPTOR_REF_SCALAR_MOVZX_LOAD_U16_GPR32,          \
-    .load_u32 = prefix##_DESCRIPTOR_REF_SCALAR_MOV_LOAD_GPR32,                \
-    .load_u64 = prefix##_DESCRIPTOR_REF_SCALAR_MOV_LOAD_GPR64,                \
-    .widen_u32 = prefix##_DESCRIPTOR_REF_SCALAR_MOVZX_GPR64_GPR32,            \
-    .constant_u32 = prefix##_DESCRIPTOR_REF_SCALAR_MOVIMM_GPR32,              \
-    .constant_u64 = prefix##_DESCRIPTOR_REF_SCALAR_MOVIMM_GPR64,              \
-    .compare_uge_u32 = prefix##_DESCRIPTOR_REF_SCALAR_CMP_UGE_IMM_GPR32,      \
-    .symbol_address = prefix##_DESCRIPTOR_REF_SCALAR_LEA_SYMBOL_GPR64,        \
+    .maximum_simd_byte_length = 0, LOOM_X86_ENTRY_BASE_FIELDS(prefix)         \
+  }
+
+#define LOOM_X86_ENTRY_AVX2(prefix)                                           \
+  [prefix##_DESCRIPTOR_SET_ORDINAL] = &(const loom_x86_entry_descriptors_t) { \
+    .maximum_simd_byte_length = 32,                                           \
+    LOOM_X86_ENTRY_BASE_FIELDS(prefix) LOOM_X86_ENTRY_AVX2_FIELDS(prefix)     \
+  }
+
+#define LOOM_X86_ENTRY_AVX512(prefix)                                         \
+  [prefix##_DESCRIPTOR_SET_ORDINAL] = &(const loom_x86_entry_descriptors_t) { \
+    .maximum_simd_byte_length = 64,                                           \
+    LOOM_X86_ENTRY_BASE_FIELDS(prefix) LOOM_X86_ENTRY_AVX2_FIELDS(prefix)     \
+        LOOM_X86_ENTRY_AVX512_FIELDS(prefix)                                  \
   }
 
 static const loom_x86_entry_descriptors_t* const kEntryDescriptors[] = {
-    LOOM_X86_ENTRY_DESCRIPTORS(X86_SCALAR_CORE),
-    LOOM_X86_ENTRY_DESCRIPTORS(X86_SIMD128_CORE),
-    LOOM_X86_ENTRY_DESCRIPTORS(X86_AVX2_CORE),
-    LOOM_X86_ENTRY_DESCRIPTORS(X86_AVX2_FEATURES_CORE),
-    LOOM_X86_ENTRY_DESCRIPTORS(X86_AVX512_CORE),
-    LOOM_X86_ENTRY_DESCRIPTORS(X86_AVX512_FEATURES_CORE),
+    LOOM_X86_ENTRY_SCALAR(X86_SCALAR_CORE),
+    LOOM_X86_ENTRY_AVX2(X86_AVX2_CORE),
+    LOOM_X86_ENTRY_AVX2(X86_AVX2_FEATURES_CORE),
+    LOOM_X86_ENTRY_AVX512(X86_AVX512_CORE),
+    LOOM_X86_ENTRY_AVX512(X86_AVX512_FEATURES_CORE),
 };
-#undef LOOM_X86_ENTRY_DESCRIPTORS
+#undef LOOM_X86_ENTRY_AVX512
+#undef LOOM_X86_ENTRY_AVX2
+#undef LOOM_X86_ENTRY_SCALAR
+#undef LOOM_X86_ENTRY_AVX512_FIELDS
+#undef LOOM_X86_ENTRY_AVX2_FIELDS
+#undef LOOM_X86_ENTRY_BASE_FIELDS
 
 const loom_x86_entry_descriptors_t* loom_x86_entry_descriptors(
     const loom_low_descriptor_set_t* descriptor_set) {

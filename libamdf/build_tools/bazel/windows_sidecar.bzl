@@ -54,17 +54,29 @@ def amdf_windows_sidecar_library(
         **_SIDECAR_ATTRIBUTES
     )
 
-def amdf_windows_sidecar_test(name, srcs, deps = None):
+def amdf_windows_sidecar_test(
+        name,
+        srcs,
+        deps = None,
+        linkopts = None,
+        tags = None,
+        resource_group = None):
     """Tests private sidecar implementation with its production C++ and CRT ABI.
 
     Args:
       name: Test target name.
       srcs: Sidecar implementation and test sources.
       deps: Private link dependencies using the release static CRT.
+      linkopts: Private linker options.
+      tags: Test selection and runtime resource requirements.
+      resource_group: Local resource exclusion group for hardware tests.
     """
     amdf_cc_test(
         name = name,
         srcs = srcs,
         deps = deps,
+        linkopts = linkopts,
+        tags = tags,
+        resource_group = resource_group,
         **_SIDECAR_ATTRIBUTES
     )

@@ -93,6 +93,9 @@ TEST_F(TaskParameterLayoutTest,
       EXPECT_EQ(abi.parameters[2].offset, payload.bytes);
       EXPECT_EQ(abi.parameters[2].size, payload.bytes * lanes);
       EXPECT_EQ(abi.parameters[3].offset, 1u);
+      for (uint16_t i = 0; i < IREE_ARRAYSIZE(types); ++i) {
+        EXPECT_TRUE(loom_type_equal(abi.parameter_types[i], types[i]));
+      }
     }
   }
 }

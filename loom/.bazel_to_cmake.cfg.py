@@ -834,7 +834,9 @@ class LoomBuildFileFunctions(
             + ")\n\n"
         )
 
-    def loomc_shared_libraries(self, name, components, runtime_deps):
+    def loomc_shared_libraries(
+        self, name, components, runtime_deps, tool_components=[]
+    ):
         components_block, variables_block = self._convert_platform_select_deps(
             name, components, "COMPONENTS"
         )
@@ -843,6 +845,7 @@ class LoomBuildFileFunctions(
             + "loomc_shared_libraries(\n"
             + self._convert_string_arg_block("NAME", name, quote=False)
             + components_block
+            + self._convert_target_list_block("TOOL_COMPONENTS", tool_components)
             + self._convert_target_list_block("RUNTIME_DEPS", runtime_deps)
             + ")\n\n"
         )

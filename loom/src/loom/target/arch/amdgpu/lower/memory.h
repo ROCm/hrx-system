@@ -60,6 +60,12 @@ typedef struct loom_amdgpu_memory_access_selection_t {
   uint32_t packet_count;
 } loom_amdgpu_memory_access_selection_t;
 
+typedef uint8_t loom_amdgpu_memory_access_selection_flags_t;
+enum loom_amdgpu_memory_access_selection_flag_bits_e {
+  // Native packets retain their destination for inactive SIMD lanes.
+  LOOM_AMDGPU_MEMORY_ACCESS_SELECTION_FLAG_PRESERVE_INACTIVE = 1u << 0,
+};
+
 typedef uint32_t loom_amdgpu_memory_access_rejection_flags_t;
 
 #define LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_VECTOR_TYPE ((uint32_t)1u << 0)
@@ -211,6 +217,7 @@ bool loom_amdgpu_memory_access_plan_select(
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     uint8_t read_visibility_scope, const loom_op_t* source_op,
     const loom_low_source_memory_access_plan_t* source,
+    loom_amdgpu_memory_access_selection_flags_t selection_flags,
     loom_amdgpu_memory_access_selection_t* out_selection,
     loom_amdgpu_memory_access_diagnostic_t* out_diagnostic);
 

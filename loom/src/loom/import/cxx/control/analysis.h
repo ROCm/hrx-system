@@ -83,7 +83,8 @@ enum class ExitFlow { None, Some, All };
 class ControlFlow final : private cxx::ASTVisitor {
  public:
   ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-              Types& types, cxx::StatementAST* body);
+              Types& types, cxx::StatementAST* body,
+              cxx::FunctionSymbol* function = nullptr);
   ControlFlow(const ControlFlow&) = delete;
   ControlFlow& operator=(const ControlFlow&) = delete;
 
@@ -143,6 +144,9 @@ class ControlFlow final : private cxx::ASTVisitor {
                                    cxx::AST* owner);
   std::optional<Destination> retain_destination(cxx::ExpressionAST* expression);
   void record(cxx::ExpressionAST* expression);
+  void record(cxx::Symbol* binding);
+  void record_implicit_object_call(cxx::CallExpressionAST* call,
+                                   cxx::FunctionSymbol* callee);
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
   bool classify_storage(cxx::ExpressionAST* expression) const;
@@ -164,6 +168,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   Diagnostics& diagnostics_;
   // Admitted source member partitions outlive all retained destination slices.
   Types& types_;
+  // Source definition whose implicit object fields participate in SSA flow.
+  cxx::FunctionSymbol* function_;
   // Active write-summary owners during construction only, including direct
   // for-loop bodies without a compound statement.
   std::vector<cxx::AST*> owners_;

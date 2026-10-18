@@ -122,6 +122,7 @@ iree_status_t loom_task_parameter_layout_parse(
            .workgroup_size_y = 1,
            .workgroup_size_z = 1,
            .parameter_count = signature->arg_count},
+      .parameter_types = signature->types,
       .parameters = rows,
   };
   bool accepted = true;

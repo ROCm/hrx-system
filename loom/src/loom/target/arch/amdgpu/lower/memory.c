@@ -856,6 +856,7 @@ bool loom_amdgpu_memory_access_plan_select(
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     uint8_t read_visibility_scope, const loom_op_t* source_op,
     const loom_low_source_memory_access_plan_t* source,
+    loom_amdgpu_memory_access_selection_flags_t selection_flags,
     loom_amdgpu_memory_access_selection_t* out_selection,
     loom_amdgpu_memory_access_diagnostic_t* out_diagnostic) {
   out_selection->packet_count = 0;
@@ -894,9 +895,9 @@ bool loom_amdgpu_memory_access_plan_select(
   loom_amdgpu_memory_dynamic_term_materialization_plan_build(
       module, fact_table, view_regions, analysis, selected_source,
       &materialization_plan);
-  const bool preserve_inactive =
-      loom_memory_access_mask(loom_memory_access_cast(module, source_op)) !=
-      LOOM_VALUE_ID_INVALID;
+  const bool preserve_inactive = iree_any_bit_set(
+      selection_flags,
+      LOOM_AMDGPU_MEMORY_ACCESS_SELECTION_FLAG_PRESERVE_INACTIVE);
   const loom_amdgpu_memory_packet_selection_context_t selection_context = {
       .module = module,
       .fact_table = fact_table,

@@ -6,6 +6,7 @@
 
 #include "diagnostic.h"
 
+#include "context.h"
 #include "iree/base/api.h"
 #include "loom/error/error_defs.h"
 #include "loom/error/json_sink.h"
@@ -15,6 +16,7 @@
 #include "loom/util/stream.h"
 #include "loom/verify/verify.h"
 #include "loomc/iree.h"
+#include "target.h"
 
 static loomc_diagnostic_severity_t loomc_diagnostic_severity_from_loom(
     loom_diagnostic_severity_t severity) {
@@ -355,12 +357,16 @@ iree_status_t loomc_diagnostic_capture_emission(
 }
 
 loomc_status_t loomc_result_verify_loom_module(
-    const loom_module_t* module, loom_source_resolver_t source_resolver,
-    uint32_t max_errors, loomc_result_t* result) {
+    const loomc_context_t* context, const loom_module_t* module,
+    loom_source_resolver_t source_resolver, uint32_t max_errors,
+    loomc_result_t* result) {
+  const loomc_target_pass_environment_t* environment =
+      loomc_context_target_pass_environment(context);
   loomc_diagnostic_capture_t capture;
-  loomc_diagnostic_capture_initialize(result, /*source=*/NULL, module,
-                                      source_resolver, LOOM_EMITTER_VERIFIER,
-                                      /*text_print_options=*/NULL, &capture);
+  loomc_diagnostic_capture_initialize(
+      result, /*source=*/NULL, module, source_resolver, LOOM_EMITTER_VERIFIER,
+      environment ? &environment->diagnostic_type_print_options : NULL,
+      &capture);
   const loom_verify_options_t verify_options = {
       .sink =
           {

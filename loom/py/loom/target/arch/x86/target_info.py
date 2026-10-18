@@ -43,7 +43,6 @@ X86_REG_CLASS_ZMM = "x86.zmm"
 X86_REG_CLASS_K = "x86.k"
 
 X86_ISA_TIER_SCALAR = "scalar"
-X86_ISA_TIER_SIMD128 = "simd128"
 X86_ISA_TIER_AVX2 = "avx2"
 X86_ISA_TIER_AVX512 = "avx512"
 X86_ISA_TIER_PACKED_DOT = "packed_dot"
@@ -97,13 +96,6 @@ X86_DESCRIPTOR_SET_INFOS: tuple[X86DescriptorSetInfo, ...] = (
         key="x86.scalar.core",
         isa_tier=X86_ISA_TIER_SCALAR,
         register_classes=_with_base_registers(),
-        storage_generator_target="avx512_features",
-    ),
-    X86DescriptorSetInfo(
-        generator_target="simd128",
-        key="x86.simd128.core",
-        isa_tier=X86_ISA_TIER_SIMD128,
-        register_classes=_with_base_registers(X86_REG_CLASS_XMM),
         storage_generator_target="avx512_features",
     ),
     X86DescriptorSetInfo(
@@ -242,15 +234,6 @@ X86_TARGET_PROFILE_INFOS: tuple[X86TargetProfileInfo, ...] = (
         feature_contract_set_key="x86.scalar.core",
         supported_feature_bits=_X86_NATIVE_SCALAR_FEATURE_BITS,
         automatic_priority=1,
-    ),
-    X86TargetProfileInfo(
-        profile_key="x86.simd128",
-        descriptor_generator_target="simd128",
-        descriptor_set_key="x86.simd128.core",
-        register_classes=_with_base_registers(X86_REG_CLASS_XMM),
-        native_bundle_key="x86-simd128",
-        feature_contract_set_key="x86.simd128.core",
-        required_cpu_features=("AVX",),
     ),
     X86TargetProfileInfo(
         profile_key="x86.avx2",
@@ -394,7 +377,6 @@ X86_NATIVE_TARGET_SELECTOR_PROFILE_KEYS: tuple[str | None, ...] = (
     "x86.packed_dot",
     "x86.avx512_packed_dot",
     "x86.scalar",
-    "x86.simd128",
     "x86.avx2",
 )
 

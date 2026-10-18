@@ -167,11 +167,11 @@ unsigned entry(unsigned x) { return Add<count>::apply(x); }
 
 // ----
 func.def public @entry(%x: i32) -> (i32) {
-  %2 = func.call pure @apply(%x) : (i32) -> (i32)
+  %2 = func.call pure @Add__apply(%x) : (i32) -> (i32)
   func.return %2 : i32
 }
 
-func.def @apply(%x: i32) -> (i32) {
+func.def @Add__apply(%x: i32) -> (i32) {
   %5 = scalar.constant 5 : i32
   %6 = scalar.addi %x, %5 : i32
   func.return %6 : i32

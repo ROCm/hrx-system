@@ -127,6 +127,8 @@ loom_cc_library(
     loom::target::specialization
     loom::target::types
     loom::testing::test_diagnostic
+    loom::testing::test_diagnostic_loomc
+    loom::testing::test_diagnostic_native
     loom::testing::test_file
     loom::tooling::cli::loomc_diagnostic_json
     loom::tooling::input

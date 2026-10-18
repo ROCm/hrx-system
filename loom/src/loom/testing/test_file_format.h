@@ -11,8 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/format/text/low_asm.h"
-#include "loom/ir/context.h"
+#include "loomc/module.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,11 +28,13 @@ extern "C" {
 //
 // |out_source| is reset before formatting. It retains no partial output when
 // formatting fails.
-iree_status_t loom_test_file_format(
-    iree_string_view_t source, iree_string_view_t filename,
-    loom_context_t* context, iree_arena_block_pool_t* block_pool,
-    loom_text_low_asm_environment_t low_asm_environment,
-    iree_allocator_t allocator, iree_string_builder_t* out_source);
+iree_status_t loom_test_file_format(iree_string_view_t source,
+                                    iree_string_view_t filename,
+                                    loomc_context_t* context,
+                                    loomc_workspace_t* workspace,
+                                    iree_arena_block_pool_t* block_pool,
+                                    iree_allocator_t allocator,
+                                    iree_string_builder_t* out_source);
 
 #ifdef __cplusplus
 }  // extern "C"

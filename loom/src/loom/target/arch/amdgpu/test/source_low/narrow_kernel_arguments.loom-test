@@ -1,0 +1,122 @@
+// RUN: emit source-low target=amdgpu:gfx90a output=low
+
+// Boolean truth and negation consume the same unpacked byte. Adjacent Boolean
+// arguments remain independent when native materialization groups word loads.
+kernel.def @boolean_argument_truth() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%first: i1, %second: i1, %third: i1, %output: buffer) {
+  %true = scalar.constant true : i1
+  %negated = scalar.xori %first, %true : i1
+  %combined = scalar.andi %second, %third : i1
+  %first_word = scalar.extui %first : i1 to i32
+  %negated_word = scalar.extui %negated : i1 to i32
+  %combined_word = scalar.extui %combined : i1 to i32
+  %base = index.constant 0 : offset
+  %out = buffer.view %output[%base] : buffer -> view<3xi32>
+  view.store %first_word, %out[0] : i32, view<3xi32>
+  view.store %negated_word, %out[1] : i32, view<3xi32>
+  view.store %combined_word, %out[2] : i32, view<3xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 3, direct_arg_count = 3, direct_arg_names = {arg0 = "first", arg1 = "second", arg2 = "third"}, direct_arg_offsets = [0, 4, 8], direct_arg_parameter_indices = [0, 1, 2], direct_arg_payload_sizes = [1, 1, 1], direct_arg_sizes = [4, 4, 4], parameter_count = 4, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [3], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @boolean_argument_truth(%first$22: reg<amdgpu.sgpr>, %second$23: reg<amdgpu.sgpr>, %third$24: reg<amdgpu.sgpr>) asm {
+  %out = resource<hal_binding> {extent = 12, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %first$26 = s_bfe_u32_lit %first$22, 524288
+  %second$27 = s_bfe_u32_lit %second$23, 524288
+  %third$28 = s_bfe_u32_lit %third$24, 524288
+  %29 = s_mov_b32 0
+  %true = s_cmp_eq_i32 %29, %29
+  %32 = s_mov_b32 1
+  %33 = s_cselect_b32 %32, %29, %true
+  %34 = s_xor_b32 %first$26, %33
+  %negated = s_cmp_lg_i32 %34, %29
+  %37 = s_and_b32 %second$27, %third$28
+  %combined = s_cmp_lg_i32 %37, %29
+  %41 = s_cmp_lg_i32_src1_inline %first$26 {rhs = 0}
+  %first_word = s_cselect_b32 %32, %29, %41
+  %negated_word = s_cselect_b32 %32, %29, %negated
+  %combined_word = s_cselect_b32 %32, %29, %combined
+  %45 = v_mov_b32_copy %first_word
+  %46 = v_mov_b32 0
+  global_store_dword_saddr %46, %45, %out
+  %47 = v_mov_b32_copy %negated_word
+  global_store_dword_saddr %46, %47, %out {offset = 4}
+  %49 = v_mov_b32_copy %combined_word
+  global_store_dword_saddr %46, %49, %out {offset = 8}
+  return
+}
+
+// ====
+
+// Widening observes only the declared low bits. A raw store keeps those bits
+// directly; neither signed nor unsigned consumers can infer slot padding.
+kernel.def @narrow_integer_arguments() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%byte: i8, %half: i16, %output: buffer) {
+  %base = index.constant 0 : offset
+  %out = buffer.view %output[%base] : buffer -> view<4xi32>
+  %byte_signed = scalar.extsi %byte : i8 to i32
+  %byte_unsigned = scalar.extui %byte : i8 to i32
+  %half_signed = scalar.extsi %half : i16 to i32
+  %half_unsigned = scalar.extui %half : i16 to i32
+  view.store %byte_signed, %out[0] : i32, view<4xi32>
+  view.store %byte_unsigned, %out[1] : i32, view<4xi32>
+  view.store %half_signed, %out[2] : i32, view<4xi32>
+  view.store %half_unsigned, %out[3] : i32, view<4xi32>
+  %byte_base = index.constant 16 : offset
+  %byte_out = buffer.view %output[%byte_base] : buffer -> view<1xi8>
+  view.store %byte, %byte_out[0] : i8, view<1xi8>
+  %half_base = index.constant 18 : offset
+  %half_out = buffer.view %output[%half_base] : buffer -> view<1xi16>
+  view.store %half, %half_out[0] : i16, view<1xi16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "byte", arg1 = "half"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_payload_sizes = [1, 2], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @narrow_integer_arguments(%byte: reg<amdgpu.sgpr>, %half: reg<amdgpu.sgpr>) asm {
+  %half_out = resource<hal_binding> {extent = 20, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = v_mov_b32_copy %byte
+  %byte_signed = v_mov_b32_sdwa %17 {dst_sel = 6, dst_unused = 0, src0_sel = 0, src0_sext = 1}
+  %byte_unsigned = v_and_b32_lit %17, 255
+  %21 = v_mov_b32_copy %half
+  %half_signed = v_mov_b32_sdwa %21 {dst_sel = 6, dst_unused = 0, src0_sel = 4, src0_sext = 1}
+  %half_unsigned = v_and_b32_lit %21, 65535
+  %25 = v_mov_b32 0
+  global_store_dword_saddr %25, %byte_signed, %half_out
+  global_store_dword_saddr %25, %byte_unsigned, %half_out {offset = 4}
+  global_store_dword_saddr %25, %half_signed, %half_out {offset = 8}
+  global_store_dword_saddr %25, %half_unsigned, %half_out {offset = 12}
+  global_store_b8_saddr %25, %17, %half_out {offset = 16}
+  global_store_short_saddr %25, %21, %half_out {offset = 18}
+  return
+}
+
+// ====
+
+// Narrow transport alone does not require normalizing unused high bits.
+kernel.def @raw_narrow_arguments() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%byte: i8, %half: i16, %output: buffer) {
+  %byte_base = index.constant 0 : offset
+  %byte_out = buffer.view %output[%byte_base] : buffer -> view<1xi8>
+  view.store %byte, %byte_out[0] : i8, view<1xi8>
+  %half_base = index.constant 2 : offset
+  %half_out = buffer.view %output[%half_base] : buffer -> view<1xi16>
+  view.store %half, %half_out[0] : i16, view<1xi16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "byte", arg1 = "half"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_payload_sizes = [1, 2], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @raw_narrow_arguments(%byte: reg<amdgpu.sgpr>, %half: reg<amdgpu.sgpr>) asm {
+  %half_out = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %11 = v_mov_b32_copy %byte
+  %12 = v_mov_b32 0
+  global_store_b8_saddr %12, %11, %half_out
+  %13 = v_mov_b32_copy %half
+  global_store_short_saddr %12, %13, %half_out {offset = 2}
+  return
+}

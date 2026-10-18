@@ -115,7 +115,7 @@ loomc_status_t loomc_config_apply_text_to_module(
   }
   if (loomc_status_is_ok(status) &&
       materialize_result.materialized_count != 0) {
-    status = loomc_result_verify_loom_module(options->module,
+    status = loomc_result_verify_loom_module(options->context, options->module,
                                              options->source_resolver,
                                              /*max_errors=*/0, options->result);
   }

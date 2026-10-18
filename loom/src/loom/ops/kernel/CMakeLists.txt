@@ -9,6 +9,21 @@
 
 iree_add_all_subdirs()
 
+loom_cc_library(
+  NAME
+    launch_config_dependence
+  HDRS
+    "launch_config_dependence.h"
+  SRCS
+    "launch_config_dependence.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::value_relation
+    loom::ir
+  PUBLIC
+)
+
 loom_generated_cc_library(
   NAME
     kernel
@@ -18,6 +33,7 @@ loom_generated_cc_library(
     "canonicalize.c"
     "facts.c"
     "launch_config.c"
+    "launch_config_callable_summary.c"
     "launch_config_contract.c"
     "verify.c"
   TEXTUAL_HDRS
@@ -30,6 +46,7 @@ loom_generated_cc_library(
     "tables.c"
   HDRS
     "launch_config.h"
+    "launch_config_callable_summary.h"
     "launch_config_contract.h"
     "ops.h"
   ARGS
@@ -39,6 +56,7 @@ loom_generated_cc_library(
   EXTRA_OUTPUTS
     "ops.inc"
   DEPS
+    ::launch_config_dependence
     iree::base
     iree::base::internal
     iree::base::internal::arena

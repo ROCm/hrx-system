@@ -257,6 +257,8 @@ loom_cc_library(
         "//loom/src/loom/target/reporting:low",
         "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/testing:test_diagnostic",
+        "//loom/src/loom/testing:test_diagnostic_loomc",
+        "//loom/src/loom/testing:test_diagnostic_native",
         "//loom/src/loom/testing:test_file",
         "//loom/src/loom/tooling/cli:loomc_diagnostic_json",
         "//loom/src/loom/tooling/input",

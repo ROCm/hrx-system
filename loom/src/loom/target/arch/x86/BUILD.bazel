@@ -159,6 +159,7 @@ loom_cc_library(
     srcs = ["hal_materialization.c"],
     hdrs = ["hal_materialization.h"],
     deps = [
+        ":call_abi",
         ":facts",
         ":register_classes",
         "//loom/src/loom/codegen/low:builder",

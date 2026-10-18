@@ -49,6 +49,58 @@ TEST(AmdgpuTsanAbiTest, ShadowConstantsMatchHalTsanAbi) {
       static_cast<uint32_t>(LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_EPOCH_OFFSET),
       static_cast<uint32_t>(
           IREE_HAL_AMDGPU_TSAN_WORKGROUP_SHADOW_EPOCH_OFFSET));
+  EXPECT_EQ(static_cast<uint32_t>(
+                LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_LAYOUT_TAG_OFFSET),
+            static_cast<uint32_t>(
+                IREE_HAL_AMDGPU_TSAN_WORKGROUP_SHADOW_LAYOUT_TAG_OFFSET));
+  EXPECT_EQ(static_cast<uint32_t>(
+                LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_GENERATION_TAG_OFFSET),
+            static_cast<uint32_t>(
+                IREE_HAL_AMDGPU_TSAN_WORKGROUP_SHADOW_GENERATION_TAG_OFFSET));
+  EXPECT_EQ(
+      static_cast<uint32_t>(LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_RESERVED_OFFSET),
+      static_cast<uint32_t>(
+          IREE_HAL_AMDGPU_TSAN_WORKGROUP_SHADOW_RESERVED_OFFSET));
+  EXPECT_EQ(static_cast<uint32_t>(
+                LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_LAYOUT_TAG_MARKER),
+            static_cast<uint32_t>(
+                IREE_HAL_AMDGPU_TSAN_WORKGROUP_SHADOW_LAYOUT_TAG_MARKER));
+  EXPECT_EQ(static_cast<uint32_t>(
+                LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_CHUNK_STATE_OFFSET),
+            static_cast<uint32_t>(
+                IREE_HAL_AMDGPU_TSAN_WORKGROUP_SHADOW_CHUNK_STATE_OFFSET));
+  EXPECT_EQ(static_cast<uint32_t>(
+                LOOM_AMDGPU_TSAN_SHADOW_CHUNK_APPLICATION_BYTE_LENGTH),
+            static_cast<uint32_t>(
+                IREE_HAL_AMDGPU_TSAN_SHADOW_CHUNK_APPLICATION_BYTE_LENGTH));
+  EXPECT_EQ(static_cast<uint32_t>(
+                LOOM_AMDGPU_TSAN_SHADOW_CHUNK_APPLICATION_BYTE_SHIFT),
+            static_cast<uint32_t>(
+                IREE_HAL_AMDGPU_TSAN_SHADOW_CHUNK_APPLICATION_BYTE_SHIFT));
+  EXPECT_EQ(
+      static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BIT_COUNT),
+      static_cast<uint32_t>(IREE_HAL_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BIT_COUNT));
+  EXPECT_EQ(static_cast<uint32_t>(
+                LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_WORD_BYTE_LENGTH),
+            static_cast<uint32_t>(
+                IREE_HAL_AMDGPU_TSAN_SHADOW_CHUNK_STATE_WORD_BYTE_LENGTH));
+  EXPECT_EQ(
+      static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_CHUNKS_PER_STATE_WORD),
+      static_cast<uint32_t>(IREE_HAL_AMDGPU_TSAN_SHADOW_CHUNKS_PER_STATE_WORD));
+  EXPECT_EQ(static_cast<uint32_t>(
+                LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BITMAP_ALIGNMENT),
+            static_cast<uint32_t>(
+                IREE_HAL_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BITMAP_ALIGNMENT));
+  EXPECT_EQ(
+      static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_UNINITIALIZED),
+      static_cast<uint32_t>(
+          IREE_HAL_AMDGPU_TSAN_SHADOW_CHUNK_STATE_UNINITIALIZED));
+  EXPECT_EQ(
+      static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_CLAIMED),
+      static_cast<uint32_t>(IREE_HAL_AMDGPU_TSAN_SHADOW_CHUNK_STATE_CLAIMED));
+  EXPECT_EQ(
+      static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_READY),
+      static_cast<uint32_t>(IREE_HAL_AMDGPU_TSAN_SHADOW_CHUNK_STATE_READY));
   EXPECT_EQ(
       static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_ENTRY_ACCESS_KIND_SHIFT),
       static_cast<uint32_t>(
@@ -79,6 +131,14 @@ TEST(AmdgpuTsanAbiTest, ShadowConstantsMatchHalTsanAbi) {
       static_cast<uint32_t>(
           IREE_HAL_AMDGPU_TSAN_SHADOW_ENTRY_GENERATION_BIT_COUNT));
   EXPECT_EQ(
+      static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_GENERATION_WINDOW_SHIFT),
+      static_cast<uint32_t>(
+          IREE_HAL_AMDGPU_TSAN_SHADOW_GENERATION_WINDOW_SHIFT));
+  EXPECT_EQ(
+      static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_GENERATION_WINDOW_CAPACITY),
+      static_cast<uint32_t>(
+          IREE_HAL_AMDGPU_TSAN_SHADOW_GENERATION_WINDOW_CAPACITY));
+  EXPECT_EQ(
       static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_ENTRY_SITE_SHIFT),
       static_cast<uint32_t>(IREE_HAL_AMDGPU_TSAN_SHADOW_ENTRY_SITE_SHIFT));
   EXPECT_EQ(
@@ -100,6 +160,18 @@ TEST(AmdgpuTsanAbiTest, ShadowConstantsMatchHalTsanAbi) {
   EXPECT_EQ(
       static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_ACCESS_KIND_ATOMIC),
       static_cast<uint32_t>(IREE_HAL_AMDGPU_TSAN_SHADOW_ACCESS_KIND_ATOMIC));
+}
+
+TEST(AmdgpuTsanAbiTest, ShadowLayoutMarkerCannotAliasPayload) {
+  const uint32_t marker = LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_LAYOUT_TAG_MARKER;
+  const uint32_t chunk_state_mask =
+      (1u << LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BIT_COUNT) - 1u;
+  EXPECT_EQ(marker & chunk_state_mask, 2u);
+
+  const uint32_t access_kind_mask =
+      (1u << LOOM_AMDGPU_TSAN_SHADOW_ENTRY_ACCESS_KIND_BIT_COUNT) - 1u;
+  EXPECT_GT(marker & access_kind_mask,
+            static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_ACCESS_KIND_ATOMIC));
 }
 
 TEST(AmdgpuTsanAbiTest, ReportConstantsMatchHalTsanAbi) {

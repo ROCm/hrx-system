@@ -307,12 +307,19 @@ iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument_setup(
       IREE_ASSERT_EQ(storage.element_register_count, 2u);
       predicate_lane_count = storage.element_count;
     } else if (loom_amdgpu_type_is_i1(source_type)) {
-      // A scalar predicate remains in its dense one-word ABI carrier when its
-      // body uses scalar truth. Expand only values whose selected body
-      // representation is an EXEC-width native lane mask.
+      // Scalar truth consumes only the declared byte, not the padding in its
+      // word-sized ABI slot. Native lane masks unpack the byte below.
       if (!loom_amdgpu_low_type_is_register_class_count(
               context, argument_map[i].body_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
               2)) {
+        loom_value_id_t scalar_truth = LOOM_VALUE_ID_INVALID;
+        IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_bitfield(
+            context, source_function.op,
+            loom_low_lower_lookup_value(context, argument), /*bit_offset=*/0,
+            /*bit_count=*/8, LOOM_AMDGPU_BITFIELD_EXTRACT_MODE_ZERO_EXTEND,
+            argument_map[i].abi_type, &scalar_truth));
+        IREE_RETURN_IF_ERROR(loom_low_lower_replace_value_binding(
+            context, argument, scalar_truth));
         continue;
       }
       predicate_lane_count = 1;

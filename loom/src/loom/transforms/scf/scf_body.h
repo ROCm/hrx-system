@@ -53,9 +53,9 @@ typedef enum loom_scf_body_mode_e {
 } loom_scf_body_mode_t;
 
 // Space-qualified effects used by the read-ahead cut. Unknown or other spaces
-// remain distinct from the proven global/workgroup separation.
+// remain distinct from the proven read-ahead/workgroup separation.
 enum loom_scf_body_memory_effect_bits_e {
-  LOOM_SCF_BODY_MEMORY_GLOBAL_LOAD = 1u << 0,
+  LOOM_SCF_BODY_MEMORY_READ_AHEAD_LOAD = 1u << 0,
   LOOM_SCF_BODY_MEMORY_WORKGROUP = 1u << 1,
   LOOM_SCF_BODY_MEMORY_OTHER_LOAD = 1u << 2,
   LOOM_SCF_BODY_MEMORY_UNSUPPORTED = 1u << 3,

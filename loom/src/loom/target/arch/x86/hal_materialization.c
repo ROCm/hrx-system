@@ -10,6 +10,7 @@
 #include "loom/codegen/low/transforms/task_abi.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/x86/call_abi.h"
 #include "loom/target/arch/x86/descriptors/entry.h"
 #include "loom/target/arch/x86/facts.h"
 #include "loom/target/arch/x86/ops/ops.h"
@@ -21,6 +22,12 @@ typedef struct loom_x86_task_entry_t {
   const loom_low_descriptor_set_t* descriptors;
   // View-local instruction identities used to realize task entry actions.
   const loom_x86_entry_descriptors_t* entry;
+  // Reusable zero value in the XMM register class.
+  loom_value_id_t xmm_zero;
+  // Reusable zero value in the YMM register class.
+  loom_value_id_t ymm_zero;
+  // Reusable zero value in the ZMM register class.
+  loom_value_id_t zmm_zero;
 } loom_x86_task_entry_t;
 
 static bool loom_x86_task_entry_initialize(
@@ -32,6 +39,9 @@ static bool loom_x86_task_entry_initialize(
   if (!target->entry) {
     return false;
   }
+  target->xmm_zero = LOOM_VALUE_ID_INVALID;
+  target->ymm_zero = LOOM_VALUE_ID_INVALID;
+  target->zmm_zero = LOOM_VALUE_ID_INVALID;
   builder->word_type = loom_low_register_type(descriptors->stable_id,
                                               LOOM_X86_REGISTER_CLASS_GPR32, 1);
   builder->pointer_type = loom_low_register_type(
@@ -71,7 +81,7 @@ static iree_status_t loom_x86_hal_build_packet(
   return iree_ok_status();
 }
 
-static iree_status_t loom_x86_hal_build_load(
+static iree_status_t loom_x86_hal_build_gpr_load(
     loom_low_task_entry_builder_t* builder, loom_value_id_t base,
     uint32_t offset, uint8_t size, loom_type_t type,
     loom_value_id_t* out_value) {
@@ -95,20 +105,155 @@ static iree_status_t loom_x86_hal_build_success(
                                    builder->word_type, out_value);
 }
 
-static iree_string_view_t loom_x86_task_parameter_constraint(loom_type_t type,
-                                                             uint8_t size) {
-  // Byte width alone cannot admit an authored XMM or mask carrier.
-  if ((size != 1 && size != 2 && size != 4 && size != 8) ||
-      !loom_low_type_is_register(type) ||
-      loom_low_register_type_unit_count(type) != 1 ||
-      loom_low_register_type_class_id(type) !=
-          (size <= 4 ? LOOM_X86_REGISTER_CLASS_GPR32
-                     : LOOM_X86_REGISTER_CLASS_GPR64)) {
-    return IREE_SV(
-        "a 1-, 2-, or 4-byte value in one GPR32, "
-        "or an 8-byte value in one GPR64");
+static bool loom_x86_task_source_is_predicate_vector(loom_type_t source_type) {
+  return loom_type_is_vector(source_type) &&
+         loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_I1;
+}
+
+static iree_string_view_t loom_x86_task_parameter_constraint(
+    const loom_low_task_entry_builder_t* builder, loom_type_t source_type,
+    loom_type_t carrier_type, uint8_t byte_length) {
+  static const iree_string_view_t kConstraint = IREE_SVL(
+      "a source-compatible single GPR32, GPR64, XMM, YMM, or ZMM carrier "
+      "with an exact task constant load");
+  if (!loom_low_type_is_register(carrier_type) ||
+      loom_low_register_type_unit_count(carrier_type) != 1) {
+    return kConstraint;
   }
-  return iree_string_view_empty();
+  const uint16_t register_class = loom_low_register_type_class_id(carrier_type);
+  loom_x86_call_abi_classification_t classification;
+  if (!loom_x86_call_abi_classify_source_carrier(source_type, register_class,
+                                                 &classification)) {
+    return kConstraint;
+  }
+  const loom_x86_task_entry_t* target = builder->target_data;
+  switch (register_class) {
+    case LOOM_X86_REGISTER_CLASS_GPR32:
+      return byte_length == 1 || byte_length == 2 || byte_length == 4
+                 ? iree_string_view_empty()
+                 : kConstraint;
+    case LOOM_X86_REGISTER_CLASS_GPR64:
+      return byte_length == 8 ? iree_string_view_empty() : kConstraint;
+    case LOOM_X86_REGISTER_CLASS_XMM:
+      return target->entry->maximum_simd_byte_length >= 16 &&
+                     (byte_length == 1 || byte_length == 2 ||
+                      byte_length == 4 || byte_length == 8 || byte_length == 16)
+                 ? iree_string_view_empty()
+                 : kConstraint;
+    case LOOM_X86_REGISTER_CLASS_YMM:
+      return target->entry->maximum_simd_byte_length >= 32 && byte_length == 32
+                 ? iree_string_view_empty()
+                 : kConstraint;
+    case LOOM_X86_REGISTER_CLASS_ZMM:
+      return target->entry->maximum_simd_byte_length >= 64 && byte_length == 64
+                 ? iree_string_view_empty()
+                 : kConstraint;
+    default:
+      return kConstraint;
+  }
+}
+
+static iree_status_t loom_x86_task_emit_simd_zero(
+    loom_low_task_entry_builder_t* builder, loom_type_t carrier_type,
+    loom_value_id_t* out_value) {
+  loom_x86_task_entry_t* target = builder->target_data;
+  uint32_t descriptor_ref = target->entry->zero_xmm;
+  loom_value_id_t* cached_value = &target->xmm_zero;
+  switch (loom_low_register_type_class_id(carrier_type)) {
+    case LOOM_X86_REGISTER_CLASS_XMM:
+      descriptor_ref = target->entry->zero_xmm;
+      cached_value = &target->xmm_zero;
+      break;
+    case LOOM_X86_REGISTER_CLASS_YMM:
+      descriptor_ref = target->entry->zero_ymm;
+      cached_value = &target->ymm_zero;
+      break;
+    case LOOM_X86_REGISTER_CLASS_ZMM:
+      descriptor_ref = target->entry->zero_zmm;
+      cached_value = &target->zmm_zero;
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("admitted x86 task SIMD carrier");
+      break;
+  }
+  if (*cached_value == LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(loom_x86_hal_build_packet(
+        builder, descriptor_ref, NULL, 0, iree_string_view_empty(),
+        loom_attr_absent(), carrier_type, cached_value));
+  }
+  *out_value = *cached_value;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_x86_task_emit_simd_load(
+    loom_low_task_entry_builder_t* builder, loom_value_id_t base,
+    uint32_t offset, uint8_t byte_length, loom_type_t carrier_type,
+    loom_value_id_t* out_value) {
+  const loom_x86_task_entry_t* target = builder->target_data;
+  uint32_t descriptor_ref = target->entry->load_128_xmm;
+  const uint16_t register_class = loom_low_register_type_class_id(carrier_type);
+  if (register_class == LOOM_X86_REGISTER_CLASS_XMM && byte_length <= 2) {
+    loom_value_id_t bits;
+    IREE_RETURN_IF_ERROR(loom_x86_hal_build_gpr_load(
+        builder, base, offset, byte_length, builder->word_type, &bits));
+    descriptor_ref = target->entry->move_u32_xmm;
+    return loom_x86_hal_build_packet(
+        builder, descriptor_ref, &bits, 1, iree_string_view_empty(),
+        loom_attr_absent(), carrier_type, out_value);
+  }
+  if (register_class == LOOM_X86_REGISTER_CLASS_XMM) {
+    descriptor_ref = byte_length == 4   ? target->entry->load_32_xmm
+                     : byte_length == 8 ? target->entry->load_64_xmm
+                                        : target->entry->load_128_xmm;
+  } else if (register_class == LOOM_X86_REGISTER_CLASS_YMM) {
+    descriptor_ref = target->entry->load_256_ymm;
+  } else if (register_class == LOOM_X86_REGISTER_CLASS_ZMM) {
+    descriptor_ref = target->entry->load_512_zmm;
+  } else {
+    IREE_ASSERT_UNREACHABLE("admitted x86 task SIMD carrier");
+  }
+  return loom_x86_hal_build_packet(builder, descriptor_ref, &base, 1,
+                                   IREE_SV("disp32"), loom_attr_i64(offset),
+                                   carrier_type, out_value);
+}
+
+static iree_status_t loom_x86_task_emit_predicate_import(
+    loom_low_task_entry_builder_t* builder, loom_value_id_t table,
+    const loom_low_task_parameter_access_t* access,
+    loom_value_id_t* out_value) {
+  const loom_x86_task_entry_t* target = builder->target_data;
+  loom_value_id_t bytes;
+  IREE_RETURN_IF_ERROR(loom_x86_task_emit_simd_load(
+      builder, table, access->value_offset, access->byte_length,
+      access->carrier_type, &bytes));
+  loom_value_id_t zero;
+  IREE_RETURN_IF_ERROR(
+      loom_x86_task_emit_simd_zero(builder, access->carrier_type, &zero));
+  const uint16_t register_class =
+      loom_low_register_type_class_id(access->carrier_type);
+  const uint32_t subtract_ref = register_class == LOOM_X86_REGISTER_CLASS_XMM
+                                    ? target->entry->subtract_i8_xmm
+                                : register_class == LOOM_X86_REGISTER_CLASS_YMM
+                                    ? target->entry->subtract_i8_ymm
+                                    : target->entry->subtract_i8_zmm;
+  const loom_value_id_t subtract_operands[] = {zero, bytes};
+  loom_value_id_t lanes;
+  IREE_RETURN_IF_ERROR(loom_x86_hal_build_packet(
+      builder, subtract_ref, subtract_operands,
+      IREE_ARRAYSIZE(subtract_operands), iree_string_view_empty(),
+      loom_attr_absent(), access->carrier_type, &lanes));
+  if (register_class != LOOM_X86_REGISTER_CLASS_XMM ||
+      access->byte_length == 16) {
+    *out_value = lanes;
+    return iree_ok_status();
+  }
+  const uint32_t widen_ref =
+      access->byte_length == 2   ? target->entry->widen_i8_i64_xmm
+      : access->byte_length == 4 ? target->entry->widen_i8_i32_xmm
+                                 : target->entry->widen_i8_i16_xmm;
+  return loom_x86_hal_build_packet(builder, widen_ref, &lanes, 1,
+                                   iree_string_view_empty(), loom_attr_absent(),
+                                   access->carrier_type, out_value);
 }
 
 static iree_status_t loom_x86_task_emit_parameter(
@@ -116,7 +261,15 @@ static iree_status_t loom_x86_task_emit_parameter(
     const loom_low_task_parameter_access_t* access, loom_value_id_t dispatch,
     loom_value_id_t* table, loom_value_id_t* out_value) {
   const loom_x86_task_entry_t* target = builder->target_data;
+  const uint16_t register_class =
+      loom_low_register_type_class_id(access->carrier_type);
   if (!access->used) {
+    if (register_class == LOOM_X86_REGISTER_CLASS_XMM ||
+        register_class == LOOM_X86_REGISTER_CLASS_YMM ||
+        register_class == LOOM_X86_REGISTER_CLASS_ZMM) {
+      return loom_x86_task_emit_simd_zero(builder, access->carrier_type,
+                                          out_value);
+    }
     return loom_x86_hal_build_packet(
         builder,
         access->byte_length <= 4 ? target->entry->constant_u32
@@ -125,13 +278,23 @@ static iree_status_t loom_x86_task_emit_parameter(
         loom_attr_i64(0), access->carrier_type, out_value);
   }
   if (*table == LOOM_VALUE_ID_INVALID) {
-    IREE_RETURN_IF_ERROR(loom_x86_hal_build_load(
+    IREE_RETURN_IF_ERROR(loom_x86_hal_build_gpr_load(
         builder, dispatch, access->table_offset, LOOM_TASK_ABI64_POINTER_SIZE,
         builder->pointer_type, table));
   }
-  return loom_x86_hal_build_load(builder, *table, access->value_offset,
-                                 access->byte_length, access->carrier_type,
-                                 out_value);
+  if (register_class == LOOM_X86_REGISTER_CLASS_GPR32 ||
+      register_class == LOOM_X86_REGISTER_CLASS_GPR64) {
+    return loom_x86_hal_build_gpr_load(builder, *table, access->value_offset,
+                                       access->byte_length,
+                                       access->carrier_type, out_value);
+  }
+  if (loom_x86_task_source_is_predicate_vector(access->source_type)) {
+    return loom_x86_task_emit_predicate_import(builder, *table, access,
+                                               out_value);
+  }
+  return loom_x86_task_emit_simd_load(builder, *table, access->value_offset,
+                                      access->byte_length, access->carrier_type,
+                                      out_value);
 }
 
 static iree_status_t loom_x86_task_emit_builtin(
@@ -140,9 +303,9 @@ static iree_status_t loom_x86_task_emit_builtin(
     loom_value_id_t* out_value) {
   const loom_x86_task_entry_t* target = builder->target_data;
   loom_value_id_t value;
-  IREE_RETURN_IF_ERROR(loom_x86_hal_build_load(builder, state, builtin->offset,
-                                               builtin->size,
-                                               builder->word_type, &value));
+  IREE_RETURN_IF_ERROR(
+      loom_x86_hal_build_gpr_load(builder, state, builtin->offset,
+                                  builtin->size, builder->word_type, &value));
   return loom_x86_hal_build_packet(builder, target->entry->widen_u32, &value, 1,
                                    iree_string_view_empty(), loom_attr_absent(),
                                    builder->pointer_type, out_value);

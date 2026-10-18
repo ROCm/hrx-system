@@ -52,10 +52,39 @@ enum loom_amdgpu_tsan_shadow_layout_e {
       LOOM_AMDGPU_TSAN_SHADOW_HISTORY_BYTE_LENGTH *
       LOOM_AMDGPU_TSAN_SHADOW_HISTORY_COUNT,
   // Per-workgroup shadow header byte length.
-  LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_HEADER_BYTE_LENGTH = 8u,
+  LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_HEADER_BYTE_LENGTH = 32u,
   // Offset of the low 32-bit per-workgroup barrier epoch inside the shadow
-  // header. The upper 32 bits of the 8-byte header are reserved.
+  // header. The upper 32 bits of the 8-byte epoch word are reserved.
   LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_EPOCH_OFFSET = 0u,
+  // Offset of the marked shadow-record stride used to identify the layout
+  // that initialized this workgroup record.
+  LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_LAYOUT_TAG_OFFSET = 8u,
+  // Offset of the full dispatch-generation window tag that owns this record.
+  LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_GENERATION_TAG_OFFSET = 16u,
+  // Offset of the reserved zero word that distinguishes headers displaced by
+  // one 16-byte shadow cell.
+  LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_RESERVED_OFFSET = 24u,
+  // Low-nibble marker combined with the 16-byte-aligned record stride. Its low
+  // three bits are not an access kind, and its low two bits are the forbidden
+  // chunk state, so neither histories nor the state bitmap can mimic a header.
+  LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_LAYOUT_TAG_MARKER = 0xEu,
+  // Offset of the chunk-state bitmap following the fixed record header.
+  LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_CHUNK_STATE_OFFSET =
+      LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_HEADER_BYTE_LENGTH,
+  // Application bytes retired together on their first access in a record
+  // lifetime.
+  LOOM_AMDGPU_TSAN_SHADOW_CHUNK_APPLICATION_BYTE_LENGTH = 16u,
+  // Shift mapping an application byte offset to its chunk index.
+  LOOM_AMDGPU_TSAN_SHADOW_CHUNK_APPLICATION_BYTE_SHIFT = 4u,
+  // Bits retained for each chunk state in the record bitmap.
+  LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BIT_COUNT = 2u,
+  // Byte length of one atomically updated chunk-state word.
+  LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_WORD_BYTE_LENGTH = 4u,
+  // Chunk states packed into one 32-bit state word.
+  LOOM_AMDGPU_TSAN_SHADOW_CHUNKS_PER_STATE_WORD =
+      32u / LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BIT_COUNT,
+  // Alignment of the history array following the chunk-state bitmap.
+  LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BITMAP_ALIGNMENT = 16u,
   // Bit offset of the encoded prior access kind in a shadow entry.
   LOOM_AMDGPU_TSAN_SHADOW_ENTRY_ACCESS_KIND_SHIFT = 0u,
   // Bit count of the encoded prior access kind in a shadow entry.
@@ -75,6 +104,13 @@ enum loom_amdgpu_tsan_shadow_layout_e {
   LOOM_AMDGPU_TSAN_SHADOW_ENTRY_GENERATION_SHIFT = 23u,
   // Bit count of the encoded dispatch generation low bits.
   LOOM_AMDGPU_TSAN_SHADOW_ENTRY_GENERATION_BIT_COUNT = 20u,
+  // Dispatch-ID shift selecting the full generation window stored in the
+  // workgroup header. The stored tag adds one so zero means uninitialized.
+  LOOM_AMDGPU_TSAN_SHADOW_GENERATION_WINDOW_SHIFT =
+      LOOM_AMDGPU_TSAN_SHADOW_ENTRY_GENERATION_BIT_COUNT,
+  // Number of dispatch IDs distinguished by compact history generation bits.
+  LOOM_AMDGPU_TSAN_SHADOW_GENERATION_WINDOW_CAPACITY =
+      1u << LOOM_AMDGPU_TSAN_SHADOW_GENERATION_WINDOW_SHIFT,
   // Dispatch generation bits encoded in the low shadow entry word.
   LOOM_AMDGPU_TSAN_SHADOW_ENTRY_LOW_GENERATION_BIT_COUNT =
       32u - LOOM_AMDGPU_TSAN_SHADOW_ENTRY_GENERATION_SHIFT,
@@ -86,6 +122,18 @@ enum loom_amdgpu_tsan_shadow_layout_e {
   LOOM_AMDGPU_TSAN_SHADOW_ENTRY_SITE_SHIFT = 43u,
   // Bit count of the encoded instrumentation site low bits.
   LOOM_AMDGPU_TSAN_SHADOW_ENTRY_SITE_BIT_COUNT = 21u,
+};
+
+// State of one lazily retired shadow-history chunk.
+typedef uint32_t loom_amdgpu_tsan_shadow_chunk_state_t;
+
+enum loom_amdgpu_tsan_shadow_chunk_state_e {
+  // No access has established this chunk in the current record lifetime.
+  LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_UNINITIALIZED = 0u,
+  // One access owns history retirement while competitors wait.
+  LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_CLAIMED = 1u,
+  // Histories are retired and may participate in race observations.
+  LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_READY = 3u,
 };
 
 // Encoded access kind stored in each TSAN shadow entry.

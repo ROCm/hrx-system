@@ -33,17 +33,6 @@ loom_low_descriptor_cc_library(
 )
 
 loom_low_descriptor_cc_library(
-    name = "simd128_descriptors",
-    header_only = True,
-    ids_deps = ["//loom/src/loom/codegen/low:descriptors"],
-    visibility = _X86_NATIVE_VISIBILITY,
-    deps = [
-        ":avx512_features_descriptors",
-        "//loom/src/loom/codegen/low:descriptors",
-    ],
-)
-
-loom_low_descriptor_cc_library(
     name = "avx2_descriptors",
     header_only = True,
     ids_deps = ["//loom/src/loom/codegen/low:descriptors"],
@@ -172,7 +161,6 @@ loom_low_descriptor_cc_library(
     ],
     generated_hdr_flags = [
         "--view-header=scalar",
-        "--view-header=simd128",
         "--view-header=avx2",
         "--view-header=avx2_features",
         "--view-header=avx512",
@@ -187,7 +175,6 @@ loom_low_descriptor_cc_library(
     ],
     generated_hdrs = [
         "scalar_descriptors.h",
-        "simd128_descriptors.h",
         "avx2_descriptors.h",
         "avx2_features_descriptors.h",
         "avx512_descriptors.h",
@@ -222,7 +209,6 @@ loom_cc_library(
         ":avx512_descriptors_ids",
         ":avx512_features_descriptors_ids",
         ":scalar_descriptors_ids",
-        ":simd128_descriptors_ids",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
     ],
@@ -274,7 +260,6 @@ loom_cc_library(
         ":avx_vnni_int8_descriptors",
         ":packed_dot_descriptors",
         ":scalar_descriptors",
-        ":simd128_descriptors",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:types",
@@ -300,7 +285,6 @@ loom_cc_library(
         ":avx_vnni_int8_descriptors.h",
         ":packed_dot_descriptors.h",
         ":scalar_descriptors.h",
-        ":simd128_descriptors.h",
     ],
     visibility = _X86_ROOT_VISIBILITY,
     deps = [
@@ -317,6 +301,5 @@ loom_cc_library(
         ":avx_vnni_int8_descriptors",
         ":packed_dot_descriptors",
         ":scalar_descriptors",
-        ":simd128_descriptors",
     ],
 )

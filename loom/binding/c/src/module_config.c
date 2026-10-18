@@ -65,6 +65,7 @@ loomc_status_t loomc_module_apply_config(
         config != NULL && (config->binding_count != 0 ||
                            !loomc_string_view_is_empty(config->json_object));
     const loomc_config_apply_text_to_module_options_t apply_options = {
+        .context = context,
         .config = config,
         .module = internal_module,
         .source_resolver = loomc_module_source_resolver(module),

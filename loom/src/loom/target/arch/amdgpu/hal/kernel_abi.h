@@ -34,8 +34,8 @@ extern "C" {
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT 8u
 
 // Kernarg storage for one 32-bit direct dispatch constant word. Logical
-// payloads narrower than a word occupy its low-address bytes; HAL dispatch
-// zero-fills the remaining native slot before launch.
+// payloads narrower than a word occupy its low-address bytes. Padding is
+// unspecified; source lowering establishes each consumer's carrier contract.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE 4u
 
 // Required kernarg alignment for direct dispatch constant words.

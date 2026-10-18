@@ -307,10 +307,23 @@ enum loom_amdgpu_bf16_pack_kind_e {
   LOOM_AMDGPU_BF16_PACK_KIND_NATIVE = 1,
   // Pack the upper F32 bits after proving every lane exactly representable.
   LOOM_AMDGPU_BF16_PACK_KIND_EXACT = 2,
+  // Gather the upper F32 bytes with one byte-permutation packet after proving
+  // every lane exactly representable.
+  LOOM_AMDGPU_BF16_PACK_KIND_EXACT_PERMUTE = 3,
   // Round through integer packets after proving inputs are not NaNs.
-  LOOM_AMDGPU_BF16_PACK_KIND_ROUND_NOT_NAN = 3,
+  LOOM_AMDGPU_BF16_PACK_KIND_ROUND_NOT_NAN = 4,
   // Round through integer packets with NaN payload repair.
-  LOOM_AMDGPU_BF16_PACK_KIND_ROUND_PRESERVE_NAN = 4,
+  LOOM_AMDGPU_BF16_PACK_KIND_ROUND_PRESERVE_NAN = 5,
+};
+
+typedef uint8_t loom_amdgpu_f16_pack_kind_t;
+enum loom_amdgpu_f16_pack_kind_e {
+  // No F32-to-F16 pack action has been selected.
+  LOOM_AMDGPU_F16_PACK_KIND_NONE = 0,
+  // Preserve round-to-nearest-even semantics with per-lane conversion.
+  LOOM_AMDGPU_F16_PACK_KIND_ROUND = 1,
+  // Use packed round-toward-zero conversion after proving every lane exact.
+  LOOM_AMDGPU_F16_PACK_KIND_EXACT_NATIVE = 2,
 };
 
 typedef uint8_t loom_amdgpu_vector_scale_materialization_kind_t;
@@ -385,6 +398,8 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   union {
     // Selected F32-to-BF16 pack action.
     loom_amdgpu_bf16_pack_kind_t bf16_pack_kind;
+    // Selected F32-to-F16 pack action.
+    loom_amdgpu_f16_pack_kind_t f16_pack_kind;
     // Packed FP4 decode strategy when strategy_kind is FP4_DECODE.
     loom_amdgpu_fp4_decode_plan_t fp4_decode;
     // Packed FP8 encode strategy when strategy_kind is FP8_ENCODE.
@@ -1146,14 +1161,22 @@ typedef struct loom_amdgpu_memory_mask_plan_t {
   const void* condition_plan;
 } loom_amdgpu_memory_mask_plan_t;
 
+typedef uint8_t loom_amdgpu_memory_access_plan_flags_t;
+enum loom_amdgpu_memory_access_plan_flag_bits_e {
+  // An appended mask plan preserves the source passthrough value.
+  LOOM_AMDGPU_MEMORY_ACCESS_PLAN_FLAG_PRESERVE_INACTIVE = 1u << 0,
+  // An exact view descriptor makes every inactive packet read positive zero.
+  LOOM_AMDGPU_MEMORY_ACCESS_PLAN_FLAG_DESCRIPTOR_ZERO_FILL = 1u << 1,
+};
+
 // Immutable function-retained direct-memory packet plan.
 typedef struct loom_amdgpu_memory_access_plan_t {
   // Canonical source access shared by all physical packet views.
   loom_low_source_memory_access_plan_t source;
   // Number of populated packet plans.
   uint32_t packet_count;
-  // A mask plan follows the packets; ordinary loads/stores allocate no tail.
-  bool has_mask;
+  // Inactive-lane semantics selected before source-storage allocation.
+  loom_amdgpu_memory_access_plan_flags_t flags;
   // Direct memory packets emitted in increasing payload-byte order. The
   // function-retained allocation contains exactly |packet_count| entries.
   loom_amdgpu_memory_packet_plan_t packets[];
@@ -1162,7 +1185,8 @@ typedef struct loom_amdgpu_memory_access_plan_t {
 static inline const loom_amdgpu_memory_mask_plan_t*
 loom_amdgpu_memory_access_mask_plan(
     const loom_amdgpu_memory_access_plan_t* plan) {
-  return plan->has_mask
+  return iree_any_bit_set(plan->flags,
+                          LOOM_AMDGPU_MEMORY_ACCESS_PLAN_FLAG_PRESERVE_INACTIVE)
              ? (const loom_amdgpu_memory_mask_plan_t*)(plan->packets +
                                                        plan->packet_count)
              : NULL;

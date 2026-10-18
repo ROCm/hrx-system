@@ -8,7 +8,6 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/ops/index/ops.h"
-#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/arch/amdgpu/lower/bitpack.h"
@@ -258,23 +257,11 @@ void loom_amdgpu_source_integer_representation_observe_callable_boundary(
       uint16_t argument_count = 0;
       const loom_value_id_t* argument_ids =
           loom_func_like_arg_ids(function, &argument_count);
-      const loom_low_lower_abi_argument_t* argument_map = NULL;
-      uint16_t mapped_argument_count = 0;
-      if (loom_kernel_def_isa(source_op)) {
-        argument_map = loom_low_lower_context_argument_map(
-            context, &mapped_argument_count);
-        IREE_ASSERT_EQ(mapped_argument_count, argument_count);
-      }
-      for (uint16_t i = 0; i < argument_count; ++i) {
-        loom_amdgpu_narrow_integer_guarantees_t guarantees =
-            LOOM_AMDGPU_NARROW_INTEGER_GUARANTEE_LOW_BITS;
-        if (argument_map != NULL &&
-            argument_map[i].kind == LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT) {
-          guarantees |= LOOM_AMDGPU_NARROW_INTEGER_GUARANTEE_ZERO_EXTENDED;
-        }
-        loom_amdgpu_source_integer_representation_record_callable_inputs(
-            context, &argument_ids[i], 1, guarantees, recorder);
-      }
+      // Kernel metadata advertises payload bytes, not a zero-extended carrier.
+      // Both kernel and ordinary callable inputs guarantee only their low bits.
+      loom_amdgpu_source_integer_representation_record_callable_inputs(
+          context, argument_ids, argument_count,
+          LOOM_AMDGPU_NARROW_INTEGER_GUARANTEE_LOW_BITS, recorder);
       return;
     }
     case LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_CALL: {

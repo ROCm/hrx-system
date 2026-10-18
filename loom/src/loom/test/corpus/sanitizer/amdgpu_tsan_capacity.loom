@@ -11,16 +11,16 @@ kernel.def @tsan_shadow_capacity_8(%workgroups_x: index, %workgroups_y: index, %
   kernel.return
 }
 
-kernel.def @tsan_shadow_capacity_16(%workgroups_x: index, %workgroups_y: index, %workgroups_z: index) {
+kernel.def @tsan_shadow_capacity_17(%workgroups_x: index, %workgroups_y: index, %workgroups_z: index) {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%workgroups_x, %workgroups_y, %workgroups_z) workgroup_size(%unit, %unit, %unit) : index
 } launch() {
   %base = index.constant 0 : offset
-  %bytes = index.constant 16 : offset
-  %value = scalar.constant 1 : i64
-  %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<2xi64>
-  view.store %value, %view[0] : i64, view<2xi64>
+  %bytes = index.constant 17 : offset
+  %value = scalar.constant 1 : i8
+  %scratch = buffer.alloca<workgroup> align(1) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<17xi8>
+  view.store %value, %view[0] : i8, view<17xi8>
   kernel.return
 }
 
@@ -52,11 +52,11 @@ func.def @tsan_shadow_capacity_output_unchanged(%output: buffer) {
 }
 
 check.scenario @tsan_shadow_capacity_boundaries {
-  // Sixteen 136-byte records exactly consume the 2176-byte test arena.
+  // Four 304-byte single-chunk records fit in the 1440-byte test arena.
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %x = check.literal value(4) : index
+    %x = check.literal value(2) : index
     %y = check.literal value(2) : index
-    %z = check.literal value(2) : index
+    %z = check.literal value(1) : index
     check.compare<@tsan_shadow_capacity_8, @tsan_shadow_capacity_no_output>[%x, %y, %z]() : [index, index, index]() -> () {
     }
   }
@@ -64,35 +64,34 @@ check.scenario @tsan_shadow_capacity_boundaries {
   // A second trial reuses the prepared queue and proves that one dispatch does
   // not permanently consume its shadow records.
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %x = check.literal value(4) : index
+    %x = check.literal value(2) : index
     %y = check.literal value(2) : index
-    %z = check.literal value(2) : index
+    %z = check.literal value(1) : index
     check.compare<@tsan_shadow_capacity_8, @tsan_shadow_capacity_no_output>[%x, %y, %z]() : [index, index, index]() -> () {
     }
   }
 
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %x = check.literal value(17) : index
+    %x = check.literal value(5) : index
     %unit = check.literal value(1) : index
     check.compare<@tsan_shadow_capacity_8, @tsan_shadow_capacity_no_output>[%x, %unit, %unit]() : [index, index, index]() -> () {
       check.expect.event<device> {count = 1, severity = "error", tsan = {check = "shadow_capacity"}, type = "tsan_report"}
     }
   }
 
-  // Eight 264-byte records fit; the ninth does not. The excess case uses a 3D
-  // launch so ordinal calculation, not only the X dimension, owns the result.
+  // Crossing the 16-byte chunk boundary raises the record to 560 bytes. Two
+  // records fit; a 3D three-record launch exercises ordinal capacity failure.
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %x = check.literal value(8) : index
+    %x = check.literal value(2) : index
     %unit = check.literal value(1) : index
-    check.compare<@tsan_shadow_capacity_16, @tsan_shadow_capacity_no_output>[%x, %unit, %unit]() : [index, index, index]() -> () {
+    check.compare<@tsan_shadow_capacity_17, @tsan_shadow_capacity_no_output>[%x, %unit, %unit]() : [index, index, index]() -> () {
     }
   }
 
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %x = check.literal value(3) : index
-    %y = check.literal value(3) : index
     %unit = check.literal value(1) : index
-    check.compare<@tsan_shadow_capacity_16, @tsan_shadow_capacity_no_output>[%x, %y, %unit]() : [index, index, index]() -> () {
+    %z = check.literal value(3) : index
+    check.compare<@tsan_shadow_capacity_17, @tsan_shadow_capacity_no_output>[%unit, %unit, %z]() : [index, index, index]() -> () {
       check.expect.event<device> {count = 1, severity = "error", tsan = {check = "shadow_capacity"}, type = "tsan_report"}
     }
   }

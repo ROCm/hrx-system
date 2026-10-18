@@ -1,11 +1,12 @@
-// RUN: with-checks pass-report pipeline-scf-for
+// RUN: pass-report pipeline-scf-for
 
-// Global reads advance; two views of the same workgroup allocation remain ordered.
+// Every concrete global-like source reads ahead while two views of the same
+// workgroup allocation remain ordered.
 kernel.def @ordered_workgroup_consumer() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%input: buffer, %output: buffer) {
+} launch(%global_input: buffer, %constant_input: buffer, %descriptor_input: buffer, %output: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -16,7 +17,12 @@ kernel.def @ordered_workgroup_consumer() {
   %stage_bytes = index.constant 256 : offset
   %lane = kernel.workitem.id<x> : index
   %peer = index.sub %last, %lane : index
-  %source = buffer.view %input[%origin] : buffer -> view<256xi32>
+  %global_buffer = buffer.assume.memory_space<global> %global_input : buffer
+  %constant_buffer = buffer.assume.memory_space<constant> %constant_input : buffer
+  %descriptor_buffer = buffer.assume.memory_space<descriptor> %descriptor_input : buffer
+  %global_source = buffer.view %global_buffer[%origin] : buffer -> view<256xi32>
+  %constant_source = buffer.view %constant_buffer[%origin] : buffer -> view<256xi32>
+  %descriptor_source = buffer.view %descriptor_buffer[%origin] : buffer -> view<256xi32>
   %destination = buffer.view %output[%origin] : buffer -> view<64xi32>
   %scratch = buffer.alloca<workgroup> align(4) %stage_bytes : buffer
   %published = buffer.view %scratch[%origin] : buffer -> view<64xi32>
@@ -24,7 +30,11 @@ kernel.def @ordered_workgroup_consumer() {
   %identity = scalar.constant 0 : i32
   %result = scf.for %row = [%c0 to %c4 step %c1](%sum = %identity : i32) -> (i32) pipeline(%c2) {
     %address = index.madd %row, %width, %lane : index
-    %value = view.load %source[%address] : view<256xi32> -> i32
+    %global_value = view.load %global_source[%address] : view<256xi32> -> i32
+    %constant_value = view.load %constant_source[%address] : view<256xi32> -> i32
+    %descriptor_value = view.load %descriptor_source[%address] : view<256xi32> -> i32
+    %external_sum = scalar.addi %global_value, %constant_value : i32
+    %value = scalar.addi %external_sum, %descriptor_value : i32
     view.store %value, %published[%lane] : i32, view<64xi32>
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     %observed = view.load %consumed[%peer] : view<64xi32> -> i32
@@ -37,14 +47,7 @@ kernel.def @ordered_workgroup_consumer() {
 }
 
 // ----
-CHECK: *"loops-pipelined":1,"policies-cleared":0*
-CHECK: *"values_per_record":1,"read_count":1*
-CHECK: *"op":"view.load","stage":"producer"*
-CHECK: *"op":"view.load","stage":"consumer"*
-CHECK: *"op":"view.store","stage":"consumer"*
-CHECK: *"op":"kernel.barrier","stage":"consumer"*
-CHECK-NOT: *"op":"view.store","stage":"producer"*
-CHECK-NOT: *"op":"kernel.barrier","stage":"producer"*
+{"invocations":[{"pass":"pipeline-scf-for","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"ordered_workgroup_consumer","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"loops-pipelined":1,"policies-cleared":0},"details":[{"category":"scf-pipeline","loop":0,"outcome":"pipelined","schedule":"read_ahead","depth":2,"queue_records":1,"values_per_record":3,"read_count":3},{"category":"scf-pipeline-stage","loop":0,"position":0,"op":"index.madd","stage":"producer","iteration_lookahead":1},{"category":"scf-pipeline-stage","loop":0,"position":1,"op":"view.load","stage":"producer","iteration_lookahead":1},{"category":"scf-pipeline-stage","loop":0,"position":2,"op":"view.load","stage":"producer","iteration_lookahead":1},{"category":"scf-pipeline-stage","loop":0,"position":3,"op":"view.load","stage":"producer","iteration_lookahead":1},{"category":"scf-pipeline-stage","loop":0,"position":4,"op":"scalar.addi","stage":"consumer","iteration_lookahead":0},{"category":"scf-pipeline-stage","loop":0,"position":5,"op":"scalar.addi","stage":"consumer","iteration_lookahead":0},{"category":"scf-pipeline-stage","loop":0,"position":6,"op":"view.store","stage":"consumer","iteration_lookahead":0},{"category":"scf-pipeline-stage","loop":0,"position":7,"op":"kernel.barrier","stage":"consumer","iteration_lookahead":0},{"category":"scf-pipeline-stage","loop":0,"position":8,"op":"view.load","stage":"consumer","iteration_lookahead":0},{"category":"scf-pipeline-stage","loop":0,"position":9,"op":"scalar.addi","stage":"consumer","iteration_lookahead":0},{"category":"scf-pipeline-stage","loop":0,"position":10,"op":"kernel.barrier","stage":"consumer","iteration_lookahead":0},{"category":"value-facts","acquisition_count":1,"cache_hit_count":0,"recomputation_count":1,"preparation_count":0,"invalidation_count":2,"scope_clear_count":1,"computed_value_count":38,"cleared_value_count":38}]}]}
 
 // ====
 
@@ -763,7 +766,7 @@ kernel.def @ordered_mixed_read_region() {
     %value = view.load %source[%address] : view<256xi32> -> i32
     view.store %value, %staged[%lane] : i32, view<64xi32>
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    // ERROR@+1: STRUCTURE/014 {expected_constraint="separate global load and workgroup consumer units"}
+    // ERROR@+1: STRUCTURE/014 {expected_constraint="separate read-ahead load and workgroup consumer units"}
     %next = scf.if %enabled -> (i32) {
       %global_value = view.load %source[%address] : view<256xi32> -> i32
       %local_value = view.load %staged[%peer] : view<64xi32> -> i32

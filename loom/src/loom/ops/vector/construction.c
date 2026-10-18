@@ -11,6 +11,74 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/fact_vector_partition.h"
+
+iree_status_t loom_vector_project_regular_partition(loom_op_t* op,
+                                                    loom_rewriter_t* rewriter,
+                                                    bool* out_changed) {
+  *out_changed = false;
+  const bool is_extract = loom_vector_extract_isa(op);
+  if (!is_extract && !loom_vector_slice_isa(op)) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t source = loom_op_const_operands(op)[0];
+  const loom_type_t source_type =
+      loom_module_value_type(rewriter->module, source);
+  const loom_type_t result_type =
+      loom_module_value_type(rewriter->module, loom_op_const_results(op)[0]);
+  if (loom_type_rank(source_type) != 1 ||
+      (is_extract ? !loom_type_is_scalar(result_type)
+                  : !loom_type_is_all_static(result_type))) {
+    return iree_ok_status();
+  }
+  const loom_attribute_t offsets = is_extract
+                                       ? loom_vector_extract_static_indices(op)
+                                       : loom_vector_slice_static_offsets(op);
+  const uint64_t length =
+      is_extract ? 1 : loom_type_dim_static_size_at(result_type, 0);
+  // An empty slice may start at the end of the source, outside any component.
+  if (length == 0 || offsets.i64_array[0] == INT64_MIN) {
+    return iree_ok_status();
+  }
+  const loom_value_fact_vector_partition_t partition =
+      loom_value_fact_table_query_vector_partition(rewriter->fact_table,
+                                                   source);
+  if (partition.snapshot_lane_count == 0) {
+    return iree_ok_status();
+  }
+  const uint64_t offset = offsets.i64_array[0];
+  const loom_value_fact_vector_partition_component_t component =
+      partition.snapshot_components[offset / partition.snapshot_lane_count];
+  const int64_t component_offset = offset % partition.snapshot_lane_count;
+  if (length > component.lane_count - component_offset) {
+    return iree_ok_status();
+  }
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  loom_value_id_t replacement = component.value;
+  if (is_extract || component_offset != 0 ||
+      !loom_type_equal(
+          loom_module_value_type(rewriter->module, component.value),
+          result_type)) {
+    loom_op_t* projected = NULL;
+    if (is_extract) {
+      IREE_RETURN_IF_ERROR(loom_vector_extract_build(
+          &rewriter->builder, component.value, NULL, 0, &component_offset, 1,
+          result_type, op->location, &projected));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_vector_slice_build(
+          &rewriter->builder, component.value, NULL, 0, &component_offset, 1,
+          result_type, op->location, &projected));
+    }
+    replacement = loom_op_const_results(projected)[0];
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  *out_changed = true;
+  return iree_ok_status();
+}
 
 iree_status_t loom_vector_fold_constant_lanes(loom_op_t* op,
                                               loom_rewriter_t* rewriter,

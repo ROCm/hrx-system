@@ -24,6 +24,12 @@ typedef struct loom_amdgpu_sanitizer_race_shadow_layout_config_t {
 typedef struct loom_amdgpu_sanitizer_race_shadow_layout_t {
   // Final group-segment byte size carried by the dispatch packet.
   loom_value_id_t workgroup_local_memory_size;
+  // Number of fixed application-byte chunks represented by this record.
+  loom_value_id_t workgroup_chunk_count;
+  // Aligned bytes occupied by the per-chunk state bitmap.
+  loom_value_id_t workgroup_chunk_state_bitmap_size;
+  // Byte offset of the padded history array within the workgroup record.
+  loom_value_id_t workgroup_history_data_offset;
   // Bytes occupied by one workgroup shadow record for this dispatch.
   loom_value_id_t workgroup_shadow_stride;
   // Flattened 64-bit workgroup ordinal in the dispatch.

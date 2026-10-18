@@ -1331,7 +1331,7 @@ TEST(AqlBlockProcessorTest, IndirectDispatchEmitsPatchThenUnpublishedDispatch) {
             (uint32_t)iree_hal_amdgpu_aql_make_header(
                 IREE_HSA_PACKET_TYPE_KERNEL_DISPATCH,
                 iree_hal_amdgpu_aql_packet_control(
-                    /*has_barrier=*/true, IREE_HSA_FENCE_SCOPE_NONE,
+                    /*has_barrier=*/true, IREE_HSA_FENCE_SCOPE_AGENT,
                     IREE_HSA_FENCE_SCOPE_SYSTEM)) |
                 ((uint32_t)packet_setups[1] << 16));
   EXPECT_TRUE(AqlHeaderHasBarrier(packet_headers[0]));
@@ -1381,7 +1381,7 @@ TEST(AqlBlockProcessorTest, IndirectDispatchSplitsCommandBarrierScopes) {
             (uint32_t)iree_hal_amdgpu_aql_make_header(
                 IREE_HSA_PACKET_TYPE_KERNEL_DISPATCH,
                 iree_hal_amdgpu_aql_packet_control(
-                    /*has_barrier=*/false, IREE_HSA_FENCE_SCOPE_NONE,
+                    /*has_barrier=*/false, IREE_HSA_FENCE_SCOPE_AGENT,
                     IREE_HSA_FENCE_SCOPE_AGENT)) |
                 ((uint32_t)packet_setups[1] << 16));
 
@@ -1391,6 +1391,71 @@ TEST(AqlBlockProcessorTest, IndirectDispatchSplitsCommandBarrierScopes) {
   EXPECT_EQ(AqlHeaderReleaseScope(packet_headers[0]),
             IREE_HSA_FENCE_SCOPE_NONE);
   EXPECT_EQ(packet_headers[1], IREE_HSA_PACKET_TYPE_INVALID);
+}
+
+TEST(AqlBlockProcessorTest, ProfiledIndirectDispatchAcquiresPatchedParameters) {
+  const iree_hal_amdgpu_device_kernels_t kernels = MakeTransferKernels();
+  const iree_hal_amdgpu_device_buffer_transfer_context_t transfer_context =
+      MakeTransferContext(&kernels);
+  const uint32_t workgroup_count[3] = {7, 5, 3};
+  for (iree_hsa_fence_scope_t scope :
+       {IREE_HSA_FENCE_SCOPE_NONE, IREE_HSA_FENCE_SCOPE_AGENT,
+        IREE_HSA_FENCE_SCOPE_SYSTEM}) {
+    SCOPED_TRACE(scope);
+    IndirectDispatchBlock block = MakeIndirectDispatchBlock(
+        workgroup_count,
+        CommandFlags(
+            IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_USES_QUEUE_KERNARGS |
+                IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER,
+            scope, scope));
+    alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
+    iree_hal_amdgpu_host_queue_t queue = {};
+    queue.aql_ring.base = packets;
+    queue.aql_ring.mask = IREE_ARRAYSIZE(packets) - 1u;
+    queue.transfer_context = &transfer_context;
+    iree_hal_amdgpu_wait_resolution_t resolution = {};
+    uint16_t packet_headers[2] = {};
+    uint16_t packet_setups[2] = {};
+    iree_hal_amdgpu_kernarg_block_t kernarg_blocks[2] = {};
+    iree_hal_amdgpu_aql_block_processor_profile_t processor = {
+        .queue = &queue,
+        .block = &block.header,
+    };
+    processor.submission.resolution = &resolution;
+    processor.packets.first_payload_id = 4;
+    processor.packets.count = IREE_ARRAYSIZE(packet_headers);
+    processor.packets.headers = packet_headers;
+    processor.packets.setups = packet_setups;
+    processor.kernargs.blocks = kernarg_blocks;
+    processor.kernargs.count = IREE_ARRAYSIZE(kernarg_blocks);
+    iree_hal_amdgpu_aql_block_processor_profile_result_t result;
+    IREE_ASSERT_OK(iree_hal_amdgpu_aql_block_processor_profile_invoke(
+        &processor, &result));
+
+    EXPECT_EQ(result.packets.recorded, 2u);
+    EXPECT_EQ(result.packets.emitted, 2u);
+    const auto* patch_args = reinterpret_cast<
+        const iree_hal_amdgpu_device_dispatch_patch_indirect_params_args_t*>(
+        kernarg_blocks[0].data);
+    EXPECT_EQ(patch_args->workgroup_count, workgroup_count);
+    EXPECT_EQ(patch_args->dispatch_packet, &packets[5].dispatch);
+    // The final profiled packet also retires queue-owned storage.
+    const iree_hsa_fence_scope_t release_scope =
+        scope == IREE_HSA_FENCE_SCOPE_SYSTEM ? scope
+                                             : IREE_HSA_FENCE_SCOPE_AGENT;
+    EXPECT_EQ(patch_args->dispatch_header_setup,
+              (uint32_t)iree_hal_amdgpu_aql_make_header(
+                  IREE_HSA_PACKET_TYPE_KERNEL_DISPATCH,
+                  iree_hal_amdgpu_aql_packet_control(
+                      /*has_barrier=*/true, IREE_HSA_FENCE_SCOPE_AGENT,
+                      release_scope)) |
+                  ((uint32_t)packet_setups[1] << 16));
+    EXPECT_TRUE(AqlHeaderHasBarrier(packet_headers[0]));
+    EXPECT_EQ(AqlHeaderAcquireScope(packet_headers[0]), scope);
+    EXPECT_EQ(AqlHeaderReleaseScope(packet_headers[0]),
+              IREE_HSA_FENCE_SCOPE_NONE);
+    EXPECT_EQ(packet_headers[1], IREE_HSA_PACKET_TYPE_INVALID);
+  }
 }
 
 TEST_F(AqlBlockProcessorRecordedTest, RecordedTransfersEmitBlitPackets) {

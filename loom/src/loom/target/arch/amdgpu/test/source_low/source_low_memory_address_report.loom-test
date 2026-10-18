@@ -157,3 +157,25 @@ CHECK: COMPILE-REPORT: source_low_memory * packets=3 loads=2 stores=1 *
 CHECK: COMPILE-REPORT: source_low_memory[*] * source_op=view.load memory_space=global operation=load packet=amdgpu.global_load_b32_saddr source_root=global_input *storage={element_format:i32} * address_form=global_saddr dynamic_term_kind=none * static_offset_bytes=0 element_bytes=4 vector_lanes=1 issued_read_bytes=4 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=0 vector_lane_stride_bytes=4
 CHECK: COMPILE-REPORT: source_low_memory[*] * source_op=view.load memory_space=descriptor operation=load packet=amdgpu.buffer_load_dword_off_zero source_root=descriptor_input *storage={element_format:i32} * address_form=buffer_off_zero dynamic_term_kind=none * static_offset_bytes=0 element_bytes=4 vector_lanes=1 issued_read_bytes=4 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=0 vector_lane_stride_bytes=4
 CHECK: COMPILE-REPORT: source_low_memory[*] * source_op=view.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr source_root=output *storage={element_format:i32} * address_form=global_saddr dynamic_term_kind=none * static_offset_bytes=0 element_bytes=4 vector_lanes=1 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=0 vector_lane_stride_bytes=4
+
+// ====
+
+// The report exposes when an exact descriptor range replaces a uniform mask
+// whose false path is wholly beyond the logical view.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @report_descriptor_zero_fill(%row0: index, %rows0: index, %input: buffer) -> (vector<4xf32>) {
+  %row = index.assume %row0 [range(%row0, 0, 1023)] : index
+  %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
+  %base = index.constant 0 : offset
+  %descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xf32>
+  %inside = index.cmp slt, %row, %rows : index
+  %mask = vector.splat %inside : vector<4xi1>
+  %passthrough = vector.constant 0.0 : vector<4xf32>
+  %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xf32>, vector<4xi1>, vector<4xf32>
+  func.return %value : vector<4xf32>
+}
+
+// ----
+CHECK: COMPILE-REPORT: source_low_memory[*] * source_op=vector.load.mask memory_space=descriptor operation=load packet=amdgpu.buffer_load_b128 * strategy=descriptor_zero_fill * address_form=default dynamic_term_kind=soffset *

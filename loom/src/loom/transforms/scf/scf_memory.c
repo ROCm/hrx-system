@@ -6,6 +6,13 @@
 
 #include "loom/transforms/scf/scf_memory.h"
 
+bool loom_scf_memory_space_is_read_ahead_source(
+    loom_value_fact_memory_space_t space) {
+  return space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
+         space == LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT ||
+         space == LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR;
+}
+
 static iree_host_size_t loom_scf_memory_slot(const loom_op_t* op,
                                              iree_host_size_t capacity) {
   uintptr_t bits = (uintptr_t)op;

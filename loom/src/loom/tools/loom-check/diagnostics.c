@@ -10,6 +10,7 @@
 
 #include "loom/error/renderer.h"
 #include "loom/error/source.h"
+#include "loom/testing/test_diagnostic_native.h"
 #include "loom/util/stream.h"
 
 //===----------------------------------------------------------------------===//

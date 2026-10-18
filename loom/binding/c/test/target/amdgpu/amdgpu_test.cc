@@ -51,6 +51,34 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) workgroup_size(64,
   return DeserializeModule(context, workspace, source.get());
 }
 
+TEST(AmdgpuTargetTest, ParsingRetainsTargetOwnedAliasDiagnostics) {
+  auto environment = CreateAmdgpuTargetEnvironment();
+  auto context = CreateAmdgpuContext(environment.get());
+  auto workspace = CreateWorkspace();
+  auto source = CreateTextSource("rejected_alias.loom", R"(
+amdgpu.target<gfx1100> @target
+low.func.def target<amdgpu.rdna3.core>(@target) @multiply(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) asm {
+  %product = v_mul_dx9_zero_f32 %a, %b
+  return
+}
+)");
+  loomc_module_t* raw_module = nullptr;
+  loomc_result_t* raw_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_deserialize_from_source(
+      context.get(), workspace.get(), source.get(), nullptr,
+      loomc_allocator_system(), &raw_module, &raw_result));
+  ModulePtr module(raw_module);
+  ResultPtr result(raw_result);
+  EXPECT_EQ(module.get(), nullptr);
+  EXPECT_FALSE(loomc_result_succeeded(result.get()));
+  ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+  const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+  EXPECT_EQ(ToString(diagnostic->code), "AMDGPU/032");
+  EXPECT_NE(ToString(diagnostic->message).find("v_mul_dx9_zero_f32"),
+            std::string::npos);
+  EXPECT_NE(ToString(diagnostic->message).find("v_mul_f32"), std::string::npos);
+}
+
 TEST(AmdgpuTargetTest, NativeReportSurvivesFailedExecutionCleanup) {
   auto environment = CreateAmdgpuTargetEnvironment();
   auto context = CreateAmdgpuContext(environment.get());

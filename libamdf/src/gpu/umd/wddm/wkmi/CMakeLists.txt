@@ -80,6 +80,28 @@ endif()
 if(IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 amdf_windows_sidecar_test(
   NAME
+    adapter_info_system_test
+  SRCS
+    "adapter_info_system_test.cc"
+    "dxcore_loader_compatibility.cc"
+  LINKOPTS
+    "gdi32.lib"
+  DEPS
+    amdf::headers
+    iree::third_party::amdf_wkmi
+  LABELS
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+amdf_windows_sidecar_test(
+  NAME
     allocation_test
   SRCS
     "adapter_state.cc"

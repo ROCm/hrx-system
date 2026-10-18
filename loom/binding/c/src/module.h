@@ -42,6 +42,8 @@ typedef struct loomc_module_resolved_serialize_options_t {
 
   // Text presentation policy for textual output.
   loomc_module_text_presentation_t text_presentation;
+  // Whether textual output includes operation source locations.
+  bool print_locations;
 } loomc_module_resolved_serialize_options_t;
 
 // Decodes one resolved source format into internal module storage.

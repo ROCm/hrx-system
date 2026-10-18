@@ -149,11 +149,18 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void require_launch_configuration_context(cxx::AST* owner) {
-    if (current_function_.kind != FunctionKind::LaunchConfiguration &&
-        current_function_.kind != FunctionKind::ClusteredLaunchConfiguration) {
-      fail(owner,
-           "target launch query requires a kernel configuration function");
+    // Required inlining defers the IR ancestor requirement until expansion.
+    if (current_function_.kind == FunctionKind::LaunchConfiguration ||
+        current_function_.kind == FunctionKind::ClusteredLaunchConfiguration ||
+        current_function_.kind == FunctionKind::TemplateDefinition ||
+        (current_function_.kind == FunctionKind::Ordinary &&
+         loom_func_def_inline_policy(current_function_.operation) ==
+             LOOM_INLINE_POLICY_INLINE)) {
+      return;
     }
+    fail(owner,
+         "target launch query requires a kernel configuration or force-inline "
+         "helper");
   }
 
   struct ReceiverOwner {
@@ -173,6 +180,8 @@ class Translator final : private Initialization::Evaluation {
   };
 
   struct ActiveReceiver {
+    // Canonical flattened structure shared by value and storage receivers.
+    const RecordPartition* record;
     // Addressable destination, absent for a record assembled as SSA values.
     std::optional<StorageProjection> storage;
     // Cv-qualified complete object type governing storage observations.
@@ -184,7 +193,7 @@ class Translator final : private Initialization::Evaluation {
   void enter_receiver(const RecordPartition& record,
                       std::optional<StorageProjection> storage,
                       const cxx::Type* object_type) {
-    ActiveReceiver receiver{storage, object_type, {}};
+    ActiveReceiver receiver{&record, storage, object_type, {}};
     receiver.fields.reserve(record.members.size());
     const size_t receiver_index = receivers_.size();
     for (const auto& member : record.members) {
@@ -211,6 +220,47 @@ class Translator final : private Initialization::Evaluation {
                               StorageProjection destination,
                               const cxx::Type* object_type) override {
     enter_receiver(record, destination, object_type);
+  }
+
+  void bind_value_receiver(const RecordPartition& record, Value value) {
+    enter_receiver(record, std::nullopt, record.source->type());
+    for (const auto& member : record.members) {
+      publish_receiver_member(
+          member.field,
+          value.project(*member.partition, member.component_offset));
+    }
+  }
+
+  void bind_storage_receiver(const RecordPartition& record,
+                             StorageProjection destination,
+                             const cxx::Type* object_type) {
+    enter_receiver(record, destination, object_type);
+    for (const auto& member : record.members) {
+      complete_storage_receiver_member(member.field);
+    }
+  }
+
+  Value current_receiver_value(cxx::AST* owner) {
+    IREE_ASSERT(!receivers_.empty());
+    const auto& active = receivers_.back();
+    IREE_ASSERT(!active.storage);
+    std::vector<loom_value_id_t> components;
+    components.reserve(active.record->component_count);
+    for (const auto& member : active.record->members) {
+      receiver_member(member.field, owner).append_to(components);
+    }
+    return value_arena_.capture(*active.record, components);
+  }
+
+  void replace_current_receiver(Value value) {
+    IREE_ASSERT(!receivers_.empty());
+    const auto& active = receivers_.back();
+    IREE_ASSERT(!active.storage && &value.partition() == active.record);
+    for (const auto& member : active.record->members) {
+      publish_receiver_member(
+          member.field,
+          value.project(*member.partition, member.component_offset));
+    }
   }
 
   ActiveReceiver* receiver(cxx::FieldSymbol* field) {
@@ -522,6 +572,12 @@ class Translator final : private Initialization::Evaluation {
     if (!unit_.typeTraits().is_void(current_function_.return_type)) {
       sources.push_back(current_function_.return_type);
     }
+    if (current_function_.implicit_object &&
+        current_function_.implicit_object->abi == ImplicitObjectABI::Value &&
+        current_function_.implicit_object->mutable_access) {
+      sources.push_back(
+          types_.unqualified(current_function_.implicit_object->object_type));
+    }
     auto parameters = current_function_.source->symbol->parameters();
     for (const auto& reference : current_function_.reference_parameters) {
       if (reference.mutable_access) {
@@ -533,6 +589,11 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Returned complete_return(Returned returned) {
+    if (current_function_.implicit_object &&
+        current_function_.implicit_object->abi == ImplicitObjectABI::Value &&
+        current_function_.implicit_object->mutable_access) {
+      current_receiver_value(returned.source).append_to(returned.values);
+    }
     auto parameters = current_function_.source->symbol->parameters();
     for (const auto& reference : current_function_.reference_parameters) {
       if (reference.mutable_access) {
@@ -542,8 +603,8 @@ class Translator final : private Initialization::Evaluation {
     return returned;
   }
 
-  void function(cxx::FunctionSymbol* symbol) {
-    auto defined = functions_.define(symbol, types_, locations_, &builder_);
+  void function(FunctionInstance instance) {
+    auto defined = functions_.define(instance, types_, locations_, &builder_);
     if (defined.configuration) {
       function_body(*defined.configuration);
     }
@@ -575,7 +636,7 @@ class Translator final : private Initialization::Evaluation {
       return;
     }
     auto parameters = defined.source->symbol->parameters();
-    control_.emplace(unit_, diagnostics_, types_, body);
+    control_.emplace(unit_, diagnostics_, types_, body, defined.source->symbol);
     auto saved = loom_builder_enter_region(&builder_, op, region);
     values_.clear();
     locals_.clear();
@@ -583,6 +644,28 @@ class Translator final : private Initialization::Evaluation {
     receiver_owners_.clear();
     value_arena_.reset();
     size_t argument_index = 0;
+    if (defined.implicit_object) {
+      const auto& implicit = *defined.implicit_object;
+      auto* record = types_.record(types_.unqualified(implicit.object_type),
+                                   defined.source);
+      if (!record) {
+        fail(defined.source,
+             "implicit object receiver requires an admitted record type");
+      }
+      if (implicit.abi == ImplicitObjectABI::Value) {
+        auto value =
+            name(region_value(region, argument_index, *record), "this");
+        bind_value_receiver(*record, value);
+      } else {
+        auto pointer = name(
+            region_value(region, argument_index, kPointerPartition), "this");
+        bind_storage_receiver(
+            *record,
+            storage_.project(pointer.pointer(), implicit.object_type,
+                             defined.source),
+            implicit.object_type);
+      }
+    }
     size_t parameter_index = 0;
     for (auto* parameter : parameters) {
       const auto* reference = reference_parameter(parameter_index);
@@ -627,6 +710,9 @@ class Translator final : private Initialization::Evaluation {
     }
     auto returned = return_sequence(
         {body->statementList, nullptr, lexical_fastmath_flags_});
+    if (defined.implicit_object) {
+      leave_receiver();
+    }
     loom_op_t* terminator;
     if (defined.kind == FunctionKind::Kernel) {
       check(loom_kernel_return_build(&builder_, locations_.get(returned.source),
@@ -1321,15 +1407,184 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
+  struct ReceiverArgument {
+    // Native callable specialization selected by receiver ownership.
+    ImplicitObjectABI abi;
+    // Prvalue record or resolved storage pointer, when evaluated eagerly.
+    std::optional<Value> value;
+    // Value structure used by a tied mutable receiver result.
+    const RecordPartition* record;
+    // Once-evaluated external lvalue, absent for temporaries/current object.
+    std::optional<Lvalue> target;
+    // Whether mutable results replace the active value receiver.
+    bool current;
+    // Whether this method may replace receiver value components.
+    bool mutable_access;
+    // Automatic receiver slices participating in reference overlap checks.
+    std::vector<ReferenceOrigin> origins;
+  };
+
+  ReceiverArgument current_receiver_argument(const RecordPartition& record,
+                                             bool mutable_access,
+                                             cxx::AST* owner) {
+    if (receivers_.empty() || receivers_.back().record != &record) {
+      fail(owner,
+           "implicit member call requires a matching current source object");
+    }
+    const auto& active = receivers_.back();
+    if (active.storage) {
+      return {ImplicitObjectABI::Storage,
+              Value(active.storage->pointer),
+              &record,
+              std::nullopt,
+              true,
+              mutable_access,
+              {}};
+    }
+    return {ImplicitObjectABI::Value,
+            std::nullopt,
+            &record,
+            std::nullopt,
+            true,
+            mutable_access,
+            {}};
+  }
+
+  ReceiverArgument receiver_argument(cxx::CallExpressionAST* call,
+                                     cxx::FunctionSymbol* function) {
+    auto* object_type = implicit_object_type(unit_, function);
+    auto* record = object_type
+                       ? types_.record(types_.unqualified(object_type), call)
+                       : nullptr;
+    if (!record) {
+      fail(call, "non-static member call requires an admitted record object");
+    }
+    const bool mutable_access = implicit_object_may_mutate(function);
+    const bool requires_storage = unit_.typeTraits().is_volatile(object_type);
+    auto admit = [&](ReceiverArgument argument) {
+      if (requires_storage && argument.abi == ImplicitObjectABI::Value) {
+        fail(call, "volatile member calls require a storage-backed receiver");
+      }
+      return argument;
+    };
+    auto* base = unwrap_expression(call->baseExpression);
+    auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base);
+    if (!member || is_current_object(member->baseExpression)) {
+      return admit(current_receiver_argument(*record, mutable_access, call));
+    }
+    auto* receiver = member->baseExpression;
+    if (member->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+      auto projection = pointer_expression(receiver);
+      return admit({ImplicitObjectABI::Storage,
+                    Value(projection.pointer),
+                    record,
+                    std::nullopt,
+                    false,
+                    mutable_access,
+                    {}});
+    }
+    if (member->accessOp != cxx::TokenKind::T_DOT) {
+      fail(member, "member call requires a dot or arrow receiver");
+    }
+    if (receiver->valueCategory == cxx::ValueCategory::kPrValue) {
+      auto value = expression(receiver);
+      if (&value.partition() != record) {
+        fail(receiver,
+             "member call receiver must preserve its admitted record type");
+      }
+      return admit({ImplicitObjectABI::Value,
+                    value,
+                    record,
+                    std::nullopt,
+                    false,
+                    mutable_access,
+                    {}});
+    }
+
+    auto target =
+        destination(receiver, call,
+                    mutable_access ? LvalueAccess::Write : LvalueAccess::Read);
+    auto* object = std::get_if<ObjectLvalue>(&target.projection);
+    if (!object) {
+      fail(receiver, "member call receiver requires a complete object");
+    }
+    if (auto* storage = std::get_if<StorageProjection>(&object->location)) {
+      return admit({ImplicitObjectABI::Storage,
+                    Value(storage->pointer),
+                    record,
+                    std::nullopt,
+                    false,
+                    mutable_access,
+                    {}});
+    }
+    return admit({ImplicitObjectABI::Value,
+                  std::nullopt,
+                  record,
+                  std::move(target),
+                  false,
+                  mutable_access,
+                  {}});
+  }
+
+  Value materialize_receiver(ReceiverArgument& receiver, cxx::AST* owner) {
+    if (receiver.value) {
+      return *receiver.value;
+    }
+    Value value = receiver.current ? current_receiver_value(owner)
+                                   : read(*receiver.target, owner);
+    if (&value.partition() != receiver.record) {
+      fail(owner,
+           "member call receiver must preserve its admitted record type");
+    }
+    if (receiver.current) {
+      receiver.origins.reserve(receiver.record->members.size());
+      for (const auto& member : receiver.record->members) {
+        receiver.origins.push_back({member.field, 0,
+                                    member.partition->component_count,
+                                    receiver.mutable_access});
+      }
+    } else {
+      receiver.origins.push_back(reference_origin(
+          *receiver.target, value, receiver.mutable_access, owner));
+    }
+    receiver.value = value;
+    return value;
+  }
+
+  void write_receiver(const ReceiverArgument& receiver, Value value,
+                      cxx::AST* owner) {
+    if (receiver.current) {
+      replace_current_receiver(value);
+    } else if (receiver.target) {
+      write(*receiver.target, value, owner);
+    }
+  }
+
   std::optional<Value> ordinary_call(cxx::CallExpressionAST* call,
                                      cxx::FunctionSymbol* function,
                                      loom_location_id_t source) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     IREE_ASSERT(signature);
+    if (call->isVirtualDispatch) {
+      fail(call, "virtual member dispatch is not admitted");
+    }
+    if (function->hasExplicitObjectParameter()) {
+      fail(call, "explicit object member functions are not admitted");
+    }
+    std::optional<ReceiverArgument> receiver;
+    if (function->isImplicitObjectMemberFunction()) {
+      receiver = receiver_argument(call, function);
+    } else if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(
+                   unwrap_expression(call->baseExpression))) {
+      // C++ evaluates the object expression even when member lookup selects a
+      // static function. Preserve that sequencing before explicit arguments.
+      effect(member->baseExpression);
+    }
     auto parameters = function->parameters();
-    auto callee = functions_.declare(function, call);
+    auto receiver_abi = receiver ? receiver->abi : ImplicitObjectABI::None;
+    auto callee = functions_.declare(function, call, receiver_abi);
     auto references = functions_.reference_parameters(function);
-    if (references.empty()) {
+    if (references.empty() && !receiver) {
       std::vector<loom_value_id_t> arguments;
       for (auto* argument : cxx::ListView{call->expressionList}) {
         expression(argument).append_to(arguments);
@@ -1354,7 +1609,15 @@ class Translator final : private Initialization::Evaluation {
     std::vector<ReferenceWriteback> writebacks;
     std::vector<ReferenceOrigin> origins;
     writebacks.reserve(references.size());
-    origins.reserve(references.size());
+    origins.reserve(references.size() +
+                    (receiver && receiver->abi == ImplicitObjectABI::Value
+                         ? receiver->record->members.size()
+                         : 0));
+    const size_t receiver_argument_count =
+        !receiver ? 0
+        : receiver->abi == ImplicitObjectABI::Value
+            ? receiver->record->component_count
+            : kPointerPartition.component_count;
 
     size_t reference_index = 0;
     auto* argument = call->expressionList;
@@ -1372,7 +1635,7 @@ class Translator final : private Initialization::Evaluation {
       auto* expected_type =
           types_.unqualified_value(parameters[ordinal]->type());
       const auto& expected_partition = types_.partition(expected_type, call);
-      const size_t argument_offset = arguments.size();
+      const size_t argument_offset = receiver_argument_count + arguments.size();
       std::optional<Lvalue> target;
       Value value;
       if (argument->value->valueCategory == cxx::ValueCategory::kLValue) {
@@ -1404,17 +1667,33 @@ class Translator final : private Initialization::Evaluation {
     for (; argument; argument = argument->next) {
       expression(argument->value).append_to(arguments);
     }
+    if (receiver) {
+      auto receiver_value = materialize_receiver(*receiver, call);
+      auto receiver_components = receiver_value.components();
+      arguments.insert(arguments.begin(), receiver_components.begin(),
+                       receiver_components.end());
+      origins.insert(origins.end(), receiver->origins.begin(),
+                     receiver->origins.end());
+    }
     require_nonoverlapping_references(std::move(origins), call);
 
     const bool returns_void =
         unit_.typeTraits().is_void(signature->returnType());
     std::vector<const cxx::Type*> result_sources;
-    result_sources.reserve(!returns_void + writebacks.size());
+    const bool receiver_writeback = receiver &&
+                                    receiver->abi == ImplicitObjectABI::Value &&
+                                    receiver->mutable_access;
+    result_sources.reserve(!returns_void + receiver_writeback +
+                           writebacks.size());
     size_t ordinary_result_count = 0;
     if (!returns_void) {
       result_sources.push_back(signature->returnType());
       ordinary_result_count =
           types_.partition(signature->returnType(), call).component_count;
+    }
+    if (receiver_writeback) {
+      result_sources.push_back(
+          types_.unqualified(implicit_object_type(unit_, function)));
     }
     for (const auto& writeback : writebacks) {
       result_sources.push_back(writeback.value_type);
@@ -1425,6 +1704,24 @@ class Translator final : private Initialization::Evaluation {
     }
     std::vector<loom_tied_result_t> tied_results;
     size_t result_offset = ordinary_result_count;
+    if (receiver_writeback) {
+      const size_t component_count = receiver->record->component_count;
+      if (component_count > UINT16_MAX ||
+          result_offset + component_count > UINT16_MAX) {
+        fail(call,
+             "implicit object call exceeds native operand or result limits");
+      }
+      for (size_t component = 0; component < component_count; ++component) {
+        tied_results.push_back({
+            .result_index = static_cast<uint16_t>(result_offset + component),
+            .operand_index = static_cast<uint16_t>(component),
+            .has_type_change = !loom_type_equal(
+                loom_module_value_type(module_, arguments[component]),
+                results.types[result_offset + component]),
+        });
+      }
+      result_offset += component_count;
+    }
     for (const auto& writeback : writebacks) {
       const size_t component_count = writeback.partition->component_count;
       if (writeback.argument_offset + component_count > UINT16_MAX ||
@@ -1453,6 +1750,14 @@ class Translator final : private Initialization::Evaluation {
                                tied_results.size(), source, &op));
 
     result_offset = ordinary_result_count;
+    if (receiver_writeback) {
+      const size_t component_count = receiver->record->component_count;
+      auto updated = value_arena_.capture(
+          *receiver->record,
+          {loom_op_results(op) + result_offset, component_count});
+      write_receiver(*receiver, updated, call);
+      result_offset += component_count;
+    }
     for (const auto& writeback : writebacks) {
       const size_t component_count = writeback.partition->component_count;
       auto updated = value_arena_.capture(
@@ -2177,10 +2482,7 @@ class Translator final : private Initialization::Evaluation {
       if (auto called = atomic_builtin(call)) {
         return *called->value;
       }
-      auto* callee = cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression);
-      auto* function =
-          callee ? cxx::symbol_cast<cxx::FunctionSymbol>(callee->symbol)
-                 : nullptr;
+      auto* function = direct_callee(call);
       if (!function) {
         fail(ast, "call must resolve to a function symbol");
       }
@@ -3130,8 +3432,7 @@ class Translator final : private Initialization::Evaluation {
           expression(ast);
           return;
         }
-        auto* function =
-            id ? cxx::symbol_cast<cxx::FunctionSymbol>(id->symbol) : nullptr;
+        auto* function = direct_callee(call);
         if (function && (intrinsics_.check_binding(function, ast) ||
                          functions_.is_check_case(function) ||
                          annotated(function, "check_benchmark"))) {

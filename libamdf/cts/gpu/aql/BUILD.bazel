@@ -86,6 +86,7 @@ amdf_cc_library(
 amdf_cts_test_suite(
     name = "aql",
     srcs = [
+        "argument_payloads_test.cc",
         "barrier_test.cc",
         "byte_copy_test.cc",
         "dispatch_test.cc",
@@ -113,6 +114,7 @@ amdf_cts_test_suite(
         ":dispatch_fixture",
         ":dispatch_timing_fixture",
         ":queue_fixture",
+        "//libamdf/cts/gpu/kernels:argument_payloads_kernels",
         "//libamdf/cts/gpu/kernels:byte_copy_unaligned",
         "//libamdf/cts/gpu/kernels:byte_copy_unaligned_kernels",
         "//libamdf/cts/gpu/kernels:geometry_ids",

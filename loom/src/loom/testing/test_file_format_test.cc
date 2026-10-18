@@ -11,9 +11,8 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/codegen/low/text_asm.h"
-#include "loom/target/test/descriptors.h"
-#include "loom/testing/context.h"
+#include "loom/testing/target_environment.h"
+#include "loomc/iree.h"
 
 namespace loom {
 namespace {
@@ -21,37 +20,44 @@ namespace {
 using ::iree::testing::status::StatusIs;
 using ::testing::HasSubstr;
 
-static const loom_low_descriptor_set_provider_t kLowDescriptorSetProviders[] = {
-    loom_test_low_core_descriptor_set,
-};
-
 class LoomTestFileFormatTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
-    loom_context_initialize(iree_allocator_system(), &context_);
-    IREE_ASSERT_OK(loom_testing_context_register_all_dialects(&context_));
-    IREE_ASSERT_OK(loom_context_finalize(&context_));
-    low_descriptor_registry_.descriptor_set_providers =
-        kLowDescriptorSetProviders;
-    low_descriptor_registry_.descriptor_set_provider_count =
-        IREE_ARRAYSIZE(kLowDescriptorSetProviders);
-    loom_low_descriptor_text_asm_environment_initialize(
-        &low_descriptor_registry_, &low_asm_environment_);
+    loomc_target_environment_t* environment = nullptr;
+    IREE_ASSERT_OK(
+        iree_status_from_loomc(loomc_target_environment_create_test_ir(
+            loomc_allocator_system(), &environment)));
+    const loomc_context_target_options_t targets = {
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+        .structure_size = sizeof(targets),
+        .target_environment = environment,
+    };
+    const loomc_context_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = &targets,
+    };
+    IREE_ASSERT_OK(iree_status_from_loomc(
+        loomc_context_create(&options, loomc_allocator_system(), &context_)));
+    loomc_target_environment_release(environment);
+    IREE_ASSERT_OK(iree_status_from_loomc(loomc_workspace_create(
+        nullptr, loomc_allocator_system(), &workspace_)));
   }
 
   void TearDown() override {
-    loom_context_deinitialize(&context_);
+    loomc_workspace_release(workspace_);
+    loomc_context_release(context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
   std::string Format(iree_string_view_t source) {
     iree_string_builder_t output;
     iree_string_builder_initialize(iree_allocator_system(), &output);
-    IREE_EXPECT_OK(loom_test_file_format(
-        source, IREE_SV("test.loom-test"), &context_, &block_pool_,
-        low_asm_environment_, iree_allocator_system(), &output));
+    IREE_EXPECT_OK(loom_test_file_format(source, IREE_SV("test.loom-test"),
+                                         context_, workspace_, &block_pool_,
+                                         iree_allocator_system(), &output));
     std::string result(iree_string_builder_buffer(&output),
                        iree_string_builder_size(&output));
     iree_string_builder_deinitialize(&output);
@@ -62,16 +68,15 @@ class LoomTestFileFormatTest : public ::testing::Test {
     iree_string_builder_t output;
     iree_string_builder_initialize(iree_allocator_system(), &output);
     iree_status_t status = loom_test_file_format(
-        source, IREE_SV("test.loom-test"), &context_, &block_pool_,
-        low_asm_environment_, iree_allocator_system(), &output);
+        source, IREE_SV("test.loom-test"), context_, workspace_, &block_pool_,
+        iree_allocator_system(), &output);
     iree_string_builder_deinitialize(&output);
     return status;
   }
 
-  loom_context_t context_;
+  loomc_context_t* context_ = nullptr;
+  loomc_workspace_t* workspace_ = nullptr;
   iree_arena_block_pool_t block_pool_;
-  loom_low_descriptor_registry_t low_descriptor_registry_ = {};
-  loom_text_low_asm_environment_t low_asm_environment_ = {};
 };
 
 TEST_F(LoomTestFileFormatTest, FormatsInputAndPreservesExpectedOutput) {
@@ -230,6 +235,20 @@ TEST_F(LoomTestFileFormatTest, PreservesExactlyAnnotatedVerifierFailure) {
       "func.def @invalid(%value: f32) where [eq(%value, 4)] {\n"
       "  func.return\n"
       "}\n");
+  EXPECT_EQ(Format(source), std::string(source.data, source.size));
+}
+
+TEST_F(LoomTestFileFormatTest, PreservesTargetTypeDiagnosticParameters) {
+  const iree_string_view_t source = IREE_SV(
+      "// RUN: verify\n\n"
+      "test.target<low_core> @target\n\n"
+      "low.func.def target<test.low.core>(@target) @copy(%pair: reg<test.i32 "
+      "x2>) {\n"
+      "  // ERROR@+1: TYPE/001 {field_a=\"source\", type_a=\"reg<test.i32 "
+      "x2>\", "
+      "field_b=\"result\", type_b=\"reg<test.i32>\"}\n"
+      "  %copy = low.copy %pair : reg<test.i32 x2> -> reg<test.i32>\n"
+      "  low.return\n}\n");
   EXPECT_EQ(Format(source), std::string(source.data, source.size));
 }
 

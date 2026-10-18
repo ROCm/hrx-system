@@ -13,6 +13,7 @@
 #include "loom/error/source.h"
 #include "loom/ir/module.h"
 #include "loomc/config.h"
+#include "loomc/context.h"
 #include "result.h"
 #include "visibility.h"
 
@@ -54,6 +55,9 @@ LOOMC_API_PRIVATE iree_status_t loomc_config_binding_list_append(
 
 // Structured config module application options.
 typedef struct loomc_config_apply_module_options_t {
+  // Compiler context supplying target-aware diagnostic spelling.
+  const loomc_context_t* context;
+
   // Typed config definitions to overlay, or NULL to apply only policy.
   const loom_module_t* config_module;
 
@@ -84,6 +88,9 @@ typedef struct loomc_config_apply_module_options_t {
 
 // Text and JSON config application options.
 typedef struct loomc_config_apply_text_to_module_options_t {
+  // Compiler context supplying target-aware diagnostic spelling.
+  const loomc_context_t* context;
+
   // Public text and JSON config options to materialize.
   const loomc_config_options_t* config;
 

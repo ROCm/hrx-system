@@ -21,17 +21,11 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/tooling/io/module_format.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Supported external module formats.
-typedef enum loom_module_format_e {
-  LOOM_MODULE_FORMAT_AUTO = 0,
-  LOOM_MODULE_FORMAT_TEXT = 1,
-  LOOM_MODULE_FORMAT_BYTECODE = 2,
-} loom_module_format_t;
 
 // Options controlling a single format conversion.
 typedef struct loom_format_convert_options_t {
@@ -62,18 +56,6 @@ typedef struct loom_format_output_t {
   // Number of valid bytes in data.
   iree_host_size_t length;
 } loom_format_output_t;
-
-// Returns the stable flag spelling for |format|.
-const char* loom_module_format_name(loom_module_format_t format);
-
-// Parses a format flag value: auto, text, bc, or bytecode.
-iree_status_t loom_module_format_parse(iree_string_view_t value,
-                                       bool allow_auto,
-                                       loom_module_format_t* out_format);
-
-// Detects the input format from bytes using the bytecode file magic.
-loom_module_format_t loom_module_format_detect_input(
-    iree_const_byte_span_t input);
 
 // Converts |input| from options.input_format to options.output_format.
 //

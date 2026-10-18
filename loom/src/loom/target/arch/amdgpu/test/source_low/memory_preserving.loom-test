@@ -259,3 +259,177 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @lds_strided_pair(%cond
   s_mov_b64_exec %23
   return %value
 }
+
+// ====
+
+// A dynamic view base contributes to both the access address and the
+// root-relative descriptor end. The hardware range remains the logical view
+// boundary instead of the broader resource extent.
+func.def @dynamic_base_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %input: buffer) -> (vector<4xi32>) {
+  %row = index.assume %row0 [range(%row0, 0, 1023)] : index
+  %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
+  %base0 = index.cast %base_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4096), multiple_of(%base0, 16)] : offset
+  %descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xi32>
+  %inside = index.cmp slt, %row, %rows : index
+  %mask = vector.splat %inside : vector<4xi1>
+  %passthrough = vector.constant 0 : vector<4xi32>
+  %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
+  func.return %value : vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @dynamic_base_zero_fill(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %20 = v_mov_b32 0
+  %21 = s_lshl_b32_rhs_inline %row, 4
+  %22 = s_add_u32 %base, %21
+  %23 = s_lshl_b32_rhs_inline %rows, 4
+  %24 = s_add_u32 %base, %23
+  %27 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = s_mov_b32 65535
+  %30 = s_and_b32 %28, %29
+  %31 = concat(%27, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %32 = s_mov_b32 822173696
+  %33 = concat(%31, %24, %32) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %value = buffer_load_b128 %33, %20, %22
+  return %value
+}
+
+// ====
+
+// Floating-point negative zero is observably different at the bit level and
+// therefore retains the source passthrough path.
+func.def @negative_zero_passthrough_preserved(%row0: index, %rows0: index, %input: buffer) -> (vector<4xf32>) {
+  %row = index.assume %row0 [range(%row0, 0, 1023)] : index
+  %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
+  %base = index.constant 0 : offset
+  %descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xf32>
+  %inside = index.cmp slt, %row, %rows : index
+  %mask = vector.splat %inside : vector<4xi1>
+  %passthrough = vector.constant -0.0 : vector<4xf32>
+  %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xf32>, vector<4xi1>, vector<4xf32>
+  func.return %value : vector<4xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @negative_zero_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %inside = v_cmp_lt_i32 %row, %rows
+  %18 = v_mov_b32 2147483648
+  %passthrough = concat(%18, %18, %18, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %24 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %25 = v_mov_b32 0
+  %26 = s_lshl_b32_rhs_inline %row, 4
+  %27 = s_lshl_b32_rhs_inline %rows, 4
+  %32 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = s_mov_b32 65535
+  %35 = s_and_b32 %33, %34
+  %36 = concat(%32, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %37 = s_mov_b32 822173696
+  %38 = concat(%36, %27, %37) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %29, %30 = s_and_saveexec_b64 %inside
+  %value = buffer_load_b128_preserve %24, %38, %25, %26
+  s_mov_b64_exec %29
+  return %value
+}
+
+// ====
+
+// A false conjunction does not identify which operand failed, so the row may
+// remain in bounds. Descriptor zero fill cannot replace the source mask.
+func.def @conjunctive_passthrough_preserved(%row0: index, %rows0: index, %column0: index, %input: buffer) -> (vector<4xi32>) {
+  %row = index.assume %row0 [range(%row0, 0, 1023)] : index
+  %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
+  %column = index.assume %column0 [range(%column0, 0, 7)] : index
+  %base = index.constant 0 : offset
+  %columns = index.constant 4 : index
+  %descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xi32>
+  %row_inside = index.cmp slt, %row, %rows : index
+  %column_inside = index.cmp slt, %column, %columns : index
+  %inside = scalar.andi %row_inside, %column_inside : i1
+  %mask = vector.splat %inside : vector<4xi1>
+  %passthrough = vector.constant 0 : vector<4xi32>
+  %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
+  func.return %value : vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @conjunctive_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %column: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %columns = s_mov_b32 4
+  %row_inside = s_cmp_lt_i32 %row, %rows
+  %column_inside = s_cmp_lt_i32 %column, %columns
+  %26 = s_mov_b64_exec_read
+  %27 = slice %26[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = slice %26[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = s_mov_b32 0
+  %30 = s_cselect_b32 %27, %29, %row_inside
+  %31 = s_cselect_b32 %28, %29, %row_inside
+  %32 = concat(%30, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %37 = s_cselect_b32 %27, %29, %column_inside
+  %38 = s_cselect_b32 %28, %29, %column_inside
+  %39 = concat(%37, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %inside = s_and_b64 %32, %39
+  %41 = v_mov_b32 0
+  %passthrough = concat(%41, %41, %41, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %47 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %49 = s_lshl_b32_rhs_inline %row, 4
+  %50 = s_lshl_b32_rhs_inline %rows, 4
+  %55 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57 = s_mov_b32 65535
+  %58 = s_and_b32 %56, %57
+  %59 = concat(%55, %58) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %60 = s_mov_b32 822173696
+  %61 = concat(%59, %50, %60) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %52, %53 = s_and_saveexec_b64 %inside
+  %value = buffer_load_b128_preserve %47, %61, %41, %49
+  s_mov_b64_exec %52
+  return %value
+}
+
+// ====
+
+// A strided view needs a stronger address proof than the dense row boundary.
+// It retains the source mask even when the passthrough is positive zero.
+func.def @strided_passthrough_preserved(%row0: index, %rows0: index, %input: buffer) -> (vector<4xi32>) {
+  %row = index.assume %row0 [range(%row0, 0, 1023)] : index
+  %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xi32, %layout>
+  %inside = index.cmp slt, %row, %rows : index
+  %mask = vector.splat %inside : vector<4xi1>
+  %passthrough = vector.constant 0 : vector<4xi32>
+  %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32, %layout>, vector<4xi1>, vector<4xi32>
+  func.return %value : vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @strided_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %inside = v_cmp_lt_i32 %row, %rows
+  %19 = v_mov_b32 0
+  %passthrough = concat(%19, %19, %19, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %25 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %27 = s_lshl_b32_rhs_inline %row, 5
+  %32 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = s_mov_b32 65535
+  %35 = s_and_b32 %33, %34
+  %36 = concat(%32, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %37 = s_mov_b32 4294967295
+  %38 = s_mov_b32 822173696
+  %39 = concat(%36, %37, %38) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %29, %30 = s_and_saveexec_b64 %inside
+  %value = buffer_load_b128_preserve %25, %39, %19, %27
+  s_mov_b64_exec %29
+  return %value
+}

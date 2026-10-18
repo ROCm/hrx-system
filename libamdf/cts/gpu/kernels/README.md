@@ -14,6 +14,16 @@ the cold publication fixture and exercise caller-owned executable memory,
 code publication, kernargs, dispatch completion and exact output through the
 public AQL queue ABI.
 
+[argument_payloads.loom](argument_payloads.loom) observes narrow scalar and
+packed-vector arguments through Boolean operations, integer widening, and
+floating conversion. Its [AQL case](../aql/argument_payloads_test.cc) fills the
+native argument segment with nonzero bytes before copying exactly each
+metadata-declared payload. This exercises the AMDHSA argument boundary without
+depending on a launcher's padding initialization or allocation-reuse policy.
+Each completed dispatch checks all workitems against a CPU oracle, including
+both Boolean values, integer sign boundaries, and partially occupied vector
+words.
+
 [transform_alternate.loom](transform_alternate.loom) changes the multiplier to
 five while preserving the transform's argument and memory-access contract. Its
 [executable replacement case](../aql/executable_test.cc) retains each program's

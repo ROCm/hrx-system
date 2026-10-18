@@ -1,5 +1,31 @@
 // RUN: emit source-low target=wasm:simd128 output=low
 
+// Partial floating literals use ordinary native constants. Only authored
+// lanes contribute when the final SIMD value is assembled with a runtime tail.
+func.def @partial_float_constants(%input: vector<4xf32>, %wide_input: vector<2xf64>) -> (vector<4xf32>, vector<2xf64>) {
+  %head = vector.constant -0.0 : vector<3xf32>
+  %last = vector.slice %input[3] : vector<4xf32> -> vector<1xf32>
+  %joined = vector.concat<0> %head, %last : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %wide_head = vector.constant -inf : vector<1xf64>
+  %wide_last = vector.slice %wide_input[1] : vector<2xf64> -> vector<1xf64>
+  %wide_joined = vector.concat<0> %wide_head, %wide_last : vector<1xf64>, vector<1xf64> -> vector<2xf64>
+  func.return %joined, %wide_joined : vector<4xf32>, vector<2xf64>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @partial_float_constants(%input: reg<wasm.v128>, %wide_input: reg<wasm.v128>) -> (reg<wasm.v128>, reg<wasm.v128>) asm {
+  %14 = f32.const 2147483648
+  %head = f32x4.splat %14
+  %last = i8x16.shuffle %input, %input, 12, 13, 14, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  %joined = i8x16.shuffle %head, %last, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 18, 19
+  %wide_head = v128.const -4503599627370496, -4503599627370496
+  %wide_last = i8x16.shuffle %wide_input, %wide_input, 8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0, 0, 0, 0
+  %wide_joined = i8x16.shuffle %wide_head, %wide_last, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23
+  return %joined, %wide_joined
+}
+
+// ====
+
 // Runtime and literal i32 splats use the scalar-to-vector instruction path.
 func.def @i32_splat_forms(%dynamic: i32) -> (vector<4xi32>) {
   %literal = vector.constant -19088743 : vector<4xi32>

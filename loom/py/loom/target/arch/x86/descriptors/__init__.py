@@ -27,7 +27,6 @@ from .packed_dot import (
     X86_PACKED_DOT_DESCRIPTOR_SET,
 )
 from .scalar import X86_INTEGER_CONDITION_CODES, X86_SCALAR_DESCRIPTOR_SET
-from .simd128 import X86_SIMD128_DESCRIPTOR_SET
 
 __all__ = (
     "X86_AVX2_DESCRIPTOR_SET",
@@ -45,6 +44,5 @@ __all__ = (
     "X86_INTEGER_CONDITION_CODES",
     "X86_PACKED_DOT_DESCRIPTOR_SET",
     "X86_SCALAR_DESCRIPTOR_SET",
-    "X86_SIMD128_DESCRIPTOR_SET",
     "_merge_component_descriptors",
 )

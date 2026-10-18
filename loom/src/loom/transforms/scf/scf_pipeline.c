@@ -73,8 +73,8 @@ typedef uint8_t loom_scf_pipeline_loop_flags_t;
 enum loom_scf_pipeline_loop_flag_bits_e {
   // This loop or an ancestor requests nonserial reconstruction.
   LOOM_SCF_PIPELINE_LOOP_PREPARE_DESCENDANTS = 1u << 0,
-  // The original analysis proves an ordinary global load in this subtree.
-  LOOM_SCF_PIPELINE_LOOP_GLOBAL_READ = 1u << 1,
+  // The original analysis proves an ordinary read-ahead load in this subtree.
+  LOOM_SCF_PIPELINE_LOOP_READ_AHEAD = 1u << 1,
   // This unroll-only descendant has a selected finite full-linear plan.
   LOOM_SCF_PIPELINE_LOOP_PREPARE = 1u << 2,
   // Exact bounds preserve participants across the main/drain split.
@@ -231,10 +231,10 @@ static iree_status_t loom_scf_pipeline_resolve_facts(
             &reference)) {
       entry->space = reference.memory_space;
     }
-    if (entry->space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL &&
+    if (loom_scf_memory_space_is_read_ahead_source(entry->space) &&
         loom_memory_access_operation_kind(access) ==
             LOOM_MEMORY_ACCESS_OPERATION_LOAD) {
-      loops->values[entry->scope].flags |= LOOM_SCF_PIPELINE_LOOP_GLOBAL_READ;
+      loops->values[entry->scope].flags |= LOOM_SCF_PIPELINE_LOOP_READ_AHEAD;
     }
   }
   for (iree_host_size_t i = loops->first; i != UINT32_MAX;
@@ -243,7 +243,7 @@ static iree_status_t loom_scf_pipeline_resolve_facts(
     if (loop->parent != UINT32_MAX) {
       loom_scf_pipeline_loop_t* parent = &loops->values[loop->parent];
       parent->consumer_effects |= loop->consumer_effects;
-      parent->flags |= loop->flags & LOOM_SCF_PIPELINE_LOOP_GLOBAL_READ;
+      parent->flags |= loop->flags & LOOM_SCF_PIPELINE_LOOP_READ_AHEAD;
     }
   }
   for (iree_host_size_t i = 0; i < loops->count; ++i) {
@@ -257,7 +257,7 @@ static iree_status_t loom_scf_pipeline_resolve_facts(
     }
     if (!loom_scf_for_pipeline_depth_is_present(loop->source)) {
       if (enclosing &&
-          iree_any_bit_set(loop->flags, LOOM_SCF_PIPELINE_LOOP_GLOBAL_READ) &&
+          iree_any_bit_set(loop->flags, LOOM_SCF_PIPELINE_LOOP_READ_AHEAD) &&
           loop->consumer_effects &&
           loom_scf_unroll_plan_full(pass, module, facts, loop->source,
                                     &loop->plan.unroll)) {

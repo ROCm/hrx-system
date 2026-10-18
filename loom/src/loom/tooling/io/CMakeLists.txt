@@ -54,4 +54,17 @@ loom_cc_test(
     "requires-filesystem"
 )
 
+loom_cc_library(
+  NAME
+    module_format
+  HDRS
+    "module_format.h"
+  SRCS
+    "module_format.c"
+  DEPS
+    iree::base
+    loom::format::bytecode::format
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

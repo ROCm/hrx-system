@@ -657,6 +657,7 @@ def shared_tool_bazel_step(
         (
             "//loom/src/loom/tools/loom-compile:execution_test",
             "//loom/src/loom/tools/loom-opt:execution_test",
+            "//loom/src/loom/tools/loom-format:execution_test",
             "//loom/src/loom/tools/loom-import-cxx:execution_test",
             "//loom/src/loom/tools/loom-import-cxx:export_roundtrip_test",
             "//loom/src/loom/tools/loom-serve:execution_test",
@@ -827,6 +828,17 @@ def amdgpu_windows_steps(
     )
     steps = [
         bazel_configure_step(extra_options=options),
+        bazel_test_step(
+            "Query Windows GPU native queue capabilities",
+            ("//libamdf/src/gpu/umd/wddm/wkmi:adapter_info_system_test",),
+            config=config,
+            available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
+            bazel_options=options
+            + (
+                f"--test_arg=--amdf_gpu_target={target_selector}",
+                "--test_output=all",
+            ),
+        ),
         bazel_run_step(
             "Enumerate Windows GPU queue families",
             "//libamdf/examples:enumerate",
@@ -1011,6 +1023,7 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
                     (
                         "loom-compile",
                         "loom-opt",
+                        "loom-format",
                         "loom-import-cxx",
                         "loom-serve",
                         "loom_tooling_target_cpu_serve_loom-serve-test-tool",
@@ -1019,7 +1032,7 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
                 cmake_test_step(
                     command_name,
                     "Test shared Loom tools",
-                    regex=r"^(loom/tools/(loom-compile|loom-opt|loom-import-cxx|loom-serve)/(execution_test|export_roundtrip_test)|loom/tooling/target/cpu/serve/serve_command_test)$",
+                    regex=r"^(loom/tools/(loom-compile|loom-opt|loom-format|loom-import-cxx|loom-serve)/(execution_test|export_roundtrip_test)|loom/tooling/target/cpu/serve/serve_command_test)$",
                 ),
             ]
         )

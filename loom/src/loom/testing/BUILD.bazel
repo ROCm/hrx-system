@@ -41,6 +41,18 @@ loom_cc_library(
     hdrs = ["test_diagnostic.h"],
     deps = [
         ":test_file",
+        "//loom/src/loom/error:error_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "test_diagnostic_native",
+    srcs = ["test_diagnostic_native.c"],
+    hdrs = ["test_diagnostic_native.h"],
+    deps = [
+        ":test_diagnostic",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:renderer",
         "//loom/src/loom/format/text:printer",
@@ -51,11 +63,50 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "test_diagnostic_loomc",
+    srcs = ["test_diagnostic_loomc.c"],
+    hdrs = ["test_diagnostic_loomc.h"],
+    deps = [
+        ":test_diagnostic",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/error:error_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "target_environment",
+    srcs = ["target_environment.c"],
+    hdrs = ["target_environment.h"],
+    linkstatic = True,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/test:ir_provider",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_test(
+    name = "target_environment_test",
+    srcs = ["target_environment_test.cc"],
+    deps = [
+        ":target_environment",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "test_diagnostic_test",
     srcs = ["test_diagnostic_test.cc"],
     deps = [
         ":test_diagnostic",
+        ":test_diagnostic_native",
         "//loom/src/loom/error:error_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -70,13 +121,9 @@ loom_cc_library(
     hdrs = ["test_file_format.h"],
     deps = [
         ":test_diagnostic",
+        ":test_diagnostic_loomc",
         ":test_file",
-        "//loom/src/loom/error:source",
-        "//loom/src/loom/format/text:low_asm",
-        "//loom/src/loom/format/text:parser",
-        "//loom/src/loom/format/text:printer",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/verify",
+        "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -86,10 +133,9 @@ loom_cc_test(
     name = "test_file_format_test",
     srcs = ["test_file_format_test.cc"],
     deps = [
-        ":context",
+        ":target_environment",
         ":test_file_format",
-        "//loom/src/loom/codegen/low:text_asm",
-        "//loom/src/loom/target/test:descriptors",
+        "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

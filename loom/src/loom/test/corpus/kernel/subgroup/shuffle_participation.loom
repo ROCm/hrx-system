@@ -149,3 +149,166 @@ check.scenario @subgroup_shuffle_participation_values {
   }
   check.return
 }
+
+// All four shuffle modes share runtime width/offset controls across a
+// seven-component payload. Recorded topology keeps the independent oracle
+// valid for sparse participation and partial subgroups.
+kernel.def @subgroup_shuffle_wide_payload() {
+  %unit = index.constant 1 : index
+  %items = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%width_i32: i32, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %lane = kernel.subgroup.lane.id : index
+  %subgroup = kernel.subgroup.id : index
+  %lane_i32 = index.cast %lane : index to i32
+  %subgroup_i32 = index.cast %subgroup : index to i32
+  %topology_bytes = index.constant 536 : offset
+  %scratch = buffer.alloca<workgroup> align(4) %topology_bytes : buffer
+  %topology = buffer.view %scratch[%base] : buffer -> view<67x2xi32>
+  %result_bytes = index.constant 1876 : offset
+  %results = buffer.alloca<workgroup> align(4) %result_bytes : buffer
+  %actual = buffer.view %results[%base] : buffer -> view<67x7xi32>
+  view.store %lane_i32, %topology[%item, 0] : i32, view<67x2xi32>
+  view.store %subgroup_i32, %topology[%item, 1] : i32, view<67x2xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %source = buffer.view %input[%base] : buffer -> view<67x7xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<67xi32>
+  %value = vector.load %source[%item, 0] : view<67x7xi32> -> vector<7xi32>
+  %c3 = scalar.constant 3 : i32
+  %c1 = scalar.constant 1 : i32
+  %lane_class = scalar.remui %lane_i32, %c3 : i32
+  %active = scalar.cmpi ne, %lane_class, %c1 : i32
+  %none = scalar.constant 0 : i32
+  %difference = scf.if %active -> (i32) {
+    %width = target.subgroup.size : index
+    %subgroup_width = index.cast %width : index to i32
+    %width_fits = scalar.cmpi ule, %width_i32, %subgroup_width : i32
+    %cluster = scalar.divui %lane_i32, %width_i32 : i32
+    %cluster_base = scalar.muli %cluster, %width_i32 : i32
+    %offset = scalar.remui %lane_i32, %c3 : i32
+    %offset_fits = scalar.cmpi ult, %offset, %width_i32 : i32
+    %address_valid = scalar.andi %width_fits, %offset_fits : i1
+    %begin = index.constant 0 : index
+    %end = index.constant 67 : index
+    %components = index.constant 7 : index
+    %step = index.constant 1 : index
+    %modes = index.constant 4 : index
+    %index_mode = index.constant 0 : index
+    %xor_mode = index.constant 1 : index
+    %up_mode = index.constant 2 : index
+    %all_modes = scf.for %mode = [%begin to %modes step %step](%mode_previous = %none : i32) -> (i32) {
+      %is_index = index.cmp eq, %mode, %index_mode : index
+      %is_xor = index.cmp eq, %mode, %xor_mode : index
+      %is_up = index.cmp eq, %mode, %up_mode : index
+      %shuffled, %valid, %selected_lane = scf.if %is_index -> (vector<7xi32>, i1, i32) {
+        %result, %valid = kernel.subgroup.shuffle<index> %value, %offset, %width_i32 : vector<7xi32>, i32, i32
+        %source_lane = scalar.addi %cluster_base, %offset : i32
+        scf.yield %result, %valid, %source_lane : vector<7xi32>, i1, i32
+      } else {
+        %result, %valid, %source_lane = scf.if %is_xor -> (vector<7xi32>, i1, i32) {
+          %result, %valid = kernel.subgroup.shuffle<xor> %value, %offset, %width_i32 : vector<7xi32>, i32, i32
+          %source_lane = scalar.xori %lane_i32, %offset : i32
+          scf.yield %result, %valid, %source_lane : vector<7xi32>, i1, i32
+        } else {
+          %result, %valid, %source_lane = scf.if %is_up -> (vector<7xi32>, i1, i32) {
+            %result, %valid = kernel.subgroup.shuffle<up> %value, %offset, %width_i32 : vector<7xi32>, i32, i32
+            %source_lane = scalar.subi %lane_i32, %offset : i32
+            scf.yield %result, %valid, %source_lane : vector<7xi32>, i1, i32
+          } else {
+            %result, %valid = kernel.subgroup.shuffle<down> %value, %offset, %width_i32 : vector<7xi32>, i32, i32
+            %source_lane = scalar.addi %lane_i32, %offset : i32
+            scf.yield %result, %valid, %source_lane : vector<7xi32>, i1, i32
+          }
+          scf.yield %result, %valid, %source_lane : vector<7xi32>, i1, i32
+        }
+        scf.yield %result, %valid, %source_lane : vector<7xi32>, i1, i32
+      }
+      %source_cluster = scalar.divui %selected_lane, %width_i32 : i32
+      %same_cluster = scalar.cmpi eq, %source_cluster, %cluster : i32
+      %within_cluster = scalar.andi %address_valid, %same_cluster : i1
+      scf.if %valid {
+        vector.store %shuffled, %actual[%item, 0] : vector<7xi32>, view<67x7xi32>
+      }
+      %absent = scalar.constant false : i1
+      %mismatches = scf.for %component = [%begin to %components step %step](%previous = %mode_previous : i32) -> (i32) {
+        %selected, %found = scf.for %other = [%begin to %end step %step](%selected_acc = %none : i32, %found_acc = %absent : i1) -> (i32, i1) {
+          %other_lane = view.load %topology[%other, 0] : view<67x2xi32> -> i32
+          %other_subgroup = view.load %topology[%other, 1] : view<67x2xi32> -> i32
+          %other_value = view.load %source[%other, %component] : view<67x7xi32> -> i32
+          %same_subgroup = scalar.cmpi eq, %subgroup_i32, %other_subgroup : i32
+          %other_class = scalar.remui %other_lane, %c3 : i32
+          %other_active = scalar.cmpi ne, %other_class, %c1 : i32
+          %include = scalar.andi %same_subgroup, %other_active : i1
+          %matches_lane = scalar.cmpi eq, %other_lane, %selected_lane : i32
+          %matches_source = scalar.andi %include, %matches_lane : i1
+          %matches = scalar.andi %matches_source, %within_cluster : i1
+          %next_selected = scf.select %matches, %other_value, %selected_acc : i32
+          %next_found = scalar.ori %found_acc, %matches : i1
+          scf.yield %next_selected, %next_found : i32, i1
+        }
+        %validity_matches = scalar.cmpi eq, %valid, %found : i1
+        %payload_matches = scf.if %valid -> (i1) {
+          %actual_selected = view.load %actual[%item, %component] : view<67x7xi32> -> i32
+          %matches = scalar.cmpi eq, %actual_selected, %selected : i32
+          scf.yield %matches : i1
+        } else {
+          scf.yield %validity_matches : i1
+        }
+        %shuffle_matches = scalar.andi %validity_matches, %payload_matches : i1
+        %failed = scf.select %shuffle_matches, %none, %c1 : i32
+        %next = scalar.ori %previous, %failed : i32
+        scf.yield %next : i32
+      }
+      scf.yield %mismatches : i32
+    }
+    scf.yield %all_modes : i32
+  } else {
+    scf.yield %none : i32
+  }
+  view.store %difference, %destination[%item] : i32, view<67xi32>
+  kernel.return
+}
+
+func.def @subgroup_shuffle_wide_payload_oracle(%width_i32: i32, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 67 : index
+  %step = index.constant 1 : index
+  %no_mismatch = scalar.constant 0 : i32
+  %destination = buffer.view %output[%base] : buffer -> view<67xi32>
+  scf.for %item = [%begin to %end step %step] {
+    view.store %no_mismatch, %destination[%item] : i32, view<67xi32>
+  }
+  func.return
+}
+
+func.def @subgroup_shuffle_packet_width(%trial: index) -> (i32) {
+  %ordinal = index.cast %trial : index to i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c3 = scalar.constant 3 : i32
+  %c16 = scalar.constant 16 : i32
+  %c32 = scalar.constant 32 : i32
+  %first = scalar.cmpi eq, %ordinal, %c0 : i32
+  %second = scalar.cmpi eq, %ordinal, %c1 : i32
+  %power = scf.select %second, %c16, %c32 : i32
+  %width = scf.select %first, %c3, %power : i32
+  func.return %width : i32
+}
+
+check.scenario @subgroup_shuffle_wide_payload_values {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    // The width crosses the scenario boundary as a runtime value: 3, 16, 32.
+    %width = check.generate<@subgroup_shuffle_packet_width>(%trial) : (index) -> (i32)
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-8388608 to 8388607) : tensor<67x7xi32>
+    %output = check.generate.fill value(-1) : tensor<67xi32>
+    check.compare<@subgroup_shuffle_wide_payload, @subgroup_shuffle_wide_payload_oracle>(%width, %input, %output) : (i32, tensor<67x7xi32>, tensor<67xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<67x7xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67xi32>
+    }
+  }
+  check.return
+}

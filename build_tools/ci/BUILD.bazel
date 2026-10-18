@@ -50,6 +50,15 @@ py_test(
 )
 
 py_test(
+    name = "windows_stl_asan_test",
+    size = "small",
+    srcs = [
+        "windows_stl_asan.py",
+        "windows_stl_asan_test.py",
+    ],
+)
+
+py_test(
     name = "rocm_environment_test",
     size = "small",
     srcs = [

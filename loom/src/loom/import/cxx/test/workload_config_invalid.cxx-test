@@ -149,7 +149,7 @@ static unsigned scalar_result(unsigned item_count) { return item_count; }
 #include <loomcxx/target.h>
 
 unsigned query_target() {
-  // ERROR@+1: LOWERING/059 "target launch query requires a kernel configuration function"
+  // ERROR@+1: LOWERING/059 "target launch query requires a kernel configuration or force-inline helper"
   return loom::target::subgroup::size();
 }
 

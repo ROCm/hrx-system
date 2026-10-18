@@ -32,6 +32,7 @@ loom_check_test_suite(
         "load_extract.loom-test",
         "numeric_projection.loom-test",
         "partial_lane_facts.loom-test",
+        "partition_projection.loom-test",
         "range_mask_facts.loom-test",
         "roundtrip.loom-test",
         "selection_facts.loom-test",

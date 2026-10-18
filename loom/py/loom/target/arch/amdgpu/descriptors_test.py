@@ -1915,6 +1915,43 @@ def test_f16_pair_pack_is_available_on_all_targets() -> None:
         ) == (_REG_PART_VGPR_LOW16, _REG_PART_VGPR_LOW16)
 
 
+def test_exact_f16_pair_conversion_is_available_on_all_targets() -> None:
+    for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items():
+        descriptors = {
+            descriptor.descriptor_key: descriptor
+            for descriptor in builder.overlay_rows()
+        }
+        descriptor = descriptors.get("amdgpu.v_cvt_pk_rtz_f16_f32")
+        assert descriptor is not None, target
+        assert descriptor.semantic_tag == "convert.float.f32x2.f16x2.rtz", target
+        assert tuple(
+            operand.descriptor_operand.field_name for operand in descriptor.operands
+        ) == ("dst", "low", "high"), target
+        if descriptor.instruction_name == "V_CVT_PKRTZ_F16_F32":
+            assert descriptor.mnemonic == "v_cvt_pkrtz_f16_f32", target
+            assert descriptor.encoding_name == "ENC_VOP3", target
+            assert tuple(operand.xml_field_name for operand in descriptor.operands) == (
+                "VDST",
+                "SRC0",
+                "SRC1",
+            ), target
+            assert len(descriptor.operands[2].descriptor_operand.reg_alts) == 2, target
+        else:
+            assert descriptor.instruction_name == "V_CVT_PK_RTZ_F16_F32", target
+            assert descriptor.mnemonic == "v_cvt_pk_rtz_f16_f32", target
+            assert descriptor.encoding_name == "ENC_VOP2", target
+            assert tuple(operand.xml_field_name for operand in descriptor.operands) == (
+                "VDST",
+                "SRC0",
+                "VSRC1",
+            ), target
+            assert len(descriptor.operands[2].descriptor_operand.reg_alts) == 1, target
+            assert (
+                descriptor.operands[2].descriptor_operand.reg_alts[0].reg_class
+                == _REG_VGPR
+            ), target
+
+
 def test_gfx11_wmma_wave64_asm_forms_keep_native_mnemonics_unsuffixed() -> None:
     descriptors = {
         descriptor.descriptor_key: descriptor for descriptor in _gfx11_core_overlays()

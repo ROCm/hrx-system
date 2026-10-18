@@ -13,6 +13,14 @@
 extern "C" {
 #endif
 
+// Projects a static rank-one slice or scalar extraction into one retained
+// regular vector component. The indexed partition preserves the component's
+// SSA value instead of rematerializing its producer. Spanning or dynamic
+// projections and sources without a regular partition remain unchanged.
+iree_status_t loom_vector_project_regular_partition(loom_op_t* op,
+                                                    loom_rewriter_t* rewriter,
+                                                    bool* out_changed);
+
 // Folds a pure single-vector-result operation to vector.from_elements when
 // retained small-static-lane facts provide an exact constant for every lane.
 // The caller selects operations whose constant construction is canonical;

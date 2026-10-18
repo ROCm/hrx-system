@@ -89,7 +89,15 @@ extern "C" {
 /// such as compiling a module require exclusive access to that module handle.
 typedef struct loomc_module_t loomc_module_t;
 
-/// Options for an explicit structural and target-Low verification operation.
+/// Invariants checked by an explicit module verification operation.
+typedef enum loomc_module_verify_scope_e {
+  /// Structural and target-Low checks using the module's target environment.
+  LOOMC_MODULE_VERIFY_SCOPE_DEFAULT = 0,
+  /// Structural checks only, without establishing target-Low admission.
+  LOOMC_MODULE_VERIFY_SCOPE_STRUCTURAL = 1,
+} loomc_module_verify_scope_t;
+
+/// Options for an explicit module verification operation.
 typedef struct loomc_module_verify_options_t {
   /// Structure type; LOOMC_STRUCTURE_TYPE_MODULE_VERIFY_OPTIONS when nonzero.
   loomc_structure_type_t type;
@@ -99,15 +107,21 @@ typedef struct loomc_module_verify_options_t {
   const void* next;
   /// Maximum errors to report; zero selects the library default.
   uint32_t max_errors;
+  /// Reserved padding separating appended fields from the original ABI prefix.
+  uint32_t reserved;
+  /// Verification scope. Requires structure_size to include this field;
+  /// absent fields and zero-sized descriptors select the default scope.
+  loomc_module_verify_scope_t scope;
 } loomc_module_verify_options_t;
 
-/// Checks the module's structural and target-Low invariants explicitly.
+/// Checks module invariants explicitly according to the selected scope.
 ///
 /// Every call performs verification and returns its diagnostics, even when a
 /// prior operation established cached admission facts. Target checks use the
 /// module's context and retained function-version facts. Successful
 /// verification establishes admission for subsequent compilation or pipeline
-/// execution.
+/// execution. Structural-only verification establishes no target admission;
+/// later compilation or pipeline execution still performs its target checks.
 ///
 /// @param module Module to check, without modifying its IR.
 /// @param options Verification options, or NULL for defaults.
@@ -355,6 +369,14 @@ typedef struct loomc_module_serialize_options_t {
 
   /// Presentation policy for textual `.loom` output.
   loomc_module_text_presentation_t text_presentation;
+
+  /// Reserved padding separating appended fields from the original ABI prefix.
+  uint32_t reserved;
+
+  /// Include operation source locations in textual output. Requires
+  /// structure_size to include this field; absent fields default to false.
+  /// Bytecode preserves location information independently of this option.
+  bool print_locations;
 } loomc_module_serialize_options_t;
 
 /// Module deserialization options.

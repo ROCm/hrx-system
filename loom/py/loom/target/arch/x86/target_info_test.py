@@ -97,7 +97,6 @@ def test_descriptor_storage_target_lookup_classifies_current_views() -> None:
         "avx_vnni_int8",
         "packed_dot",
         "scalar",
-        "simd128",
     ]
 
 
@@ -165,15 +164,6 @@ def test_target_profile_lookup_records_planned_scalar_and_packed_dot_rows() -> N
     assert scalar.contract_feature_bits == 0
     assert scalar.native_bundle_key == "x86-scalar"
 
-    simd128 = x86_target_profile_info_by_key("x86.simd128")
-    assert simd128.descriptor_set_key == "x86.simd128.core"
-    assert simd128.register_classes == (
-        X86_REG_CLASS_GPR32,
-        X86_REG_CLASS_GPR64,
-        X86_REG_CLASS_XMM,
-    )
-    assert simd128.native_bundle_key == "x86-simd128"
-
     avx2 = x86_target_profile_info_by_key("x86.avx2")
     assert avx2.descriptor_set_key == "x86.avx2.core"
     assert avx2.register_classes == (
@@ -214,7 +204,6 @@ def test_native_selector_profiles_are_backed_by_native_bundles() -> None:
         "x86-packed-dot",
         "x86-avx512-packed-dot",
         "x86-scalar",
-        "x86-simd128",
         "x86-avx2",
     ]
 

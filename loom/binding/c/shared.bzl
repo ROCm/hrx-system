@@ -116,7 +116,7 @@ def loomc_interop_headers(name, deps):
         shared = select({_SHARED_TOOLS: True, "//conditions:default": False}),
     )
 
-def loomc_shared_libraries(name, components, runtime_deps):
+def loomc_shared_libraries(name, components, runtime_deps, tool_components = []):
     """Composes enabled bindings and their exact-build runtime companion.
 
     The ordinary component targets remain the static API. Native dynamic_deps
@@ -126,6 +126,7 @@ def loomc_shared_libraries(name, components, runtime_deps):
       name: Compiler shared-library target name.
       components: Enabled public binding implementations exported by the compiler.
       runtime_deps: Runtime roots shared by the compiler and its tools.
+      tool_components: Exact-build bindings included only in shared tool bundles.
     """
     compatible_with = select({_SHARED_TOOLS: [], "//conditions:default": ["@platforms//:incompatible"]})
     loom_cc_library(
@@ -140,7 +141,7 @@ def loomc_shared_libraries(name, components, runtime_deps):
             "//build_tools/third_party:__subpackages__",
             "@mimalloc//:__pkg__",
         ]),
-        (name, "loomc", components, [":iree_shared"], []),
+        (name, "loomc", components + tool_components, [":iree_shared"], []),
     ]:
         _exports(
             name = target_name + "_exports",

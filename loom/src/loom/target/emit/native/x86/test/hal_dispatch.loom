@@ -1,4 +1,4 @@
-x86.target<scalar> @cpu
+x86.target<avx2> @cpu
 
 // One invocation per workgroup. The host chooses the XYZ dispatch dimensions;
 // the worker observes them through the task entry ABI. Bindings and constants
@@ -51,5 +51,31 @@ kernel.def export("fill_byte") @fill_byte(%groups: index) {
   %buffer_base = index.constant 0 : offset
   %view = buffer.view %output[%buffer_base] : buffer -> view<[%count]xi8>
   view.store %value, %view[%position] : i8, view<[%count]xi8>
+  kernel.return
+}
+
+// Constants retain their logical scalar, vector, and predicate values while
+// crossing the byte-addressed task ABI into XMM and YMM carriers.
+kernel.def export("constant_carriers") @constant_carriers() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %single: f32, %double: f64, %xmm: vector<2xf64>, %ymm: vector<8xf32>, %predicate: vector<8xi1>) {
+  %single_offset = index.constant 0 : offset
+  %double_offset = index.constant 8 : offset
+  %xmm_offset = index.constant 16 : offset
+  %ymm_offset = index.constant 32 : offset
+  %selected_offset = index.constant 64 : offset
+  %single_output = buffer.view %output[%single_offset] : buffer -> view<1xf32>
+  %double_output = buffer.view %output[%double_offset] : buffer -> view<1xf64>
+  %xmm_output = buffer.view %output[%xmm_offset] : buffer -> view<2xf64>
+  %ymm_output = buffer.view %output[%ymm_offset] : buffer -> view<8xf32>
+  %selected_output = buffer.view %output[%selected_offset] : buffer -> view<8xf32>
+  %inactive = vector.constant 0.0 : vector<8xf32>
+  %selected = vector.select %predicate, %ymm, %inactive : vector<8xf32>
+  view.store %single, %single_output[0] : f32, view<1xf32>
+  view.store %double, %double_output[0] : f64, view<1xf64>
+  vector.store %xmm, %xmm_output[0] : vector<2xf64>, view<2xf64>
+  vector.store %ymm, %ymm_output[0] : vector<8xf32>, view<8xf32>
+  vector.store %selected, %selected_output[0] : vector<8xf32>, view<8xf32>
   kernel.return
 }

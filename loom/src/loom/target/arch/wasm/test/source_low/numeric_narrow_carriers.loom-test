@@ -1,5 +1,25 @@
 // RUN: emit source-low target=wasm:simd128 output=low
 
+// Narrow floating constants retain their source bits in integer carriers.
+func.def @narrow_float_constants() -> (f8E4M3, f8E5M2, f16, bf16) {
+  %e4_value = scalar.constant -2.0 : f8E4M3
+  %e5_zero = scalar.constant -0.0 : f8E5M2
+  %half_subnormal = scalar.constant 5.9604644775390625e-08 : f16
+  %bfloat_infinity = scalar.constant inf : bf16
+  func.return %e4_value, %e5_zero, %half_subnormal, %bfloat_infinity : f8E4M3, f8E5M2, f16, bf16
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @narrow_float_constants() -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %e4_value = i32.const 192
+  %e5_zero = i32.const 128
+  %half_subnormal = i32.const 1
+  %bfloat_infinity = i32.const 32640
+  return %e4_value, %e5_zero, %half_subnormal, %bfloat_infinity
+}
+
+// ====
+
 // Narrow integer constants use their signed source domains while occupying
 // Wasm i32 registers.
 func.def @scalar_integer_constants() -> (i8, i8, i16, i16) {

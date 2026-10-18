@@ -22,38 +22,34 @@ loom_cc_library(
     iree::io::stream
     loom::error::diagnostic
     loom::error::source
-    loom::format::bytecode::format
     loom::format::bytecode::reader
     loom::format::bytecode::writer
     loom::format::text::low_asm
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::tooling::io::module_format
     loom::verify
   PUBLIC
 )
 
-loom_cc_binary(
+loomc_cc_binary(
   NAME
     loom-format
   SRCS
     "loom-format.c"
   DEPS
-    ::convert
     iree::base
     iree::base::internal::arena
     iree::base::tooling::flags
-    iree::io::file_handle
-    loom::codegen::low::text_asm
-    loom::error::diagnostic
-    loom::target::configured::provider_set
-    loom::target::provider
-    loom::target::test::provider
+    loom::binding::c::loomc
+    loom::binding::c::target::configured::ir
+    loom::testing::target_environment
     loom::testing::test_file_format
     loom::tooling::cli::help
-    loom::tooling::context
+    loom::tooling::cli::loomc_result
     loom::tooling::io::file
-    loom::util::stream
+    loom::tooling::io::module_format
 )
 
 iree_execution_test_suite(

@@ -15,6 +15,7 @@
 #include "loom/ir/types.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/vector/transpose.h"
@@ -1217,8 +1218,12 @@ static iree_status_t loom_vector_legalize_extract(
   }
 
   bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_extract_to_scalar_rewrite_op(
-      context->pass, context->rewriter, op, &rewritten));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_project_regular_partition(op, context->rewriter, &rewritten));
+  if (!rewritten) {
+    IREE_RETURN_IF_ERROR(loom_vector_extract_to_scalar_rewrite_op(
+        context->pass, context->rewriter, op, &rewritten));
+  }
   if (rewritten) {
     *out_result = (loom_target_legalizer_result_t){
         .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,

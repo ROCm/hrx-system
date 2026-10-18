@@ -168,7 +168,6 @@ loom_cc_test(
     loom::target::arch::x86::descriptors::avx_vnni_int8_descriptors
     loom::target::arch::x86::descriptors::packed_dot_descriptors
     loom::target::arch::x86::descriptors::scalar_descriptors
-    loom::target::arch::x86::descriptors::simd128_descriptors
     loom::target::arch::x86::register_classes
     loom::testing::module_ptr
   LABELS
@@ -441,7 +440,7 @@ loom_generated_file(
     "--output="
   ARGS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/native/x86/test/hal_dispatch.loom"
-    "--target=x86:scalar"
+    "--target=x86:avx2"
   INPUTS
     "test/hal_dispatch.loom"
   TESTONLY
@@ -473,7 +472,7 @@ loom_generated_file(
     "{path}"
   ARGS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/native/x86/test/hal_dispatch.loom"
-    "x86:scalar"
+    "x86:avx2"
   INPUTS
     "test/hal_dispatch.loom"
   TESTONLY

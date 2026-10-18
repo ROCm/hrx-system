@@ -4,10 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Architecture-independent consumer of the grid/fill_byte task library.
-// Backend tests supply their artifact through --executable_file.
+// Architecture-independent consumer of a compiled task test library. Backend
+// tests supply their artifact through --executable_file.
 
 #include <array>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <vector>
@@ -138,7 +139,6 @@ class HalDispatchTest : public ::testing::Test {
 
 TEST_F(HalDispatchTest, GridCallsAndIndependentImageLifetime) {
   ASSERT_NO_FATAL_FAILURE(LoadImage());
-  ASSERT_EQ(iree_hal_executable_function_count(executable_), 2u);
   iree_hal_executable_function_t function;
   IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
       executable_, IREE_SV("grid"), &function));
@@ -269,6 +269,100 @@ TEST_F(HalDispatchTest, NarrowParameterAndZeroWork) {
   IREE_ASSERT_OK(status);
   EXPECT_THAT(output, ::testing::ElementsAre(0xc8, 0xef, 0xef, 0xef, 0xef, 0xef,
                                              0xc8, 0xc8));
+}
+
+TEST_F(HalDispatchTest, ConstantsCrossPhysicalCarriers) {
+  ASSERT_NO_FATAL_FAILURE(LoadImage());
+  iree_hal_executable_function_t function;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable_, IREE_SV("constant_carriers"), &function));
+  iree_hal_executable_function_info_t info;
+  IREE_ASSERT_OK(
+      iree_hal_executable_function_info(executable_, function, &info));
+  EXPECT_EQ(info.binding_count, 1u);
+  EXPECT_EQ(info.constant_byte_length, 72u);
+  ASSERT_EQ(info.parameter_count, 6u);
+  std::array<iree_hal_executable_function_parameter_t, 6> parameters;
+  IREE_ASSERT_OK(iree_hal_executable_function_parameters(
+      executable_, function, parameters.size(), parameters.data()));
+  EXPECT_EQ(parameters[0].type,
+            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING);
+  EXPECT_EQ(parameters[0].offset, 0u);
+  const std::array<uint16_t, 5> constant_offsets = {0, 8, 16, 32, 64};
+  const std::array<uint8_t, 5> constant_sizes = {4, 8, 16, 32, 8};
+  for (size_t i = 0; i < constant_offsets.size(); ++i) {
+    EXPECT_EQ(parameters[i + 1].type,
+              IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT);
+    EXPECT_EQ(parameters[i + 1].offset, constant_offsets[i]);
+    EXPECT_EQ(parameters[i + 1].size, constant_sizes[i]);
+  }
+
+  const float single = 1.5f;
+  const double double_value = -2.25;
+  const std::array<double, 2> xmm = {3.5, -4.75};
+  const std::array<float, 8> ymm = {1.25f, -2.5f,  3.75f, -4.0f,
+                                    5.5f,  -6.25f, 7.0f,  -8.5f};
+  const std::array<uint8_t, 8> predicate = {1, 0, 1, 0, 0, 1, 1, 0};
+  std::array<uint8_t, 72> constants = {};
+  const auto write_constant = [&constants](size_t offset, const auto& value) {
+    std::memcpy(constants.data() + offset, &value, sizeof(value));
+  };
+  write_constant(0, single);
+  write_constant(8, double_value);
+  write_constant(16, xmm);
+  write_constant(32, ymm);
+  write_constant(64, predicate);
+
+  std::array<uint8_t, 96> output = {};
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(output.size(), 8),
+      iree_infinite_timeout(), &buffer_));
+  uint64_t uploaded = 1, dispatched = 2, downloaded = 3;
+  IREE_ASSERT_OK(iree_hal_queue_upload(
+      queue_, iree_hal_semaphore_list_empty(), Completion(&uploaded),
+      output.data(), buffer_, 0, output.size(), /*barriers=*/NULL));
+  const iree_hal_buffer_ref_t binding =
+      iree_hal_make_buffer_ref(buffer_, 0, output.size());
+  const iree_hal_buffer_ref_list_t bindings = {1, &binding};
+  iree_status_t status = iree_hal_queue_dispatch(
+      queue_, Completion(&uploaded), Completion(&dispatched), executable_,
+      function, iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_make_const_byte_span(constants.data(), constants.size()), bindings,
+      /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE);
+  uint64_t completion = uploaded;
+  if (iree_status_is_ok(status)) {
+    completion = dispatched;
+    status = iree_hal_queue_download(
+        queue_, Completion(&dispatched), Completion(&downloaded), buffer_, 0,
+        output.data(), output.size(), /*barriers=*/NULL);
+  }
+  if (iree_status_is_ok(status)) {
+    completion = downloaded;
+  }
+  status = iree_status_join(
+      status,
+      iree_hal_semaphore_wait(semaphore_, completion, iree_infinite_timeout(),
+                              IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(status);
+
+  float observed_single;
+  double observed_double;
+  std::array<double, 2> observed_xmm;
+  std::array<float, 8> observed_ymm;
+  std::array<float, 8> observed_selected;
+  std::memcpy(&observed_single, output.data(), sizeof(observed_single));
+  std::memcpy(&observed_double, output.data() + 8, sizeof(observed_double));
+  std::memcpy(&observed_xmm, output.data() + 16, sizeof(observed_xmm));
+  std::memcpy(&observed_ymm, output.data() + 32, sizeof(observed_ymm));
+  std::memcpy(&observed_selected, output.data() + 64,
+              sizeof(observed_selected));
+  EXPECT_FLOAT_EQ(observed_single, single);
+  EXPECT_DOUBLE_EQ(observed_double, double_value);
+  EXPECT_THAT(observed_xmm, ::testing::ElementsAreArray(xmm));
+  EXPECT_THAT(observed_ymm, ::testing::ElementsAreArray(ymm));
+  for (size_t i = 0; i < observed_selected.size(); ++i) {
+    EXPECT_FLOAT_EQ(observed_selected[i], predicate[i] ? ymm[i] : 0.0f);
+  }
 }
 
 }  // namespace

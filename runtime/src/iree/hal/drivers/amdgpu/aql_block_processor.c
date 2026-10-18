@@ -1038,9 +1038,12 @@ static iree_status_t iree_hal_amdgpu_aql_block_processor_emit_indirect_dispatch(
     dispatch_packet_flags |=
         IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_PACKET_FLAG_FINAL;
   }
+  // The patch kernel publishes both the dispatch packet and implicit counts.
+  // Its header release makes the packet visible to the CP; the target acquire
+  // also makes those device-written parameters visible to every shader engine.
   const iree_hal_amdgpu_aql_packet_control_t dispatch_packet_control =
       iree_hal_amdgpu_aql_block_processor_packet_control(
-          processor, dispatch_packet_index, IREE_HSA_FENCE_SCOPE_NONE,
+          processor, dispatch_packet_index, IREE_HSA_FENCE_SCOPE_AGENT,
           dispatch_packet_flags);
   iree_status_t status =
       iree_hal_amdgpu_aql_block_processor_replay_indirect_dispatch_packet_bodies(

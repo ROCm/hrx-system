@@ -62,6 +62,10 @@ iree_status_t loom_amdgpu_sanitizer_race_get_report_coordinates(
 iree_status_t loom_amdgpu_sanitizer_race_get_workgroup_shadow_record_offset(
     loom_low_lower_context_t* context, loom_value_id_t* out_offset);
 
+// Returns the byte offset of the current workgroup's padded history array.
+iree_status_t loom_amdgpu_sanitizer_race_get_workgroup_shadow_history_offset(
+    loom_low_lower_context_t* context, loom_value_id_t* out_offset);
+
 // Returns shadow entry bits shared by the current workitem's observations.
 iree_status_t loom_amdgpu_sanitizer_race_get_shadow_entry_base(
     loom_low_lower_context_t* context,

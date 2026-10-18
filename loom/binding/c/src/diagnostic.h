@@ -11,6 +11,7 @@
 #include "loom/error/source.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/module.h"
+#include "loomc/context.h"
 #include "loomc/diagnostic.h"
 #include "result.h"
 #include "visibility.h"
@@ -93,8 +94,9 @@ LOOMC_API_PRIVATE loomc_status_t loomc_result_add_loom_diagnostic_emission(
 // Verifies a Loom module and adds verifier diagnostics to result. A zero error
 // limit selects the binding's default diagnostic limit.
 LOOMC_API_PRIVATE loomc_status_t loomc_result_verify_loom_module(
-    const loom_module_t* module, loom_source_resolver_t source_resolver,
-    uint32_t max_errors, loomc_result_t* result);
+    const loomc_context_t* context, const loom_module_t* module,
+    loom_source_resolver_t source_resolver, uint32_t max_errors,
+    loomc_result_t* result);
 
 // Adds a rendered status as a result diagnostic without consuming status.
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_status_diagnostic(

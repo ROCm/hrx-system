@@ -1,0 +1,90 @@
+// RUN: pass canonicalize,dce
+
+// Select one retained component without replaying its arithmetic producer.
+// The short final component uses its own extent, not the regular packet size.
+func.def @partition_projections(%left: vector<4xf32>, %right: vector<4xf32>, %tail: vector<2xf32>) -> (vector<4xf32>, vector<2xf32>, vector<2xf32>, f32, f32) {
+  %sum = vector.addf %left, %right : vector<4xf32>
+  %joined = vector.concat<0> %sum, %tail : vector<4xf32>, vector<2xf32> -> vector<6xf32>
+  %head = vector.slice %joined[0] : vector<6xf32> -> vector<4xf32>
+  %suffix = vector.slice %joined[4] : vector<6xf32> -> vector<2xf32>
+  %middle = vector.slice %joined[1] : vector<6xf32> -> vector<2xf32>
+  %head_lane = vector.extract %joined[3] : vector<6xf32> -> f32
+  %tail_lane = vector.extract %joined[5] : vector<6xf32> -> f32
+  func.return %head, %suffix, %middle, %head_lane, %tail_lane : vector<4xf32>, vector<2xf32>, vector<2xf32>, f32, f32
+}
+
+// ----
+func.def @partition_projections(%left: vector<4xf32>, %right: vector<4xf32>, %tail: vector<2xf32>) -> (vector<4xf32>, vector<2xf32>, vector<2xf32>, f32, f32) {
+  %sum = vector.addf %left, %right : vector<4xf32>
+  %middle = vector.slice %sum[1] : vector<4xf32> -> vector<2xf32>
+  %head_lane = vector.extract %sum[3] : vector<4xf32> -> f32
+  %tail_lane = vector.extract %tail[1] : vector<2xf32> -> f32
+  func.return %sum, %tail, %middle, %head_lane, %tail_lane : vector<4xf32>, vector<2xf32>, vector<2xf32>, f32, f32
+}
+
+// ====
+
+// Constant dynamic indices are normalized before the retained-partition query.
+// Repeated components still denote the same captured SSA value.
+func.def @repeated_integer_component(%input: vector<3xi16>, %tail: vector<1xi16>) -> (i16, i16, vector<1xi16>) {
+  %joined = vector.concat<0> %input, %input, %tail : vector<3xi16>, vector<3xi16>, vector<1xi16> -> vector<7xi16>
+  %c4 = index.constant 4 : index
+  %c6 = index.constant 6 : index
+  %middle = vector.extract %joined[%c4] : vector<7xi16> -> i16
+  %last = vector.extract %joined[%c6] : vector<7xi16> -> i16
+  %suffix = vector.slice %joined[%c6] : vector<7xi16> -> vector<1xi16>
+  func.return %middle, %last, %suffix : i16, i16, vector<1xi16>
+}
+
+// ----
+func.def @repeated_integer_component(%input: vector<3xi16>, %tail: vector<1xi16>) -> (i16, i16, vector<1xi16>) {
+  %middle = vector.extract %input[1] : vector<3xi16> -> i16
+  %last = vector.extract %tail[0] : vector<1xi16> -> i16
+  func.return %middle, %last, %tail : i16, i16, vector<1xi16>
+}
+
+// ====
+
+// A runtime projection or a slice crossing packet boundaries cannot select
+// one component. Their complete source remains available to later lowering.
+func.def @nonlocal_projections(%head: vector<4xi32>, %tail: vector<2xi32>, %lane: index) -> (i32, vector<2xi32>, vector<2xi32>) {
+  %joined = vector.concat<0> %head, %tail : vector<4xi32>, vector<2xi32> -> vector<6xi32>
+  %dynamic_lane = vector.extract %joined[%lane] : vector<6xi32> -> i32
+  %dynamic_slice = vector.slice %joined[%lane] : vector<6xi32> -> vector<2xi32>
+  %crossing = vector.slice %joined[3] : vector<6xi32> -> vector<2xi32>
+  func.return %dynamic_lane, %dynamic_slice, %crossing : i32, vector<2xi32>, vector<2xi32>
+}
+
+// ====
+
+// Structural projection preserves boolean values and the bytes of BF16
+// payloads without asking arithmetic providers to interpret them.
+func.def @nonarithmetic_projections(%bits: vector<4xi1>, %bit_tail: vector<2xi1>, %values: vector<4xbf16>, %value_tail: vector<2xbf16>) -> (i1, bf16) {
+  %all_bits = vector.concat<0> %bits, %bit_tail : vector<4xi1>, vector<2xi1> -> vector<6xi1>
+  %all_values = vector.concat<0> %values, %value_tail : vector<4xbf16>, vector<2xbf16> -> vector<6xbf16>
+  %bit = vector.extract %all_bits[4] : vector<6xi1> -> i1
+  %value = vector.extract %all_values[5] : vector<6xbf16> -> bf16
+  func.return %bit, %value : i1, bf16
+}
+
+// ----
+func.def @nonarithmetic_projections(%bits: vector<4xi1>, %bit_tail: vector<2xi1>, %values: vector<4xbf16>, %value_tail: vector<2xbf16>) -> (i1, bf16) {
+  %bit = vector.extract %bit_tail[0] : vector<2xi1> -> i1
+  %value = vector.extract %value_tail[1] : vector<2xbf16> -> bf16
+  func.return %bit, %value : i1, bf16
+}
+
+// ====
+
+// An empty terminal slice is valid but does not select a retained component.
+func.def @empty_terminal_slice(%head: vector<4xi32>, %tail: vector<2xi32>) -> (vector<0xi32>) {
+  %joined = vector.concat<0> %head, %tail : vector<4xi32>, vector<2xi32> -> vector<6xi32>
+  %empty = vector.slice %joined[6] : vector<6xi32> -> vector<0xi32>
+  func.return %empty : vector<0xi32>
+}
+
+// ----
+func.def @empty_terminal_slice(%head: vector<4xi32>, %tail: vector<2xi32>) -> (vector<0xi32>) {
+  %empty = vector.empty : vector<0xi32>
+  func.return %empty : vector<0xi32>
+}

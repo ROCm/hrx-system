@@ -17,6 +17,7 @@ from loom.target.contracts import (
     GuardKind,
     UnsupportedRule,
     ValueAliasRule,
+    ValueProject,
     ValueRef,
 )
 from loom.target.emit.wasm.contracts import WASM_CORE_SIMD128_CONTRACT_FRAGMENT
@@ -230,6 +231,39 @@ def test_scalar_integer_constants_cover_every_fixed_width_type() -> None:
         "i32": "wasm.i32.const",
         "i64": "wasm.i64.const",
     }
+
+
+def test_scalar_float_constants_preserve_every_source_format() -> None:
+    expected = {
+        "f8E4M3": "wasm.i32.const",
+        "f8E5M2": "wasm.i32.const",
+        "f16": "wasm.i32.const",
+        "bf16": "wasm.i32.const",
+        "f32": "wasm.f32.const",
+        "f64": "wasm.f64.const",
+    }
+    assert set(expected) == {scalar_type_name(kind) for kind in _FLOAT_KINDS}
+    actual = {}
+    for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases:
+        if (
+            not isinstance(rule, DescriptorRule)
+            or rule.source_op is not conversion.scalar_constant
+        ):
+            continue
+        result_type = next(
+            guard.type_pattern
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_TYPE and guard.field == "result"
+        )
+        (element,) = result_type.elements
+        if element not in expected:
+            continue
+        assert element not in actual
+        assert len(rule.emit) == 1
+        immediate = "bits" if element in ("f32", "f64") else "i32_value"
+        assert rule.emit[0].immediates == {immediate: ValueProject.float_bits("result")}
+        actual[element] = rule.emit[0].descriptor.key
+    assert actual == expected
 
 
 def test_scalar_integer_truncation_covers_every_carrier_pair() -> None:
@@ -453,6 +487,24 @@ def _expected_numeric_vector_shapes():
         (scalar_type_name(kind), 128 // ScalarType(kind).bitwidth)
         for kind in ScalarTypeKind
         if kind not in (ScalarTypeKind.I1, ScalarTypeKind.INDEX, ScalarTypeKind.OFFSET)
+    }
+
+
+def test_numeric_constants_cover_every_native_and_partial_carrier() -> None:
+    actual = set()
+    for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases:
+        if (
+            not isinstance(rule, DescriptorRule)
+            or rule.source_op is not vector.vector_constant
+        ):
+            continue
+        actual.update(_numeric_vector_shapes(rule, "result"))
+        for element, minimum, maximum in _numeric_vector_ranges(rule, "result"):
+            actual.update((element, count) for count in range(minimum, maximum + 1))
+    assert actual == {
+        (element, count)
+        for element, maximum in _expected_numeric_vector_shapes()
+        for count in range(1, maximum + 1)
     }
 
 

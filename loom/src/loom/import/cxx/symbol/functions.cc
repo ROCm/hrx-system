@@ -25,6 +25,7 @@
 
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/value/signature.h"
 #include "loom/ir/module.h"
 #include "loom/ops/check/ops.h"
@@ -91,7 +92,8 @@ void Functions::select(std::span<const iree_string_view_t> roots) {
   } else {
     for (auto* symbol : definitions) {
       if (launches_.is_configuration(symbol) ||
-          template_definitions_.lookup(symbol)) {
+          template_definitions_.lookup(symbol) ||
+          symbol->isImplicitObjectMemberFunction()) {
         continue;
       }
       bool visible = !symbol->isStatic();
@@ -135,15 +137,17 @@ void Functions::select(std::span<const iree_string_view_t> roots) {
       diagnostics_.reject(unit_, source,
                           "template definitions require a function body");
     }
-    retain(body, source);
+    retain({body->canonical(), ImplicitObjectABI::None}, source);
   }
   // A check record can only be selected as a root, never reached through a
   // call. Reserve its public benchmark names before discovering private
   // helpers.
   for (const auto& benchmark : benchmarks_) {
-    if (callees_.contains(benchmark.record_function->canonical())) {
+    if (callees_.contains({benchmark.record_function->canonical(),
+                           ImplicitObjectABI::None})) {
       exported_.insert(benchmark.function);
-      create_symbol(benchmark.function, benchmark.source);
+      create_symbol({benchmark.function->canonical(), ImplicitObjectABI::None},
+                    benchmark.source);
     }
   }
 }
@@ -539,11 +543,13 @@ bool Functions::is_check_record(cxx::FunctionSymbol* function) const {
 void Functions::build_benchmarks(Locations& locations,
                                  loom_builder_t* builder) {
   for (const auto& benchmark : benchmarks_) {
-    auto target = callees_.find(benchmark.record_function->canonical());
+    auto target = callees_.find(
+        {benchmark.record_function->canonical(), ImplicitObjectABI::None});
     if (target == callees_.end()) {
       continue;
     }
-    auto symbol = callees_.at(benchmark.function->canonical());
+    auto symbol =
+        callees_.at({benchmark.function->canonical(), ImplicitObjectABI::None});
     loom_op_t* op;
     check(loom_check_benchmark_build(builder, /*build_flags=*/0, target->second,
                                      symbol, {},
@@ -562,26 +568,39 @@ const std::string& Functions::qualified_name(cxx::FunctionSymbol* symbol) {
       if (space->name()) {
         spelling = cxx::to_string(space->name()) + "::" + spelling;
       }
+    } else if (auto* record = cxx::symbol_cast<cxx::ClassSymbol>(owner)) {
+      if (record->name()) {
+        spelling = cxx::to_string(record->name()) + "::" + spelling;
+      }
     }
   }
   return qualified_names_.emplace(symbol, std::move(spelling)).first->second;
 }
 
 loom_symbol_ref_t Functions::declare(cxx::FunctionSymbol* function,
-                                     cxx::AST* owner) {
+                                     cxx::AST* owner,
+                                     ImplicitObjectABI receiver_abi) {
   if (auto* provider = template_definitions_.lookup(function)) {
     diagnostics_.reject(
         unit_, owner ? owner : provider->source,
         "template definition implementations cannot be selected or called "
         "directly");
   }
-  return retain(function, owner);
+  return retain({function->canonical(), receiver_abi}, owner);
 }
 
-loom_symbol_ref_t Functions::retain(cxx::FunctionSymbol* function,
+loom_symbol_ref_t Functions::retain(FunctionInstance instance,
                                     cxx::AST* owner) {
-  if (auto found = callees_.find(function->canonical());
-      found != callees_.end()) {
+  auto* function = instance.symbol;
+  const bool implicit = function->isImplicitObjectMemberFunction();
+  if (implicit == (instance.receiver_abi == ImplicitObjectABI::None)) {
+    diagnostics_.reject(
+        unit_, owner ? owner : function->declaration(),
+        implicit
+            ? "non-static member call requires an implicit object receiver"
+            : "implicit object receiver requires a non-static member function");
+  }
+  if (auto found = callees_.find(instance); found != callees_.end()) {
     return found->second;
   }
   if (launches_.is_configuration(function)) {
@@ -592,6 +611,10 @@ loom_symbol_ref_t Functions::retain(cxx::FunctionSymbol* function,
   }
   auto* body = definition(function);
   if (!body) {
+    if (instance.receiver_abi != ImplicitObjectABI::None) {
+      diagnostics_.reject(
+          unit_, owner, "non-static member call requires a source definition");
+    }
     auto found = declarations_.find(function->canonical());
     if (found == declarations_.end()) {
       diagnostics_.reject(
@@ -607,7 +630,9 @@ loom_symbol_ref_t Functions::retain(cxx::FunctionSymbol* function,
     external_.insert(function->canonical());
     admit_reference_parameters(declaration.function,
                                owner ? owner : declaration.source);
-    auto callee = create_symbol(declaration.function, declaration.source);
+    auto callee = create_symbol(
+        {declaration.function->canonical(), ImplicitObjectABI::None},
+        declaration.source);
     pending_declarations_.push_back(declaration);
     return callee;
   }
@@ -629,13 +654,15 @@ loom_symbol_ref_t Functions::retain(cxx::FunctionSymbol* function,
     }
   }
   admit_reference_parameters(function, owner ? owner : body->declaration());
-  auto callee = create_symbol(function, body->declaration());
-  pending_.push_back(body);
+  auto retained = FunctionInstance{body, instance.receiver_abi};
+  auto callee = create_symbol(retained, body->declaration());
+  pending_.push_back(retained);
   return callee;
 }
 
-loom_symbol_ref_t Functions::create_symbol(cxx::FunctionSymbol* function,
+loom_symbol_ref_t Functions::create_symbol(FunctionInstance instance,
                                            cxx::AST* source) {
+  auto* function = instance.symbol;
   std::string spelling;
   if (auto found = explicit_names_.find(function->canonical());
       found != explicit_names_.end()) {
@@ -671,6 +698,14 @@ loom_symbol_ref_t Functions::create_symbol(cxx::FunctionSymbol* function,
     names_.reserve(spelling, source);
   } else {
     spelling = qualified_name(function);
+    const std::string source_name = cxx::to_string(function->name());
+    if (source_name == "operator ()") {
+      spelling.replace(spelling.size() - source_name.size(), source_name.size(),
+                       "operator_call");
+    } else if (source_name == "operator []") {
+      spelling.replace(spelling.size() - source_name.size(), source_name.size(),
+                       "operator_subscript");
+    }
     for (const auto& argument : function->templateArguments()) {
       spelling += "_" + cxx::to_string(argument);
     }
@@ -679,6 +714,11 @@ loom_symbol_ref_t Functions::create_symbol(cxx::FunctionSymbol* function,
         ch = '_';
       }
     }
+    if (instance.receiver_abi == ImplicitObjectABI::Value) {
+      spelling += "_value";
+    } else if (instance.receiver_abi == ImplicitObjectABI::Storage) {
+      spelling += "_storage";
+    }
     spelling = names_.unique(std::move(spelling));
   }
   loom_string_id_t name;
@@ -686,7 +726,7 @@ loom_symbol_ref_t Functions::create_symbol(cxx::FunctionSymbol* function,
   loom_symbol_id_t id;
   check(loom_module_add_symbol(module_, name, &id));
   loom_symbol_ref_t callee = {0, id};
-  callees_[function->canonical()] = callee;
+  callees_[{function->canonical(), instance.receiver_abi}] = callee;
   return callee;
 }
 
@@ -762,12 +802,29 @@ std::span<const ValueReferenceParameter> Functions::reference_parameters(
              : std::span<const ValueReferenceParameter>{found->second};
 }
 
+std::optional<ImplicitObjectParameter> Functions::implicit_object(
+    FunctionInstance instance, cxx::AST* source) const {
+  auto* symbol = instance.symbol;
+  if (instance.receiver_abi == ImplicitObjectABI::None) {
+    return std::nullopt;
+  }
+  auto* object_type = cxx_import::implicit_object_type(unit_, symbol);
+  if (!object_type) {
+    diagnostics_.reject(unit_, source,
+                        "implicit object receiver requires a non-static "
+                        "member function of a class");
+  }
+  return ImplicitObjectParameter{instance.receiver_abi, object_type,
+                                 implicit_object_may_mutate(symbol)};
+}
+
 BoundSignature Functions::bind_callable_signature(
-    cxx::FunctionSymbol* symbol, cxx::AST* source, Types& types,
+    FunctionInstance instance, cxx::AST* source, Types& types,
     loom_builder_t* builder, std::vector<loom_type_t>& arguments,
     std::vector<loom_type_t>& results,
     std::vector<loom_tied_result_t>& tied_results,
     std::vector<loom_predicate_t>& predicates) {
+  auto* symbol = instance.symbol;
   auto* signature = cxx::type_cast<cxx::FunctionType>(symbol->type());
   if (!signature || signature->isVariadic()) {
     diagnostics_.reject(unit_, source, "variadic functions are not admitted");
@@ -789,9 +846,24 @@ BoundSignature Functions::bind_callable_signature(
   std::vector<const cxx::Type*> sources;
   auto parameters = symbol->parameters();
   auto references = reference_parameters(symbol);
+  auto receiver = implicit_object(instance, source);
   const bool returns_void = unit_.typeTraits().is_void(signature->returnType());
-  sources.reserve(parameters.size() + !returns_void + references.size());
+  sources.reserve(receiver.has_value() + parameters.size() + !returns_void +
+                  references.size() +
+                  (receiver && receiver->abi == ImplicitObjectABI::Value &&
+                   receiver->mutable_access));
   size_t argument_count = 0;
+  size_t receiver_argument_count = 0;
+  if (receiver) {
+    const cxx::Type* receiver_type =
+        receiver->abi == ImplicitObjectABI::Value
+            ? types.unqualified(receiver->object_type)
+            : unit_.typeTraits().add_pointer(receiver->object_type);
+    sources.push_back(receiver_type);
+    receiver_argument_count =
+        types.partition(receiver_type, source).component_count;
+    argument_count = receiver_argument_count;
+  }
   std::vector<size_t> argument_offsets;
   if (!references.empty()) {
     argument_offsets.resize(parameters.size());
@@ -816,6 +888,10 @@ BoundSignature Functions::bind_callable_signature(
     ordinary_result_count =
         types.partition(signature->returnType(), source).component_count;
   }
+  if (receiver && receiver->abi == ImplicitObjectABI::Value &&
+      receiver->mutable_access) {
+    sources.push_back(types.unqualified(receiver->object_type));
+  }
   for (const auto& reference : references) {
     if (reference.mutable_access) {
       sources.push_back(
@@ -831,6 +907,25 @@ BoundSignature Functions::bind_callable_signature(
                    callable.types.begin() + argument_count);
   results.assign(callable.types.begin() + argument_count, callable.types.end());
   size_t result_offset = ordinary_result_count;
+  if (receiver && receiver->abi == ImplicitObjectABI::Value &&
+      receiver->mutable_access) {
+    const size_t component_count = receiver_argument_count;
+    if (component_count > UINT16_MAX ||
+        result_offset + component_count > UINT16_MAX) {
+      diagnostics_.reject(unit_, source,
+                          "implicit object signature exceeds native operand "
+                          "or result limits");
+    }
+    for (size_t component = 0; component < component_count; ++component) {
+      tied_results.push_back({
+          .result_index = static_cast<uint16_t>(result_offset + component),
+          .operand_index = static_cast<uint16_t>(component),
+          .has_type_change = !loom_type_equal(
+              arguments[component], results[result_offset + component]),
+      });
+    }
+    result_offset += component_count;
+  }
   for (const auto& reference : references) {
     if (!reference.mutable_access) {
       continue;
@@ -860,7 +955,22 @@ BoundSignature Functions::bind_callable_signature(
     result_offset += component_count;
   }
   auto predicate_identities = std::span(callable.identities);
-  if (!predicate_identities.empty()) {
+  std::vector<loom_value_id_t> projected_predicate_identities;
+  if (receiver && !predicate_identities.empty()) {
+    projected_predicate_identities.reserve(
+        argument_count - receiver_argument_count + ordinary_result_count);
+    auto explicit_arguments = predicate_identities.subspan(
+        receiver_argument_count, argument_count - receiver_argument_count);
+    projected_predicate_identities.insert(projected_predicate_identities.end(),
+                                          explicit_arguments.begin(),
+                                          explicit_arguments.end());
+    auto ordinary_results =
+        predicate_identities.subspan(argument_count, ordinary_result_count);
+    projected_predicate_identities.insert(projected_predicate_identities.end(),
+                                          ordinary_results.begin(),
+                                          ordinary_results.end());
+    predicate_identities = projected_predicate_identities;
+  } else if (!predicate_identities.empty()) {
     predicate_identities =
         predicate_identities.first(argument_count + ordinary_result_count);
   }
@@ -892,9 +1002,9 @@ void Functions::build_declarations(Types& types, Locations& locations,
     std::vector<loom_predicate_t> predicates;
     // Dependent type payloads in this signature must outlive the declaration
     // builder call below.
-    auto bound_signature =
-        bind_callable_signature(symbol, source, types, builder, arguments,
-                                results, tied_results, predicates);
+    auto bound_signature = bind_callable_signature(
+        {symbol->canonical(), ImplicitObjectABI::None}, source, types, builder,
+        arguments, results, tied_results, predicates);
 
     loom_func_decl_build_flags_t flags = 0;
     loom_string_id_t import_module = LOOM_STRING_ID_INVALID;
@@ -925,16 +1035,17 @@ void Functions::build_declarations(Types& types, Locations& locations,
         /*effect_contract=*/0, /*temperature=*/0,
         annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0, {},
         /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
-        callees_.at(symbol->canonical()), arguments.data(), arguments.size(),
-        results.data(), results.size(), tied_results.data(),
-        tied_results.size(), predicates.data(), predicates.size(),
-        locations.get(source), &op));
+        callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
+        arguments.data(), arguments.size(), results.data(), results.size(),
+        tied_results.data(), tied_results.size(), predicates.data(),
+        predicates.size(), locations.get(source), &op));
   }
 }
 
-DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
+DefinedFunction Functions::define(FunctionInstance instance, Types& types,
                                   Locations& locations,
                                   loom_builder_t* builder) {
+  auto* symbol = instance.symbol;
   auto* definition = symbol->declaration();
   auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
       definition->functionBody);
@@ -989,7 +1100,7 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
     }
   } else if (!check_case && !check_scenario) {
     callable_signature =
-        bind_callable_signature(symbol, definition, types, builder, arguments,
+        bind_callable_signature(instance, definition, types, builder, arguments,
                                 results, tied_results, predicates);
   }
   loom_op_t* op;
@@ -997,7 +1108,8 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
     launches_.reject_ordinary_function(symbol);
     check(loom_check_case_build(
         builder, LOOM_CHECK_CASE_BUILD_FLAG_HAS_VISIBILITY,
-        LOOM_CHECK_VISIBILITY_PUBLIC, callees_.at(symbol->canonical()),
+        LOOM_CHECK_VISIBILITY_PUBLIC,
+        callees_.at({symbol->canonical(), instance.receiver_abi}),
         locations.get(definition), &op));
   } else if (check_scenario) {
     launches_.reject_ordinary_function(symbol);
@@ -1034,14 +1146,14 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
     }
     check(loom_check_scenario_build(
         builder, flags, LOOM_CHECK_VISIBILITY_PUBLIC,
-        callees_.at(symbol->canonical()), configuration_count,
-        configuration_arguments.data(), configuration_argument_count,
-        locations.get(definition), &op));
+        callees_.at({symbol->canonical(), instance.receiver_abi}),
+        configuration_count, configuration_arguments.data(),
+        configuration_argument_count, locations.get(definition), &op));
   } else if (kernel) {
     if (!returns_void) {
       diagnostics_.reject(unit_, definition, "kernel must return void");
     }
-    auto callee = callees_.at(symbol->canonical());
+    auto callee = callees_.at({symbol->canonical(), instance.receiver_abi});
     auto target = target_definitions_.reference(symbol);
     auto name_id = module_->symbols.entries[callee.symbol_id].name_id;
     size_t configuration_identity_count = 0;
@@ -1135,10 +1247,10 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
         loom_make_parameterized_attr_array(requirements.data(),
                                            requirements.size()),
         template_definition->priority.value_or(0),
-        callees_.at(symbol->canonical()), arguments.data(), arguments.size(),
-        results.data(), results.size(), tied_results.data(),
-        tied_results.size(), predicates.data(), predicates.size(),
-        locations.get(definition), &op));
+        callees_.at({symbol->canonical(), instance.receiver_abi}),
+        arguments.data(), arguments.size(), results.data(), results.size(),
+        tied_results.data(), tied_results.size(), predicates.data(),
+        predicates.size(), locations.get(definition), &op));
   } else {
     launches_.reject_ordinary_function(symbol);
     const bool link_once =
@@ -1159,10 +1271,10 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
         /*effect_contract=*/0, /*temperature=*/0,
         annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0, {},
-        0, {}, 0, {}, callees_.at(symbol->canonical()), arguments.data(),
-        arguments.size(), results.data(), results.size(), tied_results.data(),
-        tied_results.size(), predicates.data(), predicates.size(),
-        locations.get(definition), &op));
+        0, {}, 0, {}, callees_.at({symbol->canonical(), instance.receiver_abi}),
+        arguments.data(), arguments.size(), results.data(), results.size(),
+        tied_results.data(), tied_results.size(), predicates.data(),
+        predicates.size(), locations.get(definition), &op));
   }
   auto* region = check_case            ? loom_check_case_body(op)
                  : check_scenario      ? loom_check_scenario_body(op)
@@ -1182,6 +1294,7 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
                             : FunctionKind::Ordinary,
       parameter_contracts,
       reference_parameters(symbol),
+      implicit_object(instance, definition),
   };
   std::optional<FunctionBody> configuration;
   if (launch_configuration) {
@@ -1196,6 +1309,7 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
             : FunctionKind::LaunchConfiguration,
         {},
         {},
+        std::nullopt,
     };
   }
   return {function_body, configuration};

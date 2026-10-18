@@ -51,6 +51,7 @@ loom_generated_cc_library(
     name = "func",
     srcs = [
         "canonicalize.c",
+        "facts.c",
         "location.c",
         "verify.c",
     ],
@@ -83,6 +84,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/util:fact_table_api",
         "//runtime/src/iree/base:core_headers",
     ],
 )
@@ -94,6 +96,19 @@ loom_cc_test(
         ":func",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "facts_test",
+    srcs = ["facts_test.cc"],
+    deps = [
+        ":func",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

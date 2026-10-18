@@ -327,7 +327,9 @@ def _const_i64_rule(source_op: Op, result_type: TypePattern) -> DescriptorRule:
     )
 
 
-def _const_float_rule(result_type: TypePattern, descriptor_key: str) -> DescriptorRule:
+def _const_float_rule(
+    result_type: TypePattern, descriptor_key: str, immediate: str = "bits"
+) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
         source_op=scalar_conversion.scalar_constant,
@@ -340,7 +342,7 @@ def _const_float_rule(result_type: TypePattern, descriptor_key: str) -> Descript
             EmitDescriptorOp(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
-                immediates={"bits": ValueProject.float_bits("result")},
+                immediates={immediate: ValueProject.float_bits("result")},
                 form=DescriptorEmitForm.CONST,
             ),
         ),
@@ -1783,6 +1785,10 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _const_i32_rule(scalar_conversion.scalar_constant, _I16),
         _const_i32_rule(scalar_conversion.scalar_constant, _I32),
         _const_i64_rule(scalar_conversion.scalar_constant, _I64),
+        *(
+            _const_float_rule(result_type, "wasm.i32.const", "i32_value")
+            for result_type in (_F8E4M3, _F8E5M2, _F16, _BF16)
+        ),
         _const_float_rule(_F32, "wasm.f32.const"),
         _const_float_rule(_F64, "wasm.f64.const"),
         *predicate_rules(_descriptor, _value_type),
@@ -1796,6 +1802,11 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         ),
         _const_v128_rule(
             _V2F64, ValueProject.float_bits("result"), Guard.value_exact_float("result")
+        ),
+        _const_v128_rule(
+            Vector("f64", minimum_lanes=1, maximum_lanes=1),
+            ValueProject.float_bits("result"),
+            Guard.value_exact_float("result"),
         ),
         *(
             _const_vector_splat_rule(
@@ -1836,6 +1847,12 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 (Vector(("f8E4M3", "f8E5M2"), lanes=16), "i32", "i8x16", "i32_value"),
                 (Vector(("f16", "bf16"), lanes=8), "i32", "i16x8", "i32_value"),
                 (_V4F32, "f32", "f32x4", "bits"),
+                (
+                    Vector("f32", minimum_lanes=1, maximum_lanes=3),
+                    "f32",
+                    "f32x4",
+                    "bits",
+                ),
             )
         ),
         *(

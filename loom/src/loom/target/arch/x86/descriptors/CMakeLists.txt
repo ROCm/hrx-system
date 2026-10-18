@@ -25,19 +25,6 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
 loom_low_descriptor_cc_library(
   NAME
-    simd128_descriptors
-  DEPS
-    ::avx512_features_descriptors
-    loom::codegen::low::descriptors
-  IDS_DEPS
-    loom::codegen::low::descriptors
-  HEADER_ONLY
-)
-endif()
-
-if(LOOM_TARGET_ARCH_X86)
-loom_low_descriptor_cc_library(
-  NAME
     avx2_descriptors
   DEPS
     ::avx512_features_descriptors
@@ -186,7 +173,6 @@ loom_low_descriptor_cc_library(
     loom::py::loom::gen::target::arch::x86::low_descriptor_shard
   GENERATED_HDR_FLAGS
     "--view-header=scalar"
-    "--view-header=simd128"
     "--view-header=avx2"
     "--view-header=avx2_features"
     "--view-header=avx512"
@@ -200,7 +186,6 @@ loom_low_descriptor_cc_library(
     "--view-header=avx10_2"
   GENERATED_HDRS
     "scalar_descriptors.h"
-    "simd128_descriptors.h"
     "avx2_descriptors.h"
     "avx2_features_descriptors.h"
     "avx512_descriptors.h"
@@ -239,7 +224,6 @@ loom_cc_library(
     ::avx512_descriptors_ids
     ::avx512_features_descriptors_ids
     ::scalar_descriptors_ids
-    ::simd128_descriptors_ids
     iree::base
     loom::codegen::low::descriptors
   PUBLIC
@@ -304,7 +288,6 @@ loom_cc_library(
     ::avx_vnni_int8_descriptors
     ::packed_dot_descriptors
     ::scalar_descriptors
-    ::simd128_descriptors
     iree::base
     loom::codegen::low::descriptors
     loom::target::arch::x86::records::target_records
@@ -332,7 +315,6 @@ loom_cc_library(
     "avx_vnni_int8_descriptors.h"
     "packed_dot_descriptors.h"
     "scalar_descriptors.h"
-    "simd128_descriptors.h"
   DEPS
     ::avx10_2_descriptors
     ::avx2_descriptors
@@ -347,7 +329,6 @@ loom_cc_library(
     ::avx_vnni_int8_descriptors
     ::packed_dot_descriptors
     ::scalar_descriptors
-    ::simd128_descriptors
   TESTONLY
   PUBLIC
 )

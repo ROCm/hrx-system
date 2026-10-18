@@ -542,3 +542,83 @@ func.def @choose_count(%enabled: i1, %count: i32) -> (i32) {
   }
   func.return %23 : i32
 }
+
+// ====
+// Required-inline helpers preserve target queries, nested pointer provenance,
+// and deterministic workload reads until the normal inline phase.
+#include <loomcxx/kernel.h>
+#include <loomcxx/target.h>
+
+LOOM_FORCE_INLINE const unsigned* select_counts(bool use_left, const unsigned* left, const unsigned* right) {
+  return use_left ? left : right;
+}
+
+LOOM_FORCE_INLINE unsigned read_count(bool use_left, const unsigned* left, const unsigned* right) {
+  return select_counts(use_left, left, right)[0];
+}
+
+LOOM_FORCE_INLINE unsigned launch_width() {
+  return loom::target::subgroup::size();
+}
+
+static loom::kernel::configuration configure_helpers(bool use_left, const unsigned* left, const unsigned* right) {
+  unsigned width = launch_width();
+  return {{read_count(use_left, left, right), 1, 1}, {width, 1, 1}};
+}
+
+[[loom::kernel(configure_helpers)]] void helper_composed() {}
+
+// ----
+func.def public linkonce inline @select_counts(%use_left: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (buffer, offset) {
+  %7, %8 = scf.if %use_left -> (buffer, offset) {
+    scf.yield %left, %left_byte_offset : buffer, offset
+  } else {
+    scf.yield %right, %right_byte_offset : buffer, offset
+  }
+  func.return %7, %8 : buffer, offset
+}
+
+func.def public linkonce inline @read_count(%use_left: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i32) {
+  %15, %16 = func.call pure @select_counts(%use_left, %left, %left_byte_offset, %right, %right_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
+  %17 = scalar.constant 0 : i32
+  %18 = scalar.extsi %17 : i32 to i64
+  %19 = scalar.constant 4 : i64
+  %20 = scalar.muli %18, %19 : i64
+  %21 = index.cast %16 : offset to i64
+  %22 = scalar.addi %21, %20 : i64
+  %23 = scalar.assume %22 [range(%22, 0, 9223372036854775807)] : i64
+  %24 = index.cast %23 : i64 to offset
+  %25 = buffer.view %15[%24] : buffer -> view<1xi32>
+  %26 = view.load %25[0] : view<1xi32> -> i32
+  func.return %26 : i32
+}
+
+func.def public linkonce inline @launch_width() -> (i32) {
+  %28 = target.subgroup.size : index
+  %29 = index.cast %28 : index to i32
+  func.return %29 : i32
+}
+
+kernel.def @helper_composed(%use_left: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) {
+  %width = func.call pure @launch_width() : () -> (i32)
+  %36 = func.call readonly @read_count(%use_left, %left, %left_byte_offset, %right, %right_byte_offset) : (i1, buffer, offset, buffer, offset) -> (i32)
+  %37 = scalar.constant 1 : i32
+  %38 = scalar.constant 1 : i32
+  %39 = scalar.constant 1 : i32
+  %40 = scalar.constant 1 : i32
+  %41 = scalar.extui %36 : i32 to i64
+  %42 = index.cast %41 : i64 to index
+  %43 = scalar.extui %37 : i32 to i64
+  %44 = index.cast %43 : i64 to index
+  %45 = scalar.extui %38 : i32 to i64
+  %46 = index.cast %45 : i64 to index
+  %47 = scalar.extui %width : i32 to i64
+  %48 = index.cast %47 : i64 to index
+  %49 = scalar.extui %39 : i32 to i64
+  %50 = index.cast %49 : i64 to index
+  %51 = scalar.extui %40 : i32 to i64
+  %52 = index.cast %51 : i64 to index
+  kernel.launch.config workgroups(%42, %44, %46) workgroup_size(%48, %50, %52) : index
+} launch() {
+  kernel.return
+}

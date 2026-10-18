@@ -423,11 +423,13 @@ static iree_status_t loomc_cmd_program_product_capture_diagnostic(
 
 static iree_status_t loomc_cmd_program_product_verify_module(
     void* user_data, const loom_module_t* module, bool* out_valid) {
-  loomc_result_t* result = (loomc_result_t*)user_data;
+  loomc_cmd_program_product_invocation_t* invocation =
+      (loomc_cmd_program_product_invocation_t*)user_data;
   *out_valid = false;
   IREE_RETURN_IF_ERROR(iree_status_from_loomc(loomc_result_verify_loom_module(
-      module, (loom_source_resolver_t){0}, /*max_errors=*/0, result)));
-  *out_valid = loomc_result_succeeded(result);
+      invocation->request.context, module, (loom_source_resolver_t){0},
+      /*max_errors=*/0, invocation->result)));
+  *out_valid = loomc_result_succeeded(invocation->result);
   return iree_ok_status();
 }
 
@@ -522,7 +524,7 @@ static loomc_status_t loomc_cmd_program_product_build_indexed(
   loom_cmd_program_plan_index_options_t plan_options;
   loom_cmd_program_plan_index_options_initialize(&plan_options);
   plan_options.verification.fn = loomc_cmd_program_product_verify_module;
-  plan_options.verification.user_data = result;
+  plan_options.verification.user_data = &invocation;
   if (request_sink.publish != NULL) {
     plan_options.kernel_request_sink = (loom_cmd_program_kernel_request_sink_t){
         .publish = loomc_cmd_program_product_publish_kernel_request,

@@ -375,6 +375,8 @@ loomc_shared_libraries(
     loom::binding::c::target::cpu::iree_hal
     loom::binding::c::target::iree_hal
     ${_loomc_shared_platform_components}
+  TOOL_COMPONENTS
+    loom::testing::target_environment
   RUNTIME_DEPS
     iree::async
     iree::async::util::proactor_pool

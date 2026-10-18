@@ -298,8 +298,8 @@ static iree_status_t loom_scf_body_capture_operation(
         if (ordinary && space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
           memory_effects = LOOM_SCF_BODY_MEMORY_WORKGROUP;
         } else if (ordinary && effects == LOOM_SCF_BODY_EFFECT_READ) {
-          memory_effects = space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL
-                               ? LOOM_SCF_BODY_MEMORY_GLOBAL_LOAD
+          memory_effects = loom_scf_memory_space_is_read_ahead_source(space)
+                               ? LOOM_SCF_BODY_MEMORY_READ_AHEAD_LOAD
                                : LOOM_SCF_BODY_MEMORY_OTHER_LOAD;
         } else {
           memory_effects = LOOM_SCF_BODY_MEMORY_UNSUPPORTED;

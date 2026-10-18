@@ -1,0 +1,18 @@
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+struct Counter {
+  unsigned value;
+
+  [[loom::force_inline]] void add(unsigned amount) { value += amount; }
+  [[loom::force_inline]] unsigned read() const { return value; }
+};
+
+unsigned update(Counter value, unsigned amount) {
+  value.add(amount);
+  return value.read();
+}
+
+// ----
+func.def public @update(%value_value: i32, %amount: i32) -> (i32) {
+  %value = scalar.addi %value_value, %amount : i32
+  func.return %value : i32
+}

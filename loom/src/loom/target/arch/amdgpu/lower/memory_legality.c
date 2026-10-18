@@ -114,8 +114,12 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
           module, loom_target_low_legality_fact_table(context), descriptor_set,
           view_regions, analysis, loom_target_low_legality_function(context),
           bundle, target_facts->properties.instruction_constraints,
-          alloca_layout, LOOM_ATOMIC_SCOPE_THREAD, op, &source, &selection,
-          &diagnostic)) {
+          alloca_layout, LOOM_ATOMIC_SCOPE_THREAD, op, &source,
+          loom_memory_access_mask(loom_memory_access_cast(module, op)) !=
+                  LOOM_VALUE_ID_INVALID
+              ? LOOM_AMDGPU_MEMORY_ACCESS_SELECTION_FLAG_PRESERVE_INACTIVE
+              : 0,
+          &selection, &diagnostic)) {
     if (!iree_string_view_is_empty(diagnostic.atomic_constraint)) {
       return loom_amdgpu_low_legality_reject(context, op,
                                              diagnostic.atomic_constraint);

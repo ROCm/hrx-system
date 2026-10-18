@@ -165,6 +165,20 @@ struct loom_fact_context_t {
                         const loom_target_facts_t** out_facts);
   } resolve_region_target;
 
+  // Optionally resolves direct-call result facts through an analysis-owned
+  // callable summary. Generic scopes leave this empty and retain ordinary
+  // type-derived facts at call boundaries. The callback fills every result;
+  // unsupported calls return unknown facts rather than inspecting callees.
+  struct {
+    // Owner of the callable summary cache.
+    void* user_data;
+    // Imports one verified call's result facts into this fact context.
+    iree_status_t (*fn)(void* user_data, loom_fact_context_t* context,
+                        const loom_module_t* module, const loom_op_t* op,
+                        const loom_value_facts_t* operand_facts,
+                        loom_value_facts_t* result_facts);
+  } resolve_call_results;
+
   // Optional type-domain resolver installed by layers that own registered type
   // descriptors. The fact table itself intentionally does not depend on the
   // generated type registry; callers that can map |type| to a descriptor can

@@ -159,6 +159,7 @@ loom_cc_library(
   SRCS
     "hal_materialization.c"
   DEPS
+    ::call_abi
     ::facts
     ::register_classes
     iree::base

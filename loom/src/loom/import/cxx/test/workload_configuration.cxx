@@ -8,9 +8,17 @@
 #include <loomcxx/kernel.h>
 #include <loomcxx/target.h>
 
+LOOM_FORCE_INLINE unsigned launch_width() {
+  return loom::target::subgroup::size();
+}
+
+LOOM_FORCE_INLINE unsigned divide_up(unsigned value, unsigned divisor) {
+  return (value + divisor - 1) / divisor;
+}
+
 static loom::kernel::configuration configure_copy(unsigned item_count) {
-  unsigned width = loom::target::subgroup::size();
-  return {{(item_count + width - 1) / width, 1, 1}, {width, 1, 1}};
+  unsigned width = launch_width();
+  return {{divide_up(item_count, width), 1, 1}, {width, 1, 1}};
 }
 
 [[loom::kernel(configure_copy)]] void configured_copy(unsigned item_count,

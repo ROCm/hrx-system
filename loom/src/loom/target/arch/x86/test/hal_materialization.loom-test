@@ -114,3 +114,126 @@ low.func.def public target<x86.scalar.core>(@target) abi(hal_kernel) abi_layout(
   %8 = mov.imm32 0
   return %8
 }
+
+// ====
+
+// The feature-view AVX2 entry vocabulary imports every numeric constant
+// storage width into its callable SIMD carrier. Unused SIMD slots remain pure
+// zero values and do not acquire a constants-table dependency.
+// RUN: pass x86-materialize-hal-kernel
+x86.target<avx2> @target {features = [f16c]}
+
+low.kernel.def target<x86.avx2_features.core>(@target) abi_layout({offsets = [0, 2, 4, 8, 16, 32, 64, 80], signature = (vector<1xi8>, f16, f32, f64, vector<4xi32>, vector<8xf32>, vector<2xf64>, vector<4xf64>) -> ()}) workgroup_size(1, 1, 1) @numeric_simd(%byte: reg<x86.xmm>, %halfword: reg<x86.xmm>, %single: reg<x86.xmm>, %double: reg<x86.xmm>, %xmm: reg<x86.xmm>, %ymm: reg<x86.ymm>, %unused_xmm: reg<x86.xmm>, %unused_ymm: reg<x86.ymm>) asm {
+  %byte_copy = copy %byte : reg<x86.xmm> -> reg<x86.xmm>
+  %halfword_copy = copy %halfword : reg<x86.xmm> -> reg<x86.xmm>
+  %single_copy = copy %single : reg<x86.xmm> -> reg<x86.xmm>
+  %double_copy = copy %double : reg<x86.xmm> -> reg<x86.xmm>
+  %xmm_copy = copy %xmm : reg<x86.xmm> -> reg<x86.xmm>
+  %ymm_copy = copy %ymm : reg<x86.ymm> -> reg<x86.ymm>
+  return
+}
+
+// ----
+x86.target<avx2> @target {features = [f16c]}
+
+low.func.def public target<x86.avx2_features.core>(@target) abi(hal_kernel) abi_layout({offsets = [0, 2, 4, 8, 16, 32, 64, 80], signature = (vector<1xi8>, f16, f32, f64, vector<4xi32>, vector<8xf32>, vector<2xf64>, vector<4xf64>) -> ()}) @numeric_simd(%14: reg<x86.gpr64>, %15: reg<x86.gpr64>, %16: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %18 = mov.load.gpr64 %15 {disp32 = 24}
+  %19 = movzx.load.u8.gpr32 %18 {disp32 = 0}
+  %20 = vmovd.xmm.gpr32 %19
+  %21 = movzx.load.u16.gpr32 %18 {disp32 = 2}
+  %22 = vmovd.xmm.gpr32 %21
+  %23 = vmovss.load.xmm %18 {disp32 = 4}
+  %24 = vmovsd.load.xmm %18 {disp32 = 8}
+  %25 = vmovdqu32.load.xmm %18 {disp32 = 16}
+  %26 = vmovdqu32.load.ymm %18 {disp32 = 32}
+  %27 = vxorps.zero.xmm
+  %28 = vxorps.zero.ymm
+  %29 = mov.imm32 0
+  low.br ^_bb1(%20: reg<x86.xmm>, %22: reg<x86.xmm>, %23: reg<x86.xmm>, %24: reg<x86.xmm>, %25: reg<x86.xmm>, %26: reg<x86.ymm>, %27: reg<x86.xmm>, %28: reg<x86.ymm>)
+^_bb1(%byte: reg<x86.xmm>, %halfword: reg<x86.xmm>, %single: reg<x86.xmm>, %double: reg<x86.xmm>, %xmm: reg<x86.xmm>, %ymm: reg<x86.ymm>, %unused_xmm: reg<x86.xmm>, %unused_ymm: reg<x86.ymm>):
+  %byte_copy = copy %byte : reg<x86.xmm> -> reg<x86.xmm>
+  %halfword_copy = copy %halfword : reg<x86.xmm> -> reg<x86.xmm>
+  %single_copy = copy %single : reg<x86.xmm> -> reg<x86.xmm>
+  %double_copy = copy %double : reg<x86.xmm> -> reg<x86.xmm>
+  %xmm_copy = copy %xmm : reg<x86.xmm> -> reg<x86.xmm>
+  %ymm_copy = copy %ymm : reg<x86.ymm> -> reg<x86.ymm>
+  return %29
+}
+
+// ====
+
+// Task constants store predicates as one 0/1 byte per lane. Entry import
+// normalizes those bytes to the callable all-zero/all-one lane widths.
+// RUN: pass x86-materialize-hal-kernel
+x86.target<avx2> @target
+
+low.kernel.def target<x86.avx2.core>(@target) abi_layout({offsets = [0, 2, 6, 14, 30], signature = (vector<2xi1>, vector<4xi1>, vector<8xi1>, vector<16xi1>, vector<32xi1>) -> ()}) workgroup_size(1, 1, 1) @predicate_simd(%lanes2: reg<x86.xmm>, %lanes4: reg<x86.xmm>, %lanes8: reg<x86.xmm>, %lanes16: reg<x86.xmm>, %lanes32: reg<x86.ymm>) asm {
+  %lanes2_copy = copy %lanes2 : reg<x86.xmm> -> reg<x86.xmm>
+  %lanes4_copy = copy %lanes4 : reg<x86.xmm> -> reg<x86.xmm>
+  %lanes8_copy = copy %lanes8 : reg<x86.xmm> -> reg<x86.xmm>
+  %lanes16_copy = copy %lanes16 : reg<x86.xmm> -> reg<x86.xmm>
+  %lanes32_copy = copy %lanes32 : reg<x86.ymm> -> reg<x86.ymm>
+  return
+}
+
+// ----
+x86.target<avx2> @target
+
+low.func.def public target<x86.avx2.core>(@target) abi(hal_kernel) abi_layout({offsets = [0, 2, 6, 14, 30], signature = (vector<2xi1>, vector<4xi1>, vector<8xi1>, vector<16xi1>, vector<32xi1>) -> ()}) @predicate_simd(%10: reg<x86.gpr64>, %11: reg<x86.gpr64>, %12: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %14 = mov.load.gpr64 %11 {disp32 = 24}
+  %15 = movzx.load.u16.gpr32 %14 {disp32 = 0}
+  %16 = vmovd.xmm.gpr32 %15
+  %17 = vxorps.zero.xmm
+  %18 = vpsubb.xmm %17, %16
+  %19 = vpmovsxbq.xmm %18
+  %20 = vmovss.load.xmm %14 {disp32 = 2}
+  %21 = vpsubb.xmm %17, %20
+  %22 = vpmovsxbd.xmm %21
+  %23 = vmovsd.load.xmm %14 {disp32 = 6}
+  %24 = vpsubb.xmm %17, %23
+  %25 = vpmovsxbw.xmm %24
+  %26 = vmovdqu32.load.xmm %14 {disp32 = 14}
+  %27 = vpsubb.xmm %17, %26
+  %28 = vmovdqu32.load.ymm %14 {disp32 = 30}
+  %29 = vxorps.zero.ymm
+  %30 = vpsubb.ymm %29, %28
+  %31 = mov.imm32 0
+  low.br ^_bb1(%19: reg<x86.xmm>, %22: reg<x86.xmm>, %25: reg<x86.xmm>, %27: reg<x86.xmm>, %30: reg<x86.ymm>)
+^_bb1(%lanes2: reg<x86.xmm>, %lanes4: reg<x86.xmm>, %lanes8: reg<x86.xmm>, %lanes16: reg<x86.xmm>, %lanes32: reg<x86.ymm>):
+  %lanes2_copy = copy %lanes2 : reg<x86.xmm> -> reg<x86.xmm>
+  %lanes4_copy = copy %lanes4 : reg<x86.xmm> -> reg<x86.xmm>
+  %lanes8_copy = copy %lanes8 : reg<x86.xmm> -> reg<x86.xmm>
+  %lanes16_copy = copy %lanes16 : reg<x86.xmm> -> reg<x86.xmm>
+  %lanes32_copy = copy %lanes32 : reg<x86.ymm> -> reg<x86.ymm>
+  return %31
+}
+
+// ====
+
+// The AVX-512 feature view extends the same mechanism to full ZMM numeric and
+// predicate carriers. An unused ZMM parameter remains a pure zero value.
+// RUN: pass x86-materialize-hal-kernel
+x86.target<avx512> @target {features = [avx512bf16]}
+
+low.kernel.def target<x86.avx512_features.core>(@target) abi_layout({offsets = [0, 64, 128], signature = (vector<16xf32>, vector<64xi1>, vector<8xf64>) -> ()}) workgroup_size(1, 1, 1) @zmm_constants(%numeric: reg<x86.zmm>, %predicate: reg<x86.zmm>, %unused: reg<x86.zmm>) asm {
+  %numeric_copy = copy %numeric : reg<x86.zmm> -> reg<x86.zmm>
+  %predicate_copy = copy %predicate : reg<x86.zmm> -> reg<x86.zmm>
+  return
+}
+
+// ----
+x86.target<avx512> @target {features = [avx512bf16]}
+
+low.func.def public target<x86.avx512_features.core>(@target) abi(hal_kernel) abi_layout({offsets = [0, 64, 128], signature = (vector<16xf32>, vector<64xi1>, vector<8xf64>) -> ()}) @zmm_constants(%5: reg<x86.gpr64>, %6: reg<x86.gpr64>, %7: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %9 = mov.load.gpr64 %6 {disp32 = 24}
+  %10 = vmovdqu32.load %9 {disp32 = 0}
+  %11 = vmovdqu32.load %9 {disp32 = 64}
+  %12 = vxorps.zero
+  %13 = vpsubb %12, %11
+  %14 = mov.imm32 0
+  low.br ^_bb1(%10: reg<x86.zmm>, %13: reg<x86.zmm>, %12: reg<x86.zmm>)
+^_bb1(%numeric: reg<x86.zmm>, %predicate: reg<x86.zmm>, %unused: reg<x86.zmm>):
+  %numeric_copy = copy %numeric : reg<x86.zmm> -> reg<x86.zmm>
+  %predicate_copy = copy %predicate : reg<x86.zmm> -> reg<x86.zmm>
+  return %14
+}

@@ -108,7 +108,7 @@ static void loom_amdgpu_memory_report_row_populate_storage_schema(
 static iree_status_t loom_amdgpu_record_memory_packet_report(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_memory_packet_plan_t* packet,
-    uint64_t execution_count_plus_one) {
+    iree_string_view_t strategy_key, uint64_t execution_count_plus_one) {
   loom_low_source_memory_access_plan_t packet_source;
   loom_amdgpu_memory_access_source_plan(&packet->access, &packet_source);
   const loom_low_source_memory_access_plan_t* source = &packet_source;
@@ -143,6 +143,7 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
       .memory_space = loom_amdgpu_memory_space_name(source->memory_space),
       .operation_kind = loom_amdgpu_memory_operation_name(operation_kind),
       .packet_key = packet_key,
+      .strategy_key = strategy_key,
       .address_form =
           loom_amdgpu_memory_address_form_name(packet->access.address_form),
       .dynamic_term_kind =
@@ -292,11 +293,17 @@ iree_status_t loom_amdgpu_report_memory_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_memory_access_plan_t* plan,
     uint64_t execution_count_plus_one) {
+  const iree_string_view_t strategy_key =
+      iree_any_bit_set(plan->flags,
+                       LOOM_AMDGPU_MEMORY_ACCESS_PLAN_FLAG_DESCRIPTOR_ZERO_FILL)
+          ? IREE_SV("descriptor_zero_fill")
+          : iree_string_view_empty();
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < plan->packet_count && iree_status_is_ok(status);
        ++i) {
     status = loom_amdgpu_record_memory_packet_report(
-        context, source_op, &plan->packets[i], execution_count_plus_one);
+        context, source_op, &plan->packets[i], strategy_key,
+        execution_count_plus_one);
   }
   return status;
 }

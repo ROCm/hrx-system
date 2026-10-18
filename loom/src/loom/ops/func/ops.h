@@ -414,6 +414,11 @@ iree_status_t loom_func_call_build(
 iree_status_t loom_func_call_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 loom_trait_flags_t loom_func_call_effective_traits(
     const loom_module_t* module, const loom_op_t* op);
+iree_status_t loom_func_call_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_func_call_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);

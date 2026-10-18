@@ -58,6 +58,21 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    ir_provider
+  HDRS
+    "ir_provider.h"
+  SRCS
+    "ir_provider.c"
+  DEPS
+    ::target_record_table
+    loom::ops::test
+    loom::target::low_descriptor_registry_core_test
+    loom::target::provider
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     provider
   HDRS
     "provider.h"

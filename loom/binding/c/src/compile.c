@@ -639,9 +639,9 @@ static loomc_status_t loomc_compile_prepared_module_into_result(
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       launch_config_module != NULL) {
-    status = loomc_result_verify_loom_module(launch_config_module,
-                                             (loom_source_resolver_t){0},
-                                             /*max_errors=*/0, result);
+    status = loomc_result_verify_loom_module(
+        compiler->context, launch_config_module, (loom_source_resolver_t){0},
+        /*max_errors=*/0, result);
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_emit_requested_artifacts(
@@ -693,6 +693,7 @@ static loomc_status_t loomc_compile_module_into_result(
     const loomc_module_t* config_module =
         options ? options->config_module : NULL;
     const loomc_config_apply_module_options_t config_apply_options = {
+        .context = compiler->context,
         .config_module = loomc_module_const_loom_module(config_module),
         .config_source_resolver = loomc_module_source_resolver(config_module),
         .target_module = internal_module,
@@ -921,6 +922,7 @@ loomc_status_t loomc_compile_artifact(
     // unreachable from the selected program. Validate the survivors below.
     materialization_config.flags &= ~LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
     const loomc_config_apply_text_to_module_options_t config_apply_options = {
+        .context = compiler->context,
         .config = config ? &materialization_config : NULL,
         .module = internal_module,
         .source_resolver = loomc_module_source_resolver(module),

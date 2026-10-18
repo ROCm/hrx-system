@@ -38,6 +38,8 @@ typedef struct loom_low_task_entry_builder_t {
 // by the shared task ABI owner, not inferred by the target from IR or
 // registers.
 typedef struct loom_low_task_parameter_access_t {
+  // Logical source type retained by the task parameter layout.
+  loom_type_t source_type;
   // Admitted physical carrier of the original body parameter.
   loom_type_t carrier_type;
   // Byte offset of the constants/bindings pointer within dispatch state.
@@ -61,10 +63,12 @@ typedef struct loom_low_task_entry_lowering_t {
   // False means the selected representation cannot implement task entries.
   bool (*initialize)(const loom_low_descriptor_set_t* descriptors,
                      loom_low_task_entry_builder_t* builder);
-  // Returns an empty string for an admitted carrier/width, or the violated
-  // physical constraint. The shared owner emits its parameter diagnostic.
-  iree_string_view_t (*parameter_constraint)(loom_type_t carrier_type,
-                                             uint8_t byte_length);
+  // Returns an empty string for an admitted source/carrier/width, or the
+  // violated physical constraint. The shared owner emits its parameter
+  // diagnostic. The initialized builder exposes concrete target vocabulary.
+  iree_string_view_t (*parameter_constraint)(
+      const loom_low_task_entry_builder_t* builder, loom_type_t source_type,
+      loom_type_t carrier_type, uint8_t byte_length);
   // Imports one parameter or supplies its unused-slot value. table starts
   // invalid and caches this table's loaded pointer across subsequent
   // parameters.

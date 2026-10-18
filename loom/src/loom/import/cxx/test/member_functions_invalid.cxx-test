@@ -1,0 +1,49 @@
+// RUN: verify
+struct Aliased {
+  unsigned first;
+  unsigned second;
+
+  void mix(unsigned& selected) {
+    first += selected;
+    ++selected;
+  }
+};
+
+Aliased overlapping_receiver(Aliased value) {
+  // ERROR@+1: LOWERING/059 "mutable value-reference arguments must select nonoverlapping"
+  value.mix(value.first);
+  return value;
+}
+
+// ====
+struct Polymorphic {
+  unsigned value;
+  virtual unsigned read() const { return value; }
+};
+
+unsigned virtual_dispatch(Polymorphic* object) {
+  // ERROR@+1: LOWERING/059 "virtual member dispatch is not admitted"
+  return object->read();
+}
+
+// ====
+struct ExplicitObject {
+  unsigned value;
+  unsigned read(this const ExplicitObject& self) { return self.value; }
+};
+
+unsigned explicit_object(ExplicitObject object) {
+  // ERROR@+1: LOWERING/059 "explicit object member functions are not admitted"
+  return object.read();
+}
+
+// ====
+struct VolatileValue {
+  unsigned value;
+  unsigned read() volatile { return value; }
+};
+
+unsigned volatile_value_receiver(VolatileValue object) {
+  // ERROR@+1: LOWERING/059 "volatile member calls require a storage-backed receiver"
+  return object.read();
+}

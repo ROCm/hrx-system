@@ -621,6 +621,7 @@ loom_check_test_suite(
     "test/source_low/workgroup_payload_projection.loom-test"
     "test/source_low/workgroup_storage.loom-test"
     "test/source_low/workgroup_storage_reuse.loom-test"
+    "test/subgroup_packet_legalization.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )

@@ -20,6 +20,8 @@ extern "C" {
 typedef struct loom_task_parameter_layout_t {
   // Dispatch requirements represented by the versioned executable schema.
   iree_hal_executable_dispatch_attrs_v0_t attributes;
+  // Module-owned logical parameter types in declaration order.
+  const loom_type_t* parameter_types;
   // Arena-owned parameter records in logical declaration order.
   const iree_hal_executable_dispatch_parameter_v0_t* parameters;
 } loom_task_parameter_layout_t;

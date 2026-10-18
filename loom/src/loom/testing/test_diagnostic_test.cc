@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/testing/test_diagnostic_native.h"
 
 namespace {
 

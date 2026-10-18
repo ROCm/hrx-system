@@ -752,11 +752,25 @@ jobs:
         shell: powershell
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or -not $installation) { throw 'Visual Studio C++ tools discovery failed.' }
+          $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $visualStudio) { throw 'Visual Studio C++ tools discovery failed.' }
+          $installation = $visualStudio.installationPath
           Import-Module (Join-Path $installation 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
           Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
           if ($env:VSCMD_ARG_TGT_ARCH -ne 'x64') { throw 'Visual Studio x64 developer environment was not initialized.' }
+          $env:BAZEL_VC = $env:VCINSTALLDIR.TrimEnd('\')
+          $env:BAZEL_VC_FULL_VERSION = $env:VCToolsVersion
+          if ('${{ matrix.command }}'.EndsWith('-asan')) {
+            $catalog = Join-Path $env:ProgramData "Microsoft\VisualStudio\Packages\_Instances\$($visualStudio.instanceId)\catalog.json"
+            $stlAsanDirectory = python build_tools/ci/windows_stl_asan.py `
+              --tools-dir ($env:VCToolsInstallDir.TrimEnd('\')) --catalog $catalog `
+              --output-dir "$env:HRX_OUTPUT_DIR\stl-asan"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            # rules_cc reconstructs LIB from vcvarsall, so supply the companion
+            # as an explicit ASAN link search path instead of editing LIB.
+            "build:asan --linkopt=`"/LIBPATH:$($stlAsanDirectory.Replace('\', '/'))`"" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          }
           foreach ($tool in @('clang-cl.exe', 'lld-link.exe', 'llvm-lib.exe')) {
             if (-not (Test-Path -LiteralPath (Join-Path $env:BAZEL_LLVM "bin\$tool") -PathType Leaf)) {
               throw "Missing LLVM tool: $tool"

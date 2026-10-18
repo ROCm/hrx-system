@@ -617,6 +617,12 @@ static iree_status_t loom_vector_canonicalize_slice(loom_op_t* op,
     return iree_ok_status();
   }
 
+  IREE_RETURN_IF_ERROR(
+      loom_vector_project_regular_partition(op, rewriter, out_changed));
+  if (*out_changed) {
+    return iree_ok_status();
+  }
+
   loom_op_t* source_def_op = loom_rewriter_value_defining_op(rewriter, source);
   if (!source_def_op || !loom_vector_concat_isa(source_def_op)) {
     return iree_ok_status();
@@ -1531,6 +1537,12 @@ static iree_status_t loom_vector_canonicalize_extract(loom_op_t* op,
 
   IREE_RETURN_IF_ERROR(loom_vector_canonicalize_extract_static_indices(
       op, rewriter, source_type, result_type, out_changed));
+  if (*out_changed) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(
+      loom_vector_project_regular_partition(op, rewriter, out_changed));
   if (*out_changed) {
     return iree_ok_status();
   }

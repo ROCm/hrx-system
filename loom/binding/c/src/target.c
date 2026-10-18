@@ -211,8 +211,11 @@ static loomc_status_t loomc_target_pass_environment_initialize(
       loom_target_environment_low_descriptor_registry(internal_environment);
   out_environment->diagnostic_type_print_options.flags =
       LOOM_TEXT_PRINT_DEFAULT;
-  loom_low_descriptor_text_asm_environment_initialize(
+  loom_low_descriptor_text_asm_environment_initialize_with_diagnostics(
       &out_environment->low_descriptor_registry.registry,
+      loom_target_environment_low_asm_diagnostic_provider_list(
+          internal_environment),
+      &out_environment->text_asm_storage,
       &out_environment->diagnostic_type_print_options.low_asm_environment);
   out_environment->low_lower_policy_registry =
       loom_target_environment_low_lower_policy_registry(internal_environment);
@@ -628,15 +631,10 @@ loom_pass_environment_t loomc_codegen_pass_environment_storage_initialize(
 void loomc_target_pass_environment_initialize_text_asm_environment(
     const loomc_target_pass_environment_t* environment,
     loom_text_low_asm_environment_t* out_environment) {
-  if (out_environment == NULL) {
-    return;
-  }
-  if (environment == NULL) {
-    *out_environment = (loom_text_low_asm_environment_t){0};
-    return;
-  }
-  loom_low_descriptor_text_asm_environment_initialize(
-      &environment->low_descriptor_registry.registry, out_environment);
+  *out_environment =
+      environment
+          ? environment->diagnostic_type_print_options.low_asm_environment
+          : (loom_text_low_asm_environment_t){0};
 }
 
 void loomc_target_pass_environment_initialize_low_repr_environment(

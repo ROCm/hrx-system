@@ -78,9 +78,10 @@ typedef struct loom_scf_pipeline_rejection_t {
 
 // Builds the two-stage read-ahead schedule of a verified loop body.
 // Ordinary reads and their transitive payload prerequisites form the producer.
-// When the body has ordered memory effects, only proven global loads move;
-// workgroup accesses, including guarded reads, stay intact in the ordered
-// consumer with workgroup barriers and the carried recurrence. |spaces| retains
+// When the body has ordered memory effects, only proven read-ahead loads from
+// concrete global-like storage move; workgroup accesses, including guarded
+// reads, stay intact in the ordered consumer with workgroup barriers and the
+// carried recurrence. |spaces| retains
 // the owning analysis's classifications across nested reconstruction without
 // borrowing its invalidated fact table. Nested scf.if/scf.for operations remain
 // intact within their assigned stage unless a guarded read is split from its
@@ -94,11 +95,11 @@ typedef struct loom_scf_pipeline_rejection_t {
 // complete prerequisites are already available there. This removes redundant
 // queue entries and keeps their arithmetic relationship to other queued values.
 //
-// The admission contract excludes other nested control, global/unknown writes,
-// global fences, source-order constraints, mixed producer/consumer units,
-// producers depending on carried state, and cross-stage values whose types vary
-// with the iteration. Convergence in a read unit or prerequisite cannot move
-// into the producer. Rejections identify the source requirement;
+// The admission contract excludes other nested control, global-like/unknown
+// writes, global fences, source-order constraints, mixed producer/consumer
+// units, producers depending on carried state, and cross-stage values whose
+// types vary with the iteration. Convergence in a read unit or prerequisite
+// cannot move into the producer. Rejections identify the source requirement;
 // status failures identify allocation or representation limits. Plan storage
 // belongs to |arena| and borrows the source IR until reconstruction completes.
 iree_status_t loom_scf_pipeline_plan_build(

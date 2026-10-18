@@ -52,3 +52,13 @@ loom_cc_test(
         "//runtime/src/iree/testing:temp_file",
     ],
 )
+
+loom_cc_library(
+    name = "module_format",
+    srcs = ["module_format.c"],
+    hdrs = ["module_format.h"],
+    deps = [
+        "//loom/src/loom/format/bytecode:format",
+        "//runtime/src/iree/base",
+    ],
+)

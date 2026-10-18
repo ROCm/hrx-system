@@ -491,6 +491,7 @@ loomc_shared_libraries(
         ],
         "//conditions:default": [],
     }),
+    tool_components = ["//loom/src/loom/testing:target_environment"],
     runtime_deps = [
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
