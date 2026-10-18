@@ -34,9 +34,10 @@ python dev.py cmake fix
 ```
 
 `fix` applies staged hygiene repairs and stages files owned by those fixers.
-Bazel-to-CMake receives only selected BUILD/CMake inputs and may stage their
-same-directory generated output. Converter-wide inputs are checked without
-writing. Loom artifact maintenance updates only families whose owned outputs
+Bazel-to-CMake may stage same-directory generated output for selected BUILD/CMake
+inputs. Changed Starlark files and converter-wide inputs trigger a repository-wide
+read-only check: their loaded data and rules can affect other packages. Loom
+artifact maintenance updates only families whose owned outputs
 were selected; the read-only retry detects source changes that require an
 explicit regeneration. `precommit` checks the current local change set, with
 autofix enabled for staged and explicit-path test-bearing runs. `presubmit` is

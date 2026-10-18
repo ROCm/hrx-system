@@ -1514,9 +1514,10 @@ def run_build_filename_check(paths: list[str]) -> bool:
 
 
 def is_bazel_to_cmake_global_trigger(path: str) -> bool:
+    input_path = Path(path)
     return (
-        Path(path).name == ".bazel_to_cmake.cfg.py"
-        or path == "loom/build_tools/amdgpu/target_config.bzl"
+        input_path.name == ".bazel_to_cmake.cfg.py"
+        or input_path.suffix == ".bzl"
         or path.startswith(
             (
                 "build_tools/bazel_to_cmake/",

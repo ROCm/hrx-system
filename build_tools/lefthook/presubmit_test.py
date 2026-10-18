@@ -739,6 +739,31 @@ class PresubmitTest(unittest.TestCase):
         )
         run_command.assert_not_called()
 
+    def test_starlark_changes_check_cmake_without_rewriting_dependents(self):
+        for path in (
+            "loom/src/loom/test/corpus/numeric/manifest.bzl",
+            "runtime/src/iree/hal/driver_rules.bzl",
+        ):
+            for fix in (False, True):
+                with (
+                    self.subTest(path=path, fix=fix),
+                    mock.patch.object(
+                        presubmit, "run_command", return_value=False
+                    ) as run_command,
+                ):
+                    self.assertFalse(
+                        presubmit.run_bazel_to_cmake([path], fix=fix, verbose=False)
+                    )
+                    run_command.assert_called_once_with(
+                        [
+                            sys.executable,
+                            "build_tools/bazel_to_cmake/bazel_to_cmake.py",
+                            "--check",
+                        ],
+                        "Bazel-to-CMake",
+                        False,
+                    )
+
     def test_clang_tidy_candidates_require_configured_prefix_and_extension(self):
         with (
             mock.patch.object(presubmit, "CLANG_TIDY_PATH_PREFIXES", ("project/src/",)),
