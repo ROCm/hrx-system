@@ -46,6 +46,13 @@ void loom_serve_realtime_wire_deinitialize(loom_serve_realtime_wire_t* wire);
 // Drops queued delivery, retaining only reusable construction storage.
 void loom_serve_realtime_wire_clear(loom_serve_realtime_wire_t* wire);
 
+// Rolls back events appended after a saved queue tail, or the entire queue
+// when tail is NULL. The serialized command owner saves wire->last before
+// construction; no flush, cancellation, or other queue mutation intervenes.
+// Earlier queued events and their owned payloads remain unchanged.
+void loom_serve_realtime_wire_rewind(loom_serve_realtime_wire_t* wire,
+                                     loom_serve_realtime_wire_message_t* tail);
+
 // Begins one object with event_id and type, leaving the object open. The caller
 // adds event-specific fields and closes it before commit. No queue mutation
 // occurs until commit succeeds; failed command formatting can reset scratch.
@@ -53,7 +60,9 @@ iree_status_t loom_serve_realtime_wire_begin(loom_serve_realtime_wire_t* wire,
                                              const char* type);
 // Transfers scratch to the bounded queue. publication tags unsent response
 // data for cancellation. Queued events own their complete serialized payload;
-// they borrow no conversation or model storage.
+// they borrow no conversation or model storage. An oversized individual event
+// returns OUT_OF_RANGE and releases its construction storage. Aggregate queued
+// byte/count pressure returns RESOURCE_EXHAUSTED.
 iree_status_t loom_serve_realtime_wire_commit(loom_serve_realtime_wire_t* wire,
                                               uint64_t response,
                                               bool publication);

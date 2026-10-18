@@ -20,10 +20,6 @@ extern "C" {
 // Protocol output budget bound, independent of a deployment's context limit.
 #define LOOM_SERVE_TEXT_CHAT_MAX_OUTPUT_TOKENS 16384
 
-// Protocol resource bound for declared or generated function tools. Storage is
-// allocated only for the declarations present in a request.
-#define LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT 4096
-
 // Protocol resource bound for ordered content parts in one message. The HTTP
 // body has an independent byte bound; this limits the compact source-policy
 // record set created from pathologically small JSON objects.
@@ -136,18 +132,6 @@ iree_status_t loom_serve_text_chat_prepare_input(
     loom_serve_text_media_span_t** out_media_spans,
     iree_host_size_t* out_media_span_count);
 
-// Indexed function-tool schema borrowing the request body. Names are literal
-// ASCII identifiers. The optional XML codec uses property types to recover
-// generated JSON values; the agent owns execution and full schema validation.
-typedef struct loom_serve_text_chat_tool_t {
-  // Literal function name, without JSON quotes.
-  iree_string_view_t name;
-  // JSON object mapping parameter names to schemas.
-  iree_string_view_t properties;
-  // JSON array of required parameter names, or empty when absent.
-  iree_string_view_t required;
-} loom_serve_text_chat_tool_t;
-
 enum loom_serve_text_chat_flag_bits_e {
   // Publish incremental semantic spans; HTTP encodes them as SSE events.
   LOOM_SERVE_TEXT_CHAT_FLAG_STREAM = 1u << 0,
@@ -184,14 +168,8 @@ typedef struct loom_serve_text_chat_t {
   loom_serve_text_chat_flags_t flags;
   // Original tool declarations borrowing the request body, or the literal [].
   iree_string_view_t tool_schemas;
-  // Host allocator owning the tool descriptor array.
+  // Host allocator owning request metadata and image descriptors.
   iree_allocator_t host_allocator;
-  // Number of populated tool descriptors.
-  iree_host_size_t tool_count;
-  // Allocated descriptor capacity.
-  iree_host_size_t tool_capacity;
-  // Dynamically sized validated tool descriptors sorted by literal name.
-  loom_serve_text_chat_tool_t* tools;
   // Ordered inspected image occurrences.
   struct {
     // Number of populated image descriptors.

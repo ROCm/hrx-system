@@ -848,6 +848,73 @@ def rejected_capture(address, trace):
         client.close()
 
 
+def empty_response(address, trace):
+    client = Client(address, trace)
+    admin = HttpClient(address)
+    drained = False
+    try:
+        assert client.receive()["type"] == "session.created"
+        client.message("empty", "a" * 11)
+        admin.request("/v1/models/drain", {"model": "speech"})
+        drained = True
+        client.send("response.create")
+        events = client.until("response.done")
+        response = events[-1]["response"]
+        assert response["status"] == "completed", events
+        assert response["usage"]["input_tokens"] == 11, response
+        assert response["usage"]["output_tokens"] == 1, response
+        assert not any(e["type"].endswith(".delta") for e in events), events
+        admin.request("/v1/models/undrain", {"model": "speech"})
+        drained = False
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        if drained:
+            admin.request("/v1/models/undrain", {"model": "speech"})
+        client.close()
+
+
+def oversized_item_admission(address, trace):
+    client = Client(address, trace)
+    try:
+        assert client.receive()["type"] == "session.created"
+        client.message("before", "a")
+        messages = [{"role": "user", "content": "a"}]
+        for label, unit, width in (("ascii", "a", 1), ("escaped", "\0", 6)):
+            item = {
+                "id": label,
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": ""}],
+            }
+            event_id = label[0]
+            request = {
+                "type": "conversation.item.create",
+                "event_id": event_id,
+                "previous_item_id": "root",
+                "item": item,
+            }
+            overhead = len(json.dumps(request, ensure_ascii=False).encode())
+            count = (512 * 1024 - overhead) // width
+            item["content"][0]["text"] = unit * count
+            payload = json.dumps(request, ensure_ascii=False).encode()
+            assert len(payload) <= 512 * 1024
+            client.send_frame(1, payload)
+            error = client.receive(allow_error=True)
+            assert error["type"] == "error", error
+            assert error["error"]["code"] == "OUT_OF_RANGE", error
+            assert error["error"]["event_id"] == event_id, error
+            # Reusing the rejected identity and generating on this same socket
+            # prove neither the item nor its oversized text entered history.
+            client.message(label, "b")
+            messages.append({"role": "user", "content": "b"})
+        client.respond(messages)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
 def main():
     executable = str(Path(sys.argv[1]).resolve())
     fixtures = [Path(value).resolve() for value in sys.argv[2:5]]
@@ -901,6 +968,8 @@ def main():
         with running_server(command, artifacts / "server.log") as (process, address):
             assert address is not None, process.poll()
             with (artifacts / "wire.jsonl").open("w") as trace:
+                empty_response(address, trace)
+                oversized_item_admission(address, trace)
                 response_policy(address, trace)
                 conversation(address, trace)
                 response_failure(address, trace, speech=True)

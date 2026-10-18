@@ -341,7 +341,6 @@ class RequestCheckTest(unittest.TestCase):
                 PACKAGE / "control.loom", self.request(tools=tools), capacity=8192
             )
         )
-        self.assertEqual(value["declared_tool_count"], len(tools))
         catalog = value["prompt"].split("<tools>\n", 1)[1].split("\n</tools>", 1)[0]
         self.assertEqual([json.loads(line) for line in catalog.splitlines()], tools)
 

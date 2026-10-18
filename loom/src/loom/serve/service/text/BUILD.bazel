@@ -288,13 +288,17 @@ loom_cc_library(
     name = "chat",
     srcs = [
         "chat.c",
+        "chat_fields.c",
         "media.c",
         "tool_calls.c",
+        "tool_schemas.c",
     ],
     hdrs = [
         "chat.h",
+        "chat_fields.h",
         "media.h",
         "tool_calls.h",
+        "tool_schemas.h",
     ],
     deps = [
         "//loom/src/loom/serve/media:digest",
@@ -334,6 +338,17 @@ loom_cc_test(
 loom_cc_test(
     name = "tool_calls_test",
     srcs = ["tool_calls_test.cc"],
+    deps = [
+        ":chat",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "tool_schemas_test",
+    srcs = ["tool_schemas_test.cc"],
     deps = [
         ":chat",
         "//runtime/src/iree/base",

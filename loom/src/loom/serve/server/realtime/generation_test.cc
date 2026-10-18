@@ -94,29 +94,32 @@ class RealtimeGenerationTest : public ::testing::Test {
              loom_serve_registry_at(registry_, 1)->phase ==
                  LOOM_SERVE_REGISTRATION_READY;
     }));
+  }
+
+  iree_status_t Start(iree_string_view_t content, iree_string_view_t voice) {
     loom_serve_realtime_binding_t text;
     loom_serve_realtime_binding_t speech;
-    IREE_ASSERT_OK(loom_serve_realtime_binding_resolve(
+    IREE_RETURN_IF_ERROR(loom_serve_realtime_binding_resolve(
         registry_, loom_serve_registry_at(registry_, 0)->service.name,
         1u << LOOM_SERVE_MODEL_KIND_TEXT, &text));
-    IREE_ASSERT_OK(loom_serve_realtime_binding_resolve(
+    IREE_RETURN_IF_ERROR(loom_serve_realtime_binding_resolve(
         registry_, loom_serve_registry_at(registry_, 1)->service.name,
         1u << LOOM_SERVE_MODEL_KIND_SPEECH, &speech));
     loom_serve_text_request_t request = {};
     iree_string_builder_initialize(iree_allocator_system(), &request.body);
-    auto status = iree_string_builder_append_string(
+    auto status = iree_string_builder_append_format(
         &request.body,
-        IREE_SV("{\"model\":\"fixture-text\","
-                "\"messages\":[{\"role\":\"user\",\"content\":\"abxa\"}],"
-                "\"max_tokens\":4,\"stream\":true}"));
+        "{\"model\":\"fixture-text\","
+        "\"messages\":[{\"role\":\"user\",\"content\":\"%.*s\"}],"
+        "\"max_tokens\":4,\"stream\":true}",
+        (int)content.size, content.data);
     if (iree_status_is_ok(status)) {
       status = loom_serve_realtime_generation_allocate(
           loom_serve_host_executor(host_), registry_, text, speech, &request,
-          IREE_SV("positive"), 42, &audio_, Wake(), iree_allocator_system(),
-          &generation_);
+          voice, 42, &audio_, Wake(), iree_allocator_system(), &generation_);
     }
     iree_string_builder_deinitialize(&request.body);
-    IREE_ASSERT_OK(status);
+    return status;
   }
 
   void TearDown() override {
@@ -206,6 +209,7 @@ class RealtimeGenerationTest : public ::testing::Test {
 };
 
 TEST_F(RealtimeGenerationTest, CancellationRetainsWaveformUntilWorkerRelease) {
+  IREE_ASSERT_OK(Start(IREE_SV("abxa"), IREE_SV("positive")));
   IREE_ASSERT_OK(Until([&] {
     return loom_serve_realtime_generation_text(generation_).size != 0;
   }));
@@ -235,6 +239,34 @@ TEST_F(RealtimeGenerationTest, CancellationRetainsWaveformUntilWorkerRelease) {
   IREE_ASSERT_OK(Until(
       [&] { return !loom_serve_realtime_generation_pending(generation_); }));
   EXPECT_EQ(loom_serve_realtime_generation_audio(generation_).size, 0);
+}
+
+TEST_F(RealtimeGenerationTest, EmptyContentDoesNotValidateAnUnusedVoice) {
+  IREE_ASSERT_OK(Start(IREE_SV("aaaaaaaaaaa"), IREE_SV("unknown-voice")));
+  IREE_ASSERT_OK(Until(
+      [&] { return loom_serve_realtime_generation_complete(generation_); }));
+  const auto* result = loom_serve_realtime_generation_result(generation_);
+  ASSERT_NE(result, nullptr);
+  EXPECT_EQ(result->content.size, 0);
+  EXPECT_EQ(result->calls->count, 0);
+  EXPECT_TRUE(iree_string_view_equal(result->finish_reason, IREE_SV("stop")));
+  EXPECT_EQ(result->response.usage.output_tokens, 1);
+  EXPECT_EQ(loom_serve_realtime_generation_text(generation_).size, 0);
+  EXPECT_EQ(loom_serve_realtime_generation_audio(generation_).size, 0);
+  EXPECT_EQ(loom_serve_realtime_generation_frames(generation_), 0);
+}
+
+TEST_F(RealtimeGenerationTest,
+       EmptyContentDoesNotWaitForClosedSpeechAdmission) {
+  loom_serve_registry_at(registry_, 1)->closed = true;
+  IREE_ASSERT_OK(Start(IREE_SV("aaaaaaaaaaa"), IREE_SV("positive")));
+  IREE_ASSERT_OK(Until(
+      [&] { return loom_serve_realtime_generation_complete(generation_); }));
+  const auto* result = loom_serve_realtime_generation_result(generation_);
+  ASSERT_NE(result, nullptr);
+  EXPECT_EQ(result->content.size, 0);
+  EXPECT_EQ(loom_serve_realtime_generation_audio(generation_).size, 0);
+  EXPECT_EQ(loom_serve_realtime_generation_frames(generation_), 0);
 }
 
 }  // namespace
