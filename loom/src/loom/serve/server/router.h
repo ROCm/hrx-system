@@ -9,6 +9,7 @@
 
 #include "iree/task/executor.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/server/realtime/server.h"
 #include "loom/serve/server/registry.h"
 #include "loom/serve/server/resources.h"
 
@@ -30,6 +31,9 @@ typedef struct loom_serve_router_options_t {
   // Optional idle reclamation without changing model admission or retained
   // sessions. Enabled policy requires resources.device_group.
   loom_serve_device_idle_policy_t idle;
+  // Optional named native text/recognition/speech conversations. Configuration
+  // and origin strings remain borrowed until this routing call retires.
+  loom_serve_realtime_options_t realtime;
 } loom_serve_router_options_t;
 
 // Routes JSON request bodies by their model field and checkpoint operations by
@@ -73,16 +77,18 @@ typedef struct loom_serve_router_options_t {
 // POST /v1/models/drain and /v1/models/undrain select {"model":"name"} and
 // change admission without evicting weights or discarding retained state.
 // Drain lets every already-admitted request finish, including service queues;
-// later inference/checkpoint/tokenizer requests wait outside those services.
-// Holding overload returns 429. Control and observation remain ungated. Status
-// reports admission separately from the modality phase and held requests.
-// Each turn claims at most request_quota new requests and releases at most that
-// many held requests before advancing each service once, with rotating service
-// priority on the borrowed executor. Owner turns return workers while waiting
-// for network, CPU or device readiness. The outer
-// caller waits only for final process release; this function is not a task.
-// POST /tokenize and /detokenize use the selected service's optional tokenizer
-// on independent finite CPU tasks. Transport connection credit bounds utility
+// later inference, checkpoint pinning/suspension, and tokenizer requests wait
+// outside those services. Checkpoint deletion bypasses drain and held
+// inference, using the normal bounded control slot; an unprepared model returns
+// 404 without preparing. Holding overload returns 429. Control and observation
+// remain ungated. Status reports admission separately from the modality phase
+// and held requests. Each turn claims at most request_quota new requests and
+// releases at most that many held requests before advancing each service once,
+// with rotating service priority on the borrowed executor. Owner turns return
+// workers while waiting for network, CPU or device readiness. The outer caller
+// waits only for final process release; this function is not a task. POST
+// /tokenize and /detokenize use the selected service's optional tokenizer on
+// independent finite CPU tasks. Transport connection credit bounds utility
 // jobs; each retains its request claim until task release, even on
 // cancellation. Shutdown/failure stops admission and drains accepted
 // asynchronous callbacks before detaching their wake targets. Managed models

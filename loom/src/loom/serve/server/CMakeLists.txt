@@ -52,6 +52,7 @@ loom_cc_library(
     loom::serve::server::http::response
     loom::serve::server::http::tokenization
     loom::serve::server::http::variants
+    loom::serve::server::realtime::server
     loom::serve::service
     loom::serve::service::inspection
     loom::serve::service::kind
@@ -219,6 +220,7 @@ loom_cc_library(
     loom::serve::runtime::program::compilation
     loom::serve::service
     loom::serve::service::kind
+    loom::serve::service::text::checkpoint_control
     loom::serve::telemetry::latency
     loom::serve::telemetry::record
     loom::serve::telemetry::stream

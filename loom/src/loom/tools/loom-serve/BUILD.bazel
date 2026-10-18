@@ -99,6 +99,8 @@ loom_cc_library(
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/server:router",
+        "//loom/src/loom/serve/server/realtime:configuration",
+        "//loom/src/loom/serve/server/realtime:settings",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:server",
         "//loom/src/loom/tooling/cli:help",
