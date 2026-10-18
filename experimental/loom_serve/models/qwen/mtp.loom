@@ -1,5 +1,7 @@
 config.decl @runner.qwen38.mixed_inputs : %value: index where [range(%value, 0, 1)]
 
+config.decl @runner.qwen38.verification_width : index
+
 // One compact proposal step. Committed target carry is separate from hidden,
 // which is overwritten after its last read and carried only within a proposal.
 config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%value, 1, 512)]
@@ -160,7 +162,7 @@ command.program.def @qwen38_mtp_draft() launch(%embedding_parameters: buffer, %i
   command.return
 }
 
-// Three autoregressive proposals remain in device storage from committed
+// Autoregressive proposals remain in device storage from committed
 // carry through target verification. The transient allocator shares the same
 // residency workspace as the target; no per-round queue transfer or host wait
 // is needed. Only spans requesting generated candidates enter the draft batch.
@@ -187,8 +189,10 @@ command.program.def public @qwen38_mtp_propose() launch(%embedding_parameters: b
   kernel.launch @qwen38_mtp_gather_carry[%spans](%draft, %carry, %hidden) : [index](buffer, buffer, buffer)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %c3 = index.constant 3 : index
-  scf.for %round = [%c0 to %c3 step %c1] unroll {
+  %width_value = config.get @runner.qwen38.verification_width : index
+  %width = index.assume %width_value [range(%width_value, 2, 8)] : index
+  %depth = index.sub %width, %c1 : index
+  scf.for %round = [%c0 to %depth step %c1] unroll {
     command.program.launch @qwen38_mtp_draft(%embedding_parameters, %input_parameters, %layer_parameters, %head_parameters, %output_parameters, %residual, %draft, %rows, %cache, %hidden, %input_tokens, %output_tokens) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @qwen38_mtp_proposal_advance[%round](%round, %token_capacity, %token_capacity, %draft, %origins, %output_tokens, %input_tokens, %target_tokens) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer)
   }
