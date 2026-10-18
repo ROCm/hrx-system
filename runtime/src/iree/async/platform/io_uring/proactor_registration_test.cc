@@ -149,6 +149,33 @@ TEST_P(SlabRegistrationFaultTest, HostBufferFailurePreservesRegistrationState) {
   ASSERT_NO_FATAL_FAILURE(RegisterAtFirstSlot());
 }
 
+TEST_P(SlabRegistrationFaultTest,
+       PreparedBufferFailurePreservesRegistrationState) {
+  if (!iree_any_bit_set(
+          iree_async_proactor_query_capabilities(proactor_),
+          IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+    GTEST_SKIP() << "kernel cannot attach prepared registrations";
+  }
+  ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 4));
+  auto* fault_page = static_cast<uint8_t*>(mapping_) + GetParam() * page_size_;
+  ASSERT_EQ(mprotect(fault_page, page_size_, PROT_NONE), 0);
+  iree_async_buffer_registration_state_t state = {};
+  iree_async_buffer_registration_entry_t* entry = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_async_proactor_prepare_buffer(
+          proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+          IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry));
+  EXPECT_EQ(entry, nullptr);
+  EXPECT_TRUE(iree_async_buffer_registration_state_is_empty(&state));
+  iree_async_buffer_registration_state_deinitialize(&state);
+
+  // A failed preparation publishes nothing and returns the reserved fixed
+  // slot. Restoring the host range permits an ordinary registration at zero.
+  ASSERT_EQ(mprotect(fault_page, page_size_, PROT_READ | PROT_WRITE), 0);
+  ASSERT_NO_FATAL_FAILURE(RegisterAtFirstSlot());
+}
+
 TEST_F(SlabRegistrationTest, HostBufferAccessDoesNotSelectReceiveBuffers) {
   ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 3));
   const iree_async_buffer_access_flags_t accesses[] = {
@@ -229,6 +256,8 @@ enum class FileRegistrationKind {
   kIndexedSlab,
   kHostBuffer,
   kHostBufferCrossThread,
+  kPreparedBuffer,
+  kPreparedBufferCrossThread,
 };
 
 class FileRegistrationTest
@@ -241,7 +270,8 @@ class FileRegistrationTest
       return;
     }
 
-    if (GetParam() == FileRegistrationKind::kHostBufferCrossThread) {
+    if (GetParam() == FileRegistrationKind::kHostBufferCrossThread ||
+        GetParam() == FileRegistrationKind::kPreparedBufferCrossThread) {
       iree_async_proactor_release(proactor_);
       proactor_ = nullptr;
       auto options = iree_async_proactor_options_default();
@@ -263,6 +293,13 @@ class FileRegistrationTest
       ASSERT_NO_FATAL_FAILURE(Run(&nop.base));
     }
 
+    if (IsPrepared() &&
+        !iree_any_bit_set(
+            iree_async_proactor_query_capabilities(proactor_),
+            IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+      GTEST_SKIP() << "kernel cannot attach prepared buffers";
+    }
+
     // Shared backing preserves the registered pages when CPU translations are
     // discarded. Anonymous MADV_DONTNEED would replace the visible contents.
     backing_fd_ = memfd_create("iree_fixed_file_buffer", MFD_CLOEXEC);
@@ -275,13 +312,21 @@ class FileRegistrationTest
     ASSERT_EQ(madvise(mapping_, mapping_length_, MADV_NOHUGEPAGE), 0);
     if (GetParam() != FileRegistrationKind::kIndexedSlab) {
       iree_async_buffer_registration_entry_t* entry = nullptr;
-      iree_status_t status = iree_async_proactor_register_buffer(
-          proactor_, &registration_state_,
-          iree_make_byte_span(mapping_, mapping_length_),
-          IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
-              IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-          &entry);
-      IREE_ASSERT_OK(status);
+      auto register_buffer = IsPrepared() ? iree_async_proactor_prepare_buffer
+                                          : iree_async_proactor_register_buffer;
+      IREE_ASSERT_OK(
+          register_buffer(proactor_, &registration_state_,
+                          iree_make_byte_span(mapping_, mapping_length_),
+                          IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+                              IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+                          &entry));
+      if (IsPrepared()) {
+        Completion completion;
+        iree_async_proactor_attach_buffer(
+            proactor_, entry, {Completion::RecordRegistration, &completion});
+        ASSERT_NO_FATAL_FAILURE(Wait(completion));
+        prepared_entry_ = entry;
+      }
       region_ = entry->region;
       iree_async_region_retain(region_);
       EXPECT_EQ(region_->handles.iouring.buffer_group_id, -1);
@@ -317,6 +362,7 @@ class FileRegistrationTest
     if (pagemap_fd_ >= 0) {
       EXPECT_EQ(close(pagemap_fd_), 0);
     }
+    DetachPreparedBuffer();
     iree_async_buffer_registration_state_deinitialize(&registration_state_);
     ResetSlab();
     if (proactor_thread_) {
@@ -331,6 +377,23 @@ class FileRegistrationTest
     if (backing_fd_ >= 0) {
       EXPECT_EQ(close(backing_fd_), 0);
     }
+  }
+
+  bool IsPrepared() const {
+    return GetParam() == FileRegistrationKind::kPreparedBuffer ||
+           GetParam() == FileRegistrationKind::kPreparedBufferCrossThread;
+  }
+
+  void DetachPreparedBuffer() {
+    if (!prepared_entry_) {
+      return;
+    }
+    Completion completion;
+    iree_async_proactor_detach_buffer(
+        proactor_, prepared_entry_,
+        {Completion::RecordRegistration, &completion});
+    ASSERT_NO_FATAL_FAILURE(Wait(completion));
+    prepared_entry_ = nullptr;
   }
 
   void DiscardCpuTranslations() {
@@ -360,6 +423,10 @@ class FileRegistrationTest
     bool done = false;
     // Terminal result published under |mutex| and consumed by the waiter.
     iree::Status status;
+
+    static void RecordRegistration(void* user_data, iree_status_t status) {
+      Record(user_data, nullptr, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
+    }
 
     static void Record(void* user_data, iree_async_operation_t*,
                        iree_status_t status,
@@ -399,6 +466,8 @@ class FileRegistrationTest
   iree_async_proactor_thread_t* proactor_thread_ = nullptr;
   // Registration owner whose references may retire before accepted I/O.
   iree_async_buffer_registration_state_t registration_state_ = {};
+  // Prepared entry needs explicit detachment before cold pin cleanup.
+  iree_async_buffer_registration_entry_t* prepared_entry_ = nullptr;
   // Shared physical backing retained until all registrations are released.
   int backing_fd_ = -1;
   // Own-process translation metadata, independent of payload access.
@@ -542,8 +611,16 @@ TEST_P(FileRegistrationTest, AcceptedFileWriteRetainsRegistration) {
   write.buffer = iree_async_span_make(region_, 0, page_size_);
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &write.base));
 
-  // Only the accepted operation retains the registration from this point.
-  // The backing still belongs to this fixture, independently of its region.
+  if (IsPrepared()) {
+    // Explicitly prepared pins are removed only after native I/O and detach
+    // completion. Other registrations retain their implicit last-reference
+    // retirement contract below.
+    ASSERT_NO_FATAL_FAILURE(Wait(completion));
+    ASSERT_NO_FATAL_FAILURE(DetachPreparedBuffer());
+  }
+  // Drop the fixture's metadata references. An ordinary registration remains
+  // retained by accepted I/O; prepared pins have already detached above. The
+  // backing belongs to this fixture independently of either lifetime.
   iree_async_buffer_registration_state_deinitialize(&registration_state_);
   iree_async_region_release(region_);
   region_ = nullptr;
@@ -575,7 +652,9 @@ INSTANTIATE_TEST_SUITE_P(
     RegistrationKind, FileRegistrationTest,
     ::testing::Values(FileRegistrationKind::kIndexedSlab,
                       FileRegistrationKind::kHostBuffer,
-                      FileRegistrationKind::kHostBufferCrossThread),
+                      FileRegistrationKind::kHostBufferCrossThread,
+                      FileRegistrationKind::kPreparedBuffer,
+                      FileRegistrationKind::kPreparedBufferCrossThread),
     [](const ::testing::TestParamInfo<FileRegistrationKind>& info) {
       switch (info.param) {
         case FileRegistrationKind::kIndexedSlab:
@@ -584,6 +663,10 @@ INSTANTIATE_TEST_SUITE_P(
           return "HostBuffer";
         case FileRegistrationKind::kHostBufferCrossThread:
           return "HostBufferCrossThread";
+        case FileRegistrationKind::kPreparedBuffer:
+          return "PreparedBuffer";
+        case FileRegistrationKind::kPreparedBufferCrossThread:
+          return "PreparedBufferCrossThread";
       }
       return "";
     });

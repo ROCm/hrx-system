@@ -215,6 +215,220 @@ class IoUringRegistrationOwnerTest : public ::testing::Test {
   iree_async_file_read_operation_t read_operation_;
 };
 
+struct RegistrationCompletion {
+  // Joins the notification producer before completion storage is reclaimed.
+  std::mutex mutex;
+  // Wakes the waiting construction owner after attachment or detachment.
+  std::condition_variable condition;
+  // Published under mutex by the terminal callback.
+  bool done = false;
+  // Owned terminal status, consumed by Wait.
+  iree::Status status;
+
+  static void Record(void* user_data, iree_status_t status) {
+    auto* completion = static_cast<RegistrationCompletion*>(user_data);
+    std::lock_guard<std::mutex> lock(completion->mutex);
+    completion->status = std::move(status);
+    completion->done = true;
+    completion->condition.notify_one();
+  }
+  void Wait() {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&] { return done; });
+    IREE_ASSERT_OK(status.release());
+  }
+  bool IsDone() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return done;
+  }
+};
+
+class PreparedBufferOwnerTest : public IoUringRegistrationOwnerTest {
+ protected:
+  void SetUp() override {
+    IoUringRegistrationOwnerTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    if (!iree_any_bit_set(
+            iree_async_proactor_query_capabilities(proactor_),
+            IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+      GTEST_SKIP() << "kernel cannot attach prepared registrations";
+    }
+    ASSERT_NO_FATAL_FAILURE(WaitForPollOwner());
+  }
+
+  void TearDown() override {
+    ReleaseOwner();
+    if (attached_) {
+      RegistrationCompletion completion;
+      iree_async_proactor_detach_buffer(
+          proactor_, entry_, {RegistrationCompletion::Record, &completion});
+      completion.Wait();
+    }
+    iree_async_buffer_registration_state_deinitialize(&registrations_);
+    IoUringRegistrationOwnerTest::TearDown();
+  }
+
+  void Prepare() {
+    IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
+        proactor_, &registrations_,
+        iree_make_byte_span(backing_, sizeof(backing_)),
+        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+        &entry_));
+  }
+
+  void Attach() {
+    RegistrationCompletion completion;
+    iree_async_proactor_attach_buffer(
+        proactor_, entry_, {RegistrationCompletion::Record, &completion});
+    ASSERT_NO_FATAL_FAILURE(completion.Wait());
+    attached_ = true;
+  }
+
+  void HoldCallback() {
+    std::unique_lock<std::mutex> lock(gate_mutex_);
+    entered_ = true;
+    gate_condition_.notify_one();
+    gate_condition_.wait(lock, [&] { return released_; });
+    exited_ = true;
+    gate_condition_.notify_one();
+  }
+
+  void WaitForHeldOwner() {
+    std::unique_lock<std::mutex> lock(gate_mutex_);
+    gate_condition_.wait(lock, [&] { return entered_; });
+  }
+
+  void ReleaseOwner() {
+    std::unique_lock<std::mutex> lock(gate_mutex_);
+    released_ = true;
+    gate_condition_.notify_one();
+    if (entered_) {
+      gate_condition_.wait(lock, [&] { return exited_; });
+    }
+  }
+
+  void HoldOwner() {
+    {
+      std::lock_guard<std::mutex> lock(gate_mutex_);
+      entered_ = released_ = exited_ = false;
+    }
+    nop_ = {};
+    nop_.base.type = IREE_ASYNC_OPERATION_TYPE_NOP;
+    nop_.base.user_data = this;
+    nop_.base.completion_fn =
+        +[](void* user_data, iree_async_operation_t*, iree_status_t status,
+            iree_async_completion_flags_t) {
+          IREE_EXPECT_OK(status);
+          static_cast<PreparedBufferOwnerTest*>(user_data)->HoldCallback();
+        };
+    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &nop_.base));
+    WaitForHeldOwner();
+  }
+
+  static void DetachAfterFileWrite(void* user_data, iree_async_operation_t*,
+                                   iree_status_t status,
+                                   iree_async_completion_flags_t) {
+    auto* fixture = static_cast<PreparedBufferOwnerTest*>(user_data);
+    IREE_EXPECT_OK(status);
+    iree_async_proactor_detach_buffer(
+        fixture->proactor_, fixture->entry_,
+        {RegistrationCompletion::Record, &fixture->detachment_});
+    fixture->HoldCallback();
+  }
+
+  // Detachment receipt retained through the held file completion callback.
+  RegistrationCompletion detachment_;
+  // Physical memory stays owned independently of registration metadata.
+  uint8_t backing_[4096] = {};
+  // Cold construction owner mutates this list before/after native transitions.
+  iree_async_buffer_registration_state_t registrations_ = {};
+  // Prepared entry, dominated by registrations_ until explicit cleanup.
+  iree_async_buffer_registration_entry_t* entry_ = nullptr;
+  // True after successful attach and before successful detach.
+  bool attached_ = false;
+  // Serializes the test's explicit owner-progress boundary.
+  std::mutex gate_mutex_;
+  // Publishes entry, release permission, and callback exit without deadlines.
+  std::condition_variable gate_condition_;
+  // Owner has entered the held callback.
+  bool entered_ = false;
+  // Caller permits the callback to return.
+  bool released_ = false;
+  // Owner made its final access to gate state under the mutex.
+  bool exited_ = false;
+};
+
+TEST_F(PreparedBufferOwnerTest, PreparationAndTransitionsReturnWhileOwnerHeld) {
+  ASSERT_NO_FATAL_FAILURE(HoldOwner());
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  RegistrationCompletion attached;
+  iree_async_proactor_attach_buffer(
+      proactor_, entry_, {RegistrationCompletion::Record, &attached});
+  EXPECT_FALSE(attached.IsDone());
+
+  // More cold preparation and cleanup proceed without requesting the held
+  // owner. This uses another actual pin range, not a mocked registration.
+  uint8_t other_backing[4096] = {};
+  iree_async_buffer_registration_state_t other_registrations = {};
+  iree_async_buffer_registration_entry_t* other_entry = nullptr;
+  IREE_EXPECT_OK(iree_async_proactor_prepare_buffer(
+      proactor_, &other_registrations,
+      iree_make_byte_span(other_backing, sizeof(other_backing)),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &other_entry));
+  iree_async_buffer_registration_state_deinitialize(&other_registrations);
+  ReleaseOwner();
+  ASSERT_NO_FATAL_FAILURE(attached.Wait());
+  attached_ = true;
+
+  ASSERT_NO_FATAL_FAILURE(HoldOwner());
+  RegistrationCompletion detached;
+  iree_async_proactor_detach_buffer(
+      proactor_, entry_, {RegistrationCompletion::Record, &detached});
+  EXPECT_FALSE(detached.IsDone());
+  ReleaseOwner();
+  ASSERT_NO_FATAL_FAILURE(detached.Wait());
+  attached_ = false;
+}
+
+TEST_F(PreparedBufferOwnerTest, ColdCleanupPrecedesFinalIoMetadataRelease) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  ASSERT_NO_FATAL_FAILURE(Attach());
+  memset(backing_, 0x73, sizeof(backing_));
+  raw_file_fd_ = memfd_create("prepared-registration-file", MFD_CLOEXEC);
+  ASSERT_GE(raw_file_fd_, 0);
+  IREE_ASSERT_OK(iree_async_file_import(
+      proactor_, iree_async_primitive_from_fd(raw_file_fd_),
+      IREE_ASYNC_FILE_FLAG_NONE, &file_));
+  raw_file_fd_ = -1;
+  write_operation_ = {};
+  write_operation_.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_WRITE;
+  write_operation_.base.user_data = this;
+  write_operation_.base.completion_fn = DetachAfterFileWrite;
+  write_operation_.file = file_;
+  write_operation_.buffer =
+      iree_async_span_make(entry_->region, 0, sizeof(backing_));
+  IREE_ASSERT_OK(
+      iree_async_proactor_submit_one(proactor_, &write_operation_.base));
+  WaitForHeldOwner();
+  ASSERT_NO_FATAL_FAILURE(detachment_.Wait());
+  attached_ = false;
+
+  // The file callback is still held and its region reference is live. Pin
+  // cleanup runs here without waiting for that callback or freeing metadata
+  // still owned by operation_completion.
+  iree_async_buffer_registration_state_deinitialize(&registrations_);
+  entry_ = nullptr;
+  std::vector<uint8_t> actual(sizeof(backing_));
+  EXPECT_EQ(pread(file_->primitive.value.fd, actual.data(), actual.size(), 0),
+            actual.size());
+  EXPECT_EQ(actual, std::vector<uint8_t>(sizeof(backing_), 0x73));
+  ReleaseOwner();
+  ASSERT_NO_FATAL_FAILURE(WaitForPollOwner());
+}
+
 TEST_F(IoUringRegistrationOwnerTest, SlabLifecycleFromCallerTask) {
   ASSERT_NO_FATAL_FAILURE(WaitForPollOwner());
 

@@ -14,6 +14,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/uio.h>
@@ -225,6 +226,269 @@ static void iree_async_io_uring_dmabuf_registration_cleanup(
   (void)proactor_ptr;
   // Release our reference. The destroy callback handles munmap and free.
   iree_async_region_release(&registration->region);
+}
+
+//===----------------------------------------------------------------------===//
+// Prepared host-buffer registration
+//===----------------------------------------------------------------------===//
+
+typedef enum iree_async_io_uring_prepared_buffer_phase_e {
+  IREE_ASYNC_IO_URING_PREPARED_BUFFER_DETACHED,
+  IREE_ASYNC_IO_URING_PREPARED_BUFFER_ATTACHING,
+  IREE_ASYNC_IO_URING_PREPARED_BUFFER_ATTACHED,
+  IREE_ASYNC_IO_URING_PREPARED_BUFFER_DETACHING,
+  IREE_ASYNC_IO_URING_PREPARED_BUFFER_FAILED,
+} iree_async_io_uring_prepared_buffer_phase_t;
+
+typedef struct iree_async_io_uring_prepared_buffer_t {
+  // Entry owns pins until cold cleanup, then releases its region reference.
+  iree_async_buffer_registration_entry_t entry;
+  // I/O may retain this metadata through the end of its completion callback.
+  iree_async_region_t region;
+  // Slots reserved until cleanup, including while temporarily detached.
+  iree_async_io_uring_fixed_buffers_t fixed_buffers;
+  // Independent native pin owner; no I/O or concurrent pinning uses this ring.
+  int source_fd;
+  // Caller-serialized transition state, published before terminal delivery.
+  iree_async_io_uring_prepared_buffer_phase_t phase;
+  // Owner-dispatch storage secured before any attachment is published.
+  iree_io_uring_registration_request_t request;
+  // Stable argument storage through native transition completion.
+  union {
+    // Prepared source copied into the destination's reserved slots.
+    iree_io_uring_clone_buffers_t clone;
+    // Empty vectors detach slots while the source retains their pins.
+    iree_io_uring_rsrc_update2_t clear;
+  } parameters;
+  // One terminal callback per transition; may reclaim the entire record.
+  iree_async_buffer_registration_callback_t callback;
+  // Initially pin descriptors; zeroed after preparation for allocation-free
+  // detachment. Has fixed_buffers.count elements.
+  struct iovec buffers[];
+} iree_async_io_uring_prepared_buffer_t;
+
+static void iree_async_io_uring_prepared_buffer_destroy(
+    iree_async_region_t* region) {
+  // Pin release already occurred in entry cleanup on the memory owner. The
+  // last I/O reference may drop on the polling task after its user callback.
+  iree_async_io_uring_prepared_buffer_t* buffer =
+      (void*)((uint8_t*)region -
+              offsetof(iree_async_io_uring_prepared_buffer_t, region));
+  iree_allocator_free(region->proactor->allocator, buffer);
+}
+
+static void iree_async_io_uring_prepared_buffer_cleanup(void* entry_ptr,
+                                                        void* proactor_ptr) {
+  iree_async_io_uring_prepared_buffer_t* buffer = entry_ptr;
+  iree_async_proactor_io_uring_t* proactor = proactor_ptr;
+  IREE_ASSERT(buffer->phase == IREE_ASYNC_IO_URING_PREPARED_BUFFER_DETACHED,
+              "prepared pins require completed detachment before cleanup");
+  int result = iree_io_uring_registration_release_buffers(buffer->source_fd);
+  if (result < 0) {
+    // The pin-only descriptor is consumed even when explicit unregistration
+    // fails. No source-ring I/O can still reach caller memory.
+    iree_status_t status =
+        iree_make_status(iree_status_code_from_errno(-result),
+                         "prepared buffer pin release failed (%d)", -result);
+    iree_status_fprint(stderr, status);
+    iree_status_free(status);
+  }
+  iree_io_uring_sparse_table_release(proactor->buffer_table,
+                                     buffer->fixed_buffers.base,
+                                     buffer->fixed_buffers.count);
+  iree_async_region_release(&buffer->region);
+}
+
+iree_status_t iree_async_proactor_io_uring_prepare_buffer(
+    iree_async_proactor_t* base_proactor,
+    iree_async_buffer_registration_state_t* state, iree_byte_span_t contents,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry) {
+  iree_async_proactor_io_uring_t* proactor =
+      iree_async_proactor_io_uring_cast(base_proactor);
+  if (!iree_any_bit_set(
+          proactor->capabilities,
+          IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "kernel cannot attach prepared buffer pins");
+  }
+  const iree_host_size_t buffer_size =
+      iree_min(contents.data_length, (iree_host_size_t)(UINT32_C(1) << 30));
+  const iree_host_size_t buffer_count =
+      (contents.data_length - 1) / buffer_size + 1;
+  if (buffer_count >
+      iree_io_uring_sparse_table_capacity(proactor->buffer_table)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "prepared buffer exceeds fixed table capacity");
+  }
+  int32_t base = iree_io_uring_sparse_table_acquire(proactor->buffer_table,
+                                                    (uint16_t)buffer_count);
+  if (base < 0) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "fixed buffer table has no contiguous slots");
+  }
+  iree_async_io_uring_prepared_buffer_t* buffer = NULL;
+  iree_status_t status = iree_allocator_malloc(
+      base_proactor->allocator,
+      sizeof(*buffer) + buffer_count * sizeof(buffer->buffers[0]),
+      (void**)&buffer);
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < buffer_count; ++i) {
+      buffer->buffers[i] = (struct iovec){
+          .iov_base = contents.data + i * buffer_size,
+          .iov_len =
+              iree_min(buffer_size, contents.data_length - i * buffer_size),
+      };
+    }
+    int result = iree_io_uring_registration_prepare_buffers(
+        buffer->buffers, (uint32_t)buffer_count, &buffer->source_fd);
+    if (result < 0) {
+      status = iree_make_status(iree_status_code_from_errno(-result),
+                                "buffer pin preparation failed (%d)", -result);
+    }
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_io_uring_sparse_table_release(proactor->buffer_table, (uint16_t)base,
+                                       (uint16_t)buffer_count);
+    iree_allocator_free(base_proactor->allocator, buffer);
+    return status;
+  }
+
+  memset(buffer->buffers, 0, buffer_count * sizeof(buffer->buffers[0]));
+  buffer->fixed_buffers = (iree_async_io_uring_fixed_buffers_t){
+      .base = (uint16_t)base,
+      .count = (uint16_t)buffer_count,
+  };
+  buffer->phase = IREE_ASYNC_IO_URING_PREPARED_BUFFER_DETACHED;
+  iree_async_region_t* region = &buffer->region;
+  iree_atomic_ref_count_init(&region->ref_count);
+  region->proactor = base_proactor;
+  region->destroy_fn = iree_async_io_uring_prepared_buffer_destroy;
+  region->type = IREE_ASYNC_REGION_TYPE_IOURING;
+  region->access_flags = access_flags;
+  region->base_ptr = contents.data;
+  region->length = contents.data_length;
+  region->buffer_size = buffer_size;
+  region->buffer_count = (uint32_t)buffer_count;
+  region->handles.iouring.buffer_group_id = -1;
+  region->handles.iouring.base_buffer_index = base;
+  buffer->entry = (iree_async_buffer_registration_entry_t){
+      .proactor = base_proactor,
+      .cleanup_fn = iree_async_io_uring_prepared_buffer_cleanup,
+      .region = region,
+  };
+  iree_async_buffer_registration_state_add(state, &buffer->entry);
+  *out_entry = &buffer->entry;
+  return iree_ok_status();
+}
+
+static void iree_async_io_uring_prepared_buffer_complete(void* user_data,
+                                                         int result) {
+  iree_async_io_uring_prepared_buffer_t* buffer = user_data;
+  const bool attaching =
+      buffer->phase == IREE_ASYNC_IO_URING_PREPARED_BUFFER_ATTACHING;
+  iree_status_t status = iree_ok_status();
+  if (result < 0) {
+    status = iree_make_status(iree_status_code_from_errno(-result),
+                              "prepared buffer %s failed (%d)",
+                              attaching ? "attachment" : "detachment", -result);
+  } else if (!attaching) {
+    iree_io_uring_rsrc_update2_t* clear = &buffer->parameters.clear;
+    if (result > 0 && (uint32_t)result < clear->nr) {
+      clear->offset += (uint32_t)result;
+      clear->nr -= (uint32_t)result;
+      iree_async_proactor_io_uring_t* proactor =
+          iree_async_proactor_io_uring_cast(buffer->entry.proactor);
+      iree_io_uring_registration_submit(&proactor->ring.registration,
+                                        &buffer->request);
+      return;
+    }
+    if ((uint32_t)result != clear->nr) {
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "prepared buffer detachment cleared %d of %u "
+                                "slots",
+                                result, clear->nr);
+    }
+  }
+  buffer->phase = attaching
+                      ? (iree_status_is_ok(status)
+                             ? IREE_ASYNC_IO_URING_PREPARED_BUFFER_ATTACHED
+                             : IREE_ASYNC_IO_URING_PREPARED_BUFFER_DETACHED)
+                      : (iree_status_is_ok(status)
+                             ? IREE_ASYNC_IO_URING_PREPARED_BUFFER_DETACHED
+                             : IREE_ASYNC_IO_URING_PREPARED_BUFFER_FAILED);
+  iree_async_buffer_registration_callback_t callback = buffer->callback;
+  callback.fn(callback.user_data, status);
+}
+
+static void iree_async_io_uring_prepared_buffer_transition(
+    iree_async_proactor_t* base_proactor,
+    iree_async_buffer_registration_entry_t* entry, bool attaching,
+    iree_async_buffer_registration_callback_t callback) {
+  if (entry->region->destroy_fn !=
+      iree_async_io_uring_prepared_buffer_destroy) {
+    callback.fn(callback.user_data,
+                iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                 "buffer was not prepared for attachment"));
+    return;
+  }
+  iree_async_io_uring_prepared_buffer_t* buffer = (void*)entry;
+  const iree_async_io_uring_prepared_buffer_phase_t expected =
+      attaching ? IREE_ASYNC_IO_URING_PREPARED_BUFFER_DETACHED
+                : IREE_ASYNC_IO_URING_PREPARED_BUFFER_ATTACHED;
+  if (buffer->phase != expected) {
+    callback.fn(callback.user_data,
+                iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                 "prepared buffer has a pending, failed, or "
+                                 "incompatible attachment state"));
+    return;
+  }
+  buffer->callback = callback;
+  buffer->phase = attaching ? IREE_ASYNC_IO_URING_PREPARED_BUFFER_ATTACHING
+                            : IREE_ASYNC_IO_URING_PREPARED_BUFFER_DETACHING;
+  buffer->request = (iree_io_uring_registration_request_t){
+      .completion = {iree_async_io_uring_prepared_buffer_complete, buffer},
+  };
+  if (attaching) {
+    buffer->parameters.clone = (iree_io_uring_clone_buffers_t){
+        .src_fd = (uint32_t)buffer->source_fd,
+        .flags = IREE_IORING_REGISTER_DST_REPLACE,
+        .dst_off = buffer->fixed_buffers.base,
+        .nr = buffer->fixed_buffers.count,
+    };
+    buffer->request.opcode = IREE_IORING_REGISTER_CLONE_BUFFERS;
+    buffer->request.arg = &buffer->parameters.clone;
+    buffer->request.argument_count = 1;
+  } else {
+    buffer->parameters.clear = (iree_io_uring_rsrc_update2_t){
+        .offset = buffer->fixed_buffers.base,
+        .data = (uint64_t)(uintptr_t)buffer->buffers,
+        .nr = buffer->fixed_buffers.count,
+    };
+    buffer->request.opcode = IREE_IORING_REGISTER_BUFFERS_UPDATE;
+    buffer->request.arg = &buffer->parameters.clear;
+    buffer->request.argument_count = sizeof(buffer->parameters.clear);
+  }
+  iree_async_proactor_io_uring_t* proactor =
+      iree_async_proactor_io_uring_cast(base_proactor);
+  iree_io_uring_registration_submit(&proactor->ring.registration,
+                                    &buffer->request);
+}
+
+void iree_async_proactor_io_uring_attach_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback) {
+  iree_async_io_uring_prepared_buffer_transition(proactor, entry, true,
+                                                 callback);
+}
+
+void iree_async_proactor_io_uring_detach_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback) {
+  iree_async_io_uring_prepared_buffer_transition(proactor, entry, false,
+                                                 callback);
 }
 
 //===----------------------------------------------------------------------===//

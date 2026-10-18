@@ -119,6 +119,55 @@ TEST_P(BufferRegistrationTest, RegisterHostBuffer) {
   iree_async_buffer_registration_state_deinitialize(&state);
 }
 
+TEST_P(BufferRegistrationTest, PreparedHostBufferLifecycle) {
+  if (!iree_any_bit_set(
+          iree_async_proactor_query_capabilities(proactor_),
+          IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+    GTEST_SKIP() << "Backend cannot attach prepared registrations";
+  }
+  std::vector<uint8_t> buffer(4096, 0x53);
+  iree_async_buffer_registration_state_t state = {};
+  iree_async_buffer_registration_entry_t* entry = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
+      proactor_, &state, iree_make_byte_span(buffer.data(), buffer.size()),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ | IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+      &entry));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->region->base_ptr, buffer.data());
+  EXPECT_EQ(entry->region->length, buffer.size());
+  iree_async_buffer_registration_callback_t callback = {
+      +[](void* user_data, iree_status_t status) {
+        CompletionTracker::Callback(user_data, nullptr, status,
+                                    IREE_ASYNC_COMPLETION_FLAG_NONE);
+      },
+      nullptr};
+  for (int iteration = 0; iteration < 2; ++iteration) {
+    for (bool attaching : {true, false}) {
+      CompletionTracker completion;
+      callback.user_data = &completion;
+      if (attaching) {
+        iree_async_proactor_attach_buffer(proactor_, entry, callback);
+      } else {
+        iree_async_proactor_detach_buffer(proactor_, entry, callback);
+      }
+      while (!completion.call_count) {
+        IREE_ASSERT_OK(iree_async_proactor_poll(
+            proactor_, iree_infinite_timeout(), nullptr));
+      }
+      EXPECT_EQ(completion.call_count, 1);
+      IREE_ASSERT_OK(completion.ConsumeStatus());
+    }
+  }
+  // Completion bookkeeping can retain metadata after detached pins are
+  // released on the caller that owns cold memory work.
+  AsyncRegionPtr region(entry->region);
+  iree_async_region_retain(region.get());
+  iree_async_buffer_registration_state_deinitialize(&state);
+  EXPECT_TRUE(iree_async_buffer_registration_state_is_empty(&state));
+  EXPECT_EQ(region->base_ptr, buffer.data());
+  EXPECT_EQ(region->length, buffer.size());
+}
+
 // Multiple buffer registrations in the same state.
 TEST_P(BufferRegistrationTest, RegisterMultipleBuffers) {
   std::vector<uint8_t> buffer1(1024, 0x11);

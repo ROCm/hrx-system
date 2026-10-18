@@ -39,12 +39,21 @@ typedef struct iree_async_region_t iree_async_region_t;
 
 // Cleanup function for registration entries.
 // Called when the owning buffer is destroyed or explicitly unregistered.
-// MUST NOT FAIL. If cleanup would leak or corrupt, it must abort.
+// Has no failure return. Kernel ownership must be settled before the referenced
+// memory is freed; metadata cleanup alone does not authorize backing release.
 // Responsible for releasing the region reference and freeing entry memory.
 typedef void (*iree_async_registration_cleanup_fn_t)(void* entry,
                                                      void* proactor);
 
-// Buffer recycle callback for provided buffer rings.
+// Terminal completion of one prepared registration attachment or detachment.
+// The callback owns |status| and may release or reuse its request state.
+typedef struct iree_async_buffer_registration_callback_t {
+  // Required callback, invoked without registration locks held.
+  void (*fn)(void* user_data, iree_status_t status);
+  // Borrowed state, valid through terminal delivery.
+  void* user_data;
+} iree_async_buffer_registration_callback_t;
+
 // A single registration entry linking a buffer to one proactor.
 // Allocated by the proactor during registration. Linked into the buffer's
 // registration state list. Entry lifetime is tied to the buffer — when the
@@ -73,6 +82,7 @@ typedef struct iree_async_buffer_registration_entry_t {
 //   - Read-only access during steady-state operations.
 //   - Cleanup only happens during buffer destroy (single owner).
 typedef struct iree_async_buffer_registration_state_t {
+  // Owned entries; mutation and cleanup are serialized by the caller.
   iree_async_buffer_registration_entry_t* head;
 } iree_async_buffer_registration_state_t;
 
@@ -88,6 +98,8 @@ static inline void iree_async_buffer_registration_state_initialize(
 
 // Deinitializes registration state. Call from buffer destroy, before freeing
 // the buffer's memory. Walks the list and invokes each entry's cleanup_fn.
+// Prepared entries must have completed detachment. Their cleanup performs
+// cold pin release on this caller before dropping the entry's region reference.
 static inline void iree_async_buffer_registration_state_deinitialize(
     iree_async_buffer_registration_state_t* state) {
   iree_async_buffer_registration_entry_t* entry = state->head;

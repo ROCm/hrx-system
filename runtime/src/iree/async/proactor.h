@@ -708,6 +708,21 @@ typedef struct iree_async_proactor_vtable_t {
                            iree_async_relay_t* relay,
                            iree_async_relay_unregistered_callback_t callback);
 
+  // Prepared buffer ownership separates cold pins from owner-task attachment.
+  iree_status_t (*prepare_buffer)(
+      iree_async_proactor_t* proactor,
+      iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
+      iree_async_buffer_access_flags_t access_flags,
+      iree_async_buffer_registration_entry_t** out_entry);
+  // Attaches prepared pins without waiting for another owner.
+  void (*attach_buffer)(iree_async_proactor_t* proactor,
+                        iree_async_buffer_registration_entry_t* entry,
+                        iree_async_buffer_registration_callback_t callback);
+  // Detaches native handles while retaining pins for cold caller cleanup.
+  void (*detach_buffer)(iree_async_proactor_t* proactor,
+                        iree_async_buffer_registration_entry_t* entry,
+                        iree_async_buffer_registration_callback_t callback);
+
   iree_status_t (*register_buffer)(
       iree_async_proactor_t* proactor,
       iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
@@ -1126,6 +1141,61 @@ void iree_async_cancel_request_complete(iree_async_cancel_request_t* request);
 //   operations can read them concurrently from any thread.
 //
 // See iree/async/types.h for the entry and state type definitions.
+
+// Prepares a nonempty host range for asynchronous registration attachment.
+// Performs cold page pinning and reserves attachment/release storage on the
+// caller, without waiting for the polling owner. Failure publishes no entry.
+// Success links an owned entry into |state|; its region must not be used for
+// I/O until attach_buffer completes successfully. The proactor and borrowed
+// host range must outlive the entry, all accepted I/O, and
+// attachment/detachment.
+//
+// io_uring requires CONCURRENT_BUFFER_REGISTRATION and retains an independent
+// native pin owner. Metadata-only backends retain the same entry/region
+// lifetime. Registration retains pins across reuse; buffered files still use
+// the OS page cache. Slot geometry has the same meaning as register_buffer
+// below.
+IREE_API_EXPORT iree_status_t iree_async_proactor_prepare_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry);
+
+// Attaches a prepared entry without pinning or waiting for polling progress.
+// Exactly one required callback receives the result, possibly inline. The
+// caller serializes transitions on each entry and retains it through callback
+// delivery. Failure leaves the entry detached and eligible for cold cleanup.
+// A successful attachment publishes its immutable region handles for I/O.
+IREE_API_EXPORT void iree_async_proactor_attach_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback);
+
+// Detaches a prepared entry after its accepted I/O has completed. No additional
+// I/O may use the region until a later successful attachment. Exactly one
+// required callback receives the result, possibly inline. This does not wait
+// for the poll owner, allocate release storage, or release the prepared pins.
+//
+// Success permits cold unregister_buffer/state_deinitialize on the caller's
+// chosen memory owner. That cleanup releases pins before dropping the entry's
+// region reference; outstanding completion bookkeeping may still retain the
+// region metadata. Failure does not authorize cleanup or backing release.
+IREE_API_EXPORT void iree_async_proactor_detach_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback);
+
+// Shared prepared-registration implementation for metadata-only backends.
+// Native backends provide their own cold preparation and owner transitions.
+iree_status_t iree_async_proactor_prepare_buffer_emulated(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry);
+void iree_async_proactor_transition_buffer_emulated(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback);
 
 // Registers a nonempty host range for repeated I/O with the requested access.
 //

@@ -157,6 +157,20 @@ int iree_io_uring_registration_execute(
     iree_io_uring_registration_t* registration, uint32_t opcode, void* arg,
     uint32_t argument_count);
 
+// Pins buffers into an independent native ring on the caller. The returned
+// descriptor has no mapped queues or SINGLE_ISSUER owner and can be borrowed
+// by CLONE_BUFFERS requests until release_buffers. Returns zero or -errno;
+// failure leaves |out_source_fd| at -1 and owns no pins.
+int iree_io_uring_registration_prepare_buffers(const struct iovec* buffers,
+                                               uint32_t count,
+                                               int* out_source_fd);
+
+// Releases an independent pin owner's table and descriptor on the caller.
+// Every borrowing clone must have completed. Other rings retain their own pin
+// references; this call releases only this descriptor's ownership. Returns zero
+// or -errno. The descriptor is consumed even if unregistration fails.
+int iree_io_uring_registration_release_buffers(int source_fd);
+
 // Pins |buffers| on the caller and installs them at |offset| in the existing
 // fixed-buffer table. The caller owns these empty destination slots and keeps
 // every backing range alive until unregistration and accepted I/O complete.

@@ -211,6 +211,42 @@ int iree_io_uring_registration_execute(
   return result;
 }
 
+int iree_io_uring_registration_prepare_buffers(const struct iovec* buffers,
+                                               uint32_t count,
+                                               int* out_source_fd) {
+  *out_source_fd = -1;
+  iree_io_uring_params_t parameters = {0};
+  long source_fd = 0;
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_setup, "io_uring_setup");
+  do {
+    source_fd = syscall(IREE_IO_URING_SYSCALL_SETUP, 1, &parameters);
+  } while (source_fd < 0 && errno == EINTR);
+  const int setup_error = source_fd < 0 ? errno : 0;
+  IREE_TRACE_ZONE_END(z_setup);
+  if (source_fd < 0) {
+    return -setup_error;
+  }
+  int result = iree_io_uring_registration_syscall(
+      (int)source_fd, IREE_IORING_REGISTER_BUFFERS, (void*)buffers, count);
+  if (result < 0) {
+    close((int)source_fd);
+  } else {
+    *out_source_fd = (int)source_fd;
+  }
+  return result;
+}
+
+int iree_io_uring_registration_release_buffers(int source_fd) {
+  const int result = iree_io_uring_registration_syscall(
+      source_fd, IREE_IORING_UNREGISTER_BUFFERS, NULL, 0);
+  // A pin owner never issues I/O. Closing also drops its remaining references
+  // if syscall policy prevented explicit unregistration.
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_close, "io_uring_close");
+  const int close_result = close(source_fd) < 0 ? -errno : 0;
+  IREE_TRACE_ZONE_END(z_close);
+  return result < 0 ? result : close_result;
+}
+
 int iree_io_uring_registration_update_buffers(
     iree_io_uring_registration_t* registration, uint32_t offset,
     const struct iovec* buffers, uint32_t count) {
@@ -249,36 +285,26 @@ int iree_io_uring_registration_update_buffers(
   // No SQ/CQ mapping or submissions are needed: this descriptor only owns
   // pins until the destination takes its references. It must not use
   // SINGLE_ISSUER, as the destination owner imports it from a different task.
-  iree_io_uring_params_t parameters = {0};
-  long source_fd = 0;
-  IREE_TRACE_ZONE_BEGIN_NAMED(z_setup, "io_uring_setup");
-  do {
-    source_fd = syscall(IREE_IO_URING_SYSCALL_SETUP, 1, &parameters);
-  } while (source_fd < 0 && errno == EINTR);
-  const int setup_error = source_fd < 0 ? errno : 0;
-  IREE_TRACE_ZONE_END(z_setup);
-  if (source_fd < 0) {
-    return -setup_error;
+  int source_fd = -1;
+  int result =
+      iree_io_uring_registration_prepare_buffers(buffers, count, &source_fd);
+  if (result < 0) {
+    return result;
   }
-
-  int result = iree_io_uring_registration_syscall(
-      (int)source_fd, IREE_IORING_REGISTER_BUFFERS, (void*)buffers, count);
+  iree_io_uring_clone_buffers_t clone = {
+      .src_fd = (uint32_t)source_fd,
+      .flags = IREE_IORING_REGISTER_DST_REPLACE,
+      .dst_off = offset,
+      .nr = count,
+  };
+  result = iree_io_uring_registration_execute(
+      registration, IREE_IORING_REGISTER_CLONE_BUFFERS, &clone, 1);
   if (result >= 0) {
-    iree_io_uring_clone_buffers_t clone = {
-        .src_fd = (uint32_t)source_fd,
-        .flags = IREE_IORING_REGISTER_DST_REPLACE,
-        .dst_off = offset,
-        .nr = count,
-    };
-    result = iree_io_uring_registration_execute(
-        registration, IREE_IORING_REGISTER_CLONE_BUFFERS, &clone, 1);
-    if (result >= 0) {
-      result = (int)count;
-    } else if (result == -EINVAL) {
-      // The ranges and flags are internally established. Older kernels reject
-      // the opcode or lack range replacement; neither permits owner-side pins.
-      result = -EOPNOTSUPP;
-    }
+    result = (int)count;
+  } else if (result == -EINVAL) {
+    // The ranges and flags are internally established. Older kernels reject
+    // the opcode or lack range replacement; neither permits owner-side pins.
+    result = -EOPNOTSUPP;
   }
   IREE_TRACE_ZONE_BEGIN_NAMED(z_close, "io_uring_close");
   close((int)source_fd);

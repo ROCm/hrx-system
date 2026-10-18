@@ -7,6 +7,80 @@
 #include "iree/async/proactor.h"
 
 //===----------------------------------------------------------------------===//
+// Prepared buffer registration
+//===----------------------------------------------------------------------===//
+
+IREE_API_EXPORT iree_status_t iree_async_proactor_prepare_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry) {
+  *out_entry = NULL;
+  if (!buffer.data || !buffer.data_length ||
+      !iree_any_bit_set(access_flags,
+                        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+                            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "buffer preparation requires a nonempty range "
+                            "and READ or WRITE access");
+  }
+  if (buffer.data_length > UINTPTR_MAX - (uintptr_t)buffer.data) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "buffer preparation range overflows address space");
+  }
+  if (!proactor->vtable->prepare_buffer) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "proactor does not support prepared buffers");
+  }
+  return proactor->vtable->prepare_buffer(proactor, state, buffer, access_flags,
+                                          out_entry);
+}
+
+IREE_API_EXPORT void iree_async_proactor_attach_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback) {
+  if (entry->proactor != proactor || !proactor->vtable->attach_buffer) {
+    callback.fn(callback.user_data,
+                iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                 "buffer has no attachment on this proactor"));
+    return;
+  }
+  proactor->vtable->attach_buffer(proactor, entry, callback);
+}
+
+IREE_API_EXPORT void iree_async_proactor_detach_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback) {
+  if (entry->proactor != proactor || !proactor->vtable->detach_buffer) {
+    callback.fn(callback.user_data,
+                iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                 "buffer has no attachment on this proactor"));
+    return;
+  }
+  proactor->vtable->detach_buffer(proactor, entry, callback);
+}
+
+iree_status_t iree_async_proactor_prepare_buffer_emulated(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry) {
+  return proactor->vtable->register_buffer(proactor, state, buffer,
+                                           access_flags, out_entry);
+}
+
+void iree_async_proactor_transition_buffer_emulated(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback) {
+  (void)proactor;
+  (void)entry;
+  callback.fn(callback.user_data, iree_ok_status());
+}
+
+//===----------------------------------------------------------------------===//
 // iree_async_proactor_initialize
 //===----------------------------------------------------------------------===//
 

@@ -313,6 +313,19 @@ iree_status_t iree_async_proactor_io_uring_probe_buffer_clone(
     iree_io_uring_ring_t* ring, bool* out_supported);
 
 // Buffer registration vtable implementations (in proactor_registration.c).
+iree_status_t iree_async_proactor_io_uring_prepare_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry);
+void iree_async_proactor_io_uring_attach_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback);
+void iree_async_proactor_io_uring_detach_buffer(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_entry_t* entry,
+    iree_async_buffer_registration_callback_t callback);
 iree_status_t iree_async_proactor_io_uring_register_buffer(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
