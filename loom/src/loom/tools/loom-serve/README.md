@@ -112,3 +112,32 @@ command test also lives here, with its x86/task-HAL execution registered under
 the CPU tooling provider. It exercises runtime source loading, text/bytecode
 mixing, multiple devices, first output and dynamic model retirement through the
 same executable.
+
+The [native activity caller](activity_test.cc) drives activity detection and
+transcription through the registry without an HTTP connection. One application
+owns the worker pool and device group across the suite. The CPU provider runs
+it with one and eight workers; the AMDGPU provider places activity on CPU and
+transcription on GPU:
+
+```sh
+iree-bazel-test --config=asan \
+  //loom/src/loom/tooling/target/cpu/serve:activity_test \
+  //loom/src/loom/tooling/target/cpu/serve:activity_parallel_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:activity_test
+```
+
+The fixture checks independent histories as requests join and finish, a held
+reader while peers complete, cancellation after task acceptance, and output
+retained across model replacement. A second path feeds activity-selected audio
+to the recognizer through a bounded pre-roll ring, checks successive utterances
+and EOF, and verifies that silence creates no recognition request. Physical
+entry points and their runtime requirements belong to the tooling providers.
+
+The same executable accepts learned model documents with `--fixture=false`,
+`--model`, and optional `--transcription_model`. `--input` supplies mono F32LE
+audio at `--sample_rate`; `--reference` supplies independent per-hop F32LE
+activity probabilities. Model documents retain their explicit device indices.
+Composition qualification supplies `--pre_roll_frames`, `--hangover_frames`,
+`--retained_frames`, `--expected_begin`, `--expected_end`, and `--expected_text`.
+These are test workload inputs. They do not establish conversation defaults or
+derive a source's maximum lookahead from its input credit.
