@@ -95,6 +95,25 @@ output modality, or token budget at an idle response boundary. Selecting
 The [Realtime profile](../http-profiles.md#realtime-conversations) defines the
 supported event and settings surface.
 
+To customize one reply, put its overrides in `response.create`:
+
+```json
+{
+  "type": "response.create",
+  "response": {
+    "audio": {"output": {"voice": "alba"}},
+    "max_output_tokens": 128,
+    "metadata": {"input_item_id": "utterance-7"}
+  }
+}
+```
+
+Use a voice supplied by the selected speech package and your own correlation
+values. The response owns its settings and metadata through completion,
+cancellation, or failure. Both `response.created` and `response.done` echo the
+metadata; it is not passed to the model. The next reply inherits session defaults
+again. Voice and metadata changes preserve compatible text checkpoints.
+
 ## Detect turns automatically
 
 Register an activity-capable model and add `"activity":"detector"` to the

@@ -462,7 +462,7 @@ mono PCM16LE carried in base64 JSON strings. Supported commands are:
 | `input_audio_buffer.append` | Appends complete PCM16 samples from the `audio` string. |
 | `input_audio_buffer.commit` | Creates an input item and finalizes recognition; does not create a response. |
 | `input_audio_buffer.clear` | Cancels the current uncommitted input item. |
-| `response.create` | Generates from canonical conversation history; optional overrides are instructions, output modality, and maximum tokens. |
+| `response.create` | Generates from canonical conversation history with an independent snapshot of output settings and optional response metadata. |
 | `response.cancel` | Cancels the active response, optionally checked against `response_id`. |
 | `conversation.item.create` | Inserts a completed text message with user, assistant, or system role. Optional `previous_item_id:"root"` prepends it. |
 | `conversation.item.delete` | Removes an item after active response ownership retires. |
@@ -471,6 +471,18 @@ mono PCM16LE carried in base64 JSON strings. Supported commands are:
 Session settings accept instructions, one output modality (`audio` or `text`),
 positive `max_output_tokens`, the configured transcription model plus language
 and prompt hints, the speech voice, and speed 1. Input noise reduction is null.
+Each `response.create.response` may override `instructions`, `output_modalities`,
+`max_output_tokens`, and `audio.output` without changing subsequent session
+defaults. Response audio has the same fixed format, voice, and speed contract.
+Input audio settings and session type are not response overrides.
+
+Response `metadata` is null or an object containing at most 16 distinct keys.
+Keys contain at most 64 Unicode codepoints; values are strings of at most 512
+codepoints. Escaped spellings are decoded before checking uniqueness and length.
+`response.created` and `response.done` echo the same metadata object, including
+for cancelled or failed responses. Metadata does not enter model context or
+affect text-prefix reuse. Session settings do not accept metadata.
+
 Turn detection defaults to null for explicit commits. An assistant with an
 `activity` deployment also accepts `audio.input.turn_detection` with:
 
