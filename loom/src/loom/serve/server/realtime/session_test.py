@@ -137,11 +137,14 @@ class Client:
         response = events[-1]["response"]
         status = "completed" if finish == "stop" else "incomplete"
         assert response["status"] == status, response
-        item = response["output"][0]
-        assert item["status"] == status, item
-        assert item["content"][0]["transcript" if audio_output else "text"] == text, (
-            response
-        )
+        if text:
+            item = response["output"][0]
+            assert item["status"] == status, item
+            assert (
+                item["content"][0]["transcript" if audio_output else "text"] == text
+            ), response
+        else:
+            assert response["output"] == [], response
         assert response["status_details"] == (
             None
             if finish == "stop"
@@ -416,7 +419,20 @@ def response_failure(address, trace, *, speech):
         assert not any(e["type"] == "response.output_audio.delta" for e in events), (
             events
         )
-        assert response["output"][0]["content"][0]["transcript"] is None, response
+        if speech:
+            # Text supplies the first content before the independently queued
+            # speech preparation rejects its voice. The real message survives
+            # as incomplete, with its unaligned transcript removed.
+            assert response["output"][0]["status"] == "incomplete", response
+            assert response["output"][0]["content"][0]["transcript"] is None, response
+            assert any(e["type"] == "response.output_item.added" for e in events), (
+                events
+            )
+        else:
+            assert response["output"] == [], response
+            assert not any(e["type"] == "response.output_item.added" for e in events), (
+                events
+            )
         client.send("conversation.item.delete", item_id="rejected-input")
         client.until("conversation.item.deleted")
         client.send(
@@ -447,7 +463,7 @@ def cancellation(address, trace):
         client.message("pending", "a")
         metadata = {"input_item_id": "pending"}
         client.send("response.create", response={"metadata": metadata})
-        events = client.until("response.content_part.added")
+        events = client.until("response.created")
         identity = next(
             e["response"]["id"] for e in events if e["type"] == "response.created"
         )
@@ -465,8 +481,10 @@ def cancellation(address, trace):
             "reason": "client_cancelled",
         }, response
         assert not any(e["type"].endswith(".delta") for e in events), events
-        client.send("conversation.item.delete", item_id=response["output"][0]["id"])
-        client.until("conversation.item.deleted")
+        assert response["output"] == [], response
+        assert not any(e["type"] == "response.output_item.added" for e in events), (
+            events
+        )
         admin.request("/v1/models/undrain", {"model": "fixture-text"})
         client.respond([{"role": "user", "content": "a"}])
         client.send("input_audio_buffer.append", audio="AAAAAA==")
@@ -743,19 +761,9 @@ def automatic_response_policy(address, trace, *, interrupt):
                 "type": "cancelled",
                 "reason": "turn_detected",
             }, cancelled
-            item = cancelled["output"][0]
-            assert item["content"][0]["transcript"] is None, item
+            assert cancelled["output"] == [], cancelled
             client.send("response.create")
             client.until("response.created")
-            # The old unaligned text is already absent. A late playback report
-            # cannot cancel or invalidate the correctly composed successor.
-            client.send(
-                "conversation.item.truncate",
-                item_id=item["id"],
-                content_index=0,
-                audio_end_ms=0,
-            )
-            client.until("conversation.item.truncated")
         else:
             assert not any(
                 e["type"] in ("response.done", "response.created") for e in events
@@ -848,6 +856,210 @@ def rejected_capture(address, trace):
         client.close()
 
 
+def anonymous_item(address, trace):
+    client = Client(address, trace)
+    try:
+        assert client.receive()["type"] == "session.created"
+        client.send(
+            "conversation.item.create",
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "a"}],
+            },
+        )
+        item = client.until("conversation.item.done")[-1]["item"]
+        response = client.respond([{"role": "user", "content": "a"}])
+        assert item["id"] != response["output"][0]["id"], response
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def reserved_item_identity(address, trace):
+    client = Client(address, trace)
+    try:
+        session = client.receive()["session"]
+        namespace = session["id"].removeprefix("sess_")
+        claimed = f"item_{namespace}_1"
+        client.message(claimed, "a")
+        response = client.respond([{"role": "user", "content": "a"}])
+        assert response["output"][0]["id"] == f"item_{namespace}_2", response
+        client.send(
+            "session.update",
+            session={
+                "audio": {
+                    "input": {
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "silence_duration_ms": 100,
+                            "create_response": False,
+                            "interrupt_response": False,
+                        }
+                    }
+                }
+            },
+        )
+        client.until("session.updated")
+        raw = struct.pack("<288h", *([64] * 192 + [0] * 96))
+        for commit in (True, False):
+            client.send(
+                "input_audio_buffer.append", audio=base64.b64encode(raw).decode()
+            )
+            started = client.until("input_audio_buffer.speech_started")[-1]
+            identity = started["item_id"]
+            client.send(
+                "conversation.item.create",
+                event_id="reserved-collision",
+                item={
+                    "id": identity,
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "b"}],
+                },
+            )
+            error = client.receive(allow_error=True)
+            assert error["error"]["code"] == "INVALID_ARGUMENT", error
+            assert error["error"]["event_id"] == "reserved-collision", error
+            if commit:
+                client.send("input_audio_buffer.commit")
+                events = client.until("conversation.item.done")
+                transcript = next(
+                    e
+                    for e in events
+                    if e["type"]
+                    == "conversation.item.input_audio_transcription.completed"
+                )
+                assert transcript["item_id"] == identity, transcript
+                assert transcript["transcript"] == "A", transcript
+            else:
+                client.send("input_audio_buffer.clear")
+                client.until("input_audio_buffer.cleared")
+                # Clear releases the reserved identity without publishing a
+                # canonical item; the same explicit ID can now be accepted.
+                client.message(identity, "b")
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def deferred_response_frontier(address, trace):
+    client = Client(address, trace)
+    admin = HttpClient(address)
+    drained = False
+    try:
+        assert client.receive()["type"] == "session.created"
+        admin.request("/v1/models/drain", {"model": "recognition"})
+        drained = True
+        audio = base64.b64encode(bytes(480)).decode()
+        client.send("input_audio_buffer.append", audio=audio)
+        client.send("input_audio_buffer.commit")
+        first = client.until("conversation.item.added")[-1]["item"]["id"]
+        client.send("response.create")
+        created = client.until("response.created")[-1]["response"]
+        client.send("input_audio_buffer.append", audio=audio)
+        client.send("input_audio_buffer.commit")
+        appended = client.until("conversation.item.added")[-1]
+        second = appended["item"]["id"]
+        assert appended["previous_item_id"] == first, appended
+        admin.request("/v1/models/undrain", {"model": "recognition"})
+        drained = False
+        events, transcripts, inputs_done = [], set(), set()
+        response = None
+        while response is None or len(transcripts) != 2 or len(inputs_done) != 2:
+            event = client.receive()
+            events.append(event)
+            if event["type"] == "conversation.item.input_audio_transcription.completed":
+                transcripts.add(event["item_id"])
+                assert event["transcript"] == "A", event
+            elif (
+                event["type"] == "conversation.item.done"
+                and event["item"]["role"] == "user"
+            ):
+                inputs_done.add(event["item"]["id"])
+            elif event["type"] == "response.done":
+                response = event["response"]
+        assert transcripts == {first, second}, events
+        assert response["id"] == created["id"], response
+        messages = [{"role": "user", "content": "A"}]
+        expected = complete(messages, 2)[0]
+        assert response["output"][0]["content"][0]["transcript"] == expected, response
+        assert response["usage"]["input_tokens"] == 1, response
+        added = next(
+            e
+            for e in events
+            if e["type"] == "conversation.item.added"
+            and e["item"]["role"] == "assistant"
+        )
+        assert added["previous_item_id"] == first, added
+        pcm = b"".join(
+            base64.b64decode(e["delta"])
+            for e in events
+            if e["type"] == "response.output_audio.delta"
+        )
+        check_pcm(pcm, expected, 42)
+        messages.extend(
+            [
+                {"role": "assistant", "content": expected},
+                {"role": "user", "content": "A"},
+            ]
+        )
+        client.respond(messages)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        if drained:
+            admin.request("/v1/models/undrain", {"model": "recognition"})
+        client.close()
+
+
+def repeated_playback_report(address, trace):
+    client = Client(address, trace)
+    admin = HttpClient(address)
+    drained = False
+    try:
+        assert client.receive()["type"] == "session.created"
+        client.message("before-playback", "a")
+        messages = [{"role": "user", "content": "a"}]
+        response = client.respond(messages)
+        item = response["output"][0]
+        report = {"item_id": item["id"], "content_index": 0, "audio_end_ms": 0}
+        client.send("conversation.item.truncate", **report)
+        client.until("conversation.item.truncated")
+        admin.request("/v1/models/drain", {"model": "fixture-text"})
+        drained = True
+        client.send("response.create")
+        pending = client.until("response.created")[-1]["response"]
+        # The already removed transcript cannot invalidate or cancel the new
+        # response, even when it has not published an output item yet.
+        client.send("conversation.item.truncate", **report)
+        client.until("conversation.item.truncated")
+        admin.request("/v1/models/undrain", {"model": "fixture-text"})
+        drained = False
+        events = client.until("response.done")
+        response = events[-1]["response"]
+        expected, finish = complete(messages, 2)
+        assert response["id"] == pending["id"], response
+        assert response["status"] == (
+            "completed" if finish == "stop" else "incomplete"
+        ), response
+        assert response["output"][0]["content"][0]["transcript"] == expected, response
+        pcm = b"".join(
+            base64.b64decode(e["delta"])
+            for e in events
+            if e["type"] == "response.output_audio.delta"
+        )
+        check_pcm(pcm, expected, 42)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        if drained:
+            admin.request("/v1/models/undrain", {"model": "fixture-text"})
+        client.close()
+
+
 def empty_response(address, trace):
     client = Client(address, trace)
     admin = HttpClient(address)
@@ -863,9 +1075,22 @@ def empty_response(address, trace):
         assert response["status"] == "completed", events
         assert response["usage"]["input_tokens"] == 11, response
         assert response["usage"]["output_tokens"] == 1, response
-        assert not any(e["type"].endswith(".delta") for e in events), events
+        assert response["output"] == [], response
+        assert [e["type"] for e in events] == ["response.created", "response.done"], (
+            events
+        )
         admin.request("/v1/models/undrain", {"model": "speech"})
         drained = False
+        # No assistant separator from an invented empty message may enter the
+        # next native prompt or its compatible checkpoint.
+        client.message("after-empty", "b")
+        response = client.respond(
+            [
+                {"role": "user", "content": "a" * 11},
+                {"role": "user", "content": "b"},
+            ]
+        )
+        assert response["usage"]["input_tokens"] == 12, response
         client.send_frame(8, struct.pack(">H", 1000))
         assert client.read_frame() == (8, struct.pack(">H", 1000))
     finally:
@@ -968,6 +1193,10 @@ def main():
         with running_server(command, artifacts / "server.log") as (process, address):
             assert address is not None, process.poll()
             with (artifacts / "wire.jsonl").open("w") as trace:
+                anonymous_item(address, trace)
+                reserved_item_identity(address, trace)
+                deferred_response_frontier(address, trace)
+                repeated_playback_report(address, trace)
                 empty_response(address, trace)
                 oversized_item_admission(address, trace)
                 response_policy(address, trace)
