@@ -28,11 +28,25 @@ global.rodata.def @thinking = bytes("656e61626c655f7468696e6b696e67")
 
 global.rodata.def @options = bytes("6d6f64656c5f6f7074696f6e73")
 
-global.rodata.def @invalid = bytes("746578742066697874757265206163636570747320612f622f78206d6573736167657320776974686f757420746f6f6c732c20726561736f6e696e67206f72206d6f64656c206f7074696f6e73")
+global.rodata.def @invalid = bytes("74657874206669787475726520726571756972657320612f622f7820636f6e74656e7420616e642073696e676c652d6c65747465722076616c75652066756e6374696f6e20617267756d656e74733b20726561736f6e696e6720616e64206d6f64656c206f7074696f6e732061726520756e737570706f72746564")
 
 global.rodata.def @unsupported = bytes("74657874206669787475726520726571756972657320706f6f6c65642065706f63687320776974686f7574204d5450")
 
 global.rodata.def @overflow = bytes("696e7075742065786365656473206361706163697479")
+
+global.rodata.def @tool_role = bytes("746f6f6c")
+
+global.rodata.def @function_key = bytes("66756e6374696f6e")
+
+global.rodata.def @name_key = bytes("6e616d65")
+
+global.rodata.def @value_key = bytes("76616c7565")
+
+global.rodata.def @call_prefix = bytes("7b2274797065223a2266756e6374696f6e222c2266756e6374696f6e223a7b226e616d65223a22")
+
+global.rodata.def @call_middle = bytes("222c22617267756d656e7473223a227b5c2276616c75655c223a5c22")
+
+global.rodata.def @call_suffix = bytes("5c227d227d7d")
 
 func.def @check(%condition: i1) {
   %value = scalar.extui %condition : i1 to i32
@@ -233,7 +247,7 @@ func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
       func.call @check(%empty_options) : (i1)
     }
   }
-  func.return %rendered_tools, %c0_i64 : buffer, i64
+  func.return %rendered_tools, %tool_count : buffer, i64
 }
 
 func.def @ordered_content(%content: buffer, %parts: buffer, %part_count: i64) -> (buffer, buffer) {
@@ -307,16 +321,21 @@ func.def @ordered_content(%content: buffer, %parts: buffer, %part_count: i64) ->
 
 func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %parts: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64, %part_count: i64) -> (buffer, i64, buffer) {
   %c0_i64 = scalar.constant 0 : i64
-  %plain = scalar.cmpi eq, %fields, %c0_i64 : i64
-  func.call @check(%plain) : (i1)
+  %reasoning_bit = scalar.constant 1 : i64
+  %reasoning_field = scalar.andi %fields, %reasoning_bit : i64
+  %no_reasoning = scalar.cmpi eq, %reasoning_field, %c0_i64 : i64
+  func.call @check(%no_reasoning) : (i1)
   %assistant_role = global.load @assistant : buffer
   %user_role = global.load @user : buffer
   %system_role = global.load @system : buffer
   %assistant = func.call @equal(%role, %assistant_role) : (buffer, buffer) -> (i1)
   %user = func.call @equal(%role, %user_role) : (buffer, buffer) -> (i1)
   %system = func.call @equal(%role, %system_role) : (buffer, buffer) -> (i1)
+  %tool_role = global.load @tool_role : buffer
+  %tool = func.call @equal(%role, %tool_role) : (buffer, buffer) -> (i1)
   %ordinary = scalar.ori %user, %system : i1
-  %supported = scalar.ori %ordinary, %assistant : i1
+  %conversation = scalar.ori %ordinary, %assistant : i1
+  %supported = scalar.ori %conversation, %tool : i1
   func.call @check(%supported) : (i1)
   %terminal = global.load @terminal : buffer
   %empty = global.load @empty : buffer
@@ -328,7 +347,8 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   } else {
     scf.yield %content, %empty : buffer, buffer
   }
-  %fragment = func.call @join(%ordered, %suffix) : (buffer, buffer) -> (buffer)
+  %with_calls = func.call @join(%ordered, %calls) : (buffer, buffer) -> (buffer)
+  %fragment = func.call @join(%with_calls, %suffix) : (buffer, buffer) -> (buffer)
   func.return %fragment, %state, %plan : buffer, i64, buffer
 }
 
@@ -337,18 +357,157 @@ func.def public @chat_end(%state: i64) -> (buffer, i64) {
   func.return %empty, %state : buffer, i64
 }
 
-func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
-  %c0 = scalar.constant 0 : i32
-  %c0_i64 = scalar.constant 0 : i64
-  %error = global.load @invalid : buffer
-  func.call @require(%c0, %error) : (i32, buffer)
+// Native schema validation has established literal member names. Source-owned
+// argument parsing extracts a single value; malformed fixture grammar fails here.
+func.def @json_field(%json: buffer, %key: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %fields, %type, %count64 = func.call @members(%json) : (buffer) -> (buffer, i32, i64)
+  %bounded_count = scalar.assume %count64 [range(%count64, 0, 2147483647)] : i64
+  %count = index.cast %bounded_count : i64 to index
+  %records = buffer.view %fields[%origin] : buffer -> view<[%count]x5xi64>
+  %key_length = buffer.length %key
   %empty = global.load @empty : buffer
-  func.return %empty, %c0_i64 : buffer, i64
+  %found = scf.for %i = [%c0 to %count step %c1](%result = %empty : buffer) -> (buffer) {
+    %offset64 = view.load %records[%i, 0] : view<[%count]x5xi64> -> i64
+    %length64 = view.load %records[%i, 1] : view<[%count]x5xi64> -> i64
+    %bounded_offset = scalar.assume %offset64 [range(%offset64, 0, 9223372036854775807)] : i64
+    %bounded_length = scalar.assume %length64 [range(%length64, 0, 9223372036854775807)] : i64
+    %offset = index.cast %bounded_offset : i64 to offset
+    %length = index.cast %bounded_length : i64 to offset
+    %same_length = index.cmp eq, %length, %key_length : offset
+    %matches = scf.if %same_length -> (i1) {
+      %compared = buffer.compare %json[%offset], %key[%origin], %length
+      %equal = scalar.cmpi eq, %compared, %c0_i32 : i32
+      scf.yield %equal : i1
+    } else {
+      %false = scalar.constant false : i1
+      scf.yield %false : i1
+    }
+    %next = scf.if %matches -> (buffer) {
+      %begin64 = view.load %records[%i, 2] : view<[%count]x5xi64> -> i64
+      %size64 = view.load %records[%i, 3] : view<[%count]x5xi64> -> i64
+      %bounded_begin = scalar.assume %begin64 [range(%begin64, 0, 9223372036854775807)] : i64
+      %bounded_size = scalar.assume %size64 [range(%size64, 0, 9223372036854775807)] : i64
+      %begin = index.cast %bounded_begin : i64 to offset
+      %size = index.cast %bounded_size : i64 to offset
+      %value = buffer.alloca<private> align(1) %size : buffer
+      buffer.copy %json[%begin], %value[%origin], %size
+      scf.yield %value : buffer
+    } else {
+      scf.yield %result : buffer
+    }
+    scf.yield %next : buffer
+  }
+  func.return %found : buffer
 }
 
+func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
+  %key = global.load @value_key : buffer
+  %value = func.call @json_field(%arguments, %key) : (buffer, buffer) -> (buffer)
+  %length = buffer.length %value
+  %c1 = index.constant 1 : offset
+  %single = index.cmp eq, %length, %c1 : offset
+  func.call @check(%single) : (i1)
+  %origin = index.constant 0 : offset
+  %byte = buffer.load.i8.u %value[%origin]
+  %a = scalar.constant 97 : i32
+  %b = scalar.constant 98 : i32
+  %x = scalar.constant 120 : i32
+  %is_a = scalar.cmpi eq, %byte, %a : i32
+  %is_b = scalar.cmpi eq, %byte, %b : i32
+  %is_x = scalar.cmpi eq, %byte, %x : i32
+  %ab = scalar.ori %is_a, %is_b : i1
+  %valid = scalar.ori %ab, %is_x : i1
+  func.call @check(%valid) : (i1)
+  %c1_i64 = scalar.constant 1 : i64
+  func.return %value, %c1_i64 : buffer, i64
+}
+
+// The first predicted x is itself a call. Every suffix letter maps to one
+// complete argument document, so tool rendering restores the exact raw suffix.
 func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
-  %empty = global.load @no_tools : buffer
-  func.return %empty : buffer
+  %origin = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %length = buffer.length %response
+  %nonempty = index.cmp ne, %length, %origin : offset
+  %calls = scf.if %nonempty -> (buffer) {
+    %first = buffer.load.i8.u %response[%origin]
+    %x = scalar.constant 120 : i32
+    %is_x = scalar.cmpi eq, %first, %x : i32
+    func.call @check(%is_x) : (i1)
+    %fields, %type, %count64 = func.call @members(%schemas) : (buffer) -> (buffer, i32, i64)
+    %c0_i64 = scalar.constant 0 : i64
+    %declared = scalar.cmpi ne, %count64, %c0_i64 : i64
+    func.call @check(%declared) : (i1)
+    %bounded_count = scalar.assume %count64 [range(%count64, 1, 4096)] : i64
+    %count = index.cast %bounded_count : i64 to index
+    %records = buffer.view %fields[%origin] : buffer -> view<[%count]x5xi64>
+    %begin64 = view.load %records[0, 2] : view<[%count]x5xi64> -> i64
+    %size64 = view.load %records[0, 3] : view<[%count]x5xi64> -> i64
+    %bounded_begin = scalar.assume %begin64 [range(%begin64, 0, 9223372036854775807)] : i64
+    %bounded_size = scalar.assume %size64 [range(%size64, 0, 9223372036854775807)] : i64
+    %begin = index.cast %bounded_begin : i64 to offset
+    %size = index.cast %bounded_size : i64 to offset
+    %declaration = buffer.alloca<private> align(1) %size : buffer
+    buffer.copy %schemas[%begin], %declaration[%origin], %size
+    %function_key = global.load @function_key : buffer
+    %function = func.call @json_field(%declaration, %function_key) : (buffer, buffer) -> (buffer)
+    %name_key = global.load @name_key : buffer
+    %name = func.call @json_field(%function, %name_key) : (buffer, buffer) -> (buffer)
+    %prefix = global.load @call_prefix : buffer
+    %middle = global.load @call_middle : buffer
+    %suffix = global.load @call_suffix : buffer
+    %prefix_length = buffer.length %prefix
+    %name_length = buffer.length %name
+    %middle_length = buffer.length %middle
+    %suffix_length = buffer.length %suffix
+    %name_end = index.add %prefix_length, %name_length : offset
+    %value_begin = index.add %name_end, %middle_length : offset
+    %value_end = index.add %value_begin, %c1 : offset
+    %record_length = index.add %value_end, %suffix_length : offset
+    %stride = index.add %record_length, %c1 : offset
+    %limit = index.constant 4096 : offset
+    %bounded = index.cmp ule, %length, %limit : offset
+    func.call @check(%bounded) : (i1)
+    %length64 = index.cast %length : offset to i64
+    %bounded_length64 = scalar.assume %length64 [range(%length64, 1, 4096)] : i64
+    %call_count = index.cast %bounded_length64 : i64 to index
+    %records_length = index.scale %call_count, %stride : index, offset -> offset
+    %output_length = index.add %records_length, %c1 : offset
+    %output = buffer.alloca<private> align(1) %output_length : buffer
+    %open = scalar.constant 91 : i32
+    %close = scalar.constant 93 : i32
+    %comma = scalar.constant 44 : i32
+    buffer.store.i8 %open, %output[%origin]
+    %c0_index = index.constant 0 : index
+    %c1_index = index.constant 1 : index
+    scf.for %i = [%c0_index to %call_count step %c1_index] {
+      %record_begin = index.scale %i, %stride : index, offset -> offset
+      %body_begin = index.add %record_begin, %c1 : offset
+      %name_begin = index.add %body_begin, %prefix_length : offset
+      %middle_begin = index.add %body_begin, %name_end : offset
+      %argument_begin = index.add %body_begin, %value_begin : offset
+      %suffix_begin = index.add %body_begin, %value_end : offset
+      %record_end = index.add %body_begin, %record_length : offset
+      buffer.copy %prefix[%origin], %output[%body_begin], %prefix_length
+      buffer.copy %name[%origin], %output[%name_begin], %name_length
+      buffer.copy %middle[%origin], %output[%middle_begin], %middle_length
+      %input_offset = index.cast %i : index to offset
+      %letter = buffer.load.i8.u %response[%input_offset]
+      buffer.store.i8 %letter, %output[%argument_begin]
+      buffer.copy %suffix[%origin], %output[%suffix_begin], %suffix_length
+      buffer.store.i8 %comma, %output[%record_end]
+    }
+    buffer.store.i8 %close, %output[%records_length]
+    scf.yield %output : buffer
+  } else {
+    %empty = global.load @no_tools : buffer
+    scf.yield %empty : buffer
+  }
+  func.return %calls : buffer
 }
 
 // The host supplies the previous raw prediction separately. On EOS it replaces
@@ -427,7 +586,30 @@ func.def public @prepare_input(%text: buffer, %markers: buffer, %marker_count: i
 
 func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
   %length = buffer.length %response
-  %count = index.cast %length : offset to i64
+  %c0_i64 = scalar.constant 0 : i64
+  %has_tools = scalar.cmpi ne, %state, %c0_i64 : i64
+  %end = scf.if %has_tools -> (offset) {
+    %bounded_previous = scalar.assume %previous [range(%previous, 0, 9223372036854775807)] : i64
+    %begin = index.cast %bounded_previous : i64 to offset
+    %c1 = index.constant 1 : offset
+    %x = scalar.constant 120 : i32
+    %boundary = scf.for %i = [%begin to %length step %c1](%stop = %length : offset) -> (offset) {
+      %before = index.cmp ult, %i, %stop : offset
+      %next = scf.if %before -> (offset) {
+        %letter = buffer.load.i8.u %response[%i]
+        %is_x = scalar.cmpi eq, %letter, %x : i32
+        %selected = scf.select %is_x, %i, %stop : offset
+        scf.yield %selected : offset
+      } else {
+        scf.yield %stop : offset
+      }
+      scf.yield %next : offset
+    }
+    scf.yield %boundary : offset
+  } else {
+    scf.yield %length : offset
+  }
+  %count = index.cast %end : offset to i64
   %content = scalar.constant 1 : i64
   func.return %content, %previous, %count, %state : i64, i64, i64, i64
 }
