@@ -166,6 +166,9 @@ enum iree_hal_amdgpu_tsan_shadow_entry_layout_t {
   IREE_HAL_AMDGPU_TSAN_SHADOW_ENTRY_EPOCH_SHIFT = 13u,
   // Bit count of the encoded workgroup barrier epoch.
   IREE_HAL_AMDGPU_TSAN_SHADOW_ENTRY_EPOCH_BIT_COUNT = 10u,
+  // Barrier epochs distinguished by each compact history entry.
+  IREE_HAL_AMDGPU_TSAN_SHADOW_EPOCH_CAPACITY =
+      1u << IREE_HAL_AMDGPU_TSAN_SHADOW_ENTRY_EPOCH_BIT_COUNT,
   // Bit offset of the encoded dispatch generation low bits.
   IREE_HAL_AMDGPU_TSAN_SHADOW_ENTRY_GENERATION_SHIFT = 23u,
   // Bit count of the encoded dispatch generation low bits.

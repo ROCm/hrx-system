@@ -29,6 +29,17 @@ iree_status_t loom_amdgpu_sanitizer_race_establish_workgroup_lifetime(
     const loom_amdgpu_sanitizer_race_shadow_layout_t* layout,
     loom_value_id_t workitem_linear_id, loom_value_id_t dispatch_id);
 
+// Advances the workgroup barrier epoch. When the compact history epoch wraps,
+// the first wave retires the shared chunk-state bitmap before returning. The
+// caller must make every wave execute a workgroup barrier immediately after
+// this transition so no later access can observe partial retirement.
+iree_status_t loom_amdgpu_sanitizer_race_advance_barrier_epoch(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_sanitizer_race_config_values_t* config,
+    loom_value_id_t workgroup_shadow_record_offset,
+    loom_value_id_t workgroup_chunk_state_bitmap_size,
+    loom_value_id_t workitem_linear_id);
+
 // Establishes every fixed history chunk intersecting an application-memory
 // access. Concurrent first accesses elect one retiring lane per chunk and wait
 // for its release publication before consulting either compact history.

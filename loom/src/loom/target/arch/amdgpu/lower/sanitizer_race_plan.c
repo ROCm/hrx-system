@@ -143,10 +143,10 @@ static bool loom_amdgpu_sanitizer_race_required_descriptors_present(
   }
   return loom_amdgpu_descriptor_set_has_ref(
              descriptor_set,
-             LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_ADD_U32_SADDR) ||
+             LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_ADD_U32_RTN_SADDR) ||
          loom_amdgpu_descriptor_set_has_ref(
              descriptor_set,
-             LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_ADD_U64_SADDR);
+             LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_ADD_U64_RTN_SADDR);
 }
 
 static iree_string_view_t
