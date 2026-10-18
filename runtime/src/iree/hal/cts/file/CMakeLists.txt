@@ -33,5 +33,44 @@ iree_cc_library(
   TESTONLY
   PUBLIC
 )
+if(IREE_BUILD_BENCHMARKS)
+iree_cc_binary(
+  NAME
+    file_benchmark
+  SRCS
+    "file_benchmark.cc"
+  DEPS
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::hal
+    iree::hal::drivers
+    iree::io::file_handle
+    iree::testing::benchmark
+    iree::third_party::google_benchmark
+    iree::tooling::device_util
+  TESTONLY
+)
+
+if(IREE_HAL_DRIVER_TASK)
+iree_native_test(
+  NAME
+    "file_benchmark_test"
+  ARGS
+    "--device=task"
+    "--file={{${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/file/file_benchmark.cc}}"
+    "--file_length=4096"
+    "--read_bytes=4096"
+    "--read_depth=1"
+    "--benchmark_dry_run"
+  SRC
+    ::file_benchmark
+  DATA
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/file/file_benchmark.cc"
+)
+endif()
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

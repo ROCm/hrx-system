@@ -6,7 +6,9 @@
 
 # File I/O CTS tests.
 
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -35,4 +37,52 @@ iree_runtime_cc_library(
     deps = [
         ":file_test",
     ],
+)
+
+iree_cmake_extra_content(
+    content = "if(IREE_BUILD_BENCHMARKS)",
+    inline = True,
+)
+
+iree_runtime_cc_binary(
+    name = "file_benchmark",
+    testonly = True,
+    srcs = ["file_benchmark.cc"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/tooling:device_util",
+        "//third_party:google_benchmark",
+    ],
+)
+
+# Only the smoke test requires Task; the binary accepts any configured driver.
+iree_executable_test(
+    name = "file_benchmark_test",
+    src = ":file_benchmark",
+    args = [
+        "--device=task",
+        "--file=$(rootpath file_benchmark.cc)",
+        "--file_length=4096",
+        "--read_bytes=4096",
+        "--read_depth=1",
+        "--benchmark_dry_run",
+    ],
+    data = ["file_benchmark.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_task": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+iree_cmake_extra_content(
+    content = "endif()",
+    inline = True,
 )
