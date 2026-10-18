@@ -240,6 +240,57 @@ def conversation(address, trace):
         client.close()
 
 
+def response_failure(address, trace, *, speech):
+    client = Client(address, trace)
+    try:
+        assert client.receive()["type"] == "session.created"
+        if speech:
+            client.send(
+                "session.update", session={"audio": {"output": {"voice": "missing"}}}
+            )
+            client.until("session.updated")
+        # Both failures come from real native request preparation: a source-
+        # rejected voice or input plus output exceeding the text context.
+        client.message("rejected-input", "a" if speech else "a" * 128)
+        client.send(
+            "input_audio_buffer.append", audio=base64.b64encode(bytes(480)).decode()
+        )
+        client.send("response.create")
+        events = client.until("response.done")
+        response = events[-1]["response"]
+        assert response["status"] == "failed", response
+        details = response["status_details"]
+        assert details["type"] == "failed", details
+        error = details["error"]
+        assert error["code"] == ("INVALID_ARGUMENT" if speech else "OUT_OF_RANGE"), (
+            error
+        )
+        assert error["message"], error
+        assert not any(e["type"] == "response.output_audio.delta" for e in events), (
+            events
+        )
+        assert response["output"][0]["content"][0]["transcript"] is None, response
+        client.send("conversation.item.delete", item_id="rejected-input")
+        client.until("conversation.item.deleted")
+        client.send(
+            "session.update", session={"audio": {"output": {"voice": "positive"}}}
+        )
+        client.until("session.updated")
+        # Previously recorded microphone audio survives the failed response.
+        # Failed audio contributes no unaligned text to the recovered prompt.
+        client.send("input_audio_buffer.commit")
+        transcript = client.until(
+            "conversation.item.input_audio_transcription.completed"
+        )[-1]
+        assert transcript["transcript"] == "A", transcript
+        client.respond([{"role": "user", "content": "A"}])
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+        assert client.input.read(1) == b""
+    finally:
+        client.close()
+
+
 def cancellation(address, trace):
     admin = HttpClient(address)
     admin.request("/v1/models/drain", {"model": "fixture-text"})
@@ -260,6 +311,10 @@ def cancellation(address, trace):
         assert response["id"] == identity and response["status"] == "cancelled", (
             response
         )
+        assert response["status_details"] == {
+            "type": "cancelled",
+            "reason": "client_cancelled",
+        }, response
         assert not any(e["type"].endswith(".delta") for e in events), events
         client.send("conversation.item.delete", item_id=response["output"][0]["id"])
         client.until("conversation.item.deleted")
@@ -535,6 +590,10 @@ def automatic_response_policy(address, trace, *, interrupt):
             assert (
                 cancelled["id"] == response["id"] and cancelled["status"] == "cancelled"
             ), events
+            assert cancelled["status_details"] == {
+                "type": "cancelled",
+                "reason": "turn_detected",
+            }, cancelled
             item = cancelled["output"][0]
             assert item["content"][0]["transcript"] is None, item
             client.send("response.create")
@@ -694,6 +753,8 @@ def main():
             assert address is not None, process.poll()
             with (artifacts / "wire.jsonl").open("w") as trace:
                 conversation(address, trace)
+                response_failure(address, trace, speech=True)
+                response_failure(address, trace, speech=False)
                 cancellation(address, trace)
                 pipelined_microphone_items(address, trace)
                 packed = automatic_microphone(
