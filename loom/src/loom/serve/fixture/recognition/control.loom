@@ -4,7 +4,7 @@ func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i
 
 func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
   %origin = index.constant 0 : offset
-  %length = index.constant 24 : offset
+  %length = index.constant 32 : offset
   %state = buffer.alloca<private> align(8) %length : buffer
   %fields = buffer.view %state[%origin] : buffer -> view<3xi64>
   %c0 = scalar.constant 0 : i64
@@ -12,6 +12,12 @@ func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buf
   view.store %c0, %fields[1] : i64, view<3xi64>
   %outputs64 = scalar.extui %outputs : i32 to i64
   view.store %outputs64, %fields[2] : i64, view<3xi64>
+  // Activity depends on this quantum's PCM contribution, not the retained
+  // transcript accumulator. Silence after speech must become inactive again.
+  %sum_offset = index.constant 24 : offset
+  %previous = buffer.view %state[%sum_offset] : buffer -> view<1xf32>
+  %initial_sum = scalar.constant 0.0 : f32
+  view.store %initial_sum, %previous[0] : f32, view<1xf32>
   // The prompt is immutable request data; it may be empty. Numerical work
   // consumes PCM from later work offers and does not need this request root.
   func.return %state, %prompt : buffer, buffer
@@ -165,6 +171,11 @@ func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordina
   %done = view.load %output[2] : view<4xi32> -> i32
   %values = buffer.view %feedback[%offset] : buffer -> view<4xf32>
   %sum = view.load %values[3] : view<4xf32> -> f32
+  %sum_offset = index.constant 24 : offset
+  %previous = buffer.view %state[%sum_offset] : buffer -> view<1xf32>
+  %previous_sum = view.load %previous[0] : view<1xf32> -> f32
+  %changed = scalar.cmpf one, %sum, %previous_sum : f32
+  view.store %sum, %previous[0] : f32, view<1xf32>
   %integer = scalar.fptoui %sum : f32 to i32
   %letters = scalar.constant 26 : i32
   %base = scalar.constant 65 : i32
@@ -209,7 +220,9 @@ func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordina
     view.store %end, %interval[1] : i64, view<2xi64>
     %probability_offset = index.constant 28 : offset
     %probability = buffer.view %model[%probability_offset] : buffer -> view<1xf32>
-    %score = scalar.constant 0.75 : f32
+    %active = scalar.constant 0.75 : f32
+    %inactive = scalar.constant 0.0 : f32
+    %score = scf.select %changed, %active, %inactive : f32
     view.store %score, %probability[0] : f32, view<1xf32>
   }
   %header_bytes = scalar.constant 4 : i64
