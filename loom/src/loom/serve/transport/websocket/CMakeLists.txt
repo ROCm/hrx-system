@@ -73,8 +73,10 @@ loom_cc_test(
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
+    iree::task
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::testing::worker_gate
     loom::serve::transport::http::listener
     loom::serve::transport::http::request
     loom::serve::transport::http::server
