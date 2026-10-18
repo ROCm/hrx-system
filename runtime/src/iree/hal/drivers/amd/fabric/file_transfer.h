@@ -144,9 +144,11 @@ void iree_hal_amd_fabric_file_transfer_deinitialize(
 // Native file-capable host views support direct files. Registered sources also
 // retain fixed-buffer identity; registration is not required for an otherwise
 // capable view. Other host views support ordinary buffered I/O. A registration
-// for a different file proactor is an admission error. Prepared host views are
-// borrowed until deinitialization, without adding source ownership or public
-// host-mapping permissions to the buffer.
+// for a different file proactor is an admission error. DIRECT files require
+// file-capable system backing; incompatible sources fail before any prefix is
+// accessed instead of staging through another system allocation. Prepared views
+// are borrowed until deinitialization, without adding source ownership or
+// public host-mapping permissions to the buffer.
 iree_status_t iree_hal_amd_fabric_file_transfer_prepare_ranges(
     iree_hal_amd_fabric_file_transfer_t* transfer, const amdf_api_t* api,
     const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,

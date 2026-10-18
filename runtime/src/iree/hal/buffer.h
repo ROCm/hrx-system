@@ -804,6 +804,9 @@ typedef enum iree_hal_buffer_interface_e {
   IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA = 3,
   IREE_HAL_BUFFER_INTERFACE_XDNA_FIRMWARE = 4,
   IREE_HAL_BUFFER_INTERFACE_RDMA = 5,
+  // Retained native file-I/O registration for the requesting queue family.
+  // Selects file-capable backing and prepares registration before the buffer
+  // becomes usable. This does not grant public host-mapping access.
   IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO = 6,
   IREE_HAL_BUFFER_INTERFACE_REMOTE = 7,
   IREE_HAL_BUFFER_INTERFACE_WEBGPU_BUFFER = 8,

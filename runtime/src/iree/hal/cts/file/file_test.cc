@@ -597,8 +597,30 @@ TEST_P(AsyncFileTest, DirectFileRoundTripUsesReportedRequirements) {
   const size_t buffer_offset = alignment;
   const uint64_t file_offset = stride;
   const size_t buffer_length = length + 2 * alignment;
+  // Request file-capable backing before allocation. Backends without retained
+  // I/O registration exercise their ordinary file-transfer route.
+  const iree_hal_pool_family_access_t family = {
+      .family = iree_hal_queue_family(transfer_queue_),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO,
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &family,
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> registered_pool;
+  status =
+      iree_hal_slab_pool_create(device_group_, scope, &options,
+                                iree_allocator_system(), registered_pool.out());
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(GetDevicePool(&pool));
+  if (status.code() == iree::StatusCode::kUnavailable) {
+    IREE_ASSERT_OK(GetDevicePool(&pool));
+  } else {
+    IREE_ASSERT_OK(status);
+    pool = registered_pool.get();
+  }
   Ref<iree_hal_buffer_t> source, target;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool, iree_hal_make_pool_reservation_request(buffer_length, alignment),

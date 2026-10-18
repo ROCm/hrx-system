@@ -39,6 +39,7 @@ enum class FileBacking {
   kNestedPrivate,
   kNestedHost,
   kVirtualMixed,
+  kVirtualMixedRegistered,
 };
 
 class GpuNativeFileTest : public GpuNativeTest,
@@ -57,10 +58,14 @@ class GpuNativeFileTest : public GpuNativeTest,
 
   bool is_registered() const {
     return GetParam() == FileBacking::kPhysicalRegistered ||
-           GetParam() == FileBacking::kVirtualRegistered;
+           GetParam() == FileBacking::kVirtualRegistered ||
+           GetParam() == FileBacking::kVirtualMixedRegistered;
   }
 
-  bool is_mixed() const { return GetParam() == FileBacking::kVirtualMixed; }
+  bool is_mixed() const {
+    return GetParam() == FileBacking::kVirtualMixed ||
+           GetParam() == FileBacking::kVirtualMixedRegistered;
+  }
 
   void SetUp() override {
     GpuNativeTest::SetUp();
@@ -75,7 +80,7 @@ class GpuNativeFileTest : public GpuNativeTest,
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
-    const iree_hal_pool_family_access_t family = {
+    iree_hal_pool_family_access_t family = {
         .family = iree_hal_queue_family(queues_[0]),
         .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
         .interfaces =
@@ -112,6 +117,8 @@ class GpuNativeFileTest : public GpuNativeTest,
     IREE_ASSERT_OK(status);
     if (is_mixed()) {
       scope.host = {};
+      family.interfaces &=
+          ~(UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO);
       IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &options,
                                                iree_allocator_system(),
                                                device_pool_.out()));
@@ -179,8 +186,13 @@ class GpuNativeFileTest : public GpuNativeTest,
       host_transfer_ = facts->memory->mapping != nullptr;
       file_io_capable_ = iree_any_bit_set(facts->memory->host_features,
                                           AMDF_HOST_MAPPING_FEATURE_FILE_IO);
+      direct_io_available_ =
+          facts->memory->info.memory_class != AMDF_MEMORY_CLASS_SYSTEM ||
+          file_io_capable_;
       RecordProperty("physical_sources_host_visible", host_transfer_);
       RecordProperty("physical_sources_file_io_capable", file_io_capable_);
+      RecordProperty("physical_sources_direct_io_available",
+                     direct_io_available_);
       if (GetParam() == FileBacking::kPhysicalPrivate ||
           GetParam() == FileBacking::kNestedPrivate) {
         EXPECT_EQ(memory.contract->host.access, 0u);
@@ -251,6 +263,11 @@ class GpuNativeFileTest : public GpuNativeTest,
       file_io_capable_ &=
           iree_any_bit_set(native_source->storage->host_features,
                            AMDF_HOST_MAPPING_FEATURE_FILE_IO);
+      direct_io_available_ &=
+          native_source->storage->info.memory_class !=
+              AMDF_MEMORY_CLASS_SYSTEM ||
+          iree_any_bit_set(native_source->storage->host_features,
+                           AMDF_HOST_MAPPING_FEATURE_FILE_IO);
       mappings_.push_back({
           .target = *out_buffer,
           .scope = program_scope,
@@ -271,6 +288,8 @@ class GpuNativeFileTest : public GpuNativeTest,
         iree_hal_semaphore_wait(mapped, value, iree_infinite_timeout(), 0));
     RecordProperty("physical_sources_host_visible", host_transfer_);
     RecordProperty("physical_sources_file_io_capable", file_io_capable_);
+    RecordProperty("physical_sources_direct_io_available",
+                   direct_io_available_);
   }
 
   void ReleaseSources() {
@@ -373,6 +392,8 @@ class GpuNativeFileTest : public GpuNativeTest,
   // Every physical source exposes a native file-capable view, independent of
   // retained registration and public host-mapping permission.
   bool file_io_capable_ = true;
+  // No system source requires a redundant staging copy for DIRECT files.
+  bool direct_io_available_ = true;
   // Public operation timeline, independent of private native handoff points.
   Ref<iree_hal_semaphore_t> timeline_;
   // Real shader that leaves dirty lines before file access.
@@ -634,7 +655,7 @@ TEST_P(GpuNativeDirectFileTest, DirectFileRoundTripThroughGpuBacking) {
   }
   IREE_ASSERT_OK(file_status);
   auto* semaphore = timeline_.get();
-  uint64_t one = 1, two = 2, three = 3, four = 4;
+  uint64_t one = 1, two = 2, three = 3, four = 4, five = 5;
   uint32_t sentinel = 0xCDCDCDCDu;
   IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &semaphore, &one},
                                      buffer, 0, kBytes + 2 * kAlignment,
@@ -644,22 +665,59 @@ TEST_P(GpuNativeDirectFileTest, DirectFileRoundTripThroughGpuBacking) {
   IREE_ASSERT_OK(iree_hal_queue_read(
       queues_[0], {1, &semaphore, &one}, {1, &semaphore, &two}, file,
       kAlignment, buffer, buffer_offset, kBytes, &barriers_, 0));
+  if (!direct_io_available_) {
+    EXPECT_EQ(iree::Status(iree_hal_semaphore_wait(timeline_, two,
+                                                   iree_infinite_timeout(), 0))
+                  .code(),
+              iree::StatusCode::kUnavailable);
+    Ref<iree_hal_semaphore_t> write_completion;
+    CreateSemaphore(write_completion.out());
+    auto* write_semaphore = write_completion.get();
+    IREE_ASSERT_OK(iree_hal_queue_write(
+        queues_[0], {}, {1, &write_semaphore, &one}, buffer, buffer_offset,
+        file, 0, kBytes, &barriers_, 0));
+    file.reset();
+    EXPECT_EQ(iree::Status(iree_hal_semaphore_wait(write_completion, one,
+                                                   iree_infinite_timeout(), 0))
+                  .code(),
+              iree::StatusCode::kUnavailable);
+    // Failure retires the captured operands without publishing even an
+    // eligible prefix. Independent GPU work still advances this queue.
+    timeline_.reset();
+    CreateSemaphore(timeline_.out());
+    semaphore = timeline_.get();
+    ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, 0, one, 19, buffer_offset));
+    ASSERT_NO_FATAL_FAILURE(Wait(one));
+    EXPECT_EQ(Publications() - before_read, 1u);
+    std::vector<uint32_t> observed(expected.size());
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queues_[0], {1, &semaphore, &one}, {1, &semaphore, &two}, buffer, 0,
+        observed.data(), observed.size() * sizeof(uint32_t), nullptr));
+    ASSERT_NO_FATAL_FAILURE(Wait(two));
+    std::vector<uint32_t> unchanged(expected.size(), sentinel);
+    unchanged[buffer_offset / sizeof(uint32_t)] += 19;
+    EXPECT_EQ(observed, unchanged);
+    ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
+    return;
+  }
   ASSERT_NO_FATAL_FAILURE(Wait(two));
   if (file_io_capable_) {
     EXPECT_EQ(Publications() - before_read, 2u);
   }
+  ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, two, three, 19, buffer_offset));
+  expected[kAlignment / sizeof(uint32_t)] += 19;
   std::vector<uint32_t> observed(kBytes / 4);
   IREE_ASSERT_OK(iree_hal_queue_download(
-      queues_[0], {1, &semaphore, &two}, {1, &semaphore, &three}, buffer,
+      queues_[0], {1, &semaphore, &three}, {1, &semaphore, &four}, buffer,
       buffer_offset, observed.data(), kBytes, nullptr));
-  ASSERT_NO_FATAL_FAILURE(Wait(three));
+  ASSERT_NO_FATAL_FAILURE(Wait(four));
   EXPECT_TRUE(std::equal(observed.begin(), observed.end(),
                          expected.begin() + kAlignment / 4));
   const uint64_t before_write = Publications();
   IREE_ASSERT_OK(iree_hal_queue_write(
-      queues_[0], {1, &semaphore, &three}, {1, &semaphore, &four}, buffer,
+      queues_[0], {1, &semaphore, &four}, {1, &semaphore, &five}, buffer,
       buffer_offset, file, 0, kBytes, &barriers_, 0));
-  ASSERT_NO_FATAL_FAILURE(Wait(four));
+  ASSERT_NO_FATAL_FAILURE(Wait(five));
   if (file_io_capable_) {
     EXPECT_EQ(Publications() - before_write, 2u);
   }
@@ -864,38 +922,32 @@ TEST_P(GpuNativeFileProgressTest,
       iree_hal_semaphore_wait(allocated, two, iree_infinite_timeout(), 0));
 }
 
-INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeFileTest,
-                         ::testing::Values(FileBacking::kPhysicalHost,
-                                           FileBacking::kVirtualHost,
-                                           FileBacking::kVirtualPrivate,
-                                           FileBacking::kPhysicalRegistered,
-                                           FileBacking::kVirtualRegistered,
-                                           FileBacking::kPhysicalPrivate,
-                                           FileBacking::kNestedPrivate,
-                                           FileBacking::kNestedHost,
-                                           FileBacking::kVirtualMixed));
+INSTANTIATE_TEST_SUITE_P(
+    PhysicalAndVirtual, GpuNativeFileTest,
+    ::testing::Values(
+        FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
+        FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
+        FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
+        FileBacking::kNestedPrivate, FileBacking::kNestedHost,
+        FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
 
-INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeFileProgressTest,
-                         ::testing::Values(FileBacking::kPhysicalHost,
-                                           FileBacking::kVirtualHost,
-                                           FileBacking::kVirtualPrivate,
-                                           FileBacking::kPhysicalRegistered,
-                                           FileBacking::kVirtualRegistered,
-                                           FileBacking::kPhysicalPrivate,
-                                           FileBacking::kNestedPrivate,
-                                           FileBacking::kNestedHost,
-                                           FileBacking::kVirtualMixed));
+INSTANTIATE_TEST_SUITE_P(
+    PhysicalAndVirtual, GpuNativeFileProgressTest,
+    ::testing::Values(
+        FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
+        FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
+        FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
+        FileBacking::kNestedPrivate, FileBacking::kNestedHost,
+        FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
 
-INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeDirectFileTest,
-                         ::testing::Values(FileBacking::kPhysicalHost,
-                                           FileBacking::kVirtualHost,
-                                           FileBacking::kVirtualPrivate,
-                                           FileBacking::kPhysicalRegistered,
-                                           FileBacking::kVirtualRegistered,
-                                           FileBacking::kPhysicalPrivate,
-                                           FileBacking::kNestedPrivate,
-                                           FileBacking::kNestedHost,
-                                           FileBacking::kVirtualMixed));
+INSTANTIATE_TEST_SUITE_P(
+    PhysicalAndVirtual, GpuNativeDirectFileTest,
+    ::testing::Values(
+        FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
+        FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
+        FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
+        FileBacking::kNestedPrivate, FileBacking::kNestedHost,
+        FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
 
 INSTANTIATE_TEST_SUITE_P(RegisteredVirtual, GpuNativeRegisteredFileProgressTest,
                          ::testing::Values(FileBacking::kVirtualRegistered));

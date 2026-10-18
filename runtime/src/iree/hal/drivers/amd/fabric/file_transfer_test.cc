@@ -179,10 +179,14 @@ struct BufferStorage {
   alignas(64) std::array<uint8_t, 256> contents;
   // Mapping information borrowed by the production buffer view.
   iree_hal_amd_fabric_memory_t memory = {};
+  // Prepared physical-view identity, independent of a parent-buffer lookup.
+  iree_hal_buffer_backing_facts_t backing = {};
   // Native dependency providing cache maintenance.
   amdf_api_t api = {};
   // Persistent host execution binding independent of public map grants.
   iree_hal_buffer_native_binding_t binding = {};
+  // Native source suffix consumed by the shared physical-range resolver.
+  iree_hal_amd_fabric_memory_binding_facts_t binding_facts = {};
   // Observed native cache operations.
   std::vector<CacheOperation> cache_operations;
   // Native cache result under test.
@@ -190,6 +194,10 @@ struct BufferStorage {
   // Number of final backing-view releases.
   size_t release_count = 0;
 };
+
+static_assert(offsetof(BufferStorage, binding_facts) ==
+              offsetof(BufferStorage, binding) +
+                  sizeof(iree_hal_buffer_native_binding_t));
 
 class FileTransferTest : public ::testing::TestWithParam<
                              std::tuple<iree_hal_memory_access_t, bool>> {
@@ -249,6 +257,7 @@ class FileTransferTest : public ::testing::TestWithParam<
       iree_hal_amd_fabric_file_transfer_deinitialize(&transfer_);
     }
     iree_hal_buffer_release(buffer_);
+    iree_hal_memory_contract_release(contract_);
     if (file_owned_) {
       iree_hal_file_release(provider_.file());
     }
@@ -290,6 +299,10 @@ class FileTransferTest : public ::testing::TestWithParam<
   BufferStorage storage_;
   // Logical view with no public mapping permissions.
   iree_hal_buffer_t* buffer_ = nullptr;
+  // Optional physical-source contract, borrowed by the buffer until teardown.
+  iree_hal_memory_contract_t* contract_ = nullptr;
+  // Dense host/queue/program scope mapping to the sole native device access.
+  std::array<uint32_t, 4> access_ordinals_ = {};
   // Shared production operation under test.
   iree_hal_amd_fabric_file_transfer_t transfer_ = {};
   // True after operand capture owns references.
@@ -305,6 +318,89 @@ class FileTransferTest : public ::testing::TestWithParam<
   // Exact expected file bytes including unchanged guards.
   std::array<uint8_t, 128> expected_file_;
 };
+
+TEST_P(FileTransferTest, DirectAdmissionUsesAchievedBackingCapabilities) {
+  enum class Route { kHost, kCopy, kUnavailable };
+  struct Case {
+    // Achieved physical storage class, independent of requested placement.
+    amdf_memory_class_t memory_class;
+    // Native qualification of the prepared host mapping.
+    amdf_host_mapping_features_t features;
+    // Expected route for DIRECT; buffered files always use this host view.
+    Route direct_route;
+  };
+  const Case cases[] = {
+      {AMDF_MEMORY_CLASS_SYSTEM, 0, Route::kUnavailable},
+      {AMDF_MEMORY_CLASS_SYSTEM, AMDF_HOST_MAPPING_FEATURE_FILE_IO,
+       Route::kHost},
+      {AMDF_MEMORY_CLASS_LOCAL, 0, Route::kCopy},
+      {AMDF_MEMORY_CLASS_LOCAL, AMDF_HOST_MAPPING_FEATURE_FILE_IO,
+       Route::kHost},
+      {AMDF_MEMORY_CLASS_PRIVATE, 0, Route::kCopy},
+      {AMDF_MEMORY_CLASS_PRIVATE, AMDF_HOST_MAPPING_FEATURE_FILE_IO,
+       Route::kHost},
+  };
+  const uint16_t type = IREE_HAL_BUFFER_INTERFACE_HOST;
+  const iree_hal_buffer_binding_layout_t layout = {
+      .byte_length = sizeof(storage_.binding) + sizeof(storage_.binding_facts),
+      .binding_count = 1,
+      .host_binding_index = 0,
+      .types = &type,
+  };
+  IREE_ASSERT_OK(iree_hal_memory_contract_create(
+      &storage_, access_ordinals_.size(), &layout, iree_allocator_system(),
+      &contract_));
+  contract_->scopes[2].usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  buffer_->memory.contract = contract_;
+  buffer_->memory.backing = &storage_.backing;
+  buffer_->memory.offset = 8 + 16;
+  storage_.binding_facts = {&storage_.memory, access_ordinals_.data()};
+  storage_.memory.host_access =
+      AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+  storage_.api.memory_query_pair_info =
+      +[](const amdf_memory_site_t*, const amdf_memory_site_t*,
+          amdf_memory_pair_info_t* pair) -> amdf_status_t {
+    pair->flags = AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE;
+    pair->release.kind = pair->acquire.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
+    return AMDF_STATUS_OK;
+  };
+  iree_hal_queue_family_t family = {};
+  family.memory.domain = &storage_;
+  family.memory.queue_scope_id = 2;
+  for (const auto& item : cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << item.memory_class << ':' << item.features);
+    storage_.memory.info.memory_class = item.memory_class;
+    storage_.memory.host_features = item.features;
+    ASSERT_NO_FATAL_FAILURE(Initialize());
+    iree_hal_memory_effects_t before, after;
+    iree::Status status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
+        &transfer_, &storage_.api, &family, 0, &before, &after);
+    const Route route = is_direct() ? item.direct_route : Route::kHost;
+    if (route == Route::kUnavailable) {
+      EXPECT_EQ(status.code(), iree::StatusCode::kUnavailable);
+      EXPECT_EQ(transfer_.sources.count, 0u);
+      EXPECT_EQ(transfer_.sources.ranges, nullptr);
+    } else {
+      IREE_ASSERT_OK(status);
+      ASSERT_EQ(transfer_.sources.count, 1u);
+      EXPECT_EQ(transfer_.sources.host_count, route == Route::kHost ? 1u : 0u);
+      const auto& range = transfer_.sources.ranges[0];
+      EXPECT_EQ(range.storage, &storage_.memory);
+      EXPECT_EQ(range.source_offset, kNativeOffset);
+      EXPECT_EQ(range.contents.data_length, kLength);
+      EXPECT_EQ(range.contents.data,
+                route == Route::kHost ? storage_.contents.data() + kNativeOffset
+                                      : nullptr);
+    }
+    EXPECT_EQ(before.bits, 0u);
+    EXPECT_EQ(after.bits, 0u);
+    EXPECT_TRUE(provider_.requests.empty());
+    EXPECT_TRUE(storage_.cache_operations.empty());
+    iree_hal_amd_fabric_file_transfer_deinitialize(&transfer_);
+    initialized_ = false;
+  }
+}
 
 TEST_P(FileTransferTest, PartialTransfersRetainOperandsAndPublishExactRanges) {
   ASSERT_NO_FATAL_FAILURE(Initialize());

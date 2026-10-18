@@ -375,6 +375,8 @@ struct FakeNative {
     uint64_t identity;
     // Native placement captured for owned construction only.
     amdf_memory_placement_t placement;
+    // Achieved physical storage class of the creating scope.
+    amdf_memory_class_t memory_class;
     // Whether the native object borrows application storage.
     bool registered;
     // Native attachments captured in the construction request's order.
@@ -411,6 +413,7 @@ struct FakeNative {
                               info->byte_length,
                               identity,
                               info->placement,
+                              storage->memory_class,
                               info->registered_host_pointer != nullptr,
                               self->created_accesses};
     if (!memory->registered) {
@@ -453,6 +456,7 @@ struct FakeNative {
     auto* memory = reinterpret_cast<Memory*>(handle);
     out_info->byte_length = memory->byte_length;
     out_info->placement = memory->placement;
+    out_info->memory_class = memory->memory_class;
     const uintptr_t pointer = reinterpret_cast<uintptr_t>(memory->data);
     out_info->alignment = memory->registered ? pointer & (~pointer + 1) : 4096;
     out_info->source_byte_offset =
