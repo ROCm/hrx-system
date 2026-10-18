@@ -219,3 +219,31 @@ memory and creates no additional threads. Device-only backing without a host
 execution binding needs an engine-specific copy/staging route and is rejected by
 the direct host path. File and buffer references remain retained through the
 operation; callers still own backing retirement and the device lifetime.
+
+### Registered physical backing
+
+A pool can request `IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO` from the family
+that will perform file transfers, alongside `MAPPING_SOURCE` when the storage
+will back virtual buffers. Construction qualifies native `HOST_FILE_IO` storage
+and the family's existing file proactor. The proactor must support concurrent
+buffer registration so cold page pinning runs on the allocation caller while
+unrelated I/O continues. On Linux, this requires actual `CLONE_BUFFERS` range
+replacement support; the proactor probes it before publication. Missing native
+or proactor support makes this optional pool profile unavailable at construction.
+
+Physical slabs retain their prepared host view and file registration through
+reuse. Virtual aliases preserve the original source binding, and file operations
+consume those retained fixed-buffer spans without pinning the payload again.
+Trim releases the registration before the native storage. Registration requires
+the file to use the captured proactor; a different I/O owner fails admission
+instead of silently registering another view. Physical allocation, registration,
+and I/O failures propagate after the pool has been selected.
+
+Linux exported-host backing also requires the native provider's huge-page
+preparation and `/dev/udmabuf` access, and fixed-buffer registration consumes the
+process's locked-memory allowance. These are optional deployment prerequisites,
+not requirements for ordinary device backing. The native memory documentation
+describes the export limits and supported alias contracts. Registered reads
+avoid repeated page lookup and pinning; buffered files still use the operating
+system's page cache. Direct file I/O additionally requires the file's advertised
+offset, length, and buffer alignment.

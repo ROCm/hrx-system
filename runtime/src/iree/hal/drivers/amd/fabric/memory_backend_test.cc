@@ -36,6 +36,12 @@ TEST_F(MemoryBackendTest, PhysicalSlabsRetainSharedFileRegistrations) {
   IREE_ASSERT_OK(iree_async_proactor_pool_acquire(proactor_pool_, 0, &entry));
   iree_async_proactor_t* proactor =
       iree_async_proactor_pool_entry_proactor(entry);
+  if (!iree_any_bit_set(
+          iree_async_proactor_query_capabilities(proactor),
+          IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+    iree_async_proactor_pool_entry_release(entry);
+    GTEST_SKIP() << "file proactor cannot register from allocation owner";
+  }
   for (auto& backend : backends_) {
     backend.native.io_proactor = proactor;
   }
@@ -104,6 +110,33 @@ TEST_F(MemoryBackendTest, PhysicalSlabsRetainSharedFileRegistrations) {
   EXPECT_EQ(native_.unmap_count, 4);
   EXPECT_EQ(native_.destroy_count, 4);
   iree_async_proactor_pool_entry_release(entry);
+}
+
+TEST_F(MemoryBackendTest, RegisteredIoRequiresConcurrentRegistration) {
+  auto options = iree_async_proactor_options_default();
+  options.allowed_capabilities &=
+      ~IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION;
+  iree_async_proactor_t* proactor = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_create_platform(
+      options, iree_allocator_system(), &proactor));
+  for (auto& backend : backends_) {
+    backend.native.io_proactor = proactor;
+  }
+  native_.file_io_enabled = true;
+  iree_hal_pool_t* pool = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool,
+                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO, 0));
+  EXPECT_EQ(pool, nullptr);
+  EXPECT_EQ(native_.create_count, 0);
+  IREE_EXPECT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool));
+  EXPECT_NE(pool, nullptr);
+  iree_hal_pool_release(pool);
+  for (auto& backend : backends_) {
+    backend.native.io_proactor = nullptr;
+  }
+  iree_async_proactor_release(proactor);
 }
 
 TEST_F(MemoryBackendTest, UnavailableProfilesPreserveAvailableAllocation) {

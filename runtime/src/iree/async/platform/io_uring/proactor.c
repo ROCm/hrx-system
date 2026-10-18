@@ -205,15 +205,6 @@ iree_status_t iree_async_proactor_create_io_uring(
     }
   }
 
-  // Apply the allowed_capabilities mask from options.
-  if (iree_status_is_ok(status)) {
-    proactor->capabilities =
-        proactor->kernel_capabilities & options.allowed_capabilities;
-    if (!proactor->supports_buffer_ring) {
-      proactor->capabilities &= ~IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT;
-    }
-  }
-
   // Create sparse buffer table on 5.19+ kernels for dynamic buffer
   // registration. This pre-allocates an empty table in the kernel so
   // individual slots can be populated later via IORING_REGISTER_BUFFERS_UPDATE.
@@ -241,6 +232,28 @@ iree_status_t iree_async_proactor_create_io_uring(
             "IORING_REGISTER_BUFFERS2 (sparse, capacity=%u) failed (%d)",
             (unsigned)table_capacity, error_number);
       }
+    }
+  }
+
+  // Probe attachment separately from ordinary fixed-buffer registration. A
+  // sparse table alone does not guarantee that another task can prepare pins
+  // without stalling the poll owner. No caller storage has been registered yet.
+  if (iree_status_is_ok(status) && proactor->buffer_table) {
+    bool supports_buffer_clone = false;
+    status = iree_async_proactor_io_uring_probe_buffer_clone(
+        &proactor->ring, &supports_buffer_clone);
+    if (supports_buffer_clone) {
+      proactor->kernel_capabilities |=
+          IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION;
+    }
+  }
+
+  // Apply the allowed_capabilities mask from options.
+  if (iree_status_is_ok(status)) {
+    proactor->capabilities =
+        proactor->kernel_capabilities & options.allowed_capabilities;
+    if (!proactor->supports_buffer_ring) {
+      proactor->capabilities &= ~IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT;
     }
   }
 

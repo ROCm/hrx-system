@@ -12,6 +12,8 @@
 
 #include <errno.h>
 #include <string.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include "iree/async/platform/io_uring/defs.h"
 #include "iree/async/platform/io_uring/uring.h"
@@ -52,6 +54,54 @@ iree_status_t iree_async_proactor_io_uring_probe_buffer_ring(
     return iree_make_status(iree_status_code_from_errno(-result),
                             "provided-buffer ring probe retirement failed: %s",
                             strerror(-result));
+  }
+  *out_supported = true;
+  return iree_ok_status();
+}
+
+iree_status_t iree_async_proactor_io_uring_probe_buffer_clone(
+    iree_io_uring_ring_t* ring, bool* out_supported) {
+  *out_supported = false;
+  // Match the caller-side pin owner: no mapped SQ/CQ or SINGLE_ISSUER binding.
+  iree_io_uring_params_t parameters = {0};
+  int source_fd = 0;
+  do {
+    source_fd = (int)syscall(IREE_IO_URING_SYSCALL_SETUP, 1, &parameters);
+  } while (source_fd < 0 && errno == EINTR);
+  int result = source_fd < 0 ? -errno : 0;
+  iree_io_uring_rsrc_register_t registration = {
+      .nr = 1,
+      .flags = IREE_IORING_RSRC_REGISTER_SPARSE,
+  };
+  if (source_fd >= 0) {
+    do {
+      result = (int)syscall(IREE_IO_URING_SYSCALL_REGISTER, source_fd,
+                            IREE_IORING_REGISTER_BUFFERS2, &registration,
+                            sizeof(registration));
+    } while (result < 0 && errno == EINTR);
+    if (result < 0) {
+      result = -errno;
+    }
+  }
+  if (result >= 0) {
+    iree_io_uring_clone_buffers_t clone = {
+        .src_fd = (uint32_t)source_fd,
+        .flags = IREE_IORING_REGISTER_DST_REPLACE,
+        .nr = 1,
+    };
+    result = iree_io_uring_ring_register(
+        ring, IREE_IORING_REGISTER_CLONE_BUFFERS, &clone, 1);
+  }
+  if (source_fd >= 0) {
+    close(source_fd);
+  }
+  if (result == -EINVAL || result == -ENOSYS || result == -EOPNOTSUPP ||
+      result == -EPERM || result == -EACCES) {
+    return iree_ok_status();
+  }
+  if (result < 0) {
+    return iree_make_status(iree_status_code_from_errno(-result),
+                            "buffer clone probe failed: %s", strerror(-result));
   }
   *out_supported = true;
   return iree_ok_status();

@@ -285,6 +285,7 @@ iree_cc_library(
     ::memory_transition
     ::slab_provider
     amdf::headers
+    iree::async
     iree::base
     iree::base::internal
     iree::base::threading

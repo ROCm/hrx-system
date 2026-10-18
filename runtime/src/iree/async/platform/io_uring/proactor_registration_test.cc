@@ -248,6 +248,11 @@ class FileRegistrationTest
       options.threading_mode = IREE_ASYNC_PROACTOR_THREADING_CROSS_THREAD;
       IREE_ASSERT_OK(iree_async_proactor_create_io_uring(
           options, iree_allocator_system(), &proactor_));
+      if (!iree_any_bit_set(
+              iree_async_proactor_query_capabilities(proactor_),
+              IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+        GTEST_SKIP() << "kernel cannot attach retained pins across owner tasks";
+      }
       IREE_ASSERT_OK(iree_async_proactor_thread_create(
           proactor_, iree_async_proactor_thread_options_default(),
           iree_allocator_system(), &proactor_thread_));
@@ -276,11 +281,6 @@ class FileRegistrationTest
           IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
               IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
           &entry);
-      if (GetParam() == FileRegistrationKind::kHostBufferCrossThread &&
-          iree_status_is_unimplemented(status)) {
-        iree_status_free(status);
-        GTEST_SKIP() << "kernel cannot attach retained pins across owner tasks";
-      }
       IREE_ASSERT_OK(status);
       region_ = entry->region;
       iree_async_region_retain(region_);
@@ -358,7 +358,7 @@ class FileRegistrationTest
     std::condition_variable condition;
     // Set under |mutex| after the terminal result is published.
     bool done = false;
-    // Terminal result consumed after the completion callback has returned.
+    // Terminal result published under |mutex| and consumed by the waiter.
     iree::Status status;
 
     static void Record(void* user_data, iree_async_operation_t*,
@@ -554,6 +554,13 @@ TEST_P(FileRegistrationTest, AcceptedFileWriteRetainsRegistration) {
   ASSERT_EQ(pread(file_->primitive.value.fd, actual.data(), actual.size(), 0),
             actual.size());
   EXPECT_EQ(actual, expected);
+
+  // Regions remain retained through the callback. Observing its result from
+  // another task does not join the subsequent release. A new operation on the
+  // same poll owner proves the prior callback and its cleanup have finished.
+  iree_async_nop_operation_t retirement = {};
+  retirement.base.type = IREE_ASYNC_OPERATION_TYPE_NOP;
+  ASSERT_NO_FATAL_FAILURE(Run(&retirement.base));
 
   // Terminal retirement returns the exact fixed-table range for reuse.
   iree_async_buffer_registration_entry_t* entry = nullptr;

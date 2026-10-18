@@ -363,6 +363,15 @@ enum iree_async_proactor_capability_bits_e {
   //   n/a     | n/a      | Win 8.1+ | n/a
   IREE_ASYNC_PROACTOR_CAPABILITY_WAIT_COMPLETION_PACKET = 1u << 10,
 
+  // Supports register_buffer from a caller other than the active polling task.
+  // Page pinning, when required, runs on that caller; only attaching retained
+  // pins may require a synchronous handoff to the polling task. The caller
+  // still serializes access to its registration state and retains the memory.
+  // Absence does not prevent registration before polling or on the poll owner.
+  // io_uring probes CLONE_BUFFERS range replacement; metadata-only backends
+  // support this without a native registration handoff.
+  IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION = 1u << 11,
+
   // All capabilities enabled (for allowed_capabilities default).
   IREE_ASYNC_PROACTOR_CAPABILITY_ALL = ~0u,
 };
@@ -1135,7 +1144,8 @@ void iree_async_cancel_request_complete(iree_async_cancel_request_t* request);
 // This is cold, synchronous setup and may block while pinning pages. io_uring
 // pins on the caller; a different bound polling owner only attaches the
 // retained pins. That cross-thread path requires kernel CLONE_BUFFERS range
-// replacement and fails with UNIMPLEMENTED when unavailable. Registering before
+// replacement, reported by CONCURRENT_BUFFER_REGISTRATION, and fails with
+// UNIMPLEMENTED when unavailable. Registering before
 // polling starts, or from the polling task itself, uses ordinary buffer
 // registration. Registration does not guarantee zero-copy I/O: buffered files
 // still use the OS page cache.

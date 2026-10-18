@@ -306,6 +306,12 @@ iree_status_t iree_async_proactor_io_uring_detect_capabilities(
 iree_status_t iree_async_proactor_io_uring_probe_buffer_ring(
     iree_io_uring_ring_t* ring, void* probe_page, bool* out_supported);
 
+// Probes retained-pin attachment before publication. The destination already
+// has an empty sparse buffer table. Replacing one empty slot pins no pages and
+// leaves the table empty, including when the optional operation is unavailable.
+iree_status_t iree_async_proactor_io_uring_probe_buffer_clone(
+    iree_io_uring_ring_t* ring, bool* out_supported);
+
 // Buffer registration vtable implementations (in proactor_registration.c).
 iree_status_t iree_async_proactor_io_uring_register_buffer(
     iree_async_proactor_t* proactor,

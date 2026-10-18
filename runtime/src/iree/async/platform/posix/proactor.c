@@ -193,6 +193,7 @@ iree_status_t iree_async_proactor_create_posix_with_backend(
   iree_async_proactor_capabilities_t supported_capabilities =
       IREE_ASYNC_PROACTOR_CAPABILITY_LINKED_OPERATIONS |
       IREE_ASYNC_PROACTOR_CAPABILITY_REGISTERED_BUFFERS |
+      IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION |
       IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT |
       IREE_ASYNC_PROACTOR_CAPABILITY_DEVICE_FENCE;
   proactor->capabilities =

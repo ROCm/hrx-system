@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 
+#include "iree/async/proactor.h"
 #include "iree/base/internal/math.h"
 #include "iree/hal/device_group.h"
 #include "iree/hal/drivers/amd/fabric/asan.h"
@@ -1314,7 +1315,11 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       }
       if (requested->interfaces &
           (UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO)) {
-        if (!backend->native.io_proactor) {
+        if (!backend->native.io_proactor ||
+            !iree_any_bit_set(
+                iree_async_proactor_query_capabilities(
+                    backend->native.io_proactor),
+                IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
           supported = false;
           break;
         }

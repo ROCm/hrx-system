@@ -197,12 +197,11 @@ class IoUringCapabilityDeathTest : public ::testing::Test {
   }
 
   template <typename Fn>
-  void Run(Fn function, int error_number = EINVAL,
-           bool restrict_setup = false) {
+  void Run(Fn function, int error_number = EINVAL, bool restrict_setup = false,
+           uint32_t opcode = IREE_IORING_REGISTER_PBUF_RING) {
     ASSERT_EXIT(
         {
-          RestrictIoUring(restrict_setup, IREE_IORING_REGISTER_PBUF_RING,
-                          error_number);
+          RestrictIoUring(restrict_setup, opcode, error_number);
           function();
           _exit(::testing::Test::HasFailure() ? 1 : 0);
         },
@@ -220,6 +219,49 @@ TEST_F(IoUringCapabilityDeathTest, UnavailableSetupUsesPortableBackend) {
   for (int error_number : {ENOSYS, EPERM}) {
     Run([] { ReceiveHarness(false).RoundTrip(); }, error_number, true);
   }
+}
+
+TEST_F(IoUringCapabilityDeathTest,
+       UnavailableBufferClonePreservesOrdinaryRegistration) {
+  for (int error_number : {EINVAL, ENOSYS, EOPNOTSUPP, EPERM, EACCES}) {
+    Run(
+        [] {
+          iree_async_proactor_t* proactor = nullptr;
+          IREE_CHECK_OK(iree_async_proactor_create_io_uring(
+              iree_async_proactor_options_default(), iree_allocator_system(),
+              &proactor));
+          EXPECT_FALSE(iree_any_bit_set(
+              iree_async_proactor_query_capabilities(proactor),
+              IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION));
+          std::array<uint8_t, 4096> storage = {};
+          iree_async_buffer_registration_state_t state = {};
+          iree_async_buffer_registration_entry_t* entry = nullptr;
+          IREE_CHECK_OK(iree_async_proactor_register_buffer(
+              proactor, &state,
+              iree_make_byte_span(storage.data(), storage.size()),
+              IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+                  IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+              &entry));
+          EXPECT_EQ(entry->region->handles.iouring.base_buffer_index, 0);
+          iree_async_buffer_registration_state_deinitialize(&state);
+          iree_async_proactor_release(proactor);
+        },
+        error_number, false, IREE_IORING_REGISTER_CLONE_BUFFERS);
+  }
+}
+
+TEST_F(IoUringCapabilityDeathTest, BufferCloneResourceFailurePropagates) {
+  Run(
+      [] {
+        iree_async_proactor_t* proactor = nullptr;
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              iree_async_proactor_create_platform(
+                                  iree_async_proactor_options_default(),
+                                  iree_allocator_system(), &proactor));
+        EXPECT_EQ(proactor, nullptr);
+        iree_async_proactor_release(proactor);
+      },
+      ENOMEM, false, IREE_IORING_REGISTER_CLONE_BUFFERS);
 }
 
 TEST_F(IoUringCapabilityDeathTest, UnexpectedProbeFailureIsNotDowngraded) {
