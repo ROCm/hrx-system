@@ -471,10 +471,14 @@ static iree_status_t loom_rewriter_update_cfg_block_facts(
       if (iree_status_is_ok(status)) {
         status = loom_rewriter_publish_cfg_control_changes(rewriter, structure);
       }
-      structure->control_flow
-          .dirty[structure->graph.blocks[block_index].component] = false;
+      iree_bitmap_reset(structure->control_flow.dirty,
+                        structure->graph.blocks[block_index].component);
       return status;
     }
+  }
+  if (loom_cfg_graph_block_is_reachable(&structure->graph, block_index)) {
+    iree_bitmap_reset(structure->control_flow.dirty,
+                      structure->graph.blocks[block_index].component);
   }
   return loom_value_fact_table_update_cfg_block_args(
       rewriter->fact_table, rewriter->module, structure, block_index,
@@ -586,9 +590,9 @@ static iree_status_t loom_rewriter_refresh_cfg_block_facts(
         if (old_indices[i] != IREE_HOST_SIZE_MAX &&
             old_structure->control_flow.components.count &&
             old_structure->graph.blocks[old_indices[i]].reachable) {
-          was_dirty =
-              old_structure->control_flow
-                  .dirty[old_structure->graph.blocks[old_indices[i]].component];
+          was_dirty = iree_bitmap_test(
+              old_structure->control_flow.dirty,
+              old_structure->graph.blocks[old_indices[i]].component);
         }
         if (!was_dirty && old_indices[i] != IREE_HOST_SIZE_MAX &&
             loom_rewriter_cfg_predecessors_equal(old_structure, old_indices[i],
@@ -659,7 +663,7 @@ static iree_status_t loom_rewriter_update_successor_facts(
     const iree_host_size_t component_index =
         structure->graph.blocks[block_index].component;
     if (structure->control_flow.anchors[component_index] == op &&
-        structure->control_flow.dirty[component_index]) {
+        iree_bitmap_test(structure->control_flow.dirty, component_index)) {
       IREE_RETURN_IF_ERROR(loom_rewriter_update_cfg_block_facts(
           rewriter, structure, block_index));
     }
@@ -671,14 +675,12 @@ static iree_status_t loom_rewriter_update_successor_facts(
   if (!successor->arg_count) {
     return iree_ok_status();
   }
-  if (structure->control_flow.components.count &&
-      structure->graph.blocks[successor->region_index].reachable) {
-    iree_host_size_t component_index =
-        structure->graph.blocks[successor->region_index].component;
-    if (structure->control_flow.components.values[component_index].is_cycle &&
-        !structure->control_flow.dirty[component_index]) {
-      return iree_ok_status();
-    }
+  const loom_cfg_block_info_t* successor_info =
+      &structure->graph.blocks[successor->region_index];
+  if (!successor_info->reachable ||
+      !iree_bitmap_test(structure->control_flow.dirty,
+                        successor_info->component)) {
+    return iree_ok_status();
   }
   return loom_rewriter_update_cfg_block_facts(rewriter, structure,
                                               successor->region_index);
@@ -977,14 +979,15 @@ iree_status_t loom_rewriter_add_to_worklist(loom_rewriter_t* rewriter,
 }
 
 static iree_status_t loom_rewriter_add_cfg_summary_to_worklist(
-    loom_rewriter_t* rewriter, const loom_block_t* block) {
+    loom_rewriter_t* rewriter, const loom_block_t* block,
+    bool arguments_changed) {
   if (!rewriter->fact_table || !block || !block->parent_region) {
     return iree_ok_status();
   }
   const loom_value_fact_cfg_region_t* structure =
       loom_value_fact_table_lookup_cfg_region(rewriter->fact_table,
                                               block->parent_region);
-  if (!structure || !structure->control_flow.components.count) {
+  if (!structure) {
     return iree_ok_status();
   }
   iree_host_size_t block_index =
@@ -995,9 +998,17 @@ static iree_status_t loom_rewriter_add_cfg_summary_to_worklist(
   }
   iree_host_size_t component_index =
       structure->graph.blocks[block_index].component;
+  if (!structure->graph.blocks[block_index].component_is_cyclic) {
+    // Incoming terminators are already queued by the mutation or control
+    // publication. Their first visit rejoins all inputs; the rest reuse it.
+    if (arguments_changed && block->arg_count) {
+      iree_bitmap_set(structure->control_flow.dirty, component_index);
+    }
+    return iree_ok_status();
+  }
   loom_op_t* anchor = structure->control_flow.anchors[component_index];
   if (anchor) {
-    structure->control_flow.dirty[component_index] = true;
+    iree_bitmap_set(structure->control_flow.dirty, component_index);
     IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, anchor));
   }
   return iree_ok_status();
@@ -1045,7 +1056,7 @@ static iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
        parent = parent->parent_op) {
     if (has_cfg_facts) {
       IREE_RETURN_IF_ERROR(loom_rewriter_add_cfg_summary_to_worklist(
-          rewriter, parent->parent_block));
+          rewriter, parent->parent_block, /*arguments_changed=*/false));
     }
     const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, parent);
     if (loom_rewriter_op_summarizes_nested_regions(vtable)) {
@@ -1067,11 +1078,11 @@ static iree_status_t loom_rewriter_add_summary_ops_to_worklist(
         loom_rewriter_op_summarizes_nested_regions(vtable) ||
         iree_any_bit_set(op->traits, LOOM_TRAIT_TERMINATOR)) {
       IREE_RETURN_IF_ERROR(loom_rewriter_add_cfg_summary_to_worklist(
-          rewriter, op->parent_block));
+          rewriter, op->parent_block, /*arguments_changed=*/false));
     }
     for (uint8_t i = 0; i < op->successor_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_rewriter_add_cfg_summary_to_worklist(
-          rewriter, loom_op_successors(op)[i]));
+          rewriter, loom_op_successors(op)[i], /*arguments_changed=*/true));
     }
   }
   return loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, op);
