@@ -6,9 +6,9 @@ func.def @qwen38_vision_root(%value: i32) -> (i32) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
-  %zero = scalar.constant 0 : i32
+  %c0_i32 = scalar.constant 0 : i32
   %high_bit = scalar.constant 128 : i32
-  %root = scf.for %step = [%c0 to %c8 step %c1](%root = %zero : i32) -> (i32) {
+  %root = scf.for %step = [%c0 to %c8 step %c1](%root = %c0_i32 : i32) -> (i32) {
     %shift = index.cast %step : index to i32
     %bit = scalar.shrui %high_bit, %shift : i32
     %candidate = scalar.ori %root, %bit : i32
@@ -23,14 +23,14 @@ func.def @qwen38_vision_root(%value: i32) -> (i32) {
 func.def @qwen38_vision_nearest_tiles(%pixels: i32) -> (i32) {
   %tile = scalar.constant 32 : i32
   %half = scalar.constant 16 : i32
-  %one = scalar.constant 1 : i32
-  %zero = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c0_i32 = scalar.constant 0 : i32
   %whole = scalar.divui %pixels, %tile : i32
   %remainder = scalar.remui %pixels, %tile : i32
   %above = scalar.cmpi ugt, %remainder, %half : i32
   %tie = scalar.cmpi eq, %remainder, %half : i32
-  %low_bit = scalar.andi %whole, %one : i32
-  %odd = scalar.cmpi ne, %low_bit, %zero : i32
+  %low_bit = scalar.andi %whole, %c1_i32 : i32
+  %odd = scalar.cmpi ne, %low_bit, %c0_i32 : i32
   %odd_tie = scalar.andi %tie, %odd : i1
   %round_up = scalar.ori %above, %odd_tie : i1
   %increment = scalar.extui %round_up : i1 to i32
@@ -40,14 +40,14 @@ func.def @qwen38_vision_nearest_tiles(%pixels: i32) -> (i32) {
 
 func.def @qwen38_vision_minimum_tiles(%axis: i32, %other: i32) -> (i32) {
   %minimum = scalar.constant 64 : i32
-  %one = scalar.constant 1 : i32
+  %c1_i32 = scalar.constant 1 : i32
   %numerator = scalar.muli %minimum, %axis : i32
   %quotient = scalar.divui %numerator, %other : i32
   %floor = func.call @qwen38_vision_root(%quotient) : (i32) -> (i32)
   %square = scalar.muli %floor, %floor : i32
   %represented = scalar.muli %square, %other : i32
   %exact = scalar.cmpi eq, %represented, %numerator : i32
-  %ceil = scalar.addi %floor, %one : i32
+  %ceil = scalar.addi %floor, %c1_i32 : i32
   %result = scf.select %exact, %floor, %ceil : i32
   func.return %result : i32
 }
@@ -62,7 +62,7 @@ func.def public @qwen38_vision_geometry(%width: i32, %height: i32, %maximum_toke
   %rounded_height = func.call @qwen38_vision_nearest_tiles(%height) : (i32) -> (i32)
   %rounded_tokens = scalar.muli %rounded_width, %rounded_height : i32
   %minimum_tokens = scalar.constant 64 : i32
-  %one = scalar.constant 1 : i32
+  %c1_i32 = scalar.constant 1 : i32
   %maximum_axis = scalar.constant 128 : i32
   %too_large = scalar.cmpi ugt, %rounded_tokens, %maximum_tokens : i32
   %columns, %rows = scf.if %too_large -> (i32, i32) {
@@ -82,8 +82,8 @@ func.def public @qwen38_vision_geometry(%width: i32, %height: i32, %maximum_toke
     %capped_height = scalar.minui %height_root, %maximum_axis : i32
     %selected_width = scf.select %height_exceeds, %height_limited_width, %capped_width : i32
     %selected_height = scf.select %width_exceeds, %width_limited_height, %capped_height : i32
-    %result_width = scalar.maxui %selected_width, %one : i32
-    %result_height = scalar.maxui %selected_height, %one : i32
+    %result_width = scalar.maxui %selected_width, %c1_i32 : i32
+    %result_height = scalar.maxui %selected_height, %c1_i32 : i32
     scf.yield %result_width, %result_height : i32, i32
   } else {
     %too_small = scalar.cmpi ult, %rounded_tokens, %minimum_tokens : i32
