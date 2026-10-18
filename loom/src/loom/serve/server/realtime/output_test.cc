@@ -8,19 +8,20 @@
 
 #include <algorithm>
 #include <string>
+#include <tuple>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
 
-class OutputTest : public ::testing::TestWithParam<bool> {
+class OutputTest : public ::testing::TestWithParam<std::tuple<bool, bool>> {
  protected:
   void SetUp() override {
     loom_serve_realtime_conversation_initialize(7, iree_allocator_system(),
                                                 &conversation_);
-    IREE_ASSERT_OK(
-        loom_serve_realtime_conversation_begin(&conversation_, &group_));
+    IREE_ASSERT_OK(loom_serve_realtime_conversation_begin(
+        &conversation_, std::get<1>(GetParam()), &group_));
     for (int i = 0; i < 2; ++i) {
       loom_serve_realtime_item_t* item = nullptr;
       IREE_ASSERT_OK(loom_serve_realtime_conversation_add(
@@ -32,6 +33,7 @@ class OutputTest : public ::testing::TestWithParam<bool> {
     }
     view_ = {
         .id = IREE_SV("resp_7_1"),
+        .conversation_id = std::get<1>(GetParam()) ? 0u : 7u,
         .first = group_->first,
         .last = group_->last,
         .metadata = IREE_SV("{\"purpose\":\"lookup\"}"),
@@ -72,8 +74,8 @@ class OutputTest : public ::testing::TestWithParam<bool> {
 TEST_P(OutputTest, AggregateEscapedBytesEstablishTheExecutableBoundary) {
   // Both call objects are independently small enough; the final aggregate is
   // the binding limit. Arguments remain valid JSON, including escaped slashes.
-  const std::string unit = GetParam() ? "\\\\" : "a";
-  const size_t encoded_width = GetParam() ? 4 : 1;
+  const std::string unit = std::get<0>(GetParam()) ? "\\\\" : "a";
+  const size_t encoded_width = std::get<0>(GetParam()) ? 4 : 1;
   Append(group_->last, std::string(128 * 1024, 'a') + "\"}");
   const size_t base =
       std::max({Measure(LOOM_SERVE_REALTIME_OUTPUT_COMPLETED),
@@ -107,6 +109,8 @@ TEST_P(OutputTest, AggregateEscapedBytesEstablishTheExecutableBoundary) {
   EXPECT_EQ(group_->completed_calls, 0);
 }
 
-INSTANTIATE_TEST_SUITE_P(Arguments, OutputTest, ::testing::Bool());
+INSTANTIATE_TEST_SUITE_P(Arguments, OutputTest,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
 
 }  // namespace

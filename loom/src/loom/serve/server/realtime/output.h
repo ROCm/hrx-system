@@ -28,6 +28,8 @@ typedef enum loom_serve_realtime_output_state_e {
 typedef struct loom_serve_realtime_output_t {
   // Borrowed stable response identity.
   iree_string_view_t id;
+  // Default conversation namespace, or zero for independent output.
+  uint64_t conversation_id;
   // First output member, or NULL for a response with no announced output.
   const loom_serve_realtime_item_t* first;
   // Last announced member; later reserved members are not visible on the wire.
