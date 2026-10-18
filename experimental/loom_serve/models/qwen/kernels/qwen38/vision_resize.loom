@@ -20,7 +20,7 @@ kernel.def target(@qwen38_resize_wave32) @qwen38_vision_resize(%groups_x: index,
   %c15 = index.constant 15 : index
   %c16 = index.constant 16 : index
   %c32 = index.constant 32 : index
-  %zero = scalar.constant 0.0 : f32
+  %c0_f32 = scalar.constant 0.0 : f32
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %header = buffer.view %input_noalias[%packet_offset] : buffer -> view<16xi32>
   %source_height_word = view.load %header[0] : view<16xi32> -> i32
@@ -143,7 +143,7 @@ kernel.def target(@qwen38_resize_wave32) @qwen38_vision_resize(%groups_x: index,
   %accumulators = buffer.view %accumulator_buffer[%origin] : buffer -> view<2x3xf32>
   scf.for %pixel = [%c0 to %c2 step %c1] unroll {
     scf.for %channel = [%c0 to %c3 step %c1] unroll {
-      view.store %zero, %accumulators[%pixel, %channel] : f32, view<2x3xf32>
+      view.store %c0_f32, %accumulators[%pixel, %channel] : f32, view<2x3xf32>
     }
   }
 
@@ -163,7 +163,7 @@ kernel.def target(@qwen38_resize_wave32) @qwen38_vision_resize(%groups_x: index,
       %end0 = index.cast %end_word : i32 to index
       %begin = index.assume %begin0 [ge(%begin0, 0), lt(%begin0, %horizontal_count)] : index
       %end = index.assume %end0 [ge(%end0, 1), le(%end0, %horizontal_count)] : index
-      %red_sum, %green_sum, %blue_sum = scf.for %tap = [%begin to %end step %c1](%r = %zero : f32, %g = %zero : f32, %b = %zero : f32) -> (f32, f32, f32) {
+      %red_sum, %green_sum, %blue_sum = scf.for %tap = [%begin to %end step %c1](%r = %c0_f32 : f32, %g = %c0_f32 : f32, %b = %c0_f32 : f32) -> (f32, f32, f32) {
         %relative = index.sub %tap, %begin : index
         %source_x = index.add %start, %relative : index
         %source_x_i32 = index.cast %source_x : index to i32
@@ -224,7 +224,7 @@ kernel.def target(@qwen38_resize_wave32) @qwen38_vision_resize(%groups_x: index,
       }
       scf.yield %red_sum, %green_sum, %blue_sum : f32, f32, f32
     } else {
-      scf.yield %zero, %zero, %zero : f32, f32, f32
+      scf.yield %c0_f32, %c0_f32, %c0_f32 : f32, f32, f32
     }
     view.store %red, %panel[%source_lane, %column, 0] : f32, view<8x32x3xf32>
     view.store %green, %panel[%source_lane, %column, 1] : f32, view<8x32x3xf32>
@@ -280,7 +280,7 @@ kernel.def target(@qwen38_resize_wave32) @qwen38_vision_resize(%groups_x: index,
         %value = view.load %accumulators[%pixel, %channel] : view<2x3xf32> -> f32
         %rounded = scalar.roundevenf %value : f32
         %maximum = scalar.constant 255.0 : f32
-        %clamped_low = scalar.maxnumf %rounded, %zero : f32
+        %clamped_low = scalar.maxnumf %rounded, %c0_f32 : f32
         %clamped = scalar.minnumf %clamped_low, %maximum : f32
         %integer = scalar.fptoui %clamped : f32 to i32
         %byte = scalar.trunci %integer : i32 to i8

@@ -664,8 +664,8 @@ kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_attention_output() {
         %loaded = vector.load %context_view[%global_input_row, %global_input_column] : view<[%rows]x1152xf16> -> vector<4xf16>
         scf.yield %loaded : vector<4xf16>
       } else {
-        %zero = vector.constant 0.0 : vector<4xf16>
-        scf.yield %zero : vector<4xf16>
+        %padding = vector.constant 0.0 : vector<4xf16>
+        scf.yield %padding : vector<4xf16>
       }
       vector.store %input_values, %input_stage_view[%input_stage_row, %input_stage_column] : vector<4xf16>, view<64x64xf16>
     }
