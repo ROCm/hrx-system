@@ -92,9 +92,12 @@ static iree_status_t loom_run_hal_runtime_create_pools(
     iree_hal_tlsf_pool_options_t device_options = {
         .tlsf_options =
             {
-                // This is the smallest ordinary backing range. Every larger
-                // request gets dedicated backing sized from that request.
-                .range_length = pool_alignment,
+                // Share ordinary buffers within a modest backing slab. Native
+                // allocation granularity can be much larger than each buffer;
+                // dedicating every small request would amplify ASAN quarantine
+                // retention by that granularity. Larger requests stay
+                // dedicated.
+                .range_length = iree_max(pool_alignment, 1024u * 1024u),
                 .alignment = pool_alignment,
             },
         .trace_name = IREE_SV("loom.device"),
