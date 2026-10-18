@@ -611,6 +611,12 @@ Failed audio has no model-visible transcript. Cancellation reports reason
 transport, or checkpoint capture still end the affected session; other sessions
 and deployments remain independent.
 
+Cancelling a response that is no longer active returns an `error` with code
+`response_cancel_not_active` and the command's `event_id`, when supplied. This
+includes cancellation racing with completion or automatic interruption. The
+session and other responses remain usable. Malformed cancellation commands
+retain their ordinary validation errors.
+
 Each received message is at most 512 KiB. Receive storage retains at most 64
 records and 1 MiB of allocations, including worker-borrowed messages. Up to four
 input items can remain live, including cancelled work awaiting retirement.
