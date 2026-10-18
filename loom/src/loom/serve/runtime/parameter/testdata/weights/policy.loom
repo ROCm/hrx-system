@@ -5,6 +5,8 @@ global.rodata.def @add7 = bytes("61646437")
 
 global.rodata.def @absent = bytes("616273656e745f636f6d6d616e64")
 
+global.rodata.def @wide = bytes("6164645f77696465")
+
 global.rodata.def @unchanged = bytes("")
 
 func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
@@ -38,8 +40,17 @@ func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
           %bytes = scalar.constant 32 : i64
           scf.yield %root, %bytes : buffer, i64
         } else {
-          %root = global.load @unchanged : buffer
-          %bytes = scalar.constant 0 : i64
+          %w = scalar.constant 119 : i32
+          %is_wide = scalar.cmpi eq, %letter, %w : i32
+          %root, %bytes = scf.if %is_wide -> (buffer, i64) {
+            %root = global.load @wide : buffer
+            %bytes = scalar.constant 2097184 : i64
+            scf.yield %root, %bytes : buffer, i64
+          } else {
+            %root = global.load @unchanged : buffer
+            %bytes = scalar.constant 0 : i64
+            scf.yield %root, %bytes : buffer, i64
+          }
           scf.yield %root, %bytes : buffer, i64
         }
         scf.yield %root, %bytes : buffer, i64

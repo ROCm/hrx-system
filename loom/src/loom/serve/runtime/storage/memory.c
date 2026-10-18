@@ -376,6 +376,11 @@ uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool) {
   return pool->limit_bytes;
 }
 
+iree_device_size_t loom_serve_memory_pool_slab_size(
+    const loom_serve_memory_pool_t* pool) {
+  return pool->slab_size;
+}
+
 iree_status_t loom_serve_memory_pool_query_status(
     loom_serve_memory_pool_t* pool) {
   loom_serve_memory_pool_collect(pool);

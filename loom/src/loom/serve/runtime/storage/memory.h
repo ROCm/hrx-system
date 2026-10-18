@@ -71,6 +71,11 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 // This is the configured budget, not currently available backing.
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool);
 
+// Immutable physical commitment granularity in bytes. Reservations and queued
+// mappings use this same geometry.
+iree_device_size_t loom_serve_memory_pool_slab_size(
+    const loom_serve_memory_pool_t* pool);
+
 // Clones a shared capacity-observation or reclamation failure, or returns OK.
 // Those failures apply to the shared domain; the serialized owner stops new
 // work and drains consumers before cleanup. Individual allocation, mapping,

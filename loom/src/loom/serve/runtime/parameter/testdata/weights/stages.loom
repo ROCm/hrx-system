@@ -1,10 +1,10 @@
 kernel.def @add() {
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c1, %c1) : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer, %delta: i32) {
   %c0 = index.constant 0 : offset
-  %element = kernel.workitem.id<x> : index
+  %element = kernel.workgroup.id<x> : index
   %view = buffer.view %storage[%c0] : buffer -> view<8xi32>
   %value = view.load %view[%element] : view<8xi32> -> i32
   %next = scalar.addi %value, %delta : i32
@@ -27,10 +27,10 @@ command.program.def public @add7() launch(%storage: buffer) {
 kernel.def @consume() {
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c1, %c1) : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%a: view<8xi32>, %b: view<8xi32>, %raw: view<8xi32>, %output: buffer) {
   %c0 = index.constant 0 : offset
-  %element = kernel.workitem.id<x> : index
+  %element = kernel.workgroup.id<x> : index
   %output_view = buffer.view %output[%c0] : buffer -> view<8xi32>
   %av = view.load %a[%element] : view<8xi32> -> i32
   // An authored check requires device feedback without sanitizer insertion.
@@ -96,5 +96,73 @@ command.program.def public @partial() launch(%weights: buffer, %output: buffer) 
   %b = command.parameter %weights, "b" : view<8xi32>
   %missing = command.parameter %weights, "unavailable" : view<8xi32>
   kernel.launch @consume(%a, %b, %missing, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+// The tensor crosses a physical slab boundary after an aligned small prefix.
+kernel.def @add_wide_kernel() {
+  %groups = index.constant 8193 : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %c0 = index.constant 0 : offset
+  %c64 = index.constant 64 : index
+  %count = index.constant 524296 : index
+  %group = kernel.workgroup.id<x> : index
+  %first = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.mul %group, %c64 : index
+  %view = buffer.view %storage[%c0] : buffer -> view<524296xi32>
+  scf.for %local = [%first to %c64 step %step] {
+    %element = index.add %base, %local : index
+    %valid = index.cmp ult, %element, %count : index
+    scf.if %valid {
+      %value = view.load %view[%element] : view<524296xi32> -> i32
+      %delta = scalar.constant 5 : i32
+      %next = scalar.addi %value, %delta : i32
+      view.store %next, %view[%element] : i32, view<524296xi32>
+    }
+  }
+  kernel.return
+}
+
+command.program.def public @add_wide() launch(%storage: buffer) {
+  kernel.launch @add_wide_kernel(%storage) : (buffer)
+  command.return
+}
+
+kernel.def @consume_wide() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%a: view<8xi32>, %wide: view<524296xi32>, %b: view<8xi32>, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %tail = index.constant 524288 : index
+  %element = kernel.workgroup.id<x> : index
+  %wide_element = index.add %tail, %element : index
+  %av = view.load %a[%element] : view<8xi32> -> i32
+  %wv = view.load %wide[%wide_element] : view<524296xi32> -> i32
+  %bv = view.load %b[%element] : view<8xi32> -> i32
+  %aw = scalar.addi %av, %wv : i32
+  %sum = scalar.addi %aw, %bv : i32
+  %output_view = buffer.view %output[%c0] : buffer -> view<8xi32>
+  view.store %sum, %output_view[%element] : i32, view<8xi32>
+  kernel.return
+}
+
+command.program.def public @windowed() launch(%weights: buffer, %output: buffer) {
+  %a = command.parameter %weights, "a" : view<8xi32>
+  %wide = command.parameter %weights, "wide" : view<524296xi32>
+  %b = command.parameter %weights, "b" : view<8xi32>
+  kernel.launch @consume_wide(%a, %wide, %b, %output) : (view<8xi32>, view<524296xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.program.def public @windowed_partial() launch(%weights: buffer, %output: buffer) {
+  %a = command.parameter %weights, "a" : view<8xi32>
+  %wide = command.parameter %weights, "wide" : view<524296xi32>
+  %missing = command.parameter %weights, "unavailable" : view<8xi32>
+  kernel.launch @consume_wide(%a, %wide, %missing, %output) : (view<8xi32>, view<524296xi32>, view<8xi32>, buffer)
   command.return
 }

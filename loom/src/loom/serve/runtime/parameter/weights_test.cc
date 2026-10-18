@@ -28,6 +28,7 @@
 #include "loom/serve/testing/native_allocator.h"
 
 IREE_FLAG(string, weight_sources, "", "Weight loader source catalog.");
+IREE_FLAG(string, weight_device_uri, "", "Override the device leaf URI.");
 
 namespace {
 
@@ -285,7 +286,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
       const bool elastic = i != 0;
       const loom_serve_device_options_t options = {
           .driver = driver,
-          .uri = IREE_SV("amdgpu:?feedback"),
+          .uri = FLAG_weight_device_uri[0]
+                     ? iree_make_cstring_view(FLAG_weight_device_uri)
+                     : loom_serve_test_device()->device_uri,
           .backing = elastic ? LOOM_SERVE_DEVICE_BACKING_ELASTIC
                              : LOOM_SERVE_DEVICE_BACKING_FIXED,
           .slab_size = kSlabBytes,
@@ -337,6 +340,62 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     }
     file.close();
     ASSERT_TRUE(file.good());
+  }
+
+  void WriteWindowedCheckpoint() {
+    constexpr size_t kElements = 524296;
+    const std::string header =
+        "{\"a\":{\"dtype\":\"I32\",\"shape\":[8],\"data_offsets\":[0,32]},"
+        "\"wide\":{\"dtype\":\"I32\",\"shape\":[524296],"
+        "\"data_offsets\":[32,2097216]},"
+        "\"b\":{\"dtype\":\"I32\",\"shape\":[8],"
+        "\"data_offsets\":[2097216,2097248]}}";
+    std::vector<int32_t> values(8 + kElements + 8);
+    for (size_t i = 0; i < 8; ++i) {
+      values[i] = 10 + i;
+      values[8 + kElements + i] = 20 + i;
+    }
+    for (size_t i = 0; i < kElements; ++i) {
+      values[8 + i] = 1000 + i;
+    }
+    std::ofstream file(path_.path(), std::ios::binary);
+    for (unsigned i = 0; i < 8; ++i) {
+      file.put(
+          static_cast<char>(static_cast<uint64_t>(header.size()) >> (8 * i)));
+    }
+    file.write(header.data(), header.size());
+    file.write(reinterpret_cast<const char*>(values.data()),
+               values.size() * sizeof(int32_t));
+    file.close();
+    ASSERT_TRUE(file.good());
+  }
+
+  void VerifyWindowedStorage() {
+    const auto* program = loom_serve_jit_stage_program(compiled_[0]);
+    std::vector<int32_t> values(524296);
+    for (uint32_t i = 0; i < program->parameters.count; ++i) {
+      const auto parameter = loom_cmd_program_parameter_at(program, i);
+      const iree_hal_transfer_operation_t download = {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+          .download = {.source_buffer = buffers_[0][0],
+                       .source_offset = parameter.byte_offset,
+                       .target = values.data(),
+                       .length = parameter.byte_length},
+      };
+      uint64_t completion = 0;
+      IREE_ASSERT_OK(
+          loom_serve_execution_feedback(execution_, 1, &download, &completion));
+      IREE_ASSERT_OK(
+          loom_serve_execution_feedback_wait(execution_, completion));
+      const int32_t base =
+          iree_string_view_equal(parameter.key, IREE_SV("a"))   ? 13
+          : iree_string_view_equal(parameter.key, IREE_SV("b")) ? 27
+                                                                : 1005;
+      for (size_t j = 0; j < parameter.byte_length / sizeof(int32_t); ++j) {
+        ASSERT_EQ(values[j], base + static_cast<int32_t>(j))
+            << "parameter " << i << " element " << j;
+      }
+    }
   }
 
   void SetUp() override {
@@ -650,6 +709,71 @@ TEST_P(WeightsTest, MultiplePreparersAndSharedRootsPrepareEachTensorOnce) {
   Run(0, 70);
   Run(1, 70);
   Run(2, 93);
+}
+
+class WindowedWeightsTest : public WeightsTest {};
+
+TEST_P(WindowedWeightsTest,
+       CrossSlabTensorPreparesOnceAndReloadsInSharedStorage) {
+  ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint());
+  IREE_ASSERT_OK(Compile(0, "windowed"));
+  IREE_ASSERT_OK(Compile(1, "windowed"));
+  IREE_ASSERT_OK(Load(2, 2));
+  EXPECT_EQ(buffers_[0][0], buffers_[1][0]);
+  ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage());
+  Run(0, 525333);
+  Run(1, 525333);
+  const auto activity = loom_serve_weights_activity(plans_[0]);
+  EXPECT_EQ(activity.read_bytes, 2097248u);
+  EXPECT_EQ(activity.prepared_bytes, activity.read_bytes);
+  EXPECT_EQ(activity.groups, GetParam() ? 2u : 3u);
+  if (GetParam()) {
+    bool complete = false;
+    IREE_ASSERT_OK(loom_serve_weights_deactivate(plans_[0], &complete));
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+    IREE_ASSERT_OK(loom_serve_weights_deactivate(plans_[0], &complete));
+    ASSERT_TRUE(complete);
+    IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+    IREE_ASSERT_OK(loom_serve_weights_import_readiness(plans_[0], execution_));
+    IREE_ASSERT_OK(loom_serve_weights_await(plans_[0]));
+    ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage());
+    Run(1, 525333);
+    EXPECT_EQ(loom_serve_weights_activity(plans_[0]).read_bytes,
+              activity.read_bytes * 2);
+  }
+}
+
+TEST_P(WindowedWeightsTest,
+       LateWindowLookupFailureRetiresAcceptedReadsAndMappings) {
+  ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint());
+  IREE_ASSERT_OK(Compile(0, "windowed_partial"));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  loom_serve_weights_await_retirement(plans_[0]);
+  EXPECT_TRUE(loom_serve_weights_is_retired(plans_[0]));
+  IREE_ASSERT_OK(loom_serve_weights_free(plans_[0]));
+  plans_[0] = nullptr;
+  if (GetParam()) {
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+    EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
+  }
+}
+
+TEST_P(WindowedWeightsTest,
+       WindowedAdmissionDoesNotPartiallyCommitForLackOfCapacity) {
+  if (!GetParam()) {
+    GTEST_SKIP() << "fixed backing has no virtual pool admission";
+  }
+  ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint());
+  IREE_ASSERT_OK(Compile(0, "windowed"));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool_, kSlabBytes, 256, &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Load(0, 1));
+  const auto memory = loom_serve_weights_statistics(plans_[0]);
+  EXPECT_EQ(memory.committed_bytes, 0u);
+  EXPECT_EQ(memory.pending_bytes, 0u);
 }
 
 TEST_P(WeightsTest, SplitFilesPopulateOneSharedCheckpointDomain) {
@@ -2022,5 +2146,7 @@ TEST_P(WeightsTest,
 }
 
 INSTANTIATE_TEST_SUITE_P(Backing, WeightsTest, ::testing::Values(false, true));
+INSTANTIATE_TEST_SUITE_P(Streaming, WindowedWeightsTest,
+                         ::testing::Values(false, true));
 
 }  // namespace

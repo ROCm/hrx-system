@@ -126,10 +126,11 @@ iree_status_t loom_serve_weights_prepare(
     iree_string_view_t policy_path);
 
 // Commits storage and streams/prepares directly into final roots through four
-// independent queue lanes. An already active plan does not reload or prepare
+// independent read lanes. An already active plan does not reload or prepare
 // again. Success means producer submission, not completion or consumer
-// ordering. Native backing runs on the shared cold-memory executor and gates
-// file loading through a semaphore. Neither native preparation nor device
+// ordering. Native backing runs on the driver's allocation owner. Each physical
+// slab's mapping gates its own reads; complete-tensor read frontiers gate
+// in-place preparation lanes. Neither native preparation nor device
 // completion blocks the submitting owner. The caller pins backing until every
 // consuming domain retires. A failed load is terminal: later consumers receive
 // its error without replaying accepted I/O, whose ownership remains protected
@@ -160,7 +161,7 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights,
 // Parameter accounting only, separate from state sharing the physical pool.
 // Fixed storage reports zero virtual-pool statistics.
 loom_serve_memory_statistics_t loom_serve_weights_statistics(
-    const loom_serve_weights_t* weights);
+    loom_serve_weights_t* weights);
 
 // Copies cumulative submission counters on the serialized activation owner.
 loom_serve_weight_activity_t loom_serve_weights_activity(
