@@ -74,7 +74,9 @@ class Client:
         )
 
     def send(self, kind, **fields):
-        self.send_frame(1, json.dumps({"type": kind, **fields}).encode())
+        self.send_frame(
+            1, json.dumps({"type": kind, **fields}, ensure_ascii=False).encode()
+        )
 
     def read_frame(self):
         header = self.input.read(2)
@@ -109,14 +111,18 @@ class Client:
             if event["type"] == kind:
                 return events
 
-    def respond(self, messages, maximum=2, voice="positive"):
-        self.send("response.create", response={"max_output_tokens": maximum})
+    def respond(self, messages, maximum=2, voice="positive", *, overrides=None):
+        settings = {"max_output_tokens": maximum, **(overrides or {})}
+        self.send("response.create", response=settings)
         events = self.until("response.done")
-        text = "".join(
-            e["delta"]
-            for e in events
-            if e["type"] == "response.output_audio_transcript.delta"
+        check_response_metadata(events, settings.get("metadata"))
+        audio_output = settings.get("output_modalities", ["audio"]) == ["audio"]
+        delta_kind = (
+            "response.output_audio_transcript.delta"
+            if audio_output
+            else "response.output_text.delta"
         )
+        text = "".join(e["delta"] for e in events if e["type"] == delta_kind)
         expected, finish = complete(messages, maximum)
         assert text == expected, (text, expected, events)
         audio = b"".join(
@@ -124,13 +130,18 @@ class Client:
             for e in events
             if e["type"] == "response.output_audio.delta"
         )
-        check_pcm(audio, text, 42, voice)
+        if audio_output:
+            check_pcm(audio, text, 42, voice)
+        else:
+            assert not any("output_audio" in e["type"] for e in events), events
         response = events[-1]["response"]
         status = "completed" if finish == "stop" else "incomplete"
         assert response["status"] == status, response
         item = response["output"][0]
         assert item["status"] == status, item
-        assert item["content"][0]["transcript"] == text, response
+        assert item["content"][0]["transcript" if audio_output else "text"] == text, (
+            response
+        )
         assert response["status_details"] == (
             None
             if finish == "stop"
@@ -154,6 +165,137 @@ class Client:
     def close(self):
         self.input.close()
         self.socket.close()
+
+
+def check_response_metadata(events, metadata):
+    responses = [
+        e["response"]
+        for e in events
+        if e["type"] in ("response.created", "response.done")
+    ]
+    assert len(responses) == 2, events
+    assert responses[0]["id"] == responses[1]["id"], responses
+    assert all(r["metadata"] == metadata for r in responses), responses
+
+
+def response_policy(address, trace):
+    client = Client(address, trace)
+    try:
+        defaults = client.receive()["session"]
+        invalid_metadata = [
+            [],
+            "metadata",
+            1,
+            {str(i): "value" for i in range(17)},
+            {"k" * 65: "value"},
+            {"🦉" * 65: "value"},
+            {"key": "v" * 513},
+            {"key": "🦉" * 513},
+            *({"key": value} for value in (None, True, 1, [], {})),
+        ]
+        invalid_overrides = [
+            *({"metadata": value} for value in invalid_metadata),
+            {"type": "realtime"},
+            {"audio": {"input": {}}},
+            {"audio": {"output": {"voice": ""}}},
+            {"audio": {"output": {"speed": 2}}},
+            {"audio": {"output": {"format": {"type": "audio/pcm", "rate": 16000}}}},
+        ]
+        for invalid in invalid_overrides:
+            client.send(
+                "response.create",
+                response={
+                    "instructions": "x",
+                    "audio": {"output": {"voice": "negative"}},
+                    **invalid,
+                },
+            )
+            assert client.receive(allow_error=True)["type"] == "error", invalid
+        for metadata in (
+            r'{"a":"one","\u0061":"two"}',
+            r'{"\u0000":"one","\u0000":"two"}',
+            r'{"\uD800":"value"}',
+            r'{"key":"\uDC00"}',
+        ):
+            client.send_frame(
+                1,
+                (
+                    '{"type":"response.create","response":{"metadata":'
+                    + metadata
+                    + "}}"
+                ).encode(),
+            )
+            assert client.receive(allow_error=True)["type"] == "error", metadata
+        client.send("session.update", session={"metadata": {}})
+        assert client.receive(allow_error=True)["type"] == "error"
+        client.send("session.update", session={})
+        assert client.until("session.updated")[-1]["session"] == defaults
+
+        client.message("first", "a")
+        messages = [{"role": "user", "content": "a"}]
+        first = client.respond(messages)
+        assert first["status"] == "incomplete", first
+        messages.append(
+            {
+                "role": "assistant",
+                "content": first["output"][0]["content"][0]["transcript"],
+            }
+        )
+        client.message("second", "ab")
+        messages.append({"role": "user", "content": "ab"})
+        # Character limits count Unicode codepoints, including four-byte scalars.
+        # Empty and embedded-NUL keys remain distinct after decoding and echoing.
+        metadata = {
+            "": "",
+            "\0": 'quoted " and escaped \\ newline\nNUL\0',
+            **{chr(0x1F300 + i) * 64: "🦉" * 512 for i in range(14)},
+        }
+        second = client.respond(
+            messages,
+            maximum=16,
+            voice="negative",
+            overrides={
+                "metadata": metadata,
+                "audio": {
+                    "output": {
+                        "voice": "negative",
+                        "speed": 1,
+                        "format": {"type": "audio/pcm", "rate": 24000},
+                    }
+                },
+            },
+        )
+        assert second["status"] == "completed", second
+        assert second["usage"]["input_token_details"]["cached_tokens"] > 0, second
+        messages.append(
+            {
+                "role": "assistant",
+                "content": second["output"][0]["content"][0]["transcript"],
+            }
+        )
+        client.message("third", "x")
+        messages.append({"role": "user", "content": "x"})
+        third = client.respond(
+            [{"role": "system", "content": "x"}, *messages],
+            maximum=3,
+            overrides={
+                "instructions": "x",
+                "output_modalities": ["text"],
+                "metadata": {},
+            },
+        )
+        assert third["usage"]["input_token_details"]["cached_tokens"] == 0, third
+        messages.append(
+            {"role": "assistant", "content": third["output"][0]["content"][0]["text"]}
+        )
+        client.message("fourth", "a")
+        messages.append({"role": "user", "content": "a"})
+        fourth = client.respond(messages, overrides={"metadata": None})
+        assert fourth["usage"]["input_token_details"]["cached_tokens"] > 0, fourth
+        client.send("session.update", session={})
+        assert client.until("session.updated")[-1]["session"] == defaults
+    finally:
+        client.close()
 
 
 def conversation(address, trace):
@@ -255,8 +397,13 @@ def response_failure(address, trace, *, speech):
         client.send(
             "input_audio_buffer.append", audio=base64.b64encode(bytes(480)).decode()
         )
-        client.send("response.create")
+        metadata = {
+            "input_item_id": "rejected-input",
+            "kind": "speech" if speech else "text",
+        }
+        client.send("response.create", response={"metadata": metadata})
         events = client.until("response.done")
+        check_response_metadata(events, metadata)
         response = events[-1]["response"]
         assert response["status"] == "failed", response
         details = response["status_details"]
@@ -298,7 +445,8 @@ def cancellation(address, trace):
     try:
         assert client.receive()["type"] == "session.created"
         client.message("pending", "a")
-        client.send("response.create")
+        metadata = {"input_item_id": "pending"}
+        client.send("response.create", response={"metadata": metadata})
         events = client.until("response.content_part.added")
         identity = next(
             e["response"]["id"] for e in events if e["type"] == "response.created"
@@ -306,7 +454,8 @@ def cancellation(address, trace):
         # Drained native admission is an explicit readiness boundary: this
         # cancellation cannot race with a fixture that already completed.
         client.send("response.cancel", response_id=identity)
-        events = client.until("response.done")
+        events += client.until("response.done")
+        check_response_metadata(events, metadata)
         response = events[-1]["response"]
         assert response["id"] == identity and response["status"] == "cancelled", (
             response
@@ -752,6 +901,7 @@ def main():
         with running_server(command, artifacts / "server.log") as (process, address):
             assert address is not None, process.poll()
             with (artifacts / "wire.jsonl").open("w") as trace:
+                response_policy(address, trace)
                 conversation(address, trace)
                 response_failure(address, trace, speech=True)
                 response_failure(address, trace, speech=False)
