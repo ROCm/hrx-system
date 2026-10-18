@@ -240,17 +240,47 @@ typedef enum iree_async_io_uring_prepared_buffer_phase_e {
   IREE_ASYNC_IO_URING_PREPARED_BUFFER_FAILED,
 } iree_async_io_uring_prepared_buffer_phase_t;
 
+typedef struct iree_async_io_uring_prepared_pins_t {
+  // One reference per prepared entry, released only after detachment.
+  iree_atomic_ref_count_t ref_count;
+  // Pin-only native ring shared by identical ranges in a registration state.
+  int source_fd;
+  // Frees this record independently of any particular proactor's lifetime.
+  iree_allocator_t allocator;
+} iree_async_io_uring_prepared_pins_t;
+
+static void iree_async_io_uring_prepared_pins_release(
+    iree_async_io_uring_prepared_pins_t* pins) {
+  if (!pins) {
+    return;
+  }
+  if (iree_atomic_ref_count_dec(&pins->ref_count) != 1) {
+    return;
+  }
+  int result = iree_io_uring_registration_release_buffers(pins->source_fd);
+  if (result < 0) {
+    // The pin-only descriptor is consumed even when explicit unregistration
+    // fails. No source-ring I/O can still reach caller memory.
+    iree_status_t status =
+        iree_make_status(iree_status_code_from_errno(-result),
+                         "prepared buffer pin release failed (%d)", -result);
+    iree_status_fprint(stderr, status);
+    iree_status_free(status);
+  }
+  iree_allocator_free(pins->allocator, pins);
+}
+
 typedef struct iree_async_io_uring_prepared_buffer_t {
-  // Entry owns pins until cold cleanup, then releases its region reference.
+  // Entry retains pins until cold cleanup, then releases its region reference.
   iree_async_buffer_registration_entry_t entry;
   // I/O may retain this metadata through the end of its completion callback.
   iree_async_region_t region;
   // Slots reserved until cleanup, including while temporarily detached.
   iree_async_io_uring_fixed_buffers_t fixed_buffers;
-  // Independent native pin owner; no I/O or concurrent pinning uses this ring.
-  int source_fd;
   // Caller-serialized transition state, published before terminal delivery.
   iree_async_io_uring_prepared_buffer_phase_t phase;
+  // Retained native pins, independent of each proactor's attachment slots.
+  iree_async_io_uring_prepared_pins_t* pins;
   // Owner-dispatch storage secured before any attachment is published.
   iree_io_uring_registration_request_t request;
   // Stable argument storage through native transition completion.
@@ -269,7 +299,7 @@ typedef struct iree_async_io_uring_prepared_buffer_t {
 
 static void iree_async_io_uring_prepared_buffer_destroy(
     iree_async_region_t* region) {
-  // Pin release already occurred in entry cleanup on the memory owner. The
+  // Entry cleanup already dropped its pin reference on the memory owner. The
   // last I/O reference may drop on the polling task after its user callback.
   iree_async_io_uring_prepared_buffer_t* buffer =
       (void*)((uint8_t*)region -
@@ -283,20 +313,56 @@ static void iree_async_io_uring_prepared_buffer_cleanup(void* entry_ptr,
   iree_async_proactor_io_uring_t* proactor = proactor_ptr;
   IREE_ASSERT(buffer->phase == IREE_ASYNC_IO_URING_PREPARED_BUFFER_DETACHED,
               "prepared pins require completed detachment before cleanup");
-  int result = iree_io_uring_registration_release_buffers(buffer->source_fd);
-  if (result < 0) {
-    // The pin-only descriptor is consumed even when explicit unregistration
-    // fails. No source-ring I/O can still reach caller memory.
-    iree_status_t status =
-        iree_make_status(iree_status_code_from_errno(-result),
-                         "prepared buffer pin release failed (%d)", -result);
-    iree_status_fprint(stderr, status);
-    iree_status_free(status);
-  }
+  iree_async_io_uring_prepared_pins_release(buffer->pins);
   iree_io_uring_sparse_table_release(proactor->buffer_table,
                                      buffer->fixed_buffers.base,
                                      buffer->fixed_buffers.count);
   iree_async_region_release(&buffer->region);
+}
+
+static iree_status_t iree_async_io_uring_prepared_pins_acquire(
+    const iree_async_buffer_registration_state_t* state,
+    iree_byte_span_t contents, const struct iovec* buffers,
+    uint32_t buffer_count, iree_allocator_t allocator,
+    iree_async_io_uring_prepared_pins_t** out_pins) {
+  // State mutation and cleanup are caller-serialized. Native pinning is
+  // independent of per-region access flags and destination fixed-table slots.
+  for (iree_async_buffer_registration_entry_t* entry = state->head; entry;
+       entry = entry->next) {
+    if (entry->cleanup_fn == iree_async_io_uring_prepared_buffer_cleanup &&
+        entry->region->base_ptr == contents.data &&
+        entry->region->length == contents.data_length) {
+      iree_async_io_uring_prepared_buffer_t* buffer = (void*)entry;
+      // A different allocator may be scoped to the first proactor's lifetime.
+      // Sharing must not extend that allocator's lifetime into another owner.
+      if (buffer->pins->allocator.self != allocator.self ||
+          buffer->pins->allocator.ctl != allocator.ctl) {
+        continue;
+      }
+      iree_atomic_ref_count_inc(&buffer->pins->ref_count);
+      *out_pins = buffer->pins;
+      return iree_ok_status();
+    }
+  }
+
+  iree_async_io_uring_prepared_pins_t* pins = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(allocator, sizeof(*pins), (void**)&pins));
+  iree_atomic_ref_count_init(&pins->ref_count);
+  pins->allocator = allocator;
+  const int result = iree_io_uring_registration_prepare_buffers(
+      buffers, buffer_count, &pins->source_fd);
+  iree_status_t status = iree_ok_status();
+  if (result < 0) {
+    status = iree_make_status(iree_status_code_from_errno(-result),
+                              "buffer pin preparation failed (%d)", -result);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_pins = pins;
+  } else {
+    iree_allocator_free(allocator, pins);
+  }
+  return status;
 }
 
 iree_status_t iree_async_proactor_io_uring_prepare_buffer(
@@ -340,12 +406,9 @@ iree_status_t iree_async_proactor_io_uring_prepare_buffer(
               iree_min(buffer_size, contents.data_length - i * buffer_size),
       };
     }
-    int result = iree_io_uring_registration_prepare_buffers(
-        buffer->buffers, (uint32_t)buffer_count, &buffer->source_fd);
-    if (result < 0) {
-      status = iree_make_status(iree_status_code_from_errno(-result),
-                                "buffer pin preparation failed (%d)", -result);
-    }
+    status = iree_async_io_uring_prepared_pins_acquire(
+        state, contents, buffer->buffers, (uint32_t)buffer_count,
+        base_proactor->allocator, &buffer->pins);
   }
   if (!iree_status_is_ok(status)) {
     iree_io_uring_sparse_table_release(proactor->buffer_table, (uint16_t)base,
@@ -451,7 +514,7 @@ static void iree_async_io_uring_prepared_buffer_transition(
   };
   if (attaching) {
     buffer->parameters.clone = (iree_io_uring_clone_buffers_t){
-        .src_fd = (uint32_t)buffer->source_fd,
+        .src_fd = (uint32_t)buffer->pins->source_fd,
         .flags = IREE_IORING_REGISTER_DST_REPLACE,
         .dst_off = buffer->fixed_buffers.base,
         .nr = buffer->fixed_buffers.count,

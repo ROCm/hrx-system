@@ -206,7 +206,7 @@ TEST_F(SlabRegistrationTest,
           IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
     GTEST_SKIP() << "kernel cannot attach prepared registrations";
   }
-  ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 1));
+  ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 2));
   struct rlimit descriptor_limit = {};
   ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
   iree_async_buffer_registration_state_t state = {};
@@ -215,7 +215,7 @@ TEST_F(SlabRegistrationTest,
       cleanup(&state, iree_async_buffer_registration_state_deinitialize);
   iree_async_buffer_registration_entry_t* first_entry = nullptr;
   IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
-      proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+      proactor_, &state, iree_make_byte_span(mapping_, page_size_),
       IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &first_entry));
   EXPECT_EQ(first_entry->region->handles.iouring.base_buffer_index, 0);
 
@@ -226,7 +226,9 @@ TEST_F(SlabRegistrationTest,
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &exhausted_limit), 0);
   iree_async_buffer_registration_entry_t* entry = first_entry;
   iree_status_t status = iree_async_proactor_prepare_buffer(
-      proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+      proactor_, &state,
+      iree_make_byte_span(static_cast<uint8_t*>(mapping_) + page_size_,
+                          page_size_),
       IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry);
   // Restore the process limit before assertion/reporting infrastructure runs.
   EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
@@ -236,7 +238,9 @@ TEST_F(SlabRegistrationTest,
   EXPECT_EQ(first_entry->next, nullptr);
 
   IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
-      proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+      proactor_, &state,
+      iree_make_byte_span(static_cast<uint8_t*>(mapping_) + page_size_,
+                          page_size_),
       IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry));
   EXPECT_EQ(entry->region->handles.iouring.base_buffer_index, 1);
   EXPECT_EQ(entry->next, first_entry);
@@ -716,6 +720,209 @@ INSTANTIATE_TEST_SUITE_P(
           return "PreparedBufferCrossThread";
       }
       return "";
+    });
+
+class SharedPreparedRegistrationTest : public FileRegistrationTest {
+ protected:
+  void TearDown() override {
+    if (second_attached_) {
+      DetachSecond();
+    }
+    if (second_entry_) {
+      iree_async_proactor_unregister_buffer(second_proactor_, second_entry_,
+                                            &registration_state_);
+    }
+    iree_async_file_release(second_file_);
+    iree_async_proactor_release(second_proactor_);
+    FileRegistrationTest::TearDown();
+  }
+
+  void CreateSecondProactor(
+      iree_allocator_t allocator = iree_allocator_system()) {
+    IREE_ASSERT_OK(iree_async_proactor_create_io_uring(
+        iree_async_proactor_options_default(), allocator, &second_proactor_));
+    int file_fd = dup(file_->primitive.value.fd);
+    ASSERT_GE(file_fd, 0);
+    iree_status_t status = iree_async_file_import(
+        second_proactor_, iree_async_primitive_from_fd(file_fd),
+        IREE_ASYNC_FILE_FLAG_NONE, &second_file_);
+    if (!iree_status_is_ok(status)) {
+      EXPECT_EQ(close(file_fd), 0);
+    }
+    IREE_ASSERT_OK(status);
+  }
+
+  void WaitSecond(Completion& completion) {
+    while (!completion.done) {
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          second_proactor_, iree_infinite_timeout(), nullptr));
+    }
+    IREE_ASSERT_OK(completion.status.release());
+  }
+
+  void AttachSecond() {
+    Completion completion;
+    iree_async_proactor_attach_buffer(
+        second_proactor_, second_entry_,
+        {Completion::RecordRegistration, &completion});
+    ASSERT_NO_FATAL_FAILURE(WaitSecond(completion));
+    second_attached_ = true;
+  }
+
+  void DetachSecond() {
+    Completion completion;
+    iree_async_proactor_detach_buffer(
+        second_proactor_, second_entry_,
+        {Completion::RecordRegistration, &completion});
+    ASSERT_NO_FATAL_FAILURE(WaitSecond(completion));
+    second_attached_ = false;
+  }
+
+  void WriteSecond(uint8_t value) {
+    memset(mapping_, value, mapping_length_);
+    ASSERT_NO_FATAL_FAILURE(DiscardCpuTranslations());
+    Completion completion;
+    iree_async_file_write_operation_t write = {};
+    write.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_WRITE;
+    write.base.completion_fn = Completion::Record;
+    write.base.user_data = &completion;
+    write.file = second_file_;
+    write.buffer =
+        iree_async_span_make(second_entry_->region, 0, mapping_length_);
+    IREE_ASSERT_OK(
+        iree_async_proactor_submit_one(second_proactor_, &write.base));
+    ASSERT_NO_FATAL_FAILURE(WaitSecond(completion));
+    ASSERT_EQ(write.bytes_written, mapping_length_);
+    ASSERT_NO_FATAL_FAILURE(ExpectNoCpuTranslations());
+    std::vector<uint8_t> actual(mapping_length_);
+    ASSERT_EQ(pread(second_file_->primitive.value.fd, actual.data(),
+                    actual.size(), 0),
+              actual.size());
+    EXPECT_EQ(actual, std::vector<uint8_t>(mapping_length_, value));
+  }
+
+  void DestroyFirstProactor() {
+    auto* entry = prepared_entry_;
+    ASSERT_NO_FATAL_FAILURE(DetachPreparedBuffer());
+    iree_async_proactor_unregister_buffer(proactor_, entry,
+                                          &registration_state_);
+    iree_async_region_release(region_);
+    region_ = nullptr;
+    iree_async_file_release(file_);
+    file_ = nullptr;
+    if (proactor_thread_) {
+      iree_async_proactor_thread_request_stop(proactor_thread_);
+      IREE_ASSERT_OK(iree_async_proactor_thread_join(proactor_thread_,
+                                                     IREE_DURATION_INFINITE));
+      IREE_ASSERT_OK(
+          iree_async_proactor_thread_consume_status(proactor_thread_));
+      iree_async_proactor_thread_release(proactor_thread_);
+      proactor_thread_ = nullptr;
+    }
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
+  }
+
+  // Independent polling owner borrowing the same prepared host range.
+  iree_async_proactor_t* second_proactor_ = nullptr;
+  // Entry has its own fixed slots and retains the shared native pins.
+  iree_async_buffer_registration_entry_t* second_entry_ = nullptr;
+  // Imported duplicate used only by the second polling owner.
+  iree_async_file_t* second_file_ = nullptr;
+  // Tracks whether teardown must complete an explicit detach.
+  bool second_attached_ = false;
+};
+
+TEST_P(SharedPreparedRegistrationTest, PinsOutliveFirstProactor) {
+  ASSERT_NO_FATAL_FAILURE(CreateSecondProactor());
+
+  // Both destination rings already exist. Preparing the second view may
+  // allocate metadata/slots, but cannot create another native pin descriptor.
+  struct rlimit descriptor_limit = {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
+  struct rlimit exhausted_limit = descriptor_limit;
+  exhausted_limit.rlim_cur = 0;
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &exhausted_limit), 0);
+  iree_status_t status = iree_async_proactor_prepare_buffer(
+      second_proactor_, &registration_state_,
+      iree_make_byte_span(mapping_, mapping_length_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_);
+  EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(second_entry_->region->access_flags,
+            IREE_ASYNC_BUFFER_ACCESS_FLAG_READ);
+  EXPECT_NE(second_entry_->region, region_);
+
+  memset(mapping_, 0x37, mapping_length_);
+  ASSERT_NO_FATAL_FAILURE(DiscardCpuTranslations());
+  iree_async_file_write_operation_t first_write = {};
+  first_write.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_WRITE;
+  first_write.file = file_;
+  first_write.buffer = iree_async_span_make(region_, 0, mapping_length_);
+  ASSERT_NO_FATAL_FAILURE(Run(&first_write.base));
+  ASSERT_EQ(first_write.bytes_written, mapping_length_);
+  ASSERT_NO_FATAL_FAILURE(ExpectNoCpuTranslations());
+  std::vector<uint8_t> actual(mapping_length_);
+  ASSERT_EQ(pread(file_->primitive.value.fd, actual.data(), actual.size(), 0),
+            actual.size());
+  EXPECT_EQ(actual, std::vector<uint8_t>(mapping_length_, 0x37));
+
+  ASSERT_NO_FATAL_FAILURE(AttachSecond());
+  ASSERT_NO_FATAL_FAILURE(WriteSecond(0xA9));
+  ASSERT_NO_FATAL_FAILURE(DetachSecond());
+  ASSERT_NO_FATAL_FAILURE(DestroyFirstProactor());
+
+  // Reattachment must still reach the original pin table after the first
+  // region, file, polling thread, and proactor have all been destroyed.
+  ASSERT_NO_FATAL_FAILURE(AttachSecond());
+  ASSERT_NO_FATAL_FAILURE(WriteSecond(0xE3));
+}
+
+TEST_P(SharedPreparedRegistrationTest, DistinctAllocatorOwnsSeparatePins) {
+  const iree_allocator_t allocator = {
+      nullptr,
+      +[](void*, iree_allocator_command_t command, const void* params,
+          void** inout_ptr) {
+        auto system_allocator = iree_allocator_system();
+        return system_allocator.ctl(system_allocator.self, command, params,
+                                    inout_ptr);
+      },
+  };
+  ASSERT_NO_FATAL_FAILURE(CreateSecondProactor(allocator));
+
+  // A separately owned allocator must not borrow a pin record from another
+  // allocator's lifetime. Its own native pin context needs another descriptor.
+  struct rlimit descriptor_limit = {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
+  struct rlimit exhausted_limit = descriptor_limit;
+  exhausted_limit.rlim_cur = 0;
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &exhausted_limit), 0);
+  iree_status_t status = iree_async_proactor_prepare_buffer(
+      second_proactor_, &registration_state_,
+      iree_make_byte_span(mapping_, mapping_length_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_);
+  EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+  EXPECT_EQ(second_entry_, nullptr);
+
+  IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
+      second_proactor_, &registration_state_,
+      iree_make_byte_span(mapping_, mapping_length_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_));
+  EXPECT_EQ(second_entry_->region->handles.iouring.base_buffer_index, 0);
+  ASSERT_NO_FATAL_FAILURE(DestroyFirstProactor());
+  ASSERT_NO_FATAL_FAILURE(AttachSecond());
+  ASSERT_NO_FATAL_FAILURE(WriteSecond(0x6D));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    FirstPollingOwner, SharedPreparedRegistrationTest,
+    ::testing::Values(FileRegistrationKind::kPreparedBuffer,
+                      FileRegistrationKind::kPreparedBufferCrossThread),
+    [](const ::testing::TestParamInfo<FileRegistrationKind>& info) {
+      return info.param == FileRegistrationKind::kPreparedBuffer
+                 ? "Caller"
+                 : "OtherThread";
     });
 
 class ReceiveSlabRegistrationTest : public SlabRegistrationTest {

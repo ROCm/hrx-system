@@ -1151,10 +1151,12 @@ void iree_async_cancel_request_complete(iree_async_cancel_request_t* request);
 // attachment/detachment.
 //
 // io_uring requires CONCURRENT_BUFFER_REGISTRATION and retains an independent
-// native pin owner. Metadata-only backends retain the same entry/region
-// lifetime. Registration retains pins across reuse; buffered files still use
-// the OS page cache. Slot geometry has the same meaning as register_buffer
-// below.
+// native pin owner. Prepared entries for the same exact range in |state| share
+// those pins across proactors using the same host allocator. Each entry has
+// independent slots, access flags, and attachment state. Metadata-only backends
+// retain the same entry/region lifetime. Registration retains pins across
+// reuse; buffered files still use the OS page cache. Slot geometry has the same
+// meaning as register_buffer below.
 IREE_API_EXPORT iree_status_t iree_async_proactor_prepare_buffer(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
@@ -1177,9 +1179,10 @@ IREE_API_EXPORT void iree_async_proactor_attach_buffer(
 // for the poll owner, allocate release storage, or release the prepared pins.
 //
 // Success permits cold unregister_buffer/state_deinitialize on the caller's
-// chosen memory owner. That cleanup releases pins before dropping the entry's
-// region reference; outstanding completion bookkeeping may still retain the
-// region metadata. Failure does not authorize cleanup or backing release.
+// chosen memory owner. That cleanup drops the entry's pin reference before its
+// region reference, releasing native pins after the last sharing entry is
+// cleaned up. Outstanding completion bookkeeping may still retain the region
+// metadata. Failure does not authorize cleanup or backing release.
 IREE_API_EXPORT void iree_async_proactor_detach_buffer(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_entry_t* entry,
