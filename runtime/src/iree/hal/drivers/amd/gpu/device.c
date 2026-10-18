@@ -338,6 +338,8 @@ static void iree_hal_amd_gpu_device_initialize_memory(
       .api = context->api,
       .instance = context->fabric->instance,
       .device = context->device,
+      .io_proactor =
+          iree_async_proactor_pool_entry_proactor(device->proactor_entry),
       .address_domain_ordinal =
           device->memory.capabilities.address_domain_ordinal,
       .storage_count = context->memory_scope_count + 1,

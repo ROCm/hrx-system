@@ -12,17 +12,6 @@
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/status.h"
 
-// One installed range. Source metadata is borrowed under the same lifetime
-// contract as the native mapping; the index never keeps physical storage live.
-typedef struct iree_hal_amd_fabric_virtual_mapping_t {
-  // Native source coordinates and exact target range.
-  amdf_memory_mapping_update_t native;
-  // Provider-owned consumer array, live through the source's final alias.
-  const amdf_memory_device_access_t* accesses;
-  // Number of exact consumers in accesses.
-  uint32_t access_count;
-} iree_hal_amd_fabric_virtual_mapping_t;
-
 // A native consumer and its canonical shared page-table projection. Distinct
 // consumers may alias one projection but still require exact source accesses.
 typedef struct iree_hal_amd_fabric_reservation_access_t {
@@ -79,7 +68,7 @@ static void iree_hal_amd_fabric_virtual_mapping_append(
     iree_hal_amd_fabric_virtual_mapping_t* previous = &mappings[*count - 1];
     if (previous->native.memory == value.native.memory &&
         previous->native.access == value.native.access &&
-        previous->accesses == value.accesses &&
+        previous->source == value.source &&
         previous->native.target_byte_offset + previous->native.byte_length ==
             value.native.target_byte_offset &&
         previous->native.source_byte_offset + previous->native.byte_length ==
@@ -167,8 +156,7 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_prepare_mappings(
           updates[i].source.mapping_source.descriptor;
       const iree_hal_amd_fabric_virtual_mapping_t value = {
           .native = *update,
-          .accesses = source->accesses,
-          .access_count = source->access_count,
+          .source = source,
       };
       iree_hal_amd_fabric_virtual_mapping_append(value, mappings, &count);
     }
@@ -348,8 +336,8 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_update(
 iree_status_t iree_hal_amd_fabric_virtual_buffer_query_source(
     iree_hal_virtual_buffer_view_t view, uint32_t scope_id,
     iree_device_size_t offset, iree_device_size_t length,
-    amdf_memory_mapping_update_t* out_source) {
-  *out_source = (amdf_memory_mapping_update_t){0};
+    iree_hal_amd_fabric_virtual_mapping_t* out_mapping) {
+  *out_mapping = (iree_hal_amd_fabric_virtual_mapping_t){0};
   iree_hal_amd_fabric_virtual_buffer_t* reservation = (void*)view.root;
   const uint32_t consumer = reservation->scope_accesses[scope_id];
   const uint32_t ordinal =
@@ -386,20 +374,24 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_query_source(
   mapping = iree_hal_amd_fabric_virtual_mapping_tail(
       mapping, position - mapping.native.target_byte_offset);
   mapping.native.byte_length = iree_min(mapping.native.byte_length, length);
-  // Shared page tables do not imply shared consumer ordinals. Source accesses
-  // were qualified at mapping admission; select this queue's exact consumer.
+  // Mapping one consumer's shared page table does not grant source access to
+  // every other consumer of that table. Resolve this queue's exact admission.
   if (consumer != ordinal) {
     uint32_t i = 0;
-    for (; i < mapping.access_count; ++i) {
-      if (mapping.accesses[i].device ==
+    for (; i < mapping.source->access_count; ++i) {
+      if (mapping.source->accesses[i].device ==
           reservation->accesses[consumer].native.device) {
         break;
       }
     }
-    IREE_ASSERT_LT(i, mapping.access_count);
+    if (i == mapping.source->access_count) {
+      return iree_make_status(
+          IREE_STATUS_PERMISSION_DENIED,
+          "mapped source is not admitted for this file queue's consumer");
+    }
     mapping.native.memory_access_ordinal = i;
   }
-  *out_source = mapping.native;
+  *out_mapping = mapping;
   return iree_ok_status();
 }
 

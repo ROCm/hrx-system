@@ -6,9 +6,105 @@
 
 #include <cerrno>
 
+#include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend_test_base.h"
 
 namespace iree::hal::amd::fabric {
+
+TEST_F(MemoryBackendTest, RegisteredIoRequiresBothFileOwnerAndNativeAdmission) {
+  const uint64_t interfaces = UINT64_C(1)
+                              << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
+  iree_hal_pool_t* pool = nullptr;
+  native_.file_io_enabled = true;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool, interfaces, 0));
+  EXPECT_EQ(pool, nullptr);
+  for (auto& backend : backends_) {
+    backend.native.io_proactor = test_proactor();
+  }
+  native_.file_io_enabled = false;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool, interfaces, 0));
+  EXPECT_EQ(pool, nullptr);
+  EXPECT_EQ(native_.create_count, 0);
+}
+
+TEST_F(MemoryBackendTest, PhysicalSlabsRetainSharedFileRegistrations) {
+  iree_async_proactor_pool_entry_t* entry = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_pool_acquire(proactor_pool_, 0, &entry));
+  iree_async_proactor_t* proactor =
+      iree_async_proactor_pool_entry_proactor(entry);
+  for (auto& backend : backends_) {
+    backend.native.io_proactor = proactor;
+  }
+  native_.file_io_enabled = true;
+  const uint64_t interfaces = UINT64_C(1)
+                              << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
+  native_.required_flags |= AMDF_MEMORY_FLAG_HOST_FILE_IO;
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool, interfaces, 0));
+  EXPECT_EQ(iree_hal_pool_query_host_access(pool).access, 0u);
+  native_.fail_after_bindings = true;
+  iree_hal_buffer_t* rejected = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_pool_allocate_buffer(
+          pool, iree_hal_make_pool_reservation_request(8192, 4096),
+          iree_infinite_timeout(), &rejected));
+  EXPECT_EQ(rejected, nullptr);
+  native_.AwaitEmpty();
+  native_.fail_after_bindings = false;
+  // Repeated physical acquisition/release exercises registration cleanup and
+  // slot reuse. Both participating devices share the same actual I/O owner.
+  for (int iteration = 0; iteration < 3; ++iteration) {
+    iree_hal_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool, iree_hal_make_pool_reservation_request(8192, 4096),
+        iree_infinite_timeout(), &buffer));
+    iree_async_region_t* region = nullptr;
+    for (uint32_t i = 0; i < families_.size(); ++i) {
+      iree_hal_buffer_native_binding_slot_t slot;
+      const iree_hal_memory_scope_t scope = {
+          families_[i]->memory.domain, families_[i]->memory.queue_scope_id};
+      IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
+          pool, scope, IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO, &slot));
+      iree_hal_buffer_t* subspan = nullptr;
+      IREE_ASSERT_OK(iree_hal_buffer_subspan(
+          buffer, 123, 456, iree_allocator_system(), &subspan));
+      const auto binding = iree_hal_buffer_native_binding(subspan, slot);
+      const auto* table =
+          static_cast<const iree_hal_amd_fabric_io_binding_table_t*>(
+              binding.registered_io.table);
+      ASSERT_NE(table, nullptr);
+      EXPECT_NE(table->memory, nullptr);
+      EXPECT_NE(table->mapping, nullptr);
+      EXPECT_EQ(binding.registered_io.index, i);
+      EXPECT_EQ(binding.registered_io.offset, 123u);
+      auto* selected = table->regions[binding.registered_io.index];
+      ASSERT_NE(selected, nullptr);
+      EXPECT_EQ(selected->proactor, proactor);
+      EXPECT_EQ(selected->length, 8192u);
+      EXPECT_EQ(selected->access_flags,
+                IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+                    IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE);
+      if (region) {
+        EXPECT_EQ(selected, region);
+      }
+      region = selected;
+      iree_hal_buffer_release(subspan);
+    }
+    iree_hal_buffer_release(buffer);
+    native_.AwaitEmpty();
+  }
+  iree_hal_pool_release(pool);
+  native_.AwaitEmpty();
+  EXPECT_EQ(native_.unmap_count, 4);
+  EXPECT_EQ(native_.destroy_count, 4);
+  iree_async_proactor_pool_entry_release(entry);
+}
 
 TEST_F(MemoryBackendTest, UnavailableProfilesPreserveAvailableAllocation) {
   native_.host_placement_enabled = true;

@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/fabric/slab_provider.h"
 
+#include "iree/async/proactor.h"
 #include "iree/base/internal/math.h"
 #include "iree/hal/drivers/amd/fabric/asan.h"
 #include "iree/hal/drivers/amd/status.h"
@@ -36,6 +37,8 @@ typedef struct iree_hal_amd_fabric_slab_provider_t {
   iree_hal_memory_trace_t trace;
   // Whether slabs need one shared prepared source descriptor.
   bool has_mapping_source;
+  // Whether slabs retain registrations for the participating file proactors.
+  bool has_registered_io;
   // Native access ordinal of the optional ASAN namespace's device.
   uint32_t asan_access_ordinal;
   // Cumulative successful slab acquisitions.
@@ -51,6 +54,10 @@ typedef struct iree_hal_amd_fabric_slab_handle_t {
   iree_hal_buffer_native_binding_t* bindings;
   // Prepared backing identity; absent for ordinary address-only slabs.
   iree_hal_amd_fabric_mapping_source_t* mapping_source;
+  // Optional placed table indexing file registrations by native consumer.
+  iree_hal_amd_fabric_io_binding_table_t* io_bindings;
+  // Owned registrations, released before their borrowed native host view.
+  iree_async_buffer_registration_state_t registrations;
   // Explicit external attachment whose teardown completes before release.
   bool imported;
 } iree_hal_amd_fabric_slab_handle_t;
@@ -192,6 +199,8 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
   for (uint32_t i = 0; i < options->binding_count; ++i) {
     provider->has_mapping_source |=
         bindings[i].type == IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
+    provider->has_registered_io |=
+        bindings[i].type == IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
   }
   iree_hal_external_storage_class_t* exports =
       (iree_hal_external_storage_class_t*)((uint8_t*)provider + exports_offset);
@@ -275,6 +284,8 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_allocate(
   iree_host_size_t total_size = 0;
   iree_host_size_t bindings_offset = 0;
   iree_host_size_t mapping_source_offset = 0;
+  iree_host_size_t io_bindings_offset = 0;
+  iree_host_size_t io_regions_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_fabric_slab_handle_t) +
           (provider->options.asan ? sizeof(iree_hal_amd_fabric_slab_asan_t)
@@ -285,7 +296,14 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_allocate(
                                 &bindings_offset),
       IREE_STRUCT_FIELD(provider->has_mapping_source ? 1 : 0,
                         iree_hal_amd_fabric_mapping_source_t,
-                        &mapping_source_offset)));
+                        &mapping_source_offset),
+      IREE_STRUCT_FIELD(provider->has_registered_io ? 1 : 0,
+                        iree_hal_amd_fabric_io_binding_table_t,
+                        &io_bindings_offset),
+      IREE_STRUCT_FIELD(provider->has_registered_io
+                            ? provider->options.memory.access_count
+                            : 0,
+                        iree_async_region_t*, &io_regions_offset)));
   iree_hal_amd_fabric_slab_handle_t* handle = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(provider->base.host_allocator,
                                              total_size, (void**)&handle));
@@ -297,6 +315,12 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_allocate(
         (iree_hal_amd_fabric_mapping_source_t*)((uint8_t*)handle +
                                                 mapping_source_offset);
   }
+  if (provider->has_registered_io) {
+    handle->io_bindings = (void*)((uint8_t*)handle + io_bindings_offset);
+    handle->io_bindings->regions =
+        (void*)((uint8_t*)handle + io_regions_offset);
+  }
+  iree_async_buffer_registration_state_initialize(&handle->registrations);
   *out_handle = handle;
   return iree_ok_status();
 }
@@ -312,6 +336,7 @@ static bool iree_hal_amd_fabric_slab_handle_free(
     }
   }
   const bool owns_memory = handle->memory.handle && !handle->imported;
+  iree_async_buffer_registration_state_deinitialize(&handle->registrations);
   iree_hal_amd_fabric_memory_deinitialize(provider->api, provider->event_sink,
                                           &handle->memory);
   if (owns_memory) {
@@ -359,12 +384,17 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_bind(
     iree_hal_amd_fabric_slab_provider_t* provider,
     iree_hal_amd_fabric_slab_handle_t* handle) {
   iree_status_t status = iree_ok_status();
+  if (handle->io_bindings) {
+    handle->io_bindings->memory = handle->memory.handle;
+    handle->io_bindings->mapping = handle->memory.mapping;
+  }
   if (provider->has_mapping_source) {
     *handle->mapping_source = (iree_hal_amd_fabric_mapping_source_t){
         .memory = handle->memory.handle,
         .access_count = provider->options.memory.access_count,
         .accesses = provider->options.memory.accesses,
         .logical_byte_offset = handle->memory.info.source_byte_offset,
+        .io_bindings = handle->io_bindings,
     };
     if (provider->options.import_accesses) {
       const iree_hal_amd_fabric_slab_asan_t* asan = (const void*)(handle + 1);
@@ -386,6 +416,27 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_bind(
             binding->mapping_granularity;
         handle->bindings[i].mapping_source.offset =
             handle->mapping_source->logical_byte_offset;
+        continue;
+      }
+      if (binding->type == IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO) {
+        iree_async_buffer_registration_entry_t* entry =
+            iree_async_buffer_registration_state_find(&handle->registrations,
+                                                      binding->io_proactor);
+        if (!entry) {
+          // Pins are part of physical acquisition. Reuse and file submission
+          // consume the prepared table without entering registration again.
+          status = iree_async_proactor_register_buffer(
+              binding->io_proactor, &handle->registrations,
+              handle->memory.contents,
+              IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+                  IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+              &entry);
+        }
+        if (iree_status_is_ok(status)) {
+          handle->io_bindings->regions[binding->access_ordinal] = entry->region;
+          handle->bindings[i].registered_io.table = handle->io_bindings;
+          handle->bindings[i].registered_io.index = binding->access_ordinal;
+        }
         continue;
       }
       status = IREE_HAL_AMD_STATUS_FROM_AMDF(

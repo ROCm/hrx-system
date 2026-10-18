@@ -132,6 +132,7 @@ iree_cc_library(
     "file_transfer.c"
   DEPS
     ::buffer
+    ::memory
     ::memory_backend
     ::memory_transition
     amdf::headers
@@ -179,6 +180,7 @@ iree_cc_library(
     ::buffer
     ::memory
     amdf::headers
+    iree::async
     iree::base
     iree::base::internal
     iree::base::threading
@@ -302,6 +304,8 @@ iree_cc_test(
     "memory_backend_test_base.h"
     "virtual_buffer_test.cc"
   DEPS
+    ::file_transfer
+    ::memory
     ::memory_backend
     ::slab_provider
     amdf::headers
@@ -315,9 +319,12 @@ iree_cc_test(
     iree::hal::memory::fixed_block_pool
     iree::hal::memory::slab_cache
     iree::hal::testing::mock_device
+    iree::hal::utils::files
+    iree::io::file_handle
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
   LABELS
     "iree-build-requirement=libamdf"
 )

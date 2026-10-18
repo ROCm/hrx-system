@@ -192,6 +192,7 @@ struct FakeNative {
              : 0);
     out_profile->supported_flags =
         out_profile->guaranteed_flags | AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+        (self->file_io_enabled ? AMDF_MEMORY_FLAG_HOST_FILE_IO : 0) |
         (self->host_source_enabled ? AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE : 0);
     out_profile->allocation.maximum_byte_length = UINT64_C(1) << 30;
     out_profile->allocation.byte_length_granularity = 4096;
@@ -597,8 +598,9 @@ struct FakeNative {
     for (uint32_t i = 0; i < count; ++i) {
       if (updates[i].memory) {
         EXPECT_EQ(updates[i].memory_access_ordinal, device->ordinal);
-        EXPECT_EQ(updates[i].access,
-                  AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+        EXPECT_TRUE(updates[i].access & AMDF_MEMORY_ACCESS_READ);
+        EXPECT_EQ(updates[i].access & reservation->accesses[ordinal].access,
+                  updates[i].access);
       }
     }
     return self->update_failure;
@@ -629,6 +631,8 @@ struct FakeNative {
   bool host_reservation_enabled = false;
   // Whether owned backing supports independently replaceable CPU aliases.
   bool host_source_enabled = false;
+  // Whether the native profile admits ordinary host buffers for file I/O.
+  bool file_io_enabled = false;
   // Native address geometry per live consumer, before addresses are reserved.
   std::array<uint64_t, 2> reservation_granularities = {4096, 4096};
   // Whole-backing preparation required by each native address domain.

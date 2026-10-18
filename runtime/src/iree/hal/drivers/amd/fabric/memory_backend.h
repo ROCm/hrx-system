@@ -78,6 +78,9 @@ typedef struct iree_hal_amd_fabric_memory_backend_options_t {
   amdf_instance_t* instance;
   // Already-created native device admitted by this backend.
   amdf_device_t* device;
+  // Existing file I/O owner, dominated by the retained HAL device; NULL when
+  // registered file buffers are unavailable. Cold construction prepares pins.
+  iree_async_proactor_t* io_proactor;
   // Ordinary device address domain consumed by the captured families.
   uint32_t address_domain_ordinal;
   // Number of immutable storage choices owned by this backend.

@@ -15,6 +15,8 @@
 extern "C" {
 #endif
 
+typedef struct iree_async_region_t iree_async_region_t;
+
 // One native backing with an optional persistent host view. Borrowed scopes,
 // native devices, and the API table outlive this owner and every device use.
 // Addresses belong to prepared binding tables, not to the backing itself.
@@ -35,6 +37,18 @@ typedef struct iree_hal_amd_fabric_memory_t {
   iree_hal_pool_export_classes_t exports;
 } iree_hal_amd_fabric_memory_t;
 
+// Prepared file registrations placed with one physical slab. Regions borrow
+// the persistent host view and expire before native storage is released.
+typedef struct iree_hal_amd_fabric_io_binding_table_t {
+  // Borrowed native backing used for exact file/device visibility queries.
+  amdf_memory_t* memory;
+  // Borrowed persistent ordinary host view admitted for native file I/O.
+  amdf_host_mapping_t* mapping;
+  // Borrowed regions in native access-ordinal order, NULL for excluded devices.
+  // Devices sharing a proactor share one region and one set of retained pins.
+  iree_async_region_t** regions;
+} iree_hal_amd_fabric_io_binding_table_t;
+
 // Prepared source metadata owned by one physical slab. Native updates receive
 // logical offsets while HAL views preserve native coordinates for alignment.
 typedef struct iree_hal_amd_fabric_mapping_source_t {
@@ -48,6 +62,8 @@ typedef struct iree_hal_amd_fabric_mapping_source_t {
   const amdf_memory_device_access_t* accesses;
   // Native payload preceding logical source byte zero.
   uint64_t logical_byte_offset;
+  // Optional file registrations owned by this same physical slab.
+  const iree_hal_amd_fabric_io_binding_table_t* io_bindings;
 } iree_hal_amd_fabric_mapping_source_t;
 
 // Qualified construction facts copied by a provider. Accesses and scope are

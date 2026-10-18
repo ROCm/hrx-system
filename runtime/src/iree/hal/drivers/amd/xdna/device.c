@@ -241,6 +241,8 @@ iree_status_t iree_hal_amd_xdna_device_create(
         .api = context->api,
         .instance = context->fabric->instance,
         .device = context->device,
+        .io_proactor =
+            iree_async_proactor_pool_entry_proactor(device->proactor_entry),
         .address_domain_ordinal = context->data_source.capabilities
                                       .device_address.address_domain_ordinal,
         .storage_count = 1,

@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_FABRIC_VIRTUAL_BUFFER_H_
 
 #include "amdf/amdf.h"
+#include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/memory_backend.h"
 #include "iree/hal/virtual_buffer.h"
 
@@ -31,6 +32,15 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
     const iree_hal_virtual_buffer_options_t* options,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 
+// One installed range and its original prepared source facts. Both are borrowed
+// under the caller's physical backing lifetime, including through subranges.
+typedef struct iree_hal_amd_fabric_virtual_mapping_t {
+  // Native source coordinates and exact target range.
+  amdf_memory_mapping_update_t native;
+  // Provider-owned source metadata, live through the source's final alias.
+  const iree_hal_amd_fabric_mapping_source_t* source;
+} iree_hal_amd_fabric_virtual_mapping_t;
+
 // Resolves the mapped prefix of a nonempty range in a native AMDF view.
 // The returned source offset is native-memory-relative; length stops at the
 // next source boundary. The access ordinal names the exact consumer of
@@ -43,7 +53,7 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
 iree_status_t iree_hal_amd_fabric_virtual_buffer_query_source(
     iree_hal_virtual_buffer_view_t view, uint32_t scope_id,
     iree_device_size_t offset, iree_device_size_t length,
-    amdf_memory_mapping_update_t* out_source);
+    iree_hal_amd_fabric_virtual_mapping_t* out_mapping);
 
 #ifdef __cplusplus
 }  // extern "C"

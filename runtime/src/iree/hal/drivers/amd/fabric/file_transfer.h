@@ -59,7 +59,8 @@ typedef struct iree_hal_amd_fabric_file_transfer_t {
     const amdf_api_t* api;
     // Borrowed destination for native view cleanup diagnostics.
     iree_hal_device_event_sink_t event_sink;
-    // Owned host views in logical file order; no physical backing is retained.
+    // File ranges in logical order, borrowing registered views or owning
+    // ordinary buffered views. No physical backing is retained.
     iree_hal_amd_fabric_file_host_range_t* ranges;
     // Number of initialized ranges, including any partially prepared tail.
     iree_host_size_t count;
@@ -77,7 +78,7 @@ typedef struct iree_hal_amd_fabric_file_transfer_t {
       // Transfer-relative position of the chunk's first byte.
       uint64_t offset;
       // Complete chunk extent, including any successfully completed prefix.
-      iree_byte_span_t contents;
+      iree_async_span_t span;
     } chunk;
     // Byte count completed across all native requests.
     uint64_t bytes_transferred;
@@ -108,16 +109,21 @@ iree_status_t iree_hal_amd_fabric_file_transfer_initialize(
 void iree_hal_amd_fabric_file_transfer_deinitialize(
     iree_hal_amd_fabric_file_transfer_t* transfer);
 
-// Prepares direct buffered I/O through the physical sources of an AMDF virtual
-// buffer, after mapping dependencies complete and before executing barriers.
+// Qualifies the complete mapped range of an AMDF virtual buffer and prepares
+// platform I/O through its sources or registered physical backing, after
+// dependencies complete and before barriers. Memory files still qualify every
+// mapped source before the engine copies their bytes.
 // Queue visibility is combined over the entire operation; CPU actions are
 // qualified against each physical source and performed only when required.
 // Unsupported backing returns OK with available=false and no acquired views.
 // Mapping failures, holes, native errors, and allocation failures propagate.
-// Success with available=true retains host views until deinitialization,
+// Registered sources support direct files and retain fixed-buffer identity.
+// Sources without registration may use ordinary buffered I/O. A registration
+// for a different file proactor is an admission error. Success with
+// available=true keeps host views until deinitialization,
 // without adding source ownership or public host-mapping permissions to the
 // buffer.
-iree_status_t iree_hal_amd_fabric_file_transfer_prepare_virtual(
+iree_status_t iree_hal_amd_fabric_file_transfer_prepare_ranges(
     iree_hal_amd_fabric_file_transfer_t* transfer, const amdf_api_t* api,
     const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
     iree_hal_device_event_sink_t event_sink,
@@ -139,15 +145,16 @@ iree_status_t iree_hal_amd_fabric_file_transfer_flush(
 iree_status_t iree_hal_amd_fabric_file_transfer_prepare(
     iree_hal_amd_fabric_file_transfer_t* transfer);
 
-// Prepares the next platform-file chunk in an engine-owned ordinary host span.
+// Prepares the next platform-file chunk in an engine-owned host span.
 // The file must have an async handle. Geometry can reduce the supplied extent;
 // async.chunk records the exact admitted span and transfer-relative offset.
+// Registered spans preserve their identity and end at a native slot boundary.
 // No buffer mapping, host cache maintenance, allocation, or copy occurs here.
 // GPU engines use this for staging, then order the native buffer copy
 // themselves. Contents remain borrowed until the accepted I/O and engine copy
 // both retire.
 iree_status_t iree_hal_amd_fabric_file_transfer_prepare_chunk(
-    iree_hal_amd_fabric_file_transfer_t* transfer, iree_byte_span_t contents);
+    iree_hal_amd_fabric_file_transfer_t* transfer, iree_async_span_t span);
 
 // Submits the prepared chunk, continuing partial requests until the exact
 // chunk completes or an error occurs. Failure retains caller ownership and does

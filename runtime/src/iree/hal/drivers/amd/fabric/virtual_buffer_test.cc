@@ -9,7 +9,11 @@
 #include <algorithm>
 #include <future>
 
+#include "iree/hal/drivers/amd/fabric/file_transfer.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend_test_base.h"
+#include "iree/hal/utils/fd_file.h"
+#include "iree/hal/utils/memory_file.h"
+#include "iree/testing/temp_file.h"
 
 namespace iree::hal::amd::fabric {
 
@@ -87,6 +91,187 @@ TEST_F(MemoryBackendTest, QueriesReservationGeometryBeforeAcquiringAddresses) {
 
 class ReservationBackendTest : public MemoryBackendTest,
                                public ::testing::WithParamInterface<bool> {};
+
+TEST_F(MemoryBackendTest, SharedTranslationsDoNotGrantSourceConsumerAccess) {
+  native_.mapping_enabled = true;
+  native_.alias_projections = true;
+  native_.required_flags = 0;
+  std::array<iree_hal_pool_family_access_t, 2> families = {};
+  for (uint32_t i = 0; i < families.size(); ++i) {
+    binding_descriptions_[i] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                                AMDF_MEMORY_ADDRESS_GPU};
+    native_.address_kinds[i] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
+    native_families_[i].host_usage = 0;
+    families[i] = {
+        .family = families_[i],
+        .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+        .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+    };
+  }
+  iree_hal_pool_t* pool = nullptr;
+  const iree_hal_pool_scope_t source_scope = {1, families.data(), {}};
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, source_scope, &pool_options_,
+                                           allocator_, &pool));
+  iree_hal_buffer_t* backing = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(4096, 4096),
+      iree_infinite_timeout(), &backing));
+  for (auto& family : families) {
+    family.interfaces = 0;
+  }
+  const iree_hal_pool_scope_t target_scope = {
+      families.size(), families.data(), {}};
+  const iree_hal_virtual_buffer_options_t options = {.byte_length = 4096};
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, target_scope, &options,
+                                                allocator_, &target));
+  const auto first = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
+  const auto second = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[1]);
+  const iree_hal_memory_mapping_t mapping = {
+      .target = target,
+      .scope = first,
+      .target_range = {0, 4096},
+      .source = backing,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+  };
+  iree_hal_semaphore_t* done = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      cpu_device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0, 0, &done));
+  uint64_t value = 1;
+  IREE_ASSERT_OK(iree_hal_queue_map(iree_hal_device_queue(cpu_device_, 0, 0),
+                                    {}, {1, &done, &value}, 1, &mapping, 0));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
+  iree_hal_amd_fabric_virtual_mapping_t source;
+  const auto view = iree_hal_buffer_virtual_view(target);
+  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+      view, first.id, 0, 4096, &source));
+  EXPECT_EQ(source.source->access_count, 1u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_amd_fabric_virtual_buffer_query_source(
+                            view, second.id, 0, 4096, &source));
+  iree_hal_semaphore_release(done);
+  iree_hal_buffer_release(target);
+  iree_hal_buffer_release(backing);
+  iree_hal_pool_release(pool);
+}
+
+TEST_F(MemoryBackendTest, FileTransfersQualifySourcesAfterDeviceOnlyPrefix) {
+  native_.mapping_enabled = true;
+  native_.host_mappable = false;
+  native_.required_flags = 0;
+  for (uint32_t i = 0; i < families_.size(); ++i) {
+    binding_descriptions_[i] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                                AMDF_MEMORY_ADDRESS_GPU};
+    native_.address_kinds[i] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
+    native_families_[i].host_usage = 0;
+  }
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool,
+                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+                 IREE_HAL_MEMORY_ACCESS_NONE));
+  iree_hal_buffer_t* backing = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(16384, 4096),
+      iree_infinite_timeout(), &backing));
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(CreateReservation(&target));
+  iree_hal_semaphore_t* done = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      cpu_device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0, 0, &done));
+  const auto scope = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
+  iree_hal_memory_mapping_t mappings[2] = {
+      {
+          .target = target,
+          .scope = scope,
+          .target_range = {0, 8192},
+          .source = backing,
+          .access = IREE_HAL_MEMORY_ACCESS_ALL,
+          .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE,
+      },
+      {.target = target, .scope = scope, .target_range = {8192, 8192}},
+  };
+
+  iree::testing::TempFilePath path("iree_fabric_file_sources");
+  iree_io_file_handle_t* handle = nullptr;
+  IREE_ASSERT_OK(iree_io_file_handle_create(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE |
+          IREE_IO_FILE_MODE_ASYNC,
+      path.path_view(), 16384, allocator_, &handle));
+  iree_async_proactor_t* proactor = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_pool_get(proactor_pool_, 0, &proactor));
+  std::array<iree_hal_file_t*, 2> files = {};
+  iree_status_t status = iree_hal_fd_file_from_handle(
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, handle,
+      proactor, allocator_, &files[0]);
+  iree_io_file_handle_release(handle);
+  IREE_ASSERT_OK(status);
+  std::vector<uint8_t> contents(16384);
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+      iree_make_byte_span(contents.data(), contents.size()), {}, allocator_,
+      &handle));
+  status = iree_hal_memory_file_wrap(
+      nullptr, IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      handle, IREE_HAL_MEMORY_FILE_FLAG_NONE, allocator_, &files[1]);
+  iree_io_file_handle_release(handle);
+  IREE_ASSERT_OK(status);
+
+  uint64_t value = 0;
+  for (const auto access :
+       {IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_MEMORY_ACCESS_WRITE}) {
+    for (const auto suffix_access :
+         {IREE_HAL_MEMORY_ACCESS_NONE, IREE_HAL_MEMORY_ACCESS_READ,
+          IREE_HAL_MEMORY_ACCESS_ALL}) {
+      // Read-only mappings allow writing the file but deny reading into memory.
+      const auto expected = !suffix_access ? IREE_STATUS_FAILED_PRECONDITION
+                            : access == IREE_HAL_MEMORY_ACCESS_READ &&
+                                    suffix_access == IREE_HAL_MEMORY_ACCESS_READ
+                                ? IREE_STATUS_PERMISSION_DENIED
+                                : IREE_STATUS_OK;
+      SCOPED_TRACE(::testing::Message()
+                   << "file access=" << access << " expected=" << expected);
+      const bool mapped = suffix_access != IREE_HAL_MEMORY_ACCESS_NONE;
+      mappings[1].source = mapped ? backing : nullptr;
+      mappings[1].source_offset = mapped ? 8192 : 0;
+      mappings[1].access = suffix_access;
+      mappings[1].operation = mapped ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
+                                     : IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+      ++value;
+      IREE_ASSERT_OK(iree_hal_queue_map(
+          iree_hal_device_queue(cpu_device_, 0, 0), {}, {1, &done, &value},
+          IREE_ARRAYSIZE(mappings), mappings, 0));
+      IREE_ASSERT_OK(
+          iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
+      for (auto* file : files) {
+        SCOPED_TRACE(iree_hal_file_async_handle(file) ? "platform" : "memory");
+        iree_hal_amd_fabric_file_transfer_t transfer;
+        IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
+            file, access, 0, target, 0, 16384, allocator_, &transfer));
+        iree_hal_memory_effects_t before, after;
+        bool available = true;
+        IREE_EXPECT_STATUS_IS(
+            expected, iree_hal_amd_fabric_file_transfer_prepare_ranges(
+                          &transfer, &native_.api, families_[0],
+                          native_families_[0].queue_family_ordinal, {}, &before,
+                          &after, &available));
+        EXPECT_FALSE(available);
+        EXPECT_EQ(transfer.host.count, 0u);
+        EXPECT_EQ(native_.map_count, 0);
+        iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
+      }
+    }
+  }
+  for (auto* file : files) {
+    iree_hal_file_release(file);
+  }
+  EXPECT_TRUE(path.Remove());
+  iree_hal_semaphore_release(done);
+  iree_hal_buffer_release(target);
+  iree_hal_buffer_release(backing);
+  iree_hal_pool_release(pool);
+}
 
 TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
   native_.mapping_enabled = true;
@@ -166,14 +351,14 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
   EXPECT_EQ(native_.last_updates[0].source_byte_offset, 12288u);
   EXPECT_EQ(native_.last_updates[0].target_byte_offset, 4096u);
   EXPECT_EQ(native_.last_updates[0].byte_length, 8192u);
-  amdf_memory_mapping_update_t source;
+  iree_hal_amd_fabric_virtual_mapping_t source;
   for (uint32_t i = 0; i < 2; ++i) {
     IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
         iree_hal_buffer_virtual_view(reservations[i]), i ? second.id : first.id,
         5000, 8000, &source));
-    EXPECT_EQ(source.source_byte_offset, 12288u + 904u);
-    EXPECT_EQ(source.byte_length, 8192u - 904u);
-    EXPECT_EQ(source.memory_access_ordinal, i);
+    EXPECT_EQ(source.native.source_byte_offset, 12288u + 904u);
+    EXPECT_EQ(source.native.byte_length, 8192u - 904u);
+    EXPECT_EQ(source.native.memory_access_ordinal, i);
   }
 
   // ANY expands distinct projections while deduplicating native aliases.
@@ -186,7 +371,7 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
   IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
       iree_hal_buffer_virtual_view(reservations[0]), second.id, 4096, 8192,
       &source));
-  EXPECT_EQ(source.memory_access_ordinal, 1u);
+  EXPECT_EQ(source.native.memory_access_ordinal, 1u);
   mappings[0].scope = first;
 
   // Distinct consumers of one page table still produce a single native vector.
@@ -232,7 +417,7 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
   IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
       iree_hal_buffer_virtual_view(reservations[0]), first.id, 0, 16384,
       &source));
-  EXPECT_EQ(source.byte_length, 4096u);
+  EXPECT_EQ(source.native.byte_length, 4096u);
   // Exercise source-index splits, holes, and coalescing through real queue_map
   // admission. A page assignment oracle is independent of the run
   // representation.
@@ -271,12 +456,12 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
         IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, result);
       } else {
         IREE_ASSERT_OK(result);
-        EXPECT_EQ(source.source_byte_offset, pages[p] * 4096u + 123);
+        EXPECT_EQ(source.native.source_byte_offset, pages[p] * 4096u + 123);
         uint32_t end = p + 1;
         while (end < pages.size() && pages[end] == pages[p] + end - p) {
           ++end;
         }
-        EXPECT_EQ(source.byte_length, (end - p) * 4096u - 123);
+        EXPECT_EQ(source.native.byte_length, (end - p) * 4096u - 123);
       }
     }
   }
@@ -315,7 +500,7 @@ TEST_F(MemoryBackendTest, NativeMappingFailureReachesQueueCompletion) {
       iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
   EXPECT_EQ(native_.update_count, 1);
   EXPECT_EQ(native_.reservation_count, 1);
-  amdf_memory_mapping_update_t source;
+  iree_hal_amd_fabric_virtual_mapping_t source;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
                         iree_hal_amd_fabric_virtual_buffer_query_source(
                             iree_hal_buffer_virtual_view(reservation),

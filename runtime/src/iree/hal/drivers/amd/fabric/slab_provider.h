@@ -20,7 +20,7 @@ typedef struct iree_hal_amd_fabric_asan_t iree_hal_amd_fabric_asan_t;
 // One native address to resolve into a prepared binding slot. The request at
 // host_binding_index is unused: that slot receives the optional host pointer.
 typedef struct iree_hal_amd_fabric_binding_request_t {
-  // Prepared interface: an execution address or a mapping source.
+  // Prepared interface: an execution address, mapping source, or I/O binding.
   iree_hal_buffer_interface_t type;
   // Index into the complete native access set, or zero for a host source.
   uint32_t access_ordinal;
@@ -28,6 +28,8 @@ typedef struct iree_hal_amd_fabric_binding_request_t {
   amdf_memory_address_kind_t address_kind;
   // Required native source offset alignment for MAPPING_SOURCE, otherwise zero.
   uint32_t mapping_granularity;
+  // Borrowed device file proactor for REGISTERED_IO; otherwise NULL.
+  iree_async_proactor_t* io_proactor;
 } iree_hal_amd_fabric_binding_request_t;
 
 // One exact input class with its qualified native construction profile.

@@ -102,6 +102,7 @@ iree_runtime_cc_library(
     hdrs = ["file_transfer.h"],
     deps = [
         ":buffer",
+        ":memory",
         ":memory_backend",
         ":memory_transition",
         "//libamdf:headers",
@@ -143,6 +144,7 @@ iree_runtime_cc_library(
         ":buffer",
         ":memory",
         "//libamdf:headers",
+        "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
@@ -247,6 +249,8 @@ iree_runtime_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":file_transfer",
+        ":memory",
         ":memory_backend",
         ":slab_provider",
         "//libamdf:headers",
@@ -260,9 +264,12 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/memory:fixed_block_pool",
         "//runtime/src/iree/hal/memory:slab_cache",
         "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/hal/utils:files",
+        "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )
 

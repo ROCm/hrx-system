@@ -500,7 +500,29 @@ static void iree_hal_amd_xdna_host_worker_execute(
     iree_hal_amd_xdna_operation_profile_ready(operation);
     start = iree_hal_amd_xdna_profile_host_begin(queue->profile);
   }
-  const uint32_t count = iree_hal_amd_xdna_operation_execute_host(operation);
+  if (operation->kind == IREE_HAL_AMD_XDNA_OPERATION_FILE &&
+      !operation->file.io_completed &&
+      !operation->file.transfer->async.bytes_transferred) {
+    iree_hal_memory_effects_t before = {0}, after = {0};
+    bool available = false;
+    operation->status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
+        operation->file.transfer, queue->context->api, queue->base.queue_family,
+        queue->context->queue_family_ordinal, queue->context->event_sink,
+        &before, &after, &available);
+    // XDNA command boundaries supply global visibility, but this engine has
+    // no command for a range-specific queue recipe.
+    if (iree_status_is_ok(operation->status) &&
+        (iree_hal_memory_effects_requires_resources(before) ||
+         iree_hal_memory_effects_requires_resources(after))) {
+      operation->status = iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "XDNA file transfers cannot encode ranged queue transitions");
+    }
+  }
+  const uint32_t count =
+      iree_status_is_ok(operation->status)
+          ? iree_hal_amd_xdna_operation_execute_host(operation)
+          : 0;
   if (start) {
     iree_hal_amd_xdna_operation_profile_host_end(
         operation, start, iree_status_code(operation->status), count);

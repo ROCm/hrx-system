@@ -1312,6 +1312,35 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
         bindings->bindings[IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE] =
             (uint16_t)index;
       }
+      if (requested->interfaces &
+          (UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO)) {
+        if (!backend->native.io_proactor) {
+          supported = false;
+          break;
+        }
+        required_flags |= AMDF_MEMORY_FLAG_HOST_FILE_IO;
+        private_host_access |=
+            AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+        uint32_t index = 1;
+        for (; index < binding_count; ++index) {
+          if (requests[index].access_ordinal == access_ordinal &&
+              binding_types[index] == IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO) {
+            break;
+          }
+        }
+        if (index == binding_count) {
+          requests[index] = (iree_hal_amd_fabric_binding_request_t){
+              .type = IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO,
+              .access_ordinal = access_ordinal,
+              .io_proactor = backend->native.io_proactor,
+          };
+          binding_types[index] = IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
+          ++binding_count;
+        }
+        bindings->interfaces |= 1u << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
+        bindings->bindings[IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO] =
+            (uint16_t)index;
+      }
       if (requested->interfaces & ~((uint64_t)bindings->interfaces)) {
         supported = false;
         break;

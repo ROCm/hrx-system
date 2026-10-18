@@ -210,7 +210,7 @@ static void iree_hal_amd_gpu_file_transfer_copy(
   const iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
   const iree_byte_span_t contents =
       transfer->async.file
-          ? transfer->async.chunk.contents
+          ? iree_async_span_data(transfer->async.chunk.span)
           : iree_make_byte_span(
                 transfer->file_contents.data + transfer->file_offset,
                 (iree_host_size_t)transfer->length);
@@ -254,7 +254,9 @@ static void iree_hal_amd_gpu_file_transfer_advance(
       operation->host_transfer
           ? iree_hal_amd_fabric_file_transfer_prepare(transfer)
           : iree_hal_amd_fabric_file_transfer_prepare_chunk(
-                transfer, transfer->async.staging);
+                transfer,
+                iree_async_span_from_ptr(transfer->async.staging.data,
+                                         transfer->async.staging.data_length));
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
   } else if (operation->host_transfer ||
@@ -344,26 +346,26 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
                                               (void*)(operation + 1), true, 0);
   }
   iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
-  operation->host_transfer =
-      iree_hal_amd_gpu_file_transfer_prepare_host(operation);
+  iree_hal_memory_effects_t before = {0}, after = {0};
+  status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
+      transfer, operation->executor->context->api,
+      operation->executor->queue->queue_family,
+      operation->executor->native_family_ordinal,
+      operation->executor->context->event_sink, &before, &after,
+      &operation->host_transfer);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_file_transfer_complete(operation, status);
+    return;
+  }
+  if (operation->host_transfer) {
+    operation->executor->add_effects(operation->executor->queue, before,
+                                     operation->before);
+    operation->executor->add_effects(operation->executor->queue, after,
+                                     operation->after);
+  }
   if (!operation->host_transfer) {
-    iree_hal_memory_effects_t before = {0}, after = {0};
-    status = iree_hal_amd_fabric_file_transfer_prepare_virtual(
-        transfer, operation->executor->context->api,
-        operation->executor->queue->queue_family,
-        operation->executor->native_family_ordinal,
-        operation->executor->context->event_sink, &before, &after,
-        &operation->host_transfer);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_amd_gpu_file_transfer_complete(operation, status);
-      return;
-    }
-    if (operation->host_transfer) {
-      operation->executor->add_effects(operation->executor->queue, before,
-                                       operation->before);
-      operation->executor->add_effects(operation->executor->queue, after,
-                                       operation->after);
-    }
+    operation->host_transfer =
+        iree_hal_amd_gpu_file_transfer_prepare_host(operation);
   }
   if (operation->host_transfer) {
     iree_hal_amd_gpu_file_transfer_submit_native(

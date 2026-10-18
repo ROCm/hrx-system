@@ -29,6 +29,11 @@ struct FileProvider {
     uint64_t offset;
     // Requested remaining length.
     iree_host_size_t length;
+    // Registered identity preserved across short transfers, or NULL for raw
+    // I/O.
+    iree_async_region_t* region;
+    // Region-relative position (raw address for unregistered spans).
+    iree_host_size_t buffer_offset;
   };
 
   FileProvider() {
@@ -81,12 +86,14 @@ struct FileProvider {
     if (self->pending->type == IREE_ASYNC_OPERATION_TYPE_FILE_READ) {
       auto* read =
           reinterpret_cast<iree_async_file_read_operation_t*>(self->pending);
-      self->requests.push_back({read->offset, read->buffer.length});
+      self->requests.push_back({read->offset, read->buffer.length,
+                                read->buffer.region, read->buffer.offset});
     } else {
       EXPECT_EQ(self->pending->type, IREE_ASYNC_OPERATION_TYPE_FILE_WRITE);
       auto* write =
           reinterpret_cast<iree_async_file_write_operation_t*>(self->pending);
-      self->requests.push_back({write->offset, write->buffer.length});
+      self->requests.push_back({write->offset, write->buffer.length,
+                                write->buffer.region, write->buffer.offset});
     }
     return iree_ok_status();
   }
@@ -349,6 +356,45 @@ TEST_P(FileTransferTest, ZeroProgressFailsTheExactRange) {
   EXPECT_EQ(provider_.pending, nullptr);
 }
 
+TEST_P(FileTransferTest, RegisteredChunksPreserveSlotsAndShortIoOffsets) {
+  ASSERT_NO_FATAL_FAILURE(Initialize());
+  iree_async_region_t region = {
+      .proactor = &provider_.proactor,
+      .base_ptr = storage_.contents.data(),
+      .length = storage_.contents.size(),
+      .buffer_size = 16,
+  };
+  for (size_t offset = 0; offset < kLength;) {
+    const size_t region_offset = kNativeOffset + offset;
+    const size_t chunk_length =
+        std::min(kLength - offset, 16 - region_offset % 16);
+    IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_chunk(
+        &transfer_,
+        iree_async_span_make(&region, region_offset, kLength - offset)));
+    EXPECT_EQ(transfer_.async.chunk.span.length, chunk_length);
+    EXPECT_EQ(transfer_.async.chunk.span.region, &region);
+    const size_t first_request = provider_.requests.size();
+    IREE_ASSERT_OK(Submit());
+    const size_t prefix = std::min(chunk_length, size_t{7});
+    provider_.Complete(prefix);
+    if (prefix != chunk_length) {
+      EXPECT_EQ(provider_.requests.back().region, &region);
+      EXPECT_EQ(provider_.requests.back().buffer_offset,
+                region_offset + prefix);
+      provider_.Complete(chunk_length - prefix);
+    }
+    EXPECT_EQ(provider_.requests[first_request].region, &region);
+    EXPECT_EQ(provider_.requests[first_request].buffer_offset, region_offset);
+    EXPECT_EQ(completion_code_, IREE_STATUS_OK);
+    offset += chunk_length;
+    EXPECT_EQ(transfer_.async.bytes_transferred, offset);
+  }
+  EXPECT_EQ(storage_.contents, expected_buffer_);
+  EXPECT_EQ(provider_.contents, expected_file_);
+  EXPECT_TRUE(storage_.cache_operations.empty());
+  EXPECT_EQ(transfer_.async.staging.data, nullptr);
+}
+
 TEST_P(FileTransferTest, EngineStagingDoesNotRequireOrTouchAHostBufferView) {
   ASSERT_NO_FATAL_FAILURE(Initialize());
   const auto original_buffer = storage_.contents;
@@ -360,9 +406,9 @@ TEST_P(FileTransferTest, EngineStagingDoesNotRequireOrTouchAHostBufferView) {
              staging.size());
     }
     IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_chunk(
-        &transfer_, iree_make_byte_span(staging.data(), staging.size())));
+        &transfer_, iree_async_span_from_ptr(staging.data(), staging.size())));
     EXPECT_EQ(transfer_.async.chunk.offset, offset);
-    EXPECT_EQ(transfer_.async.chunk.contents.data, staging.data());
+    EXPECT_EQ(iree_async_span_ptr(transfer_.async.chunk.span), staging.data());
     IREE_ASSERT_OK(Submit());
     provider_.Complete(7);
     provider_.Complete(9);
