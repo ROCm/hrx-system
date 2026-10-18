@@ -92,7 +92,7 @@ class TextStreamTest : public ::testing::Test {
   loom_serve_text_chat_response_t response_ = {
       .model_name = IREE_SV("text"),
       .request_id = 7,
-      .creation_time = 12000000000,
+      .created_unix_seconds = 12,
       .flags = LOOM_SERVE_TEXT_CHAT_FLAG_STREAM,
       .usage = {.input_tokens = 6, .cached_tokens = 4, .output_tokens = 2},
   };
