@@ -24,8 +24,9 @@
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "'aligned' attribute requires a record, non-static data member, or variable"
 typedef unsigned Value __attribute__((aligned(16)));
+// ERROR@+1: PARSE/036 "array element size 4 is not a multiple of its alignment 16"
+Value values[2];
 
 // ====
 // INPUT: cxx triple=x86_64-w64-windows-gnu data-model=llp64
@@ -158,7 +159,7 @@ struct [[gnu::packed]] Packet { alignas(2) unsigned value [[gnu::aligned(8)]]; }
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "'aligned' attribute requires a record, non-static data member, or variable"
+// ERROR@+1: PARSE/036 "'aligned' attribute requires a record, type alias, non-static data member, or variable"
 struct Packet { [[gnu::aligned(8)]] static unsigned value; };
 
 // ====

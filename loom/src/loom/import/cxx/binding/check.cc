@@ -114,7 +114,7 @@ std::optional<CheckIntrinsic> CheckIntrinsic::resolve(
   }
   auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
   auto parameters = signature->parameterTypes();
-  bool returns_void = signature->returnType()->kind() == cxx::TypeKind::kVoid;
+  bool returns_void = unit.typeTraits().is_void(signature->returnType());
   auto fail = [&](const char* message) {
     diagnostics.reject(unit, owner, message);
   };

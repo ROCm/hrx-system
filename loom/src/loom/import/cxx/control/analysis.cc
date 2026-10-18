@@ -558,7 +558,7 @@ std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {
   if (!induction || traits.is_volatile(induction->type())) {
     return std::nullopt;
   }
-  if (traits.remove_cv(induction->type())->kind() ==
+  if (cxx::unaligned_type(traits.remove_cv(induction->type()))->kind() ==
       cxx::TypeKind::kUnsignedInt) {
     return classify_unsigned(loop, induction, condition);
   }
@@ -577,10 +577,10 @@ std::optional<CountedLoop> ControlFlow::classify_unsigned(
   auto* left = cxx::ast_cast<cxx::IdExpressionAST>(
       unwrap_expression(condition->leftExpression));
   if (condition->symbol || !left || left->symbol != induction ||
-      traits.remove_cv(condition->leftExpression->type)->kind() !=
-          cxx::TypeKind::kUnsignedInt ||
-      traits.remove_cv(condition->rightExpression->type)->kind() !=
-          cxx::TypeKind::kUnsignedInt) {
+      cxx::unaligned_type(traits.remove_cv(condition->leftExpression->type))
+              ->kind() != cxx::TypeKind::kUnsignedInt ||
+      cxx::unaligned_type(traits.remove_cv(condition->rightExpression->type))
+              ->kind() != cxx::TypeKind::kUnsignedInt) {
     return std::nullopt;
   }
 

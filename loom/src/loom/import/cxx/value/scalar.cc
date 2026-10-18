@@ -53,7 +53,8 @@ const cxx::ConstValue& address_constant_payload(cxx::TranslationUnit& unit,
           : static_cast<const cxx::Type*>(
                 unit.control()->getUnsignedLongLongIntType());
   if (!field || field->isStatic() ||
-      unit.typeTraits().remove_cv(field->type()) != expected) {
+      !unit.typeTraits().is_same(unit.typeTraits().remove_cv(field->type()),
+                                 expected)) {
     diagnostics.reject(
         unit, owner, "address constant storage does not match its signedness");
   }

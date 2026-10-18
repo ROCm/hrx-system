@@ -280,7 +280,7 @@ std::optional<FragmentIntrinsic> FragmentIntrinsic::resolve(
     }
     case Operation::Store: {
       if (parameters.size() != 4 ||
-          signature->returnType()->kind() != cxx::TypeKind::kVoid ||
+          !unit.typeTraits().is_void(signature->returnType()) ||
           !types.native_vector(parameters[0])) {
         diagnostics.reject(
             unit, owner,

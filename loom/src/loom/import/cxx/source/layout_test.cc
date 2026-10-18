@@ -94,13 +94,15 @@ TEST_P(LayoutTest, MemberPackingCrossesTheDeclaredAllocationUnit) {
   EXPECT_FALSE(cxx::symbol_cast<cxx::FieldSymbol>(*first.begin())->isPacked());
 }
 
-TEST_P(LayoutTest, PackedRequestsAndResolvedLayoutSurviveSemanticArchives) {
+TEST_P(LayoutTest, LayoutRequestsAndResolvedLayoutSurviveSemanticArchives) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
   options.data_model = GetParam();
   Source source(
       IREE_SV(
           "enum [[gnu::packed]] Byte { byte = 255 };\n"
+          "typedef unsigned AlignedWord __attribute__((aligned(32)));\n"
+          "struct AliasPacket { unsigned char tag; AlignedWord value; };\n"
           "struct [[gnu::packed, gnu::aligned(64)]] Packet {\n"
           "  unsigned char tag;\n"
           "  alignas(16) unsigned value;\n"
@@ -140,6 +142,27 @@ TEST_P(LayoutTest, PackedRequestsAndResolvedLayoutSurviveSemanticArchives) {
   EXPECT_EQ(destination.unit().typeTraits().promoted_integer_type(
                 enumeration->type()),
             enumeration->promotionType());
+  auto aliases = restored.globalScope->find("AlignedWord");
+  ASSERT_FALSE(aliases.begin() == aliases.end());
+  auto* alias = cxx::symbol_cast<cxx::TypeAliasSymbol>(*aliases.begin());
+  ASSERT_NE(alias, nullptr);
+  auto* aligned = cxx::type_cast<cxx::AlignedType>(alias->type());
+  ASSERT_NE(aligned, nullptr);
+  EXPECT_EQ(aligned->alignment(), 32u);
+  EXPECT_NE(cxx::type_cast<cxx::UnsignedIntType>(aligned->elementType()),
+            nullptr);
+  auto aliasRecords = restored.globalScope->find("AliasPacket");
+  ASSERT_FALSE(aliasRecords.begin() == aliasRecords.end());
+  auto* aliasRecord = cxx::symbol_cast<cxx::ClassSymbol>(*aliasRecords.begin());
+  ASSERT_NE(aliasRecord, nullptr);
+  EXPECT_EQ(aliasRecord->sizeInBytes(), 64);
+  EXPECT_EQ(aliasRecord->alignment(), 32);
+  auto aliasFields = aliasRecord->find("value");
+  ASSERT_FALSE(aliasFields.begin() == aliasFields.end());
+  auto* aliasValue = cxx::symbol_cast<cxx::FieldSymbol>(*aliasFields.begin());
+  ASSERT_NE(aliasValue, nullptr);
+  ASSERT_TRUE(aliasRecord->layout()->getFieldInfo(aliasValue).has_value());
+  EXPECT_EQ(aliasRecord->layout()->getFieldInfo(aliasValue)->offset, 32u);
   auto records = restored.globalScope->find("Packet");
   ASSERT_FALSE(records.begin() == records.end());
   auto* record = cxx::symbol_cast<cxx::ClassSymbol>(*records.begin());

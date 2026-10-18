@@ -437,7 +437,7 @@ std::optional<BarrierIntrinsic> BarrierIntrinsic::resolve(
   }
   auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
   if (signature->isVariadic() || !signature->parameterTypes().empty() ||
-      signature->returnType()->kind() != cxx::TypeKind::kVoid) {
+      !unit.typeTraits().is_void(signature->returnType())) {
     diagnostics.reject(unit, owner, "kernel.barrier requires void()");
   }
   auto arguments = function->templateArguments();

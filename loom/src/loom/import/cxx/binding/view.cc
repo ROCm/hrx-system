@@ -131,7 +131,7 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
     }
   };
   auto require_void = [&] {
-    if (signature->returnType()->kind() != cxx::TypeKind::kVoid) {
+    if (!unit.typeTraits().is_void(signature->returnType())) {
       diagnostics.reject(unit, owner, "view.store must return void");
     }
   };
