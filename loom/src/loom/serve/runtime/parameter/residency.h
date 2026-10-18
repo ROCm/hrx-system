@@ -19,6 +19,7 @@ extern "C" {
 // make the request impossible. The common physical pool invokes this policy
 // during both parameter activation and mutable-state growth.
 typedef struct loom_serve_residency_cache_t loom_serve_residency_cache_t;
+typedef struct loom_serve_residency_group_t loom_serve_residency_group_t;
 typedef struct loom_serve_residency_t loom_serve_residency_t;
 
 // Borrows pool. NULL pool supports fixed-backed consumers but
@@ -27,7 +28,7 @@ iree_status_t loom_serve_residency_cache_allocate(
     loom_serve_memory_pool_t* pool, iree_allocator_t host_allocator,
     loom_serve_residency_cache_t** out_cache);
 
-// All registered residencies must have been destroyed. Removes pressure policy.
+// All residencies and groups must have been destroyed. Removes pressure policy.
 void loom_serve_residency_cache_free(loom_serve_residency_cache_t* cache);
 
 // Collects completed parameter releases on the serialized owner without
@@ -54,18 +55,29 @@ iree_status_t loom_serve_residency_cache_trim_idle(
     loom_serve_residency_cache_t* cache, iree_time_t now,
     iree_duration_t timeout, bool* out_pending);
 
-// Registers the weight plans consumed together by one model invocation. Copies
-// the pointer array, not the plans. Plans belong to this cache's physical pool,
-// are initially inactive, belong exclusively to this registration, and outlive
-// it. Borrows the model's execution domain for activation dependencies and
-// synchronous outer-thread error retirement; the shared cache never waits on
-// unrelated model timelines. All calls on the cache and registered models are
-// serialized by their shared host owner. A group's complete physical parameter
-// footprint must fit the configured pool budget, independent of current usage;
-// impossible groups fail before joining admission or claiming storage.
+// Registers one independently evictable group of immutable weight plans.
+// Copies the pointer array, not the plans. Plans belong to this cache's
+// physical pool, are initially inactive, belong exclusively to this group, and
+// outlive it. Multiple invocation residencies may borrow the same group. All
+// cache, group, and residency operations share one serialized host owner.
+iree_status_t loom_serve_residency_group_allocate(
+    loom_serve_residency_cache_t* cache, iree_host_size_t weight_count,
+    loom_serve_weights_t* const* weights, iree_allocator_t host_allocator,
+    loom_serve_residency_group_t** out_group);
+
+// Unregisters after every borrowing residency is destroyed and accepted weight
+// operations have retired. Does not destroy borrowed plans. NULL is accepted.
+void loom_serve_residency_group_free(loom_serve_residency_group_t* group);
+
+// Registers one invocation/cohort working set of distinct groups in this cache.
+// Copies the pointer array; groups outlive the residency. Borrows execution for
+// readiness import and synchronous outer-thread error retirement, never waiting
+// on unrelated consumer timelines. The complete working set must fit the pool
+// budget independent of current usage; impossible sets fail before admission.
+// A shared group contributes physical storage once regardless of its borrowers.
 iree_status_t loom_serve_residency_allocate(
     loom_serve_residency_cache_t* cache, loom_serve_execution_t* execution,
-    iree_host_size_t weight_count, loom_serve_weights_t* const* weights,
+    iree_host_size_t group_count, loom_serve_residency_group_t* const* groups,
     iree_allocator_t host_allocator, loom_serve_residency_t** out_residency);
 
 // Unregisters after all consumers have retired, including failed operations.
@@ -118,9 +130,10 @@ void loom_serve_residency_set_reclaimer(
 bool loom_serve_residency_cache_is_reclaiming(
     const loom_serve_residency_cache_t* cache);
 
-// Pins the entire group before admission/loading. Already active groups need
-// no I/O. Enqueues loading before consumption on the model timeline, without
-// waiting on device or I/O completion. On success admitted=true owns one pin,
+// Pins every group before admission/loading. Already active groups need no I/O;
+// each execution imports their readiness once per activation. Enqueues loading
+// before consumption without waiting on device or I/O completion.
+// On success admitted=true owns one pin,
 // released only after activation and consuming work retire (or after activation
 // if the caller relinquishes explicit retention). admitted=false owns no
 // pin and reports ordinary backpressure, with no partial parameter load. Real
@@ -143,11 +156,11 @@ typedef enum loom_serve_residency_admission_e {
 // capacity denial starts a FIFO; subsequent weighted admissions join it, even
 // for an already-active model. Accepted work uses acquire/try_acquire directly
 // so nested execution pins never wait behind the work they must unblock.
-// Parameter-free groups bypass weight pressure. Acquiring parameters preserves
-// an existing interest: model-owned state may still need capacity. The caller
-// withdraws it with cancel_admission only after the complete request/cohort is
-// admitted or abandoned. All calls share the cache's serialized owner. No
-// callback or task waits are installed.
+// Parameter-free working sets bypass weight pressure. Acquiring parameters
+// preserves an existing interest: model-owned state may still need capacity.
+// The caller withdraws it with cancel_admission only after the complete
+// request/cohort is admitted or abandoned. All calls share the cache's
+// serialized owner. No callback or task waits are installed.
 iree_status_t loom_serve_residency_try_admit(
     loom_serve_residency_t* residency,
     loom_serve_residency_admission_t* out_admission);
@@ -172,8 +185,9 @@ iree_status_t loom_serve_residency_acquire(loom_serve_residency_t* residency);
 iree_status_t loom_serve_residency_acquire_wait(
     loom_serve_residency_t* residency);
 
-// Cold outer-thread activation join for a pinned group. Task services consume
-// the model timeline asynchronously. Failure preserves the pin until teardown.
+// Cold outer-thread activation join for a pinned working set. Task services
+// consume the model timeline asynchronously. Failure preserves the pin until
+// teardown.
 iree_status_t loom_serve_residency_await(loom_serve_residency_t* residency);
 
 // Captures the borrowed execution frontier after accepted activation. A caller
@@ -204,7 +218,8 @@ iree_status_t loom_serve_residency_activate(loom_serve_residency_t* residency);
 iree_status_t loom_serve_residency_deactivate(loom_serve_residency_t* residency,
                                               bool* out_complete);
 
-// Combined parameter accounting for the group's independently prepared plans.
+// Combined accounting for this working set. Shared groups appear in each
+// borrower's snapshot; summing borrower snapshots is not physical accounting.
 loom_serve_memory_statistics_t loom_serve_residency_statistics(
     const loom_serve_residency_t* residency);
 
@@ -217,7 +232,7 @@ loom_serve_weight_activity_t loom_serve_residency_activity(
 // that its device timeline has completed. Fixed backing has no virtual-pool
 // accounting; its zero memory fields do not describe actual physical usage.
 typedef struct loom_serve_residency_snapshot_t {
-  // Every parameter plan has enqueued activation on the model timeline.
+  // This execution imported readiness for every group's current activation.
   bool active;
   // Physical parameter backing can be reclaimed without destroying the model.
   bool elastic;

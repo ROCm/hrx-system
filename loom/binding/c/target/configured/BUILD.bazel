@@ -24,6 +24,18 @@ loom_cc_library(
     linkstatic = True,
     deps = [
         "//loom/binding/c:loomc",
+        "//loom/src/loom/target/configured:ir_provider_set",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "target",
+    srcs = ["configured_target.c"],
+    hdrs = ["//loom/binding/c:include/loomc/target/configured_target.h"],
+    linkstatic = True,
+    deps = [
+        "//loom/binding/c:loomc",
         "//loom/src/loom/target/configured:provider_set",
     ],
     alwayslink = True,

@@ -10,14 +10,15 @@
 #include "loomc/target.h"
 
 /// @file
-/// Build-configured target IR support for parsing and transformation.
+/// Build-configured target IR representation support.
 ///
 /// Link the optional `//loom/binding/c/target/configured:ir` Bazel package or
 /// `loom::binding::c::target::configured::ir` CMake target to use this factory.
-/// It joins portable command IR and all enabled target architectures, including
-/// families without an artifact emitter. The separate configured compiler
-/// package joins artifact-capable targets. Clients needing one target family
-/// can continue selecting that family's package directly.
+/// It joins portable command IR and all enabled target representations without
+/// their lowering, pass, legalization, or artifact-emission implementations.
+/// The configured target package adds transformation support, and the separate
+/// configured compiler package joins artifact-capable targets. Clients needing
+/// one target family can continue selecting that family's package directly.
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,9 +26,9 @@ extern "C" {
 
 /// Creates an environment supporting every configured target IR family.
 ///
-/// The environment supplies descriptor registries, passes, and lowering
-/// capabilities from the enabled architecture providers. Construction does not
-/// probe devices or load platform runtimes.
+/// The environment supplies dialects, target facts, Low descriptor registries,
+/// and source diagnostics for parsing, structural verification, and printing.
+/// Construction does not probe devices or load platform runtimes.
 ///
 /// @param allocator Host allocator used for target-environment storage.
 /// @param out_target_environment Receives one retained environment on success.

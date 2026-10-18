@@ -372,6 +372,7 @@ loomc_shared_libraries(
     loom::binding::c::target::cmd
     loom::binding::c::target::configured
     loom::binding::c::target::configured::ir
+    loom::binding::c::target::configured::target
     loom::binding::c::target::cpu::iree_hal
     loom::binding::c::target::iree_hal
     ${_loomc_shared_platform_components}

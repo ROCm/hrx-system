@@ -844,7 +844,11 @@ static bool loom_amdgpu_branch_arg_payload_prefers_vgpr(
   const loom_value_t* incoming_value =
       loom_module_value(module, incoming_value_id);
   if (loom_value_is_block_arg(incoming_value)) {
-    return false;
+    // Following CFG carriers is recursive and requires the cycle-aware query
+    // cache. Contract-only queries may intentionally omit that cache.
+    return analysis != NULL &&
+           loom_amdgpu_analyzed_source_value_prefers_vgpr(
+               module, fact_table, view_regions, analysis, incoming_value_id);
   }
   const loom_op_t* defining_op = loom_value_def_op(incoming_value);
   if (defining_op == NULL) {

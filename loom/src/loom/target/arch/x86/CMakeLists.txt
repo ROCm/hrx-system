@@ -199,6 +199,24 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
+    ir_provider
+  HDRS
+    "ir_provider.h"
+  SRCS
+    "ir_provider.c"
+  DEPS
+    ::facts
+    iree::base
+    loom::target::arch::x86::descriptors::low_registry
+    loom::target::arch::x86::ops
+    loom::target::provider
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
     provider
   HDRS
     "provider.h"

@@ -9,6 +9,61 @@
 
 iree_add_all_subdirs()
 
+set(_ir_provider_set_platform_copts "")
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _ir_provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_VM=1")
+endif()
+if(LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _ir_provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_AMDGPU=1")
+endif()
+if(LOOM_TARGET_ARCH_XDNA)
+  list(APPEND _ir_provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_XDNA=1")
+endif()
+if(LOOM_TARGET_ARCH_SPIRV)
+  list(APPEND _ir_provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_SPIRV=1")
+endif()
+if(LOOM_TARGET_ARCH_WASM)
+  list(APPEND _ir_provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_WASM=1")
+endif()
+if(LOOM_TARGET_ARCH_X86)
+  list(APPEND _ir_provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_X86=1")
+endif()
+set(_ir_provider_set_platform_deps "")
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _ir_provider_set_platform_deps loom::target::arch::vm::ir_provider)
+endif()
+if(LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _ir_provider_set_platform_deps loom::target::arch::amdgpu::ir_provider)
+endif()
+if(LOOM_TARGET_ARCH_XDNA)
+  list(APPEND _ir_provider_set_platform_deps loom::target::arch::amd::xdna::aie2p::ir_provider)
+endif()
+if(LOOM_TARGET_ARCH_SPIRV)
+  list(APPEND _ir_provider_set_platform_deps loom::target::arch::spirv::ir_provider)
+endif()
+if(LOOM_TARGET_ARCH_WASM)
+  list(APPEND _ir_provider_set_platform_deps loom::target::arch::wasm::ir_provider)
+endif()
+if(LOOM_TARGET_ARCH_X86)
+  list(APPEND _ir_provider_set_platform_deps loom::target::arch::x86::ir_provider)
+endif()
+loom_cc_library(
+  NAME
+    ir_provider_set
+  COPTS
+    ${_ir_provider_set_platform_copts}
+  HDRS
+    "ir_provider_set.h"
+  SRCS
+    "ir_provider_set.c"
+  DEPS
+    iree::base
+    loom::target::arch::cmd::provider
+    loom::target::provider
+    ${_ir_provider_set_platform_deps}
+  PUBLIC
+)
+
 set(_provider_set_platform_copts "")
 if(LOOM_TARGET_ARCH_VM)
   list(APPEND _provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_VM=1")

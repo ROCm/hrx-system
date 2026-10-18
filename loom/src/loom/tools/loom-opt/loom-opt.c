@@ -27,7 +27,7 @@
 #include "loomc/interop.h"
 #include "loomc/iree.h"
 #include "loomc/module_config.h"
-#include "loomc/target/configured_ir.h"
+#include "loomc/target/configured_target.h"
 
 IREE_FLAG(string, to, "text", "Output format: text, bc, or bytecode.");
 IREE_FLAG(string, output, "-",
@@ -855,7 +855,7 @@ int main(int argc, char** argv) {
   // needs every configured architecture provider, including portable cmd.core.
   // The configured compiler package contains only artifact-capable providers.
   iree_status_t status =
-      iree_status_from_loomc(loomc_target_environment_create_configured_ir(
+      iree_status_from_loomc(loomc_target_environment_create_configured_target(
           loom_allocator, &public_target_environment));
   if (iree_status_is_ok(status)) {
     status = iree_status_from_loomc(

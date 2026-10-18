@@ -62,14 +62,16 @@ class AmdgpuSanitizerRaceLifetimeTest : public ::testing::Test {
     return ModulePtr(module);
   }
 
-  std::string SourceForTarget(const char* target) {
+  std::string SourceForTarget(const char* target, uint32_t workgroup_size = 1) {
     std::string source = "amdgpu.target<";
     source.append(target);
     source.append(R"(> @target
 
 kernel.def target(@target) @lifetime_sync() {
   %unit = index.constant 1 : index
-  %threads = index.constant 1 : index
+  %threads = index.constant )");
+    source.append(std::to_string(workgroup_size));
+    source.append(R"( : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   %base = index.constant 0 : offset
@@ -322,7 +324,7 @@ TEST_F(AmdgpuSanitizerRaceLifetimeTest,
 
   const auto b128_stores =
       OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B128_SADDR);
-  ASSERT_EQ(b128_stores.size(), 3u);
+  ASSERT_EQ(b128_stores.size(), 4u);
   loom_op_t* publish_store = nullptr;
   for (loom_op_t* op : b128_stores) {
     if (LowOpOffset(op) ==
@@ -496,7 +498,8 @@ TEST_F(AmdgpuSanitizerRaceLifetimeTest,
 
   loom_op_t* chunk_clear_store = nullptr;
   for (loom_op_t* op : b128_stores) {
-    if (loom_low_op_operands(op).values[2] != record_base) {
+    if (loom_low_op_operands(op).values[2] != record_base &&
+        LowOpOffset(op) == 0) {
       chunk_clear_store = op;
     }
   }
@@ -555,6 +558,93 @@ TEST_F(AmdgpuSanitizerRaceLifetimeTest,
 }
 
 TEST_F(AmdgpuSanitizerRaceLifetimeTest,
+       BarrierEpochWrapRetiresBitmapBeforeMultiwaveBarrier) {
+  const std::string source = SourceForTarget("gfx11-generic", 192);
+  ModulePtr module = Parse(iree_make_cstring_view(source.c_str()));
+  IREE_ASSERT_OK(RunSourceToLow(module.get()));
+  loom_op_t* kernel = FindKernel(module.get(), IREE_SV("lifetime_sync"));
+  ASSERT_NE(kernel, nullptr);
+  ASSERT_TRUE(loom_low_kernel_def_isa(kernel));
+  BindKernel(module.get(), kernel);
+  ASSERT_NE(descriptor_set_, nullptr);
+
+  std::vector<loom_op_t*> epoch_adds = OpsForDescriptorRef(
+      LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_ADD_U32_RTN_SADDR);
+  const auto epoch_adds_u64 = OpsForDescriptorRef(
+      LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_ADD_U64_RTN_SADDR);
+  epoch_adds.insert(epoch_adds.end(), epoch_adds_u64.begin(),
+                    epoch_adds_u64.end());
+  ASSERT_EQ(epoch_adds.size(), 1u);
+  loom_op_t* epoch_add = epoch_adds[0];
+  loom_block_t* epoch_update_block = epoch_add->parent_block;
+  const loom_op_t* epoch_update_terminator =
+      loom_block_const_last_op(epoch_update_block);
+  ASSERT_TRUE(loom_low_cond_br_isa(epoch_update_terminator));
+
+  bool found_compact_epoch_mask = false;
+  loom_op_t* update_op = nullptr;
+  loom_block_for_each_op(epoch_update_block, update_op) {
+    int64_t immediate = 0;
+    if (LowOpHasDescriptorRef(update_op,
+                              LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT) &&
+        TryGetAttrI64(loom_low_op_attrs(update_op), IREE_SV("imm32"),
+                      &immediate) &&
+        immediate == LOOM_AMDGPU_TSAN_SHADOW_EPOCH_CAPACITY - 1u) {
+      found_compact_epoch_mask = true;
+    }
+  }
+  EXPECT_TRUE(found_compact_epoch_mask);
+
+  const loom_value_id_t shadow_base = loom_low_op_operands(epoch_add).values[2];
+  loom_op_t* epoch_bitmap_clear = nullptr;
+  for (loom_op_t* store : OpsForDescriptorRef(
+           LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B128_SADDR)) {
+    if (loom_low_op_operands(store).values[2] == shadow_base &&
+        LowOpOffset(store) ==
+            LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_CHUNK_STATE_OFFSET) {
+      ASSERT_EQ(epoch_bitmap_clear, nullptr);
+      epoch_bitmap_clear = store;
+    }
+  }
+  ASSERT_NE(epoch_bitmap_clear, nullptr);
+
+  loom_block_t* wrap_entry_block =
+      loom_low_cond_br_true_dest(epoch_update_terminator);
+  loom_block_t* barrier_block =
+      loom_low_cond_br_false_dest(epoch_update_terminator);
+  const loom_op_t* wrap_entry_terminator =
+      loom_block_const_last_op(wrap_entry_block);
+  ASSERT_TRUE(loom_low_br_isa(wrap_entry_terminator));
+  loom_block_t* clear_header_block = loom_low_br_dest(wrap_entry_terminator);
+  const loom_op_t* clear_header_terminator =
+      loom_block_const_last_op(clear_header_block);
+  ASSERT_TRUE(loom_low_cond_br_isa(clear_header_terminator));
+  EXPECT_EQ(loom_low_cond_br_true_dest(clear_header_terminator),
+            epoch_bitmap_clear->parent_block);
+  loom_block_t* release_block =
+      loom_low_cond_br_false_dest(clear_header_terminator);
+  const loom_op_t* clear_body_terminator =
+      loom_block_const_last_op(epoch_bitmap_clear->parent_block);
+  ASSERT_TRUE(loom_low_br_isa(clear_body_terminator));
+  EXPECT_EQ(loom_low_br_dest(clear_body_terminator), clear_header_block);
+  const loom_op_t* release_terminator = loom_block_const_last_op(release_block);
+  ASSERT_TRUE(loom_low_br_isa(release_terminator));
+  EXPECT_EQ(loom_low_br_dest(release_terminator), barrier_block);
+  EXPECT_TRUE(
+      BlockHasDescriptor(release_block, LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT));
+  EXPECT_TRUE(BlockHasDescriptor(release_block,
+                                 LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT_VSCNT));
+  EXPECT_TRUE(
+      BlockHasDescriptor(barrier_block, LOOM_AMDGPU_DESCRIPTOR_REF_S_BARRIER));
+  for (loom_block_t* block :
+       {epoch_update_block, wrap_entry_block, clear_header_block,
+        epoch_bitmap_clear->parent_block, release_block}) {
+    EXPECT_FALSE(
+        BlockHasDescriptor(block, LOOM_AMDGPU_DESCRIPTOR_REF_S_BARRIER));
+  }
+}
+
+TEST_F(AmdgpuSanitizerRaceLifetimeTest,
        SelectsLifetimeProtocolForEveryMemoryOrderingModel) {
   // One target represents each memory-ordering model that can select the
   // AMDGPU race sanitizer.
@@ -579,9 +669,17 @@ TEST_F(AmdgpuSanitizerRaceLifetimeTest,
                   LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_OR_B32_SADDR)
                   .size(),
               1u);
+    EXPECT_EQ(
+        OpsForDescriptorRef(
+            LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_ADD_U32_RTN_SADDR)
+                .size() +
+            OpsForDescriptorRef(
+                LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_ADD_U64_RTN_SADDR)
+                .size(),
+        1u);
     const auto stores =
         OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B128_SADDR);
-    ASSERT_EQ(stores.size(), 3u);
+    ASSERT_EQ(stores.size(), 4u);
   }
 }
 

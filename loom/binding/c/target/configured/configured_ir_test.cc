@@ -66,8 +66,13 @@ low.func.def target<cmd.core> abi(command_program) @empty() asm {
   HandlePtr<loomc_result_t, loomc_result_release> result_owner(result);
   ASSERT_TRUE(loomc_result_succeeded(result));
 
-  LOOMC_ASSERT_OK(
-      loomc_module_verify(module, nullptr, loomc_allocator_system(), &result));
+  const loomc_module_verify_options_t verify_options = {
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_VERIFY_OPTIONS,
+      .structure_size = sizeof(verify_options),
+      .scope = LOOMC_MODULE_VERIFY_SCOPE_STRUCTURAL,
+  };
+  LOOMC_ASSERT_OK(loomc_module_verify(module, &verify_options,
+                                      loomc_allocator_system(), &result));
   result_owner.reset(result);
   EXPECT_TRUE(loomc_result_succeeded(result));
 }

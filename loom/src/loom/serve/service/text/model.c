@@ -85,8 +85,9 @@ struct loom_serve_text_model_t {
   loom_serve_jit_t* jit;
   // Checkpoint domains owning stable parameter reservations across all stages.
   loom_serve_text_parameters_t parameters;
-  // Shared-device admission registration borrowing parameter plans until
-  // teardown.
+  // Owned physical parameter group, outliving borrowing invocation residencies.
+  loom_serve_residency_group_t* parameter_group;
+  // Atomic invocation working set and independent admission interest.
   loom_serve_residency_t* residency;
   // Source-declared command programs, owned in declaration order.
   loom_serve_text_stage_t* stages;
@@ -529,10 +530,13 @@ static iree_status_t loom_serve_text_load_bind(loom_serve_text_model_t* model) {
 static iree_status_t loom_serve_text_load_link(loom_serve_text_load_t* load) {
   loom_serve_text_model_t* model = load->model;
   iree_status_t status = iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_serve_residency_group_allocate(
+      loom_serve_device_residency_cache(model->device_owner),
+      model->parameters.count, model->parameters.plans, model->host_allocator,
+      &model->parameter_group));
   IREE_RETURN_IF_ERROR(loom_serve_residency_allocate(
       loom_serve_device_residency_cache(model->device_owner), model->execution,
-      model->parameters.count, model->parameters.plans, model->host_allocator,
-      &model->residency));
+      1, &model->parameter_group, model->host_allocator, &model->residency));
   for (iree_host_size_t i = 0;
        i < model->stage_count && iree_status_is_ok(status); ++i) {
     loom_serve_text_stage_t* stage = &model->stages[i];
@@ -869,6 +873,8 @@ iree_status_t loom_serve_text_model_free_retired(
   IREE_ASSERT(loom_serve_text_model_is_retired(model));
   loom_serve_residency_free(model->residency);
   model->residency = NULL;
+  loom_serve_residency_group_free(model->parameter_group);
+  model->parameter_group = NULL;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < model->parameters.count && iree_status_is_ok(status); ++i) {

@@ -103,6 +103,7 @@ LOOMC_TARGET_X86_PUBLIC_HDRS = [
 LOOMC_TARGET_CONFIGURED_PUBLIC_HDRS = [
     "include/loomc/target/configured.h",
     "include/loomc/target/configured_ir.h",
+    "include/loomc/target/configured_target.h",
 ]
 
 LOOMC_TARGET_CMD_PUBLIC_HDRS = [
@@ -438,6 +439,7 @@ loomc_shared_libraries(
         ":task_pool",
         ":task_queue",
         "//loom/binding/c/target/configured:ir",
+        "//loom/binding/c/target/configured:target",
         "//loom/binding/c/target/configured",
         "//loom/binding/c/target/cmd",
         "//loom/binding/c/target/cpu:iree_hal",

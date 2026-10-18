@@ -122,6 +122,8 @@ TEST(AmdgpuTsanAbiTest, ShadowConstantsMatchHalTsanAbi) {
   EXPECT_EQ(
       static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_ENTRY_EPOCH_BIT_COUNT),
       static_cast<uint32_t>(IREE_HAL_AMDGPU_TSAN_SHADOW_ENTRY_EPOCH_BIT_COUNT));
+  EXPECT_EQ(static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_EPOCH_CAPACITY),
+            static_cast<uint32_t>(IREE_HAL_AMDGPU_TSAN_SHADOW_EPOCH_CAPACITY));
   EXPECT_EQ(
       static_cast<uint32_t>(LOOM_AMDGPU_TSAN_SHADOW_ENTRY_GENERATION_SHIFT),
       static_cast<uint32_t>(

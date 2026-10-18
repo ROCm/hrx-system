@@ -34,6 +34,9 @@ from loom.target.arch.amdgpu.descriptors.memory import _s_load_dword_overlay
 from loom.target.arch.amdgpu.descriptors.rdna3 import (
     _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
 )
+from loom.target.arch.amdgpu.descriptors.sets import (
+    _amdgpu_core_descriptor_set_bases,
+)
 from loom.target.arch.amdgpu.descriptors.timing import (
     _with_lds_service_timing,
     _with_state_read_before_clobber_timing,
@@ -51,12 +54,30 @@ from loom.target.low_descriptors import (
     Descriptor,
     EventSeparation,
     IssueUse,
+    LatencyKind,
     ModelQuality,
     Operand,
     OperandFlag,
     OperandRole,
     RegClassAlt,
 )
+
+
+@pytest.mark.parametrize(
+    "base", _amdgpu_core_descriptor_set_bases(), ids=lambda b: b.key
+)
+def test_vector_memory_completion_is_distinct_from_issue_throughput(base) -> None:
+    # RDNA uses LLVM's single-cycle issue model. CDNA retains its own profile.
+    latency = 16 if "cdna" in base.key or "gfx9" in base.key else 320
+    classes = {row.name: row for row in base.schedule_classes}
+    for space in ("vmem", "flat"):
+        for operation in ("load", "store", "atomic.return", "atomic.no_return"):
+            row = classes[f"amdgpu.{space}.{operation}"]
+            assert row.latency_kind is LatencyKind.VARIABLE
+            assert row.model_quality is ModelQuality.FALLBACK
+            assert row.latency_cycles == latency
+            assert row.minimum_issue_separation_cycles == latency
+            assert all(use.cycles == 1 for use in row.issue_uses)
 
 
 def test_lds_packets_share_width_dependent_service() -> None:

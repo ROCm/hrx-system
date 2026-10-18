@@ -91,6 +91,43 @@ _CONFIGURED_TARGET_DEPS = (
     })
 )
 
+_CONFIGURED_IR_DEPS = (
+    iree_select({
+        "//loom/config/target/arch:vm": ["//loom/src/loom/target/arch/vm:ir_provider"],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:amdgpu": [
+            "//loom/src/loom/target/arch/amdgpu:ir_provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:xdna": [
+            "//loom/src/loom/target/arch/amd/xdna/aie2p:ir_provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:spirv": [
+            "//loom/src/loom/target/arch/spirv:ir_provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:wasm": [
+            "//loom/src/loom/target/arch/wasm:ir_provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:x86": [
+            "//loom/src/loom/target/arch/x86:ir_provider",
+        ],
+        "//conditions:default": [],
+    })
+)
+
 _CONFIGURED_COMPILER_COPTS = (
     iree_select({
         "//loom/config/target/arch:x86": [
@@ -167,6 +204,19 @@ _CONFIGURED_COMPILER_DEPS = (
         ],
         "//conditions:default": [],
     })
+)
+
+loom_cc_library(
+    name = "ir_provider_set",
+    srcs = ["ir_provider_set.c"],
+    hdrs = ["ir_provider_set.h"],
+    copts = _CONFIGURED_TARGET_COPTS,
+    visibility = ["//loom/binding/c/target/configured:__pkg__"],
+    deps = [
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/cmd:provider",
+        "//runtime/src/iree/base",
+    ] + _CONFIGURED_IR_DEPS,
 )
 
 loom_cc_library(

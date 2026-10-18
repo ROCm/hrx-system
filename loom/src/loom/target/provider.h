@@ -6,11 +6,12 @@
 
 // Target provider composition shared by tools and compile drivers.
 //
-// A target provider owns the target dialects, descriptor registries, lowering
-// policies, diagnostics, and emitters linked into a binary. Tool-specific
-// layers may select and invoke these capabilities for execution or checking;
-// they do not own alternate artifact compilers or duplicate target registry
-// aggregation.
+// A target provider contributes target dialects, descriptor registries,
+// lowering policies, diagnostics, emitters, or any coherent subset linked into
+// a binary. IR-only providers keep parsing and formatting tools independent of
+// lowering and compilation code. Tool-specific layers may select and invoke
+// provider capabilities for execution or checking; they do not own alternate
+// artifact compilers or duplicate target registry aggregation.
 
 #ifndef LOOM_TARGET_PROVIDER_H_
 #define LOOM_TARGET_PROVIDER_H_

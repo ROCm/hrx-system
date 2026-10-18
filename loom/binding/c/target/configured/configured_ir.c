@@ -6,12 +6,12 @@
 
 #include "loomc/target/configured_ir.h"
 
-#include "loom/target/configured/provider_set.h"
+#include "loom/target/configured/ir_provider_set.h"
 #include "target.h"
 
 loomc_status_t loomc_target_environment_create_configured_ir(
     loomc_allocator_t allocator,
     loomc_target_environment_t** out_target_environment) {
   return loomc_target_environment_create_from_provider_set_internal(
-      loom_configured_target_provider_set(), allocator, out_target_environment);
+      loom_configured_ir_provider_set(), allocator, out_target_environment);
 }

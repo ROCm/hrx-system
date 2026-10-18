@@ -67,3 +67,54 @@ low.func.def target<amdgpu.rdna3.core>(@target) @exec_read_fills_compare_latency
 block 0 order: 1, 0, 2
 node 2 <- 0, 1
 timing 0 -> 2: separation=0 source=event-pair quality=exact
+
+// ====
+// RUN: emit amdgpu-assembly @barrier_overlaps_arithmetic strategy=resource-stall
+
+amdgpu.target<gfx1100> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @barrier_overlaps_arithmetic(%address: reg<amdgpu.vgpr>, %payload: reg<amdgpu.vgpr>, %angle: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  ds_write_b32 %address, %payload
+  s_barrier
+  %loaded = ds_read_b32 %address
+  %coefficient = v_cos_f32 %angle
+  %result = v_mul_f32 %loaded, %coefficient
+  return %result
+}
+
+// ----
+  ds_write_b32 v2, v0 offset:0
+  v_cos_f32 v0, v1
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_barrier
+  ds_read_b32 v1, v2 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  v_mul_f32 v0, v1, v0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @split_barrier_overlaps_arithmetic strategy=resource-stall
+
+amdgpu.target<gfx1200> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna4.core>(@target) @split_barrier_overlaps_arithmetic(%address: reg<amdgpu.vgpr>, %payload: reg<amdgpu.vgpr>, %angle: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  ds_write_b32 %address, %payload
+  s_barrier_signal_all
+  %coefficient = v_cos_f32 %angle
+  s_barrier_wait_all
+  %loaded = ds_read_b32 %address
+  %result = v_mul_f32 %loaded, %coefficient
+  return %result
+}
+
+// ----
+  ds_write_b32 v2, v0 offset:0
+  v_cos_f32 v0, v1
+  s_wait_dscnt dscnt(0)
+  s_barrier_signal -1
+  s_barrier_wait -1
+  ds_read_b32 v1, v2 offset:0
+  s_wait_dscnt dscnt(0)
+  s_delay_alu instid0(TRANS32_DEP_1)
+  v_mul_f32 v0, v1, v0
+  s_endpgm

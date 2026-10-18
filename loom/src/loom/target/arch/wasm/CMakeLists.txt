@@ -50,6 +50,23 @@ endif()
 if(LOOM_TARGET_ARCH_WASM)
 loom_cc_library(
   NAME
+    ir_provider
+  HDRS
+    "ir_provider.h"
+  SRCS
+    "ir_provider.c"
+  DEPS
+    iree::base
+    loom::target::arch::wasm::descriptors::low_registry
+    loom::target::arch::wasm::ops
+    loom::target::provider
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_WASM)
+loom_cc_library(
+  NAME
     provider
   HDRS
     "legalization_float.h"

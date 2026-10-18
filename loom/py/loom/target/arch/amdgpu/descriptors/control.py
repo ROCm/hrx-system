@@ -381,6 +381,8 @@ def _s_set_vgpr_msb_descriptor() -> Descriptor:
 
 
 def _s_barrier_overlay() -> AmdgpuDescriptorOverlay:
+    # Effects order workgroup memory and convergent protocols. Independent
+    # register arithmetic can cross the barrier without changing either.
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.s_barrier",
         instruction_name="S_BARRIER",
@@ -390,7 +392,7 @@ def _s_barrier_overlay() -> AmdgpuDescriptorOverlay:
         schedule_class=_SCHEDULE_BARRIER,
         operands=(),
         effects=(_WORKGROUP_BARRIER_EFFECT, _CONVERGENT_EFFECT),
-        flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER),
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
 
@@ -406,7 +408,7 @@ def _s_barrier_signal_all_overlay() -> AmdgpuDescriptorOverlay:
         operands=(),
         fixed_encoding_fields=(("SSRC0", _predefined("-1", "OPR_SSRC_BARRIER_ID")),),
         effects=(_WORKGROUP_BARRIER_EFFECT, _CONVERGENT_EFFECT),
-        flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER),
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
         asm_forms=_asm(
             mnemonic="s_barrier_signal_all",
             native_assembly_mnemonic="s_barrier_signal",
@@ -426,7 +428,7 @@ def _s_barrier_wait_all_overlay() -> AmdgpuDescriptorOverlay:
         operands=(),
         fixed_encoding_fields=(("SIMM16", AmdgpuEncodingFieldAllOnes()),),
         effects=(_EXECUTION_BARRIER_EFFECT, _CONVERGENT_EFFECT),
-        flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER),
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
         asm_forms=_asm(
             mnemonic="s_barrier_wait_all",
             native_assembly_mnemonic="s_barrier_wait",

@@ -411,6 +411,24 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
+    ir_provider
+  HDRS
+    "ir_provider.h"
+  SRCS
+    "ir_provider.c"
+  DEPS
+    ::facts
+    iree::base
+    loom::target::arch::spirv::descriptors::low_registry
+    loom::target::arch::spirv::ops
+    loom::target::provider
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_library(
+  NAME
     provider
   HDRS
     "provider.h"

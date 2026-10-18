@@ -62,6 +62,19 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "ir_provider",
+    srcs = ["ir_provider.c"],
+    hdrs = ["ir_provider.h"],
+    visibility = ["//loom/src/loom/target/configured:__pkg__"],
+    deps = [
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/wasm/descriptors:low_registry",
+        "//loom/src/loom/target/arch/wasm/ops",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "provider",
     srcs = [
         "legalization_float.c",

@@ -100,6 +100,9 @@ enum loom_amdgpu_tsan_shadow_layout_e {
   LOOM_AMDGPU_TSAN_SHADOW_ENTRY_EPOCH_SHIFT = 13u,
   // Bit count of the encoded workgroup barrier epoch.
   LOOM_AMDGPU_TSAN_SHADOW_ENTRY_EPOCH_BIT_COUNT = 10u,
+  // Barrier epochs distinguished by each compact history entry.
+  LOOM_AMDGPU_TSAN_SHADOW_EPOCH_CAPACITY =
+      1u << LOOM_AMDGPU_TSAN_SHADOW_ENTRY_EPOCH_BIT_COUNT,
   // Bit offset of the encoded dispatch generation low bits.
   LOOM_AMDGPU_TSAN_SHADOW_ENTRY_GENERATION_SHIFT = 23u,
   // Bit count of the encoded dispatch generation low bits.

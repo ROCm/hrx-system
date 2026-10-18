@@ -9,13 +9,14 @@
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test")
 load("@rules_testing//lib:truth.bzl", "matching")
+load("//loom/config/target:targets.bzl", "LOOM_TARGET_ARCHITECTURES")
 
 _VALID_VALUES = {
     "loom/config/emit": ["amdgpu", "spirv", "wasm"],
     "loom/config/execute": ["iree_hal"],
     "loom/config/import": ["mlir", "tilelang"],
-    "loom/config/target": ["amdgpu", "spirv", "vm", "wasm", "x86"],
-    "loom/config/target/arch": ["amdgpu", "spirv", "vm", "wasm", "x86"],
+    "loom/config/target": LOOM_TARGET_ARCHITECTURES,
+    "loom/config/target/arch": LOOM_TARGET_ARCHITECTURES,
 }
 
 def _expect_values(env, target):

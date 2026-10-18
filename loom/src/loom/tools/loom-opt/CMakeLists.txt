@@ -19,7 +19,7 @@ loomc_cc_binary(
     iree::base::tooling::flags
     loom::binding::c::interop
     loom::binding::c::loomc
-    loom::binding::c::target::configured::ir
+    loom::binding::c::target::configured::target
     loom::config::text_binding
     loom::pass::registry
     loom::pass::report

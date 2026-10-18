@@ -525,6 +525,24 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
+    ir_provider
+  HDRS
+    "ir_provider.h"
+  SRCS
+    "ir_provider.c"
+  DEPS
+    ::low_registry
+    ::target_facts
+    iree::base
+    loom::target::arch::amd::xdna::aie2p::ops
+    loom::target::provider
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_library(
+  NAME
     provider
   HDRS
     "provider.h"

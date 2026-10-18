@@ -138,6 +138,19 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "ir_provider",
+    srcs = ["ir_provider.c"],
+    hdrs = ["ir_provider.h"],
+    visibility = ["//loom/src/loom/target/configured:__pkg__"],
+    deps = [
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/vm/descriptors",
+        "//loom/src/loom/target/arch/vm/ops",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "provider",
     srcs = [
         "lower.c",

@@ -270,30 +270,56 @@ loom_cc_library(
   NAME
     source_execution_tests
   SRCS
+    "source_execution_test.cc"
+  DEPS
+    ::source_service_fixture
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
+    source_media_tests
+  SRCS
     "managed_media_service_test.cc"
     "media_execution_test.cc"
     "media_service_test.cc"
-    "native_service_test.cc"
     "projector_execution_test.cc"
-    "source_execution_test.cc"
   DEPS
-    ::checkpoint_control
     ::epoch
     ::media_projector
     ::model
     ::readiness
     ::source_service_fixture
-    ::stream
     iree::base::internal::json
-    iree::base::tooling::flags
     loom::serve::media::image_codec
     loom::serve::media::image_codecs
     loom::serve::media::image_request
-    loom::serve::runtime::device
     loom::serve::service::finite::component
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
     loom::serve::service::finite::result
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
+    native_service_tests
+  SRCS
+    "native_service_test.cc"
+  DEPS
+    ::checkpoint_control
+    ::source_service_fixture
+    ::stream
+    iree::base::tooling::flags
+    loom::serve::runtime::device
     loom::util::json
   TESTONLY
   ALWAYSLINK

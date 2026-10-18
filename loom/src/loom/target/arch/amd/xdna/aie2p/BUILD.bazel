@@ -446,6 +446,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "ir_provider",
+    srcs = ["ir_provider.c"],
+    hdrs = ["ir_provider.h"],
+    visibility = ["//loom/src/loom/target/configured:__pkg__"],
+    deps = [
+        ":low_registry",
+        ":target_facts",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "provider",
     srcs = ["provider.c"],
     hdrs = ["provider.h"],

@@ -18,6 +18,20 @@ loom_cc_library(
     "configured_ir.c"
   DEPS
     loom::binding::c::loomc
+    loom::target::configured::ir_provider_set
+  ALWAYSLINK
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    target
+  HDRS
+    "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/configured_target.h"
+  SRCS
+    "configured_target.c"
+  DEPS
+    loom::binding::c::loomc
     loom::target::configured::provider_set
   ALWAYSLINK
   PUBLIC

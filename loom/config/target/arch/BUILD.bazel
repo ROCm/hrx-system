@@ -6,6 +6,7 @@
 
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("//build_tools/bazel:settings.bzl", "iree_string_list_flag")
+load("//loom/config/target:targets.bzl", "LOOM_TARGET_ARCHITECTURES")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -14,19 +15,10 @@ package(default_visibility = ["//visibility:public"])
 # target metadata/providers without the corresponding production emitters.
 DEFAULT_ENABLED = []
 
-SUPPORTED_VALUES = [
-    "amdgpu",
-    "spirv",
-    "vm",
-    "wasm",
-    "xdna",
-    "x86",
-]
-
 iree_string_list_flag(
     name = "enable",
     build_setting_default = DEFAULT_ENABLED,
-    values = SUPPORTED_VALUES,
+    values = LOOM_TARGET_ARCHITECTURES,
 )
 
 [
@@ -36,7 +28,7 @@ iree_string_list_flag(
             ":enable": value,
         },
     )
-    for value in SUPPORTED_VALUES
+    for value in LOOM_TARGET_ARCHITECTURES
 ]
 
 [

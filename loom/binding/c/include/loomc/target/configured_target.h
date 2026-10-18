@@ -1,0 +1,49 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef LOOMC_TARGET_CONFIGURED_TARGET_H_
+#define LOOMC_TARGET_CONFIGURED_TARGET_H_
+
+#include "loomc/target.h"
+
+/// @file
+/// Build-configured target transformation support.
+///
+/// Link the optional `//loom/binding/c/target/configured:target` Bazel package
+/// or `loom::binding::c::target::configured::target` CMake target to use this
+/// factory. It joins portable command IR and every enabled target architecture,
+/// including families without an artifact emitter. The configured IR package
+/// supplies only representation support, while the configured compiler package
+/// also joins artifact-capable targets.
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/// Creates an environment supporting every configured target architecture.
+///
+/// The environment supplies target passes, lowering policies, legality, and
+/// verification in addition to the configured target IR representations. It
+/// does not contain artifact emitters, probe devices, or load platform
+/// runtimes.
+///
+/// @param allocator Host allocator used for target-environment storage.
+/// @param out_target_environment Receives one retained environment on success.
+/// @return OK when the environment was created.
+///
+/// @ownership
+/// The caller releases the returned reference with
+/// `loomc_target_environment_release`. Contexts retain their own reference.
+LOOMC_API_EXPORT loomc_status_t
+loomc_target_environment_create_configured_target(
+    loomc_allocator_t allocator,
+    loomc_target_environment_t** out_target_environment);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // LOOMC_TARGET_CONFIGURED_TARGET_H_

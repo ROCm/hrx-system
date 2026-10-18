@@ -1,0 +1,182 @@
+// RUN: emit low-schedule-query @ready_work_beyond_source_window strategy=resource-stall order=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 issue=2,18
+
+test.target<low_core> @target
+
+// The source window contains only consumers of a pending producer. The
+// schedule view must nominate independent work beyond that window before
+// advancing the issue cycle to a consumer.
+low.func.def target<test.low.core>(@target) @ready_work_beyond_source_window(%lhs: reg<test.i32>, %base: reg<test.i32>, %rhs0: reg<test.i32>, %rhs1: reg<test.i32>, %rhs2: reg<test.i32>, %rhs3: reg<test.i32>, %rhs4: reg<test.i32>, %rhs5: reg<test.i32>, %rhs6: reg<test.i32>, %rhs7: reg<test.i32>, %rhs8: reg<test.i32>, %rhs9: reg<test.i32>, %rhs10: reg<test.i32>, %rhs11: reg<test.i32>, %rhs12: reg<test.i32>, %rhs13: reg<test.i32>, %rhs14: reg<test.i32>, %rhs15: reg<test.i32>) -> (reg<test.i32 x16>, reg<test.i32>) asm {
+  %producer = test.event.fast.i32 %lhs, %base
+  low.schedule.fence
+  %used0 = test.add.i32 %producer, %rhs0
+  %used1 = test.add.i32 %producer, %rhs1
+  %used2 = test.add.i32 %producer, %rhs2
+  %used3 = test.add.i32 %producer, %rhs3
+  %used4 = test.add.i32 %producer, %rhs4
+  %used5 = test.add.i32 %producer, %rhs5
+  %used6 = test.add.i32 %producer, %rhs6
+  %used7 = test.add.i32 %producer, %rhs7
+  %used8 = test.add.i32 %producer, %rhs8
+  %used9 = test.add.i32 %producer, %rhs9
+  %used10 = test.add.i32 %producer, %rhs10
+  %used11 = test.add.i32 %producer, %rhs11
+  %used12 = test.add.i32 %producer, %rhs12
+  %used13 = test.add.i32 %producer, %rhs13
+  %used14 = test.add.i32 %producer, %rhs14
+  %used15 = test.add.i32 %producer, %rhs15
+  %independent = test.add.i32 %lhs, %base
+  %results = concat(%used0, %used1, %used2, %used3, %used4, %used5, %used6, %used7, %used8, %used9, %used10, %used11, %used12, %used13, %used14, %used15) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x16>
+  return %results, %independent
+}
+
+// ----
+block 0 order: 0, 1, 18, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19
+node 2 issue-cycle: 7
+node 18 issue-cycle: 1
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_recovers_descriptor_storage_beyond_source_window strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_recovers_descriptor_storage_beyond_source_window(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %part0: reg<test.i32>, %part1: reg<test.i32>, %part2: reg<test.i32>, %part3: reg<test.i32>) -> (reg<test.i32 x4>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  // Independent arithmetic fills the source-order nominee window. A ready
+  // descriptor-bound alias beyond that window must still expose its critical
+  // path without opening new storage.
+  // REMARK@+1: BACKEND/015
+  %independent0 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent1 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent2 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent3 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent4 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent5 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent6 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent7 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent8 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent9 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent10 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent11 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent12 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent13 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent14 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent15 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent16 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent17 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %independent18 = test.mul.i32 %lhs, %rhs
+  %independent19 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", ready_candidate_count="21", scored_candidate_count="17", chosen_packet="low.concat", rejected_packet="test.mul.i32", chosen_effective_stall_cycles="0"}
+  %packed = concat(%part0, %part1, %part2, %part3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.v4i32", chosen_effective_stall_cycles="0"}
+  %first = test.add.v4i32 %packed, %packed
+  // REMARK@+1: BACKEND/015
+  %second = test.add.v4i32 %first, %first
+  return %second, %independent0, %independent1, %independent2, %independent3, %independent4, %independent5, %independent6, %independent7, %independent8, %independent9, %independent10, %independent11, %independent12, %independent13, %independent14, %independent15, %independent16, %independent17, %independent18, %independent19
+}
+
+// ====
+// RUN: emit low-schedule-query @resource_stall_refreshes_ready_sole_consumer strategy=resource-stall test.i32=16 order=*
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_refreshes_ready_sole_consumer(%shared: reg<test.i32 x4>, %anchor: reg<test.i32 x4>, %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  // Scheduling the dead bridge leaves the final add as the sole consumer of
+  // both inputs. The final add begins outside the bounded source window; its
+  // refreshed pressure key must nominate it before unrelated ready work.
+  %bridge = test.add.v4i32 %shared, %anchor
+  %independent0 = test.add.v4i32 %lhs, %rhs
+  %independent1 = test.add.v4i32 %lhs, %rhs
+  %independent2 = test.add.v4i32 %lhs, %rhs
+  %independent3 = test.add.v4i32 %lhs, %rhs
+  %independent4 = test.add.v4i32 %lhs, %rhs
+  %independent5 = test.add.v4i32 %lhs, %rhs
+  %independent6 = test.add.v4i32 %lhs, %rhs
+  %independent7 = test.add.v4i32 %lhs, %rhs
+  %independent8 = test.add.v4i32 %lhs, %rhs
+  %independent9 = test.add.v4i32 %lhs, %rhs
+  %independent10 = test.add.v4i32 %lhs, %rhs
+  %independent11 = test.add.v4i32 %lhs, %rhs
+  %independent12 = test.add.v4i32 %lhs, %rhs
+  %independent13 = test.add.v4i32 %lhs, %rhs
+  %independent14 = test.add.v4i32 %lhs, %rhs
+  %independent15 = test.add.v4i32 %lhs, %rhs
+  %independent16 = test.add.v4i32 %lhs, %rhs
+  %independent17 = test.add.v4i32 %lhs, %rhs
+  %final = test.add.v4i32 %shared, %anchor
+  return %independent0, %independent1, %independent2, %independent3, %independent4, %independent5, %independent6, %independent7, %independent8, %independent9, %independent10, %independent11, %independent12, %independent13, %independent14, %independent15, %independent16, %independent17, %final
+}
+
+// ----
+block 0 order: 0, 19, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20
+
+// ====
+// The source frontier exactly fills the bounded nominee window. Graph ranking
+// reaches the extract one critical-path cycle beyond that window, but opening
+// its live range and downstream activation reaches the register budget.
+// Repeated graph nominations can otherwise accumulate each extracted lane
+// before the bounded source paths close their live ranges.
+// RUN: emit low-schedule-query @resource_stall_rejects_risky_graph_nominee strategy=resource-stall test.i32=10 order=0,32,33
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_rejects_risky_graph_nominee(%vector: reg<test.i32 x4>, %part0: reg<test.i32>, %part1: reg<test.i32>, %part2: reg<test.i32>, %part3: reg<test.i32>) asm {
+  %independent0 = test.add.v4i32 %vector, %vector
+  %discarded_independent0 = test.add.v4i32 %independent0, %independent0
+  %independent1 = test.add.v4i32 %vector, %vector
+  %discarded_independent1 = test.add.v4i32 %independent1, %independent1
+  %independent2 = test.add.v4i32 %vector, %vector
+  %discarded_independent2 = test.add.v4i32 %independent2, %independent2
+  %independent3 = test.add.v4i32 %vector, %vector
+  %discarded_independent3 = test.add.v4i32 %independent3, %independent3
+  %independent4 = test.add.v4i32 %vector, %vector
+  %discarded_independent4 = test.add.v4i32 %independent4, %independent4
+  %independent5 = test.add.v4i32 %vector, %vector
+  %discarded_independent5 = test.add.v4i32 %independent5, %independent5
+  %independent6 = test.add.v4i32 %vector, %vector
+  %discarded_independent6 = test.add.v4i32 %independent6, %independent6
+  %independent7 = test.add.v4i32 %vector, %vector
+  %discarded_independent7 = test.add.v4i32 %independent7, %independent7
+  %independent8 = test.add.v4i32 %vector, %vector
+  %discarded_independent8 = test.add.v4i32 %independent8, %independent8
+  %independent9 = test.add.v4i32 %vector, %vector
+  %discarded_independent9 = test.add.v4i32 %independent9, %independent9
+  %independent10 = test.add.v4i32 %vector, %vector
+  %discarded_independent10 = test.add.v4i32 %independent10, %independent10
+  %independent11 = test.add.v4i32 %vector, %vector
+  %discarded_independent11 = test.add.v4i32 %independent11, %independent11
+  %independent12 = test.add.v4i32 %vector, %vector
+  %discarded_independent12 = test.add.v4i32 %independent12, %independent12
+  %independent13 = test.add.v4i32 %vector, %vector
+  %discarded_independent13 = test.add.v4i32 %independent13, %independent13
+  %independent14 = test.add.v4i32 %vector, %vector
+  %discarded_independent14 = test.add.v4i32 %independent14, %independent14
+  %independent15 = test.add.v4i32 %vector, %vector
+  %discarded_independent15 = test.add.v4i32 %independent15, %independent15
+  %packed = concat(%part0, %part1, %part2, %part3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %lane0 = test.extract_lane.i32 %packed, 0
+  %lane0_step0 = test.add.i32 %lane0, %lane0
+  %lane0_step1 = test.add.i32 %lane0_step0, %lane0_step0
+  %discarded_lane0 = test.add.i32 %lane0_step1, %lane0_step1
+  %discarded_lane1 = test.extract_lane.i32 %packed, 1
+  return
+}
+
+// ----
+block 0 order: 32, 0, 33

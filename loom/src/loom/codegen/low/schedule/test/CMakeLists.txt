@@ -19,6 +19,7 @@ loom_check_test_suite(
     "packing_completion.loom-test"
     "pressure_cfg.loom-test"
     "pressure_headroom.loom-test"
+    "ready_nomination.loom-test"
     "schedule.loom-test"
     "schedule_locked.loom-test"
     "schedule_scopes.loom-test"

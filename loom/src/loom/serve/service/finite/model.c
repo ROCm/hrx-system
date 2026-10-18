@@ -46,7 +46,9 @@ struct loom_serve_finite_model_t {
   loom_serve_device_t* owner;
   // Owned model work and feedback timelines, independent of other models.
   loom_serve_execution_t* execution;
-  // Shared-device admission group protecting every checkpoint domain together.
+  // Owned physical parameter group, outliving borrowing invocation residencies.
+  loom_serve_residency_group_t* parameter_group;
+  // Atomic invocation working set and independent admission interest.
   loom_serve_residency_t* residency;
   // Cohort input remains live through actual producer retirement.
   struct {
@@ -175,6 +177,8 @@ static iree_status_t loom_serve_finite_model_destroy_resources(
   IREE_ASSERT(loom_serve_finite_model_is_retired(model));
   loom_serve_residency_free(model->residency);
   model->residency = NULL;
+  loom_serve_residency_group_free(model->parameter_group);
+  model->parameter_group = NULL;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        model->weights.plans && i < model->weights.count &&
@@ -513,10 +517,12 @@ static iree_status_t loom_serve_finite_model_link(
     iree_hal_command_buffer_mode_t command_mode) {
   const iree_allocator_t host_allocator = model->host_allocator;
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(model->owner);
+  IREE_RETURN_IF_ERROR(loom_serve_residency_group_allocate(
+      loom_serve_device_residency_cache(model->owner), model->weights.count,
+      model->weights.plans, host_allocator, &model->parameter_group));
   IREE_RETURN_IF_ERROR(loom_serve_residency_allocate(
-      loom_serve_device_residency_cache(model->owner), model->execution,
-      model->weights.count, model->weights.plans, host_allocator,
-      &model->residency));
+      loom_serve_device_residency_cache(model->owner), model->execution, 1,
+      &model->parameter_group, host_allocator, &model->residency));
   const loom_serve_executable_options_t options = {
       .device = model->owner,
       .jit = model->jit,
