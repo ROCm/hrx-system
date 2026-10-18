@@ -1009,12 +1009,13 @@ static iree_status_t loom_vector_to_scalar_try_from_elements_lane(
   loom_vector_to_scalar_index_term_t ordinal;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_linear_ordinal_term(
       state, vector_type, indices, &ordinal));
-  // The final lane needs no comparison: every valid index selects one lane.
+  // The first lane needs no comparison: every valid index selects one lane.
+  // This matches the splat-first seed used to lower vector construction, so
+  // retaining the constructor does not introduce a new zero-index constant.
   // Selecting existing SSA values preserves their bits and memory snapshots.
-  loom_value_id_t lane = loom_value_slice_get(elements, elements.count - 1);
+  loom_value_id_t lane = loom_value_slice_get(elements, 0);
   iree_status_t status = iree_ok_status();
-  for (uint16_t i = 0; i + 1 < elements.count && iree_status_is_ok(status);
-       ++i) {
+  for (uint16_t i = 1; i < elements.count && iree_status_is_ok(status); ++i) {
     loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
     status = loom_vector_to_scalar_build_index_term_cmp(
         state, LOOM_INDEX_CMP_PREDICATE_EQ, ordinal,

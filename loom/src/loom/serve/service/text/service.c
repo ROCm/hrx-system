@@ -15,12 +15,16 @@
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/execution_reconfiguration.h"
+#include "loom/serve/service/kind.h"
 #include "loom/serve/service/text/admission.h"
 #include "loom/serve/service/text/chat.h"
+#include "loom/serve/service/text/checkpoint_http.h"
 #include "loom/serve/service/text/checkpoint_registry.h"
 #include "loom/serve/service/text/checkpoint_request.h"
+#include "loom/serve/service/text/consumer.h"
 #include "loom/serve/service/text/epoch.h"
 #include "loom/serve/service/text/heartbeat.h"
+#include "loom/serve/service/text/http.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/packing.h"
@@ -28,7 +32,6 @@
 #include "loom/serve/service/text/prefix_cache.h"
 #include "loom/serve/service/text/readiness.h"
 #include "loom/serve/service/text/reconfiguration.h"
-#include "loom/serve/service/text/response.h"
 #include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/session.h"
 #include "loom/serve/service/text/session_cache.h"
@@ -78,6 +81,8 @@ struct loom_serve_text_service_t {
   loom_serve_text_epoch_options_t scheduling;
   // Rotating admission priority, independent of row or request identity.
   iree_host_size_t cursor;
+  // Irreversible admission seal after stop or a terminal service failure.
+  bool stopping;
   // Proactor-timed reporting of copied state, independent of model readiness.
   loom_serve_text_heartbeat_t heartbeat;
   // Independent CPU/device publication; only the owner mutates model state.
@@ -96,8 +101,8 @@ struct loom_serve_text_service_t {
   loom_serve_text_cpu_work_t cpu_work;
   // Retained cohort inputs and feedback through response CPU release.
   loom_serve_text_epoch_t epoch;
-  // One control claim, including request-backed names through device readiness.
-  loom_serve_text_checkpoint_request_t control;
+  // One delivery receipt retaining validated names through device readiness.
+  loom_serve_text_checkpoint_operation_t control;
   // Single-owner observation; CPU jobs never publish into this stream.
   loom_serve_text_telemetry_t telemetry;
   // Cold admission queue, independent of device slots and epoch span capacity.
@@ -151,10 +156,10 @@ struct loom_serve_text_service_t {
   loom_serve_text_session_cache_t cache;
   // Shared consumed-token frontiers, independent of completed chat histories.
   loom_serve_text_prefix_cache_t prefixes;
-  // Shared JSON/SSE serialization scratch, copied into a row packet or carrier.
+  // Shared CPU encoding scratch, copied into consumer-owned staged output.
   iree_string_builder_t scratch;
-  // Shared typed tool-call serialization scratch used at generation end.
-  iree_string_builder_t tool_calls;
+  // Shared validated tool records used after complete source parsing.
+  loom_serve_text_tool_calls_t tool_calls;
   // Fixed retained rows sharing one model, command set and execution timeline.
   loom_serve_text_session_t sessions[LOOM_SERVE_TEXT_ROW_CAPACITY];
 };
@@ -188,16 +193,15 @@ static void loom_serve_text_observe(loom_serve_text_service_t* service,
   iree_time_t oldest_active_arrival = IREE_TIME_INFINITE_FUTURE;
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     const loom_serve_text_session_t* session = &service->sessions[i];
-    if (session->request.connection) {
+    if (session->request.consumer.self) {
       ++active;
       const iree_time_t arrival =
           session->request.start_time - session->request.queue_duration;
       oldest_active_arrival = iree_min(oldest_active_arrival, arrival);
       prefill += session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL;
       decode += session->request.phase == LOOM_SERVE_TEXT_REQUEST_DECODE;
-      backpressured +=
-          iree_string_builder_size(&session->packet) &&
-          !loom_serve_http_connection_can_send(session->request.connection);
+      backpressured += session->request.consumer.vtable->is_blocked(
+          session->request.consumer.self);
     }
   }
   iree_slim_mutex_lock(&service->heartbeat.mutex);
@@ -243,9 +247,14 @@ static void loom_serve_text_request_cancel(loom_serve_text_service_t* service,
       service->telemetry.failure_code || session->request.diagnostic.code
           ? LOOM_SERVE_TELEMETRY_FAILED
           : LOOM_SERVE_TELEMETRY_CANCELLED);
-  loom_serve_http_connection_abort(session->request.connection);
+  const loom_serve_text_consumer_t consumer = session->request.consumer;
+  const iree_status_code_t code = service->telemetry.failure_code
+                                      ? service->telemetry.failure_code
+                                      : session->request.diagnostic.code;
   loom_serve_text_chat_completion_deinitialize(&session->completion);
   loom_serve_text_request_release(service, session);
+  consumer.vtable->end(consumer.self, false,
+                       code ? code : IREE_STATUS_CANCELLED);
 }
 
 static void loom_serve_text_request_finish(loom_serve_text_service_t* service,
@@ -254,8 +263,10 @@ static void loom_serve_text_request_finish(loom_serve_text_service_t* service,
                                         session->request.diagnostic.code
                                             ? LOOM_SERVE_TELEMETRY_FAILED
                                             : LOOM_SERVE_TELEMETRY_COMPLETED);
-  loom_serve_http_connection_finish(session->request.connection);
+  const loom_serve_text_consumer_t consumer = session->request.consumer;
+  const iree_status_code_t code = session->request.diagnostic.code;
   loom_serve_text_request_release(service, session);
+  consumer.vtable->end(consumer.self, true, code);
 }
 
 static loom_serve_text_session_t* loom_serve_text_session_select(
@@ -268,7 +279,7 @@ static loom_serve_text_session_t* loom_serve_text_session_select(
             name, iree_make_cstring_view(session->lifetime.name))) {
       return session;
     }
-    if (!session->request.connection &&
+    if (!session->request.consumer.self &&
         (!oldest || session->lifetime.serial < oldest->lifetime.serial)) {
       oldest = session;
     }
@@ -280,18 +291,10 @@ static loom_serve_text_session_t* loom_serve_text_session_select(
 // live rows, detached history and generation requests borrowing the same name.
 static iree_status_t loom_serve_text_submit_checkpoint(
     loom_serve_text_service_t* service) {
-  iree_string_view_t session_name;
-  iree_status_t status = loom_serve_text_checkpoint_request_parse(
-      &service->control, &session_name);
-  if (!iree_status_is_ok(status)) {
-    const loom_serve_text_checkpoint_request_t control = service->control;
-    memset(&service->control, 0, sizeof(service->control));
-    return loom_serve_text_response_reject(
-        &service->telemetry, control.connection, control.receipt, 400,
-        "Bad Request", status, service->host_allocator);
-  }
+  const iree_string_view_t session_name = service->control.request.session;
   loom_serve_text_checkpoint_source_t source = {0};
-  if (service->control.action == LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN) {
+  if (service->control.request.action ==
+      LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN) {
     source.session = loom_serve_text_session_select(service, session_name);
     if (source.session &&
         !iree_string_view_equal(
@@ -302,7 +305,7 @@ static iree_status_t loom_serve_text_submit_checkpoint(
     const loom_serve_text_session_cache_entry_t* cached =
         loom_serve_text_session_cache_find(&service->cache, session_name);
     source.cached = cached ? &cached->endpoint : NULL;
-    source.busy = source.session && source.session->request.connection;
+    source.busy = source.session && source.session->request.consumer.self;
     for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
       source.busy |= iree_string_view_equal(session_name,
                                             service->pending.values[i]->name);
@@ -310,15 +313,17 @@ static iree_status_t loom_serve_text_submit_checkpoint(
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_request_submit(
       &service->control, &service->checkpoints, source,
-      service->control.action == LOOM_SERVE_TEXT_CHECKPOINT_ACTION_SUSPEND &&
+      service->control.request.action ==
+              LOOM_SERVE_TEXT_CHECKPOINT_ACTION_SUSPEND &&
           loom_serve_text_model_memory_statistics(service->model)
                   .reserved_bytes != 0,
       &service->telemetry, &service->scratch, &service->pool.trim.pending,
-      service->host_allocator, &service->completion.frontier));
+      &service->completion.frontier));
   if (!service->control.checkpoint) {
     return iree_ok_status();
   }
-  if (service->control.action == LOOM_SERVE_TEXT_CHECKPOINT_ACTION_SUSPEND) {
+  if (service->control.request.action ==
+      LOOM_SERVE_TEXT_CHECKPOINT_ACTION_SUSPEND) {
     loom_serve_text_observe(service, "checkpoint_suspend");
   }
   return loom_serve_text_await_work(service, TEXT_WORK_CHECKPOINT);
@@ -367,7 +372,7 @@ static void loom_serve_text_pending_observe(
 }
 
 // Removal transfers no resources: the caller first releases the queued chat
-// and connection, or transfers both into an admitted request.
+// and consumer, or transfers both into an admitted request.
 static void loom_serve_text_pending_remove(loom_serve_text_service_t* service,
                                            iree_host_size_t index) {
   loom_serve_text_pending_request_t* request = service->pending.values[index];
@@ -412,7 +417,7 @@ static void loom_serve_text_pending_cancel_failed(
   for (iree_host_size_t i = 0; i < service->pending.count;) {
     loom_serve_text_pending_request_t* request = service->pending.values[i];
     if (request != borrowed &&
-        loom_serve_http_connection_failed(request->connection) &&
+        !request->consumer.vtable->is_open(request->consumer.self) &&
         loom_serve_text_media_projector_cancel(service->projector,
                                                request->media)) {
       loom_serve_text_pending_cancel(service, i);
@@ -478,7 +483,7 @@ static bool loom_serve_text_cache_reclaim_pending(void* self) {
 
 static bool loom_serve_text_cache_reclaim_request(void* self) {
   loom_serve_text_service_t* service = self;
-  if (loom_serve_text_has_work(service) || service->control.connection) {
+  if (loom_serve_text_has_work(service) || service->control.consumer.self) {
     return false;
   }
   if (!loom_serve_text_prefix_cache_evict(&service->prefixes,
@@ -735,14 +740,14 @@ static iree_status_t loom_serve_text_reject_prepared(
 }
 
 static iree_status_t loom_serve_text_complete_preparation(
-    loom_serve_text_service_t* service, loom_serve_http_service_flags_t flags,
+    loom_serve_text_service_t* service, loom_serve_service_flags_t flags,
     iree_status_t status) {
   loom_serve_text_pending_request_t* pending =
       service->pending.prepared.request;
   const iree_host_size_t index = service->pending.prepared.index;
   const bool cancelled =
-      iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING) ||
-      loom_serve_http_connection_failed(pending->connection);
+      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING) ||
+      !pending->consumer.vtable->is_open(pending->consumer.self);
   if (!iree_status_is_ok(status)) {
     switch (iree_status_code(status)) {
       case IREE_STATUS_INVALID_ARGUMENT:
@@ -788,7 +793,7 @@ static iree_status_t loom_serve_text_complete_preparation(
 }
 
 static iree_status_t loom_serve_text_admit_request(
-    loom_serve_text_service_t* service, loom_serve_http_service_flags_t flags) {
+    loom_serve_text_service_t* service, loom_serve_service_flags_t flags) {
   loom_serve_text_pending_request_t* pending =
       service->pending.prepared.request;
   loom_serve_text_session_t* session = service->pending.prepared.session;
@@ -800,8 +805,8 @@ static iree_status_t loom_serve_text_admit_request(
   const iree_host_size_t reservation = pending->reservation;
   const iree_host_size_t restored_bytes =
       service->pending.prepared.restored_bytes;
-  if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING) ||
-      loom_serve_http_connection_failed(pending->connection)) {
+  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING) ||
+      !pending->consumer.vtable->is_open(pending->consumer.self)) {
     loom_serve_text_reset_session(service, session);
     loom_serve_text_pending_cancel(service, service->pending.admission.cursor);
     return iree_ok_status();
@@ -854,7 +859,7 @@ static iree_status_t loom_serve_text_admit_request(
   }
   ++session->lifetime.counters.requests;
   session->request.counters.requests = 1;
-  session->request.connection = request.connection;
+  session->request.consumer = request.consumer;
   session->request.chat = request.chat;
   session->request.media = request.media;
   session->request.phase = LOOM_SERVE_TEXT_REQUEST_PREFILL;
@@ -897,14 +902,14 @@ static iree_status_t loom_serve_text_admit_request(
 }
 
 static iree_status_t loom_serve_text_complete_reservation(
-    loom_serve_text_service_t* service, loom_serve_http_service_flags_t flags) {
+    loom_serve_text_service_t* service, loom_serve_service_flags_t flags) {
   if (loom_serve_text_row_complete_reserve(
           service->pending.prepared.session->row)) {
     return loom_serve_text_admit_request(service, flags);
   }
-  if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING) ||
-      loom_serve_http_connection_failed(
-          service->pending.prepared.request->connection)) {
+  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING) ||
+      !service->pending.prepared.request->consumer.vtable->is_open(
+          service->pending.prepared.request->consumer.self)) {
     loom_serve_text_pending_cancel(service, service->pending.admission.cursor);
   }
   return iree_ok_status();
@@ -945,7 +950,7 @@ static void loom_serve_text_complete_retention(
 }
 
 static iree_status_t loom_serve_text_admit_pending(
-    loom_serve_text_service_t* service, loom_serve_http_service_flags_t flags,
+    loom_serve_text_service_t* service, loom_serve_service_flags_t flags,
     bool allow_preparation) {
   // Cancellation can leave a completed full-cache exchange without its
   // incoming admission. Settle that excess here, never in terminal teardown's
@@ -1027,10 +1032,10 @@ static iree_status_t loom_serve_text_admit_pending(
         continue;
       }
       bool active =
-          iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY);
+          iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY);
       active |= loom_serve_text_media_projector_is_pending(service->projector);
       for (iree_host_size_t i = 0; i < service->row_count; ++i) {
-        active |= service->sessions[i].request.connection != NULL;
+        active |= service->sessions[i].request.consumer.self != NULL;
       }
       if (active) {
         if (admission == TEXT_ADMISSION_CAPACITY) {
@@ -1064,6 +1069,120 @@ static iree_status_t loom_serve_text_admit_pending(
   return status;
 }
 
+// Both ingress paths resolve names on the owner before accepting input. Source
+// JSON validation remains on the finite preparation loan, after acceptance.
+static iree_status_t loom_serve_text_select_request(
+    loom_serve_text_service_t* service, iree_string_view_t name,
+    iree_string_view_t checkpoint_name,
+    loom_serve_text_checkpoint_entry_t** out_checkpoint) {
+  *out_checkpoint = NULL;
+  if (!loom_serve_text_session_name_valid(name)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "session must be at most 64 ASCII identifier characters");
+  }
+  if (!loom_serve_text_session_name_valid(checkpoint_name)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "checkpoint must be at most 64 ASCII identifier characters");
+  }
+  if (checkpoint_name.size) {
+    *out_checkpoint = loom_serve_text_checkpoint_registry_find(
+        &service->checkpoints, checkpoint_name);
+    if (!*out_checkpoint) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "checkpoint is not pinned");
+    }
+  }
+  const loom_serve_text_session_t* session =
+      loom_serve_text_session_select(service, name);
+  bool busy = session && session->request.consumer.self;
+  for (iree_host_size_t i = 0; name.size && i < service->pending.count; ++i) {
+    busy |= iree_string_view_equal(name, service->pending.values[i]->name);
+  }
+  if (busy) {
+    return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                            "session already has an active or queued request");
+  }
+  return iree_ok_status();
+}
+
+static void loom_serve_text_pending_push(
+    loom_serve_text_service_t* service, loom_serve_text_consumer_t consumer,
+    iree_string_view_t body, iree_string_view_t name,
+    loom_serve_text_checkpoint_entry_t* checkpoint,
+    loom_serve_text_receipt_t receipt) {
+  if (checkpoint) {
+    ++checkpoint->pending;
+  }
+  *service->pending.values[service->pending.count++] =
+      (loom_serve_text_pending_request_t){
+          .consumer = consumer,
+          .body = body,
+          .name = name,
+          .checkpoint = checkpoint,
+          .receipt = receipt,
+      };
+  loom_serve_text_pending_observe(service);
+  // Both ingress paths can prepare the oldest queued input while an accepted
+  // epoch owns different rows. Scheduling this finite loan cannot fail or
+  // change the accepted request's ownership.
+  if (service->completion.work == TEXT_WORK_EPOCH &&
+      service->cpu_work == TEXT_CPU_WORK_NONE) {
+    loom_serve_text_begin_preparation(service);
+  }
+}
+
+iree_status_t loom_serve_text_service_try_open(
+    loom_serve_text_service_t* service, loom_serve_text_request_t* request,
+    loom_serve_text_stream_t** out_stream) {
+  *out_stream = NULL;
+  if (service->stopping) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "text service is stopping");
+  }
+  loom_serve_text_checkpoint_entry_t* checkpoint = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_text_select_request(
+      service, request->session, request->checkpoint, &checkpoint));
+  if (service->pending.count == service->pending.capacity) {
+    return iree_ok_status();
+  }
+  loom_serve_text_consumer_t consumer;
+  IREE_RETURN_IF_ERROR(loom_serve_text_stream_allocate(
+      service->name, request, service->host_allocator, out_stream, &consumer));
+  const loom_serve_text_request_t* input =
+      loom_serve_text_stream_request(*out_stream);
+  const loom_serve_text_receipt_t receipt =
+      loom_serve_text_telemetry_begin(&service->telemetry);
+  loom_serve_text_pending_push(service, consumer,
+                               iree_string_builder_view(&input->body),
+                               input->session, checkpoint, receipt);
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_service_try_open_checkpoint(
+    loom_serve_text_service_t* service,
+    const loom_serve_text_checkpoint_request_t* request,
+    loom_serve_text_checkpoint_control_t** out_control) {
+  *out_control = NULL;
+  if (service->stopping) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "text service is stopping");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_request_validate(request));
+  if (service->control.consumer.self) {
+    return iree_ok_status();
+  }
+  loom_serve_text_checkpoint_consumer_t consumer;
+  IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_control_allocate(
+      request, service->host_allocator, out_control, &consumer));
+  service->control = (loom_serve_text_checkpoint_operation_t){
+      .consumer = consumer,
+      .request = *loom_serve_text_checkpoint_control_request(*out_control),
+      .receipt = loom_serve_text_telemetry_begin(&service->telemetry)};
+  return iree_ok_status();
+}
+
 static iree_status_t loom_serve_text_enqueue(
     loom_serve_text_service_t* service,
     loom_serve_http_connection_t* connection,
@@ -1072,18 +1191,25 @@ static iree_status_t loom_serve_text_enqueue(
   iree_string_view_t checkpoint_name = request->target;
   if (iree_string_view_consume_prefix(&checkpoint_name,
                                       IREE_SV("/v1/checkpoints/"))) {
-    if (service->control.connection) {
-      return loom_serve_text_response_reject(
+    if (service->control.consumer.self) {
+      return loom_serve_text_http_reject(
           &service->telemetry, connection, receipt, 503, "Service Unavailable",
           iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                            "model control queue is full"),
           service->host_allocator);
     }
-    service->control =
-        (loom_serve_text_checkpoint_request_t){.connection = connection,
-                                               .request = request,
-                                               .receipt = receipt,
-                                               .name = checkpoint_name};
+    loom_serve_text_checkpoint_request_t input;
+    iree_status_t status =
+        loom_serve_text_checkpoint_http_parse(request, &input);
+    if (!iree_status_is_ok(status)) {
+      return loom_serve_text_http_reject(&service->telemetry, connection,
+                                         receipt, 400, "Bad Request", status,
+                                         service->host_allocator);
+    }
+    service->control = (loom_serve_text_checkpoint_operation_t){
+        .consumer = loom_serve_text_checkpoint_http_consumer(connection),
+        .request = input,
+        .receipt = receipt};
     return loom_serve_text_has_work(service)
                ? iree_ok_status()
                : loom_serve_text_submit_checkpoint(service);
@@ -1091,7 +1217,7 @@ static iree_status_t loom_serve_text_enqueue(
   if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
       !iree_string_view_equal(request->target,
                               IREE_SV("/v1/chat/completions"))) {
-    return loom_serve_text_response_reject(
+    return loom_serve_text_http_reject(
         &service->telemetry, connection, receipt, 404, "Not Found",
         iree_make_status(IREE_STATUS_NOT_FOUND,
                          "use /v1/chat/completions or /v1/checkpoints/NAME"),
@@ -1104,7 +1230,7 @@ static iree_status_t loom_serve_text_enqueue(
                                     IREE_SV("application/json")) ||
         iree_string_view_equal_case(
             content_type, IREE_SV("application/json; charset=utf-8")))) {
-    return loom_serve_text_response_reject(
+    return loom_serve_text_http_reject(
         &service->telemetry, connection, receipt, 415, "Unsupported Media Type",
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "Content-Type must be application/json"),
@@ -1113,119 +1239,97 @@ static iree_status_t loom_serve_text_enqueue(
   iree_string_view_t name;
   loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Session"),
                                         &name);
-  if (!loom_serve_text_session_name_valid(name)) {
-    return loom_serve_text_response_reject(
+  if (loom_serve_http_request_lookup_header(
+          request, IREE_SV("X-Loom-Checkpoint"), &checkpoint_name) &&
+      !checkpoint_name.size) {
+    return loom_serve_text_http_reject(
         &service->telemetry, connection, receipt, 400, "Bad Request",
-        iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "X-Loom-Session must be at most 64 ASCII identifier characters"),
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "X-Loom-Checkpoint requires a nonempty identifier"),
         service->host_allocator);
   }
   loom_serve_text_checkpoint_entry_t* checkpoint = NULL;
-  if (loom_serve_http_request_lookup_header(
-          request, IREE_SV("X-Loom-Checkpoint"), &checkpoint_name)) {
-    if (!checkpoint_name.size ||
-        !loom_serve_text_session_name_valid(checkpoint_name)) {
-      return loom_serve_text_response_reject(
-          &service->telemetry, connection, receipt, 400, "Bad Request",
-          iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "X-Loom-Checkpoint requires a nonempty ASCII identifier"),
-          service->host_allocator);
-    }
-    checkpoint = loom_serve_text_checkpoint_registry_find(&service->checkpoints,
-                                                          checkpoint_name);
-    if (!checkpoint) {
-      return loom_serve_text_response_reject(
-          &service->telemetry, connection, receipt, 404, "Not Found",
-          iree_make_status(IREE_STATUS_NOT_FOUND, "checkpoint is not pinned"),
-          service->host_allocator);
-    }
-  }
-  loom_serve_text_session_t* session =
-      loom_serve_text_session_select(service, name);
-  bool busy = session && session->request.connection;
-  for (iree_host_size_t i = 0; name.size && i < service->pending.count; ++i) {
-    busy |= iree_string_view_equal(name, service->pending.values[i]->name);
-  }
-  if (busy) {
-    return loom_serve_text_response_reject(
-        &service->telemetry, connection, receipt, 409, "Conflict",
-        iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                         "session already has an active or queued request"),
-        service->host_allocator);
+  iree_status_t status = loom_serve_text_select_request(
+      service, name, checkpoint_name, &checkpoint);
+  if (!iree_status_is_ok(status)) {
+    const bool missing = iree_status_is_not_found(status);
+    const bool conflict = iree_status_is_already_exists(status);
+    return loom_serve_text_http_reject(&service->telemetry, connection, receipt,
+                                       missing    ? 404
+                                       : conflict ? 409
+                                                  : 400,
+                                       missing    ? "Not Found"
+                                       : conflict ? "Conflict"
+                                                  : "Bad Request",
+                                       status, service->host_allocator);
   }
   if (service->pending.count == service->pending.capacity) {
-    return loom_serve_text_response_reject(
+    return loom_serve_text_http_reject(
         &service->telemetry, connection, receipt, 503, "Service Unavailable",
         iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                          "pending request queue is full"),
         service->host_allocator);
   }
-  if (checkpoint) {
-    ++checkpoint->pending;
+  loom_serve_text_consumer_t consumer;
+  status = loom_serve_text_http_consumer_allocate(
+      connection, &service->telemetry, receipt, service->host_allocator,
+      &consumer);
+  if (!iree_status_is_ok(status)) {
+    return loom_serve_text_http_reject(&service->telemetry, connection, receipt,
+                                       503, "Service Unavailable", status,
+                                       service->host_allocator);
   }
-  *service->pending.values[service->pending.count++] =
-      (loom_serve_text_pending_request_t){
-          .connection = connection,
-          .body = request->body,
-          .name = name,
-          .checkpoint = checkpoint,
-          .receipt = receipt,
-      };
-  loom_serve_text_pending_observe(service);
+  loom_serve_text_pending_push(service, consumer, request->body, name,
+                               checkpoint, receipt);
   return iree_ok_status();
 }
 
-// Output credit and cancellation are settled before a row enters an epoch.
-// The carrier owns a copied send and the row owns one staging packet. An empty
-// staging packet is output credit even while the preceding send is in flight;
-// waiting for that send would split an otherwise ready cohort. A full staging
-// packet behind a busy carrier pauses only that row.
+// Delivery owns a published slot and a staging slot. An empty stage permits
+// another epoch even while the preceding output is unread. A full stage behind
+// a stalled consumer pauses only that row; cancellation waits for retirement.
 static iree_status_t loom_serve_text_prepare_ready(
     loom_serve_text_service_t* service, loom_serve_text_session_t* session,
     bool* out_progress, loom_serve_ready_span_t* out_ready) {
   *out_ready = (loom_serve_ready_span_t){0};
-  if (!session->request.connection) {
+  const loom_serve_text_consumer_t consumer = session->request.consumer;
+  if (!consumer.self) {
     return iree_ok_status();
   }
-  if (loom_serve_http_connection_failed(session->request.connection)) {
+  if (!consumer.vtable->is_open(consumer.self)) {
     loom_serve_text_request_cancel(service, session);
     *out_progress = true;
-    service->pool.trim.pending = true;
     loom_serve_text_row_reset_retired(session->row);
     return iree_ok_status();
   }
-  if (iree_string_builder_size(&session->packet)) {
-    if (!loom_serve_http_connection_can_send(session->request.connection)) {
-      return iree_ok_status();
-    }
+  bool ready = false;
+  bool progress = false;
+  iree_status_t status =
+      consumer.vtable->publish(consumer.self, &ready, &progress);
+  if (!iree_status_is_ok(status)) {
+    loom_serve_text_telemetry_diagnose(&service->telemetry,
+                                       session->lifetime.serial, status);
+    loom_serve_text_request_cancel(service, session);
     *out_progress = true;
-    iree_status_t status = loom_serve_http_connection_send(
-        session->request.connection,
-        iree_string_builder_view(&session->packet));
-    if (!iree_status_is_ok(status)) {
-      loom_serve_text_telemetry_diagnose(&service->telemetry,
-                                         session->lifetime.serial, status);
-      loom_serve_text_request_cancel(service, session);
-      service->pool.trim.pending = true;
-      loom_serve_text_row_reset_retired(session->row);
-      return iree_ok_status();
-    }
-    iree_string_builder_reset(&session->packet);
-    if (session->request.publication.pending &&
-        !session->request.publication.recorded) {
-      loom_serve_telemetry_latency_publish_output(
-          &service->telemetry.latency, service->telemetry.stream,
-          session->lifetime.serial,
-          session->request.start_time - session->request.queue_duration);
-      session->request.publication.recorded = true;
-    }
-    session->request.publication.pending = false;
-    if (session->request.phase == LOOM_SERVE_TEXT_REQUEST_FINISHING) {
-      loom_serve_text_request_finish(service, session);
-      return iree_ok_status();
-    }
+    loom_serve_text_row_reset_retired(session->row);
+    return iree_ok_status();
+  }
+  *out_progress |= progress;
+  if (!ready) {
+    return iree_ok_status();
+  }
+  if (session->request.publication.pending &&
+      !session->request.publication.recorded) {
+    loom_serve_telemetry_latency_publish_output(
+        &service->telemetry.latency, service->telemetry.stream,
+        session->lifetime.serial,
+        session->request.start_time - session->request.queue_duration);
+    session->request.publication.recorded = true;
+  }
+  session->request.publication.pending = false;
+  if (session->request.phase == LOOM_SERVE_TEXT_REQUEST_FINISHING) {
+    loom_serve_text_request_finish(service, session);
+    *out_progress = true;
+    return iree_ok_status();
   }
   if (session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL) {
     *out_ready = (loom_serve_ready_span_t){
@@ -1361,7 +1465,7 @@ static iree_status_t loom_serve_text_process_output(void* user_data) {
     if (output->output_count) {
       loom_serve_text_session_t* session =
           &service->sessions[service->epoch.spans[i].row_index];
-      status = loom_serve_text_response_tokens(
+      status = loom_serve_text_session_append_tokens(
           session, service->name, output->output_count, output->tokens,
           &service->scratch, &service->tool_calls);
     }
@@ -1423,7 +1527,8 @@ static iree_status_t loom_serve_text_capture_prefix(
         session->request.phase != LOOM_SERVE_TEXT_REQUEST_PREFILL ||
         session->request.retained_count != session->request.input_origin ||
         count < service->pool.geometry.block_size ||
-        loom_serve_http_connection_failed(session->request.connection)) {
+        !session->request.consumer.vtable->is_open(
+            session->request.consumer.self)) {
       continue;
     }
     bool evicted = false;
@@ -1443,7 +1548,7 @@ static iree_status_t loom_serve_text_capture_prefix(
 }
 
 static iree_status_t loom_serve_text_complete_epoch(
-    loom_serve_text_service_t* service, loom_serve_http_service_flags_t flags) {
+    loom_serve_text_service_t* service, loom_serve_service_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, service->name.data, service->name.size);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
@@ -1454,7 +1559,7 @@ static iree_status_t loom_serve_text_complete_epoch(
       z0,
       loom_serve_text_epoch_complete(
           service->model, service->scheduling.schedule_mode, &service->epoch));
-  if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
     if (service->scheduling.schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
       // Only these isolated spans were submitted; the remainder never ran.
       service->epoch.count = service->epoch.cursor;
@@ -1532,11 +1637,12 @@ static iree_status_t loom_serve_text_service_initialize(
 // failed device readiness leaves model storage pinned for actual retirement.
 static void loom_serve_text_stop(loom_serve_text_service_t* service,
                                  iree_status_code_t terminal_code) {
+  service->stopping = true;
   loom_serve_residency_cancel_admission(
       loom_serve_text_model_residency(service->model));
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     loom_serve_text_session_t* session = &service->sessions[i];
-    if (session->request.connection) {
+    if (session->request.consumer.self) {
       // Failed device readiness keeps pins and reserved views until model
       // destruction actually retires accepted work. Normal shutdown is at a
       // completed model boundary and can release unused completion capacity.
@@ -1589,7 +1695,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
     loom_serve_text_session_deinitialize(&service->sessions[i]);
   }
   loom_serve_text_readiness_deinitialize(&service->readiness);
-  iree_string_builder_deinitialize(&service->tool_calls);
+  loom_serve_text_tool_calls_deinitialize(&service->tool_calls);
   iree_string_builder_deinitialize(&service->scratch);
   iree_allocator_free(host_allocator, service->pending.storage);
   loom_serve_text_checkpoint_registry_deinitialize(&service->checkpoints);
@@ -1671,7 +1777,7 @@ iree_status_t loom_serve_text_service_allocate(
   loom_serve_text_readiness_initialize(loom_serve_host_executor(host), proactor,
                                        &service->readiness);
   iree_string_builder_initialize(host_allocator, &service->scratch);
-  iree_string_builder_initialize(host_allocator, &service->tool_calls);
+  loom_serve_text_tool_calls_initialize(host_allocator, &service->tool_calls);
   iree_status_t status = loom_serve_text_service_initialize(service, stream);
   if (iree_status_is_ok(status)) {
     status = loom_serve_execution_reconfiguration_allocate(
@@ -1720,11 +1826,11 @@ static bool loom_serve_text_is_active(void* self) {
   const loom_serve_text_service_t* service = self;
   if (loom_serve_text_has_work(service) || service->pool.trim.pending ||
       loom_serve_text_media_projector_is_pending(service->projector) ||
-      service->control.connection) {
+      service->control.consumer.self) {
     return true;
   }
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
-    if (service->sessions[i].request.connection) {
+    if (service->sessions[i].request.consumer.self) {
       return true;
     }
   }
@@ -1732,7 +1838,7 @@ static bool loom_serve_text_is_active(void* self) {
 }
 
 static iree_status_t loom_serve_text_advance_work(
-    void* self, loom_serve_http_service_flags_t flags, bool* out_progress) {
+    void* self, loom_serve_service_flags_t flags, bool* out_progress) {
   loom_serve_text_service_t* service = self;
   *out_progress = false;
   loom_serve_text_pending_cancel_failed(service, out_progress);
@@ -1760,7 +1866,7 @@ static iree_status_t loom_serve_text_advance_work(
     iree_status_t status = iree_ok_status();
     if (!loom_serve_text_readiness_take_device(&service->readiness, &status)) {
       if (service->completion.work == TEXT_WORK_EPOCH &&
-          !iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+          !iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
         *out_progress |= loom_serve_text_begin_preparation(service);
       }
       return iree_ok_status();
@@ -1776,7 +1882,7 @@ static iree_status_t loom_serve_text_advance_work(
       case TEXT_WORK_CHECKPOINT:
         status = loom_serve_text_checkpoint_request_complete(
             &service->control,
-            iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING),
+            iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING),
             &service->telemetry, &service->scratch,
             &service->pool.trim.pending);
         break;
@@ -1797,7 +1903,7 @@ static iree_status_t loom_serve_text_advance_work(
         loom_serve_text_record(service->telemetry.stream,
                                &LOOM_SERVE_TEXT_PREFIX_CAPTURE, 0, &record,
                                sizeof(record));
-        if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+        if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
           service->epoch.count = 0;
         } else {
           loom_serve_text_begin_output(service);
@@ -1812,13 +1918,13 @@ static iree_status_t loom_serve_text_advance_work(
       return iree_ok_status();
     }
   }
-  if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
     if (loom_serve_text_media_projector_is_pending(service->projector)) {
       return iree_ok_status();
     }
-    *out_progress |= service->pending.count || service->control.connection;
+    *out_progress |= service->pending.count || service->control.consumer.self;
     for (iree_host_size_t i = 0; i < service->row_count; ++i) {
-      *out_progress |= service->sessions[i].request.connection != NULL;
+      *out_progress |= service->sessions[i].request.consumer.self != NULL;
     }
     loom_serve_text_stop(service, service->telemetry.failure_code);
     return iree_ok_status();
@@ -1827,9 +1933,9 @@ static iree_status_t loom_serve_text_advance_work(
       service->reconfiguration, /*quiescent=*/true, /*stopping=*/false);
   // Release/suspend controls can free capacity for a stalled generation queue.
   // They run only after the previous epoch relinquishes its retained views.
-  if (service->control.connection) {
+  if (service->control.consumer.self) {
     *out_progress = true;
-    if (loom_serve_http_connection_failed(service->control.connection)) {
+    if (!service->control.consumer.is_open(service->control.consumer.self)) {
       loom_serve_text_checkpoint_request_abort(&service->control,
                                                &service->telemetry);
     } else {
@@ -1842,8 +1948,8 @@ static iree_status_t loom_serve_text_advance_work(
   // Collection may have returned the selected candidate's last loan. Retire it
   // before another reservation without rescanning the unborrowed tails.
   if (service->pending.prepared.session &&
-      loom_serve_http_connection_failed(
-          service->pending.prepared.request->connection)) {
+      !service->pending.prepared.request->consumer.vtable->is_open(
+          service->pending.prepared.request->consumer.self)) {
     loom_serve_text_pending_cancel(service, service->pending.admission.cursor);
     *out_progress = true;
   }
@@ -1925,39 +2031,44 @@ static bool loom_serve_text_media_lookahead(
   return loom_serve_text_media_projector_start(service->projector);
 }
 
-static iree_status_t loom_serve_text_advance(
-    void* self, loom_serve_http_service_flags_t flags, bool* out_progress) {
+static iree_status_t loom_serve_text_advance(void* self,
+                                             loom_serve_service_flags_t flags,
+                                             bool* out_progress) {
   loom_serve_text_service_t* service = self;
+  service->stopping |=
+      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING);
+  if (service->stopping) {
+    flags |= LOOM_SERVE_SERVICE_FLAG_STOPPING;
+  }
   const bool image_progress = loom_serve_finite_component_advance(
       service->image,
-      iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING));
   const bool configuration_progress =
       loom_serve_execution_reconfiguration_advance(
           service->reconfiguration, /*quiescent=*/false,
-          iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+          iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING));
   iree_status_t status = loom_serve_text_heartbeat_advance(
       &service->heartbeat,
-      iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING),
-      out_progress);
+      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING), out_progress);
   if (!iree_status_is_ok(status)) {
-    flags |= LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING;
+    flags |= LOOM_SERVE_SERVICE_FLAG_STOPPING;
   }
   bool projection_progress = false;
-  loom_serve_http_service_flags_t projection_flags = flags;
+  loom_serve_service_flags_t projection_flags = flags;
   if (loom_serve_text_is_active(service)) {
-    projection_flags |= LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY;
+    projection_flags |= LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
   }
   iree_status_t projection_status = loom_serve_text_media_projector_advance(
       service->projector, projection_flags, &projection_progress);
   if (!iree_status_is_ok(projection_status)) {
-    flags |= LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING;
+    flags |= LOOM_SERVE_SERVICE_FLAG_STOPPING;
   }
   status = iree_status_join(status, projection_status);
   bool work_progress = false;
   iree_status_t work_status =
       loom_serve_text_advance_work(self, flags, &work_progress);
   if (iree_status_is_ok(work_status) &&
-      !iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+      !iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
     work_progress |= loom_serve_text_media_lookahead(service);
   }
   // A new model failure needs another owner turn to stop a pending timer.
@@ -1966,6 +2077,7 @@ static iree_status_t loom_serve_text_advance(
                    !iree_status_is_ok(work_status);
   status = iree_status_join(status, work_status);
   if (!iree_status_is_ok(status)) {
+    service->stopping = true;
     loom_serve_text_telemetry_fail(&service->telemetry, status);
   }
   return status;
@@ -1974,10 +2086,18 @@ static iree_status_t loom_serve_text_advance(
 static iree_status_t loom_serve_text_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
-    loom_serve_http_service_flags_t flags) {
+    loom_serve_service_flags_t flags) {
   loom_serve_text_service_t* service = self;
   const loom_serve_text_receipt_t receipt =
       loom_serve_text_telemetry_begin(&service->telemetry);
+  if (service->stopping ||
+      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+    service->stopping = true;
+    return loom_serve_text_http_reject(
+        &service->telemetry, connection, receipt, 503, "Service Unavailable",
+        iree_make_status(IREE_STATUS_UNAVAILABLE, "text service is stopping"),
+        service->host_allocator);
+  }
   iree_status_t status =
       loom_serve_text_enqueue(service, connection, request, receipt);
   if (iree_status_is_ok(status) && !loom_serve_text_has_work(service)) {
@@ -1985,31 +2105,44 @@ static iree_status_t loom_serve_text_accept(
                                            /*allow_preparation=*/true);
   } else if (iree_status_is_ok(status) &&
              service->completion.work == TEXT_WORK_EPOCH &&
-             service->cpu_work == TEXT_CPU_WORK_NONE &&
-             !iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+             service->cpu_work == TEXT_CPU_WORK_NONE) {
     loom_serve_text_begin_preparation(service);
   }
   if (!iree_status_is_ok(status)) {
+    service->stopping = true;
     loom_serve_text_telemetry_fail(&service->telemetry, status);
   }
   return status;
 }
 
-static loom_serve_http_service_snapshot_t loom_serve_text_snapshot(void* self) {
+static iree_status_t loom_serve_text_open(
+    void* self, loom_serve_text_request_t* request,
+    loom_serve_text_stream_t** out_stream) {
+  return loom_serve_text_service_try_open(self, request, out_stream);
+}
+
+static iree_status_t loom_serve_text_open_checkpoint(
+    void* self, const loom_serve_text_checkpoint_request_t* request,
+    loom_serve_text_checkpoint_control_t** out_control) {
+  return loom_serve_text_service_try_open_checkpoint(self, request,
+                                                     out_control);
+}
+
+static loom_serve_service_snapshot_t loom_serve_text_snapshot(void* self) {
   loom_serve_text_service_t* service = self;
   const loom_serve_text_heartbeat_snapshot_t state =
       loom_serve_text_heartbeat_read(&service->heartbeat);
   const iree_time_t now = iree_time_now();
   const char* image_phase =
       loom_serve_text_media_projector_phase(service->projector);
-  const bool active_control = service->control.connection &&
+  const bool active_control = service->control.consumer.self &&
                               service->completion.work == TEXT_WORK_CHECKPOINT;
   iree_time_t queued_arrival =
       service->pending.count ? service->pending.values[0]->receipt.arrival_time
                              : IREE_TIME_INFINITE_FUTURE;
   iree_time_t active_arrival = state.active_rows ? state.oldest_active_arrival
                                                  : IREE_TIME_INFINITE_FUTURE;
-  if (service->control.connection) {
+  if (service->control.consumer.self) {
     if (active_control) {
       active_arrival =
           iree_min(active_arrival, service->control.receipt.arrival_time);
@@ -2018,11 +2151,11 @@ static loom_serve_http_service_snapshot_t loom_serve_text_snapshot(void* self) {
           iree_min(queued_arrival, service->control.receipt.arrival_time);
     }
   }
-  return (loom_serve_http_service_snapshot_t){
+  return (loom_serve_service_snapshot_t){
       .phase = image_phase && !strcmp(state.phase, "idle") ? image_phase
                                                            : state.phase,
       .queued_requests = service->pending.count +
-                         (service->control.connection && !active_control),
+                         (service->control.consumer.self && !active_control),
       .active_requests = state.active_rows + active_control,
       .oldest_queued_age = queued_arrival == IREE_TIME_INFINITE_FUTURE
                                ? 0
@@ -2049,7 +2182,8 @@ static bool loom_serve_text_request_at(
         &service->sessions[index - service->pending.count]);
   } else if (index - service->pending.count == service->row_count) {
     *out_snapshot = (loom_serve_http_request_snapshot_t){
-        .id = service->control.connection ? service->control.receipt.serial : 0,
+        .id = service->control.consumer.self ? service->control.receipt.serial
+                                             : 0,
         .phase = "control",
         .arrival_time = service->control.receipt.arrival_time,
         .counters = {.requests = 1}};
@@ -2068,7 +2202,7 @@ static bool loom_serve_text_session_at(
       out_snapshot);
 }
 
-loom_serve_http_service_t loom_serve_text_service_interface(
+loom_serve_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service) {
   static const iree_string_view_t modalities[] = {IREE_SVL("text")};
   static const iree_string_view_t image_modalities[] = {IREE_SVL("text"),
@@ -2078,17 +2212,19 @@ loom_serve_http_service_t loom_serve_text_service_interface(
       service->image &&
       loom_serve_text_model_chat_policy(service->model)->images.maximum_count &&
       loom_serve_media_image_codecs(&codecs);
-  return (loom_serve_http_service_t){
+  return (loom_serve_service_t){
       .name = service->name,
       .self = service,
       .set_observer = loom_serve_text_set_observer,
       .is_pending = loom_serve_text_is_pending,
       .is_active = loom_serve_text_is_active,
       .accept = loom_serve_text_accept,
+      .try_open_text = loom_serve_text_open,
+      .try_open_text_checkpoint = loom_serve_text_open_checkpoint,
       .advance = loom_serve_text_advance,
       .tokenizer = loom_serve_text_model_tokenizer(service->model),
-      .kind = "text",
-      .endpoint = "/v1/chat/completions",
+      .kind = LOOM_SERVE_MODEL_KIND_TEXT,
+      .endpoint = loom_serve_model_kind_endpoint(LOOM_SERVE_MODEL_KIND_TEXT),
       .capabilities =
           {.input_modalities = {images ? IREE_ARRAYSIZE(image_modalities)
                                        : IREE_ARRAYSIZE(modalities),

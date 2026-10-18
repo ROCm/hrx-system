@@ -1,4 +1,4 @@
-// RUN: roundtrip
+// RUN: format bytecode
 #include <loomcxx/kernel.h>
 
 LOOM_TEMPLATE_DECL("test.tick") unsigned tick();
@@ -14,6 +14,11 @@ struct Pair {
 
 LOOM_TEMPLATE_DECL("test.pair") Pair transform_pair(Pair value);
 
+// Headers may expose families that this translation unit never reaches.
+LOOM_TEMPLATE_DECL("test.unused_void") void unused_void();
+LOOM_TEMPLATE_DECL("test.unused_scalar") unsigned unused_scalar(unsigned value);
+LOOM_TEMPLATE_DECL("test.unused_pair") Pair unused_pair(Pair value);
+
 unsigned linked_pipeline(unsigned value) {
   unsigned before = tick();
   consume(value++);
@@ -25,23 +30,23 @@ Pair linked_record(Pair value) { return transform_pair(value); }
 // ----
 func.def public @linked_pipeline(%value$0: i32) -> (i32) {
   %before = template.apply<@test.tick>() : () -> (i32)
-  %4 = scalar.constant 1 : i32
-  %value$5 = scalar.addi %value$0, %4 : i32
+  %3 = scalar.constant 1 : i32
+  %value$4 = scalar.addi %value$0, %3 : i32
   template.apply<@test.consume>(%value$0) : (i32)
-  %9 = template.apply<@test.transform>(%value$5) : (i32) -> (i32)
-  %10 = scalar.addi %before, %9 : i32
-  func.return %10 : i32
+  %5 = template.apply<@test.transform>(%value$4) : (i32) -> (i32)
+  %6 = scalar.addi %before, %5 : i32
+  func.return %6 : i32
 }
 
 template.decl @test.tick() -> (i32)
 
-template.decl @test.consume(%6: i32)
+template.decl @test.consume(%8: i32)
 
-template.decl @test.transform(%7: i32) -> (i32)
+template.decl @test.transform(%9: i32) -> (i32)
 
 func.def public @linked_record(%value_count: i32, %value_scale: f32) -> (i32, f32) {
-  %19, %20 = template.apply<@test.pair>(%value_count, %value_scale) : (i32, f32) -> (i32, f32)
-  func.return %19, %20 : i32, f32
+  %15, %16 = template.apply<@test.pair>(%value_count, %value_scale) : (i32, f32) -> (i32, f32)
+  func.return %15, %16 : i32, f32
 }
 
-template.decl @test.pair(%15: i32, %16: f32) -> (i32, f32)
+template.decl @test.pair(%17: i32, %18: f32) -> (i32, f32)

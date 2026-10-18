@@ -365,6 +365,20 @@ check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
 The predicate accepts every device that satisfies that target, including both
 RDNA3 and RDNA3.5 for `gfx11-generic`. An exact selector such as `gfx1100`
 requires that processor; `gfx942:xnack-` also constrains its feature mode.
+A case that accepts any of several targets can list their selectors in one
+requirement:
+
+```loom
+check.requires<hal.amdgpu.target> {targets = ["gfx12-generic", "gfx1250"]}
+```
+
+Each entry uses the same selector grammar as `target`, and the list has OR
+semantics. The AMDGPU requirement provider validates every selector before
+device access and admits the case when the selected device satisfies any one of
+them. Because the selector strings remain opaque provider data on the generic
+`check.requires` operation, a compiler built without AMDGPU support can still
+load and selectively link the containing library. If such a runner selects the
+case, it skips it with `provider_not_registered`.
 A valid incompatible target reports `target_mismatch` before case compilation.
 An unknown target or malformed attribute fails the check. The
 `hal.amdgpu.descriptor_set` provider remains available when a case specifically

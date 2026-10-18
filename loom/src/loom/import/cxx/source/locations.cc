@@ -25,11 +25,6 @@ loom_location_id_t Locations::get(cxx::AST* ast) {
     locations_[ast] = LOOM_LOCATION_UNKNOWN;
     return LOOM_LOCATION_UNKNOWN;
   }
-  if (first.line > UINT16_MAX || last.line > UINT16_MAX ||
-      first.column > UINT16_MAX || last.column > UINT16_MAX) {
-    diagnostics_.reject(unit_, ast,
-                        "source range exceeds Loom's location representation");
-  }
   loom_source_id_t source;
   const iree_host_size_t source_count = module_->sources.count;
   check(loom_module_register_source(

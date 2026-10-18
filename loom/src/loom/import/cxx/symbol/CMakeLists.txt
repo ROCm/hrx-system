@@ -87,6 +87,7 @@ loom_cc_test(
     loom::import::cxx::binding::function_contracts
     loom::import::cxx::binding::template_definitions
     loom::import::cxx::value::builder_test
+    loom::import::cxx::value::vector
     loom::ops::check
     loom::ops::func
     loom::ops::kernel

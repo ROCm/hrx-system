@@ -27,13 +27,6 @@ typedef struct loomc_diagnostic_type_printer_t {
   const loom_text_print_options_t* text_print_options;
 } loomc_diagnostic_type_printer_t;
 
-// Initializes a diagnostic type printer over one module and optional target
-// type printer options.
-LOOMC_API_PRIVATE void loomc_diagnostic_type_printer_initialize(
-    const loom_module_t* module,
-    const loom_text_print_options_t* text_print_options,
-    loomc_diagnostic_type_printer_t* out_printer);
-
 // Returns a formatter backed by |printer|, or the context-free formatter when
 // |printer| is NULL.
 LOOMC_API_PRIVATE loom_type_formatter_t loomc_diagnostic_type_printer_formatter(
@@ -51,8 +44,8 @@ typedef struct loomc_diagnostic_capture_t {
   loom_source_resolver_t source_resolver;
   // Native emitter identity assigned to diagnostic emissions.
   loom_emitter_t emitter;
-  // Module- and target-aware type printer.
-  loomc_diagnostic_type_printer_t type_printer;
+  // Optional target-aware type printer options borrowed during capture.
+  const loom_text_print_options_t* text_print_options;
 } loomc_diagnostic_capture_t;
 
 // Initializes one synchronous native-to-public diagnostic adapter.
@@ -86,7 +79,7 @@ loomc_result_loom_diagnostic_sink(const loomc_result_t* result);
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_loom_diagnostic(
     loomc_result_t* result, const loomc_source_t* source,
     const loom_diagnostic_t* diagnostic,
-    const loomc_diagnostic_type_printer_t* type_printer);
+    const loom_text_print_options_t* text_print_options);
 
 // Resolves an emission against |module| or its explicit module override and
 // adds the diagnostic to result, which owns all resolved source identities.
@@ -95,7 +88,7 @@ LOOMC_API_PRIVATE loomc_status_t loomc_result_add_loom_diagnostic_emission(
     loomc_result_t* result, const loom_module_t* module,
     loom_source_resolver_t source_resolver, loom_emitter_t emitter,
     const loom_diagnostic_emission_t* emission,
-    const loomc_diagnostic_type_printer_t* type_printer);
+    const loom_text_print_options_t* text_print_options);
 
 // Verifies a Loom module and adds verifier diagnostics to result. A zero error
 // limit selects the binding's default diagnostic limit.

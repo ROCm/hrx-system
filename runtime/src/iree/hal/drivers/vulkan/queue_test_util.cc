@@ -10,6 +10,11 @@
 
 namespace iree::hal::cts {
 
+void RetireVulkanQueue(iree_hal_queue_t* queue) {
+  iree_hal_vulkan_queue_retire_frontier(
+      reinterpret_cast<iree_hal_vulkan_queue_t*>(queue));
+}
+
 iree_hal_queue_t* FindVulkanSparseBindingQueue(iree_hal_device_t* device) {
   const auto* queues =
       iree_hal_device_spec_queues(iree_hal_device_spec(device));

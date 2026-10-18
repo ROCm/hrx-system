@@ -119,6 +119,7 @@ from loom.ir import (
     SignedEnumSetAttr,
     StaticDim,
     StorageType,
+    StringArrayAttr,
     SymbolName,
     SymbolNameArray,
     SymbolNameSet,
@@ -781,6 +782,12 @@ def _format_attr_value(
                 f"symbol-set attribute value must be SymbolNameSet: {value!r}"
             )
         return "[" + ", ".join("@" + str(element) for element in value) + "]"
+    if attr_def is not None and attr_def.attr_type == "string_array":
+        if not isinstance(value, StringArrayAttr):
+            raise TypeError(
+                f"string-array attribute value must be StringArrayAttr: {value!r}"
+            )
+        return "[" + ", ".join(_format_string_literal(v) for v in value) + "]"
     if (attr_def is not None and attr_def.attr_type == "type") or isinstance(
         value, _IR_TYPE_CLASSES
     ):
@@ -814,6 +821,8 @@ def _format_attr_value(
         raise ValueError("enum arrays require a descriptor-backed field")
     if isinstance(value, SignedEnumSetAttr):
         raise ValueError("signed enum sets require a descriptor-backed field")
+    if isinstance(value, StringArrayAttr):
+        return "[" + ", ".join(_format_string_literal(v) for v in value) + "]"
     if isinstance(value, ParameterizedAttr):
         if attr_def is not None:
             if attr_def.attr_type != "parameterized":
@@ -1017,6 +1026,8 @@ def _is_pipeline_printable_attr_value(
             _is_pipeline_printable_name(str(element), allow_dot=False)
             for element in value
         )
+    if isinstance(value, StringArrayAttr):
+        return attr_def is None or attr_def.attr_type == "string_array"
     if isinstance(value, ParameterizedAttr):
         return all(
             slot is None or _is_pipeline_printable_attr_value(slot, parameter)

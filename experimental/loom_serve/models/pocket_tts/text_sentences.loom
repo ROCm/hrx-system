@@ -1,0 +1,255 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("input") @decoder_create(%flags: i32, %token_capacity: i64) -> (input.decoder)
+
+func.decl import("input") @decoder_reset(%state: input.decoder, %flags: i32)
+
+func.decl import("input") @decoder_feed(%state: input.decoder, %input: buffer, %input_offset: i64, %input_length: i64, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i64)
+
+func.decl import("input") @decoder_finalize(%state: input.decoder, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i32)
+
+func.decl @pocket.boundary_token(%token: i32, %set: buffer, %count: index) -> (i1)
+
+func.decl @pocket.decode_span(%tokens: buffer, %begin: index, %end: index) -> (buffer)
+
+func.decl @text.next(%text: buffer, %position: offset) -> (i32, offset)
+
+func.decl @text.is_digit(%codepoint: i32) -> (i1)
+
+// Cursor words:
+// 0: number of unresolved sentence IDs in the queue.
+// 1: last scalar emitted by the continuing prefix decoder.
+// 2: scalar before the last, for decimal-period recognition.
+// 3: whether the previous ID belongs to the sentence punctuation set.
+// 4: pending decimal boundary's queue extent plus one, or zero when absent.
+// 5: token extent of the ready sentence, which may be empty at EOF.
+// 6: whether one sentence is ready for fresh decoding and refinement.
+// 7: EOF phase: accepting, final boundary pending, or final boundary queued.
+// Prefix and suffix decoder owners are independent of the queue and each other.
+func.def public @pocket.sentences_create(%input_limit: index) -> (buffer, buffer, buffer, input.decoder, input.decoder) {
+  %origin = index.constant 0 : offset
+  %state_bytes = index.constant 64 : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %zero = scalar.constant 0 : i32
+  buffer.fill %zero, %state[%origin], %state_bytes : i32
+  %word = index.constant 4 : offset
+  %one = index.constant 1 : index
+  %capacity = index.add %input_limit, %one : index
+  %queue_bytes = index.scale %capacity, %word : index, offset -> offset
+  %queue = buffer.alloca<private> align(4) %queue_bytes : buffer
+  // The pinned vocabulary emits at most nine bytes per ID. This also covers
+  // a decoder's pending byte-fallback UTF-8 tail before its next scalar.
+  %scratch_bytes = index.constant 32 : offset
+  %scratch = buffer.alloca<private> align(1) %scratch_bytes : buffer
+  %skip_special = scalar.constant 1 : i32
+  %one64 = scalar.constant 1 : i64
+  %prefix = func.call @decoder_create(%skip_special, %one64) : (i32, i64) -> (input.decoder)
+  %suffix = func.call @decoder_create(%skip_special, %one64) : (i32, i64) -> (input.decoder)
+  func.return %state, %queue, %scratch, %prefix, %suffix : buffer, buffer, buffer, input.decoder, input.decoder
+}
+
+// Visit each newly decoded prefix scalar once. No completed prefix is kept or
+// decoded again to discover a subsequent sentence boundary.
+func.def @pocket.sentence_history(%state: buffer, %text: buffer, %length64: i64) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<8xi64>
+  %last64 = view.load %header[1] : view<8xi64> -> i64
+  %previous64 = view.load %header[2] : view<8xi64> -> i64
+  %last = scalar.trunci %last64 : i64 to i32
+  %previous = scalar.trunci %previous64 : i64 to i32
+  %length_value = scalar.assume %length64 [range(%length64, 0, 32)] : i64
+  %length = index.cast %length_value : i64 to offset
+  %unused, %next_last, %next_previous = scf.while(%position = %origin : offset, %last = %last : i32, %previous = %previous : i32) -> (offset, i32, i32) {
+    %more = index.cmp ult, %position, %length : offset
+    scf.condition %more, %position, %last, %previous : i1, offset, i32, i32
+  } do(%position: offset, %last: i32, %previous: i32) {
+    %scalar, %next = func.call @text.next(%text, %position) : (buffer, offset) -> (i32, offset)
+    scf.yield %next, %scalar, %last : offset, i32, i32
+  }
+  %next_last64 = scalar.extui %next_last : i32 to i64
+  %next_previous64 = scalar.extui %next_previous : i32 to i64
+  view.store %next_last64, %header[1] : i64, view<8xi64>
+  view.store %next_previous64, %header[2] : i64, view<8xi64>
+  func.return
+}
+
+// A fresh suffix can initially decode no scalar, for example when it starts
+// with special IDs or a partial byte-fallback scalar. Keep the candidate until
+// its first scalar or EOF establishes the exact decimal exclusion decision.
+func.def @pocket.sentence_decimal(%state: buffer, %text: buffer, %length: i64, %final: i1) {
+  %origin = index.constant 0 : offset
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %present = scalar.cmpi ne, %length, %zero : i64
+  %resolve = scalar.ori %present, %final : i1
+  scf.if %resolve {
+    %decimal = scf.if %present -> (i1) {
+      %first, %unused = func.call @text.next(%text, %origin) : (buffer, offset) -> (i32, offset)
+      %digit = func.call @text.is_digit(%first) : (i32) -> (i1)
+      scf.yield %digit : i1
+    } else {
+      %false = scalar.constant false : i1
+      scf.yield %false : i1
+    }
+    %header = buffer.view %state[%origin] : buffer -> view<8xi64>
+    %candidate = view.load %header[4] : view<8xi64> -> i64
+    view.store %zero, %header[4] : i64, view<8xi64>
+    %false = scalar.constant false : i1
+    %boundary = scalar.cmpi eq, %decimal, %false : i1
+    scf.if %boundary {
+      %count = scalar.subi %candidate, %one : i64
+      view.store %count, %header[5] : i64, view<8xi64>
+      view.store %one, %header[6] : i64, view<8xi64>
+    }
+  }
+  func.return
+}
+
+// The owner feeds one ID only while no sentence is awaiting refinement. ASCII
+// punctuation resolves a pending suffix before another punctuation run can
+// end, so at most one decimal candidate is live.
+func.def public @pocket.sentences_feed(%state: buffer, %queue: buffer, %scratch: buffer, %prefix: input.decoder, %suffix: input.decoder, %set: buffer, %set_count: index, %token: i32) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<8xi64>
+  %count64 = view.load %header[0] : view<8xi64> -> i64
+  %count = index.cast %count64 : i64 to index
+  %word = index.constant 4 : offset
+  %position = index.scale %count, %word : index, offset -> offset
+  %entry = buffer.view %queue[%position] : buffer -> view<1xi32>
+  view.store %token, %entry[0] : i32, view<1xi32>
+  %one64 = scalar.constant 1 : i64
+  %zero64 = scalar.constant 0 : i64
+  %next_count = scalar.addi %count64, %one64 : i64
+  view.store %next_count, %header[0] : i64, view<8xi64>
+  %punctuation = func.call @pocket.boundary_token(%token, %set, %set_count) : (i32, buffer, index) -> (i1)
+  %previous_punctuation = view.load %header[3] : view<8xi64> -> i64
+  %previous = scalar.cmpi ne, %previous_punctuation, %zero64 : i64
+  %false = scalar.constant false : i1
+  %ordinary = scalar.cmpi eq, %punctuation, %false : i1
+  %candidate = scalar.andi %previous, %ordinary : i1
+  %skip_special = scalar.constant 1 : i32
+  scf.if %candidate {
+    %last64 = view.load %header[1] : view<8xi64> -> i64
+    %before64 = view.load %header[2] : view<8xi64> -> i64
+    %last = scalar.trunci %last64 : i64 to i32
+    %before = scalar.trunci %before64 : i64 to i32
+    %period = scalar.constant 46 : i32
+    %is_period = scalar.cmpi eq, %last, %period : i32
+    %digit = func.call @text.is_digit(%before) : (i32) -> (i1)
+    %decimal = scalar.andi %is_period, %digit : i1
+    scf.if %decimal {
+      view.store %next_count, %header[4] : i64, view<8xi64>
+      func.call @decoder_reset(%suffix, %skip_special) : (input.decoder, i32)
+    } else {
+      view.store %count64, %header[5] : i64, view<8xi64>
+      view.store %one64, %header[6] : i64, view<8xi64>
+    }
+  }
+  %punctuation64 = scalar.extui %punctuation : i1 to i64
+  view.store %punctuation64, %header[3] : i64, view<8xi64>
+  %pending = view.load %header[4] : view<8xi64> -> i64
+  %has_pending = scalar.cmpi ne, %pending, %zero64 : i64
+  %position64 = index.cast %position : offset to i64
+  %capacity = scalar.constant 32 : i64
+  scf.if %has_pending {
+    %unused_consumed, %written = func.call @decoder_feed(%suffix, %queue, %position64, %one64, %scratch, %zero64, %capacity) : (input.decoder, buffer, i64, i64, buffer, i64, i64) -> (i64, i64)
+    func.call @pocket.sentence_decimal(%state, %scratch, %written, %false) : (buffer, buffer, i64, i1)
+  }
+  %unused_consumed, %written = func.call @decoder_feed(%prefix, %queue, %position64, %one64, %scratch, %zero64, %capacity) : (input.decoder, buffer, i64, i64, buffer, i64, i64) -> (i64, i64)
+  func.call @pocket.sentence_history(%state, %scratch, %written) : (buffer, buffer, i64)
+  func.return
+}
+
+func.def public @pocket.sentences_peek(%state: buffer) -> (i64, i32, i32) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<8xi64>
+  %count = view.load %header[5] : view<8xi64> -> i64
+  %ready = view.load %header[6] : view<8xi64> -> i64
+  %phase = view.load %header[7] : view<8xi64> -> i64
+  %zero = scalar.constant 0 : i64
+  %two = scalar.constant 2 : i64
+  %drained = scalar.cmpi eq, %ready, %zero : i64
+  %final = scalar.cmpi eq, %phase, %two : i64
+  %complete = scalar.andi %drained, %final : i1
+  %ready32 = scalar.trunci %ready : i64 to i32
+  %complete32 = scalar.extui %complete : i1 to i32
+  func.return %count, %ready32, %complete32 : i64, i32, i32
+}
+
+// Decode the ready extent with fresh leading-space state, as Pocket's finite
+// segment policy requires. Only that extent enters packet refinement.
+func.def public @pocket.sentences_read(%state: buffer, %queue: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<8xi64>
+  %count64 = view.load %header[5] : view<8xi64> -> i64
+  %count = index.cast %count64 : i64 to index
+  %zero = index.constant 0 : index
+  %sentence = func.call @pocket.decode_span(%queue, %zero, %count) : (buffer, index, index) -> (buffer)
+  func.return %sentence : buffer
+}
+
+func.def public @pocket.sentences_consume(%state: buffer, %queue: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<8xi64>
+  %length64 = view.load %header[0] : view<8xi64> -> i64
+  %ready64 = view.load %header[5] : view<8xi64> -> i64
+  %length_value = index.cast %length64 : i64 to index
+  %length = index.assume %length_value [ge(%length_value, 0)] : index
+  %ready_value = index.cast %ready64 : i64 to index
+  %ready = index.assume %ready_value [ge(%ready_value, 0), le(%ready_value, %length)] : index
+  %remaining = index.sub %length, %ready : index
+  %remaining64 = index.cast %remaining : index to i64
+  %word = index.constant 4 : offset
+  %source_origin = index.scale %ready, %word : index, offset -> offset
+  %source_tokens = buffer.view %queue[%source_origin] : buffer -> view<[%remaining]xi32>
+  %target_tokens = buffer.view %queue[%origin] : buffer -> view<[%remaining]xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %i = [%zero to %remaining step %one] {
+    %token = view.load %source_tokens[%i] : view<[%remaining]xi32> -> i32
+    view.store %token, %target_tokens[%i] : i32, view<[%remaining]xi32>
+  }
+  %zero64 = scalar.constant 0 : i64
+  view.store %remaining64, %header[0] : i64, view<8xi64>
+  view.store %zero64, %header[5] : i64, view<8xi64>
+  view.store %zero64, %header[6] : i64, view<8xi64>
+  func.return
+}
+
+// EOF can establish two boundaries: a pending decimal candidate, then the
+// final extent. Keep them as separate ready sentences across CPU turns.
+func.def public @pocket.sentences_finish(%state: buffer, %scratch: buffer, %prefix: input.decoder, %suffix: input.decoder) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<8xi64>
+  %phase = view.load %header[7] : view<8xi64> -> i64
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %two = scalar.constant 2 : i64
+  %begin = scalar.cmpi eq, %phase, %zero : i64
+  %capacity = scalar.constant 32 : i64
+  scf.if %begin {
+    %written, %unused_complete = func.call @decoder_finalize(%prefix, %scratch, %zero, %capacity) : (input.decoder, buffer, i64, i64) -> (i64, i32)
+    func.call @pocket.sentence_history(%state, %scratch, %written) : (buffer, buffer, i64)
+    %pending = view.load %header[4] : view<8xi64> -> i64
+    %has_pending = scalar.cmpi ne, %pending, %zero : i64
+    scf.if %has_pending {
+      %written, %unused_complete = func.call @decoder_finalize(%suffix, %scratch, %zero, %capacity) : (input.decoder, buffer, i64, i64) -> (i64, i32)
+      %true = scalar.constant true : i1
+      func.call @pocket.sentence_decimal(%state, %scratch, %written, %true) : (buffer, buffer, i64, i1)
+    }
+    view.store %one, %header[7] : i64, view<8xi64>
+  }
+  %ready = view.load %header[6] : view<8xi64> -> i64
+  %no_sentence = scalar.cmpi eq, %ready, %zero : i64
+  scf.if %no_sentence {
+    %length = view.load %header[0] : view<8xi64> -> i64
+    view.store %length, %header[5] : i64, view<8xi64>
+    view.store %one, %header[6] : i64, view<8xi64>
+    view.store %two, %header[7] : i64, view<8xi64>
+  }
+  func.return
+}

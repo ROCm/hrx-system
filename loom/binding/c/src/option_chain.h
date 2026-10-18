@@ -17,10 +17,15 @@
 extern "C" {
 #endif
 
+typedef struct loom_pass_report_t loom_pass_report_t;
+typedef struct loom_target_compile_report_t loom_target_compile_report_t;
+
 enum loomc_option_chain_allowed_bit_e {
   LOOMC_OPTION_CHAIN_ALLOW_TARGET_SPECIALIZATION = 1u << 0,
   LOOMC_OPTION_CHAIN_ALLOW_SANITIZER = 1u << 1,
   LOOMC_OPTION_CHAIN_ALLOW_PASS_TRACE = 1u << 2,
+  LOOMC_OPTION_CHAIN_ALLOW_NATIVE_PASS_REPORT = 1u << 3,
+  LOOMC_OPTION_CHAIN_ALLOW_NATIVE_COMPILE_REPORT = 1u << 4,
 };
 typedef uint32_t loomc_option_chain_allowed_t;
 
@@ -33,6 +38,10 @@ typedef struct loomc_option_chain_t {
   loom_sanitizer_options_t sanitizer;
   // Pass trace descriptor found in the option chain, or NULL.
   const loomc_pass_trace_options_t* pass_trace;
+  // Caller-owned pass invocation collector, or NULL.
+  loom_pass_report_t* pass_report;
+  // Caller-owned target compilation collector, or NULL.
+  loom_target_compile_report_t* compile_report;
 } loomc_option_chain_t;
 
 // Resolves a public option-extension chain into the descriptors allowed by

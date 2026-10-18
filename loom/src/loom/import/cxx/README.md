@@ -143,15 +143,17 @@ narrowing conversions.
 The fundamental spellings `__float8_e4m3fn` and `__float8_e5m2` also work in C.
 Ordinary floating literals initialize them; no FP8 literal suffix is required.
 These spellings identify signed-zero formats, not the distinct FNUZ encodings.
-The optional header contains only aliases, documentation and guards, with no
-transitive includes. Scalar math templates admit these types when used without
-adding per-format declarations to every import.
+The optional header has no transitive includes. It contains the aliases and the
+small numeric-conversion facade described below; scalar math templates admit
+these types without adding per-format declarations to every import.
 
-## Numeric vector conversion
+## Numeric conversion
 
-`__builtin_convertvector(value, DestinationType)` converts each lane numerically
-while preserving the number of lanes. It works in C and C++, needs no header,
-and accepts template-dependent destination types and constant expressions.
+`loom::convert<DestinationType>(value)` converts a scalar or each vector lane
+numerically. Native vectors preserve their lane count, and semantic
+`loom::type::vector` values preserve their complete logical shape. The same
+spelling accepts template-dependent destination types and remains a constant
+expression for scalars and native vectors.
 
 For example, load packed FP8 values, compute in F32, and round back to FP8:
 
@@ -162,8 +164,8 @@ using Float8x4 =
 using Float4 = float __attribute__((ext_vector_type(4)));
 
 Float8x4 scale(Float8x4 value, float factor) {
-  auto wide = __builtin_convertvector(value, Float4);
-  return __builtin_convertvector(wide * factor, Float8x4);
+  auto wide = loom::convert<Float4>(value);
+  return loom::convert<Float8x4>(wide * factor);
 }
 ```
 
@@ -318,8 +320,8 @@ selects ordered F32 accumulation:
 using Float16 = float __attribute__((ext_vector_type(16)));
 
 float ordered_weighted_sum(BFloat16 weights, BFloat16 activations, float seed) {
-  return loom::vector::dotf(__builtin_convertvector(weights, Float16),
-                           __builtin_convertvector(activations, Float16), seed);
+  return loom::vector::dotf(loom::convert<Float16>(weights),
+                            loom::convert<Float16>(activations), seed);
 }
 ```
 
@@ -460,7 +462,7 @@ own lane. The imported value stays in SSA: a scalar endpoint uses a one-lane
 `vector.from_elements` or `vector.extract` around `vector.bitcast`. The target
 compiler can realize those representation changes as register aliases. Floating
 bit casts preserve the payload, including signed zero and NaN encodings; use
-`__builtin_convertvector` for numeric conversion.
+`loom::convert` for numeric conversion.
 
 The same operation supports scalar-to-scalar and vector-to-vector values.
 Pointers, aggregates and padded vectors produce source diagnostics. Runtime
@@ -480,7 +482,7 @@ constexpr Fp8x4 kScale = __builtin_bit_cast(Fp8x4, 0x403c3830u);
 static_assert(kScale[0] == 0.5f && kScale[3] == 2.0f);
 
 void apply_scale(const Float4* input, Float4* output) {
-  *output = *input * __builtin_convertvector(kScale, Float4);
+  *output = *input * loom::convert<Float4>(kScale);
 }
 ```
 

@@ -214,8 +214,8 @@ iree_hal_memory_tlsf_find_suitable_block(iree_hal_memory_tlsf_t* tlsf,
 }
 
 // Merges |source_frontier| into |target_block|'s inline frontier. If the
-// merge overflows capacity, marks the target block as tainted and increments
-// the diagnostic counter.
+// merge overflows capacity, the owner captures its inputs. Without a capture
+// handler, the block is tainted and unavailable for causal reuse.
 static void iree_hal_memory_tlsf_merge_frontiers(
     iree_hal_memory_tlsf_t* tlsf, iree_hal_memory_tlsf_block_t* target_block,
     const iree_async_frontier_t* source_frontier) {
@@ -233,6 +233,11 @@ static void iree_hal_memory_tlsf_merge_frontiers(
 
   if (!iree_async_frontier_merge(target_frontier, tlsf->frontier_capacity,
                                  source_frontier)) {
+    if (tlsf->frontier_overflow) {
+      tlsf->frontier_overflow(tlsf->frontier_overflow_user_data,
+                              target_frontier, source_frontier);
+      return;
+    }
     // Overflow: mark tainted and zero the frontier.
     target_block->flags |= IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_TAINTED;
     target_frontier->entry_count = 0;
@@ -700,10 +705,8 @@ static void iree_hal_memory_tlsf_free_impl(
                          sizeof(iree_async_frontier_entry_t));
         }
       } else {
-        // Death frontier too large for inline storage; taint.
         iree_async_frontier_initialize(block_frontier, 0);
-        block->flags |= IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_TAINTED;
-        tlsf->tainted_coalesce_count++;
+        iree_hal_memory_tlsf_merge_frontiers(tlsf, block, death_frontier);
       }
     } else {
       iree_async_frontier_initialize(block_frontier, 0);
@@ -860,6 +863,25 @@ void iree_hal_memory_tlsf_merge_full_free_frontier(
               tlsf->bytes_free == tlsf->range_length);
   iree_hal_memory_tlsf_merge_frontiers(
       tlsf, iree_hal_memory_tlsf_block_at(tlsf, 0), frontier);
+}
+
+void iree_hal_memory_tlsf_reset(iree_hal_memory_tlsf_t* tlsf,
+                                const iree_async_frontier_t* initial_frontier) {
+  IREE_ASSERT(tlsf->allocation_count == 0 && tlsf->free_block_count == 1 &&
+              tlsf->bytes_free == tlsf->range_length);
+  iree_hal_memory_tlsf_block_t* block = iree_hal_memory_tlsf_block_at(tlsf, 0);
+  block->flags = IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_FREE |
+                 IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_LAST;
+  iree_async_frontier_t* frontier =
+      iree_hal_memory_tlsf_block_frontier(tlsf, block);
+  if (initial_frontier) {
+    memcpy(frontier, initial_frontier,
+           sizeof(*frontier) + initial_frontier->entry_count *
+                                   sizeof(iree_async_frontier_entry_t));
+  } else {
+    iree_async_frontier_initialize(frontier, 0);
+  }
+  tlsf->tainted_coalesce_count = 0;
 }
 
 iree_device_size_t iree_hal_memory_tlsf_largest_free_block(

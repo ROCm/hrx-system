@@ -1188,6 +1188,8 @@ loom_cc_benchmark(
     loom::ops::test
     loom::ops::vector
     loom::util::fact_table
+  ARGS
+    "--benchmark_filter=^(BM_AnalyzeAndPlanSymbolicMemory/16/16|BM_AnalyzeAndPlanDigitMemory/(ConstantDivisor|RuntimeDivisor)/1/|BM_AnalyzeAndPlanRefinedMemory/1/8/1)"
   TESTONLY
 )
 

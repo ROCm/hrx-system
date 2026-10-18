@@ -54,13 +54,14 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
       loomc_source_create(&source_options, loomc_allocator_system(), &source));
 
   loomc_result_t* result = nullptr;
-  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &result));
 
   char code[] = "PARSE/001";
   char message[] = "expected a thing";
   char formatted[] = "bad.loom:1:1: error [PARSE/001]: expected a thing\n";
+  char formatted_json[] = "{\"message\":\"expected a thing\"}";
   char parameter_name[] = "expected_kind";
   char parameter_value[] = "thing";
   loomc_diagnostic_t diagnostic = {
@@ -94,6 +95,7 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   };
   diagnostic.parameters = &parameter;
   diagnostic.parameter_count = 1;
+  diagnostic.formatted_json = loomc_make_cstring_view(formatted_json);
   LOOMC_ASSERT_OK(loomc_result_add_diagnostic(result, &diagnostic));
   const auto* retained_related =
       loomc_result_diagnostic_at(result, 0)->related_locations;
@@ -124,6 +126,7 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   code[0] = 'X';
   message[0] = 'X';
   formatted[0] = 'X';
+  formatted_json[0] = 'X';
   label[0] = 'X';
   parameter_name[0] = 'X';
   parameter_value[0] = 'X';
@@ -145,6 +148,8 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   EXPECT_EQ(ToString(stored_diagnostic->message), "expected a thing");
   EXPECT_EQ(ToString(stored_diagnostic->formatted_text),
             "bad.loom:1:1: error [PARSE/001]: expected a thing\n");
+  EXPECT_EQ(ToString(stored_diagnostic->formatted_json),
+            "{\"message\":\"expected a thing\"}");
   EXPECT_EQ(ToString(loomc_source_identifier(stored_diagnostic->range.source)),
             "bad.loom");
   ASSERT_EQ(stored_diagnostic->related_location_count, 1u);
@@ -171,6 +176,26 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   loomc_result_release(result);
 }
 
+TEST(ResultTest, DerivesTerminalStateFromStatusCode) {
+  for (auto code :
+       {LOOMC_STATUS_OK, LOOMC_STATUS_CANCELLED, LOOMC_STATUS_NOT_FOUND,
+        LOOMC_STATUS_INVALID_ARGUMENT, LOOMC_STATUS_FAILED_PRECONDITION}) {
+    loomc_result_t* result = nullptr;
+    LOOMC_ASSERT_OK(loomc_result_create(code, LOOMC_SOURCE_RETENTION_EXACT,
+                                        loomc_allocator_system(), &result));
+    ResultPtr owner(result);
+    EXPECT_EQ(loomc_result_status_code(result), code);
+    EXPECT_EQ(loomc_result_succeeded(result), code == LOOMC_STATUS_OK);
+    EXPECT_EQ(loomc_result_state(result),
+              code == LOOMC_STATUS_OK          ? LOOMC_RESULT_STATE_SUCCEEDED
+              : code == LOOMC_STATUS_CANCELLED ? LOOMC_RESULT_STATE_CANCELLED
+                                               : LOOMC_RESULT_STATE_FAILED);
+  }
+  EXPECT_EQ(loomc_result_status_code(nullptr), LOOMC_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(loomc_result_state(nullptr), LOOMC_RESULT_STATE_FAILED);
+  EXPECT_FALSE(loomc_result_succeeded(nullptr));
+}
+
 TEST(ResultTest, MetadataDiagnosticsRetainLocationWithoutSourceContents) {
   const char source_text[] = "bad";
   const loomc_source_options_t source_options = {
@@ -187,7 +212,7 @@ TEST(ResultTest, MetadataDiagnosticsRetainLocationWithoutSourceContents) {
       loomc_source_create(&source_options, loomc_allocator_system(), &source));
 
   loomc_result_t* result = nullptr;
-  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,
                                       LOOMC_SOURCE_RETENTION_METADATA_ONLY,
                                       loomc_allocator_system(), &result));
   ResultPtr result_owner(result);
@@ -236,7 +261,7 @@ TEST(ResultTest, MetadataDiagnosticsRetainLocationWithoutSourceContents) {
 
 TEST(ResultTest, RejectsDiagnosticWithMissingRelatedLocations) {
   loomc_result_t* result = nullptr;
-  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &result));
   ResultPtr result_owner(result);
@@ -248,7 +273,7 @@ TEST(ResultTest, RejectsDiagnosticWithMissingRelatedLocations) {
 
 TEST(ResultTest, RejectsDiagnosticWithMissingParameters) {
   loomc_result_t* result = nullptr;
-  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &result));
   ResultPtr result_owner(result);
@@ -260,7 +285,7 @@ TEST(ResultTest, RejectsDiagnosticWithMissingParameters) {
 
 TEST(ResultTest, EmptyDiagnosticNeedsNoMetadataPayload) {
   loomc_result_t* result = nullptr;
-  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &result));
   ResultPtr owner(result);
@@ -278,7 +303,7 @@ TEST(ResultTest, EmptyDiagnosticNeedsNoMetadataPayload) {
 
 TEST(ResultTest, RejectsMalformedArtifact) {
   loomc_result_t* result = nullptr;
-  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_OK,
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &result));
 

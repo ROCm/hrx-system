@@ -1,0 +1,144 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+target.decl @pocket
+
+// Complete ascending-K accumulators for a 16-output by 32-position panel.
+// The caller excludes a wholly inactive position panel uniformly and retains
+// all 128 workitems through both publication and retirement barriers.
+template.decl @pocket.prefix.matrix(%rows: index, %row_capacity: index, %input_first_row: index, %inputs: index, %outputs: index, %bf16_weights: i1, %input: buffer, %weight: buffer, %input_origin: offset, %weight_origin: offset, %input_row_stride: index, %weight_output_stride: index, %weight_input_stride: index) -> (index, index, f64, f64, f64, f64)
+
+template.def<@pocket.prefix.matrix> device @pocket_prefix_matrix(%rows: index, %row_capacity: index, %input_first_row: index, %inputs: index, %outputs: index, %bf16_weights: i1, %input: buffer, %weight: buffer, %input_origin: offset, %weight_origin: offset, %input_row_stride: index, %weight_output_stride: index, %weight_input_stride: index) -> (index, index, f64, f64, f64, f64) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %threads = index.constant 128 : index
+  %weight_elements = index.constant 512 : index
+  %origin = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %output_group = kernel.workgroup.id<x> : index
+  %row_group = kernel.workgroup.id<y> : index
+  %output_base = index.mul %output_group, %sixteen : index
+  %row_base = index.mul %row_group, %thirty_two : index
+  %remaining = index.sub %rows, %row_base : index
+  %rounding = index.constant 7 : index
+  %rounded = index.add %remaining, %rounding : index
+  %available_groups = index.div %rounded, %eight : index
+  %four = index.constant 4 : index
+  %three = index.constant 3 : index
+  %two = index.constant 2 : index
+  %full = index.cmp ugt, %available_groups, %four : index
+  %groups = scf.select %full, %four, %available_groups : index
+  %group_elements = index.constant 256 : index
+  %input_elements = index.mul %groups, %group_elements : index
+  %has_group1 = index.cmp ugt, %groups, %one : index
+  %has_group2 = index.cmp ugt, %groups, %two : index
+  %has_group3 = index.cmp ugt, %groups, %three : index
+  %output_lane = index.rem %lane, %sixteen : index
+  %row_lane = index.div %lane, %sixteen : index
+  %output_index = index.add %output_base, %output_lane : index
+  %row_index = index.add %row_base, %row_lane : index
+  %row_lane_1 = index.add %row_lane, %eight : index
+  %row_lane_2 = index.add %row_lane_1, %eight : index
+  %row_lane_3 = index.add %row_lane_2, %eight : index
+  %input_layout = encoding.layout.strided [%input_row_stride, %one] : encoding<layout>
+  %input_view = buffer.view %input[%input_origin] : buffer -> view<[%row_capacity]x[%inputs]xf32, %input_layout>
+  %weight_layout = encoding.layout.strided [%weight_output_stride, %weight_input_stride] : encoding<layout>
+  %weight_bytes = index.constant 2176 : offset
+  %input_bytes = index.constant 4224 : offset
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_bytes : buffer
+  %input_stage = buffer.alloca<workgroup> align(16) %input_bytes : buffer
+  %weights = buffer.view %weight_stage[%origin] : buffer -> view<32x17xf32>
+  %values = buffer.view %input_stage[%origin] : buffer -> view<32x33xf32>
+  %zero32 = scalar.constant 0.0 : f32
+  %initial = scalar.constant 0.0 : f64
+  %result0, %result1, %result2, %result3 = scf.for %begin = [%zero to %inputs step %thirty_two](%acc0 = %initial : f64, %acc1 = %initial : f64, %acc2 = %initial : f64, %acc3 = %initial : f64) -> (f64, f64, f64, f64) {
+    scf.for %element = [%lane to %weight_elements step %threads] {
+      %output_local = index.div %element, %thirty_two : index
+      %input_local = index.rem %element, %thirty_two : index
+      %output = index.add %output_base, %output_local : index
+      %channel = index.add %begin, %input_local : index
+      %output_live = index.cmp ult, %output, %outputs : index
+      %input_live = index.cmp ult, %channel, %inputs : index
+      %live = scalar.andi %output_live, %input_live : i1
+      %value = scf.if %live -> (f32) {
+        %bounded_output = index.assume %output [ge(%output, 0), lt(%output, %outputs)] : index
+        %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+        %value = scf.if %bf16_weights -> (f32) {
+          %view = buffer.view %weight[%weight_origin] : buffer -> view<[%outputs]x[%inputs]xbf16, %weight_layout>
+          %stored = view.load %view[%bounded_output, %bounded_channel] : view<[%outputs]x[%inputs]xbf16, %weight_layout> -> bf16
+          %wide = scalar.extf %stored : bf16 to f32
+          scf.yield %wide : f32
+        } else {
+          %view = buffer.view %weight[%weight_origin] : buffer -> view<[%outputs]x[%inputs]xf32, %weight_layout>
+          %stored = view.load %view[%bounded_output, %bounded_channel] : view<[%outputs]x[%inputs]xf32, %weight_layout> -> f32
+          scf.yield %stored : f32
+        }
+        scf.yield %value : f32
+      } else {
+        scf.yield %zero32 : f32
+      }
+      view.store %value, %weights[%input_local, %output_local] : f32, view<32x17xf32>
+    }
+    scf.for %element = [%lane to %input_elements step %threads] {
+      %row_local = index.div %element, %thirty_two : index
+      %input_local = index.rem %element, %thirty_two : index
+      %row = index.add %row_base, %row_local : index
+      %channel = index.add %begin, %input_local : index
+      %row_live = index.cmp ult, %row, %rows : index
+      %input_live = index.cmp ult, %channel, %inputs : index
+      %live = scalar.andi %row_live, %input_live : i1
+      %value = scf.if %live -> (f32) {
+        %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+        %source_row_value = index.add %input_first_row, %row : index
+        %source_row = index.assume %source_row_value [ge(%source_row_value, 0), lt(%source_row_value, %row_capacity)] : index
+        %loaded = view.load %input_view[%source_row, %bounded_channel] : view<[%row_capacity]x[%inputs]xf32, %input_layout> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero32 : f32
+      }
+      view.store %value, %values[%input_local, %row_local] : f32, view<32x33xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %next0, %next1, %next2, %next3 = scf.for %channel = [%zero to %thirty_two step %one](%sum0 = %acc0 : f64, %sum1 = %acc1 : f64, %sum2 = %acc2 : f64, %sum3 = %acc3 : f64) -> (f64, f64, f64, f64) {
+      %stored_weight = view.load %weights[%channel, %output_lane] : view<32x17xf32> -> f32
+      %weight64 = scalar.extf %stored_weight : f32 to f64
+      %stored0 = view.load %values[%channel, %row_lane] : view<32x33xf32> -> f32
+      %input0 = scalar.extf %stored0 : f32 to f64
+      %value0 = scalar.fmaf %input0, %weight64, %sum0 : f64
+      %value1 = scf.if %has_group1 -> (f64) {
+        %stored1 = view.load %values[%channel, %row_lane_1] : view<32x33xf32> -> f32
+        %input1 = scalar.extf %stored1 : f32 to f64
+        %next1 = scalar.fmaf %input1, %weight64, %sum1 : f64
+        scf.yield %next1 : f64
+      } else {
+        scf.yield %sum1 : f64
+      }
+      %value2 = scf.if %has_group2 -> (f64) {
+        %stored2 = view.load %values[%channel, %row_lane_2] : view<32x33xf32> -> f32
+        %input2 = scalar.extf %stored2 : f32 to f64
+        %next2 = scalar.fmaf %input2, %weight64, %sum2 : f64
+        scf.yield %next2 : f64
+      } else {
+        scf.yield %sum2 : f64
+      }
+      %value3 = scf.if %has_group3 -> (f64) {
+        %stored3 = view.load %values[%channel, %row_lane_3] : view<32x33xf32> -> f32
+        %input3 = scalar.extf %stored3 : f32 to f64
+        %next3 = scalar.fmaf %input3, %weight64, %sum3 : f64
+        scf.yield %next3 : f64
+      } else {
+        scf.yield %sum3 : f64
+      }
+      scf.yield %value0, %value1, %value2, %value3 : f64, f64, f64, f64
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next0, %next1, %next2, %next3 : f64, f64, f64, f64
+  }
+  template.return %row_index, %output_index, %result0, %result1, %result2, %result3 : index, index, f64, f64, f64, f64
+}

@@ -207,7 +207,7 @@ check.scenario @subgroup_float_reduction_values {
 }
 
 // Eight-lane clusters exercise partial subgroups. All floating additions are
-// exact in every source format for this input range. Integer narrowing happens
+// exact in F16/F32/F64; BF16 rounds the final sum. Integer narrowing happens
 // before the collective, so byte sums also exercise modular overflow.
 kernel.def @subgroup_extended_reductions() {
   %unit = index.constant 1 : index
@@ -217,7 +217,7 @@ kernel.def @subgroup_extended_reductions() {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
   %source = buffer.view %input[%base] : buffer -> view<64xi32>
-  %destination = buffer.view %output[%base] : buffer -> view<64x7xi64>
+  %destination = buffer.view %output[%base] : buffer -> view<64x9xi64>
   %value = view.load %source[%lane] : view<64xi32> -> i32
   %byte = scalar.trunci %value : i32 to i8
   %short = scalar.trunci %value : i32 to i16
@@ -236,6 +236,18 @@ kernel.def @subgroup_extended_reductions() {
   %single_sum = kernel.subgroup.reduce<addf> %single {cluster_size = 8} : f32
   %double_sum = kernel.subgroup.reduce<addf> %double {cluster_size = 8} : f64
   %parity = kernel.subgroup.reduce<xori> %predicate {cluster_size = 8} : i1
+  %bfloat = scalar.fptrunc %single : f32 to bf16
+  %bfloat_packet = vector.splat %bfloat : vector<1xbf16>
+  %bfloat_packet_sum = kernel.subgroup.reduce<addf> %bfloat_packet {cluster_size = 8} : vector<1xbf16>
+  %bfloat_sum = vector.extract %bfloat_packet_sum[0] : vector<1xbf16> -> bf16
+  %positive = scalar.constant 1.0 : bf16
+  %negative = scalar.constant -1.0 : bf16
+  %factor = scf.select %predicate, %negative, %positive : bf16
+  %bfloat_product = kernel.subgroup.reduce<mulf> %factor {cluster_size = 8} : bf16
+  %bfloat_sum_bits = scalar.bitcast %bfloat_sum : bf16 to i16
+  %bfloat_product_bits = scalar.bitcast %bfloat_product : bf16 to i16
+  %bfloat_sum_result = scalar.extui %bfloat_sum_bits : i16 to i64
+  %bfloat_product_result = scalar.extui %bfloat_product_bits : i16 to i64
   %byte_result = scalar.extsi %byte_sum : i8 to i64
   %short_result = scalar.extsi %short_sum : i16 to i64
   %half_bits = scalar.bitcast %half_sum : f16 to i16
@@ -244,13 +256,15 @@ kernel.def @subgroup_extended_reductions() {
   %single_result = scalar.extui %single_bits : i32 to i64
   %double_result = scalar.bitcast %double_sum : f64 to i64
   %parity_result = scalar.extui %parity : i1 to i64
-  view.store %byte_result, %destination[%lane, 0] : i64, view<64x7xi64>
-  view.store %short_result, %destination[%lane, 1] : i64, view<64x7xi64>
-  view.store %wide_sum, %destination[%lane, 2] : i64, view<64x7xi64>
-  view.store %half_result, %destination[%lane, 3] : i64, view<64x7xi64>
-  view.store %single_result, %destination[%lane, 4] : i64, view<64x7xi64>
-  view.store %double_result, %destination[%lane, 5] : i64, view<64x7xi64>
-  view.store %parity_result, %destination[%lane, 6] : i64, view<64x7xi64>
+  view.store %byte_result, %destination[%lane, 0] : i64, view<64x9xi64>
+  view.store %short_result, %destination[%lane, 1] : i64, view<64x9xi64>
+  view.store %wide_sum, %destination[%lane, 2] : i64, view<64x9xi64>
+  view.store %half_result, %destination[%lane, 3] : i64, view<64x9xi64>
+  view.store %single_result, %destination[%lane, 4] : i64, view<64x9xi64>
+  view.store %double_result, %destination[%lane, 5] : i64, view<64x9xi64>
+  view.store %parity_result, %destination[%lane, 6] : i64, view<64x9xi64>
+  view.store %bfloat_sum_result, %destination[%lane, 7] : i64, view<64x9xi64>
+  view.store %bfloat_product_result, %destination[%lane, 8] : i64, view<64x9xi64>
   kernel.return
 }
 
@@ -259,7 +273,7 @@ kernel.def @subgroup_extended_reductions() {
 func.def @subgroup_extended_reductions_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<64xi32>
-  %destination = buffer.view %output[%base] : buffer -> view<64x7xi64>
+  %destination = buffer.view %output[%base] : buffer -> view<64x9xi64>
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %items = index.constant 64 : index
@@ -290,14 +304,22 @@ func.def @subgroup_extended_reductions_oracle(%input: buffer, %output: buffer) {
     %double = scalar.sitofp %sum : i64 to f64
     %double_result = scalar.bitcast %double : f64 to i64
     %parity_result = scalar.extui %parity : i1 to i64
+    %bfloat_sum = scalar.fptrunc %single : f32 to bf16
+    %bfloat_sum_bits = scalar.bitcast %bfloat_sum : bf16 to i16
+    %bfloat_sum_result = scalar.extui %bfloat_sum_bits : i16 to i64
+    %positive = scalar.constant 16256 : i64
+    %negative = scalar.constant 49024 : i64
+    %bfloat_product_result = scf.select %parity, %negative, %positive : i64
     scf.for %lane = [%cluster to %end step %step] {
-      view.store %byte_result, %destination[%lane, 0] : i64, view<64x7xi64>
-      view.store %short_result, %destination[%lane, 1] : i64, view<64x7xi64>
-      view.store %sum, %destination[%lane, 2] : i64, view<64x7xi64>
-      view.store %half_result, %destination[%lane, 3] : i64, view<64x7xi64>
-      view.store %single_result, %destination[%lane, 4] : i64, view<64x7xi64>
-      view.store %double_result, %destination[%lane, 5] : i64, view<64x7xi64>
-      view.store %parity_result, %destination[%lane, 6] : i64, view<64x7xi64>
+      view.store %byte_result, %destination[%lane, 0] : i64, view<64x9xi64>
+      view.store %short_result, %destination[%lane, 1] : i64, view<64x9xi64>
+      view.store %sum, %destination[%lane, 2] : i64, view<64x9xi64>
+      view.store %half_result, %destination[%lane, 3] : i64, view<64x9xi64>
+      view.store %single_result, %destination[%lane, 4] : i64, view<64x9xi64>
+      view.store %double_result, %destination[%lane, 5] : i64, view<64x9xi64>
+      view.store %parity_result, %destination[%lane, 6] : i64, view<64x9xi64>
+      view.store %bfloat_sum_result, %destination[%lane, 7] : i64, view<64x9xi64>
+      view.store %bfloat_product_result, %destination[%lane, 8] : i64, view<64x9xi64>
     }
   }
   func.return
@@ -307,10 +329,10 @@ check.scenario @subgroup_extended_reduction_values {
   check.trial[8](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<64xi32>
-    %output = check.generate.fill value(123) : tensor<64x7xi64>
-    check.compare<@subgroup_extended_reductions, @subgroup_extended_reductions_oracle>(%input, %output) : (tensor<64xi32>, tensor<64x7xi64>) -> () {
+    %output = check.generate.fill value(123) : tensor<64x9xi64>
+    check.compare<@subgroup_extended_reductions, @subgroup_extended_reductions_oracle>(%input, %output) : (tensor<64xi32>, tensor<64x9xi64>) -> () {
       check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
-      check.expect.bitwise actual(%output) expected(%output) : tensor<64x7xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x9xi64>
     }
   }
   check.return
@@ -386,13 +408,10 @@ check.scenario @subgroup_ieee_extrema_values {
   check.return
 }
 
-// Uniform runtime inputs isolate F16 key encoding and decoding from subgroup
+// Uniform runtime inputs isolate F16/BF16 encoding and decoding from subgroup
 // packing. Arithmetic quiets NaNs; a singleton subgroup may forward its input.
-func.def inline @half_collective_bits(%value: f16, %combined: i1) -> (i16) {
-  %bits = scalar.bitcast %value : f16 to i16
+func.def inline @narrow_collective_bits(%bits: i16, %infinity: i16, %quiet_mask: i16, %combined: i1) -> (i16) {
   %mask = scalar.constant 32767 : i16
-  %infinity = scalar.constant 31744 : i16
-  %quiet_mask = scalar.constant 512 : i16
   %magnitude = scalar.andi %bits, %mask : i16
   %nan = scalar.cmpi ugt, %magnitude, %infinity : i16
   %quiet_bits = scalar.andi %bits, %quiet_mask : i16
@@ -412,7 +431,7 @@ kernel.def @subgroup_half_extrema() {
   %group = kernel.workgroup.id<x> : index
   %item = kernel.workitem.id<x> : index
   %source = buffer.view %input[%base] : buffer -> view<16xf16>
-  %destination = buffer.view %output[%base] : buffer -> view<16x67x4xi16>
+  %destination = buffer.view %output[%base] : buffer -> view<16x67x8xi16>
   %value = view.load %source[%group] : view<16xf16> -> f16
   %present = scalar.constant 1 : i32
   %participants = kernel.subgroup.reduce<addi> %present : i32
@@ -421,21 +440,47 @@ kernel.def @subgroup_half_extrema() {
   %maximum = kernel.subgroup.reduce<maxnumf> %value : f16
   %nan_minimum = kernel.subgroup.reduce<minimumf> %value : f16
   %nan_maximum = kernel.subgroup.reduce<maximumf> %value : f16
-  %minimum_bits = func.call @half_collective_bits(%minimum, %combined) : (f16, i1) -> (i16)
-  %maximum_bits = func.call @half_collective_bits(%maximum, %combined) : (f16, i1) -> (i16)
-  %nan_minimum_bits = func.call @half_collective_bits(%nan_minimum, %combined) : (f16, i1) -> (i16)
-  %nan_maximum_bits = func.call @half_collective_bits(%nan_maximum, %combined) : (f16, i1) -> (i16)
-  view.store %minimum_bits, %destination[%group, %item, 0] : i16, view<16x67x4xi16>
-  view.store %maximum_bits, %destination[%group, %item, 1] : i16, view<16x67x4xi16>
-  view.store %nan_minimum_bits, %destination[%group, %item, 2] : i16, view<16x67x4xi16>
-  view.store %nan_maximum_bits, %destination[%group, %item, 3] : i16, view<16x67x4xi16>
+  %half_infinity = scalar.constant 31744 : i16
+  %half_quiet = scalar.constant 512 : i16
+  %minimum_raw = scalar.bitcast %minimum : f16 to i16
+  %maximum_raw = scalar.bitcast %maximum : f16 to i16
+  %nan_minimum_raw = scalar.bitcast %nan_minimum : f16 to i16
+  %nan_maximum_raw = scalar.bitcast %nan_maximum : f16 to i16
+  %minimum_bits = func.call @narrow_collective_bits(%minimum_raw, %half_infinity, %half_quiet, %combined) : (i16, i16, i16, i1) -> (i16)
+  %maximum_bits = func.call @narrow_collective_bits(%maximum_raw, %half_infinity, %half_quiet, %combined) : (i16, i16, i16, i1) -> (i16)
+  %nan_minimum_bits = func.call @narrow_collective_bits(%nan_minimum_raw, %half_infinity, %half_quiet, %combined) : (i16, i16, i16, i1) -> (i16)
+  %nan_maximum_bits = func.call @narrow_collective_bits(%nan_maximum_raw, %half_infinity, %half_quiet, %combined) : (i16, i16, i16, i1) -> (i16)
+  %raw = scalar.bitcast %value : f16 to i16
+  %bfloat = scalar.bitcast %raw : i16 to bf16
+  %bfloat_minimum = kernel.subgroup.reduce<minnumf> %bfloat : bf16
+  %bfloat_maximum = kernel.subgroup.reduce<maxnumf> %bfloat : bf16
+  %bfloat_nan_minimum = kernel.subgroup.reduce<minimumf, preserve> %bfloat : bf16
+  %bfloat_nan_maximum = kernel.subgroup.reduce<maximumf, preserve> %bfloat : bf16
+  %bfloat_infinity = scalar.constant 32640 : i16
+  %bfloat_quiet = scalar.constant 64 : i16
+  %bfloat_minimum_raw = scalar.bitcast %bfloat_minimum : bf16 to i16
+  %bfloat_maximum_raw = scalar.bitcast %bfloat_maximum : bf16 to i16
+  %bfloat_nan_minimum_raw = scalar.bitcast %bfloat_nan_minimum : bf16 to i16
+  %bfloat_nan_maximum_raw = scalar.bitcast %bfloat_nan_maximum : bf16 to i16
+  %bfloat_minimum_bits = func.call @narrow_collective_bits(%bfloat_minimum_raw, %bfloat_infinity, %bfloat_quiet, %combined) : (i16, i16, i16, i1) -> (i16)
+  %bfloat_maximum_bits = func.call @narrow_collective_bits(%bfloat_maximum_raw, %bfloat_infinity, %bfloat_quiet, %combined) : (i16, i16, i16, i1) -> (i16)
+  %bfloat_nan_minimum_bits = func.call @narrow_collective_bits(%bfloat_nan_minimum_raw, %bfloat_infinity, %bfloat_quiet, %combined) : (i16, i16, i16, i1) -> (i16)
+  %bfloat_nan_maximum_bits = func.call @narrow_collective_bits(%bfloat_nan_maximum_raw, %bfloat_infinity, %bfloat_quiet, %combined) : (i16, i16, i16, i1) -> (i16)
+  view.store %minimum_bits, %destination[%group, %item, 0] : i16, view<16x67x8xi16>
+  view.store %maximum_bits, %destination[%group, %item, 1] : i16, view<16x67x8xi16>
+  view.store %nan_minimum_bits, %destination[%group, %item, 2] : i16, view<16x67x8xi16>
+  view.store %nan_maximum_bits, %destination[%group, %item, 3] : i16, view<16x67x8xi16>
+  view.store %bfloat_minimum_bits, %destination[%group, %item, 4] : i16, view<16x67x8xi16>
+  view.store %bfloat_maximum_bits, %destination[%group, %item, 5] : i16, view<16x67x8xi16>
+  view.store %bfloat_nan_minimum_bits, %destination[%group, %item, 6] : i16, view<16x67x8xi16>
+  view.store %bfloat_nan_maximum_bits, %destination[%group, %item, 7] : i16, view<16x67x8xi16>
   kernel.return
 }
 
 func.def @subgroup_half_extrema_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<16xi16>
-  %destination = buffer.view %output[%base] : buffer -> view<16x67x4xi16>
+  %destination = buffer.view %output[%base] : buffer -> view<16x67x8xi16>
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %groups = index.constant 16 : index
@@ -443,14 +488,18 @@ func.def @subgroup_half_extrema_oracle(%input: buffer, %output: buffer) {
   %mask = scalar.constant 32767 : i16
   %infinity = scalar.constant 31744 : i16
   %quiet_nan = scalar.constant 32256 : i16
+  %bfloat_infinity = scalar.constant 32640 : i16
+  %bfloat_quiet_nan = scalar.constant 32704 : i16
   scf.for %group = [%begin to %groups step %step] {
     %bits = view.load %source[%group] : view<16xi16> -> i16
     %magnitude = scalar.andi %bits, %mask : i16
     %nan = scalar.cmpi ugt, %magnitude, %infinity : i16
     %expected = scf.select %nan, %quiet_nan, %bits : i16
-    %results = vector.splat %expected : vector<4xi16>
+    %bfloat_nan = scalar.cmpi ugt, %magnitude, %bfloat_infinity : i16
+    %bfloat_expected = scf.select %bfloat_nan, %bfloat_quiet_nan, %bits : i16
+    %results = vector.from_elements %expected, %expected, %expected, %expected, %bfloat_expected, %bfloat_expected, %bfloat_expected, %bfloat_expected : vector<8xi16>
     scf.for %item = [%begin to %items step %step] {
-      vector.store %results, %destination[%group, %item, 0] : vector<4xi16>, view<16x67x4xi16>
+      vector.store %results, %destination[%group, %item, 0] : vector<8xi16>, view<16x67x8xi16>
     }
   }
   func.return
@@ -460,31 +509,31 @@ check.scenario @subgroup_half_extrema_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     // Signed zero and the smallest subnormal magnitudes, as raw input bits.
     %input = check.generate.iota offset(-32768) step(1) : tensor<16xi16>
-    %output = check.generate.fill value(123) : tensor<16x67x4xi16>
-    check.compare<@subgroup_half_extrema, @subgroup_half_extrema_oracle>(%input, %output) : (tensor<16xi16>, tensor<16x67x4xi16>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<16x67x4xi16>
+    %output = check.generate.fill value(123) : tensor<16x67x8xi16>
+    check.compare<@subgroup_half_extrema, @subgroup_half_extrema_oracle>(%input, %output) : (tensor<16xi16>, tensor<16x67x8xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x67x8xi16>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(0) step(1) : tensor<16xi16>
-    %output = check.generate.fill value(123) : tensor<16x67x4xi16>
-    check.compare<@subgroup_half_extrema, @subgroup_half_extrema_oracle>(%input, %output) : (tensor<16xi16>, tensor<16x67x4xi16>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<16x67x4xi16>
+    %output = check.generate.fill value(123) : tensor<16x67x8xi16>
+    check.compare<@subgroup_half_extrema, @subgroup_half_extrema_oracle>(%input, %output) : (tensor<16xi16>, tensor<16x67x8xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x67x8xi16>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     // Infinity and signaling NaNs must not be confused with numeric extrema.
     %input = check.generate.iota offset(31744) step(1) : tensor<16xi16>
-    %output = check.generate.fill value(123) : tensor<16x67x4xi16>
-    check.compare<@subgroup_half_extrema, @subgroup_half_extrema_oracle>(%input, %output) : (tensor<16xi16>, tensor<16x67x4xi16>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<16x67x4xi16>
+    %output = check.generate.fill value(123) : tensor<16x67x8xi16>
+    check.compare<@subgroup_half_extrema, @subgroup_half_extrema_oracle>(%input, %output) : (tensor<16xi16>, tensor<16x67x8xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x67x8xi16>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-1024) step(64) : tensor<16xi16>
-    %output = check.generate.fill value(123) : tensor<16x67x4xi16>
-    check.compare<@subgroup_half_extrema, @subgroup_half_extrema_oracle>(%input, %output) : (tensor<16xi16>, tensor<16x67x4xi16>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<16x67x4xi16>
+    %output = check.generate.fill value(123) : tensor<16x67x8xi16>
+    check.compare<@subgroup_half_extrema, @subgroup_half_extrema_oracle>(%input, %output) : (tensor<16xi16>, tensor<16x67x8xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x67x8xi16>
     }
   }
   check.return

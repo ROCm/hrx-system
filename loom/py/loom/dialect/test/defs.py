@@ -67,6 +67,7 @@ from loom.dsl import (
     ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_SIGNED_ENUM_SET,
+    ATTR_TYPE_STRING_ARRAY,
     ATTR_TYPE_SYMBOL,
     ATTR_TYPE_SYMBOL_ARRAY,
     ATTR_TYPE_SYMBOL_SET,
@@ -2352,6 +2353,41 @@ test_compact_parameterized_attr = Op(
 )
 
 # ============================================================================
+# test.string_array_attrs — ordered string-array attributes
+# ============================================================================
+
+test_string_array_attrs = Op(
+    "test.string_array_attrs",
+    group=test_ops,
+    doc="Test op with required and optional ordered string arrays.",
+    attrs=[
+        AttrDef(
+            "required_values",
+            ATTR_TYPE_STRING_ARRAY,
+            doc="Required ordered string values.",
+        ),
+        AttrDef(
+            "optional_values",
+            ATTR_TYPE_STRING_ARRAY,
+            optional=True,
+            doc="Optional ordered string values.",
+        ),
+        AttrDef("dict", "dict", optional=True),
+    ],
+    format=[
+        Attr("required_values"),
+        OptionalGroup(
+            [kw("using"), Attr("optional_values")],
+            anchor="optional_values",
+        ),
+        AttrDict("dict"),
+    ],
+    examples=[
+        'test.string_array_attrs ["first", "second"] using []',
+    ],
+)
+
+# ============================================================================
 # test.enum_array_attrs — descriptor-backed enum-array attributes
 # ============================================================================
 
@@ -3294,4 +3330,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_block_arg_groups,
     test_signature_sink,
     test_fact_exact_float_types,
+    test_string_array_attrs,
 )

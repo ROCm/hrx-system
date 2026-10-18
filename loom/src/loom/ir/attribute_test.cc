@@ -291,6 +291,29 @@ TEST(AttributeEqual, I64ArraySamePointer) {
   EXPECT_TRUE(loom_attribute_equal(&a, &b));
 }
 
+TEST(AttributeEqual, StringArrayPreservesOrderAndDuplicates) {
+  const loom_string_id_t values_a[] = {4, 9, 4};
+  const loom_string_id_t values_b[] = {4, 9, 4};
+  const loom_string_id_t reordered[] = {4, 4, 9};
+  loom_attribute_t a = loom_attr_string_array(values_a, 3);
+  loom_attribute_t b = loom_attr_string_array(values_b, 3);
+  loom_attribute_t c = loom_attr_string_array(reordered, 3);
+
+  EXPECT_TRUE(loom_attribute_equal(&a, &b));
+  EXPECT_EQ(loom_attribute_hash(&a), loom_attribute_hash(&b));
+  EXPECT_FALSE(loom_attribute_equal(&a, &c));
+}
+
+TEST(AttributeEqual, EmptyStringArrayIsPresentAndStructural) {
+  loom_attribute_t first = loom_attr_string_array(nullptr, 0);
+  loom_attribute_t second = loom_attr_string_array(nullptr, 0);
+  loom_attribute_t absent = loom_attr_absent();
+
+  EXPECT_TRUE(loom_attribute_equal(&first, &second));
+  EXPECT_EQ(loom_attribute_hash(&first), loom_attribute_hash(&second));
+  EXPECT_FALSE(loom_attribute_equal(&first, &absent));
+}
+
 TEST(AttributeEqual, PredicateListSameContent) {
   loom_predicate_t preds_a[2];
   memset(preds_a, 0, sizeof(preds_a));

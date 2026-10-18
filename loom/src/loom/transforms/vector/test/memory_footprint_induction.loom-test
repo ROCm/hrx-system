@@ -29,6 +29,32 @@ CHECK: view.store %value, %output_view[%position] : i32, view<4xi32>
 
 // RUN: pass vector-memory-footprint
 
+// Frontends may carry an unsigned fixed-width extent into the view through an
+// explicit zero extension while using offset as the loop carrier. Narrowing
+// the induction value and widening it again preserves the loop relation while
+// every active induction value remains representable in the payload width.
+func.def @unsigned_payload_dynamic_bound(%output: buffer, %count: i32, %value: i32) {
+  %count_wide = scalar.extui %count : i32 to i64
+  %count_index = index.cast %count_wide : i64 to index
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%count_index]xi32>
+  %c0 = scalar.constant 0 : i32
+  %begin = index.cast %c0 : i32 to offset
+  %end = index.cast %count : i32 to offset
+  %step = index.constant 1 : offset
+  scf.for %position = [%begin to %end step %step] {
+    %position_payload = index.cast %position : offset to i32
+    %position_wide = scalar.extui %position_payload : i32 to i64
+    %position_index = index.cast %position_wide : i64 to index
+    view.store %value, %output_view[%position_index] : i32, view<[%count_index]xi32>
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
 func.def @header_store_includes_terminal(%output: buffer) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index

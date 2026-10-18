@@ -9,19 +9,11 @@
 
 #include "loom/serve/runtime/program/sources.h"
 #include "loom/serve/runtime/program/variant_pool.h"
+#include "loom/serve/service/kind.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef enum loom_serve_model_kind_e {
-  LOOM_SERVE_MODEL_KIND_TEXT = 1,
-  LOOM_SERVE_MODEL_KIND_IMAGE = 2,
-  LOOM_SERVE_MODEL_KIND_EMBEDDING = 3,
-  LOOM_SERVE_MODEL_KIND_DECISION = 4,
-  LOOM_SERVE_MODEL_KIND_SPEECH = 5,
-  LOOM_SERVE_MODEL_KIND_RECOGNITION = 6,
-} loom_serve_model_kind_t;
 
 // Optional model-owned finite computation with independent preparation and
 // parameter residency. The enclosing deployment supplies the source package,

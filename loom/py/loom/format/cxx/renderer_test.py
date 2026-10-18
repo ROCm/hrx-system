@@ -264,6 +264,47 @@ def test_projects_vector_absolute_value_as_typed_intrinsic() -> None:
     assert "Float32x4 absolute = loom::vector::absf(values);" in result
 
 
+def test_projects_numeric_conversions_through_the_public_facade() -> None:
+    source = """\
+kernel.def @conversions() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%integer: i32, %floating: f32) {
+  %signed_float = scalar.sitofp %integer : i32 to f32
+  %unsigned_float = scalar.uitofp %integer : i32 to f32
+  %signed_integer = scalar.fptosi %floating : f32 to i32
+  %unsigned_integer = scalar.fptoui %floating : f32 to i32
+  %values = vector.splat %integer : vector<4xi32>
+  %signed_vector = vector.sitofp %values : vector<4xi32> to vector<4xf32>
+  %unsigned_vector = vector.uitofp %values : vector<4xi32> to vector<4xf32>
+  %signed_lanes = vector.fptosi %signed_vector : vector<4xf32> to vector<4xi32>
+  %unsigned_lanes = vector.fptoui %unsigned_vector : vector<4xf32> to vector<4xi32>
+  kernel.return
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert "#include <loomcxx/numeric.h>" in result
+    assert "float signed_float = loom::convert<float>(integer);" in result
+    assert (
+        "float unsigned_float = loom::convert<float>("
+        "loom::convert<unsigned>(integer));" in result
+    )
+    assert "int signed_integer = loom::convert<int>(floating);" in result
+    assert "unsigned unsigned_integer = loom::convert<unsigned>(floating);" in result
+    assert "Float32x4 signed_vector = loom::convert<Float32x4>(values);" in result
+    assert (
+        "Float32x4 unsigned_vector = loom::convert<Float32x4>("
+        "loom::convert<UInt32x4>(values));" in result
+    )
+    assert "Int32x4 signed_lanes = loom::convert<Int32x4>(signed_vector);" in result
+    assert (
+        "UInt32x4 unsigned_lanes = loom::convert<UInt32x4>(unsigned_vector);" in result
+    )
+    assert "__builtin_convertvector" not in result
+
+
 def test_projects_static_encoding_through_the_public_schema_facade() -> None:
     source = SOURCE_MODULE.replace(
         "  %zero = index.constant 0 : offset\n",
@@ -577,7 +618,8 @@ def test_preserves_unsigned_extension_of_a_signed_runtime_value() -> None:
 
     assert "int signed_input" in result
     assert (
-        "static_cast<unsigned long long>(static_cast<unsigned>(signed_input))" in result
+        "loom::convert<unsigned long long>(loom::convert<unsigned>(signed_input))"
+        in result
     )
 
 

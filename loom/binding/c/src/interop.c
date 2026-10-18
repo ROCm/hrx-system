@@ -7,6 +7,8 @@
 #include "loomc/interop.h"
 
 #include "context.h"
+#include "loom/pass/builtin_registry.h"
+#include "loomc/iree.h"
 #include "module.h"
 #include "result.h"
 #include "target.h"
@@ -16,6 +18,22 @@ loomc_status_t loomc_target_environment_create_from_provider_set(
     loomc_target_environment_t** out_target_environment) {
   return loomc_target_environment_create_from_provider_set_internal(
       provider_set, allocator, out_target_environment);
+}
+
+loomc_status_t loomc_target_environment_get_native_pass_registry(
+    const loomc_target_environment_t* target_environment,
+    loom_pass_registry_storage_t* out_storage) {
+  if (out_storage == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "out_storage must not be NULL");
+  }
+  const loom_target_environment_t* environment =
+      loomc_target_environment_loom_target_environment(target_environment);
+  return loomc_status_from_iree(
+      loom_pass_registry_storage_initialize_with_builtins(
+          environment ? loom_target_environment_pass_registry(environment)
+                      : NULL,
+          out_storage));
 }
 
 loomc_status_t loomc_module_get_interop_view(
@@ -39,7 +57,7 @@ loomc_status_t loomc_module_get_interop_view(
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(
-      LOOMC_RESULT_STATE_SUCCEEDED,
+      LOOMC_STATUS_OK,
       loomc_context_source_retention(loomc_module_context(module)), allocator,
       &result));
   loomc_target_environment_t* target_environment =

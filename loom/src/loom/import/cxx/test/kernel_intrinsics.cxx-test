@@ -39,14 +39,8 @@ kernel.def @entry() {
     %33 = buffer.view %coordinates[%32] : buffer -> view<1xi32>
     view.store %57, %33[0] : i32, view<1xi32>
     %34 = scalar.constant 1 : i32
-    %35 = scalar.constant 32 : i32
-    %36, %37 = kernel.subgroup.shuffle<xor> %value, %34, %35 : f32, i32, i32
-    %49 = scalar.constant 2 : i32
-    %50 = scalar.shli %46, %49 : i32
-    %51 = scalar.extui %50 : i32 to i64
-    %43 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
-    %44 = index.cast %43 : i64 to offset
-    %45 = buffer.view %output[%44] : buffer -> view<1xf32>
+    %36, %37 = kernel.subgroup.shuffle<xor> %value, %34, %13 : f32, i32, i32
+    %45 = buffer.view %output[%32] : buffer -> view<1xf32>
     view.store %36, %45[0] : f32, view<1xf32>
   }
   func.call @synchronize() : ()

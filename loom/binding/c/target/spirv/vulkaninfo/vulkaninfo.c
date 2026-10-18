@@ -1487,9 +1487,8 @@ loomc_status_t loomc_target_profile_create_spirv_vulkaninfo(
   }
 
   loomc_result_t* result = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
-                                            LOOMC_SOURCE_RETENTION_EXACT,
-                                            allocator, &result));
+  LOOMC_RETURN_IF_ERROR(loomc_result_create(
+      LOOMC_STATUS_OK, LOOMC_SOURCE_RETENTION_EXACT, allocator, &result));
   loomc_spirv_vulkaninfo_import_t import = {
       .source = source,
       .result = result,

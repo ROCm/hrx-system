@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_FABRIC_SLAB_PROVIDER_H_
 #define IREE_HAL_DRIVERS_AMD_FABRIC_SLAB_PROVIDER_H_
 
+#include "iree/hal/drivers/amd/fabric/allocation_queue.h"
 #include "iree/hal/drivers/amd/fabric/buffer.h"
 #include "iree/hal/memory/slab_provider.h"
 
@@ -39,8 +40,14 @@ typedef struct iree_hal_amd_fabric_import_route_t {
 
 // Cold native construction contract copied into one slab provider.
 typedef struct iree_hal_amd_fabric_slab_provider_options_t {
+  // Static physical domain prefix, independent of logical pool names.
+  const char* trace_domain;
+  // Native domain ordinal, or UINT32_MAX for unspecified system placement.
+  uint32_t trace_ordinal;
   // Qualified construction policy; the provider copies the access array.
   iree_hal_amd_fabric_memory_options_t memory;
+  // HAL owners parallel to memory.accesses, retained through native cleanup.
+  iree_hal_device_t* const* access_devices;
   // Number of exact external storage routes.
   iree_host_size_t import_count;
   // Qualified input routes, including their export class arrays.
@@ -60,14 +67,23 @@ typedef struct iree_hal_amd_fabric_slab_provider_options_t {
 } iree_hal_amd_fabric_slab_provider_options_t;
 
 // Creates a provider that obtains one fully attached libamdf allocation per
-// slab. The provider copies the options arrays and borrows |device|, |api|,
-// the memory scope, and every native device named by the copied accesses. The
-// sealed HAL device group must outlive the provider and all derived objects.
+// slab. The provider copies the options arrays and retains |device|, every
+// access owner, and |allocation_queue| through all native cleanup. These owners
+// keep the API, native instance/scopes/devices, and progress services alive.
+// Explicit external imports and their native teardown remain synchronous;
+// owned allocation/free batches execute on the native allocation queue.
 iree_status_t iree_hal_amd_fabric_slab_provider_create(
     iree_hal_device_t* device, const amdf_api_t* api,
     iree_hal_device_event_sink_t event_sink,
+    iree_hal_amd_fabric_allocation_queue_t* allocation_queue,
     const iree_hal_amd_fabric_slab_provider_options_t* options,
     iree_allocator_t host_allocator, iree_hal_slab_provider_t** out_provider);
+
+// Executes a prepared fabric-provider batch on its native allocation worker.
+// The worker retains the provider through this call and its completion
+// callback.
+void iree_hal_amd_fabric_slab_provider_execute(
+    iree_hal_slab_operation_t* operation);
 
 #ifdef __cplusplus
 }  // extern "C"

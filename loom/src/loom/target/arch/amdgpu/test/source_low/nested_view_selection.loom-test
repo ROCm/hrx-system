@@ -94,36 +94,36 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @selection_with_s
   %first_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %second_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %third_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %40 = s_mov_b32 0
-  %41 = s_cmp_lg_i32 %enter, %40
-  low.cond_br %41, ^producer, ^exit : reg<amdgpu.scc>
+  %41 = s_mov_b32 0
+  %42 = s_cmp_lg_i32 %enter, %41
+  low.cond_br %42, ^producer, ^exit : reg<amdgpu.scc>
 ^producer:
-  %42 = v_mov_b32_copy %initial
-  %43 = v_mov_b32 0
-  global_store_b32_saddr %43, %42, %third_view
-  %45 = s_cmp_lg_i32 %side, %40
-  low.cond_br %45, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %43 = v_mov_b32_copy %initial
+  %44 = v_mov_b32 0
+  global_store_b32_saddr %44, %43, %third_view
+  %46 = s_cmp_lg_i32 %side, %41
+  low.cond_br %46, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  global_store_b32_saddr %43, %42, %first_view
+  global_store_b32_saddr %44, %43, %first_view
   low.br ^_bb3
 ^_bb3:
-  %49 = s_cmp_lg_i32 %select_first, %40
-  low.cond_br %49, ^_bb4, ^_bb5 : reg<amdgpu.scc>
+  %50 = s_cmp_lg_i32 %select_first, %41
+  low.cond_br %50, ^_bb4, ^_bb5 : reg<amdgpu.scc>
 ^_bb4:
   low.br ^_bb6(%first_view: reg<amdgpu.sgpr x2>)
 ^_bb5:
   low.br ^_bb6(%second_aligned: reg<amdgpu.sgpr x2>)
 ^_bb6(%pair_root: reg<amdgpu.sgpr x2>):
-  %51 = s_cmp_lg_i32 %select_pair, %40
-  low.cond_br %51, ^_bb7, ^_bb8 : reg<amdgpu.scc>
+  %52 = s_cmp_lg_i32 %select_pair, %41
+  low.cond_br %52, ^_bb7, ^_bb8 : reg<amdgpu.scc>
 ^_bb7:
   low.br ^_bb9(%pair_root: reg<amdgpu.sgpr x2>)
 ^_bb8:
   low.br ^_bb9(%third_view: reg<amdgpu.sgpr x2>)
 ^_bb9(%selected: reg<amdgpu.sgpr x2>):
-  %result = global_load_b32_saddr %43, %selected
+  %result = global_load_b32_saddr %44, %selected
   return %result
 ^exit:
-  %54 = v_mov_b32_copy %initial
-  return %54
+  %55 = v_mov_b32_copy %initial
+  return %55
 }

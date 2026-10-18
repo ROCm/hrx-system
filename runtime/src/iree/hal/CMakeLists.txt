@@ -273,7 +273,6 @@ iree_cc_test(
     iree::base
     iree::hal::memory::cpu_slab_provider
     iree::hal::memory::fixed_block_pool
-    iree::hal::memory::maintenance_thread
     iree::hal::memory::passthrough_pool
     iree::testing::gtest
     iree::testing::gtest_main

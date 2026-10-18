@@ -6,6 +6,8 @@
 
 #include "iree/hal/memory/cpu_slab_provider.h"
 
+#include "iree/hal/memory/tracing.h"
+
 #if defined(IREE_PLATFORM_LINUX)
 #include <sys/mman.h>
 #endif  // IREE_PLATFORM_LINUX
@@ -13,9 +15,8 @@
 typedef struct iree_hal_cpu_slab_provider_t {
   // Base provider header for vtable dispatch and ref counting.
   iree_hal_slab_provider_t base;
-
-  // Host allocator used for provider metadata and slab memory.
-  iree_allocator_t host_allocator;
+  // Process-owned system backing, without a native NUMA placement guarantee.
+  iree_hal_memory_trace_t trace;
 
   // Minimum absolute byte alignment of every slab allocation.
   iree_host_size_t allocation_alignment;
@@ -42,19 +43,24 @@ iree_status_t iree_hal_cpu_slab_provider_create(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*provider),
                                              (void**)&provider));
   iree_hal_slab_provider_initialize(&iree_hal_cpu_slab_provider_vtable,
-                                    &provider->base);
-  provider->host_allocator = host_allocator;
+                                    host_allocator, &provider->base);
   provider->allocation_alignment =
       iree_max(min_alignment, IREE_HAL_HEAP_BUFFER_ALIGNMENT);
-  *out_provider = &provider->base;
-  return iree_ok_status();
+  iree_status_t status = iree_hal_memory_trace_initialize(
+      iree_string_view_empty(), "hal-system", &provider->trace);
+  if (iree_status_is_ok(status)) {
+    *out_provider = &provider->base;
+  } else {
+    iree_hal_slab_provider_release(&provider->base);
+  }
+  return status;
 }
 
 static void iree_hal_cpu_slab_provider_destroy(
     iree_hal_slab_provider_t* base_provider) {
   iree_hal_cpu_slab_provider_t* provider =
       (iree_hal_cpu_slab_provider_t*)base_provider;
-  iree_allocator_t allocator = provider->host_allocator;
+  iree_allocator_t allocator = provider->base.host_allocator;
   iree_allocator_free(allocator, provider);
 }
 
@@ -70,9 +76,10 @@ static iree_status_t iree_hal_cpu_slab_provider_acquire_slab(
   }
   void* ptr = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
-      provider->host_allocator, min_length,
+      provider->base.host_allocator, min_length,
       iree_max(min_alignment, provider->allocation_alignment),
       /*offset=*/0, &ptr));
+  iree_hal_memory_trace_alloc(&provider->trace, ptr, min_length);
   out_slab->base_ptr = (uint8_t*)ptr;
   out_slab->length = min_length;
   out_slab->provider_handle = 0;
@@ -157,7 +164,8 @@ static void iree_hal_cpu_slab_provider_release_slab(
   iree_hal_cpu_slab_provider_t* provider =
       (iree_hal_cpu_slab_provider_t*)base_provider;
   if (slab->provider_handle != IREE_HAL_CPU_SLAB_PROVIDER_IMPORTED_HANDLE) {
-    iree_allocator_free_aligned(provider->host_allocator, slab->base_ptr);
+    iree_hal_memory_trace_free(&provider->trace, slab->base_ptr);
+    iree_allocator_free_aligned(provider->base.host_allocator, slab->base_ptr);
   }
 }
 
@@ -180,7 +188,7 @@ static iree_status_t iree_hal_cpu_slab_provider_wrap_buffer(
   iree_status_t status = iree_hal_heap_buffer_wrap(
       placement, IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE, allowed_access,
       allowed_usage, slab->length, data, release_callback,
-      provider->host_allocator, out_buffer);
+      provider->base.host_allocator, out_buffer);
   if (iree_status_is_ok(status)) {
     (*out_buffer)->byte_offset = slab_offset;
     (*out_buffer)->byte_length = allocation_size;
@@ -273,12 +281,27 @@ static void iree_hal_cpu_slab_provider_query_properties(
           IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
 }
 
+static void iree_hal_cpu_slab_provider_acquire_slabs(
+    iree_hal_slab_provider_t* provider,
+    iree_hal_slab_acquire_request_t* request) {
+  iree_hal_slab_provider_acquire_slabs_inline(
+      provider, request, iree_hal_cpu_slab_provider_acquire_slab,
+      iree_hal_cpu_slab_provider_release_slab);
+}
+
+static void iree_hal_cpu_slab_provider_release_slabs(
+    iree_hal_slab_provider_t* provider,
+    iree_hal_slab_release_request_t* request) {
+  iree_hal_slab_provider_release_slabs_inline(
+      provider, request, iree_hal_cpu_slab_provider_release_slab);
+}
+
 static const iree_hal_slab_provider_vtable_t iree_hal_cpu_slab_provider_vtable =
     {
         .destroy = iree_hal_cpu_slab_provider_destroy,
-        .acquire_slab = iree_hal_cpu_slab_provider_acquire_slab,
+        .acquire_slabs = iree_hal_cpu_slab_provider_acquire_slabs,
         .import_slab = iree_hal_cpu_slab_provider_import_slab,
-        .release_slab = iree_hal_cpu_slab_provider_release_slab,
+        .release_slabs = iree_hal_cpu_slab_provider_release_slabs,
         .wrap_buffer = iree_hal_cpu_slab_provider_wrap_buffer,
         .validate_asan_options =
             iree_hal_cpu_slab_provider_validate_asan_options,

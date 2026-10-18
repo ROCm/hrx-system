@@ -137,6 +137,14 @@ typedef struct loomc_diagnostic_t {
 
   /// Number of entries in parameters.
   loomc_host_size_t parameter_count;
+
+  /// Canonical JSON object for the native compiler diagnostic, without a
+  /// trailing newline. This preserves producer-specific fields, typed JSON
+  /// parameters, source provenance, and fix hints that the common fields above
+  /// do not express. It is rendered during the operation while compiler-owned
+  /// values are available and remains valid until the result is released.
+  /// Empty for diagnostics produced without a native compiler record.
+  loomc_string_view_t formatted_json;
 } loomc_diagnostic_t;
 
 #ifdef __cplusplus

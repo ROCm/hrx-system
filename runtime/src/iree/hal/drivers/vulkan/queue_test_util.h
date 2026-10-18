@@ -15,6 +15,10 @@ namespace iree::hal::cts {
 // or nullptr if none exists. Transfer support alone does not imply this role.
 iree_hal_queue_t* FindVulkanSparseBindingQueue(iree_hal_device_t* device);
 
+// Runs the production queue teardown boundary without destroying the fixture's
+// device, allowing callers to observe cancellation before releasing resources.
+void RetireVulkanQueue(iree_hal_queue_t* queue);
+
 }  // namespace iree::hal::cts
 
 #endif  // IREE_HAL_DRIVERS_VULKAN_QUEUE_TEST_UTIL_H_

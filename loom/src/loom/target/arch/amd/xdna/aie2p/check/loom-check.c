@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 
+#include "loom/target/arch/amd/xdna/aie2p/check/configuration.h"
 #include "loom/target/arch/amd/xdna/aie2p/check/provider.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/artifact.h"
 #include "loom/tools/loom-check/provider.h"
@@ -20,6 +21,7 @@ static const loom_check_provider_t* const kAie2pCheckProviders[] = {
 
 static const loom_target_provider_t* const kAie2pEmitterProviders[] = {
     &loom_aie2p_xdna_artifact_provider,
+    &loom_aie2p_configuration_check_provider,
 };
 
 static const loom_target_provider_set_t kAie2pEmitterProviderSet = {

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -20,6 +21,7 @@
 #include "iree/async/semaphore.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/amd/fabric/buffer.h"
+#include "iree/hal/drivers/amd/fabric/fabric.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/xdna/device.h"
 #include "iree/hal/drivers/amd/xdna/image/testing/image_fixture.h"
@@ -27,6 +29,7 @@
 #include "iree/hal/drivers/amd/xdna/queue.h"
 #include "iree/hal/drivers/amd/xdna/queue_frontier.h"
 #include "iree/hal/drivers/amd/xdna/semaphore.h"
+#include "iree/hal/drivers/amd/xdna/testing/allocation_tracker.h"
 #include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/hal/slab_pool.h"
@@ -34,70 +37,6 @@
 #include "iree/testing/status_matchers.h"
 
 namespace iree::hal::amd::xdna::testing {
-
-struct HostAllocationCounters {
-  std::atomic<uint64_t> allocations{0};
-  std::atomic<uint64_t> reallocations{0};
-  std::atomic<uint64_t> frees{0};
-  std::atomic<int64_t> live_allocations{0};
-};
-
-struct HostAllocationSnapshot {
-  uint64_t allocations;
-  uint64_t reallocations;
-  uint64_t frees;
-};
-
-inline iree_status_t TrackingAllocatorControl(void* self,
-                                              iree_allocator_command_t command,
-                                              const void* params,
-                                              void** inout_pointer) {
-  auto* counters = static_cast<HostAllocationCounters*>(self);
-  const bool had_pointer = inout_pointer && *inout_pointer;
-  if (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
-      command == IREE_ALLOCATOR_COMMAND_CALLOC) {
-    ++counters->allocations;
-  } else if (command == IREE_ALLOCATOR_COMMAND_REALLOC) {
-    ++counters->reallocations;
-  } else if (command == IREE_ALLOCATOR_COMMAND_FREE) {
-    ++counters->frees;
-  }
-  iree_allocator_t system_allocator = iree_allocator_system();
-  iree_status_t status = system_allocator.ctl(system_allocator.self, command,
-                                              params, inout_pointer);
-  if (iree_status_is_ok(status)) {
-    if (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
-        command == IREE_ALLOCATOR_COMMAND_CALLOC ||
-        (command == IREE_ALLOCATOR_COMMAND_REALLOC && !had_pointer)) {
-      ++counters->live_allocations;
-    } else if (command == IREE_ALLOCATOR_COMMAND_FREE && had_pointer) {
-      --counters->live_allocations;
-    }
-  }
-  return status;
-}
-
-inline iree_allocator_t TrackingAllocator(HostAllocationCounters* counters) {
-  return {counters, TrackingAllocatorControl};
-}
-
-inline HostAllocationSnapshot SnapshotHostAllocations(
-    const HostAllocationCounters& counters) {
-  return {
-      counters.allocations.load(),
-      counters.reallocations.load(),
-      counters.frees.load(),
-  };
-}
-
-inline void ExpectHostAllocationsUnchanged(
-    const HostAllocationSnapshot& before,
-    const HostAllocationCounters& counters) {
-  const HostAllocationSnapshot after = SnapshotHostAllocations(counters);
-  EXPECT_EQ(after.allocations, before.allocations);
-  EXPECT_EQ(after.reallocations, before.reallocations);
-  EXPECT_EQ(after.frees, before.frees);
-}
 
 enum class Outcome {
   kSuccess,
@@ -114,6 +53,45 @@ enum class Outcome {
 // loading, buffer capture, native notification, proactor polling, semaphore
 // publication, and teardown all use their production implementations.
 struct NativeProvider {
+  // Holds a selected native call while independent production work progresses.
+  struct MemoryGate {
+    // Guards this dependency's explicit readiness predicates.
+    std::mutex mutex;
+    // Publishes entry and release without timing assumptions.
+    std::condition_variable condition;
+    // Exact native size to intercept; zero leaves calls unblocked.
+    uint64_t byte_length = 0;
+    // The selected native call has reached the gate.
+    bool entered = false;
+    // The test has permitted that native call to return.
+    bool released = false;
+
+    void Arm(uint64_t length) {
+      std::lock_guard<std::mutex> lock(mutex);
+      byte_length = length;
+      entered = released = false;
+    }
+    void Enter(uint64_t length) {
+      std::unique_lock<std::mutex> lock(mutex);
+      if (length != byte_length) {
+        return;
+      }
+      entered = true;
+      condition.notify_all();
+      condition.wait(lock, [&] { return released; });
+      byte_length = 0;
+    }
+    void AwaitEntry() {
+      std::unique_lock<std::mutex> lock(mutex);
+      condition.wait(lock, [&] { return entered; });
+    }
+    void Release() {
+      std::lock_guard<std::mutex> lock(mutex);
+      released = true;
+      condition.notify_all();
+    }
+  };
+
   struct Memory {
     // Provider observing native ownership transitions.
     NativeProvider* owner;
@@ -126,6 +104,9 @@ struct NativeProvider {
   NativeProvider() {
     iree_notification_initialize(&submission_notification);
     api.instance_destroy = InstanceDestroy;
+    api.instance_create = InstanceCreate;
+    api.instance_enumerate_memory_scopes = EnumerateMemoryScopes;
+    api.endpoint_enumerate = EnumerateEndpoints;
     api.memory_create = MemoryCreate;
     api.memory_query_info = MemoryQueryInfo;
     api.memory_destroy = MemoryDestroy;
@@ -155,6 +136,34 @@ struct NativeProvider {
 
   ~NativeProvider() {
     iree_notification_deinitialize(&submission_notification);
+  }
+
+  static amdf_status_t AMDF_CALL InstanceCreate(
+      const amdf_instance_create_info_t* info, amdf_instance_t** out_instance) {
+    *out_instance = reinterpret_cast<amdf_instance_t*>(construction_instance);
+    return AMDF_STATUS_OK;
+  }
+
+  static amdf_status_t AMDF_CALL
+  EnumerateMemoryScopes(amdf_instance_t* instance, uint32_t capacity,
+                        amdf_memory_scope_t** scopes, uint32_t* out_count) {
+    *out_count = 1;
+    if (!capacity) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL);
+    }
+    scopes[0] = reinterpret_cast<amdf_memory_scope_t*>(instance);
+    return AMDF_STATUS_OK;
+  }
+
+  static amdf_status_t AMDF_CALL
+  EnumerateEndpoints(amdf_instance_t* instance, uint32_t capacity,
+                     amdf_endpoint_summary_t* endpoints, uint32_t* out_count) {
+    *out_count = 1;
+    if (capacity) {
+      endpoints[0] = {};
+      endpoints[0].engine_kind = AMDF_ENGINE_KIND_XDNA;
+    }
+    return AMDF_STATUS_OK;
   }
 
   static bool SubmissionEntered(void* user_data) {
@@ -282,6 +291,7 @@ struct NativeProvider {
       amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
       amdf_memory_t** out_memory) {
     auto* self = reinterpret_cast<NativeProvider*>(scope);
+    self->allocation_gate.Enter(info->byte_length);
     const bool is_command_memory =
         info->access_count == 1 &&
         iree_any_bit_set(info->accesses[0].requirements.address_kinds,
@@ -291,8 +301,8 @@ struct NativeProvider {
       return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
     }
     auto* memory = new Memory{self, std::vector<uint8_t>(info->byte_length),
-                              self->next_address};
-    self->next_address += iree_host_align(info->byte_length, 32768);
+                              self->next_address.fetch_add(
+                                  iree_host_align(info->byte_length, 32768))};
     self->command_memory_create_count += is_command_memory ? 1 : 0;
     ++self->live_memories;
     ++self->memory_create_count;
@@ -310,6 +320,7 @@ struct NativeProvider {
   }
   static amdf_status_t AMDF_CALL MemoryDestroy(amdf_memory_t* handle) {
     auto* memory = reinterpret_cast<Memory*>(handle);
+    memory->owner->release_gate.Enter(memory->contents.size());
     --memory->owner->live_memories;
     delete memory;
     return AMDF_STATUS_OK;
@@ -647,6 +658,7 @@ struct NativeProvider {
   static amdf_status_t AMDF_CALL InstanceDestroy(amdf_instance_t* instance) {
     auto* self = reinterpret_cast<NativeProvider*>(instance);
     EXPECT_EQ(self->context_destroy_count, 1u);
+    EXPECT_EQ(self->live_memories, 0u);
     ++self->instance_destroy_count;
     return AMDF_STATUS_OK;
   }
@@ -698,6 +710,12 @@ struct NativeProvider {
   std::vector<Flush> flushes;
   // Serializes controlled provider vectors shared by publisher and proactor.
   std::mutex mutex;
+  // Native acquisition held by the independent-progression witness.
+  MemoryGate allocation_gate;
+  // Native release held by the final-owner lifetime witness.
+  MemoryGate release_gate;
+  // Dependency instance supplied to the synchronous native instance factory.
+  inline static thread_local NativeProvider* construction_instance = nullptr;
   // Explicit gate used to hold one native publication without wall-clock waits.
   iree_notification_t submission_notification;
   // True when the next native submission must wait at the explicit gate.
@@ -713,9 +731,9 @@ struct NativeProvider {
   // True when the checked waiter may leave the explicit gate.
   std::atomic<bool> wait_released{false};
   // Total native backing creations, including destroyed allocations.
-  size_t memory_create_count = 0;
+  std::atomic<size_t> memory_create_count{0};
   // Context-private instruction allocations accepted by the provider.
-  size_t command_memory_create_count = 0;
+  std::atomic<size_t> command_memory_create_count{0};
   // True when the context accepts only one complete instruction aperture.
   bool enforce_single_command_memory = true;
   // Native finite result association and failure injection.
@@ -753,9 +771,9 @@ struct NativeProvider {
   // Borrowed timeline that must be published before the second native submit.
   iree_hal_semaphore_t* preceding_completion = nullptr;
   // Next native allocation address, aligned for instruction storage.
-  uint64_t next_address = 0x1000000;
+  std::atomic<uint64_t> next_address{0x1000000};
   // Number of native memory resources not yet destroyed.
-  size_t live_memories = 0;
+  std::atomic<size_t> live_memories{0};
   // Number of native submissions fully accepted by the controlled provider.
   std::atomic<uint64_t> submission_count{0};
   // Number of native submission attempts used to assign opaque points.
@@ -832,13 +850,12 @@ class QueueHarness {
     IREE_ASSERT_OK(iree_allocator_malloc(host_allocator, sizeof(*context),
                                          reinterpret_cast<void**>(&context)));
     context->host_allocator = host_allocator;
-    IREE_ASSERT_OK(
-        iree_allocator_malloc(host_allocator, sizeof(*context->fabric),
-                              reinterpret_cast<void**>(&context->fabric)));
-    iree_atomic_ref_count_init(&context->fabric->ref_count);
-    context->fabric->host_allocator = host_allocator;
-    context->fabric->api = &native.api;
-    context->fabric->instance = reinterpret_cast<amdf_instance_t*>(&native);
+    NativeProvider::construction_instance = &native;
+    iree_status_t fabric_status =
+        iree_hal_amd_fabric_create(&native.api, AMDF_NATIVE_LIFETIME_PROCESS,
+                                   host_allocator, &context->fabric);
+    NativeProvider::construction_instance = nullptr;
+    IREE_ASSERT_OK(fabric_status);
     context->api = &native.api;
     context->xdna = &native.xdna;
     context->handle = reinterpret_cast<amdf_xdna_context_t*>(&native);
@@ -1168,13 +1185,34 @@ class QueueHarness {
   }
 
   void PollUntilValue(iree_hal_semaphore_t* semaphore, uint64_t target_value) {
-    uint64_t value = 0;
-    IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &value));
-    while (value < target_value) {
-      IREE_ASSERT_OK(
+    struct Wait {
+      // Poll owner to wake when another thread publishes the semaphore.
+      iree_async_proactor_t* proactor;
+      // Publishes callback final access to the waiting test.
+      std::atomic<bool> completed{false};
+      // Owned terminal result, transferred after completed is published.
+      iree_status_t status = iree_ok_status();
+    } wait = {proactor};
+    iree_async_semaphore_timepoint_t timepoint = {};
+    timepoint.user_data = &wait;
+    timepoint.callback =
+        +[](void* user_data, iree_async_semaphore_timepoint_t* timepoint,
+            iree_status_t status) {
+          auto* wait = static_cast<Wait*>(user_data);
+          auto* proactor = wait->proactor;
+          wait->status = status;
+          wait->completed.store(true, std::memory_order_release);
+          iree_async_proactor_wake(proactor);
+        };
+    IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
+        reinterpret_cast<iree_async_semaphore_t*>(semaphore), target_value,
+        &timepoint));
+    while (!wait.completed.load(std::memory_order_acquire)) {
+      // A failed progress engine cannot leave a stack-owned registration live.
+      IREE_CHECK_OK(
           iree_async_proactor_poll(proactor, iree_infinite_timeout(), nullptr));
-      IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &value));
     }
+    IREE_ASSERT_OK(wait.status);
   }
 
   void ReleaseDevice() {
@@ -1233,7 +1271,7 @@ class QueueHarness {
     iree_allocator_free(storage->host_allocator, storage);
   }
 
-  // Mocked native dependency; all access runs on this test's polling thread.
+  // Mocked native dependency shared with the native allocation worker.
   NativeProvider native;
   // Allocator used by the production device and shared proactor.
   iree_allocator_t host_allocator = iree_allocator_system();

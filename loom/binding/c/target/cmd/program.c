@@ -414,15 +414,11 @@ static iree_status_t loomc_cmd_program_product_capture_diagnostic(
       (loomc_cmd_program_product_invocation_t*)user_data;
   const loomc_target_pass_environment_t* pass_environment =
       loomc_context_target_pass_environment(invocation->request.context);
-  loomc_diagnostic_type_printer_t type_printer;
-  loomc_diagnostic_type_printer_initialize(
-      emission->module,
-      pass_environment ? &pass_environment->diagnostic_type_print_options
-                       : NULL,
-      &type_printer);
   return iree_status_from_loomc(loomc_result_add_loom_diagnostic_emission(
       invocation->result, /*module=*/NULL, (loom_source_resolver_t){0},
-      LOOM_EMITTER_PASS, emission, emission->module ? &type_printer : NULL));
+      LOOM_EMITTER_PASS, emission,
+      pass_environment ? &pass_environment->diagnostic_type_print_options
+                       : NULL));
 }
 
 static iree_status_t loomc_cmd_program_product_verify_module(
@@ -447,9 +443,10 @@ static loomc_status_t loomc_cmd_program_product_translate_plan_status(
   if (!loomc_result_succeeded(invocation->result) ||
       loomc_result_diagnostic_count(invocation->result) !=
           diagnostic_count_before) {
+    loomc_result_set_status_code(
+        invocation->result, (loomc_status_code_t)iree_status_code(plan_status));
     iree_status_free(plan_status);
-    return loomc_result_set_state(invocation->result,
-                                  LOOMC_RESULT_STATE_FAILED);
+    return loomc_ok_status();
   }
   return loomc_status_from_iree(plan_status);
 }
@@ -564,7 +561,7 @@ static loomc_status_t loomc_cmd_program_product_build_indexed(
           LOOMC_STATUS_INTERNAL,
           "command program planning failed without a diagnostic");
     } else {
-      status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+      loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
     }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
@@ -598,7 +595,7 @@ loomc_status_t loomc_cmd_program_product_build(
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(
-      loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+      loomc_result_create(LOOMC_STATUS_OK,
                           loomc_context_source_retention(
                               loomc_link_index_context(options->link_index)),
                           allocator, &result));
@@ -668,8 +665,8 @@ loomc_status_t loomc_cmd_program_product_build_request(
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(
-      LOOMC_RESULT_STATE_SUCCEEDED, loomc_context_source_retention(context),
-      allocator, &result));
+      LOOMC_STATUS_OK, loomc_context_source_retention(context), allocator,
+      &result));
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(loomc_workspace_block_pool(workspace), &scratch_arena);
   loomc_request_index_overlay_t request_overlay = {0};

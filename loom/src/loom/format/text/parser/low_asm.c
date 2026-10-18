@@ -589,11 +589,10 @@ static iree_status_t loom_low_asm_make_fallback_location(
   if (parser->source_id == LOOM_SOURCE_ID_INVALID) {
     return iree_ok_status();
   }
-  loom_location_entry_t entry =
-      loom_location_file_range(parser->source_id, (uint16_t)start_token.line,
-                               (uint16_t)start_token.column,
-                               (uint16_t)parser->tokenizer.consumed_end_line,
-                               (uint16_t)parser->tokenizer.consumed_end_column);
+  loom_location_entry_t entry = loom_location_file_range(
+      parser->source_id, start_token.line, start_token.column,
+      parser->tokenizer.consumed_end_line,
+      parser->tokenizer.consumed_end_column);
   return loom_module_add_location(parser->module, entry, out_location);
 }
 
@@ -626,9 +625,8 @@ static iree_status_t loom_parse_low_asm_packet_location(
   if (*out_location == fallback_location &&
       fallback_location != LOOM_LOCATION_UNKNOWN &&
       parsed_spans->field_span_count > 0) {
-    IREE_RETURN_IF_ERROR(loom_module_attach_location_field_spans(
-        parser->module, fallback_location, parsed_spans->field_spans,
-        parsed_spans->field_span_count));
+    IREE_RETURN_IF_ERROR(loom_parsed_op_attach_field_spans(
+        parsed_spans, parser->module, fallback_location));
   }
   return iree_ok_status();
 }

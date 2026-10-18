@@ -26,12 +26,44 @@ persist voice samples. Package assets supply its conditioning inputs.
 The [waveform fixture](../../fixture/speech/README.md) is an executable example
 of the model contract. It generates deterministic samples, not learned speech.
 
+## Native waveform consumers
+
+An in-process serving owner uses `loom_serve_registry_try_open_speech` with an
+initialized request and a deployment name. A successful admission moves the
+request and returns an independently owned [stream handle](stream.h). NULL
+success reports bounded admission pressure and leaves the request with its
+caller. Native requests share HTTP's queue, numerical cohorts, residency, and
+retirement; opening a handle does not expose a model or service pointer.
+
+The stream reports its sample geometry and publishes one copied F32LE block at
+a time, with an absolute frame position and explicit completion. Consuming the
+block returns output credit. A stalled reader makes only its own request
+ineligible for the next compatible batch. Copies run in the existing shared
+CPU collection task. HTTP consumers encode directly into their PCM buffer.
+
+Closing a native handle cancels caller interest, while accepted CPU and device
+work retains its storage through retirement. Final blocks and terminal status
+can outlive model removal, same-name replacement, and registry destruction.
+Holding that result keeps no model pin or source row.
+
+`loom_serve_speech_request_initialize_text` supplies finite text at admission.
+`loom_serve_speech_request_initialize_stream` starts an empty continuing request:
+write text through `loom_serve_speech_stream_write`, honor the accepted byte
+count, and call `loom_serve_speech_stream_finish` when the final text arrives.
+Writes may split UTF-8 characters; only complete scalars reach source. Invalid
+input accepts no bytes, and finishing inside a scalar leaves input open so the
+caller can complete it. The model declares both a bounded input window and a
+total text limit. Input credit returns after the CPU accepts text, independently
+of numerical completion and waveform consumption. HTTP still supplies a complete
+JSON request; continuing text uses the native serving interface.
+
 ## Model ownership
 
 The [model ABI](model.h) separates cold preparation, CPU request preparation,
-next-work selection, batch packing, numerical execution and retired-feedback
-interpretation. Source preparation chooses checkpoint domains, stages,
-capacities, waveform geometry and initial conditioning. The native model does
+continuing input acceptance, next-work selection, batch packing, numerical
+execution, and retired-feedback interpretation. Source preparation chooses
+checkpoint domains, stages, capacities, waveform geometry and initial
+conditioning. The native model does
 not encode a particular vocoder, speaker vector, latent width, number of
 diffusion steps or waveform block size.
 
@@ -50,7 +82,37 @@ commands lives in the stream bank; compiler-private workspace belongs to one
 complete command and is released by the shared runner. Each request retains its
 own source state, including cache positions and RNG progression.
 
-`prepare_work` describes the request's next operation without advancing it.
+CPU request state is an ordered set of typed scalar and reference values chosen
+by `prepare_request`. Its final result is the device upload buffer; the preceding
+values remain owned by that request. Every consuming entry declares the exact
+same types. `prepare_input` and `complete` return replacement state before their
+acceptance or waveform fields, so source can grow a text buffer while retaining
+independent tokenizer or decoder objects. Binding checks those signatures before
+service publication. State never
+passes through the packed numerical upload or moves when batch membership
+changes.
+
+The synchronous [`input` capability](../../runtime/program/input.h) supplies
+managed `input.encoder` and `input.decoder` objects for source-owned text
+processing. Each object retains its own tokenizer state across calls. Source
+passes reusable buffer ranges, receives consumed/written counts, and drains
+final output with an explicit completion result. Reset restores independent
+first-token behavior, so a continuing prefix decoder and a fresh suffix decoder
+can coexist without rebuilding tokenizer state for every token. The capability
+owns byte conversion and tokenizer mechanics; normalization, sentence boundaries,
+packet construction, and buffering limits remain source policy.
+
+`prepare_input` receives an immutable text window and its unconsumed byte offset.
+Source can accept a complete-scalar prefix, retain the window through ordinary
+VM ownership, and continue CPU processing over later turns. The adapter copies
+each window once and reuses it until drained; source never sees a mutable input
+ring alias. A delayed end-of-input signal reaches the current window when it
+covers the final bytes.
+
+`prepare_work` describes the request's next operation without advancing it:
+numerical work, another bounded CPU step, waiting for input, or completion.
+Waiting sleeps until a complete text prefix or EOF arrives. Completion can
+publish an empty final waveform block without submitting numerical work.
 Equal compatibility tags and additive work units within the declared batch
 capacity permit a cohort. Source owns phase and shape compatibility; differing
 request progress alone need not separate requests. `prepare_batch` packs the
@@ -66,10 +128,11 @@ after its producer retires; cancelled partial work cannot publish a valid cache
 entry.
 
 The [generator](generator.h) carries native sample rate and channel count.
-The PCM HTTP service currently requires 24 kHz mono at registration; this wire
-format does not redefine the model ABI's geometry. Supporting a package with a
-different native geometry requires an explicit continuous audio conversion
-path, including filter history and final tail handling.
+PCM HTTP requests require 24 kHz mono; a package with different geometry remains
+usable through native handles and rejects incompatible HTTP requests. This wire
+format does not redefine the model ABI's geometry. HTTP conversion for another
+native geometry requires a continuous converter with retained filter history
+and final tail handling.
 
 ## Scheduling and retirement
 
@@ -80,6 +143,13 @@ batch selection/packing and feedback interpretation/encoding run on the shared
 CPU executor. Queue submission and admission run on the serialized service
 owner. Device work and feedback have independent completion frontiers, waited
 together by the shared proactor. No worker waits for a device or socket.
+
+CPU candidates and numerical members have separate ownership records. Every
+successful CPU acceptance returns that request's input credit, including offers
+that do not fit the selected numerical cohort. Request-local source rejection
+retires only that row; accepted borrowers retain it through their actual release.
+No-input waits, CPU continuations, and zero-work completion remain ordinary
+scheduling outcomes rather than artificial device batches.
 
 Each resident request owns at most one encoded block outside copied transport
 sends. Its next model unit becomes eligible after that block acquires send

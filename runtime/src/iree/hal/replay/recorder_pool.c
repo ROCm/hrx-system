@@ -181,15 +181,15 @@ static iree_status_t iree_hal_replay_recorder_pool_acquire_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reserve_flags_t flags,
     iree_hal_pool_reservation_t* out_reservations,
     iree_hal_pool_acquire_info_t* out_infos,
-    iree_hal_pool_acquire_result_t* out_result) {
+    iree_hal_pool_acquire_callback_t completion,
+    iree_hal_pool_reserve_flags_t flags) {
   iree_hal_replay_recorder_pool_t* pool =
       iree_hal_replay_recorder_pool_cast(base_pool);
   return iree_hal_pool_acquire_reservations(
-      pool->base_pool, request_count, requests, requester_frontier, flags,
-      out_reservations, out_infos, out_result);
+      pool->base_pool, request_count, requests, requester_frontier,
+      out_reservations, out_infos, completion, flags);
 }
 
 static void iree_hal_replay_recorder_pool_release_reservations(
@@ -597,7 +597,6 @@ iree_status_t iree_hal_replay_recorder_create_slab_pool(
         native_pool->frontier_tracker, host_allocator, &pool->base);
   }
   if (iree_status_is_ok(status)) {
-    pool->base.maintenance = native_pool->maintenance;
     pool->base.epoch_query = native_pool->epoch_query;
     pool->base.asan_enabled = native_pool->asan_enabled;
     pool->base.allocation_interceptor =

@@ -364,13 +364,14 @@ iree_cc_test(
     "slab_pool_test.cc"
   DEPS
     ::backends
+    iree::async
     iree::hal
     iree::hal::cts::util::pool_test_util
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::hal::cts::util::test_main
+    iree::hal::drivers::vulkan::queue_test_util
     iree::hal::memory::fixed_block_pool
-    iree::hal::memory::maintenance
     iree::hal::memory::slab_cache
     iree::hal::memory::tlsf_pool
     iree::testing::gtest

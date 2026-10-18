@@ -73,6 +73,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/vulkan/util:libvulkan",
+        "//runtime/src/iree/hal/memory:tracing",
         "//third_party:vulkan_headers",
     ],
 )
@@ -307,6 +308,8 @@ iree_runtime_cc_library(
 iree_runtime_cc_library(
     name = "vulkan",
     srcs = [
+        "allocation_queue.c",
+        "allocation_queue.h",
         "allocator.c",
         "allocator.h",
         "api.c",
@@ -342,6 +345,7 @@ iree_runtime_cc_library(
         "physical_device_selection.h",
         "queue.c",
         "queue.h",
+        "queue_memory.c",
         "queue_stats.h",
         "semaphore.c",
         "semaphore.h",
@@ -371,8 +375,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/vulkan/device:library",
         "//runtime/src/iree/hal/drivers/vulkan/util:libvulkan",
-        "//runtime/src/iree/hal/memory:maintenance",
-        "//runtime/src/iree/hal/memory:maintenance_thread",
         "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/hal/memory:slab_provider",
         "//runtime/src/iree/hal/memory:tracing",

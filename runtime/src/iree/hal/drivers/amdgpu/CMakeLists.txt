@@ -264,6 +264,8 @@ iree_cc_library(
     "allocator.h"
     "api.h"
   SRCS
+    "allocation_queue.c"
+    "allocation_queue.h"
     "allocator.c"
     "allocator.h"
     "aql_atomic.c"
@@ -391,6 +393,7 @@ iree_cc_library(
     "transient_buffer.h"
     "tsan_state.c"
     "tsan_state.h"
+    "virtual_buffer.c"
     "virtual_memory.c"
     "virtual_memory.h"
   DEPS
@@ -451,8 +454,6 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::topology
     iree::hal::drivers::amdgpu::util::vmem
     iree::hal::memory::asan_pool
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_cache
     iree::hal::memory::slab_provider
@@ -703,11 +704,11 @@ iree_cc_test(
     ::headers
     iree::base
     iree::hal
+    iree::hal::cts::util::pool_test_util
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::util::info
     iree::hal::drivers::amdgpu::util::topology
     iree::hal::drivers::amdgpu::util::vmem
-    iree::hal::memory::maintenance
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -859,6 +860,29 @@ iree_cc_test(
     iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::packet
     iree::hal::drivers::amdgpu::util::pm4_atomic
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    driver_test
+  SRCS
+    "driver_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::hal
+    iree::hal::cts::util::test_base
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

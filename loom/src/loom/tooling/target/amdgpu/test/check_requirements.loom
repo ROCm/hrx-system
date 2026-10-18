@@ -20,7 +20,7 @@ check.case @scalar_case {
 check.benchmark<@device_case> @device_benchmark
 
 check.case @target_case {
-  check.requires<hal.amdgpu.target> {target = "gfx942:xnack-"}
+  check.requires<hal.amdgpu.target> {targets = ["gfx12-generic", "gfx942:xnack-"]}
   kernel.launch @device_kernel() : ()
   check.return
 }

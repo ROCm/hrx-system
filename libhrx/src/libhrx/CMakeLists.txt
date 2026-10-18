@@ -259,7 +259,6 @@ iree_cc_test(
     ::hrx_static
     iree::base
     iree::hal
-    iree::hal::memory::maintenance
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs
@@ -274,7 +273,6 @@ iree_cc_test(
     ::hrx_static
     iree::base
     iree::hal
-    iree::hal::memory::maintenance
     iree::hal::memory::slab_cache
     iree::testing::gtest
     iree::testing::gtest_main
@@ -292,7 +290,6 @@ iree_cc_test(
     ::hrx_static
     iree::base
     iree::hal
-    iree::hal::memory::maintenance
     iree::hal::memory::slab_cache
     iree::testing::gtest
     iree::testing::gtest_main

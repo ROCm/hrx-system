@@ -44,10 +44,12 @@ template.def<@pocket.request_state_size> pure @pocket_request_state_size(%capaci
 }
 
 // Membership is count plus capacity resident IDs. A stage ordinal follows;
-// eight-word work records begin at the next 16-byte boundary. Each record is
-// phase, voice ordinal, phase cursor, chunk, voice frames, unique-writer bit,
-// selected prefill token, and a reserved word. Membership owns identity;
-// records own next work.
+// 160-byte work records begin at the next 16-byte boundary. Each record starts
+// with phase, voice ordinal, phase cursor, chunk, voice frames, unique-writer
+// bit, prefill token or packed-position origin, and accepted prefix length.
+// Space for 32 token IDs follows that eight-word header. Membership owns
+// resident identity; records own next work. The packed-position table follows
+// all records, with its own 16-byte header and sixteen bytes per position.
 template.def<@pocket.batch_work_header_size> pure @pocket_batch_work_header_size(%capacity: index) -> (offset) {
   %two = index.constant 2 : index
   %words = index.add %capacity, %two : index
@@ -62,16 +64,21 @@ template.def<@pocket.batch_work_header_size> pure @pocket_batch_work_header_size
 
 template.def<@pocket.batch_work_size> pure @pocket_batch_work_size(%capacity: index) -> (offset) {
   %header = template.apply<@pocket.batch_work_header_size>(%capacity) pure : (index) -> (offset)
-  %record = index.constant 32 : offset
+  %record = index.constant 160 : offset
   %records = index.scale %capacity, %record : index, offset -> offset
-  %bytes = index.add %header, %records : offset
+  %request_bytes = index.add %header, %records : offset
+  %position_record_bytes = index.constant 512 : offset
+  %position_bytes = index.scale %capacity, %position_record_bytes : index, offset -> offset
+  %position_header = index.constant 16 : offset
+  %with_positions = index.add %request_bytes, %position_bytes : offset
+  %bytes = index.add %with_positions, %position_header : offset
   template.return %bytes : offset
 }
 
 template.def<@pocket.batch.work_record> device @pocket_batch_work_record(%work: buffer, %packed: index) -> (view<8xi32>) {
   %capacity = config.get @pocket.batch_capacity : index
   %header = template.apply<@pocket.batch_work_header_size>(%capacity) pure : (index) -> (offset)
-  %stride = index.constant 32 : offset
+  %stride = index.constant 160 : offset
   %relative = index.scale %packed, %stride : index, offset -> offset
   %origin = index.add %header, %relative : offset
   %record = buffer.view %work[%origin] : buffer -> view<8xi32>

@@ -118,7 +118,8 @@ typedef struct loomc_pass_run_options_t {
   loomc_structure_type_t type;
   /// Size of this structure in bytes, or zero.
   loomc_host_size_t structure_size;
-  /// Optional loomc_pass_trace_options_t, borrowed until execution returns.
+  /// Invocation extensions, borrowed until execution returns. Supports
+  /// loomc_pass_trace_options_t and native report options from loomc/interop.h.
   const void* next;
 } loomc_pass_run_options_t;
 

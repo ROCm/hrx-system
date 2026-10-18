@@ -37,7 +37,9 @@ iree_status_t iree_hal_amd_xdna_operation_signal(
 void iree_hal_amd_xdna_operation_complete(
     iree_hal_amd_xdna_operation_t* operation);
 
-// Resolves the unproven suffix of the captured wait list under the state mutex.
+// Resolves the unproven suffix of the captured wait list. Native operations
+// hold the state mutex to read FIFO causality; memory operations have no FIFO
+// state and resolve only their captured semaphore dependencies.
 iree_status_t iree_hal_amd_xdna_operation_resolve_waits(
     iree_hal_amd_xdna_operation_t* operation,
     iree_hal_amd_xdna_wait_resolution_t* out_resolution,
@@ -46,6 +48,11 @@ iree_status_t iree_hal_amd_xdna_operation_resolve_waits(
 // Consumes a causal admission result while the state mutex is held.
 void iree_hal_amd_xdna_operation_admit(iree_hal_amd_xdna_operation_t* operation,
                                        iree_status_t status);
+
+// Resolves memory dependencies directly on the caller or last wait callback.
+// No queue state lock or native admission owner is required.
+void iree_hal_amd_xdna_operation_admit_memory(
+    iree_hal_amd_xdna_operation_t* operation, iree_status_t status);
 
 // Reconsiders consumers attached while a caller owned native publication.
 void iree_hal_amd_xdna_queue_retry_acceptance_waiters(

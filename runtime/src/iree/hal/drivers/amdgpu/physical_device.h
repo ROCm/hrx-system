@@ -260,10 +260,11 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   // Pool of HSA signals for host-waited semaphores and proactor integration.
   iree_hal_amdgpu_host_signal_pool_t host_signal_pool;
 
+  // Typed native allocation owner, joined before native device teardown.
+  struct iree_hal_amdgpu_allocation_queue_t* allocation_queue;
+
   // Shared capacity notification for caller-created native pools.
   iree_async_notification_t* memory_notification;
-  // Shared cold memory worker independent of execution queue failure/lifetime.
-  iree_hal_memory_maintenance_t* memory_maintenance;
   // ASAN allocation-shaping policy inherited by caller-created native pools.
   iree_hal_asan_pool_options_t asan_pool_options;
 

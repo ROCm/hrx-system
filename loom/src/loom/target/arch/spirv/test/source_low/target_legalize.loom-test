@@ -283,23 +283,23 @@ func.def @decomposes_wide_table(%input: buffer, %position: i32) -> (i8) {
   %15 = view.load %source[3] : view<5xi8> -> i8
   %16 = view.load %source[4] : view<5xi8> -> i8
   %9 = index.cast %position : i32 to index
-  %18 = index.constant 0 : index
+  %18 = index.constant 1 : index
   %19 = index.cmp eq, %9, %18 : index
-  %20 = scf.select %19, %12, %16 : i8
-  %21 = index.constant 1 : index
+  %20 = scf.select %19, %13, %12 : i8
+  %21 = index.constant 2 : index
   %22 = index.cmp eq, %9, %21 : index
-  %23 = scf.select %22, %13, %20 : i8
-  %24 = index.constant 2 : index
+  %23 = scf.select %22, %14, %20 : i8
+  %24 = index.constant 3 : index
   %25 = index.cmp eq, %9, %24 : index
-  %26 = scf.select %25, %14, %23 : i8
-  %27 = index.constant 3 : index
+  %26 = scf.select %25, %15, %23 : i8
+  %27 = index.constant 4 : index
   %28 = index.cmp eq, %9, %27 : index
-  %29 = scf.select %28, %15, %26 : i8
+  %29 = scf.select %28, %16, %26 : i8
   func.return %29 : i8
 }
 
 // ====
-// RUN: pass target=spirv:vulkan1.3+bda+extended-types target-legalize{mode=eager},dce,canonicalize
+// RUN: pass target=spirv:vulkan1.3+bda+extended-types target-legalize{mode=complete},dce,canonicalize
 
 // Quantization owns the same independently sized table boundary as lookup.
 func.def @decomposes_wide_thresholds(%value: f32, %floor: f32, %lower: f32, %middle: f32, %upper: f32, %ceiling: f32) -> (i32) {

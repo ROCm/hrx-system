@@ -110,6 +110,11 @@ iree_status_t iree_task_executor_create(iree_task_executor_options_t options,
 void iree_task_executor_retain(iree_task_executor_t* executor);
 
 // Releases the given |executor| from the caller.
+// The final release requests worker shutdown. An external caller joins worker
+// exit before returning. A worker of this executor cannot join itself; in that
+// case the last exiting worker reclaims executor storage after its final
+// access. Pending processes must be quiesced before the final reference is
+// released.
 void iree_task_executor_release(iree_task_executor_t* executor);
 
 // Returns the NUMA node this executor's workers are pinned to, or

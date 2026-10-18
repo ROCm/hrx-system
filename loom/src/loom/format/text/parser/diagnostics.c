@@ -144,6 +144,7 @@ static iree_status_t loom_parser_emit_diagnostic(
       .params = params,
       .param_count = param_count,
       .emitter = LOOM_EMITTER_PARSER,
+      .module = parser->module,
       .origin = origin,
       // The text parser currently reports the parse token itself as the
       // user-facing location. Parsed loc() metadata can diverge from origin in
@@ -167,6 +168,7 @@ static iree_status_t loom_parser_emit_diagnostic(
         .params = limit_params,
         .param_count = IREE_ARRAYSIZE(limit_params),
         .emitter = LOOM_EMITTER_PARSER,
+        .module = parser->module,
         .origin = diagnostic.origin,
         .source_location = diagnostic.source_location,
     };

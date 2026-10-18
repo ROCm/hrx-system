@@ -18,6 +18,7 @@
 #include "loom/tooling/config/input.h"
 #include "loom/tooling/io/file.h"
 #include "loom/tooling/io/source_path.h"
+#include "loom/tooling/pass/loomc_trace.h"
 #include "loom/tooling/pass/trace_cli.h"
 #include "loom/util/stream.h"
 #include "loomc/iree.h"
@@ -298,84 +299,6 @@ static iree_status_t loom_compile_load_source(
       loomc_allocator_from_iree(allocator), out_source));
 }
 
-static loomc_status_t loom_compile_trace_write(void* user_data,
-                                               loomc_string_view_t fragment) {
-  return loomc_status_from_iree(loom_output_stream_write(
-      (loom_output_stream_t*)user_data, iree_string_view_from_loomc(fragment)));
-}
-
-static loomc_status_t loom_compile_trace_open_artifact(
-    void* user_data, const loomc_pass_trace_event_t* event,
-    loomc_pass_trace_artifact_t* out_artifact) {
-  iree_string_view_t point = iree_string_view_empty();
-  switch (event->point) {
-    case LOOMC_PASS_TRACE_POINT_BEFORE:
-      point = IREE_SV("before");
-      break;
-    case LOOMC_PASS_TRACE_POINT_AFTER:
-      point = IREE_SV("after");
-      break;
-    default:
-      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                               "pass trace point is invalid");
-  }
-  loom_output_stream_t* stream = NULL;
-  iree_string_view_t reference = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      loomc_status_from_iree(loom_tooling_pass_trace_open_artifact(
-          (loom_tooling_pass_trace_t*)user_data, event->event_ordinal, point,
-          iree_string_view_from_loomc(event->pass_key), &stream, &reference)));
-  *out_artifact = (loomc_pass_trace_artifact_t){
-      .reference = loomc_string_view_from_iree(reference),
-      .sink =
-          {
-              .write = loom_compile_trace_write,
-              .user_data = stream,
-          },
-  };
-  return loomc_ok_status();
-}
-
-static loomc_status_t loom_compile_trace_close_artifact(
-    void* user_data, loomc_pass_trace_artifact_t* artifact) {
-  (void)artifact;
-  return loomc_status_from_iree(loom_tooling_pass_trace_close_artifact(
-      (loom_tooling_pass_trace_t*)user_data));
-}
-
-static void loom_compile_initialize_trace_options(
-    loom_tooling_pass_trace_t* trace, const loomc_string_view_t* before_filters,
-    const loomc_string_view_t* after_filters,
-    loomc_pass_trace_options_t* out_options) {
-  *out_options = (loomc_pass_trace_options_t){
-      .type = LOOMC_STRUCTURE_TYPE_PASS_TRACE_OPTIONS,
-      .structure_size = sizeof(*out_options),
-      .format = trace->format == LOOM_TOOLING_PASS_TRACE_FORMAT_JSONL
-                    ? LOOMC_PASS_TRACE_FORMAT_JSONL
-                    : LOOMC_PASS_TRACE_FORMAT_TEXT,
-      .flags = (trace->dump_before_all ? LOOMC_PASS_TRACE_FLAG_BEFORE_ALL : 0) |
-               (trace->dump_after_all ? LOOMC_PASS_TRACE_FLAG_AFTER_ALL : 0),
-      .tool_name = loomc_string_view_from_iree(trace->tool_name),
-      .input_identifier = loomc_string_view_from_iree(trace->input_path),
-      .before_filters = before_filters,
-      .before_filter_count = trace->dump_before.count,
-      .after_filters = after_filters,
-      .after_filter_count = trace->dump_after.count,
-      .sink =
-          {
-              .write = loom_compile_trace_write,
-              .user_data = &trace->output.stream,
-          },
-  };
-  if (loom_tooling_pass_trace_has_artifact_sink(trace)) {
-    out_options->artifact_sink = (loomc_pass_trace_artifact_sink_t){
-        .open = loom_compile_trace_open_artifact,
-        .close = loom_compile_trace_close_artifact,
-        .user_data = trace,
-    };
-  }
-}
-
 typedef struct loom_compile_artifacts_t {
   // Primary target executable or loadable module.
   const loomc_artifact_t* primary;
@@ -548,8 +471,6 @@ int main(int argc, char** argv) {
   loomc_config_options_t config_options = {0};
   loomc_string_view_t* roots = NULL;
   loomc_string_view_t* excluded_roots = NULL;
-  loomc_string_view_t* before_filters = NULL;
-  loomc_string_view_t* after_filters = NULL;
   char* input_identifier_storage = NULL;
   char* manifest_output_path_storage = NULL;
   iree_string_view_t manifest_output_path = iree_string_view_empty();
@@ -563,12 +484,11 @@ int main(int argc, char** argv) {
   loomc_target_profile_t* target_profile = NULL;
   loomc_pass_program_t* pass_program = NULL;
   loomc_result_t* result = NULL;
-  loom_tooling_pass_trace_t pass_trace = {0};
+  loom_tooling_loomc_pass_trace_t pass_trace = {0};
 
   loomc_compile_report_options_t report_options = {0};
   loomc_artifact_manifest_options_t manifest_options = {0};
   loomc_sanitizer_options_t sanitizer_options = {0};
-  loomc_pass_trace_options_t trace_options = {0};
   bool report_enabled = false;
   bool manifest_enabled = false;
   bool sanitizer_enabled = false;
@@ -704,7 +624,7 @@ int main(int argc, char** argv) {
     result = NULL;
   }
   if (iree_status_is_ok(status) && exit_code == 0) {
-    status = loom_tooling_pass_trace_open_from_flags(
+    status = loom_tooling_loomc_pass_trace_open_from_flags(
         &(loom_tooling_pass_trace_open_options_t){
             .tool_name = IREE_SV("loom-compile"),
             .input_path =
@@ -712,19 +632,6 @@ int main(int argc, char** argv) {
         },
         allocator, &pass_trace);
   }
-  if (iree_status_is_ok(status) && exit_code == 0 && pass_trace.enabled) {
-    status = loom_compile_make_string_array(pass_trace.dump_before, allocator,
-                                            &before_filters);
-  }
-  if (iree_status_is_ok(status) && exit_code == 0 && pass_trace.enabled) {
-    status = loom_compile_make_string_array(pass_trace.dump_after, allocator,
-                                            &after_filters);
-  }
-  if (iree_status_is_ok(status) && exit_code == 0 && pass_trace.enabled) {
-    loom_compile_initialize_trace_options(&pass_trace, before_filters,
-                                          after_filters, &trace_options);
-  }
-
   if (report_enabled) {
     const iree_string_view_t report_output_path =
         iree_make_cstring_view(FLAG_compile_report_output);
@@ -748,13 +655,13 @@ int main(int argc, char** argv) {
   if (!loom_tooling_output_path_is_stdout(output_path)) {
     emit_options.identifier = loomc_string_view_from_iree(output_path);
   }
-  trace_options.next = sanitizer_enabled ? &sanitizer_options : NULL;
+  pass_trace.options.next = sanitizer_enabled ? &sanitizer_options : NULL;
   loomc_compile_artifact_options_t compile_options = {
       .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
       .structure_size = sizeof(compile_options),
-      .next = pass_trace.enabled  ? (const void*)&trace_options
-              : sanitizer_enabled ? (const void*)&sanitizer_options
-                                  : NULL,
+      .next = pass_trace.output.enabled ? (const void*)&pass_trace.options
+              : sanitizer_enabled       ? (const void*)&sanitizer_options
+                                        : NULL,
       .roots = roots,
       .root_count = root_list.count,
       .excluded_roots = excluded_roots,
@@ -768,7 +675,8 @@ int main(int argc, char** argv) {
         loomc_compile_artifact(compiler, workspace, pass_program, module,
                                &compile_options, loom_allocator, &result));
   }
-  status = iree_status_join(status, loom_tooling_pass_trace_close(&pass_trace));
+  status = iree_status_join(status,
+                            loom_tooling_loomc_pass_trace_close(&pass_trace));
 
   if (iree_status_is_ok(status) && exit_code == 0) {
     bool compile_succeeded = false;
@@ -810,8 +718,6 @@ int main(int argc, char** argv) {
   loomc_workspace_release(workspace);
   loomc_context_release(context);
   loomc_target_environment_release(target_environment);
-  iree_allocator_free(allocator, after_filters);
-  iree_allocator_free(allocator, before_filters);
   iree_allocator_free(allocator, excluded_roots);
   iree_allocator_free(allocator, roots);
   iree_allocator_free(allocator, config_bindings);

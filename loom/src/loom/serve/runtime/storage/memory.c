@@ -6,19 +6,38 @@
 
 #include "loom/serve/runtime/storage/memory.h"
 
+#include "iree/async/semaphore.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
-#include "iree/hal/memory/maintenance.h"
+#include "iree/hal/pool_wait.h"
 
 struct loom_serve_memory_pool_t {
   // Allocator owning pool, buffer, and slab metadata.
   iree_allocator_t host_allocator;
-  // Retained physical allocation domain.
-  iree_hal_allocator_t* device_allocator;
-  // Borrowed native source outliving this pool and its publication bridge.
+  // Borrowed sealed group outliving all source pools and virtual buffers.
+  iree_hal_device_group_t* group;
+  // Retained mapping-source pool, used only by this physical budget.
   iree_hal_pool_t* storage_pool;
-  // Queue families permitted to access all reservations.
-  iree_hal_queue_family_affinity_t queue_affinity;
+  // Borrowed queue accepting batched allocation and mapping operations.
+  iree_hal_queue_t* queue;
+  // Exact virtual-target scope; family storage trails this object.
+  iree_hal_pool_scope_t scope;
+  // All sites admitted by the virtual-target scope in this sealed group.
+  iree_hal_memory_scope_t mapping_scope;
+  // Capacity observation independent of any model's completion semaphore.
+  iree_hal_pool_wait_t* capacity_wait;
+  // Protects capacity completion and pool observer lifetime only.
+  iree_slim_mutex_t capacity_mutex;
+  // Outer teardown waits for a committed capacity observation to retire.
+  iree_notification_t capacity_notification;
+  // A committed capacity observation owns its callback storage.
+  bool capacity_pending;
+  // The owner withdrew an observation after its returned backing retired.
+  bool capacity_withdrawn;
+  // Callback-owned failure transferred to the serialized owner on collection.
+  iree_status_t capacity_status;
+  // The capacity source failed and cannot admit another observation.
+  bool capacity_failed;
   // Common independent physical allocation size in bytes.
   iree_device_size_t slab_size;
   // Minimum address alignment guaranteed by virtual reservations.
@@ -27,9 +46,13 @@ struct loom_serve_memory_pool_t {
   uint64_t limit_bytes;
   // Accounting across all buffers, with physical allocations counted once.
   loom_serve_memory_statistics_t statistics;
-  // Owner-only list of native operations awaiting result publication.
+  // Pending mapping bytes whose allocation completion is already published.
+  uint64_t acquired_pending_bytes;
+  // Upper bound on returned backing still charged until native disposal.
+  uint64_t retiring_bytes;
+  // Owner-only list of queue operations awaiting result publication.
   loom_serve_memory_operation_t* operations;
-  // Owner wake copied into operations before handing them to maintenance.
+  // Owner wake copied into operations and capacity observations.
   struct {
     // Nonblocking callback; detachment joins every accepted copy.
     void (*wake)(void* user_data);
@@ -38,20 +61,16 @@ struct loom_serve_memory_pool_t {
   } observer;
   // Borrowed owner of cold capacity reclamation, separate from slab mechanics.
   loom_serve_memory_reclaimer_t reclaimer;
-  // Owned first native/reclamation failure; backing may be partially changed.
+  // Owned shared capacity-observation or reclamation failure.
   iree_status_t failure;
-  // The legacy ROCr backend needs a native mapping publication after VMM edits.
-  bool legacy_amdgpu_mapping_publication;
-  // New mappings cannot be admitted until the cold publication succeeds.
-  bool legacy_amdgpu_mappings_pending;
 };
 
 typedef struct loom_serve_memory_slab_t {
   // Owned physical handle, or null for uncommitted storage.
-  iree_hal_physical_memory_t* physical;
+  iree_hal_buffer_t* physical;
   // Whether physical is currently mapped into its virtual slot.
   bool mapped;
-  // Whether a current maintenance range requires this slab.
+  // Whether a current retained range requires this slab.
   bool keep;
   // Missing slab selected by the current serialized commitment transaction.
   bool pending_commit;
@@ -66,9 +85,11 @@ struct loom_serve_virtual_buffer_t {
   loom_serve_memory_statistics_t* statistics;
   // Owned stable virtual reservation, independent of physical commitment.
   iree_hal_buffer_t* handle;
+  // Owned incomplete-edit failure; only checked detach can retire this target.
+  iree_status_t failure;
   // Number of equally sized slots spanning the reservation.
   iree_host_size_t slab_count;
-  // Physical ownership and maintenance marks for each virtual slot.
+  // Physical ownership and retained-range marks for each virtual slot.
   loom_serve_memory_slab_t slabs[];
 };
 
@@ -77,13 +98,36 @@ typedef struct loom_serve_memory_edit_t {
   loom_serve_virtual_buffer_t* buffer;
   // Slab index within buffer.
   iree_host_size_t index;
-  // Native result written exclusively by the cold owner until completion.
+  // Result written exclusively by the last queue completion before publication.
   loom_serve_memory_slab_t result;
 } loom_serve_memory_edit_t;
 
+typedef struct loom_serve_memory_stage_t {
+  // Borrowed enclosing transaction through the last completion claim.
+  loom_serve_memory_operation_t* operation;
+  // Owned private timeline; caller readiness cannot fail accepted ownership.
+  iree_hal_semaphore_t* semaphore;
+  // Embedded observation retained until this stage completes.
+  iree_async_semaphore_timepoint_t timepoint;
+  // Owned terminal result, published before dropping the completion claim.
+  iree_status_t status;
+} loom_serve_memory_stage_t;
+
 struct loom_serve_memory_operation_t {
-  // Intrusive work item owned by the native executor until callback entry.
-  iree_hal_memory_maintenance_entry_t entry;
+  // Submission and both private stage callbacks each own one claim.
+  iree_atomic_int32_t pending;
+  // Allocation completion published once; immutable after becoming true.
+  iree_atomic_int32_t acquired;
+  // The serialized owner has included this allocation in known-live backing.
+  bool acquired_accounted;
+  // Allocation/map or unmap/deallocation completion, respectively.
+  loom_serve_memory_stage_t stages[2];
+  // Batched source buffers in trailing storage; ownership moves into edits.
+  iree_hal_buffer_t** sources;
+  // Prepared allocation requests in trailing storage.
+  iree_hal_pool_reservation_request_t* requests;
+  // Captured virtual mapping updates in trailing storage.
+  iree_hal_memory_mapping_t* mappings;
   // Borrowed pool outliving the operation and every reservation.
   loom_serve_memory_pool_t* pool;
   // Owner-only link while results still need publication.
@@ -98,12 +142,15 @@ struct loom_serve_memory_operation_t {
   iree_slim_mutex_t mutex;
   // Outer-thread wait only; shared task workers never wait here.
   iree_notification_t notification;
-  // Native executor has completed all resource accesses.
+  // Both queue operations and submission have released captured ownership.
   bool complete;
   // Serialized owner has installed native results and returned budget credit.
   bool published;
-  // Terminal native failure, consumed by owner publication.
+  // Owned terminal result, independent of other operations on the same pool.
   iree_status_t status;
+  // Native edits failed after backing could change; affected targets require
+  // checked detach before their physical sources can be released.
+  bool invalidates_backing;
   // Optional owner scheduling callback, protected by mutex.
   void (*wake)(void* user_data);
   // Borrowed callback payload, joined by detachment or final observation.
@@ -123,27 +170,117 @@ struct loom_serve_memory_operation_t {
 
 static void loom_serve_memory_pool_collect(loom_serve_memory_pool_t* pool);
 
-static iree_hal_physical_memory_params_t loom_serve_memory_params(void) {
-  iree_hal_physical_memory_params_t params = {0};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
-                 IREE_HAL_BUFFER_USAGE_TRANSFER |
-                 IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS;
-  return params;
+static void loom_serve_memory_capacity_completed(void* user_data,
+                                                 iree_status_t status) {
+  loom_serve_memory_pool_t* pool = user_data;
+  iree_slim_mutex_lock(&pool->capacity_mutex);
+  if (pool->capacity_withdrawn && iree_status_is_cancelled(status)) {
+    iree_status_ignore(status);
+    status = iree_ok_status();
+  }
+  pool->capacity_status = iree_status_join(pool->capacity_status, status);
+  pool->capacity_pending = false;
+  pool->capacity_withdrawn = false;
+  iree_notification_post(&pool->capacity_notification, IREE_ALL_WAITERS);
+  if (pool->observer.wake) {
+    pool->observer.wake(pool->observer.user_data);
+  }
+  iree_slim_mutex_unlock(&pool->capacity_mutex);
+}
+
+static bool loom_serve_memory_capacity_is_idle(void* user_data) {
+  loom_serve_memory_pool_t* pool = user_data;
+  iree_slim_mutex_lock(&pool->capacity_mutex);
+  const bool idle = !pool->capacity_pending;
+  iree_slim_mutex_unlock(&pool->capacity_mutex);
+  return idle;
+}
+
+// Native allocation becomes visible before its queue completion. Only known
+// returns can consume retirement credit; newly allocated pending bytes cannot
+// create it. In-flight returns may already have freed their native payload and
+// therefore do not establish a lower bound on still-owned native bytes.
+static uint64_t loom_serve_memory_pool_observe_retirement(
+    loom_serve_memory_pool_t* pool) {
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(pool->storage_pool, &stats);
+  const uint64_t retained_bytes = pool->statistics.committed_bytes -
+                                  pool->statistics.releasing_bytes +
+                                  pool->acquired_pending_bytes;
+  const uint64_t retiring_bytes = stats.bytes_committed > retained_bytes
+                                      ? stats.bytes_committed - retained_bytes
+                                      : 0;
+  pool->retiring_bytes = iree_min(pool->retiring_bytes, retiring_bytes);
+  return stats.bytes_committed;
+}
+
+static uint64_t loom_serve_memory_pool_charged_bytes(
+    loom_serve_memory_pool_t* pool) {
+  loom_serve_memory_pool_observe_retirement(pool);
+  return pool->statistics.committed_bytes + pool->statistics.pending_bytes +
+         pool->retiring_bytes;
+}
+
+// Arms a one-shot capacity wake only while native retirement can make progress.
+// Prepare precedes the final query so a concurrent free cannot lose its wake.
+static bool loom_serve_memory_pool_observe_capacity(
+    loom_serve_memory_pool_t* pool) {
+  if (pool->capacity_failed) {
+    return false;
+  }
+  if (!loom_serve_memory_capacity_is_idle(pool)) {
+    loom_serve_memory_pool_observe_retirement(pool);
+    if (!pool->retiring_bytes) {
+      // Pending acquisitions can obscure a concurrent native return. Once
+      // their ownership is published, withdraw any obsolete capacity wait;
+      // there may be no further native free to signal it.
+      iree_slim_mutex_lock(&pool->capacity_mutex);
+      pool->capacity_withdrawn = pool->capacity_pending;
+      iree_slim_mutex_unlock(&pool->capacity_mutex);
+      iree_hal_pool_wait_cancel(pool->capacity_wait);
+    }
+    return !loom_serve_memory_capacity_is_idle(pool);
+  }
+  iree_hal_pool_wait_prepare(pool->capacity_wait);
+  loom_serve_memory_pool_observe_retirement(pool);
+  if (!pool->retiring_bytes) {
+    iree_hal_pool_wait_abort(pool->capacity_wait);
+    return false;
+  }
+  iree_slim_mutex_lock(&pool->capacity_mutex);
+  pool->capacity_pending = true;
+  iree_slim_mutex_unlock(&pool->capacity_mutex);
+  iree_hal_pool_wait_commit(pool->capacity_wait, iree_infinite_timeout(),
+                            (iree_hal_pool_wait_callback_t){
+                                loom_serve_memory_capacity_completed, pool});
+  return true;
 }
 
 iree_status_t loom_serve_memory_pool_allocate(
-    iree_hal_device_t* device, iree_hal_pool_t* storage_pool,
-    iree_hal_queue_family_affinity_t queue_affinity,
+    iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
+    iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
     iree_device_size_t slab_size, uint64_t limit_bytes,
     iree_allocator_t host_allocator, loom_serve_memory_pool_t** out_pool) {
   *out_pool = NULL;
-  iree_hal_allocator_t* device_allocator = iree_hal_device_allocator(device);
-  iree_device_size_t minimum = 0, recommended = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_allocator_virtual_memory_query_granularity(
-      device_allocator, loom_serve_memory_params(), &minimum, &recommended));
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_RETURN_IF_ERROR(iree_hal_virtual_buffer_query_capabilities(
+      group, scope, host_allocator, &capabilities));
+  const iree_hal_memory_mapping_operations_t required =
+      (1u << IREE_HAL_MEMORY_MAPPING_OPERATION_BIND) |
+      (1u << IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND);
+  if (!capabilities.max_byte_length ||
+      !iree_all_bits_set(capabilities.operations, required)) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "elastic backing requires bind and unbind support");
+  }
+  const iree_hal_pool_mapping_requirements_t requirements =
+      iree_hal_pool_query_mapping_requirements(storage_pool);
+  const iree_device_size_t minimum =
+      iree_max(capabilities.reservation_granularity,
+               iree_max(capabilities.mapping_granularity,
+                        requirements.minimum_granularity));
   if (!slab_size) {
-    slab_size = recommended;
+    slab_size = iree_max(minimum, requirements.recommended_granularity);
   }
   if (!slab_size || slab_size > INT64_MAX || slab_size % minimum) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -151,20 +288,33 @@ iree_status_t loom_serve_memory_pool_allocate(
                             minimum);
   }
   loom_serve_memory_pool_t* pool = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, sizeof(*pool), (void**)&pool));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
+      host_allocator, sizeof(*pool), scope.family_count,
+      sizeof(iree_hal_pool_family_access_t), (void**)&pool));
   pool->host_allocator = host_allocator;
-  pool->device_allocator = device_allocator;
+  pool->group = group;
   pool->storage_pool = storage_pool;
-  iree_hal_allocator_retain(device_allocator);
-  pool->queue_affinity = queue_affinity;
+  iree_hal_pool_retain(storage_pool);
+  pool->queue = queue;
+  pool->scope = scope;
+  pool->scope.families = (iree_hal_pool_family_access_t*)(pool + 1);
+  memcpy((void*)pool->scope.families, scope.families,
+         scope.family_count * sizeof(*scope.families));
+  pool->mapping_scope = (iree_hal_memory_scope_t){
+      iree_hal_device_group_memory_domain(group), IREE_HAL_MEMORY_SCOPE_ANY};
   pool->slab_size = slab_size;
   pool->minimum_alignment = minimum;
   pool->limit_bytes = limit_bytes ? limit_bytes : UINT64_MAX;
-  pool->legacy_amdgpu_mapping_publication =
-      iree_string_view_equal(iree_hal_device_id(device), IREE_SV("amdgpu"));
-  *out_pool = pool;
-  return iree_ok_status();
+  iree_slim_mutex_initialize(&pool->capacity_mutex);
+  iree_notification_initialize(&pool->capacity_notification);
+  iree_status_t status = iree_hal_pool_wait_allocate(
+      storage_pool, host_allocator, &pool->capacity_wait);
+  if (iree_status_is_ok(status)) {
+    *out_pool = pool;
+  } else {
+    loom_serve_memory_pool_free(pool);
+  }
+  return status;
 }
 
 void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool) {
@@ -173,15 +323,32 @@ void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool) {
   }
   IREE_ASSERT(!pool->statistics.reserved_bytes &&
               !pool->statistics.committed_bytes && !pool->operations);
+  if (!loom_serve_memory_capacity_is_idle(pool)) {
+    iree_hal_pool_wait_cancel(pool->capacity_wait);
+    iree_notification_await(&pool->capacity_notification,
+                            loom_serve_memory_capacity_is_idle, pool,
+                            iree_infinite_timeout());
+  }
+  iree_hal_pool_wait_free(pool->capacity_wait);
+  iree_status_free(pool->capacity_status);
   iree_status_free(pool->failure);
-  iree_hal_allocator_release(pool->device_allocator);
+  iree_notification_deinitialize(&pool->capacity_notification);
+  iree_slim_mutex_deinitialize(&pool->capacity_mutex);
+  iree_hal_pool_release(pool->storage_pool);
   iree_allocator_free(pool->host_allocator, pool);
 }
 
 loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
     loom_serve_memory_pool_t* pool) {
   loom_serve_memory_pool_collect(pool);
-  return pool->statistics;
+  loom_serve_memory_statistics_t statistics = pool->statistics;
+  const uint64_t physical = loom_serve_memory_pool_observe_retirement(pool);
+  const uint64_t retiring = pool->retiring_bytes;
+  statistics.committed_bytes += retiring;
+  statistics.releasing_bytes += retiring;
+  statistics.released_bytes -= iree_min(statistics.released_bytes, retiring);
+  statistics.peak_bytes = iree_max(statistics.peak_bytes, physical);
+  return statistics;
 }
 
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool) {
@@ -197,8 +364,10 @@ iree_status_t loom_serve_memory_pool_query_status(
 void loom_serve_memory_pool_set_observer(loom_serve_memory_pool_t* pool,
                                          void (*wake)(void* user_data),
                                          void* user_data) {
+  iree_slim_mutex_lock(&pool->capacity_mutex);
   pool->observer.wake = wake;
   pool->observer.user_data = user_data;
+  iree_slim_mutex_unlock(&pool->capacity_mutex);
   for (loom_serve_memory_operation_t* operation = pool->operations; operation;
        operation = operation->next) {
     iree_slim_mutex_lock(&operation->mutex);
@@ -210,12 +379,22 @@ void loom_serve_memory_pool_set_observer(loom_serve_memory_pool_t* pool,
 
 bool loom_serve_memory_pool_is_pending(loom_serve_memory_pool_t* pool) {
   loom_serve_memory_pool_collect(pool);
-  return pool->operations != NULL;
+  if (pool->operations) {
+    return true;
+  }
+  loom_serve_memory_pool_observe_capacity(pool);
+  return !loom_serve_memory_capacity_is_idle(pool);
 }
 
 iree_status_t loom_serve_memory_pool_await(loom_serve_memory_pool_t* pool) {
-  while (pool->operations) {
-    loom_serve_memory_operation_await(pool->operations);
+  while (loom_serve_memory_pool_is_pending(pool)) {
+    if (pool->operations) {
+      loom_serve_memory_operation_await(pool->operations);
+    } else {
+      iree_notification_await(&pool->capacity_notification,
+                              loom_serve_memory_capacity_is_idle, pool,
+                              iree_infinite_timeout());
+    }
   }
   return iree_status_clone(pool->failure);
 }
@@ -225,21 +404,25 @@ void loom_serve_memory_pool_set_reclaimer(
   pool->reclaimer = reclaimer;
 }
 
-iree_status_t loom_serve_memory_pool_prepare(loom_serve_memory_pool_t* pool,
-                                             uint64_t additional_bytes,
-                                             bool* out_admitted) {
-  *out_admitted = false;
+iree_status_t loom_serve_memory_pool_prepare(
+    loom_serve_memory_pool_t* pool, uint64_t additional_bytes,
+    loom_serve_memory_admission_t* out_admission) {
+  *out_admission = LOOM_SERVE_MEMORY_ADMISSION_CAPACITY;
   loom_serve_memory_pool_collect(pool);
   IREE_RETURN_IF_ERROR(iree_status_clone(pool->failure));
+  if (!additional_bytes) {
+    *out_admission = LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
+    return iree_ok_status();
+  }
   if (additional_bytes > pool->limit_bytes) {
     return iree_ok_status();
   }
   const uint64_t target_bytes = pool->limit_bytes - additional_bytes;
   if (pool->statistics.pending_bytes > target_bytes) {
+    *out_admission = LOOM_SERVE_MEMORY_ADMISSION_DEFERRED;
     return iree_ok_status();
   }
-  if (pool->statistics.committed_bytes + pool->statistics.pending_bytes >
-          target_bytes &&
+  if (loom_serve_memory_pool_charged_bytes(pool) > target_bytes &&
       pool->reclaimer.fn) {
     iree_status_t status =
         pool->reclaimer.fn(pool->reclaimer.user_data,
@@ -253,9 +436,18 @@ iree_status_t loom_serve_memory_pool_prepare(loom_serve_memory_pool_t* pool,
   }
   loom_serve_memory_pool_collect(pool);
   IREE_RETURN_IF_ERROR(iree_status_clone(pool->failure));
-  *out_admitted =
-      pool->statistics.committed_bytes + pool->statistics.pending_bytes <=
-      target_bytes;
+  bool deferred = false;
+  if (loom_serve_memory_pool_charged_bytes(pool) > target_bytes) {
+    deferred = loom_serve_memory_pool_observe_capacity(pool) ||
+               pool->operations != NULL;
+  }
+  // Capacity may have returned during observation. A committed observation
+  // remains evidence of progress even if its callback already ran.
+  if (loom_serve_memory_pool_charged_bytes(pool) <= target_bytes) {
+    *out_admission = LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
+  } else if (deferred) {
+    *out_admission = LOOM_SERVE_MEMORY_ADMISSION_DEFERRED;
+  }
   return iree_ok_status();
 }
 
@@ -287,9 +479,14 @@ iree_status_t loom_serve_virtual_buffer_allocate(
   buffer->pool = pool;
   buffer->statistics = statistics;
   buffer->slab_count = (iree_host_size_t)count;
-  iree_status_t status = iree_hal_allocator_virtual_memory_reserve(
-      pool->device_allocator, pool->queue_affinity, count * pool->slab_size,
-      &buffer->handle);
+  const iree_hal_virtual_buffer_options_t options = {
+      .byte_length = count * pool->slab_size,
+      .min_alignment = alignment,
+      .mapping_granularity = pool->slab_size,
+  };
+  iree_status_t status =
+      iree_hal_virtual_buffer_create(pool->group, pool->scope, &options,
+                                     pool->host_allocator, &buffer->handle);
   if (iree_status_is_ok(status)) {
     pool->statistics.reserved_bytes += count * pool->slab_size;
     statistics->reserved_bytes += count * pool->slab_size;
@@ -305,24 +502,6 @@ iree_hal_buffer_t* loom_serve_virtual_buffer_handle(
   return buffer->handle;
 }
 
-static iree_status_t loom_serve_memory_slab_release_native(
-    loom_serve_virtual_buffer_t* buffer, iree_host_size_t index,
-    loom_serve_memory_slab_t* slab) {
-  loom_serve_memory_pool_t* pool = buffer->pool;
-  if (slab->mapped) {
-    IREE_RETURN_IF_ERROR(iree_hal_allocator_virtual_memory_unmap(
-        pool->device_allocator, buffer->handle, index * pool->slab_size,
-        pool->slab_size));
-    slab->mapped = false;
-  }
-  if (slab->physical) {
-    IREE_RETURN_IF_ERROR(iree_hal_allocator_physical_memory_free(
-        pool->device_allocator, slab->physical));
-    slab->physical = NULL;
-  }
-  return iree_ok_status();
-}
-
 // Publishes one native result on the serialized pool owner. Native work never
 // mutates this accounting or another operation's slab metadata.
 static void loom_serve_memory_slab_publish(
@@ -333,6 +512,7 @@ static void loom_serve_memory_slab_publish(
   if (slab->physical && !result->physical) {
     pool->statistics.committed_bytes -= pool->slab_size;
     pool->statistics.released_bytes += pool->slab_size;
+    pool->retiring_bytes += pool->slab_size;
     buffer->statistics->committed_bytes -= pool->slab_size;
     buffer->statistics->released_bytes += pool->slab_size;
   } else if (!slab->physical && result->physical) {
@@ -348,61 +528,21 @@ static void loom_serve_memory_slab_publish(
   slab->in_flight = false;
 }
 
-static iree_status_t loom_serve_memory_slab_commit_native(
-    loom_serve_virtual_buffer_t* buffer, iree_host_size_t index,
-    loom_serve_memory_slab_t* slab) {
-  loom_serve_memory_pool_t* pool = buffer->pool;
-  iree_status_t status = iree_hal_allocator_physical_memory_allocate(
-      pool->device_allocator, loom_serve_memory_params(), pool->slab_size,
-      pool->host_allocator, &slab->physical);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_allocator_virtual_memory_map(
-        pool->device_allocator, buffer->handle, index * pool->slab_size,
-        slab->physical, 0, pool->slab_size);
-    slab->mapped = iree_status_is_ok(status);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_allocator_virtual_memory_protect(
-        pool->device_allocator, buffer->handle, index * pool->slab_size,
-        pool->slab_size, pool->queue_affinity,
-        IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
-        IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
-  }
-  if (!iree_status_is_ok(status)) {
-    status = iree_status_join(
-        status, loom_serve_memory_slab_release_native(buffer, index, slab));
-  }
-  return status;
-}
-
-// Temporary bridge for the ROCr-backed AMDGPU allocator: its GEM_VA mapping
-// path can complete page-table writes without making the changed translations
-// visible to existing compute queues. An ordinary native allocation takes the
-// KFD map path, including compute TLB publication. The extent exceeds ROCr's
-// fragment allocator so this cannot be satisfied from an already mapped slab.
-// No device work references the buffer; it is released before admission.
-// This costs one transient 64-MiB allocation per cold commitment transaction,
-// never per epoch or when all requested slabs are already committed. The
-// replacement native allocator must supply mapping readiness itself, at which
-// point this bridge and its two pool fields are removed together.
-static iree_status_t loom_serve_memory_publish_legacy_amdgpu_mappings(
-    loom_serve_memory_pool_t* pool) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_buffer_t* publication = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_pool_allocate_buffer(
-              pool->storage_pool,
-              iree_hal_make_pool_reservation_request(64 * 1024 * 1024, 0),
-              iree_infinite_timeout(), &publication));
-  iree_hal_buffer_release(publication);
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
 static void loom_serve_memory_pool_collect(loom_serve_memory_pool_t* pool) {
+  iree_slim_mutex_lock(&pool->capacity_mutex);
+  iree_status_t capacity_status = pool->capacity_status;
+  pool->capacity_status = iree_ok_status();
+  iree_slim_mutex_unlock(&pool->capacity_mutex);
+  pool->capacity_failed |= !iree_status_is_ok(capacity_status);
+  pool->failure = iree_status_join(pool->failure, capacity_status);
   loom_serve_memory_operation_t** link = &pool->operations;
   while (*link) {
     loom_serve_memory_operation_t* operation = *link;
+    if (!operation->acquired_accounted &&
+        iree_atomic_load(&operation->acquired, iree_memory_order_acquire)) {
+      pool->acquired_pending_bytes += operation->count * pool->slab_size;
+      operation->acquired_accounted = true;
+    }
     iree_slim_mutex_lock(&operation->mutex);
     const bool complete = operation->complete;
     iree_slim_mutex_unlock(&operation->mutex);
@@ -413,53 +553,68 @@ static void loom_serve_memory_pool_collect(loom_serve_memory_pool_t* pool) {
     for (iree_host_size_t i = 0; i < operation->count; ++i) {
       const loom_serve_memory_edit_t* edit = &operation->edits[i];
       loom_serve_memory_slab_publish(edit->buffer, edit->index, &edit->result);
+      if (operation->invalidates_backing &&
+          iree_status_is_ok(edit->buffer->failure)) {
+        edit->buffer->failure = iree_status_clone(operation->status);
+      }
       if (operation->releasing) {
         edit->buffer->statistics->releasing_bytes -= pool->slab_size;
       } else {
         edit->buffer->statistics->pending_bytes -= pool->slab_size;
+        if (!edit->result.physical) {
+          // Failed acquisition can leave native disposal behind its buffer
+          // return. Transfer the pending charge until native counts prove it
+          // has retired, including the case where no backing was allocated.
+          pool->retiring_bytes += pool->slab_size;
+        }
       }
     }
     if (operation->releasing) {
       pool->statistics.releasing_bytes -= operation->count * pool->slab_size;
     } else {
       pool->statistics.pending_bytes -= operation->count * pool->slab_size;
+      if (operation->acquired_accounted) {
+        pool->acquired_pending_bytes -= operation->count * pool->slab_size;
+      }
     }
-    pool->failure = iree_status_join(pool->failure, operation->status);
-    operation->status = iree_ok_status();
     operation->published = true;
     *link = operation->next;
     operation->next = NULL;
   }
 }
 
-static void loom_serve_memory_operation_execute(
-    iree_hal_memory_maintenance_entry_t* entry) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  loom_serve_memory_operation_t* operation =
-      (loom_serve_memory_operation_t*)entry;
-  iree_status_t status = iree_ok_status();
-  bool mapped = false;
-  for (iree_host_size_t i = 0;
-       i < operation->count && iree_status_is_ok(status); ++i) {
-    loom_serve_memory_edit_t* edit = &operation->edits[i];
+static void loom_serve_memory_operation_complete(
+    loom_serve_memory_operation_t* operation) {
+  if (iree_atomic_fetch_sub(&operation->pending, 1,
+                            iree_memory_order_acq_rel) != 1) {
+    return;
+  }
+  const bool first_ok = iree_status_is_ok(operation->stages[0].status);
+  const bool second_ok = iree_status_is_ok(operation->stages[1].status);
+  for (iree_host_size_t i = 0; i < operation->count; ++i) {
+    loom_serve_memory_slab_t* result = &operation->edits[i].result;
     if (operation->releasing) {
-      status = loom_serve_memory_slab_release_native(edit->buffer, edit->index,
-                                                     &edit->result);
+      if (first_ok) {
+        result->mapped = false;
+      }
+      if (second_ok) {
+        iree_hal_buffer_release(operation->sources[i]);
+        result->physical = NULL;
+      }
+    } else if (first_ok) {
+      result->physical = operation->sources[i];
+      // Failed batches can have installed a subset. Checked whole-target
+      // detach owns recovery after all consumers and captured work retire.
+      result->mapped = true;
     } else {
-      status = loom_serve_memory_slab_commit_native(edit->buffer, edit->index,
-                                                    &edit->result);
-      mapped |= edit->result.mapped;
+      iree_hal_buffer_release(operation->sources[i]);
     }
   }
-  if (mapped && operation->pool->legacy_amdgpu_mapping_publication) {
-    status = iree_status_join(
-        status,
-        loom_serve_memory_publish_legacy_amdgpu_mappings(operation->pool));
-  }
-  // A readiness observer may immediately attempt retirement. Serialize the
-  // final signal and ownership publication so it cannot observe ready mappings
-  // without also joining the callback's final access to this operation.
-  iree_slim_mutex_lock(&operation->mutex);
+  iree_status_t status = iree_status_join(operation->stages[0].status,
+                                          operation->stages[1].status);
+  operation->stages[0].status = operation->stages[1].status = iree_ok_status();
+  operation->invalidates_backing =
+      !iree_status_is_ok(status) && (operation->releasing || first_ok);
   if (operation->readiness && iree_status_is_ok(status)) {
     status =
         iree_hal_semaphore_signal(operation->readiness, operation->value, NULL);
@@ -467,6 +622,7 @@ static void loom_serve_memory_operation_execute(
   if (operation->readiness && !iree_status_is_ok(status)) {
     iree_hal_semaphore_fail(operation->readiness, iree_status_clone(status));
   }
+  iree_slim_mutex_lock(&operation->mutex);
   operation->status = status;
   operation->complete = true;
   iree_notification_post(&operation->notification, IREE_ALL_WAITERS);
@@ -477,21 +633,129 @@ static void loom_serve_memory_operation_execute(
     operation->observer.wake(operation->observer.user_data);
   }
   iree_slim_mutex_unlock(&operation->mutex);
-  IREE_TRACE_ZONE_END(z0);
+}
+
+static void loom_serve_memory_stage_completed(
+    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
+    iree_status_t status) {
+  loom_serve_memory_stage_t* stage = user_data;
+  stage->status = status;
+  if (stage == &stage->operation->stages[0] && !stage->operation->releasing &&
+      iree_status_is_ok(status)) {
+    iree_atomic_store(&stage->operation->acquired, 1,
+                      iree_memory_order_release);
+  }
+  loom_serve_memory_operation_complete(stage->operation);
+}
+
+static iree_status_t loom_serve_memory_operation_allocate(
+    loom_serve_memory_pool_t* pool, iree_host_size_t count,
+    loom_serve_memory_operation_t** out_operation) {
+  *out_operation = NULL;
+  loom_serve_memory_operation_t* operation = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
+      pool->host_allocator, sizeof(*operation), count,
+      sizeof(loom_serve_memory_edit_t) + sizeof(iree_hal_buffer_t*) +
+          sizeof(iree_hal_pool_reservation_request_t) +
+          sizeof(iree_hal_memory_mapping_t),
+      (void**)&operation));
+  operation->pool = pool;
+  operation->count = count;
+  operation->sources = (iree_hal_buffer_t**)(operation->edits + count);
+  operation->requests =
+      (iree_hal_pool_reservation_request_t*)(operation->sources + count);
+  operation->mappings =
+      (iree_hal_memory_mapping_t*)(operation->requests + count);
+  iree_slim_mutex_initialize(&operation->mutex);
+  iree_notification_initialize(&operation->notification);
+  iree_hal_device_t* device =
+      iree_hal_queue_family_device(iree_hal_queue_family(pool->queue));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < 2 && iree_status_is_ok(status); ++i) {
+    operation->stages[i].operation = operation;
+    operation->stages[i].timepoint.callback = loom_serve_memory_stage_completed;
+    operation->stages[i].timepoint.user_data = &operation->stages[i];
+    status = iree_hal_semaphore_create(
+        device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &operation->stages[i].semaphore);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_operation = operation;
+  } else {
+    operation->published = true;
+    loom_serve_memory_operation_free(operation);
+  }
+  return status;
 }
 
 static void loom_serve_memory_operation_enqueue(
     loom_serve_memory_pool_t* pool, loom_serve_memory_operation_t* operation) {
-  operation->entry.fn = loom_serve_memory_operation_execute;
-  operation->pool = pool;
   operation->observer.wake = pool->observer.wake;
   operation->observer.user_data = pool->observer.user_data;
-  iree_slim_mutex_initialize(&operation->mutex);
-  iree_notification_initialize(&operation->notification);
   operation->next = pool->operations;
   pool->operations = operation;
-  iree_hal_memory_maintenance_enqueue(pool->storage_pool->maintenance,
-                                      &operation->entry);
+  iree_atomic_store(&operation->pending, 3, iree_memory_order_relaxed);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    loom_serve_memory_stage_t* stage = &operation->stages[i];
+    iree_status_t acquired = iree_async_semaphore_acquire_timepoint(
+        (iree_async_semaphore_t*)stage->semaphore, 1, &stage->timepoint);
+    if (!iree_status_is_ok(acquired)) {
+      status = iree_status_join(status, iree_status_clone(acquired));
+      loom_serve_memory_stage_completed(stage, &stage->timepoint, acquired);
+    }
+  }
+  uint64_t value = 1;
+  const iree_hal_semaphore_list_t first = {1, &operation->stages[0].semaphore,
+                                           &value};
+  const iree_hal_semaphore_list_t second = {1, &operation->stages[1].semaphore,
+                                            &value};
+  for (iree_host_size_t i = 0; i < operation->count; ++i) {
+    loom_serve_memory_edit_t* edit = &operation->edits[i];
+    operation->requests[i] =
+        iree_hal_make_pool_reservation_request(pool->slab_size, 0);
+    if (operation->releasing) {
+      operation->sources[i] = edit->result.physical;
+    }
+    operation->mappings[i] = (iree_hal_memory_mapping_t){
+        .target = edit->buffer->handle,
+        .scope = pool->mapping_scope,
+        .target_range = {edit->index * pool->slab_size, pool->slab_size},
+        .access = operation->releasing ? IREE_HAL_MEMORY_ACCESS_NONE
+                                       : IREE_HAL_MEMORY_ACCESS_ALL,
+        .operation = operation->releasing
+                         ? IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND
+                         : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+    };
+  }
+  if (iree_status_is_ok(status)) {
+    status = operation->releasing
+                 ? iree_hal_queue_map(pool->queue,
+                                      iree_hal_semaphore_list_empty(), first,
+                                      operation->count, operation->mappings, 0)
+                 : iree_hal_queue_alloca(
+                       pool->queue, iree_hal_semaphore_list_empty(), first,
+                       pool->storage_pool, operation->count,
+                       operation->requests, operation->sources);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_semaphore_fail(operation->stages[0].semaphore,
+                            iree_status_clone(status));
+  } else if (operation->releasing) {
+    status = iree_hal_queue_dealloca(pool->queue, first, second,
+                                     operation->count, operation->sources);
+  } else {
+    for (iree_host_size_t i = 0; i < operation->count; ++i) {
+      operation->mappings[i].source = operation->sources[i];
+    }
+    status = iree_hal_queue_map(pool->queue, first, second, operation->count,
+                                operation->mappings, 0);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_semaphore_fail(operation->stages[1].semaphore, status);
+  }
+  // Final handoff: an inline completion can now publish and release capture.
+  loom_serve_memory_operation_complete(operation);
 }
 
 iree_status_t loom_serve_memory_pool_commit_async(
@@ -503,13 +767,12 @@ iree_status_t loom_serve_memory_pool_commit_async(
   *out_admitted = false;
   *out_operation = NULL;
   loom_serve_memory_pool_collect(pool);
-  // Elastic sources capture a cold owner when their native pool is created.
-  // This serving allocator composes with that domain, never with task workers.
-  if (!pool->storage_pool->maintenance) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "elastic backing requires native cold maintenance");
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
+       ++r) {
+    status = iree_status_clone(ranges[r].buffer->failure);
   }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   iree_host_size_t count = 0;
   for (iree_host_size_t r = 0; r < range_count; ++r) {
     const loom_serve_memory_range_t* range = &ranges[r];
@@ -524,14 +787,13 @@ iree_status_t loom_serve_memory_pool_commit_async(
       }
     }
   }
-  bool admitted = false;
-  iree_status_t status =
-      loom_serve_memory_pool_prepare(pool, count * pool->slab_size, &admitted);
+  loom_serve_memory_admission_t admission;
+  status =
+      loom_serve_memory_pool_prepare(pool, count * pool->slab_size, &admission);
+  const bool admitted = admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
   loom_serve_memory_operation_t* operation = NULL;
   if (iree_status_is_ok(status) && admitted && count) {
-    status = iree_allocator_malloc_struct_array(
-        pool->host_allocator, sizeof(*operation), count,
-        sizeof(loom_serve_memory_edit_t), (void**)&operation);
+    status = loom_serve_memory_operation_allocate(pool, count, &operation);
   }
   iree_host_size_t index = 0;
   for (iree_host_size_t r = 0; r < range_count; ++r) {
@@ -561,7 +823,7 @@ iree_status_t loom_serve_memory_pool_commit_async(
     pool->statistics.pending_bytes += count * pool->slab_size;
     *out_operation = operation;
     loom_serve_memory_operation_enqueue(pool, operation);
-  } else if (iree_status_is_ok(status) && admitted) {
+  } else if (iree_status_is_ok(status) && admitted && readiness) {
     status = iree_hal_semaphore_signal(readiness, value, NULL);
   }
   *out_admitted = iree_status_is_ok(status) && admitted;
@@ -577,11 +839,12 @@ iree_status_t loom_serve_memory_pool_trim_async(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_operation = NULL;
   loom_serve_memory_pool_collect(pool);
-  if (!pool->storage_pool->maintenance) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "elastic backing requires native cold maintenance");
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t b = 0; b < buffer_count && iree_status_is_ok(status);
+       ++b) {
+    status = iree_status_clone(buffers[b]->failure);
   }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   iree_host_size_t count = 0;
   for (iree_host_size_t b = 0; b < buffer_count; ++b) {
     for (iree_host_size_t i = 0; i < buffers[b]->slab_count; ++i) {
@@ -601,9 +864,7 @@ iree_status_t loom_serve_memory_pool_trim_async(
   }
   loom_serve_memory_operation_t* operation = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc_struct_array(
-              pool->host_allocator, sizeof(*operation), count,
-              sizeof(loom_serve_memory_edit_t), (void**)&operation));
+      z0, loom_serve_memory_operation_allocate(pool, count, &operation));
   operation->count = count;
   operation->releasing = true;
   operation->readiness = readiness;
@@ -667,13 +928,21 @@ void loom_serve_memory_operation_await(
   }
 }
 
+iree_status_t loom_serve_memory_operation_query_status(
+    const loom_serve_memory_operation_t* operation) {
+  return operation ? iree_status_clone(operation->status) : iree_ok_status();
+}
+
 void loom_serve_memory_operation_free(
     loom_serve_memory_operation_t* operation) {
   if (operation) {
     IREE_ASSERT(operation->published);
     iree_notification_deinitialize(&operation->notification);
     iree_slim_mutex_deinitialize(&operation->mutex);
+    iree_hal_semaphore_release(operation->stages[0].semaphore);
+    iree_hal_semaphore_release(operation->stages[1].semaphore);
     iree_hal_semaphore_release(operation->readiness);
+    iree_status_free(operation->status);
     iree_allocator_free(operation->pool->host_allocator, operation);
   }
 }
@@ -681,59 +950,12 @@ void loom_serve_memory_operation_free(
 iree_status_t loom_serve_memory_pool_try_commit(
     loom_serve_memory_pool_t* pool, iree_host_size_t range_count,
     const loom_serve_memory_range_t* ranges, bool* out_admitted) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  loom_serve_memory_pool_collect(pool);
-  *out_admitted = false;
-  uint64_t additional_bytes = 0;
-  for (iree_host_size_t r = 0; r < range_count; ++r) {
-    const loom_serve_memory_range_t* range = &ranges[r];
-    const iree_host_size_t end =
-        (range->offset + range->length - 1) / pool->slab_size + 1;
-    for (iree_host_size_t i = range->offset / pool->slab_size; i < end; ++i) {
-      loom_serve_memory_slab_t* slab = &range->buffer->slabs[i];
-      IREE_ASSERT(!slab->in_flight);
-      if (!slab->physical && !slab->pending_commit) {
-        slab->pending_commit = true;
-        additional_bytes += pool->slab_size;
-      }
-    }
-  }
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)additional_bytes);
-  bool admitted = false;
-  iree_status_t status =
-      loom_serve_memory_pool_prepare(pool, additional_bytes, &admitted);
-  // Clear every temporary mark even after denial or platform failure. No plan
-  // state survives this serialized call or changes the maintenance keep set.
-  for (iree_host_size_t r = 0; r < range_count; ++r) {
-    const loom_serve_memory_range_t* range = &ranges[r];
-    const iree_host_size_t end =
-        (range->offset + range->length - 1) / pool->slab_size + 1;
-    for (iree_host_size_t i = range->offset / pool->slab_size; i < end; ++i) {
-      loom_serve_memory_slab_t* slab = &range->buffer->slabs[i];
-      if (slab->pending_commit) {
-        slab->pending_commit = false;
-        if (iree_status_is_ok(status) && admitted) {
-          loom_serve_memory_slab_t result = {0};
-          status =
-              loom_serve_memory_slab_commit_native(range->buffer, i, &result);
-          loom_serve_memory_slab_publish(range->buffer, i, &result);
-          if (result.mapped && pool->legacy_amdgpu_mapping_publication) {
-            pool->legacy_amdgpu_mappings_pending = true;
-          }
-        }
-      }
-    }
-  }
-  // Publish partial progress too: a later request can reuse successfully added
-  // slabs after an allocation failure. Failed publication remains pending.
-  if (pool->legacy_amdgpu_mappings_pending) {
-    iree_status_t publication =
-        loom_serve_memory_publish_legacy_amdgpu_mappings(pool);
-    pool->legacy_amdgpu_mappings_pending = !iree_status_is_ok(publication);
-    status = iree_status_join(status, publication);
-  }
-  *out_admitted = iree_status_is_ok(status) && admitted;
-  IREE_TRACE_ZONE_END(z0);
+  loom_serve_memory_operation_t* operation = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_memory_pool_commit_async(
+      pool, range_count, ranges, NULL, 0, out_admitted, &operation));
+  loom_serve_memory_operation_await(operation);
+  iree_status_t status = loom_serve_memory_operation_query_status(operation);
+  loom_serve_memory_operation_free(operation);
   return status;
 }
 
@@ -769,20 +991,14 @@ void loom_serve_virtual_buffer_keep(loom_serve_virtual_buffer_t* buffer,
 
 iree_status_t loom_serve_virtual_buffer_trim(
     loom_serve_virtual_buffer_t* buffer) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  loom_serve_memory_pool_collect(buffer->pool);
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < buffer->slab_count && iree_status_is_ok(status); ++i) {
-    if (!buffer->slabs[i].keep) {
-      IREE_ASSERT(!buffer->slabs[i].in_flight);
-      loom_serve_memory_slab_t result = buffer->slabs[i];
-      status = loom_serve_memory_slab_release_native(buffer, i, &result);
-      loom_serve_memory_slab_publish(buffer, i, &result);
-    }
-  }
-  IREE_TRACE_ZONE_END(z0);
-  return status;
+  loom_serve_memory_operation_t* operation = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_memory_pool_trim_async(
+      buffer->pool, 1, &buffer, NULL, 0, &operation));
+  loom_serve_memory_operation_await(operation);
+  iree_status_t status = loom_serve_memory_operation_query_status(operation);
+  loom_serve_memory_operation_free(operation);
+  // Synchronous trimming is an explicit outer capacity-reclamation boundary.
+  return iree_status_join(status, loom_serve_memory_pool_await(buffer->pool));
 }
 
 iree_status_t loom_serve_virtual_buffer_free(
@@ -791,10 +1007,19 @@ iree_status_t loom_serve_virtual_buffer_free(
     return iree_ok_status();
   }
   loom_serve_memory_pool_t* pool = buffer->pool;
-  loom_serve_virtual_buffer_begin_trim(buffer);
-  IREE_RETURN_IF_ERROR(loom_serve_virtual_buffer_trim(buffer));
-  IREE_RETURN_IF_ERROR(iree_hal_allocator_virtual_memory_release(
-      pool->device_allocator, buffer->handle));
+  loom_serve_memory_pool_collect(pool);
+  // Checked removal remains available after a partial failed mapping batch.
+  // Sources stay owned if detach fails, so the caller can retry cleanup.
+  IREE_RETURN_IF_ERROR(
+      iree_hal_virtual_buffer_detach(buffer->handle, pool->mapping_scope));
+  for (iree_host_size_t i = 0; i < buffer->slab_count; ++i) {
+    IREE_ASSERT(!buffer->slabs[i].in_flight);
+    iree_hal_buffer_release(buffer->slabs[i].physical);
+    const loom_serve_memory_slab_t empty = {0};
+    loom_serve_memory_slab_publish(buffer, i, &empty);
+  }
+  iree_hal_buffer_release(buffer->handle);
+  iree_status_free(buffer->failure);
   pool->statistics.reserved_bytes -= buffer->slab_count * pool->slab_size;
   buffer->statistics->reserved_bytes -= buffer->slab_count * pool->slab_size;
   iree_allocator_free(pool->host_allocator, buffer);

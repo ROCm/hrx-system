@@ -6,6 +6,8 @@
 
 #include "iree/hal/drivers/task/device.h"
 
+#include <atomic>
+
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
@@ -14,6 +16,35 @@
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+struct DeviceAllocationLifetime {
+  // Device-owned allocations not yet returned to the underlying allocator.
+  std::atomic<int64_t> outstanding{0};
+
+  iree_allocator_t allocator() { return {this, Control}; }
+
+  static iree_status_t Control(void* user_data,
+                               iree_allocator_command_t command,
+                               const void* params, void** pointer) {
+    auto* lifetime = static_cast<DeviceAllocationLifetime*>(user_data);
+    const bool had_pointer = (command == IREE_ALLOCATOR_COMMAND_FREE ||
+                              command == IREE_ALLOCATOR_COMMAND_REALLOC) &&
+                             *pointer != nullptr;
+    const auto allocator = iree_allocator_system();
+    iree_status_t status =
+        allocator.ctl(allocator.self, command, params, pointer);
+    if (iree_status_is_ok(status)) {
+      if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+        if (had_pointer) {
+          --lifetime->outstanding;
+        }
+      } else if (command != IREE_ALLOCATOR_COMMAND_REALLOC || !had_pointer) {
+        ++lifetime->outstanding;
+      }
+    }
+    return status;
+  }
+};
 
 class TaskDeviceLocalityTest : public ::testing::Test {
  protected:
@@ -51,7 +82,8 @@ class TaskDeviceLocalityTest : public ::testing::Test {
   iree_status_t CreateDevice(
       iree_host_size_t count, const uint32_t* nodes,
       iree_host_size_t queue_count = 1,
-      iree_task_executor_t* const* queue_executors = nullptr) {
+      iree_task_executor_t* const* queue_executors = nullptr,
+      iree_allocator_t host_allocator = iree_allocator_system()) {
     IREE_RETURN_IF_ERROR(iree_async_proactor_pool_create(
         count, nodes, iree_async_proactor_pool_options_default(),
         iree_allocator_system(), &pool_));
@@ -63,7 +95,7 @@ class TaskDeviceLocalityTest : public ::testing::Test {
         IREE_SV("device_test"), &params, queue_count,
         queue_executors ? queue_executors : &executor_,
         /*loader_count=*/0, /*loaders=*/nullptr, device_allocator_,
-        &create_params, iree_allocator_system(), &device_);
+        &create_params, host_allocator, &device_);
   }
 
   iree_status_t CreateUnplacedExecutor() {
@@ -131,7 +163,48 @@ class TaskDeviceLocalityTest : public ::testing::Test {
   iree_async_proactor_pool_t* pool_ = nullptr;
   // Device under test, released before its construction inputs.
   iree_hal_device_t* device_ = nullptr;
+  // Outlives teardown, including failure exits from allocator lifetime tests.
+  DeviceAllocationLifetime allocation_lifetime_;
 };
+
+TEST_F(TaskDeviceLocalityTest, DestructionJoinsNativeAllocationOwnership) {
+  const uint32_t nodes[] = {UINT32_MAX};
+  IREE_ASSERT_OK(CreateDevice(IREE_ARRAYSIZE(nodes), nodes, 1, nullptr,
+                              allocation_lifetime_.allocator()));
+  iree_async_frontier_tracker_t* tracker = nullptr;
+  IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+      iree_async_frontier_tracker_options_default(), iree_allocator_system(),
+      &tracker));
+  iree_hal_device_group_builder_t builder;
+  iree_hal_device_group_builder_initialize(&builder, tracker);
+  iree_async_frontier_tracker_release(tracker);
+  IREE_ASSERT_OK(iree_hal_device_group_builder_add_device(&builder, device_));
+  iree_hal_device_group_t* group = nullptr;
+  IREE_ASSERT_OK(iree_hal_device_group_builder_finalize(
+      &builder, iree_allocator_system(), &group));
+  iree_hal_device_group_builder_deinitialize(&builder);
+  const iree_hal_pool_family_access_t family = {
+      .family = iree_hal_device_queue_family(device_, 0),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group, {1, &family}, &options,
+                                           iree_allocator_system(), &pool));
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(4096, 64),
+      iree_infinite_timeout(), &buffer));
+  iree_hal_buffer_release(buffer);
+  iree_hal_pool_release(pool);
+  iree_hal_device_group_release(group);
+  // Native free may still be running. Device destruction joins that work even
+  // though the executor and its workers remain alive in the fixture.
+  iree_hal_device_release(device_);
+  device_ = nullptr;
+  EXPECT_EQ(allocation_lifetime_.outstanding.load(), 0);
+}
 
 TEST_F(TaskDeviceLocalityTest, AcceptsExplicitUnplacedService) {
   const uint32_t nodes[] = {UINT32_MAX};

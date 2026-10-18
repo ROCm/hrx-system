@@ -138,8 +138,8 @@ struct iree_hal_amd_xdna_queue_t {
   bool notification_pending;
   // Direct-wait ownership and native-event handoff flags.
   iree_atomic_int32_t direct_wait_flags;
-  // Sticky native observation/execution failure, owned by this queue.
-  iree_status_t failure_status;
+  // First native failure, published once and immutable until queue destruction.
+  iree_atomic_intptr_t failure_status;
   // Retained topology tracker; NULL before group assignment.
   iree_async_frontier_tracker_t* tracker;
   // Queue axis assigned by its group.
@@ -150,6 +150,15 @@ struct iree_hal_amd_xdna_queue_t {
   // Complete causal lower bound of the accepted native FIFO.
   iree_hal_amd_xdna_frontier_state_t accepted_frontier;
 };
+
+// Borrows the immutable first failure while the caller retains queue/device
+// lifetime. Semaphore callbacks can query this while their signal producer
+// owns the state mutex; no lock or mutable status annotation is involved.
+static inline iree_status_t iree_hal_amd_xdna_queue_failure_status(
+    const iree_hal_amd_xdna_queue_t* queue) {
+  return (iree_status_t)iree_atomic_load(&queue->failure_status,
+                                         iree_memory_order_acquire);
+}
 
 // Publishes a driver failure event without consuming a status.
 void iree_hal_amd_xdna_queue_report(iree_hal_amd_xdna_queue_t* queue,

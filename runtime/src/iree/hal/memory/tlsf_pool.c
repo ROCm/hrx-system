@@ -11,10 +11,10 @@
 #include "iree/async/notification.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/mutex.h"
-#include "iree/base/threading/notification.h"
 #include "iree/hal/memory/buffer_range.h"
-#include "iree/hal/memory/maintenance.h"
+#include "iree/hal/memory/pool_history.h"
 #include "iree/hal/memory/tlsf_pool_reservation.h"
+#include "iree/hal/memory/tlsf_pool_slab.h"
 #include "iree/hal/memory/tracing.h"
 
 enum {
@@ -25,36 +25,6 @@ enum {
 //===----------------------------------------------------------------------===//
 // Types
 //===----------------------------------------------------------------------===//
-
-typedef struct iree_hal_tlsf_pool_slab_t {
-  // Next owned slab, or next detached slab awaiting release outside the mutex.
-  struct iree_hal_tlsf_pool_slab_t* next;
-
-  // Previous owned slab, allowing constant-time removal of unused backing.
-  struct iree_hal_tlsf_pool_slab_t* previous;
-
-  // Next slab whose free state must be checked by maintenance.
-  struct iree_hal_tlsf_pool_slab_t* candidate_next;
-
-  // Whether this slab is already linked in the return-candidate list.
-  bool return_candidate;
-
-  // Cold transaction preparations preserving this slab until their next
-  // attempt.
-  uint32_t preparation_count;
-
-  // Offset allocator for the address range backed by |slab|.
-  iree_hal_memory_tlsf_t tlsf;
-
-  // Prepared backing range; borrowed from source_range for a finite arena.
-  iree_hal_pool_buffer_range_t range;
-
-  // Ordinary parent reservation owned until this slab is returned.
-  iree_hal_pool_reservation_t reservation;
-
-  // Exact history returned with reservation before TLSF metadata is freed.
-  const iree_async_frontier_t* release_frontier;
-} iree_hal_tlsf_pool_slab_t;
 
 typedef struct iree_hal_tlsf_pool_allocation_t {
   // Owning slab, stable across directory changes while this allocation is live.
@@ -113,6 +83,9 @@ typedef struct iree_hal_tlsf_pool_t {
   // Guards TLSF mutation and the owned slab inventory.
   iree_slim_mutex_t mutex;
 
+  // Overflow proofs and presecured backing-return metadata.
+  iree_hal_pool_history_t history;
+
   // Template options used when initializing each new TLSF slab.
   iree_hal_memory_tlsf_options_t slab_options;
 
@@ -132,22 +105,17 @@ typedef struct iree_hal_tlsf_pool_t {
     uint32_t count;
   } slabs;
 
+  // One idle metadata set, independent of all backing ownership. Protected by
+  // |mutex| and emptied by explicit trim.
+  struct {
+    // Free offset metadata whose entire parent reservation has returned.
+    iree_hal_tlsf_pool_slab_t* slab;
+    // Durable storage sized for the largest completed acquisition batch.
+    struct iree_hal_tlsf_pool_acquire_t* acquire;
+  } reusable;
+
   // Slabs changed by growth or returned blocks. Protected by |mutex|.
   iree_hal_tlsf_pool_slab_t* return_candidates;
-
-  // Coalesced cold work. Its mutex guards only scheduling and final joining.
-  struct {
-    // Protects requested/pending and the callback's final notification access.
-    iree_slim_mutex_t mutex;
-    // Joins this pool's work during caller-quiescent destruction.
-    iree_notification_t notification;
-    // Reusable entry on the backing pool's captured maintenance owner.
-    iree_hal_memory_maintenance_entry_t entry;
-    // Whether a producer requested another pass over changed metadata.
-    bool requested;
-    // Whether the entry is queued or executing.
-    bool pending;
-  } maintenance;
 
   // Preferred slab to try first for the next allocation. Protected by |mutex|.
   iree_hal_tlsf_pool_slab_t* preferred_slab;
@@ -259,9 +227,6 @@ typedef struct iree_hal_tlsf_pool_acquire_element_t {
     iree_hal_pool_acquire_result_t result;
   } dedicated;
 
-  // Backing preserved across a cold retry, without withholding free blocks.
-  iree_hal_tlsf_pool_slab_t* preparing_slab;
-
   // Reservation produced for the request.
   iree_hal_pool_reservation_t reservation;
 
@@ -284,28 +249,13 @@ static bool iree_hal_tlsf_pool_query_completed_epoch(void* user_data,
 // Internal helpers
 //===----------------------------------------------------------------------===//
 
-static void iree_hal_tlsf_pool_schedule_maintenance(
-    iree_hal_tlsf_pool_t* pool) {
-  if (!pool->backing_pool) {
-    return;
+static void iree_hal_tlsf_pool_attach_slab_history(
+    iree_hal_tlsf_pool_t* pool, iree_hal_tlsf_pool_slab_t* slab) {
+  slab->history_owned = pool->history.timeline != NULL;
+  if (pool->history.timeline) {
+    slab->tlsf.frontier_overflow = iree_hal_pool_history_collapse;
+    slab->tlsf.frontier_overflow_user_data = &pool->history;
   }
-  iree_slim_mutex_lock(&pool->maintenance.mutex);
-  pool->maintenance.requested = true;
-  const bool enqueue = !pool->maintenance.pending;
-  pool->maintenance.pending = true;
-  iree_slim_mutex_unlock(&pool->maintenance.mutex);
-  if (enqueue) {
-    iree_hal_memory_maintenance_enqueue(pool->base.maintenance,
-                                        &pool->maintenance.entry);
-  }
-}
-
-static bool iree_hal_tlsf_pool_maintenance_is_idle(void* user_data) {
-  iree_hal_tlsf_pool_t* pool = user_data;
-  iree_slim_mutex_lock(&pool->maintenance.mutex);
-  const bool idle = !pool->maintenance.pending;
-  iree_slim_mutex_unlock(&pool->maintenance.mutex);
-  return idle;
 }
 
 static void iree_hal_tlsf_pool_note_return_candidate(
@@ -464,11 +414,15 @@ static void iree_hal_tlsf_pool_return_release_node_to_tlsf(
   iree_async_frontier_t* death_frontier =
       iree_hal_tlsf_pool_release_node_frontier(pool, node);
   if (node->block_index == IREE_HAL_MEMORY_TLSF_BLOCK_INDEX_NONE) {
+    bool merged = iree_hal_tlsf_pool_dedicated_merge_return_frontier(
+        node, &pool->reservation_layout);
+    if (!merged && pool->history.timeline) {
+      iree_hal_pool_history_collapse(&pool->history, death_frontier,
+                                     node->range->memory.reuse_frontier);
+      merged = true;
+    }
     iree_hal_tlsf_pool_release_node_t** list =
-        iree_hal_tlsf_pool_dedicated_merge_return_frontier(
-            node, &pool->reservation_layout)
-            ? &pool->dedicated.returns
-            : &pool->dedicated.tainted;
+        merged ? &pool->dedicated.returns : &pool->dedicated.tainted;
     node->next = *list;
     *list = node;
     return;
@@ -620,73 +574,6 @@ static bool iree_hal_tlsf_pool_frontier_is_satisfied(
   return true;
 }
 
-// Acquires and prepares an ordinary backing range outside the mutation mutex.
-// Setup rollback returns the original prerequisite even when the requester
-// already covers it: requester eligibility is not global completion.
-static iree_status_t iree_hal_tlsf_pool_prepare_slab(
-    iree_hal_tlsf_pool_t* pool, const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reserve_flags_t flags, iree_hal_tlsf_pool_slab_t** out_slab,
-    iree_hal_pool_acquire_result_t* out_result) {
-  *out_slab = NULL;
-  *out_result = IREE_HAL_POOL_ACQUIRE_OK_FRESH;
-  iree_hal_tlsf_pool_slab_t* slab = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(pool->host_allocator,
-                                             sizeof(*slab), (void**)&slab));
-  memset(slab, 0, sizeof(*slab));
-  iree_status_t status = iree_ok_status();
-  iree_hal_pool_acquire_info_t info = {0};
-  if (pool->backing_pool) {
-    const iree_hal_pool_reservation_request_t request = {
-        .allocation_size = pool->backing_slab_length,
-        .min_alignment = iree_min(pool->slab_options.alignment,
-                                  pool->capabilities.max_allocation_alignment),
-    };
-    status = iree_hal_pool_acquire_reservations(
-        pool->backing_pool, 1, &request, requester_frontier, flags,
-        &slab->reservation, &info, out_result);
-    if (iree_status_is_ok(status) &&
-        (*out_result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED ||
-         *out_result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET)) {
-      iree_allocator_free(pool->host_allocator, slab);
-      return iree_ok_status();
-    }
-    iree_hal_buffer_t* buffer = NULL;
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_pool_materialize_reservations(
-          pool->backing_pool, 1, &request, &slab->reservation,
-          IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &buffer);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_pool_buffer_range_initialize(
-          buffer, 0, IREE_HAL_WHOLE_BUFFER, request.min_alignment,
-          &pool->asan_options, &slab->range);
-      slab->range.memory.reuse_frontier = info.reuse_frontier;
-    }
-    iree_hal_buffer_release(buffer);
-  } else {
-    slab->range = pool->source_range;
-  }
-  if (iree_status_is_ok(status)) {
-    iree_hal_memory_tlsf_options_t options = pool->slab_options;
-    options.range_length = slab->range.length;
-    options.initial_frontier = slab->range.memory.reuse_frontier;
-    status = iree_hal_memory_tlsf_initialize(options, pool->host_allocator,
-                                             &slab->tlsf);
-  }
-  if (iree_status_is_ok(status)) {
-    slab->release_frontier = info.reuse_frontier;
-    *out_slab = slab;
-  } else {
-    if (pool->backing_pool && info.result != IREE_HAL_POOL_ACQUIRE_NONE) {
-      iree_hal_pool_release_reservations(
-          pool->backing_pool, 1, &slab->reservation, info.reuse_frontier);
-      iree_hal_pool_buffer_range_deinitialize(&slab->range);
-    }
-    iree_allocator_free(pool->host_allocator, slab);
-  }
-  return status;
-}
-
 // Publishes prepared backing with no allocation or native work under the mutex.
 static void iree_hal_tlsf_pool_publish_slab(
     iree_hal_tlsf_pool_t* pool, iree_hal_tlsf_pool_slab_t* slab_entry)
@@ -708,39 +595,8 @@ static void iree_hal_tlsf_pool_publish_slab(
                         iree_memory_order_relaxed);
 }
 
-static void iree_hal_tlsf_pool_destroy_slab(iree_hal_tlsf_pool_t* pool,
-                                            iree_hal_tlsf_pool_slab_t* slab) {
-  if (pool->backing_pool) {
-    iree_hal_pool_release_reservations(
-        pool->backing_pool, 1, &slab->reservation, slab->release_frontier);
-    iree_hal_pool_buffer_range_deinitialize(&slab->range);
-  }
-  iree_hal_memory_tlsf_deinitialize(&slab->tlsf);
-  iree_allocator_free(pool->host_allocator, slab);
-}
-
-// Returns the history of the entire parent reservation, including bytes that
-// endpoint alignment excluded from the child's managed interval.
-static bool iree_hal_tlsf_pool_query_full_free_slab(
-    iree_hal_tlsf_pool_slab_t* slab, const iree_async_frontier_t** out_frontier,
-    iree_hal_memory_tlsf_block_flags_t* out_flags) {
-  if (!iree_hal_memory_tlsf_query_full_free_block(&slab->tlsf, out_frontier,
-                                                  out_flags)) {
-    return false;
-  }
-  if (slab->reservation.byte_length &&
-      (slab->range.offset ||
-       slab->range.length != slab->reservation.byte_length)) {
-    iree_hal_memory_tlsf_merge_full_free_frontier(
-        &slab->tlsf, slab->range.memory.reuse_frontier);
-    iree_hal_memory_tlsf_query_full_free_block(&slab->tlsf, out_frontier,
-                                               out_flags);
-  }
-  return true;
-}
-
 // Removes only ownership metadata. Parent calls and metadata destruction run
-// after dropping the mutation mutex on the captured maintenance owner.
+// after dropping the mutation mutex, in the returning caller's context.
 static void iree_hal_tlsf_pool_detach_slab(iree_hal_tlsf_pool_t* pool,
                                            iree_hal_tlsf_pool_slab_t* slab)
     IREE_THREAD_ANNOTATION_ATTRIBUTE(requires_capability(&pool->mutex)) {
@@ -787,7 +643,7 @@ static iree_hal_tlsf_pool_slab_t* iree_hal_tlsf_pool_take_unused_slabs(
     const iree_device_size_t committed = (iree_device_size_t)iree_atomic_load(
         &pool->bytes_committed, iree_memory_order_relaxed);
     if (!slab->preparation_count &&
-        iree_hal_tlsf_pool_query_full_free_slab(slab, &slab->release_frontier,
+        iree_hal_tlsf_pool_slab_query_full_free(slab, &slab->release_frontier,
                                                 &flags) &&
         !iree_any_bit_set(flags, IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_TAINTED)) {
       if (committed >= min_bytes_to_keep &&
@@ -805,11 +661,28 @@ static iree_hal_tlsf_pool_slab_t* iree_hal_tlsf_pool_take_unused_slabs(
   return retired;
 }
 
-static void iree_hal_tlsf_pool_destroy_slab_list(
-    iree_hal_tlsf_pool_t* pool, iree_hal_tlsf_pool_slab_t* slab) {
+static void iree_hal_tlsf_pool_release_slab_list(
+    iree_hal_tlsf_pool_t* pool, iree_hal_tlsf_pool_slab_t* slab,
+    bool retain_metadata) {
   while (slab) {
     iree_hal_tlsf_pool_slab_t* next = slab->next;
-    iree_hal_tlsf_pool_destroy_slab(pool, slab);
+    if (slab->history_owned) {
+      slab->history_owned = false;
+      iree_hal_pool_history_retire_backing(&pool->history);
+    }
+    if (retain_metadata) {
+      iree_hal_tlsf_pool_slab_release_backing(pool->backing_pool, slab);
+      iree_slim_mutex_lock(&pool->mutex);
+      if (!pool->reusable.slab) {
+        pool->reusable.slab = slab;
+        slab = NULL;
+      }
+      iree_slim_mutex_unlock(&pool->mutex);
+    }
+    if (slab) {
+      iree_hal_tlsf_pool_slab_release(pool->backing_pool, slab,
+                                      pool->host_allocator);
+    }
     slab = next;
   }
 }
@@ -826,6 +699,7 @@ static void iree_hal_tlsf_pool_release_dedicated_list(
     iree_hal_tlsf_pool_t* pool, iree_hal_tlsf_pool_release_node_t* node) {
   while (node) {
     iree_hal_tlsf_pool_release_node_t* next = node->next;
+    iree_hal_pool_history_retire_backing(&pool->history);
     const iree_device_size_t length =
         iree_hal_tlsf_pool_dedicated_backing_length(node,
                                                     &pool->reservation_layout);
@@ -840,32 +714,16 @@ static void iree_hal_tlsf_pool_release_dedicated_list(
   }
 }
 
-static void iree_hal_tlsf_pool_maintain(
-    iree_hal_memory_maintenance_entry_t* entry) {
-  iree_hal_tlsf_pool_t* pool =
-      (iree_hal_tlsf_pool_t*)((uint8_t*)entry - offsetof(iree_hal_tlsf_pool_t,
-                                                         maintenance.entry));
-  for (;;) {
-    iree_slim_mutex_lock(&pool->maintenance.mutex);
-    if (!pool->maintenance.requested) {
-      pool->maintenance.pending = false;
-      iree_notification_post(&pool->maintenance.notification, IREE_ALL_WAITERS);
-      iree_slim_mutex_unlock(&pool->maintenance.mutex);
-      return;
-    }
-    pool->maintenance.requested = false;
-    iree_slim_mutex_unlock(&pool->maintenance.mutex);
-
-    iree_slim_mutex_lock(&pool->mutex);
-    iree_hal_tlsf_pool_drain_pending_releases(pool);
-    iree_hal_tlsf_pool_slab_t* retired =
-        iree_hal_tlsf_pool_take_unused_slabs(pool, 0);
-    iree_hal_tlsf_pool_release_node_t* dedicated =
-        iree_hal_tlsf_pool_take_dedicated_returns(pool);
-    iree_slim_mutex_unlock(&pool->mutex);
-    iree_hal_tlsf_pool_destroy_slab_list(pool, retired);
-    iree_hal_tlsf_pool_release_dedicated_list(pool, dedicated);
-  }
+static void iree_hal_tlsf_pool_return_unused_slabs(iree_hal_tlsf_pool_t* pool) {
+  iree_slim_mutex_lock(&pool->mutex);
+  iree_hal_tlsf_pool_drain_pending_releases(pool);
+  iree_hal_tlsf_pool_slab_t* retired =
+      iree_hal_tlsf_pool_take_unused_slabs(pool, 0);
+  iree_hal_tlsf_pool_release_node_t* dedicated =
+      iree_hal_tlsf_pool_take_dedicated_returns(pool);
+  iree_slim_mutex_unlock(&pool->mutex);
+  iree_hal_tlsf_pool_release_slab_list(pool, retired, /*retain_metadata=*/true);
+  iree_hal_tlsf_pool_release_dedicated_list(pool, dedicated);
 }
 
 static void iree_hal_tlsf_pool_deinitialize_slabs(iree_hal_tlsf_pool_t* pool) {
@@ -873,7 +731,7 @@ static void iree_hal_tlsf_pool_deinitialize_slabs(iree_hal_tlsf_pool_t* pool) {
   while (slab) {
     iree_hal_tlsf_pool_slab_t* next = slab->next;
     iree_hal_memory_tlsf_block_flags_t flags;
-    const bool is_free = iree_hal_tlsf_pool_query_full_free_slab(
+    const bool is_free = iree_hal_tlsf_pool_slab_query_full_free(
         slab, &slab->release_frontier, &flags);
     IREE_ASSERT(is_free, "pool destruction requires returned reservations");
     if (iree_any_bit_set(flags, IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_TAINTED)) {
@@ -881,7 +739,12 @@ static void iree_hal_tlsf_pool_deinitialize_slabs(iree_hal_tlsf_pool_t* pool) {
       // Ordinary trim cannot discard this prerequisite.
       slab->release_frontier = NULL;
     }
-    iree_hal_tlsf_pool_destroy_slab(pool, slab);
+    if (slab->history_owned) {
+      slab->history_owned = false;
+      iree_hal_pool_history_retire_backing(&pool->history);
+    }
+    iree_hal_tlsf_pool_slab_release(pool->backing_pool, slab,
+                                    pool->host_allocator);
     slab = next;
   }
   memset(&pool->slabs, 0, sizeof(pool->slabs));
@@ -971,76 +834,6 @@ static void iree_hal_tlsf_pool_return_allocation(
 // Create / Destroy
 //===----------------------------------------------------------------------===//
 
-static iree_status_t iree_hal_tlsf_pool_calculate_backing_geometry(
-    const iree_hal_tlsf_pool_options_t* options,
-    iree_device_size_t* out_alignment, iree_device_size_t* out_length) {
-  iree_device_size_t alignment = options->tlsf_options.alignment;
-  if (!alignment) {
-    alignment = IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT;
-  }
-  if (alignment < IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT ||
-      !iree_device_size_is_power_of_two(alignment)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "TLSF alignment must be a power of two at least 16");
-  }
-  iree_device_size_t length = options->tlsf_options.range_length;
-  if (iree_hal_asan_pool_options_is_enabled(&options->asan)) {
-    alignment =
-        iree_max(alignment, iree_max(options->asan.backing_alignment,
-                                     options->asan.shadow_granule_size));
-    iree_hal_asan_allocation_layout_t layout;
-    IREE_RETURN_IF_ERROR(iree_hal_asan_calculate_allocation_layout(
-        &options->asan, length, alignment, &layout));
-    length = layout.backing_length;
-  }
-  if (!iree_device_size_checked_align(length, alignment, &length)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "TLSF backing size overflows alignment");
-  }
-  *out_alignment = alignment;
-  *out_length = length;
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_tlsf_pool_resolve_backing_request(
-    const iree_hal_pool_capabilities_t* capabilities,
-    const iree_hal_tlsf_pool_options_t* options,
-    iree_hal_pool_reservation_request_t* out_request) {
-  iree_device_size_t alignment = 0;
-  iree_device_size_t length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_tlsf_pool_calculate_backing_geometry(
-      options, &alignment, &length));
-  if (!options->tlsf_options.range_length) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "TLSF range_length must be > 0");
-  }
-  if (alignment > capabilities->max_allocation_alignment) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "TLSF alignment exceeds backing pool support");
-  }
-  // Native address alignment and storage-relative maintenance endpoints are
-  // independent. Reserve complete granules without asking the parent to
-  // strengthen its native address guarantee.
-  const iree_device_size_t granule =
-      iree_max(alignment, capabilities->maintenance_alignment);
-  if (!iree_device_size_checked_align(length, granule, &length)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "TLSF backing size overflows maintenance granule");
-  }
-  alignment = iree_min(granule, capabilities->max_allocation_alignment);
-  if (capabilities->max_allocation_size &&
-      length > capabilities->max_allocation_size) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "TLSF slab size exceeds backing pool support");
-  }
-  *out_request = (iree_hal_pool_reservation_request_t){
-      .allocation_size = length,
-      .min_alignment = alignment,
-  };
-  return iree_ok_status();
-}
-
 iree_status_t iree_hal_tlsf_pool_query_backing_request(
     iree_hal_pool_t* backing_pool, const iree_hal_tlsf_pool_options_t* options,
     iree_hal_pool_reservation_request_t* out_request) {
@@ -1048,8 +841,8 @@ iree_status_t iree_hal_tlsf_pool_query_backing_request(
       iree_hal_pool_validate_asan_options(backing_pool, &options->asan));
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(backing_pool, &capabilities);
-  return iree_hal_tlsf_pool_resolve_backing_request(&capabilities, options,
-                                                    out_request);
+  return iree_hal_tlsf_pool_slab_resolve_request(
+      &capabilities, &options->tlsf_options, &options->asan, out_request);
 }
 
 static iree_status_t iree_hal_tlsf_pool_create_impl(
@@ -1068,12 +861,6 @@ static iree_status_t iree_hal_tlsf_pool_create_impl(
                             "range_length must be > 0");
   }
   if (backing_pool) {
-    if (!backing_pool->maintenance) {
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "TLSF backing pool has no memory maintenance owner");
-    }
     if (options.tlsf_options.initial_frontier) {
       IREE_TRACE_ZONE_END(z0);
       return iree_make_status(
@@ -1091,15 +878,16 @@ static iree_status_t iree_hal_tlsf_pool_create_impl(
     iree_hal_pool_query_capabilities(backing_pool, &capabilities);
     iree_hal_pool_reservation_request_t request;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_tlsf_pool_resolve_backing_request(&capabilities, &options,
-                                                       &request));
+        z0, iree_hal_tlsf_pool_slab_resolve_request(
+                &capabilities, &options.tlsf_options, &options.asan, &request));
     tlsf_options.alignment =
         iree_max(request.min_alignment, capabilities.maintenance_alignment);
     backing_slab_length = request.allocation_size;
   } else {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_tlsf_pool_calculate_backing_geometry(
-                &options, &tlsf_options.alignment, &backing_slab_length));
+        z0, iree_hal_tlsf_pool_slab_calculate_geometry(
+                &options.tlsf_options, &options.asan, &tlsf_options.alignment,
+                &backing_slab_length));
     backing_slab_length = source_range.length;
     tlsf_options.range_length = source_range.length;
     capabilities = (iree_hal_pool_capabilities_t){
@@ -1160,17 +948,11 @@ static iree_status_t iree_hal_tlsf_pool_create_impl(
     return status;
   }
   iree_slim_mutex_initialize(&pool->mutex);
-  iree_slim_mutex_initialize(&pool->maintenance.mutex);
-  iree_notification_initialize(&pool->maintenance.notification);
-  pool->maintenance.entry.fn = iree_hal_tlsf_pool_maintain;
   iree_atomic_store(&pool->pending_release_head, 0, iree_memory_order_relaxed);
   pool->host_allocator = host_allocator;
   pool->source_range = source_range;
   iree_hal_buffer_retain(source_range.buffer);
   pool->base.epoch_query = epoch_query;
-  pool->base.maintenance = backing_pool
-                               ? backing_pool->maintenance
-                               : source_range.memory.backing->maintenance;
   pool->budget_limit = options.budget_limit;
   pool->slab_options = tlsf_options;
   pool->reservation_layout =
@@ -1190,18 +972,31 @@ static iree_status_t iree_hal_tlsf_pool_create_impl(
   pool->backing_pool = backing_pool;
   pool->capabilities = capabilities;
 
-  status = iree_hal_memory_trace_initialize_pool(options.trace_name,
-                                                 IREE_HAL_TLSF_POOL_TRACE_ID,
-                                                 host_allocator, &pool->trace);
+  status = iree_hal_pool_history_initialize(
+      frontier_tracker, tlsf_options.frontier_capacity, &pool->history);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_memory_trace_initialize_pool(
+        options.trace_name, IREE_HAL_TLSF_POOL_TRACE_ID, &pool->trace);
+  }
   iree_hal_tlsf_pool_slab_t* initial_slab = NULL;
   if (iree_status_is_ok(status) && source_range.buffer) {
-    iree_hal_pool_acquire_result_t result;
-    status = iree_hal_tlsf_pool_prepare_slab(
-        pool, NULL, IREE_HAL_POOL_RESERVE_FLAG_NONE, &initial_slab, &result);
+    iree_async_single_frontier_t compact;
+    iree_hal_memory_tlsf_options_t initial_options = pool->slab_options;
+    status = iree_hal_pool_history_prepare_backing(
+        &pool->history, source_range.memory.reuse_frontier, &compact,
+        &initial_options.initial_frontier);
     if (iree_status_is_ok(status)) {
-      iree_slim_mutex_lock(&pool->mutex);
-      iree_hal_tlsf_pool_publish_slab(pool, initial_slab);
-      iree_slim_mutex_unlock(&pool->mutex);
+      status = iree_hal_tlsf_pool_slab_initialize_range(
+          pool->source_range, initial_options, pool->host_allocator,
+          &initial_slab);
+      if (iree_status_is_ok(status)) {
+        iree_hal_tlsf_pool_attach_slab_history(pool, initial_slab);
+        iree_slim_mutex_lock(&pool->mutex);
+        iree_hal_tlsf_pool_publish_slab(pool, initial_slab);
+        iree_slim_mutex_unlock(&pool->mutex);
+      } else {
+        iree_hal_pool_history_retire_backing(&pool->history);
+      }
     }
   }
 
@@ -1284,9 +1079,6 @@ static void iree_hal_tlsf_pool_destroy(iree_hal_pool_t* base_pool) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_tlsf_pool_t* pool = (iree_hal_tlsf_pool_t*)base_pool;
 
-  iree_notification_await(&pool->maintenance.notification,
-                          iree_hal_tlsf_pool_maintenance_is_idle, pool,
-                          iree_infinite_timeout());
   iree_slim_mutex_lock(&pool->mutex);
   iree_hal_tlsf_pool_drain_pending_releases(pool);
   iree_hal_tlsf_pool_flush_quarantine(pool);
@@ -1308,8 +1100,10 @@ static void iree_hal_tlsf_pool_destroy(iree_hal_pool_t* base_pool) {
   iree_hal_tlsf_pool_release_dedicated_list(pool, dedicated);
 
   iree_hal_tlsf_pool_deinitialize_slabs(pool);
-  iree_notification_deinitialize(&pool->maintenance.notification);
-  iree_slim_mutex_deinitialize(&pool->maintenance.mutex);
+  iree_hal_tlsf_pool_release_slab_list(pool, pool->reusable.slab,
+                                       /*retain_metadata=*/false);
+  iree_allocator_free(pool->host_allocator, pool->reusable.acquire);
+  iree_hal_pool_history_deinitialize(&pool->history);
   iree_slim_mutex_deinitialize(&pool->mutex);
   iree_hal_memory_trace_deinitialize(&pool->trace);
   iree_hal_pool_deinitialize(base_pool);
@@ -1441,7 +1235,6 @@ static void iree_hal_tlsf_pool_acquire_one_reservation_locked(
           out_reservation, out_info, out_result);
     } else {
       iree_hal_tlsf_pool_uncharge_reservation(pool, charged_length);
-      out_info->flags = IREE_HAL_POOL_ACQUIRE_FLAG_GROWTH_REQUIRED;
       out_info->result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
       *out_result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
     }
@@ -1452,7 +1245,6 @@ static void iree_hal_tlsf_pool_acquire_one_reservation_locked(
   iree_hal_pool_acquire_result_t selected_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
   bool has_selected_allocation = false;
-  bool growth_required = false;
   iree_hal_tlsf_pool_pending_candidate_t pending_storage = {0};
   iree_hal_tlsf_pool_pending_candidate_t* pending_candidate =
       iree_any_bit_set(flags, IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER)
@@ -1514,8 +1306,6 @@ static void iree_hal_tlsf_pool_acquire_one_reservation_locked(
       has_selected_allocation =
           selected_result != IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
     }
-    growth_required = pool->backing_pool && !has_selected_allocation &&
-                      !iree_hal_tlsf_pool_metadata_is_required(metadata);
   }
 
   if (has_selected_allocation) {
@@ -1548,9 +1338,6 @@ static void iree_hal_tlsf_pool_acquire_one_reservation_locked(
   } else {
     memset(out_reservation, 0, sizeof(*out_reservation));
     memset(out_info, 0, sizeof(*out_info));
-    if (growth_required || iree_hal_tlsf_pool_metadata_is_required(metadata)) {
-      out_info->flags |= IREE_HAL_POOL_ACQUIRE_FLAG_GROWTH_REQUIRED;
-    }
     out_info->result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
     *out_result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
     iree_hal_tlsf_pool_uncharge_reservation(pool, charged_length);
@@ -1604,299 +1391,467 @@ static void iree_hal_tlsf_pool_commit_reservation(
   iree_hal_memory_trace_alloc(&pool->trace, node, reservation->byte_length);
 }
 
-static iree_status_t iree_hal_tlsf_pool_acquire_reservations(
-    iree_hal_pool_t* base_pool, iree_host_size_t request_count,
-    const iree_hal_pool_reservation_request_t* requests,
-    const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reserve_flags_t flags,
-    iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
-    iree_hal_pool_acquire_result_t* out_result) {
-  iree_hal_tlsf_pool_t* pool = (iree_hal_tlsf_pool_t*)base_pool;
+// A ready transaction lives on the caller's stack. A parent acquisition
+// promotes it once into durable storage, retaining the acquired prefix and next
+// request.
+typedef struct iree_hal_tlsf_pool_acquire_t {
+  // Pool borrowed through the caller's completion contract.
+  iree_hal_tlsf_pool_t* pool;
+  // Borrowed public input and output arrays.
+  struct {
+    // Number of requests in this all-or-none transaction.
+    iree_host_size_t count;
+    // Original requests, validated before accepting completion ownership.
+    const iree_hal_pool_reservation_request_t* requests;
+    // Requester's ordering proof, independent of physical completion.
+    const iree_async_frontier_t* frontier;
+    // Published reservations; untouched until the whole batch succeeds.
+    iree_hal_pool_reservation_t* reservations;
+    // Published per-request outcome and exact prior-use history.
+    iree_hal_pool_acquire_info_t* infos;
+    // Terminal completion, invoked after cleanup and dropping all locks.
+    iree_hal_pool_acquire_callback_t completion;
+    // Acquisition behavior selected at the public boundary.
+    iree_hal_pool_reserve_flags_t flags;
+  } call;
+  // Private staged results, inline or following this durable transaction.
+  iree_hal_tlsf_pool_acquire_element_t* elements;
+  // Already selected prefix, retained across parent and metadata preparation.
+  iree_host_size_t acquired_count;
+  // Trailing element capacity, or zero for caller-stack transaction storage.
+  iree_host_size_t element_capacity;
+  // A prefix was visible as withheld capacity while the mutex was unlocked.
+  bool exposed_prefix;
+  // Owned infrastructure failure, transferred to terminal completion.
+  iree_status_t status;
+  // Whole-batch outcome; ordinary pressure never creates a status.
+  iree_hal_pool_acquire_result_t result;
+  // Split and release metadata prepared outside the mutation mutex.
+  iree_hal_tlsf_pool_metadata_t metadata;
+  // Prepared slab, published only if existing capacity still cannot satisfy us.
+  iree_hal_tlsf_pool_slab_t* prepared_slab;
+  // One outstanding parent request, stable through submission and completion.
+  struct {
+    // Submission and completion must both finish before resuming the pump.
+    iree_atomic_int32_t pending;
+    // True while a parent result still needs to be consumed.
+    bool active;
+    // True when the missing request needs a dedicated parent range.
+    bool dedicated;
+    // Exact backing geometry requested from the parent.
+    iree_hal_pool_reservation_request_t request;
+    // Parent token, consumed by slab or dedicated setup on success.
+    iree_hal_pool_reservation_t reservation;
+    // Exact inherited history, borrowed until the parent token is returned.
+    iree_hal_pool_acquire_info_t info;
+    // Parent capacity outcome, consumed after the two-party join.
+    iree_hal_pool_acquire_result_t result;
+  } parent;
+} iree_hal_tlsf_pool_acquire_t;
 
-  iree_hal_tlsf_pool_acquire_element_t
-      inline_elements[IREE_HAL_TLSF_POOL_INLINE_TRANSACTION_CAPACITY];
-  const bool growth_allowed =
-      !iree_any_bit_set(flags, IREE_HAL_POOL_RESERVE_FLAG_DISALLOW_GROWTH);
-  if (request_count > IREE_ARRAYSIZE(inline_elements) && !growth_allowed) {
-    for (iree_host_size_t i = 0; i < request_count; ++i) {
-      iree_hal_tlsf_pool_request_geometry_t geometry = {0};
-      IREE_RETURN_IF_ERROR(iree_hal_tlsf_pool_reservation_geometry(
-          &requests[i], pool->slab_options.alignment, &pool->capabilities,
-          &pool->asan_options, &geometry));
-    }
-    // Staging large transactions is cold work even when all backing and
-    // persistent allocator metadata are already available.
-    iree_atomic_fetch_add(&pool->exhausted_count, 1, iree_memory_order_relaxed);
-    for (iree_host_size_t i = 0; i < request_count; ++i) {
-      out_infos[i] = (iree_hal_pool_acquire_info_t){
-          .result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED,
-          .flags = IREE_HAL_POOL_ACQUIRE_FLAG_GROWTH_REQUIRED,
-      };
-    }
-    *out_result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-    return iree_ok_status();
+static void iree_hal_tlsf_pool_acquire_rollback_locked(
+    iree_hal_tlsf_pool_acquire_t* acquire)
+    IREE_THREAD_ANNOTATION_ATTRIBUTE(
+        requires_capability(&acquire->pool->mutex)) {
+  for (iree_host_size_t i = 0; i < acquire->acquired_count; ++i) {
+    iree_hal_tlsf_pool_rollback_reservation_locked(
+        acquire->pool, &acquire->elements[i].reservation,
+        &acquire->elements[i].info);
+    memset(&acquire->elements[i].info, 0, sizeof(acquire->elements[i].info));
   }
-  iree_hal_tlsf_pool_acquire_element_t* elements = inline_elements;
-  bool elements_allocated = false;
-  iree_status_t status = iree_ok_status();
-  if (request_count > IREE_ARRAYSIZE(inline_elements)) {
-    status = iree_allocator_malloc_array(pool->host_allocator, request_count,
-                                         sizeof(*elements), (void**)&elements);
-    elements_allocated = iree_status_is_ok(status);
+  acquire->acquired_count = 0;
+}
+
+static void iree_hal_tlsf_pool_acquire_finish(
+    iree_hal_tlsf_pool_acquire_t* acquire) {
+  iree_hal_tlsf_pool_t* pool = acquire->pool;
+  if (iree_status_is_ok(acquire->status)) {
+    acquire->status = iree_hal_pool_history_seal_acquire(&pool->history);
   }
-  iree_host_size_t initialized_count = 0;
-  if (iree_status_is_ok(status)) {
-    memset(elements, 0, request_count * sizeof(*elements));
-    initialized_count = request_count;
-  }
-  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
-       ++i) {
-    status = iree_hal_tlsf_pool_reservation_geometry(
-        &requests[i], pool->slab_options.alignment, &pool->capabilities,
-        &pool->asan_options, &elements[i].geometry);
-  }
-  iree_host_size_t acquired_count = 0;
-  iree_host_size_t preparing_count = 0;
-  iree_hal_pool_acquire_result_t transaction_result =
-      IREE_HAL_POOL_ACQUIRE_OK_FRESH;
-  iree_hal_tlsf_pool_slab_t* prepared_slab = NULL;
-  iree_hal_tlsf_pool_metadata_t metadata = {0};
-  bool needs_preparation = true;
-  while (iree_status_is_ok(status) && needs_preparation) {
-    acquired_count = 0;
-    transaction_result = IREE_HAL_POOL_ACQUIRE_OK_FRESH;
-    bool published_growth = false;
-    bool needs_growth = false;
-    bool needs_dedicated = false;
-    memset(&metadata.required, 0, sizeof(metadata.required));
+  const bool committed = iree_status_is_ok(acquire->status) &&
+                         acquire->acquired_count == acquire->call.count;
+  if (!committed &&
+      (acquire->acquired_count || acquire->metadata.required.slab)) {
     iree_slim_mutex_lock(&pool->mutex);
-    for (iree_host_size_t i = 0; i < preparing_count; ++i) {
-      --elements[i].preparing_slab->preparation_count;
+    if (acquire->metadata.required.slab) {
+      --acquire->metadata.required.slab->preparation_count;
       iree_hal_tlsf_pool_note_return_candidate(pool,
-                                               elements[i].preparing_slab);
+                                               acquire->metadata.required.slab);
     }
-    preparing_count = 0;
-    for (iree_host_size_t i = 0; i < request_count; ++i) {
-      elements[i].preparing_slab = NULL;
-      memset(&elements[i].reservation, 0, sizeof(elements[i].reservation));
-      memset(&elements[i].info, 0, sizeof(elements[i].info));
+    iree_hal_tlsf_pool_acquire_rollback_locked(acquire);
+    iree_slim_mutex_unlock(&pool->mutex);
+    iree_hal_tlsf_pool_return_unused_slabs(pool);
+  }
+  if (!committed && acquire->exposed_prefix) {
+    iree_async_notification_signal_if_observed(pool->base.notification,
+                                               INT32_MAX);
+  }
+  iree_allocator_free(pool->host_allocator,
+                      acquire->metadata.prepared.blocks.storage);
+  iree_hal_tlsf_pool_free_release_node_list(
+      pool, acquire->metadata.prepared.release_nodes);
+  if (acquire->prepared_slab) {
+    iree_hal_tlsf_pool_release_slab_list(pool, acquire->prepared_slab,
+                                         /*retain_metadata=*/true);
+  }
+  if (!committed) {
+    for (iree_host_size_t i = 0; i < acquire->call.count; ++i) {
+      if (acquire->elements[i].dedicated.node) {
+        iree_hal_tlsf_pool_release_dedicated_list(
+            pool, acquire->elements[i].dedicated.node);
+      }
     }
+  }
+  if (iree_status_is_ok(acquire->status)) {
+    if (acquire->result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED) {
+      iree_atomic_fetch_add(&pool->exhausted_count, 1,
+                            iree_memory_order_relaxed);
+    }
+    for (iree_host_size_t i = 0; i < acquire->call.count; ++i) {
+      acquire->call.infos[i] = acquire->elements[i].info;
+      if (committed) {
+        iree_hal_tlsf_pool_commit_reservation(
+            pool, &acquire->elements[i].reservation);
+        acquire->call.reservations[i] = acquire->elements[i].reservation;
+      }
+    }
+  }
+  const iree_hal_pool_acquire_callback_t completion = acquire->call.completion;
+  const iree_status_t status = acquire->status;
+  const iree_hal_pool_acquire_result_t result = acquire->result;
+  if (acquire->element_capacity) {
+    iree_hal_tlsf_pool_acquire_t* discarded = acquire;
+    iree_slim_mutex_lock(&pool->mutex);
+    if (!pool->reusable.acquire ||
+        pool->reusable.acquire->element_capacity < acquire->element_capacity) {
+      discarded = pool->reusable.acquire;
+      pool->reusable.acquire = acquire;
+    }
+    iree_slim_mutex_unlock(&pool->mutex);
+    iree_allocator_free(pool->host_allocator, discarded);
+  }
+  completion.fn(completion.user_data, status, result);
+}
+
+// Mutual recursion only occurs for deferred completion. The pending join keeps
+// inline parent completions on the submitting pump's bounded stack.
+static void iree_hal_tlsf_pool_acquire_progress(
+    iree_hal_tlsf_pool_acquire_t* acquire);
+
+static void iree_hal_tlsf_pool_acquire_parent_complete(
+    void* user_data, iree_status_t status,
+    iree_hal_pool_acquire_result_t result) {
+  iree_hal_tlsf_pool_acquire_t* acquire = user_data;
+  acquire->status = status;
+  acquire->parent.result = result;
+  if (iree_atomic_fetch_sub(&acquire->parent.pending, 1,
+                            iree_memory_order_acq_rel) == 1) {
+    iree_hal_tlsf_pool_acquire_progress(acquire);
+  }
+}
+
+// Consumes one accepted parent outcome without revisiting the selected prefix.
+static void iree_hal_tlsf_pool_acquire_consume_parent(
+    iree_hal_tlsf_pool_acquire_t* acquire) {
+  iree_hal_tlsf_pool_t* pool = acquire->pool;
+  acquire->parent.active = false;
+  if (!iree_status_is_ok(acquire->status)) {
+    return;
+  }
+  iree_hal_tlsf_pool_acquire_element_t* element =
+      &acquire->elements[acquire->acquired_count];
+  if (acquire->parent.result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED ||
+      acquire->parent.result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET) {
+    acquire->result = acquire->parent.result;
+    element->info = (iree_hal_pool_acquire_info_t){
+        .result = acquire->result,
+    };
+    if (acquire->result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET) {
+      iree_atomic_fetch_add(&pool->over_budget_count, 1,
+                            iree_memory_order_relaxed);
+    }
+    return;
+  }
+  iree_async_single_frontier_t compact;
+  const iree_async_frontier_t* initial_frontier = NULL;
+  acquire->status = iree_hal_pool_history_prepare_backing(
+      &pool->history, acquire->parent.info.reuse_frontier, &compact,
+      &initial_frontier);
+  if (!iree_status_is_ok(acquire->status)) {
+    iree_hal_pool_release_reservations(pool->backing_pool, 1,
+                                       &acquire->parent.reservation,
+                                       acquire->parent.info.reuse_frontier);
+    return;
+  }
+  if (acquire->parent.dedicated) {
+    acquire->status = iree_hal_tlsf_pool_dedicated_prepare(
+        pool->backing_pool, &acquire->parent.request, &pool->asan_options,
+        &element->geometry.asan, &pool->reservation_layout,
+        acquire->parent.reservation, acquire->parent.info, initial_frontier,
+        pool->host_allocator, &element->dedicated.node);
+    if (iree_status_is_ok(acquire->status)) {
+      element->dedicated.result = acquire->parent.result;
+      iree_atomic_fetch_add(
+          &pool->bytes_committed,
+          (int64_t)iree_hal_tlsf_pool_dedicated_backing_length(
+              element->dedicated.node, &pool->reservation_layout),
+          iree_memory_order_relaxed);
+      iree_atomic_fetch_add(&pool->committed_slab_count, 1,
+                            iree_memory_order_relaxed);
+    }
+  } else {
+    iree_slim_mutex_lock(&pool->mutex);
+    iree_hal_tlsf_pool_slab_t* reusable_slab = pool->reusable.slab;
+    pool->reusable.slab = NULL;
+    iree_slim_mutex_unlock(&pool->mutex);
+    iree_hal_memory_tlsf_options_t options = pool->slab_options;
+    options.initial_frontier = initial_frontier;
+    acquire->status = iree_hal_tlsf_pool_slab_prepare(
+        pool->backing_pool, &acquire->parent.request,
+        acquire->parent.reservation, acquire->parent.info, options,
+        &pool->asan_options, pool->host_allocator, reusable_slab,
+        &acquire->prepared_slab);
+    if (iree_status_is_ok(acquire->status)) {
+      iree_hal_tlsf_pool_attach_slab_history(pool, acquire->prepared_slab);
+    }
+  }
+  if (!iree_status_is_ok(acquire->status)) {
+    iree_hal_pool_history_retire_backing(&pool->history);
+  }
+}
+
+static void iree_hal_tlsf_pool_acquire_progress(
+    iree_hal_tlsf_pool_acquire_t* acquire) {
+  iree_hal_tlsf_pool_t* pool = acquire->pool;
+  for (;;) {
+    if (acquire->parent.active) {
+      iree_hal_tlsf_pool_acquire_consume_parent(acquire);
+    }
+    if (!iree_status_is_ok(acquire->status) ||
+        acquire->result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED ||
+        acquire->result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET) {
+      break;
+    }
+    bool needs_parent = false;
+    bool published_growth = false;
+    iree_slim_mutex_lock(&pool->mutex);
+    if (acquire->metadata.required.slab) {
+      --acquire->metadata.required.slab->preparation_count;
+      iree_hal_tlsf_pool_note_return_candidate(pool,
+                                               acquire->metadata.required.slab);
+    }
+    memset(&acquire->metadata.required, 0, sizeof(acquire->metadata.required));
     iree_hal_tlsf_pool_drain_pending_releases(pool);
-    while (acquired_count < request_count) {
-      iree_hal_pool_acquire_result_t item_result = IREE_HAL_POOL_ACQUIRE_NONE;
+    while (acquire->acquired_count < acquire->call.count) {
+      const iree_hal_pool_reservation_request_t* request =
+          &acquire->call.requests[acquire->acquired_count];
+      iree_hal_tlsf_pool_acquire_element_t* element =
+          &acquire->elements[acquire->acquired_count];
+      iree_hal_pool_acquire_result_t item_result;
       iree_hal_tlsf_pool_acquire_one_reservation_locked(
-          pool, &requests[acquired_count], requester_frontier, flags, &metadata,
-          &elements[acquired_count], &item_result);
-      if (iree_hal_tlsf_pool_metadata_is_required(&metadata)) {
-        transaction_result = item_result;
+          pool, request, acquire->call.frontier, acquire->call.flags,
+          &acquire->metadata, element, &item_result);
+      if (iree_hal_tlsf_pool_metadata_is_required(&acquire->metadata)) {
+        ++acquire->metadata.required.slab->preparation_count;
         break;
       }
       if (item_result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED &&
-          iree_any_bit_set(elements[acquired_count].info.flags,
-                           IREE_HAL_POOL_ACQUIRE_FLAG_GROWTH_REQUIRED) &&
-          growth_allowed) {
-        if (iree_hal_tlsf_pool_request_is_dedicated(
-                pool, &requests[acquired_count])) {
-          needs_dedicated = true;
-        } else if (prepared_slab) {
-          iree_hal_tlsf_pool_publish_slab(pool, prepared_slab);
-          prepared_slab = NULL;
+          pool->backing_pool) {
+        acquire->parent.dedicated =
+            iree_hal_tlsf_pool_request_is_dedicated(pool, request);
+        if (!acquire->parent.dedicated && acquire->prepared_slab) {
+          iree_hal_tlsf_pool_publish_slab(pool, acquire->prepared_slab);
+          acquire->prepared_slab = NULL;
           published_growth = true;
           continue;
-        } else {
-          needs_growth = true;
         }
-      }
-      switch (item_result) {
-        case IREE_HAL_POOL_ACQUIRE_OK:
-          if (transaction_result == IREE_HAL_POOL_ACQUIRE_OK_FRESH) {
-            transaction_result = IREE_HAL_POOL_ACQUIRE_OK;
-          }
-          break;
-        case IREE_HAL_POOL_ACQUIRE_OK_FRESH:
-          break;
-        case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT:
-          transaction_result = IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT;
-          break;
-        case IREE_HAL_POOL_ACQUIRE_EXHAUSTED:
-        case IREE_HAL_POOL_ACQUIRE_OVER_BUDGET:
-          transaction_result = item_result;
-          break;
-        default:
-          IREE_ASSERT(false, "invalid TLSF acquisition result: %u",
-                      item_result);
-          break;
+        needs_parent = true;
+        break;
       }
       if (item_result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED ||
           item_result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET) {
+        acquire->result = item_result;
         break;
       }
-      ++acquired_count;
-    }
-    needs_preparation =
-        growth_allowed && (needs_growth || needs_dedicated ||
-                           iree_hal_tlsf_pool_metadata_is_required(&metadata));
-    if (acquired_count != request_count) {
-      for (iree_host_size_t i = 0; i < acquired_count; ++i) {
-        // Restored blocks remain available to competing callers, but their
-        // backing must survive preparation or each retry can erase its own
-        // progress toward a multi-slab transaction.
-        const iree_hal_tlsf_pool_release_node_t* node =
-            (iree_hal_tlsf_pool_release_node_t*)(uintptr_t)elements[i]
-                .reservation.block_handle;
-        iree_hal_tlsf_pool_slab_t* slab =
-            node->block_index != IREE_HAL_MEMORY_TLSF_BLOCK_INDEX_NONE
-                ? iree_hal_tlsf_pool_slab_from_release_node(node)
-                : NULL;
-        iree_hal_tlsf_pool_rollback_reservation_locked(
-            pool, &elements[i].reservation, &elements[i].info);
-        memset(&elements[i].reservation, 0, sizeof(elements[i].reservation));
-        memset(&elements[i].info, 0, sizeof(elements[i].info));
-        if (needs_preparation && slab) {
-          elements[preparing_count++].preparing_slab = slab;
-          ++slab->preparation_count;
-        }
+      if (item_result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT ||
+          (item_result == IREE_HAL_POOL_ACQUIRE_OK &&
+           acquire->result == IREE_HAL_POOL_ACQUIRE_OK_FRESH)) {
+        acquire->result = item_result;
       }
+      ++acquire->acquired_count;
     }
-    const bool needs_maintenance =
+    const bool needs_metadata =
+        iree_hal_tlsf_pool_metadata_is_required(&acquire->metadata);
+    acquire->exposed_prefix |=
+        acquire->acquired_count && (needs_parent || needs_metadata);
+    if (!needs_metadata && !needs_parent &&
+        acquire->acquired_count != acquire->call.count) {
+      iree_hal_tlsf_pool_acquire_rollback_locked(acquire);
+    }
+    const bool has_unused_slabs =
         pool->return_candidates != NULL || pool->dedicated.returns != NULL;
-    if (needs_preparation && metadata.required.slab) {
-      elements[preparing_count++].preparing_slab = metadata.required.slab;
-      ++metadata.required.slab->preparation_count;
-    }
     iree_slim_mutex_unlock(&pool->mutex);
-    if (needs_maintenance) {
-      iree_hal_tlsf_pool_schedule_maintenance(pool);
+    if (has_unused_slabs) {
+      iree_hal_tlsf_pool_return_unused_slabs(pool);
     }
-    // A restored prefix was never visible to competing acquisitions. Only new
-    // backing creates capacity progress; a rollback-only signal would let a
-    // failed retry wake itself indefinitely.
     if (published_growth) {
       iree_async_notification_signal_if_observed(pool->base.notification,
                                                  INT32_MAX);
     }
-    if (iree_status_is_ok(status) && needs_preparation &&
-        metadata.required.blocks.first_block) {
-      iree_allocator_free(pool->host_allocator,
-                          metadata.prepared.blocks.storage);
-      metadata.prepared.blocks = metadata.required.blocks;
-      status = iree_hal_memory_tlsf_prepare_growth(&metadata.prepared.blocks,
-                                                   pool->host_allocator);
+    if (!needs_metadata && !needs_parent) {
+      break;
     }
-    if (iree_status_is_ok(status) && needs_preparation &&
-        metadata.required.release_node) {
-      // The accepted candidate needs a record. Prepare the remaining batch's
-      // records together so each missing record does not cause another replay.
-      for (iree_host_size_t i = acquired_count;
-           i < request_count && iree_status_is_ok(status); ++i) {
-        if (iree_hal_tlsf_pool_request_is_dedicated(pool, &requests[i])) {
-          continue;
-        }
-        iree_hal_tlsf_pool_release_node_t* node = NULL;
-        status = iree_allocator_malloc(pool->host_allocator,
-                                       pool->reservation_layout.node_size,
-                                       (void**)&node);
-        if (iree_status_is_ok(status)) {
-          node->next = metadata.prepared.release_nodes;
-          metadata.prepared.release_nodes = node;
-        }
+    if (needs_metadata) {
+      if (acquire->metadata.required.blocks.first_block) {
+        iree_allocator_free(pool->host_allocator,
+                            acquire->metadata.prepared.blocks.storage);
+        acquire->metadata.prepared.blocks = acquire->metadata.required.blocks;
+        acquire->status = iree_hal_memory_tlsf_prepare_growth(
+            &acquire->metadata.prepared.blocks, pool->host_allocator);
       }
-    }
-    if (iree_status_is_ok(status) && needs_dedicated) {
-      iree_hal_tlsf_pool_acquire_element_t* element = &elements[acquired_count];
-      const iree_hal_pool_reservation_request_t backing_request = {
-          .allocation_size = element->geometry.length,
-          .min_alignment =
-              iree_min(element->geometry.alignment,
-                       pool->capabilities.max_allocation_alignment),
-      };
-      status = iree_hal_tlsf_pool_dedicated_acquire(
-          pool->backing_pool, &backing_request, &pool->asan_options,
-          &element->geometry.asan, &pool->reservation_layout,
-          requester_frontier, flags, pool->host_allocator,
-          &element->dedicated.node, &element->dedicated.result);
-      if (iree_status_is_ok(status)) {
-        if (element->dedicated.node) {
-          iree_atomic_fetch_add(
-              &pool->bytes_committed,
-              (int64_t)iree_hal_tlsf_pool_dedicated_backing_length(
-                  element->dedicated.node, &pool->reservation_layout),
-              iree_memory_order_relaxed);
-          iree_atomic_fetch_add(&pool->committed_slab_count, 1,
-                                iree_memory_order_relaxed);
-        } else {
-          transaction_result = element->dedicated.result;
-          element->info.result = transaction_result;
-          element->info.flags = IREE_HAL_POOL_ACQUIRE_FLAG_NONE;
-          if (transaction_result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET) {
-            iree_atomic_fetch_add(&pool->over_budget_count, 1,
-                                  iree_memory_order_relaxed);
+      if (acquire->metadata.required.release_node) {
+        for (iree_host_size_t i = acquire->acquired_count;
+             i < acquire->call.count && iree_status_is_ok(acquire->status);
+             ++i) {
+          if (iree_hal_tlsf_pool_request_is_dedicated(
+                  pool, &acquire->call.requests[i])) {
+            continue;
           }
-          needs_preparation = false;
+          iree_hal_tlsf_pool_release_node_t* node = NULL;
+          acquire->status = iree_allocator_malloc(
+              pool->host_allocator, pool->reservation_layout.node_size,
+              (void**)&node);
+          if (iree_status_is_ok(acquire->status)) {
+            node->next = acquire->metadata.prepared.release_nodes;
+            acquire->metadata.prepared.release_nodes = node;
+          }
         }
       }
+      continue;
     }
-    if (iree_status_is_ok(status) && needs_growth) {
-      iree_hal_pool_acquire_result_t backing_result;
-      status = iree_hal_tlsf_pool_prepare_slab(pool, requester_frontier, flags,
-                                               &prepared_slab, &backing_result);
-      if (iree_status_is_ok(status) && !prepared_slab) {
-        transaction_result = backing_result;
-        elements[acquired_count].info.result = backing_result;
-        elements[acquired_count].info.flags = IREE_HAL_POOL_ACQUIRE_FLAG_NONE;
-        if (backing_result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET) {
-          iree_atomic_fetch_add(&pool->over_budget_count, 1,
-                                iree_memory_order_relaxed);
-        }
-        needs_preparation = false;
+    if (!acquire->element_capacity) {
+      iree_slim_mutex_lock(&pool->mutex);
+      iree_hal_tlsf_pool_acquire_t* durable = pool->reusable.acquire;
+      pool->reusable.acquire = NULL;
+      iree_slim_mutex_unlock(&pool->mutex);
+      const iree_host_size_t capacity =
+          durable ? durable->element_capacity
+                  : IREE_HAL_TLSF_POOL_INLINE_TRANSACTION_CAPACITY;
+      if (!durable) {
+        acquire->status = iree_allocator_malloc(
+            pool->host_allocator,
+            sizeof(*durable) + capacity * sizeof(*acquire->elements),
+            (void**)&durable);
       }
+      if (!iree_status_is_ok(acquire->status)) {
+        break;
+      }
+      *durable = *acquire;
+      durable->element_capacity = capacity;
+      durable->elements = (iree_hal_tlsf_pool_acquire_element_t*)(durable + 1);
+      memcpy(durable->elements, acquire->elements,
+             acquire->call.count * sizeof(*acquire->elements));
+      acquire = durable;
+    }
+    const iree_hal_tlsf_pool_request_geometry_t* geometry =
+        &acquire->elements[acquire->acquired_count].geometry;
+    acquire->parent.request = (iree_hal_pool_reservation_request_t){
+        .allocation_size = acquire->parent.dedicated
+                               ? geometry->length
+                               : pool->backing_slab_length,
+        .min_alignment =
+            iree_min(acquire->parent.dedicated ? geometry->alignment
+                                               : pool->slab_options.alignment,
+                     pool->capabilities.max_allocation_alignment),
+    };
+    acquire->parent.info = (iree_hal_pool_acquire_info_t){0};
+    acquire->parent.active = true;
+    iree_atomic_store(&acquire->parent.pending, 2, iree_memory_order_relaxed);
+    iree_status_t status = iree_hal_pool_acquire_reservations(
+        pool->backing_pool, 1, &acquire->parent.request, acquire->call.frontier,
+        &acquire->parent.reservation, &acquire->parent.info,
+        (iree_hal_pool_acquire_callback_t){
+            .fn = iree_hal_tlsf_pool_acquire_parent_complete,
+            .user_data = acquire,
+        },
+        acquire->call.flags);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_tlsf_pool_acquire_parent_complete(acquire, status,
+                                                 IREE_HAL_POOL_ACQUIRE_NONE);
+    }
+    if (iree_atomic_fetch_sub(&acquire->parent.pending, 1,
+                              iree_memory_order_acq_rel) != 1) {
+      return;
     }
   }
-  if (preparing_count) {
+  iree_hal_tlsf_pool_acquire_finish(acquire);
+}
+
+static iree_status_t iree_hal_tlsf_pool_acquire_reservations(
+    iree_hal_pool_t* base_pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    const iree_async_frontier_t* requester_frontier,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos,
+    iree_hal_pool_acquire_callback_t completion,
+    iree_hal_pool_reserve_flags_t flags) {
+  iree_hal_tlsf_pool_t* pool = (iree_hal_tlsf_pool_t*)base_pool;
+  iree_hal_tlsf_pool_acquire_element_t
+      inline_elements[IREE_HAL_TLSF_POOL_INLINE_TRANSACTION_CAPACITY];
+  iree_hal_tlsf_pool_acquire_t inline_acquire = {
+      .pool = pool,
+      .call =
+          {
+              .count = request_count,
+              .requests = requests,
+              .frontier = requester_frontier,
+              .reservations = out_reservations,
+              .infos = out_infos,
+              .completion = completion,
+              .flags = flags,
+          },
+      .elements = inline_elements,
+      .result = IREE_HAL_POOL_ACQUIRE_OK_FRESH,
+  };
+  iree_hal_tlsf_pool_acquire_t* acquire = &inline_acquire;
+  if (request_count > IREE_ARRAYSIZE(inline_elements)) {
+    iree_host_size_t storage_size = 0;
+    if (!iree_host_size_checked_mul_add(sizeof(*acquire), request_count,
+                                        sizeof(*acquire->elements),
+                                        &storage_size)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "TLSF acquisition metadata size overflows");
+    }
+    acquire = NULL;
+    iree_host_size_t capacity = request_count;
     iree_slim_mutex_lock(&pool->mutex);
-    for (iree_host_size_t i = 0; i < preparing_count; ++i) {
-      --elements[i].preparing_slab->preparation_count;
-      iree_hal_tlsf_pool_note_return_candidate(pool,
-                                               elements[i].preparing_slab);
+    if (pool->reusable.acquire &&
+        pool->reusable.acquire->element_capacity >= request_count) {
+      acquire = pool->reusable.acquire;
+      pool->reusable.acquire = NULL;
+      capacity = acquire->element_capacity;
     }
     iree_slim_mutex_unlock(&pool->mutex);
-    iree_hal_tlsf_pool_schedule_maintenance(pool);
-  }
-  iree_allocator_free(pool->host_allocator, metadata.prepared.blocks.storage);
-  iree_hal_tlsf_pool_free_release_node_list(pool,
-                                            metadata.prepared.release_nodes);
-  if (prepared_slab) {
-    iree_hal_tlsf_pool_destroy_slab(pool, prepared_slab);
-  }
-
-  if (!iree_status_is_ok(status) || acquired_count != request_count) {
-    for (iree_host_size_t i = 0; i < initialized_count; ++i) {
-      if (elements[i].dedicated.node) {
-        iree_hal_tlsf_pool_release_dedicated_list(pool,
-                                                  elements[i].dedicated.node);
-      }
+    if (!acquire) {
+      IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+          pool->host_allocator, storage_size, (void**)&acquire));
     }
+    *acquire = inline_acquire;
+    acquire->element_capacity = capacity;
+    acquire->elements = (iree_hal_tlsf_pool_acquire_element_t*)(acquire + 1);
   }
-
+  memset(acquire->elements, 0, request_count * sizeof(*acquire->elements));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_tlsf_pool_reservation_geometry(
+        &requests[i], pool->slab_options.alignment, &pool->capabilities,
+        &pool->asan_options, &acquire->elements[i].geometry);
+  }
   if (iree_status_is_ok(status)) {
-    if (transaction_result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED) {
-      iree_atomic_fetch_add(&pool->exhausted_count, 1,
-                            iree_memory_order_relaxed);
-    }
-    for (iree_host_size_t i = 0; i < request_count; ++i) {
-      out_infos[i] = elements[i].info;
-    }
-    if (acquired_count == request_count) {
-      for (iree_host_size_t i = 0; i < request_count; ++i) {
-        iree_hal_tlsf_pool_commit_reservation(pool, &elements[i].reservation);
-        out_reservations[i] = elements[i].reservation;
-      }
-    }
-    *out_result = transaction_result;
-  }
-  if (elements_allocated) {
-    iree_allocator_free(pool->host_allocator, elements);
+    iree_hal_tlsf_pool_acquire_progress(acquire);
+  } else if (acquire->element_capacity) {
+    iree_allocator_free(pool->host_allocator, acquire);
   }
   return status;
 }
@@ -1919,6 +1874,10 @@ static void iree_hal_tlsf_pool_release_one_reservation(
                    (iree_host_size_t)death_frontier->entry_count *
                        sizeof(iree_async_frontier_entry_t));
       }
+    } else if (pool->history.timeline) {
+      iree_async_frontier_initialize(release_frontier, 0);
+      iree_hal_pool_history_collapse(&pool->history, release_frontier,
+                                     death_frontier);
     } else {
       // Sentinel count larger than capacity. The drain path forwards this
       // header to TLSF free(), which marks the block tainted without reading
@@ -1951,7 +1910,7 @@ static void iree_hal_tlsf_pool_release_reservations(
     iree_hal_tlsf_pool_release_one_reservation(base_pool, &reservations[i],
                                                death_frontier);
   }
-  iree_hal_tlsf_pool_schedule_maintenance(pool);
+  iree_hal_tlsf_pool_return_unused_slabs(pool);
   iree_async_notification_signal_if_observed(pool->base.notification,
                                              INT32_MAX);
 }
@@ -2086,14 +2045,21 @@ static void iree_hal_tlsf_pool_trim(iree_hal_pool_t* base_pool,
   }
   iree_hal_tlsf_pool_release_node_t* release_nodes =
       iree_hal_tlsf_pool_take_free_release_nodes(pool);
-  const bool needs_maintenance =
-      pool->return_candidates != NULL || pool->dedicated.returns != NULL;
+  iree_hal_tlsf_pool_release_node_t* dedicated =
+      iree_hal_tlsf_pool_take_dedicated_returns(pool);
+  iree_hal_tlsf_pool_slab_t* reusable_slab = pool->reusable.slab;
+  iree_hal_tlsf_pool_acquire_t* reusable_acquire = pool->reusable.acquire;
+  pool->reusable.slab = NULL;
+  pool->reusable.acquire = NULL;
   iree_slim_mutex_unlock(&pool->mutex);
   iree_hal_tlsf_pool_free_release_node_list(pool, release_nodes);
-  iree_hal_tlsf_pool_destroy_slab_list(pool, retired_slabs);
-  if (needs_maintenance) {
-    iree_hal_tlsf_pool_schedule_maintenance(pool);
-  }
+  iree_hal_tlsf_pool_release_slab_list(pool, retired_slabs,
+                                       /*retain_metadata=*/false);
+  iree_hal_tlsf_pool_release_slab_list(pool, reusable_slab,
+                                       /*retain_metadata=*/false);
+  iree_allocator_free(pool->host_allocator, reusable_acquire);
+  iree_hal_tlsf_pool_release_dedicated_list(pool, dedicated);
+  iree_hal_pool_history_trim(&pool->history);
   (void)flags;
 }
 

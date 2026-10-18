@@ -35,8 +35,6 @@ typedef struct iree_hal_amdgpu_slab_pool_plan_t {
   struct {
     // Native owner's capacity notification.
     iree_async_notification_t* notification;
-    // Independent allocation and retirement owner.
-    iree_hal_memory_maintenance_t* maintenance;
     // Sealed group's completion probe.
     iree_hal_pool_epoch_query_t epoch_query;
     // Sealed group's shared completion tracker.
@@ -57,6 +55,8 @@ typedef struct iree_hal_amdgpu_slab_pool_plan_t {
   } imports;
   // Borrowed until synchronous creation copies the diagnostic name.
   iree_string_view_t trace_name;
+  // Physical HSA domain name, copied by the native provider at construction.
+  char physical_trace_name[64];
   // Unique native agents selected for this source, copied by the provider.
   hsa_agent_t agents[];
 } iree_hal_amdgpu_slab_pool_plan_t;
@@ -77,8 +77,9 @@ static iree_status_t iree_hal_amdgpu_slab_pool_plan_create(
   iree_hal_slab_provider_t* provider = NULL;
   iree_status_t status = iree_hal_amdgpu_slab_provider_create(
       plan->device, plan->allocator, plan->libhsa, plan->provider_options,
-      plan->physical_ordinal, plan->buffer_pool, plan->trace_name,
-      host_allocator, &provider);
+      plan->physical_ordinal, plan->buffer_pool,
+      iree_make_cstring_view(plan->physical_trace_name),
+      iree_hal_device_host_allocator(plan->device), &provider);
   if (iree_status_is_ok(status)) {
     const iree_hal_passthrough_pool_options_t options = {
         .memory_contract = plan->contract,
@@ -94,7 +95,7 @@ static iree_status_t iree_hal_amdgpu_slab_pool_plan_create(
     };
     status = iree_hal_passthrough_pool_create(
         options, provider, plan->progress.notification, plan->progress.tracker,
-        plan->progress.maintenance, host_allocator, out_pool);
+        host_allocator, out_pool);
   }
   iree_hal_slab_provider_release(provider);
   return status;
@@ -302,6 +303,27 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
   if (!memory_pool.handle) {
     return iree_ok_status();
   }
+  bool mapping_source = false;
+  for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
+    mapping_source |=
+        (scope.families[i].interfaces &
+         (UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE)) != 0;
+  }
+  if (mapping_source &&
+      (options->owned.mode != IREE_HAL_SLAB_POOL_OWNED_ENABLED ||
+       options->imports.class_count || options->owned.exports.class_count ||
+       requires_uncached ||
+       !iree_hal_allocator_supports_virtual_memory(backend->allocator))) {
+    return iree_ok_status();
+  }
+  iree_hal_amdgpu_vmem_granularity_t mapping_granularity = {0};
+  if (mapping_source) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_vmem_query_alloc_granularity(
+        backend->libhsa, memory_pool, &mapping_granularity));
+    if (mapping_granularity.minimum > UINT32_MAX) {
+      return iree_ok_status();
+    }
+  }
   uint32_t global_flags = 0;
   hsa_amd_memory_pool_location_t location;
   IREE_RETURN_IF_ERROR(iree_hsa_amd_memory_pool_get_info(
@@ -362,7 +384,8 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
       iree_any_bit_set(exposed_memory_type, IREE_HAL_MEMORY_TYPE_HOST_COHERENT);
   const uint32_t interfaces =
       (1u << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS) |
-      (exposed_host_visible ? (1u << IREE_HAL_BUFFER_INTERFACE_HOST) : 0);
+      (exposed_host_visible ? (1u << IREE_HAL_BUFFER_INTERFACE_HOST) : 0) |
+      (mapping_source ? (1u << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE) : 0);
   iree_hal_buffer_usage_t usage = IREE_HAL_BUFFER_USAGE_NONE;
   for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
     const iree_hal_pool_family_access_t* access = &scope.families[i];
@@ -410,9 +433,22 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
   plan->allocator = backend->allocator;
   plan->libhsa = backend->libhsa;
   plan->physical_ordinal = physical_device->device_ordinal;
+  if (location == HSA_AMD_MEMORY_POOL_LOCATION_CPU &&
+      physical_device->host_numa_node == UINT32_MAX) {
+    iree_snprintf(plan->physical_trace_name, sizeof(plan->physical_trace_name),
+                  "amdgpu-system");
+  } else {
+    iree_snprintf(plan->physical_trace_name, sizeof(plan->physical_trace_name),
+                  location == HSA_AMD_MEMORY_POOL_LOCATION_CPU
+                      ? "amdgpu-numa-%u"
+                      : "amdgpu-gpu-%u",
+                  location == HSA_AMD_MEMORY_POOL_LOCATION_CPU
+                      ? physical_device->host_numa_node
+                      : (uint32_t)physical_device->device_ordinal);
+  }
   plan->buffer_pool = &physical_device->materialized_buffer_pool;
+  plan->provider_options.allocation_queue = physical_device->allocation_queue;
   plan->progress.notification = physical_device->memory_notification;
-  plan->progress.maintenance = physical_device->memory_maintenance;
   plan->progress.epoch_query = backend->epoch_query;
   plan->progress.tracker =
       iree_hal_device_topology_info(backend->device)->frontier.tracker;
@@ -443,6 +479,13 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
       plan->provider_options.flags |=
           IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_VMM;
     }
+  }
+
+  if (mapping_source) {
+    plan->provider_options.flags |=
+        IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_MAPPING_SOURCE;
+    plan->provider_options.vmem_memory_type =
+        IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_PINNED_HOST;
   }
 
   bool supported = true;
@@ -547,6 +590,15 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
   if (iree_status_is_ok(status) && supported) {
     iree_hal_memory_contract_t* contract = plan->contract;
     contract->host = host;
+    if (mapping_source) {
+      contract->mapping_source.type = IREE_HAL_MEMORY_BACKEND_ROCR;
+      contract->mapping_source.requirements =
+          (iree_hal_pool_mapping_requirements_t){
+              .minimum_granularity = mapping_granularity.minimum,
+              .recommended_granularity = mapping_granularity.recommended,
+              .flags = IREE_HAL_POOL_MAPPING_FLAG_WHOLE_ALLOCATION,
+          };
+    }
     contract->allowed_access =
         iree_hal_buffer_usage_access(usage) | host.access;
     contract->allowed_usage =
@@ -565,6 +617,11 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
         contract->scopes[id]
             .bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] =
             IREE_HAL_AMDGPU_BUFFER_BINDING_DEVICE_ADDRESS;
+        if (mapping_source) {
+          contract->scopes[id]
+              .bindings[IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE] =
+              IREE_HAL_AMDGPU_BUFFER_BINDING_MAPPING_SOURCE;
+        }
         if (exposed_host_visible) {
           contract->scopes[id].bindings[IREE_HAL_BUFFER_INTERFACE_HOST] =
               IREE_HAL_AMDGPU_BUFFER_BINDING_HOST;
@@ -672,5 +729,7 @@ void iree_hal_amdgpu_memory_backend_initialize(
       .type = IREE_HAL_MEMORY_BACKEND_ROCR,
       .factory_count = IREE_ARRAYSIZE(iree_hal_amdgpu_slab_pool_factories),
       .factories = iree_hal_amdgpu_slab_pool_factories,
+      .query_virtual_buffer = iree_hal_amdgpu_virtual_buffer_query_capabilities,
+      .create_virtual_buffer = iree_hal_amdgpu_virtual_buffer_create,
   };
 }

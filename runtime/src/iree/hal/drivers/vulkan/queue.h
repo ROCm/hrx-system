@@ -13,6 +13,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/base/threading/notification.h"
 #include "iree/base/threading/thread.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/vulkan/allocator.h"
@@ -185,6 +186,19 @@ typedef struct iree_hal_vulkan_queue_t {
   // submission state, and host access to the shared native command pools.
   // Recording different command buffers from one pool also requires this lock.
   iree_slim_mutex_t submission_mutex;
+
+  // Protects only linkage of logical memory operations during admission/return.
+  iree_slim_mutex_t memory_mutex;
+
+  // Accepted logical operations, independent of native FIFO submission.
+  struct iree_hal_vulkan_memory_operation_t* memory_head;
+
+  // Captures still owning callbacks or native semaphore references, including
+  // the final tail after terminal publication. Protected by memory_mutex.
+  iree_host_size_t memory_operation_count;
+
+  // Teardown notification posted after the last capture is fully destroyed.
+  iree_notification_t memory_notification;
 
   // Cold-path activation state published after all submission resources exist.
   iree_atomic_int32_t activation_state;
@@ -422,6 +436,13 @@ iree_status_t iree_hal_vulkan_queue_assign_frontier(
 // Retires this queue's causal frontier axis and stops completion processing.
 void iree_hal_vulkan_queue_retire_frontier(iree_hal_vulkan_queue_t* queue);
 
+// Cancels logical memory waits without stopping native FIFO progression.
+// Native allocations already accepted finish before their operations retire.
+void iree_hal_vulkan_queue_cancel_memory(iree_hal_vulkan_queue_t* queue);
+
+// Joins accepted logical operations during caller-quiescent queue teardown.
+void iree_hal_vulkan_queue_join_memory(iree_hal_vulkan_queue_t* queue);
+
 // Assigns the active HAL-native profile recorder for this queue.
 void iree_hal_vulkan_queue_set_profile_recorder(
     iree_hal_vulkan_queue_t* queue,
@@ -474,21 +495,22 @@ iree_status_t iree_hal_vulkan_queue_submit_barrier(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const iree_hal_vulkan_queue_barriers_t* barriers);
 
-// Submits one queue-ordered allocation transaction.
-iree_status_t iree_hal_vulkan_queue_submit_alloca(
-    iree_hal_vulkan_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_host_size_t request_count,
-    const iree_hal_pool_reservation_request_t* requests,
-    iree_hal_buffer_t* const* buffers);
+// Validates native semaphore ownership at queue submission boundaries.
+iree_status_t iree_hal_vulkan_queue_validate_semaphore_list(
+    iree_hal_vulkan_queue_t* queue, iree_hal_semaphore_list_t semaphores,
+    iree_string_view_t usage);
 
-// Submits one queue-ordered deallocation transaction.
-iree_status_t iree_hal_vulkan_queue_submit_dealloca(
-    iree_hal_vulkan_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers);
+// Logical memory operations progress in the submitting/completing context.
+// Native allocation is delegated only through the pool's slab provider.
+iree_status_t iree_hal_vulkan_queue_memory_alloca(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_pool_t* pool,
+    iree_host_size_t count, const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffers);
+iree_status_t iree_hal_vulkan_queue_memory_dealloca(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t count,
+    iree_hal_buffer_t* const* buffers);
 
 // Submits sparse buffer memory binds ordered by queue semaphores.
 //
@@ -539,6 +561,20 @@ iree_status_t iree_hal_vulkan_queue_submit_copy(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, const iree_hal_vulkan_queue_barriers_t* barriers,
     iree_hal_copy_flags_t flags);
+
+// Prepares staged file I/O for a caller-owned dependency boundary. The returned
+// action owns one resource reference, captures the file/buffer/signals, and
+// starts when invoked after the entry barriers retire. The caller releases
+// overlapping captures before invocation and releases action.resource
+// afterward.
+iree_status_t iree_hal_vulkan_queue_prepare_staged_file_transfer(
+    iree_hal_vulkan_queue_t* queue,
+    iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_memory_access_t file_access, iree_hal_file_t* file,
+    uint64_t file_offset, iree_hal_buffer_t* buffer,
+    iree_device_size_t buffer_offset, iree_device_size_t length,
+    const iree_hal_vulkan_queue_barriers_t* barriers,
+    iree_hal_vulkan_queue_completion_action_t* out_action);
 
 // Submits a direct dispatch ordered by queue semaphores.
 iree_status_t iree_hal_vulkan_queue_submit_dispatch(

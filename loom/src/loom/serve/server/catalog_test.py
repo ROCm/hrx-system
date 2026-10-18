@@ -81,14 +81,19 @@ def check_parameter_residency(client, backing, workers):
         assert "error" not in state, state
         return state
 
-    def retained_memory():
-        devices = client.request("/v1/status")["server"]["resources"]["devices"]
-        assert len(devices) == 1, devices
-        assert devices[0]["memory"]["backing"] == backing, devices
-        return devices[0]["memory"]["retained"]
+    def settled_retained_memory():
+        # Model deactivation can finish before its accepted native releases.
+        # Compare device totals only after those releases have retired.
+        while True:
+            devices = client.request("/v1/status")["server"]["resources"]["devices"]
+            assert len(devices) == 1, devices
+            assert devices[0]["memory"]["backing"] == backing, devices
+            retained = devices[0]["memory"]["retained"]
+            if retained is None or retained["releasing_bytes"] == 0:
+                return retained
 
     before = snapshot()
-    memory_before = retained_memory()
+    memory_before = settled_retained_memory()
     assert before["parameters"]["primary"]["active"], before
     assert before["parameters"]["primary"]["backing"] == backing, before
     selector = {"model": "fixture-text"}
@@ -130,7 +135,7 @@ def check_parameter_residency(client, backing, workers):
             assert len(retained) == 1 and retained[0]["request"] is None, sessions
             assert retained[0]["position"] == 5, retained
             assert retained[0]["counters"]["completed"] == 1, retained
-            memory_cold = retained_memory()
+            memory_cold = settled_retained_memory()
             if backing == "elastic":
                 assert not parameters["active"], cold
                 assert parameters["committed_bytes"] == 0, cold
@@ -168,7 +173,7 @@ def check_parameter_residency(client, backing, workers):
             assert peer["data"][0]["embedding"] == [3, 2], peer
             assert not continuation.done()
             warmed = client.activate("fixture-text")
-            memory_warmed = retained_memory()
+            memory_warmed = settled_retained_memory()
             assert warmed["incarnation"] == before["incarnation"], warmed
             assert warmed["compilation"] == before["compilation"], warmed
             assert warmed["status"]["held_requests"] == 1, warmed
@@ -472,7 +477,7 @@ def check_device_trim(client, backing, workers):
                 "/v1/devices/trim", {"device": 0, "target_bytes": 0}
             )
             # Trim accepts native release work; physical capacity returns only
-            # after the maintenance owner completes that work.
+            # after those releases have retired.
             while True:
                 device = client.request("/v1/status")["server"]["resources"]["devices"][
                     0
@@ -941,12 +946,12 @@ def check_control_contracts(server_command, directory, catalog):
             "speech",
             [
                 (
-                    "@prepare_work(%model: buffer, %state: buffer)",
-                    "@prepare_work(%model: buffer, %state: buffer, %extra: i32)",
+                    "@prepare_work(%model: buffer, %state: buffer, %position: i64)",
+                    "@prepare_work(%model: buffer, %state: buffer, %position: i64, %extra: i32)",
                 )
             ],
             "model export 'prepare_work' argument count mismatch: "
-            "host expects 2, source declares 3",
+            "host expects 3, source declares 4",
         ),
     ]
     with running_server(server_command, directory, catalog_path, 1) as (client, _):
@@ -1262,9 +1267,9 @@ def check_dynamic_catalog(
             else:
                 raise AssertionError(kind)
 
-        # Activate the shared device queue with one real request before checking
-        # model-count scaling. Vulkan starts its queue completion thread lazily.
-        # Names may change during native initialization; identities must remain.
+        # Observe the first request separately from activating the whole fixed
+        # queue inventory. Models may bind different provisioned queues, and
+        # Vulkan starts each queue's completion thread on first submission.
         first = next(
             item for item in declarations if item["definition"]["kind"] == "embedding"
         )
@@ -1282,12 +1287,13 @@ def check_dynamic_catalog(
             queued_requests=0,
             active_requests=0,
         )
-        activated_threads = thread_snapshot(process)
+        first_request_threads = thread_snapshot(process)
         assert (
-            initial_threads["userspace"].keys() <= activated_threads["userspace"].keys()
+            initial_threads["userspace"].keys()
+            <= first_request_threads["userspace"].keys()
         ), (
             initial_threads,
-            activated_threads,
+            first_request_threads,
         )
         for declaration in declarations:
             if declaration is not first:
@@ -1301,13 +1307,13 @@ def check_dynamic_catalog(
                 future.result()
             client.idle()
             observer.completed(2)
-            loaded_threads = thread_snapshot(process)
+            activated_threads = thread_snapshot(process)
             assert (
-                loaded_threads["userspace"].keys()
-                == activated_threads["userspace"].keys()
+                first_request_threads["userspace"].keys()
+                <= activated_threads["userspace"].keys()
             ), (
+                first_request_threads,
                 activated_threads,
-                loaded_threads,
             )
             check_sporadic_connections(
                 process,
@@ -1409,6 +1415,8 @@ def check_dynamic_catalog(
             retained = device["memory"]["retained"]
             if retained is not None:
                 assert retained["reserved_bytes"] == retained["committed_bytes"] == 0
+        # Reloads reuse the provisioned inventory. Its completion threads and
+        # the shared application workers survive model churn with no new IDs.
         final_threads = thread_snapshot(process)
         assert (
             final_threads["userspace"].keys() == activated_threads["userspace"].keys()
@@ -1436,8 +1444,8 @@ def check_dynamic_catalog(
                     "sse_model_lifetime_verified": True,
                     "thread_samples": [
                         initial_threads,
+                        first_request_threads,
                         activated_threads,
-                        loaded_threads,
                         final_threads,
                     ],
                 }

@@ -14,6 +14,20 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "allocation_queue",
+    srcs = ["allocation_queue.c"],
+    hdrs = ["allocation_queue.h"],
+    deps = [
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:slab_provider",
+        "//runtime/src/iree/task",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "atomic",
     srcs = ["atomic.c"],
     hdrs = ["atomic.h"],
@@ -132,6 +146,7 @@ iree_runtime_cc_library(
     srcs = ["device.c"],
     hdrs = ["device.h"],
     deps = [
+        ":allocation_queue",
         ":atomic",
         ":device_spec_builder",
         ":profile",
@@ -150,8 +165,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/task/queue",
         "//runtime/src/iree/hal/memory:cpu_slab_provider",
         "//runtime/src/iree/hal/memory:host_memory_backend",
-        "//runtime/src/iree/hal/memory:maintenance",
-        "//runtime/src/iree/hal/memory:maintenance_thread",
         "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/hal/utils:host_semaphore",
         "//runtime/src/iree/task",

@@ -47,7 +47,8 @@ activation can prepare a model while its admission stays closed.
 ## Programs and dependencies
 
 Every definition contains `kind`, `prepare`, `control` and a nonempty `sources`
-array. Kinds are `text`, `image`, `embedding`, `decision`, `speech` and `recognition`.
+array. Kinds are `text`, `image`, `embedding`, `decision`, `speech`, `recognition`,
+and `activity`.
 
 | Field | Role |
 | --- | --- |
@@ -55,7 +56,7 @@ array. Kinds are `text`, `image`, `embedding`, `decision`, `speech` and `recogni
 | `control` | Warm VM program implementing the modality's request and execution contract. |
 | `sources` | Shared VM functions, native commands, kernels, configuration and motif providers. |
 | `options` | JSON object passed to source preparation unchanged; defaults to `{}`. |
-| `pending_requests` | Request credit, default `32`; positive integer. Text/image/speech/recognition count queued requests, while embedding/decision also count the active cohort. |
+| `pending_requests` | Request credit, default `32`; positive integer. Text/image/speech/recognition/activity count queued requests, while embedding/decision also count the active cohort. |
 | `variant_capacity` | Text/image/embedding/decision retained native executable choices, default `16`, including the original, pending compilations and failed attempts; zero disables native reconfiguration. |
 
 Programs accept text or portable Loom bytecode (`.loom` or `.loombc`), detected
@@ -214,13 +215,24 @@ speech. Pinning governs parameter residency, independently of mutable-state
 admission and compute scheduling. Speech does not currently accept
 `variant_capacity`; replacing its execution contract requires a new registration.
 
-## Recognition definitions
+## Recognition and activity definitions
 
 Recognition requires `kind:"recognition"` and an `assets` directory. It uses the
 same `prepare`, `control`, `sources` and source-owned `options` fields as other
 modalities. The package declares input sample rate and channels, bounded input
-credit, maximum recording length, transcript-event capacity, persistent request
-storage and numerical batch capacity.
+credit, maximum recording length, supported event types, event count and byte
+bounds, persistent request storage and numerical batch capacity. Native requests
+explicitly select transcript or activity output, or both when the source supports
+them. HTTP transcription selects transcripts.
+
+An `activity` deployment uses the same fields and continuing-input execution
+contract for native speech activity detection. The source must support activity
+events; a `recognition` source must support transcripts. Either can additionally
+support the other event family, with each native request selecting its outputs.
+These are deployment roles, not fixed model architectures or turn policies.
+An activity deployment has no HTTP inference endpoint. Its `/v1/models` entry
+has `loom.kind:"activity"`, omits `loom.endpoint`, and reports the prepared
+source's actual output modalities, including `activity`.
 
 `pending_requests` bounds the additional host queue. Each admitted request owns
 its input clock, unconsumed PCM, model state and transcript revisions. Source
@@ -230,12 +242,13 @@ language, prompting, decoding, segment boundaries and any speaker/alignment
 evidence.
 
 The [transcription profile](http-profiles.md#audio-transcription) accepts uploaded
-WAV, MP3, or FLAC when enabled, and always accepts PCM16LE with matching sample
-geometry. It returns final JSON or text. The underlying continuing-input service
+WAV, MP3, or FLAC when enabled, and always accepts PCM16LE with an explicit
+sample rate and matching channel count. Raw rate conversion works without audio
+codecs. It returns final JSON or text. The underlying continuing-input service
 also accepts bounded PCM with explicit end-of-input, independently of HTTP.
-The normal pin/unpin, activation, drain and removal controls apply. Recognition
-does not accept `variant_capacity`; changing its execution contract requires a
-new registration.
+The normal pin/unpin, activation, drain and removal controls apply to both roles.
+Neither recognition nor activity accepts `variant_capacity`; changing its
+execution contract requires a new registration.
 
 ## Local path binding
 

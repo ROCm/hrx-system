@@ -57,6 +57,7 @@ iree_runtime_cc_library(
     srcs = ["pool_test_util.cc"],
     hdrs = ["pool_test_util.h"],
     deps = [
+        "//runtime/src/iree/async",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:fixed_block_pool",
         "//runtime/src/iree/hal/memory:passthrough_pool",

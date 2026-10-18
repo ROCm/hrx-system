@@ -12,11 +12,28 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
-    maintenance_gate
+    native_allocator
   HDRS
-    "maintenance_gate.h"
+    "native_allocator.h"
   DEPS
-    iree::hal::memory::maintenance
+    ::device
+    iree::base
+    iree::hal
+    loom::serve::runtime::device
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    worker_gate
+  HDRS
+    "worker_gate.h"
+  DEPS
+    iree::task
+    iree::testing::gtest
   TESTONLY
   PUBLIC
 )
@@ -51,8 +68,8 @@ loom_cc_library(
     "device.c"
   DEPS
     iree::base
+    iree::base::threading
     iree::hal
-    iree::hal::memory::maintenance
     loom::serve::runtime::device
     loom::serve::runtime::host
   TESTONLY
@@ -122,6 +139,7 @@ loom_cc_library(
   DEPS
     ::compiler
     ::device
+    ::native_allocator
     iree::base
     iree::hal
     iree::testing::gtest

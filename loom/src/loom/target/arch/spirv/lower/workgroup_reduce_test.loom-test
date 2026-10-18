@@ -129,92 +129,92 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %item = OpLoadBuiltin.local_invocation_id.x
-  %49 = OpSConvert.i32.offset64 %item
-  %50 = OpConstant.offset64 8
-  %51 = OpIMul.offset64 %49, %50
-  %52 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %51
-  %53 = OpLoad.storage_buffer.i32 %52
-  %57 = OpConstant.offset64 4
-  %58 = OpIAdd.offset64 %51, %57
-  %59 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %58
-  %60 = OpLoad.storage_buffer.i32 %59
-  %61 = OpConstant.i32 1
-  %62 = OpBitwiseAnd %53, %61
-  %63 = OpIEqual %62, %61
-  %65 = OpBitwiseAnd %60, %61
-  %66 = OpIEqual %65, %61
-  %predicates = OpCompositeConstruct.v2bool %63, %66
-  %68 = OpConstant.i32 0
-  %70 = OpLoadBuiltin.subgroup_id : reg<spirv.id : i32>
-  %71 = OpLoadBuiltin.num_subgroups : reg<spirv.id : i32>
-  %72 = OpGroupNonUniformIAdd.exclusive_scan.i32 %61
-  %73 = OpConstantFalse.bool
-  %74 = OpCompositeExtract.v2bool.bool %predicates, 0
-  %75 = OpGroupNonUniformLogicalXor.reduce.bool %74
-  %76 = OpSelect %75, %61, %68
-  %77 = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
-  %78 = storage_address %77 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
-  %79 = OpCompositeExtract.v2bool.bool %predicates, 1
-  %80 = OpGroupNonUniformLogicalXor.reduce.bool %79
-  %81 = OpSelect %80, %61, %68
-  %82 = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
-  %83 = storage_address %82 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
-  %84 = OpIEqual %72, %68
-  low.scf.if %84 {
-    %85 = OpAccessChain.workgroup.i32.element_index %78, %70
-    OpStore.workgroup.i32 %85, %76
-    %86 = OpAccessChain.workgroup.i32.element_index %83, %70
-    OpStore.workgroup.i32 %86, %81
+  %47 = OpSConvert.i32.offset64 %item
+  %48 = OpConstant.offset64 8
+  %49 = OpIMul.offset64 %47, %48
+  %50 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %49
+  %51 = OpLoad.storage_buffer.i32 %50
+  %55 = OpConstant.offset64 4
+  %56 = OpIAdd.offset64 %49, %55
+  %57 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %56
+  %58 = OpLoad.storage_buffer.i32 %57
+  %59 = OpConstant.i32 1
+  %60 = OpBitwiseAnd %51, %59
+  %61 = OpIEqual %60, %59
+  %63 = OpBitwiseAnd %58, %59
+  %64 = OpIEqual %63, %59
+  %predicates = OpCompositeConstruct.v2bool %61, %64
+  %66 = OpConstant.i32 0
+  %68 = OpLoadBuiltin.subgroup_id : reg<spirv.id : i32>
+  %69 = OpLoadBuiltin.num_subgroups : reg<spirv.id : i32>
+  %70 = OpGroupNonUniformIAdd.exclusive_scan.i32 %59
+  %71 = OpConstantFalse.bool
+  %72 = OpCompositeExtract.v2bool.bool %predicates, 0
+  %73 = OpGroupNonUniformLogicalXor.reduce.bool %72
+  %74 = OpSelect %73, %59, %66
+  %75 = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
+  %76 = storage_address %75 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %77 = OpCompositeExtract.v2bool.bool %predicates, 1
+  %78 = OpGroupNonUniformLogicalXor.reduce.bool %77
+  %79 = OpSelect %78, %59, %66
+  %80 = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
+  %81 = storage_address %80 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %82 = OpIEqual %70, %66
+  low.scf.if %82 {
+    %83 = OpAccessChain.workgroup.i32.element_index %76, %68
+    OpStore.workgroup.i32 %83, %74
+    %84 = OpAccessChain.workgroup.i32.element_index %81, %68
+    OpStore.workgroup.i32 %84, %79
   }
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %87 = OpConstant.i32 2
-  %88 = OpAccessChain.workgroup.i32.element_index %78, %87
-  %89 = OpAccessChain.workgroup.i32.element_index %83, %87
-  %90 = OpIEqual %70, %68
-  low.scf.if %90 {
-    %91 = OpGroupNonUniformIAdd.reduce.i32 %61
-    %95, %96 = low.scf.for unsigned [%72 to %71 step %91] iter_args(%73: reg<spirv.id : i1>, %73: reg<spirv.id : i1>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>) do(%92: reg<spirv.id : i32>, %93: reg<spirv.id : i1>, %94: reg<spirv.id : i1>) {
-      %97 = OpAccessChain.workgroup.i32.element_index %78, %92
-      %98 = OpLoad.workgroup.i32 %97
-      %99 = OpINotEqual %98, %68
-      %100 = OpLogicalNotEqual.bool %93, %99
-      %101 = OpAccessChain.workgroup.i32.element_index %83, %92
-      %102 = OpLoad.workgroup.i32 %101
-      %103 = OpINotEqual %102, %68
-      %104 = OpLogicalNotEqual.bool %94, %103
-      low.scf.yield %100, %104 : reg<spirv.id : i1>, reg<spirv.id : i1>
+  %85 = OpConstant.i32 2
+  %86 = OpAccessChain.workgroup.i32.element_index %76, %85
+  %87 = OpAccessChain.workgroup.i32.element_index %81, %85
+  %88 = OpIEqual %68, %66
+  low.scf.if %88 {
+    %89 = OpGroupNonUniformIAdd.reduce.i32 %59
+    %93, %94 = low.scf.for unsigned [%70 to %69 step %89] iter_args(%71: reg<spirv.id : i1>, %71: reg<spirv.id : i1>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>) do(%90: reg<spirv.id : i32>, %91: reg<spirv.id : i1>, %92: reg<spirv.id : i1>) {
+      %95 = OpAccessChain.workgroup.i32.element_index %76, %90
+      %96 = OpLoad.workgroup.i32 %95
+      %97 = OpINotEqual %96, %66
+      %98 = OpLogicalNotEqual.bool %91, %97
+      %99 = OpAccessChain.workgroup.i32.element_index %81, %90
+      %100 = OpLoad.workgroup.i32 %99
+      %101 = OpINotEqual %100, %66
+      %102 = OpLogicalNotEqual.bool %92, %101
+      low.scf.yield %98, %102 : reg<spirv.id : i1>, reg<spirv.id : i1>
     }
-    %105 = OpGroupNonUniformLogicalXor.reduce.bool %95
-    %106 = OpSelect %105, %61, %68
-    %107 = OpGroupNonUniformLogicalXor.reduce.bool %96
-    %108 = OpSelect %107, %61, %68
-    low.scf.if %84 {
-      OpStore.workgroup.i32 %88, %106
-      OpStore.workgroup.i32 %89, %108
+    %103 = OpGroupNonUniformLogicalXor.reduce.bool %93
+    %104 = OpSelect %103, %59, %66
+    %105 = OpGroupNonUniformLogicalXor.reduce.bool %94
+    %106 = OpSelect %105, %59, %66
+    low.scf.if %82 {
+      OpStore.workgroup.i32 %86, %104
+      OpStore.workgroup.i32 %87, %106
     }
   }
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %109 = OpLoad.workgroup.i32 %88
-  %110 = OpINotEqual %109, %68
-  %111 = OpLoad.workgroup.i32 %89
-  %112 = OpINotEqual %111, %68
-  %parity = OpCompositeConstruct.v2bool %110, %112
-  %114 = OpConstant.i32 1
+  %107 = OpLoad.workgroup.i32 %86
+  %108 = OpINotEqual %107, %66
+  %109 = OpLoad.workgroup.i32 %87
+  %110 = OpINotEqual %109, %66
+  %parity = OpCompositeConstruct.v2bool %108, %110
+  %112 = OpConstant.i32 1
+  %113 = OpCompositeConstruct.v2i32 %112, %112
+  %114 = OpConstant.i32 0
   %115 = OpCompositeConstruct.v2i32 %114, %114
-  %116 = OpConstant.i32 0
-  %117 = OpCompositeConstruct.v2i32 %116, %116
-  %bits = OpSelect.v2i32 %parity, %115, %117
-  %119 = OpCompositeExtract.v2i32.i32 %bits, 0
-  %120 = OpCompositeExtract.v2i32.i32 %bits, 1
-  %121 = OpSConvert.i32.offset64 %item
-  %122 = OpConstant.offset64 8
-  %123 = OpIMul.offset64 %121, %122
-  %124 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %123
-  OpStore.storage_buffer.i32 %124, %119
-  %128 = OpConstant.offset64 4
-  %129 = OpIAdd.offset64 %123, %128
-  %130 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %129
-  OpStore.storage_buffer.i32 %130, %120
+  %bits = OpSelect.v2i32 %parity, %113, %115
+  %117 = OpCompositeExtract.v2i32.i32 %bits, 0
+  %118 = OpCompositeExtract.v2i32.i32 %bits, 1
+  %119 = OpSConvert.i32.offset64 %item
+  %120 = OpConstant.offset64 8
+  %121 = OpIMul.offset64 %119, %120
+  %122 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %121
+  OpStore.storage_buffer.i32 %122, %117
+  %126 = OpConstant.offset64 4
+  %127 = OpIAdd.offset64 %121, %126
+  %128 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %127
+  OpStore.storage_buffer.i32 %128, %118
   return
 }
 
@@ -243,15 +243,15 @@ kernel.def @later_payload_capability() {
 
 // RUN: emit spirv-low target=spirv:vulkan1.3+bda+subgroup32+reductions+hal features=BFLOAT16_TYPE_KHR
 
-kernel.def @unsupported_native_type() {
+kernel.def @bfloat_preservation_requires_provider() {
   %unit = index.constant 1 : index
   %width = index.constant 3 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
 } launch(%output: buffer, %value: bf16) {
   %base = index.constant 0 : offset
   %destination = buffer.view %output[%base] : buffer -> view<1xbf16>
-  // ERROR@+1: TARGET/033 {field_name="values", actual_type="bf16"}
-  %sum = kernel.workgroup.reduce<addf> %value : bf16
+  // ERROR@+1: TARGET/003 {subject_role="flags", subject_name="math", constraint_key="has_none.preserve"}
+  %sum = kernel.workgroup.reduce<addf, preserve> %value : bf16
   view.store %sum, %destination[0] : bf16, view<1xbf16>
   kernel.return
 }

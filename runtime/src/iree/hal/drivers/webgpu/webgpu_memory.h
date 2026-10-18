@@ -9,7 +9,6 @@
 
 #include "iree/hal/drivers/webgpu/handle_table.h"
 #include "iree/hal/drivers/webgpu/webgpu.h"
-#include "iree/hal/memory/maintenance.h"
 #include "iree/hal/memory_backend.h"
 
 #ifdef __cplusplus
@@ -32,8 +31,6 @@ typedef struct iree_hal_webgpu_memory_backend_t {
   iree_hal_webgpu_handle_t device_handle;
   // Device-owned capacity notification shared by constructed pools.
   iree_async_notification_t* notification;
-  // Serialized owner for execution-context-affine native allocation calls.
-  iree_hal_memory_maintenance_t* maintenance;
   // Completion probe with a sealed-group lifetime context.
   iree_hal_pool_epoch_query_t epoch_query;
 } iree_hal_webgpu_memory_backend_t;

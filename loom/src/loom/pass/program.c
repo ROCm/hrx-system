@@ -209,6 +209,30 @@ static iree_status_t loom_pass_program_copy_attr_value(
       return loom_pass_program_copy_string(
           &compiler->program->arena, source_string, &out_value->string_value);
     }
+    case LOOM_ATTR_STRING_ARRAY: {
+      if (source_attr.count == 0) {
+        return iree_ok_status();
+      }
+      if (!source_attr.string_ids) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty pass predicate string array has a NULL payload");
+      }
+      iree_string_view_t* values = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &compiler->program->arena, source_attr.count, sizeof(*values),
+          (void**)&values));
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        iree_string_view_t source_string = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_pass_program_string_from_id(
+            compiler->module, source_attr.string_ids[i],
+            "pass predicate string array element", &source_string));
+        IREE_RETURN_IF_ERROR(loom_pass_program_copy_string(
+            &compiler->program->arena, source_string, &values[i]));
+      }
+      out_value->string_array = values;
+      return iree_ok_status();
+    }
     case LOOM_ATTR_BOOL:
       out_value->bool_value = source_attr.raw != 0;
       return iree_ok_status();

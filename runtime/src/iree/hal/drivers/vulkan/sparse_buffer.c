@@ -40,13 +40,12 @@ VkMemoryRequirements iree_hal_vulkan_sparse_buffer_query_requirements(
 // iree_hal_vulkan_sparse_buffer_t
 //===----------------------------------------------------------------------===//
 
-#if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
-static const char* IREE_HAL_VULKAN_ALLOCATOR_ID = "iree-hal-vulkan-unpooled";
-#endif  // IREE_TRACING_FEATURE_ALLOCATION_TRACKING
-
 typedef struct iree_hal_vulkan_sparse_buffer_t {
   // Base HAL buffer resource returned to callers.
   iree_hal_buffer_t base;
+
+  // Physical bytes in the owned blocks, independent of their virtual mapping.
+  iree_hal_memory_trace_t allocation_trace;
 
   // Host allocator used to free wrapper storage and temporary bind arrays.
   iree_allocator_t host_allocator;
@@ -263,6 +262,7 @@ iree_status_t iree_hal_vulkan_sparse_buffer_create_bound_sync(
     VkMemoryRequirements memory_requirements, uint32_t memory_type_index,
     VkDeviceSize max_allocation_size,
     VkMemoryAllocateFlags memory_allocate_flags,
+    const iree_hal_memory_trace_t* allocation_trace,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(syms);
   IREE_ASSERT_ARGUMENT(logical_device);
@@ -313,6 +313,9 @@ iree_status_t iree_hal_vulkan_sparse_buffer_create_bound_sync(
   }
 
   if (iree_status_is_ok(status)) {
+    buffer->allocation_trace = *allocation_trace;
+    iree_hal_memory_trace_alloc(&buffer->allocation_trace, buffer,
+                                memory_requirements.size);
     *out_buffer = &buffer->base;
   } else if (buffer) {
     iree_hal_vulkan_sparse_buffer_free_physical_blocks(
@@ -338,7 +341,6 @@ static void iree_hal_vulkan_sparse_buffer_destroy(
       (VkBuffer)buffer->native.bindings[IREE_HAL_VULKAN_BUFFER_BINDING_RESOURCE]
           .vulkan.buffer;
   if (handle) {
-    IREE_TRACE_FREE_NAMED(IREE_HAL_VULKAN_ALLOCATOR_ID, (void*)handle);
     iree_vkDestroyBuffer(IREE_VULKAN_DEVICE(&buffer->syms),
                          buffer->logical_device, handle,
                          /*pAllocator=*/NULL);
@@ -346,6 +348,7 @@ static void iree_hal_vulkan_sparse_buffer_destroy(
   iree_hal_vulkan_sparse_buffer_free_physical_blocks(
       &buffer->syms, buffer->logical_device, buffer->physical_block_count,
       buffer->physical_blocks);
+  iree_hal_memory_trace_free(&buffer->allocation_trace, buffer);
   iree_allocator_free(host_allocator, buffer);
 
   IREE_TRACE_ZONE_END(z0);

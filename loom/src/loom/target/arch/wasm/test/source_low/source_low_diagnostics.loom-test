@@ -101,7 +101,7 @@ CHECK: COMPILE-REPORT: target_legalization[0] function=unsupported_reduction_car
 
 // ====
 
-// RUN: with-checks compile-report target-legalize{mode=eager}
+// RUN: with-checks compile-report target-legalize{mode=complete}
 
 wasm.target<simd128> @target
 

@@ -51,8 +51,11 @@ header.
 
 Prepared but drained or weight-evicted models remain discoverable.
 `created` is the registration timestamp; `owned_by` is `"local"`.
-`loom.kind`, `loom.endpoint` and `loom.tokenize` describe the modality and
-loaded tokenizer. Text also reports configured `context_length` and
+`loom.kind`, optional `loom.endpoint`, and `loom.tokenize` describe the deployment
+role, HTTP inference route, and loaded tokenizer. Native-only activity models
+omit `loom.endpoint`; HTTP inference requests to them return 404. Management and
+tokenizer utilities remain available according to their normal capabilities.
+Text also reports configured `context_length` and
 `limits.max_output_tokens`, not training context or total cache-pool capacity.
 Capabilities do not establish learned quality or support for every optional field.
 
@@ -381,27 +384,34 @@ codec or unsupported container returns an error. Direct WebM/Opus and MP4/AAC
 uploads are not accepted; clients must convert them to an enabled format.
 
 Raw PCM16LE works in every build. Its file part explicitly declares `audio/pcm`
-with the sample rate and interleaved channel count, matching the selected model.
-For a 16 kHz mono recognizer:
+with a positive sample rate and the interleaved channel count required by the
+selected model. The server converts the declared rate to the model's rate.
+For a 24 kHz mono recording sent to a 16 kHz mono recognizer:
 
 ```sh
 curl --fail-with-body -H 'Expect:' \
   http://127.0.0.1:8080/v1/audio/transcriptions \
   -F model=recognizer \
-  -F 'file=@recording.pcm;headers="Content-Type: audio/pcm;rate=16000;channels=1"'
+  -F 'file=@recording.pcm;headers="Content-Type: audio/pcm;rate=24000;channels=1"'
 ```
 
-These bytes contain whole PCM16 frames without a WAV header. Missing, duplicate,
-or mismatched geometry and partial frames reject. The raw path performs no
-resampling or channel conversion. PCM input and PCM speech output require no
-audio codec dependency.
+These bytes contain whole PCM16 frames without a WAV header. Missing or duplicate
+geometry, nonpositive rates, mismatched channel counts, and partial frames reject.
+Raw PCM uses bandlimited rate conversion with continuous filter history across
+worker chunks; it does not mix channels. Equal rates preserve each sample.
+PCM input, its rate conversion, and PCM speech output require no audio codec
+dependency.
 
 The request-body byte limit and source-defined input-frame limit apply
-independently. The raw PCM frame count is checked before model admission;
-encoded recordings are checked as decoded frames reach recognition. An
+independently. The converted raw PCM frame count is checked before model
+admission; encoded recordings are checked as decoded frames reach recognition. An
 overlong recording rejects without truncation or a partial success response.
 Decoding and conversion stage a bounded number of frames on the shared CPU
 executor, retaining each recording's codec and resampling history across blocks.
+Raw conversion preserves the input duration: `N` frames produce
+`ceil(N * model_rate / input_rate)` frames, with filter lookahead flushed only
+at the recording's end. Conversion storage is bounded per request; a rate ratio
+that exceeds that budget rejects without reducing filter quality.
 
 Uploads may share numerical batches while retaining independent sample clocks,
 model histories, and transcript state. A disconnect cancels that request;

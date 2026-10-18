@@ -76,6 +76,7 @@ loom_cc_benchmark(
   NAME
     compile_throughput_benchmark
   SRCS
+    "module_config_benchmark.cc"
     "pass_program_benchmark.cc"
     "targetless_compile_throughput_benchmark.cc"
   DEPS

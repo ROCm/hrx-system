@@ -23,13 +23,12 @@ func.def target(@target) @insert_tail(%input: buffer, %output: buffer, %value: i
   %13 = view.load %source[1] : view<5xi32> -> i32
   %14 = view.load %source[2] : view<5xi32> -> i32
   %15 = view.load %source[3] : view<5xi32> -> i32
-  %41 = vector.splat %12 : vector<4xi32>
-  %36 = vector.insert %13 into %41[1] : i32, vector<4xi32>
-  %40 = vector.splat %12 : vector<1xi32>
-  %32 = vector.insert %14 into %36[2] : i32, vector<4xi32>
-  %28 = vector.insert %15 into %32[3] : i32, vector<4xi32>
-  %39 = vector.insert %value into %40[0] : i32, vector<1xi32>
-  %result = vector.concat<0> %28, %39 : vector<4xi32>, vector<1xi32> -> vector<5xi32>
+  %16 = view.load %source[4] : view<5xi32> -> i32
+  %values = vector.from_elements %12, %13, %14, %15, %16 : vector<5xi32>
+  %8 = vector.slice %values[0] : vector<5xi32> -> vector<4xi32>
+  %9 = vector.slice %values[4] : vector<5xi32> -> vector<1xi32>
+  %10 = vector.insert %value into %9[0] : i32, vector<1xi32>
+  %result = vector.concat<0> %8, %10 : vector<4xi32>, vector<1xi32> -> vector<5xi32>
   vector.store %result, %destination[0] : vector<5xi32>, view<5xi32>
   func.return
 }
@@ -60,21 +59,18 @@ func.def target(@target) @insert_dynamic(%input: buffer, %output: buffer, %value
   %28 = view.load %source[2] : view<5xi64> -> i64
   %29 = view.load %source[3] : view<5xi64> -> i64
   %30 = view.load %source[4] : view<5xi64> -> i64
-  %58 = vector.splat %26 : vector<4xi64>
-  %50 = vector.insert %27 into %58[1] : i64, vector<4xi64>
-  %57 = vector.splat %26 : vector<1xi64>
-  %46 = vector.insert %28 into %50[2] : i64, vector<4xi64>
-  %42 = vector.insert %29 into %46[3] : i64, vector<4xi64>
-  %39 = vector.insert %30 into %57[0] : i64, vector<1xi64>
+  %values = vector.from_elements %26, %27, %28, %29, %30 : vector<5xi64>
   %9 = index.constant 0 : index
   %10 = index.constant 4 : index
   %11 = index.cmp ult, %position, %10 : index
   %14 = index.cmp uge, %position, %10 : index
+  %16 = vector.slice %values[0] : vector<5xi64> -> vector<4xi64>
   %17 = scf.select %11, %position, %9 : index
-  %18 = vector.insert %value into %42[%17] : i64, vector<4xi64>
-  %19 = scf.select %11, %18, %42 : vector<4xi64>
-  %56 = vector.insert %value into %57[0] : i64, vector<1xi64>
-  %24 = scf.select %14, %56, %39 : vector<1xi64>
+  %18 = vector.insert %value into %16[%17] : i64, vector<4xi64>
+  %19 = scf.select %11, %18, %16 : vector<4xi64>
+  %20 = vector.slice %values[4] : vector<5xi64> -> vector<1xi64>
+  %34 = vector.insert %value into %20[0] : i64, vector<1xi64>
+  %24 = scf.select %14, %34, %20 : vector<1xi64>
   %result = vector.concat<0> %19, %24 : vector<4xi64>, vector<1xi64> -> vector<5xi64>
   vector.store %result, %destination[0] : vector<5xi64>, view<5xi64>
   func.return

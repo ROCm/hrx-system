@@ -69,6 +69,8 @@ typedef struct loom_aie2p_configuration_load_t {
 struct loom_aie2p_configuration_plan_t {
   // Enclosing immutable compilation request.
   const loom_aie2p_xdna_artifact_request_t* request;
+  // Entry-time symbol index borrowing versions from the compilation request.
+  loom_target_function_version_snapshot_t versions;
   // Device facts governing physical coordinates and DMA address encoding.
   const loom_xdna_array_family_t* family;
   // Product entry populated by the three explicit phases.
@@ -95,10 +97,11 @@ static iree_status_t loom_aie2p_configuration_schedule(
     loom_aie2p_configuration_plan_t* emitter, const loom_op_t* function,
     loom_low_schedule_table_t* out_schedule) {
   const loom_aie2p_xdna_artifact_request_t* request = emitter->request;
+  const loom_symbol_ref_t symbol = loom_func_like_callee(
+      loom_func_like_const_cast(request->module, function));
   const loom_target_function_version_t* version =
-      loom_target_function_version_list_find(
-          request->function_versions,
-          loom_func_like_const_cast(request->module, function));
+      loom_target_function_version_snapshot_at(&emitter->versions,
+                                               symbol.symbol_id);
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
       request->module, function,
@@ -208,9 +211,8 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     loom_op_t* function =
         request->module->symbols.entries[symbol.symbol_id].defining_op;
     const loom_target_function_version_t* version =
-        loom_target_function_version_list_find(
-            request->function_versions,
-            loom_func_like_const_cast(request->module, function));
+        loom_target_function_version_snapshot_at(&emitter->versions,
+                                                 symbol.symbol_id);
     loom_target_compile_report_t report;
     loom_target_compile_report_t* report_ptr = NULL;
     if (request->compile_report) {
@@ -224,6 +226,8 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
         .descriptor_registry = request->low_descriptor_registry,
         .function_target_facts =
             version ? version->function_target_facts : NULL,
+        .memory_accesses = version ? version->memory_accesses : NULL,
+        .loop_execution = version ? version->loop_execution : NULL,
         .diagnostic_emitter = request->diagnostic_emitter,
         .compile_report = report_ptr,
     };
@@ -766,6 +770,7 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
 
 iree_status_t loom_aie2p_configuration_plan_build(
     const loom_aie2p_xdna_artifact_request_t* request,
+    const loom_target_function_version_snapshot_t* versions,
     const loom_op_t* entry_op, const loom_xdna_device_profile_t* device_profile,
     loom_aie2p_configuration_plan_t** out_plan,
     loom_aie2p_xdna_entry_t* out_entry, bool* out_valid) {
@@ -784,6 +789,7 @@ iree_status_t loom_aie2p_configuration_plan_build(
                                            sizeof(*plan), (void**)&plan));
   *plan = (loom_aie2p_configuration_plan_t){
       .request = request,
+      .versions = *versions,
       .family = loom_xdna_device_profile_array_family(device_profile),
       .entry = out_entry,
       .initialize = loom_symbol_ref_null(),

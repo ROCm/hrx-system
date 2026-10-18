@@ -239,7 +239,7 @@ CHECK: COMPILE-REPORT: target_legalization[*] function=i64_combining_reference_f
 
 // ====
 
-// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=eager}
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=complete}
 
 // Static partial reductions use one structural path for the complete combining
 // vocabulary. Individual target contracts still select how each generated
@@ -264,7 +264,7 @@ CHECK: COMPILE-REPORT: target_legalization[*] function=integer_partial_reduction
 
 // ====
 
-// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=eager}
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=complete}
 
 func.def @float_partial_reduction_family(%values: vector<2x2xf32>, %init: vector<2xf32>) -> (vector<2xf32>, vector<2xf32>, vector<2xf32>, vector<2xf32>, vector<2xf32>, vector<2xf32>) {
   %sum = vector.reduce.axes<addf> %values, %init axes [0] : vector<2x2xf32>, vector<2xf32>

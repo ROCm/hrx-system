@@ -555,6 +555,7 @@ static iree_status_t loom_low_lower_query_target_contract_index(
     loom_low_lower_rule_selection_t unavailable_selection = {
         .rule_index = UINT16_MAX,
     };
+    uint16_t declined_rule_count = 0;
     loom_low_lower_contract_case_iterator_t iterator;
     const bool used_candidates =
         loom_low_lower_contract_case_iterator_initialize(
@@ -629,6 +630,7 @@ static iree_status_t loom_low_lower_query_target_contract_index(
           options, contract_case, case_index, binding, &case_match_context,
           /*apply_accept_rule=*/true, &match, &accepted));
       if (!accepted) {
+        ++declined_rule_count;
         continue;
       }
       if (primary_status ==
@@ -656,6 +658,18 @@ static iree_status_t loom_low_lower_query_target_contract_index(
       *out_result = unavailable_result;
       if (out_selection != NULL) {
         *out_selection = unavailable_selection;
+      }
+      return iree_ok_status();
+    }
+    if (environment->defer_rejection_diagnostics) {
+      // The candidate index excludes only impossible matches. A query rule
+      // either failed or matched and was declined by the ownership filter;
+      // the generated total distinguishes those outcomes without replaying
+      // excluded rules just to rank their failure diagnostics.
+      *out_result = loom_target_contract_query_result_empty();
+      if (has_unsupported_marker ||
+          declined_rule_count < op_entry.query_rule_count) {
+        out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED;
       }
       return iree_ok_status();
     }

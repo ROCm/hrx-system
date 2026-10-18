@@ -203,7 +203,7 @@ static iree_host_size_t loom_collect_source_backed_highlights(
   const loom_location_entry_t* location =
       loom_location_table_const_entry(&module->locations, op->location);
   if (location->kind != LOOM_LOCATION_FILE ||
-      location->file.field_span_count == 0 || !location->file.field_spans) {
+      location->file.field_span_count == 0 || !location->file.field_span_data) {
     return 0;
   }
 
@@ -212,9 +212,11 @@ static iree_host_size_t loom_collect_source_backed_highlights(
   for (uint16_t span_index = 0; span_index < location->file.field_span_count &&
                                 highlight_count < max_highlight_count;
        ++span_index) {
+    const loom_location_field_span_t field_span =
+        loom_location_file_field_span_at(location, span_index);
     loom_print_field_ref_t span_field_ref = {0};
-    if (!loom_verify_print_field_ref_from_location_field(
-            &location->file.field_spans[span_index], &span_field_ref)) {
+    if (!loom_verify_print_field_ref_from_location_field(&field_span,
+                                                         &span_field_ref)) {
       continue;
     }
 
@@ -225,12 +227,10 @@ static iree_host_size_t loom_collect_source_backed_highlights(
       continue;
     }
 
-    const loom_location_field_span_t* field_span =
-        &location->file.field_spans[span_index];
     iree_host_size_t start_offset = loom_source_range_byte_offset(
-        source_location, field_span->start_line, field_span->start_col);
+        source_location, field_span.start_line, field_span.start_col);
     iree_host_size_t end_offset = loom_source_range_byte_offset(
-        source_location, field_span->end_line, field_span->end_col);
+        source_location, field_span.end_line, field_span.end_col);
     if (start_offset >= end_offset || start_offset < source_location->start ||
         end_offset > source_location->end) {
       continue;
@@ -396,6 +396,7 @@ void loom_verify_emit_diagnostic(loom_verify_state_t* state,
   diagnostic.params = emission->params;
   diagnostic.param_count = emission->param_count;
   diagnostic.emitter = LOOM_EMITTER_VERIFIER;
+  diagnostic.module = emission->module ? emission->module : state->module;
   diagnostic.origin.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
   diagnostic.source_location.provenance =
       LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
@@ -419,8 +420,7 @@ void loom_verify_emit_diagnostic(loom_verify_state_t* state,
       &diagnostic.highlight_omitted_count);
   loom_highlight_range_t highlights[LOOM_VERIFY_MAX_HIGHLIGHTS];
 
-  const loom_module_t* module =
-      emission->module ? emission->module : state->module;
+  const loom_module_t* module = diagnostic.module;
   bool resolved = loom_verify_resolve_location(state, module, emission->op,
                                                &diagnostic.source_location);
   if (resolved) {

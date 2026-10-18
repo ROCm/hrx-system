@@ -72,8 +72,8 @@ typedef struct loomc_emit_transaction_t {
   // Borrowed result sink writing into |compile_report_diagnostics|.
   loom_diagnostic_sink_t compile_report_diagnostic_sink;
 
-  // Current module and target descriptors used by the report diagnostic sink.
-  loomc_diagnostic_type_printer_t diagnostic_type_printer;
+  // Target-aware printer options borrowed by the report diagnostic sink.
+  const loom_text_print_options_t* diagnostic_text_print_options;
 
   // True when diagnostic JSON capture was installed on |result|.
   bool compile_report_diagnostics_initialized;
@@ -88,10 +88,9 @@ LOOMC_API_PRIVATE loomc_status_t loomc_emit_transaction_initialize(
 LOOMC_API_PRIVATE loomc_string_view_t loomc_emit_transaction_artifact_format(
     const loomc_emit_transaction_t* transaction);
 
-// Updates the module and target descriptor context used when detailed compile
-// reports capture diagnostics. Call again after module replacement.
-LOOMC_API_PRIVATE void loomc_emit_transaction_set_diagnostic_context(
-    loomc_emit_transaction_t* transaction, const loom_module_t* module,
+// Sets the target printer environment used by detailed diagnostic reports.
+LOOMC_API_PRIVATE void loomc_emit_transaction_set_diagnostic_environment(
+    loomc_emit_transaction_t* transaction,
     const loomc_target_environment_t* target_environment);
 
 // Selects an emitter from the target environment using resolved options.

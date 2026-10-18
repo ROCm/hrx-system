@@ -67,6 +67,7 @@ loom_test(
     srcs = [
         "tests/text_normalization.loom",
         "text_normalization.loom",
+        "text_stream.loom",
         "//experimental/loom_serve/motifs/text:library",
     ],
     benchmark_smoke = False,
@@ -82,6 +83,19 @@ loom_test(
     ],
     benchmark_smoke = False,
     configs = {"pocket.threads": "128"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "prefix_matrix_test",
+    srcs = [
+        "prefix_matrix.loom",
+        "tests/prefix_matrix.loom",
+    ],
+    benchmark_smoke = False,
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,

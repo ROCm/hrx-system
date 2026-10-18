@@ -123,6 +123,9 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
       iree_string_view_equal(extf_entries[1].provider_name, IREE_SV("scalar")));
   EXPECT_EQ(extf_entries[1].provider_strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
+  EXPECT_EQ(extf_entries[1].first_operand_element_types,
+            LOOM_SCALAR_TYPE_SET_FLOAT_LE16);
+  EXPECT_NE(extf_entries[1].match, nullptr);
 
   ExpectReferenceProvider(registry, LOOM_OP_BUFFER_COPY, IREE_SV("buffer"));
   ExpectReferenceProvider(registry, LOOM_OP_INDEX_MIN, IREE_SV("index"));

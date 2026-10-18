@@ -11,6 +11,7 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/notification.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/processor.h"
 #include "iree/hal/detail.h"
@@ -64,7 +65,6 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_initialize(
   };
   out_pool->host_allocator = host_allocator;
   out_pool->frontier_tracker = frontier_tracker;
-  out_pool->maintenance = NULL;
   out_pool->epoch_query = iree_hal_pool_epoch_query_null();
   out_pool->asan_enabled = false;
   out_pool->allocation_interceptor =
@@ -87,22 +87,88 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservations(
     iree_hal_pool_t* pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reserve_flags_t flags,
     iree_hal_pool_reservation_t* out_reservations,
     iree_hal_pool_acquire_info_t* out_infos,
-    iree_hal_pool_acquire_result_t* out_result) {
+    iree_hal_pool_acquire_callback_t completion,
+    iree_hal_pool_reserve_flags_t flags) {
   IREE_ASSERT_ARGUMENT(pool);
   IREE_ASSERT_ARGUMENT(request_count);
   IREE_ASSERT_ARGUMENT(requests);
   IREE_ASSERT_ARGUMENT(out_reservations);
   IREE_ASSERT_ARGUMENT(out_infos);
-  IREE_ASSERT_ARGUMENT(out_result);
+  IREE_ASSERT_ARGUMENT(completion.fn);
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)request_count);
   iree_status_t status = _VTABLE_DISPATCH(pool, acquire_reservations)(
-      pool, request_count, requests, requester_frontier, flags,
-      out_reservations, out_infos, out_result);
+      pool, request_count, requests, requester_frontier, out_reservations,
+      out_infos, completion, flags);
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+typedef struct iree_hal_pool_sync_acquire_t {
+  // Protects the terminal result and the callback's final notification access.
+  iree_slim_mutex_t mutex;
+  // Wakes the caller after accepted native preparation completes.
+  iree_notification_t notification;
+  // True after completion publishes status and result.
+  bool complete;
+  // Owned terminal failure, transferred to the synchronous caller.
+  iree_status_t status;
+  // Whole-batch outcome, meaningful only on success.
+  iree_hal_pool_acquire_result_t result;
+} iree_hal_pool_sync_acquire_t;
+
+static void iree_hal_pool_sync_acquire_complete(
+    void* user_data, iree_status_t status,
+    iree_hal_pool_acquire_result_t result) {
+  iree_hal_pool_sync_acquire_t* call = user_data;
+  iree_slim_mutex_lock(&call->mutex);
+  call->status = status;
+  call->result = result;
+  call->complete = true;
+  iree_notification_post(&call->notification, IREE_ALL_WAITERS);
+  iree_slim_mutex_unlock(&call->mutex);
+}
+
+static bool iree_hal_pool_sync_acquire_is_complete(void* user_data) {
+  iree_hal_pool_sync_acquire_t* call = user_data;
+  iree_slim_mutex_lock(&call->mutex);
+  const bool complete = call->complete;
+  iree_slim_mutex_unlock(&call->mutex);
+  return complete;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservations_sync(
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    const iree_async_frontier_t* requester_frontier,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos,
+    iree_hal_pool_acquire_result_t* out_result,
+    iree_hal_pool_reserve_flags_t flags) {
+  iree_hal_pool_sync_acquire_t call = {0};
+  iree_slim_mutex_initialize(&call.mutex);
+  iree_notification_initialize(&call.notification);
+  iree_status_t status = iree_hal_pool_acquire_reservations(
+      pool, request_count, requests, requester_frontier, out_reservations,
+      out_infos,
+      (iree_hal_pool_acquire_callback_t){
+          .fn = iree_hal_pool_sync_acquire_complete,
+          .user_data = &call,
+      },
+      flags);
+  if (iree_status_is_ok(status)) {
+    iree_notification_await(&call.notification,
+                            iree_hal_pool_sync_acquire_is_complete, &call,
+                            iree_infinite_timeout());
+    status = call.status;
+    if (iree_status_is_ok(status)) {
+      *out_result = call.result;
+    }
+  }
+  iree_notification_deinitialize(&call.notification);
+  iree_slim_mutex_deinitialize(&call.mutex);
   return status;
 }
 
@@ -280,6 +346,14 @@ IREE_API_EXPORT void iree_hal_pool_trim(iree_hal_pool_t* pool,
                                         iree_device_size_t min_bytes_to_keep) {
   IREE_ASSERT_ARGUMENT(pool);
   IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE({
+    char message[128];
+    int length =
+        iree_snprintf(message, sizeof(message),
+                      "HAL pool trim pool=%p flags=0x%08x keep=%" PRIu64,
+                      (void*)pool, flags, (uint64_t)min_bytes_to_keep);
+    IREE_TRACE_MESSAGE_DYNAMIC(INFO, message, (iree_host_size_t)length);
+  });
   _VTABLE_DISPATCH(pool, trim)(pool, flags, min_bytes_to_keep);
   IREE_TRACE_ZONE_END(z0);
 }
@@ -402,10 +476,10 @@ static iree_status_t iree_hal_pool_allocate_buffer_direct(
     iree_hal_pool_reservation_t reservation;
     iree_hal_pool_acquire_info_t acquire_info;
     iree_hal_pool_acquire_result_t result;
-    status = iree_hal_pool_acquire_reservations(
-        pool, 1, &request, /*requester_frontier=*/NULL,
-        IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, &reservation,
-        &acquire_info, &result);
+    status = iree_hal_pool_acquire_reservations_sync(
+        pool, 1, &request,
+        /*requester_frontier=*/NULL, &reservation, &acquire_info, &result,
+        IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER);
     if (capacity_wait && (!iree_status_is_ok(status) ||
                           (result != IREE_HAL_POOL_ACQUIRE_EXHAUSTED &&
                            result != IREE_HAL_POOL_ACQUIRE_OVER_BUDGET))) {

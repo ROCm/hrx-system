@@ -134,9 +134,9 @@ TEST_P(VulkanAllocatorGuardrailTest,
   iree_hal_pool_reservation_t reservation;
   iree_hal_pool_acquire_info_t info;
   iree_hal_pool_acquire_result_t result;
-  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      pool, 1, &request, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation,
-      &info, &result));
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
+      pool, 1, &request, nullptr, &reservation, &info, &result,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE));
   ASSERT_EQ(IREE_HAL_POOL_ACQUIRE_OK_FRESH, result);
   EXPECT_EQ(info.reuse_frontier, nullptr);
   Ref<iree_hal_buffer_t> buffer;

@@ -33,7 +33,7 @@ global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
 
 global.rodata.def @empty = bytes("")
 
-func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer) {
   %c0 = scalar.constant 0 : i64
   %c1 = scalar.constant 1 : i64
   %c2 = scalar.constant 2 : i64
@@ -70,10 +70,10 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   // 2048-position bound (40.96 seconds) and 512-token hypothesis capacity.
   %input_frames = scalar.constant 320 : i64
   %frame_limit = scalar.constant 655360 : i64
-  %event_bytes = scalar.constant 16432 : i64
+  %event_bytes = scalar.constant 16444 : i64
   %rate = scalar.constant 16000 : i64
   %tokenizer = global.load @tokenizer : buffer
   %name = global.load @name : buffer
   %empty = global.load @empty : buffer
-  func.return %requests, %requests, %small, %small, %state, %work, %output, %output, %input_frames, %frame_limit, %event_bytes, %rate, %c1, %tokenizer, %name, %empty, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer
+  func.return %requests, %requests, %small, %small, %state, %work, %output, %output, %input_frames, %frame_limit, %event_bytes, %rate, %c1, %c1, %one32, %tokenizer, %name, %empty, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer
 }

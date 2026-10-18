@@ -45,6 +45,8 @@ struct loom_serve_workspace_scope_t {
   iree_host_size_t count;
   // True after execution releases its ownership; collection then frees storage.
   bool released;
+  // Whether this scope's roots contribute to transient workspace activity.
+  bool tracks_workspace;
   // Shared-owner scope chain, including active and released execution domains.
   struct loom_serve_workspace_scope_t* next;
 };
@@ -122,7 +124,7 @@ static void loom_serve_workspace_scope_collect(
     }
     scope->count = retained;
   }
-  if (scope->count != previous_count) {
+  if (scope->tracks_workspace && scope->count != previous_count) {
     scope->workspace->idle.since = iree_time_now();
     scope->workspace->idle.trimmed = false;
   }
@@ -164,7 +166,7 @@ static bool loom_serve_workspace_collect(
   while (*scope_link) {
     loom_serve_workspace_scope_t* scope = *scope_link;
     loom_serve_workspace_scope_collect(scope, mode);
-    live |= scope->count != 0;
+    live |= scope->tracks_workspace && scope->count != 0;
     if (scope->count || !scope->released) {
       scope_link = &scope->next;
     } else {
@@ -353,13 +355,14 @@ iree_hal_pool_stats_t loom_serve_workspace_statistics(
 }
 
 iree_status_t loom_serve_workspace_scope_allocate(
-    loom_serve_workspace_t* workspace,
+    loom_serve_workspace_t* workspace, bool tracks_workspace,
     loom_serve_workspace_scope_t** out_scope) {
   *out_scope = NULL;
   loom_serve_workspace_scope_t* scope = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(workspace->host_allocator,
                                              sizeof(*scope), (void**)&scope));
   scope->workspace = workspace;
+  scope->tracks_workspace = tracks_workspace;
   iree_slim_mutex_lock(&workspace->mutex);
   scope->next = workspace->scopes;
   workspace->scopes = scope;
@@ -368,20 +371,21 @@ iree_status_t loom_serve_workspace_scope_allocate(
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_workspace_scope_acquire(
-    loom_serve_workspace_scope_t* scope, iree_hal_pool_t** out_pool) {
-  *out_pool = NULL;
+iree_status_t loom_serve_workspace_scope_reserve(
+    loom_serve_workspace_scope_t* scope, iree_host_size_t count) {
   loom_serve_workspace_t* workspace = scope->workspace;
   iree_slim_mutex_lock(&workspace->mutex);
   loom_serve_workspace_scope_collect(scope, WORKSPACE_COLLECTION_PREFIX);
   iree_status_t status = iree_ok_status();
-  if (scope->count == scope->capacity) {
+  if (count > scope->capacity - scope->count) {
     loom_serve_workspace_scope_collect(scope, WORKSPACE_COLLECTION_COMPLETE);
     // Reclaim at least half the ring before reusing a full allocation.
     // Otherwise geometric growth amortizes the scan over subsequent captures,
     // including when nearly every root remains live across many submissions.
-    if (!scope->capacity || scope->count > scope->capacity / 2) {
-      const iree_host_size_t capacity = iree_max(16, scope->capacity * 2);
+    if (count > scope->capacity - scope->count ||
+        scope->count > scope->capacity / 2) {
+      const iree_host_size_t capacity =
+          iree_max(iree_max(16, scope->capacity * 2), scope->count + count);
       loom_serve_workspace_root_t* roots = NULL;
       status = iree_allocator_malloc_array(workspace->host_allocator, capacity,
                                            sizeof(*roots), (void**)&roots);
@@ -397,10 +401,14 @@ iree_status_t loom_serve_workspace_scope_acquire(
     }
   }
   iree_slim_mutex_unlock(&workspace->mutex);
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_workspace_acquire_pool(workspace, out_pool);
-  }
   return status;
+}
+
+iree_status_t loom_serve_workspace_scope_acquire(
+    loom_serve_workspace_scope_t* scope, iree_hal_pool_t** out_pool) {
+  *out_pool = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_workspace_scope_reserve(scope, 1));
+  return loom_serve_workspace_acquire_pool(scope->workspace, out_pool);
 }
 
 void loom_serve_workspace_scope_capture(loom_serve_workspace_scope_t* scope,
@@ -411,7 +419,9 @@ void loom_serve_workspace_scope_capture(loom_serve_workspace_scope_t* scope,
       (scope->head + scope->count++) % scope->capacity;
   scope->roots[tail] = (loom_serve_workspace_root_t){buffer, pool};
   iree_hal_buffer_retain(buffer);
-  scope->workspace->idle.trimmed = false;
+  if (scope->tracks_workspace) {
+    scope->workspace->idle.trimmed = false;
+  }
   iree_slim_mutex_unlock(&scope->workspace->mutex);
 }
 
@@ -433,9 +443,8 @@ static iree_device_size_t loom_serve_workspace_trim_locked(
        generation; generation = generation->next) {
     iree_hal_pool_trim(generation->pool, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
     iree_hal_pool_trim(generation->cache, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
-    // The cache may still count a slab already detached by concurrent child
-    // maintenance. Its queued sweep will discard that return; only backing
-    // retained by the child contributes to further reclamation decisions.
+    // Child returns reach the cache synchronously. After trimming both layers,
+    // only backing still retained by the child contributes to reclamation.
     iree_hal_pool_stats_t statistics;
     iree_hal_pool_query_stats(generation->pool, &statistics);
     retained_bytes += statistics.bytes_committed;

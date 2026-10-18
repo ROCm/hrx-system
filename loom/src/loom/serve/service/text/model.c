@@ -749,6 +749,16 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
       return iree_ok_status();
     }
   }
+  if (!iree_status_is_ok(status)) {
+    // Binding may already have queued backing allocation. Failure of a later
+    // preparation step does not retire that accepted ownership.
+    loom_serve_text_model_retire(model, load->event.wake,
+                                 load->event.user_data);
+    if (!loom_serve_text_model_is_retired(model)) {
+      load->terminal_status = status;
+      return iree_ok_status();
+    }
+  }
   *out_complete = load->phase == TEXT_LOAD_COMPLETE;
   return status;
 }

@@ -81,6 +81,7 @@ void ExpectSucceededResult(const loomc_result_t* result) {
     ADD_FAILURE() << ToString(diagnostic->message);
   }
   EXPECT_TRUE(loomc_result_succeeded(result));
+  EXPECT_EQ(loomc_result_status_code(result), LOOMC_STATUS_OK);
   EXPECT_EQ(loomc_result_diagnostic_count(result), 0u);
 }
 
@@ -199,6 +200,7 @@ TEST(PassProgramTest, ReportsMissingModuleSymbolInResult) {
   EXPECT_EQ(pass_program, nullptr);
   ResultPtr result_ptr(result);
   ExpectInvalidPassProgramResult(result_ptr.get());
+  EXPECT_EQ(loomc_result_status_code(result_ptr.get()), LOOMC_STATUS_NOT_FOUND);
 }
 
 TEST(PassProgramTest, ReportsNonPipelineModuleSymbolInResult) {
@@ -416,6 +418,7 @@ TEST(PassProgramTest, RunAdmitsInputBeforeExecutingPasses) {
                                          loomc_allocator_system(), &result));
   ResultPtr result_owner(result);
   EXPECT_FALSE(loomc_result_succeeded(result));
+  EXPECT_EQ(loomc_result_status_code(result), LOOMC_STATUS_FAILED_PRECONDITION);
   ASSERT_GT(loomc_result_diagnostic_count(result), 0u);
   module.reset();
   source.reset();
@@ -465,6 +468,8 @@ pass.pipeline<module> @failure pipeline {
     LOOMC_ASSERT_OK(status);
     EXPECT_EQ(actual_rounding, FE_DOWNWARD);
     EXPECT_EQ(loomc_result_succeeded(result), succeeds);
+    EXPECT_EQ(loomc_result_status_code(result),
+              succeeds ? LOOMC_STATUS_OK : LOOMC_STATUS_FAILED_PRECONDITION);
     EXPECT_EQ(
         SourceContents(
             SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_TEXT).get()),

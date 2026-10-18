@@ -74,6 +74,90 @@ static iree_hal_memory_fixed_block_allocator_options_t DefaultOptions() {
 // Lifecycle tests
 //===----------------------------------------------------------------------===//
 
+TEST(FixedBlockAllocator, RebindingPreservesExactChangedAndUntouchedHistory) {
+  MAKE_FRONTIER(initial, 1, E(TestQueueAxis(0), 7));
+  MAKE_FRONTIER(returned, 1, E(TestQueueAxis(1), 13));
+  MAKE_FRONTIER(combined, 2, E(TestQueueAxis(0), 7), E(TestQueueAxis(1), 13));
+  MAKE_FRONTIER(replacement, 1, E(TestQueueAxis(2), 19));
+  FRONTIER_ALLOC(merged, 2);
+  for (uint32_t block_count : {1, 63, 64, 65, 4096}) {
+    SCOPED_TRACE(block_count);
+    auto options = DefaultOptions();
+    options.block_count = block_count;
+    options.frontier_capacity = 2;
+    options.initial_frontier = initial;
+    iree_hal_memory_fixed_block_allocator_t* pool = nullptr;
+    IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
+        options, iree_allocator_system(), &pool));
+    iree_hal_memory_fixed_block_allocator_allocation_t allocation;
+    IREE_ASSERT_OK(
+        iree_hal_memory_fixed_block_allocator_acquire(pool, &allocation));
+    EXPECT_EQ(iree_async_frontier_compare(allocation.death_frontier, initial),
+              IREE_ASYNC_FRONTIER_EQUAL);
+    iree_hal_memory_fixed_block_allocator_release(pool, allocation.block_index,
+                                                  returned);
+    if (block_count > 1) {
+      EXPECT_FALSE(iree_hal_memory_fixed_block_allocator_merge_free_frontiers(
+          pool, 1, nullptr, nullptr, merged));
+    }
+    ASSERT_TRUE(iree_hal_memory_fixed_block_allocator_merge_free_frontiers(
+        pool, 2, nullptr, nullptr, merged));
+    EXPECT_EQ(iree_async_frontier_compare(
+                  merged, block_count == 1 ? returned : combined),
+              IREE_ASYNC_FRONTIER_EQUAL);
+
+    iree_hal_memory_fixed_block_allocator_reset(pool, replacement);
+    IREE_ASSERT_OK(
+        iree_hal_memory_fixed_block_allocator_acquire(pool, &allocation));
+    EXPECT_EQ(
+        iree_async_frontier_compare(allocation.death_frontier, replacement),
+        IREE_ASYNC_FRONTIER_EQUAL);
+    iree_hal_memory_fixed_block_allocator_restore(pool, allocation.block_index);
+    ASSERT_TRUE(iree_hal_memory_fixed_block_allocator_merge_free_frontiers(
+        pool, 2, nullptr, nullptr, merged));
+    EXPECT_EQ(iree_async_frontier_compare(merged, replacement),
+              IREE_ASYNC_FRONTIER_EQUAL);
+
+    std::vector<iree_hal_memory_fixed_block_allocator_allocation_t> allocations(
+        block_count);
+    for (auto& current : allocations) {
+      IREE_ASSERT_OK(
+          iree_hal_memory_fixed_block_allocator_acquire(pool, &current));
+    }
+    for (const auto& current : allocations) {
+      iree_hal_memory_fixed_block_allocator_release(pool, current.block_index,
+                                                    nullptr);
+    }
+    ASSERT_TRUE(iree_hal_memory_fixed_block_allocator_merge_free_frontiers(
+        pool, 2, nullptr, nullptr, merged));
+    EXPECT_EQ(merged->entry_count, 0);
+    iree_hal_memory_fixed_block_allocator_free(pool);
+  }
+}
+
+TEST(FixedBlockAllocator, RebindingClearsTagsWhenGenerationWraps) {
+  MAKE_FRONTIER(old_history, 1, E(TestQueueAxis(0), 7));
+  MAKE_FRONTIER(new_history, 1, E(TestQueueAxis(1), 13));
+  iree_hal_memory_fixed_block_allocator_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
+      DefaultOptions(), iree_allocator_system(), &pool));
+  iree_hal_memory_fixed_block_allocator_allocation_t allocation;
+  IREE_ASSERT_OK(
+      iree_hal_memory_fixed_block_allocator_acquire(pool, &allocation));
+  iree_hal_memory_fixed_block_allocator_release(pool, allocation.block_index,
+                                                old_history);
+  // Skip quiescent generations while leaving the old generation-one tag.
+  pool->generation = UINT32_MAX;
+  iree_hal_memory_fixed_block_allocator_reset(pool, new_history);
+  IREE_ASSERT_OK(
+      iree_hal_memory_fixed_block_allocator_acquire(pool, &allocation));
+  EXPECT_EQ(iree_async_frontier_compare(allocation.death_frontier, new_history),
+            IREE_ASYNC_FRONTIER_EQUAL);
+  iree_hal_memory_fixed_block_allocator_release(pool, allocation.block_index,
+                                                nullptr);
+  iree_hal_memory_fixed_block_allocator_free(pool);
+}
+
 TEST(FixedBlockAllocator, AllocateFree) {
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(

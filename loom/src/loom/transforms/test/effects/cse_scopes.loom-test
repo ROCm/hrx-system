@@ -88,11 +88,11 @@ func.def @published_parent_resumes(%condition: i1) -> (i32, i32) {
 
 // ====
 
-// The same table slot is reused across published full-invalidation epochs.
-// Later children see the new insertion, then reject all expired identities
-// after the next barrier. Sibling definitions remain separate.
+// Pure source values remain available across collectives and nested scopes.
+// The dominating definition can serve both sibling regions without merging
+// or moving the convergent operations themselves.
 // RUN: pass cse
-func.def @published_full_invalidation_epochs(%condition: i1, %row: i32) -> (i32, i32, i32) {
+func.def @dominating_values_across_collectives(%condition: i1, %row: i32) -> (i32, i32, i32) {
   %before = test.addi %row, %row : i32
   %first = scf.if %condition -> (i32) {
     %duplicate = test.addi %row, %row : i32
@@ -122,7 +122,7 @@ func.def @published_full_invalidation_epochs(%condition: i1, %row: i32) -> (i32,
 }
 
 // ----
-func.def @published_full_invalidation_epochs(%condition: i1, %row: i32) -> (i32, i32, i32) {
+func.def @dominating_values_across_collectives(%condition: i1, %row: i32) -> (i32, i32, i32) {
   %before = test.addi %row, %row : i32
   %first = scf.if %condition -> (i32) {
     scf.yield %before : i32
@@ -130,19 +130,16 @@ func.def @published_full_invalidation_epochs(%condition: i1, %row: i32) -> (i32,
     scf.yield %before : i32
   }
   %first_barrier = test.convergent %row : i32
-  %middle = test.addi %row, %row : i32
   %second = scf.if %condition -> (i32) {
-    scf.yield %middle : i32
+    scf.yield %before : i32
   } else {
-    scf.yield %middle : i32
+    scf.yield %before : i32
   }
   %second_barrier = test.convergent %row : i32
   %third = scf.if %condition -> (i32) {
-    %left = test.addi %row, %row : i32
-    scf.yield %left : i32
+    scf.yield %before : i32
   } else {
-    %right = test.addi %row, %row : i32
-    scf.yield %right : i32
+    scf.yield %before : i32
   }
   func.return %first, %second, %third : i32, i32, i32
 }

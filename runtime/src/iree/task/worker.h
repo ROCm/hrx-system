@@ -145,6 +145,10 @@ typedef struct iree_alignas(iree_hardware_destructive_interference_size)
   iree_byte_span_t local_memory;
 } iree_task_worker_t;
 
+// Returns true if the calling thread is one of |executor|'s workers.
+// Used only for cold ownership transitions, not scheduling decisions.
+bool iree_task_worker_is_current_executor(iree_task_executor_t* executor);
+
 // Initializes a worker by creating its thread and configuring it for receiving
 // tasks. Where supported the worker will be created in a suspended state so
 // that we aren't creating a thundering herd on startup:

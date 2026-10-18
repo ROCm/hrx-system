@@ -67,16 +67,15 @@ void loom_source_resolve_diagnostic(
       .params = emission->params,
       .param_count = emission->param_count,
       .emitter = emitter,
+      .module = emission->module ? emission->module : module,
       .origin = {.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE},
       .source_location = {.provenance =
                               LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE},
   };
   if (emission->op) {
-    const loom_module_t* primary_module =
-        emission->module ? emission->module : module;
     loom_source_range_t range;
-    if (loom_source_resolve(resolver, primary_module, emission->op->location,
-                            &range)) {
+    if (loom_source_resolve(resolver, out_diagnostic->module,
+                            emission->op->location, &range)) {
       out_diagnostic->origin = range;
       out_diagnostic->source_location = range;
     }

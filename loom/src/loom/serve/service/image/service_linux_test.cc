@@ -377,7 +377,7 @@ class ImageServiceFixture : public ::testing::Test {
   // Production services kept alive until all telemetry readers finish.
   loom_serve_image_service_t* images_[2] = {};
   // Borrowed registry interfaces, valid until RetireImages.
-  loom_serve_http_service_t services_[2] = {};
+  loom_serve_service_t services_[2] = {};
   // Independent reader position for heartbeat and shutdown evidence.
   uint64_t cursor_ = 0;
 };

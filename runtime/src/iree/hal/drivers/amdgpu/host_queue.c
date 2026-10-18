@@ -33,6 +33,7 @@
 #include "iree/hal/drivers/amdgpu/host_queue_waits.h"
 #include "iree/hal/drivers/amdgpu/hsa_queue.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
+#include "iree/hal/drivers/amdgpu/memory_backend.h"
 #include "iree/hal/drivers/amdgpu/semaphore.h"
 #include "iree/hal/drivers/amdgpu/system_event.h"
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
@@ -757,11 +758,6 @@ void iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(
 // signal changes or teardown/error signals the stop signal. Completion wakeups
 // drain normally; stop/error wakeups perform one final drain/fail before exit.
 static int iree_hal_amdgpu_host_queue_completion_thread_main(void* entry_arg) {
-  {
-    IREE_TRACE_ZONE_BEGIN_NAMED(
-        z0, "iree_hal_amdgpu_host_queue_completion_thread_start");
-    IREE_TRACE_ZONE_END(z0);
-  }
   iree_hal_amdgpu_host_queue_t* queue =
       (iree_hal_amdgpu_host_queue_t*)entry_arg;
 
@@ -1834,12 +1830,9 @@ static iree_status_t iree_hal_amdgpu_host_queue_enqueue_alloca(
 
   // Always ask the pool to surface waitable death-frontier candidates so the
   // queue can distinguish true pool pressure from an internal dependency.
-  // Disallow growth while submission_mutex is held; growable pools report that
-  // as a cold retry instead of calling into their slab provider on the
-  // serialized queue path.
+  // Pool acquisition begins only after submission_mutex is released.
   const iree_hal_pool_reserve_flags_t reserve_flags =
-      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER |
-      IREE_HAL_POOL_RESERVE_FLAG_DISALLOW_GROWTH;
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER;
 
   iree_hal_amdgpu_host_queue_op_submission_t submission = {0};
   iree_hal_amdgpu_pending_op_t* memory_wait_op = NULL;
@@ -2662,6 +2655,7 @@ static const iree_hal_queue_vtable_t iree_hal_amdgpu_host_queue_vtable = {
     .flush = iree_hal_amdgpu_host_queue_flush,
     .alloca = iree_hal_amdgpu_host_queue_alloca,
     .dealloca = iree_hal_amdgpu_host_queue_dealloca,
+    .map = iree_hal_amdgpu_memory_mapping_queue_map,
     .transfer = iree_hal_amdgpu_host_queue_transfer,
     .read = iree_hal_amdgpu_host_queue_read,
     .write = iree_hal_amdgpu_host_queue_write,

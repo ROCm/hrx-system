@@ -317,6 +317,7 @@ loom_target_legalization_query_contract_with_vector_lane_projection(
       .view_regions = context->view_regions,
       .function_analysis = context->function_analysis,
       .arena = context->arena,
+      .defer_rejection_diagnostics = true,
   };
   return context->contract_query.fn(context->contract_query.user_data,
                                     &environment, op, out_result);

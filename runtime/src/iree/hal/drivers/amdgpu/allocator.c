@@ -24,10 +24,6 @@
 // iree_hal_amdgpu_allocator_t
 //===----------------------------------------------------------------------===//
 
-#if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
-static const char* IREE_HAL_AMDGPU_ALLOCATOR_ID = "iree-hal-amdgpu-unpooled";
-#endif  // IREE_TRACING_FEATURE_ALLOCATION_TRACKING
-
 typedef struct iree_hal_amdgpu_allocator_memory_pool_t {
   // HSA memory pool used for allocations.
   hsa_amd_memory_pool_t memory_pool;
@@ -1509,8 +1505,7 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer_spec(
   }
 
   if (iree_status_is_ok(status)) {
-    IREE_TRACE_ALLOC_NAMED(IREE_HAL_AMDGPU_ALLOCATOR_ID, host_ptr,
-                           (iree_host_size_t)allocation_size);
+    IREE_TRACE(iree_hal_amdgpu_buffer_trace_allocation(buffer));
     iree_hal_amdgpu_allocator_record_buffer_allocate(
         allocator, &memory_placement, compat_params, allocation_size, host_ptr,
         buffer);

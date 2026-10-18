@@ -93,28 +93,27 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
   %49 = OpBitcast.i32.u32 %offset
   %half_result = OpGroupNonUniformShuffleDown.v3f16 %halves, %49
   %predicate = OpCompositeExtract.v4bool.bool %predicate_result, 0
-  %52 = OpConstant.i32 1
-  %53 = OpConstant.i32 0
-  %predicate_i32 = OpSelect %predicate, %52, %53
-  %55 = OpSConvert.i32.offset64 %lane
-  %56 = OpConstant.offset64 4
-  %57 = OpIMul.offset64 %55, %56
-  %58 = OpPtrAccessChain.storage_buffer.i32.byte_offset %predicate_output, %57
-  OpStore.storage_buffer.i32 %58, %predicate_i32
-  %59 = OpCompositeExtract.v3f16.f16 %half_result, 0
-  %60 = OpCompositeExtract.v3f16.f16 %half_result, 1
-  %61 = OpCompositeExtract.v3f16.f16 %half_result, 2
-  %63 = OpConstant.offset64 6
-  %64 = OpIMul.offset64 %55, %63
-  %65 = OpPtrAccessChain.storage_buffer.f16.byte_offset %half_output, %64
-  OpStore.storage_buffer.f16 %65, %59
-  %69 = OpConstant.offset64 2
-  %70 = OpIAdd.offset64 %64, %69
-  %71 = OpPtrAccessChain.storage_buffer.f16.byte_offset %half_output, %70
-  OpStore.storage_buffer.f16 %71, %60
-  %76 = OpIAdd.offset64 %64, %56
-  %77 = OpPtrAccessChain.storage_buffer.f16.byte_offset %half_output, %76
-  OpStore.storage_buffer.f16 %77, %61
+  %52 = OpConstant.i32 0
+  %predicate_i32 = OpSelect %predicate, %offset, %52
+  %54 = OpSConvert.i32.offset64 %lane
+  %55 = OpConstant.offset64 4
+  %56 = OpIMul.offset64 %54, %55
+  %57 = OpPtrAccessChain.storage_buffer.i32.byte_offset %predicate_output, %56
+  OpStore.storage_buffer.i32 %57, %predicate_i32
+  %58 = OpCompositeExtract.v3f16.f16 %half_result, 0
+  %59 = OpCompositeExtract.v3f16.f16 %half_result, 1
+  %60 = OpCompositeExtract.v3f16.f16 %half_result, 2
+  %62 = OpConstant.offset64 6
+  %63 = OpIMul.offset64 %54, %62
+  %64 = OpPtrAccessChain.storage_buffer.f16.byte_offset %half_output, %63
+  OpStore.storage_buffer.f16 %64, %58
+  %68 = OpConstant.offset64 2
+  %69 = OpIAdd.offset64 %63, %68
+  %70 = OpPtrAccessChain.storage_buffer.f16.byte_offset %half_output, %69
+  OpStore.storage_buffer.f16 %70, %59
+  %75 = OpIAdd.offset64 %63, %55
+  %76 = OpPtrAccessChain.storage_buffer.f16.byte_offset %half_output, %75
+  OpStore.storage_buffer.f16 %76, %60
   return
 }
 
@@ -166,15 +165,14 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
   %35 = OpGroupNonUniformBallot.v4u32 %34
   %36 = OpGroupNonUniformBallotBitExtract.bool %35, %33 : reg<spirv.id>
   %valid = OpLogicalAnd.bool %31, %36
-  %38 = OpConstant.i32 1
-  %39 = OpConstant.i32 0
-  %valid_i32 = OpSelect %valid, %38, %39
-  %41 = OpSConvert.i32.offset64 %lane
-  %42 = OpConstant.offset64 4
-  %43 = OpIMul.offset64 %41, %42
-  %44 = OpPtrAccessChain.storage_buffer.i32.byte_offset %value_output, %43
-  OpStore.storage_buffer.i32 %44, %shuffled
-  %48 = OpPtrAccessChain.storage_buffer.i32.byte_offset %valid_output, %43
-  OpStore.storage_buffer.i32 %48, %valid_i32
+  %38 = OpConstant.i32 0
+  %valid_i32 = OpSelect %valid, %offset, %38
+  %40 = OpSConvert.i32.offset64 %lane
+  %41 = OpConstant.offset64 4
+  %42 = OpIMul.offset64 %40, %41
+  %43 = OpPtrAccessChain.storage_buffer.i32.byte_offset %value_output, %42
+  OpStore.storage_buffer.i32 %43, %shuffled
+  %47 = OpPtrAccessChain.storage_buffer.i32.byte_offset %valid_output, %42
+  OpStore.storage_buffer.i32 %47, %valid_i32
   return
 }

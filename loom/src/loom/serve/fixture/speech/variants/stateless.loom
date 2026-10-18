@@ -1,0 +1,37 @@
+// A stateless source may complete with no waveform frames. It exercises the
+// empty state prefix without retaining a placeholder CPU buffer.
+global.rodata.def @work = bytes("00000000")
+
+func.def public @prepare_request(%model: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer) {
+  %work = global.load @work : buffer
+  func.return %work : buffer
+}
+
+func.def public @prepare_input(%model: buffer, %text: buffer, %offset: i64, %complete: i32) -> (i64) {
+  %length = buffer.length %text
+  %length64 = index.cast %length : offset to i64
+  %remaining = scalar.subi %length64, %offset : i64
+  func.return %remaining : i64
+}
+
+func.def public @prepare_work(%model: buffer) -> (i32, buffer, i64, i64) {
+  %work = global.load @work : buffer
+  %kind = scalar.constant 3 : i32
+  %unit = scalar.constant 0 : i64
+  %tag = scalar.constant 0 : i64
+  func.return %kind, %work, %unit, %tag : i32, buffer, i64, i64
+}
+
+func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  func.return %packed, %packed : buffer, buffer
+}
+
+func.def public @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) {
+  func.return
+}
+
+func.def public @complete(%model: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, i64, i64, i32) {
+  %c0 = scalar.constant 0 : i64
+  %done = scalar.constant 1 : i32
+  func.return %c0, %c0, %c0, %done : i64, i64, i64, i32
+}

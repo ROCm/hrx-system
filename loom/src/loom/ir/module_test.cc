@@ -3803,7 +3803,7 @@ TEST_F(ModuleTest, AddLocationRejectsWrappedIdZero) {
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
                                       NULL, iree_allocator_system(), &module));
 
-  module->locations.count = (iree_host_size_t)UINT32_MAX + 1;
+  module->locations.count = (iree_host_size_t)LOOM_LOCATION_ID_MAX + 1;
 
   loom_location_id_t id = LOOM_LOCATION_UNKNOWN;
   IREE_EXPECT_STATUS_IS(

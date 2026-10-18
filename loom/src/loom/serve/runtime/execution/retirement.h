@@ -14,8 +14,8 @@
 extern "C" {
 #endif
 
-// Final ownership of buffer views lent to queues. Failed readiness may precede
-// retirement of accepted operations; borrowed host payloads and virtual address
+// Final ownership of buffer views and operations lent to queues. Failed
+// readiness may precede retirement; borrowed host payloads and virtual address
 // mappings must survive that interval. Tracking wraps a root once, not on every
 // dispatch. Nested views inherit the obligation without address indirection.
 typedef struct loom_serve_retirement_t {
@@ -23,7 +23,7 @@ typedef struct loom_serve_retirement_t {
   iree_slim_mutex_t mutex;
   // Wakes the teardown owner after a view's final queue release.
   iree_notification_t notification;
-  // Root views still retained by callers, commands, children or queues.
+  // Outstanding root views and explicitly accepted operation claims.
   iree_host_size_t count;
   // Optional nonblocking owner wake, invoked under mutex at final retirement.
   void (*wake)(void* user_data);
@@ -32,6 +32,12 @@ typedef struct loom_serve_retirement_t {
 } loom_serve_retirement_t;
 
 void loom_serve_retirement_initialize(loom_serve_retirement_t* retirement);
+
+// Captures an accepted operation independently of its caller-visible readiness.
+// The owner acquires before submission and releases on rejection or the actual
+// terminal callback. Release is nonblocking and may run inline or on a worker.
+void loom_serve_retirement_acquire(loom_serve_retirement_t* retirement);
+void loom_serve_retirement_release(loom_serve_retirement_t* retirement);
 
 // Replaces an owned reference with a release-tracked view of the same range.
 // On failure the input reference is unchanged. All consumers use this returned

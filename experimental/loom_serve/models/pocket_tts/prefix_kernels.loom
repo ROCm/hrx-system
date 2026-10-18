@@ -1,0 +1,594 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+target.decl @pocket
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.request_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.rotary_capacity : %value: index where [range(%value, 16, 1048576)]
+
+template.decl pure @pocket.batch_work_header_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.request_state_size(%capacity: index) -> (offset)
+
+template.decl @pocket.element() -> (index)
+
+template.decl @pocket.batch.work_record(%work: buffer, %packed: index) -> (view<8xi32>)
+
+template.decl pure @pocket.prefix.capacity() -> (index)
+
+template.decl pure @pocket.prefix.header() -> (offset)
+
+template.decl @pocket.prefix.count(%work: buffer) -> (index)
+
+template.decl pure @pocket.prefix.record_origin(%column: index) -> (offset)
+
+template.decl @pocket.prefix.matrix(%rows: index, %row_capacity: index, %input_first_row: index, %inputs: index, %outputs: index, %bf16_weights: i1, %input: buffer, %weight: buffer, %input_origin: offset, %weight_origin: offset, %input_row_stride: index, %weight_output_stride: index, %weight_input_stride: index) -> (index, index, f64, f64, f64, f64)
+
+template.decl @pocket.softmax.body(%elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer, %scores_origin: offset, %probabilities_origin: offset)
+
+template.decl @pocket.rotary_cache.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %packed_channels: index, %value_origin: index, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer, %x_origin: offset, %q_origin: offset, %keys_origin: offset, %values_origin: offset, %position_origin: offset, %cosine_origin: offset, %sine_origin: offset)
+
+template.decl @pocket.residual.body(%elements: index, %channels: index, %times: index, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %x_origin: offset, %update_origin: offset, %y_origin: offset)
+
+template.decl @pocket.gelu.body(%elements: index, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
+
+template.decl @pocket.prefix.normalization.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset, %bias_origin: offset)
+
+template.def<@pocket.prefix.normalization.body> device @pocket_prefix_normalization_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset, %bias_origin: offset) {
+  %one = index.constant 1 : index
+  %layout = encoding.layout.strided [%one, %channels] : encoding<layout>
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%channels]x[%times]xf32, %layout>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%channels]x[%times]xf32, %layout>
+    %scale_view = buffer.view %scale_storage[%scale_origin] : buffer -> view<[%channels]xbf16>
+    %bias_view = buffer.view %bias_storage[%bias_origin] : buffer -> view<[%channels]xbf16>
+    %acc_zero = scalar.constant 0.0 : f64
+    %total = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32, %layout> -> f32
+      %wide_input = scalar.extf %input : f32 to f64
+      %next = scalar.addf %acc, %wide_input : f64
+      scf.yield %next : f64
+    }
+    %mean_wide = scalar.divf %total, %divisor : f64
+    %mean = scalar.fptrunc %mean_wide : f64 to f32
+    %squared = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32, %layout> -> f32
+      %centered = scalar.subf %input, %mean : f32
+      %wide_centered = scalar.extf %centered : f32 to f64
+      %next = scalar.fmaf %wide_centered, %wide_centered, %acc : f64
+      scf.yield %next : f64
+    }
+    %variance_wide = scalar.divf %squared, %variance_divisor : f64
+    %variance = scalar.fptrunc %variance_wide : f64 to f32
+    %stabilized = scalar.addf %variance, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %stabilized : f32
+    scf.for %channel = [%c0 to %channels step %c1] {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32, %layout> -> f32
+      %centered = scalar.subf %input, %mean : f32
+      %normalized = scalar.mulf %centered, %inverse : f32
+      %factor_stored = view.load %scale_view[%channel] : view<[%channels]xbf16> -> bf16
+      %factor = scalar.extf %factor_stored : bf16 to f32
+      %shift_stored = view.load %bias_view[%channel] : view<[%channels]xbf16> -> bf16
+      %shift = scalar.extf %shift_stored : bf16 to f32
+      %scaled = scalar.mulf %normalized, %factor : f32
+      %output = scalar.addf %scaled, %shift : f32
+      view.store %output, %y_view[%channel, %element] : f32, view<[%channels]x[%times]xf32, %layout>
+    }
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.normalize() {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %unit = index.constant 1 : index
+  %elements = index.mul %capacity, %unit : index
+  %threads = index.constant 128 : index
+  %tail = index.constant 127 : index
+  %one = index.constant 1 : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %input: buffer, %output: buffer, %scale: buffer, %bias: buffer) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %count = template.apply<@pocket.prefix.count>(%work) : (buffer) -> (index)
+  %origin = index.constant 0 : offset
+  %channels = index.constant 1024 : index
+  %divisor = scalar.constant 1024.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  template.apply<@pocket.prefix.normalization.body>(%count, %channels, %capacity, %divisor, %divisor, %epsilon, %input, %output, %scale, %bias, %origin, %origin, %origin, %origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.embed() {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %channels = index.constant 1024 : index
+  %elements = index.mul %capacity, %channels : index
+  %threads = index.constant 128 : index
+  %tail = index.constant 127 : index
+  %one = index.constant 1 : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %weight: buffer, %output: buffer) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %count = template.apply<@pocket.prefix.count>(%work) : (buffer) -> (index)
+  %origin = index.constant 0 : offset
+  %channels = index.constant 1024 : index
+  %elements = index.mul %count, %channels : index
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %column = index.div %element, %channels : index
+    %channel = index.rem %element, %channels : index
+    %record_origin = template.apply<@pocket.prefix.record_origin>(%column) pure : (index) -> (offset)
+    %record = buffer.view %work[%record_origin] : buffer -> view<4xi32>
+    %token32 = view.load %record[2] : view<4xi32> -> i32
+    %token_value = index.cast %token32 : i32 to index
+    %token = index.assume %token_value [range(%token_value, 0, 4000)] : index
+    %weights = buffer.view %weight[%origin] : buffer -> view<4001x1024xbf16>
+    %target = buffer.view %output[%origin] : buffer -> view<[%capacity]x1024xf32>
+    %stored = view.load %weights[%token, %channel] : view<4001x1024xbf16> -> bf16
+    %value = scalar.extf %stored : bf16 to f32
+    view.store %value, %target[%column, %channel] : f32, view<[%capacity]x1024xf32>
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.softmax() {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %heads = index.constant 16 : index
+  %elements = index.mul %capacity, %heads : index
+  %threads = index.constant 128 : index
+  %tail = index.constant 127 : index
+  %one = index.constant 1 : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %scores: buffer, %probabilities: buffer) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %count = template.apply<@pocket.prefix.count>(%work) : (buffer) -> (index)
+  %origin = index.constant 0 : offset
+  %heads = index.constant 16 : index
+  %rows = index.mul %capacity, %heads : index
+  %live = index.mul %count, %heads : index
+  %context = config.get @pocket.context_capacity : index
+  template.apply<@pocket.softmax.body>(%live, %rows, %context, %scores, %probabilities, %origin, %origin) : (index, index, index, buffer, buffer, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.residual() {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %channels = index.constant 1024 : index
+  %elements = index.mul %capacity, %channels : index
+  %threads = index.constant 128 : index
+  %tail = index.constant 127 : index
+  %one = index.constant 1 : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %input: buffer, %update: buffer, %output: buffer) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %count = template.apply<@pocket.prefix.count>(%work) : (buffer) -> (index)
+  %origin = index.constant 0 : offset
+  %channels = index.constant 1024 : index
+  %elements = index.mul %capacity, %channels : index
+  %live_elements = index.mul %count, %channels : index
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %live_elements : index
+  scf.if %live {
+    %one = index.constant 1 : index
+    template.apply<@pocket.residual.body>(%elements, %elements, %one, %input, %update, %output, %origin, %origin, %origin) : (index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.gelu() {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %channels = index.constant 4096 : index
+  %elements = index.mul %capacity, %channels : index
+  %threads = index.constant 128 : index
+  %tail = index.constant 127 : index
+  %one = index.constant 1 : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %input: buffer, %output: buffer) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %count = template.apply<@pocket.prefix.count>(%work) : (buffer) -> (index)
+  %origin = index.constant 0 : offset
+  %channels = index.constant 4096 : index
+  %elements = index.mul %capacity, %channels : index
+  %live_elements = index.mul %count, %channels : index
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %live_elements : index
+  scf.if %live {
+    template.apply<@pocket.gelu.body>(%elements, %input, %output, %origin, %origin) : (index, buffer, buffer, offset, offset)
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.project(%inputs: index, %outputs: index) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %sixteen = index.constant 16 : index
+  %tail = index.constant 15 : index
+  %rounded = index.add %outputs, %tail : index
+  %output_groups = index.div %rounded, %sixteen : index
+  %block = index.constant 32 : index
+  %row_groups = index.div %capacity, %block : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%output_groups, %row_groups, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %input: buffer, %weight: buffer, %output: buffer, %inputs: index, %outputs: index) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %count = template.apply<@pocket.prefix.count>(%work) : (buffer) -> (index)
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %block = index.constant 32 : index
+  %row_group = kernel.workgroup.id<y> : index
+  %row_base = index.mul %row_group, %block : index
+  %active = index.cmp ult, %row_base, %count : index
+  scf.if %active {
+    %bf16 = scalar.constant true : i1
+    %row, %column, %acc0, %acc1, %acc2, %acc3 = template.apply<@pocket.prefix.matrix>(%count, %capacity, %zero, %inputs, %outputs, %bf16, %input, %weight, %origin, %origin, %inputs, %inputs, %one) : (index, index, index, index, index, i1, buffer, buffer, offset, offset, index, index, index) -> (index, index, f64, f64, f64, f64)
+    %target = buffer.view %output[%origin] : buffer -> view<[%capacity]x[%outputs]xf32>
+    %delta0 = index.constant 0 : index
+    %row0 = index.add %row, %delta0 : index
+    %row_live0 = index.cmp ult, %row0, %count : index
+    %column_live0 = index.cmp ult, %column, %outputs : index
+    %live0 = scalar.andi %row_live0, %column_live0 : i1
+    scf.if %live0 {
+      %bounded_column0 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %value0 = scalar.fptrunc %acc0 : f64 to f32
+      view.store %value0, %target[%row0, %bounded_column0] : f32, view<[%capacity]x[%outputs]xf32>
+    }
+    %delta1 = index.constant 8 : index
+    %row1 = index.add %row, %delta1 : index
+    %row_live1 = index.cmp ult, %row1, %count : index
+    %column_live1 = index.cmp ult, %column, %outputs : index
+    %live1 = scalar.andi %row_live1, %column_live1 : i1
+    scf.if %live1 {
+      %bounded_column1 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %value1 = scalar.fptrunc %acc1 : f64 to f32
+      view.store %value1, %target[%row1, %bounded_column1] : f32, view<[%capacity]x[%outputs]xf32>
+    }
+    %delta2 = index.constant 16 : index
+    %row2 = index.add %row, %delta2 : index
+    %row_live2 = index.cmp ult, %row2, %count : index
+    %column_live2 = index.cmp ult, %column, %outputs : index
+    %live2 = scalar.andi %row_live2, %column_live2 : i1
+    scf.if %live2 {
+      %bounded_column2 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %value2 = scalar.fptrunc %acc2 : f64 to f32
+      view.store %value2, %target[%row2, %bounded_column2] : f32, view<[%capacity]x[%outputs]xf32>
+    }
+    %delta3 = index.constant 24 : index
+    %row3 = index.add %row, %delta3 : index
+    %row_live3 = index.cmp ult, %row3, %count : index
+    %column_live3 = index.cmp ult, %column, %outputs : index
+    %live3 = scalar.andi %row_live3, %column_live3 : i1
+    scf.if %live3 {
+      %bounded_column3 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %value3 = scalar.fptrunc %acc3 : f64 to f32
+      view.store %value3, %target[%row3, %bounded_column3] : f32, view<[%capacity]x[%outputs]xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.rotary() {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %groups = index.constant 8 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %one, %capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %input: buffer, %query: buffer, %state: buffer, %cosine: buffer, %sine: buffer, %cache_origin: offset) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %count = template.apply<@pocket.prefix.count>(%work) : (buffer) -> (index)
+  %origin = index.constant 0 : offset
+  %column = kernel.workgroup.id<z> : index
+  %active = index.cmp ult, %column, %count : index
+  scf.if %active {
+    %record_origin = template.apply<@pocket.prefix.record_origin>(%column) pure : (index) -> (offset)
+    %record = buffer.view %work[%record_origin] : buffer -> view<4xi32>
+    %resident32 = view.load %record[0] : view<4xi32> -> i32
+    %resident_value = index.cast %resident32 : i32 to index
+    %resident_capacity = config.get @pocket.request_capacity : index
+    %resident = index.assume %resident_value [ge(%resident_value, 0), lt(%resident_value, %resident_capacity)] : index
+    %context = config.get @pocket.context_capacity : index
+    %state_stride = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+    %state_row = index.scale %resident, %state_stride : index, offset -> offset
+    %keys_origin = index.add %state_row, %cache_origin : offset
+    %tensor_stride = index.constant 4096 : offset
+    %plane = index.scale %context, %tensor_stride : index, offset -> offset
+    %values_origin = index.add %keys_origin, %plane : offset
+    %packed_stride = index.constant 12288 : offset
+    %x_origin = index.scale %column, %packed_stride : index, offset -> offset
+    %q_origin = index.scale %column, %tensor_stride : index, offset -> offset
+    %word = index.constant 4 : offset
+    %position_origin = index.add %record_origin, %word : offset
+    %channels = index.constant 1024 : index
+    %one = index.constant 1 : index
+    %past = index.sub %context, %one : index
+    %packed = index.constant 3072 : index
+    %value_origin = index.constant 2048 : index
+    template.apply<@pocket.rotary_cache.body>(%channels, %channels, %one, %context, %past, %packed, %value_origin, %input, %query, %state, %state, %work, %cosine, %sine, %x_origin, %q_origin, %keys_origin, %values_origin, %position_origin, %origin, %origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset)
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.scores() {
+  %requests = config.get @pocket.batch_capacity : index
+  %heads = index.constant 16 : index
+  %groups = index.mul %requests, %heads : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %context = config.get @pocket.context_capacity : index
+  %tail = index.constant 15 : index
+  %rounded = index.add %context, %tail : index
+  %output_groups = index.div %rounded, %heads : index
+  kernel.launch.config workgroups(%output_groups, %one, %groups) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %input: buffer, %state: buffer, %output: buffer, %cache_origin: offset) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %requests = config.get @pocket.batch_capacity : index
+  %one = index.constant 1 : index
+  %map_length = index.add %requests, %one : index
+  %origin = index.constant 0 : offset
+  %membership = buffer.view %work[%origin] : buffer -> view<[%map_length]xi32>
+  %count32 = view.load %membership[0] : view<[%map_length]xi32> -> i32
+  %count_value = index.cast %count32 : i32 to index
+  %count = index.assume %count_value [ge(%count_value, 1), le(%count_value, %requests)] : index
+  %heads = index.constant 16 : index
+  %group = kernel.workgroup.id<z> : index
+  %packed = index.div %group, %heads : index
+  %head = index.rem %group, %heads : index
+  %active = index.cmp ult, %packed, %count : index
+  scf.if %active {
+    %entry = index.add %packed, %one : index
+    %resident32 = view.load %membership[%entry] : view<[%map_length]xi32> -> i32
+    %resident_value = index.cast %resident32 : i32 to index
+    %resident_capacity = config.get @pocket.request_capacity : index
+    %resident = index.assume %resident_value [ge(%resident_value, 0), lt(%resident_value, %resident_capacity)] : index
+    %record = template.apply<@pocket.batch.work_record>(%work, %packed) : (buffer, index) -> (view<8xi32>)
+    %first32 = view.load %record[6] : view<8xi32> -> i32
+    %rows32 = view.load %record[7] : view<8xi32> -> i32
+    %first_value = index.cast %first32 : i32 to index
+    %first = index.assume %first_value [ge(%first_value, 0), lt(%first_value, %capacity)] : index
+    %remaining = index.sub %capacity, %first : index
+    %rows_value = index.cast %rows32 : i32 to index
+    %rows = index.assume %rows_value [range(%rows_value, 1, 32), le(%rows_value, %remaining)] : index
+    %context = config.get @pocket.context_capacity : index
+    %state_stride = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+    %state_row = index.scale %resident, %state_stride : index, offset -> offset
+    %cache = index.add %state_row, %cache_origin : offset
+    %head_bytes = index.constant 256 : offset
+    %head_offset = index.scale %head, %head_bytes : index, offset -> offset
+    %state_origin = index.add %cache, %head_offset : offset
+    %width = index.constant 1024 : index
+    %head_width = index.constant 64 : index
+    %bf16 = scalar.constant false : i1
+    %score_stride = index.mul %heads, %context : index
+    %row, %column, %acc0, %acc1, %acc2, %acc3 = template.apply<@pocket.prefix.matrix>(%rows, %capacity, %first, %head_width, %context, %bf16, %input, %state, %head_offset, %state_origin, %width, %width, %one) : (index, index, index, index, index, i1, buffer, buffer, offset, offset, index, index, index) -> (index, index, f64, f64, f64, f64)
+    %first_record_origin = template.apply<@pocket.prefix.record_origin>(%first) pure : (index) -> (offset)
+    %first_record = buffer.view %work[%first_record_origin] : buffer -> view<4xi32>
+    %position32 = view.load %first_record[1] : view<4xi32> -> i32
+    %position_value = index.cast %position32 : i32 to index
+    %position = index.assume %position_value [ge(%position_value, 0), lt(%position_value, %context)] : index
+    %target = buffer.view %output[%origin] : buffer -> view<[%capacity]x16x[%context]xf32>
+    %scale = scalar.constant 0.125 : f32
+    %negative = scalar.constant -1e+30 : f32
+    %delta0 = index.constant 0 : index
+    %row0 = index.add %row, %delta0 : index
+    %row_live0 = index.cmp ult, %row0, %rows : index
+    %column_live0 = index.cmp ult, %column, %context : index
+    %live0 = scalar.andi %row_live0, %column_live0 : i1
+    scf.if %live0 {
+      %packed_value0 = index.add %first, %row0 : index
+      %packed_row0 = index.assume %packed_value0 [ge(%packed_value0, 0), lt(%packed_value0, %capacity)] : index
+      %rounded0 = scalar.fptrunc %acc0 : f64 to f32
+      %scaled0 = scalar.mulf %rounded0, %scale : f32
+      %position0 = index.add %position, %row0 : index
+      %causal0 = index.cmp ule, %column, %position0 : index
+      %value0 = scf.select %causal0, %scaled0, %negative : f32
+      view.store %value0, %target[%packed_row0, %head, %column] : f32, view<[%capacity]x16x[%context]xf32>
+    }
+    %delta1 = index.constant 8 : index
+    %row1 = index.add %row, %delta1 : index
+    %row_live1 = index.cmp ult, %row1, %rows : index
+    %column_live1 = index.cmp ult, %column, %context : index
+    %live1 = scalar.andi %row_live1, %column_live1 : i1
+    scf.if %live1 {
+      %packed_value1 = index.add %first, %row1 : index
+      %packed_row1 = index.assume %packed_value1 [ge(%packed_value1, 0), lt(%packed_value1, %capacity)] : index
+      %rounded1 = scalar.fptrunc %acc1 : f64 to f32
+      %scaled1 = scalar.mulf %rounded1, %scale : f32
+      %position1 = index.add %position, %row1 : index
+      %causal1 = index.cmp ule, %column, %position1 : index
+      %value1 = scf.select %causal1, %scaled1, %negative : f32
+      view.store %value1, %target[%packed_row1, %head, %column] : f32, view<[%capacity]x16x[%context]xf32>
+    }
+    %delta2 = index.constant 16 : index
+    %row2 = index.add %row, %delta2 : index
+    %row_live2 = index.cmp ult, %row2, %rows : index
+    %column_live2 = index.cmp ult, %column, %context : index
+    %live2 = scalar.andi %row_live2, %column_live2 : i1
+    scf.if %live2 {
+      %packed_value2 = index.add %first, %row2 : index
+      %packed_row2 = index.assume %packed_value2 [ge(%packed_value2, 0), lt(%packed_value2, %capacity)] : index
+      %rounded2 = scalar.fptrunc %acc2 : f64 to f32
+      %scaled2 = scalar.mulf %rounded2, %scale : f32
+      %position2 = index.add %position, %row2 : index
+      %causal2 = index.cmp ule, %column, %position2 : index
+      %value2 = scf.select %causal2, %scaled2, %negative : f32
+      view.store %value2, %target[%packed_row2, %head, %column] : f32, view<[%capacity]x16x[%context]xf32>
+    }
+    %delta3 = index.constant 24 : index
+    %row3 = index.add %row, %delta3 : index
+    %row_live3 = index.cmp ult, %row3, %rows : index
+    %column_live3 = index.cmp ult, %column, %context : index
+    %live3 = scalar.andi %row_live3, %column_live3 : i1
+    scf.if %live3 {
+      %packed_value3 = index.add %first, %row3 : index
+      %packed_row3 = index.assume %packed_value3 [ge(%packed_value3, 0), lt(%packed_value3, %capacity)] : index
+      %rounded3 = scalar.fptrunc %acc3 : f64 to f32
+      %scaled3 = scalar.mulf %rounded3, %scale : f32
+      %position3 = index.add %position, %row3 : index
+      %causal3 = index.cmp ule, %column, %position3 : index
+      %value3 = scf.select %causal3, %scaled3, %negative : f32
+      view.store %value3, %target[%packed_row3, %head, %column] : f32, view<[%capacity]x16x[%context]xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.values() {
+  %requests = config.get @pocket.batch_capacity : index
+  %heads = index.constant 16 : index
+  %groups = index.mul %requests, %heads : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %output_groups = index.constant 4 : index
+  kernel.launch.config workgroups(%output_groups, %one, %groups) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %input: buffer, %state: buffer, %output: buffer, %cache_origin: offset) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %requests = config.get @pocket.batch_capacity : index
+  %one = index.constant 1 : index
+  %map_length = index.add %requests, %one : index
+  %origin = index.constant 0 : offset
+  %membership = buffer.view %work[%origin] : buffer -> view<[%map_length]xi32>
+  %count32 = view.load %membership[0] : view<[%map_length]xi32> -> i32
+  %count_value = index.cast %count32 : i32 to index
+  %count = index.assume %count_value [ge(%count_value, 1), le(%count_value, %requests)] : index
+  %heads = index.constant 16 : index
+  %group = kernel.workgroup.id<z> : index
+  %packed = index.div %group, %heads : index
+  %head = index.rem %group, %heads : index
+  %active = index.cmp ult, %packed, %count : index
+  scf.if %active {
+    %entry = index.add %packed, %one : index
+    %resident32 = view.load %membership[%entry] : view<[%map_length]xi32> -> i32
+    %resident_value = index.cast %resident32 : i32 to index
+    %resident_capacity = config.get @pocket.request_capacity : index
+    %resident = index.assume %resident_value [ge(%resident_value, 0), lt(%resident_value, %resident_capacity)] : index
+    %record = template.apply<@pocket.batch.work_record>(%work, %packed) : (buffer, index) -> (view<8xi32>)
+    %first32 = view.load %record[6] : view<8xi32> -> i32
+    %rows32 = view.load %record[7] : view<8xi32> -> i32
+    %first_value = index.cast %first32 : i32 to index
+    %first = index.assume %first_value [ge(%first_value, 0), lt(%first_value, %capacity)] : index
+    %remaining = index.sub %capacity, %first : index
+    %rows_value = index.cast %rows32 : i32 to index
+    %rows = index.assume %rows_value [range(%rows_value, 1, 32), le(%rows_value, %remaining)] : index
+    %context = config.get @pocket.context_capacity : index
+    %state_stride = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+    %state_row = index.scale %resident, %state_stride : index, offset -> offset
+    %cache = index.add %state_row, %cache_origin : offset
+    %head_bytes = index.constant 256 : offset
+    %head_offset = index.scale %head, %head_bytes : index, offset -> offset
+    %state_origin = index.add %cache, %head_offset : offset
+    %width = index.constant 1024 : index
+    %head_width = index.constant 64 : index
+    %bf16 = scalar.constant false : i1
+    %score_stride = index.mul %heads, %context : index
+    %word = index.constant 4 : offset
+    %head_elements = index.mul %head, %context : index
+    %input_origin = index.scale %head_elements, %word : index, offset -> offset
+    %row, %column, %acc0, %acc1, %acc2, %acc3 = template.apply<@pocket.prefix.matrix>(%rows, %capacity, %first, %context, %head_width, %bf16, %input, %state, %input_origin, %state_origin, %score_stride, %one, %width) : (index, index, index, index, index, i1, buffer, buffer, offset, offset, index, index, index) -> (index, index, f64, f64, f64, f64)
+    %channel = index.madd %head, %head_width, %column : index
+    %target = buffer.view %output[%origin] : buffer -> view<[%capacity]x1024xf32>
+    %delta0 = index.constant 0 : index
+    %row0 = index.add %row, %delta0 : index
+    %row_live0 = index.cmp ult, %row0, %rows : index
+    %column_live0 = index.cmp ult, %column, %head_width : index
+    %live0 = scalar.andi %row_live0, %column_live0 : i1
+    scf.if %live0 {
+      %packed_value0 = index.add %first, %row0 : index
+      %packed_row0 = index.assume %packed_value0 [ge(%packed_value0, 0), lt(%packed_value0, %capacity)] : index
+      %rounded0 = scalar.fptrunc %acc0 : f64 to f32
+      view.store %rounded0, %target[%packed_row0, %channel] : f32, view<[%capacity]x1024xf32>
+    }
+    %delta1 = index.constant 8 : index
+    %row1 = index.add %row, %delta1 : index
+    %row_live1 = index.cmp ult, %row1, %rows : index
+    %column_live1 = index.cmp ult, %column, %head_width : index
+    %live1 = scalar.andi %row_live1, %column_live1 : i1
+    scf.if %live1 {
+      %packed_value1 = index.add %first, %row1 : index
+      %packed_row1 = index.assume %packed_value1 [ge(%packed_value1, 0), lt(%packed_value1, %capacity)] : index
+      %rounded1 = scalar.fptrunc %acc1 : f64 to f32
+      view.store %rounded1, %target[%packed_row1, %channel] : f32, view<[%capacity]x1024xf32>
+    }
+    %delta2 = index.constant 16 : index
+    %row2 = index.add %row, %delta2 : index
+    %row_live2 = index.cmp ult, %row2, %rows : index
+    %column_live2 = index.cmp ult, %column, %head_width : index
+    %live2 = scalar.andi %row_live2, %column_live2 : i1
+    scf.if %live2 {
+      %packed_value2 = index.add %first, %row2 : index
+      %packed_row2 = index.assume %packed_value2 [ge(%packed_value2, 0), lt(%packed_value2, %capacity)] : index
+      %rounded2 = scalar.fptrunc %acc2 : f64 to f32
+      view.store %rounded2, %target[%packed_row2, %channel] : f32, view<[%capacity]x1024xf32>
+    }
+    %delta3 = index.constant 24 : index
+    %row3 = index.add %row, %delta3 : index
+    %row_live3 = index.cmp ult, %row3, %rows : index
+    %column_live3 = index.cmp ult, %column, %head_width : index
+    %live3 = scalar.andi %row_live3, %column_live3 : i1
+    scf.if %live3 {
+      %packed_value3 = index.add %first, %row3 : index
+      %packed_row3 = index.assume %packed_value3 [ge(%packed_value3, 0), lt(%packed_value3, %capacity)] : index
+      %rounded3 = scalar.fptrunc %acc3 : f64 to f32
+      view.store %rounded3, %target[%packed_row3, %channel] : f32, view<[%capacity]x1024xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.prefix.advance() {
+  %requests = config.get @pocket.batch_capacity : index
+  %tail = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %requests, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %state: buffer) {
+  %requests = config.get @pocket.batch_capacity : index
+  %one = index.constant 1 : index
+  %map_length = index.add %requests, %one : index
+  %origin = index.constant 0 : offset
+  %map = buffer.view %work[%origin] : buffer -> view<[%map_length]xi32>
+  %count32 = view.load %map[0] : view<[%map_length]xi32> -> i32
+  %count_value = index.cast %count32 : i32 to index
+  %count = index.assume %count_value [ge(%count_value, 1), le(%count_value, %requests)] : index
+  %packed = template.apply<@pocket.element>() : () -> (index)
+  %active = index.cmp ult, %packed, %count : index
+  scf.if %active {
+    %entry = index.add %packed, %one : index
+    %resident32 = view.load %map[%entry] : view<[%map_length]xi32> -> i32
+    %resident_value = index.cast %resident32 : i32 to index
+    %resident_capacity = config.get @pocket.request_capacity : index
+    %resident = index.assume %resident_value [ge(%resident_value, 0), lt(%resident_value, %resident_capacity)] : index
+    %record = template.apply<@pocket.batch.work_record>(%work, %packed) : (buffer, index) -> (view<8xi32>)
+    %extent = view.load %record[7] : view<8xi32> -> i32
+    %context = config.get @pocket.context_capacity : index
+    %stride = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+    %state_origin = index.scale %resident, %stride : index, offset -> offset
+    %position = buffer.view %state[%state_origin] : buffer -> view<1xi32>
+    %previous = view.load %position[0] : view<1xi32> -> i32
+    %next = scalar.addi %previous, %extent : i32
+    view.store %next, %position[0] : i32, view<1xi32>
+  }
+  kernel.return
+}

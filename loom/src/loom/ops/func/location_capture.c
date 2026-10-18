@@ -161,11 +161,12 @@ static iree_status_t loom_location_capture_file(
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0;
        i < entry->file.field_span_count && iree_status_is_ok(status); ++i) {
-    const loom_location_field_span_t* field = &entry->file.field_spans[i];
-    const int64_t range[] = {field->start_line, field->start_col,
-                             field->end_line, field->end_col};
+    const loom_location_field_span_t field =
+        loom_location_file_field_span_at(entry, (uint16_t)i);
+    const int64_t range[] = {field.start_line, field.start_col, field.end_line,
+                             field.end_col};
     status = loom_func_location_field_attr_make(
-        module, field->kind, field->index,
+        module, field.kind, field.index,
         (loom_i64_array_t){.values = range, .count = 4}, &fields[i]);
   }
   IREE_RETURN_IF_ERROR(status);

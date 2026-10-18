@@ -50,11 +50,11 @@ iree_status_t iree_tokenizer_vocab_builder_allocate(
 // Use this for sources where tokens are already ordered by ID.
 //
 // |text| is the token string (copied into the builder's string table).
-// |score| is the BPE priority score (use 0.0 for WordPiece/unscored).
-// |attrs| are attribute flags for the token.
+// |score| is the Unigram log-probability score (use 0.0 for
+// WordPiece/unscored). |attrs| are attribute flags for the token.
 iree_status_t iree_tokenizer_vocab_builder_add_token(
     iree_tokenizer_vocab_builder_t* builder, iree_string_view_t text,
-    float score, iree_tokenizer_token_attr_t attrs);
+    double score, iree_tokenizer_token_attr_t attrs);
 
 // Adds a token with an explicit ID (for out-of-order insertion).
 //
@@ -64,11 +64,11 @@ iree_status_t iree_tokenizer_vocab_builder_add_token(
 //
 // |token_id| is the target ID for this token.
 // |text| is the token string (copied into the builder's string table).
-// |score| is the BPE priority score (use 0.0 for WordPiece/unscored).
-// |attrs| are attribute flags for the token.
+// |score| is the Unigram log-probability score (use 0.0 for
+// WordPiece/unscored). |attrs| are attribute flags for the token.
 iree_status_t iree_tokenizer_vocab_builder_add_token_with_id(
     iree_tokenizer_vocab_builder_t* builder, int32_t token_id,
-    iree_string_view_t text, float score, iree_tokenizer_token_attr_t attrs);
+    iree_string_view_t text, double score, iree_tokenizer_token_attr_t attrs);
 
 // Sets a special token ID.
 //
@@ -107,11 +107,11 @@ iree_status_t iree_tokenizer_vocab_builder_add_token_attrs(
 //
 // |token_id| is the target ID for this token.
 // |text| is the token string (only used if inserting; copied into string
-// table). |score| is the BPE priority score (only used if inserting). |attrs|
-// are attribute flags to set/add on the token.
+// table). |score| is the Unigram log-probability score (only used if
+// inserting). |attrs| are attribute flags to set/add on the token.
 iree_status_t iree_tokenizer_vocab_builder_ensure_token(
     iree_tokenizer_vocab_builder_t* builder, int32_t token_id,
-    iree_string_view_t text, float score, iree_tokenizer_token_attr_t attrs);
+    iree_string_view_t text, double score, iree_tokenizer_token_attr_t attrs);
 
 // Adds a BPE merge rule.
 //

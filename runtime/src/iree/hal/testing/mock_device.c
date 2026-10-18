@@ -321,6 +321,9 @@ typedef struct iree_hal_mock_device_t {
   // Optional caller-owned native-memory metadata.
   const iree_hal_memory_backend_t* memory_backend;
 
+  // Retained owner of any native dependencies published by the mock.
+  iree_hal_resource_t* lifetime_owner;
+
   // Number of queue family identities exposed by the device spec.
   iree_host_size_t queue_family_count;
 
@@ -426,6 +429,8 @@ iree_status_t iree_hal_mock_device_create(
       options->assign_topology_info_status_code;
   device->executable_loading_enabled = options->executable_loading_enabled;
   device->memory_backend = options->memory_backend;
+  device->lifetime_owner = options->lifetime_owner;
+  iree_hal_resource_retain(device->lifetime_owner);
 
   // Copy identifier into trailing storage.
   iree_string_view_append_to_buffer(
@@ -484,6 +489,7 @@ static void iree_hal_mock_device_destroy(iree_hal_device_t* base_device) {
   iree_hal_mock_device_t* device = iree_hal_mock_device_cast(base_device);
   iree_allocator_t host_allocator = device->host_allocator;
   iree_hal_device_spec_release(device->device_spec);
+  iree_hal_resource_release(device->lifetime_owner);
   iree_allocator_free(host_allocator, device->queue_families);
   iree_allocator_free(host_allocator, device);
 }

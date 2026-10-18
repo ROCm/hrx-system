@@ -75,6 +75,7 @@ loom_cc_library(
   SRCS
     "weights.c"
   DEPS
+    iree::async
     iree::base
     iree::base::threading
     iree::hal

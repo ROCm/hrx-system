@@ -1,4 +1,4 @@
-// RUN: with-checks compile-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
+// RUN: pass scf-to-cfg,cfg-simplify,source-to-low,low-dce
 
 amdgpu.target<gfx11-generic> @target
 
@@ -36,7 +36,84 @@ kernel.def target(@target) @workgroup_reduce_leader_cfg_cycle() {
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] * source_op=kernel.workgroup.reduce selection=plan plan_key=amdgpu.workgroup_reduce.publication.leader_workitem *
+amdgpu.target<gfx11-generic> @target
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_leader_cfg_cycle() asm {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %flags_view = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %leader_index = s_mov_b32 0
+  %loop_step = s_mov_b32 1
+  %32 = v_lshlrev_b32_src0_inline %tid, 2
+  %value = global_load_b32_saddr %32, %input_view
+  %34 = v_and_b32_src0_inline %tid, 31
+  %35 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
+  %36 = storage_address %35 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %37 = v_add_f32_dpp16 %value, %value {dpp_ctrl = 177}
+  %38 = v_add_f32_dpp16 %37, %37 {dpp_ctrl = 78}
+  %39 = v_add_f32_dpp16 %38, %38 {dpp_ctrl = 321}
+  %40 = v_add_f32_dpp16 %39, %39 {dpp_ctrl = 320}
+  %41 = v_permlanex16_b32_src12_inline %40, 0, 0
+  %42 = v_add_f32 %40, %41
+  %43 = v_lshrrev_b32_src0_inline %tid, 5
+  %44 = v_lshlrev_b32_src0_inline %43, 2
+  %45 = v_mov_b32 1
+  %46 = v_cmp_lt_u32 %34, %45
+  %47, %48 = s_and_saveexec_b64 %46
+  %49 = v_add_u32 %36, %44
+  ds_write_b32 %49, %42
+  s_mov_b64_exec %47
+  s_barrier
+  %50 = v_mov_b32 2
+  %51 = v_cmp_lt_u32 %tid, %50
+  %52, %53 = s_and_saveexec_b64 %51
+  %54 = v_lshlrev_b32_src0_inline %34, 2
+  %55 = v_add_u32 %36, %54
+  %56 = ds_read_b32 %55
+  %sum = v_add_f32_dpp16 %56, %56 {dpp_ctrl = 177}
+  s_mov_b64_exec %52
+  s_barrier
+  %58 = v_mov_b32 0
+  %flag = global_load_b32_saddr %58, %flags_view
+  %condition = v_cmp_ne_i32_src1_inline %flag {rhs = 0}
+  %is_leader = v_cmp_eq_i32_src1_inline %tid {rhs = 0}
+  %62, %63 = s_and_saveexec_b64 %is_leader
+  low.cond_br %63, ^_bb1, ^_bb7 : reg<amdgpu.scc>
+^_bb1:
+  %64 = v_mov_b32_copy %leader_index
+  low.br ^_bb9(%64: reg<amdgpu.vgpr>)
+^_bb9(%25: reg<amdgpu.vgpr>):
+  %66 = s_mov_b64_exec_read
+  low.br ^_bb2(%25: reg<amdgpu.vgpr>)
+^_bb2(%iteration: reg<amdgpu.vgpr>):
+  %65 = v_cmp_lt_i32_src1_inline %iteration {rhs = 4}
+  %67, %68 = s_and_saveexec_b64 %65
+  low.cond_br %68, ^_bb3, ^_bb10 : reg<amdgpu.scc>
+^_bb3:
+  %69 = s_mov_b64_exec_read
+  %70, %71 = s_and_b64_scc %condition, %69
+  low.cond_br %71, ^_bb4, ^_bb5 : reg<amdgpu.scc>
+^_bb4:
+  %72 = v_mov_b32 0
+  global_store_b32_saddr %72, %sum, %output_view
+  low.br ^_bb6
+^_bb5:
+  %73 = v_mov_b32 0
+  global_store_b32_saddr %73, %sum, %output_view
+  low.br ^_bb6
+^_bb6:
+  %74 = v_add_u32 %loop_step, %iteration
+  low.br ^_bb2(%74: reg<amdgpu.vgpr>)
+^_bb7:
+  s_mov_b64_exec %62
+  low.br ^_bb8
+^_bb8:
+  return
+^_bb10:
+  s_mov_b64_exec %66
+  low.br ^_bb7
+}
 
 // ====
 
@@ -72,4 +149,65 @@ kernel.def target(@target) @workgroup_reduce_cfg_unguarded_bypass() {
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] * source_op=kernel.workgroup.reduce selection=plan plan_key=amdgpu.workgroup_reduce.publication.redundant_subgroup *
+amdgpu.target<gfx11-generic> @target
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_cfg_unguarded_bypass() asm {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %flags_view = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = v_lshlrev_b32_src0_inline %tid, 2
+  %value = global_load_b32_saddr %21, %input_view
+  %23 = v_and_b32_src0_inline %tid, 31
+  %24 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
+  %25 = storage_address %24 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %26 = v_add_f32_dpp16 %value, %value {dpp_ctrl = 177}
+  %27 = v_add_f32_dpp16 %26, %26 {dpp_ctrl = 78}
+  %28 = v_add_f32_dpp16 %27, %27 {dpp_ctrl = 321}
+  %29 = v_add_f32_dpp16 %28, %28 {dpp_ctrl = 320}
+  %30 = v_permlanex16_b32_src12_inline %29, 0, 0
+  %31 = v_add_f32 %29, %30
+  %32 = v_lshrrev_b32_src0_inline %tid, 5
+  %33 = v_lshlrev_b32_src0_inline %32, 2
+  %34 = v_mov_b32 1
+  %35 = v_cmp_lt_u32 %23, %34
+  %36, %37 = s_and_saveexec_b64 %35
+  %38 = v_add_u32 %25, %33
+  ds_write_b32 %38, %31
+  s_mov_b64_exec %36
+  s_barrier
+  %39 = v_mov_b32 2
+  %40 = v_cmp_lt_u32 %23, %39
+  %41, %42 = s_and_saveexec_b64 %40
+  %43 = v_lshlrev_b32_src0_inline %23, 2
+  %44 = v_add_u32 %25, %43
+  %45 = ds_read_b32 %44
+  %46 = v_add_f32_dpp16 %45, %45 {dpp_ctrl = 177}
+  s_mov_b64_exec %41
+  %47 = v_mov_b32 0
+  %sum = ds_bpermute_b32 %47, %46
+  s_barrier
+  %49 = v_mov_b32 0
+  %flag = global_load_b32_saddr %49, %flags_view
+  %condition = v_cmp_ne_i32_src1_inline %flag {rhs = 0}
+  %is_leader = v_cmp_eq_i32_src1_inline %tid {rhs = 0}
+  %53 = s_mov_b64_exec_read
+  %54, %55 = s_and_b64_scc %condition, %53
+  low.cond_br %55, ^_bb1, ^_bb3 : reg<amdgpu.scc>
+^_bb1:
+  %56, %57 = s_and_saveexec_b64 %is_leader
+  low.cond_br %57, ^_bb2, ^_bb4 : reg<amdgpu.scc>
+^_bb2:
+  %58 = v_mov_b32 0
+  global_store_b32_saddr %58, %sum, %output_view
+  low.br ^_bb4
+^_bb3:
+  %59 = v_mov_b32 0
+  global_store_b32_saddr %59, %sum, %output_view
+  low.br ^_bb5
+^_bb4:
+  s_mov_b64_exec %56
+  low.br ^_bb5
+^_bb5:
+  return
+}

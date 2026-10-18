@@ -75,12 +75,13 @@ iree_cc_test(
   DEPS
     ::backends
     ::executable_testdata
+    iree::async
     iree::hal
+    iree::hal::cts::util::pool_test_util
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::hal::cts::util::test_main
     iree::hal::memory::fixed_block_pool
-    iree::hal::memory::maintenance
     iree::hal::memory::slab_cache
     iree::hal::memory::tlsf_pool
     iree::testing::gtest

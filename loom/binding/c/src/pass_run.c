@@ -23,9 +23,7 @@ loomc_status_t loomc_pass_program_run_into_result(
     const loomc_pass_program_t* pass_program, loomc_workspace_t* workspace,
     loomc_module_t* module,
     const loom_pass_environment_capability_t* launch_config_capability,
-    loom_target_compile_report_t* compile_report,
-    const loomc_pass_trace_options_t* pass_trace_options,
-    loomc_result_t* result) {
+    const loomc_option_chain_t* options, loomc_result_t* result) {
   loomc_context_t* context = loomc_module_context(module);
   loom_module_t* internal_module = loomc_module_loom_module(module);
   loom_source_resolver_t source_resolver = loomc_module_source_resolver(module);
@@ -46,8 +44,8 @@ loomc_status_t loomc_pass_program_run_into_result(
       loomc_codegen_pass_environment_storage_initialize(
           target_pass_environment,
           loomc_context_cleanup_pattern_registry(context),
-          function_version_owner, launch_config_capability, compile_report,
-          &codegen_environment_storage);
+          function_version_owner, launch_config_capability,
+          options->compile_report, &codegen_environment_storage);
   loom_target_pass_predicate_provider_storage_t predicate_storage = {0};
   loom_pass_predicate_provider_t predicate_provider = {0};
   if (target_pass_environment != NULL) {
@@ -58,9 +56,9 @@ loomc_status_t loomc_pass_program_run_into_result(
   }
   loomc_pass_trace_state_t pass_trace_state = {0};
   loom_pass_trace_t* pass_trace = NULL;
-  if (pass_trace_options != NULL) {
+  if (options->pass_trace != NULL) {
     loomc_pass_trace_state_initialize(
-        pass_trace_options, loomc_pass_program_trace_stage(pass_program),
+        options->pass_trace, loomc_pass_program_trace_stage(pass_program),
         target_pass_environment, &function_version_owner->list,
         loomc_workspace_block_pool(workspace), &pass_trace_state);
     pass_trace = &pass_trace_state.trace;
@@ -76,6 +74,7 @@ loomc_status_t loomc_pass_program_run_into_result(
       .environment = pass_environment,
       .function_versions = &function_version_owner->list,
       .trace = pass_trace,
+      .report = options->pass_report,
   };
   loom_pass_run_result_t run_result = {0};
   loomc_status_t status =
@@ -89,12 +88,14 @@ loomc_status_t loomc_pass_program_run_into_result(
           result, /*source=*/NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
           loomc_make_cstring_view("PASS_PROGRAM/EXECUTION"), status);
     } else {
+      loomc_result_set_status_code(result, loomc_status_code(status));
       loomc_status_free(status);
       status = loomc_ok_status();
     }
   }
-  if (loomc_status_is_ok(status) && run_result.error_count != 0) {
-    status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
+      run_result.error_count != 0) {
+    loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
   }
   loomc_module_invalidate_target_verification(module);
   return status;
@@ -116,9 +117,12 @@ static loomc_status_t loomc_pass_run_options_resolve(
                                "pass run options structure_size is too small");
     }
   }
-  return loomc_option_chain_resolve(options ? options->next : NULL,
-                                    LOOMC_OPTION_CHAIN_ALLOW_PASS_TRACE,
-                                    out_option_chain);
+  return loomc_option_chain_resolve(
+      options ? options->next : NULL,
+      LOOMC_OPTION_CHAIN_ALLOW_PASS_TRACE |
+          LOOMC_OPTION_CHAIN_ALLOW_NATIVE_PASS_REPORT |
+          LOOMC_OPTION_CHAIN_ALLOW_NATIVE_COMPILE_REPORT,
+      out_option_chain);
 }
 
 loomc_status_t loomc_pass_program_run(const loomc_pass_program_t* pass_program,
@@ -146,14 +150,14 @@ loomc_status_t loomc_pass_program_run(const loomc_pass_program_t* pass_program,
   LOOMC_RETURN_IF_ERROR(loomc_pass_run_options_resolve(options, &option_chain));
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(
-      LOOMC_RESULT_STATE_SUCCEEDED, loomc_context_source_retention(context),
-      allocator, &result));
+      LOOMC_STATUS_OK, loomc_context_source_retention(context), allocator,
+      &result));
   loomc_status_t status = loomc_module_admit(
       module, loomc_context_target_environment(context), result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_pass_program_run_into_result(
         pass_program, workspace, module, /*launch_config_capability=*/NULL,
-        /*compile_report=*/NULL, option_chain.pass_trace, result);
+        &option_chain, result);
   }
   if (!loomc_status_is_ok(status) || !loomc_result_succeeded(result)) {
     loomc_module_invalidate_verification(module);

@@ -2,8 +2,10 @@ aie2p.target<array> @array_target
 
 func.def inline @kernel_alias_ordering_body(%first: buffer, %second: buffer, %observed: buffer) {
   %origin = index.constant 0 : offset
-  %first_view = buffer.view %first[%origin] : buffer -> view<4xi32>
-  %second_view = buffer.view %second[%origin] : buffer -> view<4xi32>
+  %first_global = buffer.assume.memory_space<global> %first : buffer
+  %second_global = buffer.assume.memory_space<global> %second : buffer
+  %first_view = buffer.view %first_global[%origin] : buffer -> view<4xi32>
+  %second_view = buffer.view %second_global[%origin] : buffer -> view<4xi32>
   %observed_view = buffer.view %observed[%origin] : buffer -> view<4xi32>
   %first_value = vector.constant 17 : vector<4xi32>
   vector.store %first_value, %first_view[0] : vector<4xi32>, view<4xi32>

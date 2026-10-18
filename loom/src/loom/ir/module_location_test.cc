@@ -66,7 +66,7 @@ class ModuleLocationTest : public ::testing::TestWithParam<iree_host_size_t> {
     iree_arena_block_pool_deinitialize(&pool_);
   }
 
-  loom_location_id_t AppendLocation(uint16_t line) {
+  loom_location_id_t AppendLocation(uint32_t line) {
     loom_location_id_t id = LOOM_LOCATION_UNKNOWN;
     IREE_CHECK_OK(loom_module_add_location(
         module_, loom_location_file_range(source_id_, line, 1, line, 12), &id));
@@ -161,7 +161,7 @@ TEST_P(ModuleLocationTest, FieldSpansRemainAttachedToTheStableRow) {
   for (uint32_t i = 0; i < 2 * LOOM_LOCATION_SEGMENT_CAPACITY; ++i) {
     AppendLocation(2);
   }
-  loom_location_field_span_t span = {
+  loom_location_compact_field_span_t span = {
       .kind = LOOM_LOCATION_FIELD_OPERAND,
       .index = 0,
       .start_line = 1,
@@ -169,12 +169,14 @@ TEST_P(ModuleLocationTest, FieldSpansRemainAttachedToTheStableRow) {
       .end_line = 1,
       .end_col = 8,
   };
-  IREE_ASSERT_OK(
-      loom_module_attach_location_field_spans(module_, id, &span, 1));
+  IREE_ASSERT_OK(loom_module_attach_location_field_spans(
+      module_, id, loom_location_field_span_array_compact(&span, 1)));
   EXPECT_EQ(entry, loom_location_table_const_entry(&module_->locations, id));
   ASSERT_EQ(entry->file.field_span_count, 1u);
-  ASSERT_NE(entry->file.field_spans, nullptr);
-  EXPECT_NE(entry->file.field_spans, &span);
+  EXPECT_EQ(entry->file.field_span_format,
+            LOOM_LOCATION_FIELD_SPAN_FORMAT_COMPACT);
+  ASSERT_NE(entry->file.field_span_data, nullptr);
+  EXPECT_NE(entry->file.field_span_data, &span);
   span.start_col = 10;
 
   iree_arena_allocator_t scratch;
@@ -186,8 +188,41 @@ TEST_P(ModuleLocationTest, FieldSpansRemainAttachedToTheStableRow) {
 
   EXPECT_EQ(entry, loom_location_table_const_entry(&module_->locations, id));
   ASSERT_EQ(entry->file.field_span_count, 1u);
-  EXPECT_EQ(entry->file.field_spans[0].start_col, 3u);
-  EXPECT_EQ(entry->file.field_spans[0].end_col, 8u);
+  const auto retained_span = loom_location_file_field_span_at(entry, 0);
+  EXPECT_EQ(retained_span.start_col, 3u);
+  EXPECT_EQ(retained_span.end_col, 8u);
+}
+
+TEST_P(ModuleLocationTest, WideCoordinatesRemainExact) {
+  loom_location_id_t id = LOOM_LOCATION_UNKNOWN;
+  IREE_ASSERT_OK(loom_module_add_location(
+      module_,
+      loom_location_file_range(source_id_, 70000, 80000, 90000, 100000), &id));
+  loom_location_field_span_t span = {
+      .kind = LOOM_LOCATION_FIELD_ATTRIBUTE,
+      .index = 3,
+      .start_line = 70001,
+      .start_col = 80002,
+      .end_line = 90003,
+      .end_col = 100004,
+  };
+  IREE_ASSERT_OK(loom_module_attach_location_field_spans(
+      module_, id, loom_location_field_span_array_wide(&span, 1)));
+  const auto* entry = loom_location_table_const_entry(&module_->locations, id);
+  EXPECT_EQ(entry->file.start_line, 70000u);
+  EXPECT_EQ(entry->file.start_col, 80000u);
+  EXPECT_EQ(entry->file.end_line, 90000u);
+  EXPECT_EQ(entry->file.end_col, 100000u);
+  EXPECT_EQ(entry->file.field_span_format,
+            LOOM_LOCATION_FIELD_SPAN_FORMAT_WIDE);
+  span.end_col = 1;
+  const auto retained_span = loom_location_file_field_span_at(entry, 0);
+  EXPECT_EQ(retained_span.kind, LOOM_LOCATION_FIELD_ATTRIBUTE);
+  EXPECT_EQ(retained_span.index, 3u);
+  EXPECT_EQ(retained_span.start_line, 70001u);
+  EXPECT_EQ(retained_span.start_col, 80002u);
+  EXPECT_EQ(retained_span.end_line, 90003u);
+  EXPECT_EQ(retained_span.end_col, 100004u);
 }
 
 TEST_P(ModuleLocationTest, FailedAppendCanRewindAndRetryWithoutChangingIds) {

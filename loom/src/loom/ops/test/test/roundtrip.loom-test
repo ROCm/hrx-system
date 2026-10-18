@@ -66,6 +66,16 @@ test.func @template_param_symbol() {
 
 // ====
 
+// Ordered string arrays preserve duplicates, optional empty presence, and
+// generic dictionary nesting.
+test.func @string_arrays() {
+  test.string_array_attrs ["gfx12-generic", "gfx1250", "gfx12-generic"] using [] {fallbacks = ["gfx11-generic", "gfx12-generic"]}
+  test.string_array_attrs ["gfx1250"]
+  test.yield
+}
+
+// ====
+
 // Owned-resource operations model generic lifetime effects without depending
 // on a target dialect.
 test.func @owned_resources(%size: index) {

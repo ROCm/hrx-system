@@ -29,10 +29,17 @@
               "{srcdir}/loom_opt_f32_arith.loom",
               "--root=@f32_arith",
               "--format=amdgpu-hsaco",
-              "--output={tmp}/source.hsaco"
+              "--output={tmp}/source.hsaco",
+              "--dump-ir-before=source-to-low",
+              "--dump-ir-after=source-to-low",
+              "--dump-ir-output={tmp}/compile-trace/"
             ]
           },
-          "files": [{"path": "{tmp}/source.hsaco", "non_empty": true}]
+          "files": [
+            {"path": "{tmp}/source.hsaco", "non_empty": true},
+            {"path": "{tmp}/compile-trace/ir/000000-before-source-to-low.loom", "non_empty": true},
+            {"path": "{tmp}/compile-trace/ir/000001-after-source-to-low.loom", "non_empty": true}
+          ]
         },
         {
           "name": "save-low-text",
@@ -57,15 +64,16 @@
               "--output={tmp}/text.hsaco"
             ]
           },
-          "files": [{"path": "{tmp}/text.hsaco", "non_empty": true}]
+          "files": [{"path": "{tmp}/text.hsaco", "equals": "{tmp}/source.hsaco"}]
         },
         {
           "name": "save-low-bytecode",
           "run": {
-            "tool": "loom-format",
+            "tool": "loom-opt",
             "args": [
-              "{tmp}/prepared.loom",
-              "--to=bc",
+              "{srcdir}/loom_opt_f32_arith.loom",
+              "--pipeline=source-low",
+              "--to=bytecode",
               "--output={tmp}/prepared.loombc"
             ]
           },
@@ -82,7 +90,7 @@
               "--output={tmp}/bytecode.hsaco"
             ]
           },
-          "files": [{"path": "{tmp}/bytecode.hsaco", "non_empty": true}]
+          "files": [{"path": "{tmp}/bytecode.hsaco", "equals": "{tmp}/source.hsaco"}]
         },
         {
           "name": "infer-low-kernel-root-and-format",

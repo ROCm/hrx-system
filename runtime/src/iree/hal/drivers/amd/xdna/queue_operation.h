@@ -35,6 +35,7 @@ typedef enum iree_hal_amd_xdna_memory_wait_kind_e {
   IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE = 0,
   IREE_HAL_AMD_XDNA_MEMORY_WAIT_FRONTIER,
   IREE_HAL_AMD_XDNA_MEMORY_WAIT_CAPACITY,
+  IREE_HAL_AMD_XDNA_MEMORY_WAIT_CAPACITY_PREPARED,
 } iree_hal_amd_xdna_memory_wait_kind_t;
 
 // Cold alloca state used only when the selected pool cannot return immediately
@@ -119,7 +120,7 @@ struct iree_hal_amd_xdna_operation_t {
   iree_async_operation_t admission;
   // Placed callback returning resolved software waits to the queue owner.
   iree_async_operation_t wait_completion;
-  // Placed callback returning pool readiness or file I/O to the queue owner.
+  // Placed callback returning file I/O to the queue owner.
   iree_async_operation_t continuation;
   // Intrusive progress-service admission and placed result handoff.
   iree_hal_amd_xdna_queue_service_item_t service_item;
@@ -127,7 +128,7 @@ struct iree_hal_amd_xdna_operation_t {
   iree_atomic_int32_t wait_count;
   // First failure transferred from a resolved timepoint callback.
   iree_atomic_intptr_t wait_status;
-  // Pool-wait or file-I/O status transferred to the proactor owner.
+  // File-I/O status transferred to the proactor owner.
   iree_atomic_intptr_t continuation_status;
   // Borrowed queue kept live by |device|.
   iree_hal_amd_xdna_queue_t* queue;
@@ -212,6 +213,10 @@ struct iree_hal_amd_xdna_operation_t {
       iree_hal_amd_xdna_memory_wait_t* memory_wait;
       // Result from the most recent pool acquisition attempt.
       iree_hal_pool_acquire_result_t acquire_result;
+      // Submission and callback claims protecting the borrowed pool arrays.
+      iree_atomic_int32_t acquire_pending;
+      // Callback-owned result transferred after the final acquisition claim.
+      iree_status_t acquire_status;
       // True while this operation owns |reservations|.
       bool reservations_held;
     } alloca;
@@ -331,15 +336,12 @@ void iree_hal_amd_xdna_operation_release_resources(
 void iree_hal_amd_xdna_operation_release_alloca_reservations(
     iree_hal_amd_xdna_operation_t* operation);
 
-// Merges all reservation reuse prerequisites into the operation frontier.
-void iree_hal_amd_xdna_operation_merge_memory_frontiers(
-    iree_hal_amd_xdna_operation_t* operation);
+// Consumes a ready memory operation directly, without a queue or pool lock.
+// Pending pool acquisition resumes through its captured completion callback.
+void iree_hal_amd_xdna_operation_issue_memory(
+    iree_hal_amd_xdna_operation_t* operation, iree_status_t status);
 
-// Builds the joined frontier for reservations that require asynchronous reuse.
-iree_status_t iree_hal_amd_xdna_operation_prepare_frontier_wait(
-    iree_hal_amd_xdna_operation_t* operation);
-
-// Executes allocation, deallocation, transfers, callbacks, or file preparation
+// Executes transfers, callbacks, or file preparation
 // and publication on the host service and returns the represented operation
 // count. Disk I/O runs on its file's proactor.
 uint32_t iree_hal_amd_xdna_operation_execute_host(

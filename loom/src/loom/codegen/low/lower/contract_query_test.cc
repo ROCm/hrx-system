@@ -147,6 +147,14 @@ class SingleOpContract {
         .selection_data = nullptr,
         .source_graph_root_op_kinds = source_graph_root_op_kinds,
     };
+    for (uint16_t i = 0; i < case_count; ++i) {
+      uint16_t rule_index = UINT16_MAX;
+      if (loom_low_lower_contract_case_queries_target(&index_, &cases[i]) &&
+          loom_low_lower_contract_case_lower_rule_index(&index_, &cases[i],
+                                                        &rule_index)) {
+        ++entries_[loom_op_dialect_index(OpKind)].query_rule_count;
+      }
+    }
   }
   const loom_target_contract_index_t* index() const { return &index_; }
 
@@ -486,17 +494,19 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
       .descriptor_set = &kDescriptorSet,
   };
   loom_op_t op = {.kind = kSourceOpKind};
-  loom_target_contract_query_result_t result =
-      loom_target_contract_query_result_empty();
-  IREE_ASSERT_OK(loom_low_lower_query_target_contract(&environment, &options,
-                                                      &op, &result));
-
-  EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
-  EXPECT_EQ(result.binding_index, 0);
-  EXPECT_EQ(result.case_index, 0);
-  EXPECT_EQ(result.rule_set_index, 0);
-  EXPECT_EQ(result.rule_index, 0);
-  EXPECT_EQ(result.selected_descriptor, &kDescriptor);
+  for (bool defer_diagnostics : {false, true}) {
+    environment.defer_rejection_diagnostics = defer_diagnostics;
+    loom_target_contract_query_result_t result =
+        loom_target_contract_query_result_empty();
+    IREE_ASSERT_OK(loom_low_lower_query_target_contract(&environment, &options,
+                                                        &op, &result));
+    EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
+    EXPECT_EQ(result.binding_index, 0);
+    EXPECT_EQ(result.case_index, 0);
+    EXPECT_EQ(result.rule_set_index, 0);
+    EXPECT_EQ(result.rule_index, 0);
+    EXPECT_EQ(result.selected_descriptor, &kDescriptor);
+  }
 }
 
 TEST(LowContractQueryTest, LoweringVisitorIncludesNonQueryCases) {
@@ -592,6 +602,85 @@ TEST(LowContractQueryTest, LoweringVisitorIncludesNonQueryCases) {
       LOOM_LOW_LOWER_CONTRACT_CASE_SCOPE_ALL, &match_context,
       target_query_callback, /*out_used_candidate_index=*/nullptr));
   EXPECT_EQ(target_query_state.count, 0);
+
+  for (bool defer_diagnostics : {false, true}) {
+    loom_target_contract_query_environment_t query_environment = environment;
+    query_environment.defer_rejection_diagnostics = defer_diagnostics;
+    loom_target_contract_query_result_t result;
+    IREE_ASSERT_OK(loom_low_lower_query_target_contract(
+        &query_environment, &options, &op, &result));
+    EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_UNHANDLED);
+    EXPECT_EQ(result.rejection, nullptr);
+  }
+}
+
+TEST(LowContractQueryTest, DeferredRejectionPreservesOwnershipDeclines) {
+  const loom_low_lower_guard_payload_t guard_payload = {.u64 = 1};
+  const loom_low_lower_guard_t guard = {
+      .kind = LOOM_LOW_LOWER_GUARD_INSTANCE_FLAGS_HAS_ALL,
+      .diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE,
+      .payload_ordinal = 1,
+  };
+  const loom_low_lower_guard_ref_t guard_ref = 0;
+  loom_low_lower_rule_t rules[2] = {};
+  const loom_low_lower_rule_set_t rule_set = {
+      .rules = rules,
+      .rule_count = IREE_ARRAYSIZE(rules),
+      .guard_payloads = &guard_payload,
+      .guard_payload_count = 1,
+      .guards = &guard,
+      .guard_count = 1,
+      .guard_refs = &guard_ref,
+      .guard_ref_count = 1,
+  };
+  const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};
+  const loom_target_contract_descriptor_rule_t descriptor_rules[] = {{0}, {1}};
+  const loom_target_contract_fragment_t fragment = {
+      .flags = LOOM_TARGET_CONTRACT_FRAGMENT_FLAG_TARGET_QUERY,
+      .descriptor_rule_count = IREE_ARRAYSIZE(descriptor_rules),
+      .descriptor_rules = descriptor_rules,
+  };
+  const loom_target_contract_binding_t binding = {&fragment, 0};
+  const loom_target_contract_case_t cases[] = {
+      {LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_RULE, 0, 0},
+      {LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_RULE, 0, 1},
+      {LOOM_TARGET_CONTRACT_SYSTEM_UNSUPPORTED, 0,
+       LOOM_TARGET_CONTRACT_ROW_NONE},
+  };
+  const loom_target_facts_t target_facts = MakeTargetFacts();
+  loom_target_contract_query_environment_t environment = {
+      .target_facts = &target_facts,
+  };
+  loom_op_t op = {.kind = kSourceOpKind};
+  for (bool has_marker : {false, true}) {
+    const SingleOpContract<kSourceOpKind> contract(cases, has_marker ? 3 : 2,
+                                                   &binding, 1);
+    const loom_low_lower_contract_query_options_t options = {
+        .contract_index = contract.index(),
+        .rule_sets = {.count = 1, .values = rule_sets},
+        .accept_rule =
+            {
+                .fn = [](void*, const loom_low_lower_rule_selection_t*,
+                         bool* out_accepted) -> iree_status_t {
+                  *out_accepted = false;
+                  return iree_ok_status();
+                },
+            },
+    };
+    for (bool second_rule_fails : {false, true}) {
+      rules[1].guard_count = second_rule_fails ? 1 : 0;
+      for (bool defer_diagnostics : {false, true}) {
+        environment.defer_rejection_diagnostics = defer_diagnostics;
+        loom_target_contract_query_result_t result;
+        IREE_ASSERT_OK(loom_low_lower_query_target_contract(
+            &environment, &options, &op, &result));
+        EXPECT_EQ(result.outcome, has_marker || second_rule_fails
+                                      ? LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED
+                                      : LOOM_TARGET_CONTRACT_QUERY_UNHANDLED);
+        EXPECT_EQ(result.rejection, nullptr);
+      }
+    }
+  }
 }
 
 TEST(LowContractQueryTest, SingletonScopeSkipsGraphCasesBeforeMatching) {
@@ -828,6 +917,7 @@ TEST(LowContractQueryTest,
   entries[loom_op_dialect_index(kSourceOpKind)] = {
       0,
       IREE_ARRAYSIZE(cases),
+      IREE_ARRAYSIZE(cases),
   };
   const loom_target_contract_dialect_table_t dialect = {IREE_ARRAYSIZE(entries),
                                                         entries};
@@ -867,25 +957,26 @@ TEST(LowContractQueryTest,
       .kind = kSourceOpKind,
   };
 
-  loom_target_contract_query_result_t result =
-      loom_target_contract_query_result_empty();
-  loom_low_lower_rule_selection_t selection = {};
-  IREE_ASSERT_OK(loom_low_lower_query_target_contract_with_selection(
-      &environment, &options, &op, &result, &selection));
-  EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
-  EXPECT_EQ(result.case_index, 1);
-  EXPECT_EQ(result.selected_descriptor, &descriptors[1]);
-  EXPECT_EQ(selection.rule, &rules[1]);
+  for (bool defer_diagnostics : {false, true}) {
+    environment.defer_rejection_diagnostics = defer_diagnostics;
+    layouts[1].feature_mask_word_count = 0;
+    loom_target_contract_query_result_t result;
+    loom_low_lower_rule_selection_t selection = {};
+    IREE_ASSERT_OK(loom_low_lower_query_target_contract_with_selection(
+        &environment, &options, &op, &result, &selection));
+    EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
+    EXPECT_EQ(result.case_index, 1);
+    EXPECT_EQ(result.selected_descriptor, &descriptors[1]);
+    EXPECT_EQ(selection.rule, &rules[1]);
 
-  layouts[1].feature_mask_word_count = 1;
-  result = loom_target_contract_query_result_empty();
-  selection = {};
-  IREE_ASSERT_OK(loom_low_lower_query_target_contract_with_selection(
-      &environment, &options, &op, &result, &selection));
-  EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
-  EXPECT_EQ(result.case_index, 0);
-  EXPECT_EQ(result.selected_descriptor, &descriptors[0]);
-  EXPECT_EQ(selection.rule, &rules[0]);
+    layouts[1].feature_mask_word_count = 1;
+    IREE_ASSERT_OK(loom_low_lower_query_target_contract_with_selection(
+        &environment, &options, &op, &result, &selection));
+    EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
+    EXPECT_EQ(result.case_index, 0);
+    EXPECT_EQ(result.selected_descriptor, &descriptors[0]);
+    EXPECT_EQ(selection.rule, &rules[0]);
+  }
 }
 
 TEST(LowContractQueryTest, IndexedMissReplaysCompleteOrderForBestRejection) {
@@ -939,6 +1030,7 @@ TEST(LowContractQueryTest, IndexedMissReplaysCompleteOrderForBestRejection) {
   entries[loom_op_dialect_index(kSourceOpKind)] = {
       0,
       2,
+      2,
   };
   const loom_target_contract_dialect_table_t dialect = {IREE_ARRAYSIZE(entries),
                                                         entries};
@@ -988,6 +1080,36 @@ TEST(LowContractQueryTest, IndexedMissReplaysCompleteOrderForBestRejection) {
   if (result.rejection != nullptr) {
     EXPECT_EQ(result.rejection->error_ref, LOOM_ERR_TARGET_003_REF);
   }
+
+  environment.defer_rejection_diagnostics = true;
+  IREE_ASSERT_OK(loom_low_lower_query_target_contract(&environment, &options,
+                                                      &op, &result));
+  EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED);
+  EXPECT_EQ(result.case_index, UINT16_MAX);
+  EXPECT_EQ(result.diagnostic_index, UINT16_MAX);
+  EXPECT_EQ(result.rejection, nullptr);
+
+  // Even an empty exact-key candidate list preserves the rejected-family
+  // outcome without evaluating excluded rules to choose their diagnostics.
+  const uint32_t empty_selection_data[] = {
+      1, 2, 1, 0, static_cast<uint32_t>(kSourceOpKind) << 16,
+  };
+  loom_target_contract_index_t empty_index = index;
+  empty_index.selection_data = empty_selection_data;
+  loom_low_lower_contract_query_options_t empty_options = options;
+  empty_options.contract_index = &empty_index;
+  IREE_ASSERT_OK(loom_low_lower_query_target_contract(
+      &environment, &empty_options, &op, &result));
+  EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED);
+  EXPECT_EQ(result.rejection, nullptr);
+
+  environment.defer_rejection_diagnostics = false;
+  IREE_ASSERT_OK(loom_low_lower_query_target_contract(
+      &environment, &empty_options, &op, &result));
+  EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED);
+  EXPECT_EQ(result.case_index, 1);
+  EXPECT_EQ(result.diagnostic_index, 0);
+  EXPECT_NE(result.rejection, nullptr);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
@@ -1078,7 +1200,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
   };
   loom_target_contract_op_entry_t entries[(LOOM_OP_VECTOR_NEGF & 0xFF) + 1] =
       {};
-  entries[loom_op_dialect_index(LOOM_OP_VECTOR_NEGF)] = {0, 2};
+  entries[loom_op_dialect_index(LOOM_OP_VECTOR_NEGF)] = {0, 2, 2};
   const loom_target_contract_dialect_table_t dialect = {IREE_ARRAYSIZE(entries),
                                                         entries};
   const uint32_t selection_data[] = {

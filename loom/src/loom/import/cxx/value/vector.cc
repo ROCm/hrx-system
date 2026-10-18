@@ -11,6 +11,9 @@
 #include <cxx/token.h>
 #include <cxx/types.h>
 
+#include <algorithm>
+#include <array>
+
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/vector/ops.h"
@@ -55,12 +58,43 @@ loom_value_id_t Vectors::convert_elements(loom_value_id_t value,
                                           cxx::AST* owner) {
   auto input = types_.get(input_type, owner);
   auto output = types_.get(output_type, owner);
+  auto* input_vector = types_.native_vector(input_type);
+  auto* output_vector = types_.native_vector(output_type);
+  if (!input_vector || !output_vector ||
+      input_vector->elementCount() != output_vector->elementCount()) {
+    diagnostics_.reject(unit_, owner,
+                        "numeric vector conversion requires equal lane counts");
+  }
+  return convert_elements(value, input, input_vector->elementType(), output,
+                          output_vector->elementType(), owner);
+}
+
+Value Vectors::convert_elements(Value value, const VectorPartition& input,
+                                const VectorPartition& output,
+                                ValueArena& arena, cxx::AST* owner) {
+  auto components = value.components();
+  auto dimensions = components.first(input.component_count - 1);
+  BoundTypeStorage input_storage;
+  BoundTypeStorage output_storage;
+  auto input_type = input.bind_type(dimensions, input_storage);
+  auto output_type = output.bind_type(dimensions, output_storage);
+  auto converted = convert_elements(input.vector_value(components), input_type,
+                                    input.element_type, output_type,
+                                    output.element_type, owner);
+  std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK + 1> result_components;
+  std::copy(dimensions.begin(), dimensions.end(), result_components.begin());
+  result_components[dimensions.size()] = converted;
+  return arena.capture(output,
+                       std::span<const loom_value_id_t>(result_components)
+                           .first(dimensions.size() + 1));
+}
+
+loom_value_id_t Vectors::convert_elements(
+    loom_value_id_t value, loom_type_t input, const cxx::Type* input_element,
+    loom_type_t output, const cxx::Type* output_element, cxx::AST* owner) {
   if (loom_type_equal(input, output)) {
     return value;
   }
-  auto* input_vector = types_.native_vector(input_type);
-  auto* input_element = input_vector->elementType();
-  auto* output_element = types_.native_vector(output_type)->elementType();
   bool floating_input = types_.is_float(input_element);
   bool floating_output = types_.is_float(output_element);
   auto* layout = unit_.control()->memoryLayout();
@@ -71,8 +105,10 @@ loom_value_id_t Vectors::convert_elements(loom_value_id_t value,
   if (floating_input && floating_output && input_size == output_size) {
     // F32 represents every value of the supported equal-width narrow formats
     // exactly. Only the final conversion rounds to the destination format.
-    auto widened = loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
-                                       input_vector->elementCount(), 0);
+    auto widened = input;
+    widened.header =
+        loom_type_make_header(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                              loom_type_rank(input), loom_type_flags(input));
     check(loom_vector_extf_build(&builder_, 0, value, input, widened, location,
                                  &op));
     check(loom_vector_fptrunc_build(&builder_, 0, loom_op_results(op)[0],

@@ -30,11 +30,21 @@ func.def @copy(%source: buffer, %source_offset: offset, %target: buffer, %target
 func.def @event(%text: buffer, %length64: i64, %revision: i32, %end: i32, %final: i32) -> (buffer) {
   %bounded_length = scalar.assume %length64 [range(%length64, 0, 16384)] : i64
   %length = index.cast %bounded_length : i64 to offset
-  %header_length = index.constant 48 : offset
+  %header_length = index.constant 60 : offset
   %size = index.add %length, %header_length : offset
   %packet = buffer.alloca<private> align(8) %size : buffer
   %origin = index.constant 0 : offset
-  %header = buffer.view %packet[%origin] : buffer -> view<4xi64>
+  %envelope = buffer.view %packet[%origin] : buffer -> view<3xi32>
+  %one32 = scalar.constant 1 : i32
+  %kind32 = scalar.constant 0 : i32
+  %payload_header = scalar.constant 48 : i64
+  %payload_bytes = scalar.addi %length64, %payload_header : i64
+  %payload32 = scalar.trunci %payload_bytes : i64 to i32
+  view.store %one32, %envelope[0] : i32, view<3xi32>
+  view.store %kind32, %envelope[1] : i32, view<3xi32>
+  view.store %payload32, %envelope[2] : i32, view<3xi32>
+  %payload_offset = index.constant 12 : offset
+  %header = buffer.view %packet[%payload_offset] : buffer -> view<4xi64>
   %c0 = scalar.constant 0 : i64
   %revision64 = scalar.extui %revision : i32 to i64
   %end64 = scalar.extui %end : i32 to i64
@@ -42,7 +52,7 @@ func.def @event(%text: buffer, %length64: i64, %revision: i32, %end: i32, %final
   view.store %revision64, %header[1] : i64, view<4xi64>
   view.store %c0, %header[2] : i64, view<4xi64>
   view.store %end64, %header[3] : i64, view<4xi64>
-  %fields_offset = index.constant 32 : offset
+  %fields_offset = index.constant 44 : offset
   %fields = buffer.view %packet[%fields_offset] : buffer -> view<4xi32>
   %length32 = scalar.trunci %length64 : i64 to i32
   %zero32 = scalar.constant 0 : i32
@@ -58,7 +68,7 @@ func.def @event(%text: buffer, %length64: i64, %revision: i32, %end: i32, %final
 // encoder EOF, decoder position, revision, last hypothesis sample, and consumed
 // sample end occupy words 0..6. Words 7..15 pad the 512-token buffer to 64 bytes.
 // Phases 0/1/2 select reset/encode/decode; the phase is also the compatibility tag.
-func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32) -> (buffer, buffer) {
+func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
   %language_length = buffer.length %language
   %prompt_length = buffer.length %prompt
   %origin = index.constant 0 : offset
@@ -309,7 +319,7 @@ func.def @decoded(%state: buffer, %feedback: buffer, %output_offset: offset) -> 
   func.return %packet, %complete : buffer, i32
 }
 
-func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i32) {
+func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32) {
   %origin = index.constant 0 : offset
   %bounded_ordinal = scalar.assume %ordinal [range(%ordinal, 0, 3)] : i64
   %ordinal_index = index.cast %bounded_ordinal : i64 to index
@@ -343,5 +353,7 @@ func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordina
     }
     scf.yield %consumed, %event, %done : i64, buffer, i32
   }
-  func.return %count, %packet, %complete : i64, buffer, i32
+  %packet_length = buffer.length %packet
+  %packet_bytes = index.cast %packet_length : offset to i64
+  func.return %count, %packet, %packet_bytes, %complete : i64, buffer, i64, i32
 }

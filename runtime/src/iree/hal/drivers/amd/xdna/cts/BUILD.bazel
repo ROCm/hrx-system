@@ -66,9 +66,38 @@ iree_runtime_cc_test(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "native_replay_stress",
+    srcs = ["native_replay_stress.cc"],
+    tags = [
+        "manual",
+        "stress",
+    ],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_xdna": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/cts/util:test_main",
+        "//runtime/src/iree/hal/drivers/amd:driver",
+        "//runtime/src/iree/hal/drivers/amd/xdna:allocation_tracker",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:add_i32",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:add_i32_npu4",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32_npu4",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
 iree_runtime_cc_benchmark(
     name = "queue_benchmark",
     srcs = ["queue_benchmark.cc"],
+    # Exercise each harness path without running the full depth/timing matrix.
+    args = ["--benchmark_filter=XdnaQueueBenchmark/(ReadyEndToEnd/|UnresolvedSubmitOnly/|RecordedSwitchingEndToEnd/6/|MeasuredRecordedStreamingEndToEnd/1/)"],
     tags = ["benchmark"],
     deps = [
         "//runtime/src/iree/async",

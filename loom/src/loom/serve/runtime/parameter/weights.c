@@ -7,6 +7,7 @@
 
 #include <string.h>
 
+#include "iree/async/semaphore.h"
 #include "iree/io/parameter_index_provider.h"
 #include "iree/tooling/parameter_util.h"
 #include "iree/vm/buffer.h"
@@ -20,8 +21,6 @@ enum { WEIGHT_LANES = 4 };
 typedef struct loom_serve_weight_span_t {
   // Borrowed key and final byte placement from the compiled command.
   loom_cmd_program_parameter_t parameter;
-  // Borrowed final allocation or root view receiving the file bytes.
-  iree_hal_buffer_t* buffer;
   // Unique final storage index, resolved once before any queue work.
   iree_host_size_t storage_index;
   // Owned cached in-place preparation command, or null for unchanged bytes.
@@ -44,7 +43,7 @@ typedef struct loom_serve_weight_group_t {
 } loom_serve_weight_group_t;
 
 typedef struct loom_serve_weight_storage_t {
-  // Borrowed final root retained by the caller's output slot.
+  // Owned unique root retained independently of the caller's output views.
   iree_hal_buffer_t* buffer;
   // Owned virtual reservation, or NULL for explicitly fixed backing.
   loom_serve_virtual_buffer_t* reservation;
@@ -75,6 +74,8 @@ struct loom_serve_weights_t {
     loom_serve_memory_operation_t* backing;
     // Owned native mapping readiness imported by the file-loading lanes.
     iree_hal_semaphore_t* backing_ready;
+    // Private fixed-allocation completion, independent of streaming failures.
+    iree_async_semaphore_timepoint_t backing_timepoint;
     // Accepted I/O/preparation views, including after failed readiness.
     loom_serve_retirement_t retirement;
     // Owned lane readiness handles imported into the consuming model timeline.
@@ -113,14 +114,22 @@ static const loom_serve_weight_span_t* loom_serve_weight_find(
   return NULL;
 }
 
+typedef struct loom_serve_weight_root_binding_t {
+  // Unique storage allocation selected by parameter identity and placement.
+  iree_host_size_t storage_index;
+  // Byte range of this root within the selected storage allocation.
+  iree_hal_buffer_range_t range;
+} loom_serve_weight_root_binding_t;
+
 // Resolves root sharing before submitting any I/O. Only newly allocated roots
 // append spans, so tensors shared by multiple stages are read and prepared
 // exactly once.
 static iree_status_t loom_serve_weight_resolve_root(
     loom_serve_weights_t* weights, const loom_cmd_program_t* program,
     loom_cmd_program_parameter_root_t root, iree_host_size_t* span_count,
-    loom_serve_weight_span_t* spans, iree_allocator_t host_allocator,
-    iree_hal_buffer_t** out_buffer) {
+    loom_serve_weight_span_t* spans,
+    iree_hal_pool_reservation_request_t* requests,
+    loom_serve_weight_root_binding_t* out_binding) {
   const iree_host_size_t prior_count = *span_count;
   const loom_serve_weight_span_t* shared = NULL;
   iree_device_size_t origin = 0;
@@ -146,7 +155,7 @@ static iree_status_t loom_serve_weight_resolve_root(
     }
     if ((existing != NULL) != (shared != NULL) ||
         (existing &&
-         (existing->buffer != shared->buffer ||
+         (existing->storage_index != shared->storage_index ||
           existing->parameter.byte_offset != origin + parameter.byte_offset ||
           existing->parameter.byte_length != parameter.byte_length))) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -158,29 +167,15 @@ static iree_status_t loom_serve_weight_resolve_root(
                             "empty model parameter root");
   }
   if (shared) {
-    return iree_hal_buffer_subspan(shared->buffer, origin,
-                                   root.required_byte_length, host_allocator,
-                                   out_buffer);
-  }
-  loom_serve_weight_storage_t* storage =
-      &weights->storages[weights->storage_count];
-  if (weights->pool) {
-    IREE_RETURN_IF_ERROR(loom_serve_virtual_buffer_allocate(
-        weights->pool, root.required_byte_length, root.minimum_alignment,
-        &weights->statistics, &storage->reservation));
-    *out_buffer = loom_serve_virtual_buffer_handle(storage->reservation);
-    iree_hal_buffer_retain(*out_buffer);
-  } else {
-    IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
-        weights->storage_pool,
-        iree_hal_make_pool_reservation_request(root.required_byte_length,
-                                               root.minimum_alignment),
-        iree_infinite_timeout(), out_buffer));
+    *out_binding = (loom_serve_weight_root_binding_t){
+        shared->storage_index, {origin, root.required_byte_length}};
+    return iree_ok_status();
   }
   const iree_host_size_t storage_index = weights->storage_count++;
-  IREE_RETURN_IF_ERROR(loom_serve_retirement_track(&weights->retirement,
-                                                   out_buffer, host_allocator));
-  storage->buffer = *out_buffer;
+  requests[storage_index] = iree_hal_make_pool_reservation_request(
+      root.required_byte_length, root.minimum_alignment);
+  *out_binding = (loom_serve_weight_root_binding_t){
+      storage_index, {0, root.required_byte_length}};
   for (uint32_t i = 0; i < program->parameters.count; ++i) {
     const loom_cmd_program_parameter_t parameter =
         loom_cmd_program_parameter_at(program, i);
@@ -189,7 +184,6 @@ static iree_status_t loom_serve_weight_resolve_root(
     }
     spans[(*span_count)++] = (loom_serve_weight_span_t){
         .parameter = parameter,
-        .buffer = *out_buffer,
         .storage_index = storage_index,
     };
   }
@@ -636,7 +630,7 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
     for (iree_host_size_t i = 0; i < span_count; ++i) {
       const loom_serve_weight_span_t* span = &spans[i];
       if (!i || span->prepare || spans[i - 1].prepare ||
-          span->buffer != spans[i - 1].buffer) {
+          span->storage_index != spans[i - 1].storage_index) {
         loom_serve_weight_group_t* group = &groups[group_count++];
         group->spans = &spans[i];
         group->buffer = views[span->storage_index];
@@ -716,6 +710,15 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
   return status;
 }
 
+static void loom_serve_weights_backing_completed(
+    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
+    iree_status_t status) {
+  loom_serve_weights_t* weights = user_data;
+  // The private semaphore preserves the allocation result for streaming waits.
+  iree_status_free(status);
+  loom_serve_retirement_release(&weights->activation.retirement);
+}
+
 iree_status_t loom_serve_weights_allocate(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
     iree_hal_queue_t* dispatch, iree_hal_pool_t* storage_pool,
@@ -749,6 +752,19 @@ iree_status_t loom_serve_weights_allocate(
                                          sizeof(*weights->storages),
                                          (void**)&weights->storages);
   }
+  loom_serve_weight_root_binding_t* bindings = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        host_allocator, root_count,
+        sizeof(*bindings) + sizeof(iree_hal_pool_reservation_request_t) +
+            sizeof(iree_hal_buffer_t*),
+        (void**)&bindings);
+  }
+  iree_hal_pool_reservation_request_t* requests =
+      bindings ? (iree_hal_pool_reservation_request_t*)(bindings + root_count)
+               : NULL;
+  iree_hal_buffer_t** buffers =
+      requests ? (iree_hal_buffer_t**)(requests + root_count) : NULL;
   if (shared_root_count && iree_status_is_ok(status)) {
     loom_cmd_program_parameter_root_t root = roots[0].root;
     for (iree_host_size_t i = 1; i < shared_root_count; ++i) {
@@ -760,20 +776,81 @@ iree_status_t loom_serve_weights_allocate(
     }
     status = loom_serve_weight_resolve_root(
         weights, roots[0].program, root, &weights->span_count, weights->spans,
-        host_allocator, roots[0].buffer);
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 1; i < shared_root_count; ++i) {
-      *roots[i].buffer = *roots[0].buffer;
-      iree_hal_buffer_retain(*roots[i].buffer);
-    }
+        requests, &bindings[0]);
   }
   for (iree_host_size_t i = shared_root_count;
        i < root_count && iree_status_is_ok(status); ++i) {
     status = loom_serve_weight_resolve_root(
         weights, roots[i].program, roots[i].root, &weights->span_count,
-        weights->spans, host_allocator, roots[i].buffer);
+        weights->spans, requests, &bindings[i]);
   }
+  if (iree_status_is_ok(status) && !pool && weights->storage_count) {
+    status = iree_hal_semaphore_create(
+        device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &weights->activation.backing_ready);
+    if (iree_status_is_ok(status)) {
+      weights->activation.backing_timepoint.callback =
+          loom_serve_weights_backing_completed;
+      weights->activation.backing_timepoint.user_data = weights;
+      loom_serve_retirement_acquire(&weights->activation.retirement);
+      status = iree_async_semaphore_acquire_timepoint(
+          (iree_async_semaphore_t*)weights->activation.backing_ready, 1,
+          &weights->activation.backing_timepoint);
+      if (!iree_status_is_ok(status)) {
+        loom_serve_retirement_release(&weights->activation.retirement);
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      uint64_t value = 1;
+      status = iree_hal_queue_alloca(
+          transfer, iree_hal_semaphore_list_empty(),
+          (iree_hal_semaphore_list_t){1, &weights->activation.backing_ready,
+                                      &value},
+          storage_pool, weights->storage_count, requests, buffers);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_semaphore_fail(weights->activation.backing_ready,
+                                iree_status_clone(status));
+      }
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < weights->storage_count && iree_status_is_ok(status); ++i) {
+    loom_serve_weight_storage_t* storage = &weights->storages[i];
+    if (pool) {
+      status = loom_serve_virtual_buffer_allocate(
+          pool, requests[i].allocation_size, requests[i].min_alignment,
+          &weights->statistics, &storage->reservation);
+      if (iree_status_is_ok(status)) {
+        buffers[i] = loom_serve_virtual_buffer_handle(storage->reservation);
+        iree_hal_buffer_retain(buffers[i]);
+      }
+    }
+    storage->buffer = buffers[i];
+    buffers[i] = NULL;
+  }
+  for (iree_host_size_t i = 0; i < root_count && iree_status_is_ok(status);
+       ++i) {
+    if (i && i < shared_root_count) {
+      *roots[i].buffer = *roots[0].buffer;
+      iree_hal_buffer_retain(*roots[i].buffer);
+    } else {
+      const loom_serve_weight_root_binding_t binding = bindings[i];
+      status = iree_hal_buffer_subspan(
+          weights->storages[binding.storage_index].buffer,
+          binding.range.byte_offset, binding.range.byte_length, host_allocator,
+          roots[i].buffer);
+      if (iree_status_is_ok(status)) {
+        status = loom_serve_retirement_track(&weights->retirement,
+                                             roots[i].buffer, host_allocator);
+      }
+    }
+  }
+  if (bindings) {
+    for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
+      iree_hal_buffer_release(buffers[i]);
+    }
+  }
+  iree_allocator_free(host_allocator, bindings);
   if (iree_status_is_ok(status)) {
     iree_host_size_t key_bytes = 0;
     for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
@@ -858,7 +935,8 @@ iree_status_t loom_serve_weights_await(loom_serve_weights_t* weights) {
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
   loom_serve_retirement_await(&weights->activation.retirement);
   loom_serve_memory_operation_await(weights->activation.backing);
-  return status;
+  return iree_status_join(status, loom_serve_memory_operation_query_status(
+                                      weights->activation.backing));
 }
 
 iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights,
@@ -870,10 +948,12 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights,
   }
   if (weights->deactivation) {
     if (loom_serve_memory_operation_is_complete(weights->deactivation)) {
+      iree_status_t status =
+          loom_serve_memory_operation_query_status(weights->deactivation);
       loom_serve_memory_operation_free(weights->deactivation);
       weights->deactivation = NULL;
       *out_complete = true;
-      return loom_serve_memory_pool_query_status(weights->pool);
+      return status;
     }
     return iree_ok_status();
   }
@@ -977,6 +1057,8 @@ iree_status_t loom_serve_weights_free(loom_serve_weights_t* weights) {
     status = loom_serve_virtual_buffer_free(weights->storages[i].reservation);
     if (iree_status_is_ok(status)) {
       weights->storages[i].reservation = NULL;
+      iree_hal_buffer_release(weights->storages[i].buffer);
+      weights->storages[i].buffer = NULL;
     }
   }
   if (iree_status_is_ok(status)) {

@@ -178,7 +178,7 @@
         "tool": "loom-opt",
         "args": [
           "--pass=dce",
-          "--dump-ir-after=dce",
+          "--dump-ir-after=pipeline-text",
           "--dump-ir-format=jsonl",
           "--dump-ir-output=stderr",
           "--output={tmp}/dumped.loom"
@@ -190,7 +190,7 @@
       "stderr": {
         "contains": [
           "\"tool\":\"loom-opt\"",
-          "\"stage\":\"command-line\"",
+          "\"stage\":\"pipeline-text\"",
           "\"pass\":\"dce\"",
           "\"point\":\"after\"",
           "\"ir\":\""
@@ -227,7 +227,7 @@
         "tool": "loom-opt",
         "args": [
           "--pipeline=@trace_pipeline",
-          "--dump-ir-after=dce",
+          "--dump-ir-after=pipeline-symbol",
           "--dump-ir-format=jsonl",
           "--dump-ir-output=stderr",
           "--output={tmp}/dumped-whole-module.loom"
@@ -305,6 +305,37 @@
       }
     },
     {
+      "name": "reports configuration failures through JSON diagnostics",
+      "run": {
+        "tool": "loom-opt",
+        "args": ["--config=answer=17", "--diagnostic-format=json"]
+      },
+      "stdin": {
+        "text": "config.decl @answer : %value: index where [multiple_of(%value, 16)]\n"
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": [
+          {"regex": "^\\{\"severity\":\"error\".*\"diagnostic_code\":\"CONFIG/INVALID\".*\\}$"}
+        ],
+        "not_contains": ["stack:"]
+      }
+    },
+    {
+      "name": "configuration admits input when explicit verification is disabled",
+      "run": {
+        "tool": "loom-opt",
+        "args": ["--verify=false", "--config=answer=16"]
+      },
+      "stdin": {
+        "text": "config.decl @answer : index\nfunc.def @invalid() -> (i32) { func.return }\n"
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {"contains": ["yield has 0 operands, expected 1"]}
+    },
+    {
       "name": "rejects duplicate config binding",
       "run": {
         "tool": "loom-opt",
@@ -351,7 +382,7 @@
           "exit": 1,
           "stdout": {"empty": true},
           "stderr": {
-            "contains": ["pass pipeline reproducer written to", "bytecode failure"]
+            "contains": ["bytecode failure", "pass pipeline reproducer written to"]
           },
           "files": [
             {
@@ -373,7 +404,7 @@
           "exit": 1,
           "stdout": {"empty": true},
           "stderr": {
-            "contains": ["FAILED_PRECONDITION; bytecode failure"],
+            "contains": ["error [PASS_PROGRAM/EXECUTION]: bytecode failure"],
             "not_contains": ["PARSE/"]
           }
         }
@@ -405,7 +436,7 @@
           "exit": 1,
           "stdout": {"empty": true},
           "stderr": {
-            "contains": ["pass pipeline reproducer written to", "configured failure"]
+            "contains": ["configured failure", "pass pipeline reproducer written to"]
           },
           "files": [
             {
@@ -442,7 +473,7 @@
           "exit": 1,
           "stdout": {"empty": true},
           "stderr": {
-            "contains": ["FAILED_PRECONDITION; configured failure"]
+            "contains": ["error [PASS_PROGRAM/EXECUTION]: configured failure"]
           },
           "files": [
             {
@@ -477,8 +508,8 @@
       },
       "stderr": {
         "contains": [
-          "pass pipeline reproducer written to",
-          "boom"
+          "boom",
+          "pass pipeline reproducer written to"
         ]
       },
       "files": [
@@ -495,6 +526,615 @@
             "\"status\":{\"code\":",
             "\"name\":"
           ]
+        }
+      ]
+    },
+    {
+      "name": "optimizes text input to text output",
+      "steps": [
+        {
+          "write": {
+            "path": "{tmp}/expected.loom",
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\n"
+          }
+        },
+        {
+          "name": "encode",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=text"
+            ]
+          },
+          "stdin": {
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "name": "optimize",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pass=dce",
+              "--to=text"
+            ]
+          },
+          "stdin": {
+            "step_stdout": "encode"
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-opt"
+          },
+          "stdin": {
+            "step_stdout": "optimize"
+          },
+          "stdout": {
+            "save": "{tmp}/actual.loom"
+          },
+          "stderr": {
+            "empty": true
+          },
+          "files": [
+            {
+              "path": "{tmp}/actual.loom",
+              "equals": "{tmp}/expected.loom"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "optimizes text input to bytecode output",
+      "steps": [
+        {
+          "write": {
+            "path": "{tmp}/expected.loom",
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\n"
+          }
+        },
+        {
+          "name": "encode",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=text"
+            ]
+          },
+          "stdin": {
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "name": "optimize",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pass=dce",
+              "--to=bytecode"
+            ]
+          },
+          "stdin": {
+            "step_stdout": "encode"
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-opt"
+          },
+          "stdin": {
+            "step_stdout": "optimize"
+          },
+          "stdout": {
+            "save": "{tmp}/actual.loom"
+          },
+          "stderr": {
+            "empty": true
+          },
+          "files": [
+            {
+              "path": "{tmp}/actual.loom",
+              "equals": "{tmp}/expected.loom"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "optimizes bytecode input to text output",
+      "steps": [
+        {
+          "write": {
+            "path": "{tmp}/expected.loom",
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\n"
+          }
+        },
+        {
+          "name": "encode",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=bytecode"
+            ]
+          },
+          "stdin": {
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "name": "optimize",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pass=dce",
+              "--to=text"
+            ]
+          },
+          "stdin": {
+            "step_stdout": "encode"
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-opt"
+          },
+          "stdin": {
+            "step_stdout": "optimize"
+          },
+          "stdout": {
+            "save": "{tmp}/actual.loom"
+          },
+          "stderr": {
+            "empty": true
+          },
+          "files": [
+            {
+              "path": "{tmp}/actual.loom",
+              "equals": "{tmp}/expected.loom"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "optimizes bytecode input to bytecode output",
+      "steps": [
+        {
+          "write": {
+            "path": "{tmp}/expected.loom",
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\n"
+          }
+        },
+        {
+          "name": "encode",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=bytecode"
+            ]
+          },
+          "stdin": {
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "name": "optimize",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pass=dce",
+              "--to=bytecode"
+            ]
+          },
+          "stdin": {
+            "step_stdout": "encode"
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-opt"
+          },
+          "stdin": {
+            "step_stdout": "optimize"
+          },
+          "stdout": {
+            "save": "{tmp}/actual.loom"
+          },
+          "stderr": {
+            "empty": true
+          },
+          "files": [
+            {
+              "path": "{tmp}/actual.loom",
+              "equals": "{tmp}/expected.loom"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "writes bytecode to a file and resumes execution",
+      "steps": [
+        {
+          "write": {
+            "path": "{tmp}/expected.loom",
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\n"
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--to=bc",
+              "--output={tmp}/module.loombc"
+            ]
+          },
+          "stdin": {
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "{tmp}/module.loombc",
+              "--pass=dce"
+            ]
+          },
+          "stdout": {
+            "save": "{tmp}/actual.loom"
+          },
+          "stderr": {
+            "empty": true
+          },
+          "files": [
+            {
+              "path": "{tmp}/actual.loom",
+              "equals": "{tmp}/expected.loom"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "requires verified input for execution when explicit checks are disabled",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--verify=false",
+          "--pass=dce",
+          "--output={tmp}/invalid.loom"
+        ]
+      },
+      "stdin": {
+        "text": "func.def @bad() -> (i32) {\n  func.return\n}\n"
+      },
+      "exit": 1,
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "yield has 0 operands, expected 1"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/invalid.loom",
+          "exists": false
+        }
+      ]
+    },
+    {
+      "name": "retains a partial pass report after pipeline failure",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pipeline=@boom",
+          "--pass-report=json",
+          "--pass-reproducer={tmp}/failure.loom"
+        ]
+      },
+      "stdin": {
+        "text": "pass.pipeline<module> @boom pipeline {\n  for func {\n    dce\n  }\n  fail \"stopped after cleanup\"\n}\n\nfunc.def @identity(%value: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+      },
+      "exit": 1,
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "stopped after cleanup",
+          "\"pass\":\"dce\"",
+          "\"pipeline\":\"boom\"",
+          "\"changed\":true"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/failure.loom",
+          "contains": [
+            {
+              "regex": "\"status\"\\s*:\\s*\\{\\s*\"code\"\\s*:\\s*9\\s*,\\s*\"name\"\\s*:\\s*\"FAILED_PRECONDITION\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "records missing pipeline preparation status",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pipeline=@missing",
+          "--pass-reproducer={tmp}/missing.loom",
+          "--output={tmp}/unused.loom"
+        ]
+      },
+      "stdin": {
+        "text": "func.def @identity(%value: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+      },
+      "exit": 1,
+      "stdout": {
+        "empty": true
+      },
+      "files": [
+        {
+          "path": "{tmp}/unused.loom",
+          "exists": false
+        },
+        {
+          "path": "{tmp}/missing.loom",
+          "contains": [
+            "\"NOT_FOUND\"",
+            "// RUN: loom-opt --verify=true --pipeline='@missing' %s"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "records unknown pass preparation failure",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=not-a-pass",
+          "--pass-report=json",
+          "--pass-reproducer={tmp}/unknown.loom",
+          "--output={tmp}/unused.loom"
+        ]
+      },
+      "stdin": {
+        "text": "func.def @identity(%value: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+      },
+      "exit": 1,
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "not-a-pass",
+          "\"invocations\":[]"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/unused.loom",
+          "exists": false
+        },
+        {
+          "path": "{tmp}/unknown.loom",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "rejects bytecode output for configuration schema",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--to=bytecode",
+          "--print-config-schema"
+        ]
+      },
+      "exit": 1,
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "--print-config-schema requires --to=text"
+        ]
+      }
+    },
+    {
+      "name": "rejects unresolved configuration after execution",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=dce",
+          "--require-resolved-config",
+          "--output={tmp}/unused.loom"
+        ]
+      },
+      "stdin": {
+        "text": "config.decl @answer : index\n"
+      },
+      "exit": 1,
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": [
+          "answer"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/unused.loom",
+          "exists": false
+        }
+      ]
+    },
+    {
+      "name": "prints configuration schema after materialization and execution",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=dce",
+          "--config=answer=42",
+          "--print-config-schema",
+          "--require-resolved-config"
+        ]
+      },
+      "stdin": {
+        "text": "config.decl @answer : index\n"
+      },
+      "stdout": {
+        "contains": [
+          "\"answer\"",
+          "42"
+        ]
+      },
+      "stderr": {
+        "empty": true
+      }
+    },
+    {
+      "name": "replays invalid flat pass options",
+      "steps": [
+        {
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pass=canonicalize{max-iterations=no}",
+              "--pass-reproducer={tmp}/failure.loom"
+            ]
+          },
+          "stdin": {
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n"
+          },
+          "exit": 1,
+          "stdout": {
+            "empty": true
+          },
+          "files": [
+            {
+              "path": "{tmp}/failure.loom",
+              "contains": [
+                "// RUN: loom-opt --verify=true --pass='canonicalize{max-iterations=no}' %s"
+              ],
+              "not_contains": [
+                "pass.run<",
+                "@__command_line"
+              ]
+            }
+          ]
+        },
+        {
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pass=canonicalize{max-iterations=no}",
+              "{tmp}/failure.loom"
+            ]
+          },
+          "exit": 1,
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "contains": [
+              "option 'max-iterations' expected a uint32 value"
+            ],
+            "not_contains": [
+              "PARSE/"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "replays malformed flat pass syntax",
+      "steps": [
+        {
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pass=dce{",
+              "--pass-reproducer={tmp}/failure.loom"
+            ]
+          },
+          "stdin": {
+            "text": "func.def @identity(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n"
+          },
+          "exit": 1,
+          "stdout": {
+            "empty": true
+          },
+          "files": [
+            {
+              "path": "{tmp}/failure.loom",
+              "contains": [
+                "// RUN: loom-opt --verify=true --pass='dce{' %s"
+              ],
+              "not_contains": [
+                "pass.run<",
+                "@__command_line"
+              ]
+            }
+          ]
+        },
+        {
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pass=dce{",
+              "{tmp}/failure.loom"
+            ]
+          },
+          "exit": 1,
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "contains": [
+              "unterminated pass option dictionary"
+            ],
+            "not_contains": [
+              "PARSE/"
+            ]
+          }
         }
       ]
     }

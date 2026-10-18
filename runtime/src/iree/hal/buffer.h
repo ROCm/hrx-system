@@ -793,7 +793,6 @@ typedef struct iree_hal_buffer_t iree_hal_buffer_t;
 
 typedef struct iree_async_notification_t iree_async_notification_t;
 typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
-typedef struct iree_hal_memory_maintenance_t iree_hal_memory_maintenance_t;
 
 // Native representation selected when an access contract is prepared. Ordinary
 // execution uses its backend's representation; storage usage alone does not
@@ -950,8 +949,6 @@ typedef struct iree_hal_buffer_backing_facts_t {
   iree_async_notification_t* notification;
   // Sealed-group completion tracker for exact inherited reuse prerequisites.
   iree_async_frontier_tracker_t* tracker;
-  // Borrowed placement-local owner for cold preparation and retirement.
-  iree_hal_memory_maintenance_t* maintenance;
   // Native range lifecycle operations; NULL when unavailable.
   const iree_hal_buffer_range_advice_t* advice;
   // Source-owned envelope available for cache maintenance and registration in

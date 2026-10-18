@@ -247,7 +247,16 @@ TEST_F(MemoryBackendTest, NativeMappingFailureReachesQueueCompletion) {
   iree_hal_semaphore_release(done);
 }
 
-TEST_F(MemoryBackendTest, SlowNativeMappingLeavesTheSingleCpuWorkerAvailable) {
+class ConcurrentMemoryBackendTest : public MemoryBackendTest {
+ protected:
+  void SetUp() override {
+    cpu_worker_count_ = 2;
+    MemoryBackendTest::SetUp();
+  }
+};
+
+TEST_F(ConcurrentMemoryBackendTest,
+       SlowNativeMappingLeavesOtherWorkersAvailable) {
   iree_hal_buffer_t* reservation = nullptr;
   IREE_ASSERT_OK(CreateReservation(&reservation));
   iree_hal_semaphore_t* done = nullptr;

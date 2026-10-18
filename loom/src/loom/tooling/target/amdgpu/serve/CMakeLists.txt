@@ -54,6 +54,27 @@ loom_cc_library(
 )
 endif()
 
+if(IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    execution_queues_test
+  DEPS
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::runtime::execution::queues_tests
+  ARGS
+    "--execution_device_uri=amdgpu://0?queue_count=2"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "notsan"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
@@ -107,6 +128,7 @@ loom_cc_test(
     iree::vm::bytecode::module
     loom::binding::c::loomc
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::queues
     loom::serve::runtime::execution::workspace
     loom::serve::runtime::host
     loom::serve::runtime::program::jit
@@ -592,6 +614,7 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
   DEPS
     ::test_compiler
@@ -618,6 +641,7 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
   DEPS
     ::test_compiler
@@ -641,16 +665,17 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
-    source_recognition_service_test
+    source_recognition_stream_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
   DEPS
     ::test_compiler
     ::test_device
     iree::testing::gtest_main
-    loom::serve::service::recognition::source_service_tests
+    loom::serve::service::recognition::source_stream_tests
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom}}"
   LABELS
@@ -667,19 +692,109 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
-    source_recognition_service_elastic_test
+    source_recognition_stream_elastic_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
   DEPS
     ::test_compiler
     ::test_device
     iree::testing::gtest_main
-    loom::serve::service::recognition::source_service_tests
+    loom::serve::service::recognition::source_stream_tests
   ARGS
     "--test_elastic=true"
     "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom}}"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "notsan"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    registry_speech_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/prepare.loom"
+  DEPS
+    ::test_compiler
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::server::registry_speech_tests
+  ARGS
+    "--model={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json}}"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "notsan"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    registry_text_speech_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/advance.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/tokenizer.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/weights.loom"
+  DEPS
+    ::test_compiler
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::server::registry_text_speech_tests
+  ARGS
+    "--text_model={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json}}"
+    "--speech_model={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json}}"
+    "--text_fixture=true"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "notsan"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    registry_recognition_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
+  DEPS
+    ::test_compiler
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::server::registry_recognition_tests
+  ARGS
+    "--model={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json}}"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
@@ -701,8 +816,12 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/prepare.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/identity.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/input_count.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/state_argument.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/state_result.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/stateless.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/weights.loom"
   DEPS
@@ -733,8 +852,12 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/prepare.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/identity.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/input_count.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/state_argument.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/state_result.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/stateless.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/weights.loom"
   DEPS
@@ -766,8 +889,12 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/prepare.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/identity.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/input_count.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/state_argument.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/state_result.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/stateless.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/weights.loom"
   DEPS
@@ -800,8 +927,12 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/prepare.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/identity.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/input_count.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/state_argument.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/state_result.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/stateless.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/weights.loom"
   DEPS
@@ -962,7 +1093,6 @@ loom_cc_test(
     iree::base
     iree::base::tooling::flags
     iree::hal
-    iree::hal::memory::maintenance
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main
@@ -977,7 +1107,7 @@ loom_cc_test(
     loom::serve::runtime::storage::memory
     loom::serve::testing::compiler
     loom::serve::testing::device
-    loom::serve::testing::maintenance_gate
+    loom::serve::testing::native_allocator
   ARGS
     "--weight_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/stages.loom}}"
   LABELS
@@ -1007,7 +1137,7 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::storage::memory
     loom::serve::testing::device
-    loom::serve::testing::maintenance_gate
+    loom::serve::testing::native_allocator
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
@@ -1037,7 +1167,7 @@ loom_cc_test(
     loom::serve::runtime::storage::memory
     loom::serve::runtime::storage::relocation
     loom::serve::testing::device
-    loom::serve::testing::maintenance_gate
+    loom::serve::testing::native_allocator
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"

@@ -20,13 +20,13 @@ typedef struct loom_sanitizer_site_table_file_location_t {
   // Module source table ID for the file source range.
   loom_source_id_t source_id;
   // One-based starting line.
-  uint16_t start_line;
+  uint32_t start_line;
   // One-based starting column.
-  uint16_t start_column;
+  uint32_t start_column;
   // One-based ending line.
-  uint16_t end_line;
+  uint32_t end_line;
   // One-based ending column.
-  uint16_t end_column;
+  uint32_t end_column;
 } loom_sanitizer_site_table_file_location_t;
 
 static void loom_sanitizer_site_table_write_u8(uint8_t* data,

@@ -76,36 +76,6 @@ TEST(HeapPoolTest, AllocatesMappedHostStorageWithoutProgressOwner) {
   iree_hal_pool_release(pool);
 }
 
-TEST(HeapPoolTest, NoGrowthDefersWithoutAllocating) {
-  const iree_hal_pool_host_access_t host_access = {
-      .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
-      .modes = IREE_HAL_MAPPING_MODE_SCOPED,
-  };
-  iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(iree_hal_heap_pool_create(host_access, iree_allocator_system(),
-                                           iree_allocator_system(), &pool));
-
-  const iree_hal_pool_reservation_request_t request =
-      iree_hal_make_pool_reservation_request(64, 16);
-  iree_hal_pool_reservation_t reservation = {};
-  iree_hal_pool_acquire_info_t info = {};
-  iree_hal_pool_acquire_result_t result = IREE_HAL_POOL_ACQUIRE_NONE;
-  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      pool, 1, &request, /*requester_frontier=*/nullptr,
-      IREE_HAL_POOL_RESERVE_FLAG_DISALLOW_GROWTH, &reservation, &info,
-      &result));
-  EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_EXHAUSTED);
-  EXPECT_EQ(info.result, IREE_HAL_POOL_ACQUIRE_EXHAUSTED);
-  EXPECT_EQ(info.flags, IREE_HAL_POOL_ACQUIRE_FLAG_GROWTH_REQUIRED);
-  EXPECT_EQ(reservation.block_handle, 0u);
-
-  iree_hal_pool_stats_t stats;
-  iree_hal_pool_query_stats(pool, &stats);
-  EXPECT_EQ(stats.bytes_committed, 0u);
-  EXPECT_EQ(stats.exhausted_count, 1u);
-  iree_hal_pool_release(pool);
-}
-
 TEST(HeapPoolTest, BorrowedMaterializationRetainsBackingAfterReservation) {
   const iree_hal_pool_host_access_t host_access = {
       .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
@@ -120,9 +90,10 @@ TEST(HeapPoolTest, BorrowedMaterializationRetainsBackingAfterReservation) {
   iree_hal_pool_reservation_t reservation = {};
   iree_hal_pool_acquire_info_t info = {};
   iree_hal_pool_acquire_result_t result = IREE_HAL_POOL_ACQUIRE_NONE;
-  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      pool, 1, &request, /*requester_frontier=*/nullptr,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation, &info, &result));
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
+      pool, 1, &request,
+      /*requester_frontier=*/nullptr, &reservation, &info, &result,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE));
   EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
 
   iree_hal_buffer_t* buffer = nullptr;

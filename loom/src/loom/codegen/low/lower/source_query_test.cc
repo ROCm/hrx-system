@@ -9,6 +9,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/cfg_value_identity.h"
+#include "loom/analysis/control_participants.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/rule_match.h"
 #include "loom/ir/context.h"
@@ -530,7 +531,7 @@ TEST_F(LowLowerSourceQueryTest, GraphNonmembersDoNotAcquireFunctionAnalyses) {
             nullptr);
 }
 
-TEST_F(LowLowerSourceQueryTest, RestoresIdentitiesAfterAlternateFactsQuery) {
+TEST_F(LowLowerSourceQueryTest, RestoresAnalysesAfterAlternateFactsQuery) {
   IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region_tree(
       module_, loom_func_like_body(function_), mapping_context_.function_arena,
       &mapping_context_.lowering->value_domain));
@@ -539,6 +540,10 @@ TEST_F(LowLowerSourceQueryTest, RestoresIdentitiesAfterAlternateFactsQuery) {
       &mapping_context_.lowering->value_domain,
       &mapping_context_.analysis_arena, &identities));
   const auto* representatives = identities.representatives;
+  loom_control_participant_table_t participants;
+  loom_control_participant_table_initialize(&mapping_context_.analysis_arena,
+                                            &participants);
+  mapping_context_.function_analysis.participant_zeros = &participants;
 
   loom_value_fact_table_t alternate_facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
@@ -549,6 +554,9 @@ TEST_F(LowLowerSourceQueryTest, RestoresIdentitiesAfterAlternateFactsQuery) {
   loom_target_contract_query_environment_t environment = {};
   IREE_ASSERT_OK(loom_low_lower_source_query_environment_initialize(
       &mapping_context_, mapping_context_.descriptor_set, &environment));
+  const auto analysis_phase = mapping_context_.function_analysis.phase;
+  const auto* expressions_fact_table =
+      mapping_context_.function_analysis.expression_context.fact_table;
   environment.fact_table = &alternate_facts;
   environment.view_regions = nullptr;
   const auto callback = loom_low_lower_source_query_callback(&mapping_context_);
@@ -558,6 +566,11 @@ TEST_F(LowLowerSourceQueryTest, RestoresIdentitiesAfterAlternateFactsQuery) {
 
   EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
   EXPECT_EQ(identities.representatives, representatives);
+  EXPECT_EQ(mapping_context_.function_analysis.participant_zeros,
+            &participants);
+  EXPECT_EQ(mapping_context_.function_analysis.phase, analysis_phase);
+  EXPECT_EQ(mapping_context_.function_analysis.expression_context.fact_table,
+            expressions_fact_table);
   auto* expressions =
       loom_low_lower_context_symbolic_expr_context(&mapping_context_);
   EXPECT_EQ(expressions->fact_table, &fact_table_);

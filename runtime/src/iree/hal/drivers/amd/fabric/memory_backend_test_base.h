@@ -25,7 +25,6 @@
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/task/device.h"
 #include "iree/hal/memory/fixed_block_pool.h"
-#include "iree/hal/memory/maintenance_thread.h"
 #include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/hal/testing/mock_device.h"
@@ -402,18 +401,31 @@ struct FakeNative {
           iree_allocator_system(), info->byte_length, info->minimum_alignment,
           0, &memory->data));
     }
+    {
+      std::lock_guard<std::mutex> lock(self->memory_mutex);
+      ++self->live_memories;
+    }
     *out_memory = reinterpret_cast<amdf_memory_t*>(memory);
     return AMDF_STATUS_OK;
   }
 
   static amdf_status_t AMDF_CALL MemoryDestroy(amdf_memory_t* handle) {
     auto* memory = reinterpret_cast<Memory*>(handle);
-    ++memory->owner->destroy_count;
+    auto* self = memory->owner;
     if (!memory->registered) {
       iree_allocator_free_aligned(iree_allocator_system(), memory->data);
     }
     delete memory;
+    std::lock_guard<std::mutex> lock(self->memory_mutex);
+    ++self->destroy_count;
+    --self->live_memories;
+    self->memory_condition.notify_all();
     return AMDF_STATUS_OK;
+  }
+
+  void AwaitEmpty() {
+    std::unique_lock<std::mutex> lock(memory_mutex);
+    memory_condition.wait(lock, [&] { return live_memories == 0; });
   }
 
   static amdf_status_t AMDF_CALL MemoryQueryInfo(amdf_memory_t* handle,
@@ -654,8 +666,14 @@ struct FakeNative {
   std::atomic<int> create_count{0};
   // Native allocation failure after the pool has selected its fixed contract.
   amdf_status_t create_failure = AMDF_STATUS_OK;
-  // Native destruction count observed across the maintenance handoff.
+  // Native destruction count observed across allocation-worker completion.
   std::atomic<int> destroy_count{0};
+  // Guards native allocation lifetime observations in the dependency.
+  std::mutex memory_mutex;
+  // Published when an actual native free finishes.
+  std::condition_variable memory_condition;
+  // Native backings remaining after successful acquisition.
+  size_t live_memories = 0;
   // Explicit host-view creation count.
   std::atomic<int> map_count{0};
   // Explicit host-view destruction count.
@@ -701,12 +719,24 @@ struct FakeNative {
 class MemoryBackendTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    allocator_ = iree_allocator_system();
+    allocator_ = {
+        &native_,
+        +[](void* self, iree_allocator_command_t command, const void* params,
+            void** inout_pointer) -> iree_status_t {
+          auto* native = static_cast<FakeNative*>(self);
+          if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+              native->fail_metadata_allocation.exchange(false)) {
+            return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                    "buffer metadata allocation failed");
+          }
+          const auto system = iree_allocator_system();
+          return system.ctl(system.self, command, params, inout_pointer);
+        }};
     iree_hal_slab_pool_options_initialize(&pool_options_);
     IREE_ASSERT_OK(iree_async_notification_create(
         test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification_));
-    IREE_ASSERT_OK(iree_hal_memory_maintenance_thread_create({}, allocator_,
-                                                             &maintenance_));
+    IREE_ASSERT_OK(iree_hal_amd_fabric_allocation_queue_create(
+        UINT32_MAX, allocator_, &allocation_queue_));
     IREE_ASSERT_OK(iree_async_frontier_tracker_create(
         iree_async_frontier_tracker_options_default(), allocator_, &tracker_));
 
@@ -765,7 +795,7 @@ class MemoryBackendTest : public ::testing::Test {
           .families = &native_families_[i],
       };
       iree_hal_amd_fabric_memory_backend_initialize(
-          devices_[i], &memory_options, notification_, maintenance_,
+          devices_[i], &memory_options, notification_, allocation_queue_,
           iree_hal_pool_epoch_query_null(), &backends_[i]);
     }
 
@@ -773,9 +803,10 @@ class MemoryBackendTest : public ::testing::Test {
     ASSERT_NE(host_node_id_, IREE_NUMA_NODE_ANY);
     iree_thread_affinity_t affinity;
     iree_thread_affinity_set_group_any(host_node_id_, &affinity);
+    std::vector<iree_thread_affinity_t> affinities(cpu_worker_count_, affinity);
     iree_task_topology_t topology;
     IREE_ASSERT_OK(iree_task_topology_initialize_from_thread_affinities(
-        1, &affinity, &topology));
+        affinities.size(), affinities.data(), &topology));
     iree_task_executor_options_t executor_options;
     iree_task_executor_options_initialize(&executor_options);
     iree_status_t status = iree_task_executor_create(
@@ -811,6 +842,7 @@ class MemoryBackendTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    native_.AwaitEmpty();
     iree_hal_device_group_release(group_);
     for (iree_hal_device_t* device : devices_) {
       iree_hal_device_release(device);
@@ -820,7 +852,7 @@ class MemoryBackendTest : public ::testing::Test {
     iree_hal_allocator_release(cpu_allocator_);
     iree_task_executor_release(executor_);
     iree_async_frontier_tracker_release(tracker_);
-    iree_hal_memory_maintenance_release(maintenance_);
+    iree_hal_amd_fabric_allocation_queue_release(allocation_queue_);
     iree_async_notification_release(notification_);
   }
 
@@ -939,6 +971,9 @@ class MemoryBackendTest : public ::testing::Test {
   std::array<const iree_hal_queue_family_t*, 2> families_ = {};
   // Real CPU participant, ordered before native devices in the group.
   iree_hal_device_t* cpu_device_ = nullptr;
+  // Existing CPU workers available for native mapping and independent
+  // execution.
+  iree_host_size_t cpu_worker_count_ = 1;
   // Real physical node shared by the CPU participant's queue workers.
   uint32_t host_node_id_ = IREE_NUMA_NODE_ANY;
   // Existing CPU worker, allocator and proactor services.
@@ -950,7 +985,7 @@ class MemoryBackendTest : public ::testing::Test {
   // Capacity notification retained by each created pool.
   iree_async_notification_t* notification_ = nullptr;
   // Cold native allocation and retirement executor.
-  iree_hal_memory_maintenance_t* maintenance_ = nullptr;
+  iree_hal_amd_fabric_allocation_queue_t* allocation_queue_ = nullptr;
   // Group completion coordinate owner.
   iree_async_frontier_tracker_t* tracker_ = nullptr;
   // Sealed device group assigning memory scope identities.

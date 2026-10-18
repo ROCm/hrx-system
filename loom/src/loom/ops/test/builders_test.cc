@@ -346,6 +346,45 @@ TEST_F(BuilderStorageTest, EnumArraysPreserveOrderAndOptionalPresence) {
   }
 }
 
+TEST_F(BuilderStorageTest, StringArraysPreserveCallerOrderAndStorage) {
+  loom_string_id_t required[] = {LOOM_STRING_ID_INVALID, LOOM_STRING_ID_INVALID,
+                                 LOOM_STRING_ID_INVALID};
+  loom_string_id_t optional = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_intern_string(&builder_, IREE_SV("gfx12-generic"),
+                                            &required[0]));
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("gfx1250"), &required[1]));
+  required[2] = required[0];
+  IREE_ASSERT_OK(loom_builder_intern_string(&builder_, IREE_SV("gfx11-generic"),
+                                            &optional));
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_string_array_attrs_build(
+      &builder_, LOOM_TEST_STRING_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES,
+      loom_make_string_id_array(required, IREE_ARRAYSIZE(required)),
+      loom_make_string_id_array(&optional, 1), loom_named_attr_slice_empty(),
+      LOOM_LOCATION_UNKNOWN, &op));
+
+  memset(required, 0, sizeof(required));
+  optional = LOOM_STRING_ID_INVALID;
+  const loom_string_id_array_t stored =
+      loom_test_string_array_attrs_required_values(op);
+  ASSERT_EQ(stored.count, 3u);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(&module_->strings, stored.values[0]),
+      IREE_SV("gfx12-generic")));
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(&module_->strings, stored.values[1]),
+      IREE_SV("gfx1250")));
+  EXPECT_EQ(stored.values[0], stored.values[2]);
+  const loom_string_id_array_t stored_optional =
+      loom_test_string_array_attrs_optional_values(op);
+  ASSERT_EQ(stored_optional.count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(&module_->strings, stored_optional.values[0]),
+      IREE_SV("gfx11-generic")));
+}
+
 TEST_F(BuilderStorageTest, SignedEnumSetsCopyBothPolarities) {
   for (bool present : {false, true}) {
     for (iree_host_size_t count : {0u, 4u}) {

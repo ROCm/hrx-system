@@ -47,6 +47,25 @@ typedef struct iree_hal_amdgpu_memory_backend_t {
 void iree_hal_amdgpu_memory_backend_initialize(
     iree_hal_amdgpu_memory_backend_t* backend);
 
+// Native address qualification/construction used by the backend descriptor.
+iree_status_t iree_hal_amdgpu_virtual_buffer_query_capabilities(
+    const iree_hal_memory_backend_t* backend, iree_hal_device_group_t* group,
+    iree_hal_pool_scope_t scope, iree_allocator_t host_allocator,
+    iree_hal_virtual_buffer_capabilities_t* out_capabilities);
+iree_status_t iree_hal_amdgpu_virtual_buffer_create(
+    const iree_hal_memory_backend_t* backend, iree_hal_device_group_t* group,
+    iree_hal_pool_scope_t scope,
+    const iree_hal_virtual_buffer_options_t* options,
+    iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
+
+// Uses the legacy queue's host-call owner and publishes the complete mapping
+// batch before its signal semaphores become ready.
+iree_status_t iree_hal_amdgpu_memory_mapping_queue_map(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t mapping_count,
+    const iree_hal_memory_mapping_t* mappings,
+    iree_hal_queue_map_flags_t flags);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

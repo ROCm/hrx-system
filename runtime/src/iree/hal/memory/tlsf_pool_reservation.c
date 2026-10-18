@@ -78,53 +78,34 @@ iree_status_t iree_hal_tlsf_pool_reservation_geometry(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_tlsf_pool_dedicated_acquire(
+iree_status_t iree_hal_tlsf_pool_dedicated_prepare(
     iree_hal_pool_t* backing_pool,
     const iree_hal_pool_reservation_request_t* backing_request,
     const iree_hal_asan_pool_options_t* asan,
     const iree_hal_asan_allocation_layout_t* asan_layout,
     const iree_hal_tlsf_pool_reservation_layout_t* layout,
-    const iree_async_frontier_t* requester, iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t reservation, iree_hal_pool_acquire_info_t info,
+    const iree_async_frontier_t* initial_frontier,
     iree_allocator_t host_allocator,
-    iree_hal_tlsf_pool_release_node_t** out_node,
-    iree_hal_pool_acquire_result_t* out_result) {
+    iree_hal_tlsf_pool_release_node_t** out_node) {
   *out_node = NULL;
-  *out_result = IREE_HAL_POOL_ACQUIRE_NONE;
   iree_hal_tlsf_pool_release_node_t* node = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+  iree_status_t status = iree_allocator_malloc(
       host_allocator,
       layout->node_size + sizeof(iree_hal_tlsf_pool_dedicated_backing_t),
-      (void**)&node));
+      (void**)&node);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_pool_release_reservations(backing_pool, 1, &reservation,
+                                       info.reuse_frontier);
+    return status;
+  }
   iree_hal_tlsf_pool_dedicated_backing_t* backing =
       iree_hal_tlsf_pool_dedicated_backing(node, layout);
-  iree_hal_pool_acquire_info_t info = {0};
-  iree_status_t status = iree_hal_pool_acquire_reservations(
-      backing_pool, 1, backing_request, requester, flags, &backing->reservation,
-      &info, out_result);
-  if (iree_status_is_ok(status) &&
-      (*out_result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED ||
-       *out_result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET)) {
-    iree_allocator_free(host_allocator, node);
-    return iree_ok_status();
-  }
-  if (iree_status_is_ok(status) && info.reuse_frontier &&
-      info.reuse_frontier->entry_count > layout->frontier.capacity) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "backing history exceeds TLSF frontier capacity");
-  }
-  iree_hal_buffer_t* buffer = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_pool_materialize_reservations(
-        backing_pool, 1, backing_request, &backing->reservation,
-        IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &buffer);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_pool_buffer_range_initialize(
-        buffer, 0, IREE_HAL_WHOLE_BUFFER, backing_request->min_alignment, asan,
-        &backing->range);
-    backing->range.memory.reuse_frontier = info.reuse_frontier;
-  }
-  iree_hal_buffer_release(buffer);
+  backing->reservation = reservation;
+  status = iree_hal_pool_buffer_range_prepare(
+      backing_pool, backing_request, &backing->reservation,
+      backing_request->min_alignment, asan, &backing->range);
+  backing->range.memory.reuse_frontier = info.reuse_frontier;
   if (iree_status_is_ok(status) &&
       iree_hal_asan_pool_options_is_enabled(asan)) {
     node->asan_layout = *asan_layout;
@@ -139,20 +120,18 @@ iree_status_t iree_hal_tlsf_pool_dedicated_acquire(
     node->charged_length = backing->range.length;
     iree_async_frontier_t* frontier =
         iree_hal_tlsf_pool_reservation_frontier(node, layout->frontier.offset);
-    if (info.reuse_frontier) {
-      memcpy(frontier, info.reuse_frontier,
-             sizeof(*frontier) + info.reuse_frontier->entry_count *
+    if (initial_frontier) {
+      memcpy(frontier, initial_frontier,
+             sizeof(*frontier) + initial_frontier->entry_count *
                                      sizeof(iree_async_frontier_entry_t));
     } else {
       iree_async_frontier_initialize(frontier, 0);
     }
     *out_node = node;
   } else {
-    if (info.result != IREE_HAL_POOL_ACQUIRE_NONE) {
-      iree_hal_pool_release_reservations(backing_pool, 1, &backing->reservation,
-                                         info.reuse_frontier);
-    }
     iree_hal_pool_buffer_range_deinitialize(&backing->range);
+    iree_hal_pool_release_reservations(backing_pool, 1, &backing->reservation,
+                                       info.reuse_frontier);
     iree_allocator_free(host_allocator, node);
   }
   return status;
@@ -168,8 +147,7 @@ bool iree_hal_tlsf_pool_dedicated_merge_return_frontier(
   }
   const iree_hal_tlsf_pool_dedicated_backing_t* backing =
       iree_hal_tlsf_pool_dedicated_backing(node, layout);
-  return !(backing->range.offset ||
-           backing->range.length != backing->reservation.byte_length) ||
+  return backing->range.length == backing->reservation.byte_length ||
          !backing->range.memory.reuse_frontier ||
          iree_async_frontier_merge(frontier, layout->frontier.capacity,
                                    backing->range.memory.reuse_frontier);
@@ -190,9 +168,9 @@ void iree_hal_tlsf_pool_dedicated_release(
       iree_hal_tlsf_pool_dedicated_backing(node, layout);
   const iree_async_frontier_t* frontier =
       iree_hal_tlsf_pool_reservation_frontier(node, layout->frontier.offset);
+  iree_hal_pool_buffer_range_deinitialize(&backing->range);
   iree_hal_pool_release_reservations(backing_pool, 1, &backing->reservation,
                                      frontier->entry_count ? frontier : NULL);
-  iree_hal_pool_buffer_range_deinitialize(&backing->range);
   iree_allocator_free(host_allocator, node);
 }
 

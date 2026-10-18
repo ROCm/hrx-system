@@ -79,6 +79,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/program:jit",
         "//loom/src/loom/serve/runtime/program:sources",
         "//loom/src/loom/serve/runtime/storage:memory",
+        "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",

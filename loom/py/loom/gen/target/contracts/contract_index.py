@@ -95,7 +95,7 @@ def generate_contract_index(
         ops = array(
             "loom_target_contract_op_entry_t",
             f"Ops{dialect_id}",
-            [f"{{{start}, {count}}}" for start, count in entries],
+            [f"{{{entry.case_start}, {entry.case_count}, {entry.query_rule_count}}}" for entry in entries],
         )
         dialects.append(f"{{{len(entries)}, {ops}}}")
     dialect_table = array("loom_target_contract_dialect_table_t", "Dialects", dialects)

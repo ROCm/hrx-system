@@ -23,7 +23,9 @@ static int iree_hal_amdgpu_hostcall_provider_service_thread_main(
         IREE_LIBHSA(state->libhsa), state->notification_signal,
         HSA_SIGNAL_CONDITION_NE, observed_value, UINT64_MAX,
         HSA_WAIT_STATE_BLOCKED);
+    IREE_TRACE_ZONE_BEGIN_NAMED(z_service, "iree_hal_amdgpu_hostcall_service");
     state->provider.service(state->provider_context);
+    IREE_TRACE_ZONE_END(z_service);
     if (iree_atomic_load(&state->stop_requested, iree_memory_order_acquire)) {
       break;
     }

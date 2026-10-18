@@ -79,6 +79,8 @@ http_archive(
     build_file = "//build_tools/third_party/tracy_client:tracy_client.BUILD.bazel",
     patch_args = ["-p1"],
     patches = [
+        "//build_tools/third_party/tracy_client:allocator_initialization.patch",
+        "//build_tools/third_party/tracy_client:windows_diagnostics.patch",
         "//build_tools/third_party/tracy_client:worker_signal_mask.patch",
         "//build_tools/third_party/tracy_client:instruction_symbols.patch",
     ],
@@ -90,9 +92,9 @@ http_archive(
 http_archive(
     name = "cxx",
     build_file = "//build_tools/third_party/cxx:cxx.BUILD.bazel",
-    sha256 = "e901bbdfe65e85ff6983389da007944d4c3b4bf8548bdd57d7c5f8a0a963e276",
-    strip_prefix = "cplusplus-600ba3f497035e15a12c944241bc0d15cda069ba",
-    url = "https://github.com/benvanik/cplusplus/archive/600ba3f497035e15a12c944241bc0d15cda069ba.tar.gz",
+    sha256 = "082afd33adaa3cde8b3bc467590363b6f680a8b40b59169c4a21fa34c46e183f",
+    strip_prefix = "cplusplus-da1a67afac2c15e460342ed84de9d519788a5d88",
+    url = "https://github.com/benvanik/cplusplus/archive/da1a67afac2c15e460342ed84de9d519788a5d88.tar.gz",
 )
 
 http_archive(

@@ -19,6 +19,13 @@
 
 #define IREE_TASK_WORKER_MIN_STACK_SIZE (32 * 1024)
 
+static IREE_THREAD_LOCAL iree_task_executor_t*
+    iree_task_worker_current_executor;
+
+bool iree_task_worker_is_current_executor(iree_task_executor_t* executor) {
+  return iree_task_worker_current_executor == executor;
+}
+
 static int iree_task_worker_main(iree_task_worker_t* worker);
 
 static int iree_task_worker_thread_entry(void* entry_arg) {
@@ -1178,6 +1185,7 @@ static void iree_task_worker_pump_until_exit(iree_task_worker_t* worker) {
 
 // Thread entry point for each worker.
 static int iree_task_worker_main(iree_task_worker_t* worker) {
+  iree_task_worker_current_executor = worker->executor;
   IREE_TRACE_ZONE_BEGIN_NAMED(thread_zone_entry, "iree_task_worker_main_entry");
 
   // We cannot rely on the global process settings for FPU state.
@@ -1209,5 +1217,8 @@ static int iree_task_worker_main(iree_task_worker_t* worker) {
   iree_notification_post(&worker->state_notification, IREE_ALL_WAITERS);
 
   IREE_TRACE_ZONE_END(thread_zone_exit);
+  iree_task_executor_t* executor = worker->executor;
+  iree_task_worker_current_executor = NULL;
+  iree_task_executor_worker_exit(executor);
   return 0;
 }

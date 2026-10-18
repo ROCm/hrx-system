@@ -212,6 +212,21 @@ static bool loom_attribute_equal_impl(const loom_attribute_t* a,
     return false;
   }
   switch ((loom_attr_kind_t)a->kind) {
+    case LOOM_ATTR_STRING_ARRAY:
+      if (a->count != b->count) {
+        return false;
+      }
+      if (a->count == 0) {
+        return true;
+      }
+      if (a->string_ids == NULL || b->string_ids == NULL) {
+        return false;
+      }
+      if (a->string_ids == b->string_ids) {
+        return true;
+      }
+      return memcmp(a->string_ids, b->string_ids,
+                    (iree_host_size_t)a->count * sizeof(loom_string_id_t)) == 0;
     case LOOM_ATTR_I64_ARRAY:
       if (a->count != b->count) {
         return false;
@@ -360,6 +375,14 @@ static uint32_t loom_attribute_hash_impl(const loom_attribute_t* attr,
   uint32_t hash = loom_structural_hash_initialize();
   hash = loom_structural_hash_mix_u8(hash, attr->kind);
   switch ((loom_attr_kind_t)attr->kind) {
+    case LOOM_ATTR_STRING_ARRAY:
+      hash = loom_structural_hash_mix_u16(hash, attr->count);
+      if (attr->count != 0 && attr->string_ids != NULL) {
+        hash = loom_structural_hash_mix_bytes(
+            hash, attr->string_ids,
+            (iree_host_size_t)attr->count * sizeof(loom_string_id_t));
+      }
+      break;
     case LOOM_ATTR_I64_ARRAY:
       hash = loom_structural_hash_mix_u16(hash, attr->count);
       hash = loom_structural_hash_mix_bytes(

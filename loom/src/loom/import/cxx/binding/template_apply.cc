@@ -110,6 +110,9 @@ loom_symbol_ref_t TemplateApplyIntrinsic::materialize(
     if (!requirements.empty()) {
       build_flags |= LOOM_TEMPLATE_DECL_BUILD_FLAG_HAS_REQUIRES;
     }
+    loom_symbol_ref_t reference = {};
+    check(loom_module_add_symbol(builder->module, family_->name,
+                                 &reference.symbol_id));
     check(loom_template_decl_build(
         &declaration_builder, build_flags, /*visibility=*/0,
         /*retain=*/0,
@@ -117,13 +120,12 @@ loom_symbol_ref_t TemplateApplyIntrinsic::materialize(
         /*effect_contract=*/0, /*temperature=*/0, loom_symbol_ref_null(),
         loom_make_parameterized_attr_array(requirements.data(),
                                            requirements.size()),
-        family_->reference, argument_types, argument_count, result_types,
-        result_count,
+        reference, argument_types, argument_count, result_types, result_count,
         /*tied_results=*/nullptr,
         /*tied_result_count=*/0, predicates.data(), predicates.size(),
         declaration_location_, &family_->declaration));
   }
-  return family_->reference;
+  return loom_template_decl_family(family_->declaration);
 }
 
 std::optional<Value> TemplateApplyIntrinsic::call(

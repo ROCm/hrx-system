@@ -1093,6 +1093,8 @@ loom_cc_library(
 loom_cc_benchmark(
     name = "source_memory_plan_benchmark",
     srcs = ["source_memory_plan_benchmark.cc"],
+    # Large producer/refinement/access sweeps are explicit benchmark runs.
+    args = ["--benchmark_filter=^(BM_AnalyzeAndPlanSymbolicMemory/16/16|BM_AnalyzeAndPlanDigitMemory/(ConstantDivisor|RuntimeDivisor)/1/|BM_AnalyzeAndPlanRefinedMemory/1/8/1)"],
     deps = [
         ":source_memory_plan",
         "//loom/src/loom/analysis:view_regions",

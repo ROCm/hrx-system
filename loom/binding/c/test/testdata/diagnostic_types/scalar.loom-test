@@ -1,0 +1,5 @@
+// RUN: verify
+func.def @mismatch(%value: f32) {
+  // ERROR@+1: TYPE/001 {field_a="operands[0]", field_b="type annotation"}
+  func.return %value : i32
+}

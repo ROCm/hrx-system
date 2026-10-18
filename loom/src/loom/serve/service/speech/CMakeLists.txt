@@ -12,6 +12,36 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    input
+  HDRS
+    "input.h"
+  SRCS
+    "input.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    input_test
+  SRCS
+    "input_test.cc"
+  DEPS
+    ::input
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     request
   HDRS
     "request.h"
@@ -48,11 +78,45 @@ loom_cc_library(
   HDRS
     "generator.h"
   DEPS
+    ::input
     ::request
     iree::base
     iree::tokenizer
     loom::serve::runtime::execution
     loom::serve::runtime::parameter::residency
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    consumer
+  HDRS
+    "consumer.h"
+  DEPS
+    ::generator
+    iree::base
+    loom::serve::telemetry::record
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    stream
+  HDRS
+    "stream.h"
+  SRCS
+    "stream.c"
+  DEPS
+    ::consumer
+    ::generator
+    ::input
+    ::request
+    iree::base
+    loom::serve::telemetry::record
   PUBLIC
 )
 endif()
@@ -67,6 +131,7 @@ loom_cc_library(
     "model.c"
   DEPS
     ::generator
+    ::input
     iree::base
     iree::base::threading
     iree::hal
@@ -97,17 +162,43 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    stream_test
+  SRCS
+    "stream_test.cc"
+  DEPS
+    ::consumer
+    ::input
+    ::request
+    ::stream
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::telemetry::record
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_library(
   NAME
     source_service_tests
+  HDRS
+    "service_test.h"
   SRCS
+    "readiness_test.cc"
+    "service_test.cc"
     "source_service_test.cc"
   DEPS
     ::generator
+    ::input
     ::model
     ::request
     ::service
+    ::stream
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -124,11 +215,12 @@ loom_cc_library(
     loom::serve::service
     loom::serve::telemetry::latency
     loom::serve::testing::http_harness
-    loom::serve::testing::maintenance_gate
     loom::serve::testing::model
+    loom::serve::testing::native_allocator
     loom::serve::testing::package
     loom::serve::testing::service_application
     loom::serve::testing::stalled_http_client
+    loom::serve::testing::worker_gate
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   TESTONLY
@@ -170,15 +262,39 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    http
+  HDRS
+    "http.h"
+  SRCS
+    "http.c"
+  DEPS
+    ::consumer
+    ::generator
+    ::output
+    iree::base
+    loom::serve::telemetry::record
+    loom::serve::transport::http::server
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     service
   HDRS
     "service.h"
   SRCS
     "service.c"
   DEPS
+    ::consumer
     ::generator
-    ::output
+    ::http
+    ::input
     ::request
+    ::stream
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -190,13 +306,12 @@ loom_cc_library(
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::telemetry
     loom::serve::service
+    loom::serve::service::kind
     loom::serve::telemetry::latency
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
     loom::serve::transport::http::request
     loom::serve::transport::http::server
-    loom::util::json
-    loom::util::stream
   PUBLIC
 )
 endif()

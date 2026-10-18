@@ -22,8 +22,11 @@ extern "C" {
 
 // Creation options for a Vulkan slab provider bound to one VkMemoryType.
 typedef struct iree_hal_vulkan_slab_provider_options_t {
-  // Parent HAL device used for buffer placement metadata.
+  // Parent HAL device, borrowed through public pool use and native teardown.
   iree_hal_device_t* parent_device;
+
+  // Native allocation domain, retained independently of the parent device.
+  iree_hal_vulkan_allocation_queue_t* allocation_queue;
 
   // Device-level Vulkan dispatch table copied from the logical device.
   const iree_hal_vulkan_device_syms_t* syms;
@@ -62,15 +65,20 @@ typedef struct iree_hal_vulkan_slab_provider_options_t {
 
 // Creates a slab provider that acquires whole Vulkan buffers.
 //
-// |allocator| is borrowed and must outlive the provider and all pools backed by
-// it. The sealed group keeps the native owner alive, while each constructed
-// source retains its provider. Materialized buffers borrow their source pool
+// The provider retains its allocation queue. The parent device outlives public
+// pool use and joins all native batches during teardown before releasing the
+// borrowed |allocator| and Vulkan context. Buffers borrow their source pool
 // throughout their caller-owned allocation epoch.
 iree_status_t iree_hal_vulkan_slab_provider_create(
     iree_hal_vulkan_allocator_t* allocator,
     iree_hal_vulkan_slab_provider_options_t options,
-    iree_string_view_t trace_name, iree_allocator_t host_allocator,
-    iree_hal_slab_provider_t** out_provider);
+    iree_allocator_t host_allocator, iree_hal_slab_provider_t** out_provider);
+
+// Executes a ready batch on the owning native allocation queue. No dependency
+// wait or application work enters this boundary; completion may release the
+// caller-owned descriptor and the source pool.
+void iree_hal_vulkan_slab_provider_execute(
+    iree_hal_slab_operation_t* operation);
 
 #ifdef __cplusplus
 }  // extern "C"

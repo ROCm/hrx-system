@@ -173,6 +173,29 @@ static iree_status_t loom_ir_remap_leaf_attribute(
                                      /*allow_invalid=*/false,
                                      &out_target_attr->string_id);
 
+    case LOOM_ATTR_STRING_ARRAY: {
+      if (source_attr.count == 0) {
+        *out_target_attr = loom_attr_string_array(NULL, 0);
+        return iree_ok_status();
+      }
+      if (!source_attr.string_ids) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty string array attribute has a NULL payload");
+      }
+      loom_string_id_t* target_ids = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(payload_arena, source_attr.count,
+                                    sizeof(*target_ids), (void**)&target_ids));
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(
+            loom_ir_remap_string_id(remap, source_attr.string_ids[i],
+                                    /*allow_invalid=*/false, &target_ids[i]));
+      }
+      *out_target_attr = loom_attr_string_array(target_ids, source_attr.count);
+      return iree_ok_status();
+    }
+
     case LOOM_ATTR_SYMBOL:
       return loom_ir_remap_symbol_ref(remap, source_attr.symbol,
                                       &out_target_attr->symbol);

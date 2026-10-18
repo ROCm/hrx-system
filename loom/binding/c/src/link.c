@@ -263,26 +263,12 @@ static loomc_status_t loomc_link_validate_request_options(
   return loomc_config_validate_text_options(&options->config);
 }
 
-static loomc_status_t loomc_link_result_set_failed(loomc_result_t* result) {
-  return loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
-}
-
-static loomc_status_t loomc_link_result_fail_status(
-    loomc_result_t* result, const loomc_source_t* source,
-    loomc_string_view_t code, loomc_status_t status) {
-  LOOMC_RETURN_IF_ERROR(loomc_result_add_status_diagnostic(
-      result, source, LOOMC_DIAGNOSTIC_SEVERITY_ERROR, code, status));
-  return loomc_link_result_set_failed(result);
-}
-
 static loomc_status_t loomc_link_result_fail_iree_status(
     loomc_result_t* result, const loomc_source_t* source,
     loomc_string_view_t code, iree_status_t status) {
-  loomc_status_t public_status = loomc_status_from_iree(status);
-  loomc_status_t add_status =
-      loomc_link_result_fail_status(result, source, code, public_status);
-  loomc_status_free(public_status);
-  return add_status;
+  return loomc_result_fail_status_diagnostic_consume(
+      result, source, LOOMC_DIAGNOSTIC_SEVERITY_ERROR, code,
+      loomc_status_from_iree(status));
 }
 
 static iree_string_view_t loomc_link_module_name(
@@ -360,8 +346,10 @@ static loomc_status_t loomc_link_translate_operation_status(
     return loomc_link_result_fail_iree_status(result, /*source=*/NULL, code,
                                               status);
   }
+  loomc_result_set_status_code(result,
+                               (loomc_status_code_t)iree_status_code(status));
   iree_status_free(status);
-  return loomc_link_result_set_failed(result);
+  return loomc_ok_status();
 }
 
 static loomc_status_t loomc_link_module_overlay_initialize(
@@ -583,7 +571,7 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
 
   loomc_result_t* result = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+      z0, loomc_result_create(LOOMC_STATUS_OK,
                               loomc_context_source_retention(linker->context),
                               linker->allocator, &result));
 
@@ -708,7 +696,7 @@ loomc_status_t loomc_link_request(loomc_linker_t* linker,
 
   loomc_result_t* result = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+      z0, loomc_result_create(LOOMC_STATUS_OK,
                               loomc_context_source_retention(linker->context),
                               allocator, &result));
 

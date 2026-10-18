@@ -325,16 +325,18 @@ static loomc_status_t loomc_module_mark_deserialize_failed(
     loomc_result_t* result, const loomc_source_t* source,
     loomc_host_size_t before_diagnostic_count) {
   if (loomc_result_diagnostic_count(result) != before_diagnostic_count) {
-    return loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+    loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
+    return loomc_ok_status();
   }
-  loomc_status_t status = loomc_make_status(
-      LOOMC_STATUS_INVALID_ARGUMENT, "module source did not deserialize");
-  loomc_status_t add_status = loomc_result_add_status_diagnostic(
-      result, source, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
-      loomc_make_cstring_view("MODULE/DESERIALIZE"), status);
-  loomc_status_free(status);
-  LOOMC_RETURN_IF_ERROR(add_status);
-  return loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+  const loomc_diagnostic_t diagnostic = {
+      .severity = LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
+      .code = loomc_make_cstring_view("MODULE/DESERIALIZE"),
+      .message = loomc_make_cstring_view("module source did not deserialize"),
+      .range = {.source = source},
+  };
+  LOOMC_RETURN_IF_ERROR(loomc_result_add_diagnostic(result, &diagnostic));
+  loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
+  return loomc_ok_status();
 }
 
 static loomc_status_t loomc_module_deserialize_initialize(
@@ -342,8 +344,8 @@ static loomc_status_t loomc_module_deserialize_initialize(
     loomc_allocator_t allocator, loomc_module_deserialize_state_t* out_state) {
   *out_state = (loomc_module_deserialize_state_t){0};
   LOOMC_RETURN_IF_ERROR(loomc_result_create(
-      LOOMC_RESULT_STATE_SUCCEEDED, loomc_context_source_retention(context),
-      allocator, &out_state->result));
+      LOOMC_STATUS_OK, loomc_context_source_retention(context), allocator,
+      &out_state->result));
   loomc_status_t status = loomc_module_create_empty(
       context, workspace, allocator, &out_state->module);
   out_state->before_diagnostic_count =
@@ -679,10 +681,9 @@ static loomc_status_t loomc_module_verify_target_into_result(
       z0, loomc_status_from_iree(loom_low_verify_module(
               module->module, &options, &scratch, &verify_result)));
   if (verify_result.error_count != 0) {
-    loomc_status_t return_status =
-        loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+    loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
     IREE_TRACE_ZONE_END(z0);
-    return return_status;
+    return loomc_ok_status();
   }
   if (target_environment == loomc_context_target_environment(module->context)) {
     module->verification.context_target = true;
@@ -738,8 +739,8 @@ loomc_status_t loomc_module_verify(loomc_module_t* module,
   }
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(
-      LOOMC_RESULT_STATE_SUCCEEDED,
-      loomc_context_source_retention(module->context), allocator, &result));
+      LOOMC_STATUS_OK, loomc_context_source_retention(module->context),
+      allocator, &result));
   const uint32_t max_errors = options ? options->max_errors : 0;
   loomc_module_invalidate_verification(module);
   loomc_status_t status = loomc_result_verify_loom_module(

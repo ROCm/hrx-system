@@ -113,7 +113,7 @@ def test_uniform_shifts_cover_constant_and_runtime_counts_for_all_lane_widths():
     }
 
 
-def _narrowing_pair(rule: DescriptorRule) -> tuple[str, str]:
+def _narrowing_pair(rule: DescriptorRule | ValueAliasRule) -> tuple[str, str]:
     type_guards = {
         guard.field: guard.type_pattern
         for guard in rule.guards
@@ -206,6 +206,36 @@ def test_scalar_integer_constants_cover_every_fixed_width_type() -> None:
         "i16": "wasm.i32.const",
         "i32": "wasm.i32.const",
         "i64": "wasm.i64.const",
+    }
+
+
+def test_scalar_integer_truncation_covers_every_carrier_pair() -> None:
+    actual = {}
+    for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases:
+        if rule.source_op is not conversion.scalar_trunci:
+            continue
+        input_type, result_type = _narrowing_pair(rule)
+        if result_type == "i1":
+            continue
+        pair = (input_type, result_type)
+        assert pair not in actual
+        if input_type == "i64":
+            assert isinstance(rule, DescriptorRule)
+            assert len(rule.emit) == 1
+            assert rule.emit[0].descriptor.key == "wasm.i32.wrap_i64"
+            assert rule.emit[0].operands == {"input": ValueRef.operand("input")}
+            assert rule.emit[0].results == {"dst": ValueRef.result("result")}
+        else:
+            assert isinstance(rule, ValueAliasRule)
+            assert rule.source == ValueRef.operand("input")
+            assert rule.result == ValueRef.result("result")
+        actual[pair] = rule
+
+    assert set(actual) == {
+        (f"i{source_bits}", f"i{result_bits}")
+        for source_bits in (16, 32, 64)
+        for result_bits in (8, 16, 32)
+        if result_bits < source_bits
     }
 
 

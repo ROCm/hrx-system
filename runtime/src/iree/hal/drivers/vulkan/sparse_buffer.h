@@ -11,6 +11,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/vulkan/api.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
+#include "iree/hal/memory/tracing.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +52,7 @@ iree_status_t iree_hal_vulkan_sparse_buffer_create_bound_sync(
     VkMemoryRequirements memory_requirements, uint32_t memory_type_index,
     VkDeviceSize max_allocation_size,
     VkMemoryAllocateFlags memory_allocate_flags,
+    const iree_hal_memory_trace_t* allocation_trace,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 
 // Returns true if |buffer| is a Vulkan sparse HAL buffer.

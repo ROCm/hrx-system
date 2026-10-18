@@ -15,8 +15,8 @@ model, not separate VM instances. [Source preparation](source.h) and
 The shared [program runtime](../../runtime/program/program.h) accepts text or
 bytecode source inputs through the same compilation path.
 
-The [service](service.h) is the serialized owner of HTTP claims, admission and
-epoch completion. Finite CPU preparation/output tasks borrow its model and
+The [service](service.h) is the serialized owner of request receipts, admission,
+and epoch completion. Finite CPU preparation/output tasks borrow its model and
 session storage. Device readiness and CPU release callbacks publish completion
 and wake the owner; they do not mutate sessions or destroy the model. Input
 preparation can overlap an accepted epoch on other rows. No service creates a
@@ -133,9 +133,64 @@ request asynchronous pool trim.
 
 [Chat policy](chat.h) calls the model's source VM to render input, classify output
 and retain canonical conversation state. [Session output](session.h) owns
-incremental decoding, bounded JSON/SSE packets and output credit. Shared error
-[responses](response.h) consume diagnostic status at the wire boundary without
-borrowing scratch used by a CPU output task.
+incremental decoding and source classification. A request's [consumer
+receipt](consumer.h) preserves input storage and owns bounded output delivery
+independently of the model row. The [HTTP adapter](http.h) encodes JSON/SSE in
+the existing CPU output task, then publishes its staged packet on the serving
+owner. An empty stage permits another epoch while the previous copied send is
+in flight; a full stage behind a stalled reader pauses only that row.
+
+Pending requests move their receipt into the admitted row without changing
+input storage. Rejection, cancellation, and completion release it only after
+accepted CPU/device borrowers and request-local views retire. HTTP rejection
+uses independent scratch and can overlap another row's output task. Translation
+failure discards the incomplete staged response, invalidates canonical reuse,
+and publishes the terminal protocol error.
+
+Generated function calls form one completed transaction. Source parsing and
+canonical history formatting must both succeed before the owned
+[tool-call table](tool_calls.h) is published. It retains decoded names,
+argument documents, and stable request-derived IDs independently of VM or
+request storage. HTTP encoders consume those records directly, adding delta
+indexes for streaming output. A later invalid record leaves no partial call
+set, and retained session/checkpoint histories do not keep this output table.
+
+## Native text consumers
+
+An in-process serving owner uses `loom_serve_registry_try_open_text` with a
+deployment name and a [native request](stream.h). The request contains the same
+supported chat JSON document as HTTP, in an owning string builder, plus optional
+session and checkpoint selectors. Acceptance moves the builder and copies the
+selectors; pressure or immediate failure leaves all caller ownership intact.
+Source validation, image preparation, canonical history, and packed model
+execution use the existing pending queue and shared workers. Constructing a
+large conversation or image payload can happen before entering the owner turn;
+admission never copies the complete JSON body.
+
+With `stream:true`, `loom_serve_text_stream_peek` borrows an ordered block of
+content and reasoning spans. `loom_serve_text_stream_block_count` and
+`loom_serve_text_stream_block_at` traverse those spans without parsing output
+JSON. Consuming the block returns delivery credit. The CPU output task may
+prepare the next block while the first is unread, then only this request waits
+for credit. An empty final block also requires consumption. With `stream:false`,
+the handle retains the complete result without incremental spans.
+
+After execution retires, `loom_serve_text_stream_result` exposes the complete
+content, reasoning, validated tool calls, finish reason, request identity, and
+committed token usage. Those allocations move from the completed source
+transaction; they do not retain a model row or its source VM. Canonical history
+remains separately owned by the session and can resume through HTTP or native
+admission. The final result remains valid through model removal, same-name
+replacement, and registry destruction until the caller closes the handle.
+
+The caller serializes handle operations with registry advancement. Closing
+immediately cancels output interest, while accepted CPU/device borrowers retain
+execution ownership until retirement. Source rejection and generation failure
+publish an owned terminal status. A stop discards undelivered publication but
+preserves previously borrowed bytes until consume or close. Holding a final
+result does not prevent graceful model removal.
+
+## Source request policy
 
 Source `request_defaults(options)` validates deployment policy once. Each
 `request_options(defaults, request, nonce)` call validates overrides and returns

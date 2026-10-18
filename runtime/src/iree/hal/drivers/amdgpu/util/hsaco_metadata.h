@@ -48,7 +48,7 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_arg_t {
   iree_string_view_t name;
   // Byte offset in the kernel's kernarg segment.
   uint32_t offset;
-  // Byte length of the kernarg storage for this argument.
+  // Byte length of the argument payload within the kernarg segment.
   uint32_t size;
   // Storage alignment in bytes when explicitly available; otherwise 0.
   uint32_t alignment;

@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVE_RUNTIME_EXECUTION_EXECUTION_H_
 #define LOOM_SERVE_RUNTIME_EXECUTION_EXECUTION_H_
 
+#include "loom/serve/runtime/execution/queues.h"
 #include "loom/serve/runtime/execution/workspace.h"
 
 #ifdef __cplusplus
@@ -21,15 +22,16 @@ extern "C" {
 // Completion values belong to this object and the method's named timeline.
 typedef struct loom_serve_execution_t loom_serve_execution_t;
 
-// Retains the device, both exact queues and the shared workspace. Both queues
-// belong to the same device and must be admitted by the workspace's backing
-// scope. Other execution domains may use different devices in that scope.
-// The device must belong to the workspace's live group, whose lifetime
-// encloses the execution domain and all its work.
+// Acquires a queue binding and retains the shared workspace. The device owner
+// serializes creation through this queue set; final releases may occur on
+// other threads. Both selected families must be admitted by the workspace's
+// backing scope. Other domains may use different devices in that scope.
+// The queues' device belongs to the workspace's live group, whose lifetime
+// encloses the execution domain and all its work. The binding returns only
+// when the last execution reference is released, including constructor failure.
 iree_status_t loom_serve_execution_create(
-    iree_hal_queue_t* dispatch_queue, iree_hal_queue_t* transfer_queue,
-    loom_serve_workspace_t* workspace, iree_allocator_t host_allocator,
-    loom_serve_execution_t** out_execution);
+    loom_serve_execution_queues_t* queues, loom_serve_workspace_t* workspace,
+    iree_allocator_t host_allocator, loom_serve_execution_t** out_execution);
 
 // Retains the execution domain. NULL is accepted.
 void loom_serve_execution_retain(loom_serve_execution_t* execution);
@@ -77,6 +79,17 @@ iree_status_t loom_serve_execution_alloca(
     loom_serve_execution_t* execution,
     const iree_hal_pool_reservation_request_t* request,
     iree_hal_buffer_t** out_buffer);
+
+// Enqueues a batch from caller-selected persistent storage on the work
+// timeline. The caller owns each returned buffer. The shared workspace captures
+// the raw roots and their source pool through final queue/buffer retirement,
+// including early failed readiness, in a storage scope that does not affect
+// workspace idle expiry. Subsequent domain work observes backing readiness.
+// Model-specific retirement tracking wraps these buffers separately.
+iree_status_t loom_serve_execution_alloca_from_pool(
+    loom_serve_execution_t* execution, iree_hal_pool_t* pool,
+    iree_host_size_t count, const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** out_buffers);
 
 // Enqueues release after all preceding accepted work. Caller ownership is not
 // consumed. A synchronous rejection leaves the allocation live until its final

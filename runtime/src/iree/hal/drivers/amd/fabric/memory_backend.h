@@ -9,7 +9,7 @@
 
 #include "amdf/amdf.h"
 #include "iree/hal/api.h"
-#include "iree/hal/memory/maintenance.h"
+#include "iree/hal/drivers/amd/fabric/allocation_queue.h"
 #include "iree/hal/memory_backend.h"
 
 #ifdef __cplusplus
@@ -65,6 +65,11 @@ typedef struct iree_hal_amd_fabric_memory_storage_t {
 // The device group dominates all owners. Sharing an API and instance identifies
 // one construction domain independently of its available storage scopes.
 typedef struct iree_hal_amd_fabric_memory_backend_options_t {
+  // Static allocation-domain prefix for endpoint-local physical storage,
+  // such as "libamdf-rdna", "libamdf-cdna", or "libamdf-xdna".
+  const char* trace_device_domain;
+  // Physical endpoint ordinal within that family, independent of HAL groups.
+  uint32_t trace_device_ordinal;
   // Negotiated core API table, independent of any execution extension.
   const amdf_api_t* api;
   // Native instance owning the already-created device and address domains.
@@ -98,8 +103,8 @@ typedef struct iree_hal_amd_fabric_memory_backend_t {
   iree_hal_amd_fabric_memory_backend_options_t native;
   // Existing placement-local capacity notification.
   iree_async_notification_t* notification;
-  // Existing independent cold allocation and retirement owner.
-  iree_hal_memory_maintenance_t* maintenance;
+  // Existing native allocation domain, independent of execution queues.
+  iree_hal_amd_fabric_allocation_queue_t* allocation_queue;
   // Existing completion probe with a group-lifetime borrowed context.
   iree_hal_pool_epoch_query_t epoch_query;
 } iree_hal_amd_fabric_memory_backend_t;
@@ -127,7 +132,7 @@ void iree_hal_amd_fabric_memory_backend_initialize(
     iree_hal_device_t* device,
     const iree_hal_amd_fabric_memory_backend_options_t* options,
     iree_async_notification_t* notification,
-    iree_hal_memory_maintenance_t* maintenance,
+    iree_hal_amd_fabric_allocation_queue_t* allocation_queue,
     iree_hal_pool_epoch_query_t epoch_query,
     iree_hal_amd_fabric_memory_backend_t* out_backend);
 

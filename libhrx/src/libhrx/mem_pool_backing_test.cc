@@ -8,7 +8,6 @@
 #include <thread>
 
 #include "hrx_internal.h"
-#include "iree/hal/memory/maintenance.h"
 #include "iree/hal/memory/slab_cache.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -78,18 +77,6 @@ class MemPoolBackingTest : public ::testing::Test {
                                 << ", zero bytes: " << zero_count;
   }
 
-  void JoinMaintenance() {
-    auto* owner = device_->mem_pool_backing.cache->maintenance;
-    iree_hal_memory_maintenance_call(
-        owner,
-        [](void* data) {
-          auto* owner = static_cast<iree_hal_memory_maintenance_t*>(data);
-          while (iree_hal_memory_maintenance_run_one(owner)) {
-          }
-        },
-        owner);
-  }
-
   iree_hal_pool_stats_t BackingStats() {
     iree_hal_pool_stats_t stats = {};
     iree_hal_pool_query_stats(device_->mem_pool_backing.cache, &stats);
@@ -110,7 +97,6 @@ class MemPoolBackingTest : public ::testing::Test {
 
   void Trim(hrx_mem_pool_t pool, size_t bytes = 0) {
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_mem_pool_trim(pool, bytes)));
-    JoinMaintenance();
   }
 
   // Initialized runtime device owning all pools in each test.
@@ -156,7 +142,6 @@ TEST_F(MemPoolBackingTest, LivePoolsReuseBackingAndKeepIndependentAccounting) {
   EXPECT_EQ(ReservedBytes(first.get()), backing_bytes);
   EXPECT_EQ(ReservedBytes(second.get()), 0u);
   buffer.reset();
-  JoinMaintenance();
   if (device_->mem_pool_backing.pool_options.asan.quarantine_size != 0) {
     // Native ASAN keeps returned ranges poisoned until quarantine eviction.
     // Explicit trim drains that child policy while retaining the shared slab.
@@ -204,7 +189,6 @@ TEST_F(MemPoolBackingTest, BackingOutlivesPublicPoolAndItsLastBuffer) {
   first.reset();
   WriteAndCheck(buffer.get(), 0x6B);
   buffer.reset();
-  JoinMaintenance();
   EXPECT_EQ(device_->mem_pool_backing.retention_head, nullptr);
   EXPECT_EQ(BackingStats().bytes_committed, backing_bytes);
 
@@ -248,7 +232,6 @@ TEST_F(MemPoolBackingTest, LogicalLimitsRemainIndependentOfSharedBacking) {
   }
   EXPECT_EQ(BackingStats().bytes_committed, backing_bytes);
   first_buffer.reset();
-  JoinMaintenance();
   first_buffer = Allocate(first.get());
   ASSERT_NE(first_buffer, nullptr);
   WriteAndCheck(first_buffer.get(), 0x58);
@@ -283,7 +266,6 @@ TEST_F(MemPoolBackingTest, SharedRetentionFloorsSurviveSiblingTrimAndTeardown) {
   first_buffer.reset();
   second_buffer.reset();
   third_buffer.reset();
-  JoinMaintenance();
 
   Trim(first.get());
   EXPECT_EQ(BackingStats().bytes_committed, 3 * slab_bytes);
@@ -293,7 +275,6 @@ TEST_F(MemPoolBackingTest, SharedRetentionFloorsSurviveSiblingTrimAndTeardown) {
   SetThreshold(first.get(), slab_bytes);
   SetThreshold(second.get(), slab_bytes);
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_mem_pool_release_unused(first.get())));
-  JoinMaintenance();
   EXPECT_EQ(BackingStats().bytes_committed, slab_bytes);
 
   // A larger new floor preserves available storage without creating more.
@@ -318,7 +299,6 @@ TEST_F(MemPoolBackingTest, ExplicitFloorLastsUntilAutomaticRelease) {
   Trim(second.get());
   EXPECT_EQ(BackingStats().bytes_committed, slab_bytes);
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_mem_pool_release_unused(first.get())));
-  JoinMaintenance();
   EXPECT_EQ(BackingStats().bytes_committed, 0u);
 }
 

@@ -76,6 +76,37 @@ iree_cc_test(
 )
 endif()
 
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND IREE_HAL_DRIVER_XDNA)
+iree_cc_test(
+  NAME
+    native_replay_stress
+  SRCS
+    "native_replay_stress.cc"
+  DEPS
+    iree::base
+    iree::hal
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::hal::cts::util::test_main
+    iree::hal::drivers::amd::driver
+    iree::hal::drivers::amd::xdna::allocation_tracker
+    iree::hal::drivers::amd::xdna::image::testdata::add_i32
+    iree::hal::drivers::amd::xdna::image::testdata::add_i32_npu4
+    iree::hal::drivers::amd::xdna::image::testdata::mul_i32
+    iree::hal::drivers::amd::xdna::image::testdata::mul_i32_npu4
+    iree::testing::gtest
+  LABELS
+    "manual"
+    "stress"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.xdna"
+    "iree-run-requirement=libamdf.resource.xdna"
+    "runtime-resource=amd-xdna"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
 iree_cc_binary_benchmark(
   NAME
@@ -94,6 +125,8 @@ iree_cc_binary_benchmark(
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32_npu4
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
+  ARGS
+    "--benchmark_filter=XdnaQueueBenchmark/(ReadyEndToEnd/|UnresolvedSubmitOnly/|RecordedSwitchingEndToEnd/6/|MeasuredRecordedStreamingEndToEnd/1/)"
   TESTONLY
   LABELS
     "benchmark"

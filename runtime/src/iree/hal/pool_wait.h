@@ -15,6 +15,8 @@ extern "C" {
 
 // Cold capacity observation shared by synchronous allocators and queues.
 // Successful allocation attempts need neither this object nor its operations.
+// Allocation retries use ALLOW_WAIT_FRONTIER and handle returned dependencies
+// separately; access completion alone does not publish a capacity notification.
 typedef struct iree_hal_pool_wait_t iree_hal_pool_wait_t;
 
 typedef struct iree_hal_pool_wait_callback_t {

@@ -54,15 +54,15 @@ low.func.def public target<vm.core> abi(vm_function) @call_vector_result(%input:
   %c1 = constant.i32 1
   %c2 = constant.i32 2
   %c3 = constant.i32 3
-  %31 = constant.i64 3
-  %32 = integer.compare.i64 %lane, %31, "eq"
-  %33 = constant.i64 2
+  %27 = constant.i64 1
+  %28 = integer.compare.i64 %lane, %27, "eq"
+  %29 = value.select %28, %c1, %input : reg<vm.value : i32>
+  %30 = constant.i64 2
+  %31 = integer.compare.i64 %lane, %30, "eq"
+  %32 = value.select %31, %c2, %29 : reg<vm.value : i32>
+  %33 = constant.i64 3
   %34 = integer.compare.i64 %lane, %33, "eq"
-  %35 = constant.i64 1
-  %36 = integer.compare.i64 %lane, %35, "eq"
-  %37 = value.select %36, %c1, %input : reg<vm.value : i32>
-  %38 = value.select %34, %c2, %37 : reg<vm.value : i32>
-  %result = value.select %32, %c3, %38 : reg<vm.value : i32>
+  %result = value.select %34, %c3, %32 : reg<vm.value : i32>
   return %result
 }
 

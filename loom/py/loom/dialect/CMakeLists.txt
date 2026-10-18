@@ -27,6 +27,7 @@ iree_py_library(
     loom::py::loom::dialect::group::group
     loom::py::loom::dialect::hal::hal
     loom::py::loom::dialect::index::index
+    loom::py::loom::dialect::input::input
     loom::py::loom::dialect::kernel::kernel
     loom::py::loom::dialect::low::low
     loom::py::loom::dialect::pass_::pass_

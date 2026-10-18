@@ -1,0 +1,66 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+target.decl @pocket
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.request_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.rotary_capacity : %value: index where [range(%value, 16, 1048576)]
+
+template.decl pure @pocket.batch_work_header_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.request_state_size(%capacity: index) -> (offset)
+
+template.decl @pocket.element() -> (index)
+
+template.decl @pocket.batch.work_record(%work: buffer, %packed: index) -> (view<8xi32>)
+
+template.decl pure @pocket.prefix.capacity() -> (index)
+
+template.def<@pocket.prefix.capacity> pure @pocket_prefix_capacity() -> (index) {
+  %requests = config.get @pocket.batch_capacity : index
+  %block = index.constant 32 : index
+  %capacity = index.mul %requests, %block : index
+  template.return %capacity : index
+}
+
+template.decl pure @pocket.prefix.header() -> (offset)
+
+template.def<@pocket.prefix.header> pure @pocket_prefix_header() -> (offset) {
+  %requests = config.get @pocket.batch_capacity : index
+  %header = template.apply<@pocket.batch_work_header_size>(%requests) pure : (index) -> (offset)
+  %stride = index.constant 160 : offset
+  %records = index.scale %requests, %stride : index, offset -> offset
+  %origin = index.add %header, %records : offset
+  template.return %origin : offset
+}
+
+template.decl @pocket.prefix.count(%work: buffer) -> (index)
+
+template.def<@pocket.prefix.count> device @pocket_prefix_count(%work: buffer) -> (index) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %origin = template.apply<@pocket.prefix.header>() pure : () -> (offset)
+  %header = buffer.view %work[%origin] : buffer -> view<4xi32>
+  %word = view.load %header[0] : view<4xi32> -> i32
+  %value = index.cast %word : i32 to index
+  %count = index.assume %value [ge(%value, 1), le(%value, %capacity)] : index
+  template.return %count : index
+}
+
+template.decl pure @pocket.prefix.record_origin(%column: index) -> (offset)
+
+template.def<@pocket.prefix.record_origin> pure @pocket_prefix_record_origin(%column: index) -> (offset) {
+  %header = template.apply<@pocket.prefix.header>() pure : () -> (offset)
+  %stride = index.constant 16 : offset
+  %records = index.add %header, %stride : offset
+  %relative = index.scale %column, %stride : index, offset -> offset
+  %origin = index.add %records, %relative : offset
+  template.return %origin : offset
+}

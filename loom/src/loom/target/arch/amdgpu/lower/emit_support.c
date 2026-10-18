@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/source_integer_representation.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
@@ -568,10 +569,18 @@ static iree_status_t loom_amdgpu_emit_sgpr_byte_offset_term_with_materializer(
   loom_value_id_t low_offset = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       materializer(context, source_op, term->index, &low_offset));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_normalize_narrow_source_integer(
+      context, source_op, term->index, low_offset,
+      LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_SIGN_EXTENDED, sgpr_type,
+      &low_offset));
   for (uint8_t i = 0; i < term->stride_value_count; ++i) {
     loom_value_id_t low_stride = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
         materializer(context, source_op, term->stride_values[i], &low_stride));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_normalize_narrow_source_integer(
+        context, source_op, term->stride_values[i], low_stride,
+        LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_SIGN_EXTENDED, sgpr_type,
+        &low_stride));
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_mul_u32(
         context, source_op, low_offset, low_stride, sgpr_type, &low_offset));
   }
@@ -614,6 +623,10 @@ iree_status_t loom_amdgpu_emit_sgpr_byte_offset(
 
   loom_value_id_t low_index =
       loom_low_lower_lookup_value(context, dynamic_index);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_normalize_narrow_source_integer(
+      context, source_op, dynamic_index, low_index,
+      LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_SIGN_EXTENDED, sgpr_type,
+      &low_index));
   loom_value_id_t low_dynamic_offset = low_index;
   if (dynamic_index_byte_stride != 1) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_scale_byte_offset_u32(

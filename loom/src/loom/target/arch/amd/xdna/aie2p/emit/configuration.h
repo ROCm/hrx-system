@@ -97,10 +97,14 @@ typedef struct loom_aie2p_configuration_plan_t loom_aie2p_configuration_plan_t;
 // Building evaluates all configuration functions and retains every fact needed
 // for product admission, but does not compile or link resident workers. All
 // storage in |out_plan| and |out_entry| belongs to the request's arena.
+// |versions| supplies the artifact owner's existing symbol index. The plan
+// borrows its arena-owned entries; module symbols remain fixed through worker
+// materialization.
 // Unsupported authored configuration and unresolved physical values leave
 // |out_valid| false. Status reports infrastructure failures.
 iree_status_t loom_aie2p_configuration_plan_build(
     const loom_aie2p_xdna_artifact_request_t* request,
+    const loom_target_function_version_snapshot_t* versions,
     const loom_op_t* entry_op, const loom_xdna_device_profile_t* device_profile,
     loom_aie2p_configuration_plan_t** out_plan,
     loom_aie2p_xdna_entry_t* out_entry, bool* out_valid);

@@ -13,8 +13,11 @@
 #include "iree/task/executor.h"
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 #include <type_traits>
+#include <utility>
 
 #include "iree/base/api.h"
 #include "iree/base/threading/notification.h"
@@ -64,7 +67,9 @@ class TestWaiter {
 
 // Creates a simple executor with the given number of workers.
 // Caller must release with iree_task_executor_release.
-static iree_task_executor_t* CreateExecutor(iree_host_size_t worker_count) {
+static iree_task_executor_t* CreateExecutor(
+    iree_host_size_t worker_count,
+    iree_allocator_t allocator = iree_allocator_system()) {
   iree_task_topology_t topology;
   iree_task_topology_initialize_from_group_count(worker_count, &topology);
 
@@ -72,8 +77,8 @@ static iree_task_executor_t* CreateExecutor(iree_host_size_t worker_count) {
   iree_task_executor_options_initialize(&options);
 
   iree_task_executor_t* executor = NULL;
-  IREE_CHECK_OK(iree_task_executor_create(options, &topology,
-                                          iree_allocator_system(), &executor));
+  IREE_CHECK_OK(
+      iree_task_executor_create(options, &topology, allocator, &executor));
 
   iree_task_topology_deinitialize(&topology);
   return executor;
@@ -170,6 +175,111 @@ static void SpinUntilInternalState(Fn&& condition) {
 //===----------------------------------------------------------------------===//
 // Construction tests
 //===----------------------------------------------------------------------===//
+
+// Observes complete native executor/thread reclamation through the real backing
+// allocator. The lock also joins the allocator callback's final state access.
+class ExecutorLifetime {
+ public:
+  iree_allocator_t allocator() { return {this, Control}; }
+
+  void AwaitRelease() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return allocation_count_ == 0; });
+  }
+
+  size_t allocation_count() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return allocation_count_;
+  }
+
+ private:
+  static iree_status_t Control(void* self, iree_allocator_command_t command,
+                               const void* params, void** inout_pointer) {
+    auto* state = static_cast<ExecutorLifetime*>(self);
+    std::lock_guard<std::mutex> lock(state->mutex_);
+    const bool had_pointer = *inout_pointer != nullptr;
+    iree_allocator_t allocator = iree_allocator_system();
+    iree_status_t status =
+        allocator.ctl(allocator.self, command, params, inout_pointer);
+    if (iree_status_is_ok(status)) {
+      if (command == IREE_ALLOCATOR_COMMAND_FREE && had_pointer) {
+        --state->allocation_count_;
+        state->condition_.notify_all();
+      } else if (command != IREE_ALLOCATOR_COMMAND_FREE && !had_pointer) {
+        ++state->allocation_count_;
+      }
+    }
+    return status;
+  }
+
+  // Serializes allocation accounting and the final callback observation.
+  std::mutex mutex_;
+  // Posted after native allocations are released.
+  std::condition_variable condition_;
+  // Executor and thread objects whose backing storage remains live.
+  size_t allocation_count_ = 0;
+};
+
+TEST(ExecutorTest, ExternalFinalReleaseJoinsWorkers) {
+  ExecutorLifetime lifetime;
+  auto* executor = CreateExecutor(4, lifetime.allocator());
+  EXPECT_GT(lifetime.allocation_count(), 0u);
+  iree_task_executor_release(executor);
+  EXPECT_EQ(lifetime.allocation_count(), 0u);
+}
+
+class ExecutorWorkerReleaseTest
+    : public ::testing::TestWithParam<std::pair<int, int>> {};
+
+TEST_P(ExecutorWorkerReleaseTest, FinalProcessOwnerReleasesExecutor) {
+  ExecutorLifetime lifetime;
+  const auto [worker_count, wake_budget] = GetParam();
+  auto* executor = CreateExecutor(worker_count, lifetime.allocator());
+
+  struct Context {
+    // Executor reference owned by the process until its release callback.
+    iree_task_executor_t* executor = nullptr;
+    // Holds final process release until the submitting owner has returned.
+    std::mutex release_gate;
+    // Written after final public release returns to the owning worker.
+    bool release_returned = false;
+  } context;
+  context.executor = executor;
+  std::unique_lock<std::mutex> release_gate(context.release_gate);
+
+  auto* process = new iree_task_process_t;
+  iree_task_process_initialize(
+      +[](iree_task_process_t* process,
+          const iree_task_worker_context_t* worker_context,
+          iree_task_process_drain_result_t* result) {
+        result->did_work = true;
+        result->completed = true;
+        return iree_ok_status();
+      },
+      /*suspend_count=*/0, wake_budget, process);
+  process->user_data = &context;
+  process->release_fn = +[](iree_task_process_t* process) {
+    auto* context = static_cast<Context*>(process->user_data);
+    delete process;
+    std::lock_guard<std::mutex> lock(context->release_gate);
+    iree_task_executor_release(context->executor);
+    context->release_returned = true;
+  };
+  iree_task_executor_retain(executor);
+  iree_task_executor_schedule_process(executor, process);
+  iree_task_executor_release(executor);
+  release_gate.unlock();
+
+  lifetime.AwaitRelease();
+  EXPECT_TRUE(context.release_returned);
+  EXPECT_EQ(lifetime.allocation_count(), 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(ExecutorTest, ExecutorWorkerReleaseTest,
+                         ::testing::Values(std::make_pair(1, 1),
+                                           std::make_pair(4, 1),
+                                           std::make_pair(1, 4),
+                                           std::make_pair(4, 4)));
 
 TEST(ExecutorTest, RejectsEmptyTopology) {
   iree_task_topology_t topology;

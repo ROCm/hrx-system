@@ -71,6 +71,7 @@ loom_cc_library(
 loom_cc_benchmark(
     name = "compile_throughput_benchmark",
     srcs = [
+        "module_config_benchmark.cc",
         "pass_program_benchmark.cc",
         "targetless_compile_throughput_benchmark.cc",
     ],

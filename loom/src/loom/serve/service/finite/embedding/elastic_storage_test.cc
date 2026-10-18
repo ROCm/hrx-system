@@ -18,8 +18,8 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
-#include "loom/serve/testing/maintenance_gate.h"
 #include "loom/serve/testing/model.h"
+#include "loom/serve/testing/native_allocator.h"
 #include "loom/serve/testing/package.h"
 #include "loom/serve/testing/stalled_stderr.h"
 
@@ -48,19 +48,18 @@ TEST_F(ElasticEmbeddingServiceTest,
                 .find("HTTP/1.1 200"),
             0u);
   {
-    loom_serve::testing::MaintenanceGate gate(
-        loom_serve_device_storage_pool(device_)->maintenance);
+    loom_serve::testing::ScopedNativeHold gate(device_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
     ASSERT_EQ(Read(Send(R"({"model":"cold"})", "/v1/models/deactivate"))
                   .find("HTTP/1.1 202"),
               0u);
-    const auto releasing = WaitModel("cold", R"("releasing_bytes":2097152)");
-    EXPECT_NE(releasing.find(R"("committed_bytes":2097152)"),
+    gate.WaitEntered();
+    const auto retired = WaitModel("cold", R"("parameter_operation":"idle")");
+    EXPECT_NE(retired.find(R"("committed_bytes":0)"), std::string::npos);
+    // Model ownership can end while its native capacity remains charged.
+    EXPECT_NE(Read(Send({}, "/v1/status", "GET"))
+                  .find(R"("releasing_bytes":2097152)"),
               std::string::npos);
-    EXPECT_NE(releasing.find(R"("parameter_operation":"deactivating")"),
-              std::string::npos);
-    EXPECT_EQ(Read(Send(R"({"model":"cold"})", "/v1/models/activate"))
-                  .find("HTTP/1.1 409"),
-              0u);
     EXPECT_NE(Read(Send(R"({"model":"fixture","input":"a"})"))
                   .find(R"("embedding":[1,1,1,1])"),
               std::string::npos);
@@ -78,7 +77,7 @@ TEST_F(ElasticEmbeddingServiceTest,
 }
 
 TEST_F(ElasticEmbeddingServiceTest,
-       PressureReleaseDefersAdmissionAndUnregisterJoinsNativeOwnership) {
+       PressureReleaseDefersAdmissionWithoutRetainingTheRetiredModel) {
   const std::string package =
       iree::testing::MakeTempFilePath("parameter_release_pressure");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
@@ -97,11 +96,13 @@ TEST_F(ElasticEmbeddingServiceTest,
             std::string::npos);
   int waiting = -1;
   {
-    loom_serve::testing::MaintenanceGate gate(
-        loom_serve_device_storage_pool(device_)->maintenance);
+    loom_serve::testing::ScopedNativeHold gate(device_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
     waiting = Send(R"({"model":"second","input":"a"})");
-    const auto releasing = WaitModel("first", R"("releasing_bytes":2097152)");
-    EXPECT_NE(releasing.find(R"("committed_bytes":2097152)"),
+    gate.WaitEntered();
+    ASSERT_NO_FATAL_FAILURE(WaitModel("first", R"("committed_bytes":0)"));
+    EXPECT_NE(Read(Send({}, "/v1/status", "GET"))
+                  .find(R"("releasing_bytes":2097152)"),
               std::string::npos);
     EXPECT_NE(ModelStatus("second").find(R"("committed_bytes":0)"),
               std::string::npos);
@@ -109,12 +110,13 @@ TEST_F(ElasticEmbeddingServiceTest,
                         "/v1/models/unregister"))
                   .find("HTTP/1.1 202"),
               0u);
-    ASSERT_NO_FATAL_FAILURE(WaitModel("first", R"("registration":"retiring")"));
+    ASSERT_NO_FATAL_FAILURE(WaitModel("first", {}));
     EXPECT_NE(Read(Send(R"({"model":"fixture","input":"a"})"))
                   .find(R"("embedding":[1,1,1,1])"),
               std::string::npos);
     EXPECT_EQ(Read(Send({}, "/healthz", "GET")).find("HTTP/1.1 200"), 0u);
-    EXPECT_FALSE(ModelStatus("first").empty());
+    EXPECT_NE(ModelStatus("second").find(R"("pending_bytes":0)"),
+              std::string::npos);
   }
   // No polling request drives the server between release and final inference.
   // The native capacity wake must resume the waiting request itself.
@@ -139,9 +141,9 @@ TEST_F(ElasticEmbeddingServiceTest,
             std::string::npos);
   int cold = -1;
   {
-    loom_serve::testing::MaintenanceGate gate(
-        loom_serve_device_storage_pool(device_)->maintenance);
+    loom_serve::testing::ScopedNativeHold gate(device_);
     cold = Send(R"({"model":"cold","input":"a"})");
+    gate.WaitEntered();
     const auto waiting = WaitModel("cold", R"("pending_bytes":2097152)");
     EXPECT_NE(waiting.find(R"("committed_bytes":0)"), std::string::npos);
     EXPECT_NE(Read(Send(R"({"model":"fixture","input":"a"})"))
@@ -171,9 +173,9 @@ TEST_F(ElasticEmbeddingServiceTest,
             std::string::npos);
   int cold = -1;
   {
-    loom_serve::testing::MaintenanceGate gate(
-        loom_serve_device_storage_pool(device_)->maintenance);
+    loom_serve::testing::ScopedNativeHold gate(device_);
     cold = Send(R"({"model":"cold","input":"a"})");
+    gate.WaitEntered();
     ASSERT_NO_FATAL_FAILURE(WaitModel("cold", R"("pending_bytes":2097152)"));
     EXPECT_EQ(Read(Send(R"({"model":"cold","mode":"abort"})",
                         "/v1/models/unregister"))
@@ -266,7 +268,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   EXPECT_EQ(queued.oldest_active_age, 0);
   // The outer owner holds another model's pin and will release it. Queue the
   // cohort behind that activity instead of treating capacity as unreachable.
-  constexpr auto kShared = LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY;
+  constexpr auto kShared = LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
   EXPECT_TRUE(Step(kShared));  // Prepare requests.
   EXPECT_TRUE(Step(kShared));  // Prepare cohort.
   EXPECT_TRUE(Step(kShared));  // Consume preparation; admission denied.

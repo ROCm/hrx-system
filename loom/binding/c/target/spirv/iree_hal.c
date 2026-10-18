@@ -912,9 +912,8 @@ loomc_status_t loomc_target_select_spirv_iree_hal(
   }
 
   loomc_result_t* result = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
-                                            LOOMC_SOURCE_RETENTION_EXACT,
-                                            allocator, &result));
+  LOOMC_RETURN_IF_ERROR(loomc_result_create(
+      LOOMC_STATUS_OK, LOOMC_SOURCE_RETENTION_EXACT, allocator, &result));
   loomc_spirv_iree_hal_profile_facts_t facts = {0};
   iree_hal_vulkan_device_spec_t vulkan_spec = {0};
   const iree_hal_executable_target_t* executable_target = NULL;

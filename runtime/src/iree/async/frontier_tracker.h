@@ -9,6 +9,7 @@
 
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
+#include "iree/base/internal/atomics.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,8 +28,8 @@ typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
 typedef void (*iree_async_frontier_waiter_fn_t)(void* user_data,
                                                 iree_status_t status);
 
-// Caller-owned storage for a pending frontier wait. Linked into the tracker's
-// waiter list while active. The caller must not modify or free this storage
+// Caller-owned storage for a pending frontier wait. Indexed by the next pending
+// axis and epoch while active. The caller must not modify or free this storage
 // until the callback fires.
 //
 // Usage:
@@ -36,11 +37,13 @@ typedef void (*iree_async_frontier_waiter_fn_t)(void* user_data,
 //   iree_async_frontier_tracker_wait(tracker, &frontier, on_ready, ctx,
 //   &waiter);
 //   // ... waiter is now pending. callback fires when frontier is satisfied.
-//   // After callback fires (or after cancel returns), waiter storage is yours
-//   again.
+//   // After callback fires (or cancel returns true), storage is yours again.
 typedef struct iree_async_frontier_waiter_t {
-  // Intrusive linked list (tracker-internal).
+  // Next pending waiter, or next detached callback awaiting dispatch.
   struct iree_async_frontier_waiter_t* next;
+
+  // Previous pending waiter, used for constant-time removal on terminal paths.
+  struct iree_async_frontier_waiter_t* previous;
 
   // The frontier being waited on. Must remain valid while the waiter is
   // pending. The tracker reads entries during advance() to check satisfaction.
@@ -56,6 +59,26 @@ typedef struct iree_async_frontier_waiter_t {
   // callback after the waiter has been unlinked from the tracker list.
   // Only valid between unlinking and callback invocation.
   iree_status_t dispatch_status;
+
+  // Tracker-owned ordered index for this waiter's next pending dependency.
+  struct {
+    // Smaller pending epoch, or previous peer for a duplicate epoch.
+    struct iree_async_frontier_waiter_t* left;
+    // Larger pending epoch, or next peer for a duplicate epoch.
+    struct iree_async_frontier_waiter_t* right;
+    // Parent in the axis's intrusive tree, or NULL at its root.
+    struct iree_async_frontier_waiter_t* parent;
+    // First same-epoch peer of a tree representative, or NULL.
+    struct iree_async_frontier_waiter_t* peers;
+    // Cached target epoch, avoiding frontier indirection during tree updates.
+    uint64_t epoch;
+    // Stable tracker table slot owning this index entry.
+    uint32_t axis_slot;
+    // Frontier entry currently pending; earlier entries have completed.
+    uint8_t frontier_ordinal;
+    // Tree height, UINT8_MAX for a same-epoch peer, or zero when not pending.
+    uint8_t height;
+  } index;
 } iree_async_frontier_waiter_t;
 
 //===----------------------------------------------------------------------===//
@@ -75,7 +98,7 @@ typedef struct iree_async_frontier_waiter_t {
 //     → participant timeline signals epoch N
 //     → Semaphore timepoint fires
 //     → iree_async_frontier_tracker_advance(tracker, axis, N)
-//     → Tracker checks all pending waiters
+//     → Tracker visits waits whose next axis/epoch became ready
 //     → Waiters whose frontiers are now fully satisfied get their callbacks
 //     → Callbacks submit dependent operations to their scheduler
 //
@@ -101,10 +124,12 @@ typedef struct iree_async_frontier_waiter_t {
 //                  already-dispatched callback must use their own completion
 //                  marker.
 //
-// The internal waiters list is protected by a slim mutex. The advance() hot
-// path does an atomic epoch compare first and only takes the lock if waiters
-// might be satisfied (avoiding lock contention in the common case where axes
-// advance without pending waiters).
+// Waiter indexes are protected by a slim mutex. The advance() hot path updates
+// its axis and checks that axis's earliest pending epoch before taking the
+// lock. Unrelated waits and later epochs require no traversal or locking. Each
+// wait is indexed on its first unresolved entry; satisfied prefixes are not
+// revisited. Terminal failure handling visits the full pending set so failure
+// of any referenced axis is reported even while a different axis is pending.
 //
 // ## Lifecycle
 //
@@ -199,7 +224,8 @@ uint8_t iree_async_frontier_tracker_machine_index(
 // succeeds; the others return ALREADY_EXISTS and consume no additional entry.
 //
 // |semaphore| is a borrowed bridge pointer. The registering participant must
-// retire the axis before destroying the borrowed semaphore.
+// retire the axis before destroying the borrowed semaphore. The tracker owns
+// bridge signaling; other producers must not independently signal it.
 iree_status_t iree_async_frontier_tracker_register_axis(
     iree_async_frontier_tracker_t* tracker, iree_async_axis_t axis,
     iree_async_semaphore_t* semaphore);
@@ -246,7 +272,9 @@ iree_status_t iree_async_frontier_tracker_query(
 //
 // If the axis has an associated semaphore, the semaphore is also signaled
 // to |epoch| (bridging frontier advancement to the proactor's semaphore wait
-// infrastructure).
+// infrastructure). Concurrent or reentrant advances may coalesce bridge
+// signals: the caller currently publishing to the bridge drains the latest
+// epoch while other callers continue without waiting for that publication.
 //
 // Returns the number of waiters that were dispatched.
 iree_host_size_t iree_async_frontier_tracker_advance(
@@ -274,9 +302,10 @@ iree_status_t iree_async_frontier_tracker_wait(
 
 // Cancels a pending wait.
 //
-// Returns true if |waiter| was found in the pending list and removed, meaning
-// the callback will not fire. Returns false if |waiter| was not found, meaning
-// the callback has already been dispatched and may still be executing.
+// |waiter| must have been successfully registered with this tracker. Returns
+// true if it was pending and removed, meaning the callback will not fire.
+// Returns false after cancellation or dispatch; a dispatched callback may
+// still be executing. Caller-owned storage must remain valid through this call.
 bool iree_async_frontier_tracker_cancel_wait(
     iree_async_frontier_tracker_t* tracker,
     iree_async_frontier_waiter_t* waiter);
@@ -293,6 +322,81 @@ bool iree_async_frontier_tracker_cancel_wait(
 void iree_async_frontier_tracker_fail_axis(
     iree_async_frontier_tracker_t* tracker, iree_async_axis_t axis,
     iree_status_t status);
+
+//===----------------------------------------------------------------------===//
+// Logical joins
+//===----------------------------------------------------------------------===//
+
+typedef struct iree_async_frontier_timeline_t iree_async_frontier_timeline_t;
+typedef struct iree_async_frontier_join_wait_t iree_async_frontier_join_wait_t;
+
+// Acquires a retained logical timeline. Healthy idle timelines reuse their
+// registered axis and continue its monotonically increasing epochs; completed
+// points remain valid across leases. Failed timelines are never reused.
+// The tracker owns allocation and identity storage. No thread or semaphore is
+// created. Exhaustion concerns concurrently live or failed timelines, not the
+// number of successful acquire/release cycles.
+iree_status_t iree_async_frontier_tracker_acquire_timeline(
+    iree_async_frontier_tracker_t* tracker,
+    iree_async_frontier_timeline_t** out_timeline);
+void iree_async_frontier_timeline_retain(
+    iree_async_frontier_timeline_t* timeline);
+void iree_async_frontier_timeline_release(
+    iree_async_frontier_timeline_t* timeline);
+
+// Presecured mutable capture of registered-axis dependencies. Storage is sized
+// to the tracker capacity, independently of the compact public frontier width.
+// Only |next| is caller-owned; the remaining fields belong to the join API.
+// The owner serializes begin/merge with every other capture on its timeline.
+// A returned point may escape only after its input set has become immutable.
+typedef struct iree_async_frontier_join_t {
+  // Caller-owned linkage before publish, allowing allocation-free reserve
+  // lists.
+  struct iree_async_frontier_join_t* next;
+  // Retained timeline lease, independent of the caller's metadata lifetime.
+  iree_async_frontier_timeline_t* timeline;
+  // Published proof point, or epoch zero before begin.
+  iree_async_frontier_entry_t point;
+  // Sorted unique input entries in the trailing storage before publication.
+  iree_async_frontier_entry_t* entries;
+  // Number of captured inputs, including the preceding timeline point.
+  uint32_t entry_count;
+  // Maximum distinct inputs established by the tracker capacity.
+  uint32_t entry_capacity;
+  // Presecured ordinary frontier wait records in the trailing storage.
+  iree_async_frontier_join_wait_t* waits;
+  // Number of wait records being published.
+  uint32_t wait_count;
+  // Submission and wait references preserving all callback storage.
+  iree_atomic_int32_t pending_count;
+  // First owned input failure, or zero while healthy.
+  iree_atomic_intptr_t failure_status;
+  // Set after every wait has either registered or completed inline.
+  iree_atomic_int32_t published;
+  // Zero before failure, one when requested, two when cancellation is owned.
+  iree_atomic_int32_t cancellation;
+} iree_async_frontier_join_t;
+
+// Allocates capture storage using the tracker's allocator and pins its lease.
+// The causal domain outlives unpublished captures; domain destruction cancels
+// published waits and reclaims them without an internal reference cycle.
+// This is the fallible preparation step; begin/merge/publish never allocate.
+iree_status_t iree_async_frontier_join_allocate(
+    iree_async_frontier_timeline_t* timeline,
+    iree_async_frontier_join_t** out_join);
+// Releases an unused capture that has never begun.
+void iree_async_frontier_join_free(iree_async_frontier_join_t* join);
+// Begins one immutable-in-order proof and includes its preceding timeline
+// point.
+iree_async_frontier_entry_t iree_async_frontier_join_begin(
+    iree_async_frontier_join_t* join);
+// Captures epoch maxima from a well-formed registered-axis frontier. References
+// to this open proof are already represented by its inputs and are ignored.
+void iree_async_frontier_join_merge(iree_async_frontier_join_t* join,
+                                    const iree_async_frontier_t* frontier);
+// Consumes the sealed capture. Exact waits advance/fail its point inline and
+// reclaim storage after their final callback. Must run outside caller locks.
+void iree_async_frontier_join_publish(iree_async_frontier_join_t* join);
 
 #ifdef __cplusplus
 }  // extern "C"

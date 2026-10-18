@@ -120,8 +120,8 @@ typedef struct loom_vector_component_retained_load_t {
 struct loom_vector_component_plan_t {
   // Active target legalization context.
   loom_target_legalization_context_t* context;
-  // Optional observer for completed authored-operation rewrites.
-  loom_vector_component_packet_rewrite_callback_t rewrite_callback;
+  // Optional callbacks for authored-operation rewrites and deferrals.
+  loom_vector_component_packet_callbacks_t callbacks;
   // Dense one-based record index keyed by local value ordinal.
   uint32_t* value_record_indices;
   // Retained memory roots keyed by local value ordinal.
@@ -1360,12 +1360,30 @@ static iree_status_t loom_vector_component_external_packet(
     if (loom_type_rank(values[value_index].source_type) != 1) {
       const loom_type_t linear_type = loom_vector_component_packet_type(
           values[value_index].source_type, source_lane_count);
-      loom_op_t* bitcast_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
-          &plan->context->rewriter->builder, source,
-          values[value_index].source_type, linear_type, location, &bitcast_op));
-      values[value_index].linear_source =
-          loom_vector_bitcast_result(bitcast_op);
+      const loom_value_t* source_value =
+          loom_module_value(plan->context->module, source);
+      const loom_op_t* source_op = loom_value_is_block_arg(source_value)
+                                       ? NULL
+                                       : loom_value_def_op(source_value);
+      // Row-tile linearization restores the authored shape with a bitcast.
+      // Consume its exact rank-one input so concat packet boundaries remain
+      // visible instead of materializing the inverse alias and slicing it.
+      if (source_op != NULL && loom_vector_bitcast_isa(source_op) &&
+          loom_type_equal(
+              loom_module_value_type(plan->context->module,
+                                     loom_vector_bitcast_input(source_op)),
+              linear_type)) {
+        values[value_index].linear_source =
+            loom_vector_bitcast_input(source_op);
+      } else {
+        loom_op_t* bitcast_op = NULL;
+        IREE_RETURN_IF_ERROR(
+            loom_vector_bitcast_build(&plan->context->rewriter->builder, source,
+                                      values[value_index].source_type,
+                                      linear_type, location, &bitcast_op));
+        values[value_index].linear_source =
+            loom_vector_bitcast_result(bitcast_op);
+      }
     }
   }
   const int64_t static_offset = lane_offset;
@@ -1522,10 +1540,83 @@ loom_vector_component_rewrite_observed_packetized_load_root(
   if (!*out_rewritten) {
     return iree_ok_status();
   }
-  return plan->rewrite_callback.fn(
-      plan->rewrite_callback.user_data, source_op, &authored_query_result,
+  return plan->callbacks.rewritten_fn(
+      plan->callbacks.user_data, source_op, &authored_query_result,
       rewriter->created_op_count - created_op_count_before,
       /*erased_op_count=*/1);
+}
+
+static bool loom_vector_component_shaped_load_root(
+    const loom_vector_component_plan_t* plan,
+    const loom_vector_component_t* component, loom_value_id_t operand,
+    const loom_op_t** out_load_op) {
+  *out_load_op = NULL;
+  const loom_type_t operand_type =
+      loom_module_value_type(plan->context->module, operand);
+  uint32_t operand_lane_count = 0;
+  if (!loom_vector_component_static_lane_count(operand_type,
+                                               &operand_lane_count) ||
+      operand_lane_count != component->lane_count ||
+      loom_type_rank(operand_type) == 1) {
+    return false;
+  }
+  const loom_value_t* operand_value =
+      loom_module_value(plan->context->module, operand);
+  const loom_op_t* operand_op = loom_value_is_block_arg(operand_value)
+                                    ? NULL
+                                    : loom_value_def_op(operand_value);
+  if (operand_op == NULL || !loom_vector_load_isa(operand_op)) {
+    return false;
+  }
+  *out_load_op = operand_op;
+  return true;
+}
+
+// Preserves the complete selected component and its shaped load roots through
+// eager legalization. The view linearizer then exposes proven row-contiguous
+// packets before complete target legalization revisits the component.
+static iree_status_t loom_vector_component_defer_shaped_load_component(
+    loom_vector_component_plan_t* plan,
+    const loom_vector_component_t* component, bool* out_deferred) {
+  *out_deferred = false;
+  if (plan->context->mode != LOOM_TARGET_LEGALIZATION_MODE_EAGER ||
+      plan->callbacks.deferred_fn == NULL) {
+    return iree_ok_status();
+  }
+
+  uint32_t member_index = component->first_member_index;
+  while (member_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
+    const loom_vector_component_record_t* record = &plan->records[member_index];
+    const loom_value_id_t* operands = loom_op_const_operands(record->op);
+    for (uint16_t i = 0; i < record->op->operand_count; ++i) {
+      const uint32_t producer_record_index =
+          loom_vector_component_direct_producer_record(plan, record, i);
+      if (loom_vector_component_record_is_internal_operand(
+              plan, component, producer_record_index)) {
+        continue;
+      }
+      const loom_op_t* load_op = NULL;
+      if (loom_vector_component_shaped_load_root(plan, component, operands[i],
+                                                 &load_op)) {
+        *out_deferred = true;
+        IREE_RETURN_IF_ERROR(
+            plan->callbacks.deferred_fn(plan->callbacks.user_data, load_op));
+      }
+    }
+    member_index = record->next_member_index;
+  }
+  if (!*out_deferred) {
+    return iree_ok_status();
+  }
+
+  member_index = component->first_member_index;
+  while (member_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
+    const loom_vector_component_record_t* record = &plan->records[member_index];
+    IREE_RETURN_IF_ERROR(
+        plan->callbacks.deferred_fn(plan->callbacks.user_data, record->op));
+    member_index = record->next_member_index;
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vector_component_prepare_packetized_load_roots(
@@ -1583,7 +1674,7 @@ static iree_status_t loom_vector_component_prepare_packetized_load_roots(
           retained_load ? component->packet_lane_count : 0;
 
       bool rewritten = false;
-      if (plan->rewrite_callback.fn == NULL) {
+      if (plan->callbacks.rewritten_fn == NULL) {
         IREE_RETURN_IF_ERROR(loom_vector_component_rewrite_packetized_load_root(
             plan, operand_op, maximum_lane_count, &rewritten));
       } else {
@@ -1609,9 +1700,10 @@ static iree_status_t loom_vector_component_materialize(
   if (component->packet_lane_count == 0) {
     return iree_ok_status();
   }
-  if (iree_any_bit_set(
-          plan->context->vector_packet_policy->flags,
-          LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS)) {
+  const bool owns_memory_roots = iree_any_bit_set(
+      plan->context->vector_packet_policy->flags,
+      LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS);
+  if (owns_memory_roots) {
     bool has_store_root = false;
     bool stores_support_packet_lane_count = false;
     IREE_RETURN_IF_ERROR(loom_vector_component_query_packetized_store_roots(
@@ -1624,6 +1716,16 @@ static iree_status_t loom_vector_component_materialize(
       // the complete producer graph.
       return iree_ok_status();
     }
+  }
+
+  bool deferred = false;
+  IREE_RETURN_IF_ERROR(loom_vector_component_defer_shaped_load_component(
+      plan, component, &deferred));
+  if (deferred) {
+    return iree_ok_status();
+  }
+
+  if (owns_memory_roots) {
     bool load_roots_ready = false;
     uint32_t rewritten_load_count = 0;
     IREE_RETURN_IF_ERROR(loom_vector_component_prepare_packetized_load_roots(
@@ -1835,14 +1937,14 @@ static iree_status_t loom_vector_component_materialize(
     IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, record->op));
     member_index = previous_member_index;
   }
-  if (plan->rewrite_callback.fn != NULL) {
+  if (plan->callbacks.rewritten_fn != NULL) {
     member_index = component->first_member_index;
     while (member_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
       const loom_vector_component_record_t* record =
           &plan->records[member_index];
-      IREE_RETURN_IF_ERROR(plan->rewrite_callback.fn(
-          plan->rewrite_callback.user_data, record->op,
-          &record->authored_query_result, record->created_op_count,
+      IREE_RETURN_IF_ERROR(plan->callbacks.rewritten_fn(
+          plan->callbacks.user_data, record->op, &record->authored_query_result,
+          record->created_op_count,
           /*erased_op_count=*/1));
       member_index = record->next_member_index;
     }
@@ -1871,7 +1973,7 @@ loom_vector_component_packet_query_cache_lookup(
 
 iree_status_t loom_vector_component_packet_legalize(
     loom_target_legalization_context_t* context,
-    loom_vector_component_packet_rewrite_callback_t rewrite_callback,
+    loom_vector_component_packet_callbacks_t callbacks,
     loom_vector_component_packet_query_cache_t* out_query_cache,
     uint32_t* out_rewritten_op_count) {
   *out_query_cache = loom_vector_component_packet_query_cache_empty();
@@ -1919,7 +2021,7 @@ iree_status_t loom_vector_component_packet_legalize(
       iree_arena_allocate(context->arena, sizeof(*plan), (void**)&plan));
   *plan = (loom_vector_component_plan_t){
       .context = context,
-      .rewrite_callback = rewrite_callback,
+      .callbacks = callbacks,
       .record_capacity = record_capacity,
   };
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

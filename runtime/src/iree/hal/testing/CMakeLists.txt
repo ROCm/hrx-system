@@ -35,4 +35,16 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    deferred_pool
+  HDRS
+    "deferred_pool.h"
+  DEPS
+    iree::hal
+    iree::testing::gtest
+  TESTONLY
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

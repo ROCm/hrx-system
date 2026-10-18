@@ -84,11 +84,19 @@ class CompiledIndexCase(NamedTuple):
     row_index: int
 
 
+class CompiledContractOpEntry(NamedTuple):
+    """Composed case span and number of target-query lower rules."""
+
+    case_start: int
+    case_count: int
+    query_rule_count: int
+
+
 class CompiledContractIndex(NamedTuple):
     """Dense dialect/op lookup with cases in binding precedence order."""
 
     dialect_base_id: int
-    dialects: tuple[tuple[tuple[int, int], ...], ...]
+    dialects: tuple[tuple[CompiledContractOpEntry, ...], ...]
     cases: tuple[CompiledIndexCase, ...]
 
 
@@ -121,14 +129,35 @@ def compile_contract_index(
     dialect_count = (max(cases_by_op) >> 8) - dialect_base_id + 1
     if dialect_count > 0xFF:
         raise ValueError("contract index dialect span exceeds uint8_t")
-    dialects: list[list[tuple[int, int]]] = [[] for _ in range(dialect_count)]
+    dialects: list[list[CompiledContractOpEntry]] = [[] for _ in range(dialect_count)]
     cases: list[CompiledIndexCase] = []
     for op_kind, op_cases in sorted(cases_by_op.items()):
         dialect = dialects[(op_kind >> 8) - dialect_base_id]
         op_index = op_kind & 0xFF
-        dialect.extend([(CONTRACT_ROW_NONE, 0)] * (op_index + 1 - len(dialect)))
+        dialect.extend(
+            [CompiledContractOpEntry(CONTRACT_ROW_NONE, 0, 0)]
+            * (op_index + 1 - len(dialect))
+        )
         op_cases.sort(key=lambda item: -item[0])
-        dialect[op_index] = (len(cases), len(op_cases))
+        query_rule_count = sum(
+            fragments[case.binding_index].target_contract_query
+            and (
+                case.system == ContractSystem.DESCRIPTOR_RULE
+                or (
+                    case.system
+                    in (
+                        ContractSystem.VALUE_ALIAS,
+                        ContractSystem.VALUE_ELIDE,
+                        ContractSystem.RECIPE_RULE,
+                    )
+                    and case.row_index != CONTRACT_ROW_NONE
+                )
+            )
+            for _, case in op_cases
+        )
+        dialect[op_index] = CompiledContractOpEntry(
+            len(cases), len(op_cases), query_rule_count
+        )
         cases.extend(case for _, case in op_cases)
     if len(cases) > 0xFFFF:
         raise ValueError("contract index case count exceeds uint16_t")

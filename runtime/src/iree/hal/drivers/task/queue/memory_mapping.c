@@ -7,30 +7,48 @@
 #include "iree/hal/drivers/task/queue/queue.h"
 #include "iree/hal/virtual_buffer.h"
 
-static void iree_hal_task_queue_map_execute(
-    iree_hal_memory_maintenance_entry_t* entry) {
+typedef struct iree_hal_task_queue_mapping_t {
+  // Finite worker process retained by the operation's arena until release_fn.
+  iree_task_process_t process;
+  // Accepted HAL operation, completed after the final process access.
+  iree_hal_task_queue_op_t* operation;
+  // Prepared native mapping batch retained by the operation's resource set.
+  iree_hal_host_call_t call;
+  // Owned native result transferred to HAL completion by release_fn.
+  iree_status_t status;
+} iree_hal_task_queue_mapping_t;
+
+static iree_status_t iree_hal_task_queue_map_execute(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* out_result) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_task_queue_op_t* operation =
-      iree_containerof(entry, iree_hal_task_queue_op_t, mapping.entry);
+  iree_hal_task_queue_mapping_t* mapping = process->user_data;
+  iree_hal_task_queue_profile_start_host_execution(mapping->operation);
   iree_hal_host_call_context_t context = {
-      .queue = &operation->queue->base,
+      .queue = &mapping->operation->queue->base,
       .signal_semaphore_list = iree_hal_semaphore_list_empty(),
   };
   const uint64_t args[4] = {0};
-  iree_status_t status = operation->mapping.call.fn(
-      operation->mapping.call.user_data, args, &context);
-  if (iree_status_is_ok(status)) {
-    iree_hal_task_queue_op_complete(operation);
-  } else {
-    iree_hal_task_queue_op_fail(operation, status);
-  }
+  mapping->status = mapping->call.fn(mapping->call.user_data, args, &context);
+  out_result->did_work = true;
+  out_result->completed = true;
   IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+static void iree_hal_task_queue_map_release(iree_task_process_t* process) {
+  iree_hal_task_queue_mapping_t* mapping = process->user_data;
+  if (iree_status_is_ok(mapping->status)) {
+    iree_hal_task_queue_op_complete(mapping->operation);
+  } else {
+    iree_hal_task_queue_op_fail(mapping->operation, mapping->status);
+  }
 }
 
 void iree_hal_task_queue_issue_map(iree_hal_task_queue_op_t* operation) {
-  operation->mapping.entry.fn = iree_hal_task_queue_map_execute;
-  iree_hal_memory_maintenance_enqueue(operation->queue->memory_maintenance,
-                                      &operation->mapping.entry);
+  iree_task_executor_schedule_process(operation->queue->executor,
+                                      &operation->mapping->process);
 }
 
 iree_status_t iree_hal_task_queue_submit_map(
@@ -50,9 +68,25 @@ iree_status_t iree_hal_task_queue_submit_map(
     status = iree_hal_task_queue_submit_op_begin(
         queue, IREE_HAL_TASK_QUEUE_OP_MAP, &signals, &operation);
     if (iree_status_is_ok(status)) {
-      operation->mapping.call = call;
-      status = iree_hal_task_queue_submit_op_finish(
-          operation, waits, call.resource ? 1 : 0, &call.resource);
+      status = iree_arena_allocate_aligned(
+          &operation->arena, sizeof(*operation->mapping),
+          iree_alignof(iree_hal_task_queue_mapping_t),
+          (void**)&operation->mapping);
+      if (iree_status_is_ok(status)) {
+        iree_hal_task_queue_mapping_t* mapping = operation->mapping;
+        mapping->operation = operation;
+        mapping->call = call;
+        mapping->status = iree_ok_status();
+        iree_task_process_initialize(iree_hal_task_queue_map_execute,
+                                     /*suspend_count=*/0, /*wake_budget=*/1,
+                                     &mapping->process);
+        mapping->process.user_data = mapping;
+        mapping->process.release_fn = iree_hal_task_queue_map_release;
+        status = iree_hal_task_queue_submit_op_finish(
+            operation, waits, call.resource ? 1 : 0, &call.resource);
+      } else {
+        iree_hal_task_queue_op_discard(operation);
+      }
     }
     iree_hal_resource_release(call.resource);
   }

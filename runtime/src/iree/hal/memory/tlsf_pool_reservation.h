@@ -73,21 +73,18 @@ iree_status_t iree_hal_tlsf_pool_reservation_geometry(
     const iree_hal_asan_pool_options_t* asan,
     iree_hal_tlsf_pool_request_geometry_t* out_geometry);
 
-// Acquires one dedicated ordinary range on the cold path. The source request
-// includes hidden bytes; asan_layout describes optional protection of the view.
-// The returned record owns the source token and view. Exhaustion/budget refusal
-// returns a NULL node and the source result; setup failure restores exact
-// history.
-iree_status_t iree_hal_tlsf_pool_dedicated_acquire(
+// Prepares one dedicated ordinary range from an acquired parent token. Consumes
+// the token on success or failure, preserving its exact history on rollback.
+iree_status_t iree_hal_tlsf_pool_dedicated_prepare(
     iree_hal_pool_t* backing_pool,
     const iree_hal_pool_reservation_request_t* backing_request,
     const iree_hal_asan_pool_options_t* asan,
     const iree_hal_asan_allocation_layout_t* asan_layout,
     const iree_hal_tlsf_pool_reservation_layout_t* layout,
-    const iree_async_frontier_t* requester, iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t reservation, iree_hal_pool_acquire_info_t info,
+    const iree_async_frontier_t* initial_frontier,
     iree_allocator_t host_allocator,
-    iree_hal_tlsf_pool_release_node_t** out_node,
-    iree_hal_pool_acquire_result_t* out_result);
+    iree_hal_tlsf_pool_release_node_t** out_node);
 
 // Merges untouched alignment margins before returning the whole parent token.
 // False preserves an unrepresentable history until caller-quiescent teardown.

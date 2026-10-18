@@ -20,7 +20,7 @@ typedef struct iree_hal_slab_cache_options_t {
   // entire entry; larger or more aligned requests use the same backing pool
   // without entering the idle cache.
   iree_hal_pool_reservation_request_t slab;
-  // Ready idle entries proactively prepared on the captured memory owner.
+  // Ready idle entries proactively acquired from the backing pool.
   // Zero disables prefill. Pending entries also consume the idle limit.
   uint32_t target_count;
   // Maximum idle entries retained, including pending reuse prerequisites.
@@ -34,22 +34,22 @@ typedef struct iree_hal_slab_cache_options_t {
 void iree_hal_slab_cache_options_initialize(
     iree_hal_slab_cache_options_t* out_options);
 
-// Retains |backing_pool| once and captures its native maintenance owner.
-// Entries own ordinary reservations, prepared views and exact reuse history.
-// Hot hits and returns neither allocate metadata nor call the backing pool.
-// Growth-enabled misses join cold preparation on the captured owner, without
-// waiting for another allocation to release capacity. No-growth misses report
-// EXHAUSTED/GROWTH_REQUIRED. Refill errors propagate on the next acquisition.
+// Retains |backing_pool| once. Entries own ordinary reservations, prepared
+// views, and exact reuse history. Hot hits and retained returns allocate no
+// metadata. Eviction and trim return detached entries directly to the backing
+// pool outside the cache lock. Misses and refill use parent acquisition
+// completion; the backing pool determines how native allocation executes.
+// Refill errors propagate on the next acquisition.
 //
-// Prefault touches only actually retired storage. A pending parent prerequisite
-// is preserved without touching its bytes; ordinary reservation eligibility
-// still permits an ordered borrower to accept that range with a dependency.
+// Readiness describes causal eligibility, not a platform residency guarantee.
+// The cache never reads or writes backing bytes. Native residency preparation
+// belongs to the source of physical storage.
+//
 // The cache and its backing pool must outlive all reservations and views.
-// Trim also schedules an ordered sweep after previously queued child returns;
-// it never joins native preparation on the caller. Committed-byte statistics
-// exclude detached returns even while their native retirement is pending.
-// Final destruction joins this cache's maintenance and runs outside the
-// captured executor after the caller has retired its execution.
+// Each in-flight refill retains the cache through terminal completion. Trim
+// applies its retention policy immediately and invalidates any earlier refill;
+// it never joins native preparation. Committed-byte statistics exclude detached
+// returns even while their native retirement is pending.
 iree_status_t iree_hal_slab_cache_create(
     iree_hal_pool_t* backing_pool, const iree_hal_slab_cache_options_t* options,
     iree_allocator_t host_allocator, iree_hal_pool_t** out_pool);
@@ -72,8 +72,6 @@ typedef struct iree_hal_slab_cache_stats_t {
   uint64_t bypass_count;
   // Exponentially weighted observed reuse interval in nanoseconds.
   uint64_t ema_reuse_interval_nanoseconds;
-  // Cumulative time spent prefaulting retired backing in nanoseconds.
-  uint64_t prefault_time_nanoseconds;
 } iree_hal_slab_cache_stats_t;
 
 // Cold snapshot of cache behavior. Counts distinguish actual completion from

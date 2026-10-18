@@ -15,9 +15,9 @@
 extern "C" {
 #endif
 
-// Creates an empty result with state and diagnostic source retention policy.
+// Creates an empty result with a terminal code and source retention policy.
 LOOMC_API_PRIVATE loomc_status_t loomc_result_create(
-    loomc_result_state_t state, loomc_source_retention_t source_retention,
+    loomc_status_code_t status_code, loomc_source_retention_t source_retention,
     loomc_allocator_t allocator, loomc_result_t** out_result);
 
 // Returns the allocator owned by result.
@@ -28,9 +28,10 @@ loomc_result_allocator(const loomc_result_t* result);
 LOOMC_API_PRIVATE loomc_source_retention_t
 loomc_result_source_retention(const loomc_result_t* result);
 
-// Sets the result state while the result is still being built.
-LOOMC_API_PRIVATE loomc_status_t
-loomc_result_set_state(loomc_result_t* result, loomc_result_state_t state);
+// Sets the terminal code while the result is still being built. Diagnostic-only
+// failures use FAILED_PRECONDITION; status normalization preserves its code.
+LOOMC_API_PRIVATE void loomc_result_set_status_code(
+    loomc_result_t* result, loomc_status_code_t status_code);
 
 // Adds a copied diagnostic to result.
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_diagnostic(

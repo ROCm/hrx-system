@@ -37,6 +37,31 @@ iree_c_embed_data(
   PUBLIC
 )
 
+file(GLOB _GLOB_DIAGNOSTIC_TYPES_X_LOOM_TEST LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS diagnostic_types/*.loom-test)
+loom_check_test_suite(
+  NAME
+    diagnostic_types_test
+  SRCS
+    "${_GLOB_DIAGNOSTIC_TYPES_X_LOOM_TEST}"
+)
+
+file(GLOB _GLOB_DIAGNOSTIC_TYPES_X_LOOM_TEST LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS diagnostic_types/*.loom-test)
+iree_c_embed_data(
+  NAME
+    diagnostic_types
+  SRCS
+    "${_GLOB_DIAGNOSTIC_TYPES_X_LOOM_TEST}"
+  C_FILE_OUTPUT
+    "diagnostic_type_testdata.c"
+  H_FILE_OUTPUT
+    "diagnostic_type_testdata.h"
+  IDENTIFIER
+    "loomc_diagnostic_type_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 file(GLOB _GLOB_LINK_DEPENDENCY_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS link_dependency/*.loom)
 iree_c_embed_data(
   NAME

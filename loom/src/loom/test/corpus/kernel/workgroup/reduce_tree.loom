@@ -199,6 +199,58 @@ check.scenario @workgroup_tree_vector_all_values {
   check.return
 }
 
+// Six components cross the native packet boundary while retaining one
+// workgroup collective. The scalar oracle accumulates each component in F32.
+kernel.def @workgroup_tree_bfloat_vector() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %item = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<67x6xbf16>
+  %destination = buffer.view %output[%base] : buffer -> view<67x6xbf16>
+  %value = vector.load %source[%item, 0] : view<67x6xbf16> -> vector<6xbf16>
+  %result = kernel.workgroup.reduce<addf> %value : vector<6xbf16>
+  vector.store %result, %destination[%item, 0] : vector<6xbf16>, view<67x6xbf16>
+  kernel.return
+}
+
+func.def @workgroup_tree_bfloat_vector_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 67 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<67x6xbf16>
+  %destination = buffer.view %output[%base] : buffer -> view<67x6xbf16>
+  %sum_identity = scalar.constant 0.0 : f32
+  %components = index.constant 6 : index
+  scf.for %component = [%begin to %components step %step] {
+    %sum = scf.for %item = [%begin to %end step %step](%accumulator = %sum_identity : f32) -> (f32) {
+      %value = view.load %source[%item, %component] : view<67x6xbf16> -> bf16
+      %wide = scalar.extf %value : bf16 to f32
+      %next = scalar.addf %accumulator, %wide : f32
+      scf.yield %next : f32
+    }
+    %result = scalar.fptrunc %sum : f32 to bf16
+    scf.for %item = [%begin to %end step %step] {
+      view.store %result, %destination[%item, %component] : bf16, view<67x6xbf16>
+    }
+  }
+  func.return
+}
+
+check.scenario @workgroup_tree_bfloat_vector_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0.5) step(0.5) : tensor<67x6xbf16>
+    %output = check.generate.fill value(-1.0) : tensor<67x6xbf16>
+    check.compare<@workgroup_tree_bfloat_vector, @workgroup_tree_bfloat_vector_oracle>(%input, %output) : (tensor<67x6xbf16>, tensor<67x6xbf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67x6xbf16>
+    }
+  }
+  check.return
+}
+
 kernel.def @workgroup_tree_three_waves() {
   %unit = index.constant 1 : index
   %size = index.constant 96 : index
@@ -454,8 +506,8 @@ check.scenario @workgroup_tree_integer_type_values {
   check.return
 }
 
-// Integer-valued inputs keep all three floating sum trees exact. Products use
-// runtime +/-1 factors so their oracle is independent integer arithmetic too.
+// Integer-valued inputs keep the accumulation exact; BF16 rounds the final
+// sum. Products use runtime +/-1 factors and independent integer arithmetic.
 kernel.def @workgroup_tree_float_types() {
   %unit = index.constant 1 : index
   %size = index.constant 67 : index
@@ -464,12 +516,13 @@ kernel.def @workgroup_tree_float_types() {
   %base = index.constant 0 : offset
   %item = kernel.workitem.id<x> : index
   %source = buffer.view %input[%base] : buffer -> view<67xi32>
-  %destination = buffer.view %output[%base] : buffer -> view<67x6xf64>
+  %destination = buffer.view %output[%base] : buffer -> view<67x8xf64>
   %raw = view.load %source[%item] : view<67xi32> -> i32
   %half = scalar.sitofp %raw : i32 to f16
   %single = scalar.sitofp %raw : i32 to f32
   %double = scalar.sitofp %raw : i32 to f64
-  %half_sum, %single_sum, %double_sum = kernel.workgroup.reduce<addf> %half, %single, %double : f16, f32, f64
+  %bfloat = scalar.fptrunc %single : f32 to bf16
+  %half_sum, %single_sum, %double_sum, %bfloat_sum = kernel.workgroup.reduce<addf> %half, %single, %double, %bfloat : f16, f32, f64, bf16
   %parity = scalar.trunci %raw : i32 to i1
   %positive = scalar.constant 1 : i32
   %negative = scalar.constant -1 : i32
@@ -477,24 +530,31 @@ kernel.def @workgroup_tree_float_types() {
   %half_factor = scalar.sitofp %factor : i32 to f16
   %single_factor = scalar.sitofp %factor : i32 to f32
   %double_factor = scalar.sitofp %factor : i32 to f64
-  %half_product, %single_product, %double_product = kernel.workgroup.reduce<mulf> %half_factor, %single_factor, %double_factor : f16, f32, f64
+  %bfloat_factor = scalar.fptrunc %single_factor : f32 to bf16
+  %half_product, %single_product, %double_product, %bfloat_product = kernel.workgroup.reduce<mulf> %half_factor, %single_factor, %double_factor, %bfloat_factor : f16, f32, f64, bf16
   %half_sum_result = scalar.extf %half_sum : f16 to f64
   %single_sum_result = scalar.extf %single_sum : f32 to f64
   %half_product_result = scalar.extf %half_product : f16 to f64
   %single_product_result = scalar.extf %single_product : f32 to f64
-  view.store %half_sum_result, %destination[%item, 0] : f64, view<67x6xf64>
-  view.store %single_sum_result, %destination[%item, 1] : f64, view<67x6xf64>
-  view.store %double_sum, %destination[%item, 2] : f64, view<67x6xf64>
-  view.store %half_product_result, %destination[%item, 3] : f64, view<67x6xf64>
-  view.store %single_product_result, %destination[%item, 4] : f64, view<67x6xf64>
-  view.store %double_product, %destination[%item, 5] : f64, view<67x6xf64>
+  %bfloat_sum_single = scalar.extf %bfloat_sum : bf16 to f32
+  %bfloat_product_single = scalar.extf %bfloat_product : bf16 to f32
+  %bfloat_sum_result = scalar.extf %bfloat_sum_single : f32 to f64
+  %bfloat_product_result = scalar.extf %bfloat_product_single : f32 to f64
+  view.store %half_sum_result, %destination[%item, 0] : f64, view<67x8xf64>
+  view.store %single_sum_result, %destination[%item, 1] : f64, view<67x8xf64>
+  view.store %double_sum, %destination[%item, 2] : f64, view<67x8xf64>
+  view.store %half_product_result, %destination[%item, 3] : f64, view<67x8xf64>
+  view.store %single_product_result, %destination[%item, 4] : f64, view<67x8xf64>
+  view.store %double_product, %destination[%item, 5] : f64, view<67x8xf64>
+  view.store %bfloat_sum_result, %destination[%item, 6] : f64, view<67x8xf64>
+  view.store %bfloat_product_result, %destination[%item, 7] : f64, view<67x8xf64>
   kernel.return
 }
 
 func.def @workgroup_tree_float_types_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<67xi32>
-  %destination = buffer.view %output[%base] : buffer -> view<67x6xf64>
+  %destination = buffer.view %output[%base] : buffer -> view<67x8xf64>
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %items = index.constant 67 : index
@@ -512,13 +572,18 @@ func.def @workgroup_tree_float_types_oracle(%input: buffer, %output: buffer) {
   }
   %sum_result = scalar.sitofp %sum : i64 to f64
   %product_result = scalar.sitofp %product : i64 to f64
+  %bfloat_sum = scalar.fptrunc %sum_result : f64 to bf16
+  %bfloat_sum_single = scalar.extf %bfloat_sum : bf16 to f32
+  %bfloat_sum_result = scalar.extf %bfloat_sum_single : f32 to f64
   scf.for %item = [%begin to %items step %step] {
-    view.store %sum_result, %destination[%item, 0] : f64, view<67x6xf64>
-    view.store %sum_result, %destination[%item, 1] : f64, view<67x6xf64>
-    view.store %sum_result, %destination[%item, 2] : f64, view<67x6xf64>
-    view.store %product_result, %destination[%item, 3] : f64, view<67x6xf64>
-    view.store %product_result, %destination[%item, 4] : f64, view<67x6xf64>
-    view.store %product_result, %destination[%item, 5] : f64, view<67x6xf64>
+    view.store %sum_result, %destination[%item, 0] : f64, view<67x8xf64>
+    view.store %sum_result, %destination[%item, 1] : f64, view<67x8xf64>
+    view.store %sum_result, %destination[%item, 2] : f64, view<67x8xf64>
+    view.store %product_result, %destination[%item, 3] : f64, view<67x8xf64>
+    view.store %product_result, %destination[%item, 4] : f64, view<67x8xf64>
+    view.store %product_result, %destination[%item, 5] : f64, view<67x8xf64>
+    view.store %bfloat_sum_result, %destination[%item, 6] : f64, view<67x8xf64>
+    view.store %product_result, %destination[%item, 7] : f64, view<67x8xf64>
   }
   func.return
 }
@@ -527,20 +592,23 @@ check.scenario @workgroup_tree_float_type_values {
   check.trial[8](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%seed) range(-16 to 16) : tensor<67xi32>
-    %output = check.generate.fill value(123.0) : tensor<67x6xf64>
-    check.compare<@workgroup_tree_float_types, @workgroup_tree_float_types_oracle>(%input, %output) : (tensor<67xi32>, tensor<67x6xf64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<67x6xf64>
+    %output = check.generate.fill value(123.0) : tensor<67x8xf64>
+    check.compare<@workgroup_tree_float_types, @workgroup_tree_float_types_oracle>(%input, %output) : (tensor<67xi32>, tensor<67x8xf64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67x8xf64>
     }
   }
   check.return
 }
 
-func.def inline @workgroup_extrema_store(%output: view<67x4x3xf64>, %item: index, %kind: index, %half: f16, %single: f32, %double: f64) {
+func.def inline @workgroup_extrema_store(%output: view<67x4x4xf64>, %item: index, %kind: index, %half: f16, %single: f32, %double: f64, %bfloat: bf16) {
   %half_result = scalar.extf %half : f16 to f64
   %single_result = scalar.extf %single : f32 to f64
-  view.store %half_result, %output[%item, %kind, 0] : f64, view<67x4x3xf64>
-  view.store %single_result, %output[%item, %kind, 1] : f64, view<67x4x3xf64>
-  view.store %double, %output[%item, %kind, 2] : f64, view<67x4x3xf64>
+  %bfloat_single = scalar.extf %bfloat : bf16 to f32
+  %bfloat_result = scalar.extf %bfloat_single : f32 to f64
+  view.store %half_result, %output[%item, %kind, 0] : f64, view<67x4x4xf64>
+  view.store %single_result, %output[%item, %kind, 1] : f64, view<67x4x4xf64>
+  view.store %double, %output[%item, %kind, 2] : f64, view<67x4x4xf64>
+  view.store %bfloat_result, %output[%item, %kind, 3] : f64, view<67x4x4xf64>
   func.return
 }
 
@@ -554,55 +622,62 @@ kernel.def @workgroup_tree_extrema_types() {
   %base = index.constant 0 : offset
   %item = kernel.workitem.id<x> : index
   %source = buffer.view %input[%base] : buffer -> view<67xi64>
-  %destination = buffer.view %output[%base] : buffer -> view<67x4x3xf64>
+  %destination = buffer.view %output[%base] : buffer -> view<67x4x4xf64>
   %raw = view.load %source[%item] : view<67xi64> -> i64
   %half_bits = scalar.trunci %raw : i64 to i16
   %single_bits = scalar.trunci %raw : i64 to i32
   %half = scalar.bitcast %half_bits : i16 to f16
   %single = scalar.bitcast %single_bits : i32 to f32
   %double = scalar.bitcast %raw : i64 to f64
-  %half_min, %single_min, %double_min = kernel.workgroup.reduce<minnumf> %half, %single, %double : f16, f32, f64
-  %half_max, %single_max, %double_max = kernel.workgroup.reduce<maxnumf> %half, %single, %double : f16, f32, f64
-  %half_ieee_min, %single_ieee_min, %double_ieee_min = kernel.workgroup.reduce<minimumf> %half, %single, %double : f16, f32, f64
-  %half_ieee_max, %single_ieee_max, %double_ieee_max = kernel.workgroup.reduce<maximumf> %half, %single, %double : f16, f32, f64
+  %bfloat = scalar.bitcast %half_bits : i16 to bf16
+  %half_min, %single_min, %double_min, %bfloat_min = kernel.workgroup.reduce<minnumf> %half, %single, %double, %bfloat : f16, f32, f64, bf16
+  %half_max, %single_max, %double_max, %bfloat_max = kernel.workgroup.reduce<maxnumf> %half, %single, %double, %bfloat : f16, f32, f64, bf16
+  %half_ieee_min, %single_ieee_min, %double_ieee_min, %bfloat_ieee_min = kernel.workgroup.reduce<minimumf> %half, %single, %double, %bfloat : f16, f32, f64, bf16
+  %half_ieee_max, %single_ieee_max, %double_ieee_max, %bfloat_ieee_max = kernel.workgroup.reduce<maximumf> %half, %single, %double, %bfloat : f16, f32, f64, bf16
   %minimum_row = index.constant 0 : index
   %maximum_row = index.constant 1 : index
   %ieee_minimum_row = index.constant 2 : index
   %ieee_maximum_row = index.constant 3 : index
-  func.call @workgroup_extrema_store(%destination, %item, %minimum_row, %half_min, %single_min, %double_min) : (view<67x4x3xf64>, index, index, f16, f32, f64)
-  func.call @workgroup_extrema_store(%destination, %item, %maximum_row, %half_max, %single_max, %double_max) : (view<67x4x3xf64>, index, index, f16, f32, f64)
-  func.call @workgroup_extrema_store(%destination, %item, %ieee_minimum_row, %half_ieee_min, %single_ieee_min, %double_ieee_min) : (view<67x4x3xf64>, index, index, f16, f32, f64)
-  func.call @workgroup_extrema_store(%destination, %item, %ieee_maximum_row, %half_ieee_max, %single_ieee_max, %double_ieee_max) : (view<67x4x3xf64>, index, index, f16, f32, f64)
+  func.call @workgroup_extrema_store(%destination, %item, %minimum_row, %half_min, %single_min, %double_min, %bfloat_min) : (view<67x4x4xf64>, index, index, f16, f32, f64, bf16)
+  func.call @workgroup_extrema_store(%destination, %item, %maximum_row, %half_max, %single_max, %double_max, %bfloat_max) : (view<67x4x4xf64>, index, index, f16, f32, f64, bf16)
+  func.call @workgroup_extrema_store(%destination, %item, %ieee_minimum_row, %half_ieee_min, %single_ieee_min, %double_ieee_min, %bfloat_ieee_min) : (view<67x4x4xf64>, index, index, f16, f32, f64, bf16)
+  func.call @workgroup_extrema_store(%destination, %item, %ieee_maximum_row, %half_ieee_max, %single_ieee_max, %double_ieee_max, %bfloat_ieee_max) : (view<67x4x4xf64>, index, index, f16, f32, f64, bf16)
   kernel.return
 }
 
-// Widening is exact for finite F16/F32 numbers. The serial oracle uses only F64
+// Widening is exact for finite F16/BF16/F32 numbers. The serial oracle uses F64
 // extrema and actual input seeds, never sortable keys or an injected infinity.
 func.def inline @workgroup_extrema_input(%raw: i64, %column: index) -> (f64) {
   %half_column = index.constant 0 : index
   %single_column = index.constant 1 : index
+  %bfloat_column = index.constant 3 : index
   %is_half = index.cmp eq, %column, %half_column : index
   %is_single = index.cmp eq, %column, %single_column : index
+  %is_bfloat = index.cmp eq, %column, %bfloat_column : index
   %half_bits = scalar.trunci %raw : i64 to i16
   %single_bits = scalar.trunci %raw : i64 to i32
   %half = scalar.bitcast %half_bits : i16 to f16
   %single = scalar.bitcast %single_bits : i32 to f32
   %double = scalar.bitcast %raw : i64 to f64
   %half_value = scalar.extf %half : f16 to f64
+  %bfloat = scalar.bitcast %half_bits : i16 to bf16
+  %bfloat_single = scalar.extf %bfloat : bf16 to f32
+  %bfloat_value = scalar.extf %bfloat_single : f32 to f64
   %single_value = scalar.extf %single : f32 to f64
   %single_or_double = scf.select %is_single, %single_value, %double : f64
-  %value = scf.select %is_half, %half_value, %single_or_double : f64
+  %wide_value = scf.select %is_half, %half_value, %single_or_double : f64
+  %value = scf.select %is_bfloat, %bfloat_value, %wide_value : f64
   func.return %value : f64
 }
 
 func.def @workgroup_tree_extrema_types_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<67xi64>
-  %destination = buffer.view %output[%base] : buffer -> view<67x4x3xf64>
+  %destination = buffer.view %output[%base] : buffer -> view<67x4x4xf64>
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %items = index.constant 67 : index
-  %types = index.constant 3 : index
+  %types = index.constant 4 : index
   scf.for %column = [%begin to %types step %step] {
     %first_bits = view.load %source[0] : view<67xi64> -> i64
     %first = func.call @workgroup_extrema_input(%first_bits, %column) : (i64, index) -> (f64)
@@ -616,10 +691,10 @@ func.def @workgroup_tree_extrema_types_oracle(%input: buffer, %output: buffer) {
       scf.yield %next_min, %next_max, %next_ieee_min, %next_ieee_max : f64, f64, f64, f64
     }
     scf.for %item = [%begin to %items step %step] {
-      view.store %minimum, %destination[%item, 0, %column] : f64, view<67x4x3xf64>
-      view.store %maximum, %destination[%item, 1, %column] : f64, view<67x4x3xf64>
-      view.store %ieee_minimum, %destination[%item, 2, %column] : f64, view<67x4x3xf64>
-      view.store %ieee_maximum, %destination[%item, 3, %column] : f64, view<67x4x3xf64>
+      view.store %minimum, %destination[%item, 0, %column] : f64, view<67x4x4xf64>
+      view.store %maximum, %destination[%item, 1, %column] : f64, view<67x4x4xf64>
+      view.store %ieee_minimum, %destination[%item, 2, %column] : f64, view<67x4x4xf64>
+      view.store %ieee_maximum, %destination[%item, 3, %column] : f64, view<67x4x4xf64>
     }
   }
   func.return
@@ -629,49 +704,49 @@ check.scenario @workgroup_tree_extrema_type_values {
   check.trial[8](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<67xi64>
-    %output = check.generate.fill value(123.0) : tensor<67x4x3xf64>
-    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x3xf64>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(0.0) nan(same) : tensor<67x4x3xf64>
+    %output = check.generate.fill value(123.0) : tensor<67x4x4xf64>
+    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x4xf64>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(0.0) nan(same) : tensor<67x4x4xf64>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     // All-NaN inputs must not acquire an empty stripe's numeric identity.
     %input = check.generate.fill value(-1) : tensor<67xi64>
-    %output = check.generate.fill value(123.0) : tensor<67x4x3xf64>
-    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x3xf64>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(0.0) nan(same) : tensor<67x4x3xf64>
+    %output = check.generate.fill value(123.0) : tensor<67x4x4xf64>
+    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x4xf64>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(0.0) nan(same) : tensor<67x4x4xf64>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     // NaN, zero, and the smallest subnormal exercise both NaN policies.
     %input = check.generate.iota offset(-1) step(1) period(3) : tensor<67xi64>
-    %output = check.generate.fill value(123.0) : tensor<67x4x3xf64>
-    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x3xf64>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(0.0) nan(same) : tensor<67x4x3xf64>
+    %output = check.generate.fill value(123.0) : tensor<67x4x4xf64>
+    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x4xf64>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(0.0) nan(same) : tensor<67x4x4xf64>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    // The half payload is -0; the wider payloads are positive subnormals.
+    // F16/BF16 are -0; F32/F64 are positive subnormals.
     %input = check.generate.fill value(32768) : tensor<67xi64>
-    %output = check.generate.fill value(123.0) : tensor<67x4x3xf64>
-    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x3xf64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<67x4x3xf64>
+    %output = check.generate.fill value(123.0) : tensor<67x4x4xf64>
+    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x4xf64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67x4x4xf64>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    // Single precision is -0, while half is +0 and double is subnormal.
+    // F32 is -0, F16/BF16 are +0, and F64 is subnormal.
     %input = check.generate.fill value(2147483648) : tensor<67xi64>
-    %output = check.generate.fill value(123.0) : tensor<67x4x3xf64>
-    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x3xf64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<67x4x3xf64>
+    %output = check.generate.fill value(123.0) : tensor<67x4x4xf64>
+    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x4xf64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67x4x4xf64>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     // Only double precision has a sign bit; narrow payloads are +0.
     %input = check.generate.fill value(-9223372036854775808) : tensor<67xi64>
-    %output = check.generate.fill value(123.0) : tensor<67x4x3xf64>
-    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x3xf64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<67x4x3xf64>
+    %output = check.generate.fill value(123.0) : tensor<67x4x4xf64>
+    check.compare<@workgroup_tree_extrema_types, @workgroup_tree_extrema_types_oracle>(%input, %output) : (tensor<67xi64>, tensor<67x4x4xf64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67x4x4xf64>
     }
   }
   check.return

@@ -607,12 +607,6 @@ static void iree_hal_amdgpu_feedback_state_request_device_stop(
 }
 
 static int iree_hal_amdgpu_feedback_state_service_thread_main(void* entry_arg) {
-  {
-    IREE_TRACE_ZONE_BEGIN_NAMED(
-        z0, "iree_hal_amdgpu_feedback_state_service_thread_start");
-    IREE_TRACE_ZONE_END(z0);
-  }
-
   iree_hal_amdgpu_feedback_device_state_t* device_state =
       (iree_hal_amdgpu_feedback_device_state_t*)entry_arg;
   iree_hal_amdgpu_feedback_state_t* state = device_state->parent;

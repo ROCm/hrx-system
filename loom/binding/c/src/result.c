@@ -36,8 +36,8 @@ typedef struct loomc_owned_artifact_t {
 struct loomc_result_t {
   // Atomic reference count for shared immutable ownership.
   iree_atomic_ref_count_t ref_count;
-  // Result state.
-  uint8_t state;
+  // Terminal status code; the public result state is derived from this code.
+  uint8_t status_code;
   // Source-content retention applied while diagnostics are copied.
   uint8_t source_retention;
   // Allocator used to release this result.
@@ -118,7 +118,7 @@ static void loomc_result_destroy(loomc_result_t* result) {
   loomc_allocator_free(allocator, result);
 }
 
-loomc_status_t loomc_result_create(loomc_result_state_t state,
+loomc_status_t loomc_result_create(loomc_status_code_t status_code,
                                    loomc_source_retention_t source_retention,
                                    loomc_allocator_t allocator,
                                    loomc_result_t** out_result) {
@@ -127,10 +127,6 @@ loomc_status_t loomc_result_create(loomc_result_state_t state,
                              "out_result must not be NULL");
   }
   *out_result = NULL;
-  if (state > LOOMC_RESULT_STATE_CANCELLED) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "result state is invalid");
-  }
   if (source_retention != LOOMC_SOURCE_RETENTION_EXACT &&
       source_retention != LOOMC_SOURCE_RETENTION_METADATA_ONLY) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
@@ -142,7 +138,7 @@ loomc_status_t loomc_result_create(loomc_result_state_t state,
   memset(result, 0, sizeof(*result));
   iree_atomic_ref_count_init(&result->ref_count);
   result->allocator = allocator;
-  result->state = (uint8_t)state;
+  result->status_code = (uint8_t)status_code;
   result->source_retention = (uint8_t)source_retention;
   *out_result = result;
   return loomc_ok_status();
@@ -159,18 +155,9 @@ loomc_source_retention_t loomc_result_source_retention(
   return (loomc_source_retention_t)result->source_retention;
 }
 
-loomc_status_t loomc_result_set_state(loomc_result_t* result,
-                                      loomc_result_state_t state) {
-  if (result == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "result must not be NULL");
-  }
-  if (state > LOOMC_RESULT_STATE_CANCELLED) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "result state is invalid");
-  }
-  result->state = (uint8_t)state;
-  return loomc_ok_status();
+void loomc_result_set_status_code(loomc_result_t* result,
+                                  loomc_status_code_t status_code) {
+  result->status_code = (uint8_t)status_code;
 }
 
 void loomc_result_set_loom_diagnostic_sink(loomc_result_t* result,
@@ -256,7 +243,8 @@ loomc_status_t loomc_result_add_diagnostic(
       diagnostic->parameter_count * sizeof(loomc_diagnostic_parameter_t);
   loomc_host_size_t storage_size =
       related_size + parameter_size + diagnostic->code.size +
-      diagnostic->message.size + diagnostic->formatted_text.size;
+      diagnostic->message.size + diagnostic->formatted_text.size +
+      diagnostic->formatted_json.size;
   for (loomc_host_size_t i = 0; i < diagnostic->related_location_count; ++i) {
     storage_size += diagnostic->related_locations[i].label.size;
   }
@@ -293,6 +281,8 @@ loomc_status_t loomc_result_add_diagnostic(
       loomc_diagnostic_copy_string(diagnostic->message, &cursor);
   target->value.formatted_text =
       loomc_diagnostic_copy_string(diagnostic->formatted_text, &cursor);
+  target->value.formatted_json =
+      loomc_diagnostic_copy_string(diagnostic->formatted_json, &cursor);
   target->value.related_locations = related_locations;
   target->value.parameters = parameters;
   for (loomc_host_size_t i = 0; i < diagnostic->parameter_count; ++i) {
@@ -436,12 +426,23 @@ void loomc_result_release(loomc_result_t* result) {
 }
 
 loomc_result_state_t loomc_result_state(const loomc_result_t* result) {
-  return result ? (loomc_result_state_t)result->state
-                : LOOMC_RESULT_STATE_FAILED;
+  switch (loomc_result_status_code(result)) {
+    case LOOMC_STATUS_OK:
+      return LOOMC_RESULT_STATE_SUCCEEDED;
+    case LOOMC_STATUS_CANCELLED:
+      return LOOMC_RESULT_STATE_CANCELLED;
+    default:
+      return LOOMC_RESULT_STATE_FAILED;
+  }
+}
+
+loomc_status_code_t loomc_result_status_code(const loomc_result_t* result) {
+  return result ? (loomc_status_code_t)result->status_code
+                : LOOMC_STATUS_INVALID_ARGUMENT;
 }
 
 bool loomc_result_succeeded(const loomc_result_t* result) {
-  return result && result->state == LOOMC_RESULT_STATE_SUCCEEDED;
+  return loomc_result_status_code(result) == LOOMC_STATUS_OK;
 }
 
 loomc_host_size_t loomc_result_diagnostic_count(const loomc_result_t* result) {

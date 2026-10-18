@@ -18,8 +18,10 @@ iree_cc_library(
   SRCS
     "fabric.c"
   DEPS
+    ::slab_provider
     amdf::headers
     iree::base
+    iree::base::threading
     iree::hal
     iree::hal::drivers::amd::status
   PUBLIC
@@ -122,8 +124,10 @@ iree_cc_library(
   NAME
     slab_provider
   HDRS
+    "allocation_queue.h"
     "slab_provider.h"
   SRCS
+    "allocation_queue.c"
     "slab_provider.c"
   DEPS
     ::buffer
@@ -131,9 +135,12 @@ iree_cc_library(
     amdf::headers
     iree::base
     iree::base::internal
+    iree::base::threading
+    iree::base::threading::thread
     iree::hal
     iree::hal::drivers::amd::status
     iree::hal::memory::slab_provider
+    iree::hal::memory::tracing
   PUBLIC
 )
 endif()
@@ -150,6 +157,7 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::memory::slab_provider
+    iree::hal::testing::mock_device
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -210,7 +218,6 @@ iree_cc_library(
     iree::base::internal
     iree::hal
     iree::hal::drivers::amd::status
-    iree::hal::memory::maintenance
     iree::hal::memory::passthrough_pool
   PUBLIC
 )
@@ -226,6 +233,7 @@ iree_cc_test(
     "virtual_buffer_test.cc"
   DEPS
     ::memory_backend
+    ::slab_provider
     amdf::headers
     iree::async
     iree::async::platform
@@ -235,7 +243,6 @@ iree_cc_test(
     iree::hal
     iree::hal::drivers::task::device
     iree::hal::memory::fixed_block_pool
-    iree::hal::memory::maintenance_thread
     iree::hal::memory::slab_cache
     iree::hal::testing::mock_device
     iree::task

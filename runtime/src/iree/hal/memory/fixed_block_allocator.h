@@ -132,13 +132,15 @@ enum iree_hal_memory_fixed_block_allocator_block_flag_bits_e {
   IREE_HAL_MEMORY_FIXED_BLOCK_ALLOCATOR_BLOCK_FLAG_TAINTED = 1u << 0,
 };
 
-// Fixed-size metadata for a single block. Each block has a flags field
+// Fixed-size metadata for a single block. Flags and backing generation are
 // followed by inline frontier storage (accessed via stride arithmetic).
 // This struct is exposed for sizeof() in IREE_STRUCT_LAYOUT; callers must
 // not access block fields directly.
 typedef struct iree_hal_memory_fixed_block_allocator_block_t {
   // Reuse validity of the inline frontier following this header.
   iree_hal_memory_fixed_block_allocator_block_flags_t flags;
+  // Backing generation in which this block's own history was last written.
+  uint32_t generation;
 } iree_hal_memory_fixed_block_allocator_block_t;
 
 // Options for creating a fixed-block allocator instance.
@@ -172,10 +174,9 @@ typedef struct iree_hal_memory_fixed_block_allocator_allocation_t {
   // allocator.
   uint32_t block_index;
 
-  // The death frontier from the block's previous deallocation. Points into
-  // the block's inline frontier storage (valid and stable while the block is
-  // allocated). Candidate queries borrow it only while acquisitions remain
-  // externally serialized. NULL if the block had no frontier entries.
+  // The death frontier from the block's previous deallocation or its backing's
+  // initial history, valid and stable while allocated. Candidate queries borrow
+  // it only while acquisitions remain externally serialized. NULL if empty.
   const iree_async_frontier_t* death_frontier;
 
   // Flags from the block at allocation time. Check
@@ -213,10 +214,10 @@ typedef struct iree_hal_memory_fixed_block_allocator_stats_t {
 //   - Each contended atomic gets its own cache line to avoid false sharing.
 //   - The bitmap starts on a cache line boundary; adjacent words intentionally
 //     share lines for scan locality.
-//   - Per-block metadata is a trailing flexible array member (FAM), avoiding
-//     a pointer indirection on every alloc/free.
+//   - Per-block metadata is a trailing flexible array member (FAM). Untouched
+//     blocks share one initial frontier instead of duplicating that history.
 typedef struct iree_hal_memory_fixed_block_allocator_t {
-  // --- Read-only after creation (one cache line, no contention) -----------
+  // --- Read-only while backing is attached (one cache line) --------------
 
   // Size of each block in bytes.
   iree_device_size_t block_size;
@@ -235,8 +236,12 @@ typedef struct iree_hal_memory_fixed_block_allocator_t {
   // Byte offset of the inline frontier within each block's metadata.
   iree_host_size_t frontier_offset;
 
-  // Host allocator used for allocating this allocator object.
-  iree_allocator_t host_allocator;
+  // Current backing generation; zero is reserved for untouched metadata.
+  uint32_t generation;
+  // Owned initial history for blocks not yet returned in this generation.
+  iree_async_frontier_t* initial_frontier;
+  // One bit per block whose history has been written in this generation.
+  iree_atomic_uint64_t* returned_bitmap;
 
   // --- Contended atomics (each on its own cache line) ---------------------
 
@@ -252,6 +257,9 @@ typedef struct iree_hal_memory_fixed_block_allocator_t {
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_atomic_uint32_t allocation_count;
 
+  // Cold allocator ownership, occupying padding beside the count cache line.
+  iree_allocator_t host_allocator;
+
   // --- Bitmap (cache-line-aligned, compact for scan locality) -------------
 
   // Atomic bitmap: bit set = allocated, bit clear = free.
@@ -264,8 +272,9 @@ typedef struct iree_hal_memory_fixed_block_allocator_t {
 
   // --- Per-block metadata (FAM, cache-line-aligned) -----------------------
 
-  // Flat array of per-block metadata with stride arithmetic for frontier
-  // access. Each entry is block_stride bytes: [flags] [frontier] [entries].
+  // Flat array of per-block metadata followed by the owned initial frontier
+  // and returned-block bitmap. Each block_stride-byte entry contains a
+  // flags/generation header followed by its frontier and entries.
   // Accessed on every alloc (to read death frontier) and free (to write it).
   iree_alignas(iree_hardware_destructive_interference_size) uint8_t
       block_storage[];
@@ -300,6 +309,26 @@ iree_status_t iree_hal_memory_fixed_block_allocator_allocate(
 // has ceased.
 void iree_hal_memory_fixed_block_allocator_free(
     iree_hal_memory_fixed_block_allocator_t* pool);
+
+// Rebinds a completely free allocator to backing with the same geometry.
+// The caller has transferred the old range's complete history to its owner.
+// Copies |initial_frontier|, whose width must fit the configured capacity.
+// Requires exclusion of all acquisitions, releases, and candidate readers.
+void iree_hal_memory_fixed_block_allocator_reset(
+    iree_hal_memory_fixed_block_allocator_t* pool,
+    const iree_async_frontier_t* initial_frontier);
+
+// Merges the exact histories of a completely free allocator. Reads only blocks
+// returned in the current generation and includes untouched history once.
+// False leaves a partial output; every source history remains unchanged.
+// An optional overflow handler replaces the accumulated history with a compact
+// proof covering both inputs. It must use presecured storage and cannot fail.
+// Requires the same quiescent ownership as reset().
+bool iree_hal_memory_fixed_block_allocator_merge_free_frontiers(
+    const iree_hal_memory_fixed_block_allocator_t* pool, uint8_t capacity,
+    void (*overflow)(void* user_data, iree_async_frontier_t* target,
+                     const iree_async_frontier_t* source),
+    void* user_data, iree_async_frontier_t* out_frontier);
 
 // Finds the first available block at or after |start_block_index| without
 // claiming it. Returns false when no candidate remains. The returned frontier

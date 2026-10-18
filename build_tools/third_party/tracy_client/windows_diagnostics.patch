@@ -1,0 +1,55 @@
+diff --git a/public/client/TracyCallstack.cpp b/public/client/TracyCallstack.cpp
+--- a/public/client/TracyCallstack.cpp
++++ b/public/client/TracyCallstack.cpp
+@@ -629,7 +629,7 @@
+
+ static void SymError( const char* function, DWORD code ) {
+     char message[1024] = {};
+-    int written = snprintf( message, sizeof( message ), "ERROR: %s FAILED with code %u (0x%x) | ", function, code, code );
++    int written = snprintf( message, sizeof( message ), "ERROR: %s FAILED with code %lu (0x%lx) | ", function, code, code );
+     written += FormatMessageA(
+         FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+         NULL,
+diff --git a/public/client/windows/TracyETW.cpp b/public/client/windows/TracyETW.cpp
+--- a/public/client/windows/TracyETW.cpp
++++ b/public/client/windows/TracyETW.cpp
+@@ -155,7 +155,7 @@
+     static constexpr tracy::SourceLocationData srcLocHere{ nullptr, __FUNCTION__, __FILE__, __LINE__, Color_Red4 };
+     tracy::ScopedZone ___tracy_scoped_zone( &srcLocHere, 0, true );
+     char message[128] = {};
+-    int written = snprintf( message, sizeof( message ), "ETW Error %u (0x%x): ", result, result );
++    int written = snprintf( message, sizeof( message ), "ETW Error %lu (0x%lx): ", result, result );
+     written += FormatMessageA(
+         FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+         NULL,
+@@ -176,7 +176,11 @@
+     TOKEN_ELEVATION_TYPE elevationType = TokenElevationTypeDefault;
+     DWORD ReturnLength = 0;
+     if( GetTokenInformation( hToken, TokenElevationType, &elevationType, sizeof( elevationType ), &ReturnLength ) == FALSE )
+-        ETWError( GetLastError() ), false;
++    {
++        ETWError( GetLastError() );
++        CloseHandle( hToken );
++        return false;
++    }
+     CloseHandle( hToken );
+     return ( elevationType == TokenElevationTypeFull );
+ }
+@@ -273,7 +277,7 @@
+     }
+     if( sessions[0].LoggerId == 0 )
+         return ERROR_SUCCESS;
+-    int length = snprintf( buffer, sizeof( buffer ), "ETW Warning: provider (0x%08X) already enabled by other session(s); Tracy may miss events.", provider.Data1 );
++    int length = snprintf( buffer, sizeof( buffer ), "ETW Warning: provider (0x%08lX) already enabled by other session(s); Tracy may miss events.", provider.Data1 );
+     ETWErrorAction( 0, buffer, length );
+     return ERROR_SUCCESS;
+ }
+@@ -565,7 +569,7 @@
+     if( Buffer->EventsLost > 0 )
+     {
+         char buffer[64] = {};
+-        int length = snprintf( buffer, sizeof( buffer ), "ETW Warning: %u events have been lost.", Buffer->EventsLost );
++        int length = snprintf( buffer, sizeof( buffer ), "ETW Warning: %lu events have been lost.", Buffer->EventsLost );
+         ETWErrorAction( ERROR_BUFFER_OVERFLOW, buffer, length );
+     }
+     return TRUE;    // or FALSE to break out of ProcessTrace()

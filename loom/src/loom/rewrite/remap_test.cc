@@ -877,13 +877,14 @@ TEST_F(RemapTest, RemapsLocationsAcrossModules) {
   loom_location_field_span_t field_span = {
       .kind = LOOM_LOCATION_FIELD_OPERAND,
       .index = 0,
-      .start_line = 2,
-      .start_col = 3,
-      .end_line = 2,
-      .end_col = 7,
+      .start_line = 70002,
+      .start_col = 70003,
+      .end_line = 70002,
+      .end_col = 70007,
   };
   IREE_ASSERT_OK(loom_module_attach_location_field_spans(
-      source_, file_location_id, &field_span, 1));
+      source_, file_location_id,
+      loom_location_field_span_array_wide(&field_span, 1)));
 
   loom_location_id_t* fused_children = nullptr;
   IREE_ASSERT_OK(iree_arena_allocate_array(
@@ -924,9 +925,13 @@ TEST_F(RemapTest, RemapsLocationsAcrossModules) {
       IREE_SV("model.loom")));
   EXPECT_EQ(target_child.file.start_line, 2u);
   ASSERT_EQ(target_child.file.field_span_count, 1u);
-  ASSERT_NE(target_child.file.field_spans, nullptr);
-  EXPECT_NE(target_child.file.field_spans, &field_span);
-  EXPECT_EQ(target_child.file.field_spans[0].end_col, 7u);
+  EXPECT_EQ(target_child.file.field_span_format,
+            LOOM_LOCATION_FIELD_SPAN_FORMAT_WIDE);
+  ASSERT_NE(target_child.file.field_span_data, nullptr);
+  EXPECT_NE(target_child.file.field_span_data, &field_span);
+  const auto target_span = loom_location_file_field_span_at(&target_child, 0);
+  EXPECT_EQ(target_span.start_line, 70002u);
+  EXPECT_EQ(target_span.end_col, 70007u);
 }
 
 TEST_F(RemapTest, RemapsTaggedLocationsAcrossModules) {
@@ -997,6 +1002,37 @@ static iree_status_t RemapSymbolByName(void* user_data,
   }
   *out_target_ref = {.module_id = 0, .symbol_id = target_symbol_id};
   return iree_ok_status();
+}
+
+TEST_F(RemapTest, RemapsOrderedStringArraysAcrossModules) {
+  loom_string_id_t source_ids[] = {
+      LOOM_STRING_ID_INVALID, LOOM_STRING_ID_INVALID, LOOM_STRING_ID_INVALID};
+  IREE_ASSERT_OK(loom_module_intern_string(source_, IREE_SV("gfx12-generic"),
+                                           &source_ids[0]));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("gfx1250"), &source_ids[1]));
+  source_ids[2] = source_ids[0];
+  loom_string_id_t unused = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(target_, IREE_SV("sentinel"), &unused));
+
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_attribute_t target_attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_ir_remap_attribute(
+      &remap, loom_attr_string_array(source_ids, IREE_ARRAYSIZE(source_ids)),
+      &target_attr));
+
+  const loom_string_id_array_t target_ids =
+      loom_attr_as_string_array(target_attr);
+  ASSERT_EQ(target_ids.count, IREE_ARRAYSIZE(source_ids));
+  EXPECT_NE(target_ids.values, source_ids);
+  EXPECT_EQ(target_ids.values[0], target_ids.values[2]);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(&target_->strings, target_ids.values[0]),
+      IREE_SV("gfx12-generic")));
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(&target_->strings, target_ids.values[1]),
+      IREE_SV("gfx1250")));
 }
 
 TEST_F(RemapTest, RemapsOrderedSymbolArraysAcrossModules) {

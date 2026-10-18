@@ -50,7 +50,6 @@ iree_cc_test(
     ::buffer_range
     ::cpu_slab_provider
     ::fixed_block_pool
-    ::maintenance_thread
     ::passthrough_pool
     ::tlsf_pool
     iree::async
@@ -150,6 +149,7 @@ iree_cc_library(
   DEPS
     ::buffer_range
     ::fixed_block_allocator
+    ::pool_history
     iree::async
     iree::base
     iree::base::internal
@@ -168,7 +168,7 @@ iree_cc_library(
     ::buffer_range
     ::fixed_block_allocator
     ::fixed_block_pool_slab
-    ::maintenance
+    ::pool_history
     ::tracing
     iree::async
     iree::base
@@ -213,12 +213,12 @@ iree_cc_test(
   DEPS
     ::cpu_slab_provider
     ::fixed_block_pool
-    ::maintenance_thread
     ::passthrough_pool
     iree::async
     iree::async::platform
     iree::base
     iree::hal
+    iree::hal::testing::deferred_pool
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -233,6 +233,7 @@ iree_cc_library(
     "shared_slab_provider.c"
   DEPS
     ::slab_provider
+    ::tracing
     iree::base
     iree::base::internal::memory
     iree::base::internal::shm
@@ -269,54 +270,12 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
-    maintenance
-  HDRS
-    "maintenance.h"
-  SRCS
-    "maintenance.c"
-  DEPS
-    iree::base
-    iree::base::threading
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_test(
-  NAME
-    maintenance_test
-  SRCS
-    "maintenance_test.cc"
-  DEPS
-    ::maintenance
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-iree_cc_library(
-  NAME
-    maintenance_thread
-  HDRS
-    "maintenance_thread.h"
-  SRCS
-    "maintenance_thread.c"
-  DEPS
-    ::maintenance
-    iree::base
-    iree::base::threading
-    iree::base::threading::thread
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     passthrough_pool
   HDRS
     "passthrough_pool.h"
   SRCS
     "passthrough_pool.c"
   DEPS
-    ::maintenance
     ::slab_provider
     ::tracing
     iree::async
@@ -334,8 +293,6 @@ iree_cc_test(
     "passthrough_pool_test.cc"
   DEPS
     ::cpu_slab_provider
-    ::maintenance
-    ::maintenance_thread
     ::passthrough_pool
     iree::async
     iree::async::platform
@@ -354,7 +311,6 @@ iree_cc_library(
     "slab_cache.c"
   DEPS
     ::buffer_range
-    ::maintenance
     ::tracing
     iree::async
     iree::base
@@ -371,8 +327,6 @@ iree_cc_test(
   DEPS
     ::cpu_slab_provider
     ::fixed_block_pool
-    ::maintenance
-    ::maintenance_thread
     ::passthrough_pool
     ::slab_cache
     ::tlsf_pool
@@ -380,6 +334,7 @@ iree_cc_test(
     iree::async::platform
     iree::base
     iree::hal
+    iree::hal::testing::deferred_pool
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -395,6 +350,7 @@ iree_cc_library(
     ::asan_pool
     iree::base
     iree::base::internal
+    iree::base::threading
     iree::hal
   PUBLIC
 )
@@ -445,6 +401,37 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    tlsf_pool_slab
+  HDRS
+    "tlsf_pool_slab.h"
+  SRCS
+    "tlsf_pool_slab.c"
+  DEPS
+    ::buffer_range
+    ::tlsf
+    iree::async
+    iree::base
+    iree::base::internal
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    pool_history
+  HDRS
+    "pool_history.h"
+  SRCS
+    "pool_history.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::threading
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     tlsf_pool
   HDRS
     "tlsf_pool.h"
@@ -452,9 +439,10 @@ iree_cc_library(
     "tlsf_pool.c"
   DEPS
     ::buffer_range
-    ::maintenance
+    ::pool_history
     ::tlsf
     ::tlsf_pool_reservation
+    ::tlsf_pool_slab
     ::tracing
     iree::async
     iree::base
@@ -475,6 +463,18 @@ iree_cc_library(
     iree::base
     iree::base::internal
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    tracing_test
+  SRCS
+    "tracing_test.cc"
+  DEPS
+    ::tracing
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_binary_benchmark(
@@ -512,7 +512,6 @@ iree_cc_test(
   DEPS
     ::cpu_slab_provider
     ::fixed_block_pool
-    ::maintenance_thread
     ::passthrough_pool
     ::slab_cache
     ::tlsf_pool
@@ -532,7 +531,6 @@ iree_cc_test(
   DEPS
     ::cpu_slab_provider
     ::fixed_block_pool
-    ::maintenance_thread
     ::passthrough_pool
     ::slab_cache
     ::tlsf_pool
@@ -544,6 +542,26 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_binary_benchmark(
+  NAME
+    pool_composition_benchmark
+  SRCS
+    "pool_composition_benchmark.cc"
+  DEPS
+    ::cpu_slab_provider
+    ::fixed_block_pool
+    ::passthrough_pool
+    ::slab_cache
+    ::tlsf_pool
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
 iree_cc_test(
   NAME
     tlsf_pool_concurrency_test
@@ -551,13 +569,13 @@ iree_cc_test(
     "tlsf_pool_concurrency_test.cc"
   DEPS
     ::cpu_slab_provider
-    ::maintenance_thread
     ::passthrough_pool
     ::tlsf_pool
     iree::async
     iree::async::platform
     iree::base
     iree::hal
+    iree::hal::testing::deferred_pool
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -570,8 +588,6 @@ iree_cc_test(
   DEPS
     ::cpu_slab_provider
     ::fixed_block_pool
-    ::maintenance
-    ::maintenance_thread
     ::passthrough_pool
     ::slab_cache
     ::tlsf

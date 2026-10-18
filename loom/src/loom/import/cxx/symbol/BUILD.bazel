@@ -64,6 +64,7 @@ loom_cc_test(
         "//loom/src/loom/import/cxx/binding:function_contracts",
         "//loom/src/loom/import/cxx/binding:template_definitions",
         "//loom/src/loom/import/cxx/value:builder_test",
+        "//loom/src/loom/import/cxx/value:vector",
         "//loom/src/loom/ops/check",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/kernel",

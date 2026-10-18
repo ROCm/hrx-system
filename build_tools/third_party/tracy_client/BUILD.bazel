@@ -8,7 +8,9 @@
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
+    "allocator_initialization.patch",
     "instruction_symbols.patch",
     "tracy_client.BUILD.bazel",
+    "windows_diagnostics.patch",
     "worker_signal_mask.patch",
 ])

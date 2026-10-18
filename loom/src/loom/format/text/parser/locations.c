@@ -52,27 +52,37 @@ static iree_status_t loom_parser_resolve_location_source(
   return iree_ok_status();
 }
 
-static iree_status_t loom_parse_location_integer_u16(loom_parser_t* parser,
-                                                     iree_string_view_t detail,
-                                                     uint16_t* out_value) {
+static iree_status_t loom_parse_location_tag_integer(
+    loom_parser_t* parser, loom_location_tag_t* out_tag) {
   loom_token_t token = loom_token_none();
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_INTEGER, &token);
 
   int64_t value = 0;
   if (!iree_string_view_atoi_int64(token.text, &value) || value < 0 ||
-      value > UINT16_MAX) {
-    return loom_parser_emit_location_error(parser, detail, token);
+      value > LOOM_LOCATION_TAG_MAX) {
+    return loom_parser_emit_location_error(
+        parser, IREE_SV("tag must be an integer in [1, 65535]"), token);
   }
 
-  *out_value = (uint16_t)value;
+  *out_tag = (loom_location_tag_t)value;
   return iree_ok_status();
 }
 
-static iree_status_t loom_parse_location_u16(loom_parser_t* parser,
-                                             uint16_t* out_value) {
-  return loom_parse_location_integer_u16(
-      parser, IREE_SV("line/column must be an integer in [0, 65535]"),
-      out_value);
+static iree_status_t loom_parse_location_coordinate(loom_parser_t* parser,
+                                                    uint32_t* out_value) {
+  loom_token_t token = loom_token_none();
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_INTEGER, &token);
+
+  int64_t value = 0;
+  if (!iree_string_view_atoi_int64(token.text, &value) || value < 0 ||
+      (uint64_t)value > LOOM_LOCATION_COORDINATE_MAX) {
+    return loom_parser_emit_location_error(
+        parser, IREE_SV("line/column must be an integer in [0, 4294967295]"),
+        token);
+  }
+
+  *out_value = (uint32_t)value;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_parse_location_tag(loom_parser_t* parser,
@@ -89,14 +99,11 @@ static iree_status_t loom_parse_location_tag(loom_parser_t* parser,
   }
 
   if (token.kind == LOOM_TOKEN_INTEGER) {
-    uint16_t value = 0;
-    IREE_RETURN_IF_ERROR(loom_parse_location_integer_u16(
-        parser, IREE_SV("tag must be an integer in [1, 65535]"), &value));
-    if (value == LOOM_LOCATION_TAG_INVALID) {
+    IREE_RETURN_IF_ERROR(loom_parse_location_tag_integer(parser, out_tag));
+    if (*out_tag == LOOM_LOCATION_TAG_INVALID) {
       return loom_parser_emit_location_error(
           parser, IREE_SV("tagged location tag 0 is invalid"), token);
     }
-    *out_tag = (loom_location_tag_t)value;
     return iree_ok_status();
   }
 
@@ -128,7 +135,7 @@ static iree_status_t loom_parse_location_hex_payload(
         token);
   }
   iree_host_size_t data_length = token.text.size / 2;
-  if (data_length > UINT32_MAX) {
+  if (data_length > LOOM_LOCATION_DATA_LENGTH_MAX) {
     return loom_parser_emit_location_error(
         parser, IREE_SV("tagged location payload is too large"), token);
   }
@@ -155,12 +162,12 @@ static iree_status_t loom_parse_location_hex_payload(
 }
 
 static iree_status_t loom_parse_location_coordinate_pair(loom_parser_t* parser,
-                                                         uint16_t* out_line,
-                                                         uint16_t* out_column) {
+                                                         uint32_t* out_line,
+                                                         uint32_t* out_column) {
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_COLON, NULL);
-  IREE_RETURN_IF_ERROR(loom_parse_location_u16(parser, out_line));
+  IREE_RETURN_IF_ERROR(loom_parse_location_coordinate(parser, out_line));
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_COLON, NULL);
-  return loom_parse_location_u16(parser, out_column);
+  return loom_parse_location_coordinate(parser, out_column);
 }
 
 static iree_status_t loom_parse_location_body(loom_parser_t* parser,
@@ -176,17 +183,17 @@ static iree_status_t loom_parse_file_location_body(
   IREE_RETURN_IF_ERROR(loom_parser_resolve_location_source(
       parser, source_token.text, &source_id));
 
-  uint16_t start_line = 0;
-  uint16_t start_column = 0;
+  uint32_t start_line = 0;
+  uint32_t start_column = 0;
   IREE_RETURN_IF_ERROR(
       loom_parse_location_coordinate_pair(parser, &start_line, &start_column));
 
-  uint16_t end_line = start_line;
-  uint16_t end_column = start_column;
+  uint32_t end_line = start_line;
+  uint32_t end_column = start_column;
   if (loom_tokenizer_try_consume_keyword(&parser->tokenizer, IREE_SV("to"))) {
-    IREE_RETURN_IF_ERROR(loom_parse_location_u16(parser, &end_line));
+    IREE_RETURN_IF_ERROR(loom_parse_location_coordinate(parser, &end_line));
     LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_COLON, NULL);
-    IREE_RETURN_IF_ERROR(loom_parse_location_u16(parser, &end_column));
+    IREE_RETURN_IF_ERROR(loom_parse_location_coordinate(parser, &end_column));
   }
 
   loom_location_entry_t entry = loom_location_file_range(
@@ -226,7 +233,7 @@ static iree_status_t loom_parse_fused_location_body(
   }
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
 
-  if (child_count > UINT32_MAX) {
+  if (child_count > LOOM_LOCATION_FUSED_CHILD_COUNT_MAX) {
     loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_location_error(
         parser, IREE_SV("fused location has too many children"), token);
@@ -266,7 +273,7 @@ static iree_status_t loom_parse_opaque_location_body(
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_STRING, &data_token);
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
 
-  if (data_token.text.size > UINT32_MAX) {
+  if (data_token.text.size > LOOM_LOCATION_DATA_LENGTH_MAX) {
     return loom_parser_emit_location_error(
         parser, IREE_SV("opaque location data is too large"), data_token);
   }

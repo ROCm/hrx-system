@@ -7,8 +7,12 @@
 #include "iree/hal/drivers/amd/fabric/slab_provider.h"
 
 #include <cstdint>
+#include <future>
+#include <thread>
+#include <utility>
 #include <vector>
 
+#include "iree/hal/testing/mock_device.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -215,6 +219,8 @@ struct FakeNative {
     auto* memory = reinterpret_cast<FakeMemory*>(base_memory);
     FakeNative* self = memory->owner;
     ++self->destroy_count;
+    self->destroy_threads.emplace_back(memory->registered_pointer != nullptr,
+                                       std::this_thread::get_id());
     delete memory;
     return self->fail_memory_destroy
                ? amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL)
@@ -264,6 +270,8 @@ struct FakeNative {
   int unmap_count = 0;
   // Consumed native-memory count.
   int destroy_count = 0;
+  // Imported/owned classification and execution thread for each destruction.
+  std::vector<std::pair<bool, std::thread::id>> destroy_threads;
   // Whether consuming cleanup reports a native failure.
   bool fail_memory_destroy = false;
   // Expected backing requirements for the active provider.
@@ -275,6 +283,14 @@ struct FakeNative {
 class SlabProviderTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    iree_hal_mock_device_options_t options;
+    iree_hal_mock_device_options_initialize(&options);
+    for (auto** device : {&devices_[0], &devices_[1]}) {
+      IREE_ASSERT_OK(iree_hal_mock_device_create(
+          &options, iree_allocator_system(), device));
+    }
+    IREE_ASSERT_OK(iree_hal_amd_fabric_allocation_queue_create(
+        UINT32_MAX, iree_allocator_system(), &allocation_queue_));
     CreateProvider(AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE);
   }
 
@@ -305,6 +321,7 @@ class SlabProviderTest : public ::testing::Test {
     options.memory.profile.allocation.maximum_alignment = 4096;
     options.memory.access_count = 2;
     options.memory.accesses = accesses_;
+    options.access_devices = devices_;
     native_.required_flags = host_access ? AMDF_MEMORY_FLAG_HOST_VISIBLE : 0;
     options.memory.required_flags = native_.required_flags;
     options.memory.host_access = host_access;
@@ -371,12 +388,17 @@ class SlabProviderTest : public ::testing::Test {
     }
     options.maintenance_alignment = 64;
     IREE_ASSERT_OK(iree_hal_amd_fabric_slab_provider_create(
-        reinterpret_cast<iree_hal_device_t*>(uintptr_t{1}), &native_.api,
-        iree_hal_device_event_sink_discard(), &options, iree_allocator_system(),
-        &provider_));
+        devices_[0], &native_.api, iree_hal_device_event_sink_discard(),
+        allocation_queue_, &options, iree_allocator_system(), &provider_));
   }
 
-  void TearDown() override { iree_hal_slab_provider_release(provider_); }
+  void TearDown() override {
+    iree_hal_slab_provider_release(provider_);
+    for (auto* device : devices_) {
+      iree_hal_device_release(device);
+    }
+    iree_hal_amd_fabric_allocation_queue_release(allocation_queue_);
+  }
 
   // Mocked native dependency.
   FakeNative native_;
@@ -384,7 +406,57 @@ class SlabProviderTest : public ::testing::Test {
   amdf_memory_device_access_t accesses_[2] = {};
   // Owned production provider under test.
   iree_hal_slab_provider_t* provider_ = nullptr;
+  // HAL owners retained by the provider, with native dependencies mocked above.
+  iree_hal_device_t* devices_[2] = {};
+  // Native worker used by the real provider acquisition and release paths.
+  iree_hal_amd_fabric_allocation_queue_t* allocation_queue_ = nullptr;
+  // Completion storage remains alive until TearDown joins the native owner.
+  std::promise<void> release_completed_;
 };
+
+TEST_F(SlabProviderTest, MixedReleaseDetachesImportsAndQueuesOwnedFrees) {
+  const iree_hal_external_storage_class_t storage_class = {
+      IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER, {0, 0}};
+  iree_hal_pool_import_class_t policy = {storage_class, {1, &storage_class}};
+  CreateProvider(AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+                 &policy);
+  alignas(64) uint8_t bytes[2][256] = {};
+  iree_hal_slab_t slabs[4];
+  for (int i = 0; i < 2; ++i) {
+    iree_hal_external_storage_t storage = {.storage_class = storage_class};
+    storage.payload.host_pointer = bytes[i];
+    storage.byte_length = sizeof(bytes[i]);
+    storage.host_cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK;
+    storage.maintenance_range = iree_hal_make_buffer_range(0, sizeof(bytes[i]));
+    iree_hal_imported_slab_t imported = {};
+    IREE_ASSERT_OK(
+        iree_hal_slab_provider_import_slab(provider_, &storage, &imported));
+    slabs[2 * i] = imported.slab;
+    IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab_sync(provider_, 256, 64,
+                                                            &slabs[2 * i + 1]));
+  }
+  auto completion = release_completed_.get_future();
+  iree_hal_slab_release_request_t release = {
+      .count = IREE_ARRAYSIZE(slabs),
+      .slabs = slabs,
+      .completion = {[](void* user_data) {
+                       static_cast<std::promise<void>*>(user_data)->set_value();
+                     },
+                     &release_completed_},
+  };
+  const auto caller = std::this_thread::get_id();
+  iree_hal_slab_provider_release_slabs(provider_, &release);
+  completion.get();
+  EXPECT_EQ(release.count, 2u);
+  ASSERT_EQ(native_.destroy_threads.size(), 4u);
+  for (size_t i = 0; i < 4; ++i) {
+    const auto& destroyed = native_.destroy_threads[i];
+    EXPECT_EQ(destroyed.first, i < 2);
+    EXPECT_EQ(destroyed.second == caller, i < 2);
+  }
+  EXPECT_EQ(native_.destroy_threads[2].second,
+            native_.destroy_threads[3].second);
+}
 
 TEST_F(SlabProviderTest, PublishesRangedBindingsAndCacheControl) {
   iree_hal_slab_provider_properties_t properties = {};
@@ -394,7 +466,7 @@ TEST_F(SlabProviderTest, PublishesRangedBindingsAndCacheControl) {
   EXPECT_EQ(properties.maintenance_alignment, 64u);
 
   iree_hal_slab_t slab = {};
-  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab(
+  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab_sync(
       provider_, 100, /*min_alignment=*/256, &slab));
   EXPECT_EQ(slab.length, 100u);
   ASSERT_NE(slab.base_ptr, nullptr);
@@ -454,7 +526,7 @@ TEST_F(SlabProviderTest, PublishesRangedBindingsAndCacheControl) {
   iree_hal_buffer_release(buffer);
   EXPECT_EQ(release_count, 1);
   EXPECT_EQ(native_.destroy_count, 0);
-  iree_hal_slab_provider_release_slab(provider_, &slab);
+  iree_hal_slab_provider_release_slab_sync(provider_, &slab);
   EXPECT_EQ(native_.unmap_count, 1);
   EXPECT_EQ(native_.destroy_count, 1);
 
@@ -468,13 +540,13 @@ TEST_F(SlabProviderTest, PublishesRangedBindingsAndCacheControl) {
 TEST_F(SlabProviderTest, NativeDestroyFailureLeaksWithoutAborting) {
   native_.fail_memory_destroy = true;
   iree_hal_slab_t slab = {};
-  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab(
+  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab_sync(
       provider_, 64, /*min_alignment=*/1, &slab));
   ASSERT_EQ(native_.created_lengths.size(), 1u);
   EXPECT_EQ(native_.created_lengths[0], 64u);
   ASSERT_EQ(native_.created_alignments.size(), 1u);
   EXPECT_EQ(native_.created_alignments[0], 64u);
-  iree_hal_slab_provider_release_slab(provider_, &slab);
+  iree_hal_slab_provider_release_slab_sync(provider_, &slab);
   EXPECT_EQ(native_.unmap_count, 1);
   EXPECT_EQ(native_.destroy_count, 1);
 }
@@ -482,7 +554,8 @@ TEST_F(SlabProviderTest, NativeDestroyFailureLeaksWithoutAborting) {
 TEST_F(SlabProviderTest, DeviceOnlyBackingHasNoHostMappingOrSlot) {
   CreateProvider(0);
   iree_hal_slab_t slab = {};
-  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab(provider_, 64, 64, &slab));
+  IREE_ASSERT_OK(
+      iree_hal_slab_provider_acquire_slab_sync(provider_, 64, 64, &slab));
   EXPECT_EQ(slab.base_ptr, nullptr);
   EXPECT_EQ(native_.map_count, 0);
   iree_hal_buffer_t* buffer = nullptr;
@@ -501,7 +574,7 @@ TEST_F(SlabProviderTest, DeviceOnlyBackingHasNoHostMappingOrSlot) {
                 .device_address,
             UINT64_C(0x110000) + 64 + 8);
   iree_hal_buffer_release(buffer);
-  iree_hal_slab_provider_release_slab(provider_, &slab);
+  iree_hal_slab_provider_release_slab_sync(provider_, &slab);
   EXPECT_EQ(native_.unmap_count, 0);
   EXPECT_EQ(native_.destroy_count, 1);
 }
@@ -511,7 +584,7 @@ TEST_F(SlabProviderTest, FailedBindingReleasesMappingAndBacking) {
   iree_hal_slab_t slab = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
-      iree_hal_slab_provider_acquire_slab(provider_, 64, 64, &slab));
+      iree_hal_slab_provider_acquire_slab_sync(provider_, 64, 64, &slab));
   EXPECT_EQ(slab.provider_handle, 0u);
   EXPECT_EQ(native_.map_count, 1);
   EXPECT_EQ(native_.unmap_count, 1);
@@ -568,7 +641,7 @@ TEST_F(SlabProviderTest, RegisteredStorageUsesOnlyAuthorizedEnvelope) {
   EXPECT_EQ(native_.destroy_count, 0);
   iree_hal_buffer_release(subspan);
   iree_hal_buffer_release(buffer);
-  iree_hal_slab_provider_release_slab(provider_, &imported.slab);
+  iree_hal_slab_provider_release_slab_sync(provider_, &imported.slab);
   EXPECT_EQ(native_.unmap_count, 1);
   EXPECT_EQ(native_.destroy_count, 1);
   bytes[88] = 123;
@@ -629,7 +702,7 @@ TEST_F(SlabProviderTest, FailedRegistrationPublicationPreservesCallerStorage) {
   native_.fail_second_address = false;
   IREE_ASSERT_OK(
       iree_hal_slab_provider_import_slab(provider_, &storage, &imported));
-  iree_hal_slab_provider_release_slab(provider_, &imported.slab);
+  iree_hal_slab_provider_release_slab_sync(provider_, &imported.slab);
   EXPECT_EQ(release_count, 0);
   iree_hal_external_storage_release(&storage);
   EXPECT_EQ(release_count, 1);
@@ -725,7 +798,7 @@ TEST_P(NativeTransportTest, TransactionalImportAndIndependentExport) {
   ASSERT_NE(exported.release, nullptr);
   iree_hal_buffer_release(subspan);
   iree_hal_buffer_release(buffer);
-  iree_hal_slab_provider_release_slab(provider_, &imported.slab);
+  iree_hal_slab_provider_release_slab_sync(provider_, &imported.slab);
   EXPECT_EQ(native_.destroy_count, 2);
   EXPECT_EQ(native_.export_count, 1);
   EXPECT_EQ(native_.release_export_count, 0);

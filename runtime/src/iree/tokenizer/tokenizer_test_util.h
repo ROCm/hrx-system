@@ -72,7 +72,7 @@ class ScopedVocabBuilder {
 
   // Adds a token with explicit score (for Unigram models).
   void AddTokenWithScore(
-      iree_tokenizer_token_id_t id, const char* text, float score,
+      iree_tokenizer_token_id_t id, const char* text, double score,
       iree_tokenizer_token_attr_t attrs = IREE_TOKENIZER_TOKEN_ATTR_NONE) {
     IREE_CHECK_OK(iree_tokenizer_vocab_builder_add_token_with_id(
         vocab_builder_, id, iree_make_cstring_view(text), score, attrs));
@@ -281,7 +281,7 @@ class EncodeStateStorage {
         iree_make_byte_span(storage.storage_.data(), storage.storage_.size()),
         iree_make_byte_span(storage.transform_buffer_.data(),
                             storage.transform_buffer_.size()),
-        offset_runs, flags, &storage.state_));
+        offset_runs, flags, iree_allocator_system(), &storage.state_));
 
     return storage;
   }

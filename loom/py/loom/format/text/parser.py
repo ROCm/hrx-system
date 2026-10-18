@@ -125,6 +125,7 @@ from loom.ir import (
     ShapedType,
     SignedEnumSetAttr,
     StaticDim,
+    StringArrayAttr,
     SymbolName,
     SymbolNameArray,
     SymbolNameSet,
@@ -309,6 +310,20 @@ def _parse_generic_attr_value_from_tokens(
         )
     if tokenizer.at(TokenKind.LBRACKET):
         tokenizer.next()
+        if tokenizer.at(TokenKind.STRING):
+            values: list[str] = []
+            while True:
+                if len(values) == 0xFFFF:
+                    raise ParseError(
+                        "string-array length exceeds UINT16_MAX",
+                        tokenizer.peek().location,
+                        filename,
+                    )
+                values.append(tokenizer.expect(TokenKind.STRING).text)
+                if not tokenizer.try_consume(TokenKind.COMMA):
+                    break
+            tokenizer.expect(TokenKind.RBRACKET)
+            return StringArrayAttr(values)
         values: list[int] = []
         if not tokenizer.at(TokenKind.RBRACKET):
             values.append(int(tokenizer.expect(TokenKind.INTEGER).text))
@@ -797,6 +812,22 @@ def _parse_descriptor_attr_value_from_tokens(
             return float(tokenizer.expect(TokenKind.INTEGER).text)
         case "string":
             return tokenizer.expect(TokenKind.STRING).text
+        case "string_array":
+            tokenizer.expect(TokenKind.LBRACKET)
+            values: list[str] = []
+            if not tokenizer.at(TokenKind.RBRACKET):
+                while True:
+                    if len(values) == 0xFFFF:
+                        raise ParseError(
+                            "string-array length exceeds UINT16_MAX",
+                            tokenizer.peek().location,
+                            filename,
+                        )
+                    values.append(tokenizer.expect(TokenKind.STRING).text)
+                    if not tokenizer.try_consume(TokenKind.COMMA):
+                        break
+            tokenizer.expect(TokenKind.RBRACKET)
+            return StringArrayAttr(values)
         case "bool":
             ident = tokenizer.expect(TokenKind.BARE_IDENT)
             if ident.text == "true":

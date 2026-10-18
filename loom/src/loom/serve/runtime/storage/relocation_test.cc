@@ -15,7 +15,7 @@
 #include "loom/serve/runtime/execution/retirement.h"
 #include "loom/serve/runtime/storage/memory.h"
 #include "loom/serve/testing/device.h"
-#include "loom/serve/testing/maintenance_gate.h"
+#include "loom/serve/testing/native_allocator.h"
 
 namespace {
 
@@ -35,13 +35,14 @@ class RelocationTest : public ::testing::Test {
         .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
         .slab_size = 2 * 1024 * 1024,
     };
-    auto status = loom_serve_device_group_allocate(
-        host, 1, &options, iree_allocator_system(), &group);
+    auto status = loom_serve_device_group_allocate(host, 1, &options,
+                                                   native.allocator(), &group);
     iree_hal_driver_release(driver);
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
     device = loom_serve_device_group_at(group, 0);
     pool = loom_serve_device_memory_pool(device);
+    IREE_ASSERT_OK(native.Observe(device));
     IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution));
   }
 
@@ -55,6 +56,8 @@ class RelocationTest : public ::testing::Test {
     IREE_EXPECT_OK(loom_serve_device_group_free(group));
   }
 
+  // Allocator dependency outliving the real native allocation worker.
+  loom_serve::testing::NativeAllocator native;
   // Application group enclosing all device resources.
   loom_serve_device_group_t* group = nullptr;
   // Borrowed device record within the application group.
@@ -130,13 +133,13 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready));
   loom_serve_memory_operation_t* commitment = nullptr;
   {
-    loom_serve::testing::MaintenanceGate gate(
-        loom_serve_device_storage_pool(device)->maintenance);
+    loom_serve::testing::ScopedNativeHold gate(device);
     bool admitted = false;
     IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
         pool, ranges.size(), ranges.data(), ready, 1, &admitted, &commitment));
     ASSERT_TRUE(admitted);
     ASSERT_NE(commitment, nullptr);
+    gate.WaitEntered();
     uint64_t value = 1;
     IREE_ASSERT_OK(
         loom_serve_execution_barrier(execution, {1, &ready, &value}));

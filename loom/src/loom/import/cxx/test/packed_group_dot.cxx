@@ -6,6 +6,7 @@
 
 #include <loomcxx/check.h>
 #include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
 #include <loomcxx/scalar.h>
 #include <loomcxx/vector.h>
 
@@ -36,8 +37,8 @@ float packed_group_dot(Codes16 table, Bytes16 packed, BFloat16 activations_low,
                        BFloat16 activations_high, float scale, float seed) {
   auto low_codes = lookup(table, packed & 15);
   auto high_codes = lookup(table, packed >> 4);
-  auto low_weights = __builtin_convertvector(low_codes, BFloat16);
-  auto high_weights = __builtin_convertvector(high_codes, BFloat16);
+  auto low_weights = loom::convert<BFloat16>(low_codes);
+  auto high_weights = loom::convert<BFloat16>(high_codes);
   Float8 partial = {};
   partial = loom::vector::dot2f(low_weights, activations_low, partial);
   partial = loom::vector::dot2f(high_weights, activations_high, partial);

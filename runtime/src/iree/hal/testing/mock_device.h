@@ -49,6 +49,11 @@ typedef struct iree_hal_mock_device_options_t {
   // The caller keeps this live until the device is released.
   const iree_hal_memory_backend_t* memory_backend;
 
+  // Optional resource retaining the native dependencies described by the mock.
+  // Retained until device destruction, including downstream provider
+  // references.
+  iree_hal_resource_t* lifetime_owner;
+
   // Optional status returned by assign_topology_info. IREE_STATUS_OK means the
   // mock accepts the assignment normally.
   iree_status_code_t assign_topology_info_status_code;

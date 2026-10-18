@@ -107,7 +107,7 @@ const char* loom_serve_text_media_projector_phase(
     const loom_serve_text_media_projector_t* projector);
 iree_status_t loom_serve_text_media_projector_advance(
     loom_serve_text_media_projector_t* projector,
-    loom_serve_http_service_flags_t flags, bool* out_progress);
+    loom_serve_service_flags_t flags, bool* out_progress);
 
 // All accepted callbacks have retired. Request owners have detached their jobs.
 // Failed device work remains component-owned until actual model retirement.

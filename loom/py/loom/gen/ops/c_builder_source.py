@@ -82,6 +82,22 @@ def _emit_builder_enum_array_storage(
     lines.append(f"{indent}    &{storage}));")
 
 
+def _emit_builder_string_array_storage(
+    lines: list[str],
+    *,
+    source: str,
+    storage: str,
+    op_name: str,
+    field_name: str,
+    indent: str = "",
+) -> None:
+    """Emits C code that copies a string-array attr payload into the builder."""
+    lines.append(f"{indent}const loom_string_id_t* {storage} = NULL;")
+    lines.append(f"{indent}IREE_RETURN_IF_ERROR(loom_builder_copy_string_array_attr_storage(")
+    lines.append(f'{indent}    builder, {source}, IREE_SV("{op_name} {field_name}"),')
+    lines.append(f"{indent}    &{storage}));")
+
+
 def _emit_builder_signed_enum_set_storage(
     lines: list[str],
     *,
@@ -895,6 +911,7 @@ def _generate_builder_implementation(
                 "i64": f"loom_attr_i64({name})",
                 "f64": f"loom_attr_f64({name})",
                 "string": f"loom_attr_string({name})",
+                "string_array": f"loom_attr_string_array(_{field_name}_storage, (uint16_t){name}.count)",
                 "bool": f"loom_attr_bool({name})",
                 "enum": f"loom_attr_enum({name})",
                 "enum_array": f"loom_attr_enum_array(_{field_name}_storage, (uint16_t){name}.count)",
@@ -936,6 +953,29 @@ def _generate_builder_implementation(
                         field_name=field_name,
                     )
                     lines.append(f"  loom_op_attrs(*out_op)[{idx}] = loom_attr_i64_array({storage}, (uint16_t){name}_count);")
+            elif attr_type == "string_array":
+                storage = f"_{field_name}_storage"
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                    _emit_builder_string_array_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
+                        op_name=op.name,
+                        field_name=field_name,
+                        indent="    ",
+                    )
+                    lines.append(f"    loom_op_attrs(*out_op)[{idx}] = {constructor};")
+                    lines.append("  }")
+                else:
+                    _emit_builder_string_array_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
+                        op_name=op.name,
+                        field_name=field_name,
+                    )
+                    lines.append(f"  loom_op_attrs(*out_op)[{idx}] = {constructor};")
             elif attr_type == "enum_array":
                 storage = f"_{field_name}_storage"
                 if optional_flag:

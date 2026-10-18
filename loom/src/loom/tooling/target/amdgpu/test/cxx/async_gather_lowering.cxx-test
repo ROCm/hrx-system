@@ -34,7 +34,7 @@ low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 0, direct_
   s_waitcnt {vmcnt = 0}
   s_waitcnt {lgkmcnt = 0}
   %second = ds_read_b32 %317 {offset = 256}
-  %324 = v_add_u32 %first, %second
-  global_store_dword_saddr %297, %324, %output
+  %321 = v_add_u32 %first, %second
+  global_store_dword_saddr %297, %321, %output
   return
 }

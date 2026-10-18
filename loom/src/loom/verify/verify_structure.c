@@ -1651,6 +1651,7 @@ static iree_string_view_t loom_verify_encoding_attr_kind_name(
       [LOOM_ATTR_I64] = IREE_SVL("integer"),
       [LOOM_ATTR_F64] = IREE_SVL("float"),
       [LOOM_ATTR_STRING] = IREE_SVL("string"),
+      [LOOM_ATTR_STRING_ARRAY] = IREE_SVL("string array"),
       [LOOM_ATTR_BOOL] = IREE_SVL("boolean"),
       [LOOM_ATTR_ENUM] = IREE_SVL("enum"),
       [LOOM_ATTR_I64_ARRAY] = IREE_SVL("integer array"),

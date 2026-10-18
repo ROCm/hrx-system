@@ -76,6 +76,10 @@ static iree_string_view_t loom_tooling_cli_loomc_json_severity(
 
 iree_status_t loom_tooling_cli_write_loomc_diagnostic_json(
     loom_output_stream_t* stream, const loomc_diagnostic_t* diagnostic) {
+  if (!loomc_string_view_is_empty(diagnostic->formatted_json)) {
+    return loom_output_stream_write(
+        stream, iree_string_view_from_loomc(diagnostic->formatted_json));
+  }
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(

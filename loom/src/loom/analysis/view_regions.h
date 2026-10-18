@@ -45,6 +45,27 @@ enum loom_view_access_flag_bits_e {
 };
 typedef uint8_t loom_view_access_flags_t;
 
+// Observations of a buffer root beyond addressed payload access.
+enum loom_view_root_use_flag_bits_e {
+  // The root's memory space is refined. Relocating its addressed contents must
+  // translate the corresponding memory_space_refinements to the new storage.
+  LOOM_VIEW_ROOT_USE_MEMORY_SPACE = 1u << 0,
+
+  // An opaque buffer operation or type dependency observes the original root.
+  // Replacing only its addressed contents does not preserve that observation.
+  LOOM_VIEW_ROOT_USE_OPAQUE = 1u << 1,
+};
+typedef uint8_t loom_view_root_use_flags_t;
+
+// A source refinement whose storage identity was resolved during analysis.
+typedef struct loom_view_memory_space_refinement_t {
+  // Borrowed buffer.assume.memory_space operation in the analyzed scope.
+  const loom_op_t* operation;
+
+  // Original storage root, including through other root-preserving refinements.
+  loom_value_id_t root_value_id;
+} loom_view_memory_space_refinement_t;
+
 // Precision bits describing which parts of a region are known symbolically.
 enum loom_view_region_precision_flag_bits_e {
   // The storage root identity is known.
@@ -141,6 +162,17 @@ typedef struct loom_view_region_table_t {
   // Populated by analyze, including raw buffers and nested execution scopes.
   uint8_t* storage_flags_by_value_ordinal;
 
+  // Source memory-space refinements, including those in nested control flow.
+  // Consumers changing storage use these rows instead of rediscovering uses.
+  struct {
+    // Rows owned by the expression context arena.
+    loom_view_memory_space_refinement_t* entries;
+    // Number of initialized rows.
+    iree_host_size_t count;
+    // Allocated row capacity.
+    iree_host_size_t capacity;
+  } memory_space_refinements;
+
   // Memory spaces that may change through external acquisition, unknown
   // effects, or writes without comparable storage identities.
   uint32_t interference_memory_spaces;
@@ -208,13 +240,13 @@ iree_status_t loom_view_region_table_analyze(loom_view_region_table_t* table);
 loom_view_access_flags_t loom_view_region_table_root_access_flags(
     const loom_view_region_table_t* table, loom_value_id_t root_value_id);
 
-// Returns true when every buffer value retaining |root_value_id| is consumed
-// only by typed-view construction or by transparent root-preserving alignment
-// and noalias refinements. Type dependencies and all other buffer operations
-// observe properties that staging a root into different storage cannot
-// preserve. Requires analyze to have completed; this query performs no IR
+// Returns observations of |root_value_id| beyond typed-view construction and
+// root-preserving alignment/noalias refinements. Opaque observations prohibit
+// replacing the root with only its addressed contents. Memory-space refinements
+// require translation to the replacement storage and are retained in the table.
+// Roots outside the domain are opaque. Requires completed analysis; no
 // traversal.
-bool loom_view_region_table_root_has_only_view_uses(
+loom_view_root_use_flags_t loom_view_region_table_root_use_flags(
     const loom_view_region_table_t* table, loom_value_id_t root_value_id);
 
 // Proves that an accessed storage root remains unchanged throughout the

@@ -10,7 +10,9 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
+#include "loom/error/json_sink.h"
 #include "loom/error/parameter.h"
+#include "loom/util/stream.h"
 #include "test/util.h"
 
 namespace {
@@ -18,11 +20,34 @@ using loomc::testing::HandlePtr;
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
 
+TEST(DiagnosticTest, StatusNormalizationPreservesCodeAfterStatusRelease) {
+  for (auto code :
+       {LOOMC_STATUS_NOT_FOUND, LOOMC_STATUS_INVALID_ARGUMENT,
+        LOOMC_STATUS_FAILED_PRECONDITION, LOOMC_STATUS_INCOMPATIBLE}) {
+    loomc_result_t* result = nullptr;
+    LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_OK,
+                                        LOOMC_SOURCE_RETENTION_EXACT,
+                                        loomc_allocator_system(), &result));
+    ResultPtr owner(result);
+    LOOMC_ASSERT_OK(loomc_result_fail_status_diagnostic_consume(
+        result, nullptr, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
+        loomc_make_cstring_view("TEST/DOMAIN"),
+        loomc_status_allocate(code, __FILE__, __LINE__,
+                              loomc_make_cstring_view("domain failure"))));
+    EXPECT_EQ(loomc_result_status_code(result), code);
+    EXPECT_EQ(loomc_result_state(result), LOOMC_RESULT_STATE_FAILED);
+    ASSERT_EQ(loomc_result_diagnostic_count(result), 1u);
+    EXPECT_TRUE(
+        loomc_string_view_equal(loomc_result_diagnostic_at(result, 0)->message,
+                                loomc_make_cstring_view("domain failure")));
+  }
+}
+
 ResultPtr Capture(
     const loom_source_range_t& range, const loomc_source_t* source = nullptr,
     loomc_source_retention_t source_retention = LOOMC_SOURCE_RETENTION_EXACT) {
   loomc_result_t* result = nullptr;
-  LOOMC_EXPECT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+  LOOMC_EXPECT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,
                                       source_retention,
                                       loomc_allocator_system(), &result));
   loom_diagnostic_param_t param = loom_param_string(IREE_SV("x"));
@@ -34,8 +59,9 @@ ResultPtr Capture(
   diagnostic.params = &param;
   diagnostic.param_count = 1;
   diagnostic.source_location = range;
-  LOOMC_EXPECT_OK(loomc_result_add_loom_diagnostic(result, source, &diagnostic,
-                                                   /*type_printer=*/nullptr));
+  LOOMC_EXPECT_OK(
+      loomc_result_add_loom_diagnostic(result, source, &diagnostic,
+                                       /*text_print_options=*/nullptr));
   return ResultPtr(result);
 }
 
@@ -191,13 +217,23 @@ TEST(DiagnosticTest, RetainsCanonicalFormatting) {
   diagnostic.origin = range;
   diagnostic.source_location = range;
 
+  iree_string_builder_t json_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &json_builder);
+  loom_output_stream_t json_stream;
+  loom_output_stream_for_builder(&json_builder, &json_stream);
+  IREE_ASSERT_OK(loom_diagnostic_json_write_object(
+      &json_stream, &diagnostic, {loom_type_format_minimal, nullptr}));
+  std::string expected_json(iree_string_builder_view(&json_builder).data,
+                            iree_string_builder_view(&json_builder).size);
+  iree_string_builder_deinitialize(&json_builder);
+
   loomc_result_t* raw_result = nullptr;
-  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &raw_result));
   ResultPtr result(raw_result);
   LOOMC_ASSERT_OK(loomc_result_add_loom_diagnostic(
-      result.get(), source.get(), &diagnostic, /*type_printer=*/nullptr));
+      result.get(), source.get(), &diagnostic, /*text_print_options=*/nullptr));
   source.reset();
 
   const auto* stored = loomc_result_diagnostic_at(result.get(), 0);
@@ -216,6 +252,9 @@ TEST(DiagnosticTest, RetainsCanonicalFormatting) {
       " 1 | duplicate\n"
       "   | ^^^^^^^^^\n"
       "   = help: Each SSA value name must be unique within its scope\n");
+  EXPECT_EQ(
+      std::string(stored->formatted_json.data, stored->formatted_json.size),
+      expected_json);
 }
 
 TEST(DiagnosticTest, RelatedLocationsOwnLabelsAndShareOnlyMatchingSnapshots) {
@@ -276,12 +315,13 @@ TEST(DiagnosticTest, RelatedLocationsOwnLabelsAndShareOnlyMatchingSnapshots) {
     diagnostic.related_location_count = IREE_ARRAYSIZE(related);
     diagnostic.related_location_omitted_count = 3;
     loomc_result_t* raw_result = nullptr;
-    LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+    LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,
                                         LOOMC_SOURCE_RETENTION_EXACT,
                                         loomc_allocator_system(), &raw_result));
     ResultPtr result(raw_result);
-    LOOMC_ASSERT_OK(loomc_result_add_loom_diagnostic(
-        result.get(), input.get(), &diagnostic, /*type_printer=*/nullptr));
+    LOOMC_ASSERT_OK(
+        loomc_result_add_loom_diagnostic(result.get(), input.get(), &diagnostic,
+                                         /*text_print_options=*/nullptr));
     input.reset();
     filename.assign("released");
     text.assign("released");
@@ -391,13 +431,13 @@ TEST(DiagnosticTest,
   DiagnosticAllocator baseline;
   loomc_result_t* baseline_result = nullptr;
   LOOMC_ASSERT_OK(loomc_result_create(
-      LOOMC_RESULT_STATE_FAILED, LOOMC_SOURCE_RETENTION_EXACT,
+      LOOMC_STATUS_FAILED_PRECONDITION, LOOMC_SOURCE_RETENTION_EXACT,
       loomc_allocator_t{&baseline, DiagnosticAllocator::Control},
       &baseline_result));
   ResultPtr baseline_owner(baseline_result);
   baseline.allocation_count = 0;
   LOOMC_ASSERT_OK(loomc_result_add_loom_diagnostic(
-      baseline_result, nullptr, &diagnostic, /*type_printer=*/nullptr));
+      baseline_result, nullptr, &diagnostic, /*text_print_options=*/nullptr));
   const size_t allocation_count = baseline.allocation_count;
   baseline_owner.reset();
   EXPECT_EQ(baseline.live_count, 0u);
@@ -406,7 +446,7 @@ TEST(DiagnosticTest,
     DiagnosticAllocator failing;
     loomc_result_t* result = nullptr;
     auto allocator = loomc_allocator_t{&failing, DiagnosticAllocator::Control};
-    LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+    LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,
                                         LOOMC_SOURCE_RETENTION_EXACT, allocator,
                                         &result));
     ResultPtr owner(result);
@@ -415,11 +455,11 @@ TEST(DiagnosticTest,
     LOOMC_EXPECT_STATUS_IS(
         LOOMC_STATUS_RESOURCE_EXHAUSTED,
         loomc_result_add_loom_diagnostic(result, nullptr, &diagnostic,
-                                         /*type_printer=*/nullptr));
+                                         /*text_print_options=*/nullptr));
     EXPECT_EQ(loomc_result_diagnostic_count(result), 0u);
     failing.failure_at = LOOMC_HOST_SIZE_MAX;
     LOOMC_ASSERT_OK(loomc_result_add_loom_diagnostic(
-        result, nullptr, &diagnostic, /*type_printer=*/nullptr));
+        result, nullptr, &diagnostic, /*text_print_options=*/nullptr));
     ASSERT_EQ(loomc_result_diagnostic_count(result), 1u);
     EXPECT_EQ(loomc_result_diagnostic_at(result, 0)->related_location_count,
               2u);

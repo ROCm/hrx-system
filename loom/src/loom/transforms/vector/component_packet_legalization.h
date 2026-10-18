@@ -16,16 +16,20 @@
 extern "C" {
 #endif
 
-typedef struct loom_vector_component_packet_rewrite_callback_t {
-  // Callback state borrowed for each completed source rewrite.
+typedef struct loom_vector_component_packet_callbacks_t {
+  // Callback state borrowed for each planner observation.
   void* user_data;
-  // Optional observer for cold reporting and accounting. The authored contract
-  // result is borrowed for the duration of the call.
-  iree_status_t (*fn)(
+  // Optional observer for cold reporting and accounting after a completed
+  // source rewrite. The authored contract result is borrowed for the duration
+  // of the call.
+  iree_status_t (*rewritten_fn)(
       void* user_data, const loom_op_t* source_op,
       const loom_target_contract_query_result_t* authored_query_result,
       uint64_t created_op_count, uint64_t erased_op_count);
-} loom_vector_component_packet_rewrite_callback_t;
+  // Optional handoff for an operation that eager legalization must retain
+  // until shaped view accesses have been linearized.
+  iree_status_t (*deferred_fn)(void* user_data, const loom_op_t* source_op);
+} loom_vector_component_packet_callbacks_t;
 
 typedef struct loom_vector_component_plan_t loom_vector_component_plan_t;
 
@@ -72,9 +76,11 @@ loom_vector_component_packet_query_cache_lookup(
 // emitted packet-major so direct SSA edges remain packet-local across mixed
 // operations and fanout.
 //
-// |rewrite_callback| observes each authored operation only after its packet
-// rewrite has completed and receives the contract result established for the
-// authored operation. Missing callback functions disable observation.
+// |callbacks| observes completed packet rewrites and hands eager deferrals to
+// the enclosing legalization pipeline. When deferred_fn is present, a shaped
+// load root and every member of its selected component are deferred together so
+// view access linearization can expose row packets before the later complete
+// legalization pass. Without deferred_fn, eager materialization is unchanged.
 //
 // |out_query_cache| retains every authored target contract result established
 // by the plan so later legalization consumes the same classification. The
@@ -85,7 +91,7 @@ loom_vector_component_packet_query_cache_lookup(
 // native candidate under the active legalization policy.
 iree_status_t loom_vector_component_packet_legalize(
     loom_target_legalization_context_t* context,
-    loom_vector_component_packet_rewrite_callback_t rewrite_callback,
+    loom_vector_component_packet_callbacks_t callbacks,
     loom_vector_component_packet_query_cache_t* out_query_cache,
     uint32_t* out_rewritten_op_count);
 

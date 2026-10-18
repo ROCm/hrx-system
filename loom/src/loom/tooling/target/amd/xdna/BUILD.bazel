@@ -119,6 +119,17 @@ loom_test(
     execution_profiles = [XDNA_HARDWARE_PROFILE],
 )
 
+loom_test(
+    name = "staging_stress",
+    srcs = ["test/staging_stress.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
+    tags = [
+        "manual",
+        "stress",
+    ],
+)
+
 [
     loom_generated_file(
         name = "temporal_fold_image_" + suffix,

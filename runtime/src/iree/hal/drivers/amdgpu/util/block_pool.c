@@ -76,7 +76,7 @@ iree_status_t iree_hal_amdgpu_block_pool_initialize(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_memory_trace_initialize_pool(
               options.trace_name, IREE_HAL_AMDGPU_BLOCK_POOL_TRACE_ID,
-              host_allocator, &out_block_pool->trace));
+              &out_block_pool->trace));
   iree_slim_mutex_initialize(&out_block_pool->mutex);
   out_block_pool->is_initialized = true;
   iree_slim_mutex_lock(&out_block_pool->mutex);

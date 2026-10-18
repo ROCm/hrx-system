@@ -11,6 +11,23 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    allocation_queue
+  HDRS
+    "allocation_queue.h"
+  SRCS
+    "allocation_queue.c"
+  DEPS
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::memory::slab_provider
+    iree::task
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     atomic
   HDRS
     "atomic.h"
@@ -150,6 +167,7 @@ iree_cc_library(
   SRCS
     "device.c"
   DEPS
+    ::allocation_queue
     ::atomic
     ::device_spec_builder
     ::profile
@@ -168,8 +186,6 @@ iree_cc_library(
     iree::hal::drivers::task::queue
     iree::hal::memory::cpu_slab_provider
     iree::hal::memory::host_memory_backend
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
     iree::hal::utils::files
     iree::hal::utils::host_semaphore
     iree::task

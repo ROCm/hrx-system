@@ -35,8 +35,8 @@ typedef struct iree_hal_amd_fabric_slab_pool_plan_t {
   struct {
     // Placement-local capacity notification.
     iree_async_notification_t* notification;
-    // Independent cold allocation and retirement owner.
-    iree_hal_memory_maintenance_t* maintenance;
+    // Native allocation domain shared by the placement owner's engines.
+    iree_hal_amd_fabric_allocation_queue_t* allocation_queue;
     // Sealed group's completion probe.
     iree_hal_pool_epoch_query_t epoch_query;
     // Sealed group's shared completion tracker.
@@ -65,8 +65,9 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_plan_create(
       (iree_hal_amd_fabric_slab_pool_plan_t*)base;
   iree_hal_slab_provider_t* provider = NULL;
   iree_status_t status = iree_hal_amd_fabric_slab_provider_create(
-      plan->device, plan->api, plan->event_sink, &plan->provider_options,
-      host_allocator, &provider);
+      plan->device, plan->api, plan->event_sink,
+      plan->progress.allocation_queue, &plan->provider_options,
+      iree_hal_device_host_allocator(plan->device), &provider);
   if (iree_status_is_ok(status)) {
     const iree_hal_passthrough_pool_options_t options = {
         .memory_contract = plan->contract,
@@ -81,7 +82,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_plan_create(
     };
     status = iree_hal_passthrough_pool_create(
         options, provider, plan->progress.notification, plan->progress.tracker,
-        plan->progress.maintenance, host_allocator, out_pool);
+        host_allocator, out_pool);
   }
   iree_hal_slab_provider_release(provider);
   return status;
@@ -252,6 +253,8 @@ typedef struct iree_hal_amd_fabric_slab_pool_query_t {
   uint32_t access_count;
   // Complete native access set, independent of the storage owner.
   const amdf_memory_device_access_t* accesses;
+  // Exact HAL owners parallel to the complete native access array.
+  iree_hal_device_t* const* access_devices;
   // Prepared binding slots for every requested family.
   const iree_hal_memory_scope_access_t* family_bindings;
   // Private host mapping permissions required by execution implementations.
@@ -578,11 +581,14 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
   }
 
   iree_host_size_t plan_size = 0;
+  iree_host_size_t access_devices_offset = 0;
   iree_host_size_t bindings_offset = 0;
   iree_host_size_t imports_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_fabric_slab_pool_plan_t), &plan_size,
       IREE_STRUCT_FIELD_FAM(query->access_count, amdf_memory_device_access_t),
+      IREE_STRUCT_FIELD(query->access_count, iree_hal_device_t*,
+                        &access_devices_offset),
       IREE_STRUCT_FIELD_ALIGNED(
           binding_count, iree_hal_amd_fabric_binding_request_t,
           iree_alignof(iree_hal_amd_fabric_binding_request_t),
@@ -609,6 +615,10 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
   plan->event_sink = owner->native.event_sink;
   memcpy(plan->accesses, query->accesses,
          query->access_count * sizeof(*query->accesses));
+  iree_hal_device_t** access_devices =
+      (iree_hal_device_t**)((uint8_t*)plan + access_devices_offset);
+  memcpy(access_devices, query->access_devices,
+         query->access_count * sizeof(*access_devices));
   iree_hal_amd_fabric_binding_request_t* binding_requests =
       (iree_hal_amd_fabric_binding_request_t*)((uint8_t*)plan +
                                                bindings_offset);
@@ -628,6 +638,19 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
     }
   }
   plan->provider_options = (iree_hal_amd_fabric_slab_provider_options_t){
+      .trace_domain =
+          profile && profile->memory_class == AMDF_MEMORY_CLASS_SYSTEM
+              ? (native_placement.kind == AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA
+                     ? "libamdf-numa"
+                     : "libamdf-system")
+              : owner->native.trace_device_domain,
+      .trace_ordinal =
+          profile && profile->memory_class == AMDF_MEMORY_CLASS_SYSTEM
+              ? (native_placement.kind == AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA
+                     ? native_placement.node
+                     : UINT32_MAX)
+              : owner->native.trace_device_ordinal,
+      .access_devices = access_devices,
       .memory =
           {
               .scope = storage->scope,
@@ -655,7 +678,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
   plan->owned_mode = query->options->owned.mode;
   plan->import_classes = query->options->imports.classes;
   plan->progress.notification = owner->notification;
-  plan->progress.maintenance = owner->maintenance;
+  plan->progress.allocation_queue = owner->allocation_queue;
   plan->progress.epoch_query = owner->epoch_query;
   plan->progress.tracker =
       iree_hal_device_topology_info(owner->device)->frontier.tracker;
@@ -941,6 +964,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
   }
   iree_host_size_t scratch_size = 0;
   iree_host_size_t accesses_offset = 0, family_bindings_offset = 0;
+  iree_host_size_t access_devices_offset = 0;
   iree_host_size_t backends_offset = 0;
   iree_host_size_t capabilities_offset = 0, binding_types_offset = 0;
   iree_host_size_t requests_offset = 0, transition_sites_offset = 0;
@@ -952,6 +976,8 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       IREE_STRUCT_FIELD_ALIGNED(
           scope.family_count + 1, amdf_memory_device_access_t,
           iree_alignof(amdf_memory_device_access_t), &accesses_offset),
+      IREE_STRUCT_FIELD(scope.family_count + 1, iree_hal_device_t*,
+                        &access_devices_offset),
       IREE_STRUCT_FIELD_ALIGNED(scope.family_count,
                                 iree_hal_memory_scope_access_t,
                                 iree_alignof(iree_hal_memory_scope_access_t),
@@ -977,6 +1003,8 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       (const iree_hal_amd_fabric_memory_backend_t**)(scratch + backends_offset);
   amdf_memory_device_access_t* accesses =
       (amdf_memory_device_access_t*)(scratch + accesses_offset);
+  iree_hal_device_t** access_devices =
+      (iree_hal_device_t**)(scratch + access_devices_offset);
   iree_hal_memory_scope_access_t* family_bindings =
       (iree_hal_memory_scope_access_t*)(scratch + family_bindings_offset);
   amdf_memory_access_capabilities_t* capabilities =
@@ -1122,6 +1150,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       }
       if (access_ordinal == access_count) {
         backends[access_count] = backend;
+        access_devices[access_count] = device;
         accesses[access_count++].device = backend->native.device;
       }
       amdf_memory_access_requirements_t* requirements =
@@ -1248,6 +1277,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
                                           options->placement.node),
       .access_count = access_count,
       .accesses = accesses,
+      .access_devices = access_devices,
       .family_bindings = family_bindings,
       .private_host_access = private_host_access,
       .required_flags = required_flags,
@@ -1397,6 +1427,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
                       .access = private_owner_access | storage.minimum_access,
                   },
           };
+          access_devices[access_count] = backend->device;
           ++storage_query.access_count;
         }
       } else {
@@ -1422,7 +1453,7 @@ void iree_hal_amd_fabric_memory_backend_initialize(
     iree_hal_device_t* device,
     const iree_hal_amd_fabric_memory_backend_options_t* options,
     iree_async_notification_t* notification,
-    iree_hal_memory_maintenance_t* maintenance,
+    iree_hal_amd_fabric_allocation_queue_t* allocation_queue,
     iree_hal_pool_epoch_query_t epoch_query,
     iree_hal_amd_fabric_memory_backend_t* out_backend) {
   static const iree_hal_slab_pool_factory_t* const factories[] = {
@@ -1442,7 +1473,7 @@ void iree_hal_amd_fabric_memory_backend_initialize(
       .device = device,
       .native = *options,
       .notification = notification,
-      .maintenance = maintenance,
+      .allocation_queue = allocation_queue,
       .epoch_query = epoch_query,
   };
 }

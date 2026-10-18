@@ -20,8 +20,8 @@ void expand_float8(
     [[loom::noalias, loom::assume_aligned(64)]] const Float8E4M3x4* e4m3,
     [[loom::noalias, loom::assume_aligned(64)]] const Float8E5M2x4* e5m2,
     [[loom::noalias]] Float4* output) {
-  output[0] = __builtin_convertvector(*e4m3, Float4);
-  output[1] = __builtin_convertvector(*e5m2, Float4);
+  output[0] = loom::convert<Float4>(*e4m3);
+  output[1] = loom::convert<Float4>(*e5m2);
 }
 
 LOOM_CHECK_CASE(uniform_float8_conversion) {
@@ -63,9 +63,9 @@ void convert_float8_integers(
     [[loom::noalias, loom::assume_aligned(64)]] const Float8E5M2x4* fractional,
     [[loom::noalias]] Float8E4M3x4* e4m3, [[loom::noalias]] Float8E5M2x4* e5m2,
     [[loom::noalias]] Byte4* truncated) {
-  *e4m3 = __builtin_convertvector(*codebook, Float8E4M3x4);
-  *e5m2 = __builtin_convertvector(*codebook, Float8E5M2x4);
-  *truncated = __builtin_convertvector(*fractional, Byte4);
+  *e4m3 = loom::convert<Float8E4M3x4>(*codebook);
+  *e5m2 = loom::convert<Float8E5M2x4>(*codebook);
+  *truncated = loom::convert<Byte4>(*fractional);
 }
 
 LOOM_CHECK_CASE(integer_float8_conversion) {

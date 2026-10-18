@@ -350,7 +350,8 @@ def compile_contract_selection_index(
     rows = []
     for dialect_ordinal, dialect in enumerate(index.dialects):
         dialect_id = index.dialect_base_id + dialect_ordinal
-        for op_index, (case_start, case_count) in enumerate(dialect):
+        for op_index, entry in enumerate(dialect):
+            case_start, case_count = entry.case_start, entry.case_count
             if not case_count:
                 continue
             op_kind = (dialect_id << 8) | op_index

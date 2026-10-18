@@ -183,9 +183,11 @@ typedef struct loom_low_emission_frame_lower_spill_traffic_result_t {
 
 // Target callback that rewrites structural low.spill/low.reload traffic into
 // target packets before the next emission-frame scheduling/allocation round.
-// Every register value created by the rewrite and every preexisting replacement
-// source exposed by it must be returned as a required-register value. This
-// prevents target spill traffic from recursively becoming spill traffic.
+// Its facts replace the generic materializer's facts for that traffic. Every
+// register value created by the rewrite must be returned as a required-register
+// value so target spill helpers cannot recursively spill. Existing store
+// payloads remain independently spillable; the frame separately retains values
+// whose own spill plans have already been materialized.
 // Definitions reported in |expanded_execution_value_ids| must acquire fresh
 // storage at their own definition point. Values reported in
 // |per_user_placement_value_ids| must also appear in

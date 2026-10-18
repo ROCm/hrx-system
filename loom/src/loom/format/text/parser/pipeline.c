@@ -55,9 +55,9 @@ static iree_status_t loom_pipeline_token_location(
   if (parser->source_id == LOOM_SOURCE_ID_INVALID) {
     return iree_ok_status();
   }
-  loom_location_entry_t entry = loom_location_file_range(
-      parser->source_id, (uint16_t)token.line, (uint16_t)token.column,
-      (uint16_t)token.line, (uint16_t)token.end_column);
+  loom_location_entry_t entry =
+      loom_location_file_range(parser->source_id, token.line, token.column,
+                               token.line, token.end_column);
   return loom_module_add_location(parser->module, entry, out_location);
 }
 

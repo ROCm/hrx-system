@@ -750,7 +750,7 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
                                      IREE_SV("amd.xdna.aie2p.configuration"))) {
       bool valid = false;
       IREE_RETURN_IF_ERROR(loom_aie2p_configuration_plan_build(
-          request, source_entry->function_op, device_profile,
+          request, &versions, source_entry->function_op, device_profile,
           &configuration_plans[i], &product_entries[i], &valid));
       if (!valid) {
         return iree_ok_status();

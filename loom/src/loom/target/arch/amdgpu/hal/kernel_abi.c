@@ -778,6 +778,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_direct_arg_from_block_arg(
       .argument_index = argument_index,
       .kernarg_offset = kernarg_offset,
       .kernarg_size = kernarg_size,
+      .payload_size = kernarg_size,
       .kernarg_alignment =
           LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT,
       .abi_type = abi_type,
@@ -791,6 +792,7 @@ typedef struct loom_amdgpu_hal_kernel_abi_layout_attr_keys_t {
   loom_string_id_t direct_arg_names;
   loom_string_id_t direct_arg_offsets;
   loom_string_id_t direct_arg_parameter_indices;
+  loom_string_id_t direct_arg_payload_sizes;
   loom_string_id_t direct_arg_sizes;
   loom_string_id_t parameter_count;
   loom_string_id_t resource_count;
@@ -814,6 +816,9 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_intern_layout_attr_keys(
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(module, IREE_SV("direct_arg_parameter_indices"),
                                 &out_keys->direct_arg_parameter_indices));
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_string(module, IREE_SV("direct_arg_payload_sizes"),
+                                &out_keys->direct_arg_payload_sizes));
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
       module, IREE_SV("direct_arg_sizes"), &out_keys->direct_arg_sizes));
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
@@ -883,6 +888,35 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_make_direct_arg_sizes_attr(
   }
   for (iree_host_size_t i = 0; i < layout->direct_arg_count; ++i) {
     entries[i] = layout->direct_args[i].kernarg_size;
+  }
+  *out_attr = loom_attr_i64_array(entries, (uint16_t)layout->direct_arg_count);
+  return iree_ok_status();
+}
+
+static bool loom_amdgpu_hal_kernel_abi_has_distinct_direct_arg_payload_sizes(
+    const loom_amdgpu_hal_kernel_abi_layout_t* layout) {
+  for (iree_host_size_t i = 0; i < layout->direct_arg_count; ++i) {
+    if (layout->direct_args[i].payload_size !=
+        layout->direct_args[i].kernarg_size) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t
+loom_amdgpu_hal_kernel_abi_make_direct_arg_payload_sizes_attr(
+    const loom_amdgpu_hal_kernel_abi_layout_t* layout,
+    iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr) {
+  IREE_ASSERT_LE(layout->direct_arg_count, (iree_host_size_t)UINT16_MAX);
+  int64_t* entries = NULL;
+  if (layout->direct_arg_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(scratch_arena, layout->direct_arg_count,
+                                  sizeof(*entries), (void**)&entries));
+  }
+  for (iree_host_size_t i = 0; i < layout->direct_arg_count; ++i) {
+    entries[i] = layout->direct_args[i].payload_size;
   }
   *out_attr = loom_attr_i64_array(entries, (uint16_t)layout->direct_arg_count);
   return iree_ok_status();
@@ -982,6 +1016,14 @@ iree_status_t loom_amdgpu_hal_kernel_abi_make_layout_attr(
   loom_attribute_t direct_arg_sizes_attr = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_make_direct_arg_sizes_attr(
       layout, scratch_arena, &direct_arg_sizes_attr));
+  const bool has_distinct_direct_arg_payload_sizes =
+      loom_amdgpu_hal_kernel_abi_has_distinct_direct_arg_payload_sizes(layout);
+  loom_attribute_t direct_arg_payload_sizes_attr = {0};
+  if (has_distinct_direct_arg_payload_sizes) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_hal_kernel_abi_make_direct_arg_payload_sizes_attr(
+            layout, scratch_arena, &direct_arg_payload_sizes_attr));
+  }
   loom_attribute_t resource_offsets_attr = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_make_layout_u32_array_attr(
       layout, LOOM_AMDGPU_HAL_KERNEL_ABI_LAYOUT_ARRAY_RESOURCE_OFFSETS,
@@ -992,29 +1034,60 @@ iree_status_t loom_amdgpu_hal_kernel_abi_make_layout_attr(
       LOOM_AMDGPU_HAL_KERNEL_ABI_LAYOUT_ARRAY_RESOURCE_PARAMETER_INDICES,
       scratch_arena, &resource_parameter_indices_attr));
 
-  loom_named_attr_t entries[] = {
-      {.name_id = keys.constant_count,
-       .value = loom_attr_i64(layout->constant_count)},
-      {.name_id = keys.direct_arg_count,
-       .value = loom_attr_i64(layout->direct_arg_count)},
-      {.name_id = keys.direct_arg_names, .value = direct_arg_names_attr},
-      {.name_id = keys.direct_arg_offsets, .value = direct_arg_offsets_attr},
-      {.name_id = keys.direct_arg_parameter_indices,
-       .value = direct_arg_parameter_indices_attr},
-      {.name_id = keys.direct_arg_sizes, .value = direct_arg_sizes_attr},
-      {.name_id = keys.parameter_count,
-       .value = loom_attr_i64(layout->parameter_count)},
-      {.name_id = keys.resource_count,
-       .value = loom_attr_i64(layout->resource_count)},
-      {.name_id = keys.resource_offsets, .value = resource_offsets_attr},
-      {.name_id = keys.resource_parameter_indices,
-       .value = resource_parameter_indices_attr},
-      {.name_id = keys.uses_kernarg_segment_ptr,
-       .value = loom_attr_bool(layout->uses_kernarg_segment_ptr)},
+  loom_named_attr_t entries[12] = {0};
+  iree_host_size_t entry_count = 0;
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.constant_count,
+      .value = loom_attr_i64(layout->constant_count),
   };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.direct_arg_count,
+      .value = loom_attr_i64(layout->direct_arg_count),
+  };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.direct_arg_names,
+      .value = direct_arg_names_attr,
+  };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.direct_arg_offsets,
+      .value = direct_arg_offsets_attr,
+  };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.direct_arg_parameter_indices,
+      .value = direct_arg_parameter_indices_attr,
+  };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.direct_arg_sizes,
+      .value = direct_arg_sizes_attr,
+  };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.parameter_count,
+      .value = loom_attr_i64(layout->parameter_count),
+  };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.resource_count,
+      .value = loom_attr_i64(layout->resource_count),
+  };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.resource_offsets,
+      .value = resource_offsets_attr,
+  };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.resource_parameter_indices,
+      .value = resource_parameter_indices_attr,
+  };
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = keys.uses_kernarg_segment_ptr,
+      .value = loom_attr_bool(layout->uses_kernarg_segment_ptr),
+  };
+  if (has_distinct_direct_arg_payload_sizes) {
+    entries[entry_count++] = (loom_named_attr_t){
+        .name_id = keys.direct_arg_payload_sizes,
+        .value = direct_arg_payload_sizes_attr,
+    };
+  }
   return loom_module_make_canonical_attr_dict(
-      module, loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)),
-      out_attr);
+      module, loom_make_named_attr_slice(entries, entry_count), out_attr);
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_abi_resource_from_import(
@@ -1822,6 +1895,8 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_lookup_layout_attr_keys(
           loom_module_lookup_string(module, IREE_SV("direct_arg_offsets")),
       .direct_arg_parameter_indices = loom_module_lookup_string(
           module, IREE_SV("direct_arg_parameter_indices")),
+      .direct_arg_payload_sizes = loom_module_lookup_string(
+          module, IREE_SV("direct_arg_payload_sizes")),
       .direct_arg_sizes =
           loom_module_lookup_string(module, IREE_SV("direct_arg_sizes")),
       .parameter_count =
@@ -1963,6 +2038,28 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_decode_direct_arg_size(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_hal_kernel_abi_decode_direct_arg_payload_size(
+    const loom_attribute_t* direct_arg_payload_sizes_attr,
+    uint32_t direct_arg_count, uint32_t argument_index, uint32_t kernarg_size,
+    uint32_t* out_size) {
+  *out_size = kernarg_size;
+  if (direct_arg_payload_sizes_attr == NULL) {
+    return iree_ok_status();
+  }
+  uint32_t payload_size = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_decode_u32_array_element(
+      direct_arg_payload_sizes_attr, direct_arg_count, argument_index,
+      IREE_SV("direct_arg_payload_sizes"), &payload_size));
+  if (payload_size == 0 || payload_size > kernarg_size) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU HAL ABI layout attr direct argument payload size must be "
+        "nonzero and not exceed its native storage");
+  }
+  *out_size = payload_size;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_hal_kernel_abi_lookup_direct_arg_name_key(
     const loom_module_t* module, iree_host_size_t ordinal,
     loom_string_id_t* out_key_id) {
@@ -2052,6 +2149,18 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_require_layout_attr(
       top_attrs, keys.direct_arg_sizes, LOOM_ATTR_I64_ARRAY,
       &direct_arg_sizes_attr));
+  const loom_attribute_t* direct_arg_payload_sizes_attr = NULL;
+  if (keys.direct_arg_payload_sizes != LOOM_STRING_ID_INVALID) {
+    direct_arg_payload_sizes_attr = loom_amdgpu_hal_kernel_abi_find_layout_attr(
+        top_attrs, keys.direct_arg_payload_sizes);
+    if (direct_arg_payload_sizes_attr != NULL &&
+        direct_arg_payload_sizes_attr->kind != LOOM_ATTR_I64_ARRAY) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU HAL ABI layout attr has a malformed direct argument "
+          "payload-size field");
+    }
+  }
   const loom_attribute_t* resource_offsets_attr = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_require_layout_attr(
       top_attrs, keys.resource_offsets, LOOM_ATTR_I64_ARRAY,
@@ -2152,6 +2261,11 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
     uint32_t kernarg_size = 0;
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_decode_direct_arg_size(
         direct_arg_sizes_attr, direct_arg_count, i, &kernarg_size));
+    uint32_t payload_size = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_hal_kernel_abi_decode_direct_arg_payload_size(
+            direct_arg_payload_sizes_attr, direct_arg_count, i, kernarg_size,
+            &payload_size));
     uint32_t parameter_index = 0;
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_decode_u32_array_element(
         direct_arg_parameter_indices_attr, direct_arg_count, i,
@@ -2182,6 +2296,7 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
         .argument_index = (uint16_t)i,
         .kernarg_offset = kernarg_offset,
         .kernarg_size = kernarg_size,
+        .payload_size = payload_size,
         .kernarg_alignment =
             LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT,
         .abi_type = loom_type_none(),

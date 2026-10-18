@@ -31,6 +31,7 @@ def render_preamble(
     record_declarations: dict[str, tuple[tuple[str, str], ...]],
     table_lookup_declarations: set[tuple[str, str, str, str]],
     targets: tuple[tuple[str, TargetInfo], ...],
+    uses_numeric_conversion: bool,
 ) -> list[str]:
     """Renders includes, helper declarations, and source target metadata."""
 
@@ -45,6 +46,8 @@ def render_preamble(
         headers.add("loomcxx/predicate.h")
     if "encoding.define" in operation_names:
         headers.add("loomcxx/encoding.h")
+    if uses_numeric_conversion:
+        headers.add("loomcxx/numeric.h")
     if operation_names & {
         "kernel.subgroup.reduce",
         "vector.absf",

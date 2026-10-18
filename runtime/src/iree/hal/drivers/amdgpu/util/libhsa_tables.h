@@ -386,19 +386,19 @@ IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_SIGNALS, void, hsa_signal_xor_screlease,
                            ARGS(signal, value))
 
 IREE_HAL_AMDGPU_LIBHSA_PFN(
-    TRACE_ALWAYS, hsa_signal_value_t, hsa_signal_wait_scacquire,
+    TRACE_NONE, hsa_signal_value_t, hsa_signal_wait_scacquire,
     DECL(hsa_signal_t signal, hsa_signal_condition_t condition,
          hsa_signal_value_t compare_value, uint64_t timeout_hint,
          hsa_wait_state_t wait_state_hint),
     ARGS(signal, condition, compare_value, timeout_hint, wait_state_hint))
 IREE_HAL_AMDGPU_LIBHSA_PFN(
-    TRACE_ALWAYS, hsa_signal_value_t, hsa_signal_wait_relaxed,
+    TRACE_NONE, hsa_signal_value_t, hsa_signal_wait_relaxed,
     DECL(hsa_signal_t signal, hsa_signal_condition_t condition,
          hsa_signal_value_t compare_value, uint64_t timeout_hint,
          hsa_wait_state_t wait_state_hint),
     ARGS(signal, condition, compare_value, timeout_hint, wait_state_hint))
 
-IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, uint32_t, hsa_amd_signal_wait_all,
+IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_NONE, uint32_t, hsa_amd_signal_wait_all,
                            DECL(uint32_t signal_count, hsa_signal_t* signals,
                                 hsa_signal_condition_t* conds,
                                 hsa_signal_value_t* values,
@@ -407,7 +407,7 @@ IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, uint32_t, hsa_amd_signal_wait_all,
                                 hsa_signal_value_t* satisfying_values),
                            ARGS(signal_count, signals, conds, values,
                                 timeout_hint, wait_hint, satisfying_values))
-IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, uint32_t, hsa_amd_signal_wait_any,
+IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_NONE, uint32_t, hsa_amd_signal_wait_any,
                            DECL(uint32_t signal_count, hsa_signal_t* signals,
                                 hsa_signal_condition_t* conds,
                                 hsa_signal_value_t* values,

@@ -9,6 +9,8 @@
 
 #include "loom/error/source.h"
 #include "loom/ir/module.h"
+#include "loom/pass/registry.h"
+#include "loom/pass/report.h"
 #include "loom/target/pipeline.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/report.h"
@@ -86,6 +88,27 @@ loomc_target_environment_create_from_provider_set(
     const loom_target_provider_set_t* provider_set, loomc_allocator_t allocator,
     loomc_target_environment_t** out_target_environment);
 
+/// Composes builtin and target pass descriptors for exact-version inspection.
+///
+/// This is the same registry used to prepare pass programs. It lets clients
+/// present pass names, descriptions, and option schemas without linking the
+/// builtin pass implementations. No context or heap allocation is required.
+///
+/// @param target_environment Environment supplying target-specific passes.
+/// May be `NULL` to inspect builtin passes alone.
+/// @param out_storage Caller-owned storage receiving the composed registry.
+/// @return OK on success; non-OK if the provider registries cannot be composed.
+///
+/// @lifetime
+/// The storage must remain at a stable address while its registry is used.
+/// Descriptors borrow from the target providers; retain the environment until
+/// inspection is complete. The registry has the exact-version native contract
+/// of this header, including native callback types, and is not a stable ABI.
+LOOMC_API_EXPORT loomc_status_t
+loomc_target_environment_get_native_pass_registry(
+    const loomc_target_environment_t* target_environment,
+    loom_pass_registry_storage_t* out_storage);
+
 /// Creates a public pass program from a native source-Low pipeline builder.
 ///
 /// This bridge lets an exact-version embedding select a native source-Low
@@ -116,36 +139,66 @@ loomc_pass_program_create_from_native_source_low_pipeline(
     const loom_target_pipeline_options_t* options, loomc_allocator_t allocator,
     loomc_pass_program_t** out_pass_program, loomc_result_t** out_result);
 
-/// Compiles a public module while populating a caller-owned native report.
+/// Collects native pass invocation records during prepared execution.
 ///
-/// This has the same validation, specialization, mutation, diagnostic, and
-/// artifact semantics as `loomc_compile_module`. The native report is threaded
-/// through the pass environment for exact-version consumers that need report
-/// rows not represented by stable LoomC artifacts.
+/// Attach to `loomc_pass_run_options_t::next` or
+/// `loomc_compile_options_t::next`. The caller initializes the collector with
+/// `loom_pass_report_initialize` and releases its storage with
+/// `loom_pass_report_deinitialize`. Execution appends completed records,
+/// including partial progress when the operation fails or returns a non-OK
+/// status with no result. Failure to allocate the last record leaves earlier
+/// records available.
 ///
-/// @param compiler Prepared compiler.
-/// @param workspace Invocation-local scratch workspace.
-/// @param pass_program Prepared pass program selected for this invocation.
-/// @param module Mutable input module.
-/// @param options Compile invocation options, or `NULL` for defaults.
-/// @param report Native compile report to populate. May be zero-initialized or
-/// preinitialized with caller-selected detail flags and storage.
-/// @param allocator Host allocator used for result artifacts and to initialize
-/// a zero-valued report.
-/// @param out_result Receives one retained compile result.
-/// @return OK when compilation ran to a result. Non-OK statuses represent API
-/// misuse or infrastructure failure.
+/// @lifetime
+/// The collector has exclusive access during the synchronous invocation. Its
+/// descriptor keys and statistic names borrow from the native providers, which
+/// must outlive report consumption. Pipeline/symbol names, values, and detail
+/// rows are owned by the collector. Independent executions use distinct
+/// reports.
+typedef struct loomc_native_pass_report_options_t {
+  /// Must be `LOOMC_STRUCTURE_TYPE_NATIVE_PASS_REPORT_OPTIONS`.
+  loomc_structure_type_t type;
+
+  /// Size of this structure in bytes.
+  loomc_host_size_t structure_size;
+
+  /// Next invocation option extension.
+  const void* next;
+
+  /// Initialized caller-owned collector. Must not be NULL.
+  loom_pass_report_t* report;
+} loomc_native_pass_report_options_t;
+
+/// Collects target compilation details during prepared execution.
 ///
-/// @ownership
-/// The caller retains `module` and `report` and owns `out_result`. Report rows
-/// remain owned by `report` and are released with
-/// `loom_target_compile_report_deinitialize` when its allocator requires it.
-LOOMC_API_EXPORT loomc_status_t loomc_compile_module_with_native_report(
-    loomc_compiler_t* compiler, loomc_workspace_t* workspace,
-    const loomc_pass_program_t* pass_program, loomc_module_t* module,
-    const loomc_compile_options_t* options,
-    loom_target_compile_report_t* report, loomc_allocator_t allocator,
-    loomc_result_t** out_result);
+/// Attach to `loomc_pass_run_options_t::next` or
+/// `loomc_compile_options_t::next` for `loomc_compile_module`.
+/// `loomc_compile_request` does not accept this extension because its internal
+/// module is released before returning. The caller initializes the collector
+/// with `loom_target_compile_report_initialize`, selects its requested detail
+/// flags, and releases its storage with
+/// `loom_target_compile_report_deinitialize`. Existing rows are preserved and
+/// passes append the requested observations. This collector does not request
+/// target specialization or artifact emission.
+///
+/// @lifetime
+/// The collector has exclusive access during the synchronous invocation. Native
+/// report identity and descriptor data follow the native report lifetime
+/// contract: consume the report before mutating or releasing its module,
+/// invocation profiles, or target providers.
+typedef struct loomc_native_compile_report_options_t {
+  /// Must be `LOOMC_STRUCTURE_TYPE_NATIVE_COMPILE_REPORT_OPTIONS`.
+  loomc_structure_type_t type;
+
+  /// Size of this structure in bytes.
+  loomc_host_size_t structure_size;
+
+  /// Next invocation option extension.
+  const void* next;
+
+  /// Initialized caller-owned collector. Must not be NULL.
+  loom_target_compile_report_t* report;
+} loomc_native_compile_report_options_t;
 
 /// Verifies a public module and projects its native read-only view.
 ///

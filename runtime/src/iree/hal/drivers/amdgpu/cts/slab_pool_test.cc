@@ -13,7 +13,6 @@
 #include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/memory/fixed_block_pool.h"
-#include "iree/hal/memory/maintenance.h"
 #include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/memory/tlsf_pool.h"
 
@@ -110,19 +109,6 @@ class AmdgpuSlabPoolTest : public CtsTestBase<> {
         semaphores, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
-  // Joins queued child/cache returns, including work they enqueue. A pending
-  // frontier callback can still enqueue native source retirement afterward.
-  void JoinMaintenance(iree_hal_pool_t* source) {
-    iree_hal_memory_maintenance_call(
-        source->maintenance,
-        [](void* user_data) {
-          auto* owner = static_cast<iree_hal_memory_maintenance_t*>(user_data);
-          while (iree_hal_memory_maintenance_run_one(owner)) {
-          }
-        },
-        source->maintenance);
-  }
-
   // Independent native progress owners kept alive until their group retires.
   std::array<DeviceCreateContext, 3> contexts_;
   // Owned logical devices, also retained by the sealed group.
@@ -194,7 +180,6 @@ TEST_P(AmdgpuSlabPoolTest, CapturesExactFamiliesWithoutPayload) {
   Wait(downloaded);
   EXPECT_EQ(output, value);
   buffer.reset();
-  JoinMaintenance(source);
 }
 
 TEST_P(AmdgpuSlabPoolTest, NativeOnlyQueueAllocationKeepsZeroUsage) {
@@ -225,7 +210,6 @@ TEST_P(AmdgpuSlabPoolTest, NativeOnlyQueueAllocationKeepsZeroUsage) {
                                          &raw_buffer));
   Wait(deallocated);
   buffer.reset();
-  JoinMaintenance(source);
 }
 
 TEST_P(AmdgpuSlabPoolTest, PublicHostGrantsAndNativeClassRequirements) {
@@ -289,7 +273,6 @@ TEST_P(AmdgpuSlabPoolTest, PublicHostGrantsAndNativeClassRequirements) {
                              ? 1u
                              : 0u));
       buffer.reset();
-      JoinMaintenance(source);
     }
   }
   families_[1].requirements = IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED;
@@ -318,7 +301,6 @@ TEST_P(AmdgpuSlabPoolTest, PublicHostGrantsAndNativeClassRequirements) {
                                   IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                                       IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED));
     buffer.reset();
-    JoinMaintenance(uncached_source);
   } else {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, uncached_status);
   }
@@ -400,7 +382,6 @@ TEST_P(AmdgpuSlabPoolTest, PrivateHostBindingsSurviveQueuedCommitment) {
                                          &raw_buffer));
   Wait(deallocated);
   buffer.reset();
-  JoinMaintenance(source);
 }
 
 TEST_P(AmdgpuSlabPoolTest, HostOnlySourceDoesNotGrantQueueAccess) {
@@ -448,7 +429,6 @@ TEST_P(AmdgpuSlabPoolTest, HostOnlySourceDoesNotGrantQueueAccess) {
       iree_hal_queue_alloca(queues_[0], iree_hal_semaphore_list_empty(),
                             allocated, source, 1, &request, queued.out()));
   buffer.reset();
-  JoinMaintenance(source);
 }
 
 TEST_P(AmdgpuSlabPoolTest, PlacementAndFamilyOrderAreIndependent) {
@@ -636,7 +616,6 @@ TEST_P(AmdgpuSlabPoolTest, ImportsHostStorageWithExactRangeAndOwnership) {
 
   nested.reset();
   buffer.reset();
-  JoinMaintenance(source);
   const ImportedHostAllocationReleaseResult released = release_result.get();
   EXPECT_TRUE(released.storage_class_matches);
   EXPECT_TRUE(released.payload_matches);
@@ -745,10 +724,8 @@ TEST_P(AmdgpuSlabPoolTest, BroadImportPoolUsesCommonRouteGuarantees) {
   iree_hal_external_storage_release(&reexported);
 
   imported.reset();
-  JoinMaintenance(import_pool);
   source_view.reset();
   source_buffer.reset();
-  JoinMaintenance(source_pool);
 }
 
 TEST_P(AmdgpuSlabPoolTest, RejectsUnsatisfiedExternalRouteContracts) {
@@ -884,7 +861,6 @@ TEST_P(AmdgpuSlabPoolTest, SharedCacheFeedsBothPoliciesAcrossNativeOwners) {
                                              &raw_buffer));
       Wait(deallocated);
       buffer.reset();
-      JoinMaintenance(source);
       iree_hal_pool_stats_t stats;
       iree_hal_pool_query_stats(child, &stats);
       EXPECT_EQ(stats.bytes_committed, 0u);
@@ -900,7 +876,7 @@ TEST_P(AmdgpuSlabPoolTest, SharedCacheFeedsBothPoliciesAcrossNativeOwners) {
   // frontier even though the deallocation semaphore has reached its value.
   EXPECT_EQ(cache_stats.ready_count + cache_stats.pending_count, 1u);
   iree_hal_pool_trim(cache, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
-  JoinMaintenance(source);
+  ASSERT_TRUE(WaitPoolCommittedBytes(source, 0));
   iree_hal_pool_query_stats(cache, &stats);
   EXPECT_EQ(stats.bytes_committed, 0u);
   iree_hal_pool_query_stats(source, &stats);

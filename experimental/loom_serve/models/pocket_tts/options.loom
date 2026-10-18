@@ -12,11 +12,10 @@ func.decl import("json") @parse_i64(%source: buffer, %offset: i64, %length: i64)
 
 func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
 
-// Each 32-byte numeric option record contains its padded 16-byte spelling,
-// spelling length, minimum, maximum, and default. Record order is model header
-// order: context, rotary, chunk tokens, input tokens, request rows, batch rows,
-// and threads. These ranges match the source configuration families.
-global.rodata.def @pocket.numeric_options = bytes("636f6e746578745f636170616369747910000000010000000000010000020000726f746172795f6361706163697479000f0000001000000000001000001000006368756e6b5f746f6b656e73000000000c000000010000000002000032000000696e7075745f746f6b656e73000000000c000000010000000000010000100000726571756573745f63617061636974791000000001000000000001000400000062617463685f636170616369747900000e0000000100000000000100040000007468726561647300000000000000000007000000010000000001000080000000")
+// Each 40-byte numeric option record contains its padded 16-byte spelling,
+// spelling length, minimum, maximum, default, model header word, and device
+// configuration flag. Host byte/token limits do not alter numerical kernels.
+global.rodata.def @pocket.numeric_options = bytes("636f6e746578745f6361706163697479100000000100000000000100000200000000000001000000726f746172795f6361706163697479000f00000010000000000010000010000001000000010000006368756e6b5f746f6b656e73000000000c0000000100000000020000320000000200000000000000696e7075745f746f6b656e73000000000c0000000100000000000100001000000300000000000000726571756573745f636170616369747910000000010000000000010004000000040000000100000062617463685f636170616369747900000e000000010000000000010004000000050000000100000074687265616473000000000000000000070000000100000000010000800000000600000001000000746578745f63617061636974790000000d0000000400000000000100001000000900000000000000746578745f6c696d69740000000000000a0000000100000000000001000001000a00000000000000")
 
 // voices, id, frames
 global.rodata.def @pocket.voices_key = bytes("766f69636573")
@@ -198,23 +197,24 @@ func.def @pocket.parse_voices(%source: buffer) -> (buffer, i32, i32) {
 }
 
 // Model metadata is twelve I32 header words followed by voice records. The
-// first seven fields follow numeric_options; voice count and maximum frames
-// follow, then three reserved words. Only voice readiness is mutable.
+// first seven fields hold numerical/token options; words 7/8 hold voice count
+// and maximum frames, 9/10 hold CPU input capacity/limit in bytes, and 11 is
+// reserved. Only voice readiness is mutable.
 func.def public @pocket.parse_options(%source: buffer) -> (buffer) {
   %fields, %type, %count64 = func.call @members(%source) : (buffer) -> (buffer, i32, i64)
   %object_type = scalar.constant 2 : i32
-  %maximum_fields = scalar.constant 8 : i64
+  %maximum_fields = scalar.constant 10 : i64
   %object = scalar.cmpi eq, %type, %object_type : i32
   %bounded = scalar.cmpi ule, %count64, %maximum_fields : i64
   %valid = scalar.andi %object, %bounded : i1
   %error = global.load @pocket.options_error : buffer
   func.call @pocket.check(%valid, %error) : (i1, buffer)
-  %count_value = scalar.assume %count64 [range(%count64, 0, 8)] : i64
+  %count_value = scalar.assume %count64 [range(%count64, 0, 10)] : i64
   %count = index.cast %count_value : i64 to index
   %origin = index.constant 0 : offset
   %records = buffer.view %fields[%origin] : buffer -> view<[%count]x5xi64>
   %table = global.load @pocket.numeric_options : buffer
-  %schema = buffer.view %table[%origin] : buffer -> view<7x8xi32>
+  %schema = buffer.view %table[%origin] : buffer -> view<9x10xi32>
   %header_bytes = index.constant 48 : offset
   %values = buffer.alloca<private> align(8) %header_bytes : buffer
   %zero32 = scalar.constant 0 : i32
@@ -222,10 +222,13 @@ func.def public @pocket.parse_options(%source: buffer) -> (buffer) {
   %header = buffer.view %values[%origin] : buffer -> view<12xi32>
   %begin = index.constant 0 : index
   %one = index.constant 1 : index
-  %seven = index.constant 7 : index
-  scf.for %i = [%begin to %seven step %one] {
-    %default = view.load %schema[%i, 7] : view<7x8xi32> -> i32
-    view.store %default, %header[%i] : i32, view<12xi32>
+  %option_count = index.constant 9 : index
+  scf.for %i = [%begin to %option_count step %one] {
+    %default = view.load %schema[%i, 7] : view<9x10xi32> -> i32
+    %word32 = view.load %schema[%i, 8] : view<9x10xi32> -> i32
+    %word_value = index.cast %word32 : i32 to index
+    %word = index.assume %word_value [range(%word_value, 0, 10)] : index
+    view.store %default, %header[%word] : i32, view<12xi32>
   }
   %source_bytes = buffer.length %source
   %decoded = buffer.alloca<private> align(1) %source_bytes : buffer
@@ -243,14 +246,14 @@ func.def public @pocket.parse_options(%source: buffer) -> (buffer) {
     %key_bytes = func.call @unescape(%source, %key_begin, %key_length, %decoded, %zero64) : (buffer, i64, i64, buffer, i64) -> (i64)
     %is_voices = func.call @pocket.option_equal(%decoded, %key_bytes, %voices_key) : (buffer, i64, buffer) -> (i1)
     %missing = scalar.constant -1 : i32
-    %voice_index = scalar.constant 7 : i32
+    %voice_index = scalar.constant 9 : i32
     %initial = scf.select %is_voices, %voice_index, %missing : i32
-    %selected = scf.for %j = [%begin to %seven step %one](%selected = %initial : i32) -> (i32) {
-      %length32 = view.load %schema[%j, 4] : view<7x8xi32> -> i32
+    %selected = scf.for %j = [%begin to %option_count step %one](%selected = %initial : i32) -> (i32) {
+      %length32 = view.load %schema[%j, 4] : view<9x10xi32> -> i32
       %length64 = scalar.extui %length32 : i32 to i64
       %same_length = scalar.cmpi eq, %key_bytes, %length64 : i64
       %equal = scf.if %same_length -> (i1) {
-        %stride = index.constant 32 : offset
+        %stride = index.constant 40 : offset
         %key_origin = index.scale %j, %stride : index, offset -> offset
         %length_value = scalar.assume %length32 [range(%length32, 1, 16)] : i32
         %bytes = index.cast %length_value : i32 to offset
@@ -284,10 +287,10 @@ func.def public @pocket.parse_options(%source: buffer) -> (buffer) {
       %number = scalar.cmpi eq, %value_type, %one64 : i64
       func.call @pocket.check(%number, %error) : (i1, buffer)
       %value = func.call @parse_i64(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (i64)
-      %selected_value = scalar.assume %selected [range(%selected, 0, 6)] : i32
+      %selected_value = scalar.assume %selected [range(%selected, 0, 8)] : i32
       %index = index.cast %selected_value : i32 to index
-      %minimum32 = view.load %schema[%index, 5] : view<7x8xi32> -> i32
-      %maximum32 = view.load %schema[%index, 6] : view<7x8xi32> -> i32
+      %minimum32 = view.load %schema[%index, 5] : view<9x10xi32> -> i32
+      %maximum32 = view.load %schema[%index, 6] : view<9x10xi32> -> i32
       %minimum = scalar.extui %minimum32 : i32 to i64
       %maximum = scalar.extui %maximum32 : i32 to i64
       %above = scalar.cmpi sge, %value, %minimum : i64
@@ -295,13 +298,16 @@ func.def public @pocket.parse_options(%source: buffer) -> (buffer) {
       %in_range = scalar.andi %above, %below : i1
       func.call @pocket.check(%in_range, %error) : (i1, buffer)
       %value32 = scalar.trunci %value : i64 to i32
-      view.store %value32, %header[%index] : i32, view<12xi32>
+      %word32 = view.load %schema[%index, 8] : view<9x10xi32> -> i32
+      %word_value = index.cast %word32 : i32 to index
+      %word = index.assume %word_value [range(%word_value, 0, 10)] : index
+      view.store %value32, %header[%word] : i32, view<12xi32>
       scf.yield %voices : buffer
     }
     %next_seen = scalar.ori %seen, %bit : i32
     scf.yield %next_voices, %next_seen : buffer, i32
   }
-  %voice_bit = scalar.constant 128 : i32
+  %voice_bit = scalar.constant 512 : i32
   %present = scalar.andi %seen, %voice_bit : i32
   %has_voices = scalar.cmpi ne, %present, %zero32 : i32
   func.call @pocket.check(%has_voices, %error) : (i1, buffer)
@@ -352,21 +358,19 @@ func.def public @pocket.configure(%stage: i32, %model: buffer) {
   %origin = index.constant 0 : offset
   %header = buffer.view %model[%origin] : buffer -> view<12xi32>
   %table = global.load @pocket.numeric_options : buffer
-  %schema = buffer.view %table[%origin] : buffer -> view<7x8xi32>
+  %schema = buffer.view %table[%origin] : buffer -> view<9x10xi32>
   %begin = index.constant 0 : index
   %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
-  %seven = index.constant 7 : index
+  %zero = scalar.constant 0 : i32
+  %option_count = index.constant 9 : index
   %prefix = global.load @pocket.config_prefix : buffer
   %prefix_bytes = index.constant 7 : offset
-  %record_stride = index.constant 32 : offset
-  scf.for %i = [%begin to %seven step %one] {
-    %position_config = index.cmp ult, %i, %two : index
-    %execution_config = index.cmp uge, %i, %four : index
-    %device_config = scalar.ori %position_config, %execution_config : i1
+  %record_stride = index.constant 40 : offset
+  scf.for %i = [%begin to %option_count step %one] {
+    %device = view.load %schema[%i, 9] : view<9x10xi32> -> i32
+    %device_config = scalar.cmpi ne, %device, %zero : i32
     scf.if %device_config {
-      %length32 = view.load %schema[%i, 4] : view<7x8xi32> -> i32
+      %length32 = view.load %schema[%i, 4] : view<9x10xi32> -> i32
       %length_value = scalar.assume %length32 [range(%length32, 1, 16)] : i32
       %length = index.cast %length_value : i32 to offset
       %bytes = index.add %prefix_bytes, %length : offset
@@ -374,7 +378,10 @@ func.def public @pocket.configure(%stage: i32, %model: buffer) {
       %record_origin = index.scale %i, %record_stride : index, offset -> offset
       buffer.copy %prefix[%origin], %key[%origin], %prefix_bytes
       buffer.copy %table[%record_origin], %key[%prefix_bytes], %length
-      %value32 = view.load %header[%i] : view<12xi32> -> i32
+      %word32 = view.load %schema[%i, 8] : view<9x10xi32> -> i32
+      %word_value = index.cast %word32 : i32 to index
+      %word = index.assume %word_value [range(%word_value, 0, 10)] : index
+      %value32 = view.load %header[%word] : view<12xi32> -> i32
       %value = scalar.extui %value32 : i32 to i64
       func.call @config_i64(%stage, %key, %value) : (i32, buffer, i64)
     }

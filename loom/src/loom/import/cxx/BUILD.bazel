@@ -94,6 +94,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/binding:intrinsics",
         "//loom/src/loom/import/cxx/binding:launch",
         "//loom/src/loom/import/cxx/binding:loop_schedule",
+        "//loom/src/loom/import/cxx/binding:numeric_conversion",
         "//loom/src/loom/import/cxx/binding:parameter_contracts",
         "//loom/src/loom/import/cxx/binding:target_definitions",
         "//loom/src/loom/import/cxx/binding:template_definitions",

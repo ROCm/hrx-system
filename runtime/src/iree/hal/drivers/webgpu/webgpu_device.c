@@ -239,10 +239,6 @@ iree_status_t iree_hal_webgpu_device_create(
         &device->memory_backend.notification);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_memory_maintenance_inline_create(
-        host_allocator, &device->memory_backend.maintenance);
-  }
-  if (iree_status_is_ok(status)) {
     status = iree_hal_webgpu_device_spec_create(identifier, host_allocator,
                                                 &device->device_spec);
   }
@@ -342,7 +338,6 @@ static void iree_hal_webgpu_device_destroy(iree_hal_device_t* base_device) {
     device->queue_count = 0;
   }
   iree_hal_webgpu_builtins_deinitialize(&device->builtins);
-  iree_hal_memory_maintenance_release(device->memory_backend.maintenance);
   iree_async_notification_release(device->memory_backend.notification);
   iree_hal_channel_provider_release(device->channel_provider);
   iree_hal_device_spec_release(device->device_spec);

@@ -59,12 +59,13 @@ class QualificationTest(unittest.TestCase):
         )
         diagnostics = report["cases"][0]["diagnostics"]
         self.assertEqual(len(diagnostics), 1)
-        self.assertEqual(diagnostics[0]["diagnostic_code"], "AMDGPU/026")
+        self.assertEqual(diagnostics[0]["domain"], "AMDGPU")
+        self.assertEqual(diagnostics[0]["code"], 26)
         self.assertEqual(
             diagnostics[0]["params"],
             {
                 "target_name": "wave32",
-                "subgroup_size": "32",
+                "subgroup_size": 32,
                 "processor": "gfx942",
             },
         )

@@ -283,7 +283,6 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/memory:cpu_slab_provider",
         "//runtime/src/iree/hal/memory:fixed_block_pool",
-        "//runtime/src/iree/hal/memory:maintenance_thread",
         "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

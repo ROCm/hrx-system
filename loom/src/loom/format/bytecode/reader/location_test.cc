@@ -152,7 +152,7 @@ TEST_F(BytecodeLocationTest, IndexesExactEntryRanges) {
   EXPECT_EQ(error_count_, 0u);
 }
 
-TEST_F(BytecodeLocationTest, RejectsCoordinateOutsideRuntimeWidth) {
+TEST_F(BytecodeLocationTest, MaterializesCoordinateBeyondCompactRange) {
   const uint8_t data[] = {
       0x02,                // Location count.
       LOOM_LOCATION_NONE,  // Location 0: unknown sentinel.
@@ -163,6 +163,44 @@ TEST_F(BytecodeLocationTest, RejectsCoordinateOutsideRuntimeWidth) {
       0x80,
       0x80,
       0x04,  // Start line 65536.
+      0x00,
+      0x00,
+      0x00,  // Remaining coordinates.
+  };
+  const loom_bytecode_reader_section_t section =
+      MakeSection(data, sizeof(data));
+
+  IREE_ASSERT_OK(loom_bytecode_location_table_read_count(
+      &decoder_, &module_view_, &section));
+  loom_bytecode_location_materializer_t materializer = {
+      .decoder = &decoder_,
+      .module_view = &module_view_,
+      .output_module = module_,
+  };
+  IREE_ASSERT_OK(
+      loom_bytecode_location_table_materialize(&materializer, &section));
+
+  ASSERT_EQ(module_->locations.count, 2u);
+  const auto* location =
+      loom_location_table_const_entry(&module_->locations, 1);
+  ASSERT_EQ(location->kind, LOOM_LOCATION_FILE);
+  EXPECT_EQ(location->file.start_line, 65536u);
+  EXPECT_EQ(error_count_, 0u);
+}
+
+TEST_F(BytecodeLocationTest, RejectsCoordinateOutsideRuntimeWidth) {
+  const uint8_t data[] = {
+      0x02,                // Location count.
+      LOOM_LOCATION_NONE,  // Location 0: unknown sentinel.
+      0x00,                // Flags.
+      LOOM_LOCATION_FILE,  // Location 1: source range.
+      0x00,                // Flags.
+      0x00,                // Source ordinal.
+      0x80,
+      0x80,
+      0x80,
+      0x80,
+      0x10,  // Start line UINT32_MAX + 1.
       0x00,
       0x00,
       0x00,  // Remaining coordinates.

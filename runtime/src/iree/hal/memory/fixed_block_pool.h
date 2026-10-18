@@ -29,9 +29,9 @@ typedef struct iree_hal_fixed_block_pool_options_t {
   // derives its complete block count from the supplied range.
   uint32_t blocks_per_slab;
 
-  // Maximum exact history width per block and whole-range return. Zero selects
-  // the fixed-block allocator default. Wider return histories retain backing
-  // for individual block reuse instead of discarding its prerequisites.
+  // Inline history width per block and whole-range return. Zero selects the
+  // fixed-block allocator default. Wider histories collapse to a pool timeline
+  // point covering every original prerequisite before backing is returned.
   uint32_t frontier_capacity;
 
   // Required absolute block alignment; zero selects source requirements.
@@ -63,21 +63,22 @@ IREE_API_EXPORT iree_status_t iree_hal_fixed_block_pool_query_backing_request(
 
 // Creates an initially empty fixed-block allocator retaining |backing_pool|.
 // Growth acquires ordinary reservations with their exact history and captures
-// prepared ranges. Whole unused ranges return through the inherited maintenance
-// owner; an explicit backing cache owns idle retention. Trim does not trim the
-// parent and its floor does not change automatic idle return.
+// prepared ranges. Whole unused ranges return directly to the parent; an
+// explicit backing cache owns idle retention. Trim does not trim the parent
+// and its floor does not change automatic idle return.
 //
 // Acquisition copies candidate frontiers and commits complete batches under
 // short metadata locks. Eligibility queries and all host/native allocation run
-// outside them. Release never takes the acquisition mutex; a separate brief
-// publication lock guards changed-range links and the final slab access.
+// outside them. Release publishes raw block availability before briefly taking
+// the acquisition and publication locks to detach empty backing. Parent calls
+// run after unlocking, without requiring executor progress.
 // Failed batches claim no capacity. Non-dominated recycled blocks are returned
 // as NEEDS_WAIT only with ALLOW_WAIT_FRONTIER and no ready block available.
 // Tainted histories never become queue waits or empty readiness.
 //
 // The device group and its progress owner outlive the pool. Final destruction
-// joins pool maintenance, never device execution, and runs outside that owner.
-// Reservations must be returned first. Retained ranges with unrepresentable
+// requires quiescent callers and returned reservations. It never waits for
+// device execution. Retained ranges with unrepresentable
 // histories require caller-established quiescence before final destruction.
 IREE_API_EXPORT iree_status_t iree_hal_fixed_block_pool_create(
     iree_hal_pool_t* backing_pool,

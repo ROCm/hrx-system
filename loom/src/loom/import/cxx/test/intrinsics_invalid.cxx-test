@@ -22,6 +22,11 @@ float entry(float x) { return broken(x); }
 [[loom::op("scalar.expf")]] float broken(float x) { return x; }
 
 // ====
+// Reference bodies belong only to the numeric conversion function template.
+// ERROR@+1: LOWERING/059 "an intrinsic requires one operation binding and no function body"
+[[loom::op("numeric.convert")]] int broken(int value) { return value; }
+
+// ====
 // Generated intrinsic signatures are checked.
 // ERROR@+1: LOWERING/059 "intrinsic operands must have the result's type"
 [[loom::op("scalar.expf")]] float broken(int);

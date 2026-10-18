@@ -124,6 +124,8 @@ loom_check_test_suite(
     "matrix_fragments_invalid.cxx-test"
     "mxfp_group_dot.cxx-test"
     "narrow_float_subtraction.cxx-test"
+    "numeric_conversion.cxx-test"
+    "numeric_conversion_invalid.cxx-test"
     "offsetof.cxx-test"
     "offsetof_roundtrip.cxx-test"
     "opaque_pointers.cxx-test"

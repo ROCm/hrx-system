@@ -172,13 +172,13 @@ func.def target(@target) @rank_two_dynamic_extract(%a: i32, %b: i32, %c: i32, %d
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @rank_two_dynamic_extract(%a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>, %c: reg<spirv.id : i32>, %d: reg<spirv.id : i32>, %row: reg<spirv.id : index>, %column: reg<spirv.id : index>) -> (reg<spirv.id : i32>) where [range(%row, 0, 1), range(%column, 0, 1)] asm {
   %29 = OpConstant.i32 2 : reg<spirv.id : index>
   %30 = OpIMulAdd %row, %29, %column : reg<spirv.id : index>
-  %31 = OpConstant.i32 0 : reg<spirv.id : index>
+  %31 = OpConstant.i32 1 : reg<spirv.id : index>
   %32 = OpIEqual %30, %31
-  %33 = OpSelect %32, %a, %d
-  %34 = OpConstant.i32 1 : reg<spirv.id : index>
-  %35 = OpIEqual %30, %34
-  %36 = OpSelect %35, %b, %33
-  %37 = OpIEqual %30, %29
-  %result = OpSelect %37, %c, %36
+  %33 = OpSelect %32, %b, %a
+  %34 = OpIEqual %30, %29
+  %35 = OpSelect %34, %c, %33
+  %36 = OpConstant.i32 3 : reg<spirv.id : index>
+  %37 = OpIEqual %30, %36
+  %result = OpSelect %37, %d, %35
   return %result
 }

@@ -33,7 +33,9 @@ iree_status_t loom_kernel_target_legalize_subgroup_shuffle(
 // Rewrites a subgroup scan into portable subgroup primitives. Target
 // legalizers may call this when an otherwise legal scan violates a native
 // implementation precondition. Unsupported cluster shapes are left unchanged
-// for final legality to diagnose.
+// for final legality to diagnose. Except under explicit reference-only policy,
+// expansion waits for final legalization so source cleanup can share inputs
+// before constructing the shuffle/select network.
 iree_status_t loom_kernel_target_legalize_subgroup_scan(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,

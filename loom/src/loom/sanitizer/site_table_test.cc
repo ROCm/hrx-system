@@ -69,8 +69,8 @@ class SiteTableTest : public ::testing::Test {
   }
 
   loom_location_id_t AddFileLocation(iree_string_view_t source_name,
-                                     uint16_t start_line, uint16_t start_column,
-                                     uint16_t end_line, uint16_t end_column) {
+                                     uint32_t start_line, uint32_t start_column,
+                                     uint32_t end_line, uint32_t end_column) {
     loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
     IREE_CHECK_OK(
         loom_module_register_source(module_, source_name, &source_id));
@@ -292,7 +292,7 @@ TEST_F(SiteTableTest, EncodesRecordsPayloadsSourcesAndUnknownLocations) {
 TEST_F(SiteTableTest, ResolvesSourcesThroughTaggedAndFusedLocations) {
   constexpr iree_host_size_t kKernelSourceLength = sizeof("kernel.loom") - 1;
   loom_location_id_t file_location =
-      AddFileLocation(IREE_SV("kernel.loom"), 21, 5, 23, 7);
+      AddFileLocation(IREE_SV("kernel.loom"), 70021, 80005, 90023, 100007);
   loom_location_id_t tagged_location = AddTaggedLocation(
       LOOM_LOCATION_TAG_TEMPLATE_INSTANTIATION, file_location);
   loom_location_id_t fused_location =
@@ -332,14 +332,14 @@ TEST_F(SiteTableTest, ResolvesSourcesThroughTaggedAndFusedLocations) {
                    kKernelSourceLength),
             0);
   EXPECT_EQ(ReadU32(record, LOOM_SANITIZER_SITE_TABLE_RECORD_START_LINE_OFFSET),
-            21u);
+            70021u);
   EXPECT_EQ(
       ReadU32(record, LOOM_SANITIZER_SITE_TABLE_RECORD_START_COLUMN_OFFSET),
-      5u);
+      80005u);
   EXPECT_EQ(ReadU32(record, LOOM_SANITIZER_SITE_TABLE_RECORD_END_LINE_OFFSET),
-            23u);
+            90023u);
   EXPECT_EQ(ReadU32(record, LOOM_SANITIZER_SITE_TABLE_RECORD_END_COLUMN_OFFSET),
-            7u);
+            100007u);
 }
 
 }  // namespace

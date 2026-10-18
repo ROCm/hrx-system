@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/analysis/condition_facts.h"
+#include "loom/analysis/symbolic_integer_cast.h"
 #include "loom/analysis/symbolic_quotient.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
@@ -679,6 +680,32 @@ static bool loom_symbolic_expr_ops_can_structurally_match(
                          loom_module_value_type(module, right_result));
 }
 
+static iree_status_t loom_symbolic_integer_cast_values_match(
+    loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
+    loom_value_id_t right_value, bool* out_match) {
+  *out_match = false;
+  const loom_symbolic_integer_cast_t* left_cast =
+      loom_symbolic_expr_lookup_integer_cast(context, left_value);
+  const loom_symbolic_integer_cast_t* right_cast =
+      loom_symbolic_expr_lookup_integer_cast(context, right_value);
+  if (!left_cast || !right_cast ||
+      !loom_symbolic_integer_cast_same_interpretation(left_cast, right_cast)) {
+    return iree_ok_status();
+  }
+  if (left_cast->source_value_id == right_cast->source_value_id) {
+    *out_match = true;
+    return iree_ok_status();
+  }
+
+  loom_symbolic_value_difference_t difference = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_simplify_value_difference(
+      context, left_cast->source_value_id, right_cast->source_value_id,
+      &difference));
+  *out_match = difference.kind == LOOM_SYMBOLIC_VALUE_DIFFERENCE_CONSTANT &&
+               difference.constant == 0;
+  return iree_ok_status();
+}
+
 iree_status_t loom_symbolic_values_match(loom_symbolic_expr_context_t* context,
                                          loom_value_id_t left_value,
                                          loom_value_id_t right_value,
@@ -706,9 +733,13 @@ iree_status_t loom_symbolic_values_match(loom_symbolic_expr_context_t* context,
   loom_symbolic_value_difference_t difference = {0};
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_simplify_value_difference(
       context, left_value, right_value, &difference));
-  *out_match = difference.kind == LOOM_SYMBOLIC_VALUE_DIFFERENCE_CONSTANT &&
-               difference.constant == 0;
-  return iree_ok_status();
+  if (difference.kind == LOOM_SYMBOLIC_VALUE_DIFFERENCE_CONSTANT &&
+      difference.constant == 0) {
+    *out_match = true;
+    return iree_ok_status();
+  }
+  return loom_symbolic_integer_cast_values_match(context, left_value,
+                                                 right_value, out_match);
 }
 
 typedef struct loom_symbolic_semantic_match_frame_t {

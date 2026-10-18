@@ -6,6 +6,7 @@
 
 #include <loomcxx/check.h>
 #include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
 
 #include <stdfloat>
 
@@ -20,8 +21,8 @@ void expand_float16(
     [[loom::noalias, loom::assume_aligned(64)]] const Half4* half,
     [[loom::noalias, loom::assume_aligned(64)]] const BFloat4* bfloat,
     [[loom::noalias]] Float4* output) {
-  output[0] = __builtin_convertvector(*half, Float4);
-  output[1] = __builtin_convertvector(*bfloat, Float4);
+  output[0] = loom::convert<Float4>(*half);
+  output[1] = loom::convert<Float4>(*bfloat);
 }
 
 LOOM_CHECK_CASE(uniform_float16_conversion) {
@@ -64,8 +65,8 @@ void convert_float16_integers(
     [[loom::noalias, loom::assume_aligned(64)]] const Byte4* codebook,
     [[loom::noalias, loom::assume_aligned(64)]] const Half4* fractional,
     [[loom::noalias]] BFloat4* decoded, [[loom::noalias]] Int4* truncated) {
-  *decoded = __builtin_convertvector(*codebook, BFloat4);
-  *truncated = __builtin_convertvector(*fractional, Int4);
+  *decoded = loom::convert<BFloat4>(*codebook);
+  *truncated = loom::convert<Int4>(*fractional);
 }
 
 LOOM_CHECK_CASE(integer_float16_conversion) {

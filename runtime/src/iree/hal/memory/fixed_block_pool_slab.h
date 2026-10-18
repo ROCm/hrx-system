@@ -9,6 +9,7 @@
 
 #include "iree/hal/memory/buffer_range.h"
 #include "iree/hal/memory/fixed_block_allocator.h"
+#include "iree/hal/memory/pool_history.h"
 #include "iree/hal/pool.h"
 
 typedef struct iree_hal_fixed_block_pool_slab_t
@@ -46,6 +47,8 @@ struct iree_hal_fixed_block_pool_slab_t {
   iree_hal_fixed_block_pool_slab_t* preparation_next;
   // Whether changed-range work owns this slab, guarded by publication_mutex.
   bool candidate_queued;
+  // This backing owns one presecured overflow return credit in the pool.
+  bool history_owned;
   // Snapshot and preparation pins, guarded by acquisition_mutex.
   uint32_t pins;
   // Live reservations, including a releasing thread's final slab access.
@@ -70,24 +73,28 @@ struct iree_hal_fixed_block_pool_slab_t {
 extern "C" {
 #endif
 
-// Prepares one ordinary parent reservation outside the acquisition lock.
-// Failures return the original source history and leave out_slab NULL.
-iree_status_t iree_hal_fixed_block_pool_slab_acquire(
+// Consumes an acquired parent token, including on failure. Preparation and
+// rollback preserve its exact history and run outside acquisition locks.
+// Consumes optional detached |reusable_slab| metadata, including on failure.
+iree_status_t iree_hal_fixed_block_pool_slab_prepare(
     iree_hal_pool_t* backing_pool,
     const iree_hal_pool_reservation_request_t* request,
     const iree_hal_fixed_block_pool_geometry_t* geometry,
     const iree_hal_asan_pool_options_t* asan,
-    const iree_async_frontier_t* requester, iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t reservation, iree_hal_pool_acquire_info_t info,
+    const iree_async_frontier_t* initial_frontier,
     iree_allocator_t host_allocator,
-    iree_hal_fixed_block_pool_slab_t** out_slab,
-    iree_hal_pool_acquire_result_t* out_result);
+    iree_hal_fixed_block_pool_slab_t* reusable_slab,
+    iree_hal_fixed_block_pool_slab_t** out_slab);
 
 // Retains a finite range and prepares its block metadata without a parent
 // token.
 iree_status_t iree_hal_fixed_block_pool_slab_allocate(
     const iree_hal_pool_buffer_range_t* range,
     const iree_hal_fixed_block_pool_geometry_t* geometry,
-    const iree_hal_asan_pool_options_t* asan, iree_allocator_t host_allocator,
+    const iree_hal_asan_pool_options_t* asan,
+    const iree_async_frontier_t* initial_frontier,
+    iree_allocator_t host_allocator,
     iree_hal_fixed_block_pool_slab_t** out_slab);
 
 // Merges every free block and any untouched margins. The detached slab has no
@@ -95,10 +102,16 @@ iree_status_t iree_hal_fixed_block_pool_slab_allocate(
 // intact so the caller can retain the slab for individual block reuse.
 bool iree_hal_fixed_block_pool_slab_merge_return(
     iree_hal_fixed_block_pool_slab_t* slab,
-    const iree_hal_fixed_block_pool_geometry_t* geometry);
+    const iree_hal_fixed_block_pool_geometry_t* geometry,
+    iree_hal_pool_history_t* history);
 
-// Returns an optional parent token with its prepared return history, releases
-// the view, and destroys metadata. Runs outside pool mutation locks.
+// Releases the prepared view and parent token while retaining free metadata.
+// The caller has detached this slab from acquisition and release readers.
+void iree_hal_fixed_block_pool_slab_release_backing(
+    iree_hal_fixed_block_pool_slab_t* slab, iree_hal_pool_t* backing_pool);
+
+// Releases the view, returns an optional parent token with its prepared return
+// history, and destroys metadata. Runs outside pool mutation locks.
 void iree_hal_fixed_block_pool_slab_free(iree_hal_fixed_block_pool_slab_t* slab,
                                          iree_hal_pool_t* backing_pool,
                                          iree_allocator_t host_allocator);

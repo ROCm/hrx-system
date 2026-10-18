@@ -17,6 +17,17 @@ constexpr size_t kMaxTokens = 4096;
 
 }  // namespace
 
+ScopedModelState::ScopedModelState(iree_tokenizer_model_t* model,
+                                   iree_allocator_t workspace_allocator)
+    : storage_(iree_tokenizer_model_state_size(model)) {
+  iree_tokenizer_model_state_initialize(model, storage_.data(),
+                                        workspace_allocator, &state_);
+}
+
+ScopedModelState::~ScopedModelState() {
+  iree_tokenizer_model_state_deinitialize(state_);
+}
+
 EncodeResult EncodeWithOffsetsAndFinalize(
     iree_tokenizer_model_t* model, const std::string& text,
     const std::vector<iree_tokenizer_segment_t>& segments,

@@ -1,0 +1,319 @@
+// Two programs cover every concrete source space within a single worker's
+// semaphore budget. Inline packet calls repeat refinements inside nested
+// execution; a scalar VM oracle carries no source-space annotations.
+
+func.def inline @external_packet(%global_input: buffer, %constant_input: buffer, %host_input: buffer, %generic_input: buffer, %output: buffer, %origin: offset) {
+  %global_buffer = buffer.assume.memory_space<global> %global_input : buffer
+  %global_view = buffer.view %global_buffer[%origin] : buffer -> view<4xi32>
+  %global_value = vector.load %global_view[0] : view<4xi32> -> vector<4xi32>
+  %constant_buffer = buffer.assume.memory_space<constant> %constant_input : buffer
+  %constant_view = buffer.view %constant_buffer[%origin] : buffer -> view<4xi32>
+  %constant_value = vector.load %constant_view[0] : view<4xi32> -> vector<4xi32>
+  %host_buffer = buffer.assume.memory_space<host> %host_input : buffer
+  %host_view = buffer.view %host_buffer[%origin] : buffer -> view<4xi32>
+  %host_value = vector.load %host_view[0] : view<4xi32> -> vector<4xi32>
+  %generic_buffer = buffer.assume.memory_space<generic> %generic_input : buffer
+  %generic_view = buffer.view %generic_buffer[%origin] : buffer -> view<4xi32>
+  %generic_value = vector.load %generic_view[0] : view<4xi32> -> vector<4xi32>
+  %sum0 = vector.addi %global_value, %constant_value : vector<4xi32>
+  %sum1 = vector.addi %sum0, %host_value : vector<4xi32>
+  %sum2 = vector.addi %sum1, %generic_value : vector<4xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<4xi32>
+  vector.store %sum2, %destination[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+kernel.def @staged_external() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%global_input: buffer, %constant_input: buffer, %host_input: buffer, %generic_input: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %round = [%begin to %end step %step] {
+    %origin0 = index.constant 0 : offset
+    func.call @external_packet(%global_input, %constant_input, %host_input, %generic_input, %output, %origin0) : (buffer, buffer, buffer, buffer, buffer, offset)
+    %origin1 = index.constant 16 : offset
+    func.call @external_packet(%global_input, %constant_input, %host_input, %generic_input, %output, %origin1) : (buffer, buffer, buffer, buffer, buffer, offset)
+    %origin2 = index.constant 32 : offset
+    func.call @external_packet(%global_input, %constant_input, %host_input, %generic_input, %output, %origin2) : (buffer, buffer, buffer, buffer, buffer, offset)
+    %origin3 = index.constant 48 : offset
+    func.call @external_packet(%global_input, %constant_input, %host_input, %generic_input, %output, %origin3) : (buffer, buffer, buffer, buffer, buffer, offset)
+  }
+  kernel.return
+}
+
+func.def @external_reference(%global_input: buffer, %constant_input: buffer, %host_input: buffer, %generic_input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  %global_view = buffer.view %global_input[%origin] : buffer -> view<16xi32>
+  %constant_view = buffer.view %constant_input[%origin] : buffer -> view<16xi32>
+  %host_view = buffer.view %host_input[%origin] : buffer -> view<16xi32>
+  %generic_view = buffer.view %generic_input[%origin] : buffer -> view<16xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<16xi32>
+  scf.for %i = [%begin to %end step %step] {
+    %global_value = view.load %global_view[%i] : view<16xi32> -> i32
+    %constant_value = view.load %constant_view[%i] : view<16xi32> -> i32
+    %host_value = view.load %host_view[%i] : view<16xi32> -> i32
+    %generic_value = view.load %generic_view[%i] : view<16xi32> -> i32
+    %sum0 = scalar.addi %global_value, %constant_value : i32
+    %sum1 = scalar.addi %sum0, %host_value : i32
+    %sum2 = scalar.addi %sum1, %generic_value : i32
+    view.store %sum2, %destination[%i] : i32, view<16xi32>
+  }
+  func.return
+}
+
+check.scenario @external_source_spaces {
+  check.trial[128](%trial: index, %entropy: check.entropy) {
+    %seed_index0 = check.literal value(0) : index
+    %seed0 = check.entropy.read %entropy[%seed_index0] : check.entropy -> i64
+    %global_storage = check.generate.random.uniform seed(%seed0) range(-1000 to 1000) : tensor<48xi32>
+    %global_input = check.tensor.view %global_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    %seed_index1 = check.literal value(1) : index
+    %seed1 = check.entropy.read %entropy[%seed_index1] : check.entropy -> i64
+    %constant_storage = check.generate.random.uniform seed(%seed1) range(-1000 to 1000) : tensor<48xi32>
+    %constant_input = check.tensor.view %constant_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    %seed_index2 = check.literal value(2) : index
+    %seed2 = check.entropy.read %entropy[%seed_index2] : check.entropy -> i64
+    %host_storage = check.generate.random.uniform seed(%seed2) range(-1000 to 1000) : tensor<48xi32>
+    %host_input = check.tensor.view %host_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    %seed_index3 = check.literal value(3) : index
+    %seed3 = check.entropy.read %entropy[%seed_index3] : check.entropy -> i64
+    %generic_storage = check.generate.random.uniform seed(%seed3) range(-1000 to 1000) : tensor<48xi32>
+    %generic_input = check.tensor.view %generic_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<48xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    check.compare<@staged_external, @external_reference>(%global_input, %constant_input, %host_input, %generic_input, %output) : (tensor<16xi32>, tensor<16xi32>, tensor<16xi32>, tensor<16xi32>, tensor<16xi32>) -> () {
+      check.expect.bitwise actual(%global_storage) expected(%global_storage) : tensor<48xi32>
+      check.expect.bitwise actual(%constant_storage) expected(%constant_storage) : tensor<48xi32>
+      check.expect.bitwise actual(%host_storage) expected(%host_storage) : tensor<48xi32>
+      check.expect.bitwise actual(%generic_storage) expected(%generic_storage) : tensor<48xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<48xi32>
+    }
+  }
+  check.return
+}
+
+func.def inline @scoped_packet(%workgroup_input: buffer, %private_input: buffer, %descriptor_input: buffer, %output: buffer, %origin: offset) {
+  %workgroup_buffer = buffer.assume.memory_space<workgroup> %workgroup_input : buffer
+  %workgroup_view = buffer.view %workgroup_buffer[%origin] : buffer -> view<4xi32>
+  %workgroup_value = vector.load %workgroup_view[0] : view<4xi32> -> vector<4xi32>
+  %private_buffer = buffer.assume.memory_space<private> %private_input : buffer
+  %private_view = buffer.view %private_buffer[%origin] : buffer -> view<4xi32>
+  %private_value = vector.load %private_view[0] : view<4xi32> -> vector<4xi32>
+  %descriptor_buffer = buffer.assume.memory_space<descriptor> %descriptor_input : buffer
+  %descriptor_view = buffer.view %descriptor_buffer[%origin] : buffer -> view<4xi32>
+  %descriptor_value = vector.load %descriptor_view[0] : view<4xi32> -> vector<4xi32>
+  %sum0 = vector.addi %workgroup_value, %private_value : vector<4xi32>
+  %sum1 = vector.addi %sum0, %descriptor_value : vector<4xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<4xi32>
+  vector.store %sum1, %destination[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+kernel.def @staged_scoped() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%workgroup_input: buffer, %private_input: buffer, %descriptor_input: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %round = [%begin to %end step %step] {
+    %origin0 = index.constant 0 : offset
+    func.call @scoped_packet(%workgroup_input, %private_input, %descriptor_input, %output, %origin0) : (buffer, buffer, buffer, buffer, offset)
+    %origin1 = index.constant 16 : offset
+    func.call @scoped_packet(%workgroup_input, %private_input, %descriptor_input, %output, %origin1) : (buffer, buffer, buffer, buffer, offset)
+    %origin2 = index.constant 32 : offset
+    func.call @scoped_packet(%workgroup_input, %private_input, %descriptor_input, %output, %origin2) : (buffer, buffer, buffer, buffer, offset)
+    %origin3 = index.constant 48 : offset
+    func.call @scoped_packet(%workgroup_input, %private_input, %descriptor_input, %output, %origin3) : (buffer, buffer, buffer, buffer, offset)
+  }
+  kernel.return
+}
+
+func.def @scoped_reference(%workgroup_input: buffer, %private_input: buffer, %descriptor_input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  %workgroup_view = buffer.view %workgroup_input[%origin] : buffer -> view<16xi32>
+  %private_view = buffer.view %private_input[%origin] : buffer -> view<16xi32>
+  %descriptor_view = buffer.view %descriptor_input[%origin] : buffer -> view<16xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<16xi32>
+  scf.for %i = [%begin to %end step %step] {
+    %workgroup_value = view.load %workgroup_view[%i] : view<16xi32> -> i32
+    %private_value = view.load %private_view[%i] : view<16xi32> -> i32
+    %descriptor_value = view.load %descriptor_view[%i] : view<16xi32> -> i32
+    %sum0 = scalar.addi %workgroup_value, %private_value : i32
+    %sum1 = scalar.addi %sum0, %descriptor_value : i32
+    view.store %sum1, %destination[%i] : i32, view<16xi32>
+  }
+  func.return
+}
+
+check.scenario @scoped_source_spaces {
+  check.trial[128](%trial: index, %entropy: check.entropy) {
+    %seed_index0 = check.literal value(0) : index
+    %seed0 = check.entropy.read %entropy[%seed_index0] : check.entropy -> i64
+    %workgroup_storage = check.generate.random.uniform seed(%seed0) range(-1000 to 1000) : tensor<48xi32>
+    %workgroup_input = check.tensor.view %workgroup_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    %seed_index1 = check.literal value(1) : index
+    %seed1 = check.entropy.read %entropy[%seed_index1] : check.entropy -> i64
+    %private_storage = check.generate.random.uniform seed(%seed1) range(-1000 to 1000) : tensor<48xi32>
+    %private_input = check.tensor.view %private_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    %seed_index2 = check.literal value(2) : index
+    %seed2 = check.entropy.read %entropy[%seed_index2] : check.entropy -> i64
+    %descriptor_storage = check.generate.random.uniform seed(%seed2) range(-1000 to 1000) : tensor<48xi32>
+    %descriptor_input = check.tensor.view %descriptor_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<48xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    check.compare<@staged_scoped, @scoped_reference>(%workgroup_input, %private_input, %descriptor_input, %output) : (tensor<16xi32>, tensor<16xi32>, tensor<16xi32>, tensor<16xi32>) -> () {
+      check.expect.bitwise actual(%workgroup_storage) expected(%workgroup_storage) : tensor<48xi32>
+      check.expect.bitwise actual(%private_storage) expected(%private_storage) : tensor<48xi32>
+      check.expect.bitwise actual(%descriptor_storage) expected(%descriptor_storage) : tensor<48xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<48xi32>
+    }
+  }
+  check.return
+}
+
+// Each write is followed by a potentially aliasing read. Repeated rounds
+// expose stale ingress snapshots, while the complete backing checks
+// detect wrong transfer extents on both sides of the writable views.
+kernel.def @staged_aliases() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%first: buffer, %second: buffer, %observed: buffer) {
+  %first_root = buffer.assume.memory_space<global> %first : buffer
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %rounds = index.constant 3 : index
+  %step = index.constant 1 : index
+  %first_increment = scalar.constant 1 : i32
+  %second_increment = scalar.constant 2 : i32
+  %first_view = buffer.view %first_root[%origin] : buffer -> view<16xi32>
+  %observed_view = buffer.view %observed[%origin] : buffer -> view<16xi32>
+  scf.for %round = [%begin to %rounds step %step] {
+    %second_root = buffer.assume.memory_space<global> %second : buffer
+    %second_view = buffer.view %second_root[%origin] : buffer -> view<16xi32>
+    scf.for %i = [%begin to %end step %step] {
+      %before = view.load %first_view[%i] : view<16xi32> -> i32
+      %updated = scalar.addi %before, %first_increment : i32
+      view.store %updated, %first_view[%i] : i32, view<16xi32>
+      %after = view.load %second_view[%i] : view<16xi32> -> i32
+      view.store %after, %observed_view[%i] : i32, view<16xi32>
+      %changed = scalar.addi %after, %second_increment : i32
+      view.store %changed, %second_view[%i] : i32, view<16xi32>
+    }
+  }
+  kernel.return
+}
+
+func.def @aliases_reference(%first: buffer, %second: buffer, %observed: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %rounds = index.constant 3 : index
+  %step = index.constant 1 : index
+  %first_increment = scalar.constant 1 : i32
+  %second_increment = scalar.constant 2 : i32
+  %first_view = buffer.view %first[%origin] : buffer -> view<16xi32>
+  %observed_view = buffer.view %observed[%origin] : buffer -> view<16xi32>
+  scf.for %round = [%begin to %rounds step %step] {
+    %second_view = buffer.view %second[%origin] : buffer -> view<16xi32>
+    scf.for %i = [%begin to %end step %step] {
+      %before = view.load %first_view[%i] : view<16xi32> -> i32
+      %updated = scalar.addi %before, %first_increment : i32
+      view.store %updated, %first_view[%i] : i32, view<16xi32>
+      %after = view.load %second_view[%i] : view<16xi32> -> i32
+      view.store %after, %observed_view[%i] : i32, view<16xi32>
+      %changed = scalar.addi %after, %second_increment : i32
+      view.store %changed, %second_view[%i] : i32, view<16xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario @backward_overlap {
+  check.trial[128](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<64xi32>
+    %first = check.tensor.view %storage offset(64) : tensor<64xi32> -> tensor<16xi32>
+    %second = check.tensor.view %storage offset(60) : tensor<64xi32> -> tensor<16xi32>
+    %observed_storage = check.generate.fill value(-9999) : tensor<48xi32>
+    %observed = check.tensor.view %observed_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    check.compare<@staged_aliases, @aliases_reference>(%first, %second, %observed) : (tensor<16xi32>, tensor<16xi32>, tensor<16xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<64xi32>
+      check.expect.bitwise actual(%observed_storage) expected(%observed_storage) : tensor<48xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @exact_alias {
+  check.trial[128](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<64xi32>
+    %first = check.tensor.view %storage offset(64) : tensor<64xi32> -> tensor<16xi32>
+    %second = check.tensor.view %storage offset(64) : tensor<64xi32> -> tensor<16xi32>
+    %observed_storage = check.generate.fill value(-9999) : tensor<48xi32>
+    %observed = check.tensor.view %observed_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    check.compare<@staged_aliases, @aliases_reference>(%first, %second, %observed) : (tensor<16xi32>, tensor<16xi32>, tensor<16xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<64xi32>
+      check.expect.bitwise actual(%observed_storage) expected(%observed_storage) : tensor<48xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @forward_overlap {
+  check.trial[128](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<64xi32>
+    %first = check.tensor.view %storage offset(64) : tensor<64xi32> -> tensor<16xi32>
+    %second = check.tensor.view %storage offset(68) : tensor<64xi32> -> tensor<16xi32>
+    %observed_storage = check.generate.fill value(-9999) : tensor<48xi32>
+    %observed = check.tensor.view %observed_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    check.compare<@staged_aliases, @aliases_reference>(%first, %second, %observed) : (tensor<16xi32>, tensor<16xi32>, tensor<16xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<64xi32>
+      check.expect.bitwise actual(%observed_storage) expected(%observed_storage) : tensor<48xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @half_overlap {
+  check.trial[128](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<64xi32>
+    %first = check.tensor.view %storage offset(64) : tensor<64xi32> -> tensor<16xi32>
+    %second = check.tensor.view %storage offset(96) : tensor<64xi32> -> tensor<16xi32>
+    %observed_storage = check.generate.fill value(-9999) : tensor<48xi32>
+    %observed = check.tensor.view %observed_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    check.compare<@staged_aliases, @aliases_reference>(%first, %second, %observed) : (tensor<16xi32>, tensor<16xi32>, tensor<16xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<64xi32>
+      check.expect.bitwise actual(%observed_storage) expected(%observed_storage) : tensor<48xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @disjoint_views {
+  check.trial[128](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<64xi32>
+    %first = check.tensor.view %storage offset(64) : tensor<64xi32> -> tensor<16xi32>
+    %second = check.tensor.view %storage offset(128) : tensor<64xi32> -> tensor<16xi32>
+    %observed_storage = check.generate.fill value(-9999) : tensor<48xi32>
+    %observed = check.tensor.view %observed_storage offset(64) : tensor<48xi32> -> tensor<16xi32>
+    check.compare<@staged_aliases, @aliases_reference>(%first, %second, %observed) : (tensor<16xi32>, tensor<16xi32>, tensor<16xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<64xi32>
+      check.expect.bitwise actual(%observed_storage) expected(%observed_storage) : tensor<48xi32>
+    }
+  }
+  check.return
+}

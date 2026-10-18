@@ -113,7 +113,7 @@ admission and drains accepted work before model and device destruction.
 | Ragged inputs to final embedding vectors | [Embedding package](embedding/README.md) | [Finite model](../service/finite/README.md), [embedding records](../service/finite/embedding/protocol.h) |
 | Structured questions to choice/score/noul probabilities | [Decision package](decision/README.md) | [Finite model](../service/finite/README.md), [SystemOne records](../service/finite/decision/protocol.h) |
 | Incremental waveform output | [Speech package](speech/README.md) | [Speech model](../service/speech/model.h), [stream lifecycle](../service/speech/README.md) |
-| Continuing audio input | [Recognition source](recognition/control.loom) | [Recognition model](../service/recognition/model.h), [transcription adapter](../service/recognition/http.h) |
+| Continuing audio input | [Recognition source](recognition/control.loom) | [Recognition model](../service/recognition/model.h), [transcription adapter](../service/recognition/service.h) |
 | Retained autoregressive sessions | [Tiny text package](text/README.md) | [Text model](../service/text/model.h), [source preparation](../service/text/source.h) |
 
 Copying a source package establishes its ABI skeleton, not its mathematics.
@@ -143,9 +143,13 @@ repeated HTTP output through direct `queue_dispatch`, with no command buffer.
 It requires an enabled XDNA compiler target/HAL and physical NPU, and has no
 learned weights. The ordinary catalog instead proves the native command-stage boundary.
 The recognition fixture exercises bounded audio input and independent transcript
-state through the production service. Its HTTP tests cover raw PCM and selected
-WAV/MP3/FLAC decoders, including mixed concurrent uploads and cancellation. The
-speech package supplies the incremental raw-waveform output boundary.
+and activity state through the production service. Compound native requests
+receive an activity observation plus two revisions of one segment in source order.
+All ordinals reuse one source packet buffer; caller-owned delivery must preserve
+every event while peers run and after model retirement. Its HTTP tests cover raw
+PCM and selected WAV/MP3/FLAC decoders, including mixed concurrent uploads and
+cancellation. The speech package supplies the incremental raw-waveform output
+boundary.
 
 ## Focused verification
 

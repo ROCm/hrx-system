@@ -31,11 +31,24 @@ iree_status_t loom_serve_rows_allocate(
   state->strides[LOOM_SERVE_ROWS_STREAM] = stream_stride;
   iree_status_t status = iree_allocator_malloc_array(
       host_allocator, row_count, sizeof(*state->rows), (void**)&state->rows);
+  if (iree_status_is_ok(status) && !state->pool) {
+    iree_hal_pool_reservation_request_t requests[LOOM_SERVE_ROWS_BUFFER_COUNT];
+    for (iree_host_size_t i = 0; i < LOOM_SERVE_ROWS_BUFFER_COUNT; ++i) {
+      const iree_device_size_t length =
+          state->strides[i] *
+          (i == LOOM_SERVE_ROWS_CONDITIONING ? 1 : row_count);
+      requests[i] = iree_hal_make_pool_reservation_request(length, alignment);
+    }
+    status = loom_serve_execution_alloca_from_pool(
+        execution, loom_serve_device_storage_pool(device),
+        LOOM_SERVE_ROWS_BUFFER_COUNT, requests, state->buffers);
+  }
   for (iree_host_size_t i = 0;
        i < LOOM_SERVE_ROWS_BUFFER_COUNT && iree_status_is_ok(status); ++i) {
-    const iree_device_size_t length =
-        state->strides[i] * (i == LOOM_SERVE_ROWS_CONDITIONING ? 1 : row_count);
     if (state->pool) {
+      const iree_device_size_t length =
+          state->strides[i] *
+          (i == LOOM_SERVE_ROWS_CONDITIONING ? 1 : row_count);
       status = loom_serve_virtual_buffer_allocate(state->pool, length,
                                                   alignment, &state->statistics,
                                                   &state->reservations[i]);
@@ -44,11 +57,6 @@ iree_status_t loom_serve_rows_allocate(
             loom_serve_virtual_buffer_handle(state->reservations[i]);
         iree_hal_buffer_retain(state->buffers[i]);
       }
-    } else {
-      status = iree_hal_pool_allocate_buffer(
-          loom_serve_device_storage_pool(device),
-          iree_hal_make_pool_reservation_request(length, alignment),
-          iree_infinite_timeout(), &state->buffers[i]);
     }
     if (iree_status_is_ok(status)) {
       status = loom_serve_retirement_track(&state->retirement,

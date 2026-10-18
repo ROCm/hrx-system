@@ -145,6 +145,7 @@ class CxxRenderContext:
         self.table_lookup_declarations: set[tuple[str, str, str, str]] = set()
         self.record_declarations: dict[str, tuple[tuple[str, str], ...]] = {}
         self.record_types: dict[tuple[str, tuple[tuple[str, str], ...]], str] = {}
+        self.uses_numeric_conversion = False
         self.signed_values = self._analyze_signed_values()
         self.types = CxxTypes(module, self.signed_values)
         self.unsigned_upper_bounds: dict[int, int | None] = {}

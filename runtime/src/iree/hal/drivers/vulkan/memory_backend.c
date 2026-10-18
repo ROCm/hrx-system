@@ -26,8 +26,6 @@ typedef struct iree_hal_vulkan_slab_pool_plan_t {
   struct {
     // Existing placement-local capacity notification.
     iree_async_notification_t* notification;
-    // Existing independent cold allocation and retirement owner.
-    iree_hal_memory_maintenance_t* maintenance;
     // Existing completion probe with a group-lifetime borrowed context.
     iree_hal_pool_epoch_query_t epoch_query;
     // Sealed group's shared completion tracker.
@@ -63,7 +61,8 @@ static iree_status_t iree_hal_vulkan_slab_pool_plan_create(
       (iree_hal_vulkan_slab_pool_plan_t*)base;
   iree_hal_slab_provider_t* provider = NULL;
   iree_status_t status = iree_hal_vulkan_slab_provider_create(
-      plan->allocator, plan->provider_options, plan->trace_name, host_allocator,
+      plan->allocator, plan->provider_options,
+      iree_hal_device_host_allocator(plan->provider_options.parent_device),
       &provider);
   if (iree_status_is_ok(status)) {
     const iree_hal_passthrough_pool_options_t options = {
@@ -79,7 +78,7 @@ static iree_status_t iree_hal_vulkan_slab_pool_plan_create(
     };
     status = iree_hal_passthrough_pool_create(
         options, provider, plan->progress.notification, plan->progress.tracker,
-        plan->progress.maintenance, host_allocator, out_pool);
+        host_allocator, out_pool);
   }
   iree_hal_slab_provider_release(provider);
   return status;
@@ -480,6 +479,7 @@ static iree_status_t iree_hal_vulkan_slab_pool_query_owner(
     plan->allocator = backend->allocator;
     plan->provider_options = (iree_hal_vulkan_slab_provider_options_t){
         .parent_device = backend->device,
+        .allocation_queue = backend->allocation_queue,
         .syms = backend->syms,
         .logical_device = backend->logical_device,
         .memory_type_index = i,
@@ -493,7 +493,6 @@ static iree_status_t iree_hal_vulkan_slab_pool_query_owner(
         .non_coherent_atom_size = limits->nonCoherentAtomSize,
     };
     plan->progress.notification = backend->notification;
-    plan->progress.maintenance = backend->maintenance;
     plan->progress.epoch_query = backend->epoch_query;
     plan->progress.tracker =
         iree_hal_device_topology_info(backend->device)->frontier.tracker;

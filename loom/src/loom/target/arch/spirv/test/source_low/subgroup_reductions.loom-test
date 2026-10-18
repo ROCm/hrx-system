@@ -323,5 +323,10 @@ kernel.def @preserved_arithmetic_requires_qualified_provider() {
   %vector_sum = kernel.subgroup.scan<addf, preserve> %vector {direction = forward, mode = exclusive} : vector<2xf32>
   // ERROR@+1: TARGET/003 {subject_role="flags", subject_name="math", constraint_key="has_none.preserve"}
   %vector_product = kernel.subgroup.reduce<mulf, preserve> %vector : vector<2xf32>
+  %bfloat = scalar.fptrunc %value : f32 to bf16
+  // ERROR@+1: TARGET/003 {subject_role="flags", subject_name="math", constraint_key="has_none.preserve"}
+  %bfloat_sum = kernel.subgroup.reduce<addf, preserve> %bfloat : bf16
+  // ERROR@+1: TARGET/003 {subject_role="flags", subject_name="math", constraint_key="has_none.preserve"}
+  %bfloat_product = kernel.subgroup.scan<mulf, preserve> %bfloat {direction = forward, mode = inclusive} : bf16
   kernel.return
 }

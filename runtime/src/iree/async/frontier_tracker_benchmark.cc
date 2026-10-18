@@ -11,12 +11,11 @@
 //
 // Key operations to measure:
 //   - advance() with no waiters: baseline hash/probe + CAS overhead
-//   - advance() with unaffected waiters: cost of scanning past irrelevant
-//   waiters
+//   - advance() with unaffected waiters: cost of unrelated pending work
 //   - advance() that dispatches: full satisfaction check + callback invocation
 //   - wait() immediate: already-satisfied fast path
-//   - wait() pending: insertion into waiter list
-//   - cancel_wait(): removal from waiter list
+//   - wait() pending: dependency registration
+//   - cancel_wait(): dependency cancellation
 //
 // Build/run:
 //   iree-bazel-run //runtime/src/iree/async:frontier_tracker_benchmark
@@ -96,8 +95,11 @@ class TrackerFixture {
     }
   }
 
+  // Maximum number of registered axes.
   uint32_t capacity_;
+  // Axes restored when measuring an isolated completion.
   std::vector<iree_async_axis_t> axes_;
+  // Tracker owned by this fixture.
   iree_async_frontier_tracker_t* tracker_ = nullptr;
 };
 
@@ -171,8 +173,9 @@ BENCHMARK(BM_Baseline_IndirectCall);
 // Advance benchmarks
 //===----------------------------------------------------------------------===//
 
-// Advance with no waiters: pure lookup/CAS/head-check overhead.
-// This is the hot path when axis advances happen but no one is waiting.
+// Advance with no waiters: lookup, epoch publication, and readiness-check
+// overhead. This is the hot path when axis advances happen but no one is
+// waiting.
 static void BM_Advance_NoWaiters(benchmark::State& state) {
   TrackerFixture fixture(kMaxAxes);
   fixture.AddAxis(Axis(0));
@@ -189,8 +192,7 @@ static void BM_Advance_NoWaiters(benchmark::State& state) {
 BENCHMARK(BM_Advance_NoWaiters);
 
 // Advance with waiters that don't reference the advancing axis.
-// Measures the cost of the quick-check optimization (skip waiters that don't
-// care about this axis).
+// Measures whether unrelated pending work affects independent progress.
 static void BM_Advance_UnaffectedWaiters(benchmark::State& state) {
   const int waiter_count = static_cast<int>(state.range(0));
   TrackerFixture fixture(kMaxAxes);
@@ -204,7 +206,7 @@ static void BM_Advance_UnaffectedWaiters(benchmark::State& state) {
   std::vector<iree_async_frontier_waiter_t> waiters(waiter_count);
   for (int i = 0; i < waiter_count; ++i) {
     frontier_storage[i].Initialize(1);
-    frontier_storage[i].SetEntry(0, Axis(1), 1000000);  // Never satisfied.
+    frontier_storage[i].SetEntry(0, Axis(1), UINT64_MAX);  // Never satisfied.
     IREE_CHECK_OK(iree_async_frontier_tracker_wait(
         fixture.tracker(), frontier_storage[i].frontier(), MinimalCallback,
         nullptr, &waiters[i]));
@@ -231,10 +233,41 @@ BENCHMARK(BM_Advance_UnaffectedWaiters)
     ->Arg(64)
     ->Arg(256);
 
+// Progress on an axis before its earliest pending dependency becomes ready.
+static void BM_Advance_BeforePendingEpoch(benchmark::State& state) {
+  const int waiter_count = static_cast<int>(state.range(0));
+  TrackerFixture fixture(kMaxAxes);
+  fixture.AddAxis(Axis(0));
+  FrontierStorage<1> frontier;
+  frontier.Initialize(1);
+  frontier.SetEntry(0, Axis(0), UINT64_MAX);
+  std::vector<iree_async_frontier_waiter_t> waiters(waiter_count);
+  for (auto& waiter : waiters) {
+    IREE_CHECK_OK(
+        iree_async_frontier_tracker_wait(fixture.tracker(), frontier.frontier(),
+                                         MinimalCallback, nullptr, &waiter));
+  }
+  uint64_t epoch = 1;
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(iree_async_frontier_tracker_advance(
+        fixture.tracker(), Axis(0), epoch++));
+  }
+  for (auto& waiter : waiters) {
+    iree_async_frontier_tracker_cancel_wait(fixture.tracker(), &waiter);
+  }
+  state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_Advance_BeforePendingEpoch)
+    ->Arg(1)
+    ->Arg(4)
+    ->Arg(16)
+    ->Arg(64)
+    ->Arg(256);
+
 // Advance that dispatches a single waiter.
 // Measures the full dispatch path: CAS + satisfaction check + callback.
 // NOTE: Uses PauseTiming which adds syscall overhead. See
-// BM_Advance_DispatchOne_Clean.
+// BM_Scenario_GPUCompletionDispatch for registration through completion.
 static void BM_Advance_DispatchOne(benchmark::State& state) {
   TrackerFixture fixture(kMaxAxes);
   fixture.AddAxis(Axis(0));
@@ -404,15 +437,14 @@ static void BM_Wait_ImmediatelySatisfied(benchmark::State& state) {
 }
 BENCHMARK(BM_Wait_ImmediatelySatisfied);
 
-// Wait on not-yet-satisfied frontier: pending insertion path.
-// Uses a batched approach to avoid allocating millions of waiters.
-static void BM_Wait_Pending(benchmark::State& state) {
+// Register and cancel an unresolved dependency, reusing caller-owned storage.
+static void BM_Wait_PendingAndCancel(benchmark::State& state) {
   TrackerFixture fixture(kMaxAxes);
   fixture.AddAxis(Axis(0));
 
   FrontierStorage<1> frontier_storage;
   frontier_storage.Initialize(1);
-  frontier_storage.SetEntry(0, Axis(0), 1000000);  // Never satisfied.
+  frontier_storage.SetEntry(0, Axis(0), UINT64_MAX);  // Never satisfied.
 
   iree_async_frontier_waiter_t waiter;
   for (auto _ : state) {
@@ -422,13 +454,12 @@ static void BM_Wait_Pending(benchmark::State& state) {
     benchmark::DoNotOptimize(status);
     IREE_CHECK_OK(status);
 
-    state.PauseTiming();
-    iree_async_frontier_tracker_cancel_wait(fixture.tracker(), &waiter);
-    state.ResumeTiming();
+    benchmark::DoNotOptimize(
+        iree_async_frontier_tracker_cancel_wait(fixture.tracker(), &waiter));
   }
   state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_Wait_Pending);
+BENCHMARK(BM_Wait_PendingAndCancel);
 
 // Wait with multi-entry frontier satisfaction check.
 static void BM_Wait_MultiEntrySatisfied(benchmark::State& state) {
@@ -463,7 +494,7 @@ BENCHMARK(BM_Wait_MultiEntrySatisfied)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16);
 // Cancel benchmarks
 //===----------------------------------------------------------------------===//
 
-// Cancel a waiter at the head of the list (best case).
+// Cancel a single pending waiter.
 static void BM_Cancel_Head(benchmark::State& state) {
   TrackerFixture fixture(kMaxAxes);
   fixture.AddAxis(Axis(0));
@@ -486,7 +517,7 @@ static void BM_Cancel_Head(benchmark::State& state) {
 }
 BENCHMARK(BM_Cancel_Head);
 
-// Cancel a waiter at the tail of the list (worst case: full scan).
+// Cancel the oldest registration among other pending waits.
 static void BM_Cancel_Tail(benchmark::State& state) {
   const int list_length = static_cast<int>(state.range(0));
   TrackerFixture fixture(kMaxAxes);
@@ -528,8 +559,8 @@ BENCHMARK(BM_Cancel_Tail)->Arg(4)->Arg(16)->Arg(64)->Arg(256);
 // End-to-end scenario benchmarks
 //===----------------------------------------------------------------------===//
 
-// Simulates the GPU completion hot path:
-// GPU signals semaphore -> tracker advance -> waiter dispatch -> submit next op
+// Measures host dependency registration through inline completion dispatch.
+// No GPU submission or semaphore implementation participates in this row.
 static void BM_Scenario_GPUCompletionDispatch(benchmark::State& state) {
   TrackerFixture fixture(kMaxAxes);
   fixture.AddAxis(Axis(0));
@@ -541,9 +572,7 @@ static void BM_Scenario_GPUCompletionDispatch(benchmark::State& state) {
   iree_async_frontier_waiter_t waiter;
   uint64_t epoch = 1;
   for (auto _ : state) {
-    state.PauseTiming();
-    fixture.ResetEpochs();
-    state.ResumeTiming();
+    frontier_storage.SetEntry(0, Axis(0), epoch);
 
     // Register a waiter (simulates operation waiting for GPU).
     IREE_CHECK_OK(iree_async_frontier_tracker_wait(
@@ -578,9 +607,9 @@ static void BM_Scenario_FanIn(benchmark::State& state) {
   iree_async_frontier_waiter_t waiter;
   uint64_t epoch = 1;
   for (auto _ : state) {
-    state.PauseTiming();
-    fixture.ResetEpochs();
-    state.ResumeTiming();
+    for (int i = 0; i < queue_count; ++i) {
+      frontier_storage.SetEntry(i, Axis(static_cast<uint8_t>(i)), epoch);
+    }
 
     // Register waiter waiting on all queues.
     IREE_CHECK_OK(iree_async_frontier_tracker_wait(
@@ -613,9 +642,9 @@ static void BM_Scenario_FanOut(benchmark::State& state) {
 
   uint64_t epoch = 1;
   for (auto _ : state) {
-    state.PauseTiming();
-    fixture.ResetEpochs();
-    state.ResumeTiming();
+    for (int i = 0; i < waiter_count; ++i) {
+      frontier_storage[i].SetEntry(0, Axis(0), epoch);
+    }
 
     // Register all waiters.
     for (int i = 0; i < waiter_count; ++i) {
@@ -634,5 +663,35 @@ static void BM_Scenario_FanOut(benchmark::State& state) {
   state.counters["dispatched/op"] = waiter_count;
 }
 BENCHMARK(BM_Scenario_FanOut)->Arg(1)->Arg(4)->Arg(16)->Arg(64);
+
+// Independent retirement points on one progressing queue. Register in reverse
+// epoch order, then observe each completion once; later waits remain pending.
+static void BM_Scenario_OrderedEpochs(benchmark::State& state) {
+  const int waiter_count = static_cast<int>(state.range(0));
+  TrackerFixture fixture(kMaxAxes);
+  fixture.AddAxis(Axis(0));
+  std::vector<FrontierStorage<1>> frontiers(waiter_count);
+  std::vector<iree_async_frontier_waiter_t> waiters(waiter_count);
+  for (auto& frontier : frontiers) {
+    frontier.Initialize(1);
+  }
+  uint64_t base_epoch = 0;
+  for (auto _ : state) {
+    for (int i = waiter_count - 1; i >= 0; --i) {
+      frontiers[i].SetEntry(0, Axis(0), base_epoch + i + 1);
+      IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+          fixture.tracker(), frontiers[i].frontier(), MinimalCallback, nullptr,
+          &waiters[i]));
+    }
+    for (int i = 0; i < waiter_count; ++i) {
+      benchmark::DoNotOptimize(iree_async_frontier_tracker_advance(
+          fixture.tracker(), Axis(0), base_epoch + i + 1));
+    }
+    base_epoch += waiter_count;
+  }
+  state.SetItemsProcessed(state.iterations() * waiter_count);
+  state.counters["dispatched/op"] = waiter_count;
+}
+BENCHMARK(BM_Scenario_OrderedEpochs)->Arg(4)->Arg(16)->Arg(64)->Arg(256);
 
 }  // namespace

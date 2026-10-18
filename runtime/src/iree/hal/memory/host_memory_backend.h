@@ -24,10 +24,10 @@ typedef struct iree_hal_host_memory_backend_t {
   iree_hal_device_event_sink_t event_sink;
   // Existing coherent CPU allocation source.
   iree_hal_slab_provider_t* slab_provider;
+  // Existing CPU shared-section source for remappable physical storage.
+  iree_hal_slab_provider_t* mapping_provider;
   // Existing placement-local progress notification.
   iree_async_notification_t* notification;
-  // Existing independent cold allocation/retirement owner.
-  iree_hal_memory_maintenance_t* maintenance;
   // Existing completion probe with a group-lifetime borrowed context.
   iree_hal_pool_epoch_query_t epoch_query;
 } iree_hal_host_memory_backend_t;
@@ -35,8 +35,8 @@ typedef struct iree_hal_host_memory_backend_t {
 // Captures borrowed owner views; creates no native object or payload.
 void iree_hal_host_memory_backend_initialize(
     iree_hal_slab_provider_t* slab_provider,
+    iree_hal_slab_provider_t* mapping_provider,
     iree_async_notification_t* notification,
-    iree_hal_memory_maintenance_t* maintenance,
     iree_hal_pool_epoch_query_t epoch_query,
     iree_hal_device_event_sink_t event_sink,
     iree_hal_host_memory_backend_t* out_backend);

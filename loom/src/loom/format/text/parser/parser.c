@@ -677,10 +677,9 @@ static iree_status_t loom_parse_op_into(
   loom_location_id_t fallback_location = LOOM_LOCATION_UNKNOWN;
   if (parser->source_id != LOOM_SOURCE_ID_INVALID) {
     loom_location_entry_t entry = loom_location_file_range(
-        parser->source_id, (uint16_t)start_token.line,
-        (uint16_t)start_token.column,
-        (uint16_t)parser->tokenizer.consumed_end_line,
-        (uint16_t)parser->tokenizer.consumed_end_column);
+        parser->source_id, start_token.line, start_token.column,
+        parser->tokenizer.consumed_end_line,
+        parser->tokenizer.consumed_end_column);
     IREE_RETURN_IF_ERROR(
         loom_module_add_location(parser->module, entry, &fallback_location));
   }
@@ -693,9 +692,8 @@ static iree_status_t loom_parse_op_into(
   if (location == fallback_location &&
       fallback_location != LOOM_LOCATION_UNKNOWN &&
       parsed->field_span_count > 0) {
-    IREE_RETURN_IF_ERROR(loom_module_attach_location_field_spans(
-        parser->module, fallback_location, parsed->field_spans,
-        parsed->field_span_count));
+    IREE_RETURN_IF_ERROR(loom_parsed_op_attach_field_spans(
+        parsed, parser->module, fallback_location));
   }
 
   // Finalize the op.
@@ -767,9 +765,9 @@ iree_status_t loom_parser_append_implicit_terminator(
   if (parser->source_id != LOOM_SOURCE_ID_INVALID) {
     loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
     if (token.kind != LOOM_TOKEN_EOF && token.kind != LOOM_TOKEN_NONE) {
-      loom_location_entry_t entry = loom_location_file_range(
-          parser->source_id, (uint16_t)token.line, (uint16_t)token.column,
-          (uint16_t)token.line, (uint16_t)token.end_column);
+      loom_location_entry_t entry =
+          loom_location_file_range(parser->source_id, token.line, token.column,
+                                   token.line, token.end_column);
       IREE_RETURN_IF_ERROR(
           loom_module_add_location(parser->module, entry, &location));
     }
@@ -1424,10 +1422,9 @@ static iree_status_t loom_parse_low_assembly_function(
   if (parser->source_id != LOOM_SOURCE_ID_INVALID) {
     IREE_RETURN_IF_ERROR(loom_module_add_location(
         parser->module,
-        loom_location_file_range(
-            parser->source_id, (uint16_t)start.line, (uint16_t)start.column,
-            (uint16_t)parser->tokenizer.consumed_end_line,
-            (uint16_t)parser->tokenizer.consumed_end_column),
+        loom_location_file_range(parser->source_id, start.line, start.column,
+                                 parser->tokenizer.consumed_end_line,
+                                 parser->tokenizer.consumed_end_column),
         &location));
   }
   return loom_finalize_op(parser, kind, vtable, &parsed, location,

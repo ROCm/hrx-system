@@ -612,18 +612,18 @@ static iree_status_t loom_bytecode_selected_table_finish_type(
 static iree_status_t loom_bytecode_selected_table_read_location_coordinate(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor, uint32_t source_ordinal,
-    iree_string_view_t field_name, uint16_t* out_value) {
+    iree_string_view_t field_name, uint32_t* out_value) {
   const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t value = 0;
   IREE_RETURN_IF_ERROR(
       loom_bytecode_reader_read_uvarint(materializer->decoder, cursor, &value));
-  if (value > UINT16_MAX) {
+  if (value > LOOM_LOCATION_COORDINATE_MAX) {
     return loom_bytecode_reader_emit_invalid_field(
         materializer->decoder, IREE_SV("LOCATIONS"), IREE_SV("location"),
         source_ordinal, field_name, offset,
-        IREE_SV("file_location_coordinate_exceeds_runtime_field_width"));
+        IREE_SV("file_location_coordinate_exceeds_supported_range"));
   }
-  *out_value = (uint16_t)value;
+  *out_value = (uint32_t)value;
   return iree_ok_status();
 }
 
@@ -752,10 +752,11 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
       uint64_t child_count = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
           materializer->decoder, &cursor, &child_count));
-      if (child_count > UINT32_MAX || child_count > IREE_HOST_SIZE_MAX) {
+      if (child_count > LOOM_LOCATION_FUSED_CHILD_COUNT_MAX ||
+          child_count > IREE_HOST_SIZE_MAX) {
         return loom_bytecode_reader_emit_count_exceeds(
             materializer->decoder, IREE_SV("location_children"), child_count,
-            UINT32_MAX, child_count_offset);
+            LOOM_LOCATION_FUSED_CHILD_COUNT_MAX, child_count_offset);
       }
       loom_location_id_t* children = NULL;
       if (child_count > 0) {
@@ -790,10 +791,11 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
           loom_bytecode_reader_cursor_absolute_position(&cursor);
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
           materializer->decoder, &cursor, &data_length));
-      if (data_length > UINT32_MAX || data_length > IREE_HOST_SIZE_MAX) {
+      if (data_length > LOOM_LOCATION_DATA_LENGTH_MAX ||
+          data_length > IREE_HOST_SIZE_MAX) {
         return loom_bytecode_reader_emit_count_exceeds(
             materializer->decoder, IREE_SV("opaque_location_data"), data_length,
-            UINT32_MAX, data_length_offset);
+            LOOM_LOCATION_DATA_LENGTH_MAX, data_length_offset);
       }
       iree_const_byte_span_t span = iree_const_byte_span_empty();
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_span(
@@ -808,7 +810,7 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
           loom_bytecode_reader_cursor_absolute_position(&cursor);
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
           materializer->decoder, &cursor, &tag));
-      if (tag == LOOM_LOCATION_TAG_INVALID || tag > UINT16_MAX) {
+      if (tag == LOOM_LOCATION_TAG_INVALID || tag > LOOM_LOCATION_TAG_MAX) {
         return loom_bytecode_reader_emit_invalid_field(
             materializer->decoder, IREE_SV("LOCATIONS"), IREE_SV("location"),
             source_ordinal, IREE_SV("tag"), tag_offset,
@@ -835,10 +837,11 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
           loom_bytecode_reader_cursor_absolute_position(&cursor);
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
           materializer->decoder, &cursor, &data_length));
-      if (data_length > UINT32_MAX || data_length > IREE_HOST_SIZE_MAX) {
+      if (data_length > LOOM_LOCATION_DATA_LENGTH_MAX ||
+          data_length > IREE_HOST_SIZE_MAX) {
         return loom_bytecode_reader_emit_count_exceeds(
             materializer->decoder, IREE_SV("tagged_location_data"), data_length,
-            UINT32_MAX, data_length_offset);
+            LOOM_LOCATION_DATA_LENGTH_MAX, data_length_offset);
       }
       iree_const_byte_span_t span = iree_const_byte_span_empty();
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_span(

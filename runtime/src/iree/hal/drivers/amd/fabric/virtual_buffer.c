@@ -625,7 +625,6 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
         .notification = owner->notification,
         .tracker =
             iree_hal_device_topology_info(owner->device)->frontier.tracker,
-        .maintenance = owner->maintenance,
         .maintenance_range = {.byte_length = options->byte_length},
         .allocation_alignment = alignment,
         .maintenance_alignment = iree_max(1u, host_info.cache_line_size),

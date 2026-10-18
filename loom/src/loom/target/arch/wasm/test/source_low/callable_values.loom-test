@@ -19,12 +19,12 @@ low.func.def public target<wasm.core.simd128> abi(wasm_function) @call_vector_re
   %c1 = i32.const 1
   %c2 = i32.const 2
   %c3 = i32.const 3
-  %32 = i32.eq %lane, %c3
-  %34 = i32.eq %lane, %c2
-  %36 = i32.eq %lane, %c1
-  %37 = i32.select %c1, %input, %36
-  %38 = i32.select %c2, %37, %34
-  %result = i32.select %c3, %38, %32
+  %28 = i32.eq %lane, %c1
+  %29 = i32.select %c1, %input, %28
+  %31 = i32.eq %lane, %c2
+  %32 = i32.select %c2, %29, %31
+  %34 = i32.eq %lane, %c3
+  %result = i32.select %c3, %32, %34
   return %result
 }
 

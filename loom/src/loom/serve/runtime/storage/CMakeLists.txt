@@ -18,10 +18,10 @@ loom_cc_library(
   SRCS
     "memory.c"
   DEPS
+    iree::async
     iree::base
     iree::base::threading
     iree::hal
-    iree::hal::memory::maintenance
   PUBLIC
 )
 endif()

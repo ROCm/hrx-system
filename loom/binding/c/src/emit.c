@@ -50,7 +50,8 @@ static loomc_status_t loomc_emit_result_fail_message(
       .message = message,
   };
   LOOMC_RETURN_IF_ERROR(loomc_result_add_diagnostic(result, &diagnostic));
-  return loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+  loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
+  return loomc_ok_status();
 }
 
 static loomc_status_t loomc_emit_result_fail_cstring(loomc_result_t* result,
@@ -458,11 +459,13 @@ static iree_status_t loomc_emit_capture_compile_report_diagnostic(
   loom_output_stream_t stream;
   IREE_RETURN_IF_ERROR(loom_json_value_list_begin_value(
       &transaction->compile_report_diagnostics, &stream));
+  const loomc_diagnostic_type_printer_t type_printer = {
+      .module = diagnostic->module,
+      .text_print_options = transaction->diagnostic_text_print_options,
+  };
   const loom_type_formatter_t type_formatter =
-      loomc_diagnostic_type_printer_formatter(
-          transaction->diagnostic_type_printer.module
-              ? &transaction->diagnostic_type_printer
-              : NULL);
+      loomc_diagnostic_type_printer_formatter(diagnostic->module ? &type_printer
+                                                                 : NULL);
   return loom_diagnostic_json_write_object(&stream, diagnostic, type_formatter);
 }
 
@@ -756,19 +759,16 @@ loomc_string_view_t loomc_emit_transaction_artifact_format(
   return transaction->options.artifact_format;
 }
 
-void loomc_emit_transaction_set_diagnostic_context(
-    loomc_emit_transaction_t* transaction, const loom_module_t* module,
+void loomc_emit_transaction_set_diagnostic_environment(
+    loomc_emit_transaction_t* transaction,
     const loomc_target_environment_t* target_environment) {
   IREE_ASSERT_ARGUMENT(transaction);
-  IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(target_environment);
   const loomc_target_pass_environment_t* pass_environment =
       loomc_target_environment_pass_environment(target_environment);
-  loomc_diagnostic_type_printer_initialize(
-      module,
+  transaction->diagnostic_text_print_options =
       pass_environment ? &pass_environment->diagnostic_type_print_options
-                       : NULL,
-      &transaction->diagnostic_type_printer);
+                       : NULL;
 }
 
 void loomc_emit_transaction_bind_emitter(loomc_emit_transaction_t* transaction,
@@ -835,8 +835,8 @@ loomc_status_t loomc_emit_transaction_emit(
   const loomc_emit_resolved_options_t* options = &transaction->options;
   loom_module_t* internal_module = loomc_module_loom_module(module);
   IREE_ASSERT_ARGUMENT(internal_module);
-  loomc_emit_transaction_set_diagnostic_context(transaction, internal_module,
-                                                target_environment);
+  loomc_emit_transaction_set_diagnostic_environment(transaction,
+                                                    target_environment);
 
   loomc_status_t status =
       loomc_module_admit(module, target_environment, result);
@@ -933,7 +933,7 @@ loomc_status_t loomc_emit_transaction_emit(
     }
     status = loomc_status_from_iree(emit_status);
     if (loomc_status_is_ok(status) && !target_emitted) {
-      status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+      loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
     }
   }
   if (!loomc_status_is_ok(status) &&
@@ -1031,7 +1031,7 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
 
   loomc_result_t* result = NULL;
   loomc_status_t status = loomc_result_create(
-      LOOMC_RESULT_STATE_SUCCEEDED,
+      LOOMC_STATUS_OK,
       loomc_context_source_retention(loomc_module_context(module)), allocator,
       &result);
   loomc_emit_transaction_t transaction = {0};

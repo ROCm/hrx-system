@@ -288,17 +288,6 @@ iree_status_t iree_hal_amdgpu_host_queue_prepare_alloca_buffers(
   return status;
 }
 
-static bool iree_hal_amdgpu_alloca_transaction_has_growth_request(
-    const iree_hal_amdgpu_alloca_transaction_t* transaction) {
-  for (iree_host_size_t i = 0; i < transaction->request_count; ++i) {
-    if (iree_all_bits_set(transaction->acquire_infos[i].flags,
-                          IREE_HAL_POOL_ACQUIRE_FLAG_GROWTH_REQUIRED)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Records one event per allocation while using the exact source pool supplied
 // separately. Kept distinct from the generic helper above so profiling never
 // has to recover policy objects from transient buffer state.
@@ -320,36 +309,18 @@ static void iree_hal_amdgpu_host_queue_record_alloca_pool_events(
   }
 }
 
-iree_status_t iree_hal_amdgpu_host_queue_acquire_alloca_transaction(
+iree_status_t iree_hal_amdgpu_host_queue_resolve_alloca_transaction(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
     iree_hal_pool_t* allocation_pool,
-    iree_hal_pool_reserve_flags_t reserve_flags,
     iree_hal_amdgpu_alloca_transaction_t* transaction) {
   transaction->readiness = IREE_HAL_AMDGPU_ALLOCA_RESERVATION_READY;
-  transaction->acquire_result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
   transaction->wait_resolution = *resolution;
-  transaction->reservations_held = false;
-  transaction->backing_buffers_held = false;
   iree_async_frontier_initialize(transaction->wait_frontier, 0);
-  memset(transaction->acquire_infos, 0,
-         transaction->request_count * sizeof(*transaction->acquire_infos));
-
   iree_hal_amdgpu_fixed_frontier_t requester_frontier_storage;
   const iree_async_frontier_t* requester_frontier =
       iree_hal_amdgpu_host_queue_pool_requester_frontier(
           queue, resolution, &requester_frontier_storage);
-  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations(
-      allocation_pool, transaction->request_count, transaction->requests,
-      iree_hal_pool_requires_asan_advice(allocation_pool) ? NULL
-                                                          : requester_frontier,
-      reserve_flags, transaction->reservations, transaction->acquire_infos,
-      &transaction->acquire_result));
-
-  transaction->reservations_held =
-      transaction->acquire_result == IREE_HAL_POOL_ACQUIRE_OK ||
-      transaction->acquire_result == IREE_HAL_POOL_ACQUIRE_OK_FRESH ||
-      transaction->acquire_result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT;
   iree_hal_profile_memory_event_flags_t reserve_event_flags =
       IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION;
   if (transaction->acquire_result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT) {
@@ -426,11 +397,7 @@ iree_status_t iree_hal_amdgpu_host_queue_acquire_alloca_transaction(
     case IREE_HAL_POOL_ACQUIRE_EXHAUSTED:
     case IREE_HAL_POOL_ACQUIRE_OVER_BUDGET:
       transaction->readiness =
-          transaction->acquire_result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED &&
-                  iree_hal_amdgpu_alloca_transaction_has_growth_request(
-                      transaction)
-              ? IREE_HAL_AMDGPU_ALLOCA_RESERVATION_NEEDS_POOL_GROWTH
-              : IREE_HAL_AMDGPU_ALLOCA_RESERVATION_NEEDS_POOL_NOTIFICATION;
+          IREE_HAL_AMDGPU_ALLOCA_RESERVATION_NEEDS_POOL_NOTIFICATION;
       iree_hal_amdgpu_host_queue_record_alloca_pool_events(
           queue, allocation_pool, transaction,
           IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_WAIT,

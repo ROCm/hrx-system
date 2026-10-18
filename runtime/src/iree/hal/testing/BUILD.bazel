@@ -30,3 +30,13 @@ iree_runtime_cc_library(
     hdrs = ["mapped_transfer_buffer.h"],
     deps = ["//runtime/src/iree/hal"],
 )
+
+iree_runtime_cc_library(
+    name = "deferred_pool",
+    testonly = True,
+    hdrs = ["deferred_pool.h"],
+    deps = [
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)

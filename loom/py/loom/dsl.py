@@ -105,6 +105,7 @@ __all__ = [
     "ATTR_TYPE_I64",
     "ATTR_TYPE_F64",
     "ATTR_TYPE_STRING",
+    "ATTR_TYPE_STRING_ARRAY",
     "ATTR_TYPE_BOOL",
     "ATTR_TYPE_ENUM",
     "ATTR_TYPE_ENUM_ARRAY",
@@ -569,6 +570,7 @@ type AttrType = str  # One of the ATTR_TYPE_* constants below.
 ATTR_TYPE_I64 = "i64"
 ATTR_TYPE_F64 = "f64"
 ATTR_TYPE_STRING = "string"
+ATTR_TYPE_STRING_ARRAY = "string_array"
 ATTR_TYPE_BOOL = "bool"
 ATTR_TYPE_ENUM = "enum"
 ATTR_TYPE_ENUM_ARRAY = "enum_array"
@@ -593,6 +595,7 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_I64,
         ATTR_TYPE_F64,
         ATTR_TYPE_STRING,
+        ATTR_TYPE_STRING_ARRAY,
         ATTR_TYPE_BOOL,
         ATTR_TYPE_ENUM,
         ATTR_TYPE_ENUM_ARRAY,
@@ -3293,6 +3296,7 @@ _DESCRIPTOR_PARAMETER_TYPES = frozenset(
         ATTR_TYPE_I64,
         ATTR_TYPE_F64,
         ATTR_TYPE_STRING,
+        ATTR_TYPE_STRING_ARRAY,
         ATTR_TYPE_BOOL,
         ATTR_TYPE_ENUM,
         ATTR_TYPE_ENUM_ARRAY,

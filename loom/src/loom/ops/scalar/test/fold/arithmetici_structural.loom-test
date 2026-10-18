@@ -237,16 +237,54 @@ func.def @muli_power_of_two_to_shift(%x: i32) -> (i32) {
 
 // ====
 
-func.def @muli_negative_one_to_negi(%x: i32) -> (i32) {
+func.def @muli_negative_one_to_subi(%x: i32) -> (i32) {
   %negation_factor = scalar.constant -1 : i32
   %r = scalar.muli %x, %negation_factor : i32
   func.return %r : i32
 }
 
 // ----
-func.def @muli_negative_one_to_negi(%x: i32) -> (i32) {
-  %r = scalar.negi %x : i32
+func.def @muli_negative_one_to_subi(%x: i32) -> (i32) {
+  %4 = scalar.constant 0 : i32
+  %r = scalar.subi %4, %x : i32
   func.return %r : i32
+}
+
+// ====
+
+// Late cleanup retains legalized arithmetic for both operand orders and every
+// non-predicate integer width. Multiplication in i1 remains an identity.
+func.def @negation_widths(%predicate: i1, %byte: i8, %half: i16, %wide: i64) -> (i1, i1, i8, i8, i16, i16, i64, i64) {
+  %predicate_factor = scalar.constant true : i1
+  %byte_factor = scalar.constant -1 : i8
+  %half_factor = scalar.constant -1 : i16
+  %wide_factor = scalar.constant -1 : i64
+  %predicate_left = scalar.muli %predicate_factor, %predicate : i1
+  %predicate_right = scalar.muli %predicate, %predicate_factor : i1
+  %byte_left = scalar.muli %byte_factor, %byte : i8
+  %byte_right = scalar.muli %byte, %byte_factor : i8
+  %half_left = scalar.muli %half_factor, %half : i16
+  %half_right = scalar.muli %half, %half_factor : i16
+  %wide_left = scalar.muli %wide_factor, %wide : i64
+  %wide_right = scalar.muli %wide, %wide_factor : i64
+  func.return %predicate_left, %predicate_right, %byte_left, %byte_right, %half_left, %half_right, %wide_left, %wide_right : i1, i1, i8, i8, i16, i16, i64, i64
+}
+
+// ----
+func.def @negation_widths(%predicate: i1, %byte: i8, %half: i16, %wide: i64) -> (i1, i1, i8, i8, i16, i16, i64, i64) {
+  %34 = scalar.constant 0 : i8
+  %byte_left = scalar.subi %34, %byte : i8
+  %32 = scalar.constant 0 : i8
+  %byte_right = scalar.subi %32, %byte : i8
+  %30 = scalar.constant 0 : i16
+  %half_left = scalar.subi %30, %half : i16
+  %28 = scalar.constant 0 : i16
+  %half_right = scalar.subi %28, %half : i16
+  %26 = scalar.constant 0 : i64
+  %wide_left = scalar.subi %26, %wide : i64
+  %24 = scalar.constant 0 : i64
+  %wide_right = scalar.subi %24, %wide : i64
+  func.return %predicate, %predicate, %byte_left, %byte_right, %half_left, %half_right, %wide_left, %wide_right : i1, i1, i8, i8, i16, i16, i64, i64
 }
 
 // ====

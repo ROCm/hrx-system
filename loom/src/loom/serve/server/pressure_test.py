@@ -346,10 +346,12 @@ def check(server, source, directory, workers, memory_bytes, retention):
         )
         while True:
             final = control(address, "GET", "/v1/status", 200)
-            if not final["data"]:
+            memory = final["server"]["resources"]["devices"][0]["memory"]["retained"]
+            # Logical model retirement precedes native freeing. Join both
+            # observable ownership boundaries before checking the final budget.
+            if not final["data"] and not memory["committed_bytes"]:
                 break
             assert all(not model["loom"].get("error") for model in final["data"]), final
-        memory = final["server"]["resources"]["devices"][0]["memory"]["retained"]
         assert memory["reserved_bytes"] == memory["committed_bytes"] == 0, memory
         assert memory["peak_bytes"] <= memory_bytes, memory
         assert control(address, "GET", "/readyz", 200) == {"status": "ready"}

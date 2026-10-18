@@ -13,10 +13,9 @@ loom_cc_binary(
     name = "loom-import-cxx",
     srcs = ["loom-import-cxx.c"],
     deps = [
-        "//loom/binding/c:interop",
         "//loom/binding/c:loomc",
         "//loom/binding/c/import/cxx",
-        "//loom/src/loom/target/configured:provider_set",
+        "//loom/binding/c/target/configured:ir",
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/cli:loomc_result",
         "//loom/src/loom/tooling/io:file",

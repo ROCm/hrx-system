@@ -317,6 +317,9 @@ typedef struct loom_target_contract_op_entry_t {
   uint16_t case_start;
   // Number of case rows available for the dialect-local op index.
   uint16_t case_count;
+  // Number of lower-rule cases participating in target queries. Excludes
+  // matrix adapters, unsupported markers, and metadata-only cases.
+  uint16_t query_rule_count;
 } loom_target_contract_op_entry_t;
 
 // Returns an empty target contract op entry.
@@ -325,6 +328,7 @@ loom_target_contract_op_entry_empty(void) {
   return (loom_target_contract_op_entry_t){
       /*.case_start=*/LOOM_TARGET_CONTRACT_ROW_NONE,
       /*.case_count=*/0,
+      /*.query_rule_count=*/0,
   };
 }
 
@@ -548,6 +552,11 @@ typedef struct loom_target_contract_query_environment_t {
   iree_arena_allocator_t* arena;
   // Optional scoped storage allocator for target-owned query analyses.
   loom_target_contract_query_state_allocator_t target_state_allocator;
+  // Preserves query outcomes and legal selections but permits omitting rejected
+  // rule identity, ranking, and diagnostic payloads. Rewrite probes defer this
+  // work; final legality queries leave this false to retain exact diagnostics.
+  // Authoritative target and descriptor-matrix rejections remain unchanged.
+  bool defer_rejection_diagnostics;
 } loom_target_contract_query_environment_t;
 
 // Acquires the owner's function analyses when not already borrowed.

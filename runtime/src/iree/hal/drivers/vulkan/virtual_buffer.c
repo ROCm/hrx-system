@@ -292,7 +292,6 @@ iree_status_t iree_hal_vulkan_virtual_buffer_create(
         .notification = backend->notification,
         .tracker =
             iree_hal_device_topology_info(backend->device)->frontier.tracker,
-        .maintenance = backend->maintenance,
         .maintenance_range = {.byte_length = options->byte_length},
         .allocation_alignment = alignment,
         .maintenance_alignment = 1,

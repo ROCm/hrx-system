@@ -15,7 +15,6 @@
 
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/tooling/flags.h"
-#include "iree/hal/memory/maintenance.h"
 #include "iree/task/executor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -26,7 +25,7 @@
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/testing/compiler.h"
 #include "loom/serve/testing/device.h"
-#include "loom/serve/testing/maintenance_gate.h"
+#include "loom/serve/testing/native_allocator.h"
 
 IREE_FLAG(string, weight_sources, "", "Weight loader source catalog.");
 
@@ -294,7 +293,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
           .memory_limit = elastic ? 2 * kSlabBytes : 0,
       };
       IREE_ASSERT_OK(loom_serve_device_group_allocate(
-          host, 1, &options, host_allocator, &groups_[i]));
+          host, 1, &options, native_allocators_[i].allocator(), &groups_[i]));
+      IREE_ASSERT_OK(native_allocators_[i].Observe(
+          loom_serve_device_group_at(groups_[i], 0)));
     }
     iree_hal_driver_release(driver);
     loom_serve_host_release(host);
@@ -394,7 +395,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     loom_serve_jit_release(jit_);
     loom_serve_execution_release(execution_);
     IREE_EXPECT_OK(loom_serve_device_trim(device_owner_, 0));
-    DrainMaintenance();
+    DrainNativeReturns();
     const auto memory = loom_serve_device_memory_statistics(device_owner_);
     EXPECT_EQ(memory.retained.reserved_bytes, 0u);
     EXPECT_EQ(memory.retained.committed_bytes, 0u);
@@ -485,8 +486,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   void AdmitAfterRelease(iree_host_size_t index) {
     loom_serve_residency_admission_t admission;
     {
-      loom_serve::testing::MaintenanceGate gate(
-          loom_serve_device_storage_pool(device_owner_)->maintenance);
+      loom_serve::testing::ScopedNativeHold gate(device_owner_,
+                                                 IREE_ALLOCATOR_COMMAND_FREE);
       IREE_ASSERT_OK(
           loom_serve_residency_try_admit(residencies_[index], &admission));
       ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
@@ -499,19 +500,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   }
 
-  void DrainMaintenance() {
-    // Native returns and cascading cache sweeps complete independently of
-    // model consumers. Join them only for final backing-byte observations.
-    auto* maintenance =
-        loom_serve_device_storage_pool(device_owner_)->maintenance;
-    iree_hal_memory_maintenance_call(
-        maintenance,
-        [](void* user_data) {
-          auto* owner = static_cast<iree_hal_memory_maintenance_t*>(user_data);
-          while (iree_hal_memory_maintenance_run_one(owner)) {
-          }
-        },
-        maintenance);
+  void DrainNativeReturns() {
+    IREE_ASSERT_OK(
+        loom_serve_test_device_trim_and_drain(device_owner_, UINT64_MAX));
   }
 
   iree_status_t Load(iree_host_size_t shared_count, iree_host_size_t count) {
@@ -575,6 +566,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   static constexpr uint64_t kSlabBytes = 2 * 1024 * 1024;
   // Suite-owned fixed and elastic devices, each constructed exactly once.
   inline static loom_serve_device_group_t* groups_[2] = {};
+  // Native allocator dependencies outliving their device groups.
+  inline static loom_serve::testing::NativeAllocator native_allocators_[2];
   // Owned checkpoint plans, including partially failed construction.
   std::array<loom_serve_weights_t*, 3> plans_ = {};
   // Admission groups borrowing their plans until final queue retirement.
@@ -689,7 +682,7 @@ TEST_P(WeightsTest, OneWorkerActivatesAndConsumesThroughAsyncTimelineWait) {
   loom_serve_residency_release(residencies_[0]);
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
-  DrainMaintenance();
+  DrainNativeReturns();
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
   // The same compiled consumer survives a complete asynchronous reload.
   ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
@@ -746,6 +739,34 @@ TEST_P(WeightsTest, CheckpointIndexFailureLeavesTheSharedCompilerUsable) {
   Run(1, 70);
 }
 
+TEST_P(WeightsTest, InitialBackingRetirementMatchesAcceptedWork) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  auto allocate_and_release_view = [&] {
+    IREE_ASSERT_OK(loom_serve_weights_allocate(
+        device_, transfer_, dispatch_,
+        loom_serve_device_storage_pool(device_owner_), pool_, 0, 1, &root,
+        host_allocator_, &plans_[0]));
+    iree_hal_buffer_release(buffers_[0][0]);
+    buffers_[0][0] = nullptr;
+  };
+  if (!pool_) {
+    loom_serve::testing::ScopedNativeHold hold(device_owner_);
+    ASSERT_NO_FATAL_FAILURE(allocate_and_release_view());
+    hold.WaitEntered();
+    // No caller view remains, but accepted initial allocation still owns the
+    // plan's pool and readiness state. Preparation failure must keep it alive.
+    EXPECT_FALSE(loom_serve_weights_is_retired(plans_[0]));
+  } else {
+    // Elastic binding only reserves address space; it has no accepted native
+    // backing operation until activation.
+    ASSERT_NO_FATAL_FAILURE(allocate_and_release_view());
+    EXPECT_TRUE(loom_serve_weights_is_retired(plans_[0]));
+  }
+  loom_serve_weights_await_retirement(plans_[0]);
+  EXPECT_TRUE(loom_serve_weights_is_retired(plans_[0]));
+}
+
 TEST_P(WeightsTest, MissingFileParameterFailsTheLoad) {
   IREE_ASSERT_OK(Compile(0, "unavailable"));
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
@@ -762,6 +783,7 @@ TEST_P(WeightsTest, LateMissingParameterRetiresEarlierAcceptedReads) {
   IREE_ASSERT_OK(loom_serve_weights_free(plans_[0]));
   plans_[0] = nullptr;
   if (GetParam()) {
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
     EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
   }
 }
@@ -790,6 +812,7 @@ TEST_P(WeightsTest, RejectedActivationRetainsProtectionUntilActualRetirement) {
   IREE_ASSERT_OK(loom_serve_weights_free(plans_[0]));
   plans_[0] = nullptr;
   if (GetParam()) {
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
     EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
   }
 }
@@ -846,6 +869,7 @@ TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
       loom_serve_execution_transfer(execution_, 1, &fill, &completion));
   IREE_ASSERT_OK(loom_serve_execution_wait(execution_, completion));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_free(other));
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
   IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
   IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
   const auto replay_activity = loom_serve_weights_activity(plans_[0]);
@@ -999,7 +1023,7 @@ TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
   // Warmup owns no persistent pin after completion.
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
-  DrainMaintenance();
+  DrainNativeReturns();
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
 }
 
@@ -1048,8 +1072,8 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
       loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
       &activation));
   {
-    loom_serve::testing::MaintenanceGate gate(
-        loom_serve_device_storage_pool(device_owner_)->maintenance);
+    loom_serve::testing::ScopedNativeHold gate(device_owner_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
     IREE_ASSERT_OK(loom_serve_activation_advance(activation, 0, &phase));
     EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_WAITING);
   }
@@ -1140,7 +1164,7 @@ TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {
   loom_serve_residency_release(residencies_[1]);
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
-  DrainMaintenance();
+  DrainNativeReturns();
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
   check_activity(2, 2);
 }
@@ -1296,8 +1320,8 @@ TEST_P(WeightsTest, WarmAdmissionCollectsCompletedPeerRelease) {
   bool admitted = false;
   const loom_serve_memory_range_t first = {state_, 0, kSlabBytes};
   {
-    loom_serve::testing::MaintenanceGate gate(
-        loom_serve_device_storage_pool(device_owner_)->maintenance);
+    loom_serve::testing::ScopedNativeHold gate(device_owner_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
     IREE_ASSERT_OK(
         loom_serve_memory_pool_try_commit(pool_, 1, &first, &admitted));
     EXPECT_FALSE(admitted);
@@ -1355,8 +1379,8 @@ TEST_P(WeightsTest, IdleExpiryPreservesPinsAndReloadsWithoutRecompiling) {
       cache, unpinned + timeout / 2, timeout, &pending));
   EXPECT_EQ(pending, GetParam());
   {
-    loom_serve::testing::MaintenanceGate gate(
-        loom_serve_device_storage_pool(device_owner_)->maintenance);
+    loom_serve::testing::ScopedNativeHold gate(device_owner_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
     IREE_ASSERT_OK(loom_serve_residency_cache_trim_idle(
         cache, unpinned + timeout, timeout, &pending));
     EXPECT_FALSE(pending);
@@ -1492,8 +1516,8 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   EXPECT_EQ(state_statistics_.committed_bytes, 0u);
   loom_serve_residency_release(residencies_[0]);
   {
-    loom_serve::testing::MaintenanceGate gate(
-        loom_serve_device_storage_pool(device_owner_)->maintenance);
+    loom_serve::testing::ScopedNativeHold gate(device_owner_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
     const loom_serve_memory_range_t range = {state_, 0, 2 * kSlabBytes};
     bool admitted = true;
     IREE_ASSERT_OK(
@@ -1580,7 +1604,7 @@ TEST_P(WeightsTest,
       loom_serve_device_trim(device_owner_, before.retained.committed_bytes));
   const auto idle = loom_serve_device_memory_statistics(device_owner_);
   ASSERT_EQ(idle.retained.committed_bytes, before.retained.committed_bytes);
-  DrainMaintenance();
+  DrainNativeReturns();
   EXPECT_EQ(loom_serve_device_memory_statistics(device_owner_)
                 .workspace.bytes_committed,
             0u);
@@ -1592,7 +1616,7 @@ TEST_P(WeightsTest,
   // The model's real command completion follows allocation on the work chain.
   ASSERT_NO_FATAL_FAILURE(Run(0, 70));
   IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, kSlabBytes - 1));
-  DrainMaintenance();
+  DrainNativeReturns();
   const auto pinned = loom_serve_device_memory_statistics(device_owner_);
   EXPECT_EQ(pinned.workspace.bytes_committed, kSlabBytes);
   EXPECT_EQ(pinned.workspace.reservation_count, 1u);
@@ -1608,7 +1632,7 @@ TEST_P(WeightsTest,
   workspace_ = nullptr;
   IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
   IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
-  DrainMaintenance();
+  DrainNativeReturns();
   const auto cold = loom_serve_device_memory_statistics(device_owner_);
   EXPECT_EQ(cold.retained.committed_bytes, 0u);
   EXPECT_EQ(cold.workspace.bytes_committed, 0u);

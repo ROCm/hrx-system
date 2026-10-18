@@ -727,6 +727,14 @@ iree_status_t loom_kernel_target_legalize_subgroup_scan(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
+  // Normalize and share the source values before expanding one scan into its
+  // shuffle/select network. Native target contracts are queried first and do
+  // not enter this portable expansion.
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL &&
+      context->policy != LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
   const loom_combining_kind_t kind = loom_kernel_subgroup_scan_kind(op);
   // Ordinary arithmetic support does not establish source-format preservation.
   // Extrema retain their fixed semantics independently of arithmetic mode.

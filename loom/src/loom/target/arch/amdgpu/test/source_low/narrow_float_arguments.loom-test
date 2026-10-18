@@ -51,7 +51,7 @@ kernel.def @narrow_float_arguments() {
 }
 
 // ----
-CHECK: low.kernel.def * direct_arg_offsets = [0, 4, 8, 12, 20, 24], * direct_arg_sizes = [4, 4, 4, 8, 4, 4], * @narrow_float_arguments(%e4: reg<amdgpu.sgpr>, %unused: reg<amdgpu.sgpr>, %e5: reg<amdgpu.sgpr>, %marker: reg<amdgpu.sgpr x2>, %half: reg<amdgpu.sgpr>, %brain: reg<amdgpu.sgpr>) asm {
+CHECK: low.kernel.def * direct_arg_offsets = [0, 4, 8, 12, 20, 24], * direct_arg_payload_sizes = [1, 2, 1, 8, 2, 2], direct_arg_sizes = [4, 4, 4, 8, 4, 4], * @narrow_float_arguments(%e4: reg<amdgpu.sgpr>, %unused: reg<amdgpu.sgpr>, %e5: reg<amdgpu.sgpr>, %marker: reg<amdgpu.sgpr x2>, %half: reg<amdgpu.sgpr>, %brain: reg<amdgpu.sgpr>) asm {
 CHECK: %* = v_mov_b32_copy %half
 CHECK: %* = v_mov_b32_copy %brain
 CHECK: %half_f32 = v_cvt_f32_f16 %*
@@ -114,7 +114,7 @@ kernel.def @narrow_argument_bitcasts() {
 }
 
 // ----
-CHECK: low.kernel.def * direct_arg_offsets = [0, 4, 8, 12, 20, 24], * direct_arg_sizes = [4, 4, 4, 8, 4, 4], * @narrow_argument_bitcasts(%e4: reg<amdgpu.sgpr>, %unused: reg<amdgpu.sgpr>, %e5: reg<amdgpu.sgpr>, %marker: reg<amdgpu.sgpr x2>, %half: reg<amdgpu.sgpr>, %brain: reg<amdgpu.sgpr>) asm {
+CHECK: low.kernel.def * direct_arg_offsets = [0, 4, 8, 12, 20, 24], * direct_arg_payload_sizes = [1, 2, 1, 8, 2, 2], direct_arg_sizes = [4, 4, 4, 8, 4, 4], * @narrow_argument_bitcasts(%e4: reg<amdgpu.sgpr>, %unused: reg<amdgpu.sgpr>, %e5: reg<amdgpu.sgpr>, %marker: reg<amdgpu.sgpr x2>, %half: reg<amdgpu.sgpr>, %brain: reg<amdgpu.sgpr>) asm {
 CHECK: %* = v_mov_b32_copy %half
 CHECK: %* = v_mov_b32_copy %brain
 CHECK: %half_f32 = v_cvt_f32_f16 %*

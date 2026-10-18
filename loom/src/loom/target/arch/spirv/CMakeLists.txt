@@ -375,6 +375,7 @@ loom_cc_library(
     ::value_types
     iree::base
     loom::ir
+    loom::ops::kernel
     loom::ops::scalar
     loom::ops::vector
     loom::rewrite::rewriter
@@ -534,6 +535,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/bfloat_collective_legalization.loom-test"
     "test/source_low/barrier.loom-test"
     "test/source_low/baseline.loom-test"
     "test/source_low/buffer_bulk.loom-test"

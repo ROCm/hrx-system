@@ -245,6 +245,8 @@ set(IREE_DEP_TRACY_CLIENT_SHA256 "bf4af567e9c7524d07f3caa745fad02fb33bd5694f1191
 set(IREE_DEP_TRACY_CLIENT_STRIP_PREFIX "tracy-0.14.1")
 set(IREE_DEP_TRACY_CLIENT_BUILD_FILE "//build_tools/third_party/tracy_client:tracy_client.BUILD.bazel")
 set(IREE_DEP_TRACY_CLIENT_PATCHES
+  "//build_tools/third_party/tracy_client:allocator_initialization.patch"
+  "//build_tools/third_party/tracy_client:windows_diagnostics.patch"
   "//build_tools/third_party/tracy_client:worker_signal_mask.patch"
   "//build_tools/third_party/tracy_client:instruction_symbols.patch"
 )
@@ -260,10 +262,10 @@ set(IREE_DEP_CXX_VERSION "")
 set(IREE_DEP_CXX_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_CXX_SOURCE_URL "")
 set(IREE_DEP_CXX_URLS
-  "https://github.com/benvanik/cplusplus/archive/600ba3f497035e15a12c944241bc0d15cda069ba.tar.gz"
+  "https://github.com/benvanik/cplusplus/archive/da1a67afac2c15e460342ed84de9d519788a5d88.tar.gz"
 )
-set(IREE_DEP_CXX_SHA256 "e901bbdfe65e85ff6983389da007944d4c3b4bf8548bdd57d7c5f8a0a963e276")
-set(IREE_DEP_CXX_STRIP_PREFIX "cplusplus-600ba3f497035e15a12c944241bc0d15cda069ba")
+set(IREE_DEP_CXX_SHA256 "082afd33adaa3cde8b3bc467590363b6f680a8b40b59169c4a21fa34c46e183f")
+set(IREE_DEP_CXX_STRIP_PREFIX "cplusplus-da1a67afac2c15e460342ed84de9d519788a5d88")
 set(IREE_DEP_CXX_BUILD_FILE "//build_tools/third_party/cxx:cxx.BUILD.bazel")
 set(IREE_DEP_CXX_PATCHES "")
 set(IREE_DEP_CXX_PATCH_ARGS "")

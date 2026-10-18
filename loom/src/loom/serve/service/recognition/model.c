@@ -58,8 +58,8 @@ typedef struct loom_serve_recognition_invocation_t {
   iree_host_size_t offered_frames;
   // Captured EOF, independent of later transport appends.
   bool offered_complete;
-  // Owned source event, borrowing no reusable VM or feedback storage.
-  iree_vm_buffer_t* transcript;
+  // Immutable output selection established by native request admission.
+  loom_serve_recognition_output_flags_t outputs;
 } loom_serve_recognition_invocation_t;
 
 struct loom_serve_recognition_model_t {
@@ -75,8 +75,12 @@ struct loom_serve_recognition_model_t {
   iree_host_size_t input_frames;
   // Maximum admitted input duration in sample frames.
   uint64_t frame_limit;
-  // Maximum source transcript packet bytes, including alignment records.
-  iree_host_size_t transcript_capacity;
+  // Maximum source event packet bytes, including transcript alignment records.
+  iree_host_size_t event_bytes;
+  // Maximum decoded events in one collected source ordinal.
+  iree_host_size_t event_capacity;
+  // Source-supported output types, independently selected by each request.
+  loom_serve_recognition_output_flags_t outputs;
   // Number of stable resident request rows declared by source.
   iree_host_size_t request_capacity;
   // Maximum additive work in one compatible source batch.
@@ -156,7 +160,7 @@ struct loom_serve_recognition_model_t {
   } weights;
   // One retained numerical cohort, independent of resident request lifetime.
   struct {
-    // Accepted members whose event buffers survive all collection borrowers.
+    // Accepted members retained through every original collection ordinal.
     iree_host_size_t count;
     // Selected handles in original packed order, owned by invocations above.
     loom_serve_recognition_invocation_t** invocations;
@@ -173,7 +177,7 @@ struct loom_serve_recognition_model_t {
 
 // Releases model-owned consumers, not borrowed upload/feedback payloads or the
 // storage protection those consumers still require. Partial loads use this same
-// sequence, with no submitted queue work to retire.
+// sequence and may still own accepted backing allocations.
 static void loom_serve_recognition_model_release_consumers(
     loom_serve_recognition_model_t* model) {
   loom_serve_program_free(model->control.program);
@@ -196,8 +200,10 @@ static void loom_serve_recognition_model_release_consumers(
 void loom_serve_recognition_model_retire(loom_serve_recognition_model_t* model,
                                          void (*wake)(void* user_data),
                                          void* user_data) {
-  loom_serve_execution_set_retirement_observer(model->execution, wake,
-                                               user_data);
+  if (model->execution) {
+    loom_serve_execution_set_retirement_observer(model->execution, wake,
+                                                 user_data);
+  }
   for (iree_host_size_t i = 0; i < model->weights.count; ++i) {
     loom_serve_weights_set_retirement_observer(model->weights.plans[i], wake,
                                                user_data);
@@ -261,7 +267,6 @@ static iree_status_t loom_serve_recognition_model_destroy_resources(
       iree_vm_buffer_release(invocation->state);
       iree_vm_buffer_release(invocation->payload);
       iree_vm_buffer_release(invocation->work);
-      iree_vm_buffer_release(invocation->transcript);
       iree_allocator_free(model->host_allocator, invocation);
     }
     iree_vm_buffer_release(model->control.initial_conditioning);
@@ -339,7 +344,7 @@ static iree_status_t loom_serve_recognition_prepare(
           &model->control.vm_types, &buffer);
     }
   }
-  iree_vm_variant_t results[17] = {0};
+  iree_vm_variant_t results[19] = {0};
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_allocate(
         loom_serve_host_target_environment(
@@ -350,7 +355,7 @@ static iree_status_t loom_serve_recognition_prepare(
         (iree_vm_module_span_t){modules, 2}, &model->compilation,
         host_allocator, &model->preparation);
   }
-  int64_t capacities[13] = {0};
+  int64_t capacities[14] = {0};
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(capacities) && iree_status_is_ok(status); ++i) {
     status = iree_vm_i64_from_variant(results[i], &capacities[i]);
@@ -372,11 +377,20 @@ static iree_status_t loom_serve_recognition_prepare(
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source recognition row geometry is invalid");
   }
+  int32_t outputs = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_i32_from_variant(results[14], &outputs);
+  }
+  if (iree_status_is_ok(status) &&
+      (!outputs || (outputs & ~LOOM_SERVE_RECOGNITION_OUTPUT_ALL))) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source recognition outputs are invalid");
+  }
   iree_const_byte_span_t metadata[2] = {0};
   for (iree_host_size_t i = 0; i < 2 && iree_status_is_ok(status); ++i) {
     iree_vm_buffer_t* buffer = NULL;
     status = iree_vm_buffer_ptr_from_variant_borrowed(&model->control.vm_types,
-                                                      results[13 + i], &buffer);
+                                                      results[15 + i], &buffer);
     if (iree_status_is_ok(status) && !buffer) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "source metadata must not be null");
@@ -401,16 +415,18 @@ static iree_status_t loom_serve_recognition_prepare(
     model->output.data_length = (iree_host_size_t)capacities[7];
     model->input_frames = (iree_host_size_t)capacities[8];
     model->frame_limit = (uint64_t)capacities[9];
-    model->transcript_capacity = (iree_host_size_t)capacities[10];
+    model->event_bytes = (iree_host_size_t)capacities[10];
+    model->event_capacity = (iree_host_size_t)capacities[13];
+    model->outputs = (loom_serve_recognition_output_flags_t)outputs;
     if ((uint64_t)capacities[11] > UINT32_MAX ||
         (uint64_t)capacities[12] > UINT32_MAX ||
         (uint64_t)capacities[12] > SIZE_MAX / sizeof(float) ||
         (uint64_t)capacities[8] >
             SIZE_MAX / ((uint64_t)capacities[12] * sizeof(float)) ||
-        capacities[10] < 48) {
+        capacities[10] < 4) {
       status = iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
-          "source recognition input or transcript geometry is invalid");
+          "source recognition input or event geometry is invalid");
     } else {
       model->format.sample_rate = (uint32_t)capacities[11];
       model->format.channels = (uint32_t)capacities[12];
@@ -423,7 +439,7 @@ static iree_status_t loom_serve_recognition_prepare(
   }
   if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_ptr_from_variant_move(
-        &model->control.vm_types, &results[15], &model->control.state);
+        &model->control.vm_types, &results[17], &model->control.state);
   }
   if (iree_status_is_ok(status) && !model->control.state) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -431,7 +447,7 @@ static iree_status_t loom_serve_recognition_prepare(
   }
   if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_ptr_from_variant_move(
-        &model->control.vm_types, &results[16],
+        &model->control.vm_types, &results[18],
         &model->control.initial_conditioning);
   }
   if (iree_status_is_ok(status) &&
@@ -605,7 +621,7 @@ static iree_status_t loom_serve_recognition_create_control(
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
       .value.scalar = IREE_VM_SCALAR_TYPE_F32};
   const iree_vm_signature_type_t request_arguments[] = {buffer, buffer, buffer,
-                                                        f32};
+                                                        f32, i32};
   const iree_vm_signature_type_t work_arguments[] = {buffer, buffer, buffer,
                                                      i64, i32};
   const iree_vm_signature_type_t state_pair[] = {buffer, buffer};
@@ -617,7 +633,7 @@ static iree_status_t loom_serve_recognition_create_control(
       device_buffer, device_buffer, device_buffer};
   const iree_vm_signature_type_t complete_arguments[] = {buffer, buffer, buffer,
                                                          i64, buffer};
-  const iree_vm_signature_type_t complete_results[] = {i64, buffer, i32};
+  const iree_vm_signature_type_t complete_results[] = {i64, buffer, i64, i32};
   const loom_serve_program_binding_t bindings[] = {
       {IREE_SVL("prepare_request"),
        {request_arguments, IREE_ARRAYSIZE(request_arguments)},
@@ -812,7 +828,7 @@ struct loom_serve_recognition_load_t {
   iree_status_t task_status;
   // Tokenizer construction overlaps control/native compilation and indexing.
   loom_serve_tokenizer_load_t* tokenizer_load;
-  // Terminal model outcome retained until tokenizer work also retires.
+  // Terminal outcome retained until tokenizer and backing ownership retire.
   iree_status_t terminal_status;
   // Completion publication shared with workers; owner consumes under mutex.
   struct {
@@ -1030,6 +1046,16 @@ iree_status_t loom_serve_recognition_load_advance(
     load->terminal_status = status;
     return iree_ok_status();
   }
+  if (!iree_status_is_ok(status)) {
+    // Binding may already have queued backing allocation. Failure of a later
+    // preparation step does not retire that accepted ownership.
+    loom_serve_recognition_model_retire(model, load->event.wake,
+                                        load->event.user_data);
+    if (!loom_serve_recognition_model_is_retired(model)) {
+      load->terminal_status = status;
+      return iree_ok_status();
+    }
+  }
   *out_complete = load->phase == RECOGNITION_LOAD_COMPLETE;
   return status;
 }
@@ -1113,7 +1139,6 @@ static void loom_serve_recognition_invocation_free(
   iree_vm_buffer_release(invocation->state);
   iree_vm_buffer_release(invocation->payload);
   iree_vm_buffer_release(invocation->work);
-  iree_vm_buffer_release(invocation->transcript);
   iree_allocator_free(model->host_allocator, invocation);
 }
 
@@ -1122,7 +1147,7 @@ static iree_status_t loom_serve_recognition_generator_prepare(
     const loom_serve_recognition_request_t* request, void** out_invocation) {
   *out_invocation = NULL;
   loom_serve_recognition_model_t* model = self;
-  iree_vm_variant_t arguments[4] = {iree_vm_buffer_variant_from_ptr_borrowed(
+  iree_vm_variant_t arguments[5] = {iree_vm_buffer_variant_from_ptr_borrowed(
       &model->control.vm_types, model->control.state)};
   const iree_string_view_t strings[] = {request->language, request->prompt};
   iree_status_t status = iree_ok_status();
@@ -1141,6 +1166,7 @@ static iree_status_t loom_serve_recognition_generator_prepare(
     }
   }
   arguments[3] = iree_vm_variant_from_f32(request->temperature);
+  arguments[4] = iree_vm_variant_from_i32((int32_t)request->outputs);
   iree_vm_variant_t results[2] = {0};
   if (iree_status_is_ok(status)) {
     status =
@@ -1177,6 +1203,7 @@ static iree_status_t loom_serve_recognition_generator_prepare(
     invocation->state = state;
     invocation->payload = payload;
     invocation->row_index = row_index;
+    invocation->outputs = request->outputs;
     invocation->next = model->invocations;
     invocation->previous_next = &model->invocations;
     if (invocation->next) {
@@ -1356,12 +1383,6 @@ static void loom_serve_recognition_generator_release_batch(void* self) {
   model->batch.payload = NULL;
   iree_vm_buffer_release(model->batch.plan);
   model->batch.plan = NULL;
-  for (iree_host_size_t i = 0; i < model->batch.count; ++i) {
-    loom_serve_recognition_invocation_t* invocation =
-        model->batch.invocations[i];
-    iree_vm_buffer_release(invocation->transcript);
-    invocation->transcript = NULL;
-  }
   model->batch.count = 0;
 }
 
@@ -1533,6 +1554,7 @@ static iree_status_t loom_serve_recognition_generator_submit(
 
 static iree_status_t loom_serve_recognition_generator_collect(
     void* self, iree_host_size_t ordinal,
+    loom_serve_recognition_events_t* events,
     loom_serve_recognition_result_t* out_result) {
   *out_result = (loom_serve_recognition_result_t){0};
   loom_serve_recognition_model_t* model = self;
@@ -1548,31 +1570,35 @@ static iree_status_t loom_serve_recognition_generator_collect(
       iree_vm_variant_from_i64((int64_t)ordinal),
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
                                                model->control.feedback)};
-  iree_vm_variant_t results[3] = {0};
+  iree_vm_variant_t results[4] = {0};
   iree_status_t status = iree_vm_invoke(
       loom_serve_program_invocation(model->control.program),
       model->control.complete, iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_array(results));
   int64_t consumed = 0;
+  int64_t event_bytes = 0;
   int32_t complete = 0;
+  iree_vm_buffer_t* output = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_vm_i64_from_variant(results[0], &consumed);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_ptr_from_variant_move(
-        &model->control.vm_types, &results[1], &invocation->transcript);
+    status = iree_vm_buffer_ptr_from_variant_borrowed(&model->control.vm_types,
+                                                      results[1], &output);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_vm_i32_from_variant(results[2], &complete);
+    status = iree_vm_i64_from_variant(results[2], &event_bytes);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_i32_from_variant(results[3], &complete);
   }
   if (iree_status_is_ok(status) &&
       (consumed < 0 || (uint64_t)consumed > invocation->offered_frames ||
        (complete != 0 && complete != 1) ||
        (complete && (!invocation->offered_complete ||
                      (uint64_t)consumed != invocation->offered_frames)) ||
-       !invocation->transcript ||
-       iree_vm_buffer_length(invocation->transcript) >
-           model->transcript_capacity)) {
+       !output || event_bytes < 0 ||
+       (uint64_t)event_bytes > iree_vm_buffer_length(output))) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source recognition completion is invalid");
   }
@@ -1580,31 +1606,15 @@ static iree_status_t loom_serve_recognition_generator_collect(
   if (iree_status_is_ok(status)) {
     result.consumed_frames = (iree_host_size_t)consumed;
     result.complete = complete != 0;
-    result.has_transcript = iree_vm_buffer_length(invocation->transcript) != 0;
-    if (result.has_transcript) {
-      iree_const_byte_span_t packet = iree_const_byte_span_empty();
-      status = iree_vm_buffer_map_read(
-          invocation->transcript, 0,
-          iree_vm_buffer_length(invocation->transcript), &packet);
-      // A source may reuse its event buffer for another ordinal. Freeze this
-      // revision before the next source call; reference retention alone would
-      // preserve storage but would not prevent aliasing writes.
-      iree_vm_buffer_t* frozen = NULL;
-      if (iree_status_is_ok(status)) {
-        status = iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ, packet,
-                                      8, model->host_allocator, &frozen);
-      }
-      if (iree_status_is_ok(status)) {
-        iree_vm_buffer_release(invocation->transcript);
-        invocation->transcript = frozen;
-        status = iree_vm_buffer_map_read(
-            frozen, 0, iree_vm_buffer_length(frozen), &packet);
-      }
-      if (iree_status_is_ok(status)) {
-        status = loom_serve_recognition_transcript_parse(
-            packet, invocation->frame_position + result.consumed_frames,
-            &result.transcript);
-      }
+    iree_const_byte_span_t packet = iree_const_byte_span_empty();
+    status = iree_vm_buffer_map_read(output, 0, (iree_host_size_t)event_bytes,
+                                     &packet);
+    if (iree_status_is_ok(status)) {
+      // Another ordinal may reuse the source buffer. The caller's bounded
+      // storage freezes this packet before that source call can overwrite it.
+      status = loom_serve_recognition_events_parse(
+          events, packet, invocation->frame_position + result.consumed_frames,
+          invocation->outputs);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -1646,7 +1656,9 @@ loom_serve_recognition_generator_t loom_serve_recognition_model_generator(
       .format = model->format,
       .input_capacity = model->input_frames,
       .frame_limit = model->frame_limit,
-      .transcript_capacity = model->transcript_capacity,
+      .event_capacity = model->event_capacity,
+      .event_bytes = model->event_bytes,
+      .outputs = model->outputs,
       .request_capacity = model->request_capacity,
       .batch_units = model->batch_units,
       .prepare = loom_serve_recognition_generator_prepare,

@@ -19,9 +19,8 @@ loom_cc_binary(
     iree::base
     iree::base::tooling::flags
     loom::binding::c::import::cxx
-    loom::binding::c::interop
     loom::binding::c::loomc
-    loom::target::configured::provider_set
+    loom::binding::c::target::configured::ir
     loom::tooling::cli::help
     loom::tooling::cli::loomc_result
     loom::tooling::io::file

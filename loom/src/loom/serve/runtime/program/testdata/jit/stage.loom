@@ -122,6 +122,32 @@ command.program.def public @selected_pair() launch(%storage: buffer) {
   command.return
 }
 
+kernel.def @store_boolean() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%position: index, %enabled: i1, %storage: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %data = buffer.view %storage[%c0_offset] : buffer -> view<8xi32>
+  %bounded_position = index.assume %position [range(%position, 0, 1)] : index
+  %enabled_value = scalar.constant 17 : i32
+  %disabled_value = scalar.constant -23 : i32
+  %value = scf.select %enabled, %enabled_value, %disabled_value : i32
+  view.store %value, %data[%bounded_position] : i32, view<8xi32>
+  kernel.return
+}
+
+// Logical predicates stay byte-sized in the portable command while the native
+// target independently assigns and initializes its padded kernarg slots.
+command.program.def public @boolean_arguments() launch(%storage: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %disabled = scalar.constant false : i1
+  %enabled = scalar.constant true : i1
+  kernel.launch @store_boolean(%c0, %enabled, %storage) : (index, i1, buffer)
+  kernel.launch @store_boolean(%c1, %disabled, %storage) : (index, i1, buffer)
+  command.return
+}
+
 kernel.def @temporary_write() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index

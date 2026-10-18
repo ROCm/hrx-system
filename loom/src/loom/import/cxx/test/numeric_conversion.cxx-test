@@ -1,0 +1,190 @@
+// RUN: roundtrip
+#include <loomcxx/numeric.h>
+
+long long signed_extend(int value) { return loom::convert<long long>(value); }
+unsigned long long unsigned_extend(unsigned value) { return loom::convert<unsigned long long>(value); }
+signed char truncate(int value) { return loom::convert<signed char>(value); }
+float signed_to_float(int value) { return loom::convert<float>(value); }
+float unsigned_to_float(unsigned value) { return loom::convert<float>(value); }
+int float_to_signed(float value) { return loom::convert<int>(value); }
+unsigned float_to_unsigned(float value) { return loom::convert<unsigned>(value); }
+double extend_float(float value) { return loom::convert<double>(value); }
+float truncate_float(double value) { return loom::convert<float>(value); }
+__float8_e5m2 change_format(__float8_e4m3fn value) { return loom::convert<__float8_e5m2>(value); }
+unsigned preserve_width(int value) { return loom::convert<unsigned>(value); }
+
+// ----
+func.def public @signed_extend(%value: i32) -> (i64) {
+  %2 = scalar.extsi %value : i32 to i64
+  func.return %2 : i64
+}
+
+func.def public @unsigned_extend(%value: i32) -> (i64) {
+  %5 = scalar.extui %value : i32 to i64
+  func.return %5 : i64
+}
+
+func.def public @truncate(%value: i32) -> (i8) {
+  %8 = scalar.trunci %value : i32 to i8
+  func.return %8 : i8
+}
+
+func.def public @signed_to_float(%value: i32) -> (f32) {
+  %11 = scalar.sitofp %value : i32 to f32
+  func.return %11 : f32
+}
+
+func.def public @unsigned_to_float(%value: i32) -> (f32) {
+  %14 = scalar.uitofp %value : i32 to f32
+  func.return %14 : f32
+}
+
+func.def public @float_to_signed(%value: f32) -> (i32) {
+  %17 = scalar.fptosi %value : f32 to i32
+  func.return %17 : i32
+}
+
+func.def public @float_to_unsigned(%value: f32) -> (i32) {
+  %20 = scalar.fptoui %value : f32 to i32
+  func.return %20 : i32
+}
+
+func.def public @extend_float(%value: f32) -> (f64) {
+  %23 = scalar.extf %value : f32 to f64
+  func.return %23 : f64
+}
+
+func.def public @truncate_float(%value: f64) -> (f32) {
+  %26 = scalar.fptrunc %value : f64 to f32
+  func.return %26 : f32
+}
+
+func.def public @change_format(%value: f8E4M3) -> (f8E5M2) {
+  %29 = scalar.extf %value : f8E4M3 to f32
+  %30 = scalar.fptrunc %29 : f32 to f8E5M2
+  func.return %30 : f8E5M2
+}
+
+func.def public @preserve_width(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ====
+#include <loomcxx/numeric.h>
+
+using I8x4 = signed char __attribute__((ext_vector_type(4)));
+using U8x4 = unsigned char __attribute__((ext_vector_type(4)));
+using I32x4 = int __attribute__((ext_vector_type(4)));
+using U32x4 = unsigned __attribute__((ext_vector_type(4)));
+using F16x4 = _Float16 __attribute__((ext_vector_type(4)));
+using F32x4 = float __attribute__((ext_vector_type(4)));
+using F64x4 = double __attribute__((ext_vector_type(4)));
+using E4M3x4 = __float8_e4m3fn __attribute__((ext_vector_type(4)));
+using E5M2x4 = __float8_e5m2 __attribute__((ext_vector_type(4)));
+
+I32x4 signed_extend(I8x4 value) { return loom::convert<I32x4>(value); }
+U32x4 unsigned_extend(U8x4 value) { return loom::convert<U32x4>(value); }
+I8x4 truncate(I32x4 value) { return loom::convert<I8x4>(value); }
+F32x4 signed_to_float(I32x4 value) { return loom::convert<F32x4>(value); }
+F32x4 unsigned_to_float(U32x4 value) { return loom::convert<F32x4>(value); }
+I32x4 float_to_signed(F32x4 value) { return loom::convert<I32x4>(value); }
+U32x4 float_to_unsigned(F32x4 value) { return loom::convert<U32x4>(value); }
+F64x4 extend_float(F32x4 value) { return loom::convert<F64x4>(value); }
+F16x4 truncate_float(F32x4 value) { return loom::convert<F16x4>(value); }
+E5M2x4 change_format(E4M3x4 value) { return loom::convert<E5M2x4>(value); }
+U32x4 preserve_width(I32x4 value) { return loom::convert<U32x4>(value); }
+
+constexpr F32x4 values{1.75f, -2.75f, 3.0f, -0.0f};
+constexpr auto converted = loom::convert<I32x4>(values);
+static_assert(converted[0] == 1 && converted[1] == -2);
+I32x4 folded() { return converted; }
+
+// ----
+func.def public @signed_extend(%value: vector<4xi8>) -> (vector<4xi32>) {
+  %2 = vector.extsi %value : vector<4xi8> to vector<4xi32>
+  func.return %2 : vector<4xi32>
+}
+
+func.def public @unsigned_extend(%value: vector<4xi8>) -> (vector<4xi32>) {
+  %5 = vector.extui %value : vector<4xi8> to vector<4xi32>
+  func.return %5 : vector<4xi32>
+}
+
+func.def public @truncate(%value: vector<4xi32>) -> (vector<4xi8>) {
+  %8 = vector.trunci %value : vector<4xi32> to vector<4xi8>
+  func.return %8 : vector<4xi8>
+}
+
+func.def public @signed_to_float(%value: vector<4xi32>) -> (vector<4xf32>) {
+  %11 = vector.sitofp %value : vector<4xi32> to vector<4xf32>
+  func.return %11 : vector<4xf32>
+}
+
+func.def public @unsigned_to_float(%value: vector<4xi32>) -> (vector<4xf32>) {
+  %14 = vector.uitofp %value : vector<4xi32> to vector<4xf32>
+  func.return %14 : vector<4xf32>
+}
+
+func.def public @float_to_signed(%value: vector<4xf32>) -> (vector<4xi32>) {
+  %17 = vector.fptosi %value : vector<4xf32> to vector<4xi32>
+  func.return %17 : vector<4xi32>
+}
+
+func.def public @float_to_unsigned(%value: vector<4xf32>) -> (vector<4xi32>) {
+  %20 = vector.fptoui %value : vector<4xf32> to vector<4xi32>
+  func.return %20 : vector<4xi32>
+}
+
+func.def public @extend_float(%value: vector<4xf32>) -> (vector<4xf64>) {
+  %23 = vector.extf %value : vector<4xf32> to vector<4xf64>
+  func.return %23 : vector<4xf64>
+}
+
+func.def public @truncate_float(%value: vector<4xf32>) -> (vector<4xf16>) {
+  %26 = vector.fptrunc %value : vector<4xf32> to vector<4xf16>
+  func.return %26 : vector<4xf16>
+}
+
+func.def public @change_format(%value: vector<4xf8E4M3>) -> (vector<4xf8E5M2>) {
+  %29 = vector.extf %value : vector<4xf8E4M3> to vector<4xf32>
+  %30 = vector.fptrunc %29 : vector<4xf32> to vector<4xf8E5M2>
+  func.return %30 : vector<4xf8E5M2>
+}
+
+func.def public @preserve_width(%value: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %value : vector<4xi32>
+}
+
+func.def public @folded() -> (vector<4xi32>) {
+  %34 = scalar.constant 1 : i32
+  %35 = scalar.constant -2 : i32
+  %36 = scalar.constant 3 : i32
+  %37 = scalar.constant 0 : i32
+  %converted = vector.from_elements %34, %35, %36, %37 : vector<4xi32>
+  func.return %converted : vector<4xi32>
+}
+
+// ====
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+
+namespace loomt = loom::type;
+using DynamicInt = loomt::vector<loomt::shape<loomt::dynamic, 4>, int>;
+using DynamicFloat = loomt::vector<loomt::shape<loomt::dynamic, 4>, float>;
+using StaticE4M3 = loomt::vector<loomt::shape<2, 8>, __float8_e4m3fn>;
+using StaticE5M2 = loomt::vector<loomt::shape<2, 8>, __float8_e5m2>;
+
+DynamicFloat dynamic_shape(DynamicInt value) { return loom::convert<DynamicFloat>(value); }
+StaticE5M2 change_format(StaticE4M3 value) { return loom::convert<StaticE5M2>(value); }
+
+// ----
+func.def public @dynamic_shape(%value_dim0: index, %value: vector<[%value_dim0]x4xi32>) -> (%2: index, vector<[%2]x4xf32>) {
+  %4 = vector.sitofp %value : vector<[%value_dim0]x4xi32> to vector<[%value_dim0]x4xf32>
+  func.return %value_dim0, %4 : index, vector<[%value_dim0]x4xf32>
+}
+
+func.def public @change_format(%value: vector<2x8xf8E4M3>) -> (vector<2x8xf8E5M2>) {
+  %7 = vector.extf %value : vector<2x8xf8E4M3> to vector<2x8xf32>
+  %8 = vector.fptrunc %7 : vector<2x8xf32> to vector<2x8xf8E5M2>
+  func.return %8 : vector<2x8xf8E5M2>
+}

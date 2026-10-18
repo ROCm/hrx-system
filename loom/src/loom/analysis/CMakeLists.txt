@@ -533,11 +533,13 @@ loom_cc_library(
   NAME
     cfg_condition_facts
   HDRS
+    "cfg_condition_derivation.h"
     "cfg_condition_facts.h"
     "cfg_condition_operand_domain.h"
     "cfg_condition_relation_anchors.h"
     "cfg_condition_relation_table.h"
   SRCS
+    "cfg_condition_derivation.c"
     "cfg_condition_facts.c"
     "cfg_condition_operand_domain.c"
     "cfg_condition_relation_anchors.c"
@@ -1024,6 +1026,7 @@ loom_cc_library(
     ::cfg_value_identity
     ::condition_fact_scope
     ::condition_facts
+    ::control_participants
     ::symbolic_expr
     iree::base
     iree::base::internal
@@ -1042,6 +1045,42 @@ loom_cc_library(
     loom::util::dominance
     loom::util::fact_table
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    control_participants
+  HDRS
+    "control_participants.h"
+  SRCS
+    "control_participants.c"
+  DEPS
+    ::cfg_condition_facts
+    ::condition_facts
+    ::symbolic_expr
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::util::adaptive_sort
+    loom::util::cfg_graph
+    loom::util::fact_table
+    loom::util::segmented_storage
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    control_participants_test
+  SRCS
+    "control_participants_test.cc"
+  DEPS
+    ::control_participants
+    ::symbolic_expr
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::util::fact_table
 )
 
 loom_cc_library(
@@ -1691,12 +1730,14 @@ loom_cc_library(
     "symbolic_congruence.h"
     "symbolic_expr.h"
     "symbolic_expr_proof.h"
+    "symbolic_integer_cast.h"
     "symbolic_product.h"
     "symbolic_projection.h"
   SRCS
     "symbolic_congruence.c"
     "symbolic_expr.c"
     "symbolic_expr_proof.c"
+    "symbolic_integer_cast.c"
     "symbolic_product.c"
     "symbolic_projection.c"
     "symbolic_quotient.c"

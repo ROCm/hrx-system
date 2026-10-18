@@ -54,7 +54,7 @@ CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=1 targ
 CHECK: COMPILE-REPORT: target_legalization[*] * source_op=vector.reduce.axes mode=eager policy=prefer-native action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference * scalarized=true source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 *
 
 // ====
-// RUN: with-checks compile-report target-legalize
+// RUN: with-checks compile-report target-legalize{mode=complete}
 
 test.target<low_core> @test_target
 
@@ -306,7 +306,7 @@ CHECK: COMPILE-REPORT: target_legalization[*] function=cast_reference_domains so
 CHECK: COMPILE-REPORT: target_legalization[*] function=cast_reference_domains source_op=vector.extui mode=eager policy=reference-only action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference * scalarized=true *
 
 // ====
-// RUN: with-checks compile-report target-legalize
+// RUN: with-checks compile-report target-legalize{mode=complete}
 
 test.target<low_core> @test_target
 

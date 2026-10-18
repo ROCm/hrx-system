@@ -95,8 +95,19 @@ static_assert(sizeof(iree_task_compute_slot_t) <=
 #define IREE_TASK_SLOT_SENTINEL ((int64_t)(uint32_t)INT32_MIN)
 
 struct iree_task_executor_t {
+  // Public owners. Workers keep storage alive separately during shutdown.
   iree_atomic_ref_count_t ref_count;
+  // Allocator used for the executor and its workers.
   iree_allocator_t allocator;
+
+  // Cold lifetime state, touched only at worker startup and shutdown.
+  struct {
+    // Workers that have not yet performed their final executor access.
+    iree_atomic_int32_t live_worker_count;
+    // Set when the last public owner releases from one of this executor's
+    // workers. The last exiting worker then reclaims the executor storage.
+    iree_atomic_int32_t release_on_exit;
+  } shutdown;
 
   // NUMA node this executor's workers are pinned to, or
   // IREE_NUMA_NODE_ANY if unknown or spanning memory nodes.
@@ -240,6 +251,11 @@ struct iree_task_executor_t {
   // eliminates the hard slot limit and prevents silent process drops.
   iree_task_process_slist_t compute_overflow;
 };
+
+// Drops a worker's storage lifetime claim after its final executor access.
+// May destroy the executor. The caller must not access any worker or executor
+// storage after this call.
+void iree_task_executor_worker_exit(iree_task_executor_t* executor);
 
 // Tries to place a process into the first available compute slot. Returns true
 // if placed, false if all slots are occupied. Exposed for use by worker.c's

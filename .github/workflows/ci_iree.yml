@@ -660,6 +660,13 @@ jobs:
             Out-File -FilePath .bazelrc.local -Encoding ascii -Append
           "common --repository_cache=$env:IREE_CI_BAZEL_REPOSITORY_CACHE" |
             Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          if ("${{ matrix.kind }}" -eq "repository" -and
+              "${{ matrix.host_toolchain }}" -eq "msvc") {
+            # MSVC repository tests need process-launch headroom; bound test
+            # actions independently while builds retain the full pool.
+            "test --local_test_jobs=HOST_CPUS*.875" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          }
           if ("${{ matrix.host_toolchain }}" -eq "msvc") {
             "build --config=windows-msvc" |
               Out-File -FilePath .bazelrc.local -Encoding ascii -Append

@@ -28,6 +28,8 @@ struct loom_serve_test_registration_dependency_t {
       .name = "dynamic",
       .hold_completion = true,
   };
+  // Immutable deployment role supplied by the real configuration parser.
+  loom_serve_model_kind_t kind = LOOM_SERVE_MODEL_KIND_EMBEDDING;
   // Model-protocol counters supplied by the dependency, not synthesized by
   // routing.
   loom_serve_telemetry_counters_t counters = {};
@@ -96,7 +98,7 @@ struct loom_serve_test_registration_dependency_t {
   };
 
   static iree_status_t Prepare(void* self, bool cancel, bool* complete,
-                               loom_serve_http_service_t* service,
+                               loom_serve_service_t* service,
                                loom_serve_compilation_report_t* out_report) {
     auto* dependency =
         static_cast<loom_serve_test_registration_operation_t*>(self)
@@ -112,6 +114,11 @@ struct loom_serve_test_registration_dependency_t {
     }
     *service =
         dependency->service.Interface(nullptr, dependency->capacity_domain);
+    service->kind = dependency->kind;
+    if (service->kind == LOOM_SERVE_MODEL_KIND_ACTIVITY) {
+      service->endpoint = nullptr;
+      service->accept = nullptr;
+    }
     service->telemetry.stream = dependency->stream;
     return iree_ok_status();
   }
@@ -228,6 +235,7 @@ struct loom_serve_test_registration_dependency_t {
     // Import fixture configuration before transferring it to the model owner.
     std::lock_guard<std::mutex> lock(dependency->mutex);
     dependency->service.name = configuration->name.data;
+    dependency->kind = configuration->kind;
     dependency->service.counters = &dependency->counters;
     dependency->service.latency = &dependency->latency;
     dependency->observer = observer;
@@ -287,19 +295,22 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
     managed_capacity_ = 1;
     factory_ = {
         .self = &managed_,
-        .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+        .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
+                 (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY),
         .device_count = 1,
         .create = loom_serve_test_registration_dependency_t::Create,
         .query_status = loom_serve_test_registration_dependency_t::QueryStatus,
     };
     HttpRouterTest::SetUp();
   }
-  void Declare() {
+  void Declare(const std::string& kind = "embedding") {
     EXPECT_EQ(
         Read(
             Send(
                 "POST", "/v1/models/register",
-                R"({"name":"dynamic","admission":"drained","definition":{"kind":"embedding","prepare":"/model/prepare.loom","control":"/model/control.loom","sources":["/model/kernel.loom"],"assets":"/assets"}})"))
+                R"({"name":"dynamic","admission":"drained","definition":{"kind":")" +
+                    kind +
+                    R"(","prepare":"/model/prepare.loom","control":"/model/control.loom","sources":["/model/kernel.loom"],"assets":"/assets"}})"))
             .find("HTTP/1.1 202"),
         0u);
     EXPECT_EQ(managed_.created.load(), 0u);
@@ -333,6 +344,37 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
   // production.
   loom_serve_test_registration_dependency_t managed_;
 };
+
+TEST_P(HttpRouterRegistrationTest, NativeOnlyMetadataAndHttpRejectionAgree) {
+  Declare("activity");
+  const auto declared = Read(Send("GET", "/v1/status"));
+  EXPECT_NE(declared.find(R"("kind":"activity","tokenize":false)"),
+            std::string::npos);
+  const auto cold =
+      Read(Send("POST", "/v1/audio/transcriptions", R"({"model":"dynamic"})"));
+  EXPECT_EQ(cold.find("HTTP/1.1 404"), 0u);
+  EXPECT_NE(cold.find("model has no HTTP inference endpoint"),
+            std::string::npos);
+  EXPECT_EQ(managed_.created.load(), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
+  while (Read(Send("GET", "/v1/status")).find(R"("registration":"ready")") ==
+         std::string::npos) {
+  }
+  const auto models = Read(Send("GET", "/v1/models"));
+  EXPECT_NE(models.find(R"("kind":"activity","tokenize":false)"),
+            std::string::npos);
+  const auto ready =
+      Read(Send("POST", "/v1/audio/transcriptions", R"({"model":"dynamic"})"));
+  EXPECT_EQ(ready.find("HTTP/1.1 404"), 0u);
+  const auto metrics = Read(Send("GET", "/metrics"));
+  EXPECT_NE(metrics.find("model=\"dynamic\",kind=\"activity\""),
+            std::string::npos);
+  EXPECT_NE(metrics.find("loom_serve_model_held_requests{model=\"dynamic\","
+                         "kind=\"activity\",incarnation=\"1\"} 0"),
+            std::string::npos);
+  Remove();
+  EXPECT_EQ(managed_.destroyed.load(), 1u);
+}
 
 TEST_P(HttpRouterRegistrationTest, StalledObserverDoesNotRetainRemovedModel) {
   Register();
@@ -394,18 +436,18 @@ TEST_P(HttpRouterRegistrationTest,
   const auto metrics = Read(Send("GET", "/metrics"));
   EXPECT_NE(metrics.find(
                 "loom_serve_model_parameter_pins{model=\"dynamic\",kind="
-                "\"fixture\",incarnation=\"1\",component=\"primary\"} 3\n"
+                "\"embedding\",incarnation=\"1\",component=\"primary\"} 3\n"
                 "loom_serve_model_parameter_admission_waiting{model="
-                "\"dynamic\",kind=\"fixture\",incarnation=\"1\",component="
+                "\"dynamic\",kind=\"embedding\",incarnation=\"1\",component="
                 "\"primary\"} 1\n"
                 "loom_serve_model_parameter_admission_waits_total{model="
-                "\"dynamic\",kind=\"fixture\",incarnation=\"1\",component="
+                "\"dynamic\",kind=\"embedding\",incarnation=\"1\",component="
                 "\"primary\"} 7\n"
                 "loom_serve_model_parameter_admission_wait_seconds_total{model="
-                "\"dynamic\",kind=\"fixture\",incarnation=\"1\",component="
+                "\"dynamic\",kind=\"embedding\",incarnation=\"1\",component="
                 "\"primary\"} 5\n"
                 "loom_serve_model_parameter_admission_wait_age_seconds{model="
-                "\"dynamic\",kind=\"fixture\",incarnation=\"1\",component="
+                "\"dynamic\",kind=\"embedding\",incarnation=\"1\",component="
                 "\"primary\"} 2.5\n"),
             std::string::npos);
   // A dependency without parameter observations is absent, not a zero sample.
@@ -817,7 +859,7 @@ TEST_P(HttpRouterRegistrationTest,
   managed_.WaitRetiring();
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_TRUE(iree_any_bit_set(b_.WaitAdmission(),
-                               LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY));
+                               LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_NE(Control("drain", "b").find(R"("queued_requests":1)"),
             std::string::npos);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
@@ -844,7 +886,7 @@ TEST_P(HttpRouterRegistrationTest,
   managed_.WaitRetiring();
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY));
+                                LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
   managed_.ReleaseRetirement();
@@ -979,7 +1021,7 @@ TEST_P(HttpRouterRegistrationTest,
   // not park indefinitely waiting for an ownership wake that cannot arrive.
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY));
+                                LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
   while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
@@ -1021,7 +1063,7 @@ TEST_P(HttpRouterRegistrationLatencyTest,
   Register();
   const auto live = Read(Send("GET", "/metrics"));
   EXPECT_NE(live.find("loom_serve_model_request_duration_seconds_count{"
-                      "model=\"dynamic\",kind=\"fixture\",incarnation=\"1\","
+                      "model=\"dynamic\",kind=\"embedding\",incarnation=\"1\","
                       "outcome=\"completed\"} 2\n"),
             std::string::npos);
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
@@ -1080,7 +1122,7 @@ TEST_P(HttpRouterRegistrationLatencyTest,
   }
   EXPECT_NE(Read(Send("GET", "/metrics"))
                 .find("loom_serve_model_request_duration_seconds_count{"
-                      "model=\"dynamic\",kind=\"fixture\",incarnation=\"2\","
+                      "model=\"dynamic\",kind=\"embedding\",incarnation=\"2\","
                       "outcome=\"completed\"} 1\n"),
             std::string::npos);
   Remove();

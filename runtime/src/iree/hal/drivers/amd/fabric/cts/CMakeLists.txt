@@ -23,6 +23,7 @@ iree_cc_library(
     iree::hal::cts::util::test_base
     iree::hal::drivers::amd::fabric
     iree::hal::drivers::amd::fabric::memory_backend
+    iree::hal::drivers::amd::fabric::slab_provider
     iree::hal::drivers::task::device
     iree::hal::memory::host_memory_backend
     iree::hal::memory::tlsf_pool

@@ -11,8 +11,10 @@
 namespace loom::cxx_import {
 
 Source::Source(iree_string_view_t contents, iree_string_view_t filename,
-               const loom_cxx_import_options_t& options)
+               const loom_cxx_import_options_t& options,
+               cxx::ConstexprCallProvider* constexpr_call_provider)
     : frontend_(filename, options) {
+  frontend_.unit().setConstexprCallProvider(constexpr_call_provider);
   if (restore_preamble(options.preamble, contents, options, frontend_)) {
     return;
   }

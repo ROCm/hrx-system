@@ -473,11 +473,11 @@ static iree_status_t loom_low_lower_source_query_contract(
   loom_value_fact_table_t* saved_fact_table = context->fact_table;
   const bool fact_table_changed =
       saved_fact_table != (loom_value_fact_table_t*)environment->fact_table;
-  loom_cfg_value_identity_table_t saved_identities;
+  loom_low_lower_function_analysis_t saved_analysis;
   context->descriptor_set = environment->descriptor_set;
   context->fact_table = (loom_value_fact_table_t*)environment->fact_table;
   if (fact_table_changed) {
-    saved_identities = context->function_analysis.value_identities;
+    saved_analysis = context->function_analysis;
     context->function_analysis = (loom_low_lower_function_analysis_t){0};
   }
 
@@ -587,9 +587,7 @@ static iree_status_t loom_low_lower_source_query_contract(
   context->descriptor_set = saved_descriptor_set;
   context->fact_table = saved_fact_table;
   if (fact_table_changed) {
-    context->function_analysis = (loom_low_lower_function_analysis_t){
-        .value_identities = saved_identities,
-    };
+    context->function_analysis = saved_analysis;
   }
   return status;
 }

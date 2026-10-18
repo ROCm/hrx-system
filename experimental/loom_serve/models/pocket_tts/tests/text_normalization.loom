@@ -70,3 +70,134 @@ check.case @upstream_english_normalization {
   check.expect.equal actual(%error) expected(%zero) : i32
   check.return
 }
+
+func.decl @text.next(%text: buffer, %position: offset) -> (i32, offset)
+
+func.decl @pocket.normalizer_create(%raw_limit: offset) -> (buffer, buffer)
+
+func.decl @pocket.normalizer_feed(%state: buffer, %pending: buffer, %text: buffer, %begin: offset, %end: offset)
+
+func.decl @pocket.normalizer_peek(%state: buffer) -> (i64, i64, i32)
+
+func.decl @pocket.normalizer_consume(%state: buffer, %pending: buffer, %count: i64)
+
+func.decl @pocket.normalizer_finish(%state: buffer, %pending: buffer)
+
+// Copy only published bytes, returning credit before the next source mutation.
+// A one-byte consumer deliberately cuts through multibyte UTF-8 output.
+func.def @drain_normalized(%state: buffer, %pending: buffer, %output: buffer, %written: offset, %credit: offset) -> (offset) {
+  %zero = scalar.constant 0 : i64
+  %initial_position, %initial_length, %unused_final = func.call @pocket.normalizer_peek(%state) : (buffer) -> (i64, i64, i32)
+  %unused_position, %unused_length, %end = scf.while(%position = %initial_position : i64, %length = %initial_length : i64, %written = %written : offset) -> (i64, i64, offset) {
+    %more = scalar.cmpi ne, %length, %zero : i64
+    scf.condition %more, %position, %length, %written : i1, i64, i64, offset
+  } do(%position: i64, %length: i64, %written: offset) {
+    %position_value = scalar.assume %position [range(%position, 0, 9223372036854775807)] : i64
+    %length_value = scalar.assume %length [range(%length, 0, 9223372036854775807)] : i64
+    %begin = index.cast %position_value : i64 to offset
+    %available = index.cast %length_value : i64 to offset
+    %short = index.cmp ult, %available, %credit : offset
+    %count = scf.select %short, %available, %credit : offset
+    buffer.copy %pending[%begin], %output[%written], %count
+    %count64 = index.cast %count : offset to i64
+    func.call @pocket.normalizer_consume(%state, %pending, %count64) : (buffer, buffer, i64)
+    %next_written = index.add %written, %count : offset
+    %next_position, %next_length, %unused_complete = func.call @pocket.normalizer_peek(%state) : (buffer) -> (i64, i64, i32)
+    scf.yield %next_position, %next_length, %next_written : i64, i64, offset
+  }
+  func.return %end : offset
+}
+
+func.def @normalize_windows(%input: buffer, %scalars: index, %credit: offset) -> (buffer, offset, i32) {
+  %length = buffer.length %input
+  %state, %pending = func.call @pocket.normalizer_create(%length) : (offset) -> (buffer, buffer)
+  %extra = index.constant 12 : offset
+  %capacity = index.add %length, %extra : offset
+  %output = buffer.alloca<private> align(1) %capacity : buffer
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %unused_cursor, %written = scf.while(%cursor = %origin : offset, %written = %origin : offset) -> (offset, offset) {
+    %more = index.cmp ult, %cursor, %length : offset
+    scf.condition %more, %cursor, %written : i1, offset, offset
+  } do(%cursor: offset, %written: offset) {
+    %end = scf.for %i = [%zero to %scalars step %one](%end = %cursor : offset) -> (offset) {
+      %more = index.cmp ult, %end, %length : offset
+      %after = scf.if %more -> (offset) {
+        %unused_scalar, %next = func.call @text.next(%input, %end) : (buffer, offset) -> (i32, offset)
+        scf.yield %next : offset
+      } else {
+        scf.yield %end : offset
+      }
+      scf.yield %after : offset
+    }
+    func.call @pocket.normalizer_feed(%state, %pending, %input, %cursor, %end) : (buffer, buffer, buffer, offset, offset)
+    %next_written = func.call @drain_normalized(%state, %pending, %output, %written, %credit) : (buffer, buffer, buffer, offset, offset) -> (offset)
+    scf.yield %end, %next_written : offset, offset
+  }
+  func.call @pocket.normalizer_finish(%state, %pending) : (buffer, buffer)
+  %final_written = func.call @drain_normalized(%state, %pending, %output, %written, %credit) : (buffer, buffer, buffer, offset, offset) -> (offset)
+  %unused_position, %unused_length, %complete = func.call @pocket.normalizer_peek(%state) : (buffer) -> (i64, i64, i32)
+  func.return %output, %final_written, %complete : buffer, offset, i32
+}
+
+// Reuse the independent finite oracle rows across input and output partitions.
+func.def @continuing_normalization_observations(%scalars: index, %credit: offset) -> (i32) {
+  %record_storage = global.load @normalization_records : buffer
+  %inputs = global.load @normalization_inputs : buffer
+  %outputs = global.load @normalization_outputs : buffer
+  %count = global.load @normalization_count : index
+  %origin = index.constant 0 : offset
+  %records = buffer.view %record_storage[%origin] : buffer -> view<[%count]x5xi32>
+  %begin = index.constant 0 : index
+  %one = index.constant 1 : index
+  %zero = scalar.constant 0 : i32
+  %first_error = scf.for %i = [%begin to %count step %one](%first_error = %zero : i32) -> (i32) {
+    %input_position32 = view.load %records[%i, 0] : view<[%count]x5xi32> -> i32
+    %input_length32 = view.load %records[%i, 1] : view<[%count]x5xi32> -> i32
+    %expected_position32 = view.load %records[%i, 2] : view<[%count]x5xi32> -> i32
+    %expected_length32 = view.load %records[%i, 3] : view<[%count]x5xi32> -> i32
+    %input_position = index.cast %input_position32 : i32 to offset
+    %input_length = index.cast %input_length32 : i32 to offset
+    %expected_position = index.cast %expected_position32 : i32 to offset
+    %expected_length = index.cast %expected_length32 : i32 to offset
+    %input = buffer.alloca<private> align(1) %input_length : buffer
+    buffer.copy %inputs[%input_position], %input[%origin], %input_length
+    %actual, %actual_length, %complete = func.call @normalize_windows(%input, %scalars, %credit) : (buffer, index, offset) -> (buffer, offset, i32)
+    %same_length = index.cmp eq, %actual_length, %expected_length : offset
+    %same = scf.if %same_length -> (i1) {
+      %comparison = buffer.compare %actual[%origin], %outputs[%expected_position], %expected_length
+      %same_text = scalar.cmpi eq, %comparison, %zero : i32
+      %finished = scalar.cmpi ne, %complete, %zero : i32
+      %same = scalar.andi %same_text, %finished : i1
+      scf.yield %same : i1
+    } else {
+      %false = scalar.constant false : i1
+      scf.yield %false : i1
+    }
+    %ordinal = index.add %i, %one : index
+    %ordinal32 = index.cast %ordinal : index to i32
+    %error = scf.select %same, %zero, %ordinal32 : i32
+    %no_error = scalar.cmpi eq, %first_error, %zero : i32
+    %next_error = scf.select %no_error, %error, %first_error : i32
+    scf.yield %next_error : i32
+  }
+  func.return %first_error : i32
+}
+
+check.case @continuing_english_normalization {
+  %one = check.literal value(1) : index
+  %seven = check.literal value(7) : index
+  %thirty_two = check.literal value(32) : index
+  %one_byte = check.literal value(1) : offset
+  %seven_bytes = check.literal value(7) : offset
+  %large_credit = check.literal value(128) : offset
+  %single = func.call @continuing_normalization_observations(%one, %large_credit) : (index, offset) -> (i32)
+  %mixed = func.call @continuing_normalization_observations(%seven, %seven_bytes) : (index, offset) -> (i32)
+  %short_credit = func.call @continuing_normalization_observations(%thirty_two, %one_byte) : (index, offset) -> (i32)
+  %zero = check.literal value(0) : i32
+  check.expect.equal actual(%single) expected(%zero) : i32
+  check.expect.equal actual(%mixed) expected(%zero) : i32
+  check.expect.equal actual(%short_credit) expected(%zero) : i32
+  check.return
+}

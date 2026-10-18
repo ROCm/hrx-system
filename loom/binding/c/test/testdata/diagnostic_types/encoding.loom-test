@@ -1,0 +1,5 @@
+// RUN: verify
+func.def @mismatch(%value: tile<4xi8, #encoding.i8<payload_elements=32>>) {
+  // ERROR@+1: TYPE/001 {field_a="operands[0]", field_b="type annotation"}
+  func.return %value : tile<8xi8, #encoding.i8<payload_elements=32>>
+}

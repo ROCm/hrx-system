@@ -14,6 +14,9 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/serve/server/configuration.h"
+#include "loom/serve/service/recognition/request.h"
+#include "loom/serve/service/service.h"
+#include "loom/serve/service/speech/request.h"
 
 namespace {
 
@@ -118,5 +121,89 @@ TEST_P(RegistryTest, FileRegistrationOwnsAuthoredPathsAndSelectedBase) {
 }
 
 INSTANTIATE_TEST_SUITE_P(DirectoryBase, RegistryTest, ::testing::Bool());
+
+TEST(RegistryAdmissionTest, NativeSpeechRejectionsPreserveOwnedInput) {
+  const loom_serve_service_t services[] = {
+      {.name = IREE_SV("vectors"), .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING},
+      {.name = IREE_SV("http-speech"), .kind = LOOM_SERVE_MODEL_KIND_SPEECH},
+  };
+  loom_serve_registry_t* registry = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_registry_allocate(IREE_ARRAYSIZE(services), services, 0, {},
+                                   iree_allocator_system(), &registry));
+  loom_serve_speech_request_t request;
+  IREE_ASSERT_OK(loom_serve_speech_request_initialize_text(
+      IREE_SV("Keep this request."), IREE_SV("voice"), IREE_SV("Quietly."), 73,
+      1.0f, iree_allocator_system(), &request));
+  const char* input = iree_string_builder_buffer(&request.input);
+  const char* voice = iree_string_builder_buffer(&request.voice);
+  const char* instructions = iree_string_builder_buffer(&request.instructions);
+  const struct {
+    // Name resolved through the actual registry's borrowed service metadata.
+    const char* name;
+    // Failure at the lookup, modality, or native-capability boundary.
+    iree_status_code_t code;
+  } cases[] = {{"missing", IREE_STATUS_NOT_FOUND},
+               {"vectors", IREE_STATUS_INVALID_ARGUMENT},
+               {"http-speech", IREE_STATUS_UNIMPLEMENTED}};
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.name);
+    loom_serve_speech_stream_t* stream = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        test.code,
+        loom_serve_registry_try_open_speech(
+            registry, iree_make_cstring_view(test.name), &request, &stream));
+    EXPECT_EQ(stream, nullptr);
+    EXPECT_EQ(iree_string_builder_buffer(&request.input), input);
+    EXPECT_EQ(iree_string_builder_buffer(&request.voice), voice);
+    EXPECT_EQ(iree_string_builder_buffer(&request.instructions), instructions);
+    EXPECT_STREQ(input, "Keep this request.");
+    EXPECT_STREQ(voice, "voice");
+    EXPECT_STREQ(instructions, "Quietly.");
+    EXPECT_EQ(request.seed, 73u);
+    EXPECT_EQ(request.speed, 1.0f);
+  }
+  loom_serve_speech_request_deinitialize(&request);
+  IREE_EXPECT_OK(loom_serve_registry_free(registry));
+}
+
+TEST(RegistryAdmissionTest, NativeRecognitionUsesTypedAdmissionPolicy) {
+  const loom_serve_service_t services[] = {
+      {.name = IREE_SV("vectors"), .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING},
+      {
+          .name = IREE_SV("http-recognition"),
+          .kind = LOOM_SERVE_MODEL_KIND_RECOGNITION,
+      },
+      {.name = IREE_SV("activity"), .kind = LOOM_SERVE_MODEL_KIND_ACTIVITY},
+  };
+  loom_serve_registry_t* registry = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_registry_allocate(IREE_ARRAYSIZE(services), services, 0, {},
+                                   iree_allocator_system(), &registry));
+  const loom_serve_recognition_request_t request = {
+      .language = IREE_SV("en"),
+      .prompt = IREE_SV("Keep this context."),
+      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+  };
+  const struct {
+    // Name resolved through the actual registry's borrowed service metadata.
+    const char* name;
+    // Failure at the lookup, modality, or native-capability boundary.
+    iree_status_code_t code;
+  } cases[] = {{"missing", IREE_STATUS_NOT_FOUND},
+               {"vectors", IREE_STATUS_INVALID_ARGUMENT},
+               {"http-recognition", IREE_STATUS_UNIMPLEMENTED},
+               {"activity", IREE_STATUS_UNIMPLEMENTED}};
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.name);
+    loom_serve_recognition_stream_t* stream = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        test.code,
+        loom_serve_registry_try_open_recognition(
+            registry, iree_make_cstring_view(test.name), &request, &stream));
+    EXPECT_EQ(stream, nullptr);
+  }
+  IREE_EXPECT_OK(loom_serve_registry_free(registry));
+}
 
 }  // namespace

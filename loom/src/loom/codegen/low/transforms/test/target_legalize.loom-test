@@ -716,7 +716,7 @@ func.def target(@test_target) @integer_vector_multiply_reference(%left: vector<4
 }
 
 // ====
-// RUN: pass target-legalize{mode=eager},canonicalize
+// RUN: pass target-legalize{mode=eager,policy=reference-only},canonicalize
 
 test.target<low_core> @test_target
 
@@ -735,7 +735,8 @@ func.def target(@test_target) @register_lookup_reference(%table: vector<4xi32>, 
   %7 = vector.extract %indices[1] : vector<2xi32> -> i32
   %8 = index.cast %7 : i32 to index
   %9 = vector.extract %table[%8] : vector<4xi32> -> i32
-  %result = vector.from_elements %6, %9 : vector<2xi32>
+  %11 = vector.splat %6 : vector<2xi32>
+  %result = vector.insert %9 into %11[1] : i32, vector<2xi32>
   func.return %result : vector<2xi32>
 }
 
@@ -759,7 +760,7 @@ func.def target(@test_target) @empty_partial_reduction(%values: vector<0x3xi32>,
 }
 
 // ====
-// RUN: pass target-legalize{mode=eager},dce
+// RUN: pass target-legalize{mode=complete},dce
 
 test.target<low_core> @test_target
 
@@ -825,4 +826,51 @@ func.def target(@test_target) @index_extrema_reference(%lhs: index, %rhs: index)
   %6 = index.cmp sgt, %lhs, %rhs : index
   %maximum = scf.select %6, %lhs, %rhs : index
   func.return %minimum, %maximum : index, index
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager},canonicalize,cse
+
+test.target<low_core> @target
+
+// Eager legalization leaves lane programs available for source-level sharing.
+func.def target(@target) @share_before_lane_expansion(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>) {
+  %first = vector.divsi %lhs, %rhs : vector<2xi64>
+  %second = vector.divsi %lhs, %rhs : vector<2xi64>
+  func.return %first, %second : vector<2xi64>, vector<2xi64>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @share_before_lane_expansion(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>) {
+  %first = vector.divsi %lhs, %rhs : vector<2xi64>
+  func.return %first, %first : vector<2xi64>, vector<2xi64>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager},canonicalize,cse,target-legalize{mode=complete},canonicalize,cse
+
+test.target<low_core> @target
+
+// Complete legalization expands the shared program once, retaining both uses.
+func.def target(@target) @expand_shared_lanes(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>) {
+  %first = vector.divsi %lhs, %rhs : vector<2xi64>
+  %second = vector.divsi %lhs, %rhs : vector<2xi64>
+  func.return %first, %second : vector<2xi64>, vector<2xi64>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @expand_shared_lanes(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>) {
+  %6 = vector.extract %lhs[0] : vector<2xi64> -> i64
+  %7 = vector.extract %rhs[0] : vector<2xi64> -> i64
+  %8 = scalar.divsi %6, %7 : i64
+  %9 = vector.extract %lhs[1] : vector<2xi64> -> i64
+  %10 = vector.extract %rhs[1] : vector<2xi64> -> i64
+  %11 = scalar.divsi %9, %10 : i64
+  %13 = vector.splat %8 : vector<2xi64>
+  %first = vector.insert %11 into %13[1] : i64, vector<2xi64>
+  func.return %first, %first : vector<2xi64>, vector<2xi64>
 }

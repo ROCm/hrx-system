@@ -13,6 +13,27 @@
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
 
+iree_status_t iree_hal_amdgpu_virtual_memory_publish(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_amd_memory_pool_t memory_pool,
+    uint32_t agent_count, const hsa_agent_t* agents) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  // Exceed ROCr's fragment allocator so this reaches KFD's mapping path.
+  void* allocation = NULL;
+  iree_status_t status = iree_hsa_amd_memory_pool_allocate(
+      IREE_LIBHSA(libhsa), memory_pool, 64 * 1024 * 1024,
+      HSA_AMD_MEMORY_POOL_STANDARD_FLAG, &allocation);
+  if (iree_status_is_ok(status) && agent_count) {
+    status = iree_hsa_amd_agents_allow_access(IREE_LIBHSA(libhsa), agent_count,
+                                              agents, NULL, allocation);
+  }
+  if (allocation) {
+    iree_hal_amdgpu_hsa_cleanup_assert_success(
+        iree_hsa_amd_memory_pool_free_raw(libhsa, allocation));
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 // ROCr is the authoritative owner of reservation, mapping, access, and handle
 // state. This adapter retains only the objects needed to express HAL ownership.
 

@@ -51,6 +51,9 @@ extern "C" {
 // stripped, all ops point to ID 0 and the location table is empty.
 typedef uint32_t loom_location_id_t;
 #define LOOM_LOCATION_UNKNOWN ((loom_location_id_t)0)
+// Largest representable location ID. This is a valid ID; zero is the only
+// reserved value.
+#define LOOM_LOCATION_ID_MAX ((loom_location_id_t)UINT32_MAX)
 
 // Index into the module's source table.
 //
@@ -63,6 +66,8 @@ typedef uint16_t loom_source_id_t;
 
 // Integer tag identifying a compact tagged location payload.
 typedef uint16_t loom_location_tag_t;
+// Largest valid location tag.
+#define LOOM_LOCATION_TAG_MAX ((loom_location_tag_t)UINT16_MAX)
 
 // Built-in tagged location payload tags. Values >= LOOM_LOCATION_TAG_USER_BASE
 // are reserved for embedders and user-defined tooling.
@@ -96,8 +101,9 @@ typedef struct loom_source_table_t {
   struct loom_intern_table_t* name_index;
 } loom_source_table_t;
 
-// Location kind.
-typedef enum loom_location_kind_e {
+// Location kind. Stored in one byte in every location-table row.
+typedef uint8_t loom_location_kind_t;
+enum loom_location_kind_e {
   // No location information. Synthetic or stripped.
   LOOM_LOCATION_NONE = 0,
   // Source range from a .loom file: file + start + end positions.
@@ -112,7 +118,7 @@ typedef enum loom_location_kind_e {
   // location.
   LOOM_LOCATION_TAGGED = 4,
   LOOM_LOCATION_COUNT_,
-} loom_location_kind_t;
+};
 
 // Location flags.
 enum loom_location_flag_bits_e {
@@ -124,82 +130,218 @@ typedef uint8_t loom_location_flags_t;
 // Field categories for parser-captured source spans attached to file
 // locations. These mirror the printer/verifier field namespaces without
 // making the IR layer depend on printer- or diagnostics-specific headers.
-typedef enum loom_location_field_kind_e {
+typedef uint8_t loom_location_field_kind_t;
+enum loom_location_field_kind_e {
   LOOM_LOCATION_FIELD_OPERAND = 0,
   LOOM_LOCATION_FIELD_RESULT = 1,
   LOOM_LOCATION_FIELD_ATTRIBUTE = 2,
   LOOM_LOCATION_FIELD_REGION = 3,
   LOOM_LOCATION_FIELD_SUCCESSOR = 4,
-} loom_location_field_kind_t;
+};
 
-// Source span for one concrete op field inside a file location. Lines and
-// Unicode code-point columns are one-based; the end is exclusive.
+// Largest valid line or column in a compact field span. Coordinate zero means
+// unavailable; every value through this maximum is otherwise valid.
+#define LOOM_LOCATION_COMPACT_COORDINATE_MAX ((uint32_t)UINT16_MAX)
+
+// Largest valid operation or logical field-span source coordinate.
+#define LOOM_LOCATION_COORDINATE_MAX ((uint32_t)UINT32_MAX)
+
+// Largest number of field spans retained by one file location.
+#define LOOM_LOCATION_FIELD_SPAN_COUNT_MAX ((uint16_t)UINT16_MAX)
+
+// Largest number of children retained by one fused location.
+#define LOOM_LOCATION_FUSED_CHILD_COUNT_MAX ((uint32_t)UINT32_MAX)
+
+// Largest opaque or tagged payload retained by one location.
+#define LOOM_LOCATION_DATA_LENGTH_MAX ((uint32_t)UINT32_MAX)
+
+// Physical representation used by a file location's field-span payload.
+typedef uint8_t loom_location_field_span_format_t;
+enum loom_location_field_span_format_e {
+  // No field-span payload is attached.
+  LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE = 0,
+  // Absolute 16-bit coordinates in loom_location_compact_field_span_t.
+  LOOM_LOCATION_FIELD_SPAN_FORMAT_COMPACT = 1,
+  // Absolute 32-bit coordinates in loom_location_field_span_t.
+  LOOM_LOCATION_FIELD_SPAN_FORMAT_WIDE = 2,
+};
+
+// Logical source span for one concrete op field inside a file location. Lines
+// and Unicode code-point columns are one-based; the end is exclusive. This is
+// also the physical wide representation.
 typedef struct loom_location_field_span_t {
+  // Field category interpreted by the parser, printer, and diagnostics.
   loom_location_field_kind_t kind;
+  // Reserved for representation growth; must be zero.
+  uint8_t reserved;
+  // Index within the field category.
   uint16_t index;
-  uint16_t start_line;
-  uint16_t start_col;
-  uint16_t end_line;
-  uint16_t end_col;
+  // One-based inclusive start line, or zero when unavailable.
+  uint32_t start_line;
+  // One-based inclusive start Unicode code-point column, or zero.
+  uint32_t start_col;
+  // One-based exclusive end line, or zero when unavailable.
+  uint32_t end_line;
+  // One-based exclusive end Unicode code-point column, or zero.
+  uint32_t end_col;
 } loom_location_field_span_t;
 
-static_assert(sizeof(loom_location_field_span_t) == 16,
-              "loom_location_field_span_t must be 16 bytes");
+static_assert(sizeof(loom_location_field_span_t) == 20,
+              "wide location field spans must be 20 bytes");
+
+// Common physical field-span representation. Coordinates are absolute and
+// have the same semantics as loom_location_field_span_t.
+typedef struct loom_location_compact_field_span_t {
+  // Field category interpreted by the parser, printer, and diagnostics.
+  loom_location_field_kind_t kind;
+  // Reserved for representation growth; must be zero.
+  uint8_t reserved;
+  // Index within the field category.
+  uint16_t index;
+  // One-based inclusive start line, or zero when unavailable.
+  uint16_t start_line;
+  // One-based inclusive start Unicode code-point column, or zero.
+  uint16_t start_col;
+  // One-based exclusive end line, or zero when unavailable.
+  uint16_t end_line;
+  // One-based exclusive end Unicode code-point column, or zero.
+  uint16_t end_col;
+} loom_location_compact_field_span_t;
+
+static_assert(sizeof(loom_location_compact_field_span_t) == 12,
+              "compact location field spans must be 12 bytes");
+
+// Borrowed physical field-span array supplied for module attachment.
+typedef struct loom_location_field_span_array_t {
+  // Physical representation used by entries in |data|.
+  loom_location_field_span_format_t format;
+  // Number of physical spans in |data|.
+  iree_host_size_t count;
+  // Borrowed compact or wide span storage selected by |format|.
+  const void* data;
+} loom_location_field_span_array_t;
+
+// Returns an empty field-span array.
+static inline loom_location_field_span_array_t
+loom_location_field_span_array_empty(void) {
+  return (loom_location_field_span_array_t){
+      .format = LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE,
+  };
+}
+
+// Returns a borrowed compact field-span array.
+static inline loom_location_field_span_array_t
+loom_location_field_span_array_compact(
+    const loom_location_compact_field_span_t* spans, iree_host_size_t count) {
+  return (loom_location_field_span_array_t){
+      .format = LOOM_LOCATION_FIELD_SPAN_FORMAT_COMPACT,
+      .count = count,
+      .data = spans,
+  };
+}
+
+// Returns a borrowed wide field-span array.
+static inline loom_location_field_span_array_t
+loom_location_field_span_array_wide(const loom_location_field_span_t* spans,
+                                    iree_host_size_t count) {
+  return (loom_location_field_span_array_t){
+      .format = LOOM_LOCATION_FIELD_SPAN_FORMAT_WIDE,
+      .count = count,
+      .data = spans,
+  };
+}
 
 // A compact, pointer-width-dependent source location entry. Tagged union.
 //
-// The kind field determines which union variant is active. File locations (the
-// 90% case) use uint16_t line/column numbers, supporting up to 65K lines per
-// file. Agent-authored .loom files are typically hundreds of lines; linked
-// module dumps are diagnostic output, not round-tripped source.
+// The kind field determines which union variant is active. File location rows
+// retain full uint32_t operation coordinates. Their field spans independently
+// select compact 16-bit or wide 32-bit physical storage per operation.
 //
 // File lines and Unicode code-point columns are one-based, with an exclusive
 // end; zero denotes an unavailable coordinate. The source_id field indexes into
 // the module's source table, which stores filenames, system tags, and any other
 // provenance labels.
-typedef struct loom_location_entry_t {
-  loom_location_kind_t kind;
-  loom_location_flags_t flags;
-  union {
-    // LOOM_LOCATION_FILE: source range.
-    struct {
-      loom_source_id_t source_id;
-      uint16_t field_span_count;
-      uint16_t start_line;
-      uint16_t start_col;
-      uint16_t end_line;
-      uint16_t end_col;
-      const loom_location_field_span_t* field_spans;
-    } file;
-
-    // LOOM_LOCATION_FUSED: multiple source locations.
-    struct {
-      uint32_t count;
-      loom_location_id_t* children;
-    } fused;
-
-    // LOOM_LOCATION_OPAQUE: external identifier.
-    struct {
-      loom_source_id_t source_id;
-      uint32_t data_length;
-      const uint8_t* data;
-    } opaque;
-
-    // LOOM_LOCATION_TAGGED: compact metadata payload with optional child.
-    struct {
-      // Integer tag identifying the payload schema.
-      loom_location_tag_t tag;
-      // Byte length of the payload pointed to by data.
-      uint32_t data_length;
-      // Optional child location preserving source or provenance context.
-      loom_location_id_t child;
-      // Borrowed payload bytes owned by the containing module arena.
-      const uint8_t* data;
-    } tagged;
+typedef union loom_location_entry_t {
+  // Common prefix shared by every active variant.
+  struct {
+    // Active loom_location_kind_e variant.
+    loom_location_kind_t kind;
+    // Common loom_location_flag_bits_e flags.
+    loom_location_flags_t flags;
   };
+
+  // LOOM_LOCATION_FILE: source range.
+  struct {
+    // Active kind; must be LOOM_LOCATION_FILE.
+    loom_location_kind_t kind;
+    // Common location flags.
+    loom_location_flags_t flags;
+    // Module source-table identifier.
+    loom_source_id_t source_id;
+    // Number of spans in |field_span_data|.
+    uint16_t field_span_count;
+    // Physical representation of |field_span_data|.
+    loom_location_field_span_format_t field_span_format;
+    // Reserved for representation growth; must be zero.
+    uint8_t reserved;
+    // One-based inclusive operation start line, or zero when unavailable.
+    uint32_t start_line;
+    // One-based inclusive operation start Unicode code-point column, or zero.
+    uint32_t start_col;
+    // One-based exclusive operation end line, or zero when unavailable.
+    uint32_t end_line;
+    // One-based exclusive operation end Unicode code-point column, or zero.
+    uint32_t end_col;
+    // Module-owned compact or wide spans selected by |field_span_format|.
+    const void* field_span_data;
+  } file;
+
+  // LOOM_LOCATION_FUSED: multiple source locations.
+  struct {
+    // Active kind; must be LOOM_LOCATION_FUSED.
+    loom_location_kind_t kind;
+    // Common location flags.
+    loom_location_flags_t flags;
+    // Reserved for representation growth; must be zero.
+    uint16_t reserved;
+    // Number of location IDs in |children|.
+    uint32_t count;
+    // Module-owned child location IDs.
+    loom_location_id_t* children;
+  } fused;
+
+  // LOOM_LOCATION_OPAQUE: external identifier.
+  struct {
+    // Active kind; must be LOOM_LOCATION_OPAQUE.
+    loom_location_kind_t kind;
+    // Common location flags.
+    loom_location_flags_t flags;
+    // Module source-table identifier naming the external system.
+    loom_source_id_t source_id;
+    // Byte length of |data|.
+    uint32_t data_length;
+    // Module-owned opaque identifier bytes.
+    const uint8_t* data;
+  } opaque;
+
+  // LOOM_LOCATION_TAGGED: compact metadata payload with optional child.
+  struct {
+    // Active kind; must be LOOM_LOCATION_TAGGED.
+    loom_location_kind_t kind;
+    // Common location flags.
+    loom_location_flags_t flags;
+    // Integer tag identifying the payload schema.
+    loom_location_tag_t tag;
+    // Byte length of the payload pointed to by data.
+    uint32_t data_length;
+    // Optional child location preserving source or provenance context.
+    loom_location_id_t child;
+    // Borrowed payload bytes owned by the containing module arena.
+    const uint8_t* data;
+  } tagged;
 } loom_location_entry_t;
 
-static_assert(sizeof(loom_location_entry_t) == (IREE_PTR_SIZE == 8 ? 32 : 24),
+static_assert(sizeof(loom_location_entry_t) == (IREE_PTR_SIZE == 8 ? 32 : 28),
               "loom_location_entry_t must remain compact");
 
 // Number of rows in one stable location segment.
@@ -216,7 +358,7 @@ static_assert((1u << LOOM_LOCATION_SEGMENT_SHIFT) ==
               "location segment capacity must match its index shift");
 static_assert((uint64_t)LOOM_LOCATION_SEGMENT_CAPACITY *
                       LOOM_SEGMENTED_STORAGE_MAX_SEGMENT_COUNT >=
-                  (uint64_t)UINT32_MAX + 1,
+                  (uint64_t)LOOM_LOCATION_ID_MAX + 1,
               "location storage must cover the full location ID domain");
 
 // Fixed-size arena-owned location rows; appending never moves earlier rows.
@@ -260,12 +402,22 @@ static inline const loom_location_entry_t* loom_location_table_const_entry(
 // Returns the kind tag for |entry|.
 loom_location_kind_t loom_location_get_kind(loom_location_entry_t entry);
 
+// Returns the number of bytes occupied by |count| spans in |format|. The
+// format must be compact or wide when |count| is nonzero.
+iree_host_size_t loom_location_field_span_data_length(
+    loom_location_field_span_format_t format, iree_host_size_t count);
+
+// Returns field span |index| normalized to absolute uint32_t coordinates.
+// |entry| must be a file location and |index| must be in range.
+loom_location_field_span_t loom_location_file_field_span_at(
+    const loom_location_entry_t* entry, uint16_t index);
+
 // Constructs a file source range location.
 loom_location_entry_t loom_location_file_range(loom_source_id_t source_id,
-                                               uint16_t start_line,
-                                               uint16_t start_col,
-                                               uint16_t end_line,
-                                               uint16_t end_col);
+                                               uint32_t start_line,
+                                               uint32_t start_col,
+                                               uint32_t end_line,
+                                               uint32_t end_col);
 
 // Constructs a tagged metadata location. The data payload is borrowed from the
 // caller and must outlive the containing module entry.

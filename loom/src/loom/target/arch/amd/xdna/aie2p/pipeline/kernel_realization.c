@@ -137,6 +137,14 @@ typedef struct loom_aie2p_kernel_realization_plan_t {
   // Allocated row capacity for access_bindings during planning.
   iree_host_size_t access_binding_capacity;
 
+  // Analysis-owned refinement rows for source roots replaced by local storage.
+  struct {
+    // Borrowed rows compacted in the analysis arena after planning completes.
+    loom_view_memory_space_refinement_t* entries;
+    // Number of refinements requiring translation during root replacement.
+    iree_host_size_t count;
+  } memory_space_refinements;
+
   // Selected alias-preserving realization mechanics.
   loom_aie2p_kernel_realization_mode_t mode;
 
@@ -213,14 +221,21 @@ static loom_value_id_t loom_aie2p_kernel_access_root(
 }
 
 static uint16_t loom_aie2p_kernel_find_binding(
+    const loom_module_t* module,
     const loom_aie2p_kernel_realization_plan_t* plan,
     loom_value_id_t root_value_id) {
-  for (uint16_t i = 0; i < plan->binding_count; ++i) {
-    if (plan->bindings[i].source_argument == root_value_id) {
-      return i;
-    }
+  if (root_value_id == LOOM_VALUE_ID_INVALID) {
+    return UINT16_MAX;
   }
-  return UINT16_MAX;
+  const loom_value_t* root = loom_module_value(module, root_value_id);
+  if (!loom_value_is_block_arg(root)) {
+    return UINT16_MAX;
+  }
+  const uint16_t index = loom_value_def_index(root);
+  return index < plan->binding_count &&
+                 plan->bindings[index].source_argument == root_value_id
+             ? index
+             : UINT16_MAX;
 }
 
 static iree_status_t loom_aie2p_kernel_append_access(
@@ -368,8 +383,9 @@ static iree_status_t loom_aie2p_kernel_plan_bindings(
     if (loom_value_has_no_uses(argument)) {
       continue;
     }
-    if (!loom_view_region_table_root_has_only_view_uses(
-            &regions, binding->source_argument)) {
+    if (iree_any_bit_set(loom_view_region_table_root_use_flags(
+                             &regions, binding->source_argument),
+                         LOOM_VIEW_ROOT_USE_OPAQUE)) {
       plan->rejected = true;
       status = loom_aie2p_kernel_reject(
           pass, plan->function.op,
@@ -454,7 +470,8 @@ static iree_status_t loom_aie2p_kernel_plan_bindings(
        use && iree_status_is_ok(status); use = use->next_in_function) {
     const loom_value_id_t root =
         loom_aie2p_kernel_access_root(facts, &regions, use->value_id);
-    const uint16_t binding_index = loom_aie2p_kernel_find_binding(plan, root);
+    const uint16_t binding_index =
+        loom_aie2p_kernel_find_binding(module, plan, root);
     if (binding_index == UINT16_MAX) {
       continue;
     }
@@ -508,6 +525,22 @@ static iree_status_t loom_aie2p_kernel_plan_bindings(
   }
   if (iree_status_is_ok(status) && !plan->rejected) {
     status = loom_aie2p_kernel_select_realization_mode(pass, plan);
+  }
+  if (iree_status_is_ok(status) && !plan->rejected) {
+    // The analysis arena outlives application. Compact its retained rows to the
+    // roots this plan replaces; unrelated local refinements remain untouched.
+    plan->memory_space_refinements.entries =
+        regions.memory_space_refinements.entries;
+    for (iree_host_size_t i = 0; i < regions.memory_space_refinements.count;
+         ++i) {
+      const loom_view_memory_space_refinement_t refinement =
+          regions.memory_space_refinements.entries[i];
+      if (loom_aie2p_kernel_find_binding(
+              module, plan, refinement.root_value_id) != UINT16_MAX) {
+        plan->memory_space_refinements
+            .entries[plan->memory_space_refinements.count++] = refinement;
+      }
+    }
   }
 
   loom_local_value_domain_release(&domain);
@@ -899,6 +932,17 @@ static iree_status_t loom_aie2p_kernel_move_source_body(
     IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_except(
         &builder->rewriter, binding->source_argument, replacement,
         builder->plan->function.op));
+  }
+  // Original spaces have already informed alias and transfer planning. The
+  // copied contents now live in workgroup storage, including immutable inputs;
+  // retaining source constant/private/global facts would misdescribe that copy.
+  for (iree_host_size_t i = 0;
+       i < builder->plan->memory_space_refinements.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_rewriter_set_attr(
+        &builder->rewriter,
+        (loom_op_t*)builder->plan->memory_space_refinements.entries[i]
+            .operation,
+        0, loom_attr_enum(LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP)));
   }
   return iree_ok_status();
 }

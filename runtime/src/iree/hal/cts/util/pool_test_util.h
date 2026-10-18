@@ -14,6 +14,11 @@
 
 namespace iree::hal::cts {
 
+// Waits for native committed capacity to reach |expected| through the pool's
+// public capacity notification. Callers must ensure no new allocations race the
+// observation. Returns false if the notification wait fails.
+bool WaitPoolCommittedBytes(iree_hal_pool_t* pool, iree_device_size_t expected);
+
 // Facts captured while releasing an imported host allocation.
 struct ImportedHostAllocationReleaseResult {
   // True when the callback received the expected external storage class.

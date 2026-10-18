@@ -214,12 +214,12 @@ loomc_status_t loomc_link_analyze_dependencies(
 
   loomc_result_t* result = NULL;
   if (loomc_status_is_ok(status)) {
-    const loomc_result_state_t state =
+    const loomc_status_code_t status_code =
         loom_link_dependency_analysis_succeeded(&analysis)
-            ? LOOMC_RESULT_STATE_SUCCEEDED
-            : LOOMC_RESULT_STATE_FAILED;
+            ? LOOMC_STATUS_OK
+            : LOOMC_STATUS_FAILED_PRECONDITION;
     status = loomc_result_create(
-        state,
+        status_code,
         loomc_context_source_retention(loomc_link_index_context(link_index)),
         allocator, &result);
   }

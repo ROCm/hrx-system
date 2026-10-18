@@ -18,6 +18,18 @@ package(
 )
 
 loom_cc_library(
+    name = "ir",
+    srcs = ["configured_ir.c"],
+    hdrs = ["//loom/binding/c:include/loomc/target/configured_ir.h"],
+    linkstatic = True,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/target/configured:provider_set",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
     name = "configured",
     srcs = ["configured.c"],
     hdrs = ["//loom/binding/c:include/loomc/target/configured.h"],
@@ -40,6 +52,18 @@ iree_assert_dependency_boundary(
     ],
     message = "The configured LoomC target package must depend on core target composition instead of target bindings or tooling adapters",
     target = ":configured",
+)
+
+loom_cc_test(
+    name = "configured_ir_test",
+    srcs = ["configured_ir_test.cc"],
+    deps = [
+        ":ir",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 loom_cc_test(

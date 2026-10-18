@@ -355,10 +355,15 @@ TEST_F(ViewRegionsTest, ClassifiesViewOnlyBufferRefinementChains) {
   loom_view_region_table_t table;
   Analyze(&facts, &table);
 
-  EXPECT_TRUE(loom_view_region_table_root_has_only_view_uses(&table, root));
+  EXPECT_EQ(loom_view_region_table_root_use_flags(&table, root), 0);
+  EXPECT_EQ(table.memory_space_refinements.count, 0);
 }
 
-TEST_F(ViewRegionsTest, ClassifiesRootSensitiveBufferUses) {
+class MemorySpaceRefinementTest
+    : public ViewRegionsTest,
+      public ::testing::WithParamInterface<loom_value_fact_memory_space_t> {};
+
+TEST_P(MemorySpaceRefinementTest, RetainsSourceRootAndSpace) {
   const loom_value_id_t root = DefineBufferArg();
   const loom_type_t buffer_type = loom_type_buffer();
 
@@ -371,16 +376,55 @@ TEST_F(ViewRegionsTest, ClassifiesRootSensitiveBufferUses) {
 
   loom_op_t* space_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_assume_memory_space_build(
-      &builder_, LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL, aligned, buffer_type,
-      LOOM_LOCATION_UNKNOWN, &space_op));
-  BuildView(loom_buffer_assume_memory_space_result(space_op));
+      &builder_, GetParam(), aligned, buffer_type, LOOM_LOCATION_UNKNOWN,
+      &space_op));
+  const loom_value_id_t view =
+      BuildView(loom_buffer_assume_memory_space_result(space_op));
 
   loom_value_fact_table_t facts;
   ComputeFacts(&facts);
   loom_view_region_table_t table;
   Analyze(&facts, &table);
 
-  EXPECT_FALSE(loom_view_region_table_root_has_only_view_uses(&table, root));
+  EXPECT_EQ(loom_view_region_table_root_use_flags(&table, root),
+            LOOM_VIEW_ROOT_USE_MEMORY_SPACE);
+  ASSERT_EQ(table.memory_space_refinements.count, 1);
+  EXPECT_EQ(table.memory_space_refinements.entries[0].operation, space_op);
+  EXPECT_EQ(table.memory_space_refinements.entries[0].root_value_id, root);
+  const loom_view_region_t* region = nullptr;
+  IREE_ASSERT_OK(loom_view_region_table_get(&table, view, &region));
+  EXPECT_EQ(region->root_value_id, root);
+  EXPECT_EQ(region->memory_space, GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ViewRegions, MemorySpaceRefinementTest,
+    ::testing::Values(LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_HOST,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR,
+                      LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC));
+
+TEST_F(ViewRegionsTest, ClassifiesOpaqueBufferObservations) {
+  const loom_value_id_t root = DefineBufferArg();
+  loom_op_t* space_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_assume_memory_space_build(
+      &builder_, LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT, root,
+      loom_type_buffer(), LOOM_LOCATION_UNKNOWN, &space_op));
+  loom_op_t* length_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_length_build(
+      &builder_, loom_buffer_assume_memory_space_result(space_op),
+      LOOM_LOCATION_UNKNOWN, &length_op));
+
+  loom_value_fact_table_t facts;
+  ComputeFacts(&facts);
+  loom_view_region_table_t table;
+  Analyze(&facts, &table);
+
+  EXPECT_EQ(loom_view_region_table_root_use_flags(&table, root),
+            LOOM_VIEW_ROOT_USE_MEMORY_SPACE | LOOM_VIEW_ROOT_USE_OPAQUE);
 }
 
 TEST_F(ViewRegionsTest, SelectedViewRetainsUnknownRootRelativeOffset) {

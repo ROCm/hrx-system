@@ -1,0 +1,246 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @pocket.prefix.matrix(%rows: index, %row_capacity: index, %input_first_row: index, %inputs: index, %outputs: index, %bf16_weights: i1, %input: buffer, %weight: buffer, %input_origin: offset, %weight_origin: offset, %input_row_stride: index, %weight_output_stride: index, %weight_input_stride: index) -> (index, index, f64, f64, f64, f64)
+
+global.rodata.def @prefix_row_counts = bytes("010000000700000008000000090000000f00000010000000110000001700000018000000190000001f00000020000000210000002700000037000000390000003f00000040000000410000005f00000060000000610000007f00000080000000")
+
+func.def @prefix_rows(%trial: index) -> (index) {
+  %bytes = global.load @prefix_row_counts : buffer
+  %origin = index.constant 0 : offset
+  %values = buffer.view %bytes[%origin] : buffer -> view<24xi32>
+  %i = index.assume %trial [range(%trial, 0, 23)] : index
+  %word = view.load %values[%i] : view<24xi32> -> i32
+  %count = index.cast %word : i32 to index
+  func.return %count : index
+}
+
+kernel.def @prefix_bf16() {
+  %three = index.constant 3 : index
+  %tiles = index.constant 5 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%three, %tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer, %inputs: index, %outputs: index, %rows_value: index) {
+  %rows = index.assume %rows_value [range(%rows_value, 1, 128)] : index
+  %capacity = index.constant 144 : index
+  %first = index.constant 7 : index
+  %stride0 = index.constant 65 : index
+  %stride1 = index.constant 1 : index
+  %bf16 = scalar.constant true : i1
+  %origin = index.constant 0 : offset
+  %block = index.constant 32 : index
+  %group = kernel.workgroup.id<y> : index
+  %row_base = index.mul %group, %block : index
+  %active = index.cmp ult, %row_base, %rows : index
+  scf.if %active {
+    %row, %column, %a0, %a1, %a2, %a3 = template.apply<@pocket.prefix.matrix>(%rows, %capacity, %first, %inputs, %outputs, %bf16, %input, %weight, %origin, %origin, %inputs, %stride0, %stride1) : (index, index, index, index, index, i1, buffer, buffer, offset, offset, index, index, index) -> (index, index, f64, f64, f64, f64)
+    %target = buffer.view %output[%origin] : buffer -> view<144x[%outputs]xf32>
+    %delta0 = index.constant 0 : index
+    %r0 = index.add %row, %delta0 : index
+    %rl0 = index.cmp ult, %r0, %rows : index
+    %cl0 = index.cmp ult, %column, %outputs : index
+    %live0 = scalar.andi %rl0, %cl0 : i1
+    scf.if %live0 {
+      %column0 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %v0 = scalar.fptrunc %a0 : f64 to f32
+      view.store %v0, %target[%r0, %column0] : f32, view<144x[%outputs]xf32>
+    }
+    %delta1 = index.constant 8 : index
+    %r1 = index.add %row, %delta1 : index
+    %rl1 = index.cmp ult, %r1, %rows : index
+    %cl1 = index.cmp ult, %column, %outputs : index
+    %live1 = scalar.andi %rl1, %cl1 : i1
+    scf.if %live1 {
+      %column1 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %v1 = scalar.fptrunc %a1 : f64 to f32
+      view.store %v1, %target[%r1, %column1] : f32, view<144x[%outputs]xf32>
+    }
+    %delta2 = index.constant 16 : index
+    %r2 = index.add %row, %delta2 : index
+    %rl2 = index.cmp ult, %r2, %rows : index
+    %cl2 = index.cmp ult, %column, %outputs : index
+    %live2 = scalar.andi %rl2, %cl2 : i1
+    scf.if %live2 {
+      %column2 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %v2 = scalar.fptrunc %a2 : f64 to f32
+      view.store %v2, %target[%r2, %column2] : f32, view<144x[%outputs]xf32>
+    }
+    %delta3 = index.constant 24 : index
+    %r3 = index.add %row, %delta3 : index
+    %rl3 = index.cmp ult, %r3, %rows : index
+    %cl3 = index.cmp ult, %column, %outputs : index
+    %live3 = scalar.andi %rl3, %cl3 : i1
+    scf.if %live3 {
+      %column3 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %v3 = scalar.fptrunc %a3 : f64 to f32
+      view.store %v3, %target[%r3, %column3] : f32, view<144x[%outputs]xf32>
+    }
+  }
+  kernel.return
+}
+
+func.def @oracle_bf16(%input: buffer, %weight: buffer, %output: buffer, %runtime_inputs: index, %runtime_outputs: index, %rows_value: index) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %rows = index.assume %rows_value [range(%rows_value, 1, 128)] : index
+  %inputs = index.constant 65 : index
+  %outputs = index.constant 33 : index
+  %first = index.constant 7 : index
+  %stride0 = index.constant 65 : index
+  %stride1 = index.constant 1 : index
+  %layout = encoding.layout.strided [%stride0, %stride1] : encoding<layout>
+  %x = buffer.view %input[%origin] : buffer -> view<144x65xf32>
+  %w = buffer.view %weight[%origin] : buffer -> view<33x65xbf16, %layout>
+  %y = buffer.view %output[%origin] : buffer -> view<144x33xf32>
+  %initial = scalar.constant 0.0 : f64
+  scf.for %row = [%zero to %rows step %one] {
+    %source_row = index.add %row, %first : index
+    scf.for %column = [%zero to %outputs step %one] {
+      %sum = scf.for %k = [%zero to %inputs step %one](%acc = %initial : f64) -> (f64) {
+        %v = view.load %x[%source_row, %k] : view<144x65xf32> -> f32
+        %w0 = view.load %w[%column, %k] : view<33x65xbf16, %layout> -> bf16
+        %wf = scalar.extf %w0 : bf16 to f32
+        %vw = scalar.extf %v : f32 to f64
+        %ww = scalar.extf %wf : f32 to f64
+        %next = scalar.fmaf %vw, %ww, %acc : f64
+        scf.yield %next : f64
+      }
+      %value = scalar.fptrunc %sum : f64 to f32
+      view.store %value, %y[%row, %column] : f32, view<144x33xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario @matrix_bf16 {
+  check.trial[24](%trial: index, %entropy: check.entropy) {
+    %rows = check.generate<@prefix_rows>(%trial) : (index) -> (index)
+    %inputs = check.literal value(65) : index
+    %outputs = check.literal value(33) : index
+    %x = check.generate.iota offset(-1.0) step(0.03125) period(71) : tensor<144x65xf32>
+    %w = check.generate.iota offset(-0.5) step(0.015625) period(67) : tensor<2145xbf16>
+    %y = check.generate.fill value(-123.0) : tensor<144x33xf32>
+    check.compare<@prefix_bf16, @oracle_bf16>(%x, %w, %y, %inputs, %outputs, %rows) : (tensor<144x65xf32>, tensor<2145xbf16>, tensor<144x33xf32>, index, index, index) -> () {
+      check.expect.bitwise actual(%y) expected(%y) : tensor<144x33xf32>
+    }
+  }
+  check.return
+}
+
+kernel.def @prefix_f32_transpose() {
+  %three = index.constant 3 : index
+  %tiles = index.constant 5 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%three, %tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer, %inputs: index, %outputs: index, %rows_value: index) {
+  %rows = index.assume %rows_value [range(%rows_value, 1, 128)] : index
+  %capacity = index.constant 144 : index
+  %first = index.constant 7 : index
+  %stride0 = index.constant 1 : index
+  %stride1 = index.constant 33 : index
+  %bf16 = scalar.constant false : i1
+  %origin = index.constant 0 : offset
+  %block = index.constant 32 : index
+  %group = kernel.workgroup.id<y> : index
+  %row_base = index.mul %group, %block : index
+  %active = index.cmp ult, %row_base, %rows : index
+  scf.if %active {
+    %row, %column, %a0, %a1, %a2, %a3 = template.apply<@pocket.prefix.matrix>(%rows, %capacity, %first, %inputs, %outputs, %bf16, %input, %weight, %origin, %origin, %inputs, %stride0, %stride1) : (index, index, index, index, index, i1, buffer, buffer, offset, offset, index, index, index) -> (index, index, f64, f64, f64, f64)
+    %target = buffer.view %output[%origin] : buffer -> view<144x[%outputs]xf32>
+    %delta0 = index.constant 0 : index
+    %r0 = index.add %row, %delta0 : index
+    %rl0 = index.cmp ult, %r0, %rows : index
+    %cl0 = index.cmp ult, %column, %outputs : index
+    %live0 = scalar.andi %rl0, %cl0 : i1
+    scf.if %live0 {
+      %column0 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %v0 = scalar.fptrunc %a0 : f64 to f32
+      view.store %v0, %target[%r0, %column0] : f32, view<144x[%outputs]xf32>
+    }
+    %delta1 = index.constant 8 : index
+    %r1 = index.add %row, %delta1 : index
+    %rl1 = index.cmp ult, %r1, %rows : index
+    %cl1 = index.cmp ult, %column, %outputs : index
+    %live1 = scalar.andi %rl1, %cl1 : i1
+    scf.if %live1 {
+      %column1 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %v1 = scalar.fptrunc %a1 : f64 to f32
+      view.store %v1, %target[%r1, %column1] : f32, view<144x[%outputs]xf32>
+    }
+    %delta2 = index.constant 16 : index
+    %r2 = index.add %row, %delta2 : index
+    %rl2 = index.cmp ult, %r2, %rows : index
+    %cl2 = index.cmp ult, %column, %outputs : index
+    %live2 = scalar.andi %rl2, %cl2 : i1
+    scf.if %live2 {
+      %column2 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %v2 = scalar.fptrunc %a2 : f64 to f32
+      view.store %v2, %target[%r2, %column2] : f32, view<144x[%outputs]xf32>
+    }
+    %delta3 = index.constant 24 : index
+    %r3 = index.add %row, %delta3 : index
+    %rl3 = index.cmp ult, %r3, %rows : index
+    %cl3 = index.cmp ult, %column, %outputs : index
+    %live3 = scalar.andi %rl3, %cl3 : i1
+    scf.if %live3 {
+      %column3 = index.assume %column [ge(%column, 0), lt(%column, %outputs)] : index
+      %v3 = scalar.fptrunc %a3 : f64 to f32
+      view.store %v3, %target[%r3, %column3] : f32, view<144x[%outputs]xf32>
+    }
+  }
+  kernel.return
+}
+
+func.def @oracle_f32_transpose(%input: buffer, %weight: buffer, %output: buffer, %runtime_inputs: index, %runtime_outputs: index, %rows_value: index) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %rows = index.assume %rows_value [range(%rows_value, 1, 128)] : index
+  %inputs = index.constant 65 : index
+  %outputs = index.constant 33 : index
+  %first = index.constant 7 : index
+  %stride0 = index.constant 1 : index
+  %stride1 = index.constant 33 : index
+  %layout = encoding.layout.strided [%stride0, %stride1] : encoding<layout>
+  %x = buffer.view %input[%origin] : buffer -> view<144x65xf32>
+  %w = buffer.view %weight[%origin] : buffer -> view<33x65xf32, %layout>
+  %y = buffer.view %output[%origin] : buffer -> view<144x33xf32>
+  %initial = scalar.constant 0.0 : f64
+  scf.for %row = [%zero to %rows step %one] {
+    %source_row = index.add %row, %first : index
+    scf.for %column = [%zero to %outputs step %one] {
+      %sum = scf.for %k = [%zero to %inputs step %one](%acc = %initial : f64) -> (f64) {
+        %v = view.load %x[%source_row, %k] : view<144x65xf32> -> f32
+        %w0 = view.load %w[%column, %k] : view<33x65xf32, %layout> -> f32
+        %vw = scalar.extf %v : f32 to f64
+        %ww = scalar.extf %w0 : f32 to f64
+        %next = scalar.fmaf %vw, %ww, %acc : f64
+        scf.yield %next : f64
+      }
+      %value = scalar.fptrunc %sum : f64 to f32
+      view.store %value, %y[%row, %column] : f32, view<144x33xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario @matrix_f32_transpose {
+  check.trial[24](%trial: index, %entropy: check.entropy) {
+    %rows = check.generate<@prefix_rows>(%trial) : (index) -> (index)
+    %inputs = check.literal value(65) : index
+    %outputs = check.literal value(33) : index
+    %x = check.generate.iota offset(-1.0) step(0.03125) period(71) : tensor<144x65xf32>
+    %w = check.generate.iota offset(-0.5) step(0.015625) period(67) : tensor<2145xf32>
+    %y = check.generate.fill value(-123.0) : tensor<144x33xf32>
+    check.compare<@prefix_f32_transpose, @oracle_f32_transpose>(%x, %w, %y, %inputs, %outputs, %rows) : (tensor<144x65xf32>, tensor<2145xf32>, tensor<144x33xf32>, index, index, index) -> () {
+      check.expect.bitwise actual(%y) expected(%y) : tensor<144x33xf32>
+    }
+  }
+  check.return
+}

@@ -6,12 +6,14 @@
 
 #include "loomc/module.h"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "iree/testing/gtest.h"
+#include "loom/binding/c/test/testdata/diagnostic_type_testdata.h"
 #include "loomc/compile.h"
 #include "loomc/context.h"
 #include "loomc/diagnostic.h"
@@ -489,6 +491,68 @@ TEST(ModuleTest, ParseDiagnosticCanRetainLocationWithoutText) {
   EXPECT_EQ(range.end, 1u);
   EXPECT_EQ(range.start_line, 1u);
   EXPECT_EQ(range.start_column, 1u);
+}
+
+TEST(ModuleTest, ParserDiagnosticsPreserveModuleOwnedTypes) {
+  struct TestCase {
+    // Source containing one mismatched operand type annotation.
+    const char* filename;
+    // Full type of the operand's value.
+    const char* actual_type;
+    // Full type written in the mismatched annotation.
+    const char* annotated_type;
+  };
+  const TestCase cases[] = {
+      {"scalar.loom-test", "f32", "i32"},
+      {"overflow.loom-test", "vector<2x3x4xf32>", "vector<2x3x5xf32>"},
+      {"dynamic.loom-test", "vector<[%extent]x4xf32>",
+       "vector<[%extent]x8xf32>"},
+      {"function.loom-test", "(i32) -> (i32)", "(i32) -> (f32)"},
+      {"encoding.loom-test", "tile<4xi8, #encoding.i8<payload_elements=32>>",
+       "tile<8xi8, #encoding.i8<payload_elements=32>>"},
+  };
+  const auto* files = loomc_diagnostic_type_testdata_create();
+  const auto* files_end = files + loomc_diagnostic_type_testdata_size();
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.filename);
+    const auto* file = std::find_if(files, files_end, [&](const auto& file) {
+      return strcmp(file.name, test_case.filename) == 0;
+    });
+    ASSERT_NE(file, files_end);
+    auto context = CreateContext();
+    auto workspace = CreateWorkspace();
+    auto source = CreateTextSource(test_case.filename, file->data);
+    loomc_module_t* module = nullptr;
+    loomc_result_t* result = nullptr;
+    LOOMC_ASSERT_OK(loomc_module_deserialize_text_from_source(
+        context.get(), workspace.get(), source.get(), nullptr,
+        loomc_allocator_system(), &module, &result));
+    ModulePtr module_owner(module);
+    ResultPtr result_owner(result);
+    EXPECT_EQ(module, nullptr);
+    EXPECT_FALSE(loomc_result_succeeded(result));
+    workspace.reset();
+    context.reset();
+    source.reset();
+    ASSERT_EQ(loomc_result_diagnostic_count(result), 1u);
+    const auto* diagnostic = loomc_result_diagnostic_at(result, 0);
+    EXPECT_EQ(ToString(diagnostic->code), "TYPE/001");
+    ASSERT_EQ(diagnostic->parameter_count, 4u);
+    EXPECT_EQ(ToString(diagnostic->parameters[1].value), test_case.actual_type);
+    EXPECT_EQ(ToString(diagnostic->parameters[3].value),
+              test_case.annotated_type);
+    EXPECT_EQ(ToString(diagnostic->message),
+              "'operands[0]' type " + std::string(test_case.actual_type) +
+                  " does not match 'type annotation' type " +
+                  test_case.annotated_type);
+    const auto json = ToString(diagnostic->formatted_json);
+    EXPECT_NE(
+        json.find("\"type_a\":\"" + std::string(test_case.actual_type) + "\""),
+        std::string::npos);
+    EXPECT_NE(json.find("\"type_b\":\"" +
+                        std::string(test_case.annotated_type) + "\""),
+              std::string::npos);
+  }
 }
 
 TEST(ModuleTest, BytecodeReaderDiagnosticRetainsContainerAndOffsets) {

@@ -234,10 +234,8 @@ func.def @guarded_full_tile_pipeline(%input: view<8xi32>, %initial: i32, %remain
   %tile_size = index.constant 8 : index
   %has_full_tile = index.cmp sge, %remaining, %tile_size : index
   %result = scf.if %has_full_tile -> (i32) {
-    %tile_end = index.constant 8 : index
-    %17 = index.constant 1 : index
     %value = view.load %input[%begin] : view<8xi32> -> i32
-    %24, %25 = scf.for %21 = [%17 to %tile_end step %step](%22 = %initial : i32, %23 = %value : i32) -> (i32, i32) {
+    %24, %25 = scf.for %21 = [%step to %tile_size step %step](%22 = %initial : i32, %23 = %value : i32) -> (i32, i32) {
       %value = view.load %input[%21] : view<8xi32> -> i32
       %collective = test.convergent %23 : i32
       %next = scalar.addi %22, %collective : i32

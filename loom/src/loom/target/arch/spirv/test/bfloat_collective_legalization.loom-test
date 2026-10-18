@@ -1,0 +1,180 @@
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager}
+
+// Scalar reduction promotion preserves cluster attributes at the original
+// convergence point. Conversion lowering has its own execution coverage.
+kernel.def @clustered_bfloat_sum() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: bf16) {
+  %result = kernel.subgroup.reduce<addf> %value {cluster_size = 8, cluster_stride = 1} : bf16
+  test.use %result : bf16
+  kernel.return
+}
+
+// ----
+kernel.def @clustered_bfloat_sum() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: bf16) {
+  %4 = scalar.extf %value : bf16 to f32
+  %5 = kernel.subgroup.reduce<addf> %4 {cluster_size = 8, cluster_stride = 1} : f32
+  %result = scalar.fptrunc %5 : f32 to bf16
+  test.use %result : bf16
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager}
+
+kernel.def @bfloat_prefix() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: bf16) {
+  %result = kernel.subgroup.scan<mulf> %value {direction = forward, mode = exclusive} : bf16
+  test.use %result : bf16
+  kernel.return
+}
+
+// ----
+kernel.def @bfloat_prefix() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: bf16) {
+  %4 = scalar.extf %value : bf16 to f32
+  %5 = kernel.subgroup.scan<mulf> %4 {direction = forward, mode = exclusive} : f32
+  %result = scalar.fptrunc %5 : f32 to bf16
+  test.use %result : bf16
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager}
+
+// A non-BF16 first payload must not hide a later BF16 payload. The reduction
+// remains one variadic operation, with the original positional correspondence.
+kernel.def @mixed_workgroup_payloads() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%wide: f32, %narrow: bf16) {
+  %wide_result, %narrow_result = kernel.workgroup.reduce<maxnumf, preserve> %wide, %narrow : f32, bf16
+  test.use %wide_result, %narrow_result : f32, bf16
+  kernel.return
+}
+
+// ----
+kernel.def @mixed_workgroup_payloads() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%wide: f32, %narrow: bf16) {
+  %7 = scalar.extf %narrow : bf16 to f32
+  %wide_result, %8 = kernel.workgroup.reduce<maxnumf, preserve> %wide, %7 : f32, f32
+  %narrow_result = scalar.fptrunc %8 : f32 to bf16
+  test.use %wide_result, %narrow_result : f32, bf16
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager}
+
+// Source-format rounding is not equivalent to F32 accumulation. Leave these
+// operations intact so final target legality diagnoses the unsatisfied request.
+kernel.def @preserve_bfloat_arithmetic() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: bf16) {
+  %sum = kernel.subgroup.reduce<addf, preserve> %value : bf16
+  %product = kernel.workgroup.reduce<mulf, preserve> %value : bf16
+  %prefix = kernel.subgroup.scan<addf, preserve> %value {direction = reverse, mode = inclusive} : bf16
+  test.use %sum, %product, %prefix : bf16, bf16, bf16
+  kernel.return
+}
+
+// ----
+kernel.def @preserve_bfloat_arithmetic() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: bf16) {
+  %sum = kernel.subgroup.reduce<addf, preserve> %value : bf16
+  %product = kernel.workgroup.reduce<mulf, preserve> %value : bf16
+  %prefix = kernel.subgroup.scan<addf, preserve> %value {direction = reverse, mode = inclusive} : bf16
+  test.use %sum, %product, %prefix : bf16, bf16, bf16
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager}
+
+// Promotion retains vector shape. Wider packet boundaries execute in the corpus.
+kernel.def @vector_workgroup_payload() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: vector<2xbf16>) {
+  %result = kernel.workgroup.reduce<minimumf, preserve> %value : vector<2xbf16>
+  test.use %result : vector<2xbf16>
+  kernel.return
+}
+
+// ----
+kernel.def @vector_workgroup_payload() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: vector<2xbf16>) {
+  %4 = vector.extf %value : vector<2xbf16> to vector<2xf32>
+  %5 = kernel.workgroup.reduce<minimumf, preserve> %4 : vector<2xf32>
+  %7 = vector.extract %5[0] : vector<2xf32> -> f32
+  %8 = scalar.fptrunc %7 : f32 to bf16
+  %9 = vector.extract %5[1] : vector<2xf32> -> f32
+  %10 = scalar.fptrunc %9 : f32 to bf16
+  %result = vector.from_elements %8, %10 : vector<2xbf16>
+  test.use %result : vector<2xbf16>
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},cse
+
+// All three collectives reuse one widened SSA input after source cleanup.
+// They retain distinct convergence points and independent narrowed results.
+kernel.def @shared_bfloat_collective_input() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: bf16) {
+  %sum = kernel.workgroup.reduce<addf> %value : bf16
+  %minimum = kernel.subgroup.reduce<minnumf> %value : bf16
+  %product = kernel.subgroup.scan<mulf> %value {direction = forward, mode = inclusive} : bf16
+  test.use %sum, %minimum, %product : bf16, bf16, bf16
+  kernel.return
+}
+
+// ----
+kernel.def @shared_bfloat_collective_input() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: bf16) {
+  %12 = scalar.extf %value : bf16 to f32
+  %13 = kernel.workgroup.reduce<addf> %12 : f32
+  %sum = scalar.fptrunc %13 : f32 to bf16
+  %10 = kernel.subgroup.reduce<minnumf> %12 : f32
+  %minimum = scalar.fptrunc %10 : f32 to bf16
+  %7 = kernel.subgroup.scan<mulf> %12 {direction = forward, mode = inclusive} : f32
+  %product = scalar.fptrunc %7 : f32 to bf16
+  test.use %sum, %minimum, %product : bf16, bf16, bf16
+  kernel.return
+}

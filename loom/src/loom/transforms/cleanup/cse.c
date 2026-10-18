@@ -58,8 +58,14 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
       if (!iree_status_is_ok(status) || !cursor.op) {
         break;
       }
-      const uint32_t minimum_epoch =
+      uint32_t minimum_epoch =
           loom_expression_observe_barriers(&cursor, &barriers);
+      // Source SSA values retain their meaning across collective execution.
+      // Convergence constrains the collective itself, not a dominating pure
+      // expression. Masked machine definitions have a separate Low CSE policy.
+      if (iree_any_bit_set(cursor.traits, LOOM_TRAIT_PURE)) {
+        minimum_epoch = 0;
+      }
       if (!loom_expression_is_reusable(&cursor) ||
           loom_op_requires_source_context(module, cursor.op)) {
         continue;

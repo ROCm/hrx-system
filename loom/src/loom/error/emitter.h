@@ -98,7 +98,8 @@ typedef struct loom_diagnostic_related_op_t {
 // A single structured diagnostic emission request from a producer to the
 // subsystem that owns source resolution and final sink callbacks.
 typedef struct loom_diagnostic_emission_t {
-  // Module containing |op| when it differs from the emitter's active module.
+  // Module owning |op| and parameter type identities, or NULL to use the
+  // emitter's active module. Borrowed for the emission callback.
   const loom_module_t* module;
   // Primary operation associated with the diagnostic.
   const loom_op_t* op;

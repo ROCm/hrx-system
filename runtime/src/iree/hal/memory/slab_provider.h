@@ -146,13 +146,89 @@ typedef struct iree_hal_slab_t {
 // describe this exact attachment and may be narrower than provider-owned slab
 // properties, particularly for alignment and maintenance granularity.
 typedef struct iree_hal_imported_slab_t {
-  // Provider-owned attachment released with release_slab.
+  // Provider-owned attachment returned in a native release batch.
   iree_hal_slab_t slab;
   // Offset of slab byte zero within the caller's external storage extent.
   iree_device_size_t storage_offset;
   // Exact immutable properties of this attachment.
   iree_hal_slab_provider_properties_t properties;
 } iree_hal_imported_slab_t;
+
+//===----------------------------------------------------------------------===//
+// Typed native slab batches
+//===----------------------------------------------------------------------===//
+
+// Geometry already validated by the source pool, including hidden backing.
+typedef struct iree_hal_slab_request_t {
+  // Minimum physical range length in bytes.
+  iree_device_size_t min_length;
+  // Nonzero power-of-two alignment of slab byte zero.
+  iree_device_size_t min_alignment;
+} iree_hal_slab_request_t;
+
+typedef enum iree_hal_slab_operation_type_e {
+  IREE_HAL_SLAB_OPERATION_ACQUIRE = 0,
+  IREE_HAL_SLAB_OPERATION_RELEASE,
+} iree_hal_slab_operation_type_t;
+
+// Backend-owned linkage while a typed native operation is pending. There is
+// no common execution queue: a provider decides where its native calls run.
+// The two operation kinds cannot carry arbitrary work or execution waits.
+typedef struct iree_hal_slab_operation_t {
+  // Intrusive link available to the provider until terminal completion.
+  struct iree_hal_slab_operation_t* next;
+  // Provider borrowed through submission and terminal completion.
+  iree_hal_slab_provider_t* provider;
+  // Concrete request type, initialized by the provider entry point.
+  iree_hal_slab_operation_type_t type;
+} iree_hal_slab_operation_t;
+
+typedef struct iree_hal_slab_acquire_callback_t {
+  // Takes ownership of the acquisition status after the whole batch resolves.
+  void(IREE_API_PTR* fn)(void* user_data, iree_status_t status);
+  // Borrowed callback state.
+  void* user_data;
+} iree_hal_slab_acquire_callback_t;
+
+typedef struct iree_hal_slab_release_callback_t {
+  // Called after the provider relinquishes every native slab in the batch.
+  void(IREE_API_PTR* fn)(void* user_data);
+  // Borrowed callback state.
+  void* user_data;
+} iree_hal_slab_release_callback_t;
+
+// Caller-owned descriptor and arrays, stable through both submission and
+// completion. Exactly one completion may run inline or later. On success all
+// outputs own native slabs; on failure every staged slab has been released and
+// outputs are zero. Output storage is private until completion.
+typedef struct iree_hal_slab_acquire_request_t {
+  // Backend linkage initialized by the provider entry point.
+  iree_hal_slab_operation_t operation;
+  // Number of input geometries and output slabs.
+  iree_host_size_t count;
+  // Validated native allocation geometry, borrowed through completion.
+  const iree_hal_slab_request_t* requests;
+  // Staged native outputs, borrowed through completion.
+  iree_hal_slab_t* slabs;
+  // Exactly one terminal result for the complete batch.
+  iree_hal_slab_acquire_callback_t completion;
+} iree_hal_slab_acquire_request_t;
+
+// Infallible submission using storage secured during acquisition. The caller
+// establishes actual retirement and releases every native view before submit.
+// The descriptor and slab array remain allocated through completion. Submission
+// consumes their contents; providers may compact the pending native work in
+// place.
+typedef struct iree_hal_slab_release_request_t {
+  // Backend linkage initialized by the provider entry point.
+  iree_hal_slab_operation_t operation;
+  // Number of slabs returned; providers may reduce it as entries are consumed.
+  iree_host_size_t count;
+  // Mutable native descriptors consumed by the provider through completion.
+  iree_hal_slab_t* slabs;
+  // Exactly one terminal completion after all native release attempts.
+  iree_hal_slab_release_callback_t completion;
+} iree_hal_slab_release_request_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_slab_provider_t
@@ -177,13 +253,18 @@ struct iree_hal_slab_provider_t {
 
   // Concrete provider implementation hooks.
   const iree_hal_slab_provider_vtable_t* vtable;
+
+  // Native-owner allocator, valid through the final provider release. Source
+  // pools use it for presecured retirement records that can outlive their
+  // caller-owned public pool metadata.
+  iree_allocator_t host_allocator;
 };
 
 // Initializes the base slab provider fields. Called by concrete
 // implementations during their create function.
 void iree_hal_slab_provider_initialize(
     const iree_hal_slab_provider_vtable_t* vtable,
-    iree_hal_slab_provider_t* provider);
+    iree_allocator_t host_allocator, iree_hal_slab_provider_t* provider);
 
 // Retains a reference to the slab provider.
 void iree_hal_slab_provider_retain(iree_hal_slab_provider_t* provider);
@@ -191,11 +272,16 @@ void iree_hal_slab_provider_retain(iree_hal_slab_provider_t* provider);
 // Releases a reference. Destroys the provider when the count reaches zero.
 void iree_hal_slab_provider_release(iree_hal_slab_provider_t* provider);
 
-// Acquires a slab of at least |min_length| bytes from the provider. The caller
-// has validated the nonzero power-of-two |min_alignment| against the provider's
-// maximum. The returned storage satisfies both this request and the provider's
-// guaranteed allocation alignment.
-iree_status_t iree_hal_slab_provider_acquire_slab(
+// Submits a complete native acquisition batch. Capture cannot fail: native
+// allocation failures are delivered through the exactly-once completion.
+// The caller supplies validated geometry and all descriptor/output storage.
+void iree_hal_slab_provider_acquire_slabs(
+    iree_hal_slab_provider_t* provider,
+    iree_hal_slab_acquire_request_t* request);
+
+// Explicitly blocking convenience for cold callers acquiring one slab.
+// Allocation and queue progress paths use acquire_slabs instead.
+iree_status_t iree_hal_slab_provider_acquire_slab_sync(
     iree_hal_slab_provider_t* provider, iree_device_size_t min_length,
     iree_device_size_t min_alignment, iree_hal_slab_t* out_slab);
 
@@ -225,9 +311,17 @@ bool iree_hal_slab_provider_query_import_requirements(
     iree_hal_external_storage_class_t storage_class,
     iree_hal_pool_import_requirements_t* out_requirements);
 
-// Releases a previously acquired slab back to the provider.
-void iree_hal_slab_provider_release_slab(iree_hal_slab_provider_t* provider,
-                                         const iree_hal_slab_t* slab);
+// Submits native release without allocating capture storage. Completion
+// reports relinquished ownership even if the native API could only leak on
+// release failure; concrete providers own those cleanup diagnostics.
+void iree_hal_slab_provider_release_slabs(
+    iree_hal_slab_provider_t* provider,
+    iree_hal_slab_release_request_t* request);
+
+// Explicitly blocking convenience for cold callers returning one slab.
+// Logical pool release uses an acquisition-backed release descriptor instead.
+void iree_hal_slab_provider_release_slab_sync(
+    iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab);
 
 // Wraps a byte range within |slab| as a HAL buffer using the provider-specific
 // buffer implementation for that slab's memory.
@@ -321,28 +415,44 @@ void iree_hal_slab_buffer_backing_initialize(
     const iree_hal_slab_provider_properties_t* properties,
     iree_async_notification_t* notification,
     iree_async_frontier_tracker_t* tracker,
-    iree_hal_memory_maintenance_t* maintenance,
     iree_hal_slab_buffer_backing_t* out_backing);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_slab_provider_t vtable
 //===----------------------------------------------------------------------===//
 
+// Implementer conveniences for platforms exposing scalar native operations.
+// These perform the complete batch on the calling context selected by the
+// concrete provider, roll back partial acquisition, and invoke completion.
+// They contain no scheduling, waits, or execution-context selection.
+void iree_hal_slab_provider_acquire_slabs_inline(
+    iree_hal_slab_provider_t* provider,
+    iree_hal_slab_acquire_request_t* request,
+    iree_status_t (*acquire_slab)(iree_hal_slab_provider_t* provider,
+                                  iree_device_size_t min_length,
+                                  iree_device_size_t min_alignment,
+                                  iree_hal_slab_t* out_slab),
+    void (*release_slab)(iree_hal_slab_provider_t* provider,
+                         const iree_hal_slab_t* slab));
+void iree_hal_slab_provider_release_slabs_inline(
+    iree_hal_slab_provider_t* provider,
+    iree_hal_slab_release_request_t* request,
+    void (*release_slab)(iree_hal_slab_provider_t* provider,
+                         const iree_hal_slab_t* slab));
+
 struct iree_hal_slab_provider_vtable_t {
   // Destroys a concrete slab provider implementation.
   void (*destroy)(iree_hal_slab_provider_t* provider);
 
-  // Acquires a slab of at least |min_length| bytes. The returned slab may
-  // be larger than requested. The caller must release the slab via
-  // release_slab when done.
-  iree_status_t (*acquire_slab)(iree_hal_slab_provider_t* provider,
-                                iree_device_size_t min_length,
-                                iree_device_size_t min_alignment,
-                                iree_hal_slab_t* out_slab);
+  // Accepts a typed native acquisition using caller-owned stable storage.
+  // The implementation supplies exactly one completion, including on failure.
+  void (*acquire_slabs)(iree_hal_slab_provider_t* provider,
+                        iree_hal_slab_acquire_request_t* request);
 
-  // Releases a previously acquired slab back to the platform.
-  void (*release_slab)(iree_hal_slab_provider_t* provider,
-                       const iree_hal_slab_t* slab);
+  // Returns actually retired slabs using presecured descriptor storage.
+  // Native release attempts finish before the exactly-once completion.
+  void (*release_slabs)(iree_hal_slab_provider_t* provider,
+                        iree_hal_slab_release_request_t* request);
 
   // Wraps [slab_offset, slab_offset + allocation_size) in |slab| as a HAL
   // buffer whose backing and concrete buffer type are owned by this provider.
@@ -354,7 +464,7 @@ struct iree_hal_slab_provider_vtable_t {
   //
   // The returned buffer invokes |release_callback| when destroyed. The pool
   // uses that callback to release its reservation bookkeeping; the provider
-  // remains responsible for releasing whole slabs via release_slab().
+  // remains responsible for releasing whole slabs through release_slabs().
   // If |release_callback.fn| is NULL, the returned buffer is still a borrowed
   // slab view and must not release the slab or underlying physical storage.
   iree_status_t (*wrap_buffer)(

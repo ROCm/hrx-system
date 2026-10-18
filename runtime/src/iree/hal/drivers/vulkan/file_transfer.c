@@ -8,8 +8,6 @@
 
 #include "iree/async/operations/file.h"
 #include "iree/async/proactor.h"
-#include "iree/hal/drivers/vulkan/memory_backend.h"
-#include "iree/hal/memory/maintenance.h"
 
 // Request records, not payload slots. Each continuation advances by one stripe
 // in the caller's final backing; no staging resource or copy submission exists.
@@ -43,6 +41,10 @@ struct iree_hal_vulkan_file_transfer_t {
   iree_hal_file_t* file;
   // Retained logical view preserving the prepared import owner.
   iree_hal_buffer_t* buffer;
+  // Logical byte offset, resolved only after allocation dependencies retire.
+  iree_device_size_t buffer_offset;
+  // Exact byte length in the caller's logical view.
+  iree_device_size_t length;
   // Original host allocation and its cache-maintenance coordinates.
   iree_hal_vulkan_buffer_host_span_t span;
   // Exactly READ or WRITE, from the file's perspective.
@@ -63,8 +65,6 @@ struct iree_hal_vulkan_file_transfer_t {
   iree_hal_semaphore_list_t signals;
   // Caller-requested dependency after native I/O and cache maintenance.
   iree_hal_vulkan_queue_barriers_t publication;
-  // Placed continuation for noncoherent publication on the existing host owner.
-  iree_hal_memory_maintenance_entry_t maintenance_entry;
   // Fixed native request capacity; independent of payload size.
   iree_hal_vulkan_file_transfer_lane_t
       lanes[IREE_HAL_VULKAN_FILE_TRANSFER_LANE_COUNT];
@@ -115,14 +115,6 @@ static void iree_hal_vulkan_file_transfer_publish(
   iree_hal_resource_release(&transfer->resource);
 }
 
-static void iree_hal_vulkan_file_transfer_flush(
-    iree_hal_memory_maintenance_entry_t* entry) {
-  iree_hal_vulkan_file_transfer_t* transfer = iree_containerof(
-      entry, iree_hal_vulkan_file_transfer_t, maintenance_entry);
-  iree_hal_vulkan_file_transfer_publish(
-      transfer, iree_hal_vulkan_buffer_flush_host_span(&transfer->span));
-}
-
 static void iree_hal_vulkan_file_transfer_lane_finish(
     iree_hal_vulkan_file_transfer_lane_t* lane, iree_status_t status) {
   iree_hal_vulkan_file_transfer_t* transfer = lane->transfer;
@@ -140,16 +132,9 @@ static void iree_hal_vulkan_file_transfer_lane_finish(
   if (iree_status_is_ok(status) &&
       transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ &&
       !transfer->span.coherent) {
-    const iree_hal_vulkan_memory_backend_t* backend =
-        (const iree_hal_vulkan_memory_backend_t*)iree_hal_device_memory_backend(
-            iree_hal_queue_family_device(
-                iree_hal_queue_family(&transfer->queue->base)));
-    transfer->maintenance_entry.fn = iree_hal_vulkan_file_transfer_flush;
-    iree_hal_memory_maintenance_enqueue(backend->maintenance,
-                                        &transfer->maintenance_entry);
-  } else {
-    iree_hal_vulkan_file_transfer_publish(transfer, status);
+    status = iree_hal_vulkan_buffer_flush_host_span(&transfer->span);
   }
+  iree_hal_vulkan_file_transfer_publish(transfer, status);
 }
 
 static iree_status_t iree_hal_vulkan_file_transfer_issue(
@@ -237,6 +222,40 @@ static void iree_hal_vulkan_file_transfer_start(
     void* user_data, const iree_status_t completion_status) {
   iree_hal_vulkan_file_transfer_t* transfer = user_data;
   iree_status_t status = iree_status_clone(completion_status);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_vulkan_buffer_resolve_host_span(
+        transfer->buffer, transfer->buffer_offset, transfer->length,
+        &transfer->span);
+  }
+  if (iree_status_is_ok(status) && !transfer->span.allocation) {
+    // The entry boundary already ran. Hand captured lifetimes to the staging
+    // operation before starting it, without a second empty native submission.
+    iree_hal_vulkan_queue_completion_action_t action;
+    status = iree_hal_vulkan_queue_prepare_staged_file_transfer(
+        transfer->queue, transfer->signals, transfer->file_access,
+        transfer->file, transfer->file_offset, transfer->buffer,
+        transfer->buffer_offset, transfer->length, &transfer->publication,
+        &action);
+    iree_hal_vulkan_file_transfer_release_captures(transfer);
+    if (iree_status_is_ok(status)) {
+      action.fn(action.user_data, iree_ok_status());
+      iree_hal_resource_release(action.resource);
+    } else {
+      iree_hal_semaphore_list_fail(transfer->signals, status);
+    }
+    return;
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_async_file_requirements_t* requirements =
+        iree_hal_file_requirements(transfer->file);
+    status = iree_hal_file_prepare_transfer(
+        transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
+            ? &requirements->read
+            : &requirements->write,
+        transfer->file_offset, transfer->span.contents.data,
+        transfer->span.contents.data_length,
+        IREE_HAL_VULKAN_FILE_TRANSFER_CHUNK_SIZE, &transfer->chunk_size);
+  }
   if (iree_status_is_ok(status) &&
       transfer->file_access == IREE_HAL_MEMORY_ACCESS_WRITE) {
     status = iree_hal_vulkan_buffer_invalidate_host_span(&transfer->span);
@@ -246,7 +265,15 @@ static void iree_hal_vulkan_file_transfer_start(
     iree_hal_semaphore_list_fail(transfer->signals, status);
     return;
   }
-  // One lifetime covers every accepted request and any deferred flush. The
+  transfer->lane_count = (uint32_t)iree_min(
+      IREE_HAL_VULKAN_FILE_TRANSFER_LANE_COUNT,
+      1 + (transfer->span.contents.data_length - 1) / transfer->chunk_size);
+  transfer->remaining_lanes = transfer->lane_count;
+  for (uint32_t i = 0; i < transfer->lane_count; ++i) {
+    transfer->lanes[i].transfer = transfer;
+    transfer->lanes[i].offset = i * transfer->chunk_size;
+  }
+  // One lifetime covers every accepted request and final cache publication. The
   // entry action additionally retains the object until this function returns,
   // including when all native completions race initial submission.
   iree_hal_resource_retain(&transfer->resource);
@@ -263,20 +290,13 @@ iree_status_t iree_hal_vulkan_queue_submit_file_transfer(
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list, iree_hal_file_t* file,
     iree_hal_memory_access_t file_access, uint64_t file_offset,
-    iree_hal_buffer_t* buffer, iree_hal_vulkan_buffer_host_span_t span,
+    iree_hal_buffer_t* buffer, iree_device_size_t buffer_offset,
+    iree_device_size_t length,
     const iree_hal_vulkan_queue_barriers_t* barriers) {
-  if (span.contents.data_length == 0) {
+  if (length == 0) {
     return iree_hal_vulkan_queue_submit_barrier(
         queue, wait_semaphore_list, signal_semaphore_list, barriers);
   }
-  const iree_async_file_requirements_t* requirements =
-      iree_hal_file_requirements(file);
-  iree_host_size_t chunk_size = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_file_prepare_transfer(
-      file_access == IREE_HAL_MEMORY_ACCESS_READ ? &requirements->read
-                                                 : &requirements->write,
-      file_offset, span.contents.data, span.contents.data_length,
-      IREE_HAL_VULKAN_FILE_TRANSFER_CHUNK_SIZE, &chunk_size));
   iree_hal_vulkan_file_transfer_t* transfer = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       queue->host_allocator, sizeof(*transfer), (void**)&transfer));
@@ -287,19 +307,11 @@ iree_status_t iree_hal_vulkan_queue_submit_file_transfer(
   iree_hal_file_retain(file);
   transfer->buffer = buffer;
   iree_hal_buffer_retain(buffer);
-  transfer->span = span;
+  transfer->buffer_offset = buffer_offset;
+  transfer->length = length;
   transfer->file_access = file_access;
   transfer->file_offset = file_offset;
-  transfer->chunk_size = chunk_size;
-  transfer->lane_count =
-      (uint32_t)iree_min(IREE_HAL_VULKAN_FILE_TRANSFER_LANE_COUNT,
-                         1 + (span.contents.data_length - 1) / chunk_size);
-  transfer->remaining_lanes = transfer->lane_count;
   iree_slim_mutex_initialize(&transfer->mutex);
-  for (uint32_t i = 0; i < transfer->lane_count; ++i) {
-    transfer->lanes[i].transfer = transfer;
-    transfer->lanes[i].offset = i * chunk_size;
-  }
   if (barriers) {
     transfer->publication.after = barriers->after;
   }

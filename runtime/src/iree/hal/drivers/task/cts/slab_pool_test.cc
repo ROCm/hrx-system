@@ -6,23 +6,51 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
+#include "iree/async/notification.h"
+#include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/memory/fixed_block_pool.h"
-#include "iree/hal/memory/maintenance.h"
 #include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/memory/tlsf_pool.h"
 
 namespace iree::hal::cts {
 namespace {
 
-static void CountExternalStorageRelease(
-    void* user_data, iree_hal_external_storage_class_t storage_class,
-    iree_hal_external_storage_payload_t payload) {
-  (void)storage_class;
-  (void)payload;
-  ++*static_cast<int*>(user_data);
-}
+struct ExternalStorageRelease {
+  // Joins the release callback's final access before its storage disappears.
+  std::mutex mutex;
+  // Wakes the external owner after the HAL releases its attachment.
+  std::condition_variable condition;
+  // Number of completed ownership returns.
+  unsigned count = 0;
+  // Execution context that returned this borrowed host allocation.
+  std::thread::id thread;
+
+  static void Complete(void* user_data,
+                       iree_hal_external_storage_class_t storage_class,
+                       iree_hal_external_storage_payload_t payload) {
+    auto* release = static_cast<ExternalStorageRelease*>(user_data);
+    std::lock_guard<std::mutex> lock(release->mutex);
+    ++release->count;
+    release->thread = std::this_thread::get_id();
+    release->condition.notify_all();
+  }
+
+  unsigned Query() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return count;
+  }
+
+  unsigned Wait() {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&] { return count != 0; });
+    return count;
+  }
+};
 
 class TaskSlabPoolTest : public CtsTestBase<> {
  protected:
@@ -118,19 +146,6 @@ class TaskSlabPoolTest : public CtsTestBase<> {
   iree_status_t Wait(iree_hal_semaphore_list_t semaphores) {
     return iree_hal_semaphore_list_wait(semaphores, iree_infinite_timeout(),
                                         IREE_ASYNC_WAIT_FLAG_NONE);
-  }
-
-  // Joins queued child/cache returns, including work they enqueue. A pending
-  // frontier callback can still enqueue native source retirement afterward.
-  void JoinMaintenance(iree_hal_pool_t* pool) {
-    iree_hal_memory_maintenance_call(
-        pool->maintenance,
-        [](void* user_data) {
-          auto* owner = static_cast<iree_hal_memory_maintenance_t*>(user_data);
-          while (iree_hal_memory_maintenance_run_one(owner)) {
-          }
-        },
-        pool->maintenance);
   }
 
   // Separate device progress services kept alive until their group retires.
@@ -345,7 +360,7 @@ TEST_P(TaskSlabPoolTest, ImportsFiniteExternalRangeWithExactOwnership) {
       &import_requirements));
 
   alignas(64) std::array<uint8_t, 64> storage_bytes = {};
-  int release_count = 0;
+  ExternalStorageRelease release;
   iree_hal_external_storage_t storage = {
       .storage_class = host_pointer_class,
       .payload = {.host_pointer = storage_bytes.data()},
@@ -353,8 +368,8 @@ TEST_P(TaskSlabPoolTest, ImportsFiniteExternalRangeWithExactOwnership) {
       .host_cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK,
       .maintenance_range = iree_hal_make_buffer_range(0, storage_bytes.size()),
       .physical_backing_id = {{0x1234, 0x5678}},
-      .release = CountExternalStorageRelease,
-      .release_user_data = &release_count,
+      .release = ExternalStorageRelease::Complete,
+      .release_user_data = &release,
   };
   Ref<iree_hal_buffer_t> imported;
   IREE_ASSERT_OK(iree_hal_pool_import_buffer(
@@ -378,7 +393,7 @@ TEST_P(TaskSlabPoolTest, ImportsFiniteExternalRangeWithExactOwnership) {
   IREE_ASSERT_OK(iree_hal_buffer_subspan(
       imported, 4, 8, iree_allocator_system(), nested.out()));
   imported.reset();
-  EXPECT_EQ(release_count, 0);
+  EXPECT_EQ(release.Query(), 0u);
   iree_hal_external_storage_t exported = {};
   iree_hal_buffer_range_t exported_range = {};
   IREE_ASSERT_OK(iree_hal_buffer_export(
@@ -393,8 +408,8 @@ TEST_P(TaskSlabPoolTest, ImportsFiniteExternalRangeWithExactOwnership) {
   EXPECT_EQ(exported.physical_backing_id.words[1], 0x5678u);
   iree_hal_external_storage_release(&exported);
   nested.reset();
-  JoinMaintenance(source);
-  EXPECT_EQ(release_count, 1);
+  EXPECT_EQ(release.Wait(), 1u);
+  EXPECT_EQ(release.thread, std::this_thread::get_id());
 }
 
 TEST_P(TaskSlabPoolTest, ImportAdmissionIsExplicitAndNativeOnly) {
@@ -509,7 +524,6 @@ TEST_P(TaskSlabPoolTest, PublicHostGrantsRemainIndependentOfExecution) {
   EXPECT_EQ(*reinterpret_cast<const uint32_t*>(mapping.contents.data), value);
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
   buffer.reset();
-  JoinMaintenance(source);
 }
 
 TEST_P(TaskSlabPoolTest, NativeOnlyScopeDoesNotInventSemanticPermissions) {
@@ -530,7 +544,6 @@ TEST_P(TaskSlabPoolTest, NativeOnlyScopeDoesNotInventSemanticPermissions) {
                             0, sizeof(value), /*barriers=*/NULL,
                             IREE_HAL_UPDATE_FLAG_NONE));
   buffer.reset();
-  JoinMaintenance(source);
 }
 
 TEST_P(TaskSlabPoolTest, InteriorArenasInheritTheCompleteScope) {
@@ -625,7 +638,6 @@ TEST_P(TaskSlabPoolTest, InteriorArenasInheritTheCompleteScope) {
   region.reset();
   blocks.reset();
   backing.reset();
-  JoinMaintenance(source);
 }
 
 #if IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
@@ -669,7 +681,6 @@ TEST_P(TaskSlabPoolTest, RecordedBindingsValidateTheAdmittedFamily) {
     }
   }
   buffer.reset();
-  JoinMaintenance(source);
 }
 #endif  // IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
 
@@ -861,7 +872,6 @@ TEST_P(TaskSlabPoolTest, SharedBackingAcrossDevicesAndAllocationPolicies) {
       for (auto& root : roots) {
         root.reset();
       }
-      JoinMaintenance(source);
       iree_hal_pool_stats_t stats;
       iree_hal_pool_query_stats(child, &stats);
       EXPECT_EQ(stats.bytes_committed, 0u);
@@ -950,7 +960,6 @@ TEST_P(TaskSlabPoolTest, CapturedViewsKeepAddressesAliveThroughRemoval) {
   EXPECT_EQ(observed, value);
   EXPECT_EQ(lifetime.release_count.load(), 1u);
   backing.reset();
-  JoinMaintenance(source);
 }
 
 TEST_P(TaskSlabPoolTest, CapturedPoolViewsKeepTheirRangeUntilMappingCompletes) {
@@ -1048,7 +1057,6 @@ TEST_P(TaskSlabPoolTest, CapturedPoolViewsKeepTheirRangeUntilMappingCompletes) {
   }
   child_pool.reset();
   backing.reset();
-  JoinMaintenance(source);
 }
 
 TEST_P(TaskSlabPoolTest, MappingTargetsResolveAfterQueuedAllocation) {
@@ -1122,7 +1130,6 @@ TEST_P(TaskSlabPoolTest, MappingTargetsResolveAfterQueuedAllocation) {
   EXPECT_EQ(stats.reservation_count, 0u);
   child_pool.reset();
   backing.reset();
-  JoinMaintenance(source);
 }
 
 TEST_P(TaskSlabPoolTest, CancelledMappingReleasesCapturedAddressReferences) {
@@ -1405,8 +1412,8 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
   tail.reset();
   backing.reset();
   output.reset();
-  JoinMaintenance(source);
   iree_hal_pool_stats_t stats;
+  ASSERT_TRUE(WaitPoolCommittedBytes(source, 0));
   iree_hal_pool_query_stats(source, &stats);
   EXPECT_EQ(stats.bytes_committed, 0u);
 }
@@ -1508,8 +1515,6 @@ TEST_P(TaskSlabPoolTest, RejectsMappingConflictsAndUnpreparedSources) {
   target.reset();
   backing.reset();
   unprepared.reset();
-  JoinMaintenance(source);
-  JoinMaintenance(ordinary);
 }
 
 TEST_P(TaskSlabPoolTest, QueueMappingSourcesRecycleThroughSharedSlabCache) {
@@ -1620,7 +1625,6 @@ TEST_P(TaskSlabPoolTest, QueueMappingSourcesRecycleThroughSharedSlabCache) {
     for (auto& root : roots) {
       root.reset();
     }
-    JoinMaintenance(source);
     iree_hal_pool_stats_t stats;
     iree_hal_pool_query_stats(child, &stats);
     EXPECT_EQ(stats.bytes_committed, 0u);
@@ -1643,14 +1647,13 @@ TEST_P(TaskSlabPoolTest, QueueMappingSourcesRecycleThroughSharedSlabCache) {
     iree_hal_pool_trim(child, IREE_HAL_POOL_TRIM_FLAG_EXCESS, 0);
   }
   iree_hal_pool_trim(cache, IREE_HAL_POOL_TRIM_FLAG_EXCESS, 4 * kUnit);
-  JoinMaintenance(source);
   iree_hal_pool_query_stats(source, &stats);
   EXPECT_EQ(stats.bytes_committed, physical_charge);
   IREE_ASSERT_OK(iree_hal_slab_cache_query_stats(cache, &cache_stats));
   EXPECT_EQ(cache_stats.ready_count, 1u);
 
   iree_hal_pool_trim(cache, IREE_HAL_POOL_TRIM_FLAG_EXCESS, 0);
-  JoinMaintenance(source);
+  ASSERT_TRUE(WaitPoolCommittedBytes(source, 0));
   iree_hal_pool_query_stats(source, &stats);
   EXPECT_EQ(stats.bytes_committed, 0u);
   EXPECT_EQ(stats.release_count, 1u);

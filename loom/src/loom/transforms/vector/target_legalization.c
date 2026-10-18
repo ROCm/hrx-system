@@ -143,6 +143,14 @@ static iree_status_t loom_vector_legalize_descriptor(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
+  // Keep lane programs compact while target rewrites and source cleanup can
+  // share their operands. Native packet selection retains first claim before
+  // complete legalization expands the remaining unsupported operations.
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL &&
+      context->policy != LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
   // Lane programs may eliminate transient aggregates with no target carrier.
   // The callable boundary still needs a complete representation.
   if (context->source_function_has_unsupported_vector_carrier) {
@@ -1039,6 +1047,13 @@ static iree_status_t loom_vector_legalize_from_elements(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
+  // Source cleanup consumes constructor lanes directly. Expanding to inserts
+  // earlier hides that sharing and creates transient aggregates to clean up.
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL &&
+      context->policy != LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
   const loom_type_t result_type = loom_module_value_type(
       context->module, loom_vector_from_elements_result(op));
   if (loom_type_rank(result_type) != 1) {

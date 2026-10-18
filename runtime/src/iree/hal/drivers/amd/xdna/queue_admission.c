@@ -182,10 +182,18 @@ static void iree_hal_amd_xdna_operation_record_wait_status(
   }
 }
 
-// Schedules the sole wait completion owner. A failed handoff cannot safely
-// destroy queue-owned storage from an arbitrary semaphore callback thread.
+// Memory continuations own no FIFO state and consume the last wait directly.
+// Native execution returns to its queue owner; a failed handoff cannot safely
+// destroy that owner's active publication state on a semaphore callback thread.
 static void iree_hal_amd_xdna_operation_schedule_wait_completion(
     iree_hal_amd_xdna_operation_t* operation) {
+  if (operation->kind == IREE_HAL_AMD_XDNA_OPERATION_ALLOCA ||
+      operation->kind == IREE_HAL_AMD_XDNA_OPERATION_DEALLOCA) {
+    iree_status_t status = (iree_status_t)iree_atomic_exchange(
+        &operation->wait_status, 0, iree_memory_order_acquire);
+    iree_hal_amd_xdna_operation_admit_memory(operation, status);
+    return;
+  }
   iree_status_t status = iree_async_proactor_submit_one(
       operation->queue->proactor, &operation->wait_completion);
   if (iree_status_is_ok(status)) {
@@ -267,6 +275,28 @@ static void iree_hal_amd_xdna_operation_register_waits(
   if (previous_count == 1) {
     iree_hal_amd_xdna_operation_schedule_wait_completion(operation);
   }
+}
+
+void iree_hal_amd_xdna_operation_admit_memory(
+    iree_hal_amd_xdna_operation_t* operation, iree_status_t status) {
+  iree_hal_amd_xdna_wait_resolution_t resolution =
+      IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_READY;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_xdna_operation_resolve_waits(
+        operation, &resolution, /*out_deferred_wait_index=*/NULL);
+  }
+  if (iree_status_is_ok(status) &&
+      resolution == IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_DEFER) {
+    if (operation->profile) {
+      operation->profile->event.flags |=
+          IREE_HAL_PROFILE_QUEUE_EVENT_FLAG_SOFTWARE_DEFERRED;
+      operation->profile->event.dependency_strategy =
+          IREE_HAL_PROFILE_QUEUE_DEPENDENCY_STRATEGY_SOFTWARE_DEFER;
+    }
+    iree_hal_amd_xdna_operation_register_waits(operation);
+    return;
+  }
+  iree_hal_amd_xdna_operation_issue_memory(operation, status);
 }
 
 static bool iree_hal_amd_xdna_operation_signals_wait(
@@ -359,8 +389,9 @@ static bool iree_hal_amd_xdna_operation_defer_for_acceptance(
 void iree_hal_amd_xdna_operation_admit(iree_hal_amd_xdna_operation_t* operation,
                                        iree_status_t status) {
   iree_hal_amd_xdna_queue_t* queue = operation->queue;
-  if (iree_status_is_ok(status) && !iree_status_is_ok(queue->failure_status)) {
-    status = iree_status_clone(queue->failure_status);
+  if (iree_status_is_ok(status) &&
+      !iree_status_is_ok(iree_hal_amd_xdna_queue_failure_status(queue))) {
+    status = iree_status_clone(iree_hal_amd_xdna_queue_failure_status(queue));
   }
   iree_hal_amd_xdna_wait_resolution_t resolution =
       IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_READY;

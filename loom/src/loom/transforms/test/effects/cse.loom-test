@@ -182,9 +182,8 @@ func.def @nested_while_write_blocks_outer_load_cse(%cond: i1, %buffer: buffer, %
 
 // ====
 
-// Convergent ops are execution-state barriers for pure materializations. A
-// value before the barrier may be defined only for the old dynamic participant
-// set and must not be reused by a later op.
+// Source convergence constrains the collective, not the lifetime of dominating
+// immutable SSA values. The collective remains while pure computation shares.
 // RUN: pass cse
 
 func.def @convergent_barriers_pure_cse() -> (i32, i32, i32) {
@@ -195,10 +194,18 @@ func.def @convergent_barriers_pure_cse() -> (i32, i32, i32) {
   func.return %sum, %after, %barrier : i32, i32, i32
 }
 
+// ----
+func.def @convergent_barriers_pure_cse() -> (i32, i32, i32) {
+  %before = test.constant 7 : i32
+  %barrier = test.convergent %before : i32
+  %sum = test.addi %before, %before : i32
+  func.return %sum, %before, %barrier : i32, i32, i32
+}
+
 // ====
 
-// Full invalidation permits equivalent candidates within each new participant
-// epoch, never across it. Empty epochs and reused hash slots remain valid.
+// Repeated collectives do not invalidate source SSA expressions. Convergent
+// operations themselves remain distinct, including adjacent identical ones.
 // RUN: pass cse
 func.def @successive_convergent_epochs(%value: i32) -> (i32, i32, i32, i32) {
   %before = test.addi %value, %value : i32
@@ -217,17 +224,14 @@ func.def @successive_convergent_epochs(%value: i32) -> (i32, i32, i32, i32) {
   %before = test.addi %value, %value : i32
   %first_barrier = test.convergent %value : i32
   %empty_barrier = test.convergent %value : i32
-  %middle = test.addi %value, %value : i32
-  %last_barrier = test.convergent %middle : i32
-  %after = test.addi %value, %value : i32
-  func.return %before, %middle, %after, %after : i32, i32, i32, i32
+  %last_barrier = test.convergent %before : i32
+  func.return %before, %before, %before, %before : i32, i32, i32, i32
 }
 
 // ====
 
-// Selective read invalidation leaves a tombstone, and the equivalent reload
-// reuses its slot. Full invalidation must clear that occupied slot exactly as
-// it clears a pure candidate, then permit fresh within-epoch elimination.
+// Memory reads still respect stores and convergence boundaries. Sharing pure
+// source expressions does not authorize sharing a reload across a collective.
 // RUN: pass cse
 func.def @convergent_after_read_reinsertion(%buffer: buffer, %offset: offset, %value: i32) -> (i32, i32, i32, i32) {
   %layout = encoding.layout.dense : encoding<layout>
@@ -255,10 +259,10 @@ func.def @convergent_after_read_reinsertion(%buffer: buffer, %offset: offset, %v
 
 // ====
 
-// Nested convergent effects invalidate parent membership before child lookup.
-// The nested scope and later outer scope each retain their own fresh candidate.
+// A dominating source value remains available in nested and later scopes even
+// when the nested region contains a collective. The collective remains intact.
 // RUN: pass cse
-func.def @nested_convergent_clears_parent(%condition: i1, %value: i32) -> (i32, i32) {
+func.def @pure_values_across_nested_collectives(%condition: i1, %value: i32) -> (i32, i32) {
   %before = test.addi %value, %value : i32
   scf.if %condition {
     %barrier = test.convergent %value : i32
@@ -273,16 +277,14 @@ func.def @nested_convergent_clears_parent(%condition: i1, %value: i32) -> (i32, 
 }
 
 // ----
-func.def @nested_convergent_clears_parent(%condition: i1, %value: i32) -> (i32, i32) {
+func.def @pure_values_across_nested_collectives(%condition: i1, %value: i32) -> (i32, i32) {
   %before = test.addi %value, %value : i32
   scf.if %condition {
     %barrier = test.convergent %value : i32
-    %inner = test.addi %value, %value : i32
-    test.use %inner, %inner : i32, i32
+    test.use %before, %before : i32, i32
   } else {
   }
-  %after = test.addi %value, %value : i32
-  func.return %before, %after : i32, i32
+  func.return %before, %before : i32, i32
 }
 
 // ====
@@ -358,10 +360,9 @@ func.def @independent_nested_cfgs() {
 // ====
 
 
-// An enclosing block can insert again after a nested barrier clears it. A
-// later nested barrier must find those new candidates through empty scopes.
+// Source SSA availability survives nested collectives through empty scopes.
 // RUN: pass cse
-func.def @rearm_outer_candidates(%condition: i1, %row: i32) -> (i32, i32, i32, i32) {
+func.def @dominating_values_through_nested_collectives(%condition: i1, %row: i32) -> (i32, i32, i32, i32) {
   %before = test.addi %row, %row : i32
   scf.if %condition {
     %first_barrier = test.convergent %row : i32
@@ -381,13 +382,12 @@ func.def @rearm_outer_candidates(%condition: i1, %row: i32) -> (i32, i32, i32, i
 }
 
 // ----
-func.def @rearm_outer_candidates(%condition: i1, %row: i32) -> (i32, i32, i32, i32) {
+func.def @dominating_values_through_nested_collectives(%condition: i1, %row: i32) -> (i32, i32, i32, i32) {
   %before = test.addi %row, %row : i32
   scf.if %condition {
     %first_barrier = test.convergent %row : i32
   } else {
   }
-  %middle = test.addi %row, %row : i32
   scf.if %condition {
     scf.if %condition {
       %second_barrier = test.convergent %row : i32
@@ -395,10 +395,8 @@ func.def @rearm_outer_candidates(%condition: i1, %row: i32) -> (i32, i32, i32, i
     }
   } else {
   }
-  %after = test.addi %row, %row : i32
-  func.return %before, %middle, %after, %after : i32, i32, i32, i32
+  func.return %before, %before, %before, %before : i32, i32, i32, i32
 }
-
 
 // ====
 

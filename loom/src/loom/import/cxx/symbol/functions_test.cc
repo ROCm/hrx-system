@@ -13,6 +13,7 @@
 #include <cxx/types.h>
 
 #include "loom/import/cxx/value/builder_test.h"
+#include "loom/import/cxx/value/vector.h"
 #include "loom/ops/check/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
@@ -41,14 +42,17 @@ TEST_F(FunctionsTest, RootsQueueEachConcreteHelperOnceWithPrivateVisibility) {
                 IREE_SV("functions.cxx"), options());
   Types types(source.unit(), source.diagnostics());
   Locations locations(source.unit(), source.diagnostics(), module_);
+  Scalars scalars(source.unit(), source.diagnostics(), types, locations,
+                  builder_);
+  Vectors vectors(source.unit(), source.diagnostics(), types, scalars,
+                  locations, builder_);
   SymbolNames names(source.unit(), source.diagnostics());
   LaunchContracts launches(source.unit(), source.diagnostics());
   FastMathContracts fastmath(source.unit(), source.diagnostics());
   FunctionContracts function_contracts(source.unit(), source.diagnostics());
-  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, locations,
-                        names, launches, function_contracts, module_);
-  Scalars scalars(source.unit(), source.diagnostics(), types, locations,
-                  builder_);
+  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, scalars,
+                        vectors, locations, names, launches, function_contracts,
+                        module_);
   Configs configs(source.unit(), source.diagnostics(), types, scalars,
                   locations, names);
   TargetDefinitions target_definitions(source.unit(), source.diagnostics(),
@@ -95,14 +99,17 @@ TEST_F(FunctionsTest,
                 IREE_SV("visibility.cpp"), options());
   Types types(source.unit(), source.diagnostics());
   Locations locations(source.unit(), source.diagnostics(), module_);
+  Scalars scalars(source.unit(), source.diagnostics(), types, locations,
+                  builder_);
+  Vectors vectors(source.unit(), source.diagnostics(), types, scalars,
+                  locations, builder_);
   SymbolNames names(source.unit(), source.diagnostics());
   LaunchContracts launches(source.unit(), source.diagnostics());
   FastMathContracts fastmath(source.unit(), source.diagnostics());
   FunctionContracts function_contracts(source.unit(), source.diagnostics());
-  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, locations,
-                        names, launches, function_contracts, module_);
-  Scalars scalars(source.unit(), source.diagnostics(), types, locations,
-                  builder_);
+  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, scalars,
+                        vectors, locations, names, launches, function_contracts,
+                        module_);
   Configs configs(source.unit(), source.diagnostics(), types, scalars,
                   locations, names);
   TargetDefinitions target_definitions(source.unit(), source.diagnostics(),
@@ -140,14 +147,17 @@ TEST_F(FunctionsTest, ConfiguredScenarioRetainsItsNativeRegionSignature) {
                 IREE_SV("scenario.cxx"), options());
   Types types(source.unit(), source.diagnostics(), module_);
   Locations locations(source.unit(), source.diagnostics(), module_);
+  Scalars scalars(source.unit(), source.diagnostics(), types, locations,
+                  builder_);
+  Vectors vectors(source.unit(), source.diagnostics(), types, scalars,
+                  locations, builder_);
   SymbolNames names(source.unit(), source.diagnostics());
   LaunchContracts launches(source.unit(), source.diagnostics());
   FastMathContracts fastmath(source.unit(), source.diagnostics());
   FunctionContracts function_contracts(source.unit(), source.diagnostics());
-  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, locations,
-                        names, launches, function_contracts, module_);
-  Scalars scalars(source.unit(), source.diagnostics(), types, locations,
-                  builder_);
+  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, scalars,
+                        vectors, locations, names, launches, function_contracts,
+                        module_);
   Configs configs(source.unit(), source.diagnostics(), types, scalars,
                   locations, names);
   TargetDefinitions target_definitions(source.unit(), source.diagnostics(),

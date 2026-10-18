@@ -1,0 +1,188 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl @pocket.text_stream_create(%raw_limit: offset, %transform_capacity: i64, %token_capacity: i64) -> (buffer, buffer, input.encoder)
+
+func.decl @pocket.text_stream_feed(%state: buffer, %pending: buffer, %encoder: input.encoder, %text: buffer, %begin: offset, %end: offset, %final: i32, %tokens: buffer, %token_capacity: i64) -> (i64, i64, i32, i32)
+
+func.decl @pocket.sentences_create(%input_limit: index) -> (buffer, buffer, buffer, input.decoder, input.decoder)
+
+func.decl @pocket.sentences_feed(%state: buffer, %queue: buffer, %scratch: buffer, %prefix: input.decoder, %suffix: input.decoder, %set: buffer, %set_count: index, %token: i32)
+
+func.decl @pocket.sentences_peek(%state: buffer) -> (i64, i32, i32)
+
+func.decl @pocket.sentences_read(%state: buffer, %queue: buffer) -> (buffer)
+
+func.decl @pocket.sentences_consume(%state: buffer, %queue: buffer)
+
+func.decl @pocket.sentences_finish(%state: buffer, %scratch: buffer, %prefix: input.decoder, %suffix: input.decoder)
+
+func.decl @pocket.packets_create(%input_limit: index) -> (buffer, buffer, buffer)
+
+func.decl @pocket.packets_feed(%state: buffer, %group: buffer, %packets: buffer, %sentence: buffer, %tokens: index, %fallback: buffer, %fallback_count: index, %limit: index) -> (buffer)
+
+func.decl @pocket.packets_peek(%state: buffer) -> (i64, i64, i32)
+
+func.decl @pocket.packets_finish(%state: buffer, %group: buffer, %packets: buffer, %limit: index) -> (buffer)
+
+func.decl @pocket.text_sets() -> (buffer, index, buffer, index)
+
+func.decl @pocket.check_input_count(%count: i64, %limit: i64)
+
+// Pipeline cursor words:
+// 0: cumulative encoded IDs, checked against the request input token limit.
+// 1: number of IDs in the bounded encoder window.
+// 2: next window ID for the sentence decoder.
+// 3: whether the encoder has completed final input.
+// 4: sentence-punctuation set length.
+// 5: fallback-punctuation set length.
+// 6: CPU or input-starvation work kind after the last preparation turn.
+// Every returned reference belongs to this request. Packet storage alone can
+// be replaced as a completed sentence produces a larger storage epoch.
+func.def public @pocket.input_create(%raw_limit: offset, %input_limit: index) -> (buffer, buffer, buffer, input.encoder, buffer, buffer, buffer, input.decoder, input.decoder, buffer, buffer, buffer, buffer, buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %state_bytes = index.constant 56 : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %zero = scalar.constant 0 : i32
+  buffer.fill %zero, %state[%origin], %state_bytes : i32
+  %transform_capacity = scalar.constant 4096 : i64
+  %token_capacity = scalar.constant 32 : i64
+  %normalizer, %normalized, %encoder = func.call @pocket.text_stream_create(%raw_limit, %transform_capacity, %token_capacity) : (offset, i64, i64) -> (buffer, buffer, input.encoder)
+  %sentences, %sentence_ids, %decoded, %prefix, %suffix = func.call @pocket.sentences_create(%input_limit) : (index) -> (buffer, buffer, buffer, input.decoder, input.decoder)
+  %groups, %group_text, %packets = func.call @pocket.packets_create(%input_limit) : (index) -> (buffer, buffer, buffer)
+  %token_bytes = index.constant 128 : offset
+  %tokens = buffer.alloca<private> align(4) %token_bytes : buffer
+  %sentence_set, %sentence_count, %fallback_set, %fallback_count = func.call @pocket.text_sets() : () -> (buffer, index, buffer, index)
+  %header = buffer.view %state[%origin] : buffer -> view<7xi64>
+  %sentence_count64 = index.cast %sentence_count : index to i64
+  %fallback_count64 = index.cast %fallback_count : index to i64
+  view.store %sentence_count64, %header[4] : i64, view<7xi64>
+  view.store %fallback_count64, %header[5] : i64, view<7xi64>
+  %cpu = scalar.constant 1 : i64
+  view.store %cpu, %header[6] : i64, view<7xi64>
+  func.return %state, %normalizer, %normalized, %encoder, %sentences, %sentence_ids, %decoded, %prefix, %suffix, %groups, %group_text, %packets, %tokens, %sentence_set, %fallback_set : buffer, buffer, buffer, input.encoder, buffer, buffer, buffer, input.decoder, input.decoder, buffer, buffer, buffer, buffer, buffer, buffer
+}
+
+// Completed packets have numerical priority. An empty epoch means starvation
+// only when the CPU pipeline has exhausted its currently available work.
+func.def public @pocket.input_work(%state: buffer, %groups: buffer) -> (i32) {
+  %unused_position, %packets, %complete = func.call @pocket.packets_peek(%groups) : (buffer) -> (i64, i64, i32)
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<7xi64>
+  %kind64 = view.load %header[6] : view<7xi64> -> i64
+  %kind = scalar.trunci %kind64 : i64 to i32
+  %zero64 = scalar.constant 0 : i64
+  %zero = scalar.constant 0 : i32
+  %terminal = scalar.constant 3 : i32
+  %finished = scalar.cmpi ne, %complete, %zero : i32
+  %ready = scalar.cmpi ne, %packets, %zero64 : i64
+  %waiting = scf.select %finished, %terminal, %kind : i32
+  %selected = scf.select %ready, %zero, %waiting : i32
+  func.return %selected : i32
+}
+
+// A CPU turn selects compatible next work from retained cursors. One turn
+// handles one input window, one decoded ID, one completed sentence, or one EOF
+// boundary. Numerical owners retire packets independently through consume.
+func.def public @pocket.input_prepare(%state: buffer, %normalizer: buffer, %normalized: buffer, %encoder: input.encoder, %sentences: buffer, %sentence_ids: buffer, %decoded: buffer, %prefix: input.decoder, %suffix: input.decoder, %groups: buffer, %group_text: buffer, %packets: buffer, %tokens: buffer, %sentence_set: buffer, %fallback_set: buffer, %text: buffer, %byte_offset: i64, %final: i32, %chunk_limit: index, %input_limit: index) -> (buffer, i64) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<7xi64>
+  %window_count = view.load %header[1] : view<7xi64> -> i64
+  %window_read = view.load %header[2] : view<7xi64> -> i64
+  %encoder_done = view.load %header[3] : view<7xi64> -> i64
+  %unused_position, %packet_count, %packets_done = func.call @pocket.packets_peek(%groups) : (buffer) -> (i64, i64, i32)
+  %sentence_count, %sentence_ready, %sentences_done = func.call @pocket.sentences_peek(%sentences) : (buffer) -> (i64, i32, i32)
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %four = scalar.constant 4 : i32
+  %five = scalar.constant 5 : i32
+  %six = scalar.constant 6 : i32
+  %encoding_finished = scalar.cmpi ne, %encoder_done, %zero64 : i64
+  %has_token = scalar.cmpi ult, %window_read, %window_count : i64
+  %sentences_finished = scalar.cmpi ne, %sentences_done, %zero : i32
+  %has_sentence = scalar.cmpi ne, %sentence_ready, %zero : i32
+  %packets_finished = scalar.cmpi ne, %packets_done, %zero : i32
+  %has_packet = scalar.cmpi ne, %packet_count, %zero64 : i64
+  %encoding = scf.select %encoding_finished, %two, %zero : i32
+  %decoding = scf.select %has_token, %one, %encoding : i32
+  %final_group = scf.select %sentences_finished, %four, %decoding : i32
+  %refining = scf.select %has_sentence, %three, %final_group : i32
+  %final_packets = scf.select %packets_finished, %six, %refining : i32
+  %operation = scf.select %has_packet, %five, %final_packets : i32
+  %operation_index = index.cast %operation : i32 to index
+  view.store %one64, %header[6] : i64, view<7xi64>
+  %output, %consumed = scf.switch %operation_index -> (buffer, i64) {
+    case 0 {
+      %count = view.load %header[0] : view<7xi64> -> i64
+      %limit64 = index.cast %input_limit : index to i64
+      %remaining = scalar.subi %limit64, %count : i64
+      %capacity = scalar.addi %remaining, %one64 : i64
+      %maximum = scalar.constant 32 : i64
+      %credit = scalar.minui %capacity, %maximum : i64
+      %offset_value = scalar.assume %byte_offset [range(%byte_offset, 0, 9223372036854775807)] : i64
+      %begin = index.cast %offset_value : i64 to offset
+      %end = buffer.length %text
+      %taken, %written, %done, %runnable = func.call @pocket.text_stream_feed(%normalizer, %normalized, %encoder, %text, %begin, %end, %final, %tokens, %credit) : (buffer, buffer, input.encoder, buffer, offset, offset, i32, buffer, i64) -> (i64, i64, i32, i32)
+      %next_count = scalar.addi %count, %written : i64
+      func.call @pocket.check_input_count(%next_count, %limit64) : (i64, i64)
+      view.store %next_count, %header[0] : i64, view<7xi64>
+      view.store %written, %header[1] : i64, view<7xi64>
+      view.store %zero64, %header[2] : i64, view<7xi64>
+      %done64 = scalar.extui %done : i32 to i64
+      view.store %done64, %header[3] : i64, view<7xi64>
+      %bytes = index.sub %end, %begin : offset
+      %bytes64 = index.cast %bytes : offset to i64
+      %has_input = scalar.cmpi ne, %taken, %bytes64 : i64
+      %has_output = scalar.cmpi ne, %written, %zero64 : i64
+      %finished = scalar.cmpi ne, %done, %zero : i32
+      %has_cpu = scalar.cmpi ne, %runnable, %zero : i32
+      %input_or_output = scalar.ori %has_input, %has_output : i1
+      %cpu_or_finished = scalar.ori %has_cpu, %finished : i1
+      %more = scalar.ori %input_or_output, %cpu_or_finished : i1
+      %input_kind = scalar.constant 2 : i64
+      %kind = scf.select %more, %one64, %input_kind : i64
+      view.store %kind, %header[6] : i64, view<7xi64>
+      scf.yield %packets, %taken : buffer, i64
+    }
+    case 1 {
+      %position_value = index.cast %window_read : i64 to index
+      %position = index.assume %position_value [ge(%position_value, 0), lt(%position_value, 32)] : index
+      %window = buffer.view %tokens[%origin] : buffer -> view<32xi32>
+      %token = view.load %window[%position] : view<32xi32> -> i32
+      %set_count64 = view.load %header[4] : view<7xi64> -> i64
+      %set_count = index.cast %set_count64 : i64 to index
+      func.call @pocket.sentences_feed(%sentences, %sentence_ids, %decoded, %prefix, %suffix, %sentence_set, %set_count, %token) : (buffer, buffer, buffer, input.decoder, input.decoder, buffer, index, i32)
+      %next = scalar.addi %window_read, %one64 : i64
+      view.store %next, %header[2] : i64, view<7xi64>
+      scf.yield %packets, %zero64 : buffer, i64
+    }
+    case 2 {
+      func.call @pocket.sentences_finish(%sentences, %decoded, %prefix, %suffix) : (buffer, buffer, input.decoder, input.decoder)
+      scf.yield %packets, %zero64 : buffer, i64
+    }
+    case 3 {
+      %sentence = func.call @pocket.sentences_read(%sentences, %sentence_ids) : (buffer, buffer) -> (buffer)
+      %count = index.cast %sentence_count : i64 to index
+      %fallback_count64 = view.load %header[5] : view<7xi64> -> i64
+      %fallback_count = index.cast %fallback_count64 : i64 to index
+      %output = func.call @pocket.packets_feed(%groups, %group_text, %packets, %sentence, %count, %fallback_set, %fallback_count, %chunk_limit) : (buffer, buffer, buffer, buffer, index, buffer, index, index) -> (buffer)
+      func.call @pocket.sentences_consume(%sentences, %sentence_ids) : (buffer, buffer)
+      scf.yield %output, %zero64 : buffer, i64
+    }
+    case 4 {
+      %output = func.call @pocket.packets_finish(%groups, %group_text, %packets, %chunk_limit) : (buffer, buffer, buffer, index) -> (buffer)
+      scf.yield %output, %zero64 : buffer, i64
+    }
+    default {
+      scf.yield %packets, %zero64 : buffer, i64
+    }
+  }
+  func.return %output, %consumed : buffer, i64
+}

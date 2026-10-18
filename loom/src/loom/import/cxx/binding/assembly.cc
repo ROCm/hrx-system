@@ -172,8 +172,8 @@ loom_symbol_ref_t AssemblyIntrinsic::fragment(
   }
   // The frontend has validated the raw delimiter; both delimiters have the
   // same length. Parse the original source slice to preserve exact locations.
-  if (last.line > UINT16_MAX || last.column > UINT16_MAX ||
-      first.column + opening + 1 > UINT16_MAX) {
+  if (opening >=
+      (iree_host_size_t)LOOM_LOCATION_COORDINATE_MAX - first.column) {
     diagnostics.reject(unit, source,
                        "assembly range exceeds Loom's location representation");
   }

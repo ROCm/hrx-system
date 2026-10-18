@@ -1,0 +1,43 @@
+// RUN: verify
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+
+using Source = loom::type::vector<loom::type::shape<loom::type::dynamic, 4>, int>;
+using Result = loom::type::vector<loom::type::shape<loom::type::dynamic, 8>, float>;
+Result entry(Source value) {
+  // ERROR@+1: LOWERING/059 "numeric conversion requires vectors with the same logical shape"
+  return loom::convert<Result>(value);
+}
+
+// ====
+#include <loomcxx/numeric.h>
+int entry(bool value) {
+  // ERROR@+1: LOWERING/059 "numeric conversion requires integer or floating-point scalars"
+  return loom::convert<int>(value);
+}
+
+// ====
+#include <loomcxx/numeric.h>
+bool entry(int value) {
+  // ERROR@+1: LOWERING/059 "numeric conversion requires integer or floating-point scalars"
+  return loom::convert<bool>(value);
+}
+
+// ====
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4>, bool>;
+using Result = loom::type::vector<loom::type::shape<4>, int>;
+Result entry(Source value) {
+  // ERROR@+1: LOWERING/059 "numeric conversion requires integer or floating-point elements"
+  return loom::convert<Result>(value);
+}
+
+// ====
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4>, int>;
+int entry(Source value) {
+  // ERROR@+1: LOWERING/059 "numeric conversion requires two scalars or two vectors"
+  return loom::convert<int>(value);
+}

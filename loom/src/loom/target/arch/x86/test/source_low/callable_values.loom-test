@@ -81,12 +81,12 @@ low.func.def public target<x86.avx2.core> abi(object_function) @call_vector_resu
   %c1 = mov.imm32 1
   %c2 = mov.imm32 2
   %c3 = mov.imm32 3
-  %27 = copy %c3 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %28 = cmp.select.imm.gpr64.gpr32 %lane, %input, %27, 0, "eq"
+  %27 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %28 = cmp.select.imm.gpr64.gpr32 %lane, %c1, %27, 1, "eq"
   %29 = copy %28 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %30 = cmp.select.imm.gpr64.gpr32 %lane, %c1, %29, 1, "eq"
+  %30 = cmp.select.imm.gpr64.gpr32 %lane, %c2, %29, 2, "eq"
   %31 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %result = cmp.select.imm.gpr64.gpr32 %lane, %c2, %31, 2, "eq"
+  %result = cmp.select.imm.gpr64.gpr32 %lane, %c3, %31, 3, "eq"
   return %result
 }
 

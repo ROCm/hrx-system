@@ -331,6 +331,7 @@ loom_cc_library(
         ":features",
         ":value_types",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/rewrite:rewriter",
@@ -458,6 +459,7 @@ loom_check_test_suite(
     # SPIR-V requires structured control flow. control_flow_legality owns that
     # rejection contract.
     srcs = [
+        "test/bfloat_collective_legalization.loom-test",
         "test/source_low/barrier.loom-test",
         "test/source_low/baseline.loom-test",
         "test/source_low/buffer_bulk.loom-test",

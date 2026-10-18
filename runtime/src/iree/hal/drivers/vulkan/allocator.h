@@ -22,6 +22,8 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_hal_vulkan_allocator_t iree_hal_vulkan_allocator_t;
+typedef struct iree_hal_vulkan_allocation_queue_t
+    iree_hal_vulkan_allocation_queue_t;
 typedef struct iree_hal_vulkan_queue_t iree_hal_vulkan_queue_t;
 
 typedef uint32_t iree_hal_vulkan_buffer_allocation_flags_t;
@@ -75,13 +77,13 @@ iree_status_t iree_hal_vulkan_allocator_create(
     iree_hal_vulkan_queue_t* sparse_binding_queue,
     iree_allocator_t host_allocator, iree_hal_allocator_t** out_allocator);
 
-// Creates placement-local progress services used by explicit Vulkan pools.
-// The caller keeps |proactor| alive through service teardown.
+// Creates the native allocation queue and capacity notification for this
+// device. The caller keeps |proactor| alive through service teardown.
 iree_status_t iree_hal_vulkan_allocator_initialize_memory_services(
     iree_hal_allocator_t* base_allocator, iree_async_proactor_t* proactor,
     iree_thread_affinity_t memory_affinity);
 
-// Releases the placement-local progress services.
+// Joins native allocation/free before releasing the queue and notification.
 void iree_hal_vulkan_allocator_deinitialize_memory_services(
     iree_hal_allocator_t* base_allocator);
 
@@ -90,9 +92,9 @@ void iree_hal_vulkan_allocator_deinitialize_memory_services(
 iree_async_notification_t* iree_hal_vulkan_allocator_memory_notification(
     iree_hal_allocator_t* base_allocator);
 
-// Borrows the placement-local cold memory owner. Available after memory-service
-// initialization and until deinitialization.
-iree_hal_memory_maintenance_t* iree_hal_vulkan_allocator_memory_maintenance(
+// Borrows the device-owned native allocation queue. Available after
+// memory-service initialization and until deinitialization.
+iree_hal_vulkan_allocation_queue_t* iree_hal_vulkan_allocator_allocation_queue(
     iree_hal_allocator_t* base_allocator);
 
 // Allocates one whole Vulkan buffer from a required memory type index.

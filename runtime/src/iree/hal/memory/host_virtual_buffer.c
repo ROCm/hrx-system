@@ -146,7 +146,6 @@ iree_status_t iree_hal_host_virtual_buffer_create(
     reservation->backing = (iree_hal_buffer_backing_facts_t){
         .notification = backend->notification,
         .tracker = frontier_tracker,
-        .maintenance = backend->maintenance,
         .maintenance_range = {.byte_length = options->byte_length},
         .allocation_alignment =
             iree_max(options->min_alignment, reservation->native.granularity),

@@ -58,37 +58,10 @@ static void iree_hal_amd_xdna_queue_service_abandon_all(
 static int iree_hal_amd_xdna_queue_service_main(void* user_data) {
   iree_hal_amd_xdna_queue_service_t* service =
       (iree_hal_amd_xdna_queue_service_t*)user_data;
-  IREE_TRACE_ZONE_BEGIN(z0);
   while (true) {
-    // Classify the existing predicate for tracing without adding production
-    // synchronization. An active service with no ready successor needs both
-    // acknowledgement and new work before it can run again.
-    IREE_TRACE(iree_zone_id_t wait_zone = 0);
-    IREE_TRACE({
-      iree_slim_mutex_lock(&service->mutex);
-      const bool waiting_for_acknowledgement = service->active != NULL;
-      const bool waiting_for_work = service->ready_head == NULL;
-      iree_slim_mutex_unlock(&service->mutex);
-      if (waiting_for_acknowledgement && waiting_for_work) {
-        IREE_TRACE_ZONE_BEGIN_NAMED(
-            z_wait,
-            "iree_hal_amd_xdna_queue_service_wait_for_work_and_"
-            "acknowledgement");
-        wait_zone = z_wait;
-      } else if (waiting_for_acknowledgement) {
-        IREE_TRACE_ZONE_BEGIN_NAMED(
-            z_wait, "iree_hal_amd_xdna_queue_service_wait_for_acknowledgement");
-        wait_zone = z_wait;
-      } else {
-        IREE_TRACE_ZONE_BEGIN_NAMED(
-            z_wait, "iree_hal_amd_xdna_queue_service_wait_for_work");
-        wait_zone = z_wait;
-      }
-    });
     iree_notification_await(&service->notification,
                             iree_hal_amd_xdna_queue_service_is_ready, service,
                             iree_infinite_timeout());
-    IREE_TRACE(IREE_TRACE_ZONE_END(wait_zone));
     if (iree_atomic_load(&service->stopping, iree_memory_order_acquire)) {
       break;
     }
@@ -129,7 +102,6 @@ static int iree_hal_amd_xdna_queue_service_main(void* user_data) {
       break;
     }
   }
-  IREE_TRACE_ZONE_END(z0);
   return 0;
 }
 

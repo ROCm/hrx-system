@@ -11,12 +11,14 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/reporting/format.h"
 #include "loomc/artifact.h"
 #include "loomc/artifact_manifest.h"
 #include "loomc/compile.h"
 #include "loomc/compile_report.h"
 #include "loomc/context.h"
 #include "loomc/emit.h"
+#include "loomc/interop.h"
 #include "loomc/launch_config.h"
 #include "loomc/link.h"
 #include "loomc/link_index.h"
@@ -47,6 +49,84 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) workgroup_size(64,
 }
 )");
   return DeserializeModule(context, workspace, source.get());
+}
+
+TEST(AmdgpuTargetTest, NativeReportSurvivesFailedExecutionCleanup) {
+  auto environment = CreateAmdgpuTargetEnvironment();
+  auto context = CreateAmdgpuContext(environment.get());
+  auto workspace = CreateWorkspace();
+  auto source = CreateTextSource("report.loom", R"(
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @report_kernel() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %lhs = vector.load %lhs_view[%tid] : view<64xf32> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%tid] : view<64xf32> -> vector<1xf32>
+  %sum = vector.addf %lhs, %rhs : vector<1xf32>
+  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32>
+  kernel.return
+}
+)");
+  auto module = DeserializeModule(context.get(), workspace.get(), source.get());
+  auto program = CreatePreparedLowPassProgram(context.get());
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.requested_detail_flags =
+      loom_target_compile_report_requested_detail_flags(
+          LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS);
+  const loomc_string_view_t filter = loomc_make_cstring_view("source-to-low");
+  const loomc_pass_trace_options_t trace = {
+      .type = LOOMC_STRUCTURE_TYPE_PASS_TRACE_OPTIONS,
+      .structure_size = sizeof(trace),
+      .after_filters = &filter,
+      .after_filter_count = 1,
+      .sink =
+          {
+              .write =
+                  [](void*, loomc_string_view_t) {
+                    return loomc_status_from_code(LOOMC_STATUS_UNAVAILABLE);
+                  },
+          },
+  };
+  const loomc_native_compile_report_options_t report_options = {
+      .type = LOOMC_STRUCTURE_TYPE_NATIVE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = &trace,
+      .report = &report,
+  };
+  const loomc_pass_run_options_t options = {.next = &report_options};
+  loomc_result_t* raw_result = nullptr;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_UNAVAILABLE,
+      loomc_pass_program_run(program.get(), workspace.get(), module.get(),
+                             &options, loomc_allocator_system(), &raw_result));
+  ResultPtr result(raw_result);
+  EXPECT_EQ(result.get(), nullptr);
+  EXPECT_GT(report.source_low_rows.count, 0u);
+  // Formatting consumes every retained row after invocation arenas and failed
+  // compilation facts have been reclaimed, while the public module stays live.
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  const loom_target_compile_report_format_options_t format = {
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
+  IREE_EXPECT_OK(
+      loom_target_compile_report_format_json(&report, &format, &stream));
+  const auto text = iree_string_builder_view(&builder);
+  EXPECT_NE(std::string(text.data, text.size).find("report_kernel"),
+            std::string::npos);
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&report);
 }
 
 TEST(AmdgpuTargetTest, ParsesArtifactKeyIdentity) {

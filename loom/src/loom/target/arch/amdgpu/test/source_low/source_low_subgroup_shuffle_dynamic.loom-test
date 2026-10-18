@@ -281,9 +281,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %valid = s_and_b64 %73, %85
   %selected = v_cndmask_b32_src0_inline %shuffle, %valid {false_value = 0}
   %valid_bits = v_cndmask_b32_src0_lit_src1_inline %valid {imm32 = 0, true_value = 1}
-  %93 = v_lshlrev_b32_src0_inline %item, 3
-  global_store_b32_saddr %93, %selected, %output_view
-  global_store_b32_saddr %93, %valid_bits, %output_view {offset = 4}
+  %91 = v_lshlrev_b32_src0_inline %item, 3
+  global_store_b32_saddr %91, %selected, %output_view
+  global_store_b32_saddr %91, %valid_bits, %output_view {offset = 4}
   return
 }
 
@@ -378,9 +378,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %valid = s_and_b64 %125, %135
   %selected = v_cndmask_b32_src0_inline %shuffle, %valid {false_value = 0}
   %valid_bits = v_cndmask_b32_src0_lit_src1_inline %valid {imm32 = 0, true_value = 1}
-  %143 = v_lshlrev_b32_src0_inline %item, 3
-  global_store_b32_saddr %143, %selected, %output_view
-  global_store_b32_saddr %143, %valid_bits, %output_view {offset = 4}
+  %141 = v_lshlrev_b32_src0_inline %item, 3
+  global_store_b32_saddr %141, %selected, %output_view
+  global_store_b32_saddr %141, %valid_bits, %output_view {offset = 4}
   return
 }
 
@@ -437,9 +437,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %valid = s_and_b64 %68, %78
   %selected = v_cndmask_b32_src0_inline %shuffle, %valid {false_value = 0}
   %valid_bits = v_cndmask_b32_src0_lit_src1_inline %valid {imm32 = 0, true_value = 1}
-  %86 = v_lshlrev_b32_src0_inline %item, 3
-  global_store_b32_saddr %86, %selected, %output_view
-  global_store_b32_saddr %86, %valid_bits, %output_view {offset = 4}
+  %85 = v_lshlrev_b32_src0_inline %item, 3
+  global_store_b32_saddr %85, %selected, %output_view
+  global_store_b32_saddr %85, %valid_bits, %output_view {offset = 4}
   return
 }
 
@@ -516,6 +516,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0
   %59 = v_mov_b32 0
   %offset = global_load_dword_saddr %59, %input_view : reg<amdgpu.vgpr>
   %width = global_load_dword_saddr %59, %input_view {offset = 4} : reg<amdgpu.vgpr>
+  %63 = s_mov_b32 0
   %65 = v_cmp_ne_i32_src1_inline %width {rhs = 0}
   %66 = v_cmp_le_u32_src1_inline %width {rhs = 64}
   %67 = s_and_b64 %65, %66
@@ -572,12 +573,11 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0
   %136 = v_lshlrev_b32_src0_inline %124, 2
   %shuffled = ds_bpermute_b32 %136, %value
   %valid = s_and_b64 %122, %135
-  %c0 = s_mov_b32 0
   %selected = v_cndmask_b32_src0_inline %shuffled, %valid {false_value = 0}
-  %142 = v_mov_b32_copy %c0
-  %valid_bits = v_cndmask_b32_src1_inline %142, %valid {true_value = 1}
-  %144 = v_lshlrev_b32_src0_inline %value, 3
-  global_store_dword_saddr %144, %selected, %output_view
-  global_store_dword_saddr %144, %valid_bits, %output_view {offset = 4}
+  %140 = v_mov_b32_copy %63
+  %valid_bits = v_cndmask_b32_src1_inline %140, %valid {true_value = 1}
+  %142 = v_lshlrev_b32_src0_inline %value, 3
+  global_store_dword_saddr %142, %selected, %output_view
+  global_store_dword_saddr %142, %valid_bits, %output_view {offset = 4}
   return
 }

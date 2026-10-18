@@ -101,7 +101,7 @@ TEST_F(OperandDictionaryParseTest, SortingPreservesValuesAndSourceSpans) {
     ASSERT_EQ(location->kind, LOOM_LOCATION_FILE);
     size_t parameter_spans = 0;
     for (uint16_t i = 0; i < location->file.field_span_count; ++i) {
-      const auto& span = location->file.field_spans[i];
+      const auto span = loom_location_file_field_span_at(location, i);
       if (span.kind != LOOM_LOCATION_FIELD_OPERAND || span.index == 0) {
         continue;
       }

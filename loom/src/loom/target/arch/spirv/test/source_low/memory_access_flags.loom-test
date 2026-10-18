@@ -37,51 +37,51 @@ func.def @observe_vector(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @observe_vector(%source_aligned: reg<spirv.ptr.storage_buffer>, %destination_aligned: reg<spirv.ptr.storage_buffer>) asm {
-  %69 = OpConstant.offset64 0
-  %70 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %69
-  %71 = OpLoad.storage_buffer.i32<volatile> %70
-  %72 = OpConstant.offset64 4
-  %73 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %72
-  %74 = OpLoad.storage_buffer.i32<volatile> %73
-  %75 = OpConstant.offset64 8
-  %76 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %75
-  %77 = OpLoad.storage_buffer.i32<volatile> %76
-  %78 = OpConstant.offset64 12
-  %79 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %78
-  %80 = OpLoad.storage_buffer.i32<volatile> %79
-  %81 = OpConstant.offset64 16
-  %82 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %81
-  %83 = OpLoad.storage_buffer.i32<volatile> %82
-  %86 = OpLoad.storage_buffer.i32<volatile> %70
-  %89 = OpLoad.storage_buffer.i32<volatile> %73
-  %92 = OpLoad.storage_buffer.i32<volatile> %76
-  %95 = OpLoad.storage_buffer.i32<volatile> %79
-  %98 = OpLoad.storage_buffer.i32<volatile> %82
-  %100 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %69
-  OpStore.storage_buffer.i32<volatile> %100, %71
-  %102 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %72
-  OpStore.storage_buffer.i32<volatile> %102, %74
-  %104 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %75
-  OpStore.storage_buffer.i32<volatile> %104, %77
-  %106 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %78
-  OpStore.storage_buffer.i32<volatile> %106, %80
-  %108 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %81
-  OpStore.storage_buffer.i32<volatile> %108, %83
-  %109 = OpConstant.offset64 20
-  %110 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %109
-  OpStore.storage_buffer.i32<volatile> %110, %86
-  %111 = OpConstant.offset64 24
-  %112 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %111
-  OpStore.storage_buffer.i32<volatile> %112, %89
-  %113 = OpConstant.offset64 28
-  %114 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %113
-  OpStore.storage_buffer.i32<volatile> %114, %92
-  %115 = OpConstant.offset64 32
-  %116 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %115
-  OpStore.storage_buffer.i32<volatile> %116, %95
-  %117 = OpConstant.offset64 36
-  %118 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %117
-  OpStore.storage_buffer.i32<volatile> %118, %98
+  %23 = OpConstant.offset64 0
+  %24 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %23
+  %25 = OpLoad.storage_buffer.i32<volatile> %24
+  %26 = OpConstant.offset64 4
+  %27 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %26
+  %28 = OpLoad.storage_buffer.i32<volatile> %27
+  %29 = OpConstant.offset64 8
+  %30 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %29
+  %31 = OpLoad.storage_buffer.i32<volatile> %30
+  %32 = OpConstant.offset64 12
+  %33 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %32
+  %34 = OpLoad.storage_buffer.i32<volatile> %33
+  %35 = OpConstant.offset64 16
+  %36 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source_aligned, %35
+  %37 = OpLoad.storage_buffer.i32<volatile> %36
+  %40 = OpLoad.storage_buffer.i32<volatile> %24
+  %43 = OpLoad.storage_buffer.i32<volatile> %27
+  %46 = OpLoad.storage_buffer.i32<volatile> %30
+  %49 = OpLoad.storage_buffer.i32<volatile> %33
+  %52 = OpLoad.storage_buffer.i32<volatile> %36
+  %54 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %23
+  OpStore.storage_buffer.i32<volatile> %54, %25
+  %56 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %26
+  OpStore.storage_buffer.i32<volatile> %56, %28
+  %58 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %29
+  OpStore.storage_buffer.i32<volatile> %58, %31
+  %60 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %32
+  OpStore.storage_buffer.i32<volatile> %60, %34
+  %62 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %35
+  OpStore.storage_buffer.i32<volatile> %62, %37
+  %63 = OpConstant.offset64 20
+  %64 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %63
+  OpStore.storage_buffer.i32<volatile> %64, %40
+  %65 = OpConstant.offset64 24
+  %66 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %65
+  OpStore.storage_buffer.i32<volatile> %66, %43
+  %67 = OpConstant.offset64 28
+  %68 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %67
+  OpStore.storage_buffer.i32<volatile> %68, %46
+  %69 = OpConstant.offset64 32
+  %70 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %69
+  OpStore.storage_buffer.i32<volatile> %70, %49
+  %71 = OpConstant.offset64 36
+  %72 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination_aligned, %71
+  OpStore.storage_buffer.i32<volatile> %72, %52
   return
 }
 

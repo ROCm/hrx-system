@@ -8,9 +8,30 @@
 
 #include <memory>
 
+#include "iree/async/notification.h"
 #include "iree/hal/slab_pool.h"
 
 namespace iree::hal::cts {
+
+bool WaitPoolCommittedBytes(iree_hal_pool_t* pool,
+                            iree_device_size_t expected) {
+  auto* notification = iree_hal_pool_notification(pool);
+  for (;;) {
+    const uint32_t token = iree_async_notification_begin_observe(notification);
+    iree_hal_pool_stats_t stats;
+    iree_hal_pool_query_stats(pool, &stats);
+    if (stats.bytes_committed == expected) {
+      iree_async_notification_end_observe(notification);
+      return true;
+    }
+    const bool signaled = iree_async_notification_wait_for_token(
+        notification, token, iree_infinite_timeout());
+    iree_async_notification_end_observe(notification);
+    if (!signaled) {
+      return false;
+    }
+  }
+}
 
 ImportedHostAllocation::~ImportedHostAllocation() {
   if (pointer) {

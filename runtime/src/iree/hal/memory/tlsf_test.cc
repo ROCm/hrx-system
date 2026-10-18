@@ -120,6 +120,36 @@ TEST(TLSFTest, InitializeAndDeinitialize) {
   iree_hal_memory_tlsf_deinitialize(&tlsf);
 }
 
+TEST(TLSFTest, RebindingRetainsGrownMetadataAndReplacesHistory) {
+  TestAllocatorState allocator = {iree_allocator_system()};
+  auto options = DefaultOptions();
+  options.initial_block_capacity = 1;
+  iree_hal_memory_tlsf_t tlsf;
+  IREE_ASSERT_OK(iree_hal_memory_tlsf_initialize(
+      options, TestAllocator(&allocator), &tlsf));
+  MAKE_FRONTIER(first, 1, E(TestQueueAxis(0), 7));
+  MAKE_FRONTIER(second, 1, E(TestQueueAxis(1), 13));
+  iree_hal_memory_tlsf_allocation_t allocations[16];
+  for (auto& allocation : allocations) {
+    IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &allocation));
+  }
+  for (const auto& allocation : allocations) {
+    iree_hal_memory_tlsf_free(&tlsf, allocation.block_index, first);
+  }
+  allocator.flags = kTestAllocatorFlagFailAllocation;
+  iree_hal_memory_tlsf_reset(&tlsf, second);
+  for (auto& allocation : allocations) {
+    IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &allocation));
+    ASSERT_NE(allocation.death_frontier, nullptr);
+    EXPECT_EQ(iree_async_frontier_compare(allocation.death_frontier, second),
+              IREE_ASYNC_FRONTIER_EQUAL);
+  }
+  for (const auto& allocation : allocations) {
+    iree_hal_memory_tlsf_free(&tlsf, allocation.block_index, nullptr);
+  }
+  iree_hal_memory_tlsf_deinitialize(&tlsf);
+}
+
 TEST(TLSFTest, ExactFitAtEverySizeClassRemainder) {
   // Exercise every aligned point inside bins large enough to contain multiple
   // alignments, across several first-level boundaries. A whole free range must

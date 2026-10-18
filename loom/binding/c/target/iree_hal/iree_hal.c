@@ -120,9 +120,8 @@ static loomc_status_t loomc_iree_hal_create_failed_result(
     loomc_status_t diagnostic_status, loomc_result_t** out_result) {
   *out_result = NULL;
   loomc_result_t* result = NULL;
-  loomc_status_t status =
-      loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
-                          LOOMC_SOURCE_RETENTION_EXACT, allocator, &result);
+  loomc_status_t status = loomc_result_create(
+      LOOMC_STATUS_OK, LOOMC_SOURCE_RETENTION_EXACT, allocator, &result);
   if (loomc_status_is_ok(status)) {
     status = loomc_result_fail_status_diagnostic_consume(
         result, NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR, code, diagnostic_status);

@@ -7,8 +7,10 @@
 #include "iree/hal/drivers/amdgpu/host_queue_pending.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <thread>
 
 #include "iree/async/frontier.h"
@@ -244,6 +246,129 @@ static iree_status_t CreateExplicitFixedBlockPool(
   return iree_ok_status();
 }
 
+// Holds a native provider's metadata allocation while real ROCr queue work
+// continues. Caller-side capture allocations never enter the hold.
+class NativeAllocationHold {
+ public:
+  ~NativeAllocationHold() { Release(); }
+
+  iree_allocator_t allocator() { return {this, Control}; }
+
+  void Arm() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    armed_ = true;
+    entered_ = released_ = false;
+  }
+
+  void WaitEntered() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return entered_; });
+  }
+
+  void Release() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    armed_ = false;
+    released_ = true;
+    condition_.notify_all();
+  }
+
+ private:
+  static iree_status_t Control(void* user_data,
+                               iree_allocator_command_t command,
+                               const void* params, void** inout_pointer) {
+    auto* hold = static_cast<NativeAllocationHold*>(user_data);
+    {
+      std::unique_lock<std::mutex> lock(hold->mutex_);
+      if (hold->armed_ && command == IREE_ALLOCATOR_COMMAND_CALLOC &&
+          std::this_thread::get_id() != hold->caller_) {
+        hold->armed_ = false;
+        hold->entered_ = true;
+        hold->condition_.notify_all();
+        hold->condition_.wait(lock, [&] { return hold->released_; });
+      }
+    }
+    const auto allocator = iree_allocator_system();
+    return allocator.ctl(allocator.self, command, params, inout_pointer);
+  }
+
+  // Serializes dependency ownership between the test and native worker.
+  std::mutex mutex_;
+  // Publishes native entry and releases the held dependency.
+  std::condition_variable condition_;
+  // Thread performing public queue capture, excluded from the hold.
+  std::thread::id caller_ = std::this_thread::get_id();
+  // Exactly one non-caller allocation is selected after setup completes.
+  bool armed_ = false;
+  // The allocation worker owns the selected dependency.
+  bool entered_ = false;
+  // The owner has authorized the native call to continue.
+  bool released_ = false;
+};
+
+TEST_F(HostQueuePendingTest, NativeAllocationDoesNotBlockCachedQueueWork) {
+  NativeAllocationHold native;
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+  TestLogicalDevice device;
+  IREE_ASSERT_OK(
+      device.Initialize(&options, &libhsa_, &topology_, native.allocator()));
+  auto* queue = device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
+  Ref<iree_hal_pool_t> source;
+  Ref<iree_hal_pool_t> finite;
+  IREE_ASSERT_OK(CreateExplicitFixedBlockPool(
+      device.device_group(), iree_hal_queue_family(&queue->base), 4096,
+      source.out(), finite.out()));
+  Ref<iree_hal_buffer_t> readback;
+  IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
+      device.allocator(), sizeof(uint32_t), readback.out()));
+  iree::hal::cts::SemaphoreList growing_ready(device.base_device(), {0}, {1});
+  iree::hal::cts::SemaphoreList cached_ready(device.base_device(), {0}, {1});
+  iree::hal::cts::SemaphoreList filled(device.base_device(), {0}, {1});
+  iree::hal::cts::SemaphoreList copied(device.base_device(), {0}, {1});
+  iree::hal::cts::SemaphoreList returned(device.base_device(), {0}, {1});
+  Ref<iree_hal_buffer_t> growing;
+  Ref<iree_hal_buffer_t> cached;
+  const auto request = iree_hal_make_pool_reservation_request(4096, 0);
+  const auto no_waits = iree_hal_semaphore_list_empty();
+  native.Arm();
+  // Release before resource teardown even when an assertion fails.
+  struct ScopedRelease {
+    ~ScopedRelease() { native.Release(); }
+    // Borrowed allocator dependency outliving all device resources.
+    NativeAllocationHold& native;
+  } release{native};
+  IREE_ASSERT_OK(iree_hal_queue_alloca(&queue->base, no_waits, growing_ready,
+                                       source, 1, &request, growing.out()));
+  native.WaitEntered();
+  EXPECT_FALSE(iree_hal_semaphore_list_poll(growing_ready));
+  IREE_ASSERT_OK(iree_hal_queue_alloca(&queue->base, no_waits, cached_ready,
+                                       finite, 1, &request, cached.out()));
+  const uint32_t pattern = 0xC01DCAFE;
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      &queue->base, cached_ready, filled, cached, 0, sizeof(pattern), &pattern,
+      sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_copy(&queue->base, filled, copied, cached, 0,
+                                     readback, 0, sizeof(pattern), nullptr,
+                                     IREE_HAL_COPY_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(copied, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  uint32_t result = 0;
+  IREE_ASSERT_OK(
+      iree_hal_buffer_map_read(readback, 0, &result, sizeof(result)));
+  EXPECT_EQ(result, pattern);
+  auto* buffer = cached.get();
+  IREE_ASSERT_OK(
+      iree_hal_queue_dealloca(&queue->base, copied, returned, 1, &buffer));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(returned, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_FALSE(iree_hal_semaphore_list_poll(growing_ready));
+  native.Release();
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      growing_ready, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+}
+
 TEST_F(HostQueuePendingTest,
        SynchronousPoolWaitsForNativeReclaimAfterTimeoutRollback) {
   constexpr iree_device_size_t kByteLength = 512;
@@ -420,10 +545,10 @@ static iree_status_t SeedWaitableFixedBlockReservation(
   const iree_hal_pool_reservation_request_t request =
       iree_hal_make_pool_reservation_request(allocation_size,
                                              /*min_alignment=*/1);
-  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations(
-      pool, 1, &request, /*requester_frontier=*/NULL,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation, &acquire_info,
-      &acquire_result));
+  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations_sync(
+      pool, 1, &request,
+      /*requester_frontier=*/NULL, &reservation, &acquire_info, &acquire_result,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE));
   if (acquire_result != IREE_HAL_POOL_ACQUIRE_OK &&
       acquire_result != IREE_HAL_POOL_ACQUIRE_OK_FRESH) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -720,7 +845,8 @@ TEST_F(HostQueuePendingTest, CapacityParkedHostActionRetriesAfterPostDrain) {
   HostActionStateDeinitialize(&action_state);
 }
 
-TEST_F(HostQueuePendingTest, QueueAllocaTlsfGrowthRetriesThroughColdPath) {
+TEST_F(HostQueuePendingTest,
+       QueueAllocaTlsfGrowthCompletesWithoutArtificialExhaustion) {
   const iree_device_size_t allocation_size = 4096;
 
   iree_hal_amdgpu_logical_device_options_t options;
@@ -774,7 +900,7 @@ TEST_F(HostQueuePendingTest, QueueAllocaTlsfGrowthRetriesThroughColdPath) {
   iree_hal_pool_stats_t stats;
   iree_hal_pool_query_stats(pool, &stats);
   EXPECT_GE(stats.slab_count, 2u);
-  EXPECT_GE(stats.exhausted_count, 1u);
+  EXPECT_EQ(stats.exhausted_count, 0u);
 
   iree_hal_buffer_release(buffer1);
   iree_hal_buffer_release(buffer0);
@@ -1015,10 +1141,9 @@ TEST_F(HostQueuePendingTest, CancelColdAllocaPreservesInheritedFrontier) {
   iree_hal_pool_reservation_t reservation;
   iree_hal_pool_acquire_info_t info;
   iree_hal_pool_acquire_result_t result;
-  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      pool, 1, &request, nullptr,
-      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, &reservation, &info,
-      &result));
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
+      pool, 1, &request, nullptr, &reservation, &info, &result,
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT);
   ASSERT_EQ(info.reuse_frontier->entry_count, 1u);
   EXPECT_EQ(info.reuse_frontier->entries[0].axis, queue->axis);

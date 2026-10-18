@@ -1,4 +1,4 @@
-// RUN: pass target-legalize{mode=eager}
+// RUN: pass target-legalize{mode=complete}
 
 wasm.target<simd128> @target
 
@@ -18,13 +18,5 @@ func.def target(@target) @transpose_i32_2x3(%a: i32, %b: i32, %c: i32, %d: i32, 
 wasm.target<simd128> @target
 
 func.def target(@target) @transpose_i32_2x3(%a: i32, %b: i32, %c: i32, %d: i32, %e: i32, %f: i32) -> (i32, i32, i32, i32, i32, i32) {
-  %23 = vector.from_elements %a, %d, %b, %e, %c, %f : vector<6xi32>
-  %transposed = vector.bitcast %23 : vector<6xi32> to vector<3x2xi32>
-  %r0 = vector.extract %transposed[0, 0] : vector<3x2xi32> -> i32
-  %r1 = vector.extract %transposed[0, 1] : vector<3x2xi32> -> i32
-  %r2 = vector.extract %transposed[1, 0] : vector<3x2xi32> -> i32
-  %r3 = vector.extract %transposed[1, 1] : vector<3x2xi32> -> i32
-  %r4 = vector.extract %transposed[2, 0] : vector<3x2xi32> -> i32
-  %r5 = vector.extract %transposed[2, 1] : vector<3x2xi32> -> i32
-  func.return %r0, %r1, %r2, %r3, %r4, %r5 : i32, i32, i32, i32, i32, i32
+  func.return %a, %d, %b, %e, %c, %f : i32, i32, i32, i32, i32, i32
 }

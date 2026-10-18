@@ -338,7 +338,7 @@ static iree_status_t loomc_cxx_capture_diagnostic(
   }
   return iree_status_from_loomc(
       loomc_result_add_loom_diagnostic(invocation->result, NULL, &mapped,
-                                       /*type_printer=*/NULL));
+                                       /*text_print_options=*/NULL));
 }
 
 static iree_status_t loomc_cxx_capture_source(void* user_data,
@@ -387,7 +387,7 @@ loomc_status_t loomc_cxx_preamble_create(
   loomc_status_t status = loomc_cxx_resolve_options(
       options, allocator, &native_options, &option_storage);
   if (loomc_status_is_ok(status)) {
-    status = loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+    status = loomc_result_create(LOOMC_STATUS_OK,
                                  loomc_context_source_retention(context),
                                  allocator, &invocation.result);
   }
@@ -418,8 +418,8 @@ loomc_status_t loomc_cxx_preamble_create(
         &native_preamble));
   }
   if (loomc_status_is_ok(status) && native_preamble == NULL) {
-    status =
-        loomc_result_set_state(invocation.result, LOOMC_RESULT_STATE_FAILED);
+    loomc_result_set_status_code(invocation.result,
+                                 LOOMC_STATUS_FAILED_PRECONDITION);
   }
   if (loomc_status_is_ok(status)) {
     *out_preamble = (loomc_cxx_preamble_t*)native_preamble;
@@ -467,7 +467,7 @@ loomc_status_t loomc_module_import_cxx(
   loomc_status_t status = loomc_cxx_resolve_options(
       options, allocator, &native_options, &option_storage);
   if (loomc_status_is_ok(status)) {
-    status = loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+    status = loomc_result_create(LOOMC_STATUS_OK,
                                  loomc_context_source_retention(context),
                                  allocator, &invocation.result);
   }
@@ -516,8 +516,8 @@ loomc_status_t loomc_module_import_cxx(
                                    LOOMC_MODULE_INPUT_STRUCTURALLY_VERIFIED);
       internal_module = NULL;
     } else {
-      status =
-          loomc_result_set_state(invocation.result, LOOMC_RESULT_STATE_FAILED);
+      loomc_result_set_status_code(invocation.result,
+                                   LOOMC_STATUS_FAILED_PRECONDITION);
     }
   }
   if (loomc_status_is_ok(status)) {

@@ -36,6 +36,7 @@ from loom.target.contracts.compile import (
     CONTRACT_ROW_NONE,
     CompiledCase,
     CompiledContractFragment,
+    CompiledDescriptorMatrix,
     CompiledIndexCase,
     CompiledOpSpan,
     compile_contract_index,
@@ -67,7 +68,7 @@ def test_compile_index_orders_priority_then_binding_and_local_order() -> None:
     ):
         index = compile_contract_index(fragments)
         assert index.dialect_base_id == 7
-        assert index.dialects == (((CONTRACT_ROW_NONE, 0),) * 3 + ((0, 3),),)
+        assert index.dialects == (((CONTRACT_ROW_NONE, 0, 0),) * 3 + ((0, 3, 3),),)
         assert index.cases == tuple(
             CompiledIndexCase(ContractSystem.VALUE_ALIAS, binding, row)
             for binding, row in rows
@@ -91,7 +92,7 @@ def test_compile_index_preserves_dialect_holes_and_fragment_ordinals() -> None:
     empty = replace(high, op_spans=(), cases=())
     index = compile_contract_index((high, empty, low))
     assert index.dialect_base_id == 7
-    assert index.dialects == (((CONTRACT_ROW_NONE, 0), (0, 1)), (), ((1, 1),))
+    assert index.dialects == (((CONTRACT_ROW_NONE, 0, 0), (0, 1, 1)), (), ((1, 1, 1),))
     assert [(case.binding_index, case.row_index) for case in index.cases] == [
         (2, 7),
         (0, 3),
@@ -107,6 +108,42 @@ def test_compile_index_preserves_metadata_only_rows() -> None:
     )
     assert compile_contract_index((fragment,)).cases == (
         CompiledIndexCase(ContractSystem.DESCRIPTOR_MATRIX, 0, 0),
+    )
+
+
+@pytest.mark.parametrize("target_query", [False, True])
+@pytest.mark.parametrize(
+    ("system", "row_index", "query_rule_count"),
+    [
+        (ContractSystem.DESCRIPTOR_RULE, 0, 1),
+        (ContractSystem.DESCRIPTOR_RULE_LOWERING_ONLY, 0, 0),
+        (ContractSystem.VALUE_ALIAS, 0, 1),
+        (ContractSystem.VALUE_ALIAS, CONTRACT_ROW_NONE, 0),
+        (ContractSystem.VALUE_ELIDE, 0, 1),
+        (ContractSystem.VALUE_ELIDE, CONTRACT_ROW_NONE, 0),
+        (ContractSystem.RECIPE_RULE, 0, 1),
+        (ContractSystem.RECIPE_RULE, CONTRACT_ROW_NONE, 0),
+        (ContractSystem.SOURCE_MEMORY, CONTRACT_ROW_NONE, 0),
+        (ContractSystem.ENVIRONMENT, CONTRACT_ROW_NONE, 0),
+        (ContractSystem.DESCRIPTOR_MATRIX, 0, 0),
+        (ContractSystem.UNSUPPORTED, CONTRACT_ROW_NONE, 0),
+    ],
+)
+def test_compile_index_counts_only_target_query_lower_rules(
+    system: ContractSystem, target_query: bool, row_index: int, query_rule_count: int
+) -> None:
+    fragment = replace(
+        _index_fragment(0x703, 0),
+        target_contract_query=target_query,
+        cases=(CompiledCase(system, row_index),),
+        descriptor_rules=(CompiledDescriptorRule(0),),
+        descriptor_matrices=(CompiledDescriptorMatrix("vector_mma"),),
+    )
+    entry = compile_contract_index((fragment,)).dialects[0][3]
+    assert (entry.case_start, entry.case_count, entry.query_rule_count) == (
+        0,
+        1,
+        query_rule_count if target_query else 0,
     )
 
 

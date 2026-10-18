@@ -1,0 +1,49 @@
+// RUN: with-checks pass-report specialize-target-callgraph,source-to-low,low-dce,test.aie2p-configuration-memory
+
+// Configuration materialization must pass the worker's source memory proofs to
+// leaf compilation. Its worker dependencies must agree with direct leaf
+// compilation using those same proofs. Source and output allocations are
+// independent; each input initialization still orders its load.
+aie2p.target<configuration> @configuration_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration_target) abi(array_program) @stream() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @initialize() asm {
+  %c0 = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  program.load %c0, %row, @worker
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @invoke() asm {
+  return
+}
+
+func.def target(@core_target) @worker() {
+  %bytes = index.constant 64 : offset
+  %base = index.constant 0 : offset
+  %source = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %output = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %source_view = buffer.view %source[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  view.store %c1, %source_view[0] : i32, view<16xi32>
+  view.store %c2, %source_view[1] : i32, view<16xi32>
+  %first = view.load %source_view[0] : view<16xi32> -> i32
+  %scaled_first = scalar.muli %first, %c2 : i32
+  view.store %scaled_first, %output_view[0] : i32, view<16xi32>
+  %second = view.load %source_view[1] : view<16xi32> -> i32
+  %scaled_second = scalar.muli %second, %c2 : i32
+  view.store %scaled_second, %output_view[1] : i32, view<16xi32>
+  func.return
+}
+
+// ----
+CHECK: *"memory_dependencies_preserved":true*

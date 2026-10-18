@@ -42,6 +42,17 @@ func.def @pocket.contains(%set: buffer, %codepoint: i32) -> (i1) {
   func.return %found : i1
 }
 
+// Continuing input withholds this family until a later character or EOF fixes
+// its interpretation. Membership stays with the terminal policy's exact sets.
+func.def public @pocket.rewrite_suffix(%codepoint: i32) -> (i1) {
+  %weak_set = global.load @pocket.weak_and_space : buffer
+  %closer_set = global.load @pocket.closers_and_space : buffer
+  %weak = func.call @pocket.contains(%weak_set, %codepoint) : (buffer, i32) -> (i1)
+  %closer = func.call @pocket.contains(%closer_set, %codepoint) : (buffer, i32) -> (i1)
+  %suffix = scalar.ori %weak, %closer : i1
+  func.return %suffix : i1
+}
+
 func.def @pocket.trim_suffix(%text: buffer, %end: offset, %set: buffer) -> (offset) {
   %origin = index.constant 0 : offset
   %true = scalar.constant true : i1
@@ -124,12 +135,8 @@ func.def @pocket.normalize_characters(%text: buffer, %begin: offset, %end: offse
   func.return %output, %written, %words : buffer, offset, i32
 }
 
-// Normalization for the pinned English checkpoint. Returns an exact-length
-// buffer and post-EOS frame count, including the upstream two-frame margin.
-// Empty/whitespace input returns an empty buffer; request admission rejects it.
-func.def public @pocket.normalize_text(%text: buffer) -> (buffer, i32) {
-  %begin, %end = func.call @text.trim(%text) : (buffer) -> (offset, offset)
-  %normalized, %length, %words = func.call @pocket.normalize_characters(%text, %begin, %end) : (buffer, offset, offset) -> (buffer, offset, i32)
+// Terminal policy shared by finite input and an unresolved continuing suffix.
+func.def public @pocket.finish_text(%normalized: buffer, %length: offset) -> (buffer) {
   %origin = index.constant 0 : offset
   %closer_set = global.load @pocket.closers_and_space : buffer
   %core = func.call @pocket.trim_suffix(%normalized, %length, %closer_set) : (buffer, offset, buffer) -> (offset)
@@ -181,6 +188,16 @@ func.def public @pocket.normalize_text(%text: buffer) -> (buffer, i32) {
     buffer.store.i8 %period, %output[%prefix_end]
   }
   buffer.copy %normalized[%suffix_begin], %output[%suffix_position], %suffix_bytes
+  func.return %output : buffer
+}
+
+// Normalization for the pinned English checkpoint. Returns an exact-length
+// buffer and post-EOS frame count, including the upstream two-frame margin.
+// Empty/whitespace input returns an empty buffer; request admission rejects it.
+func.def public @pocket.normalize_text(%text: buffer) -> (buffer, i32) {
+  %begin, %end = func.call @text.trim(%text) : (buffer) -> (offset, offset)
+  %normalized, %length, %words = func.call @pocket.normalize_characters(%text, %begin, %end) : (buffer, offset, offset) -> (buffer, offset, i32)
+  %output = func.call @pocket.finish_text(%normalized, %length) : (buffer, offset) -> (buffer)
   %four = scalar.constant 4 : i32
   %short = scalar.cmpi ule, %words, %four : i32
   %short_tail = scalar.constant 5 : i32

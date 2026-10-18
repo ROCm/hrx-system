@@ -346,6 +346,7 @@ iree_cc_library(
   SRCS
     "queue.c"
     "queue_admission.c"
+    "queue_memory.c"
     "queue_operation.c"
     "queue_profile.c"
   DEPS
@@ -491,10 +492,25 @@ iree_cc_library(
     iree::base
     iree::base::internal
     iree::hal
+    iree::hal::drivers::amd::fabric
     iree::hal::drivers::amd::fabric::memory_backend
-    iree::hal::memory::maintenance_thread
+    iree::hal::drivers::amd::fabric::slab_provider
     iree::hal::utils::device_spec_builder
     iree::hal::utils::files
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    allocation_tracker
+  HDRS
+    "testing/allocation_tracker.h"
+  DEPS
+    iree::base
+    iree::testing::gtest
+  TESTONLY
   PUBLIC
 )
 endif()
@@ -506,6 +522,7 @@ iree_cc_library(
   HDRS
     "testing/queue_test_util.h"
   DEPS
+    ::allocation_tracker
     ::device
     ::memory
     ::queue
@@ -516,6 +533,7 @@ iree_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::hal
+    iree::hal::drivers::amd::fabric
     iree::hal::drivers::amd::fabric::buffer
     iree::hal::drivers::amd::fabric::memory_backend
     iree::hal::drivers::amd::xdna::image::testing::image_fixture
@@ -551,6 +569,29 @@ iree_cc_test(
     iree::hal::drivers::amd::xdna::image::testing::image_fixture
     iree::hal::memory::slab_cache
     iree::hal::memory::tlsf_pool
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+iree_cc_test(
+  NAME
+    queue_memory_test
+  SRCS
+    "queue_memory_test.cc"
+  DEPS
+    ::queue
+    ::queue_test_util
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::xdna::image::testing::image_fixture
+    iree::hal::memory::fixed_block_pool
+    iree::hal::memory::tlsf_pool
+    iree::hal::testing::deferred_pool
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

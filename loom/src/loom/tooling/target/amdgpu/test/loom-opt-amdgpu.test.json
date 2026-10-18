@@ -29,6 +29,57 @@
           "non_empty": true
         }
       ]
+    },
+    {
+      "name": "default and prepared-low preserve the same serialized target facts",
+      "steps": [
+        {
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "{srcdir}/loom_opt_f32_arith.loom",
+              "--pipeline=prepared-low",
+              "--output={tmp}/prepared.loom"
+            ]
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "{srcdir}/loom_opt_f32_arith.loom",
+              "--pipeline=default",
+              "--require-resolved-config",
+              "--to=bytecode",
+              "--output={tmp}/default.loombc"
+            ]
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "{tmp}/default.loombc",
+              "--output={tmp}/default.loom"
+            ]
+          },
+          "stderr": {
+            "empty": true
+          },
+          "files": [
+            {
+              "path": "{tmp}/default.loom",
+              "equals": "{tmp}/prepared.loom"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

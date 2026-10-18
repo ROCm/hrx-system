@@ -471,6 +471,7 @@ def default_migration_types() -> tuple[Any, ...]:
     from loom.builtin_types import ALL_BUILTIN_TYPES
     from loom.dialect.check import ALL_CHECK_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
+    from loom.dialect.input import ALL_INPUT_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
     from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
 
@@ -478,6 +479,7 @@ def default_migration_types() -> tuple[Any, ...]:
         *ALL_BUILTIN_TYPES,
         *ALL_CHECK_TYPES,
         *ALL_HAL_TYPES,
+        *ALL_INPUT_TYPES,
         *ALL_KERNEL_TYPES,
         *ALL_SPIRV_TYPES,
     )

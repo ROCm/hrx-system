@@ -31,6 +31,7 @@ loom_cc_binary(
         "//loom/src/loom/tooling/config:input",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/tooling/io:source_path",
+        "//loom/src/loom/tooling/pass:loomc_trace",
         "//loom/src/loom/tooling/pass:trace_cli",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

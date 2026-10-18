@@ -11,6 +11,20 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    ir
+  HDRS
+    "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/configured_ir.h"
+  SRCS
+    "configured_ir.c"
+  DEPS
+    loom::binding::c::loomc
+    loom::target::configured::provider_set
+  ALWAYSLINK
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     configured
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/configured.h"
@@ -21,6 +35,19 @@ loom_cc_library(
     loom::target::configured::compiler_provider_set
   ALWAYSLINK
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    configured_ir_test
+  SRCS
+    "configured_ir_test.cc"
+  DEPS
+    ::ir
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::binding::c::test::test_util
 )
 
 loom_cc_test(

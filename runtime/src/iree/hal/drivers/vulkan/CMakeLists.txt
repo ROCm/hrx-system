@@ -80,6 +80,7 @@ iree_cc_library(
     iree::base
     iree::hal
     iree::hal::drivers::vulkan::util::libvulkan
+    iree::hal::memory::tracing
     iree::third_party::vulkan_headers
   PUBLIC
 )
@@ -383,6 +384,8 @@ iree_cc_library(
   NAME
     vulkan
   SRCS
+    "allocation_queue.c"
+    "allocation_queue.h"
     "allocator.c"
     "allocator.h"
     "api.c"
@@ -418,6 +421,7 @@ iree_cc_library(
     "physical_device_selection.h"
     "queue.c"
     "queue.h"
+    "queue_memory.c"
     "queue_stats.h"
     "semaphore.c"
     "semaphore.h"
@@ -446,8 +450,6 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::vulkan::device::library
     iree::hal::drivers::vulkan::util::libvulkan
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_provider
     iree::hal::memory::tracing

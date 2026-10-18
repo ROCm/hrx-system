@@ -113,9 +113,6 @@ static loomc_status_t loomc_compile_validate_options(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "compile options structure_size is too small");
   }
-  const loomc_target_specialization_options_t* target_specialization = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_resolve(
-      options->next, &target_specialization));
   LOOMC_RETURN_IF_ERROR(
       loomc_compile_validate_string_view(options->module_name));
   const loomc_compile_artifact_flags_t known_artifact_flags =
@@ -274,7 +271,7 @@ static loomc_status_t loomc_compile_specialize_functions(
       },
       function_versions, &error_count)));
   if (error_count != 0) {
-    return loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+    loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
   }
   return loomc_ok_status();
 }
@@ -564,15 +561,15 @@ static loomc_status_t loomc_compiled_module_product_create(
   return loomc_ok_status();
 }
 
-static loomc_status_t loomc_compile_resolve_target_specialization(
+static loomc_status_t loomc_compile_options_resolve(
     const loomc_compiler_t* compiler, const loomc_compile_options_t* options,
-    const loomc_target_specialization_options_t** out_target_specialization) {
-  *out_target_specialization = NULL;
+    loomc_option_chain_allowed_t allowed_options,
+    loomc_option_chain_t* out_option_chain) {
   LOOMC_RETURN_IF_ERROR(loomc_compile_validate_options(options));
-  LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_resolve(
-      options ? options->next : NULL, out_target_specialization));
+  LOOMC_RETURN_IF_ERROR(loomc_option_chain_resolve(
+      options ? options->next : NULL, allowed_options, out_option_chain));
   return loomc_target_specialization_options_validate_environment(
-      *out_target_specialization,
+      out_option_chain->target_specialization,
       loomc_context_target_environment(compiler->context));
 }
 
@@ -583,12 +580,10 @@ static loomc_status_t loomc_compile_prepared_module_into_result(
     loomc_compiler_t* compiler, loomc_workspace_t* workspace,
     const loomc_pass_program_t* pass_program, loomc_module_t* module,
     const loomc_compile_options_t* options,
-    const loomc_target_specialization_options_t* target_specialization,
+    const loomc_option_chain_t* option_chain,
     loom_target_specialization_request_list_t target_specializations,
     loom_target_declaration_binding_list_t target_bindings,
     const loomc_config_application_result_t* config_application,
-    loom_target_compile_report_t* compile_report,
-    const loomc_pass_trace_options_t* pass_trace_options,
     loomc_result_t* result) {
   IREE_ASSERT_ARGUMENT(compiler);
   IREE_ASSERT_ARGUMENT(workspace);
@@ -634,7 +629,7 @@ static loomc_status_t loomc_compile_prepared_module_into_result(
         launch_config_requested ? loom_kernel_launch_config_program_capability(
                                       &launch_config_program)
                                 : NULL,
-        compile_report, pass_trace_options, result);
+        option_chain, result);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       launch_config_requested) {
@@ -650,8 +645,8 @@ static loomc_status_t loomc_compile_prepared_module_into_result(
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_emit_requested_artifacts(
-        result, options, target_specialization, config_application, module,
-        launch_config_module);
+        result, options, option_chain->target_specialization,
+        config_application, module, launch_config_module);
   }
   if (!loomc_status_is_ok(status) || !loomc_result_succeeded(result)) {
     loomc_module_invalidate_verification(module);
@@ -672,8 +667,7 @@ static loomc_status_t loomc_compile_module_into_result(
     loomc_compiler_t* compiler, loomc_workspace_t* workspace,
     const loomc_pass_program_t* pass_program, loomc_module_t* module,
     const loomc_compile_options_t* options,
-    const loomc_target_specialization_options_t* target_specialization,
-    loom_target_compile_report_t* compile_report, loomc_result_t* result) {
+    const loomc_option_chain_t* option_chain, loomc_result_t* result) {
   IREE_ASSERT_ARGUMENT(compiler);
   IREE_ASSERT_ARGUMENT(workspace);
   IREE_ASSERT_ARGUMENT(pass_program);
@@ -687,6 +681,8 @@ static loomc_status_t loomc_compile_module_into_result(
       loomc_context_target_environment(compiler->context);
   loom_function_version_owner_t* function_versions =
       loomc_module_function_version_owner(module);
+  const loomc_target_specialization_options_t* target_specialization =
+      option_chain->target_specialization;
   loomc_config_application_result_t config_application = {0};
   loom_target_specialization_request_list_t target_specializations = {0};
   loom_target_declaration_binding_list_t target_bindings = {0};
@@ -718,10 +714,8 @@ static loomc_status_t loomc_compile_module_into_result(
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_prepared_module_into_result(
-        compiler, workspace, pass_program, module, options,
-        target_specialization, target_specializations, target_bindings,
-        &config_application, compile_report, /*pass_trace_options=*/NULL,
-        result);
+        compiler, workspace, pass_program, module, options, option_chain,
+        target_specializations, target_bindings, &config_application, result);
   }
   if (!loomc_status_is_ok(status) || !loomc_result_succeeded(result)) {
     loomc_module_invalidate_verification(module);
@@ -768,8 +762,7 @@ loomc_status_t loomc_compiler_create(loomc_context_t* context,
 static loomc_status_t loomc_compile_module_impl(
     loomc_compiler_t* compiler, loomc_workspace_t* workspace,
     const loomc_pass_program_t* pass_program, loomc_module_t* module,
-    const loomc_compile_options_t* options,
-    loom_target_compile_report_t* compile_report, loomc_allocator_t allocator,
+    const loomc_compile_options_t* options, loomc_allocator_t allocator,
     loomc_result_t** out_result) {
   if (out_result == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
@@ -790,9 +783,14 @@ static loomc_status_t loomc_compile_module_impl(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "pass program was created with another context");
   }
-  const loomc_target_specialization_options_t* target_specialization = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_compile_resolve_target_specialization(
-      compiler, options, &target_specialization));
+  loomc_option_chain_t option_chain = {0};
+  LOOMC_RETURN_IF_ERROR(loomc_compile_options_resolve(
+      compiler, options,
+      LOOMC_OPTION_CHAIN_ALLOW_TARGET_SPECIALIZATION |
+          LOOMC_OPTION_CHAIN_ALLOW_PASS_TRACE |
+          LOOMC_OPTION_CHAIN_ALLOW_NATIVE_PASS_REPORT |
+          LOOMC_OPTION_CHAIN_ALLOW_NATIVE_COMPILE_REPORT,
+      &option_chain));
   loom_module_t* internal_module = loomc_module_loom_module(module);
   if (internal_module == NULL) {
     return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
@@ -800,18 +798,14 @@ static loomc_status_t loomc_compile_module_impl(
   }
   LOOMC_RETURN_IF_ERROR(
       loomc_compile_validate_config_module(compiler, module, options));
-  if (compile_report != NULL) {
-    loom_target_compile_report_initialize_if_empty(
-        compile_report, iree_allocator_from_loomc(allocator));
-  }
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(
-      LOOMC_RESULT_STATE_SUCCEEDED,
-      loomc_context_source_retention(compiler->context), allocator, &result));
-  loomc_status_t status = loomc_compile_module_into_result(
-      compiler, workspace, pass_program, module, options, target_specialization,
-      compile_report, result);
+      LOOMC_STATUS_OK, loomc_context_source_retention(compiler->context),
+      allocator, &result));
+  loomc_status_t status =
+      loomc_compile_module_into_result(compiler, workspace, pass_program,
+                                       module, options, &option_chain, result);
   if (loomc_status_is_ok(status)) {
     *out_result = result;
     result = NULL;
@@ -828,29 +822,9 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
                                     loomc_allocator_t allocator,
                                     loomc_result_t** out_result) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  loomc_status_t return_status = loomc_compile_module_impl(
-      compiler, workspace, pass_program, module, options,
-      /*compile_report=*/NULL, allocator, out_result);
-  IREE_TRACE_ZONE_END(z0);
-  return return_status;
-}
-
-loomc_status_t loomc_compile_module_with_native_report(
-    loomc_compiler_t* compiler, loomc_workspace_t* workspace,
-    const loomc_pass_program_t* pass_program, loomc_module_t* module,
-    const loomc_compile_options_t* options,
-    loom_target_compile_report_t* report, loomc_allocator_t allocator,
-    loomc_result_t** out_result) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  if (report == NULL) {
-    loomc_status_t return_status = loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT, "report must not be NULL");
-    IREE_TRACE_ZONE_END(z0);
-    return return_status;
-  }
   loomc_status_t return_status =
       loomc_compile_module_impl(compiler, workspace, pass_program, module,
-                                options, report, allocator, out_result);
+                                options, allocator, out_result);
   IREE_TRACE_ZONE_END(z0);
   return return_status;
 }
@@ -924,16 +898,16 @@ loomc_status_t loomc_compile_artifact(
 
   loomc_result_t* result = NULL;
   loomc_status_t status = loomc_result_create(
-      LOOMC_RESULT_STATE_SUCCEEDED,
-      loomc_context_source_retention(compiler->context), allocator, &result);
+      LOOMC_STATUS_OK, loomc_context_source_retention(compiler->context),
+      allocator, &result);
   loomc_emit_transaction_t emit_transaction = {0};
   if (loomc_status_is_ok(status)) {
     status = loomc_emit_transaction_initialize(
         options ? options->emit_options : NULL, result, &emit_transaction);
   }
   if (loomc_status_is_ok(status)) {
-    loomc_emit_transaction_set_diagnostic_context(
-        &emit_transaction, internal_module, target_environment);
+    loomc_emit_transaction_set_diagnostic_environment(&emit_transaction,
+                                                      target_environment);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_module_admit(module, target_environment, result);
@@ -1056,14 +1030,13 @@ loomc_status_t loomc_compile_artifact(
     status = loomc_status_join(status, source_status);
     loomc_module_adopt_loom_module_replacement(module, internal_module,
                                                LOOMC_MODULE_INPUT_UNVERIFIED);
-    loomc_emit_transaction_set_diagnostic_context(
-        &emit_transaction, internal_module, target_environment);
     if (!loomc_status_is_ok(status)) {
       status = loomc_compile_fail_result_from_status(
           result, loomc_make_cstring_view("COMPILE/MATERIALIZE"), status);
     }
-    if (loomc_status_is_ok(status) && error_count != 0) {
-      status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+    if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
+        error_count != 0) {
+      loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
     }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
@@ -1096,13 +1069,13 @@ loomc_status_t loomc_compile_artifact(
         .structure_size = sizeof(compile_options),
         .artifact_flags = options ? options->artifact_flags : 0,
     };
+    option_chain.compile_report =
+        loomc_emit_transaction_compile_report(&emit_transaction);
     status = loomc_compile_prepared_module_into_result(
         compiler, workspace, selected_pass_program, module, &compile_options,
-        /*target_specialization=*/NULL, target_specializations,
+        &option_chain, target_specializations,
         (loom_target_declaration_binding_list_t){0},
-        /*config_application=*/NULL,
-        loomc_emit_transaction_compile_report(&emit_transaction),
-        option_chain.pass_trace, result);
+        /*config_application=*/NULL, result);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_emit_transaction_emit(&emit_transaction, target_environment,
@@ -1169,10 +1142,14 @@ loomc_status_t loomc_compile_request(
     IREE_TRACE_ZONE_END(z0);
     return return_status;
   }
-  const loomc_target_specialization_options_t* target_specialization = NULL;
+  loomc_option_chain_t option_chain = {0};
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loomc_compile_resolve_target_specialization(compiler, options,
-                                                      &target_specialization));
+      z0, loomc_compile_options_resolve(
+              compiler, options,
+              LOOMC_OPTION_CHAIN_ALLOW_TARGET_SPECIALIZATION |
+                  LOOMC_OPTION_CHAIN_ALLOW_PASS_TRACE |
+                  LOOMC_OPTION_CHAIN_ALLOW_NATIVE_PASS_REPORT,
+              &option_chain));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, loomc_compile_validate_config_module(compiler, NULL, options));
 
@@ -1183,10 +1160,9 @@ loomc_status_t loomc_compile_request(
       compiler->context, workspace, request, allocator, &module,
       /*out_root_symbols=*/NULL, &result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    status =
-        loomc_compile_module_into_result(compiler, workspace, pass_program,
-                                         module, options, target_specialization,
-                                         /*compile_report=*/NULL, result);
+    status = loomc_compile_module_into_result(compiler, workspace, pass_program,
+                                              module, options, &option_chain,
+                                              result);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_compiled_module_product_create(

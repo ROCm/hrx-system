@@ -686,21 +686,25 @@ loom_cc_library(
   HDRS
     "check/array_plan.h"
     "check/artifact.h"
+    "check/configuration.h"
     "check/leaf.h"
     "check/provider.h"
   SRCS
     "check/array_plan.c"
     "check/artifact.c"
+    "check/configuration.c"
     "check/leaf.c"
     "check/provider.c"
   DEPS
     ::array_plan
     ::array_program
     ::array_resident
+    ::artifact
     ::core_descriptors
     ::leaf_compile
     ::machine
     ::provider
+    ::target_facts
     iree::base
     iree::schemas::xdna_executable
     loom::analysis::symbol_facts
@@ -714,6 +718,10 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::ops::op_defs
+    loom::pass::report
+    loom::target::function_version
+    loom::target::pass_environment
+    loom::target::provider
     loom::target::reporting::report
     loom::tools::loom-check::execute
     loom::tools::loom-check::provider
@@ -897,6 +905,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "emit/configuration.loom-test"
     "test/array_plan/bank_spans.loom-test"
     "test/array_plan/binding_abi.loom-test"
     "test/array_plan/binding_view_admission.loom-test"
@@ -1331,12 +1340,12 @@ loom_cc_library(
     artifact
   HDRS
     "emit/artifact.h"
+    "emit/configuration.h"
   SRCS
     "emit/array_report.c"
     "emit/array_report.h"
     "emit/artifact.c"
     "emit/configuration.c"
-    "emit/configuration.h"
     "emit/configuration_report.c"
     "emit/configuration_report.h"
   DEPS

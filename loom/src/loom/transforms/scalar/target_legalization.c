@@ -522,36 +522,41 @@ iree_status_t loom_scalar_rewrite_float8_extension(
   return iree_ok_status();
 }
 
+static bool loom_scalar_match_extf(
+    const loom_target_legalizer_entry_t* entry,
+    const loom_target_legalization_context_t* context, const loom_op_t* op) {
+  (void)entry;
+  const loom_type_t input_type =
+      loom_module_value_type(context->module, loom_scalar_extf_input(op));
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_scalar_extf_result(op));
+  if (!loom_type_is_scalar(input_type)) {
+    return false;
+  }
+  const loom_scalar_type_t input_element = loom_type_element_type(input_type);
+  const loom_scalar_type_t result_element = loom_type_element_type(result_type);
+  if (result_element == LOOM_SCALAR_TYPE_F64) {
+    return loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
+                                         input_element);
+  }
+  return loom_scalar_type_set_contains(
+             LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2,
+             input_element) &&
+         (result_element == LOOM_SCALAR_TYPE_F16 ||
+          result_element == LOOM_SCALAR_TYPE_F32);
+}
+
 static iree_status_t loom_scalar_legalize_extf(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
   (void)entry;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-
   const loom_type_t input_type =
       loom_module_value_type(context->module, loom_scalar_extf_input(op));
   const loom_type_t result_type =
       loom_module_value_type(context->module, loom_scalar_extf_result(op));
-  loom_scalar_type_fp8_format_t format = {0};
-  const bool is_fp8 =
-      loom_scalar_type_fp8_format(loom_type_element_type(input_type), &format);
-  const bool widen_to_f64 =
-      loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_F64 &&
-      (is_fp8 ||
-       loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_16BIT_FLOAT,
-                                     loom_type_element_type(input_type)));
-  if (!loom_type_is_scalar(input_type) ||
-      (!widen_to_f64 &&
-       (!is_fp8 ||
-        (loom_type_element_type(result_type) != LOOM_SCALAR_TYPE_F16 &&
-         loom_type_element_type(result_type) != LOOM_SCALAR_TYPE_F32)))) {
-    return iree_ok_status();
-  }
 
-  if (!widen_to_f64) {
+  if (loom_type_element_type(result_type) != LOOM_SCALAR_TYPE_F64) {
     IREE_RETURN_IF_ERROR(loom_scalar_rewrite_float8_extension(context, op));
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
     return iree_ok_status();
@@ -1914,6 +1919,8 @@ static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
     },
     {
         .root_kind = LOOM_OP_SCALAR_EXTF,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
+        .match = loom_scalar_match_extf,
         .legalize = loom_scalar_legalize_extf,
     },
     {

@@ -50,6 +50,9 @@ typedef struct loom_vector_memory_footprint_state_t {
   // Call-scoped arena owning temporary verification analysis storage.
   iree_arena_allocator_t* arena;
 
+  // Reusable edge-derivation and projection scratch, reset between regions.
+  iree_arena_allocator_t* derivation_arena;
+
   // Per-function value facts visible to footprint proof.
   const loom_value_fact_table_t* fact_table;
 
@@ -1551,8 +1554,10 @@ static iree_status_t
 loom_vector_memory_footprint_condition_scope_for_assumption(
     loom_vector_memory_footprint_state_t* state,
     const loom_condition_fact_scope_t* parent, loom_value_id_t condition,
-    bool assumed_truth, const loom_condition_fact_scope_t** out_scope) {
+    bool assumed_truth, const loom_condition_fact_scope_t** out_scope,
+    loom_control_participant_zeros_t* out_zeros) {
   *out_scope = parent;
+  *out_zeros = 0;
   if (!state->fact_table) {
     return iree_ok_status();
   }
@@ -1561,6 +1566,15 @@ loom_vector_memory_footprint_condition_scope_for_assumption(
   IREE_RETURN_IF_ERROR(loom_condition_facts_query_complete(
       &state->expression_context.condition_query, state->fact_table, condition,
       assumed_truth, &derivation));
+  if (state->options->participants) {
+    if (state->expression_context.condition_scope) {
+      state->expression_context.condition_scope = NULL;
+      loom_symbolic_expr_context_reset(&state->expression_context);
+    }
+    IREE_RETURN_IF_ERROR(loom_control_participant_zeros_from_conditions(
+        &state->expression_context, derivation.integer_facts.integer_relations,
+        derivation.integer_facts.integer_relation_count, out_zeros));
+  }
   if (derivation.integer_facts.integer_relation_count == 0 &&
       derivation.boolean_fact_count == 0) {
     return iree_ok_status();
@@ -1589,6 +1603,8 @@ typedef struct loom_vector_memory_footprint_frame_t {
   loom_vector_memory_footprint_frame_kind_t kind;
   // Lexical condition facts active while processing this frame.
   const loom_condition_fact_scope_t* condition_scope;
+  // Topology coordinates proven zero by the complete enclosing control path.
+  loom_control_participant_zeros_t participant_zeros;
   union {
     // Region waiting to expand into block frames.
     loom_region_t* region;
@@ -1672,7 +1688,8 @@ static iree_status_t loom_vector_memory_footprint_query_relation_anchors(
 static iree_status_t loom_vector_memory_footprint_push_region(
     loom_vector_memory_footprint_state_t* state,
     loom_vector_memory_footprint_stack_t* stack, loom_region_t* region,
-    const loom_condition_fact_scope_t* condition_scope) {
+    const loom_condition_fact_scope_t* condition_scope,
+    loom_control_participant_zeros_t participant_zeros) {
   if (!region) {
     return iree_ok_status();
   }
@@ -1681,6 +1698,7 @@ static iree_status_t loom_vector_memory_footprint_push_region(
       (loom_vector_memory_footprint_frame_t){
           .kind = LOOM_VECTOR_MEMORY_FOOTPRINT_FRAME_REGION,
           .condition_scope = condition_scope,
+          .participant_zeros = participant_zeros,
           .region = region,
       });
 }
@@ -1688,15 +1706,21 @@ static iree_status_t loom_vector_memory_footprint_push_region(
 static iree_status_t loom_vector_memory_footprint_push_block(
     loom_vector_memory_footprint_state_t* state,
     loom_vector_memory_footprint_stack_t* stack, loom_block_t* block,
-    const loom_condition_fact_scope_t* condition_scope) {
+    const loom_condition_fact_scope_t* condition_scope,
+    loom_control_participant_zeros_t participant_zeros) {
   if (!block) {
     return iree_ok_status();
+  }
+  if (state->options->participants) {
+    IREE_RETURN_IF_ERROR(loom_control_participant_table_append(
+        state->options->participants, block, participant_zeros));
   }
   return loom_vector_memory_footprint_stack_push(
       state->arena, stack,
       (loom_vector_memory_footprint_frame_t){
           .kind = LOOM_VECTOR_MEMORY_FOOTPRINT_FRAME_BLOCK,
           .condition_scope = condition_scope,
+          .participant_zeros = participant_zeros,
           .block =
               {
                   .block = block,
@@ -1708,11 +1732,12 @@ static iree_status_t loom_vector_memory_footprint_push_block(
 static iree_status_t loom_vector_memory_footprint_push_structured_blocks(
     loom_vector_memory_footprint_state_t* state,
     loom_vector_memory_footprint_stack_t* stack, loom_region_t* region,
-    const loom_condition_fact_scope_t* condition_scope) {
+    const loom_condition_fact_scope_t* condition_scope,
+    loom_control_participant_zeros_t participant_zeros) {
   for (iree_host_size_t i = region->block_count; i > 0; --i) {
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_push_block(
         state, stack, loom_region_block(region, (uint16_t)(i - 1)),
-        condition_scope));
+        condition_scope, participant_zeros));
   }
   return iree_ok_status();
 }
@@ -1720,7 +1745,8 @@ static iree_status_t loom_vector_memory_footprint_push_structured_blocks(
 static iree_status_t loom_vector_memory_footprint_push_cfg_blocks(
     loom_vector_memory_footprint_state_t* state,
     loom_vector_memory_footprint_stack_t* stack, loom_region_t* region,
-    const loom_condition_fact_scope_t* condition_scope) {
+    const loom_condition_fact_scope_t* condition_scope,
+    loom_control_participant_zeros_t participant_zeros) {
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_ensure_dominance(state));
 
   const loom_value_fact_cfg_region_t* retained_region =
@@ -1729,7 +1755,7 @@ static iree_status_t loom_vector_memory_footprint_push_cfg_blocks(
   const loom_cfg_graph_t* graph = &retained_region->graph;
   if (graph->malformed) {
     return loom_vector_memory_footprint_push_structured_blocks(
-        state, stack, region, condition_scope);
+        state, stack, region, condition_scope, participant_zeros);
   }
   IREE_RETURN_IF_ERROR(loom_cfg_value_identity_table_update(
       &state->value_identities, retained_region, &state->dominance,
@@ -1744,10 +1770,21 @@ static iree_status_t loom_vector_memory_footprint_push_cfg_blocks(
       .user_data = &state->expression_context,
       .query = loom_vector_memory_footprint_query_relation_anchors,
   };
-  IREE_RETURN_IF_ERROR(loom_cfg_condition_relation_table_compute(
+  iree_arena_reset(state->derivation_arena);
+  loom_cfg_condition_edge_facts_t* edge_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_cfg_condition_derive_edges(
+      state->module, graph, state->fact_table, state->value_domain,
+      state->derivation_arena, &edge_facts));
+  IREE_RETURN_IF_ERROR(loom_cfg_condition_relation_table_compute_from_edges(
       state->module, graph, state->fact_table, &state->dominance,
       state->value_domain, &state->value_identities, &anchor_provider,
-      state->arena, condition_table));
+      edge_facts, state->derivation_arena, state->arena, condition_table));
+  loom_control_participant_zeros_t* block_zeros = NULL;
+  if (state->options->participants) {
+    IREE_RETURN_IF_ERROR(loom_control_participant_zeros_for_cfg(
+        graph, edge_facts, &state->expression_context, state->derivation_arena,
+        &block_zeros));
+  }
   for (iree_host_size_t i = graph->block_count; i > 0; --i) {
     uint16_t block_index = (uint16_t)(i - 1);
     if (!loom_cfg_graph_block_is_reachable(graph, block_index)) {
@@ -1757,6 +1794,8 @@ static iree_status_t loom_vector_memory_footprint_push_cfg_blocks(
     if (!block) {
       continue;
     }
+    const loom_control_participant_zeros_t zeros =
+        participant_zeros | (block_zeros ? block_zeros[block_index] : 0);
     const loom_cfg_condition_relation_view_t* block_view =
         loom_cfg_condition_relation_table_block(condition_table, block_index);
     if (block_view == NULL ||
@@ -1764,7 +1803,7 @@ static iree_status_t loom_vector_memory_footprint_push_cfg_blocks(
          block_view->boolean_values[0] == LOOM_CONDITION_RELATION_SET_EMPTY &&
          block_view->boolean_values[1] == LOOM_CONDITION_RELATION_SET_EMPTY)) {
       IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_push_block(
-          state, stack, block, condition_scope));
+          state, stack, block, condition_scope, zeros));
       continue;
     }
     loom_condition_fact_scope_t* block_scope = NULL;
@@ -1773,42 +1812,50 @@ static iree_status_t loom_vector_memory_footprint_push_cfg_blocks(
     loom_condition_fact_scope_initialize_indexed(
         condition_scope, condition_table, block_view, block_scope);
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_push_block(
-        state, stack, block, block_scope));
+        state, stack, block, block_scope, zeros));
   }
+  // All surviving proofs own their storage, and block summaries are copied.
+  iree_arena_reset(state->derivation_arena);
   return iree_ok_status();
 }
 
 static iree_status_t loom_vector_memory_footprint_expand_region(
     loom_vector_memory_footprint_state_t* state,
     loom_vector_memory_footprint_stack_t* stack, loom_region_t* region,
-    const loom_condition_fact_scope_t* condition_scope) {
+    const loom_condition_fact_scope_t* condition_scope,
+    loom_control_participant_zeros_t participant_zeros) {
   if (iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
-    return loom_vector_memory_footprint_push_cfg_blocks(state, stack, region,
-                                                        condition_scope);
+    return loom_vector_memory_footprint_push_cfg_blocks(
+        state, stack, region, condition_scope, participant_zeros);
   }
   return loom_vector_memory_footprint_push_structured_blocks(
-      state, stack, region, condition_scope);
+      state, stack, region, condition_scope, participant_zeros);
 }
 
 static iree_status_t loom_vector_memory_footprint_push_op_regions(
     loom_vector_memory_footprint_state_t* state,
     loom_vector_memory_footprint_stack_t* stack, loom_op_t* op,
-    const loom_condition_fact_scope_t* condition_scope) {
+    const loom_condition_fact_scope_t* condition_scope,
+    loom_control_participant_zeros_t participant_zeros) {
   if (loom_scf_if_isa(op)) {
     const loom_condition_fact_scope_t* else_scope = NULL;
+    loom_control_participant_zeros_t else_zeros = 0;
     IREE_RETURN_IF_ERROR(
         loom_vector_memory_footprint_condition_scope_for_assumption(
             state, condition_scope, loom_scf_if_condition(op),
-            /*assumed_truth=*/false, &else_scope));
+            /*assumed_truth=*/false, &else_scope, &else_zeros));
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_push_region(
-        state, stack, loom_scf_if_else_region(op), else_scope));
+        state, stack, loom_scf_if_else_region(op), else_scope,
+        participant_zeros | else_zeros));
     const loom_condition_fact_scope_t* then_scope = NULL;
+    loom_control_participant_zeros_t then_zeros = 0;
     IREE_RETURN_IF_ERROR(
         loom_vector_memory_footprint_condition_scope_for_assumption(
             state, condition_scope, loom_scf_if_condition(op),
-            /*assumed_truth=*/true, &then_scope));
+            /*assumed_truth=*/true, &then_scope, &then_zeros));
     return loom_vector_memory_footprint_push_region(
-        state, stack, loom_scf_if_then_region(op), then_scope);
+        state, stack, loom_scf_if_then_region(op), then_scope,
+        participant_zeros | then_zeros);
   }
 
   loom_region_t** regions = loom_op_regions(op);
@@ -1818,7 +1865,7 @@ static iree_status_t loom_vector_memory_footprint_push_op_regions(
         state->fact_table, regions[i - 1], condition_scope, state->arena,
         &region_scope));
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_push_region(
-        state, stack, regions[i - 1], region_scope));
+        state, stack, regions[i - 1], region_scope, participant_zeros));
   }
   return iree_ok_status();
 }
@@ -1839,7 +1886,8 @@ static iree_status_t loom_vector_memory_footprint_check_with_stack(
   IREE_RETURN_IF_ERROR(
       loom_vector_memory_footprint_stack_initialize(state->arena, &stack));
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_push_region(
-      state, &stack, root_region, /*condition_scope=*/NULL));
+      state, &stack, root_region, /*condition_scope=*/NULL,
+      /*participant_zeros=*/0));
 
   while (stack.count > 0) {
     if (loom_vector_memory_footprint_should_suppress_error(state)) {
@@ -1851,9 +1899,11 @@ static iree_status_t loom_vector_memory_footprint_check_with_stack(
       loom_region_t* region = frame->region;
       const loom_condition_fact_scope_t* condition_scope =
           frame->condition_scope;
+      const loom_control_participant_zeros_t participant_zeros =
+          frame->participant_zeros;
       loom_vector_memory_footprint_stack_pop(&stack);
       IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_expand_region(
-          state, &stack, region, condition_scope));
+          state, &stack, region, condition_scope, participant_zeros));
       continue;
     }
 
@@ -1875,7 +1925,7 @@ static iree_status_t loom_vector_memory_footprint_check_with_stack(
       }
     }
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_push_op_regions(
-        state, &stack, op, frame->condition_scope));
+        state, &stack, op, frame->condition_scope, frame->participant_zeros));
   }
   return iree_ok_status();
 }
@@ -1895,11 +1945,14 @@ iree_status_t loom_vector_memory_footprint_verify_function(
 
   iree_arena_allocator_t arena;
   iree_arena_initialize(module->arena.block_pool, &arena);
+  iree_arena_allocator_t derivation_arena;
+  iree_arena_initialize(module->arena.block_pool, &derivation_arena);
   loom_vector_memory_footprint_state_t state = {
       .module = module,
       .root_region = body,
       .options = options,
       .arena = &arena,
+      .derivation_arena = &derivation_arena,
       .fact_table = options->fact_table,
       .result = out_result,
   };
@@ -1928,9 +1981,13 @@ iree_status_t loom_vector_memory_footprint_verify_function(
     state.expression_context.value_identities = &state.value_identities;
     status = loom_vector_memory_footprint_check_with_stack(&state, body);
   }
+  if (iree_status_is_ok(status) && options->participants) {
+    loom_control_participant_table_publish(options->participants);
+  }
   if (!options->value_domain && state.value_domain) {
     loom_local_value_domain_release(&state.owned_value_domain);
   }
+  iree_arena_deinitialize(&derivation_arena);
   iree_arena_deinitialize(&arena);
   return status;
 }

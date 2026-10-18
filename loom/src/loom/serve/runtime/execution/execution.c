@@ -21,12 +21,8 @@ struct loom_serve_execution_t {
   iree_atomic_ref_count_t ref_count;
   // Allocator used for this object.
   iree_allocator_t host_allocator;
-  // Retained owner of the queues and semaphore domain.
-  iree_hal_device_t* device;
-  // Retained exact queue for command execution.
-  iree_hal_queue_t* dispatch_queue;
-  // Retained exact queue for host transfers.
-  iree_hal_queue_t* transfer_queue;
+  // Exact queues and inventory ownership held through final execution release.
+  loom_serve_execution_binding_t binding;
   // Shared physical command backing, independent of this model's timeline.
   loom_serve_workspace_t* workspace;
   // Ordered commands and input transfers for this model.
@@ -35,8 +31,10 @@ struct loom_serve_execution_t {
   loom_serve_execution_timeline_t feedback;
   // Protects timeline reservation through queue acceptance, never device waits.
   iree_slim_mutex_t mutex;
-  // Raw allocation/pool captures, transferable to the shared workspace owner.
+  // Transient allocation/pool captures governing workspace activity.
   loom_serve_workspace_scope_t* scope;
+  // Persistent allocation/pool captures, independent of workspace activity.
+  loom_serve_workspace_scope_t* storage_scope;
   // Model-visible views captured by execution and host payload transfers.
   loom_serve_retirement_t consumers;
 };
@@ -50,14 +48,13 @@ void loom_serve_execution_retain(loom_serve_execution_t* execution) {
 void loom_serve_execution_release(loom_serve_execution_t* execution) {
   if (execution && iree_atomic_ref_count_dec(&execution->ref_count) == 1) {
     loom_serve_retirement_deinitialize(&execution->consumers);
+    loom_serve_workspace_scope_retire(execution->storage_scope);
     loom_serve_workspace_scope_retire(execution->scope);
     loom_serve_workspace_release(execution->workspace);
     iree_slim_mutex_deinitialize(&execution->mutex);
     iree_hal_semaphore_release(execution->feedback.semaphore);
     iree_hal_semaphore_release(execution->work.semaphore);
-    iree_hal_queue_release(execution->transfer_queue);
-    iree_hal_queue_release(execution->dispatch_queue);
-    iree_hal_device_release(execution->device);
+    loom_serve_execution_binding_release(execution->binding);
     iree_allocator_free(execution->host_allocator, execution);
   }
 }
@@ -98,7 +95,7 @@ iree_status_t loom_serve_execution_alloca(
   const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
                                              &next_value};
   if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_alloca(execution->dispatch_queue, waits, signals,
+    status = iree_hal_queue_alloca(execution->binding.dispatch, waits, signals,
                                    pool, 1, request, out_buffer);
   }
   if (iree_status_is_ok(status)) {
@@ -119,6 +116,48 @@ iree_status_t loom_serve_execution_alloca(
   return status;
 }
 
+iree_status_t loom_serve_execution_alloca_from_pool(
+    loom_serve_execution_t* execution, iree_hal_pool_t* pool,
+    iree_host_size_t count, const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** out_buffers) {
+  memset(out_buffers, 0, count * sizeof(*out_buffers));
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  iree_status_t status = iree_ok_status();
+  if (!execution->storage_scope) {
+    status = loom_serve_workspace_scope_allocate(execution->workspace,
+                                                 /*tracks_workspace=*/false,
+                                                 &execution->storage_scope);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_serve_workspace_scope_reserve(execution->storage_scope, count);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_alloca(
+        execution->binding.dispatch,
+        (iree_hal_semaphore_list_t){1, &execution->work.semaphore,
+                                    &execution->work.submitted_value},
+        (iree_hal_semaphore_list_t){1, &execution->work.semaphore, &next_value},
+        pool, count, requests, out_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      iree_hal_pool_retain(pool);
+      loom_serve_workspace_scope_capture(execution->storage_scope, pool,
+                                         out_buffers[i]);
+    }
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
 iree_status_t loom_serve_execution_dealloca(loom_serve_execution_t* execution,
                                             iree_hal_buffer_t* buffer,
                                             uint64_t* out_value) {
@@ -134,7 +173,7 @@ iree_status_t loom_serve_execution_dealloca(loom_serve_execution_t* execution,
   const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
                                              &next_value};
   iree_hal_buffer_t* root = iree_hal_buffer_allocated_buffer(buffer);
-  iree_status_t status = iree_hal_queue_dealloca(execution->dispatch_queue,
+  iree_status_t status = iree_hal_queue_dealloca(execution->binding.dispatch,
                                                  waits, signals, 1, &root);
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
@@ -145,17 +184,9 @@ iree_status_t loom_serve_execution_dealloca(loom_serve_execution_t* execution,
 }
 
 iree_status_t loom_serve_execution_create(
-    iree_hal_queue_t* dispatch_queue, iree_hal_queue_t* transfer_queue,
-    loom_serve_workspace_t* workspace, iree_allocator_t host_allocator,
-    loom_serve_execution_t** out_execution) {
+    loom_serve_execution_queues_t* queues, loom_serve_workspace_t* workspace,
+    iree_allocator_t host_allocator, loom_serve_execution_t** out_execution) {
   *out_execution = NULL;
-  iree_hal_device_t* device =
-      iree_hal_queue_family_device(iree_hal_queue_family(dispatch_queue));
-  if (device !=
-      iree_hal_queue_family_device(iree_hal_queue_family(transfer_queue))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "execution queues must belong to the same device");
-  }
   loom_serve_execution_t* execution = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*execution),
                                              (void**)&execution));
@@ -165,14 +196,11 @@ iree_status_t loom_serve_execution_create(
   execution->host_allocator = host_allocator;
   execution->workspace = workspace;
   loom_serve_workspace_retain(workspace);
-  execution->device = device;
-  iree_hal_device_retain(device);
-  execution->dispatch_queue = dispatch_queue;
-  iree_hal_queue_retain(dispatch_queue);
-  execution->transfer_queue = transfer_queue;
-  iree_hal_queue_retain(transfer_queue);
-  iree_status_t status =
-      loom_serve_workspace_scope_allocate(workspace, &execution->scope);
+  execution->binding = loom_serve_execution_queues_acquire(queues);
+  iree_hal_device_t* device = iree_hal_queue_family_device(
+      iree_hal_queue_family(execution->binding.dispatch));
+  iree_status_t status = loom_serve_workspace_scope_allocate(
+      workspace, /*tracks_workspace=*/true, &execution->scope);
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_create(
         device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
@@ -233,7 +261,7 @@ iree_status_t loom_serve_execution_barrier(loom_serve_execution_t* execution,
       execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE
           ? iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                              "execution timeline is exhausted")
-          : iree_hal_queue_barrier(execution->dispatch_queue, dependencies,
+          : iree_hal_queue_barrier(execution->binding.dispatch, dependencies,
                                    signals, NULL,
                                    IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   if (iree_status_is_ok(status)) {
@@ -260,7 +288,7 @@ iree_status_t loom_serve_execution_execute(
   const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
                                              &next_value};
   iree_status_t status = iree_hal_queue_execute(
-      execution->dispatch_queue, waits, signals, command_buffer, bindings,
+      execution->binding.dispatch, waits, signals, command_buffer, bindings,
       IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
@@ -286,7 +314,7 @@ iree_status_t loom_serve_execution_dispatch(
   const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
                                              &next_value};
   iree_status_t status = iree_hal_queue_dispatch(
-      execution->dispatch_queue, waits, signals, executable, function, config,
+      execution->binding.dispatch, waits, signals, executable, function, config,
       iree_const_byte_span_empty(), bindings, NULL,
       IREE_HAL_DISPATCH_FLAG_NONE);
   if (iree_status_is_ok(status)) {
@@ -312,7 +340,7 @@ iree_status_t loom_serve_execution_transfer(
   const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
                                              &next_value};
   iree_status_t status =
-      iree_hal_queue_transfer(execution->transfer_queue, waits, signals,
+      iree_hal_queue_transfer(execution->binding.transfer, waits, signals,
                               operation_count, operations, NULL);
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
@@ -341,7 +369,7 @@ iree_status_t loom_serve_execution_feedback(
   const iree_hal_semaphore_list_t signals = {1, &execution->feedback.semaphore,
                                              &next_value};
   iree_status_t status =
-      iree_hal_queue_transfer(execution->transfer_queue, waits, signals,
+      iree_hal_queue_transfer(execution->binding.transfer, waits, signals,
                               operation_count, operations, NULL);
   if (iree_status_is_ok(status)) {
     execution->feedback.submitted_value = next_value;

@@ -1,0 +1,5 @@
+// RUN: verify
+func.def @mismatch(%callback: (i32) -> (i32)) {
+  // ERROR@+1: TYPE/001 {field_a="operands[0]", field_b="type annotation"}
+  func.return %callback : (i32) -> (f32)
+}

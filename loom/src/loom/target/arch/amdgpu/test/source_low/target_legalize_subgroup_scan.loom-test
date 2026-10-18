@@ -1,4 +1,4 @@
-// RUN: with-checks pass target-legalize{mode=eager,policy=prefer-native}
+// RUN: with-checks pass target-legalize{mode=complete,policy=prefer-native}
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
 
@@ -58,3 +58,33 @@ kernel.def target(@target) @clustered_scan_uses_reference_lowering() {
 CHECK: * = kernel.subgroup.active.mask : i32
 CHECK: *, * = kernel.subgroup.shuffle<index> * : i32, i32, i32
 CHECK-NOT: * = kernel.subgroup.scan<addi> *
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=prefer-native}
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+
+// This clustered shape rejects the native contract, but eager legalization
+// retains the scan so source cleanup can share its inputs before expansion.
+kernel.def target(@target) @keep_clustered_scan_compact() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: i32) {
+  %prefix = kernel.subgroup.scan<addi> %value {cluster_size = 16, direction = forward, mode = inclusive} : i32
+  test.use %prefix : i32
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+
+kernel.def target(@target) @keep_clustered_scan_compact() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: i32) {
+  %prefix = kernel.subgroup.scan<addi> %value {cluster_size = 16, direction = forward, mode = inclusive} : i32
+  test.use %prefix : i32
+  kernel.return
+}

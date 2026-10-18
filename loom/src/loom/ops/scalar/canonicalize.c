@@ -345,38 +345,30 @@ static iree_status_t loom_scalar_replace_single_result_with_binary_op(
                                                       replacement);
 }
 
-static iree_status_t loom_scalar_replace_single_result_with_unary_op(
-    loom_op_t* op, loom_rewriter_t* rewriter, loom_op_kind_t kind,
-    uint8_t instance_flags, loom_value_id_t input) {
+static iree_status_t loom_scalar_replace_single_result_with_integer_negation(
+    loom_op_t* op, loom_rewriter_t* rewriter, loom_value_id_t input) {
+  // Cleanup also runs after target legalization. Preserve its arithmetic
+  // primitives instead of recreating a negi that needs another legalization.
+  loom_builder_set_before(&rewriter->builder, op);
+  loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
+      op, rewriter, LOOM_VALUE_ID_INVALID, 0,
+      loom_scalar_single_result_type(rewriter, op), &zero));
+  return loom_scalar_replace_single_result_with_binary_op(
+      op, rewriter, LOOM_OP_SCALAR_SUBI, /*instance_flags=*/0, zero, input);
+}
+
+static iree_status_t loom_scalar_replace_single_result_with_negf(
+    loom_op_t* op, loom_rewriter_t* rewriter, uint8_t instance_flags,
+    loom_value_id_t input) {
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
   loom_type_t result_type = loom_scalar_single_result_type(rewriter, op);
 
   loom_op_t* replacement_op = NULL;
-  switch (kind) {
-    case LOOM_OP_SCALAR_NEGI: {
-      IREE_RETURN_IF_ERROR(loom_scalar_negi_build(&rewriter->builder, input,
-                                                  result_type, op->location,
-                                                  &replacement_op));
-      break;
-    }
-    case LOOM_OP_SCALAR_ABSI: {
-      IREE_RETURN_IF_ERROR(loom_scalar_absi_build(&rewriter->builder, input,
-                                                  result_type, op->location,
-                                                  &replacement_op));
-      break;
-    }
-    case LOOM_OP_SCALAR_NEGF: {
-      IREE_RETURN_IF_ERROR(
-          loom_scalar_negf_build(&rewriter->builder, instance_flags, input,
-                                 result_type, op->location, &replacement_op));
-      break;
-    }
-    default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported replacement scalar op kind %u",
-                              (unsigned)kind);
-  }
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_negf_build(&rewriter->builder, instance_flags, input,
+                             result_type, op->location, &replacement_op));
 
   loom_value_id_t replacement = loom_op_const_results(replacement_op)[0];
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
@@ -774,13 +766,13 @@ iree_status_t loom_scalar_muli_canonicalize(loom_op_t* op,
   }
   if (loom_scalar_op_has_no_instance_flags(op) &&
       loom_scalar_value_facts_are_exact_i64(rewriter, lhs, -1)) {
-    return loom_scalar_replace_single_result_with_unary_op(
-        op, rewriter, LOOM_OP_SCALAR_NEGI, /*instance_flags=*/0, rhs);
+    return loom_scalar_replace_single_result_with_integer_negation(op, rewriter,
+                                                                   rhs);
   }
   if (loom_scalar_op_has_no_instance_flags(op) &&
       loom_scalar_value_facts_are_exact_i64(rewriter, rhs, -1)) {
-    return loom_scalar_replace_single_result_with_unary_op(
-        op, rewriter, LOOM_OP_SCALAR_NEGI, /*instance_flags=*/0, lhs);
+    return loom_scalar_replace_single_result_with_integer_negation(op, rewriter,
+                                                                   lhs);
   }
   if (!loom_scalar_op_has_no_instance_flags(op)) {
     return iree_ok_status();
@@ -855,13 +847,8 @@ iree_status_t loom_scalar_divsi_canonicalize(loom_op_t* op,
     return loom_scalar_replace_single_result_with_value(op, rewriter, lhs);
   }
   if (loom_scalar_value_facts_are_exact_i64(rewriter, rhs, -1)) {
-    loom_builder_set_before(&rewriter->builder, op);
-    loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
-        op, rewriter, LOOM_VALUE_ID_INVALID, 0,
-        loom_scalar_single_result_type(rewriter, op), &zero));
-    return loom_scalar_replace_single_result_with_binary_op(
-        op, rewriter, LOOM_OP_SCALAR_SUBI, /*instance_flags=*/0, zero, lhs);
+    return loom_scalar_replace_single_result_with_integer_negation(op, rewriter,
+                                                                   lhs);
   }
   if (loom_scalar_value_facts_are_non_negative(rewriter, lhs) &&
       loom_scalar_value_facts_are_non_negative(rewriter, rhs)) {
@@ -1297,8 +1284,8 @@ iree_status_t loom_scalar_subf_canonicalize(loom_op_t* op,
   loom_value_id_t lhs = loom_scalar_subf_lhs(op);
   if (loom_scalar_fastmath_has_all(op, neg_flags) &&
       loom_scalar_value_facts_are_exact_float(rewriter, lhs, 0.0)) {
-    return loom_scalar_replace_single_result_with_unary_op(
-        op, rewriter, LOOM_OP_SCALAR_NEGF, loom_scalar_subf_fastmath(op), rhs);
+    return loom_scalar_replace_single_result_with_negf(
+        op, rewriter, loom_scalar_subf_fastmath(op), rhs);
   }
   return iree_ok_status();
 }

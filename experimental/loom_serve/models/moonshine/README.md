@@ -12,6 +12,13 @@ positions, or decoder positions. Each row owns its convolution history, encoder
 rings, attention memory, and decoder cache. A short recording can finish while
 a longer recording continues. Cancellation and output credit remain independent.
 
+Native consumers select transcript output and receive ordered revision events.
+Each event describes a replacement hypothesis at the model's input clock; the
+final document remains available after model retirement. Turn detection can run
+as an independent activity model on another device, sharing the server's worker
+pool. The microphone owner supplies pre-roll and decides when to finish an
+utterance, while Moonshine retains its own encoder and decoder history.
+
 The package consumes the original F32 tensors from
 [Moonshine Streaming Tiny](https://huggingface.co/moonshine-ai/moonshine-streaming-tiny/tree/f8e9dfd8c562c257c151a907b7b7f2fe8ff8511a)
 at revision `f8e9dfd8c562c257c151a907b7b7f2fe8ff8511a`. The numerical reference is
@@ -52,8 +59,9 @@ curl --fail-with-body -H 'Expect:' \
 
 The result is a JSON object such as `{"text":"Good day."}`. The decoder mixes
 channels and resamples encoded recordings to the model's 16 kHz mono format.
-Without optional codecs, the same endpoint accepts signed little-endian PCM16
-at exactly that geometry:
+Without optional codecs, the same endpoint accepts signed little-endian PCM16.
+Its declared sample rate and channel count drive native conversion to the
+model's 16 kHz mono geometry:
 
 ```sh
 curl --fail-with-body -H 'Expect:' \

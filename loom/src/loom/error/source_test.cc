@@ -34,6 +34,7 @@ TEST(SourceTest, DiagnosticWithoutOperationsHasNoSource) {
   EXPECT_EQ(diagnostic.params, &parameter);
   EXPECT_EQ(diagnostic.param_count, 1u);
   EXPECT_EQ(diagnostic.emitter, LOOM_EMITTER_PASS);
+  EXPECT_EQ(diagnostic.module, nullptr);
   EXPECT_EQ(diagnostic.severity, LOOM_DIAGNOSTIC_ERROR);
   EXPECT_EQ(diagnostic.origin.provenance,
             LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);
@@ -169,8 +170,8 @@ class SourceResolverTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&pool);
   }
   loom_location_id_t FileLocation(iree_string_view_t filename,
-                                  uint16_t start_line, uint16_t start_column,
-                                  uint16_t end_line, uint16_t end_column) {
+                                  uint32_t start_line, uint32_t start_column,
+                                  uint32_t end_line, uint32_t end_column) {
     loom_source_id_t source_id;
     IREE_CHECK_OK(loom_module_register_source(module, filename, &source_id));
     loom_location_id_t location;
@@ -188,6 +189,37 @@ class SourceResolverTest : public ::testing::Test {
   // Owner of the source and location namespaces under test.
   loom_module_t* module = nullptr;
 };
+
+TEST_F(SourceResolverTest, DiagnosticTypeOwnerDoesNotRequireAnOperation) {
+  loom_module_t* other_module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context, IREE_SV("other"), &pool,
+                                      nullptr, iree_allocator_system(),
+                                      &other_module));
+  const loom_diagnostic_param_t parameters[] = {
+      loom_param_string(IREE_SV("operand")),
+      loom_param_type(loom_type_scalar(LOOM_SCALAR_TYPE_F32)),
+      loom_param_string(IREE_SV("annotation")),
+      loom_param_type(loom_type_scalar(LOOM_SCALAR_TYPE_I32)),
+  };
+  loom_diagnostic_emission_t emission = {
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1),
+      .params = parameters,
+      .param_count = IREE_ARRAYSIZE(parameters),
+  };
+  loom_diagnostic_related_location_t
+      related_locations[LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS];
+  loom_diagnostic_t diagnostic;
+  loom_source_resolve_diagnostic(module, {}, LOOM_EMITTER_PASS, &emission,
+                                 related_locations, &diagnostic);
+  EXPECT_EQ(diagnostic.module, module);
+  emission.module = other_module;
+  loom_source_resolve_diagnostic(module, {}, LOOM_EMITTER_PASS, &emission,
+                                 related_locations, &diagnostic);
+  EXPECT_EQ(diagnostic.module, other_module);
+  EXPECT_EQ(diagnostic.origin.provenance,
+            LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);
+  loom_module_free(other_module);
+}
 
 TEST_F(SourceResolverTest,
        ExactResolutionRejectsUnavailableAndReversedCoordinates) {
@@ -229,15 +261,16 @@ TEST_F(SourceResolverTest,
 }
 
 TEST_F(SourceResolverTest, MissingSnapshotsRetainRecordedCoordinates) {
-  auto location = FileLocation(IREE_SV("kernel.cxx"), 3, 15, 3, 34);
+  auto location =
+      FileLocation(IREE_SV("kernel.cxx"), 70003, 80015, 90003, 100034);
   loom_source_range_t range = {};
   EXPECT_FALSE(loom_source_resolve({}, module, LOOM_LOCATION_UNKNOWN, &range));
   ASSERT_TRUE(loom_source_resolve({}, module, location, &range));
   EXPECT_TRUE(iree_string_view_equal(range.filename, IREE_SV("kernel.cxx")));
-  EXPECT_EQ(range.start_line, 3u);
-  EXPECT_EQ(range.start_column, 15u);
-  EXPECT_EQ(range.end_line, 3u);
-  EXPECT_EQ(range.end_column, 34u);
+  EXPECT_EQ(range.start_line, 70003u);
+  EXPECT_EQ(range.start_column, 80015u);
+  EXPECT_EQ(range.end_line, 90003u);
+  EXPECT_EQ(range.end_column, 100034u);
   EXPECT_EQ(range.provenance, LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);
   EXPECT_EQ(range.source.size, 0u);
   EXPECT_EQ(range.start, 0u);
@@ -246,7 +279,7 @@ TEST_F(SourceResolverTest, MissingSnapshotsRetainRecordedCoordinates) {
   loom_source_table_resolver_t table = {module, nullptr, 0};
   const loom_source_resolver_t resolver = {loom_source_table_resolve, &table};
   ASSERT_TRUE(loom_source_resolve(resolver, module, location, &range));
-  EXPECT_EQ(range.start_column, 15u);
+  EXPECT_EQ(range.start_column, 80015u);
   EXPECT_EQ(range.provenance, LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);
   // A present snapshot with incompatible coordinates cannot supply spelling.
   const loom_source_entry_t source = {0, IREE_SV("short"),
@@ -254,7 +287,7 @@ TEST_F(SourceResolverTest, MissingSnapshotsRetainRecordedCoordinates) {
   table.entries = &source;
   table.count = 1;
   ASSERT_TRUE(loom_source_resolve(resolver, module, location, &range));
-  EXPECT_EQ(range.end_column, 34u);
+  EXPECT_EQ(range.end_column, 100034u);
   EXPECT_EQ(range.source.size, 0u);
   EXPECT_EQ(range.provenance, LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);
 }

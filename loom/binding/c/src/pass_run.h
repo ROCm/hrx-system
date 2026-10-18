@@ -8,9 +8,8 @@
 #define LOOMC_PASS_RUN_H_
 
 #include "loom/pass/environment.h"
-#include "loom/target/reporting/report.h"
 #include "loomc/pass.h"
-#include "loomc/pass_trace.h"
+#include "option_chain.h"
 #include "visibility.h"
 
 #ifdef __cplusplus
@@ -25,9 +24,7 @@ LOOMC_API_PRIVATE loomc_status_t loomc_pass_program_run_into_result(
     const loomc_pass_program_t* pass_program, loomc_workspace_t* workspace,
     loomc_module_t* module,
     const loom_pass_environment_capability_t* launch_config_capability,
-    loom_target_compile_report_t* compile_report,
-    const loomc_pass_trace_options_t* pass_trace_options,
-    loomc_result_t* result);
+    const loomc_option_chain_t* options, loomc_result_t* result);
 
 #ifdef __cplusplus
 }  // extern "C"

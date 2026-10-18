@@ -7,7 +7,9 @@ The source modules provide numerical phases, native request commands, and the
 speech controller. Text preparation, registered-voice selection, chunking, and
 termination belong to the package. The serving runtime owns HTTP streaming and
 PCM encoding. Requests produce 80 ms blocks at 24 kHz, with independent history,
-sampling, cancellation, and output credit.
+sampling, cancellation, and input/output credit. Native callers can continue
+writing text while committed packets produce audio; the HTTP endpoint accepts
+one complete text request.
 
 The architecture follows
 [Pocket TTS](https://github.com/kyutai-labs/pocket-tts/tree/ec569b2dd3fec4a601b391aace185791e92b3785)
@@ -132,7 +134,9 @@ one model can register 1–256 voices. The asset directory contains the original
 | `context_capacity` | 512 | FlowLM positions per resident request |
 | `rotary_capacity` | 4096 | Absolute positions in each rotary table |
 | `chunk_tokens` | 50 | Maximum final tokens in one text chunk |
-| `input_tokens` | 4096 | Maximum tokens in the complete normalized input |
+| `input_tokens` | 4096 | Maximum cumulative tokens in the normalized input |
+| `text_capacity` | 4096 | Maximum raw UTF-8 bytes in one CPU input window |
+| `text_limit` | 65536 | Maximum cumulative raw UTF-8 bytes per request |
 | `request_capacity` | 4 | Independently resident request rows |
 | `batch_capacity` | 4 | Compatible next operations in one batch |
 | `threads` | 128 | Workitems per numerical workgroup |
@@ -143,12 +147,20 @@ tables cover both FlowLM and the codecs' sixteen positions per block. Batch
 capacity cannot exceed request capacity. Unknown or duplicate options, invalid
 voice metadata, and insufficient geometry fail during preparation.
 
-Whole-paragraph preparation follows the pinned English model's token-boundary
-sentence grouping, decimal handling, punctuation fallback, and final prompt
-normalization. Every chunk is admitted before numerical work begins. Oversized
-input or an indivisible sentence fails explicitly. Text packets retain token
-IDs, the final post-EOS tail, and the generation bound; output is never silently
-truncated to fit a request allocation.
+Text preparation follows the pinned English model's token-boundary sentence
+grouping, decimal handling, punctuation fallback, and final prompt normalization.
+The same source pipeline serves complete and continuing input. It retains only
+unresolved normalization, encoding, and sentence state, then admits packets as
+soon as later text can no longer change them. Voice conditioning can run before
+the first packet is ready. An available packet can begin numerical execution
+while the producer is still writing later text.
+
+Text packets retain token IDs, the final post-EOS tail, and the generation bound;
+output is never silently truncated to fit a request allocation. Cumulative byte
+and token limits are independent of packet and window sizes. Oversized input or
+an indivisible sentence fails explicitly. Continuing input can reveal such a
+failure after earlier audio has been delivered: the affected request terminates
+with an error, and peers retain their own input, state, and output credit.
 
 Literal tokenizer controls such as `<s>`, `<pad>`, and `</s>` retain their
 registered token IDs. Each ordinary text span around a raw control token receives
@@ -156,10 +168,41 @@ the tokenizer's declared normalization, including its prefix marker. These
 markers participate in chunk sizing and final model input.
 
 Each chunk restores its selected voice's retained prefix and starts fresh codec
-history. Its chunk index participates in sampling, while the published audio
+history. Its absolute chunk index participates in sampling, while the published audio
 position remains continuous across the paragraph. The controller emits only
 blocks before the EOS tail boundary and fails if generation exhausts its
 admitted extent. Requests accept speed `1` and no instruction text.
+
+## Continue text while receiving audio
+
+The native serving interface opens a request with
+`loom_serve_speech_request_initialize_stream`. Write bytes with
+`loom_serve_speech_stream_write`, advance by its accepted count, and publish
+explicit end-of-input with `loom_serve_speech_stream_finish`. The producer may
+split a UTF-8 character across writes. Only complete scalars reach the source
+pipeline. The [native speech contract](../../../../loom/src/loom/serve/service/speech/README.md#native-waveform-consumers)
+describes admission, input credit, waveform ownership, and cancellation.
+
+The source owns a persistent encoder and two independent decoders: one advances
+through the token prefix once; the other decodes a fresh suffix to resolve the
+model's decimal-boundary rule. `prepare_input` takes one ready CPU operation per
+turn on the existing task executor. It preserves ambiguous tokenizer history
+and unfinished sentence groups across input windows. Completed text is not
+reprocessed on every arrival. Final packet normalization and encoding remain
+the checkpoint's policy and happen once for each admitted packet.
+
+Packet storage is reused after its last numerical borrower retires. Its local
+read cursor does not determine the sampling counter: the absolute chunk ordinal
+advances independently and survives storage reuse. A temporarily empty packet
+queue waits for text or further CPU processing. It becomes stream completion
+only after explicit input EOF, final text preparation, and the last packet's
+numerical retirement. A slow waveform consumer makes only that request
+ineligible; another voice can continue accepting text and producing audio.
+
+A short input may need EOF before its first packet is stable. A sentence ending
+is not necessarily a commitment boundary because the checkpoint groups nearby
+sentences into one packet. Continuing input preserves the complete-input packet
+policy rather than selecting speech chunks from transport write boundaries.
 
 ## Phase and storage contract
 
@@ -317,7 +360,14 @@ voice length, a unique-writer bit, and the selected prefill token. Progress
 belongs to the record rather than the executable shape.
 
 `batch_request.loom` connects those work records to complete numerical phases.
-`batch_prefill_text` packs the selected tokens, including `-1` for BOS;
+`batch_prefill_text` handles BOS with token `-1`; text packets use
+`batch_prefill_prefix` from `prefix_program.loom`. The prefix path packs up to
+32 tokens per selected request, with independent request identity and absolute
+position in each packed column. `prefix_layout.loom`, `prefix_kernels.loom`, and
+`prefix_matrix.loom` own that geometry and its numerical operations. Tokens in
+one prefix operation reuse the same checkpoint weights while causal attention
+retains each request's history boundary.
+
 `batch_encode_voice` packs each selected 1,920-sample block from the registered
 `waveforms` tensor; `batch_generate_audio` packs seeds, samples independent
 noise, and decodes one block per ready request. The waveform tensor is shaped
@@ -325,10 +375,11 @@ noise, and decodes one block per ready request. The waveform tensor is shaped
 length retained in its work record. Padding is never encoded.
 
 Immutable device request rows contain only the full 64-bit seed, padded to 16
-bytes. Complete text packets remain in request-owned CPU storage. Preparing a
-work offer selects its next token without advancing the request; retirement
-advances the cursor. Text length therefore does not enlarge the device request
-bank, and a changed batch membership never changes token or seed identity.
+bytes. Admitted text packets remain in request-owned CPU storage. Preparing a
+work offer selects its next prefix span without advancing the request;
+retirement advances that request's cursor. Text length therefore does not
+enlarge the device request bank, and changed batch membership never changes
+token or seed identity.
 
 `batch_conditioning.loom` retains a separate FlowLM prefix for each registered
 voice. The bank stores twelve key/value planes with room for BOS and the longest

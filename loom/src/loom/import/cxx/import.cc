@@ -13,6 +13,7 @@
 
 #include "loom/analysis/callable_effect_inference.h"
 #include "loom/error/source.h"
+#include "loom/import/cxx/binding/numeric_conversion.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/translation.h"
@@ -63,7 +64,8 @@ iree_status_t loom_cxx_import(iree_string_view_t source,
   IREE_RETURN_IF_ERROR(loom_cxx_import_options_validate(options));
   using namespace loom::cxx_import;
   try {
-    Source parsed(source, filename, *options);
+    NumericConversionConstantEvaluator constant_evaluator;
+    Source parsed(source, filename, *options, &constant_evaluator);
     loom_module_t* raw_module = nullptr;
     check(loom_module_allocate(context, filename, block_pool, nullptr,
                                host_allocator, &raw_module));

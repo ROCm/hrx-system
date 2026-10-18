@@ -210,8 +210,9 @@ static iree_status_t CreateHostImport(HostImportCapture* capture, void* pointer,
           (coherent ? VK_MEMORY_PROPERTY_HOST_COHERENT_BIT : 0),
       0, 16, reinterpret_cast<VkDeviceMemory>(static_cast<uintptr_t>(0x1000)),
       0, 128, reinterpret_cast<VkBuffer>(static_cast<uintptr_t>(0x2000)), 128,
-      0, 0, pointer, iree_hal_buffer_release_callback_null(),
-      iree_allocator_system(), out_buffer);
+      0, 0, pointer, /*allocation_trace=*/nullptr,
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      out_buffer);
 }
 
 TEST(VulkanHostImportTest,

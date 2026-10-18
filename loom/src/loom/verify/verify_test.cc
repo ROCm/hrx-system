@@ -243,9 +243,9 @@ class VerifyTest : public ::testing::Test {
     return LOOM_SOURCE_ID_INVALID;
   }
 
-  loom_location_id_t AddFileLocation(const char* filename, uint16_t start_line,
-                                     uint16_t start_col, uint16_t end_line,
-                                     uint16_t end_col) {
+  loom_location_id_t AddFileLocation(const char* filename, uint32_t start_line,
+                                     uint32_t start_col, uint32_t end_line,
+                                     uint32_t end_col) {
     loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
     IREE_EXPECT_OK(loom_module_register_source(
         module_, iree_make_cstring_view(filename), &source_id));
@@ -1876,7 +1876,7 @@ TEST_F(VerifyTest, DuplicateTiedResultIndexDetected) {
   EnterTestFunc(arg_types, 2, args);
 
   loom_location_id_t location =
-      AddFileLocation(filename, 1, 1, 1, (uint16_t)sizeof(kSource));
+      AddFileLocation(filename, 1, 1, 1, sizeof(kSource));
   loom_location_field_span_t field_spans[] = {
       {
           .kind = LOOM_LOCATION_FIELD_RESULT,
@@ -1896,7 +1896,9 @@ TEST_F(VerifyTest, DuplicateTiedResultIndexDetected) {
       },
   };
   IREE_ASSERT_OK(loom_module_attach_location_field_spans(
-      module_, location, field_spans, IREE_ARRAYSIZE(field_spans)));
+      module_, location,
+      loom_location_field_span_array_wide(field_spans,
+                                          IREE_ARRAYSIZE(field_spans))));
 
   loom_type_t result_types[] = {f32_type, f32_type};
   loom_tied_result_t tied_results[] = {

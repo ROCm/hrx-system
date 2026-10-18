@@ -61,17 +61,12 @@ static iree_status_t iree_hal_host_slab_pool_plan_create(
           },
       .trace_name = plan->trace_name,
   };
-  iree_hal_slab_provider_t* shared_provider = NULL;
-  if (plan->mapping_source) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_shared_slab_provider_create(host_allocator, &shared_provider));
-  }
-  iree_status_t status = iree_hal_passthrough_pool_create(
-      options, shared_provider ? shared_provider : plan->backend->slab_provider,
-      plan->backend->notification, plan->frontier_tracker,
-      plan->backend->maintenance, host_allocator, out_pool);
-  iree_hal_slab_provider_release(shared_provider);
-  return status;
+  return iree_hal_passthrough_pool_create(
+      options,
+      plan->mapping_source ? plan->backend->mapping_provider
+                           : plan->backend->slab_provider,
+      plan->backend->notification, plan->frontier_tracker, host_allocator,
+      out_pool);
 }
 
 static const iree_hal_slab_pool_plan_vtable_t
@@ -187,7 +182,9 @@ static iree_status_t iree_hal_host_slab_pool_query(
   }
 
   iree_hal_slab_provider_properties_t properties;
-  iree_hal_slab_provider_query_properties(owner->slab_provider, &properties);
+  iree_hal_slab_provider_query_properties(
+      mapping_source ? owner->mapping_provider : owner->slab_provider,
+      &properties);
   iree_hal_buffer_usage_t usage = 0;
   for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
     if (!iree_hal_atomic_operation_capabilities_support(
@@ -401,8 +398,8 @@ static iree_status_t iree_hal_host_memory_backend_create_virtual_buffer(
 
 void iree_hal_host_memory_backend_initialize(
     iree_hal_slab_provider_t* slab_provider,
+    iree_hal_slab_provider_t* mapping_provider,
     iree_async_notification_t* notification,
-    iree_hal_memory_maintenance_t* maintenance,
     iree_hal_pool_epoch_query_t epoch_query,
     iree_hal_device_event_sink_t event_sink,
     iree_hal_host_memory_backend_t* out_backend) {
@@ -420,8 +417,8 @@ void iree_hal_host_memory_backend_initialize(
           },
       .event_sink = event_sink,
       .slab_provider = slab_provider,
+      .mapping_provider = mapping_provider,
       .notification = notification,
-      .maintenance = maintenance,
       .epoch_query = epoch_query,
   };
 }

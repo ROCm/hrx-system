@@ -1,0 +1,66 @@
+--- a/public/client/tracy_rpmalloc.cpp
++++ b/public/client/tracy_rpmalloc.cpp
+@@ -626,12 +626,14 @@
+ //! Run-time size limit of medium blocks
+ static size_t _memory_medium_size_limit;
+ //! Heap ID counter
+-static atomic32_t _memory_heap_id;
++static atomic32_t _memory_heap_id = {0};
+ //! Huge page support
+ static int _memory_huge_pages;
+ #if ENABLE_GLOBAL_CACHE
+ //! Global span cache
+-static global_cache_t _memory_span_cache[LARGE_CLASS_COUNT];
++// Constant initialization must precede the profiler's priority-ordered worker
++// startup. A default std::atomic constructor can otherwise run afterwards.
++static global_cache_t _memory_span_cache[LARGE_CLASS_COUNT] = {};
+ #endif
+ //! Global reserved spans
+ static span_t* _memory_global_reserve;
+@@ -642,7 +644,7 @@
+ //! All heaps
+ static heap_t* _memory_heaps[HEAP_ARRAY_SIZE];
+ //! Used to restrict access to mapping memory for huge pages
+-static atomic32_t _memory_global_lock;
++static atomic32_t _memory_global_lock = {0};
+ //! Orphaned heaps
+ static heap_t* _memory_orphan_heaps;
+ #if RPMALLOC_FIRST_CLASS_HEAPS
+@@ -651,27 +653,27 @@
+ #endif
+ #if ENABLE_STATISTICS
+ //! Allocations counter
+-static atomic64_t _allocation_counter;
++static atomic64_t _allocation_counter = {0};
+ //! Deallocations counter
+-static atomic64_t _deallocation_counter;
++static atomic64_t _deallocation_counter = {0};
+ //! Active heap count
+-static atomic32_t _memory_active_heaps;
++static atomic32_t _memory_active_heaps = {0};
+ //! Number of currently mapped memory pages
+-static atomic32_t _mapped_pages;
++static atomic32_t _mapped_pages = {0};
+ //! Peak number of concurrently mapped memory pages
+ static int32_t _mapped_pages_peak;
+ //! Number of mapped master spans
+-static atomic32_t _master_spans;
++static atomic32_t _master_spans = {0};
+ //! Number of unmapped dangling master spans
+-static atomic32_t _unmapped_master_spans;
++static atomic32_t _unmapped_master_spans = {0};
+ //! Running counter of total number of mapped memory pages since start
+-static atomic32_t _mapped_total;
++static atomic32_t _mapped_total = {0};
+ //! Running counter of total number of unmapped memory pages since start
+-static atomic32_t _unmapped_total;
++static atomic32_t _unmapped_total = {0};
+ //! Number of currently mapped memory pages in OS calls
+-static atomic32_t _mapped_pages_os;
++static atomic32_t _mapped_pages_os = {0};
+ //! Number of currently allocated pages in huge allocations
+-static atomic32_t _huge_pages_current;
++static atomic32_t _huge_pages_current = {0};
+ //! Peak number of currently allocated pages in huge allocations
+ static int32_t _huge_pages_peak;
+ #endif

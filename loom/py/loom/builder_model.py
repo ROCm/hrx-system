@@ -161,6 +161,8 @@ def attr_type_hint(attr_def: AttrDef | None) -> str:
             return "float"
         case "string":
             return "str"
+        case "string_array":
+            return "Sequence[str]"
         case "bool":
             return "bool"
         case "enum":

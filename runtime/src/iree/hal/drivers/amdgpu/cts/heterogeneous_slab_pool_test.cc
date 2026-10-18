@@ -7,11 +7,11 @@
 #include <array>
 #include <vector>
 
+#include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/task/registration/driver_module.h"
 #include "iree/hal/memory/fixed_block_pool.h"
-#include "iree/hal/memory/maintenance.h"
 #include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/memory/tlsf_pool.h"
 
@@ -96,19 +96,6 @@ class HeterogeneousSlabPoolTest : public CtsTestBase<> {
     iree_hal_driver_release(host_driver_);
     iree_hal_driver_registry_free(registry_);
     CtsTestBase::TearDown();
-  }
-
-  // Joins queued child/cache returns, including work they enqueue. A pending
-  // frontier callback can still enqueue native source retirement afterward.
-  void JoinMaintenance(iree_hal_pool_t* source) {
-    iree_hal_memory_maintenance_call(
-        source->maintenance,
-        [](void* user_data) {
-          auto* owner = static_cast<iree_hal_memory_maintenance_t*>(user_data);
-          while (iree_hal_memory_maintenance_run_one(owner)) {
-          }
-        },
-        source->maintenance);
   }
 
   iree_status_t CreateSource(iree_hal_pool_t** out_source) {
@@ -327,7 +314,6 @@ TEST_P(HeterogeneousSlabPoolTest, BothQueuesPublishSharedNativeStorage) {
       IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
           deallocated, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
       buffer.reset();
-      JoinMaintenance(source);
       iree_hal_pool_query_stats(child, &stats);
       EXPECT_EQ(stats.bytes_committed, 0u);
     }
@@ -339,7 +325,7 @@ TEST_P(HeterogeneousSlabPoolTest, BothQueuesPublishSharedNativeStorage) {
   EXPECT_EQ(cache_stats.hit_count, 3u);
   EXPECT_EQ(cache_stats.ready_count, 1u);
   iree_hal_pool_trim(cache, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
-  JoinMaintenance(source);
+  ASSERT_TRUE(WaitPoolCommittedBytes(source, 0));
   iree_hal_pool_query_stats(cache, &stats);
   EXPECT_EQ(stats.bytes_committed, 0u);
   iree_hal_pool_query_stats(source, &stats);

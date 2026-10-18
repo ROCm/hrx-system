@@ -200,6 +200,16 @@ static bool loom_print_pipeline_attr_value_is_printable(
     }
     case LOOM_ATTR_STRING:
       return attr->string_id < ctx->module->strings.count;
+    case LOOM_ATTR_STRING_ARRAY:
+      if (attr->count > 0 && !attr->string_ids) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (attr->string_ids[i] >= ctx->module->strings.count) {
+          return false;
+        }
+      }
+      return true;
     case LOOM_ATTR_I64_ARRAY:
       return attr->count == 0 || attr->i64_array != NULL;
     case LOOM_ATTR_BYTES:

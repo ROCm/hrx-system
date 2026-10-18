@@ -778,6 +778,14 @@ static iree_status_t loom_bytecode_number_leaf_attribute(
     case LOOM_ATTR_STRING:
       return loom_bytecode_numbering_intern_module_string(
           numbering, attr.string_id, &unused_id);
+    case LOOM_ATTR_STRING_ARRAY: {
+      iree_status_t status = iree_ok_status();
+      for (uint16_t i = 0; i < attr.count && iree_status_is_ok(status); ++i) {
+        status = loom_bytecode_numbering_intern_module_string(
+            numbering, attr.string_ids[i], &unused_id);
+      }
+      return status;
+    }
     case LOOM_ATTR_ENUM_ARRAY: {
       loom_enum_array_t unused_array = loom_enum_array_empty();
       return loom_bytecode_get_enum_array(attr, descriptor, &unused_array);

@@ -56,6 +56,26 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @narrow_integer_extens
 
 // ====
 
+// Truncation changes the physical carrier only when leaving i64. Every
+// narrower non-predicate result retains the low bits of its i32 carrier.
+func.def @integer_truncations(%wide: i64, %word: i32, %half: i16) -> (i8, i16, i32, i8, i16, i8) {
+  %wide_byte = scalar.trunci %wide : i64 to i8
+  %wide_half = scalar.trunci %wide : i64 to i16
+  %wide_word = scalar.trunci %wide : i64 to i32
+  %word_byte = scalar.trunci %word : i32 to i8
+  %word_half = scalar.trunci %word : i32 to i16
+  %half_byte = scalar.trunci %half : i16 to i8
+  func.return %wide_byte, %wide_half, %wide_word, %word_byte, %word_half, %half_byte : i8, i16, i32, i8, i16, i8
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @integer_truncations(%wide: reg<wasm.i64>, %word_half: reg<wasm.i32>, %half_byte: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %wide_byte = i32.wrap_i64 %wide
+  return %wide_byte, %wide_byte, %wide_byte, %word_half, %word_half, %half_byte
+}
+
+// ====
+
 // Narrow floating values use unsigned integer lane payloads without conversion.
 func.def @byte_lanes(%input: vector<16xf8E4M3>, %replacement: f8E4M3, %condition: i1) -> (vector<16xi8>, f8E4M3) {
   %last = vector.extract %input[15] : vector<16xf8E4M3> -> f8E4M3

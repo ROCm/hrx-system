@@ -22,8 +22,6 @@ static const char* IREE_HAL_WEBGPU_SLAB_PROVIDER_TRACE_ID =
 typedef struct iree_hal_webgpu_slab_provider_t {
   // Base slab provider for vtable dispatch and reference counting.
   iree_hal_slab_provider_t base;
-  // Host allocator used for provider metadata and buffer wrappers.
-  iree_allocator_t host_allocator;
   // Parent HAL device used for allocation placement metadata.
   iree_hal_device_t* parent_device;
   // Borrowed bridge handle for the native GPUDevice.
@@ -78,8 +76,7 @@ static iree_status_t iree_hal_webgpu_slab_provider_create(
                                              (void**)&provider));
   memset(provider, 0, sizeof(*provider));
   iree_hal_slab_provider_initialize(&iree_hal_webgpu_slab_provider_vtable,
-                                    &provider->base);
-  provider->host_allocator = host_allocator;
+                                    host_allocator, &provider->base);
   provider->parent_device = parent_device;
   provider->device_handle = device_handle;
   provider->queue_family_affinity = queue_family_affinity;
@@ -89,8 +86,7 @@ static iree_status_t iree_hal_webgpu_slab_provider_create(
   provider->total_released = IREE_ATOMIC_VAR_INIT(0);
 
   iree_status_t status = iree_hal_memory_trace_initialize(
-      trace_name, IREE_HAL_WEBGPU_SLAB_PROVIDER_TRACE_ID, host_allocator,
-      &provider->trace);
+      trace_name, IREE_HAL_WEBGPU_SLAB_PROVIDER_TRACE_ID, &provider->trace);
   if (iree_status_is_ok(status)) {
     *out_provider = &provider->base;
   } else {
@@ -103,7 +99,7 @@ static void iree_hal_webgpu_slab_provider_destroy(
     iree_hal_slab_provider_t* base_provider) {
   iree_hal_webgpu_slab_provider_t* provider =
       (iree_hal_webgpu_slab_provider_t*)base_provider;
-  iree_allocator_t host_allocator = provider->host_allocator;
+  iree_allocator_t host_allocator = provider->base.host_allocator;
   iree_hal_memory_trace_deinitialize(&provider->trace);
   iree_allocator_free(host_allocator, provider);
 }
@@ -148,7 +144,7 @@ static iree_status_t iree_hal_webgpu_slab_provider_acquire_slab(
       placement, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       iree_hal_buffer_usage_access(provider->supported_usage),
       provider->supported_usage, allocation_size, buffer_handle,
-      /*mapped_at_creation=*/false, provider->host_allocator, &buffer);
+      /*mapped_at_creation=*/false, provider->base.host_allocator, &buffer);
   if (iree_status_is_ok(status)) {
     out_slab->base_ptr = NULL;
     out_slab->length = allocation_size;
@@ -199,7 +195,7 @@ static iree_status_t iree_hal_webgpu_slab_provider_wrap_buffer(
       (iree_hal_buffer_t*)(uintptr_t)slab->provider_handle;
   iree_status_t status = iree_hal_subspan_buffer_create_with_callback(
       slab_buffer, slab_offset, allocation_size, release_callback,
-      provider->host_allocator, out_buffer);
+      provider->base.host_allocator, out_buffer);
   if (iree_status_is_ok(status)) {
     (*out_buffer)->allowed_access = allowed_access;
     (*out_buffer)->allowed_usage = allowed_usage;
@@ -275,11 +271,26 @@ static void iree_hal_webgpu_slab_provider_query_properties(
   };
 }
 
+static void iree_hal_webgpu_slab_provider_acquire_slabs(
+    iree_hal_slab_provider_t* provider,
+    iree_hal_slab_acquire_request_t* request) {
+  iree_hal_slab_provider_acquire_slabs_inline(
+      provider, request, iree_hal_webgpu_slab_provider_acquire_slab,
+      iree_hal_webgpu_slab_provider_release_slab);
+}
+
+static void iree_hal_webgpu_slab_provider_release_slabs(
+    iree_hal_slab_provider_t* provider,
+    iree_hal_slab_release_request_t* request) {
+  iree_hal_slab_provider_release_slabs_inline(
+      provider, request, iree_hal_webgpu_slab_provider_release_slab);
+}
+
 static const iree_hal_slab_provider_vtable_t
     iree_hal_webgpu_slab_provider_vtable = {
         .destroy = iree_hal_webgpu_slab_provider_destroy,
-        .acquire_slab = iree_hal_webgpu_slab_provider_acquire_slab,
-        .release_slab = iree_hal_webgpu_slab_provider_release_slab,
+        .acquire_slabs = iree_hal_webgpu_slab_provider_acquire_slabs,
+        .release_slabs = iree_hal_webgpu_slab_provider_release_slabs,
         .wrap_buffer = iree_hal_webgpu_slab_provider_wrap_buffer,
         .validate_asan_options =
             iree_hal_webgpu_slab_provider_validate_asan_options,
@@ -330,7 +341,7 @@ static iree_status_t iree_hal_webgpu_slab_pool_plan_create(
   iree_status_t status = iree_hal_webgpu_slab_provider_create(
       plan->backend->device, plan->backend->device_handle,
       plan->queue_family_affinity, plan->usage, plan->trace_name,
-      host_allocator, &provider);
+      iree_hal_device_host_allocator(plan->backend->device), &provider);
   if (iree_status_is_ok(status)) {
     const iree_hal_passthrough_pool_options_t options = {
         .memory_contract = plan->contract,
@@ -340,7 +351,7 @@ static iree_status_t iree_hal_webgpu_slab_pool_plan_create(
     };
     status = iree_hal_passthrough_pool_create(
         options, provider, plan->backend->notification, plan->frontier_tracker,
-        plan->backend->maintenance, host_allocator, out_pool);
+        host_allocator, out_pool);
   }
   iree_hal_slab_provider_release(provider);
   return status;

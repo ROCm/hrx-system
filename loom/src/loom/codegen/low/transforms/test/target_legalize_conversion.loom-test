@@ -147,6 +147,38 @@ func.def target(@test_target) @narrow_integer_double(%flag: i1, %byte: i8, %word
 
 // ====
 
+// The generic extension rule owns narrow-to-F64 composition, not native
+// F16/BF16-to-F32 or F32-to-F64 edges. Conversion flags stay on their respective
+// input and output boundaries.
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @floating_extensions(%half: f16, %bfloat: bf16, %single: f32) -> (f32, f32, f64, f64, f64) {
+  %half_single = scalar.extf %half : f16 to f32
+  %bfloat_single = scalar.extf %bfloat : bf16 to f32
+  %single_double = scalar.extf %single : f32 to f64
+  %half_double = scalar.extf<daz|ftz> %half : f16 to f64
+  %bfloat_double = scalar.extf<daz|ftz> %bfloat : bf16 to f64
+  func.return %half_single, %bfloat_single, %single_double, %half_double, %bfloat_double : f32, f32, f64, f64, f64
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @floating_extensions(%half: f16, %bfloat: bf16, %single: f32) -> (f32, f32, f64, f64, f64) {
+  %half_single = scalar.extf %half : f16 to f32
+  %bfloat_single = scalar.extf %bfloat : bf16 to f32
+  %single_double = scalar.extf %single : f32 to f64
+  %15 = scalar.extf<daz> %half : f16 to f32
+  %half_double = scalar.extf<ftz> %15 : f32 to f64
+  %13 = scalar.extf<daz> %bfloat : bf16 to f32
+  %bfloat_double = scalar.extf<ftz> %13 : f32 to f64
+  func.return %half_single, %bfloat_single, %single_double, %half_double, %bfloat_double : f32, f32, f64, f64, f64
+}
+
+// ====
+
 // Keep the large FP8 reference expansions isolated so changes in one
 // conversion do not renumber the others.
 // RUN: pass target-legalize{mode=eager,policy=reference-only},dce

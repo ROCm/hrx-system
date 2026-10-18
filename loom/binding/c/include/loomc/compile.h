@@ -156,7 +156,8 @@ typedef struct loomc_compile_options_t {
   loomc_host_size_t structure_size;
 
   /// Extension chain for compile invocation options such as
-  /// `loomc_target_specialization_options_t`.
+  /// `loomc_target_specialization_options_t`, `loomc_pass_trace_options_t`,
+  /// and native report options from loomc/interop.h.
   const void* next;
 
   /// Runtime artifact module name for this invocation. Empty uses the

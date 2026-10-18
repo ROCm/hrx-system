@@ -42,8 +42,6 @@ typedef struct loom_serve_speech_invocation_t {
   struct loom_serve_speech_invocation_t* next;
   // Link owning this node, permitting constant-time removal.
   struct loom_serve_speech_invocation_t** previous_next;
-  // Source-owned mutable CPU state, distinct from shared model conditioning.
-  iree_vm_buffer_t* state;
   // Immutable request upload, retained through every accepted device consumer.
   iree_vm_buffer_t* payload;
   // Stable resident row, independent of its ordinal in any numerical batch.
@@ -54,6 +52,15 @@ typedef struct loom_serve_speech_invocation_t {
   iree_vm_buffer_t* work;
   // Playback position after the most recently collected block.
   uint64_t frame_position;
+  // Immutable VM window, reused until source accepts its complete byte range.
+  iree_vm_buffer_t* text;
+  // Complete-scalar byte offset accepted within text by successful CPU calls.
+  iree_host_size_t text_offset;
+  // Source has accepted the final text byte, including an empty EOF window.
+  bool input_complete;
+  // Owned source-selected scalar/reference fields, using the model's exact
+  // state signature. Never passed directly to a consuming VM invocation.
+  iree_vm_variant_t state[];
 } loom_serve_speech_invocation_t;
 
 struct loom_serve_speech_model_t {
@@ -71,6 +78,10 @@ struct loom_serve_speech_model_t {
   iree_host_size_t request_capacity;
   // Maximum additive work in one compatible source batch.
   uint64_t batch_units;
+  // Maximum complete-scalar CPU input window, independent of device uploads.
+  iree_host_size_t text_capacity;
+  // Maximum total raw input bytes over one request's lifetime.
+  uint64_t text_limit;
   // Maximum immutable request upload bytes.
   iree_host_size_t input_capacity;
   // Per-request mutable device state extent.
@@ -124,8 +135,16 @@ struct loom_serve_speech_model_t {
     iree_vm_buffer_t* initial_conditioning;
     // Read-only view of retired feedback, borrowed only during complete.
     iree_vm_buffer_t* feedback;
+    // Number of source-selected scalar/reference fields per request.
+    iree_host_size_t state_count;
+    // Owned reusable call carriers, each side sized for state_count + 4 fields.
+    iree_vm_variant_t* arguments;
+    // Result carriers in the same allocation, empty between synchronous calls.
+    iree_vm_variant_t* results;
     // CPU request preparation entry.
     iree_vm_function_t prepare_request;
+    // Bounded CPU text acceptance and continuing source state replacement.
+    iree_vm_function_t prepare_input;
     // CPU next-work facts, evaluated before cohort selection.
     iree_vm_function_t prepare_work;
     // CPU numerical cohort packing and phase/shape selection.
@@ -161,7 +180,7 @@ struct loom_serve_speech_model_t {
 
 // Releases model-owned consumers, not borrowed upload/feedback payloads or the
 // storage protection those consumers still require. Partial loads use this same
-// sequence, with no submitted queue work to retire.
+// sequence and may still own accepted backing allocations.
 static void loom_serve_speech_model_release_consumers(
     loom_serve_speech_model_t* model) {
   loom_serve_program_free(model->control.program);
@@ -184,8 +203,10 @@ static void loom_serve_speech_model_release_consumers(
 void loom_serve_speech_model_retire(loom_serve_speech_model_t* model,
                                     void (*wake)(void* user_data),
                                     void* user_data) {
-  loom_serve_execution_set_retirement_observer(model->execution, wake,
-                                               user_data);
+  if (model->execution) {
+    loom_serve_execution_set_retirement_observer(model->execution, wake,
+                                                 user_data);
+  }
   for (iree_host_size_t i = 0; i < model->weights.count; ++i) {
     loom_serve_weights_set_retirement_observer(model->weights.plans[i], wake,
                                                user_data);
@@ -245,9 +266,11 @@ static iree_status_t loom_serve_speech_model_destroy_resources(
     while (model->invocations) {
       loom_serve_speech_invocation_t* invocation = model->invocations;
       model->invocations = invocation->next;
-      iree_vm_buffer_release(invocation->state);
+      iree_vm_variant_span_reset((iree_vm_variant_span_t){
+          invocation->state, model->control.state_count});
       iree_vm_buffer_release(invocation->payload);
       iree_vm_buffer_release(invocation->work);
+      iree_vm_buffer_release(invocation->text);
       iree_allocator_free(model->host_allocator, invocation);
     }
     iree_vm_buffer_release(model->control.initial_conditioning);
@@ -255,6 +278,7 @@ static iree_status_t loom_serve_speech_model_destroy_resources(
     iree_vm_buffer_release(model->batch.payload);
     iree_vm_buffer_release(model->batch.plan);
     iree_allocator_free(model->host_allocator, model->batch.invocations);
+    iree_allocator_free(model->host_allocator, model->control.arguments);
     iree_vm_environment_free(model->control.environment);
     loom_serve_execution_release(model->execution);
     iree_allocator_free(model->host_allocator, model->weights.sources);
@@ -324,7 +348,7 @@ static iree_status_t loom_serve_speech_prepare(
           &model->control.vm_types, &buffer);
     }
   }
-  iree_vm_variant_t results[15] = {0};
+  iree_vm_variant_t results[17] = {0};
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_allocate(
         loom_serve_host_target_environment(
@@ -335,7 +359,7 @@ static iree_status_t loom_serve_speech_prepare(
         (iree_vm_module_span_t){modules, 2}, &model->compilation,
         host_allocator, &model->preparation);
   }
-  int64_t capacities[11] = {0};
+  int64_t capacities[13] = {0};
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(capacities) && iree_status_is_ok(status); ++i) {
     status = iree_vm_i64_from_variant(results[i], &capacities[i]);
@@ -353,7 +377,7 @@ static iree_status_t loom_serve_speech_prepare(
        capacities[0] > INT64_MAX / capacities[4] ||
        (uint64_t)capacities[0] > SIZE_MAX / (uint64_t)capacities[2] ||
        (uint64_t)capacities[0] > SIZE_MAX / (uint64_t)capacities[4] ||
-       (uint64_t)capacities[0] > SIZE_MAX / 24)) {
+       (uint64_t)capacities[0] > SIZE_MAX / 24 || capacities[11] < 4)) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source speech row geometry is invalid");
   }
@@ -361,7 +385,7 @@ static iree_status_t loom_serve_speech_prepare(
   for (iree_host_size_t i = 0; i < 2 && iree_status_is_ok(status); ++i) {
     iree_vm_buffer_t* buffer = NULL;
     status = iree_vm_buffer_ptr_from_variant_borrowed(&model->control.vm_types,
-                                                      results[11 + i], &buffer);
+                                                      results[13 + i], &buffer);
     if (iree_status_is_ok(status) && !buffer) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "source metadata must not be null");
@@ -385,6 +409,8 @@ static iree_status_t loom_serve_speech_prepare(
     model->output_capacity = (iree_host_size_t)capacities[6];
     model->output.data_length = (iree_host_size_t)capacities[7];
     model->block_capacity = (iree_host_size_t)capacities[8];
+    model->text_capacity = (iree_host_size_t)capacities[11];
+    model->text_limit = (uint64_t)capacities[12];
     if ((uint64_t)capacities[9] > UINT32_MAX ||
         (uint64_t)capacities[10] > UINT32_MAX ||
         (uint64_t)capacities[10] > SIZE_MAX / sizeof(float) ||
@@ -406,7 +432,7 @@ static iree_status_t loom_serve_speech_prepare(
   }
   if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_ptr_from_variant_move(
-        &model->control.vm_types, &results[13], &model->control.state);
+        &model->control.vm_types, &results[15], &model->control.state);
   }
   if (iree_status_is_ok(status) && !model->control.state) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -414,7 +440,7 @@ static iree_status_t loom_serve_speech_prepare(
   }
   if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_ptr_from_variant_move(
-        &model->control.vm_types, &results[14],
+        &model->control.vm_types, &results[16],
         &model->control.initial_conditioning);
   }
   if (iree_status_is_ok(status) &&
@@ -506,6 +532,147 @@ static iree_status_t loom_serve_speech_check_layouts(
   return iree_ok_status();
 }
 
+// Source-selected state is reflected once, then checked against every consuming
+// entry. Only scalar/reference carriers escape into the request owner.
+static iree_status_t loom_serve_speech_bind_control(
+    loom_serve_speech_model_t* model, iree_vm_module_t* module) {
+  const iree_vm_signature_type_t buffer = {
+      .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
+      .value.ref = model->control.vm_types.buffer};
+  const iree_vm_signature_type_t device_buffer = {
+      .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
+      .value.ref = model->control.hal_types.buffer};
+  const iree_vm_signature_type_t i32 = {
+      .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
+      .value.scalar = IREE_VM_SCALAR_TYPE_I32};
+  const iree_vm_signature_type_t i64 = {
+      .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
+      .value.scalar = IREE_VM_SCALAR_TYPE_I64};
+  const iree_vm_signature_type_t f32 = {
+      .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
+      .value.scalar = IREE_VM_SCALAR_TYPE_F32};
+  const iree_vm_signature_type_t request_arguments[] = {buffer, buffer, buffer,
+                                                        i64, f32};
+  const iree_vm_signature_type_t batch_results[] = {buffer, buffer};
+  iree_vm_export_t request_export = {0};
+  IREE_RETURN_IF_ERROR(iree_vm_module_lookup_export(
+      module, IREE_SV("prepare_request"), &request_export));
+  iree_vm_module_export_declaration_t declaration = {0};
+  IREE_RETURN_IF_ERROR(iree_vm_module_query_export(
+      module, request_export.ordinal, &declaration));
+  iree_vm_module_callable_type_declaration_t callable = {0};
+  IREE_RETURN_IF_ERROR(iree_vm_module_query_callable_type(
+      module, declaration.callable_type_ordinal, &callable));
+  if (!callable.signature.results.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "model export 'prepare_request' requires a final "
+                            "payload buffer after its request state");
+  }
+  const iree_host_size_t state_count = callable.signature.results.count - 1;
+  if (state_count > SIZE_MAX / (2 * sizeof(iree_vm_signature_type_t)) - 4 ||
+      state_count > SIZE_MAX / (2 * sizeof(iree_vm_variant_t)) - 4) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "source speech state signature exceeds host size");
+  }
+  const iree_host_size_t capacity = state_count + 4;
+  iree_vm_signature_type_t* argument_types = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      model->host_allocator, capacity * 2, sizeof(*argument_types),
+      (void**)&argument_types));
+  iree_vm_signature_type_t* result_types = argument_types + capacity;
+  argument_types[0] = buffer;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < state_count && iree_status_is_ok(status);
+       ++i) {
+    const iree_vm_module_signature_type_t field =
+        callable.signature.results.data[i];
+    if (field.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+      result_types[i].kind = IREE_VM_SIGNATURE_TYPE_KIND_REF;
+      status = iree_vm_module_ref_type_by_ordinal(module, field.type_ordinal,
+                                                  &result_types[i].value.ref);
+    } else if (field.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "model export 'prepare_request' state %zu "
+                                "must be a scalar or reference",
+                                i);
+    } else {
+      result_types[i] = (iree_vm_signature_type_t){
+          .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
+          .value.scalar = (iree_vm_scalar_type_t)field.kind};
+    }
+    argument_types[1 + i] = result_types[i];
+  }
+  result_types[state_count] = buffer;
+  const iree_vm_signature_type_t work_results[] = {i32, buffer, i64, i64};
+  const iree_vm_signature_type_t batch_arguments[] = {buffer, buffer, buffer,
+                                                      buffer};
+  const iree_vm_signature_type_t generate_arguments[] = {
+      buffer,        device_buffer, device_buffer,
+      device_buffer, device_buffer, device_buffer};
+  const iree_vm_signature_type_t waveform_results[] = {i64, i64, i64, i32};
+  const loom_serve_program_binding_t request_bindings[] = {
+      {IREE_SVL("prepare_request"),
+       {request_arguments, IREE_ARRAYSIZE(request_arguments)},
+       {result_types, state_count + 1},
+       &model->control.prepare_request},
+      {IREE_SVL("prepare_work"),
+       {argument_types, state_count + 1},
+       {work_results, IREE_ARRAYSIZE(work_results)},
+       &model->control.prepare_work},
+  };
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_program_bind(model->control.program,
+                                     IREE_ARRAYSIZE(request_bindings),
+                                     request_bindings);
+  }
+  const iree_vm_signature_type_t input_arguments[] = {buffer, i64, i32};
+  memcpy(argument_types + state_count + 1, input_arguments,
+         sizeof(input_arguments));
+  result_types[state_count] = i64;
+  const loom_serve_program_binding_t input_binding = {
+      IREE_SVL("prepare_input"),
+      {argument_types, state_count + 4},
+      {result_types, state_count + 1},
+      &model->control.prepare_input};
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_program_bind(model->control.program, 1, &input_binding);
+  }
+  const iree_vm_signature_type_t completion_arguments[] = {buffer, i64, buffer};
+  memcpy(argument_types + state_count + 1, completion_arguments,
+         sizeof(completion_arguments));
+  memcpy(result_types + state_count, waveform_results,
+         sizeof(waveform_results));
+  const loom_serve_program_binding_t bindings[] = {
+      {IREE_SVL("prepare_batch"),
+       {batch_arguments, IREE_ARRAYSIZE(batch_arguments)},
+       {batch_results, IREE_ARRAYSIZE(batch_results)},
+       &model->control.prepare_batch},
+      {IREE_SVL("generate"),
+       {generate_arguments, IREE_ARRAYSIZE(generate_arguments)},
+       {NULL, 0},
+       &model->control.generate},
+      {IREE_SVL("complete"),
+       {argument_types, state_count + 4},
+       {result_types, state_count + 4},
+       &model->control.complete},
+  };
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_program_bind(model->control.program,
+                                     IREE_ARRAYSIZE(bindings), bindings);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(model->host_allocator, capacity * 2,
+                                         sizeof(iree_vm_variant_t),
+                                         (void**)&model->control.arguments);
+  }
+  if (iree_status_is_ok(status)) {
+    model->control.state_count = state_count;
+    model->control.results = model->control.arguments + capacity;
+  }
+  iree_allocator_free(model->host_allocator, argument_types);
+  return status;
+}
+
 static iree_status_t loom_serve_speech_create_control(
     loom_serve_speech_model_t* model, iree_vm_module_t* module) {
   const iree_allocator_t host_allocator = model->host_allocator;
@@ -570,57 +737,7 @@ static iree_status_t loom_serve_speech_create_control(
   iree_vm_module_release(native_modules[1]);
   iree_vm_module_release(native_modules[2]);
   IREE_RETURN_IF_ERROR(status);
-  const iree_vm_signature_type_t buffer = {
-      .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
-      .value.ref = model->control.vm_types.buffer};
-  const iree_vm_signature_type_t device_buffer = {
-      .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
-      .value.ref = model->control.hal_types.buffer};
-  const iree_vm_signature_type_t i32 = {
-      .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
-      .value.scalar = IREE_VM_SCALAR_TYPE_I32};
-  const iree_vm_signature_type_t i64 = {
-      .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
-      .value.scalar = IREE_VM_SCALAR_TYPE_I64};
-  const iree_vm_signature_type_t f32 = {
-      .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
-      .value.scalar = IREE_VM_SCALAR_TYPE_F32};
-  const iree_vm_signature_type_t request_arguments[] = {buffer, buffer, buffer,
-                                                        buffer, i64,    f32};
-  const iree_vm_signature_type_t state_pair[] = {buffer, buffer};
-  const iree_vm_signature_type_t work_results[] = {buffer, i64, i64};
-  const iree_vm_signature_type_t batch_arguments[] = {buffer, buffer, buffer,
-                                                      buffer};
-  const iree_vm_signature_type_t generate_arguments[] = {
-      buffer,        device_buffer, device_buffer,
-      device_buffer, device_buffer, device_buffer};
-  const iree_vm_signature_type_t complete_arguments[] = {buffer, buffer, buffer,
-                                                         i64, buffer};
-  const iree_vm_signature_type_t complete_results[] = {i64, i64, i64, i32};
-  const loom_serve_program_binding_t bindings[] = {
-      {IREE_SVL("prepare_request"),
-       {request_arguments, IREE_ARRAYSIZE(request_arguments)},
-       {state_pair, IREE_ARRAYSIZE(state_pair)},
-       &model->control.prepare_request},
-      {IREE_SVL("prepare_work"),
-       {state_pair, IREE_ARRAYSIZE(state_pair)},
-       {work_results, IREE_ARRAYSIZE(work_results)},
-       &model->control.prepare_work},
-      {IREE_SVL("prepare_batch"),
-       {batch_arguments, IREE_ARRAYSIZE(batch_arguments)},
-       {state_pair, IREE_ARRAYSIZE(state_pair)},
-       &model->control.prepare_batch},
-      {IREE_SVL("generate"),
-       {generate_arguments, IREE_ARRAYSIZE(generate_arguments)},
-       {NULL, 0},
-       &model->control.generate},
-      {IREE_SVL("complete"),
-       {complete_arguments, IREE_ARRAYSIZE(complete_arguments)},
-       {complete_results, IREE_ARRAYSIZE(complete_results)},
-       &model->control.complete},
-  };
-  return loom_serve_program_bind(model->control.program,
-                                 IREE_ARRAYSIZE(bindings), bindings);
+  return loom_serve_speech_bind_control(model, module);
 }
 
 // Cold binding records retain the source's checkpoint identity until all
@@ -791,7 +908,7 @@ struct loom_serve_speech_load_t {
   iree_status_t task_status;
   // Tokenizer construction overlaps control/native compilation and indexing.
   loom_serve_tokenizer_load_t* tokenizer_load;
-  // Terminal model outcome retained until tokenizer work also retires.
+  // Terminal outcome retained until tokenizer and backing ownership retire.
   iree_status_t terminal_status;
   // Completion publication shared with workers; owner consumes under mutex.
   struct {
@@ -837,8 +954,9 @@ static iree_status_t loom_serve_speech_load_prepare(
   IREE_RETURN_IF_ERROR(
       iree_hal_module_types_resolve(table, &model->control.hal_types));
   const iree_string_view_t roots[] = {
-      IREE_SVL("prepare_request"), IREE_SVL("prepare_work"),
-      IREE_SVL("prepare_batch"), IREE_SVL("generate"), IREE_SVL("complete")};
+      IREE_SVL("prepare_request"), IREE_SVL("prepare_input"),
+      IREE_SVL("prepare_work"),    IREE_SVL("prepare_batch"),
+      IREE_SVL("generate"),        IREE_SVL("complete")};
   iree_status_t status = loom_serve_program_compile(
       loom_serve_host_target_environment(loom_serve_device_host(model->owner)),
       model->control.environment, &load->options.sources,
@@ -1010,6 +1128,16 @@ iree_status_t loom_serve_speech_load_advance(
     load->terminal_status = status;
     return iree_ok_status();
   }
+  if (!iree_status_is_ok(status)) {
+    // Binding may already have queued backing allocation. Failure of a later
+    // preparation step does not retire that accepted ownership.
+    loom_serve_speech_model_retire(model, load->event.wake,
+                                   load->event.user_data);
+    if (!loom_serve_speech_model_is_retired(model)) {
+      load->terminal_status = status;
+      return iree_ok_status();
+    }
+  }
   *out_complete = load->phase == SPEECH_LOAD_COMPLETE;
   return status;
 }
@@ -1080,6 +1208,31 @@ loom_serve_residency_t* loom_serve_speech_model_residency(
   return model->residency;
 }
 
+static iree_vm_variant_span_t loom_serve_speech_state_arguments(
+    loom_serve_speech_model_t* model,
+    const loom_serve_speech_invocation_t* invocation,
+    iree_host_size_t suffix_count) {
+  iree_vm_variant_t* arguments = model->control.arguments;
+  arguments[0] = iree_vm_buffer_variant_from_ptr_borrowed(
+      &model->control.vm_types, model->control.state);
+  for (iree_host_size_t i = 0; i < model->control.state_count; ++i) {
+    arguments[1 + i] = iree_vm_variant_borrow(invocation->state[i]);
+  }
+  return (iree_vm_variant_span_t){
+      arguments, 1 + model->control.state_count + suffix_count};
+}
+
+// Successful invocation results own every returned reference independently of
+// the previous state, including aliases. Replacement never copies histories.
+static void loom_serve_speech_replace_state(
+    loom_serve_speech_model_t* model,
+    loom_serve_speech_invocation_t* invocation) {
+  for (iree_host_size_t i = 0; i < model->control.state_count; ++i) {
+    iree_vm_variant_reset(&invocation->state[i]);
+    invocation->state[i] = iree_vm_variant_move(&model->control.results[i]);
+  }
+}
+
 static void loom_serve_speech_invocation_free(
     loom_serve_speech_model_t* model,
     loom_serve_speech_invocation_t* invocation) {
@@ -1087,9 +1240,11 @@ static void loom_serve_speech_invocation_free(
   if (invocation->next) {
     invocation->next->previous_next = invocation->previous_next;
   }
-  iree_vm_buffer_release(invocation->state);
+  iree_vm_variant_span_reset(
+      (iree_vm_variant_span_t){invocation->state, model->control.state_count});
   iree_vm_buffer_release(invocation->payload);
   iree_vm_buffer_release(invocation->work);
+  iree_vm_buffer_release(invocation->text);
   iree_allocator_free(model->host_allocator, invocation);
 }
 
@@ -1098,10 +1253,9 @@ static iree_status_t loom_serve_speech_generator_prepare(
     const loom_serve_speech_request_t* request, void** out_invocation) {
   *out_invocation = NULL;
   loom_serve_speech_model_t* model = self;
-  iree_vm_variant_t arguments[6] = {iree_vm_buffer_variant_from_ptr_borrowed(
+  iree_vm_variant_t arguments[5] = {iree_vm_buffer_variant_from_ptr_borrowed(
       &model->control.vm_types, model->control.state)};
   const iree_string_view_t strings[] = {
-      iree_string_builder_view(&request->input),
       iree_string_builder_view(&request->voice),
       iree_string_builder_view(&request->instructions)};
   iree_status_t status = iree_ok_status();
@@ -1119,41 +1273,36 @@ static iree_status_t loom_serve_speech_generator_prepare(
           &model->control.vm_types, &buffer);
     }
   }
-  arguments[4] = iree_vm_variant_from_i64((int64_t)request->seed);
-  arguments[5] = iree_vm_variant_from_f32(request->speed);
-  iree_vm_variant_t results[2] = {0};
+  arguments[3] = iree_vm_variant_from_i64((int64_t)request->seed);
+  arguments[4] = iree_vm_variant_from_f32(request->speed);
+  iree_vm_variant_span_t results = {model->control.results,
+                                    model->control.state_count + 1};
   if (iree_status_is_ok(status)) {
     status =
         iree_vm_invoke(loom_serve_program_invocation(model->control.program),
                        model->control.prepare_request,
-                       iree_vm_variant_span_from_array(arguments),
-                       iree_vm_variant_span_from_array(results));
+                       iree_vm_variant_span_from_array(arguments), results);
   }
-  iree_vm_buffer_t* state = NULL;
   iree_vm_buffer_t* payload = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_ptr_from_variant_borrowed(&model->control.vm_types,
-                                                      results[0], &state);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_ptr_from_variant_borrowed(&model->control.vm_types,
-                                                      results[1], &payload);
+    status = iree_vm_buffer_ptr_from_variant_borrowed(
+        &model->control.vm_types, results.data[model->control.state_count],
+        &payload);
   }
   if (iree_status_is_ok(status) &&
-      (!state || !payload ||
-       iree_vm_buffer_length(payload) > model->input_capacity)) {
+      (!payload || iree_vm_buffer_length(payload) > model->input_capacity)) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source request exceeds declared speech storage");
   }
   loom_serve_speech_invocation_t* invocation = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(model->host_allocator, sizeof(*invocation),
-                                   (void**)&invocation);
+    status = iree_allocator_malloc_struct_array(
+        model->host_allocator, sizeof(*invocation), model->control.state_count,
+        sizeof(*invocation->state), (void**)&invocation);
   }
   if (iree_status_is_ok(status)) {
-    iree_vm_buffer_retain(state);
     iree_vm_buffer_retain(payload);
-    invocation->state = state;
+    loom_serve_speech_replace_state(model, invocation);
     invocation->payload = payload;
     invocation->row_index = row_index;
     invocation->next = model->invocations;
@@ -1164,7 +1313,7 @@ static iree_status_t loom_serve_speech_generator_prepare(
     model->invocations = invocation;
     *out_invocation = invocation;
   }
-  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  iree_vm_variant_span_reset(results);
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   return status;
 }
@@ -1247,50 +1396,160 @@ static bool loom_serve_speech_generator_complete_admit(
   return invocation->reserved;
 }
 
+// A window owns one copy of captured bytes, never a mutable ring alias. A
+// contiguous snapshot clones directly; wrapping snapshots need a writable root
+// during construction and expose only a read-only view to source.
+static iree_status_t loom_serve_speech_text_window(
+    loom_serve_speech_model_t* model,
+    loom_serve_speech_invocation_t* invocation,
+    const loom_serve_speech_input_block_t* input) {
+  if (invocation->text &&
+      (invocation->text_offset < iree_vm_buffer_length(invocation->text) ||
+       !input->byte_count)) {
+    return iree_ok_status();
+  }
+  iree_vm_buffer_t* text = NULL;
+  iree_status_t status = iree_ok_status();
+  if (!input->spans[1].data_length) {
+    status =
+        iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ, input->spans[0],
+                             1, model->host_allocator, &text);
+  } else {
+    iree_vm_buffer_t* storage = NULL;
+    status = iree_vm_buffer_create(input->byte_count, 1, model->host_allocator,
+                                   &storage);
+    if (iree_status_is_ok(status)) {
+      uint8_t* bytes = iree_vm_buffer_data(storage);
+      memcpy(bytes, input->spans[0].data, input->spans[0].data_length);
+      memcpy(bytes + input->spans[0].data_length, input->spans[1].data,
+             input->spans[1].data_length);
+      status = iree_vm_buffer_subspan(storage, 0, input->byte_count,
+                                      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                                      model->host_allocator, &text);
+    }
+    iree_vm_buffer_release(storage);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_vm_buffer_release(invocation->text);
+    invocation->text = text;
+    invocation->text_offset = 0;
+  }
+  return status;
+}
+
+static iree_status_t loom_serve_speech_prepare_input(
+    loom_serve_speech_model_t* model,
+    loom_serve_speech_invocation_t* invocation,
+    const loom_serve_speech_input_block_t* input,
+    iree_host_size_t* out_consumed_bytes) {
+  IREE_RETURN_IF_ERROR(loom_serve_speech_text_window(model, invocation, input));
+  const iree_host_size_t remaining =
+      iree_vm_buffer_length(invocation->text) - invocation->text_offset;
+  // New bytes can arrive behind an older retained window. EOF is delivered only
+  // when this window reaches the current final byte, including delayed EOF.
+  const bool complete = input->complete && remaining == input->byte_count;
+  iree_vm_variant_span_t arguments =
+      loom_serve_speech_state_arguments(model, invocation, 3);
+  iree_vm_variant_t* suffix = arguments.data + 1 + model->control.state_count;
+  suffix[0] = iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
+                                                       invocation->text);
+  suffix[1] = iree_vm_variant_from_i64((int64_t)invocation->text_offset);
+  suffix[2] = iree_vm_variant_from_i32(complete);
+  iree_vm_variant_span_t results = {model->control.results,
+                                    model->control.state_count + 1};
+  iree_status_t status =
+      iree_vm_invoke(loom_serve_program_invocation(model->control.program),
+                     model->control.prepare_input, arguments, results);
+  int64_t consumed = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_i64_from_variant(results.data[model->control.state_count],
+                                      &consumed);
+  }
+  const uint8_t* bytes = iree_vm_buffer_const_data(invocation->text);
+  if (iree_status_is_ok(status) &&
+      (consumed < 0 || (uint64_t)consumed > remaining ||
+       ((uint64_t)consumed < remaining &&
+        (bytes[invocation->text_offset + consumed] & 0xc0) == 0x80))) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "source text acceptance must end on a scalar "
+                              "boundary within its offered window");
+  }
+  if (iree_status_is_ok(status)) {
+    invocation->text_offset += (iree_host_size_t)consumed;
+    invocation->input_complete |= complete && (uint64_t)consumed == remaining;
+    *out_consumed_bytes = (iree_host_size_t)consumed;
+    loom_serve_speech_replace_state(model, invocation);
+  }
+  iree_vm_variant_span_reset(results);
+  iree_vm_variant_span_reset(arguments);
+  return status;
+}
+
 static iree_status_t loom_serve_speech_generator_prepare_work(
-    void* self, void* opaque_invocation, loom_serve_speech_work_t* out_work) {
+    void* self, void* opaque_invocation,
+    const loom_serve_speech_input_block_t* input,
+    loom_serve_speech_work_t* out_work) {
   *out_work = (loom_serve_speech_work_t){0};
   loom_serve_speech_model_t* model = self;
   loom_serve_speech_invocation_t* invocation = opaque_invocation;
+  IREE_RETURN_IF_ERROR(loom_serve_speech_prepare_input(
+      model, invocation, input, &out_work->consumed_bytes));
   iree_vm_buffer_release(invocation->work);
   invocation->work = NULL;
-  iree_vm_variant_t arguments[] = {
-      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
-                                               model->control.state),
-      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
-                                               invocation->state)};
-  iree_vm_variant_t results[3] = {0};
-  iree_status_t status = iree_vm_invoke(
-      loom_serve_program_invocation(model->control.program),
-      model->control.prepare_work, iree_vm_variant_span_from_array(arguments),
-      iree_vm_variant_span_from_array(results));
+  iree_vm_variant_span_t arguments =
+      loom_serve_speech_state_arguments(model, invocation, 0);
+  iree_vm_variant_t results[4] = {0};
+  iree_status_t status =
+      iree_vm_invoke(loom_serve_program_invocation(model->control.program),
+                     model->control.prepare_work, arguments,
+                     iree_vm_variant_span_from_array(results));
   iree_vm_buffer_t* work = NULL;
+  int32_t kind = 0;
   int64_t units = 0;
   int64_t tag = 0;
   if (iree_status_is_ok(status)) {
+    status = iree_vm_i32_from_variant(results[0], &kind);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_ptr_from_variant_borrowed(&model->control.vm_types,
-                                                      results[0], &work);
+                                                      results[1], &work);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_vm_i64_from_variant(results[1], &units);
+    status = iree_vm_i64_from_variant(results[2], &units);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_vm_i64_from_variant(results[2], &tag);
+    status = iree_vm_i64_from_variant(results[3], &tag);
   }
-  if (iree_status_is_ok(status) &&
+  if (iree_status_is_ok(status) && kind == LOOM_SERVE_SPEECH_WORK_NUMERICAL &&
       (!work || iree_vm_buffer_length(work) > model->batch_input_capacity ||
        units <= 0 || (uint64_t)units > model->batch_units)) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source speech work exceeds declared capacity");
   }
+  if (iree_status_is_ok(status) &&
+      (kind < LOOM_SERVE_SPEECH_WORK_NUMERICAL ||
+       kind > LOOM_SERVE_SPEECH_WORK_COMPLETE ||
+       (kind == LOOM_SERVE_SPEECH_WORK_INPUT &&
+        (invocation->input_complete ||
+         invocation->text_offset != iree_vm_buffer_length(invocation->text))) ||
+       (kind == LOOM_SERVE_SPEECH_WORK_COMPLETE &&
+        !invocation->input_complete))) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "source speech work conflicts with input state");
+  }
   if (iree_status_is_ok(status)) {
-    iree_vm_buffer_retain(work);
-    invocation->work = work;
-    *out_work = (loom_serve_speech_work_t){.units = (uint64_t)units,
-                                           .tag = (uint64_t)tag};
+    out_work->kind = (loom_serve_speech_work_kind_t)kind;
+    if (kind == LOOM_SERVE_SPEECH_WORK_NUMERICAL) {
+      iree_vm_buffer_retain(work);
+      invocation->work = work;
+      out_work->data.numerical.units = (uint64_t)units;
+      out_work->data.numerical.tag = (uint64_t)tag;
+    } else if (kind == LOOM_SERVE_SPEECH_WORK_COMPLETE) {
+      out_work->data.frame_position = invocation->frame_position;
+    }
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
-  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  iree_vm_variant_span_reset(arguments);
   return status;
 }
 
@@ -1473,29 +1732,28 @@ static iree_status_t loom_serve_speech_generator_collect(
   loom_serve_speech_model_t* model = self;
   loom_serve_speech_invocation_t* invocation =
       model->batch.invocations[ordinal];
-  iree_vm_variant_t arguments[] = {
-      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
-                                               model->control.state),
-      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
-                                               invocation->state),
-      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
-                                               model->batch.plan),
-      iree_vm_variant_from_i64((int64_t)ordinal),
-      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
-                                               model->control.feedback)};
-  iree_vm_variant_t results[4] = {0};
-  iree_status_t status = iree_vm_invoke(
-      loom_serve_program_invocation(model->control.program),
-      model->control.complete, iree_vm_variant_span_from_array(arguments),
-      iree_vm_variant_span_from_array(results));
+  iree_vm_variant_span_t arguments =
+      loom_serve_speech_state_arguments(model, invocation, 3);
+  iree_vm_variant_t* suffix = arguments.data + 1 + model->control.state_count;
+  suffix[0] = iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
+                                                       model->batch.plan);
+  suffix[1] = iree_vm_variant_from_i64((int64_t)ordinal);
+  suffix[2] = iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
+                                                       model->control.feedback);
+  iree_vm_variant_span_t results = {model->control.results,
+                                    model->control.state_count + 4};
+  const iree_vm_variant_t* output = results.data + model->control.state_count;
+  iree_status_t status =
+      iree_vm_invoke(loom_serve_program_invocation(model->control.program),
+                     model->control.complete, arguments, results);
   int64_t values[3] = {0};
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(values) && iree_status_is_ok(status); ++i) {
-    status = iree_vm_i64_from_variant(results[i], &values[i]);
+    status = iree_vm_i64_from_variant(output[i], &values[i]);
   }
   int32_t complete = 0;
   if (iree_status_is_ok(status)) {
-    status = iree_vm_i32_from_variant(results[3], &complete);
+    status = iree_vm_i32_from_variant(output[3], &complete);
   }
   const uint64_t frame_bytes = model->format.channels * sizeof(float);
   if (iree_status_is_ok(status) &&
@@ -1504,7 +1762,8 @@ static iree_status_t loom_serve_speech_generator_collect(
        values[2] < 0 || (uint64_t)values[2] > model->block_capacity ||
        (uint64_t)values[2] >
            (model->output.data_length - (uint64_t)values[1]) / frame_bytes ||
-       values[2] > INT64_MAX - values[0] || (complete != 0 && complete != 1))) {
+       values[2] > INT64_MAX - values[0] || (complete != 0 && complete != 1) ||
+       (complete && !invocation->input_complete))) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source waveform range or position is invalid");
   }
@@ -1517,9 +1776,10 @@ static iree_status_t loom_serve_speech_generator_collect(
             (iree_host_size_t)values[2] * frame_bytes),
         .complete = complete != 0};
     invocation->frame_position += (uint64_t)values[2];
+    loom_serve_speech_replace_state(model, invocation);
   }
-  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
-  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  iree_vm_variant_span_reset(results);
+  iree_vm_variant_span_reset(arguments);
   return status;
 }
 
@@ -1554,6 +1814,8 @@ loom_serve_speech_generator_t loom_serve_speech_model_generator(
       .block_capacity = model->block_capacity,
       .request_capacity = model->request_capacity,
       .batch_units = model->batch_units,
+      .text_capacity = model->text_capacity,
+      .text_limit = model->text_limit,
       .prepare = loom_serve_speech_generator_prepare,
       .discard = loom_serve_speech_generator_discard,
       .try_admit = loom_serve_speech_generator_admit,

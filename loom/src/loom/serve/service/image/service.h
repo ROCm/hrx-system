@@ -57,7 +57,7 @@ iree_status_t loom_serve_image_service_allocate(
 // at the complete-image boundary. Slow readers own copied response bytes, never
 // model output or workspace. Bounded observation records omit prompts and
 // never wait on log sinks.
-loom_serve_http_service_t loom_serve_image_service_interface(
+loom_serve_service_t loom_serve_image_service_interface(
     loom_serve_image_service_t* service);
 
 // Relinquishes host requests after CPU/device callbacks and timer receipts

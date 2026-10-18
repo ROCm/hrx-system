@@ -1,4 +1,4 @@
-// RUN: pass target-legalize{mode=eager,policy=prefer-native},dce
+// RUN: pass target-legalize{mode=complete,policy=prefer-native},dce
 
 test.target<low_core> @test_target
 

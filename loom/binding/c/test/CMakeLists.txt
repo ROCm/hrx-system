@@ -40,6 +40,21 @@ endif()
 
 loom_cc_test(
   NAME
+    module_config_test
+  SRCS
+    "module_config_test.cc"
+  DEPS
+    ::test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::config::schema
+    loom::util::stream
+)
+
+loom_cc_test(
+  NAME
     interop_test
   SRCS
     "interop_test.cc"
@@ -49,6 +64,10 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::binding::c::interop
     loom::binding::c::loomc
+    loom::error::parameter
+    loom::pass::registry
+    loom::pass::report
+    loom::target::math_policy
 )
 
 loom_cc_test(
@@ -127,7 +146,9 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::binding::c::loomc
+    loom::error::json_sink
     loom::error::parameter
+    loom::util::stream
 )
 
 loom_cc_test(
@@ -255,6 +276,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::binding::c::loomc
+    loom::binding::c::test::testdata::diagnostic_types
 )
 
 loom_cc_test(

@@ -27,7 +27,7 @@ iree_runtime_cc_library(
     name = "vocab",
     srcs = [
         "vocab.c",
-        "vocab_internal.h",
+        "vocab_storage.h",
     ],
     hdrs = ["vocab.h"],
     deps = [
@@ -52,7 +52,7 @@ iree_runtime_cc_library(
     name = "vocab_builder",
     srcs = [
         "vocab_builder.c",
-        "vocab_internal.h",
+        "vocab_storage.h",
     ],
     hdrs = ["vocab_builder.h"],
     deps = [

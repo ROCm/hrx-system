@@ -7,6 +7,7 @@
 #include "loom/serve/server/registry.h"
 
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/service/kind.h"
 
 struct loom_serve_registry_t {
   // Allocator owning the table and registration operations.
@@ -44,7 +45,7 @@ static void loom_serve_registry_add_counters(
 }
 
 iree_status_t loom_serve_registry_allocate(
-    iree_host_size_t service_count, const loom_serve_http_service_t* services,
+    iree_host_size_t service_count, const loom_serve_service_t* services,
     iree_host_size_t managed_capacity,
     loom_serve_registration_factory_t factory, iree_allocator_t host_allocator,
     loom_serve_registry_t** out_registry) {
@@ -137,12 +138,117 @@ loom_serve_registered_model_t* loom_serve_registry_at(
   return &registry->models[index];
 }
 
-loom_serve_http_service_snapshot_t loom_serve_registry_snapshot(
+loom_serve_service_snapshot_t loom_serve_registry_snapshot(
     const loom_serve_registered_model_t* model) {
   return model->phase == LOOM_SERVE_REGISTRATION_READY
              ? model->service.snapshot(model->service.self)
-             : (loom_serve_http_service_snapshot_t){
+             : (loom_serve_service_snapshot_t){
                    .phase = loom_serve_registry_phase(model)};
+}
+
+static iree_status_t loom_serve_registry_find_admission(
+    loom_serve_registry_t* registry, iree_string_view_t name, uint32_t kinds,
+    const char* operation, loom_serve_service_t** out_service) {
+  *out_service = NULL;
+  for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
+    loom_serve_registered_model_t* model = &registry->models[i];
+    if (!model->service.name.size ||
+        !iree_string_view_equal(model->service.name, name)) {
+      continue;
+    }
+    if (model->removal) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "model is being unregistered");
+    }
+    if (!iree_status_is_ok(model->status)) {
+      return iree_status_clone(model->status);
+    }
+    if (!(kinds & (1u << model->service.kind))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "selected model does not provide %s", operation);
+    }
+    if (model->closed || model->held_count ||
+        model->phase != LOOM_SERVE_REGISTRATION_READY) {
+      return iree_ok_status();
+    }
+    *out_service = &model->service;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_NOT_FOUND, "model is not registered");
+}
+
+iree_status_t loom_serve_registry_try_open_speech(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    loom_serve_speech_request_t* request,
+    loom_serve_speech_stream_t** out_stream) {
+  *out_stream = NULL;
+  loom_serve_service_t* service = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_SPEECH, "speech", &service));
+  if (!service) {
+    return iree_ok_status();
+  }
+  if (!service->try_open_speech) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "speech service has no native admission");
+  }
+  return service->try_open_speech(service->self, request, out_stream);
+}
+
+iree_status_t loom_serve_registry_try_open_recognition(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    const loom_serve_recognition_request_t* request,
+    loom_serve_recognition_stream_t** out_stream) {
+  *out_stream = NULL;
+  loom_serve_service_t* service = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
+      registry, name,
+      (1u << LOOM_SERVE_MODEL_KIND_RECOGNITION) |
+          (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY),
+      "recognition", &service));
+  if (!service) {
+    return iree_ok_status();
+  }
+  if (!service->try_open_recognition) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "recognition service has no native admission");
+  }
+  return service->try_open_recognition(service->self, request, out_stream);
+}
+
+iree_status_t loom_serve_registry_try_open_text(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    loom_serve_text_request_t* request, loom_serve_text_stream_t** out_stream) {
+  *out_stream = NULL;
+  loom_serve_service_t* service = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_TEXT, "text", &service));
+  if (!service) {
+    return iree_ok_status();
+  }
+  if (!service->try_open_text) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "text service has no native admission");
+  }
+  return service->try_open_text(service->self, request, out_stream);
+}
+
+iree_status_t loom_serve_registry_try_open_text_checkpoint(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    const loom_serve_text_checkpoint_request_t* request,
+    loom_serve_text_checkpoint_control_t** out_control) {
+  *out_control = NULL;
+  loom_serve_service_t* service = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_TEXT, "text", &service));
+  if (!service) {
+    return iree_ok_status();
+  }
+  if (!service->try_open_text_checkpoint) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "text service has no native checkpoint admission");
+  }
+  return service->try_open_text_checkpoint(service->self, request, out_control);
 }
 
 iree_status_t loom_serve_registry_register(
@@ -183,32 +289,9 @@ iree_status_t loom_serve_registry_register(
   model->registration_time = iree_time_now();
   model->service.name = model->configuration.name;
   // Protocol metadata is known before source preparation, without model access.
-  switch (model->configuration.kind) {
-    case LOOM_SERVE_MODEL_KIND_TEXT:
-      model->service.kind = "text";
-      model->service.endpoint = "/v1/chat/completions";
-      break;
-    case LOOM_SERVE_MODEL_KIND_IMAGE:
-      model->service.kind = "image";
-      model->service.endpoint = "/v1/images/generations";
-      break;
-    case LOOM_SERVE_MODEL_KIND_SPEECH:
-      model->service.kind = "speech";
-      model->service.endpoint = "/v1/audio/speech";
-      break;
-    case LOOM_SERVE_MODEL_KIND_RECOGNITION:
-      model->service.kind = "recognition";
-      model->service.endpoint = "/v1/audio/transcriptions";
-      break;
-    case LOOM_SERVE_MODEL_KIND_EMBEDDING:
-      model->service.kind = "embedding";
-      model->service.endpoint = "/v1/embeddings";
-      break;
-    case LOOM_SERVE_MODEL_KIND_DECISION:
-      model->service.kind = "decision";
-      model->service.endpoint = "/v1/systemone";
-      break;
-  }
+  model->service.kind = model->configuration.kind;
+  model->service.endpoint =
+      loom_serve_model_kind_endpoint(model->configuration.kind);
   model->service.telemetry.counters = &model->counters;
   model->service.telemetry.latency = &model->latency;
   model->service.telemetry.stream = model->stream;
@@ -359,17 +442,17 @@ iree_status_t loom_serve_registry_activate(
   return iree_ok_status();
 }
 
-loom_serve_http_service_flags_t loom_serve_registry_service_flags(
+loom_serve_service_flags_t loom_serve_registry_service_flags(
     const loom_serve_registered_model_t* model) {
   if (model->removal == LOOM_SERVE_REMOVAL_ABORT) {
-    return LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING;
+    return LOOM_SERVE_SERVICE_FLAG_STOPPING;
   }
   if (model->removal == LOOM_SERVE_REMOVAL_DRAIN) {
-    const loom_serve_http_service_snapshot_t snapshot =
+    const loom_serve_service_snapshot_t snapshot =
         model->service.snapshot(model->service.self);
     if (!snapshot.queued_requests && !snapshot.active_requests &&
         !model->tokenizer_count) {
-      return LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING;
+      return LOOM_SERVE_SERVICE_FLAG_STOPPING;
     }
   }
   return 0;
@@ -379,14 +462,14 @@ static void loom_serve_registry_release_service(
     loom_serve_registered_model_t* model) {
   model->counters = *model->service.telemetry.counters;
   model->latency = *model->service.telemetry.latency;
-  model->service = (loom_serve_http_service_t){
-      .name = model->service.name,
-      .kind = model->service.kind,
-      .endpoint = model->service.endpoint,
-      .capacity_domain = model->service.capacity_domain,
-      .telemetry = {.stream = model->stream,
-                    .counters = &model->counters,
-                    .latency = &model->latency}};
+  model->service =
+      (loom_serve_service_t){.name = model->service.name,
+                             .kind = model->service.kind,
+                             .endpoint = model->service.endpoint,
+                             .capacity_domain = model->service.capacity_domain,
+                             .telemetry = {.stream = model->stream,
+                                           .counters = &model->counters,
+                                           .latency = &model->latency}};
 }
 
 static void loom_serve_registry_record_error(
@@ -426,7 +509,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
   }
   if (model->phase == LOOM_SERVE_REGISTRATION_PREPARING) {
     bool complete = false;
-    loom_serve_http_service_t service = {0};
+    loom_serve_service_t service = {0};
     model->status = model->registration.prepare(
         model->registration.self, model->removal != LOOM_SERVE_REMOVAL_NONE,
         &complete, &service, &model->compilation);
@@ -474,7 +557,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
       (model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING ||
        model->parameter_operation ==
            LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING)) {
-    const loom_serve_http_service_snapshot_t snapshot =
+    const loom_serve_service_snapshot_t snapshot =
         model->service.snapshot(model->service.self);
     if (model->removal ||
         (!snapshot.queued_requests && !snapshot.active_requests &&
@@ -512,7 +595,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
   }
   if (model->phase == LOOM_SERVE_REGISTRATION_READY && model->removal &&
       model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_NONE) {
-    const loom_serve_http_service_snapshot_t snapshot =
+    const loom_serve_service_snapshot_t snapshot =
         model->service.snapshot(model->service.self);
     if (!snapshot.queued_requests && !snapshot.active_requests &&
         !model->tokenizer_count && !model->held_count &&
@@ -527,7 +610,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
   if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
       model->parameter_operation ==
           LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING) {
-    const loom_serve_http_service_snapshot_t snapshot =
+    const loom_serve_service_snapshot_t snapshot =
         model->service.snapshot(model->service.self);
     if (!snapshot.queued_requests && !snapshot.active_requests &&
         !model->service.is_active(model->service.self)) {
@@ -608,7 +691,7 @@ bool loom_serve_registry_counters(
     loom_serve_telemetry_counters_t* out_counters) {
   *out_counters = registry->retired.counters;
   for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
-    const loom_serve_http_service_t* service = &registry->models[i].service;
+    const loom_serve_service_t* service = &registry->models[i].service;
     if (!service->name.size) {
       continue;
     }
@@ -624,7 +707,7 @@ bool loom_serve_registry_latency(const loom_serve_registry_t* registry,
                                  loom_serve_telemetry_latency_t* out_latency) {
   *out_latency = registry->retired.latency;
   for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
-    const loom_serve_http_service_t* service = &registry->models[i].service;
+    const loom_serve_service_t* service = &registry->models[i].service;
     if (!service->name.size) {
       continue;
     }

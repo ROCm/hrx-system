@@ -91,6 +91,7 @@ from loom.ir import (
     StaticDim,
     StorageSpace,
     StorageType,
+    StringArrayAttr,
     SymbolName,
     SymbolNameArray,
     Type,
@@ -1642,6 +1643,30 @@ class TestRoundTrip:
         printed = _op_printer().print_operation(op, Module())
         assert printed == text
         assert _op_printer().print_operation(_parse_op(printed), Module()) == text
+
+    def test_string_arrays_preserve_order_duplicates_and_presence(self) -> None:
+        text = (
+            'test.string_array_attrs ["gfx12-generic", "gfx1250", '
+            '"gfx12-generic"] using [] '
+            '{fallbacks = ["gfx11-generic", "gfx12-generic"]}'
+        )
+        op = _parse_op(text)
+
+        assert op.attributes["required_values"] == StringArrayAttr(
+            ["gfx12-generic", "gfx1250", "gfx12-generic"]
+        )
+        assert op.attributes["optional_values"] == StringArrayAttr()
+        assert op.attributes["dict"]["fallbacks"] == StringArrayAttr(
+            ["gfx11-generic", "gfx12-generic"]
+        )
+        assert _op_printer().print_operation(op, Module()) == text
+
+        absent = _parse_op('test.string_array_attrs ["gfx1250"]')
+        assert "optional_values" not in absent.attributes
+
+    def test_string_arrays_reject_mixed_elements(self) -> None:
+        with pytest.raises(ParseError, match="expected STRING"):
+            _parse_op('test.string_array_attrs ["gfx1250", 12]')
 
     def test_signed_enum_sets_canonicalize_by_stable_value(self) -> None:
         text = "test.signed_enum_set_attrs [high, -middle, low] using [-high]"

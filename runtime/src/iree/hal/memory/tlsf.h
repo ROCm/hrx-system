@@ -409,6 +409,14 @@ typedef struct iree_hal_memory_tlsf_t {
   // Maximum frontier entries per block (set at creation time).
   uint8_t frontier_capacity;
 
+  // Optional owner-provided overflow capture. Runs under the allocator's
+  // external serialization and must only mutate presecured metadata.
+  void (*frontier_overflow)(void* user_data, iree_async_frontier_t* target,
+                            const iree_async_frontier_t* source);
+
+  // Borrowed owner of the presecured overflow capture.
+  void* frontier_overflow_user_data;
+
   // Number of published metadata segments, including the initial segment.
   uint8_t block_segment_count;
 
@@ -494,6 +502,13 @@ iree_status_t iree_hal_memory_tlsf_initialize(
 // The caller is responsible for ensuring no allocated blocks are leaked
 // (debug builds assert that allocation_count is zero).
 void iree_hal_memory_tlsf_deinitialize(iree_hal_memory_tlsf_t* tlsf);
+
+// Rebinds a completely free allocator to new backing of the same geometry.
+// The caller has transferred the old range's complete history to its owner.
+// Replaces that history with |initial_frontier|, whose width must fit the
+// configured capacity, and retains split metadata without walking its nodes.
+void iree_hal_memory_tlsf_reset(iree_hal_memory_tlsf_t* tlsf,
+                                const iree_async_frontier_t* initial_frontier);
 
 // Finds the next free block of at least |minimum_length| bytes. Pass
 // BLOCK_INDEX_NONE for |after_block| to begin, then the previous candidate's
@@ -591,13 +606,14 @@ iree_status_t iree_hal_memory_tlsf_allocate(
 //   - Right coalesce: if the right neighbor is free, merge frontiers and
 //     extend this block's range.
 //   - Frontier merge: component-wise maximum via iree_async_frontier_merge().
-//     If the merge overflows inline capacity, the merged block is marked
-//     tainted (IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_TAINTED) and the
-//     tainted_coalesce_count diagnostic counter is incremented.
+//     Overflow invokes the owner's presecured capture when configured.
+//     Otherwise the merged block is marked tainted
+//     (IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_TAINTED) and tainted_coalesce_count is
+//     incremented.
 //
 // This function cannot fail. Coalescing is always possible, bitmap updates are
-// pure computation, and frontier merge overflow is handled by setting the
-// taint flag (not by returning an error).
+// pure computation, and frontier merge overflow uses presecured capture
+// storage or sets the taint flag.
 void iree_hal_memory_tlsf_free(iree_hal_memory_tlsf_t* tlsf,
                                iree_hal_memory_tlsf_block_index_t block_index,
                                const iree_async_frontier_t* death_frontier);

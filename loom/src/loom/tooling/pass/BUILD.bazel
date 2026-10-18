@@ -13,6 +13,18 @@ package(
 )
 
 loom_cc_library(
+    name = "loomc_trace",
+    srcs = ["loomc_trace.c"],
+    hdrs = ["loomc_trace.h"],
+    deps = [
+        ":trace_cli",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "trace_cli",
     srcs = ["trace_cli.c"],
     hdrs = ["trace_cli.h"],

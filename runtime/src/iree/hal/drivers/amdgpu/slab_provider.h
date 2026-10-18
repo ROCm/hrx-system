@@ -48,11 +48,20 @@ enum iree_hal_amdgpu_slab_provider_flag_bits_e {
   // Slabs are acquired with HSA VMM and mapped into the ASAN-owned application
   // virtual address window.
   IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_VMM = 1u << 1,
+  // Slabs own ordinary VMM addresses and expose their complete physical handle
+  // for explicit aliases. This route is independent of ASAN's address window.
+  IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_MAPPING_SOURCE = 1u << 2,
 };
+
+typedef struct iree_hal_amdgpu_allocation_queue_t
+    iree_hal_amdgpu_allocation_queue_t;
 
 // HSA memory pool, mapping policy, and HAL capabilities exposed by a slab
 // provider.
 typedef struct iree_hal_amdgpu_slab_provider_options_t {
+  // Native owner retained by this provider, or NULL for explicit inline use.
+  iree_hal_amdgpu_allocation_queue_t* allocation_queue;
+
   // Flags selecting provider behavior.
   iree_hal_amdgpu_slab_provider_flags_t flags;
 
@@ -133,6 +142,10 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
     iree_host_size_t physical_device_ordinal,
     iree_hal_amdgpu_buffer_pool_t* buffer_pool, iree_string_view_t trace_name,
     iree_allocator_t host_allocator, iree_hal_slab_provider_t** out_provider);
+
+// Executes one native slab batch on the owning allocation worker.
+void iree_hal_amdgpu_slab_provider_execute(
+    iree_hal_slab_operation_t* operation);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -45,6 +45,7 @@ iree_cc_library(
   SRCS
     "pool_test_util.cc"
   DEPS
+    iree::async
     iree::hal
     iree::hal::memory::fixed_block_pool
     iree::hal::memory::passthrough_pool

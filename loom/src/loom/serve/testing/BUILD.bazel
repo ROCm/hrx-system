@@ -14,11 +14,27 @@ package(
 )
 
 loom_cc_library(
-    name = "maintenance_gate",
+    name = "native_allocator",
     testonly = True,
-    hdrs = ["maintenance_gate.h"],
+    hdrs = ["native_allocator.h"],
     visibility = ["//loom/src/loom/serve:implementation"],
-    deps = ["//runtime/src/iree/hal/memory:maintenance"],
+    deps = [
+        ":device",
+        "//loom/src/loom/serve/runtime/device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "worker_gate",
+    testonly = True,
+    hdrs = ["worker_gate.h"],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+    ],
 )
 
 loom_cc_library(
@@ -46,8 +62,8 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/host",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/memory:maintenance",
     ],
 )
 
@@ -103,6 +119,7 @@ loom_cc_library(
     deps = [
         ":compiler",
         ":device",
+        ":native_allocator",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/host",
         "//runtime/src/iree/base",

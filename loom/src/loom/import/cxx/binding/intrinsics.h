@@ -28,6 +28,7 @@
 #include "loom/import/cxx/binding/index_values.h"
 #include "loom/import/cxx/binding/kernel.h"
 #include "loom/import/cxx/binding/launch.h"
+#include "loom/import/cxx/binding/numeric_conversion.h"
 #include "loom/import/cxx/binding/scalar_bindings.h"
 #include "loom/import/cxx/binding/shaped.h"
 #include "loom/import/cxx/binding/target.h"
@@ -42,6 +43,8 @@ namespace loom::cxx_import {
 
 class SymbolNames;
 class Locations;
+class Scalars;
+class Vectors;
 
 // Result of one operation binding that has already claimed a source call.
 // Void intrinsics have no value; absence never means that the call was missed.
@@ -88,15 +91,18 @@ class Intrinsics {
                    VectorMemoryIntrinsic, AsyncIntrinsic, AtomicIntrinsic,
                    FenceIntrinsic, KernelCollectiveIntrinsic, BarrierIntrinsic,
                    TargetIntrinsic, AssemblyIntrinsic, TemplateApplyIntrinsic,
-                   CheckIntrinsic, AddressIntrinsic>;
+                   CheckIntrinsic, AddressIntrinsic,
+                   NumericConversionIntrinsic>;
 
   Intrinsics(cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
-             Locations& locations, SymbolNames& names,
-             LaunchContracts& launches, FunctionContracts& function_contracts,
-             loom_module_t* module)
+             Scalars& scalars, Vectors& vectors, Locations& locations,
+             SymbolNames& names, LaunchContracts& launches,
+             FunctionContracts& function_contracts, loom_module_t* module)
       : unit_(unit),
         diagnostics_(diagnostics),
         types_(types),
+        scalars_(scalars),
+        vectors_(vectors),
         locations_(locations),
         names_(names),
         launches_(launches),
@@ -141,7 +147,8 @@ class Intrinsics {
     // bindings resolve their complete contract at concrete specialization.
     std::variant<std::monostate, ScalarOperation, ShapedIntrinsic::Operation,
                  VectorArithmeticIntrinsic::Operation,
-                 EncodingIntrinsic::Family>
+                 EncodingIntrinsic::Family,
+                 NumericConversionIntrinsic::Operation>
         operation;
   };
 
@@ -163,6 +170,10 @@ class Intrinsics {
   Diagnostics& diagnostics_;
   // Invocation-owned source type projection shared with ordinary translation.
   Types& types_;
+  // Scalar numeric conversion builder shared with ordinary expressions.
+  Scalars& scalars_;
+  // Vector numeric conversion builder shared with ordinary expressions.
+  Vectors& vectors_;
   // Invocation-owned source provenance retained by family declarations.
   Locations& locations_;
   // Shared output namespace preventing external-family/callable collisions.

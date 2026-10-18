@@ -35,8 +35,8 @@ typedef struct iree_hal_vulkan_memory_backend_t {
   iree_hal_vulkan_features_t enabled_features;
   // Existing placement-local capacity notification.
   iree_async_notification_t* notification;
-  // Existing independent cold allocation and retirement owner.
-  iree_hal_memory_maintenance_t* maintenance;
+  // Device-owned native slab allocation/free queue.
+  iree_hal_vulkan_allocation_queue_t* allocation_queue;
   // Existing completion probe with a group-lifetime borrowed context.
   iree_hal_pool_epoch_query_t epoch_query;
 } iree_hal_vulkan_memory_backend_t;

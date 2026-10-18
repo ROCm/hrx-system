@@ -330,10 +330,6 @@ static loomc_status_t loomc_link_index_add_missing_source_diagnostic(
   return loomc_ok_status();
 }
 
-static loomc_status_t loomc_link_index_mark_failed(loomc_result_t* result) {
-  return loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
-}
-
 loomc_status_t loomc_link_index_add_source_to_module_index(
     loomc_context_t* context, loom_link_module_index_t* module_index,
     const loomc_source_t* source,
@@ -404,8 +400,9 @@ loomc_status_t loomc_link_index_add_source_to_module_index(
       return add_status;
     }
   }
+  loomc_result_set_status_code(result, loomc_status_code(public_status));
   loomc_status_free(public_status);
-  return loomc_link_index_mark_failed(result);
+  return loomc_ok_status();
 }
 
 static void loomc_link_index_destroy(loomc_link_index_t* link_index) {
@@ -518,7 +515,7 @@ loomc_status_t loomc_link_index_builder_allocate(
   }
 
   if (loomc_status_is_ok(status)) {
-    status = loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+    status = loomc_result_create(LOOMC_STATUS_OK,
                                  loomc_context_source_retention(context),
                                  allocator, &builder->result);
   }
@@ -703,8 +700,8 @@ loomc_status_t loomc_link_index_builder_finish(
     if (source->source == NULL) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, loomc_link_index_add_missing_source_diagnostic(builder, i));
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, loomc_link_index_mark_failed(builder->result));
+      loomc_result_set_status_code(builder->result,
+                                   LOOMC_STATUS_INVALID_ARGUMENT);
       continue;
     }
     const loomc_link_index_source_options_t source_options = {

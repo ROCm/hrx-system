@@ -266,7 +266,6 @@ iree_cc_library(
     iree::async
     iree::base
     iree::hal
-    iree::hal::memory::maintenance
     iree::hal::memory::passthrough_pool
     iree::hal::memory::tracing
   PUBLIC

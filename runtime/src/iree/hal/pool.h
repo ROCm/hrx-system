@@ -76,9 +76,12 @@ enum iree_hal_pool_acquire_result_e {
   // non-dominated death frontiers and the pool chose not to hand one out
   // as NEEDS_WAIT.
   //
-  // The caller should observe the pool's notification, retry the reservation,
-  // and wait on the observed token only if the pool remains exhausted. No
-  // reservation was made; |out_reservations| is not modified.
+  // With ALLOW_WAIT_FRONTIER, the caller may observe the pool's capacity
+  // sources, retry, and wait on the observed tokens if still exhausted.
+  // Without that flag, completion of pending accesses may make a free block
+  // eligible without publishing a capacity notification; such callers poll
+  // eligibility or supply their own progress source. No reservation was made;
+  // |out_reservations| is not modified.
   IREE_HAL_POOL_ACQUIRE_EXHAUSTED = 4,
 
   // The pool's budget limit would be exceeded by this reservation. The
@@ -152,22 +155,12 @@ enum iree_hal_pool_reserve_flag_bits_e {
   // are used or release the reservation with that frontier to preserve the
   // block's dependency metadata.
   //
-  // Callers that cannot model queue-owned hidden memory dependencies must omit
-  // this flag. Such calls should receive only immediately-usable reservations
-  // or transient EXHAUSTED/OVER_BUDGET results from well-behaved pools.
+  // Omitting this flag restricts acquisition to immediately usable ranges.
+  // Capacity notifications alone cannot drive retries in that mode: completing
+  // a prior access does not publish a capacity change. Asynchronous callers
+  // accept the frontier and arrange its dependency; synchronous callers may
+  // use iree_hal_pool_allocate_buffer, which waits for actual completion.
   IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER = 1u << 0,
-
-  // Prevents acquiring additional backing storage or allocating host metadata
-  // during this reservation attempt. This includes temporary transaction
-  // staging, even for a pool whose backing capacity is fixed. Pools that need
-  // such preparation return IREE_HAL_POOL_ACQUIRE_EXHAUSTED with
-  // IREE_HAL_POOL_ACQUIRE_FLAG_GROWTH_REQUIRED. The caller may retry with this
-  // flag cleared on its allocation path.
-  //
-  // Queue implementations use this inside critical sections so unbounded
-  // host and platform memory allocation is routed through an explicit cold
-  // path.
-  IREE_HAL_POOL_RESERVE_FLAG_DISALLOW_GROWTH = 1u << 1,
 };
 
 // Generic metadata flags returned by a pool reservation acquisition.
@@ -180,10 +173,6 @@ enum iree_hal_pool_acquire_flag_bits_e {
   // intentionally disabled for safety. Queue implementations should treat this
   // as a conservative dependency edge, not proof of precise happens-before.
   IREE_HAL_POOL_ACQUIRE_FLAG_WAIT_FRONTIER_TAINTED = 1u << 0,
-
-  // The pool did not make a reservation because the caller prohibited growth
-  // and the request requires additional backing storage or host metadata.
-  IREE_HAL_POOL_ACQUIRE_FLAG_GROWTH_REQUIRED = 1u << 1,
 };
 
 // Generic metadata returned by a pool reservation acquisition.
@@ -519,6 +508,16 @@ IREE_API_EXPORT void iree_hal_pool_retain(iree_hal_pool_t* pool);
 // Releases the given |pool| from the caller.
 IREE_API_EXPORT void iree_hal_pool_release(iree_hal_pool_t* pool);
 
+// Completion of one accepted reservation transaction. Takes ownership of
+// |status|. |result| is meaningful only when |status| is OK.
+typedef struct iree_hal_pool_acquire_callback_t {
+  // Terminal callback, invoked exactly once for an accepted transaction.
+  void(IREE_API_PTR* fn)(void* user_data, iree_status_t status,
+                         iree_hal_pool_acquire_result_t result);
+  // Borrowed caller state, live through submission and terminal callback.
+  void* user_data;
+} iree_hal_pool_acquire_callback_t;
+
 // Acquires an all-or-none transaction of reservations for future allocations.
 //
 // Each returned reservation may be larger than its requested allocation size
@@ -537,7 +536,7 @@ IREE_API_EXPORT void iree_hal_pool_release(iree_hal_pool_t* pool);
 // IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER before a pool may return
 // IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT.
 //
-// On success (iree_ok_status()), |out_result| describes the whole transaction:
+// On successful completion, the result describes the whole transaction:
 //   OK: all reservations succeeded and at least one recycled range was used.
 //   OK_FRESH: all reservations succeeded from previously unused ranges.
 //   OK_NEEDS_WAIT: all reservations succeeded and at least one requires a
@@ -556,24 +555,45 @@ IREE_API_EXPORT void iree_hal_pool_release(iree_hal_pool_t* pool);
 // reuse_frontier even though this requester needs no extra wait. Frontier
 // storage is borrowed and remains immutable until its reservation is released.
 //
-// On EXHAUSTED or OVER_BUDGET, every information record and |out_result| are
-// assigned while the reservation outputs remain untouched. One or more
-// information records identify the requests that could not be satisfied with
+// On EXHAUSTED or OVER_BUDGET, every information record is assigned while the
+// reservation outputs remain untouched. One or more information records
+// identify the requests that could not be satisfied with
 // the transaction result and any associated flags; requests not committed or
 // not examined use IREE_HAL_POOL_ACQUIRE_NONE. On an error status all outputs
 // are untouched.
 //
-// Returns an error status (with backtrace) only for infrastructure failures:
-// invalid arguments (size 0, non-power-of-two alignment), internal
-// corruption, or slab provider errors. These are exceptional.
+// Status reports invalid requests, metadata allocation failures, and native
+// provider failures. Ordinary capacity pressure is an acquisition result.
+//
+// OK accepts exactly one |completion|, which may run inline before this call
+// returns or later in the provider's execution
+// context. A non-OK return rejects capture: completion is not invoked, outputs
+// are unchanged, and no caller storage is retained.
+//
+// The caller keeps the pool, requests, requester frontier, output arrays, and
+// callback state alive until both submission and completion finish accessing
+// them. Completion does not establish that prior uses of recycled storage have
+// retired; successful output reuse frontiers carry that separate obligation.
 IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservations(
     iree_hal_pool_t* pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reserve_flags_t flags,
     iree_hal_pool_reservation_t* out_reservations,
     iree_hal_pool_acquire_info_t* out_infos,
-    iree_hal_pool_acquire_result_t* out_result);
+    iree_hal_pool_acquire_callback_t completion,
+    iree_hal_pool_reserve_flags_t flags);
+
+// Joins acquisition completion on the calling thread. This is for explicitly
+// blocking allocation callers; queue scheduling uses the completion form.
+// Joins native preparation only, never outstanding uses of recycled storage.
+IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservations_sync(
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    const iree_async_frontier_t* requester_frontier,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos,
+    iree_hal_pool_acquire_result_t* out_result,
+    iree_hal_pool_reserve_flags_t flags);
 
 // Releases a transaction of reservations back to the pool's free list.
 //
@@ -695,8 +715,10 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_materialize_reservations(
 //
 // On success the pool consumes and zeros |inout_storage| and owns its optional
 // release callback until the imported buffer is destroyed. Native attachments
-// are released before the callback runs. On failure |inout_storage| is
-// unchanged and |out_buffer| remains NULL. Import performs no copy or execution
+// are released before the callback runs. Final imported-view destruction
+// completes native detach before returning, including when the storage has no
+// release callback. On failure |inout_storage| is unchanged and |out_buffer|
+// remains NULL. Import performs no copy or execution
 // wait; the caller completes prior users before registration or attachment.
 IREE_API_EXPORT iree_status_t iree_hal_pool_import_buffer(
     iree_hal_pool_t* pool, iree_hal_external_storage_t* inout_storage,
@@ -763,6 +785,9 @@ IREE_API_EXPORT void iree_hal_pool_trim(iree_hal_pool_t* pool,
 // an unbounded source that reports allocation failures directly as statuses.
 // Backing pools may publish independent capacity changes; allocation retries
 // use the common pool_wait helper to observe every captured source.
+// This observes logical capacity, not completion of earlier buffer accesses.
+// Acquisition loops driven by these notifications accept wait frontiers and
+// separately arrange the returned dependencies before accessing reserved bytes.
 //
 // The notification is advisory over pool state. Callers must observe the
 // notification epoch before checking the pool state, and then wait on that
@@ -819,10 +844,10 @@ typedef struct iree_hal_pool_vtable_t {
       iree_hal_pool_t* pool, iree_host_size_t request_count,
       const iree_hal_pool_reservation_request_t* requests,
       const iree_async_frontier_t* requester_frontier,
-      iree_hal_pool_reserve_flags_t flags,
       iree_hal_pool_reservation_t* out_reservations,
       iree_hal_pool_acquire_info_t* out_infos,
-      iree_hal_pool_acquire_result_t* out_result);
+      iree_hal_pool_acquire_callback_t completion,
+      iree_hal_pool_reserve_flags_t flags);
 
   // Releases a reservation transaction to the concrete pool implementation.
   void(IREE_API_PTR* release_reservations)(
@@ -907,10 +932,6 @@ struct iree_hal_pool_t {
   // Borrowed completion tracker for all frontiers used with this pool.
   // Its owning device group must outlive the pool and its operations.
   iree_async_frontier_tracker_t* frontier_tracker;
-
-  // Borrowed placement-local owner captured from native storage or the
-  // retained backing pool. NULL for sources without cold preparation support.
-  iree_hal_memory_maintenance_t* maintenance;
 
   // Captured optional completion probe inherited by child allocators. Its
   // borrowed context belongs to the same sealed device group as the tracker.

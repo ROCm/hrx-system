@@ -47,6 +47,7 @@ LOOMC_PUBLIC_HDRS = LOOMC_BASE_HDRS + [
     "include/loomc/link_index.h",
     "include/loomc/loomc.h",
     "include/loomc/module.h",
+    "include/loomc/module_config.h",
     "include/loomc/pass.h",
     "include/loomc/pass_trace.h",
     "include/loomc/product.h",
@@ -100,6 +101,7 @@ LOOMC_TARGET_X86_PUBLIC_HDRS = [
 
 LOOMC_TARGET_CONFIGURED_PUBLIC_HDRS = [
     "include/loomc/target/configured.h",
+    "include/loomc/target/configured_ir.h",
 ]
 
 LOOMC_TARGET_CMD_PUBLIC_HDRS = [
@@ -199,6 +201,7 @@ loom_cc_library(
         "src/link_materialization.c",
         "src/module.c",
         "src/module_bytecode.c",
+        "src/module_config.c",
         "src/module_function.c",
         "src/module_global.c",
         "src/module_source.c",
@@ -253,6 +256,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/pipeline:legalizer_registry",
         "//loom/src/loom/compile:request",
         "//loom/src/loom/config:application",
+        "//loom/src/loom/config:schema",
         "//loom/src/loom/config:text",
         "//loom/src/loom/config:text_binding",
         "//loom/src/loom/error:diagnostic",
@@ -288,6 +292,7 @@ loom_cc_library(
         "//loom/src/loom/pass:pipeline_snapshot",
         "//loom/src/loom/pass:program",
         "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:report",
         "//loom/src/loom/pass:tooling",
         "//loom/src/loom/pass:trace",
         "//loom/src/loom/pass:value_facts",
@@ -326,6 +331,8 @@ loom_cc_library(
         ":loomc",
         "//loom/src/loom/error:source",
         "//loom/src/loom/ir",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:report",
         "//loom/src/loom/target:pipeline",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/reporting:report",

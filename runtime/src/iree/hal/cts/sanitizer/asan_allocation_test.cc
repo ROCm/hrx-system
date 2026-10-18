@@ -494,10 +494,9 @@ TEST_P(AsanAllocationTest, GuardedFiniteAllocaWaitsForInheritedHostUse) {
     iree_hal_pool_reservation_t source_reservation;
     iree_hal_pool_acquire_info_t source_info;
     iree_hal_pool_acquire_result_t result;
-    IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-        source_pool, 1, &source_request, nullptr,
-        IREE_HAL_POOL_RESERVE_FLAG_NONE, &source_reservation, &source_info,
-        &result));
+    IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
+        source_pool, 1, &source_request, nullptr, &source_reservation,
+        &source_info, &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
     ASSERT_EQ(IREE_HAL_POOL_ACQUIRE_OK_FRESH, result);
     iree_async_single_frontier_t prior_use;
     iree_async_single_frontier_initialize(&prior_use, host_axis, ++host_epoch);
@@ -505,10 +504,9 @@ TEST_P(AsanAllocationTest, GuardedFiniteAllocaWaitsForInheritedHostUse) {
         iree_async_single_frontier_as_const_frontier(&prior_use);
     iree_hal_pool_release_reservations(source_pool, 1, &source_reservation,
                                        frontier);
-    IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-        source_pool, 1, &source_request, nullptr,
-        IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, &source_reservation,
-        &source_info, &result));
+    IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
+        source_pool, 1, &source_request, nullptr, &source_reservation,
+        &source_info, &result, IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
     ASSERT_EQ(IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT, result);
     Ref<iree_hal_buffer_t> source;
     IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(

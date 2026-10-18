@@ -16,47 +16,23 @@ loom_cc_binary(
     "loom-opt.c"
   DEPS
     iree::base
-    iree::base::internal::arena
     iree::base::tooling::flags
-    iree::io::file_handle
     loom::binding::c::interop
     loom::binding::c::loomc
-    loom::codegen::low::pipeline::legalizer_registry
-    loom::codegen::low::text_asm
-    loom::codegen::low::verify
-    loom::codegen::pass_environment
-    loom::config::application
-    loom::config::schema
-    loom::config::text
+    loom::binding::c::target::configured::ir
     loom::config::text_binding
-    loom::error::diagnostic
-    loom::error::json_sink
-    loom::error::source
-    loom::format::text::printer
-    loom::ir
-    loom::pass::builtin_registry
-    loom::pass::pipeline
     loom::pass::registry
     loom::pass::report
-    loom::pass::tooling
-    loom::pass::trace
-    loom::target::configured::provider_set
-    loom::target::function_version_projection
-    loom::target::math_policy
-    loom::target::pipeline
-    loom::target::predicate
-    loom::target::provider
     loom::tooling::cli::help
     loom::tooling::cli::loomc_diagnostic_json
+    loom::tooling::cli::loomc_options
     loom::tooling::cli::loomc_result
     loom::tooling::config::input
     loom::tooling::io::file
+    loom::tooling::pass::loomc_trace
     loom::tooling::pass::trace_cli
-    loom::transforms::cleanup::configured
-    loom::transforms::cleanup::patterns
     loom::util::json
     loom::util::stream
-    loom::verify
 )
 
 iree_execution_test_suite(

@@ -16,9 +16,8 @@ extern "C" {
 
 // Single-owner physical allocation domain shared by independent virtual
 // buffers. Logical blocks and model geometry belong to its callers. Admission
-// and result publication stay on that owner; asynchronous native work uses the
-// storage pool's cold-memory executor. These are capacity transitions, not
-// per-token operations.
+// and result publication stay on that owner; physical and mapping operations
+// use public HAL queues. These are capacity transitions, not per-token work.
 // Backing supports storage, transfers, and indirect dispatch parameters.
 typedef struct loom_serve_memory_pool_t loom_serve_memory_pool_t;
 typedef struct loom_serve_virtual_buffer_t loom_serve_virtual_buffer_t;
@@ -27,28 +26,28 @@ typedef struct loom_serve_memory_operation_t loom_serve_memory_operation_t;
 typedef struct loom_serve_memory_statistics_t {
   // Reserved virtual bytes, including final slab alignment.
   uint64_t reserved_bytes;
-  // Unique physical bytes published to the serialized pool owner.
+  // Unique backing bytes; pool-wide queries include pending native retirement.
   uint64_t committed_bytes;
   // Budget charged to accepted native commitments not yet published by owner.
   uint64_t pending_bytes;
-  // Committed bytes selected for native release, still charged until
-  // completion.
+  // Backing selected for return. Per-buffer accounting ends at logical return;
+  // pool-wide accounting also includes outstanding native release.
   uint64_t releasing_bytes;
   // Maximum simultaneously committed physical bytes.
   uint64_t peak_bytes;
-  // Cumulative physical bytes successfully returned to the allocator.
+  // Cumulative returned backing; pool-wide queries exclude pending native free.
   uint64_t released_bytes;
 } loom_serve_memory_statistics_t;
 
-// Retains the device allocator. Zero slab_size selects its recommended
-// granularity; explicit sizes must be multiples of its minimum granularity.
-// limit_bytes bounds physical commitment, not virtual reservation. Zero means
-// no serving-imposed limit; allocation failure still propagates. Each buffer
-// borrows this pool, and must be destroyed before pool destruction. The native
-// storage_pool is borrowed for mapping publication and must outlive this pool.
+// Retains the mapping-source pool and copies the exact virtual-target scope.
+// The sealed group and selected transfer queue outlive this pool. Zero
+// slab_size selects the common recommended granularity; explicit sizes satisfy
+// both source and target geometry. limit_bytes bounds physical commitment,
+// including native releases not yet completed. Zero imposes no serving budget.
+// Each reservation borrows this pool and is destroyed before the pool.
 iree_status_t loom_serve_memory_pool_allocate(
-    iree_hal_device_t* device, iree_hal_pool_t* storage_pool,
-    iree_hal_queue_family_affinity_t queue_affinity,
+    iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
+    iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
     iree_device_size_t slab_size, uint64_t limit_bytes,
     iree_allocator_t host_allocator, loom_serve_memory_pool_t** out_pool);
 
@@ -61,10 +60,11 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 // This is the configured budget, not currently available backing.
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool);
 
-// Clones the first failure from native work or reclamation, or returns OK. Such
-// a failure may have partially changed another owner's backing; it is not
-// scoped to the caller requesting capacity. The serialized owner stops new
-// work and drains all consumers before cleanup. Querying does not clear it.
+// Clones a shared capacity-observation or reclamation failure, or returns OK.
+// Those failures apply to the shared domain; the serialized owner stops new
+// work and drains consumers before cleanup. Individual allocation, mapping,
+// and readiness errors remain on their operation and affected buffers.
+// Querying does not clear the shared failure.
 iree_status_t loom_serve_memory_pool_query_status(
     loom_serve_memory_pool_t* pool);
 
@@ -81,8 +81,8 @@ bool loom_serve_memory_pool_is_pending(loom_serve_memory_pool_t* pool);
 
 // Outer-thread join of accepted native operations, not device work or logical
 // reclamation that still needs its model scheduler. Never called by task
-// owners. Publishes final accounting and returns the pool's terminal native
-// failure.
+// owners. Publishes final accounting and returns any shared capacity or
+// reclamation failure. Each operation retains its own result.
 iree_status_t loom_serve_memory_pool_await(loom_serve_memory_pool_t* pool);
 
 // Cold pressure policy, independent of logical storage geometry. The callback
@@ -99,17 +99,26 @@ typedef struct loom_serve_memory_reclaimer_t {
 void loom_serve_memory_pool_set_reclaimer(
     loom_serve_memory_pool_t* pool, loom_serve_memory_reclaimer_t reclaimer);
 
+typedef enum loom_serve_memory_admission_e {
+  // The requested bytes cannot currently fit and no capacity wake was armed.
+  LOOM_SERVE_MEMORY_ADMISSION_CAPACITY = 0,
+  // Accepted work or a native return can change capacity and wake the owner.
+  // This result remains authoritative even if that completion races the return.
+  LOOM_SERVE_MEMORY_ADMISSION_DEFERRED,
+  // Capacity is available; the serialized owner can commit before yielding.
+  LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE,
+} loom_serve_memory_admission_t;
+
 // Makes room for additional physical bytes using the installed cold policy.
 // Includes pending commitments but does not itself allocate or reserve credit:
-// the single owner commits before yielding admission to another caller. False
-// means ordinary capacity backpressure, not an allocation failure. Consumers
-// pin every residency they need before asking for capacity, including already
-// backed ranges the policy could otherwise trim. An accepted release does not
-// grant capacity until native completion; its owner wake permits another
-// attempt.
-iree_status_t loom_serve_memory_pool_prepare(loom_serve_memory_pool_t* pool,
-                                             uint64_t additional_bytes,
-                                             bool* out_admitted);
+// the single owner commits before yielding admission to another caller.
+// Consumers pin every residency they need before asking for capacity,
+// including already backed ranges the policy could otherwise trim. Accepted
+// returns grant capacity only after native completion. The result preserves
+// this attempt's progress observation independently of model retirement.
+iree_status_t loom_serve_memory_pool_prepare(
+    loom_serve_memory_pool_t* pool, uint64_t additional_bytes,
+    loom_serve_memory_admission_t* out_admission);
 
 // Reserves stable device addresses without committing physical storage.
 // The borrowed HAL buffer remains identical across commit/trim operations.
@@ -154,12 +163,13 @@ iree_status_t loom_serve_memory_pool_try_commit(
     const loom_serve_memory_range_t* ranges, bool* out_admitted);
 
 // Admits the missing slab union on the serialized owner, then allocates, maps,
-// and publishes it on the native pool's shared cold-memory executor. Pending
-// bytes consume budget immediately. No worker accesses caller accounting or
-// invokes the pressure policy. On success, readiness reaches value only after
-// mappings are usable; failure fails readiness and preserves partial ownership
-// for teardown. Existing ready ranges need no operation and signal immediately.
-// Capacity denial returns admitted=false and no operation or readiness signal.
+// and publishes it using batched HAL queue_alloca and queue_map operations.
+// Pending bytes consume budget immediately. Completion only publishes captured
+// results and wakes the owner; it never invokes the pressure policy. On
+// success, readiness reaches value only after mappings are usable; failure
+// fails readiness and preserves partial ownership for teardown. Existing ready
+// ranges need no operation and signal immediately. Capacity denial returns
+// admitted=false and no operation or readiness signal.
 //
 // The caller keeps every reservation and its accounting alive until the
 // returned operation retires, independently of readiness success/failure. No
@@ -175,9 +185,10 @@ iree_status_t loom_serve_memory_pool_commit_async(
 // its native release. The caller has retired every consumer of that set and
 // keeps reservations/accounting alive through operation completion. Kept slabs
 // remain usable. No other operation may edit selected slabs before completion.
-// Committed bytes stay charged; releasing_bytes describes the pending subset,
-// not available capacity. Optional readiness is retained and reaches value only
-// after native release; an empty set returns NULL and signals immediately.
+// The private mapping and deallocation completions join before optional
+// readiness is signaled. Physical capacity stays charged by the source pool
+// until native release completes; its capacity notification wakes admission.
+// An empty set returns NULL and signals immediately.
 // Native failures fail readiness, preserve unreleased ownership, and poison
 // the pool for normal owner-driven shutdown.
 iree_status_t loom_serve_memory_pool_trim_async(
@@ -195,23 +206,29 @@ void loom_serve_memory_operation_set_observer(
     void* user_data);
 
 // Publishes completed native results and accounting on the serialized owner.
-// True joins the worker's final access, not merely its readiness signal. NULL
-// is complete. A failed operation is reported by pool_query_status and
+// True joins captured queue ownership, independently of caller readiness. NULL
+// is complete. A failed operation is reported by operation_query_status and
 // readiness.
 bool loom_serve_memory_operation_is_complete(
     loom_serve_memory_operation_t* operation);
 
 // Cold outer-thread join, never used by scheduler tasks or completion
 // callbacks. Publishes the same results as is_complete; failure remains on
-// pool/readiness.
+// operation/readiness.
 void loom_serve_memory_operation_await(
     loom_serve_memory_operation_t* operation);
+
+// Clones the result after is_complete or await has joined publication. NULL
+// reports OK. Failed native edits invalidate only their affected reservations;
+// a failed caller readiness signal does not invalidate successful mappings.
+iree_status_t loom_serve_memory_operation_query_status(
+    const loom_serve_memory_operation_t* operation);
 
 // Releases a completed operation. Caller-owned reservations may then be trimmed
 // or destroyed. NULL is accepted; this never waits for native work.
 void loom_serve_memory_operation_free(loom_serve_memory_operation_t* operation);
 
-// At a retired maintenance cut, clear the keep set, mark all still-live byte
+// After retiring affected users, clear the keep set, mark all still-live byte
 // ranges, then trim. Marking does not commit memory. A physical slab shared by
 // several logical ranges stays backed if any range needs it. The caller owns
 // readiness/retirement: these functions never wait for device work themselves.

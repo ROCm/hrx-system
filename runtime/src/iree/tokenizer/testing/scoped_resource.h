@@ -82,12 +82,12 @@ class ScopedResource {
 //   component_state_deinitialize(state)
 //
 // Usage:
-//   using ScopedModelState = ScopedState<
-//       iree_tokenizer_model_t, iree_tokenizer_model_state_t,
-//       iree_tokenizer_model_state_size,
-//       iree_tokenizer_model_state_initialize,
-//       iree_tokenizer_model_state_deinitialize>;
-//   ScopedModelState state(model.get());
+//   using ScopedNormalizerState = ScopedState<
+//       iree_tokenizer_normalizer_t, iree_tokenizer_normalizer_state_t,
+//       iree_tokenizer_normalizer_state_size,
+//       iree_tokenizer_normalizer_state_initialize,
+//       iree_tokenizer_normalizer_state_deinitialize>;
+//   ScopedNormalizerState state(normalizer.get());
 //   state.get();    // raw state pointer
 //   state.Reset();  // reinitialize without reallocating
 template <typename ComponentT, typename StateT,

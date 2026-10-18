@@ -52,22 +52,6 @@ static void BM_FreeNoCoalesce(benchmark::State& state) {
   // Pre-allocate three blocks. Free and re-allocate the middle one each
   // iteration. The left and right neighbors remain allocated, preventing
   // coalescing.
-  iree_hal_memory_tlsf_allocation_t left, right;
-  IREE_CHECK_OK(iree_hal_memory_tlsf_allocate(&tlsf, size, &left));
-  IREE_CHECK_OK(iree_hal_memory_tlsf_allocate(&tlsf, size, &right));
-
-  // We need a gap between left and right, so allocate the middle too.
-  // Actually, allocate left, middle, right to ensure adjacency.
-  iree_hal_memory_tlsf_allocation_t middle;
-  IREE_CHECK_OK(iree_hal_memory_tlsf_allocate(&tlsf, size, &middle));
-  // Free right, but then middle's right neighbor would be free. Fix:
-  // keep right allocated and use a 4-block pattern.
-  // Simpler: just allocate two guards and benchmark free of a block between.
-  iree_hal_memory_tlsf_free(&tlsf, middle.block_index, NULL);
-  iree_hal_memory_tlsf_free(&tlsf, right.block_index, NULL);
-  iree_hal_memory_tlsf_free(&tlsf, left.block_index, NULL);
-
-  // New approach: fill enough to make 3 adjacent allocated blocks.
   iree_hal_memory_tlsf_allocation_t guard_left, target, guard_right;
   IREE_CHECK_OK(iree_hal_memory_tlsf_allocate(&tlsf, size, &guard_left));
   IREE_CHECK_OK(iree_hal_memory_tlsf_allocate(&tlsf, size, &target));

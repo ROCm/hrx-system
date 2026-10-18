@@ -205,6 +205,20 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "tokenizer_offsets_test",
+    srcs = ["tokenizer_offsets_test.cc"],
+    deps = [
+        ":model",
+        ":tokenizer",
+        ":tokenizer_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "tokenizer_input_tokens_test",
     srcs = ["tokenizer_input_tokens_test.cc"],
     deps = [

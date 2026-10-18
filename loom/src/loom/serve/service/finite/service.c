@@ -14,6 +14,7 @@
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/finite/result.h"
+#include "loom/serve/service/kind.h"
 #include "loom/util/json.h"
 
 typedef struct loom_serve_finite_job_t {
@@ -516,11 +517,10 @@ static bool loom_serve_finite_is_pending(void* self) {
          loom_serve_timer_is_pending(&service->timer);
 }
 
-static loom_serve_http_service_snapshot_t loom_serve_finite_snapshot(
-    void* self) {
+static loom_serve_service_snapshot_t loom_serve_finite_snapshot(void* self) {
   const loom_serve_finite_service_t* service = self;
   const iree_time_t now = iree_time_now();
-  return (loom_serve_http_service_snapshot_t){
+  return (loom_serve_service_snapshot_t){
       .phase = finite_phases[service->phase],
       .queued_requests = service->pending_count,
       .active_requests = service->cohort_count,
@@ -678,11 +678,12 @@ static iree_status_t loom_serve_finite_collect(
   return status;
 }
 
-static iree_status_t loom_serve_finite_advance(
-    void* self, loom_serve_http_service_flags_t flags, bool* out_progress) {
+static iree_status_t loom_serve_finite_advance(void* self,
+                                               loom_serve_service_flags_t flags,
+                                               bool* out_progress) {
   loom_serve_finite_service_t* service = self;
   *out_progress = false;
-  if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
     service->stopping = true;
   }
   loom_serve_finite_cancel_peers(service);
@@ -734,8 +735,8 @@ static iree_status_t loom_serve_finite_advance(
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
                  admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
-                 !iree_any_bit_set(
-                     flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY)) {
+                 !iree_any_bit_set(flags,
+                                   LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY)) {
         for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
           loom_serve_finite_job_t* job = service->cohort[i];
           job->outcome = LOOM_SERVE_TELEMETRY_REJECTED;
@@ -785,14 +786,15 @@ static iree_status_t loom_serve_finite_advance(
 static iree_status_t loom_serve_finite_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
-    loom_serve_http_service_flags_t flags) {
+    loom_serve_service_flags_t flags) {
   loom_serve_finite_service_t* service = self;
   const iree_time_t arrival_time = iree_time_now();
   const uint64_t id = loom_serve_finite_request_begin(service, arrival_time);
   if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
       !iree_string_view_equal(
           request->target,
-          iree_make_cstring_view(service->protocol->endpoint))) {
+          iree_make_cstring_view(
+              loom_serve_model_kind_endpoint(service->protocol->kind)))) {
     return loom_serve_finite_decline(service, id, arrival_time, connection,
                                      "404 Not Found",
                                      IREE_SV("unknown finite-result endpoint"));
@@ -860,10 +862,10 @@ static void loom_serve_finite_set_observer(
                                                     observer);
 }
 
-loom_serve_http_service_t loom_serve_finite_service_interface(
+loom_serve_service_t loom_serve_finite_service_interface(
     loom_serve_finite_service_t* service) {
   static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
-  return (loom_serve_http_service_t){
+  return (loom_serve_service_t){
       .name = service->name,
       .self = service,
       .set_observer = loom_serve_finite_set_observer,
@@ -872,8 +874,8 @@ loom_serve_http_service_t loom_serve_finite_service_interface(
       .accept = loom_serve_finite_accept,
       .advance = loom_serve_finite_advance,
       .tokenizer = loom_serve_finite_model_tokenizer(service->model),
-      .kind = service->protocol->name,
-      .endpoint = service->protocol->endpoint,
+      .kind = service->protocol->kind,
+      .endpoint = loom_serve_model_kind_endpoint(service->protocol->kind),
       .capabilities =
           {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
                                 input_modalities},

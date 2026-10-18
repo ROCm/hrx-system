@@ -9,12 +9,12 @@ func.def @dynamic_extract(%a: f32, %b: f32, %c: f32, %index: index) -> (f32) {
 
 // ----
 func.def @dynamic_extract(%a: f32, %b: f32, %c: f32, %index: index) -> (f32) {
-  %7 = index.constant 0 : index
+  %7 = index.constant 1 : index
   %8 = index.cmp eq, %index, %7 : index
-  %9 = scf.select %8, %a, %c : f32
-  %10 = index.constant 1 : index
+  %9 = scf.select %8, %b, %a : f32
+  %10 = index.constant 2 : index
   %11 = index.cmp eq, %index, %10 : index
-  %result = scf.select %11, %b, %9 : f32
+  %result = scf.select %11, %c, %9 : f32
   func.return %result : f32
 }
 
@@ -31,15 +31,15 @@ func.def @dynamic_matrix_extract(%a: i32, %b: i32, %c: i32, %d: i32, %row: index
 func.def @dynamic_matrix_extract(%a: i32, %b: i32, %c: i32, %d: i32, %row: index, %column: index) -> (i32) {
   %9 = index.constant 2 : index
   %21 = index.madd %row, %9, %column : index
-  %12 = index.constant 0 : index
+  %12 = index.constant 1 : index
   %13 = index.cmp eq, %21, %12 : index
-  %14 = scf.select %13, %a, %d : i32
-  %15 = index.constant 1 : index
+  %14 = scf.select %13, %b, %a : i32
+  %15 = index.constant 2 : index
   %16 = index.cmp eq, %21, %15 : index
-  %17 = scf.select %16, %b, %14 : i32
-  %18 = index.constant 2 : index
+  %17 = scf.select %16, %c, %14 : i32
+  %18 = index.constant 3 : index
   %19 = index.cmp eq, %21, %18 : index
-  %result = scf.select %19, %c, %17 : i32
+  %result = scf.select %19, %d, %17 : i32
   func.return %result : i32
 }
 

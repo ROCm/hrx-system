@@ -60,7 +60,7 @@ func.def @pocket.bind_weights(%stage: i32, %directory: buffer) {
   func.return
 }
 
-func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
   %model = func.call @pocket.parse_options(%options) : (buffer) -> (buffer)
   %initialize_root = global.load @pocket.root_initialize : buffer
   %tag0 = scalar.constant 0 : i64
@@ -88,8 +88,9 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %tag4 = scalar.constant 4 : i64
   %restore_stage = func.call @stage(%restore_root, %tag4) : (buffer, i64) -> (i32)
   func.call @pocket.configure(%restore_stage, %model) : (i32, buffer)
+  %text_root = global.load @pocket.root_prefix : buffer
   %tag5 = scalar.constant 5 : i64
-  %text_stage = func.call @stage(%prefill_root, %tag5) : (buffer, i64) -> (i32)
+  %text_stage = func.call @stage(%text_root, %tag5) : (buffer, i64) -> (i32)
   func.call @pocket.configure(%text_stage, %model) : (i32, buffer)
   func.call @pocket.bind_weights(%text_stage, %directory) : (i32, buffer)
   %generate_root = global.load @pocket.root_generate : buffer
@@ -123,8 +124,14 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %frames = scalar.constant 1920 : i64
   %rate = scalar.constant 24000 : i64
   %channels = scalar.constant 1 : i64
+  %text_capacity32 = view.load %header[9] : view<12xi32> -> i32
+  %text_limit32 = view.load %header[10] : view<12xi32> -> i32
+  %text_capacity = scalar.extui %text_capacity32 : i32 to i64
+  %text_limit = scalar.extui %text_limit32 : i32 to i64
   %tokenizer = global.load @pocket.tokenizer : buffer
   %name = global.load @pocket.name : buffer
   %empty = global.load @pocket.prepare_empty : buffer
-  func.return %requests, %batch, %input, %conditioning, %state, %work, %output, %output, %frames, %rate, %channels, %tokenizer, %name, %model, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer
+  func.return %requests, %batch, %input, %conditioning, %state, %work, %output, %output, %frames, %rate, %channels, %text_capacity, %text_limit, %tokenizer, %name, %model, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer
 }
+
+global.rodata.def @pocket.root_prefix = bytes("62617463685f70726566696c6c5f707265666978")

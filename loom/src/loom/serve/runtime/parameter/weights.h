@@ -47,8 +47,8 @@ typedef struct loom_serve_weight_activity_t {
   uint64_t groups;
 } loom_serve_weight_activity_t;
 
-// Resolves final weight roots on the serialized pool owner without submitting
-// device work, indexing files or compiling source. The first
+// Resolves final weight roots on the serialized pool owner, without waiting,
+// indexing files, or compiling source. The first
 // shared_root_count roots have identical parameter placement; subsequent roots
 // either share existing placement or own new parameters. Zero shared roots is
 // valid. Only the selected roots are populated; other roots of their programs
@@ -61,7 +61,9 @@ typedef struct loom_serve_weight_activity_t {
 //
 // With pool, roots have stable virtual addresses and start without physical
 // backing. NULL selects explicitly fixed storage (including device ASAN use);
-// deactivation is unavailable in that mode. Successful source preparation is
+// deactivation is unavailable in that mode. Fixed roots use one queued
+// allocation batch; activation imports its readiness before file reads.
+// Successful source preparation is
 // required before activation, and activation before any consumer executes.
 // storage_pool supplies fixed roots, is qualified for dispatch and transfer,
 // and outlives the plan and every resolved root.

@@ -9,13 +9,12 @@
 
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
-#include "loom/target/configured/provider_set.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/cli/loomc_result.h"
 #include "loom/tooling/io/file.h"
 #include "loomc/import/cxx.h"
-#include "loomc/interop.h"
 #include "loomc/iree.h"
+#include "loomc/target/configured_ir.h"
 
 IREE_FLAG(string, output, "-", "Output path, or '-' for stdout.");
 IREE_FLAG(string, to, "text", "Output format: text or bc.");
@@ -242,9 +241,8 @@ int main(int argc, char** argv) {
   loomc_context_t* context = NULL;
   loomc_workspace_t* workspace = NULL;
   iree_status_t status =
-      iree_status_from_loomc(loomc_target_environment_create_from_provider_set(
-          loom_configured_target_provider_set(), host_allocator,
-          &target_environment));
+      iree_status_from_loomc(loomc_target_environment_create_configured_ir(
+          host_allocator, &target_environment));
   if (iree_status_is_ok(status)) {
     const loomc_context_target_options_t target_options = {
         .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,

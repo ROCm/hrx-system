@@ -12,8 +12,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -30,6 +32,39 @@
 #include "libamdf/cts/gpu/sdma/encoding/commands.h"
 
 namespace iree::hal::amd::fabric::cts {
+
+// The metadata-only GPU dependency borrows its native handles from the fixture.
+// Observe its actual final release before reclaiming those handles and facts.
+struct NativeDeviceLifetime {
+  // Retained by the mock device and indirectly by each real fabric provider.
+  iree_hal_resource_t resource;
+  // Guards final-release publication to the fixture owner.
+  std::mutex mutex;
+  // Wakes teardown after the last native user releases its owner.
+  std::condition_variable condition;
+  // True after the resource's final callback, guarded by mutex.
+  bool released = false;
+
+  NativeDeviceLifetime() {
+    static const iree_hal_resource_vtable_t vtable = {
+        .destroy =
+            +[](iree_hal_resource_t* resource) {
+              auto* lifetime =
+                  reinterpret_cast<NativeDeviceLifetime*>(resource);
+              std::lock_guard<std::mutex> lock(lifetime->mutex);
+              lifetime->released = true;
+              lifetime->condition.notify_all();
+            },
+    };
+    iree_hal_resource_initialize(&vtable, &resource);
+  }
+
+  void ReleaseAndAwait() {
+    iree_hal_resource_release(&resource);
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&] { return released; });
+  }
+};
 
 // The memory adapter and Task queue are real HAL implementations. Only GPU
 // family metadata uses a mock device until the GPU execution HAL exists; all
@@ -164,6 +199,7 @@ class FabricVirtualBufferTest
     device_options.identifier = IREE_SV("native-gpu");
     device_options.executable_loading_enabled = true;
     device_options.memory_backend = &backend_.base;
+    device_options.lifetime_owner = &native_lifetime_.resource;
     IREE_ASSERT_OK(
         iree_hal_mock_device_create(&device_options, allocator_, &device_));
     family_.queue_family_ordinal = native_family_.ordinal;
@@ -212,8 +248,10 @@ class FabricVirtualBufferTest
         .storage = storage_.data(),
         .families = &family_,
     };
+    IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+        fabric_, UINT32_MAX, &allocation_queue_));
     iree_hal_amd_fabric_memory_backend_initialize(
-        device_, &memory_options, host->notification, host->maintenance,
+        device_, &memory_options, host->notification, allocation_queue_,
         host->epoch_query, &backend_);
     iree_hal_device_group_builder_t builder;
     iree_hal_device_group_builder_initialize(&builder,
@@ -356,6 +394,8 @@ class FabricVirtualBufferTest
     iree_hal_semaphore_release(done_);
     iree_hal_device_group_release(group_);
     iree_hal_device_release(device_);
+    native_lifetime_.ReleaseAndAwait();
+    iree_hal_amd_fabric_allocation_queue_release(allocation_queue_);
     iree_hal_device_release(cpu_);
     iree_hal_allocator_release(cpu_allocator_);
     iree_task_executor_release(executor_);
@@ -526,6 +566,10 @@ class FabricVirtualBufferTest
   iree_hal_device_t* cpu_ = nullptr;
   // GPU family metadata owner with no mock execution implementation.
   iree_hal_device_t* device_ = nullptr;
+  // Native dependency lifetime retained through asynchronous provider cleanup.
+  NativeDeviceLifetime native_lifetime_;
+  // Real native allocation queue shared with other engines in this fabric.
+  iree_hal_amd_fabric_allocation_queue_t* allocation_queue_ = nullptr;
   // Shared sealed namespace containing the CPU and native GPU consumer.
   iree_hal_device_group_t* group_ = nullptr;
   // Native execution address interface captured by the family.

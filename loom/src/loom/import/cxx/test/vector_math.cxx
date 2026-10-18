@@ -6,6 +6,7 @@
 
 #include <loomcxx/check.h>
 #include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
 #include <loomcxx/vector.h>
 
 #include <stdfloat>
@@ -68,10 +69,10 @@ void pair_arithmetic(
   Float2 seed = {first, second};
   output[0] = loom::vector::dot2f(*half_lhs, *half_rhs, seed);
   output[1] = loom::vector::dot2f(*bfloat_lhs, *bfloat_rhs, seed);
-  Float4 half_left = __builtin_convertvector(*half_lhs, Float4);
-  Float4 half_right = __builtin_convertvector(*half_rhs, Float4);
-  Float4 bfloat_left = __builtin_convertvector(*bfloat_lhs, Float4);
-  Float4 bfloat_right = __builtin_convertvector(*bfloat_rhs, Float4);
+  Float4 half_left = loom::convert<Float4>(*half_lhs);
+  Float4 half_right = loom::convert<Float4>(*half_rhs);
+  Float4 bfloat_left = loom::convert<Float4>(*bfloat_lhs);
+  Float4 bfloat_right = loom::convert<Float4>(*bfloat_rhs);
   output[2] = {
       loom::vector::dotf(Float2{half_left[0], half_left[1]},
                          Float2{half_right[0], half_right[1]}, first),

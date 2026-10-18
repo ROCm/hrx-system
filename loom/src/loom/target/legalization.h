@@ -387,12 +387,15 @@ iree_status_t loom_target_legalization_resolve_function_analysis(
     loom_target_legalization_context_t* context);
 
 // Queries whether |op| is already legal for the selected target contract.
+// Rejected-rule identity and diagnostic payloads may be omitted; final legality
+// checking requests those details only for operations that remain unsupported.
 iree_status_t loom_target_legalization_query_contract(
     loom_target_legalization_context_t* context, const loom_op_t* op,
     loom_target_contract_query_result_t* out_result);
 
 // Queries |op| through a scoped vector lane-count projection. The projection
 // applies only for this query and does not mutate authored IR or context state.
+// As above, rejected-rule diagnostic details may be omitted.
 iree_status_t
 loom_target_legalization_query_contract_with_vector_lane_projection(
     loom_target_legalization_context_t* context, const loom_op_t* op,

@@ -439,6 +439,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "numeric_conversion",
+    srcs = ["numeric_conversion.cc"],
+    hdrs = ["numeric_conversion.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/source:attributes",
+        "//loom/src/loom/import/cxx/source:error",
+        "//loom/src/loom/import/cxx/value:representation",
+        "//loom/src/loom/import/cxx/value:scalar",
+        "//loom/src/loom/import/cxx/value:types",
+        "//loom/src/loom/import/cxx/value:vector",
+        "//runtime/src/iree/base",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "vector_memory",
     srcs = ["vector_memory.cc"],
     hdrs = ["vector_memory.h"],
@@ -522,6 +541,7 @@ loom_cc_library(
         ":index_values",
         ":kernel",
         ":launch",
+        ":numeric_conversion",
         ":scalar_bindings",
         ":shaped",
         ":target",

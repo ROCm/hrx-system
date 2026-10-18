@@ -37,8 +37,6 @@ extern "C" {
 // Types and Enums
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_hal_memory_maintenance_t iree_hal_memory_maintenance_t;
-
 // An opaque driver-specific handle to identify different devices.
 typedef uintptr_t iree_hal_device_id_t;
 

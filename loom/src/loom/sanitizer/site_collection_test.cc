@@ -220,7 +220,7 @@ class SiteCollectionTest : public ::testing::Test {
     return op;
   }
 
-  loom_location_id_t AddFileLocation(uint16_t start_line) {
+  loom_location_id_t AddFileLocation(uint32_t start_line) {
     loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
     IREE_CHECK_OK(loom_module_register_source(module_, IREE_SV("model.loom"),
                                               &source_id));

@@ -9,16 +9,21 @@
 
 #include "amdf/amdf.h"
 #include "iree/base/api.h"
+#include "iree/base/threading/mutex.h"
+#include "iree/hal/drivers/amd/fabric/allocation_queue.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Shared native identity and passive discovery for AMD execution engines.
+typedef struct iree_hal_amd_fabric_allocation_entry_t
+    iree_hal_amd_fabric_allocation_entry_t;
+
+// Shared native identity and allocation domains for AMD execution engines.
 // The driver and every materialized device retain this owner independently.
-// Fields are immutable after construction; engine resources and private scopes
-// belong to the consuming device, not this object. This is not a device group:
-// sharing native identity does not grant access across sealed HAL groups.
+// Discovery is immutable; node-local native allocation queues are acquired on
+// demand. Engine resources and private scopes belong to the consuming device.
+// Sharing native identity does not grant access across sealed HAL groups.
 typedef struct iree_hal_amd_fabric_t {
   // References held by native owners; never modified directly by consumers.
   iree_atomic_ref_count_t ref_count;
@@ -34,6 +39,10 @@ typedef struct iree_hal_amd_fabric_t {
   uint32_t endpoint_count;
   // Owned snapshot including all native engine kinds, without activation.
   amdf_endpoint_summary_t* endpoints;
+  // Protects cold allocation-domain construction, never native batch execution.
+  iree_slim_mutex_t allocation_mutex;
+  // Owned native allocation queues, one per requested NUMA node.
+  iree_hal_amd_fabric_allocation_entry_t* allocations;
 } iree_hal_amd_fabric_t;
 
 // Creates an independent native instance and snapshots passive discovery.
@@ -57,6 +66,13 @@ void iree_hal_amd_fabric_retain(iree_hal_amd_fabric_t* fabric);
 // teardown failure is diagnosed and preserves remaining ownership. NULL is
 // ignored. This performs no implicit device wait.
 void iree_hal_amd_fabric_release(iree_hal_amd_fabric_t* fabric);
+
+// Acquires the shared native allocation queue for |node_id|, creating it on
+// first use. The selected progress entry supplies the node; UINT32_MAX leaves
+// placement unspecified. The caller releases the returned queue reference.
+iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
+    iree_hal_amd_fabric_t* fabric, uint32_t node_id,
+    iree_hal_amd_fabric_allocation_queue_t** out_queue);
 
 #ifdef __cplusplus
 }  // extern "C"

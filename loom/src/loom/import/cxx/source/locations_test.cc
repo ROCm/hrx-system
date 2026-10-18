@@ -119,15 +119,24 @@ TEST_F(LocationsTest, ObserverReceivesExactHeaderSource) {
   EXPECT_EQ(capture.source, "int value;\n");
 }
 
-TEST_F(LocationsTest, RejectsCoordinatesThatWouldTruncate) {
-  std::string contents(65535, '\n');
+TEST_F(LocationsTest, PreservesCoordinatesBeyondCompactRange) {
+  std::string contents(LOOM_LOCATION_COMPACT_COORDINATE_MAX, '\n');
+  contents.append(LOOM_LOCATION_COMPACT_COORDINATE_MAX, ' ');
   contents += "int value;\n";
   Source source(view(contents), IREE_SV("large.cpp"), options_);
   Locations locations(source.unit(), source.diagnostics(), module_);
   auto* declaration = find_value(source.unit());
   ASSERT_NE(declaration, nullptr);
-  EXPECT_THROW(locations.get(declaration), SourceRejected);
-  EXPECT_TRUE(source.diagnostics().has_error());
+  const loom_location_id_t location = locations.get(declaration);
+  ASSERT_NE(location, LOOM_LOCATION_UNKNOWN);
+  EXPECT_FALSE(source.diagnostics().has_error());
+  const auto* entry =
+      loom_location_table_const_entry(&module_->locations, location);
+  ASSERT_EQ(entry->kind, LOOM_LOCATION_FILE);
+  EXPECT_EQ(entry->file.start_line, LOOM_LOCATION_COMPACT_COORDINATE_MAX + 1);
+  EXPECT_EQ(entry->file.start_col, LOOM_LOCATION_COMPACT_COORDINATE_MAX + 1);
+  EXPECT_EQ(entry->file.end_line, LOOM_LOCATION_COMPACT_COORDINATE_MAX + 1);
+  EXPECT_EQ(entry->file.end_col, LOOM_LOCATION_COMPACT_COORDINATE_MAX + 11);
 }
 
 }  // namespace

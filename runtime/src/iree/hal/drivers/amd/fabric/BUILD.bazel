@@ -18,8 +18,10 @@ iree_runtime_cc_library(
     srcs = ["fabric.c"],
     hdrs = ["fabric.h"],
     deps = [
+        ":slab_provider",
         "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd:status",
     ],
@@ -93,17 +95,26 @@ iree_runtime_cc_test(
 
 iree_runtime_cc_library(
     name = "slab_provider",
-    srcs = ["slab_provider.c"],
-    hdrs = ["slab_provider.h"],
+    srcs = [
+        "allocation_queue.c",
+        "slab_provider.c",
+    ],
+    hdrs = [
+        "allocation_queue.h",
+        "slab_provider.h",
+    ],
     deps = [
         ":buffer",
         ":memory",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/memory:slab_provider",
+        "//runtime/src/iree/hal/memory:tracing",
     ],
 )
 
@@ -116,6 +127,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:slab_provider",
+        "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -162,7 +174,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd:status",
-        "//runtime/src/iree/hal/memory:maintenance",
         "//runtime/src/iree/hal/memory:passthrough_pool",
     ],
 )
@@ -180,6 +191,7 @@ iree_runtime_cc_test(
     }),
     deps = [
         ":memory_backend",
+        ":slab_provider",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:platform",
@@ -189,7 +201,6 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/task:device",
         "//runtime/src/iree/hal/memory:fixed_block_pool",
-        "//runtime/src/iree/hal/memory:maintenance_thread",
         "//runtime/src/iree/hal/memory:slab_cache",
         "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/task",

@@ -18,9 +18,6 @@ typedef enum iree_hal_amdgpu_alloca_reservation_readiness_e {
   IREE_HAL_AMDGPU_ALLOCA_RESERVATION_READY = 0,
   // The transaction must wait for a pool death frontier before materialization.
   IREE_HAL_AMDGPU_ALLOCA_RESERVATION_NEEDS_FRONTIER_WAIT = 1,
-  // The pool needs cold backing growth before another queue-locked reservation
-  // attempt can succeed.
-  IREE_HAL_AMDGPU_ALLOCA_RESERVATION_NEEDS_POOL_GROWTH = 2,
   // The pool is exhausted or over budget and needs a release notification
   // retry.
   IREE_HAL_AMDGPU_ALLOCA_RESERVATION_NEEDS_POOL_NOTIFICATION = 3,
@@ -73,13 +70,12 @@ iree_status_t iree_hal_amdgpu_host_queue_prepare_alloca_buffers(
     iree_hal_pool_reservation_request_t* out_canonical_requests,
     iree_hal_buffer_t** out_buffers);
 
-// Attempts to reserve bytes from |allocation_pool| and classifies the result
-// as immediate, death-frontier-waitable, or notification-retry-required.
-iree_status_t iree_hal_amdgpu_host_queue_acquire_alloca_transaction(
+// Resolves a completed acquisition against the current queue frontier.
+// This performs no allocation or native wait while submission_mutex is held.
+iree_status_t iree_hal_amdgpu_host_queue_resolve_alloca_transaction(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
     iree_hal_pool_t* allocation_pool,
-    iree_hal_pool_reserve_flags_t reserve_flags,
     iree_hal_amdgpu_alloca_transaction_t* transaction);
 
 // Materializes every reservation in a ready transaction. Does not require

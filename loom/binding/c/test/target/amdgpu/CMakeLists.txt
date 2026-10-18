@@ -38,9 +38,11 @@ loom_cc_test(
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::binding::c::interop
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
     loom::binding::c::test::test_util
+    loom::target::reporting::format
 )
 endif()
 

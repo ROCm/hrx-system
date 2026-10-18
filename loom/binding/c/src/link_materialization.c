@@ -26,7 +26,7 @@ static iree_status_t loomc_link_materialization_capture_diagnostic(
       (loomc_link_materialization_state_t*)user_data;
   return iree_status_from_loomc(loomc_result_add_loom_diagnostic(
       state->diagnostics.result, state->diagnostics.source, diagnostic,
-      /*type_printer=*/NULL));
+      /*text_print_options=*/NULL));
 }
 
 static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
@@ -362,11 +362,8 @@ static iree_status_t loomc_link_materialization_prepare_module(
   if (error_count == 0) {
     return iree_ok_status();
   }
-  status = loomc_result_set_state(state->diagnostics.result,
-                                  LOOMC_RESULT_STATE_FAILED);
-  if (!loomc_status_is_ok(status)) {
-    return iree_status_from_loomc(status);
-  }
+  loomc_result_set_status_code(state->diagnostics.result,
+                               LOOMC_STATUS_FAILED_PRECONDITION);
   return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
 }
 

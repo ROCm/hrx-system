@@ -635,6 +635,33 @@ endif()
 if(LOOM_IMPORT_CXX)
 loom_cc_library(
   NAME
+    numeric_conversion
+  CXX_STANDARD
+    23
+  CXX_FEATURES
+    "exceptions"
+    "rtti"
+  HDRS
+    "numeric_conversion.h"
+  SRCS
+    "numeric_conversion.cc"
+  DEPS
+    iree::base
+    iree::third_party::cxx_parser
+    loom::import::cxx::source
+    loom::import::cxx::source::attributes
+    loom::import::cxx::source::error
+    loom::import::cxx::value::representation
+    loom::import::cxx::value::scalar
+    loom::import::cxx::value::types
+    loom::import::cxx::value::vector
+  PUBLIC
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_cc_library(
+  NAME
     vector_memory
   CXX_STANDARD
     23
@@ -755,6 +782,7 @@ loom_cc_library(
     ::index_values
     ::kernel
     ::launch
+    ::numeric_conversion
     ::scalar_bindings
     ::shaped
     ::target

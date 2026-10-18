@@ -227,6 +227,47 @@ TEST_F(LocationCaptureTest, SharedGraphRetainsOpaqueTaggedAndUnavailableData) {
   EXPECT_EQ(loom_location_value_kind(value, 3), LOOM_LOCATION_VALUE_UNKNOWN);
 }
 
+TEST_F(LocationCaptureTest, WideCoordinatesAndFieldsSurviveCapture) {
+  auto* module = input_.module;
+  loom_source_id_t source;
+  IREE_ASSERT_OK(
+      loom_module_register_source(module, IREE_SV("generated.loom"), &source));
+  loom_location_id_t location;
+  IREE_ASSERT_OK(loom_module_add_location(
+      module, loom_location_file_range(source, 70001, 80002, 90003, 100004),
+      &location));
+  const loom_location_field_span_t spans[] = {{
+      .kind = LOOM_LOCATION_FIELD_OPERAND,
+      .index = 7,
+      .start_line = 70005,
+      .start_col = 80006,
+      .end_line = 90007,
+      .end_col = 100008,
+  }};
+  IREE_ASSERT_OK(loom_module_attach_location_field_spans(
+      module, location,
+      loom_location_field_span_array_wide(spans, IREE_ARRAYSIZE(spans))));
+
+  const auto bytes = Capture(location);
+  loom_location_value_t value;
+  IREE_ASSERT_OK(
+      loom_location_value_parse({bytes.data(), bytes.size()}, &value));
+  const auto file = loom_location_value_file(value, 0);
+  EXPECT_EQ(String(file.source), "generated.loom");
+  EXPECT_EQ(file.range.start_line, 70001u);
+  EXPECT_EQ(file.range.start_column, 80002u);
+  EXPECT_EQ(file.range.end_line, 90003u);
+  EXPECT_EQ(file.range.end_column, 100004u);
+  ASSERT_EQ(file.field_count, 1u);
+  const auto field = loom_location_value_field(value, 0, 0);
+  EXPECT_EQ(field.kind, LOOM_LOCATION_FIELD_OPERAND);
+  EXPECT_EQ(field.index, 7u);
+  EXPECT_EQ(field.range.start_line, 70005u);
+  EXPECT_EQ(field.range.start_column, 80006u);
+  EXPECT_EQ(field.range.end_line, 90007u);
+  EXPECT_EQ(field.range.end_column, 100008u);
+}
+
 TEST_F(LocationCaptureTest, DeepGraphUsesNoCallStack) {
   loom_location_id_t root = Original()->location;
   constexpr uint32_t kDepth = 4096;

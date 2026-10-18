@@ -65,9 +65,6 @@ struct iree_hal_heap_pool_t {
 
   // Total reservation releases.
   iree_atomic_int64_t release_count;
-
-  // Transactions deferred because allocation was prohibited.
-  iree_atomic_int64_t exhausted_count;
 };
 
 static iree_status_t iree_hal_heap_pool_query_memory_pair(
@@ -242,26 +239,16 @@ static iree_status_t iree_hal_heap_pool_acquire_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reserve_flags_t flags,
     iree_hal_pool_reservation_t* out_reservations,
     iree_hal_pool_acquire_info_t* out_infos,
-    iree_hal_pool_acquire_result_t* out_result) {
+    iree_hal_pool_acquire_callback_t completion,
+    iree_hal_pool_reserve_flags_t flags) {
   (void)requester_frontier;
+  (void)flags;
   iree_hal_heap_pool_t* pool = (iree_hal_heap_pool_t*)base_pool;
   for (iree_host_size_t i = 0; i < request_count; ++i) {
     IREE_RETURN_IF_ERROR(
         iree_hal_heap_pool_validate_reservation_request(&requests[i]));
-  }
-  if (iree_any_bit_set(flags, IREE_HAL_POOL_RESERVE_FLAG_DISALLOW_GROWTH)) {
-    iree_atomic_fetch_add(&pool->exhausted_count, 1, iree_memory_order_relaxed);
-    for (iree_host_size_t i = 0; i < request_count; ++i) {
-      out_infos[i] = (iree_hal_pool_acquire_info_t){
-          .flags = IREE_HAL_POOL_ACQUIRE_FLAG_GROWTH_REQUIRED,
-          .result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED,
-      };
-    }
-    *out_result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-    return iree_ok_status();
   }
 
   iree_hal_heap_pool_reservation_state_t*
@@ -308,7 +295,6 @@ static iree_status_t iree_hal_heap_pool_acquire_reservations(
                             iree_memory_order_relaxed);
       iree_atomic_fetch_add(&pool->reserve_count, 1, iree_memory_order_relaxed);
     }
-    *out_result = IREE_HAL_POOL_ACQUIRE_OK_FRESH;
   } else {
     for (iree_host_size_t i = 0; i < acquired_count; ++i) {
       iree_hal_heap_pool_discard_unpublished_reservation(pool, states[i]);
@@ -316,6 +302,10 @@ static iree_status_t iree_hal_heap_pool_acquire_reservations(
   }
   if (states_allocated) {
     iree_allocator_free(pool->host_allocator, states);
+  }
+  if (iree_status_is_ok(status)) {
+    completion.fn(completion.user_data, iree_ok_status(),
+                  IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   }
   return status;
 }
@@ -431,8 +421,7 @@ static void iree_hal_heap_pool_query_stats(const iree_hal_pool_t* base_pool,
   out_stats->release_count = (uint64_t)iree_atomic_load(
       &pool->release_count, iree_memory_order_relaxed);
   out_stats->fresh_count = out_stats->reserve_count;
-  out_stats->exhausted_count = (uint64_t)iree_atomic_load(
-      &pool->exhausted_count, iree_memory_order_relaxed);
+  out_stats->exhausted_count = 0;
 }
 
 static void iree_hal_heap_pool_trim(iree_hal_pool_t* base_pool,

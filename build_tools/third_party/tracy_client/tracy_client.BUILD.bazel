@@ -13,9 +13,9 @@ cc_library(
     hdrs = glob(
         [
             "public/*.cpp",
-            "public/client/*.h",
-            "public/client/*.hpp",
-            "public/client/*.cpp",
+            "public/client/**/*.h",
+            "public/client/**/*.hpp",
+            "public/client/**/*.cpp",
             "public/common/*.h",
             "public/common/*.hpp",
             "public/common/*.cpp",

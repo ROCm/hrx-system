@@ -471,21 +471,28 @@ static iree_status_t loom_ir_remap_location_entry(
       IREE_RETURN_IF_ERROR(loom_ir_remap_source_id(
           remap, source_entry.file.source_id, &target_entry.file.source_id));
       if (source_entry.file.field_span_count > 0) {
-        if (!source_entry.file.field_spans) {
+        if (!source_entry.file.field_span_data ||
+            (source_entry.file.field_span_format !=
+                 LOOM_LOCATION_FIELD_SPAN_FORMAT_COMPACT &&
+             source_entry.file.field_span_format !=
+                 LOOM_LOCATION_FIELD_SPAN_FORMAT_WIDE)) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "file location has field spans but a NULL span payload");
+              "file location has invalid field span storage");
         }
-        loom_location_field_span_t* target_spans = NULL;
-        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-            &remap->target_module->arena, source_entry.file.field_span_count,
-            sizeof(loom_location_field_span_t), (void**)&target_spans));
-        memcpy(target_spans, source_entry.file.field_spans,
-               (iree_host_size_t)source_entry.file.field_span_count *
-                   sizeof(loom_location_field_span_t));
-        target_entry.file.field_spans = target_spans;
+        const iree_host_size_t data_length =
+            loom_location_field_span_data_length(
+                source_entry.file.field_span_format,
+                source_entry.file.field_span_count);
+        void* target_spans = NULL;
+        IREE_RETURN_IF_ERROR(iree_arena_allocate(&remap->target_module->arena,
+                                                 data_length, &target_spans));
+        memcpy(target_spans, source_entry.file.field_span_data, data_length);
+        target_entry.file.field_span_data = target_spans;
       } else {
-        target_entry.file.field_spans = NULL;
+        target_entry.file.field_span_format =
+            LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE;
+        target_entry.file.field_span_data = NULL;
       }
       *out_target_entry = target_entry;
       return iree_ok_status();

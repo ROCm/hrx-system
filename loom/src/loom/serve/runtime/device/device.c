@@ -8,6 +8,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/tooling/device_profiling.h"
+#include "loom/serve/runtime/execution/queues.h"
 
 struct loom_serve_device_t {
   // Borrowed enclosing application group, owning this record's storage.
@@ -18,6 +19,8 @@ struct loom_serve_device_t {
   iree_hal_queue_t* dispatch;
   // Exact transfer queue borrowed from the device.
   iree_hal_queue_t* transfer;
+  // Fixed inventory shared by independently retained model executions.
+  loom_serve_execution_queues_t* execution_queues;
   // Native retained storage qualified for both execution and transfer.
   iree_hal_pool_t* storage_pool;
   // Shared private command backing, independent of model timelines.
@@ -114,6 +117,9 @@ static iree_status_t loom_serve_device_initialize(
       iree_hal_queue_family(device->dispatch);
   const iree_hal_queue_family_t* transfer_family =
       iree_hal_queue_family(device->transfer);
+  IREE_RETURN_IF_ERROR(loom_serve_execution_queues_create(
+      dispatch_family, transfer_family, group->host_allocator,
+      &device->execution_queues));
   // Source programs may carry indirect launch counts in retained buffers or
   // execution workspace, both allocated from this dispatch-visible domain.
   const iree_hal_pool_family_access_t families[] = {
@@ -127,8 +133,9 @@ static iree_status_t loom_serve_device_initialize(
       .families = families,
   };
   // This provider traces physical backing for ordinary retained buffers and
-  // workspace slabs, including reusable idle slabs. Elastic VMM weights/state
-  // are accounted separately by memory_pool, not by this native provider.
+  // workspace slabs, including reusable idle slabs. Elastic weights and state
+  // use a separately prepared mapping-source pool with their own physical
+  // budget.
   const iree_hal_slab_pool_options_t storage_options = {
       .trace_name = IREE_SVL("loom-serve-storage-backing"),
   };
@@ -143,10 +150,26 @@ static iree_status_t loom_serve_device_initialize(
       group->handle, device->storage_pool, &asan_options, group->host_allocator,
       &device->workspace));
   if (options->backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
-    IREE_RETURN_IF_ERROR(loom_serve_memory_pool_allocate(
-        device->handle, device->storage_pool,
-        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, options->slab_size,
-        options->memory_limit, group->host_allocator, &device->memory_pool));
+    iree_hal_pool_family_access_t source_families[IREE_ARRAYSIZE(families)];
+    memcpy(source_families, families, sizeof(families));
+    for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
+      source_families[i].interfaces =
+          UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
+    }
+    iree_hal_pool_scope_t source_scope = scope;
+    source_scope.families = source_families;
+    const iree_hal_slab_pool_options_t source_options = {
+        .trace_name = IREE_SVL("loom-serve-elastic-backing"),
+    };
+    iree_hal_pool_t* source_pool = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_slab_pool_create(group->handle, source_scope, &source_options,
+                                  group->host_allocator, &source_pool));
+    iree_status_t status = loom_serve_memory_pool_allocate(
+        group->handle, scope, source_pool, device->transfer, options->slab_size,
+        options->memory_limit, group->host_allocator, &device->memory_pool);
+    iree_hal_pool_release(source_pool);
+    IREE_RETURN_IF_ERROR(status);
   }
   return loom_serve_residency_cache_allocate(
       device->memory_pool, group->host_allocator, &device->residency_cache);
@@ -222,6 +245,7 @@ iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group) {
     loom_serve_memory_pool_free(device->memory_pool);
     loom_serve_workspace_release(device->workspace);
     iree_hal_pool_release(device->storage_pool);
+    loom_serve_execution_queues_release(device->execution_queues);
   }
   iree_hal_device_group_release(group->handle);
   for (iree_host_size_t i = 0; i < group->device_count; ++i) {
@@ -318,7 +342,7 @@ iree_hal_queue_t* loom_serve_device_transfer_queue(
 iree_status_t loom_serve_device_create_execution(
     loom_serve_device_t* device, loom_serve_execution_t** out_execution) {
   return loom_serve_execution_create(
-      device->dispatch, device->transfer, device->workspace,
+      device->execution_queues, device->workspace,
       device->owner->host_allocator, out_execution);
 }
 

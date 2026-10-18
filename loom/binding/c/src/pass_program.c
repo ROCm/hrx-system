@@ -442,8 +442,8 @@ loomc_status_t loomc_pass_program_create_from_native_source_low_pipeline(
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(
-      LOOMC_RESULT_STATE_SUCCEEDED, loomc_context_source_retention(context),
-      allocator, &result));
+      LOOMC_STATUS_OK, loomc_context_source_retention(context), allocator,
+      &result));
   const iree_string_view_t pipeline_identifier =
       loomc_string_view_is_empty(identifier)
           ? IREE_SV("__loomc_native_source_low_pipeline")
@@ -531,7 +531,7 @@ loomc_status_t loomc_pass_program_create_from_pipeline_text(
 
   loomc_result_t* result = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+      z0, loomc_result_create(LOOMC_STATUS_OK,
                               loomc_context_source_retention(context),
                               allocator, &result));
 
@@ -592,7 +592,7 @@ loomc_status_t loomc_pass_program_create_from_module_symbol(
 
   loomc_result_t* result = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+      z0, loomc_result_create(LOOMC_STATUS_OK,
                               loomc_context_source_retention(context),
                               allocator, &result));
 
@@ -675,7 +675,7 @@ loomc_status_t loomc_pass_program_create_from_target_pipeline(
 
   loomc_result_t* result = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+      z0, loomc_result_create(LOOMC_STATUS_OK,
                               loomc_context_source_retention(context),
                               allocator, &result));
 

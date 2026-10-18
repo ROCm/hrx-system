@@ -468,29 +468,30 @@ iree_status_t loom_check_compile_source_low(
       .function_symbol = loomc_string_view_from_iree(function_name),
       .target_profile = target_profile,
   };
+  const loomc_native_compile_report_options_t report_options = {
+      .type = LOOMC_STRUCTURE_TYPE_NATIVE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .report = options->report,
+  };
   const loomc_target_specialization_options_t target_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       .structure_size = sizeof(target_options),
+      .next = options->report != NULL ? &report_options : NULL,
       .specializations = target_profile != NULL ? &specialization : NULL,
       .specialization_count = target_profile != NULL ? 1 : 0,
   };
   const loomc_compile_options_t compile_options = {
       .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
       .structure_size = sizeof(compile_options),
-      .next = target_profile != NULL ? &target_options : NULL,
+      .next = &target_options,
   };
   loomc_result_t* result = NULL;
   if (iree_status_is_ok(status) && pass_program != NULL) {
     const loomc_allocator_t allocator =
         loomc_allocator_from_iree(request->host_allocator);
-    const loomc_status_t operation_status =
-        options->report != NULL
-            ? loomc_compile_module_with_native_report(
-                  session->compiler, session->workspace, pass_program, module,
-                  &compile_options, options->report, allocator, &result)
-            : loomc_compile_module(session->compiler, session->workspace,
-                                   pass_program, module, &compile_options,
-                                   allocator, &result);
+    const loomc_status_t operation_status = loomc_compile_module(
+        session->compiler, session->workspace, pass_program, module,
+        &compile_options, allocator, &result);
     status = iree_status_from_loomc(operation_status);
   }
   bool compiled = false;

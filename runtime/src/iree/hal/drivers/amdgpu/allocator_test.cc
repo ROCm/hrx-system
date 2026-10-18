@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "iree/hal/api.h"
+#include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
@@ -18,7 +19,6 @@
 #include "iree/hal/drivers/amdgpu/util/info.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
-#include "iree/hal/memory/maintenance.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -294,20 +294,6 @@ static iree_hal_amdgpu_shadow_map_slab_t* FindShadowMapSlab(
     }
   }
   return nullptr;
-}
-
-// The caller has finished publishing releases. Drain on the captured owner so
-// TLSF returns and the native retirements they enqueue all finish before the
-// observation. A FIFO barrier alone does not join work enqueued behind it.
-static void DrainMemoryMaintenance(iree_hal_memory_maintenance_t* owner) {
-  iree_hal_memory_maintenance_call(
-      owner,
-      [](void* user_data) {
-        auto* owner = static_cast<iree_hal_memory_maintenance_t*>(user_data);
-        while (iree_hal_memory_maintenance_run_one(owner)) {
-        }
-      },
-      owner);
 }
 
 static const char* QueryHostIncompatibilityReason(
@@ -1195,8 +1181,7 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeQuarantineRetention) {
   iree_hal_buffer_release(buffer);
   iree_hal_buffer_release(small_buffer);
 
-  DrainMemoryMaintenance(
-      test_device.logical_device()->physical_devices[0]->memory_maintenance);
+  ASSERT_TRUE(iree::hal::cts::WaitPoolCommittedBytes(pool, 0));
 
   asan = QueryAsanObservation(test_device.device());
   EXPECT_GT(asan.quarantine_size, allocation_size + 128);
@@ -1241,8 +1226,7 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeZeroQuarantineRelease) {
       AllocateAndExportDevicePointer(pool, allocation_size, &buffer, &ptr));
   iree_hal_buffer_release(buffer);
 
-  DrainMemoryMaintenance(
-      test_device.logical_device()->physical_devices[0]->memory_maintenance);
+  ASSERT_TRUE(iree::hal::cts::WaitPoolCommittedBytes(pool, 0));
 
   asan = QueryAsanObservation(test_device.device());
   EXPECT_EQ(asan.quarantine_size, 0u);

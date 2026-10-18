@@ -58,6 +58,10 @@ class SourceTextServiceTest : public ::testing::Test {
   // the model from the submitted declaration.
   virtual bool NeedsStandaloneModel() const { return true; }
 
+  // One process uses one shared executor configuration; filtered qualification
+  // runs can exercise the same owner contract with additional workers.
+  virtual iree_host_size_t WorkerCount() const { return 1; }
+
   // Document ownership covers every asynchronous native load in this fixture.
   loom_serve::testing::ModelDocument document_;
 
@@ -309,7 +313,7 @@ class SourceTextServiceTest : public ::testing::Test {
     EXPECT_NE(log.find(R"("token_slots":null)"), std::string::npos) << log;
   }
 
-  void Observe(const loom_serve_http_service_t& interface) {
+  void Observe(const loom_serve_service_t& interface) {
     interface.set_observer(interface.self,
                            {[](void* payload) {
                               iree_notification_post(
@@ -319,7 +323,7 @@ class SourceTextServiceTest : public ::testing::Test {
                             loom_serve_http_server_notification(server_)});
   }
 
-  void Accept(int client, const loom_serve_http_service_t& interface,
+  void Accept(int client, const loom_serve_service_t& interface,
               loom_serve_http_connection_t** out_connection) {
     ASSERT_FALSE(HasFatalFailure());
     const loom_serve_http_request_t* request = nullptr;
@@ -328,7 +332,7 @@ class SourceTextServiceTest : public ::testing::Test {
         interface.accept(interface.self, *out_connection, request, 0));
   }
 
-  void AcceptLoopback(const loom_serve_http_service_t& interface,
+  void AcceptLoopback(const loom_serve_service_t& interface,
                       loom_serve_http_connection_t** out_connection) {
     auto* notification = loom_serve_http_server_notification(server_);
     for (;;) {
@@ -348,8 +352,8 @@ class SourceTextServiceTest : public ::testing::Test {
   }
 
   template <typename Predicate>
-  void AdvanceUntil(const loom_serve_http_service_t& interface, Predicate ready,
-                    loom_serve_http_service_flags_t flags = 0) {
+  void AdvanceUntil(const loom_serve_service_t& interface, Predicate ready,
+                    loom_serve_service_flags_t flags = 0) {
     auto* notification = loom_serve_http_server_notification(server_);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
@@ -537,8 +541,7 @@ class SourceTextServiceTest : public ::testing::Test {
                  !interface.is_active(interface.self) &&
                  !interface.snapshot(interface.self).queued_requests;
         },
-        action == OverlapAction::kStop ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING
-                                       : 0));
+        action == OverlapAction::kStop ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0));
     EXPECT_EQ(interface.telemetry.counters->requests, 2u);
     if (action == OverlapAction::kStop) {
       EXPECT_EQ(interface.telemetry.counters->cancelled, 2u);
@@ -634,8 +637,7 @@ class SourceTextServiceTest : public ::testing::Test {
     }
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
         interface, idle,
-        action == OverlapAction::kStop ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING
-                                       : 0));
+        action == OverlapAction::kStop ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0));
     EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
     if (action == OverlapAction::kStop) {
       EXPECT_TRUE(Read(replacement, /*allow_empty=*/true).empty());

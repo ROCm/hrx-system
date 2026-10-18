@@ -153,12 +153,16 @@ iree_status_t iree_task_executor_create(iree_task_executor_options_t options,
       iree_host_size_t worker_local_memory_size =
           iree_task_topology_group_local_memory_size(options, group);
       iree_task_worker_t* worker = &executor->workers[i];
+      iree_atomic_fetch_add(&executor->shutdown.live_worker_count, 1,
+                            iree_memory_order_relaxed);
       status = iree_task_worker_initialize(
           executor, i, group, options.worker_stack_size,
           iree_make_byte_span(worker_local_memory, worker_local_memory_size),
           &seed_prng, worker);
       worker_local_memory += worker_local_memory_size;
       if (!iree_status_is_ok(status)) {
+        iree_atomic_fetch_sub(&executor->shutdown.live_worker_count, 1,
+                              iree_memory_order_relaxed);
         break;
       }
     }
@@ -177,30 +181,13 @@ iree_status_t iree_task_executor_create(iree_task_executor_options_t options,
   return iree_ok_status();
 }
 
-static void iree_task_executor_destroy(iree_task_executor_t* executor) {
-  if (!executor) {
-    return;
-  }
+// Reclaims storage after every worker has completed its final executor access.
+// Thread handle release joins the native thread tail, or detaches the caller
+// when the last exiting worker owns finalization.
+static void iree_task_executor_finalize(iree_task_executor_t* executor) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // First ask all workers to exit. We do this prior to waiting on them to exit
-  // so that we parallelize the shutdown logic (which may flush pending tasks).
-  for (iree_host_size_t i = 0; i < executor->worker_count; ++i) {
-    iree_task_worker_t* worker = &executor->workers[i];
-    iree_task_worker_request_exit(worker);
-  }
-
-  // Now that all workers should be in the process of exiting we can join with
-  // them. Some may take longer than others to exit but that's fine as we can't
-  // return from here until they exit anyway.
-  for (iree_host_size_t i = 0; i < executor->worker_count; ++i) {
-    iree_task_worker_t* worker = &executor->workers[i];
-    iree_task_worker_await_exit(worker);
-  }
-
-  // Tear down all workers now that no more threads are live. Any live threads
-  // may still be touching their own data structures or those of others (for
-  // example when trying to steal work).
+  // No worker can still touch its own or another worker's scheduler state.
   for (iree_host_size_t i = 0; i < executor->worker_count; ++i) {
     iree_task_worker_t* worker = &executor->workers[i];
     iree_task_worker_deinitialize(worker);
@@ -210,6 +197,38 @@ static void iree_task_executor_destroy(iree_task_executor_t* executor) {
   iree_task_process_slist_deinitialize(&executor->compute_overflow);
   iree_allocator_free_aligned(executor->allocator, executor);
 
+  IREE_TRACE_ZONE_END(z0);
+}
+
+void iree_task_executor_worker_exit(iree_task_executor_t* executor) {
+  // Read the finalization mode before relinquishing storage ownership. Another
+  // worker may reclaim the executor as soon as this count is decremented.
+  const bool release_on_exit = iree_atomic_load(
+      &executor->shutdown.release_on_exit, iree_memory_order_acquire);
+  if (iree_atomic_fetch_sub(&executor->shutdown.live_worker_count, 1,
+                            iree_memory_order_acq_rel) == 1 &&
+      release_on_exit) {
+    iree_task_executor_finalize(executor);
+  }
+}
+
+static void iree_task_executor_destroy(iree_task_executor_t* executor) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  const bool release_on_exit = iree_task_worker_is_current_executor(executor);
+  iree_atomic_store(&executor->shutdown.release_on_exit, release_on_exit,
+                    iree_memory_order_release);
+
+  // Request all exits before joining any. For worker-owned final release, the
+  // calling worker's lifetime claim protects this loop and its remaining work.
+  for (iree_host_size_t i = 0; i < executor->worker_count; ++i) {
+    iree_task_worker_request_exit(&executor->workers[i]);
+  }
+  if (!release_on_exit) {
+    for (iree_host_size_t i = 0; i < executor->worker_count; ++i) {
+      iree_task_worker_await_exit(&executor->workers[i]);
+    }
+    iree_task_executor_finalize(executor);
+  }
   IREE_TRACE_ZONE_END(z0);
 }
 

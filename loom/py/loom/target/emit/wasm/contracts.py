@@ -1636,11 +1636,14 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
             _I64,
             "wasm.i64.reinterpret_f64",
         ),
-        _conversion_rule(
-            scalar_conversion.scalar_trunci,
-            _I64,
-            _I32,
-            "wasm.i32.wrap_i64",
+        *(
+            _conversion_rule(
+                scalar_conversion.scalar_trunci,
+                _I64,
+                result_type,
+                "wasm.i32.wrap_i64",
+            )
+            for result_type in (_I8, _I16, _I32)
         ),
         _conversion_rule(
             scalar_conversion.scalar_bitcast, _I32, _F32, "wasm.f32.reinterpret_i32"
@@ -1748,8 +1751,18 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
             for source_type in (_I8, _I16, _I32, _I64)
             for rule in _integer_to_predicate_rules(source_type)
         ),
-        _conversion_alias_rule(scalar_conversion.scalar_trunci, _I32, _I8),
-        _conversion_alias_rule(scalar_conversion.scalar_trunci, _I32, _I16),
+        # Narrow integers occupy i32 carriers; only their low source-width
+        # bits are significant, so truncation within that carrier is an alias.
+        *(
+            _conversion_alias_rule(
+                scalar_conversion.scalar_trunci, source_type, result_type
+            )
+            for source_type, result_type in (
+                (_I16, _I8),
+                (_I32, _I8),
+                (_I32, _I16),
+            )
+        ),
         _conversion_alias_rule(scalar_conversion.scalar_extui, _I1, _I32),
         _masked_extui_rule(_I8, 0xFF),
         _masked_extui_rule(_I16, 0xFFFF),

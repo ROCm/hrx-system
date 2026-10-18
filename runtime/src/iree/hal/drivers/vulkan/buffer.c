@@ -52,10 +52,6 @@ VkBufferUsageFlags iree_hal_vulkan_buffer_usage_from_hal(
 // iree_hal_vulkan_buffer_t
 //===----------------------------------------------------------------------===//
 
-#if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
-static const char* IREE_HAL_VULKAN_ALLOCATOR_ID = "iree-hal-vulkan-unpooled";
-#endif  // IREE_TRACING_FEATURE_ALLOCATION_TRACKING
-
 typedef uint32_t iree_hal_vulkan_buffer_ownership_t;
 enum iree_hal_vulkan_buffer_ownership_bits_e {
   IREE_HAL_VULKAN_BUFFER_OWNS_NONE = 0u,
@@ -81,6 +77,9 @@ struct iree_hal_vulkan_buffer_mapping_state_t {
 typedef struct iree_hal_vulkan_buffer_t {
   // Base HAL buffer resource returned to callers.
   iree_hal_buffer_t base;
+
+  // Physical allocation ledger, absent for imported storage and views.
+  iree_hal_memory_trace_t allocation_trace;
 
   // Host allocator used to free wrapper storage.
   iree_allocator_t host_allocator;
@@ -331,9 +330,10 @@ iree_status_t iree_hal_vulkan_buffer_create(
     VkDeviceSize device_memory_size, VkBuffer handle,
     VkDeviceSize handle_length, VkDeviceSize handle_offset,
     VkDeviceAddress device_address, void* imported_host_pointer,
+    const iree_hal_memory_trace_t* allocation_trace,
     iree_hal_buffer_release_callback_t release_callback,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
-  return iree_hal_vulkan_buffer_create_internal(
+  iree_status_t status = iree_hal_vulkan_buffer_create_internal(
       syms, logical_device, placement, memory_type, allowed_access,
       allowed_usage, allocation_size, /*byte_offset=*/0, byte_length,
       memory_property_flags, memory_type_index, non_coherent_atom_size,
@@ -344,6 +344,13 @@ iree_status_t iree_hal_vulkan_buffer_create(
           IREE_HAL_VULKAN_BUFFER_OWNS_DEVICE_MEMORY |
           IREE_HAL_VULKAN_BUFFER_OWNS_MAPPING_STATE,
       release_callback, host_allocator, out_buffer);
+  if (iree_status_is_ok(status) && allocation_trace) {
+    iree_hal_vulkan_buffer_t* buffer = iree_hal_vulkan_buffer_cast(*out_buffer);
+    buffer->allocation_trace = *allocation_trace;
+    iree_hal_memory_trace_alloc(&buffer->allocation_trace, buffer,
+                                device_memory_size);
+  }
+  return status;
 }
 
 iree_status_t iree_hal_vulkan_buffer_create_borrowed(
@@ -396,7 +403,6 @@ static void iree_hal_vulkan_buffer_destroy(iree_hal_buffer_t* base_buffer) {
           .vulkan.buffer;
   if (handle &&
       iree_any_bit_set(buffer->ownership, IREE_HAL_VULKAN_BUFFER_OWNS_HANDLE)) {
-    IREE_TRACE_FREE_NAMED(IREE_HAL_VULKAN_ALLOCATOR_ID, (void*)handle);
     iree_vkDestroyBuffer(IREE_VULKAN_DEVICE(&buffer->syms),
                          buffer->logical_device, handle,
                          /*pAllocator=*/NULL);
@@ -408,6 +414,7 @@ static void iree_hal_vulkan_buffer_destroy(iree_hal_buffer_t* base_buffer) {
                       buffer->native.device_memory,
                       /*pAllocator=*/NULL);
   }
+  iree_hal_memory_trace_free(&buffer->allocation_trace, buffer);
   if (buffer->release_callback.fn) {
     buffer->release_callback.fn(buffer->release_callback.user_data,
                                 base_buffer);

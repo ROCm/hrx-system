@@ -81,6 +81,14 @@ typedef struct loom_parser_symbol_origins_t {
 #define LOOM_PARSED_OP_INLINE_FIELD_SPANS 16
 #define LOOM_PARSED_OP_INLINE_OPERAND_SEGMENTS 8
 
+// Synthetic coordinate bit forcing an already-promoted op through the wide
+// field-span append path.
+#define LOOM_PARSED_OP_WIDE_FIELD_SPAN_MASK \
+  (LOOM_LOCATION_COMPACT_COORDINATE_MAX + 1u)
+static_assert(LOOM_PARSED_OP_WIDE_FIELD_SPAN_MASK >
+                  LOOM_LOCATION_COMPACT_COORDINATE_MAX,
+              "wide field-span mask must overflow compact coordinates");
+
 // Accumulates parsed fields during format walk. Pointers start aimed at the
 // inline arrays and redirect to parser_arena spill storage on growth.
 struct loom_parsed_op_t {
@@ -94,7 +102,10 @@ struct loom_parsed_op_t {
   loom_attribute_t* attributes;
   loom_region_t** regions;
   loom_tied_result_t* tied_results;
-  loom_location_field_span_t* field_spans;
+  // Reusable compact field-span storage active at the start of every op.
+  loom_location_compact_field_span_t* compact_field_spans;
+  // Reusable wide storage allocated only after a coordinate overflow.
+  loom_location_field_span_t* wide_field_spans;
   uint16_t* operand_segment_counts;
 
   uint16_t operand_count;
@@ -106,7 +117,13 @@ struct loom_parsed_op_t {
   uint16_t tied_result_count;
   uint16_t tied_result_capacity;
   uint16_t field_span_count;
-  uint16_t field_span_capacity;
+  // Number of compact spans available in |compact_field_spans|.
+  uint16_t compact_field_span_capacity;
+  // Number of wide spans available in |wide_field_spans|.
+  uint16_t wide_field_span_capacity;
+  // Zero for compact storage or LOOM_PARSED_OP_WIDE_FIELD_SPAN_MASK after
+  // promotion, forcing the common coordinate mask through the wide path.
+  uint32_t field_span_coordinate_overflow_mask;
   // Effective traits resolved with a representation-scoped identity.
   loom_trait_flags_t effective_traits;
   // Intrinsic write-space bound resolved with a Low descriptor's traits.
@@ -131,7 +148,7 @@ struct loom_parsed_op_t {
   loom_attribute_t inline_attributes[LOOM_PARSED_OP_INLINE_ATTRS];
   loom_region_t* inline_regions[LOOM_PARSED_OP_INLINE_REGIONS];
   loom_tied_result_t inline_tied_results[LOOM_PARSED_OP_INLINE_TIED];
-  loom_location_field_span_t
+  loom_location_compact_field_span_t
       inline_field_spans[LOOM_PARSED_OP_INLINE_FIELD_SPANS];
   uint16_t
       inline_operand_segment_counts[LOOM_PARSED_OP_INLINE_OPERAND_SEGMENTS];
@@ -182,6 +199,13 @@ iree_status_t loom_parsed_op_add_field_span(
     loom_parsed_op_t* parsed, iree_arena_allocator_t* arena,
     loom_location_field_kind_t kind, uint16_t index, loom_token_t start_token,
     uint32_t end_line, uint32_t end_column);
+// Returns the physical field-span array accumulated for the current op.
+loom_location_field_span_array_t loom_parsed_op_field_span_array(
+    const loom_parsed_op_t* parsed);
+// Copies the current nonempty field-span payload into |module|.
+iree_status_t loom_parsed_op_attach_field_spans(const loom_parsed_op_t* parsed,
+                                                loom_module_t* module,
+                                                loom_location_id_t location_id);
 iree_status_t loom_parse_format_add_field_span(loom_parser_t* parser,
                                                loom_parsed_op_t* parsed,
                                                loom_location_field_kind_t kind,

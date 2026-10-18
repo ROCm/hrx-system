@@ -106,6 +106,20 @@ LOOMC_API_EXPORT void loomc_result_release(loomc_result_t* result);
 LOOMC_API_EXPORT loomc_result_state_t
 loomc_result_state(const loomc_result_t* result);
 
+/// Returns the terminal operation-domain status code without allocating a
+/// status.
+///
+/// Success is `LOOMC_STATUS_OK`, cancellation is `LOOMC_STATUS_CANCELLED`, and
+/// other codes classify a failed result. A failure reported only through
+/// diagnostics has code `LOOMC_STATUS_FAILED_PRECONDITION`; when an operation
+/// converts a domain status into diagnostics, it preserves that status code.
+/// Diagnostics carry the detailed cause and source locations.
+///
+/// @param result Result to inspect. May be `NULL`.
+/// @return Terminal code, or `LOOMC_STATUS_INVALID_ARGUMENT` for `NULL`.
+LOOMC_API_EXPORT loomc_status_code_t
+loomc_result_status_code(const loomc_result_t* result);
+
 /// Returns true when `result` succeeded.
 ///
 /// @param result Result to inspect.

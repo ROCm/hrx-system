@@ -221,6 +221,15 @@ iree_status_t iree_hal_amd_xdna_context_allocate(
                                              (void**)&context));
   context->host_allocator = host_allocator;
   context->fabric = fabric;
+  for (uint32_t i = 0; i < fabric->endpoint_count; ++i) {
+    const amdf_endpoint_summary_t* endpoint = &fabric->endpoints[i];
+    if (amdf_endpoint_id_is_equal(&endpoint->id, endpoint_id)) {
+      break;
+    }
+    if (endpoint->engine_kind == AMDF_ENGINE_KIND_XDNA) {
+      ++context->device_ordinal;
+    }
+  }
   iree_hal_amd_fabric_retain(fabric);
   context->api = fabric->api;
   context->xdna = extension;

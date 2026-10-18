@@ -1,0 +1,121 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @pocket.prefix.normalize() launch(%work: buffer, %input: buffer, %output: buffer, %scale: buffer, %bias: buffer)
+
+kernel.decl @pocket.prefix.embed() launch(%work: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @pocket.prefix.softmax() launch(%work: buffer, %scores: buffer, %probabilities: buffer)
+
+kernel.decl @pocket.prefix.residual() launch(%work: buffer, %input: buffer, %update: buffer, %output: buffer)
+
+kernel.decl @pocket.prefix.gelu() launch(%work: buffer, %input: buffer, %output: buffer)
+
+kernel.decl @pocket.prefix.project(%inputs$18: index, %outputs$19: index) launch(%work: buffer, %input: buffer, %weight: buffer, %output: buffer, %inputs$24: index, %outputs$25: index)
+
+kernel.decl @pocket.prefix.rotary() launch(%work: buffer, %input: buffer, %query: buffer, %state: buffer, %cosine: buffer, %sine: buffer, %cache_origin: offset)
+
+kernel.decl @pocket.prefix.scores() launch(%work: buffer, %input: buffer, %state: buffer, %output: buffer, %cache_origin: offset)
+
+kernel.decl @pocket.prefix.values() launch(%work: buffer, %input: buffer, %state: buffer, %output: buffer, %cache_origin: offset)
+
+kernel.decl @pocket.prefix.advance() launch(%work: buffer, %state: buffer)
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.rotary_capacity : %value: index where [range(%value, 16, 1048576)]
+
+template.decl pure @pocket.prefix.capacity() -> (index)
+
+template.decl pure @pocket.flow_cache_origin(%layer: index) -> (offset)
+
+template.decl @pocket.prefix.layer(%work: buffer, %layer: index, %cache_origin: offset, %backbone: buffer, %rotary: buffer, %state: buffer, %input: buffer) -> (buffer)
+
+template.def<@pocket.prefix.layer> @pocket_prefix_layer(%work: buffer, %layer: index, %cache_origin: offset, %backbone: buffer, %rotary: buffer, %state: buffer, %input: buffer) -> (buffer) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %context = config.get @pocket.context_capacity : index
+  %rotary_capacity = config.get @pocket.rotary_capacity : index
+  %width = index.constant 1024 : index
+  %packed_width = index.constant 3072 : index
+  %hidden_width = index.constant 4096 : index
+  %row_bytes = index.constant 4096 : offset
+  %row_storage_bytes = index.scale %capacity, %row_bytes : index, offset -> offset
+  %packed_row_bytes = index.constant 12288 : offset
+  %packed_storage_bytes = index.scale %capacity, %packed_row_bytes : index, offset -> offset
+  %hidden_row_bytes = index.constant 16384 : offset
+  %hidden_storage_bytes = index.scale %capacity, %hidden_row_bytes : index, offset -> offset
+  %score_position_bytes = index.constant 64 : offset
+  %score_row_bytes = index.scale %context, %score_position_bytes : index, offset -> offset
+  %score_storage_bytes = index.scale %capacity, %score_row_bytes : index, offset -> offset
+  %value_cache_delta = index.scale %context, %row_bytes : index, offset -> offset
+  %value_cache_origin = index.add %cache_origin, %value_cache_delta : offset
+  %scale1 = command.parameter %backbone, "flow_lm.transformer.layers.{}.norm1.weight"[%layer] : view<1024xbf16>
+  %bias1 = command.parameter %backbone, "flow_lm.transformer.layers.{}.norm1.bias"[%layer] : view<1024xbf16>
+  %normalized1 = buffer.alloca<global> align(16) %row_storage_bytes : buffer
+  kernel.launch @pocket.prefix.normalize(%work, %input, %normalized1, %scale1, %bias1) : (buffer, buffer, buffer, view<1024xbf16>, view<1024xbf16>)
+  %qkv_weight = command.parameter %backbone, "flow_lm.transformer.layers.{}.self_attn.in_proj.weight"[%layer] : view<3072x1024xbf16>
+  %qkv = buffer.alloca<global> align(16) %packed_storage_bytes : buffer
+  kernel.launch @pocket.prefix.project[%width, %packed_width](%work, %normalized1, %qkv_weight, %qkv, %width, %packed_width) : [index, index](buffer, buffer, view<3072x1024xbf16>, buffer, index, index)
+  %cosine = command.parameter %rotary, "rotary.cosine" : view<[%rotary_capacity]x32xf32>
+  %sine = command.parameter %rotary, "rotary.sine" : view<[%rotary_capacity]x32xf32>
+  %query = buffer.alloca<global> align(16) %row_storage_bytes : buffer
+  kernel.launch @pocket.prefix.rotary(%work, %qkv, %query, %state, %cosine, %sine, %cache_origin) : (buffer, buffer, buffer, buffer, view<[%rotary_capacity]x32xf32>, view<[%rotary_capacity]x32xf32>, offset)
+  %scores = buffer.alloca<global> align(16) %score_storage_bytes : buffer
+  kernel.launch @pocket.prefix.scores(%work, %query, %state, %scores, %cache_origin) : (buffer, buffer, buffer, buffer, offset)
+  %probabilities = buffer.alloca<global> align(16) %score_storage_bytes : buffer
+  kernel.launch @pocket.prefix.softmax(%work, %scores, %probabilities) : (buffer, buffer, buffer)
+  %attention = buffer.alloca<global> align(16) %row_storage_bytes : buffer
+  kernel.launch @pocket.prefix.values(%work, %probabilities, %state, %attention, %value_cache_origin) : (buffer, buffer, buffer, buffer, offset)
+  %attention_weight = command.parameter %backbone, "flow_lm.transformer.layers.{}.self_attn.out_proj.weight"[%layer] : view<1024x1024xbf16>
+  %attention_projection = buffer.alloca<global> align(16) %row_storage_bytes : buffer
+  kernel.launch @pocket.prefix.project[%width, %width](%work, %attention, %attention_weight, %attention_projection, %width, %width) : [index, index](buffer, buffer, view<1024x1024xbf16>, buffer, index, index)
+  %attention_residual = buffer.alloca<global> align(16) %row_storage_bytes : buffer
+  kernel.launch @pocket.prefix.residual(%work, %input, %attention_projection, %attention_residual) : (buffer, buffer, buffer, buffer)
+  %scale2 = command.parameter %backbone, "flow_lm.transformer.layers.{}.norm2.weight"[%layer] : view<1024xbf16>
+  %bias2 = command.parameter %backbone, "flow_lm.transformer.layers.{}.norm2.bias"[%layer] : view<1024xbf16>
+  %normalized2 = buffer.alloca<global> align(16) %row_storage_bytes : buffer
+  kernel.launch @pocket.prefix.normalize(%work, %attention_residual, %normalized2, %scale2, %bias2) : (buffer, buffer, buffer, view<1024xbf16>, view<1024xbf16>)
+  %expand_weight = command.parameter %backbone, "flow_lm.transformer.layers.{}.linear1.weight"[%layer] : view<4096x1024xbf16>
+  %expanded = buffer.alloca<global> align(16) %hidden_storage_bytes : buffer
+  kernel.launch @pocket.prefix.project[%width, %hidden_width](%work, %normalized2, %expand_weight, %expanded, %width, %hidden_width) : [index, index](buffer, buffer, view<4096x1024xbf16>, buffer, index, index)
+  %activated = buffer.alloca<global> align(16) %hidden_storage_bytes : buffer
+  kernel.launch @pocket.prefix.gelu(%work, %expanded, %activated) : (buffer, buffer, buffer)
+  %contract_weight = command.parameter %backbone, "flow_lm.transformer.layers.{}.linear2.weight"[%layer] : view<1024x4096xbf16>
+  %contracted = buffer.alloca<global> align(16) %row_storage_bytes : buffer
+  kernel.launch @pocket.prefix.project[%hidden_width, %width](%work, %activated, %contract_weight, %contracted, %hidden_width, %width) : [index, index](buffer, buffer, view<1024x4096xbf16>, buffer, index, index)
+  %result = buffer.alloca<global> align(16) %row_storage_bytes : buffer
+  kernel.launch @pocket.prefix.residual(%work, %attention_residual, %contracted, %result) : (buffer, buffer, buffer, buffer)
+  template.return %result : buffer
+}
+
+command.program.def public @batch_prefill_prefix() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %work: buffer, %requests: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %capacity = template.apply<@pocket.prefix.capacity>() pure : () -> (index)
+  %row_bytes = index.constant 4096 : offset
+  %storage_bytes = index.scale %capacity, %row_bytes : index, offset -> offset
+  %input = buffer.alloca<global> align(16) %storage_bytes : buffer
+  %embedding = command.parameter %phase, "flow_lm.conditioner.embed.weight" : view<4001x1024xbf16>
+  kernel.launch @pocket.prefix.embed(%work, %embedding, %input) : (buffer, view<4001x1024xbf16>, buffer)
+  %layer0 = index.constant 0 : index
+  %cache0 = template.apply<@pocket.flow_cache_origin>(%layer0) pure : (index) -> (offset)
+  %result0 = template.apply<@pocket.prefix.layer>(%work, %layer0, %cache0, %backbone, %rotary, %state, %input) : (buffer, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %layer1 = index.constant 1 : index
+  %cache1 = template.apply<@pocket.flow_cache_origin>(%layer1) pure : (index) -> (offset)
+  %result1 = template.apply<@pocket.prefix.layer>(%work, %layer1, %cache1, %backbone, %rotary, %state, %result0) : (buffer, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %layer2 = index.constant 2 : index
+  %cache2 = template.apply<@pocket.flow_cache_origin>(%layer2) pure : (index) -> (offset)
+  %result2 = template.apply<@pocket.prefix.layer>(%work, %layer2, %cache2, %backbone, %rotary, %state, %result1) : (buffer, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %layer3 = index.constant 3 : index
+  %cache3 = template.apply<@pocket.flow_cache_origin>(%layer3) pure : (index) -> (offset)
+  %result3 = template.apply<@pocket.prefix.layer>(%work, %layer3, %cache3, %backbone, %rotary, %state, %result2) : (buffer, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %layer4 = index.constant 4 : index
+  %cache4 = template.apply<@pocket.flow_cache_origin>(%layer4) pure : (index) -> (offset)
+  %result4 = template.apply<@pocket.prefix.layer>(%work, %layer4, %cache4, %backbone, %rotary, %state, %result3) : (buffer, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %layer5 = index.constant 5 : index
+  %cache5 = template.apply<@pocket.flow_cache_origin>(%layer5) pure : (index) -> (offset)
+  %result5 = template.apply<@pocket.prefix.layer>(%work, %layer5, %cache5, %backbone, %rotary, %state, %result4) : (buffer, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  kernel.launch @pocket.prefix.advance(%work, %state) : (buffer, buffer)
+  command.return
+}

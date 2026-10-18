@@ -222,7 +222,9 @@ class SparseTestBuffer {
     }
     iree_hal_buffer_release(reservation_);
     if (iree_status_is_ok(status)) {
-      iree_hal_buffer_release(backing_);
+      for (auto* backing : backing_) {
+        iree_hal_buffer_release(backing);
+      }
     }
     IREE_EXPECT_OK(status);
   }
@@ -238,10 +240,14 @@ class SparseTestBuffer {
     };
     IREE_RETURN_IF_ERROR(iree_hal_virtual_buffer_create(
         group, scope, &options, iree_allocator_system(), &reservation_));
-    IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
-        source_pool,
-        iree_hal_make_pool_reservation_request(2 * page_size, page_size),
-        iree_infinite_timeout(), &backing_));
+    iree_status_t status = iree_ok_status();
+    for (size_t i = 0; i < backing_.size() && iree_status_is_ok(status); ++i) {
+      status = iree_hal_pool_allocate_buffer(
+          source_pool,
+          iree_hal_make_pool_reservation_request(page_size, page_size),
+          iree_infinite_timeout(), &backing_[i]);
+    }
+    IREE_RETURN_IF_ERROR(status);
     iree_hal_semaphore_t* semaphore = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
         iree_hal_queue_family_device(iree_hal_queue_family(queue)),
@@ -262,8 +268,7 @@ class SparseTestBuffer {
               },
           .target_range =
               iree_hal_make_buffer_range(i * kHighPageOffset, page_size),
-          .source = backing_,
-          .source_offset = i * page_size,
+          .source = backing_[i],
           .access = IREE_HAL_MEMORY_ACCESS_ALL,
           .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
       };
@@ -280,8 +285,9 @@ class SparseTestBuffer {
  private:
   // Virtual buffer retaining the address interval until final release.
   iree_hal_buffer_t* reservation_ = nullptr;
-  // Ordinary prepared backing for two distinct pages of the sparse buffer.
-  iree_hal_buffer_t* backing_ = nullptr;
+  // Separate source allocations preserve distinct low/high contents on devices
+  // whose native mappings require whole allocations.
+  std::array<iree_hal_buffer_t*, 2> backing_ = {};
 };
 
 void RunSparseByteOffsetExecution(

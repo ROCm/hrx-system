@@ -13,9 +13,13 @@ void loom_serve_retirement_initialize(loom_serve_retirement_t* retirement) {
   retirement->user_data = NULL;
 }
 
-static void loom_serve_retirement_release_view(void* user_data,
-                                               iree_hal_buffer_t* buffer) {
-  loom_serve_retirement_t* retirement = user_data;
+void loom_serve_retirement_acquire(loom_serve_retirement_t* retirement) {
+  iree_slim_mutex_lock(&retirement->mutex);
+  ++retirement->count;
+  iree_slim_mutex_unlock(&retirement->mutex);
+}
+
+void loom_serve_retirement_release(loom_serve_retirement_t* retirement) {
   iree_slim_mutex_lock(&retirement->mutex);
   --retirement->count;
   iree_notification_post(&retirement->notification, IREE_ALL_WAITERS);
@@ -23,6 +27,11 @@ static void loom_serve_retirement_release_view(void* user_data,
     retirement->wake(retirement->user_data);
   }
   iree_slim_mutex_unlock(&retirement->mutex);
+}
+
+static void loom_serve_retirement_release_view(void* user_data,
+                                               iree_hal_buffer_t* buffer) {
+  loom_serve_retirement_release(user_data);
 }
 
 iree_status_t loom_serve_retirement_track(loom_serve_retirement_t* retirement,
@@ -35,9 +44,7 @@ iree_status_t loom_serve_retirement_track(loom_serve_retirement_t* retirement,
       (iree_hal_buffer_release_callback_t){loom_serve_retirement_release_view,
                                            retirement},
       host_allocator, &view));
-  iree_slim_mutex_lock(&retirement->mutex);
-  ++retirement->count;
-  iree_slim_mutex_unlock(&retirement->mutex);
+  loom_serve_retirement_acquire(retirement);
   iree_hal_buffer_release(*buffer);
   *buffer = view;
   return iree_ok_status();

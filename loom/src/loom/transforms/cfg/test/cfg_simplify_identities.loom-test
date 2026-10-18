@@ -373,3 +373,166 @@ func.def @preserves_labels_after_identity_splits(%select: i1, %choose: i1, %agai
   test.use %provider, %provider, %provider : test.ref<vector<[%provider]xf32>>, test.ref<vector<[%provider]xf32>>, test.ref<vector<[%provider]xf32>>
   func.return
 }
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// Replacing an earlier loop argument also changes the representative used by
+// the later loop. No consumer may resurrect the removed argument.
+func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: i1, %skip: i1, %stage_again: i1) {
+  cfg.br ^outer(%n: i32)
+^outer(%a: i32):
+  cfg.br ^inner(%a: i32)
+^inner(%b: i32):
+  cfg.cond_br %inner_again, ^inner_latch, ^inner_exit
+^inner_latch:
+  cfg.br ^inner(%b: i32)
+^inner_exit:
+  cfg.cond_br %skip, ^skip, ^stage_entry
+^skip:
+  cfg.br ^latch(%b: i32)
+^stage_entry:
+  cfg.br ^stage(%b: i32)
+^stage(%c: i32):
+  cfg.cond_br %stage_again, ^stage_latch, ^stage_exit
+^stage_latch:
+  cfg.br ^stage(%c: i32)
+^stage_exit:
+  %next = scalar.addi %c, %n : i32
+  cfg.br ^latch(%next: i32)
+^latch(%d: i32):
+  cfg.br ^outer(%d: i32)
+}
+
+// ----
+func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: i1, %skip: i1, %stage_again: i1) {
+  cfg.br ^outer(%n: i32)
+^outer(%a: i32):
+  cfg.br ^inner
+^inner:
+  cfg.cond_br %inner_again, ^inner, ^inner_exit
+^inner_exit:
+  cfg.cond_br %skip, ^skip, ^stage
+^skip:
+  cfg.br ^latch(%a: i32)
+^stage:
+  cfg.cond_br %stage_again, ^stage, ^stage_exit
+^stage_exit:
+  %next = scalar.addi %a, %n : i32
+  cfg.br ^latch(%next: i32)
+^latch(%d: i32):
+  cfg.br ^outer(%d: i32)
+}
+
+// ====
+
+// RUN: with-low-asm pass cfg-simplify
+
+// The same lifetime contract applies to physical register values.
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @forwards_low_identity_across_nested_loops(%n: reg<test.i32>, %inner_again: reg<test.i32>, %skip: reg<test.i32>, %stage_again: reg<test.i32>) asm {
+  low.br ^outer(%n: reg<test.i32>)
+^outer(%a: reg<test.i32>):
+  low.br ^inner(%a: reg<test.i32>)
+^inner(%b: reg<test.i32>):
+  low.cond_br %inner_again, ^inner_latch, ^inner_exit : reg<test.i32>
+^inner_latch:
+  low.br ^inner(%b: reg<test.i32>)
+^inner_exit:
+  low.cond_br %skip, ^skip, ^stage_entry : reg<test.i32>
+^skip:
+  low.br ^latch(%b: reg<test.i32>)
+^stage_entry:
+  low.br ^stage(%b: reg<test.i32>)
+^stage(%c: reg<test.i32>):
+  low.cond_br %stage_again, ^stage_latch, ^stage_exit : reg<test.i32>
+^stage_latch:
+  low.br ^stage(%c: reg<test.i32>)
+^stage_exit:
+  %next = test.add.i32 %c, %n
+  low.br ^latch(%next: reg<test.i32>)
+^latch(%d: reg<test.i32>):
+  low.br ^outer(%d: reg<test.i32>)
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @forwards_low_identity_across_nested_loops(%n: reg<test.i32>, %inner_again: reg<test.i32>, %skip: reg<test.i32>, %stage_again: reg<test.i32>) asm {
+  low.br ^outer(%n: reg<test.i32>)
+^outer(%a: reg<test.i32>):
+  low.br ^inner
+^inner:
+  low.cond_br %inner_again, ^inner, ^inner_exit : reg<test.i32>
+^inner_exit:
+  low.cond_br %skip, ^skip, ^stage : reg<test.i32>
+^skip:
+  low.br ^latch(%a: reg<test.i32>)
+^stage:
+  low.cond_br %stage_again, ^stage, ^stage_exit : reg<test.i32>
+^stage_exit:
+  %next = test.add.i32 %a, %n
+  low.br ^latch(%next: reg<test.i32>)
+^latch(%d: reg<test.i32>):
+  low.br ^outer(%d: reg<test.i32>)
+}
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// Replacements update captures and dependent view types together. The outer
+// loop selects between distinct layout/view pairs, so only forwarded arguments
+// disappear; the selected pair must remain coherent on the bypass path.
+func.def @forwards_dependent_identities_across_loops(%inner_again: i1, %skip: i1, %stage_again: i1, %observe: i1, %initial_layout: encoding<layout>, %initial_view: view<4xf32, %initial_layout>, %next_layout: encoding<layout>, %next_view: view<4xf32, %next_layout>) {
+  cfg.br ^outer(%initial_layout: encoding<layout>, %initial_view: view<4xf32, %initial_layout>)
+^outer(%outer_layout: encoding<layout>, %outer_view: view<4xf32, %outer_layout>):
+  cfg.br ^inner(%outer_layout: encoding<layout>, %outer_view: view<4xf32, %outer_layout>)
+^inner(%inner_layout: encoding<layout>, %inner_view: view<4xf32, %inner_layout>):
+  cfg.cond_br %inner_again, ^inner_latch, ^inner_exit
+^inner_latch:
+  cfg.br ^inner(%inner_layout: encoding<layout>, %inner_view: view<4xf32, %inner_layout>)
+^inner_exit:
+  cfg.cond_br %skip, ^skip, ^stage_entry
+^skip:
+  cfg.br ^latch(%inner_layout: encoding<layout>, %inner_view: view<4xf32, %inner_layout>)
+^stage_entry:
+  cfg.br ^stage(%inner_layout: encoding<layout>, %inner_view: view<4xf32, %inner_layout>)
+^stage(%stage_layout: encoding<layout>, %stage_view: view<4xf32, %stage_layout>):
+  cfg.cond_br %stage_again, ^stage_latch, ^stage_exit
+^stage_latch:
+  cfg.br ^stage(%stage_layout: encoding<layout>, %stage_view: view<4xf32, %stage_layout>)
+^stage_exit:
+  scf.if %observe {
+    test.use %stage_view : view<4xf32, %stage_layout>
+  } else {
+  }
+  cfg.br ^latch(%next_layout: encoding<layout>, %next_view: view<4xf32, %next_layout>)
+^latch(%latch_layout: encoding<layout>, %latch_view: view<4xf32, %latch_layout>):
+  cfg.br ^outer(%latch_layout: encoding<layout>, %latch_view: view<4xf32, %latch_layout>)
+}
+
+// ----
+func.def @forwards_dependent_identities_across_loops(%inner_again: i1, %skip: i1, %stage_again: i1, %observe: i1, %initial_layout: encoding<layout>, %initial_view: view<4xf32, %initial_layout>, %next_layout: encoding<layout>, %next_view: view<4xf32, %next_layout>) {
+  cfg.br ^outer(%initial_layout: encoding<layout>, %initial_view: view<4xf32, %initial_layout>)
+^outer(%outer_layout: encoding<layout>, %outer_view: view<4xf32, %outer_layout>):
+  cfg.br ^inner
+^inner:
+  cfg.cond_br %inner_again, ^inner, ^inner_exit
+^inner_exit:
+  cfg.cond_br %skip, ^skip, ^stage
+^skip:
+  cfg.br ^latch(%outer_layout: encoding<layout>, %outer_view: view<4xf32, %outer_layout>)
+^stage:
+  cfg.cond_br %stage_again, ^stage, ^stage_exit
+^stage_exit:
+  scf.if %observe {
+    test.use %outer_view : view<4xf32, %outer_layout>
+  } else {
+  }
+  cfg.br ^latch(%next_layout: encoding<layout>, %next_view: view<4xf32, %next_layout>)
+^latch(%latch_layout: encoding<layout>, %latch_view: view<4xf32, %latch_layout>):
+  cfg.br ^outer(%latch_layout: encoding<layout>, %latch_view: view<4xf32, %latch_layout>)
+}

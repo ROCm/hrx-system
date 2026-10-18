@@ -1,0 +1,249 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl @text.next(%text: buffer, %position: offset) -> (i32, offset)
+
+func.decl @text.write(%text: buffer, %position: offset, %codepoint: i32) -> (offset)
+
+func.decl @text.uppercase(%codepoint: i32) -> (i32, i32, i32)
+
+func.decl @text.is_space(%codepoint: i32) -> (i1)
+
+func.decl @pocket.rewrite_suffix(%codepoint: i32) -> (i1)
+
+func.decl @pocket.finish_text(%normalized: buffer, %length: offset) -> (buffer)
+
+// Cursor words are pending byte length, ready end, read position, raw-trim end,
+// potential stable end, potential stable scalar, committed last scalar,
+// started, ASCII-space pair, committed-scalar presence, and final input.
+// The pending allocation bounds the unresolved suffix by the raw byte limit.
+// Uppercasing the first scalar and terminal punctuation need twelve spare bytes.
+func.def public @pocket.normalizer_create(%raw_limit: offset) -> (buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %state_bytes = index.constant 88 : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %zero = scalar.constant 0 : i32
+  buffer.fill %zero, %state[%origin], %state_bytes : i32
+  %expansion = index.constant 12 : offset
+  %capacity = index.add %raw_limit, %expansion : offset
+  %pending = buffer.alloca<private> align(1) %capacity : buffer
+  func.return %state, %pending : buffer, buffer
+}
+
+// A character outside the rewrite suffix commits every preceding character.
+// Unicode whitespace is provisionally stable here; raw trimming decides when
+// it is safe to publish that position.
+func.def @pocket.normalizer_character(%pending: buffer, %length: offset, %stable_end: offset, %stable: i32, %codepoint: i32) -> (offset, offset, i32) {
+  %after = func.call @text.write(%pending, %length, %codepoint) : (buffer, offset, i32) -> (offset)
+  %suffix = func.call @pocket.rewrite_suffix(%codepoint) : (i32) -> (i1)
+  %next_end = scf.select %suffix, %stable_end, %after : offset
+  %next_stable = scf.select %suffix, %stable, %codepoint : i32
+  func.return %after, %next_end, %next_stable : offset, offset, i32
+}
+
+// Feed one complete-scalar window after the previous ready prefix has drained.
+// Each raw scalar is visited once, including whitespace that EOF may discard.
+func.def public @pocket.normalizer_feed(%state: buffer, %pending: buffer, %text: buffer, %begin: offset, %end: offset) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<11xi64>
+  %length64 = view.load %header[0] : view<11xi64> -> i64
+  %trim64 = view.load %header[3] : view<11xi64> -> i64
+  %stable_end64 = view.load %header[4] : view<11xi64> -> i64
+  %stable64 = view.load %header[5] : view<11xi64> -> i64
+  %last64 = view.load %header[6] : view<11xi64> -> i64
+  %started64 = view.load %header[7] : view<11xi64> -> i64
+  %pair64 = view.load %header[8] : view<11xi64> -> i64
+  %present64 = view.load %header[9] : view<11xi64> -> i64
+  %length64_value = scalar.assume %length64 [range(%length64, 0, 9223372036854775807)] : i64
+  %length = index.cast %length64_value : i64 to offset
+  %trim64_value = scalar.assume %trim64 [range(%trim64, 0, 9223372036854775807)] : i64
+  %trim = index.cast %trim64_value : i64 to offset
+  %stable_end64_value = scalar.assume %stable_end64 [range(%stable_end64, 0, 9223372036854775807)] : i64
+  %stable_end = index.cast %stable_end64_value : i64 to offset
+  %stable = scalar.trunci %stable64 : i64 to i32
+  %last = scalar.trunci %last64 : i64 to i32
+  %zero64 = scalar.constant 0 : i64
+  %started = scalar.cmpi ne, %started64, %zero64 : i64
+  %pair = scalar.cmpi ne, %pair64, %zero64 : i64
+  %present = scalar.cmpi ne, %present64, %zero64 : i64
+  %false = scalar.constant false : i1
+  %zero = scalar.constant 0 : i32
+  %space = scalar.constant 32 : i32
+  %line_feed = scalar.constant 10 : i32
+  %carriage_return = scalar.constant 13 : i32
+  %unused, %written, %ready, %trim_end, %potential_end, %potential, %committed, %has_started, %next_pair, %has_committed = scf.while(%cursor = %begin : offset, %written = %length : offset, %ready = %origin : offset, %trim_end = %trim : offset, %potential_end = %stable_end : offset, %potential = %stable : i32, %committed = %last : i32, %has_started = %started : i1, %next_pair = %pair : i1, %has_committed = %present : i1) -> (offset, offset, offset, offset, offset, i32, i32, i1, i1, i1) {
+    %more = index.cmp ult, %cursor, %end : offset
+    scf.condition %more, %cursor, %written, %ready, %trim_end, %potential_end, %potential, %committed, %has_started, %next_pair, %has_committed : i1, offset, offset, offset, offset, offset, i32, i32, i1, i1, i1
+  } do(%cursor: offset, %written: offset, %ready: offset, %trim_end: offset, %potential_end: offset, %potential: i32, %committed: i32, %has_started: i1, %next_pair: i1, %has_committed: i1) {
+    %codepoint, %next = func.call @text.next(%text, %cursor) : (buffer, offset) -> (i32, offset)
+    %whitespace = func.call @text.is_space(%codepoint) : (i32) -> (i1)
+    %nonspace = scalar.cmpi eq, %whitespace, %false : i1
+    %include = scalar.ori %has_started, %nonspace : i1
+    %after, %after_end, %after_stable, %after_pair = scf.if %include -> (offset, offset, i32, i1) {
+      %newline = scalar.cmpi eq, %codepoint, %line_feed : i32
+      %return = scalar.cmpi eq, %codepoint, %carriage_return : i32
+      %line_end = scalar.ori %newline, %return : i1
+      %normalized = scf.select %line_end, %space, %codepoint : i32
+      %ascii_space = scalar.cmpi eq, %normalized, %space : i32
+      %skip = scalar.andi %ascii_space, %next_pair : i1
+      %emit = scalar.cmpi eq, %skip, %false : i1
+      %pair = scalar.andi %ascii_space, %emit : i1
+      %after, %after_end, %after_stable = scf.if %emit -> (offset, offset, i32) {
+        %first = scalar.cmpi eq, %has_started, %false : i1
+        %a, %b, %c = scf.if %first -> (i32, i32, i32) {
+          %a, %b, %c = func.call @text.uppercase(%normalized) : (i32) -> (i32, i32, i32)
+          scf.yield %a, %b, %c : i32, i32, i32
+        } else {
+          scf.yield %normalized, %zero, %zero : i32, i32, i32
+        }
+        %first_length, %first_end, %first_stable = func.call @pocket.normalizer_character(%pending, %written, %potential_end, %potential, %a) : (buffer, offset, offset, i32, i32) -> (offset, offset, i32)
+        %has_second = scalar.cmpi ne, %b, %zero : i32
+        %second_length, %second_end, %second_stable = scf.if %has_second -> (offset, offset, i32) {
+          %length, %end, %stable = func.call @pocket.normalizer_character(%pending, %first_length, %first_end, %first_stable, %b) : (buffer, offset, offset, i32, i32) -> (offset, offset, i32)
+          scf.yield %length, %end, %stable : offset, offset, i32
+        } else {
+          scf.yield %first_length, %first_end, %first_stable : offset, offset, i32
+        }
+        %has_third = scalar.cmpi ne, %c, %zero : i32
+        %third_length, %third_end, %third_stable = scf.if %has_third -> (offset, offset, i32) {
+          %length, %end, %stable = func.call @pocket.normalizer_character(%pending, %second_length, %second_end, %second_stable, %c) : (buffer, offset, offset, i32, i32) -> (offset, offset, i32)
+          scf.yield %length, %end, %stable : offset, offset, i32
+        } else {
+          scf.yield %second_length, %second_end, %second_stable : offset, offset, i32
+        }
+        scf.yield %third_length, %third_end, %third_stable : offset, offset, i32
+      } else {
+        scf.yield %written, %potential_end, %potential : offset, offset, i32
+      }
+      scf.yield %after, %after_end, %after_stable, %pair : offset, offset, i32, i1
+    } else {
+      scf.yield %written, %potential_end, %potential, %next_pair : offset, offset, i32, i1
+    }
+    %next_trim = scf.select %nonspace, %after, %trim_end : offset
+    %next_ready = scf.select %nonspace, %after_end, %ready : offset
+    %has_stable = index.cmp ugt, %after_end, %origin : offset
+    %publish = scalar.andi %nonspace, %has_stable : i1
+    %next_committed = scf.select %publish, %after_stable, %committed : i32
+    %next_present = scalar.ori %has_committed, %publish : i1
+    scf.yield %next, %after, %next_ready, %next_trim, %after_end, %after_stable, %next_committed, %include, %after_pair, %next_present : offset, offset, offset, offset, offset, i32, i32, i1, i1, i1
+  }
+  %written64 = index.cast %written : offset to i64
+  %ready64 = index.cast %ready : offset to i64
+  %trim_end64 = index.cast %trim_end : offset to i64
+  %potential_end64 = index.cast %potential_end : offset to i64
+  %potential64 = scalar.extui %potential : i32 to i64
+  %committed64 = scalar.extui %committed : i32 to i64
+  %has_started64 = scalar.extui %has_started : i1 to i64
+  %next_pair64 = scalar.extui %next_pair : i1 to i64
+  %has_committed64 = scalar.extui %has_committed : i1 to i64
+  view.store %written64, %header[0] : i64, view<11xi64>
+  view.store %ready64, %header[1] : i64, view<11xi64>
+  view.store %trim_end64, %header[3] : i64, view<11xi64>
+  view.store %potential_end64, %header[4] : i64, view<11xi64>
+  view.store %potential64, %header[5] : i64, view<11xi64>
+  view.store %committed64, %header[6] : i64, view<11xi64>
+  view.store %has_started64, %header[7] : i64, view<11xi64>
+  view.store %next_pair64, %header[8] : i64, view<11xi64>
+  view.store %has_committed64, %header[9] : i64, view<11xi64>
+  func.return
+}
+
+// Return a borrowed byte range. The next mutation follows its synchronous
+// consumer's retirement; no encoder or numerical dispatch retains this range.
+func.def public @pocket.normalizer_peek(%state: buffer) -> (i64, i64, i32) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<11xi64>
+  %end = view.load %header[1] : view<11xi64> -> i64
+  %position = view.load %header[2] : view<11xi64> -> i64
+  %final = view.load %header[10] : view<11xi64> -> i64
+  %length = scalar.subi %end, %position : i64
+  %zero = scalar.constant 0 : i64
+  %empty = scalar.cmpi eq, %length, %zero : i64
+  %finished = scalar.cmpi ne, %final, %zero : i64
+  %complete = scalar.andi %empty, %finished : i1
+  %complete32 = scalar.extui %complete : i1 to i32
+  func.return %position, %length, %complete32 : i64, i64, i32
+}
+
+// Compact only after a complete published prefix drains. The forward loop is
+// intentional: buffer.copy requires non-overlapping ranges. An ambiguous
+// suffix that only grows is not moved on each input arrival.
+func.def public @pocket.normalizer_consume(%state: buffer, %pending: buffer, %count: i64) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<11xi64>
+  %ready = view.load %header[1] : view<11xi64> -> i64
+  %position = view.load %header[2] : view<11xi64> -> i64
+  %after = scalar.addi %position, %count : i64
+  %zero = scalar.constant 0 : i64
+  %nonempty = scalar.cmpi ne, %ready, %zero : i64
+  %drained = scalar.cmpi eq, %after, %ready : i64
+  %compact = scalar.andi %nonempty, %drained : i1
+  scf.if %compact {
+    %length = view.load %header[0] : view<11xi64> -> i64
+    %trim = view.load %header[3] : view<11xi64> -> i64
+    %stable = view.load %header[4] : view<11xi64> -> i64
+    %remaining = scalar.subi %length, %ready : i64
+    %next_trim = scalar.subi %trim, %ready : i64
+    %next_stable = scalar.subi %stable, %ready : i64
+    %ready_value = scalar.assume %ready [range(%ready, 0, 9223372036854775807)] : i64
+    %begin = index.cast %ready_value : i64 to offset
+    %remaining_value = scalar.assume %remaining [range(%remaining, 0, 9223372036854775807)] : i64
+    %bytes = index.cast %remaining_value : i64 to offset
+    %one = index.constant 1 : offset
+    scf.for %i = [%origin to %bytes step %one] {
+      %source = index.add %begin, %i : offset
+      %byte = buffer.load.i8.u %pending[%source]
+      buffer.store.i8 %byte, %pending[%i]
+    }
+    view.store %remaining, %header[0] : i64, view<11xi64>
+    view.store %zero, %header[1] : i64, view<11xi64>
+    view.store %zero, %header[2] : i64, view<11xi64>
+    view.store %next_trim, %header[3] : i64, view<11xi64>
+    view.store %next_stable, %header[4] : i64, view<11xi64>
+  } else {
+    view.store %after, %header[2] : i64, view<11xi64>
+  }
+  func.return
+}
+
+// Finish after the last ready prefix drains. Only its final scalar and the
+// unresolved suffix enter the shared terminal policy; that scalar is stable
+// and is omitted from the final output. Empty raw text stays empty here.
+func.def public @pocket.normalizer_finish(%state: buffer, %pending: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<11xi64>
+  %trim64 = view.load %header[3] : view<11xi64> -> i64
+  %last64 = view.load %header[6] : view<11xi64> -> i64
+  %present = view.load %header[9] : view<11xi64> -> i64
+  %trim64_value = scalar.assume %trim64 [range(%trim64, 0, 9223372036854775807)] : i64
+  %trim = index.cast %trim64_value : i64 to offset
+  %last = scalar.trunci %last64 : i64 to i32
+  %four = index.constant 4 : offset
+  %capacity = index.add %trim, %four : offset
+  %tail = buffer.alloca<private> align(1) %capacity : buffer
+  %zero = scalar.constant 0 : i64
+  %has_last = scalar.cmpi ne, %present, %zero : i64
+  %prefix = scf.if %has_last -> (offset) {
+    %end = func.call @text.write(%tail, %origin, %last) : (buffer, offset, i32) -> (offset)
+    scf.yield %end : offset
+  } else {
+    scf.yield %origin : offset
+  }
+  buffer.copy %pending[%origin], %tail[%prefix], %trim
+  %length = index.add %prefix, %trim : offset
+  %finished = func.call @pocket.finish_text(%tail, %length) : (buffer, offset) -> (buffer)
+  %finished_length = buffer.length %finished
+  %remaining = index.sub %finished_length, %prefix : offset
+  buffer.copy %finished[%prefix], %pending[%origin], %remaining
+  %remaining64 = index.cast %remaining : offset to i64
+  view.store %remaining64, %header[0] : i64, view<11xi64>
+  view.store %remaining64, %header[1] : i64, view<11xi64>
+  view.store %remaining64, %header[3] : i64, view<11xi64>
+  view.store %remaining64, %header[4] : i64, view<11xi64>
+  %one = scalar.constant 1 : i64
+  view.store %one, %header[10] : i64, view<11xi64>
+  func.return
+}

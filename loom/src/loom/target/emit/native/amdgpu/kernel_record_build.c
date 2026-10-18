@@ -325,7 +325,7 @@ static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
     arguments[direct_arg->parameter_index] = (loom_amdgpu_metadata_argument_t){
         .name = direct_arg->name,
         .offset = direct_arg->kernarg_offset,
-        .size = direct_arg->kernarg_size,
+        .size = direct_arg->payload_size,
         .alignment = direct_arg->kernarg_alignment,
         .kind = LOOM_AMDGPU_METADATA_ARGUMENT_BY_VALUE,
     };

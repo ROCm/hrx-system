@@ -29,6 +29,7 @@
 #include "loomc/link_dependency.h"
 #include "loomc/link_index.h"
 #include "loomc/module.h"
+#include "loomc/module_config.h"
 #include "loomc/pass.h"
 #include "loomc/pass_trace.h"
 #include "loomc/product.h"

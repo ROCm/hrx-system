@@ -99,6 +99,9 @@ void loom_serve_residency_set_reclaimer(
 
 bool loom_serve_residency_cache_is_reclaiming(
     const loom_serve_residency_cache_t* cache) {
+  if (cache->pool && loom_serve_memory_pool_is_pending(cache->pool)) {
+    return true;
+  }
   for (const loom_serve_residency_t* entry = cache->oldest; entry;
        entry = entry->next) {
     if (entry->releasing) {
@@ -441,48 +444,57 @@ void loom_serve_residency_free(loom_serve_residency_t* residency) {
   iree_allocator_free(residency->host_allocator, residency);
 }
 
-iree_status_t loom_serve_residency_try_acquire(
-    loom_serve_residency_t* residency, bool* out_admitted) {
+static iree_status_t loom_serve_residency_acquire_parameters(
+    loom_serve_residency_t* residency,
+    loom_serve_residency_admission_t* out_admission) {
+  *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY;
   // Accepted work on a resident model never scans other registrations.
   if (residency->active) {
     ++residency->pin_count;
-    *out_admitted = true;
+    *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
     return iree_ok_status();
   }
-  *out_admitted = false;
-  // Collect only before attempting admission. A release accepted during this
-  // attempt remains a logical pending interest even if its callback wins the
-  // race with the capacity-denial query that follows.
   IREE_RETURN_IF_ERROR(
       loom_serve_residency_cache_query_status(residency->cache));
   if (residency->releasing) {
+    *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
     return iree_ok_status();
   }
   ++residency->pin_count;
-  if (!residency->active) {
-    if (residency->cache->pool) {
-      const loom_serve_memory_statistics_t memory =
-          loom_serve_residency_statistics(residency);
-      bool admitted = false;
-      IREE_RETURN_IF_ERROR(loom_serve_memory_pool_prepare(
-          residency->cache->pool,
-          memory.reserved_bytes - memory.committed_bytes, &admitted));
-      if (!admitted) {
-        --residency->pin_count;
-        return iree_ok_status();
+  if (residency->cache->pool) {
+    const loom_serve_memory_statistics_t memory =
+        loom_serve_residency_statistics(residency);
+    loom_serve_memory_admission_t admission;
+    IREE_RETURN_IF_ERROR(loom_serve_memory_pool_prepare(
+        residency->cache->pool, memory.reserved_bytes - memory.committed_bytes,
+        &admission));
+    if (admission != LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE) {
+      --residency->pin_count;
+      if (admission == LOOM_SERVE_MEMORY_ADMISSION_DEFERRED) {
+        *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
       }
+      return iree_ok_status();
     }
-    iree_status_t status = iree_ok_status();
-    for (iree_host_size_t i = 0;
-         i < residency->weight_count && iree_status_is_ok(status); ++i) {
-      status = loom_serve_weights_activate(residency->weights[i],
-                                           residency->execution);
-    }
-    IREE_RETURN_IF_ERROR(status);
-    residency->active = true;
   }
-  *out_admitted = true;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < residency->weight_count && iree_status_is_ok(status); ++i) {
+    status = loom_serve_weights_activate(residency->weights[i],
+                                         residency->execution);
+  }
+  IREE_RETURN_IF_ERROR(status);
+  residency->active = true;
+  *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_residency_try_acquire(
+    loom_serve_residency_t* residency, bool* out_admitted) {
+  loom_serve_residency_admission_t admission;
+  iree_status_t status =
+      loom_serve_residency_acquire_parameters(residency, &admission);
+  *out_admitted = admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
+  return status;
 }
 
 iree_status_t loom_serve_residency_try_admit(
@@ -500,11 +512,10 @@ iree_status_t loom_serve_residency_try_admit(
     *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
     return iree_ok_status();
   }
-  bool admitted = false;
-  IREE_RETURN_IF_ERROR(loom_serve_residency_try_acquire(residency, &admitted));
-  if (admitted) {
+  IREE_RETURN_IF_ERROR(
+      loom_serve_residency_acquire_parameters(residency, out_admission));
+  if (*out_admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     loom_serve_residency_cancel_admission(residency);
-    *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
   } else {
     loom_serve_residency_queue_admission(residency);
     if (loom_serve_residency_cache_is_reclaiming(cache)) {

@@ -38,6 +38,17 @@ iree_status_t iree_hal_pool_buffer_range_initialize(
     const iree_hal_asan_pool_options_t* asan,
     iree_hal_pool_buffer_range_t* out_range);
 
+// Qualifies and retains a live reservation's prepared view, materializing a
+// native buffer only when the parent requires it. Preserves the reservation's
+// memory contract and native coordinates without an intermediate subspan.
+// The caller keeps the parent token and returns it after deinitializing the
+// range. Failure leaves an empty output and does not consume the token.
+iree_status_t iree_hal_pool_buffer_range_prepare(
+    iree_hal_pool_t* pool, const iree_hal_pool_reservation_request_t* request,
+    const iree_hal_pool_reservation_t* reservation,
+    iree_device_size_t alignment, const iree_hal_asan_pool_options_t* asan,
+    iree_hal_pool_buffer_range_t* out_range);
+
 // Releases the retained source after every child reservation has retired.
 void iree_hal_pool_buffer_range_deinitialize(
     iree_hal_pool_buffer_range_t* range);

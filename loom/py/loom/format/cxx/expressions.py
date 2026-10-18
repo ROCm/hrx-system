@@ -342,15 +342,39 @@ class CxxExpressionRenderer(CxxRenderContext):
                 return self._address_cast_target(result)
         return None
 
-    def _integer_extension(self, operation: Operation, *, signed: bool) -> str:
+    def _numeric_conversion(self, operation: Operation) -> None:
+        """Projects one exact scalar or native-vector numeric conversion."""
+
+        self.uses_numeric_conversion = True
+        member = operation.name.split(".")[-1]
         source = operation.operands[0]
         result = operation.results[0]
         source_expression = self.expression(source)
-        source_type = self.cpp_type(source, signed=signed)
-        if self.expression_type(source) != source_type:
-            source_expression = f"static_cast<{source_type}>({source_expression})"
-        result_type = self.cpp_type(result, signed=signed)
-        return f"static_cast<{result_type}>({source_expression})"
+        source_signedness = {
+            "extsi": True,
+            "sitofp": True,
+            "extui": False,
+            "uitofp": False,
+        }.get(member)
+        if source_signedness is not None:
+            source_type = self.cpp_type(source, signed=source_signedness)
+            if self.expression_type(source) != source_type:
+                source_expression = f"loom::convert<{source_type}>({source_expression})"
+
+        result_signedness = {
+            "extsi": True,
+            "fptosi": True,
+            "extui": False,
+            "fptoui": False,
+        }.get(member)
+        result_type = self.cpp_type(result, signed=result_signedness)
+        self._declare(
+            result,
+            f"loom::convert<{result_type}>({source_expression})",
+            declaration_type=result_type,
+            expression_type=result_type,
+            inlineable=True,
+        )
 
     def _loop_initializer(self, value_id: int) -> str:
         definition = self.definitions.get(value_id)
@@ -929,13 +953,7 @@ class CxxExpressionRenderer(CxxRenderContext):
                 self.expressions[result] = self.expression(source)
                 self.expression_types[result] = self.expression_type(source)
                 return ()
-        if name in {"scalar.extui", "scalar.extsi"}:
-            expression = self._integer_extension(
-                operation, signed=name == "scalar.extsi"
-            )
-        else:
-            expression = self._cast(result, self.expression(operation.operands[0]))
-        self._declare(result, expression, inlineable=True)
+        self._numeric_conversion(operation)
         return ()
 
     def _render_simple(self, operation: Operation) -> tuple[str, ...] | None:
@@ -1174,14 +1192,10 @@ class CxxExpressionRenderer(CxxRenderContext):
             "vector.extui",
             "vector.extsi",
             "vector.trunci",
+            "vector.fptosi",
+            "vector.fptoui",
         }:
-            result = operation.results[0]
-            source = self.expression(operation.operands[0])
-            self._declare(
-                result,
-                f"__builtin_convertvector({source}, {self.cpp_type(result)})",
-                inlineable=True,
-            )
+            self._numeric_conversion(operation)
             return ()
         if name == "vector.table.lookup":
             result = operation.results[0]

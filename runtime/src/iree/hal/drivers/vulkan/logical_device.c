@@ -952,8 +952,8 @@ static iree_status_t iree_hal_vulkan_logical_device_assign_topology_info(
       .enabled_features = device->enabled_features,
       .notification = iree_hal_vulkan_allocator_memory_notification(
           device->device_allocator),
-      .maintenance = iree_hal_vulkan_allocator_memory_maintenance(
-          device->device_allocator),
+      .allocation_queue =
+          iree_hal_vulkan_allocator_allocation_queue(device->device_allocator),
       .epoch_query =
           {
               .fn = iree_hal_vulkan_logical_device_query_pool_epoch,

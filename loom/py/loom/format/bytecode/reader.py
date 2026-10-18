@@ -102,6 +102,7 @@ from loom.ir import (
     StaticDim,
     StorageSpace,
     StorageType,
+    StringArrayAttr,
     Symbol,
     SymbolKind,
     SymbolName,
@@ -2331,8 +2332,35 @@ class BytecodeReader:
                 return self._read_symbol_collection(
                     data, offset, attr_def, "symbol_set"
                 )
+            case 19:  # STRING_ARRAY
+                return self._read_string_array_attr(data, offset, attr_def)
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
+
+    def _read_string_array_attr(
+        self, data: bytes, offset: int, attr_def: Any | None
+    ) -> tuple[StringArrayAttr, int]:
+        if getattr(attr_def, "attr_type", None) not in (
+            None,
+            "any",
+            "string_array",
+        ):
+            raise BytecodeError(
+                "string-array attribute does not match the field contract"
+            )
+        count, offset = decode_varint(data, offset)
+        if count > 0xFFFF:
+            raise BytecodeError(f"string-array length {count} exceeds UINT16_MAX")
+        values: list[str] = []
+        for index in range(count):
+            string_id, offset = decode_varint(data, offset)
+            if string_id >= len(self._strings):
+                raise BytecodeError(
+                    f"string-array element {index} string_id {string_id} out of "
+                    f"range (string table has {len(self._strings)} entries)"
+                )
+            values.append(self._strings[string_id])
+        return StringArrayAttr(values), offset
 
     def _read_signed_enum_set_attr(
         self, data: bytes, offset: int, attr_def: Any | None

@@ -40,6 +40,10 @@ struct iree_hal_amdgpu_buffer_t {
   // bookkeeping. Otherwise this buffer frees the agent address with HSA.
   iree_hal_buffer_release_callback_t release_callback;
 
+  IREE_TRACE(
+      // Captured stream identity for direct native ownership, or NULL.
+      const char* allocation_trace_id;)
+
   // Session-local profiling allocation id for direct allocator buffers.
   uint64_t profile_allocation_id;
 
@@ -233,6 +237,7 @@ const iree_hal_buffer_binding_layout_t* iree_hal_amdgpu_buffer_binding_layout(
   static const uint16_t types[] = {
       IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
       IREE_HAL_BUFFER_INTERFACE_HOST,
+      IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
   };
   static const iree_hal_buffer_binding_layout_t layout = {
       .byte_length = sizeof(iree_hal_amdgpu_buffer_native_t),
@@ -241,6 +246,17 @@ const iree_hal_buffer_binding_layout_t* iree_hal_amdgpu_buffer_binding_layout(
       .types = types,
   };
   return &layout;
+}
+
+void iree_hal_amdgpu_buffer_prepare_mapping_source(
+    iree_hal_buffer_t* base_buffer, const void* descriptor,
+    uint32_t granularity) {
+  iree_hal_amdgpu_buffer_t* buffer = iree_hal_amdgpu_buffer_cast(base_buffer);
+  buffer->native.bindings[IREE_HAL_AMDGPU_BUFFER_BINDING_MAPPING_SOURCE] =
+      (iree_hal_buffer_native_binding_t){
+          .mapping_source = {.descriptor = descriptor,
+                             .granularity = granularity},
+      };
 }
 
 // Packet emission may precede alloca commitment. Resolve that staged edge once;
@@ -353,6 +369,7 @@ static void iree_hal_amdgpu_buffer_initialize(
   out_buffer->base.memory.binding_offset = byte_offset;
   out_buffer->base.host_binding_index = IREE_HAL_AMDGPU_BUFFER_BINDING_HOST;
   out_buffer->release_callback = release_callback;
+  IREE_TRACE(out_buffer->allocation_trace_id = NULL);
   out_buffer->profile_allocation_id = 0;
   out_buffer->profile_session_id = 0;
   out_buffer->profile_pool_id = 0;
@@ -419,6 +436,20 @@ iree_status_t iree_hal_amdgpu_buffer_create_pooled(
   return iree_ok_status();
 }
 
+void iree_hal_amdgpu_buffer_trace_allocation(iree_hal_buffer_t* base_buffer) {
+  (void)base_buffer;
+  IREE_TRACE({
+    iree_hal_amdgpu_buffer_t* buffer = iree_hal_amdgpu_buffer_cast(base_buffer);
+    buffer->allocation_trace_id = "iree-hal-amdgpu-unpooled";
+    IREE_TRACE_ALLOC_NAMED(
+        buffer->allocation_trace_id,
+        (void*)(uintptr_t)buffer->native
+            .bindings[IREE_HAL_AMDGPU_BUFFER_BINDING_DEVICE_ADDRESS]
+            .device_address,
+        (iree_host_size_t)base_buffer->allocation_size);
+  });
+}
+
 void iree_hal_amdgpu_buffer_set_profile_allocation(
     iree_hal_buffer_t* base_buffer, uint64_t session_id, uint64_t allocation_id,
     uint64_t pool_id, uint32_t physical_device_ordinal,
@@ -464,6 +495,11 @@ static void iree_hal_amdgpu_buffer_destroy(iree_hal_buffer_t* base_buffer) {
     iree_hal_amdgpu_hsa_cleanup_assert_success(
         iree_hsa_amd_memory_pool_free_raw(buffer->libhsa, device_pointer));
   }
+  IREE_TRACE({
+    if (buffer->allocation_trace_id) {
+      IREE_TRACE_FREE_NAMED(buffer->allocation_trace_id, device_pointer);
+    }
+  });
 
   buffer->libhsa = NULL;
   memset(&buffer->native, 0, sizeof(buffer->native));

@@ -25,33 +25,37 @@ extern "C" {
 //
 // Tracy requires the same stable name pointer for every alloc/free pair in a
 // named memory stream. Static strings satisfy that naturally; dynamic per-pool
-// names are copied into intentionally leaked process-lifetime storage in
-// allocation-tracing builds.
+// names are interned in process-lifetime system storage. Equal names share one
+// stream across providers, regardless of their host allocator or lifetime.
 typedef struct iree_hal_memory_trace_t {
-#if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
-  // Stable name pointer passed to IREE_TRACE_ALLOC_NAMED/FREE_NAMED.
+  // Stable name pointer, or NULL when allocation tracing is disabled.
   const char* memory_id;
-#else
-  // Placeholder that keeps the type non-empty when tracing is compiled out.
-  uint8_t reserved;
-#endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
 } iree_hal_memory_trace_t;
 
 IREE_API_EXPORT iree_status_t iree_hal_memory_trace_initialize(
     iree_string_view_t trace_name, const char* default_memory_id,
-    iree_allocator_t host_allocator, iree_hal_memory_trace_t* out_trace);
+    iree_hal_memory_trace_t* out_trace);
+
+// Initializes a physical domain named "domain-ordinal". UINT32_MAX denotes
+// unspecified placement and uses |domain| alone. Construction is cold; events
+// use the captured identity directly without a lookup or synchronization.
+IREE_API_EXPORT iree_status_t iree_hal_memory_trace_initialize_domain(
+    const char* domain, uint32_t ordinal, iree_hal_memory_trace_t* out_trace);
 
 // Initializes a trace identity for a pool-owned stream. These streams are
 // disabled unless IREE_HAL_MEMORY_TRACE_ENABLE_POOL_STREAMS is non-zero.
 IREE_API_EXPORT iree_status_t iree_hal_memory_trace_initialize_pool(
     iree_string_view_t trace_name, const char* default_memory_id,
-    iree_allocator_t host_allocator, iree_hal_memory_trace_t* out_trace);
+    iree_hal_memory_trace_t* out_trace);
 
 static inline void iree_hal_memory_trace_deinitialize(
     iree_hal_memory_trace_t* trace) {
   (void)trace;
 }
 
+// |ptr| identifies a live allocation within this stream. Physical providers may
+// use their native ownership record when the payload has no virtual address.
+// Logical mappings and imported aliases do not create new physical charges.
 static inline void iree_hal_memory_trace_alloc(
     const iree_hal_memory_trace_t* trace, void* ptr,
     iree_device_size_t byte_length) {

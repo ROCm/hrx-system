@@ -14,7 +14,6 @@
 #include "iree/hal/drivers/amd/xdna/executable.h"
 #include "iree/hal/drivers/amd/xdna/queue.h"
 #include "iree/hal/drivers/amd/xdna/semaphore.h"
-#include "iree/hal/memory/maintenance_thread.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/hal/utils/file_registry.h"
 
@@ -41,8 +40,8 @@ typedef struct iree_hal_amd_xdna_device_t {
   struct {
     // Capacity-change notification driven by the device proactor.
     iree_async_notification_t* notification;
-    // Cold allocation and retirement owner independent of queue lifetime.
-    iree_hal_memory_maintenance_t* maintenance;
+    // Shared node-local native allocation owner, independent of queue lifetime.
+    iree_hal_amd_fabric_allocation_queue_t* allocation_queue;
     // Native requirements for the single XDNA execution family.
     iree_hal_amd_fabric_memory_family_t family;
     // Borrowed system backing shared with other native fabric consumers.
@@ -145,7 +144,7 @@ static void iree_hal_amd_xdna_device_finalize(void* user_data) {
   }
   iree_hal_allocator_release(device->allocator);
   iree_hal_amd_xdna_command_arena_free(device->command_arena);
-  iree_hal_memory_maintenance_release(device->memory.maintenance);
+  iree_hal_amd_fabric_allocation_queue_release(device->memory.allocation_queue);
   iree_async_notification_release(device->memory.notification);
   iree_hal_device_spec_release(device->spec);
   iree_hal_amd_xdna_context_free(device->context);
@@ -193,9 +192,10 @@ iree_status_t iree_hal_amd_xdna_device_create(
         IREE_ASYNC_NOTIFICATION_FLAG_NONE, &device->memory.notification);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_memory_maintenance_thread_create(
-        (iree_thread_affinity_t){0}, host_allocator,
-        &device->memory.maintenance);
+    status = iree_hal_amd_fabric_acquire_allocation_queue(
+        context->fabric,
+        iree_async_proactor_pool_entry_node_id(device->proactor_entry),
+        &device->memory.allocation_queue);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_xdna_allocator_create(context, host_allocator,
@@ -236,6 +236,8 @@ iree_status_t iree_hal_amd_xdna_device_create(
         .minimum_access = context->data_source.capabilities.guaranteed_access,
     };
     const iree_hal_amd_fabric_memory_backend_options_t memory_options = {
+        .trace_device_domain = "libamdf-xdna",
+        .trace_device_ordinal = context->device_ordinal,
         .api = context->api,
         .instance = context->fabric->instance,
         .device = context->device,
@@ -248,7 +250,7 @@ iree_status_t iree_hal_amd_xdna_device_create(
     };
     iree_hal_amd_fabric_memory_backend_initialize(
         (iree_hal_device_t*)device, &memory_options,
-        device->memory.notification, device->memory.maintenance,
+        device->memory.notification, device->memory.allocation_queue,
         (iree_hal_pool_epoch_query_t){
             .fn = iree_hal_amd_xdna_device_query_pool_epoch,
             .user_data = device,
@@ -260,7 +262,8 @@ iree_status_t iree_hal_amd_xdna_device_create(
     iree_hal_queue_release(device->queue);
     iree_hal_amd_xdna_command_arena_free(device->command_arena);
     iree_hal_allocator_release(device->allocator);
-    iree_hal_memory_maintenance_release(device->memory.maintenance);
+    iree_hal_amd_fabric_allocation_queue_release(
+        device->memory.allocation_queue);
     iree_async_notification_release(device->memory.notification);
     iree_hal_device_spec_release(device->spec);
     iree_async_proactor_pool_entry_release(device->proactor_entry);

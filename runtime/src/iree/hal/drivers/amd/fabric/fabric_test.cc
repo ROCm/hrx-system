@@ -140,6 +140,39 @@ TEST(AmdFabricTest, ForwardsExplicitNativeLifetimePolicy) {
   }
 }
 
+TEST(AmdFabricTest, EmptyDiscoveryRetainsTheNativeInstance) {
+  auto api = NativeApi();
+  api.endpoint_enumerate = +[](amdf_instance_t*, uint32_t,
+                               amdf_endpoint_summary_t*, uint32_t* count) {
+    *count = 0;
+    return AMDF_STATUS_OK;
+  };
+  iree_hal_amd_fabric_t* fabric = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
+                                            iree_allocator_system(), &fabric));
+  EXPECT_EQ(fabric->endpoint_count, 0u);
+  EXPECT_EQ(fabric->endpoints, nullptr);
+  EXPECT_NE(fabric->system_scope, nullptr);
+  iree_hal_amd_fabric_release(fabric);
+}
+
+TEST(AmdFabricTest, EnginesAcquireTheSameNodeAllocationQueue) {
+  auto api = NativeApi();
+  iree_hal_amd_fabric_t* fabric = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
+                                            iree_allocator_system(), &fabric));
+  iree_hal_amd_fabric_allocation_queue_t* first = nullptr;
+  iree_hal_amd_fabric_allocation_queue_t* second = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_acquire_allocation_queue(fabric, UINT32_MAX, &first));
+  IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+      fabric, UINT32_MAX, &second));
+  EXPECT_EQ(first, second);
+  iree_hal_amd_fabric_allocation_queue_release(first);
+  iree_hal_amd_fabric_release(fabric);
+  iree_hal_amd_fabric_allocation_queue_release(second);
+}
+
 amdf_status_t AMDF_CALL FailEnumeration(amdf_instance_t* instance,
                                         uint32_t capacity,
                                         amdf_endpoint_summary_t* summaries,
