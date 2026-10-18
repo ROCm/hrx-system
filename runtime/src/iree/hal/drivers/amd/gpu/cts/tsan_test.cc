@@ -17,6 +17,11 @@
 namespace iree::hal::amd::gpu::cts {
 namespace {
 
+// Both fixture kernels fit in one 16-byte application-memory chunk: a 32-byte
+// record header, a 16-byte-aligned state bitmap, and 16 bytes of history per
+// application byte. Keep the expected layout independent of reported geometry.
+constexpr uint32_t kWorkgroupShadowStride = 32 + 16 + 16 * 16;
+
 class GpuTsanTest : public GpuNativeTest,
                     public ::testing::WithParamInterface<uint32_t> {
  protected:
@@ -103,10 +108,11 @@ class GpuTsanTest : public GpuNativeTest,
       EXPECT_EQ(capacity.workgroup_local_memory_size, 8u);
       EXPECT_EQ(capacity.shadow_cell_size, 16u);
       EXPECT_EQ(capacity.shadow_history_count, 2u);
-      EXPECT_EQ(capacity.workgroup_shadow_stride, 136u);
-      EXPECT_EQ(capacity.workgroup_ordinal, capacity.shadow_size / 136u);
+      EXPECT_EQ(capacity.workgroup_shadow_stride, kWorkgroupShadowStride);
+      EXPECT_EQ(capacity.workgroup_ordinal,
+                capacity.shadow_size / kWorkgroupShadowStride);
       EXPECT_EQ(capacity.required_shadow_end,
-                (capacity.workgroup_ordinal + 1) * 136u);
+                (capacity.workgroup_ordinal + 1) * kWorkgroupShadowStride);
       self.capacity_reports_.fetch_add(1);
       return;
     }
@@ -229,6 +235,7 @@ TEST_P(GpuTsanTest, SharedRecordingSelectsQueueShadowAndJoinsArenaReuse) {
                                              IREE_ASYNC_WAIT_FLAG_NONE));
     }
     ASSERT_EQ(reports_.load(), 2 + (replay + 1) * 2 * kPairs * 3);
+    ASSERT_EQ(capacity_reports_.load(), 0u);
     ASSERT_EQ(errors_.load(), 0u);
   }
 }
@@ -245,6 +252,7 @@ TEST_P(GpuTsanTest, ReportFailurePropagatesWithoutAbandoningNativeRetirement) {
                 .code(),
             StatusCode::kDataLoss);
   EXPECT_EQ(reports_.load(), 1u);
+  EXPECT_EQ(capacity_reports_.load(), 0u);
   EXPECT_EQ(errors_.load(), 0u);
   EXPECT_GE(queue_failures_.load(), 1u);
   // Fixture teardown waits for actual device and worker reclamation even when
@@ -255,9 +263,9 @@ TEST_P(GpuTsanTest, CapacityFailurePreservesStatusAndNativeRetirement) {
   expected_failure_ = IREE_STATUS_RESOURCE_EXHAUSTED;
   Load(IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE);
   ASSERT_FALSE(HasFatalFailure());
-  // safe_write requires 8 + 8 * 16 bytes per workgroup. Only the first excess
-  // workgroup reports capacity; valid preceding workgroups have disjoint data.
-  const uint32_t workgroups = GetParam() / 136u + 1;
+  // Only the first excess workgroup reports capacity; valid preceding
+  // workgroups have disjoint data.
+  const uint32_t workgroups = GetParam() / kWorkgroupShadowStride + 1;
   uint64_t value = 1;
   IREE_ASSERT_OK(iree_hal_queue_dispatch(
       queues_[0], iree_hal_semaphore_list_empty(), {1, &done_[0], &value},
@@ -359,14 +367,17 @@ TEST_P(GpuTsanTest, IndirectDispatchRelocatesPacketAndPreparationProgram) {
     }
     expected_reports += 2 * 17 * 3;
     ASSERT_EQ(reports_.load(), expected_reports);
+    ASSERT_EQ(capacity_reports_.load(), 0u);
     ASSERT_EQ(errors_.load(), 0u);
   }
 }
 
-// The largest kernel uses eight LDS bytes and therefore 8 + 8 * 16 shadow
-// bytes per workgroup. Each arena admits the three-workgroup replay cases.
+// Each arena admits the three-workgroup replay cases while exercising
+// different capacity boundaries.
 INSTANTIATE_TEST_SUITE_P(ShadowBytes, GpuTsanTest,
-                         ::testing::Values(544u, 1088u, 8704u));
+                         ::testing::Values(4 * kWorkgroupShadowStride,
+                                           8 * kWorkgroupShadowStride,
+                                           64 * kWorkgroupShadowStride));
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu::cts
