@@ -15,22 +15,19 @@ amdf_status_t amdf_gpu_umd_memory_describe_site(
   const bool sdma_format =
       family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA &&
       family->format_version == AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1;
-  // Host-visible LOCAL apertures require an additional HDP contract. These
-  // payload recipes cover SYSTEM and device-only LOCAL accesses. Host cache
-  // maintenance belongs to the separately queried CPU edge.
-  const bool sdma_backing =
-      (query->flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL) == 0 ||
-      (query->flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) == 0;
-  const bool scoped_sdma = sdma_format && sdma_backing &&
-                           (family->roles & AMDF_QUEUE_ROLE_TRANSFER) != 0 &&
-                           (family->format_features &
-                            AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE) != 0;
+  // CPU visibility does not change the engine's payload cache protocol. Host
+  // aperture publication, including HDP maintenance, belongs to the separately
+  // queried CPU edge and must precede a consuming queue's acquire.
+  const bool scoped_sdma =
+      sdma_format && (family->roles & AMDF_QUEUE_ROLE_TRANSFER) != 0 &&
+      (family->format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE) !=
+          0;
   const bool system_cache_format =
       (family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
        family->format_version == AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1) ||
       (family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
        family->format_version == AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1) ||
-      (sdma_format && sdma_backing &&
+      (sdma_format &&
        (family->format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0);
   const bool system_cache_operations =
       (family->roles & AMDF_QUEUE_ROLE_CACHE_CONTROL) != 0 &&

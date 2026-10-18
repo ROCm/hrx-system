@@ -54,14 +54,13 @@ static amdf_status_t amdf_gpu_kfd_sdma_system_describe_site(
   return amdf_gpu_kfd_sdma_describe_site(query, out_description);
 }
 
-// Same-GPU device-only VRAM excludes host aperture writes and their separate
-// HDP maintenance. Compute queues still require their own payload fences.
+// Same-GPU VRAM follows the engine's transfer policy. Host aperture writes
+// require the separately queried host release, including HDP maintenance;
+// compute queues still require their own payload fences.
 static amdf_status_t amdf_gpu_kfd_sdma_local_describe_site(
     const amdf_memory_site_query_t* query,
     amdf_memory_site_description_t* out_description) {
-  if ((query->flags &
-       (AMDF_MEMORY_FLAG_DEVICE_LOCAL | AMDF_MEMORY_FLAG_HOST_VISIBLE)) !=
-      AMDF_MEMORY_FLAG_DEVICE_LOCAL) {
+  if ((query->flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL) == 0) {
     return amdf_gpu_umd_memory_describe_site(query, out_description);
   }
   return amdf_gpu_kfd_sdma_describe_site(query, out_description);

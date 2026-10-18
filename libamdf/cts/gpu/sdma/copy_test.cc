@@ -30,11 +30,64 @@ class SdmaPayloadCopyTest
     : public SdmaCopyTest,
       public ::testing::WithParamInterface<amdf_memory_flags_t> {
  protected:
+  void SetUp() override {
+    SdmaCopyTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    scope_ = (GetParam() & AMDF_MEMORY_FLAG_DEVICE_LOCAL) ? local_scope_
+                                                          : system_scope_;
+    if (!scope_) {
+      GTEST_SKIP() << "endpoint has no local memory scope";
+    }
+    profile_ordinal_ = FindMemoryProfileOrdinal(
+        scope_,
+        AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
+        AMDF_MEMORY_FLAG_HOST_VISIBLE |
+            (GetParam() & AMDF_MEMORY_FLAG_DEVICE_LOCAL),
+        {
+            .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+            .flags = (GetParam() & ~AMDF_MEMORY_FLAG_DEVICE_LOCAL) |
+                     AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+        });
+    if (profile_ordinal_ == AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN) {
+      GTEST_SKIP() << "requested host-visible payload policy is unavailable";
+    }
+  }
+
   void CreatePayload(amdf_memory_access_t access, uint64_t byte_length,
                      GpuMemory** out_memory) {
-    ASSERT_NO_FATAL_FAILURE(
-        CreateMemory(access, byte_length, out_memory, GetParam()));
+    const amdf_memory_device_access_t attachment = {
+        device_,
+        {
+            .access = access,
+            .flags = (GetParam() & ~AMDF_MEMORY_FLAG_DEVICE_LOCAL) |
+                     AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+        }};
+    const amdf_memory_create_info_t creation = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(creation),
+        .memory_profile_ordinal = profile_ordinal_,
+        .access_count = 1,
+        .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
+                          (GetParam() & AMDF_MEMORY_FLAG_DEVICE_LOCAL),
+        .byte_length = byte_length,
+        .minimum_alignment = 4096,
+        .accesses = &attachment,
+    };
+    ASSERT_NO_FATAL_FAILURE(CreateMemory(scope_, creation, out_memory));
+    RecordProperty("payload_memory_class", (*out_memory)->info.memory_class);
+    if (GetParam() & AMDF_MEMORY_FLAG_DEVICE_LOCAL) {
+      EXPECT_EQ((*out_memory)->info.memory_class, AMDF_MEMORY_CLASS_LOCAL);
+      EXPECT_NE((*out_memory)->info.flags & AMDF_MEMORY_FLAG_HOST_VISIBLE, 0u);
+    }
   }
+
+ private:
+  // Borrowed placement scope selected before any workload is created.
+  amdf_memory_scope_t* scope_ = nullptr;
+  // Available host-visible profile for this case's complete payload policy.
+  uint32_t profile_ordinal_ = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
 };
 
 TEST_P(SdmaPayloadCopyTest, LinearCopyCompletesBeforeFence) {
@@ -182,7 +235,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(amdf_memory_flags_t{0},
                       amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT},
                       amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT |
-                                          AMDF_MEMORY_FLAG_QUEUE_STORAGE}));
+                                          AMDF_MEMORY_FLAG_QUEUE_STORAGE},
+                      amdf_memory_flags_t{AMDF_MEMORY_FLAG_DEVICE_LOCAL}));
 
 class SdmaDependencyTest : public SdmaCopyTest {};
 
