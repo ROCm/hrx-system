@@ -41,6 +41,7 @@ loom_cc_test(
     srcs = ["audio_test.cc"],
     deps = [
         ":audio",
+        "//loom/src/loom/serve/media:audio_resampler",
         "//loom/src/loom/serve/service/speech:generator",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:base64",
@@ -65,6 +66,7 @@ loom_cc_library(
         "//loom/src/loom/serve/testing:service_application",
         "//loom/src/loom/serve/testing:worker_gate",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",
@@ -154,6 +156,7 @@ loom_cc_library(
     deps = [
         ":audio",
         ":binding",
+        "//loom/src/loom/serve/media:audio_resampler",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/service/speech:generator",
@@ -386,7 +389,6 @@ loom_cc_library(
     srcs = ["response.c"],
     hdrs = ["response.h"],
     deps = [
-        ":audio",
         ":binding",
         ":conversation",
         ":event",
@@ -442,6 +444,7 @@ loom_cc_library(
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/testing:service_application",
+        "//loom/src/loom/serve/testing:worker_gate",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:server",
         "//loom/src/loom/serve/transport/websocket:connection",
