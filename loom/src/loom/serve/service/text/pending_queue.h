@@ -114,7 +114,8 @@ void loom_serve_text_pending_queue_remove(
     loom_serve_text_pending_queue_t* queue, iree_host_size_t index);
 
 // Terminal cancellation after CPU/device loans have retired and the projector
-// can detach. Releases request payloads, the consumer receipt, and the queue slot.
+// can detach. Releases request payloads, the consumer receipt, and the queue
+// slot.
 void loom_serve_text_pending_queue_cancel(
     loom_serve_text_pending_queue_t* queue, iree_host_size_t index,
     loom_serve_text_media_projector_t* projector);

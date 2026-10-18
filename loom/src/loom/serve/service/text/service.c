@@ -277,7 +277,8 @@ static iree_status_t loom_serve_text_submit_checkpoint(
     loom_serve_text_service_t* service) {
   const iree_string_view_t session_name = service->control.request.session;
   loom_serve_text_checkpoint_source_t source = {0};
-  if (service->control.request.action == LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN) {
+  if (service->control.request.action ==
+      LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN) {
     source.session = loom_serve_text_session_select(
         service->row_count, service->sessions, session_name, NULL);
     if (source.session &&
@@ -996,7 +997,7 @@ static void loom_serve_text_pending_push(
     loom_serve_text_checkpoint_entry_t* checkpoint,
     loom_serve_text_receipt_t receipt) {
   loom_serve_text_pending_queue_push(&service->pending, consumer, body, name,
-                                      checkpoint, receipt);
+                                     checkpoint, receipt);
   loom_serve_text_pending_observe(service);
   // Both ingress paths can prepare the oldest queued input while an accepted
   // epoch owns different rows. Scheduling this finite loan cannot fail or
@@ -1018,7 +1019,8 @@ iree_status_t loom_serve_text_service_try_open(
   loom_serve_text_checkpoint_entry_t* checkpoint = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_text_pending_queue_select_request(
       &service->pending, request->session, request->checkpoint,
-      service->row_count, service->sessions, &service->checkpoints, &checkpoint));
+      service->row_count, service->sessions, &service->checkpoints,
+      &checkpoint));
   if (service->pending.count == service->pending.capacity) {
     return iree_ok_status();
   }
@@ -1765,8 +1767,8 @@ static iree_status_t loom_serve_text_advance_work(
     } else if (work == TEXT_CPU_WORK_INPUT_COUNT) {
       status = loom_serve_text_input_count_complete(
           &service->input_counts,
-          iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING),
-          status, &service->telemetry, &service->scratch);
+          iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING), status,
+          &service->telemetry, &service->scratch);
       loom_serve_text_pending_observe(service);
       yield_preparation = true;
     }

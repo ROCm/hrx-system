@@ -165,9 +165,10 @@ void loom_serve_text_session_release_request(
 // Decodes selected tokens and stages semantic output through the consumer.
 // Source VM calls use the request policy; scratch/tool_calls are exclusive
 // shared CPU storage, not per-row caches. scratch_allocator owns call-local
-// VM wrappers and may be reset after return. Translation failures invalidate the
-// continuation and stage a terminal consumer error. Encoding allocation failure
-// propagates. No transport send or receipt release occurs on this CPU loan.
+// VM wrappers and may be reset after return. Translation failures invalidate
+// the continuation and stage a terminal consumer error. Encoding allocation
+// failure propagates. No transport send or receipt release occurs on this CPU
+// loan.
 iree_status_t loom_serve_text_session_append_tokens(
     loom_serve_text_session_t* session, iree_string_view_t model_name,
     iree_host_size_t count, const int32_t* tokens,
