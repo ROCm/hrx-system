@@ -198,17 +198,27 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
   %recurrent_state = buffer.view %gdn_state[%layer_recurrent_state_offset] : buffer -> view<786432xf32>
   %conv_history = buffer.view %gdn_state[%layer_conv_history_offset] : buffer -> view<30720xf32>
 
-  // Fixed-capacity allocations make the command buffer shape-independent.
-  // Stateful kernels mask their work to the active token prefix.
+  // Hidden and gate intermediates retain the common capacity. QKV and FFN
+  // storage follow the padded row bound of their selected projection schedule.
   %hidden_bytes = index.constant 10485760 : offset
   %hidden_q8_bytes = index.constant 2949120 : offset
-  %qkv_bytes = index.constant 20971520 : offset
   %gdn_bytes = index.constant 12582912 : offset
   %gate_bytes = index.constant 98304 : offset
   %alpha_partial_bytes = index.constant 43008 : offset
   %beta_partial_bytes = index.constant 688128 : offset
   %qk_norm_bytes = index.constant 65536 : offset
-  %ffn_bytes = index.constant 35651584 : offset
+  // The four-row dot kernels and complete 32-row WMMA tile have fixed
+  // footprints. Other projections mask active rows within the dispatch bound.
+  %matrix_rows = scf.select %uses_c64t32, %c32, %token_count : index
+  %projection_rows = scf.select %uses_m4, %c4, %matrix_rows : index
+  %qkv_row_bytes = index.constant 40960 : offset
+  %qkv_bytes = index.scale %projection_rows, %qkv_row_bytes : index, offset -> offset
+  %ffn_f32_row_bytes = index.constant 69632 : offset
+  %ffn_f16_row_bytes = index.constant 34816 : offset
+  %ffn_bytes = index.scale %projection_rows, %ffn_f32_row_bytes : index, offset -> offset
+  // Wide gate/up fusion publishes F16 directly to the F16-input down kernel.
+  %swiglu_row_bytes = scf.select %uses_f32_ffn_input, %ffn_f32_row_bytes, %ffn_f16_row_bytes : offset
+  %swiglu_bytes = index.scale %projection_rows, %swiglu_row_bytes : index, offset -> offset
 
   %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %normalized_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
@@ -352,7 +362,7 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
 
   %ffn_gate = buffer.alloca<global> align(256) %ffn_bytes : buffer
   %ffn_up = buffer.alloca<global> align(256) %ffn_bytes : buffer
-  %swiglu = buffer.alloca<global> align(256) %ffn_bytes : buffer
+  %swiglu = buffer.alloca<global> align(256) %swiglu_bytes : buffer
   scf.if %uses_m4 {
     %post_normalized_q8_bytes = index.constant 23040 : offset
     %post_normalized_q8 = buffer.alloca<global> align(256) %post_normalized_q8_bytes : buffer
@@ -381,7 +391,7 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
 
   %ffn_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
   scf.if %uses_x64 {
-    kernel.launch @qwen38_swiglu_f32_prefill[%token_count](%token_capacity, %ffn_gate, %ffn_up, %swiglu) : [index](index, buffer, buffer, buffer)
+    kernel.launch @qwen38_swiglu_f32_prefill[%token_count](%projection_rows, %ffn_gate, %ffn_up, %swiglu) : [index](index, buffer, buffer, buffer)
   }
   scf.if %uses_m4 {
     kernel.launch @ggml_linear_q6k_f32_decode_m4[%c4, %ffn_size, %hidden_size](%c4, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %ffn_output) : [index, index, index](index, index, index, buffer, view<73113600xi8>, buffer)

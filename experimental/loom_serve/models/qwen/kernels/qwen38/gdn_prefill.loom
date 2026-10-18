@@ -869,6 +869,13 @@ check.case public @qwen38_gdn_read_only_state_case {
   check.expect.equal actual(%read_only_inverse_norm) expected(%committed_inverse_norm) : tensor<4x32xf32>
   check.expect.equal actual(%read_only_history) expected(%initial_history) : tensor<30720xf32>
 
+  %parallel_qkv = check.generate.fill value(0.0) : tensor<4x10240xf32>
+  %parallel_inverse_norm = check.generate.fill value(0.0) : tensor<4x32xf32>
+  kernel.launch @qwen38_gdn_conv_prepare_prefill_parallel_read_only[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %read_only_history, %parallel_qkv, %parallel_inverse_norm) : [index](tensor<1xi32>, f32, tensor<4x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<4x10240xf32>, tensor<4x32xf32>)
+  check.expect.equal actual(%parallel_qkv) expected(%committed_qkv) : tensor<4x10240xf32>
+  check.expect.equal actual(%parallel_inverse_norm) expected(%committed_inverse_norm) : tensor<4x32xf32>
+  check.expect.equal actual(%read_only_history) expected(%initial_history) : tensor<30720xf32>
+
   %alpha = check.generate.iota offset(-0.25) step(0.0026041666666666665) : tensor<4x48xf32>
   %beta = check.generate.iota offset(0.25) step(-0.0013020833333333333) : tensor<4x48xf32>
   %ssm_a = check.generate.fill value(-0.5) : tensor<48xf32>
@@ -886,27 +893,28 @@ check.case public @qwen38_gdn_read_only_state_case {
 }
 
 // Proves that token-parallel convolution preserves the serial kernel's
-// complete output, Q/K normalization, and committed causal history.
+// complete output, Q/K normalization, and committed causal history. A full
+// launch over tight storage makes inactive-row accesses observable to ASAN.
 check.case public @qwen38_gdn_conv_parallel_differential_case {
-  %token_count = check.param.choice values([1, 2, 3, 5, 511, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 3, 4, 5, 32, 128, 511, 512]) name("token_count") : index
   %token_count_data = check.generate.fill value(0) : tensor<1xi32>
   %l2_epsilon = check.literal value(9.9999999999999995e-07) : f32
-  %qkv_input = check.generate.iota offset(-0.5) step(2.4414062500000001e-05) period(4096) : tensor<512x10240xf32>
+  %qkv_input = check.generate.iota offset(-0.5) step(2.4414062500000001e-05) period(4096) : tensor<[%token_count]x10240xf32>
   %conv_weight = check.generate.iota offset(-0.25) step(2.4414062500000001e-05) period(2048) : tensor<40960xf32>
   %serial_history = check.generate.iota offset(-0.0625) step(3.0517578125000002e-06) period(1024) : tensor<30720xf32>
   %prior_history = check.generate.fill value(0.0) : tensor<30720xf32>
   %parallel_history = check.generate.iota offset(-0.0625) step(3.0517578125000002e-06) period(1024) : tensor<30720xf32>
-  %serial_qkv = check.generate.fill value(9.125) : tensor<512x10240xf32>
-  %parallel_qkv = check.generate.fill value(9.125) : tensor<512x10240xf32>
-  %serial_inverse_norm = check.generate.fill value(9.125) : tensor<512x32xf32>
-  %parallel_inverse_norm = check.generate.fill value(9.125) : tensor<512x32xf32>
+  %serial_qkv = check.generate.fill value(9.125) : tensor<[%token_count]x10240xf32>
+  %parallel_qkv = check.generate.fill value(9.125) : tensor<[%token_count]x10240xf32>
+  %serial_inverse_norm = check.generate.fill value(9.125) : tensor<[%token_count]x32xf32>
+  %parallel_inverse_norm = check.generate.fill value(9.125) : tensor<[%token_count]x32xf32>
   kernel.launch @qwen38_gdn_prefill_store_token_count(%token_count, %token_count_data) : (index, tensor<1xi32>)
   kernel.launch @qwen38_gdn_snapshot_history(%parallel_history, %prior_history) : (tensor<30720xf32>, tensor<30720xf32>)
-  kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %serial_history, %serial_qkv, %serial_inverse_norm) : [index](tensor<1xi32>, f32, tensor<512x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<512x10240xf32>, tensor<512x32xf32>)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %serial_history, %serial_qkv, %serial_inverse_norm) : [index](tensor<1xi32>, f32, tensor<[%token_count]x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<[%token_count]x10240xf32>, tensor<[%token_count]x32xf32>)
   %launch_capacity = check.literal value(512) : index
-  kernel.launch @qwen38_gdn_conv_prepare_prefill_parallel[%launch_capacity](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %prior_history, %parallel_history, %parallel_qkv, %parallel_inverse_norm) : [index](tensor<1xi32>, f32, tensor<512x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<30720xf32>, tensor<512x10240xf32>, tensor<512x32xf32>)
-  check.expect.equal actual(%parallel_qkv) expected(%serial_qkv) : tensor<512x10240xf32>
-  check.expect.equal actual(%parallel_inverse_norm) expected(%serial_inverse_norm) : tensor<512x32xf32>
+  kernel.launch @qwen38_gdn_conv_prepare_prefill_parallel[%launch_capacity](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %prior_history, %parallel_history, %parallel_qkv, %parallel_inverse_norm) : [index](tensor<1xi32>, f32, tensor<[%token_count]x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<30720xf32>, tensor<[%token_count]x10240xf32>, tensor<[%token_count]x32xf32>)
+  check.expect.equal actual(%parallel_qkv) expected(%serial_qkv) : tensor<[%token_count]x10240xf32>
+  check.expect.equal actual(%parallel_inverse_norm) expected(%serial_inverse_norm) : tensor<[%token_count]x32xf32>
   check.expect.equal actual(%parallel_history) expected(%serial_history) : tensor<30720xf32>
   check.return
 }
