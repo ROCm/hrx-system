@@ -848,6 +848,32 @@ def rejected_capture(address, trace):
         client.close()
 
 
+def empty_response(address, trace):
+    client = Client(address, trace)
+    admin = HttpClient(address)
+    drained = False
+    try:
+        assert client.receive()["type"] == "session.created"
+        client.message("empty", "a" * 11)
+        admin.request("/v1/models/drain", {"model": "speech"})
+        drained = True
+        client.send("response.create")
+        events = client.until("response.done")
+        response = events[-1]["response"]
+        assert response["status"] == "completed", events
+        assert response["usage"]["input_tokens"] == 11, response
+        assert response["usage"]["output_tokens"] == 1, response
+        assert not any(e["type"].endswith(".delta") for e in events), events
+        admin.request("/v1/models/undrain", {"model": "speech"})
+        drained = False
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        if drained:
+            admin.request("/v1/models/undrain", {"model": "speech"})
+        client.close()
+
+
 def oversized_item_admission(address, trace):
     client = Client(address, trace)
     try:
@@ -942,6 +968,7 @@ def main():
         with running_server(command, artifacts / "server.log") as (process, address):
             assert address is not None, process.poll()
             with (artifacts / "wire.jsonl").open("w") as trace:
+                empty_response(address, trace)
                 oversized_item_admission(address, trace)
                 response_policy(address, trace)
                 conversation(address, trace)
