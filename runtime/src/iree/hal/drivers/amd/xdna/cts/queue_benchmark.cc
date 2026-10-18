@@ -20,6 +20,8 @@
 #include "iree/hal/drivers/amd/xdna/image/testdata/add_i32_npu4.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32_npu4.h"
+#include "iree/hal/memory/fixed_block_pool.h"
+#include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/slab_pool.h"
 
 namespace {
@@ -380,11 +382,12 @@ class XdnaQueueBenchmark : public benchmark::Fixture {
                                   IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
   }
 
-  iree_status_t VerifyOutput(ProgramSequence sequence,
+  iree_status_t VerifyOutput(iree_hal_buffer_t* buffer,
+                             ProgramSequence sequence,
                              iree_host_size_t dispatch_count) {
     std::array<uint32_t, 16> output;
-    IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(buffers_[2], 0, output.data(),
-                                                  sizeof(output)));
+    IREE_RETURN_IF_ERROR(
+        iree_hal_buffer_map_read(buffer, 0, output.data(), sizeof(output)));
     const iree_host_size_t terminal_program =
         SelectProgram(sequence, dispatch_count - 1);
     iree_status_t status = iree_ok_status();
@@ -451,7 +454,8 @@ class XdnaQueueBenchmark : public benchmark::Fixture {
       }
     }
     if (!HandleStatus(state, status, "XDNA batch warmup failed") ||
-        !HandleStatus(state, VerifyOutput(sequence, dispatch_count),
+        !HandleStatus(state,
+                      VerifyOutput(buffers_[2], sequence, dispatch_count),
                       "XDNA batch warmup output mismatch")) {
       return;
     }
@@ -474,7 +478,7 @@ class XdnaQueueBenchmark : public benchmark::Fixture {
       }
     }
     if (!state.skipped()) {
-      HandleStatus(state, VerifyOutput(sequence, dispatch_count),
+      HandleStatus(state, VerifyOutput(buffers_[2], sequence, dispatch_count),
                    "XDNA batch output mismatch");
     }
     state.SetItemsProcessed(state.iterations() * dispatch_count);
@@ -515,6 +519,206 @@ class XdnaQueueBenchmark : public benchmark::Fixture {
   uint64_t completion_value_ = 0;
   // Immutable recording reused by recorded batch measurements.
   iree_hal_command_buffer_t* command_buffer_ = nullptr;
+};
+
+enum class MemoryPolicy {
+  kCached,
+  kFresh,
+  kCapacityWait,
+};
+
+// Measures the full queue allocation lifetime with a real native dispatch. The
+// inputs and recording stay resident; each output is an indirect transient
+// binding. No host wait separates alloca, execute, and dealloca.
+class XdnaQueueMemoryBenchmark : public XdnaQueueBenchmark {
+ public:
+  void TearDown(benchmark::State& state) override {
+    iree_hal_pool_release(transient_pool_);
+    transient_pool_ = nullptr;
+    iree_hal_pool_release(backing_cache_);
+    backing_cache_ = nullptr;
+    XdnaQueueBenchmark::TearDown(state);
+  }
+
+ protected:
+  iree_status_t InitializeMemory(MemoryPolicy policy) {
+    iree_hal_fixed_block_pool_options_t options;
+    iree_hal_fixed_block_pool_options_initialize(&options);
+    options.block_size = kBufferLength;
+    options.blocks_per_slab = 1;
+    options.budget_limit = kBufferLength;
+    iree_hal_slab_cache_options_t cache_options;
+    iree_hal_slab_cache_options_initialize(&cache_options);
+    cache_options.max_count = policy == MemoryPolicy::kFresh ? 0 : 1;
+    IREE_RETURN_IF_ERROR(iree_hal_fixed_block_pool_query_backing_request(
+        memory_pool_, &options, &cache_options.slab));
+    IREE_RETURN_IF_ERROR(
+        iree_hal_slab_cache_create(memory_pool_, &cache_options,
+                                   iree_allocator_system(), &backing_cache_));
+    IREE_RETURN_IF_ERROR(iree_hal_fixed_block_pool_create(
+        backing_cache_, &options, iree_allocator_system(), &transient_pool_));
+
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
+        iree_hal_queue_family(queue_), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH, 1, &command_buffer_));
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer_));
+    const iree_hal_buffer_ref_t bindings[] = {
+        iree_hal_make_buffer_ref(buffers_[0], 0, kBufferLength),
+        iree_hal_make_buffer_ref(buffers_[1], 0, kBufferLength),
+        iree_hal_make_indirect_buffer_ref(0, 0, kBufferLength),
+    };
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_dispatch(
+        command_buffer_, executables_[0], functions_[0],
+        iree_hal_make_static_dispatch_config(1, 1, 1),
+        iree_const_byte_span_empty(), {IREE_ARRAYSIZE(bindings), bindings},
+        IREE_HAL_DISPATCH_FLAG_NONE));
+    return iree_hal_command_buffer_end(command_buffer_);
+  }
+
+  iree_status_t AllocateOutput(iree_hal_buffer_t** out_buffer,
+                               uint64_t* out_ready_value) {
+    const auto request =
+        iree_hal_make_pool_reservation_request(kBufferLength, 0);
+    uint64_t value = ++completion_value_;
+    iree_status_t status =
+        iree_hal_queue_alloca(queue_, {}, {1, &completion_, &value},
+                              transient_pool_, 1, &request, out_buffer);
+    if (iree_status_is_ok(status)) {
+      *out_ready_value = value;
+    }
+    return status;
+  }
+
+  iree_status_t ReleaseOutput(iree_hal_buffer_t* buffer,
+                              uint64_t* ready_value) {
+    uint64_t value = ++completion_value_;
+    iree_status_t status =
+        iree_hal_queue_dealloca(queue_, {1, &completion_, ready_value},
+                                {1, &completion_, &value}, 1, &buffer);
+    if (iree_status_is_ok(status)) {
+      *ready_value = value;
+    }
+    iree_hal_buffer_release(buffer);
+    return status;
+  }
+
+  // Occupy the complete logical budget before the timed submission. Returning
+  // this reservation below must unblock the new allocation without a host wait.
+  iree_status_t PreparePressure(iree_hal_buffer_t** out_buffer) {
+    uint64_t value = 0;
+    IREE_RETURN_IF_ERROR(AllocateOutput(out_buffer, &value));
+    return Wait(value);
+  }
+
+  iree_status_t SubmitLifetime(iree_hal_buffer_t* pressure_buffer,
+                               bool verify_output, uint64_t* out_value) {
+    iree_hal_buffer_t* output = nullptr;
+    iree_status_t status = AllocateOutput(&output, out_value);
+    if (iree_status_is_ok(status)) {
+      const iree_hal_buffer_binding_t binding = {output, 0, kBufferLength};
+      uint64_t value = ++completion_value_;
+      status = iree_hal_queue_execute(
+          queue_, {1, &completion_, out_value}, {1, &completion_, &value},
+          command_buffer_, {1, &binding}, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        *out_value = value;
+      }
+    }
+    if (pressure_buffer) {
+      // This release has no dependency on the allocation it enables and must
+      // not signal a later value on the allocation's completion timeline.
+      status = iree_status_join(
+          status, iree_hal_queue_dealloca(queue_, {}, {}, 1, &pressure_buffer));
+      iree_hal_buffer_release(pressure_buffer);
+    }
+    if (verify_output && iree_status_is_ok(status)) {
+      status = Wait(*out_value);
+      if (iree_status_is_ok(status)) {
+        status = VerifyOutput(output, ProgramSequence::kMultiplyOnly, 1);
+      }
+    }
+    if (output) {
+      status = iree_status_join(status, ReleaseOutput(output, out_value));
+    }
+    return status;
+  }
+
+  void RunMemoryBenchmark(benchmark::State& state, MemoryPolicy policy,
+                          Measurement measurement) {
+    if (!available_ || !HandleStatus(state, InitializeMemory(policy),
+                                     "XDNA memory benchmark setup failed")) {
+      return;
+    }
+    // Verify the transient output before deallocation, outside measurement.
+    // The remaining warmups exercise the ordinary submission-only chain.
+    for (uint64_t i = 0; i < kWarmupIterationCount; ++i) {
+      iree_hal_buffer_t* pressure_buffer = nullptr;
+      iree_status_t status = policy == MemoryPolicy::kCapacityWait
+                                 ? PreparePressure(&pressure_buffer)
+                                 : iree_ok_status();
+      uint64_t value = 0;
+      if (iree_status_is_ok(status)) {
+        status = SubmitLifetime(pressure_buffer, i == 0, &value);
+      } else {
+        iree_hal_buffer_release(pressure_buffer);
+      }
+      if (value) {
+        status = iree_status_join(status, Wait(value));
+      }
+      if (!HandleStatus(state, status, "XDNA memory lifetime warmup failed")) {
+        return;
+      }
+    }
+    iree_hal_pool_stats_t before;
+    iree_hal_pool_query_stats(memory_pool_, &before);
+    for (auto _ : state) {
+      iree_hal_buffer_t* pressure_buffer = nullptr;
+      iree_status_t status = iree_ok_status();
+      if (policy == MemoryPolicy::kCapacityWait) {
+        state.PauseTiming();
+        status = PreparePressure(&pressure_buffer);
+        state.ResumeTiming();
+      }
+      uint64_t value = 0;
+      if (iree_status_is_ok(status)) {
+        status = SubmitLifetime(pressure_buffer, false, &value);
+      } else {
+        iree_hal_buffer_release(pressure_buffer);
+      }
+      if (measurement == Measurement::kSubmitOnly) {
+        state.PauseTiming();
+      }
+      if (value) {
+        status = iree_status_join(status, Wait(value));
+      }
+      if (measurement == Measurement::kSubmitOnly) {
+        state.ResumeTiming();
+      }
+      if (!HandleStatus(state, status, "XDNA memory lifetime failed")) {
+        break;
+      }
+    }
+    iree_hal_pool_stats_t after;
+    iree_hal_pool_query_stats(memory_pool_, &after);
+    state.counters["native_slabs_per_iteration"] = benchmark::Counter(
+        static_cast<double>(after.reserve_count - before.reserve_count),
+        benchmark::Counter::kAvgIterations);
+    state.SetItemsProcessed(state.iterations());
+    if (!state.skipped()) {
+      uint64_t value = 0;
+      iree_status_t status = SubmitLifetime(nullptr, true, &value);
+      if (value) {
+        status = iree_status_join(status, Wait(value));
+      }
+      HandleStatus(state, status, "XDNA memory lifetime output mismatch");
+    }
+  }
+
+  // Explicit idle retention above the native source; no hidden provider cache.
+  iree_hal_pool_t* backing_cache_ = nullptr;
+  // One-block child with a one-live-output budget, returned after every
+  // dispatch.
+  iree_hal_pool_t* transient_pool_ = nullptr;
 };
 
 BENCHMARK_DEFINE_F(XdnaQueueBenchmark,
@@ -776,6 +980,60 @@ BENCHMARK_REGISTER_F(XdnaQueueBenchmark, MeasuredRecordedStreamingEndToEnd)
     ->Arg(1)
     ->Arg(8)
     ->Iterations(32)
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+
+BENCHMARK_DEFINE_F(XdnaQueueMemoryBenchmark,
+                   CachedSubmitOnly)(benchmark::State& state) {
+  RunMemoryBenchmark(state, MemoryPolicy::kCached, Measurement::kSubmitOnly);
+}
+BENCHMARK_DEFINE_F(XdnaQueueMemoryBenchmark,
+                   CachedEndToEnd)(benchmark::State& state) {
+  RunMemoryBenchmark(state, MemoryPolicy::kCached, Measurement::kEndToEnd);
+}
+BENCHMARK_DEFINE_F(XdnaQueueMemoryBenchmark,
+                   FreshSubmitOnly)(benchmark::State& state) {
+  RunMemoryBenchmark(state, MemoryPolicy::kFresh, Measurement::kSubmitOnly);
+}
+BENCHMARK_DEFINE_F(XdnaQueueMemoryBenchmark,
+                   FreshEndToEnd)(benchmark::State& state) {
+  RunMemoryBenchmark(state, MemoryPolicy::kFresh, Measurement::kEndToEnd);
+}
+BENCHMARK_DEFINE_F(XdnaQueueMemoryBenchmark,
+                   CapacityWaitSubmitOnly)(benchmark::State& state) {
+  RunMemoryBenchmark(state, MemoryPolicy::kCapacityWait,
+                     Measurement::kSubmitOnly);
+}
+BENCHMARK_DEFINE_F(XdnaQueueMemoryBenchmark,
+                   CapacityWaitEndToEnd)(benchmark::State& state) {
+  RunMemoryBenchmark(state, MemoryPolicy::kCapacityWait,
+                     Measurement::kEndToEnd);
+}
+
+// These opt-in rows are excluded from the ordinary benchmark smoke filter.
+// Fixed counts bound real device work even when completion is outside timing.
+BENCHMARK_REGISTER_F(XdnaQueueMemoryBenchmark, CachedSubmitOnly)
+    ->Iterations(128)
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_REGISTER_F(XdnaQueueMemoryBenchmark, CachedEndToEnd)
+    ->Iterations(128)
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_REGISTER_F(XdnaQueueMemoryBenchmark, FreshSubmitOnly)
+    ->Iterations(128)
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_REGISTER_F(XdnaQueueMemoryBenchmark, FreshEndToEnd)
+    ->Iterations(128)
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_REGISTER_F(XdnaQueueMemoryBenchmark, CapacityWaitSubmitOnly)
+    ->Iterations(128)
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_REGISTER_F(XdnaQueueMemoryBenchmark, CapacityWaitEndToEnd)
+    ->Iterations(128)
     ->UseRealTime()
     ->Unit(benchmark::kMicrosecond);
 

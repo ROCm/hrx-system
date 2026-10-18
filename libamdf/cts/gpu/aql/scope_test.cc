@@ -15,7 +15,12 @@
 
 namespace {
 
-TEST_F(AqlDispatchTest, AgentScopeOrdersShaderPayloadBeforeSystemCompletion) {
+class AqlSystemPayloadTest
+    : public AqlDispatchTest,
+      public ::testing::WithParamInterface<amdf_memory_flags_t> {};
+
+TEST_P(AqlSystemPayloadTest,
+       AgentScopeOrdersShaderPayloadBeforeSystemCompletion) {
   const auto* kernel_product =
       kernels::transform::kKernels.Find(gpu_endpoint_info_);
   ASSERT_NE(kernel_product, nullptr)
@@ -49,13 +54,14 @@ TEST_F(AqlDispatchTest, AgentScopeOrdersShaderPayloadBeforeSystemCompletion) {
   GpuMemory* arguments = nullptr;
   GpuMemory* completion = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(AMDF_MEMORY_ACCESS_READ,
-                                       kWordCount * sizeof(uint32_t), &input));
+                                       kWordCount * sizeof(uint32_t), &input,
+                                       GetParam()));
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                   kWordCount * sizeof(uint32_t), &intermediate));
+                   kWordCount * sizeof(uint32_t), &intermediate, GetParam()));
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                   kWordCount * sizeof(uint32_t), &output));
+                   kWordCount * sizeof(uint32_t), &output, GetParam()));
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(AMDF_MEMORY_ACCESS_READ, kPageByteLength, &arguments));
   ASSERT_NO_FATAL_FAILURE(
@@ -64,6 +70,9 @@ TEST_F(AqlDispatchTest, AgentScopeOrdersShaderPayloadBeforeSystemCompletion) {
   ASSERT_EQ(input->device_address % alignof(uint32_t), 0u);
   ASSERT_EQ(intermediate->device_address % alignof(uint32_t), 0u);
   ASSERT_EQ(output->device_address % alignof(uint32_t), 0u);
+  RecordProperty(
+      "payload_is_host_coherent",
+      (input->access_info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0);
   ASSERT_EQ(arguments->device_address % kernel.arguments.alignment, 0u);
   ASSERT_EQ(completion->device_address % alignof(aql::Signal), 0u);
   // Initialize the complete native block once. Reserved fields remain
@@ -206,6 +215,10 @@ TEST_F(AqlDispatchTest, AgentScopeOrdersShaderPayloadBeforeSystemCompletion) {
         completion_guard, kPageByteLength - sizeof(aql::Signal));
     signal.value = 1;
 
+    for (const auto* memory : {input, intermediate, output}) {
+      ASSERT_NO_FATAL_FAILURE(memory->TransferHostCache(
+          api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_FLUSH));
+    }
     GpuStoreRelease(queue->host.write_index_address, index + kPacketsPerEpoch);
     ASSERT_TRUE(aql::Publish(*queue, index++, produce));
     ASSERT_TRUE(aql::Publish(*queue, index++, consume));
@@ -216,6 +229,10 @@ TEST_F(AqlDispatchTest, AgentScopeOrdersShaderPayloadBeforeSystemCompletion) {
     // before any diagnostic or consumed-frontier wait adds synchronization.
     ASSERT_TRUE(
         GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&signal.value), 0));
+    for (const auto* memory : {output, intermediate}) {
+      ASSERT_NO_FATAL_FAILURE(memory->TransferHostCache(
+          api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
+    }
     std::memcpy(observed_output.data(), output->host.pointer,
                 sizeof(observed_output));
     std::memcpy(observed_intermediate.data(), intermediate->host.pointer,
@@ -265,5 +282,12 @@ TEST_F(AqlDispatchTest, AgentScopeOrdersShaderPayloadBeforeSystemCompletion) {
                  std::to_string(index - first_work_packet_index));
   RecordProperty("aql_agent_scope_final_packet_index", std::to_string(index));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    PayloadPolicy, AqlSystemPayloadTest,
+    ::testing::Values(amdf_memory_flags_t{0},
+                      amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT},
+                      amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                          AMDF_MEMORY_FLAG_QUEUE_STORAGE}));
 
 }  // namespace

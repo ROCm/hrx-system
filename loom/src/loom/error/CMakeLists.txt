@@ -108,6 +108,7 @@ loom_generated_cc_library(
     "error_catalog.json"
   DEPS
     iree::base
+  LINKABLE_MORE_THAN_ONCE
 )
 
 loom_generated_cc_library(

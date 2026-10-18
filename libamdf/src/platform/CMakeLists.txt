@@ -17,7 +17,38 @@ iree_cc_library(
     "endpoint.h"
     "instance.h"
   DEPS
+    ::host_export
     amdf::headers
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    host_export
+  HDRS
+    "host_export.h"
+  DEPS
+    ::host_memory
+    amdf::headers
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+set(_native_host_export_platform_deps "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  list(APPEND _native_host_export_platform_deps libamdf::src::platform::linux::host_export)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  list(APPEND _native_host_export_platform_deps libamdf::src::platform::windows::host_export)
+endif()
+iree_cc_library(
+  NAME
+    native_host_export
+  DEPS
+    amdf::headers
+    ${_native_host_export_platform_deps}
   PUBLIC
 )
 endif()

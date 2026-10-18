@@ -138,6 +138,16 @@ typedef struct loom_low_schedule_dependency_range_t {
 static_assert(sizeof(loom_low_schedule_dependency_range_t) == 8,
               "dependency range must remain a compact graph view");
 
+// Immutable dependency range with independently retained segment storage.
+typedef struct loom_low_schedule_dependency_slice_t {
+  // Retained segment pointers covering exactly |count| rows from |offset|.
+  const loom_low_schedule_dependency_segment_t* const* segments;
+  // First row's offset within the first segment.
+  uint32_t offset;
+  // Number of dependency rows in the slice.
+  uint32_t count;
+} loom_low_schedule_dependency_slice_t;
+
 // Applies a signed event separation, saturating at the issue-cycle limits.
 static inline uint32_t loom_low_schedule_add_signed_issue_separation(
     uint32_t producer_issue_cycle, int32_t minimum_separation_cycles) {
@@ -168,6 +178,24 @@ iree_status_t loom_low_schedule_dependency_graph_append(
     loom_low_schedule_dependency_graph_t* graph,
     loom_low_schedule_dependency_t dependency, iree_arena_allocator_t* arena);
 
+// Retains a producer-delimited range whose newly appended segments were
+// allocated in |arena|. The first partial segment may predate that allocation
+// scope and is copied; all subsequent segment payloads remain in place.
+// The returned slice remains valid after the graph's other storage is released.
+iree_status_t loom_low_schedule_dependency_graph_retain_range(
+    const loom_low_schedule_dependency_graph_t* graph,
+    loom_low_schedule_dependency_range_t range, iree_arena_allocator_t* arena,
+    loom_low_schedule_dependency_slice_t* out_slice);
+
+// Returns a dependency by its zero-based ordinal within the retained slice.
+static inline const loom_low_schedule_dependency_t*
+loom_low_schedule_dependency_slice_at(
+    const loom_low_schedule_dependency_slice_t* slice, uint32_t ordinal) {
+  const uint32_t index = slice->offset + ordinal;
+  return &slice->segments[index >> LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_SHIFT]
+              ->rows[index & LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_MASK];
+}
+
 // Returns a dependency by its stable zero-based index.
 static inline const loom_low_schedule_dependency_t*
 loom_low_schedule_dependency_graph_at(
@@ -181,15 +209,6 @@ loom_low_schedule_dependency_graph_at(
               dependency_index >> LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_SHIFT);
   return &segment->rows[dependency_index &
                         LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_MASK];
-}
-
-// Returns one dependency from a retained semantic range.
-static inline const loom_low_schedule_dependency_t*
-loom_low_schedule_dependency_range_at(
-    const loom_low_schedule_dependency_graph_t* graph,
-    loom_low_schedule_dependency_range_t range, uint32_t ordinal) {
-  IREE_ASSERT_LT(ordinal, range.count);
-  return loom_low_schedule_dependency_graph_at(graph, range.start + ordinal);
 }
 
 #ifdef __cplusplus

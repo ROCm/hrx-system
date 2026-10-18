@@ -186,6 +186,20 @@ void Pm4CommandWriter::ReleaseSystem32(uint64_t target_address,
   words_[word_count_++] = 0;
 }
 
+void Pm4CommandWriter::ReleaseSystemInterrupt32(uint64_t target_address,
+                                                uint32_t value,
+                                                uint32_t interrupt_context) {
+  words_[word_count_++] = MakeHeader(0x49, 8);
+  words_[word_count_++] = 0x28 | (5 << 8) | (profile_.system_release_gcr << 12);
+  // Immediate DWORD, interrupt after write confirmation, TC/L2 destination.
+  words_[word_count_++] = (1 << 29) | (2 << 24) | (1 << 16);
+  words_[word_count_++] = static_cast<uint32_t>(target_address);
+  words_[word_count_++] = static_cast<uint32_t>(target_address >> 32);
+  words_[word_count_++] = value;
+  words_[word_count_++] = 0;
+  words_[word_count_++] = interrupt_context;
+}
+
 void Pm4CommandWriter::ReleaseGpuClock64(uint64_t target_address) {
   // PAL's bottom-of-pipe timestamp requests no release cache action or CP DMA
   // wait. GPU-clock data, confirmation without interrupt and TC/L2 destination

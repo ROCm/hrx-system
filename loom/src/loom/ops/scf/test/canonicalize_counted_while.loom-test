@@ -1,0 +1,296 @@
+// RUN: pass canonicalize,cse,dce
+
+// A direct signed address recurrence becomes a counted loop while retaining
+// the non-induction carried state.
+func.def @index_sum(%begin: index, %end: index) -> (i32) {
+  %initial = scalar.constant 0 : i32
+  %step = index.constant 1 : index
+  %terminal, %result = scf.while(%before = %begin : index, %sum_before = %initial : i32) -> (index, i32) {
+    %more = index.cmp slt, %before, %end : index
+    scf.condition %more, %before, %sum_before : i1, index, i32
+  } do(%iteration: index, %sum: i32) {
+    %value = index.cast %iteration : index to i32
+    %next_sum = scalar.addi %sum, %value : i32
+    %next = index.add %iteration, %step : index
+    scf.yield %next, %next_sum : index, i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @index_sum(%begin: index, %end: index) -> (i32) {
+  %initial = scalar.constant 0 : i32
+  %step = index.constant 1 : index
+  %result = scf.for %iteration = [%begin to %end step %step](%sum = %initial : i32) -> (i32) {
+    %value = index.cast %iteration : index to i32
+    %next_sum = scalar.addi %sum, %value : i32
+    scf.yield %next_sum : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Ties on retained carried state are remapped from the while operand tuple to
+// the counted loop's iter_args segment.
+func.def @tied_state(%begin: index, %end: index, %initial: f32) -> (f32) {
+  %step = index.constant 1 : index
+  %terminal, %result = scf.while(%before = %begin : index, %state_before = %initial : f32) -> (index, %initial as f32) {
+    %more = index.cmp slt, %before, %end : index
+    scf.condition %more, %before, %state_before : i1, index, f32
+  } do(%iteration: index, %state: f32) {
+    %increment = scalar.constant 1.0 : f32
+    %next_state = scalar.addf %state, %increment : f32
+    %next = index.add %iteration, %step : index
+    scf.yield %next, %next_state : index, f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.def @tied_state(%begin: index, %end: index, %initial: f32) -> (f32) {
+  %step = index.constant 1 : index
+  %result = scf.for %iteration = [%begin to %end step %step](%state = %initial : f32) -> (%initial as f32) {
+    %increment = scalar.constant 1.0 : f32
+    %next_state = scalar.addf %state, %increment : f32
+    scf.yield %next_state : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// A bounded unsigned scalar recurrence projects into the offset domain and
+// casts its implicit induction value back to the original scalar type.
+func.def @unsigned_sum(%count: i32) -> (i32) {
+  %bounded_count = scalar.assume %count [range(%count, 0, 65535)] : i32
+  %begin = scalar.constant 0 : i32
+  %initial = scalar.constant 0 : i32
+  %terminal, %result = scf.while(%before = %begin : i32, %sum_before = %initial : i32) -> (i32, i32) {
+    %more = scalar.cmpi ult, %before, %bounded_count : i32
+    scf.condition %more, %before, %sum_before : i1, i32, i32
+  } do(%iteration: i32, %sum: i32) {
+    %next_sum = scalar.addi %sum, %iteration : i32
+    %step = scalar.constant 1 : i32
+    %next = scalar.addi %iteration, %step : i32
+    scf.yield %next, %next_sum : i32, i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @unsigned_sum(%count: i32) -> (i32) {
+  %bounded_count = scalar.assume %count [range(%count, 0, 65535)] : i32
+  %initial = scalar.constant 0 : i32
+  %begin = index.constant 0 : offset
+  %16 = index.cast %bounded_count : i32 to offset
+  %step = index.constant 1 : offset
+  %result = scf.for %iteration = [%begin to %16 step %step](%sum = %initial : i32) -> (i32) {
+    %21 = index.cast %iteration : offset to i32
+    %next_sum = scalar.addi %sum, %21 : i32
+    scf.yield %next_sum : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// A signed fixed-width recurrence projects into the index domain when all
+// three interval operands fit every target-independent address profile.
+func.def @signed_sum(%requested_begin: i32, %requested_end: i32) -> (i32) {
+  %begin = scalar.assume %requested_begin [range(%requested_begin, -1024, 1024)] : i32
+  %end = scalar.assume %requested_end [range(%requested_end, -1024, 1024)] : i32
+  %initial = scalar.constant 0 : i32
+  %terminal, %result = scf.while(%before = %begin : i32, %sum_before = %initial : i32) -> (i32, i32) {
+    %more = scalar.cmpi slt, %before, %end : i32
+    scf.condition %more, %before, %sum_before : i1, i32, i32
+  } do(%iteration: i32, %sum: i32) {
+    %next_sum = scalar.addi %sum, %iteration : i32
+    %step = scalar.constant 1 : i32
+    %next = scalar.addi %iteration, %step : i32
+    scf.yield %next, %next_sum : i32, i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @signed_sum(%requested_begin: i32, %requested_end: i32) -> (i32) {
+  %begin = scalar.assume %requested_begin [range(%requested_begin, -1024, 1024)] : i32
+  %end = scalar.assume %requested_end [range(%requested_end, -1024, 1024)] : i32
+  %initial = scalar.constant 0 : i32
+  %16 = index.cast %begin : i32 to index
+  %17 = index.cast %end : i32 to index
+  %step = index.constant 1 : index
+  %result = scf.for %iteration = [%16 to %17 step %step](%sum = %initial : i32) -> (i32) {
+    %22 = index.cast %iteration : index to i32
+    %next_sum = scalar.addi %sum, %22 : i32
+    scf.yield %next_sum : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// The terminal induction value is observable and therefore keeps the while
+// loop's explicit final condition evaluation and carried result.
+func.def @used_terminal(%begin: index, %end: index) -> (index) {
+  %step = index.constant 1 : index
+  %terminal = scf.while(%before = %begin : index) -> (index) {
+    %more = index.cmp slt, %before, %end : index
+    scf.condition %more, %before : i1, index
+  } do(%iteration: index) {
+    %next = index.add %iteration, %step : index
+    scf.yield %next : index
+  }
+  func.return %terminal : index
+}
+
+// ----
+func.def @used_terminal(%begin: index, %end: index) -> (index) {
+  %step = index.constant 1 : index
+  %terminal = scf.while(%before = %begin : index) -> (index) {
+    %more = index.cmp slt, %before, %end : index
+    scf.condition %more, %before : i1, index
+  } do(%iteration: index) {
+    %next = index.add %iteration, %step : index
+    scf.yield %next : index
+  }
+  func.return %terminal : index
+}
+
+// ====
+
+// Work in the condition region is observable once before the first body trip
+// and once after every trip, so it cannot be erased with the comparison.
+func.def @header_work(%begin: index, %end: index, %input: view<1xi32>) -> (i32) {
+  %initial = scalar.constant 0 : i32
+  %step = index.constant 1 : index
+  %terminal, %result = scf.while(%before = %begin : index, %sum_before = %initial : i32) -> (index, i32) {
+    %header_value = view.load %input[0] : view<1xi32> -> i32
+    %header_sum = scalar.addi %sum_before, %header_value : i32
+    %more = index.cmp slt, %before, %end : index
+    scf.condition %more, %before, %header_sum : i1, index, i32
+  } do(%iteration: index, %sum: i32) {
+    %next = index.add %iteration, %step : index
+    scf.yield %next, %sum : index, i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @header_work(%begin: index, %end: index, %input: view<1xi32>) -> (i32) {
+  %initial = scalar.constant 0 : i32
+  %step = index.constant 1 : index
+  %terminal, %result = scf.while(%before = %begin : index, %sum_before = %initial : i32) -> (index, i32) {
+    %header_value = view.load %input[0] : view<1xi32> -> i32
+    %header_sum = scalar.addi %sum_before, %header_value : i32
+    %more = index.cmp slt, %before, %end : index
+    scf.condition %more, %before, %header_sum : i1, index, i32
+  } do(%iteration: index, %sum: i32) {
+    %next = index.add %iteration, %step : index
+    scf.yield %next, %sum : index, i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Dependent carried types retain their tuple-local SSA references when the
+// explicit counter column becomes the scf.for induction value.
+func.def @dependent_state(%input: view<[%size]xi32>, %size: index, %end: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %terminal, %rows, %view = scf.while(%before = %begin : index, %before_rows = %size : index, %before_view = %input : view<[%before_rows]xi32>) -> (index, index, view<[%rows]xi32>) {
+    %more = index.cmp slt, %before, %end : index
+    scf.condition %more, %before, %before_rows, %before_view : i1, index, index, view<[%before_rows]xi32>
+  } do(%iteration: index, %body_rows: index, %body_view: view<[%body_rows]xi32>) {
+    %next = index.add %iteration, %step : index
+    %next_rows = index.sub %body_rows, %step : index
+    %next_view = view.subview %body_view[1] : view<[%body_rows]xi32> -> view<[%next_rows]xi32>
+    scf.yield %next, %next_rows, %next_view : index, index, view<[%next_rows]xi32>
+  }
+  test.use %rows, %view : index, view<[%rows]xi32>
+  func.return
+}
+
+// ----
+func.def @dependent_state(%input: view<[%size]xi32>, %size: index, %end: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %rows, %view = scf.for %iteration = [%begin to %end step %step](%body_rows = %size : index, %body_view = %input : view<[%size]xi32>) -> (index, view<[%rows]xi32>) {
+    %next_rows = index.sub %body_rows, %step : index
+    %next_view = view.subview %body_view[1] : view<[%body_rows]xi32> -> view<[%next_rows]xi32>
+    scf.yield %next_rows, %next_view : index, view<[%next_rows]xi32>
+  }
+  test.use %rows, %view : index, view<[%rows]xi32>
+  func.return
+}
+
+// ====
+
+// A fixed-width step can overshoot an unsigned bound and wrap. Without a
+// finite recurrence proof, the loop retains its source arithmetic.
+func.def @possibly_wrapping_step(%end: i32) -> (i32) {
+  %begin = scalar.constant 0 : i32
+  %initial = scalar.constant 0 : i32
+  %terminal, %result = scf.while(%before = %begin : i32, %sum_before = %initial : i32) -> (i32, i32) {
+    %more = scalar.cmpi ult, %before, %end : i32
+    scf.condition %more, %before, %sum_before : i1, i32, i32
+  } do(%iteration: i32, %sum: i32) {
+    %next_sum = scalar.addi %sum, %iteration : i32
+    %step = scalar.constant 3 : i32
+    %next = scalar.addi %iteration, %step : i32
+    scf.yield %next, %next_sum : i32, i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @possibly_wrapping_step(%end: i32) -> (i32) {
+  %begin = scalar.constant 0 : i32
+  %terminal, %result = scf.while(%before = %begin : i32, %sum_before = %begin : i32) -> (i32, i32) {
+    %more = scalar.cmpi ult, %before, %end : i32
+    scf.condition %more, %before, %sum_before : i1, i32, i32
+  } do(%iteration: i32, %sum: i32) {
+    %next_sum = scalar.addi %sum, %iteration : i32
+    %step = scalar.constant 3 : i32
+    %next = scalar.addi %iteration, %step : i32
+    scf.yield %next, %next_sum : i32, i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// A target-independent rewrite cannot narrow a valid fixed-width loop to a
+// 32-bit address profile. Target selection may revisit it with wider facts.
+func.def @wide_scalar_range(%requested_end: i64) -> (i64) {
+  %end = scalar.assume %requested_end [range(%requested_end, 0, 4294967295)] : i64
+  %begin = scalar.constant 0 : i64
+  %terminal, %result = scf.while(%before = %begin : i64, %sum_before = %begin : i64) -> (i64, i64) {
+    %more = scalar.cmpi slt, %before, %end : i64
+    scf.condition %more, %before, %sum_before : i1, i64, i64
+  } do(%iteration: i64, %sum: i64) {
+    %next_sum = scalar.addi %sum, %iteration : i64
+    %step = scalar.constant 1 : i64
+    %next = scalar.addi %iteration, %step : i64
+    scf.yield %next, %next_sum : i64, i64
+  }
+  func.return %result : i64
+}
+
+// ----
+func.def @wide_scalar_range(%requested_end: i64) -> (i64) {
+  %end = scalar.assume %requested_end [range(%requested_end, 0, 4294967295)] : i64
+  %begin = scalar.constant 0 : i64
+  %terminal, %result = scf.while(%before = %begin : i64, %sum_before = %begin : i64) -> (i64, i64) {
+    %more = scalar.cmpi slt, %before, %end : i64
+    scf.condition %more, %before, %sum_before : i1, i64, i64
+  } do(%iteration: i64, %sum: i64) {
+    %next_sum = scalar.addi %sum, %iteration : i64
+    %step = scalar.constant 1 : i64
+    %next = scalar.addi %iteration, %step : i64
+    scf.yield %next, %next_sum : i64, i64
+  }
+  func.return %result : i64
+}

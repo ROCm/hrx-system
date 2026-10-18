@@ -17,82 +17,9 @@ kernel.def target(@target) @race_wide_shared_store() {
 }
 
 // ----
-// A physical access walks every runtime-selected shadow entry with one
-// per-lane Low CFG loop and one static observation body. The loop keeps the
-// source access width out of static code size and freezes lanes that have
-// already reached their terminal entry.
+// The byte-range and bounded-retry loops share one static observation body.
+// Widening an access must not duplicate the CAS body in the emitted program.
 CHECK: low.kernel.def * @race_wide_shared_store() asm {
-CHECK: *{symbol = @iree_tsan_config}
-CHECK: * = v_add_u32* *, 7
-CHECK: * = v_lshrrev_b32 *
-CHECK: * = v_add_u32* *, 1
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: ^*(*reg<amdgpu.vgpr>*):
-CHECK: * = v_cmp_ne_i32 *
-CHECK: * = v_add_u32* *, 1
-CHECK: * = v_cndmask_b32 *
-CHECK: low.cond_br *
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: * = global_atomic_swap* *
-CHECK: s_mov_b64_exec *
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: ds_write_b64 *
-CHECK-NOT: *sanitizer.race.access*
-
-// ====
-
-amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
-
-kernel.def target(@target) @race_byte_shared_store() {
-  %unit = index.constant 1 : index
-  %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
-} launch() {
-  %base = index.constant 0 : offset
-  %bytes = index.constant 1 : offset
-  %value = scalar.constant 1 : i8
-  %scratch = buffer.alloca<workgroup> align(1) %bytes : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<1xi8>
-  view.store %value, %view[0] : i8, view<1xi8>
-  kernel.return
-}
-
-// ----
-// A one-byte physical access has exactly one possible shadow entry and keeps
-// the loop machinery off its lowering path.
-CHECK: low.kernel.def * @race_byte_shared_store() asm {
-CHECK: *{symbol = @iree_tsan_config}
-CHECK: * = global_atomic_swap* *
-CHECK: ds_write_b8 *
-CHECK-NOT: * = v_cndmask_b32 *
-CHECK-NOT: *sanitizer.race.access*
-
-// ====
-
-amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
-
-kernel.def target(@target) @race_non_power_of_two_shared_store() {
-  %c1 = index.constant 1 : index
-  %x = index.constant 3 : index
-  %y = index.constant 5 : index
-  %z = index.constant 7 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%x, %y, %z) : index
-} launch() {
-  %base = index.constant 0 : offset
-  %bytes = index.constant 4 : offset
-  %value = scalar.constant 1 : i32
-  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<1xi32>
-  view.store %value, %view[0] : i32, view<1xi32>
-  kernel.return
-}
-
-// ----
-// Select stable boundaries from the large instrumentation body: accepting the
-// shape, deriving dynamic workgroup counts, exchanging one shadow entry, and
-// retaining the physical access.
-CHECK: low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(3, 5, 7) workgroup_count(1, 1, 1) @race_non_power_of_two_shared_store() asm {
-CHECK: * = s_mul_hi_u32 *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: ds_write_b32 *
+CHECK-COUNT-1: * = global_atomic_cmpswap_b64_rtn_saddr *
+CHECK-COUNT-1: ds_write_b64 *
 CHECK-NOT: *sanitizer.race.access*

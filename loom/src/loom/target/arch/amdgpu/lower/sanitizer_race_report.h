@@ -80,6 +80,27 @@ typedef struct loom_amdgpu_sanitizer_race_report_t {
   loom_value_id_t prior_workitem_id_z;
 } loom_amdgpu_sanitizer_race_report_t;
 
+typedef struct loom_amdgpu_sanitizer_race_shadow_capacity_report_t {
+  // Total bytes available in the queue shadow arena.
+  loom_value_id_t shadow_size;
+  // Exclusive byte end required by the first workgroup outside the arena.
+  loom_value_id_t required_shadow_end;
+  // Bytes required by each workgroup for this dispatch.
+  loom_value_id_t workgroup_shadow_stride;
+  // Flattened ordinal of the first workgroup outside the arena.
+  loom_value_id_t workgroup_ordinal;
+  // Final group-segment byte size carried by the dispatch packet.
+  loom_value_id_t workgroup_local_memory_size;
+  // Bytes in each application-byte shadow cell.
+  loom_value_id_t shadow_cell_size;
+  // Access histories retained in each shadow cell.
+  loom_value_id_t shadow_history_count;
+  // Three-dimensional workgroup coordinates that observed the failure.
+  loom_value_id_t current_workgroup_ids[3];
+  // Three-dimensional workitem coordinates that produced the report.
+  loom_value_id_t current_workitem_ids[3];
+} loom_amdgpu_sanitizer_race_shadow_capacity_report_t;
+
 typedef struct loom_amdgpu_sanitizer_race_report_island_t {
   // Entry block accepting the source/report tuple for one failed race site.
   loom_block_t* entry_block;
@@ -126,6 +147,24 @@ iree_status_t loom_amdgpu_build_sanitizer_race_report_terminate(
     loom_symbol_ref_t feedback_config_symbol,
     const loom_amdgpu_feedback_packet_source_t* source,
     const loom_amdgpu_sanitizer_race_report_t* report,
+    loom_location_id_t location);
+
+// Emits the AMDGPU TSAN shadow-capacity payload into a reserved feedback
+// packet. The check kind, flags, and reserved fields are fixed by this builder;
+// |report| contains only the meaningful capacity operands.
+iree_status_t loom_amdgpu_build_sanitizer_race_shadow_capacity_report_payload(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_feedback_packet_address_t* packet_address,
+    const loom_amdgpu_sanitizer_race_shadow_capacity_report_t* report,
+    loom_location_id_t location);
+
+// Emits a terminal AMDGPU TSAN shadow-capacity report producer from the
+// current cold block.
+iree_status_t loom_amdgpu_build_sanitizer_race_shadow_capacity_report_terminate(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    loom_symbol_ref_t feedback_config_symbol,
+    const loom_amdgpu_feedback_packet_source_t* source,
+    const loom_amdgpu_sanitizer_race_shadow_capacity_report_t* report,
     loom_location_id_t location);
 
 // Builds a shared cold report island for failed race observations.

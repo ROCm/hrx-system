@@ -251,10 +251,12 @@ typedef struct loom_serve_text_chat_output_t {
 // state). Bounds are cursor <= begin <= end <= response.size; end advances the
 // cursor, while [cursor, begin) is framing. No progress leaves parser state
 // unchanged. Response is borrowed synchronously; published bytes are never
-// retracted.
+// retracted. scratch_allocator owns only temporary VM argument wrappers; all
+// references to that storage retire before return, so it may be a batch arena.
 iree_status_t loom_serve_text_chat_output_next(
     loom_serve_text_chat_t* chat, iree_string_view_t response,
     loom_serve_text_chat_output_phase_t phase,
+    iree_allocator_t scratch_allocator,
     loom_serve_text_chat_output_t* out_output);
 
 // Completed response metadata and its canonical retained-history checkpoint.
@@ -288,6 +290,25 @@ bool loom_serve_text_chat_completion_is_prefix(
     const loom_serve_text_chat_completion_t* completion,
     const loom_serve_text_chat_t* chat);
 
+// Reusable completion formatting buffers, exclusively borrowed for one call.
+// A service shares one instance across its rows. No views into this storage
+// escape into completed histories; only capacity survives between calls.
+typedef struct loom_serve_text_chat_scratch_t {
+  // Standard function records returned by the source parser.
+  iree_string_builder_t parsed;
+  // Canonical model-format tool fragments used to construct retained history.
+  iree_string_builder_t rendered;
+  // Decoded JSON arguments of the current generated function call.
+  iree_string_builder_t arguments;
+} loom_serve_text_chat_scratch_t;
+
+// Initializes empty builders; backing grows lazily and is reused by completion.
+void loom_serve_text_chat_scratch_initialize(
+    iree_allocator_t host_allocator,
+    loom_serve_text_chat_scratch_t* out_scratch);
+void loom_serve_text_chat_scratch_deinitialize(
+    loom_serve_text_chat_scratch_t* scratch);
+
 // Invokes source parsing of the generated suffix into typed function calls.
 // Returns the source-owned canonical completed transcript and replaces the
 // reusable tool_calls table with owned validated records. Transport encoding
@@ -298,10 +319,14 @@ bool loom_serve_text_chat_completion_is_prefix(
 // Replaces completion only on success, releasing its prior storage. Failure
 // leaves completion unchanged and tool_calls empty. The checkpoint validates
 // subsequent client history; it does not replace original generated tokens in
-// device state.
+// device state. scratch_allocator owns call-local argument wrappers only.
+// Retained history uses the request's host allocator, independent of temporary
+// formatting work. scratch is reset on entry and may be reused immediately
+// after return.
 iree_status_t loom_serve_text_chat_complete(
     loom_serve_text_chat_t* chat, iree_string_view_t response,
     uint64_t request_id, loom_serve_text_tool_calls_t* tool_calls,
+    loom_serve_text_chat_scratch_t* scratch, iree_allocator_t scratch_allocator,
     loom_serve_text_chat_completion_t* completion);
 
 // Borrowed output metadata copied from a session at each publication. Identity

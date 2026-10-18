@@ -312,6 +312,8 @@ def _f32_to_bf16_rule(
 def _representable_f32_to_bf16_rule(
     descriptor_lookup: _DescriptorLookup,
     descriptors: IntegerNarrowingDescriptors,
+    *,
+    preserve_nan: bool,
 ) -> DescriptorRule:
     emits = (
         _f32_bits_emit(descriptor_lookup),
@@ -319,14 +321,19 @@ def _representable_f32_to_bf16_rule(
             descriptors,
             ValueRef.temporary("input_bits"),
             ValueRef.result("result"),
+            preserve_nan=preserve_nan,
         ),
     )
     return _rule(
         _F32,
         _BF16,
         emits,
-        "exactly_representable_binary32_to_bfloat16",
-        fact_guards=(Guard.value_float_exactly_representable_as("input", "result"),),
+        "exactly_representable_binary32_to_bfloat16"
+        + ("_preserve_nan" if preserve_nan else ""),
+        fact_guards=(
+            *((Guard.value_not_nan("input"),) if not preserve_nan else ()),
+            Guard.value_float_exactly_representable_as("input", "result"),
+        ),
     )
 
 
@@ -390,7 +397,12 @@ def x86_float_narrowing_rules(
 
     descriptors = _integer_narrowing_descriptors(descriptor_lookup)
     return (
-        _representable_f32_to_bf16_rule(descriptor_lookup, descriptors),
+        _representable_f32_to_bf16_rule(
+            descriptor_lookup, descriptors, preserve_nan=False
+        ),
+        _representable_f32_to_bf16_rule(
+            descriptor_lookup, descriptors, preserve_nan=True
+        ),
         _f32_to_bf16_rule(descriptor_lookup, descriptors),
         _f32_to_narrow_rule(
             descriptor_lookup,

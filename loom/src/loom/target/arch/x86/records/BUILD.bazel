@@ -40,5 +40,6 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/x86:feature_bits",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/schemas:cpu_data",
     ],
 )

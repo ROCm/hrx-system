@@ -13,6 +13,33 @@ package(
 )
 
 amdf_cts_test_suite(
+    name = "file_pool",
+    srcs = [
+        "file_pool_io.cc",
+        "file_pool_io.h",
+        "file_pool_test.cc",
+    ],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ] + select({
+        "//loom/config/target:amdgpu_artifacts": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//libamdf/cts/gpu/aql:dispatch_fixture",
+        "//libamdf/cts/gpu/kernels:transform",
+        "//libamdf/cts/gpu/kernels:transform_kernels",
+        "//libamdf/cts/gpu/pm4:dispatch_fixture",
+        "//libamdf/cts/gpu/sdma/encoding:commands",
+        "//libamdf/cts/gpu/util:command_fixture",
+        "//third_party:google_test",
+        "//third_party:linux_io_uapi",
+    ],
+)
+
+amdf_cts_test_suite(
     name = "memory",
     srcs = ["memory_test.cc"],
     target_compatible_with = [

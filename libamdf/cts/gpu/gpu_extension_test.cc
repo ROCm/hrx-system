@@ -49,6 +49,11 @@ TEST(GpuExtensionTest, ReportsCompiledAvailabilityBeforeCreatingInstance) {
   EXPECT_NE(gpu_api->user_queue_create, nullptr);
   EXPECT_NE(gpu_api->device_query_queue_clock_info, nullptr);
   EXPECT_NE(gpu_api->device_query_clock_sample, nullptr);
+  EXPECT_NE(gpu_api->event_create, nullptr);
+  EXPECT_NE(gpu_api->event_query_info, nullptr);
+  EXPECT_NE(gpu_api->event_signal, nullptr);
+  EXPECT_NE(gpu_api->event_wait, nullptr);
+  EXPECT_NE(gpu_api->event_destroy, nullptr);
 }
 
 TEST(GpuExtensionTest, NegotiatesOriginalTableExtent) {
@@ -64,6 +69,22 @@ TEST(GpuExtensionTest, NegotiatesOriginalTableExtent) {
   EXPECT_EQ(gpu->structure_size,
             offsetof(amdf_gpu_api_t, device_query_queue_clock_info));
   EXPECT_NE(gpu->user_queue_create, nullptr);
+}
+
+TEST(GpuExtensionTest, PreservesVersionTwoTableBoundary) {
+  const amdf_api_t* api = QueryApi();
+  ASSERT_NE(api, nullptr);
+  const void* extension = nullptr;
+  ASSERT_EQ(
+      api->query_extension(AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_2,
+                           AMDF_GPU_EXTENSION_VERSION_2, &extension),
+      AMDF_STATUS_OK);
+  const auto* gpu = static_cast<const amdf_gpu_api_t*>(extension);
+  ASSERT_NE(gpu, nullptr);
+  EXPECT_EQ(gpu->extension_version, AMDF_GPU_EXTENSION_VERSION_2);
+  EXPECT_EQ(gpu->structure_size, offsetof(amdf_gpu_api_t, event_create));
+  EXPECT_NE(gpu->device_query_queue_clock_info, nullptr);
+  EXPECT_NE(gpu->device_query_clock_sample, nullptr);
 }
 
 TEST(GpuExtensionTest, RejectsNullClockDeviceWithoutPublishingOutput) {

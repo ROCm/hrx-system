@@ -278,7 +278,7 @@ static_assert(address<source>() == &source);
 unsigned entry() { return 7; }
 
 // ----
-func.def public @source() -> (i32) {
+func.def public linkonce @source() -> (i32) {
   %1 = scalar.constant 5 : i32
   func.return %1 : i32
 }

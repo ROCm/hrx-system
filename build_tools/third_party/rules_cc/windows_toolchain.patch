@@ -1,7 +1,7 @@
 diff --git a/cc/private/toolchain/BUILD.windows.tpl b/cc/private/toolchain/BUILD.windows.tpl
 --- a/cc/private/toolchain/BUILD.windows.tpl
 +++ b/cc/private/toolchain/BUILD.windows.tpl
-@@ -57,6 +57,39 @@
+@@ -57,6 +57,40 @@
  filegroup(
      name = "clangcl_compiler_files",
      srcs = [":builtin_include_directory_paths_clangcl"]
@@ -17,6 +17,7 @@ diff --git a/cc/private/toolchain/BUILD.windows.tpl b/cc/private/toolchain/BUILD
 +    srcs = [
 +        ":clangcl_compiler_files",
 +        ":clangcl_x64_linker_files",
++        "llvm-nm.exe",
 +    ],
 +)
 +
@@ -41,7 +42,7 @@ diff --git a/cc/private/toolchain/BUILD.windows.tpl b/cc/private/toolchain/BUILD
  )
 
  filegroup(
-@@ -601,12 +634,12 @@
+@@ -601,12 +635,12 @@
      name = "cc-compiler-x64_windows-clang-cl",
      toolchain_identifier = "clang_cl_x64",
      toolchain_config = ":clang_cl_x64",
@@ -56,7 +57,14 @@ diff --git a/cc/private/toolchain/BUILD.windows.tpl b/cc/private/toolchain/BUILD
      objcopy_files = ":empty",
      strip_files = ":empty",
      supports_param_files = 1,
-@@ -644,7 +677,10 @@
+@@ -638,13 +672,16 @@
+         "gcc": "%{clang_cl_cl_path_x64}",
+         "gcov": "wrapper/bin/msvc_nop.bat",
+         "ld": "%{clang_cl_link_path_x64}",
+-        "nm": "wrapper/bin/msvc_nop.bat",
++        "nm": "llvm-nm.exe",
+         "objcopy": "wrapper/bin/msvc_nop.bat",
+         "objdump": "wrapper/bin/msvc_nop.bat",
          "strip": "wrapper/bin/msvc_nop.bat",
      },
      archiver_flags = ["/MACHINE:X64"],
@@ -94,7 +102,7 @@ diff --git a/cc/private/toolchain/windows_cc_configure.bzl b/cc/private/toolchai
 
      escaped_cxx_include_directories = []
      for path in escaped_include_paths.split(";"):
-@@ -819,9 +835,26 @@
+@@ -819,9 +835,27 @@
      clang_version = _get_clang_version(repository_ctx, clang_cl_path)
      clang_dir = _get_clang_dir(repository_ctx, llvm_path, clang_version)
      clang_include_path = (clang_dir + "\\include").replace("\\", "\\\\")
@@ -103,6 +111,7 @@ diff --git a/cc/private/toolchain/windows_cc_configure.bzl b/cc/private/toolchai
 
 -    clang_cl_include_directories = msvc_vars["%{msvc_cxx_builtin_include_directories_" + target_arch + "}"] + (",\n        \"%s\"" % clang_include_path)
 +    if target_arch == "x64":
++        repository_ctx.symlink(find_llvm_tool(repository_ctx, llvm_path, "llvm-nm.exe"), "llvm-nm.exe")
 +        builtins_name = "clang_rt.builtins-x86_64.lib"
 +        builtins_path = repository_ctx.path(clang_dir + "\\lib\\windows\\" + builtins_name)
 +        if not builtins_path.exists:

@@ -249,7 +249,7 @@ func.def public @entry(%bound$0: i32) -> (i32) {
 // ====
 // RUN: verify
 void entry(unsigned count) {
-  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping unsigned counted for loop"
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
   [[loom::unroll]] for (unsigned index = 0; index < count; ++index)
     ++index;
 }
@@ -257,7 +257,7 @@ void entry(unsigned count) {
 // ====
 // RUN: verify
 void entry(unsigned count) {
-  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping unsigned counted for loop"
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
   [[loom::unroll]] for (unsigned index = 0; index < count; ++index)
     --count;
 }

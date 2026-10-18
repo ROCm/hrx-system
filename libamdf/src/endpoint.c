@@ -160,11 +160,26 @@ amdf_status_t AMDF_CALL amdf_endpoint_query_info(
   if (endpoint == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  const amdf_status_t status = amdf_structure_validate_output(
+  amdf_status_t status = amdf_structure_validate_header(
       out_info, AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
       (uint32_t)sizeof(amdf_endpoint_info_t));
   if (!amdf_status_is_ok(status)) {
     return status;
+  }
+
+  amdf_endpoint_host_locality_t* locality = out_info->next;
+  if (locality != NULL) {
+    if (locality->type != AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+    status = amdf_structure_validate_output(
+        locality, AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY,
+        sizeof(*locality));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    locality->numa_node =
+        amdf_platform_endpoint_host_numa_node(endpoint->platform);
   }
 
   const uint32_t structure_size = out_info->structure_size;

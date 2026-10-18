@@ -70,6 +70,11 @@ class FeedbackStateTest : public ::testing::Test {
         event->payload.data_length >= sizeof(iree_hal_device_ubsan_report_t)) {
       std::memcpy(&test->last_ubsan_report_, event->payload.data,
                   sizeof(test->last_ubsan_report_));
+    } else if (event->type == IREE_HAL_DEVICE_EVENT_TYPE_TSAN_REPORT &&
+               event->payload.data_length >=
+                   sizeof(iree_hal_device_tsan_report_t)) {
+      std::memcpy(&test->last_tsan_report_, event->payload.data,
+                  sizeof(test->last_tsan_report_));
     }
   }
 
@@ -86,13 +91,42 @@ class FeedbackStateTest : public ::testing::Test {
     report->record_length = sizeof(*report);
     report->abi_version = IREE_HAL_AMDGPU_TSAN_REPORT_ABI_VERSION_0;
     report->check_kind = IREE_HAL_AMDGPU_TSAN_CHECK_KIND_DATA_RACE;
-    report->memory_space = IREE_HAL_AMDGPU_TSAN_MEMORY_SPACE_GLOBAL;
-    report->current_access_kind = IREE_HAL_AMDGPU_TSAN_ACCESS_KIND_WRITE;
-    report->prior_access_kind = IREE_HAL_AMDGPU_TSAN_ACCESS_KIND_READ;
-    report->access_size = 4;
-    report->current_site_id = 0x1234;
-    report->prior_site_id = 0x5678;
-    report->memory_address = 0xDEAD0000;
+    auto& data_race = report->detail.data_race;
+    data_race.memory_space = IREE_HAL_AMDGPU_TSAN_MEMORY_SPACE_GLOBAL;
+    data_race.current_access_kind = IREE_HAL_AMDGPU_TSAN_ACCESS_KIND_WRITE;
+    data_race.prior_access_kind = IREE_HAL_AMDGPU_TSAN_ACCESS_KIND_READ;
+    data_race.access_size = 4;
+    data_race.current_site_id = 0x1234;
+    data_race.prior_site_id = 0x5678;
+    data_race.memory_address = 0xDEAD0000;
+    iree_hal_amdgpu_feedback_publish(&device_state_.channel.config, packet);
+  }
+
+  void PublishTsanShadowCapacity() {
+    iree_hal_amdgpu_feedback_packet_t* packet = nullptr;
+    ASSERT_TRUE(iree_hal_amdgpu_feedback_try_reserve(
+        &device_state_.channel.config,
+        IREE_HAL_AMDGPU_FEEDBACK_PACKET_KIND_TSAN,
+        IREE_HAL_AMDGPU_FEEDBACK_PACKET_FLAG_ASYNC,
+        sizeof(iree_hal_amdgpu_tsan_report_t), &packet));
+    packet->source_dispatch_ptr = 0x12340000u;
+    auto* report = reinterpret_cast<iree_hal_amdgpu_tsan_report_t*>(
+        iree_hal_amdgpu_feedback_packet_payload(packet));
+    std::memset(report, 0, sizeof(*report));
+    report->record_length = sizeof(*report);
+    report->abi_version = IREE_HAL_AMDGPU_TSAN_REPORT_ABI_VERSION_0;
+    report->check_kind = IREE_HAL_AMDGPU_TSAN_CHECK_KIND_SHADOW_CAPACITY;
+    auto& capacity = report->detail.shadow_capacity;
+    capacity.shadow_size = 4096;
+    capacity.required_shadow_end = 4112;
+    capacity.workgroup_shadow_stride = 16;
+    capacity.workgroup_ordinal = 256;
+    capacity.workgroup_local_memory_size = 2048;
+    capacity.shadow_cell_size = 16;
+    capacity.shadow_history_count = 2;
+    capacity.current_workgroup_id[0] = 16;
+    capacity.current_workgroup_id[1] = 4;
+    capacity.current_workgroup_id[2] = 1;
     iree_hal_amdgpu_feedback_publish(&device_state_.channel.config, packet);
   }
 
@@ -129,6 +163,7 @@ class FeedbackStateTest : public ::testing::Test {
   iree_hal_device_event_type_t last_event_type_ =
       IREE_HAL_DEVICE_EVENT_TYPE_NONE;
   iree_hal_device_ubsan_report_t last_ubsan_report_ = {};
+  iree_hal_device_tsan_report_t last_tsan_report_ = {};
 };
 
 TEST_F(FeedbackStateTest, UbsanAssertionPublishesEvent) {
@@ -169,6 +204,34 @@ TEST_F(FeedbackStateTest, TsanFailDeviceReportsDataLossThroughChannelDrain) {
   iree_hal_amdgpu_feedback_state_drain_physical_device(&state_, 0);
 
   EXPECT_EQ(IREE_STATUS_DATA_LOSS, iree_status_code(error_status_));
+  EXPECT_EQ(control_.read_tail, control_.reservation_head);
+}
+
+TEST_F(FeedbackStateTest, TsanShadowCapacityPublishesTypedResourceError) {
+  PublishTsanShadowCapacity();
+
+  iree_hal_amdgpu_feedback_state_drain_physical_device(&state_, 0);
+
+  EXPECT_EQ(IREE_STATUS_RESOURCE_EXHAUSTED, iree_status_code(error_status_));
+  EXPECT_EQ(event_count_, 1u);
+  EXPECT_EQ(last_event_type_, IREE_HAL_DEVICE_EVENT_TYPE_TSAN_REPORT);
+  EXPECT_EQ(last_tsan_report_.record_length, sizeof(last_tsan_report_));
+  EXPECT_EQ(last_tsan_report_.abi_version,
+            IREE_HAL_DEVICE_TSAN_REPORT_ABI_VERSION_0);
+  EXPECT_EQ(last_tsan_report_.check_kind,
+            IREE_HAL_DEVICE_TSAN_CHECK_KIND_SHADOW_CAPACITY);
+  const auto& capacity = last_tsan_report_.detail.shadow_capacity;
+  EXPECT_EQ(capacity.shadow_size, 4096u);
+  EXPECT_EQ(capacity.required_shadow_end, 4112u);
+  EXPECT_EQ(capacity.workgroup_shadow_stride, 16u);
+  EXPECT_EQ(capacity.workgroup_ordinal, 256u);
+  EXPECT_EQ(capacity.workgroup_local_memory_size, 2048u);
+  EXPECT_EQ(capacity.shadow_cell_size, 16u);
+  EXPECT_EQ(capacity.shadow_history_count, 2u);
+  EXPECT_EQ(capacity.current_workgroup_id[0], 16u);
+  EXPECT_EQ(capacity.current_workgroup_id[1], 4u);
+  EXPECT_EQ(capacity.current_workgroup_id[2], 1u);
+  EXPECT_EQ(last_tsan_report_.source_dispatch_ptr, 0x12340000u);
   EXPECT_EQ(control_.read_tail, control_.reservation_head);
 }
 

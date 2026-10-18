@@ -305,6 +305,17 @@ iree_status_t loom_amdgpu_emit_sgpr64_constant_u64(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     uint64_t value, loom_value_id_t* out_low_wide_value);
 
+// Emits a VGPR x2 unsigned integer constant.
+iree_status_t loom_amdgpu_emit_vgpr64_constant_u64(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    uint64_t value, loom_value_id_t* out_low_wide_value);
+
+// Materializes an SCC predicate as a one-word SGPR containing zero or one.
+iree_status_t loom_amdgpu_emit_scc_word(loom_low_lower_context_t* context,
+                                        const loom_op_t* source_op,
+                                        loom_value_id_t low_scc,
+                                        loom_value_id_t* out_low_word);
+
 // Compares one scalar register word against zero and returns its SCC truth.
 iree_status_t loom_amdgpu_emit_sgpr32_nonzero_scc(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

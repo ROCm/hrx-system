@@ -1,0 +1,67 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Every producer attempts CAS exactly twice. No retry or inter-wave wait is
+// needed: one contended attempt wins, and every returned value is observable.
+kernel.def export("program_atomic") @program_atomic() {
+  %groups = index.constant 4 : index
+  %width = index.constant 64 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%control: buffer, %records: buffer, %initial: i64, %mismatch: i64, %generation: i64, %bit_width: i32) {
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = kernel.workgroup.size<x> : index
+  %position = index.madd %group, %width, %lane : index
+  %producer = index.cast %position : index to i64
+  %one = scalar.constant 1 : i64
+  %increment = scalar.addi %producer, %one : i64
+  %proposal = scalar.addi %initial, %increment : i64
+  %bad = scalar.constant -1 : i64
+  %narrow_width = scalar.constant 32 : i32
+  %narrow = scalar.cmpi eq, %bit_width, %narrow_width : i32
+  %control_base = index.constant 8 : offset
+  %global_control = buffer.assume.memory_space<global> %control : buffer
+  %failed, %contended, %tail = scf.if %narrow -> (i64, i64, i64) {
+    %cells = buffer.view %global_control[%control_base] : buffer -> view<6xi32>
+    %expected = scalar.trunci %initial : i64 to i32
+    %wrong = scalar.trunci %mismatch : i64 to i32
+    %desired = scalar.trunci %proposal : i64 to i32
+    %bad32 = scalar.trunci %bad : i64 to i32
+    %one32 = scalar.trunci %one : i64 to i32
+    %observed_tail = view.atomic.load %cells[4] {ordering = acquire, scope = system} : view<6xi32> -> i32
+    %failed32 = view.atomic.cmpxchg %wrong, %bad32, %cells[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i32, view<6xi32> -> i32
+    %contended32 = view.atomic.cmpxchg %expected, %desired, %cells[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i32, view<6xi32> -> i32
+    view.atomic.reduce<addi> %one32, %cells[2] {ordering = release, scope = system} : i32, view<6xi32>
+    %failed64 = scalar.extui %failed32 : i32 to i64
+    %contended64 = scalar.extui %contended32 : i32 to i64
+    %tail64 = scalar.extui %observed_tail : i32 to i64
+    scf.yield %failed64, %contended64, %tail64 : i64, i64, i64
+  } else {
+    %cells = buffer.view %global_control[%control_base] : buffer -> view<3xi64>
+    %observed_tail = view.atomic.load %cells[2] {ordering = acquire, scope = system} : view<3xi64> -> i64
+    %failed64 = view.atomic.cmpxchg %mismatch, %bad, %cells[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<3xi64> -> i64
+    %contended64 = view.atomic.cmpxchg %initial, %proposal, %cells[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<3xi64> -> i64
+    view.atomic.reduce<addi> %one, %cells[1] {ordering = release, scope = system} : i64, view<3xi64>
+    scf.yield %failed64, %contended64, %observed_tail : i64, i64, i64
+  }
+  %record_size = index.constant 40 : offset
+  %record_offset = index.scale %position, %record_size : index, offset -> offset
+  %record = buffer.view %records[%record_offset] : buffer -> view<5xi64>
+  %payload = scalar.xori %proposal, %tail : i64
+  view.store %failed, %record[0] : i64, view<5xi64>
+  view.store %contended, %record[1] : i64, view<5xi64>
+  view.store %tail, %record[2] : i64, view<5xi64>
+  view.store %payload, %record[3] : i64, view<5xi64>
+  scf.if %narrow {
+    %record32 = buffer.view %records[%record_offset] : buffer -> view<10xi32>
+    %generation32 = scalar.trunci %generation : i64 to i32
+    view.atomic.store %generation32, %record32[8] {ordering = release, scope = system} : i32, view<10xi32>
+  } else {
+    view.atomic.store %generation, %record[4] {ordering = release, scope = system} : i64, view<5xi64>
+  }
+  kernel.return
+}

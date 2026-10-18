@@ -233,6 +233,32 @@ loom_kernel_binary(name="program", srcs=["program.loom"], deps=[":support"], tar
         self.assertIn("  LIBRARIES\n    ::support", output)
         self.assertIn('OUTPUT\n    "program"', output)
 
+    def test_shared_bindings_preserve_configuration_and_helper_ownership(self):
+        repo_cfg = SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""})
+        output = bazel_to_cmake_converter.convert_build_file(
+            """
+loomc_shared_libraries(
+    name="loomc_shared",
+    components=[":base"] + select({
+        "//loom/config/target:amdgpu_artifacts": ["//loom/binding/c/target/amdgpu"],
+        "//conditions:default": [],
+    }),
+    runtime_deps=["//runtime/src/iree/base"],
+)
+cc_library(name="helper", tags=["LINKABLE_MORE_THAN_ONCE"])
+loom_generated_cc_library(name="catalog", generator=":generate", tags=["LINKABLE_MORE_THAN_ONCE"])
+""",
+            repo_cfg,
+            str(REPO_ROOT / "loom/binding/c"),
+            repo_root=str(REPO_ROOT),
+        )
+        self.assertIn(
+            "if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)", output
+        )
+        self.assertIn("loom::binding::c::target::amdgpu", output)
+        self.assertIn("  RUNTIME_DEPS\n    iree::base", output)
+        self.assertEqual(output.count("  LINKABLE_MORE_THAN_ONCE\n"), 2)
+
     def test_loom_artifact_execution_requires_compiler_project(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(

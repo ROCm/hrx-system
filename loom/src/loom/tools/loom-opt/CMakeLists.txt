@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-loom_cc_binary(
+loomc_cc_binary(
   NAME
     loom-opt
   SRCS

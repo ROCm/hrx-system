@@ -167,7 +167,7 @@ endfunction()
 function(loom_generated_cc_library)
   cmake_parse_arguments(
     _RULE
-    "TESTONLY"
+    "TESTONLY;LINKABLE_MORE_THAN_ONCE"
     "NAME;GENERATOR;SOURCE"
     "SRCS;TEXTUAL_HDRS;GENERATED_SRC_FLAGS;GENERATED_SRCS;HDRS;GENERATED_HDR_FLAGS;GENERATED_HDRS;ARGS;INPUTS;EXTRA_OUTPUT_FLAGS;EXTRA_OUTPUTS;DEPS"
     ${ARGN}
@@ -265,6 +265,10 @@ function(loom_generated_cc_library)
     set(_TESTONLY_ARG)
   endif()
 
+  if(_RULE_LINKABLE_MORE_THAN_ONCE)
+    set(_DUPLICATE_SAFE_ARG LINKABLE_MORE_THAN_ONCE)
+  endif()
+
   loom_cc_library(
     NAME
       ${_RULE_NAME}
@@ -279,6 +283,7 @@ function(loom_generated_cc_library)
     DEPS
       ${_RULE_DEPS}
     ${_TESTONLY_ARG}
+    ${_DUPLICATE_SAFE_ARG}
     PUBLIC
   )
 endfunction()

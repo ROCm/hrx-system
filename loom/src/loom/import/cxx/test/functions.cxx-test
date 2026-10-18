@@ -24,6 +24,21 @@ func.def @helper(%p: buffer, %p_byte_offset: offset) {
 }
 
 // ====
+// Public C++ inline definitions retain source visibility and carry link-once
+// module linkage independently of Loom's call-site inline policy.
+inline unsigned header_identity(unsigned value) { return value; }
+unsigned call_header_identity(unsigned value) { return header_identity(value); }
+// ----
+func.def public linkonce @header_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @call_header_identity(%value: i32) -> (i32) {
+  %4 = func.call pure @header_identity(%value) : (i32) -> (i32)
+  func.return %4 : i32
+}
+
+// ====
 // INPUT: cxx root=entry
 // RUN: verify
 // Explicit source roots must identify one concrete definition.

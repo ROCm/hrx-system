@@ -195,7 +195,9 @@ amdf_cc_library(
         ":host_mapping",
         ":memory_profile",
         ":memory_resource",
+        "//libamdf/src/platform:host_export",
         "//libamdf/src/platform:host_memory",
+        "//libamdf/src/platform:native_host_export",
         "//libamdf/src/platform:native_host_memory",
     ],
 )
@@ -218,6 +220,7 @@ amdf_cc_library(
         ":memory_scope",
         ":memory_scope_state",
         ":structure",
+        "//libamdf/src/platform",
     ],
 )
 

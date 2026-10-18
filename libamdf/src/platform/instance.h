@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "amdf/amdf.h"
+#include "libamdf/src/platform/host_export.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,6 +29,11 @@ amdf_status_t amdf_platform_instance_destroy(
 // Returns the system virtual-memory allocation granularity in bytes. This
 // queries host facts only and initializes no accelerator or address space.
 uint64_t amdf_platform_instance_host_allocation_granularity(
+    const amdf_platform_instance_t* instance);
+
+// Borrows the optional owned-page exporter, or NULL on platforms without one.
+// The returned metadata and native service remain owned by this instance.
+const amdf_platform_host_export_t* amdf_platform_instance_host_export(
     const amdf_platform_instance_t* instance);
 
 // Serializes cold shared-native preparation and native device teardown.

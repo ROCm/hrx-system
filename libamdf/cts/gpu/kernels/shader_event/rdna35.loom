@@ -1,0 +1,40 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Complete the mailbox store before issuing the native shader interrupt.
+template.decl @shader_event_interrupt(%context: i32)
+
+low.func.def target<amdgpu.rdna3_5.core> @shader_event_rdna35(%context: reg<amdgpu.sgpr>) asm {
+  s_waitcnt {vmcnt = 0}
+  s_waitcnt_vscnt {vscnt = 0}
+  %payload = s_mov_b32_m0 %context
+  s_sendmsg %payload {message = 1}
+  return
+}
+
+amdgpu.target<gfx1150> @shader_event_gfx1150_target
+template.def<@shader_event_interrupt> target(@shader_event_gfx1150_target) @shader_event_gfx1150_impl(%context: i32) {
+  low.invoke @shader_event_rdna35(%context) : (i32) -> ()
+  template.return
+}
+
+amdgpu.target<gfx1151> @shader_event_gfx1151_target
+template.def<@shader_event_interrupt> target(@shader_event_gfx1151_target) @shader_event_gfx1151_impl(%context: i32) {
+  low.invoke @shader_event_rdna35(%context) : (i32) -> ()
+  template.return
+}
+
+amdgpu.target<gfx1152> @shader_event_gfx1152_target
+template.def<@shader_event_interrupt> target(@shader_event_gfx1152_target) @shader_event_gfx1152_impl(%context: i32) {
+  low.invoke @shader_event_rdna35(%context) : (i32) -> ()
+  template.return
+}
+
+amdgpu.target<gfx1153> @shader_event_gfx1153_target
+template.def<@shader_event_interrupt> target(@shader_event_gfx1153_target) @shader_event_gfx1153_impl(%context: i32) {
+  low.invoke @shader_event_rdna35(%context) : (i32) -> ()
+  template.return
+}

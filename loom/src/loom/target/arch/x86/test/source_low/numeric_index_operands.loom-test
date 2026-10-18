@@ -252,3 +252,22 @@ func.def @bounded_addresses(%row: index, %column: index, %byte_offset: offset) -
 low.func.def target<x86.avx2.core> abi(object_function) @bounded_addresses(%bounded_row: reg<x86.gpr64>, %bounded_column: reg<x86.gpr64>, %aligned_offset: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
   return %bounded_row, %bounded_column, %aligned_offset
 }
+
+// ====
+
+func.def @index_rotations(%value: index, %count: index) -> (index, index) {
+  %left = index.rotli %value, %count : index
+  %right = index.rotri %value, %count : index
+  func.return %left, %right : index, index
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @index_rotations(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %10 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %11 = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %left = rol.cl.gpr64 %10, %11
+  %13 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %14 = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %right = ror.cl.gpr64 %13, %14
+  return %left, %right
+}

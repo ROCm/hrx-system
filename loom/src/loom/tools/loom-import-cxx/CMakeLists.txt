@@ -10,7 +10,7 @@
 iree_add_all_subdirs()
 
 if(LOOM_IMPORT_CXX)
-loom_cc_binary(
+loomc_cc_binary(
   NAME
     loom-import-cxx
   SRCS

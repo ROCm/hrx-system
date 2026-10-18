@@ -95,6 +95,14 @@ class ConditionedValueFactsTest : public ::testing::Test {
     return loom_scalar_cttzi_result(op);
   }
 
+  loom_value_id_t Identity(loom_value_id_t value) {
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_scalar_assume_build(
+        &builder_, &value, 1, /*predicates=*/nullptr,
+        /*predicates_count=*/0, &i32_, 1, LOOM_LOCATION_UNKNOWN, &op));
+    return loom_op_const_results(op)[0];
+  }
+
   loom_value_id_t RangeLow(loom_value_id_t value) {
     loom_op_t* op = nullptr;
     IREE_CHECK_OK(loom_test_fact_range_lo_build(&builder_, value, i64_,
@@ -233,6 +241,35 @@ TEST_F(ConditionedValueFactsTest,
   ExpectRange(table, empty_count, 0, 31);
   ExpectRange(table, joined_count, 0, 32);
   owner_.lifecycle_counts = nullptr;
+}
+
+TEST_F(ConditionedValueFactsTest, FactAliasesShareIndexedGuardRefinement) {
+  const auto guard_value = Identity(input_);
+  const auto consumed_value = Identity(input_);
+  const auto bound = Constant(15);
+  loom_op_t* compare = nullptr;
+  IREE_ASSERT_OK(loom_scalar_cmpi_build(
+      &builder_, LOOM_SCALAR_CMPI_PREDICATE_SLT, guard_value, bound,
+      LOOM_LOCATION_UNKNOWN, &compare));
+  auto* live = AppendBlock();
+  auto* empty = AppendBlock();
+  auto* join = AppendBlock();
+  loom_op_t* branch = nullptr;
+  IREE_ASSERT_OK(loom_cfg_cond_br_build(&builder_,
+                                        loom_scalar_cmpi_result(compare), live,
+                                        empty, LOOM_LOCATION_UNKNOWN, &branch));
+  SetBlock(live);
+  const auto live_high = RangeHigh(consumed_value);
+  Branch(join);
+  SetBlock(empty);
+  const auto empty_low = RangeLow(consumed_value);
+  Branch(join);
+  SetBlock(join);
+  YieldBlock();
+
+  const auto* table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  ExpectRange(table, live_high, 14, 14);
+  ExpectRange(table, empty_low, 15, 15);
 }
 
 TEST_F(ConditionedValueFactsTest, BackedgeKeepsItsGuardOnTheCurrentIteration) {
@@ -463,6 +500,41 @@ TEST_F(ConditionedValueFactsTest, StructuredIfPreservesForwardedCfgIdentity) {
 
   auto* table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
   ExpectRange(table, guarded_count, 0, 31);
+}
+
+TEST_F(ConditionedValueFactsTest, GuardRefinementComposesFactAndCfgIdentities) {
+  const auto forwarded_source = Identity(input_);
+  auto* guarded = AppendBlock();
+  auto* live = AppendBlock();
+  auto* empty = AppendBlock();
+  auto* join = AppendBlock();
+  loom_value_id_t forwarded = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(module_, i32_, &forwarded));
+  IREE_ASSERT_OK(loom_block_add_arg(module_, guarded, forwarded));
+  Branch(guarded, &forwarded_source);
+
+  SetBlock(guarded);
+  const auto guard_value = Identity(forwarded);
+  const auto consumed_value = Identity(input_);
+  const auto bound = Constant(15);
+  loom_op_t* compare = nullptr;
+  IREE_ASSERT_OK(loom_scalar_cmpi_build(
+      &builder_, LOOM_SCALAR_CMPI_PREDICATE_SLT, guard_value, bound,
+      LOOM_LOCATION_UNKNOWN, &compare));
+  loom_op_t* branch = nullptr;
+  IREE_ASSERT_OK(loom_cfg_cond_br_build(&builder_,
+                                        loom_scalar_cmpi_result(compare), live,
+                                        empty, LOOM_LOCATION_UNKNOWN, &branch));
+  SetBlock(live);
+  const auto live_high = RangeHigh(consumed_value);
+  Branch(join);
+  SetBlock(empty);
+  Branch(join);
+  SetBlock(join);
+  YieldBlock();
+
+  const auto* table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  ExpectRange(table, live_high, 14, 14);
 }
 
 TEST_F(ConditionedValueFactsTest, CfgGuardRefinesInsideNestedStructuredRegion) {

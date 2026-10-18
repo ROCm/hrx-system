@@ -211,6 +211,150 @@ iree_status_t loom_amdgpu_build_sanitizer_race_report_payload(
       report->prior_workitem_id_z, location);
 }
 
+static void loom_amdgpu_sanitizer_validate_shadow_capacity_report_values(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_sanitizer_race_shadow_capacity_report_t* report) {
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->shadow_size, 2);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->required_shadow_end, 2);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->workgroup_shadow_stride, 2);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->workgroup_ordinal, 2);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->workgroup_local_memory_size, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->shadow_cell_size, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->shadow_history_count, 1);
+  for (uint32_t i = 0; i < 3; ++i) {
+    loom_amdgpu_sanitizer_race_require_data_register(
+        builder, descriptor_set, report->current_workgroup_ids[i], 1);
+    loom_amdgpu_sanitizer_race_require_data_register(
+        builder, descriptor_set, report->current_workitem_ids[i], 1);
+  }
+}
+
+iree_status_t loom_amdgpu_build_sanitizer_race_shadow_capacity_report_payload(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_feedback_packet_address_t* packet_address,
+    const loom_amdgpu_sanitizer_race_shadow_capacity_report_t* report,
+    loom_location_id_t location) {
+  loom_amdgpu_sanitizer_validate_shadow_capacity_report_values(
+      builder, descriptor_set, report);
+  const uint32_t payload_base = LOOM_AMDGPU_FEEDBACK_PACKET_BYTE_LENGTH;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_packet_store_u32_constant(
+      builder, descriptor_set, packet_address,
+      payload_base + LOOM_AMDGPU_TSAN_REPORT_RECORD_LENGTH_OFFSET,
+      LOOM_AMDGPU_TSAN_REPORT_BYTE_LENGTH, location));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_packet_store_u32_constant(
+      builder, descriptor_set, packet_address,
+      payload_base + LOOM_AMDGPU_TSAN_REPORT_ABI_VERSION_OFFSET,
+      LOOM_AMDGPU_TSAN_REPORT_ABI_VERSION, location));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_packet_store_u32_constant(
+      builder, descriptor_set, packet_address,
+      payload_base + LOOM_AMDGPU_TSAN_REPORT_CHECK_KIND_OFFSET,
+      LOOM_AMDGPU_TSAN_CHECK_KIND_SHADOW_CAPACITY, location));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_packet_store_u32_constant(
+      builder, descriptor_set, packet_address,
+      payload_base + LOOM_AMDGPU_TSAN_REPORT_FLAGS_OFFSET,
+      LOOM_AMDGPU_TSAN_REPORT_FLAG_NONE, location));
+
+  const struct {
+    uint32_t offset;
+    loom_value_id_t value;
+  } u64_fields[] = {
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_SHADOW_SIZE_OFFSET,
+       report->shadow_size},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_REQUIRED_SHADOW_END_OFFSET,
+       report->required_shadow_end},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_WORKGROUP_SHADOW_STRIDE_OFFSET,
+       report->workgroup_shadow_stride},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_WORKGROUP_ORDINAL_OFFSET,
+       report->workgroup_ordinal},
+  };
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(u64_fields); ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_packet_store_b64(
+        builder, descriptor_set, packet_address,
+        payload_base + u64_fields[i].offset, u64_fields[i].value, location));
+  }
+  const struct {
+    uint32_t offset;
+    loom_value_id_t value;
+  } u32_fields[] = {
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_LOCAL_MEMORY_SIZE_OFFSET,
+       report->workgroup_local_memory_size},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_SHADOW_CELL_SIZE_OFFSET,
+       report->shadow_cell_size},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_SHADOW_HISTORY_COUNT_OFFSET,
+       report->shadow_history_count},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_WORKGROUP_ID_X_OFFSET,
+       report->current_workgroup_ids[0]},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_WORKGROUP_ID_Y_OFFSET,
+       report->current_workgroup_ids[1]},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_WORKGROUP_ID_Z_OFFSET,
+       report->current_workgroup_ids[2]},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_WORKITEM_ID_X_OFFSET,
+       report->current_workitem_ids[0]},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_WORKITEM_ID_Y_OFFSET,
+       report->current_workitem_ids[1]},
+      {LOOM_AMDGPU_TSAN_REPORT_CAPACITY_WORKITEM_ID_Z_OFFSET,
+       report->current_workitem_ids[2]},
+  };
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(u32_fields); ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_packet_store_b32(
+        builder, descriptor_set, packet_address,
+        payload_base + u32_fields[i].offset, u32_fields[i].value, location));
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_packet_store_u32_constant(
+      builder, descriptor_set, packet_address,
+      payload_base + LOOM_AMDGPU_TSAN_REPORT_CAPACITY_RESERVED0_OFFSET, 0,
+      location));
+  for (uint32_t i = 0; i < 4; ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_packet_store_u64_constant(
+        builder, descriptor_set, packet_address,
+        payload_base + LOOM_AMDGPU_TSAN_REPORT_CAPACITY_RESERVED1_OFFSET +
+            i * sizeof(uint64_t),
+        0, location));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+loom_amdgpu_sanitizer_build_shadow_capacity_report_payload_callback(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_feedback_packet_address_t* packet_address,
+    const void* payload_context, loom_location_id_t location) {
+  return loom_amdgpu_build_sanitizer_race_shadow_capacity_report_payload(
+      builder, descriptor_set, packet_address,
+      (const loom_amdgpu_sanitizer_race_shadow_capacity_report_t*)
+          payload_context,
+      location);
+}
+
+iree_status_t loom_amdgpu_build_sanitizer_race_shadow_capacity_report_terminate(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    loom_symbol_ref_t feedback_config_symbol,
+    const loom_amdgpu_feedback_packet_source_t* source,
+    const loom_amdgpu_sanitizer_race_shadow_capacity_report_t* report,
+    loom_location_id_t location) {
+  loom_amdgpu_sanitizer_validate_shadow_capacity_report_values(
+      builder, descriptor_set, report);
+  const loom_amdgpu_feedback_packet_producer_t producer = {
+      .payload_byte_length = LOOM_AMDGPU_TSAN_REPORT_BYTE_LENGTH,
+      .packet_kind = LOOM_AMDGPU_FEEDBACK_PACKET_KIND_TSAN,
+      .packet_flags = LOOM_AMDGPU_FEEDBACK_PACKET_FLAG_ASYNC,
+      .source = source,
+      .build_payload =
+          loom_amdgpu_sanitizer_build_shadow_capacity_report_payload_callback,
+      .payload_context = report,
+  };
+  return loom_amdgpu_build_feedback_packet_producer_terminate(
+      builder, descriptor_set, feedback_config_symbol, &producer, location,
+      /*out_terminal_block=*/NULL);
+}
+
 static iree_status_t loom_amdgpu_sanitizer_build_race_report_payload_callback(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_feedback_packet_address_t* packet_address,

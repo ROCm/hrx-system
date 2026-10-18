@@ -70,6 +70,15 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare(
     amdf_gpu_kfd_buffer_t** buffer_state,
     amdf_gpu_kfd_buffer_result_t* out_result);
 
+// Prepares addressless residency for a fresh, exclusively imported DMA-BUF.
+// The descriptor is borrowed for this call; KFD retains its own reference.
+// Each independent owner must receive a different export identity, even when
+// the underlying pages are shared. No implicit RWX KFD mapping is installed.
+// Partial progress remains in buffer_state for the ordinary destroy path.
+amdf_status_t amdf_gpu_kfd_buffer_prepare_import(
+    amdf_gpu_umd_device_t* device, int descriptor, size_t byte_length,
+    amdf_gpu_kfd_buffer_t** buffer_state);
+
 // Creates one KFD allocation with stable mappings in the complete GPU group.
 // Failure rolls back locally and leaves both outputs unchanged. A terminal
 // native rollback failure leaks unreleased native resources and VA reservation;

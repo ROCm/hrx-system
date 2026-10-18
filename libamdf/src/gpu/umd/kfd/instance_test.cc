@@ -9,10 +9,12 @@
 #include <drm/amdgpu_drm.h>
 #include <fcntl.h>
 #include <linux/kfd_ioctl.h>
+#include <sys/ioctl.h>
 
 #include <algorithm>
 #include <cstdarg>
 #include <cstring>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -33,6 +35,14 @@ enum class Operation {
   kDeviceInfo,
   kAcquire,
   kReleaseBootstrap,
+  kAllocateSignalPage,
+  kMapSignalPage,
+  kUnmapSignalPage,
+  kFreeSignalPage,
+  kCreateMemoryEvent,
+  kCreateHardwareEvent,
+  kCreateSignalEvent,
+  kDestroyEvent,
   kClose,
 };
 
@@ -43,6 +53,8 @@ struct NativeState {
   bool fail_allocation = false;
   // One operation to fail, then return to normal operation.
   Operation failure = Operation::kNone;
+  // Error returned at the selected failure boundary.
+  int failure_errno = EIO;
   // Native ABI returned by the descriptor's version query.
   kfd_ioctl_get_version_args version = {1, 19};
   // Memory facts returned by the exact retained render connection.
@@ -64,6 +76,29 @@ struct NativeState {
   std::set<int> acquired;
   // Next synthetic descriptor, outside the test process's real descriptor set.
   int next_descriptor = 10000;
+  // Native event-page and event-ID ownership within this connection.
+  struct {
+    // GPU backing handle allocated once for the context.
+    uint64_t handle = 0;
+    // Backing installed by CREATE_EVENT, possibly owned by a foreign client.
+    uint64_t installed_handle = 0;
+    // Whether the failing signal create installed the page before failing.
+    bool install_before_failure = false;
+    // Whether a failed map/unmap changed its PTEs before final-sync failure.
+    bool mapping_before_failure = false;
+    // GPUs currently mapping the page, independent of final-sync success.
+    std::set<uint32_t> mapped;
+    // Prefix progress passed into each native mapping attempt.
+    std::vector<uint32_t> map_progress;
+    // Prefix progress passed into each native unmapping attempt.
+    std::vector<uint32_t> unmap_progress;
+    // Page handles supplied on signal-event creation attempts.
+    std::vector<uint64_t> create_offsets;
+    // Live event IDs and their native types.
+    std::map<uint32_t, uint32_t> ids;
+    // Next signal slot/ID supplied by the native model.
+    uint32_t next_id = 1;
+  } events;
 
   bool Record(Operation operation) {
     operations.push_back(operation);
@@ -71,7 +106,7 @@ struct NativeState {
       return true;
     }
     failure = Operation::kNone;
-    errno = EIO;
+    errno = failure_errno;
     return false;
   }
 
@@ -98,9 +133,12 @@ class KfdInstanceTest : public ::testing::Test {
   void TearDown() override {
     native_.failure = Operation::kNone;
     if (instance_ != nullptr) {
+      ReleaseSignals();
       EXPECT_EQ(amdf_gpu_umd_instance_destroy(instance_), AMDF_STATUS_OK);
     }
     EXPECT_TRUE(native_.descriptors.empty());
+    EXPECT_TRUE(native_.events.ids.empty());
+    EXPECT_TRUE(native_.events.mapped.empty());
     native_state = nullptr;
   }
 
@@ -135,14 +173,51 @@ class KfdInstanceTest : public ::testing::Test {
       topology = &local_topology;
     }
     topology->gpu_id = gpu_id;
-    return amdf_gpu_kfd_instance_prepare_vm(instance_, &endpoint, topology,
-                                            4096, out_descriptor);
+    auto* mutex = amdf_gpu_kfd_instance_memory_mutex(instance_);
+    EXPECT_EQ(pthread_mutex_lock(mutex), 0);
+    const auto status = amdf_gpu_kfd_instance_prepare_vm(
+        instance_, &endpoint, topology, 4096, out_descriptor);
+    EXPECT_EQ(pthread_mutex_unlock(mutex), 0);
+    return status;
+  }
+
+  void PrepareEventVm(uint32_t gpu_id, amdf_gpu_kfd_topology_t* topology) {
+    // The real host VA reservation must fit in the modeled GPU aperture.
+    native_.device_info.virtual_address_max = UINT64_C(1) << 48;
+    ASSERT_EQ(Prepare(), AMDF_STATUS_OK);
+    int descriptor = -1;
+    ASSERT_EQ(PrepareVm(gpu_id, &descriptor, topology), AMDF_STATUS_OK);
+  }
+
+  amdf_status_t CreateEvent(const amdf_gpu_kfd_topology_t& topology,
+                            amdf_gpu_kfd_event_info_t* out_info) {
+    auto* mutex = amdf_gpu_kfd_instance_memory_mutex(instance_);
+    EXPECT_EQ(pthread_mutex_lock(mutex), 0);
+    const auto status = amdf_gpu_kfd_instance_create_event(instance_, &topology,
+                                                           4096, out_info);
+    EXPECT_EQ(pthread_mutex_unlock(mutex), 0);
+    if (amdf_status_is_ok(status)) {
+      signals_.push_back(out_info->signal_id);
+    }
+    return status;
+  }
+
+  void ReleaseSignals() {
+    for (uint32_t id : signals_) {
+      kfd_ioctl_destroy_event_args destroy = {.event_id = id};
+      EXPECT_EQ(ioctl(amdf_gpu_kfd_instance_descriptor(instance_),
+                      AMDKFD_IOC_DESTROY_EVENT, &destroy),
+                0);
+    }
+    signals_.clear();
   }
 
   // Native dependencies, alive through instance teardown.
   NativeState native_;
   // Instance-owned native slot, including progress after preparation failure.
   amdf_gpu_umd_instance_t* instance_ = nullptr;
+  // Signal IDs transferred out of the instance and owned by this caller.
+  std::vector<uint32_t> signals_;
 };
 
 TEST_F(KfdInstanceTest, SharesOneContextAndExactPerGpuRenderBindings) {
@@ -403,6 +478,213 @@ TEST_F(KfdInstanceTest, FailedCloseNeverClosesConsumedDescriptorsAgain) {
   EXPECT_EQ(native_.Count(Operation::kClose), 2u);
 }
 
+TEST_F(KfdInstanceTest, EventBackingAndFaultSourcesAreSharedAcrossGpuBindings) {
+  amdf_gpu_kfd_topology_t first_topology = {};
+  amdf_gpu_kfd_topology_t second_topology = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &first_topology));
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(12, &second_topology));
+  amdf_gpu_kfd_event_info_t first = {};
+  amdf_gpu_kfd_event_info_t second = {};
+  amdf_gpu_kfd_event_info_t repeated = {};
+  ASSERT_EQ(CreateEvent(first_topology, &first), AMDF_STATUS_OK);
+  ASSERT_EQ(CreateEvent(second_topology, &second), AMDF_STATUS_OK);
+  ASSERT_EQ(CreateEvent(first_topology, &repeated), AMDF_STATUS_OK);
+  EXPECT_NE(first.signal_id, second.signal_id);
+  EXPECT_EQ(first.memory_exception_id, second.memory_exception_id);
+  EXPECT_EQ(first.hardware_exception_id, second.hardware_exception_id);
+  EXPECT_EQ(second.mailbox_address - first.mailbox_address, sizeof(uint64_t));
+  EXPECT_EQ(native_.Count(Operation::kAllocateSignalPage), 1u);
+  EXPECT_EQ(native_.Count(Operation::kMapSignalPage), 2u);
+  EXPECT_EQ(native_.Count(Operation::kCreateMemoryEvent), 1u);
+  EXPECT_EQ(native_.Count(Operation::kCreateHardwareEvent), 1u);
+  EXPECT_EQ(native_.events.create_offsets,
+            (std::vector<uint64_t>{native_.events.handle, 0, 0}));
+  ReleaseSignals();
+  ASSERT_EQ(amdf_gpu_umd_instance_destroy(instance_), AMDF_STATUS_OK);
+  instance_ = nullptr;
+  EXPECT_EQ(native_.Count(Operation::kUnmapSignalPage), 2u);
+  // KFD owns installed backing; FREE_MEMORY would fail with EPERM.
+  EXPECT_EQ(native_.Count(Operation::kFreeSignalPage), 0u);
+}
+
+TEST_F(KfdInstanceTest, EventPreparationFailuresPublishNoSignal) {
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+  amdf_gpu_kfd_event_info_t info = {.mailbox_address = 0x1234};
+  const auto original = info;
+  for (auto operation :
+       {Operation::kAllocateSignalPage, Operation::kMapSignalPage,
+        Operation::kCreateMemoryEvent, Operation::kCreateHardwareEvent}) {
+    native_.failure = operation;
+    EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(EIO));
+    EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
+  }
+  ASSERT_EQ(CreateEvent(topology, &info), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.Count(Operation::kAllocateSignalPage), 2u);
+  EXPECT_EQ(native_.Count(Operation::kMapSignalPage), 2u);
+  EXPECT_EQ(native_.Count(Operation::kCreateMemoryEvent), 2u);
+  EXPECT_EQ(native_.Count(Operation::kCreateHardwareEvent), 2u);
+}
+
+TEST_F(KfdInstanceTest, MappingRetryPreservesPteProgressThroughFinalSync) {
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+  native_.failure = Operation::kMapSignalPage;
+  native_.events.mapping_before_failure = true;
+  amdf_gpu_kfd_event_info_t info = {};
+  EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(EIO));
+  EXPECT_EQ(native_.events.mapped, (std::set<uint32_t>{11}));
+  ASSERT_EQ(CreateEvent(topology, &info), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.events.map_progress, (std::vector<uint32_t>{0, 1}));
+}
+
+TEST_F(KfdInstanceTest, EventOomBeforeInstallationRetriesTheSameBacking) {
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+  native_.failure = Operation::kCreateSignalEvent;
+  native_.failure_errno = ENOMEM;
+  amdf_gpu_kfd_event_info_t info = {.signal_id = 0x1234};
+  EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(ENOMEM));
+  EXPECT_EQ(info.signal_id, 0x1234u);
+  EXPECT_EQ(native_.events.installed_handle, 0u);
+  ASSERT_EQ(CreateEvent(topology, &info), AMDF_STATUS_OK);
+  EXPECT_EQ(
+      native_.events.create_offsets,
+      (std::vector<uint64_t>{native_.events.handle, native_.events.handle}));
+  EXPECT_EQ(native_.Count(Operation::kAllocateSignalPage), 1u);
+}
+
+TEST_F(KfdInstanceTest, EventOomAfterInstallationRecoversWithoutNewBacking) {
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+  native_.failure = Operation::kCreateSignalEvent;
+  native_.failure_errno = ENOMEM;
+  native_.events.install_before_failure = true;
+  amdf_gpu_kfd_event_info_t info = {.signal_id = 0x1234};
+  EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(ENOMEM));
+  EXPECT_EQ(info.signal_id, 0x1234u);
+  EXPECT_EQ(native_.events.installed_handle, native_.events.handle);
+  ASSERT_EQ(CreateEvent(topology, &info), AMDF_STATUS_OK);
+  EXPECT_EQ(
+      native_.events.create_offsets,
+      (std::vector<uint64_t>{native_.events.handle, native_.events.handle, 0}));
+  EXPECT_EQ(native_.Count(Operation::kAllocateSignalPage), 1u);
+  native_.failure = Operation::kCreateSignalEvent;
+  EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(ENOMEM));
+  ASSERT_EQ(CreateEvent(topology, &info), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.events.create_offsets,
+            (std::vector<uint64_t>{native_.events.handle, native_.events.handle,
+                                   0, 0, 0}));
+}
+
+TEST_F(KfdInstanceTest, ForeignSignalPageIsNeverAdopted) {
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+  // Another primary-context user installed different backing. Its existence
+  // never proves that our GPU mailbox addresses refer to its native page.
+  native_.events.installed_handle = 0xdead;
+  amdf_gpu_kfd_event_info_t info = {.signal_id = 0x1234};
+  for (uint32_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(EINVAL));
+    EXPECT_EQ(info.signal_id, 0x1234u);
+  }
+  EXPECT_EQ(native_.events.create_offsets,
+            (std::vector<uint64_t>{native_.events.handle, native_.events.handle,
+                                   native_.events.handle}));
+  // The foreign page is not our allocation; uninstalled backing remains
+  // freeable.
+  ASSERT_EQ(amdf_gpu_umd_instance_destroy(instance_), AMDF_STATUS_OK);
+  instance_ = nullptr;
+  EXPECT_EQ(native_.Count(Operation::kFreeSignalPage), 1u);
+}
+
+TEST_F(KfdInstanceTest, UninstalledEventBackingIsReleasedAtContextTeardown) {
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+  native_.failure = Operation::kCreateMemoryEvent;
+  amdf_gpu_kfd_event_info_t info = {};
+  EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(EIO));
+  ASSERT_EQ(amdf_gpu_umd_instance_destroy(instance_), AMDF_STATUS_OK);
+  instance_ = nullptr;
+  EXPECT_EQ(native_.Count(Operation::kFreeSignalPage), 1u);
+  EXPECT_EQ(native_.events.handle, 0u);
+}
+
+TEST_F(KfdInstanceTest, EventTeardownRetainsNativeOwnerAcrossFailures) {
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+  amdf_gpu_kfd_event_info_t info = {};
+  ASSERT_EQ(CreateEvent(topology, &info), AMDF_STATUS_OK);
+  ReleaseSignals();
+  native_.failure = Operation::kDestroyEvent;
+  EXPECT_EQ(amdf_gpu_umd_instance_destroy(instance_), amdf_linux_error(EIO));
+  EXPECT_TRUE(native_.closed.empty());
+  EXPECT_EQ(native_.Count(Operation::kUnmapSignalPage), 0u);
+  native_.failure = Operation::kUnmapSignalPage;
+  native_.events.mapping_before_failure = true;
+  EXPECT_EQ(amdf_gpu_umd_instance_destroy(instance_), amdf_linux_error(EIO));
+  EXPECT_TRUE(native_.closed.empty());
+  EXPECT_TRUE(native_.events.ids.empty());
+  EXPECT_TRUE(native_.events.mapped.empty());
+  ASSERT_EQ(amdf_gpu_umd_instance_destroy(instance_), AMDF_STATUS_OK);
+  instance_ = nullptr;
+  EXPECT_EQ(native_.events.unmap_progress, (std::vector<uint32_t>{0, 1}));
+}
+
+TEST_F(KfdInstanceTest, FailedEventMappingCanBeTornDownWithoutRecreation) {
+  for (bool mapped : {false, true}) {
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+    native_.failure = Operation::kMapSignalPage;
+    native_.events.mapping_before_failure = mapped;
+    amdf_gpu_kfd_event_info_t info = {};
+    EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(EIO));
+    ASSERT_EQ(amdf_gpu_umd_instance_destroy(instance_), AMDF_STATUS_OK);
+    instance_ = nullptr;
+    EXPECT_EQ(native_.events.handle, 0u);
+    EXPECT_TRUE(native_.events.mapped.empty());
+    EXPECT_EQ(native_.Count(Operation::kUnmapSignalPage), mapped ? 1u : 0u);
+    native_.operations.clear();
+  }
+}
+
+TEST_F(KfdInstanceTest, UninstalledBackingReleaseFailureKeepsContextAlive) {
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+  native_.failure = Operation::kCreateMemoryEvent;
+  amdf_gpu_kfd_event_info_t info = {};
+  EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(EIO));
+  native_.failure = Operation::kFreeSignalPage;
+  EXPECT_EQ(amdf_gpu_umd_instance_destroy(instance_), amdf_linux_error(EIO));
+  EXPECT_TRUE(native_.closed.empty());
+  EXPECT_TRUE(native_.events.mapped.empty());
+  EXPECT_NE(native_.events.handle, 0u);
+  ASSERT_EQ(amdf_gpu_umd_instance_destroy(instance_), AMDF_STATUS_OK);
+  instance_ = nullptr;
+  EXPECT_EQ(native_.Count(Operation::kUnmapSignalPage), 1u);
+  EXPECT_EQ(native_.Count(Operation::kFreeSignalPage), 2u);
+}
+
+TEST_F(KfdInstanceTest, AmbiguousInstallationEndsWithItsNativeContext) {
+  for (bool installed : {false, true}) {
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_NO_FATAL_FAILURE(PrepareEventVm(11, &topology));
+    native_.failure = Operation::kCreateSignalEvent;
+    native_.failure_errno = ENOMEM;
+    native_.events.install_before_failure = installed;
+    amdf_gpu_kfd_event_info_t info = {};
+    EXPECT_EQ(CreateEvent(topology, &info), amdf_linux_error(ENOMEM));
+    ASSERT_EQ(amdf_gpu_umd_instance_destroy(instance_), AMDF_STATUS_OK);
+    instance_ = nullptr;
+    EXPECT_EQ(native_.Count(Operation::kFreeSignalPage), 0u);
+    EXPECT_TRUE(native_.events.mapped.empty());
+    EXPECT_TRUE(native_.events.ids.empty());
+    // A secondary context's close reclaims installed and ordinary allocations.
+    native_.events.handle = 0;
+    native_.events.installed_handle = 0;
+  }
+}
+
 }  // namespace
 
 // Linker wrappers replace only dependencies of the unchanged instance object.
@@ -462,6 +744,115 @@ int __wrap_ioctl(int descriptor, unsigned long request, ...) {
     *reinterpret_cast<drm_amdgpu_info_device*>(query->return_pointer) =
         native_state->device_info;
     native_state->queried_descriptor = descriptor;
+    return 0;
+  }
+  auto& state = *native_state;
+  auto& events = state.events;
+  if (request == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU) {
+    auto& allocate =
+        *static_cast<kfd_ioctl_alloc_memory_of_gpu_args*>(argument);
+    EXPECT_EQ(allocate.size, KFD_SIGNAL_EVENT_LIMIT * sizeof(uint64_t));
+    EXPECT_EQ(allocate.va_addr % 4096, 0u);
+    EXPECT_EQ(allocate.flags, KFD_IOC_ALLOC_MEM_FLAGS_GTT |
+                                  KFD_IOC_ALLOC_MEM_FLAGS_COHERENT |
+                                  (UINT32_C(1) << 31));
+    if (!state.Record(Operation::kAllocateSignalPage)) {
+      return -1;
+    }
+    EXPECT_EQ(events.handle, 0u);
+    events.handle = 0x550000000b;
+    allocate.handle = events.handle;
+    return 0;
+  }
+  if (request == AMDKFD_IOC_MAP_MEMORY_TO_GPU) {
+    auto& map = *static_cast<kfd_ioctl_map_memory_to_gpu_args*>(argument);
+    EXPECT_EQ(map.handle, events.handle);
+    EXPECT_EQ(map.n_devices, 1u);
+    events.map_progress.push_back(map.n_success);
+    const bool success = state.Record(Operation::kMapSignalPage);
+    if (success || events.mapping_before_failure) {
+      const uint32_t gpu_id =
+          *reinterpret_cast<const uint32_t*>(map.device_ids_array_ptr);
+      if (map.n_success == 0) {
+        EXPECT_TRUE(events.mapped.insert(gpu_id).second);
+      }
+      map.n_success = 1;
+    }
+    return success ? 0 : -1;
+  }
+  if (request == AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU) {
+    auto& unmap = *static_cast<kfd_ioctl_unmap_memory_from_gpu_args*>(argument);
+    EXPECT_EQ(unmap.handle, events.handle);
+    EXPECT_EQ(unmap.n_devices, 1u);
+    events.unmap_progress.push_back(unmap.n_success);
+    const bool success = state.Record(Operation::kUnmapSignalPage);
+    if (success || events.mapping_before_failure) {
+      const uint32_t gpu_id =
+          *reinterpret_cast<const uint32_t*>(unmap.device_ids_array_ptr);
+      if (unmap.n_success == 0) {
+        EXPECT_EQ(events.mapped.erase(gpu_id), 1u);
+      }
+      unmap.n_success = 1;
+    }
+    return success ? 0 : -1;
+  }
+  if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU) {
+    auto& release = *static_cast<kfd_ioctl_free_memory_of_gpu_args*>(argument);
+    EXPECT_EQ(release.handle, events.handle);
+    EXPECT_TRUE(events.mapped.empty());
+    EXPECT_NE(events.installed_handle, release.handle);
+    if (!state.Record(Operation::kFreeSignalPage)) {
+      return -1;
+    }
+    events.handle = 0;
+    return 0;
+  }
+  if (request == AMDKFD_IOC_CREATE_EVENT) {
+    auto& create = *static_cast<kfd_ioctl_create_event_args*>(argument);
+    if (create.event_type == KFD_IOC_EVENT_SIGNAL) {
+      events.create_offsets.push_back(create.event_page_offset);
+      const bool success = state.Record(Operation::kCreateSignalEvent);
+      if (create.event_page_offset != 0) {
+        EXPECT_EQ(create.event_page_offset, events.handle);
+        if (events.installed_handle != 0) {
+          errno = EINVAL;
+          return -1;
+        }
+        if (success || events.install_before_failure) {
+          events.installed_handle = create.event_page_offset;
+        }
+      }
+      if (!success) {
+        return -1;
+      }
+      if (events.installed_handle == 0) {
+        errno = ENOMEM;
+        return -1;
+      }
+      EXPECT_EQ(create.auto_reset, 1u);
+    } else {
+      EXPECT_TRUE(create.event_type == KFD_IOC_EVENT_MEMORY ||
+                  create.event_type == KFD_IOC_EVENT_HW_EXCEPTION);
+      EXPECT_EQ(create.auto_reset, 0u);
+      const auto operation = create.event_type == KFD_IOC_EVENT_MEMORY
+                                 ? Operation::kCreateMemoryEvent
+                                 : Operation::kCreateHardwareEvent;
+      if (!state.Record(operation)) {
+        return -1;
+      }
+    }
+    create.event_id = events.next_id++;
+    create.event_slot_index = create.event_id;
+    create.event_trigger_data = create.event_id;
+    events.ids.emplace(create.event_id, create.event_type);
+    return 0;
+  }
+  if (request == AMDKFD_IOC_DESTROY_EVENT) {
+    auto& destroy = *static_cast<kfd_ioctl_destroy_event_args*>(argument);
+    if (!state.Record(Operation::kDestroyEvent)) {
+      return -1;
+    }
+    EXPECT_EQ(events.ids.erase(destroy.event_id), 1u);
     return 0;
   }
   EXPECT_EQ(request, AMDKFD_IOC_CREATE_PROCESS);

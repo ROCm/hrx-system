@@ -23,10 +23,15 @@ from loom.target.arch.spirv.ordinary_vector import (
 class ExtendedMathOperation:
     """One math primitive and its GLSL.std.450 instruction."""
 
+    # Scalar/vector source operation suffix.
     source_op_key: str
+    # Source operands consumed by the extended instruction, in wire order.
     operand_names: tuple[str, ...]
+    # GLSL.std.450 instruction spelling used in assembly.
     instruction_name: str
+    # Wire instruction enumerant owned by extended_instruction.h.
     instruction_c_enum: str
+    # Source permissions required by this native approximation.
     required_fastmath_flags: tuple[str, ...] = ()
     # Element formats admitted by this GLSL instruction.
     source_types: tuple[str, ...] = ("f32",)
@@ -38,7 +43,9 @@ class ExtendedMathOperation:
 class ExtendedMathInstruction:
     """One typed descriptor and packet emitted through OpExtInst."""
 
+    # Source semantics and extended-instruction identity.
     operation: ExtendedMathOperation
+    # Native scalar or vector carrier for this descriptor.
     value_type: OrdinaryVectorInstructionType
 
     @property
@@ -75,6 +82,22 @@ class ExtendedMathInstruction:
 
 
 EXTENDED_MATH_OPERATIONS = (
+    ExtendedMathOperation(
+        source_op_key="sinf",
+        operand_names=("input",),
+        instruction_name="Sin",
+        instruction_c_enum="LOOM_SPIRV_GLSL_STD_450_SIN",
+        required_fastmath_flags=("afn",),
+        source_types=("f16", "f32"),
+    ),
+    ExtendedMathOperation(
+        source_op_key="cosf",
+        operand_names=("input",),
+        instruction_name="Cos",
+        instruction_c_enum="LOOM_SPIRV_GLSL_STD_450_COS",
+        required_fastmath_flags=("afn",),
+        source_types=("f16", "f32"),
+    ),
     ExtendedMathOperation(
         source_op_key="expf",
         operand_names=("input",),

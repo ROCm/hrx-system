@@ -132,6 +132,7 @@ loom_cc_library(
     ::stream
     iree::base
     iree::base::internal::unicode
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -499,6 +500,7 @@ loom_cc_library(
     "stream.c"
   DEPS
     iree::base
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

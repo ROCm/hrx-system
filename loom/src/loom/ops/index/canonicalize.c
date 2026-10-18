@@ -1548,10 +1548,10 @@ iree_status_t loom_index_shrui_canonicalize(loom_op_t* op,
                                        loom_index_shrui_rhs(op));
 }
 
-iree_status_t loom_index_rotli_canonicalize(loom_op_t* op,
-                                            loom_rewriter_t* rewriter) {
-  loom_value_id_t lhs = loom_index_rotli_lhs(op);
-  loom_value_id_t rhs = loom_index_rotli_rhs(op);
+static iree_status_t loom_index_rotation_canonicalize(loom_op_t* op,
+                                                      loom_rewriter_t* rewriter,
+                                                      loom_value_id_t lhs,
+                                                      loom_value_id_t rhs) {
   int64_t amount = 0;
   if (!loom_index_query_exact_i64(rewriter, rhs, &amount)) {
     return iree_ok_status();
@@ -1575,38 +1575,20 @@ iree_status_t loom_index_rotli_canonicalize(loom_op_t* op,
   loom_value_id_t normalized_value = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_index_materialize_or_reuse_index_constant(
       op, rewriter, rhs, normalized_amount, &normalized_value));
-  return loom_index_replace_single_result_with_binary_op(
-      op, rewriter, LOOM_OP_INDEX_ROTLI, lhs, normalized_value);
+  return loom_rewriter_set_operand(rewriter, op, /*operand_index=*/1,
+                                   normalized_value);
+}
+
+iree_status_t loom_index_rotli_canonicalize(loom_op_t* op,
+                                            loom_rewriter_t* rewriter) {
+  return loom_index_rotation_canonicalize(
+      op, rewriter, loom_index_rotli_lhs(op), loom_index_rotli_rhs(op));
 }
 
 iree_status_t loom_index_rotri_canonicalize(loom_op_t* op,
                                             loom_rewriter_t* rewriter) {
-  loom_value_id_t lhs = loom_index_rotri_lhs(op);
-  loom_value_id_t rhs = loom_index_rotri_rhs(op);
-  int64_t amount = 0;
-  if (!loom_index_query_exact_i64(rewriter, rhs, &amount)) {
-    return iree_ok_status();
-  }
-  if (amount == 0) {
-    return loom_index_replace_single_result_with_value(op, rewriter, lhs);
-  }
-  int64_t normalized_amount = 0;
-  if (!loom_index_normalize_rotate_amount(rewriter, amount,
-                                          &normalized_amount)) {
-    return iree_ok_status();
-  }
-  if (normalized_amount == 0) {
-    return loom_index_replace_single_result_with_value(op, rewriter, lhs);
-  }
-  int32_t bitwidth = loom_index_rewriter_target_bitwidth(rewriter);
-  int64_t left_amount = bitwidth - normalized_amount;
-
-  loom_builder_set_before(&rewriter->builder, op);
-  loom_value_id_t left_amount_value = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_index_materialize_or_reuse_index_constant(
-      op, rewriter, LOOM_VALUE_ID_INVALID, left_amount, &left_amount_value));
-  return loom_index_replace_single_result_with_binary_op(
-      op, rewriter, LOOM_OP_INDEX_ROTLI, lhs, left_amount_value);
+  return loom_index_rotation_canonicalize(
+      op, rewriter, loom_index_rotri_lhs(op), loom_index_rotri_rhs(op));
 }
 
 //===----------------------------------------------------------------------===//

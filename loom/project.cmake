@@ -16,6 +16,16 @@ if(NOT DEFINED LOOM_BUILD)
     "Build Loom compiler libraries, tools, bindings, and tests." ON)
 endif()
 
+option(LOOM_LINK_SHARED_TOOLS
+  "Link LoomC tools to one shared compiler and its exact-build IREE runtime." OFF)
+if(LOOM_LINK_SHARED_TOOLS AND CMAKE_VERSION VERSION_LESS 3.27)
+  message(FATAL_ERROR "LOOM_LINK_SHARED_TOOLS requires CMake 3.27 or newer.")
+endif()
+if(LOOM_LINK_SHARED_TOOLS AND BUILD_SHARED_LIBS)
+  message(FATAL_ERROR
+    "LOOM_LINK_SHARED_TOOLS requires BUILD_SHARED_LIBS=OFF so the bundle owns its component implementations.")
+endif()
+
 option(LOOM_TARGET_DEFAULTS
   "Default value for dependency-satisfied Loom production targets." ON)
 if(NOT DEFINED LOOM_TARGET_AMDGPU_DEFAULT)

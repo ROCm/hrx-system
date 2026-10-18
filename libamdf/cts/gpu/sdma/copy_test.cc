@@ -26,15 +26,30 @@ class SdmaCopyTest : public GpuCommandTest {
         }) {}
 };
 
-TEST_F(SdmaCopyTest, LinearCopyCompletesBeforeFence) {
+class SdmaPayloadCopyTest
+    : public SdmaCopyTest,
+      public ::testing::WithParamInterface<amdf_memory_flags_t> {
+ protected:
+  void CreatePayload(amdf_memory_access_t access, uint64_t byte_length,
+                     GpuMemory** out_memory) {
+    ASSERT_NO_FATAL_FAILURE(
+        CreateMemory(access, byte_length, out_memory, GetParam()));
+  }
+};
+
+TEST_P(SdmaPayloadCopyTest, LinearCopyCompletesBeforeFence) {
   GpuMemory* source = nullptr;
   GpuMemory* target = nullptr;
   GpuMemory* completion = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateMemory(AMDF_MEMORY_ACCESS_READ, 4096, &source));
-  ASSERT_NO_FATAL_FAILURE(CreateMemory(
+  ASSERT_NO_FATAL_FAILURE(
+      CreatePayload(AMDF_MEMORY_ACCESS_READ, 4096, &source));
+  ASSERT_NO_FATAL_FAILURE(CreatePayload(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &target));
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion));
+  RecordProperty(
+      "payload_is_host_coherent",
+      (source->access_info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0);
   auto* input = static_cast<uint32_t*>(source->host.pointer);
   auto* output = static_cast<uint32_t*>(target->host.pointer);
   *static_cast<uint32_t*>(completion->host.pointer) = 0;
@@ -60,10 +75,16 @@ TEST_F(SdmaCopyTest, LinearCopyCompletesBeforeFence) {
     commands.ReleaseToSystem();
   }
   commands.Fence32(completion->device_address, 1);
+  for (const auto* memory : {source, target}) {
+    ASSERT_NO_FATAL_FAILURE(memory->TransferHostCache(
+        api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_FLUSH));
+  }
   ASSERT_NO_FATAL_FAILURE(
       queue->Publish(api_, gpu_api_, commands.word_count()));
   ASSERT_TRUE(GpuWaitEqual<uint32_t>(
       reinterpret_cast<uintptr_t>(completion->host.pointer), 1));
+  ASSERT_NO_FATAL_FAILURE(target->TransferHostCache(
+      api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
   // Capture every observation before diagnostics or retirement can intervene.
   std::array<uint32_t, kWordCount + 1> observed_output;
   std::array<uint32_t, kWordCount> observed_input;
@@ -80,7 +101,7 @@ TEST_F(SdmaCopyTest, LinearCopyCompletesBeforeFence) {
   ASSERT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
 }
 
-TEST_F(SdmaCopyTest, ByteTailsAndPageCrossingsPreserveSurroundingBytes) {
+TEST_P(SdmaPayloadCopyTest, ByteTailsAndPageCrossingsPreserveSurroundingBytes) {
   constexpr std::array<uint32_t, 6> kByteLengths = {1, 2, 3, 4, 31, 4101};
   constexpr uint64_t kSourceLength = 12288;
   constexpr uint64_t kTargetStride = 12288;
@@ -89,12 +110,15 @@ TEST_F(SdmaCopyTest, ByteTailsAndPageCrossingsPreserveSurroundingBytes) {
   GpuMemory* target = nullptr;
   GpuMemory* completion = nullptr;
   ASSERT_NO_FATAL_FAILURE(
-      CreateMemory(AMDF_MEMORY_ACCESS_READ, kSourceLength, &source));
+      CreatePayload(AMDF_MEMORY_ACCESS_READ, kSourceLength, &source));
   ASSERT_NO_FATAL_FAILURE(
-      CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                   kTargetLength, &target));
+      CreatePayload(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+                    kTargetLength, &target));
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion));
+  RecordProperty(
+      "payload_is_host_coherent",
+      (source->access_info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0);
   auto* input = static_cast<uint8_t*>(source->host.pointer);
   auto* output = static_cast<uint8_t*>(target->host.pointer);
   for (uint64_t i = 0; i < kSourceLength; ++i) {
@@ -128,10 +152,16 @@ TEST_F(SdmaCopyTest, ByteTailsAndPageCrossingsPreserveSurroundingBytes) {
     commands.ReleaseToSystem();
   }
   commands.Fence32(completion->device_address, 1);
+  for (const auto* memory : {source, target}) {
+    ASSERT_NO_FATAL_FAILURE(memory->TransferHostCache(
+        api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_FLUSH));
+  }
   ASSERT_NO_FATAL_FAILURE(
       queue->Publish(api_, gpu_api_, commands.word_count()));
   ASSERT_TRUE(GpuWaitEqual<uint32_t>(
       reinterpret_cast<uintptr_t>(completion->host.pointer), 1));
+  ASSERT_NO_FATAL_FAILURE(target->TransferHostCache(
+      api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
   // Capture every observation before diagnostics or retirement can intervene.
   std::memcpy(observed_output.data(), output, observed_output.size());
   std::memcpy(observed_input.data(), input, observed_input.size());
@@ -146,6 +176,13 @@ TEST_F(SdmaCopyTest, ByteTailsAndPageCrossingsPreserveSurroundingBytes) {
   // Nonfatal oracle failures still reach normal retirement.
   ASSERT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    PayloadPolicy, SdmaPayloadCopyTest,
+    ::testing::Values(amdf_memory_flags_t{0},
+                      amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT},
+                      amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                          AMDF_MEMORY_FLAG_QUEUE_STORAGE}));
 
 class SdmaDependencyTest : public SdmaCopyTest {};
 

@@ -17,13 +17,14 @@ namespace {
 
 void CreateStorage(const amdf_api_t* api, amdf_memory_scope_t* scope,
                    amdf_device_t* device, amdf_memory_access_t access,
-                   uint64_t byte_length, GpuMemory* memory) {
+                   uint64_t byte_length, GpuMemory* memory,
+                   amdf_memory_flags_t flags) {
   const amdf_memory_device_access_t attachment = {
       device,
       {
           .access = access,
-          .flags =
-              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+          .flags = flags | AMDF_MEMORY_FLAG_HOST_COHERENT |
+                   AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
       }};
   amdf_memory_create_info_t create = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
@@ -66,13 +67,15 @@ void Executable::Initialize(const amdf_api_t* api,
   ASSERT_NO_FATAL_FAILURE(
       CreateStorage(api, system_scope, device,
                     AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_EXECUTE,
-                    (code_byte_length + 4095u) & ~UINT64_C(4095), &code_));
-  ASSERT_NO_FATAL_FAILURE(CreateStorage(
-      api, system_scope, device,
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_EXECUTE, 4096, &commands_));
-  ASSERT_NO_FATAL_FAILURE(CreateStorage(
-      api, system_scope, device,
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion_));
+                    (code_byte_length + 4095u) & ~UINT64_C(4095), &code_, 0));
+  ASSERT_NO_FATAL_FAILURE(
+      CreateStorage(api, system_scope, device,
+                    AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_EXECUTE, 4096,
+                    &commands_, 0));
+  ASSERT_NO_FATAL_FAILURE(
+      CreateStorage(api, system_scope, device,
+                    AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096,
+                    &completion_, AMDF_MEMORY_FLAG_QUEUE_STORAGE));
   ASSERT_EQ(code_.device_address % 256, 0u);
   ASSERT_EQ(commands_.device_address % 4, 0u);
   ASSERT_LT(commands_.device_address, UINT64_C(1) << 48);

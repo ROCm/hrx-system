@@ -188,7 +188,8 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
   }
 
   void CreateJoint(amdf_memory_scope_t* scope, amdf_memory_class_t memory_class,
-                   uint64_t byte_length, JointMemory* memory) {
+                   uint64_t byte_length, JointMemory* memory,
+                   amdf_memory_flags_t flags = 0) {
     memory->scope = scope;
     const bool system = memory_class == AMDF_MEMORY_CLASS_SYSTEM;
     amdf_memory_scope_info_t scope_info = {
@@ -201,7 +202,7 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
       memory->accesses[i].device = devices_[i];
       memory->accesses[i].requirements = {
           .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+          .flags = flags | AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
                    (system ? AMDF_MEMORY_FLAG_HOST_COHERENT : UINT64_C(0)),
           .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
       };
@@ -329,8 +330,9 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
   }
 
   void InitializeControl() {
-    ASSERT_NO_FATAL_FAILURE(
-        CreateJoint(system_scope_, AMDF_MEMORY_CLASS_SYSTEM, 4096, &control_));
+    ASSERT_NO_FATAL_FAILURE(CreateJoint(system_scope_, AMDF_MEMORY_CLASS_SYSTEM,
+                                        4096, &control_,
+                                        AMDF_MEMORY_FLAG_QUEUE_STORAGE));
     if (IsSkipped()) {
       return;
     }

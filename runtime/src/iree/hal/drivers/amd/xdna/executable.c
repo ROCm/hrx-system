@@ -212,26 +212,29 @@ static void iree_hal_amd_xdna_executable_destroy(iree_hal_executable_t* base) {
 static iree_status_t iree_hal_amd_xdna_invocation_allocate(
     iree_hal_amd_xdna_function_t* function,
     iree_hal_amd_xdna_invocation_t** out_invocation) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   *out_invocation = NULL;
   const uint32_t count = function->record.allocation_use_count;
   iree_host_size_t size = 0, allocations_offset = 0, storage_offset = 0;
   iree_host_size_t binding_addresses_offset = 0;
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      sizeof(iree_hal_amd_xdna_invocation_t), &size,
-      IREE_STRUCT_FIELD_ALIGNED(
-          count, iree_hal_amd_xdna_owned_allocation_t,
-          iree_alignof(iree_hal_amd_xdna_owned_allocation_t),
-          &allocations_offset),
-      IREE_STRUCT_FIELD_ALIGNED(
-          count, iree_hal_amd_xdna_executable_storage_t,
-          iree_alignof(iree_hal_amd_xdna_executable_storage_t),
-          &storage_offset),
-      IREE_STRUCT_FIELD_ALIGNED(function->record.binding_count, uint64_t,
-                                iree_alignof(uint64_t),
-                                &binding_addresses_offset)));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, IREE_STRUCT_LAYOUT(
+              sizeof(iree_hal_amd_xdna_invocation_t), &size,
+              IREE_STRUCT_FIELD_ALIGNED(
+                  count, iree_hal_amd_xdna_owned_allocation_t,
+                  iree_alignof(iree_hal_amd_xdna_owned_allocation_t),
+                  &allocations_offset),
+              IREE_STRUCT_FIELD_ALIGNED(
+                  count, iree_hal_amd_xdna_executable_storage_t,
+                  iree_alignof(iree_hal_amd_xdna_executable_storage_t),
+                  &storage_offset),
+              IREE_STRUCT_FIELD_ALIGNED(function->record.binding_count,
+                                        uint64_t, iree_alignof(uint64_t),
+                                        &binding_addresses_offset)));
   iree_hal_amd_xdna_invocation_t* invocation = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(function->host_allocator, size,
-                                             (void**)&invocation));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_allocator_malloc(function->host_allocator, size,
+                                (void**)&invocation));
   invocation->function = function;
   invocation->allocations =
       (iree_hal_amd_xdna_owned_allocation_t*)((uint8_t*)invocation +
@@ -312,6 +315,7 @@ static iree_status_t iree_hal_amd_xdna_invocation_allocate(
   } else {
     iree_hal_amd_xdna_invocation_free(invocation);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -694,14 +698,23 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
     iree_hal_amd_xdna_executable_binding_t* bindings,
     iree_hal_amd_xdna_invocation_t** out_invocation,
     amdf_xdna_kernel_command_t* out_command) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE({
+    const iree_string_view_t name = iree_hal_amd_xdna_image_tables_entry_name(
+        iree_hal_amd_xdna_image_tables(function->image), &function->record);
+    IREE_TRACE_ZONE_APPEND_TEXT(z0, name.data, name.size);
+  });
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(
+      z0, ((iree_hal_amd_xdna_executable_t*)function->executable)->profile_id);
   *out_invocation = NULL;
-  IREE_RETURN_IF_ERROR(
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
       iree_hal_amd_xdna_function_resolve_binding_addresses(function, bindings));
   iree_hal_amd_xdna_invocation_t* invocation =
       iree_hal_amd_xdna_function_acquire_invocation(function, bindings);
   if (!invocation) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amd_xdna_invocation_allocate(function, &invocation));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_amd_xdna_invocation_allocate(function, &invocation));
     iree_slim_mutex_lock(&function->pool_mutex);
     invocation->next = function->invocations;
     function->invocations = invocation;
@@ -712,6 +725,9 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
       function->record.dynamic_relocation_count &&
       !iree_hal_amd_xdna_invocation_bindings_match(invocation, bindings);
   if (requires_patch) {
+    IREE_TRACE_ZONE_BEGIN_NAMED(z1, "iree_hal_amd_xdna_patch_bindings");
+    IREE_TRACE_ZONE_APPEND_VALUE_I64(z1,
+                                     function->record.dynamic_relocation_count);
     // The bytes cease to represent the prior tuple as soon as patching begins.
     // Leave the manifestation invalid unless all cache publication succeeds.
     invocation->prepared_bindings.valid = false;
@@ -745,6 +761,9 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
       }
       invocation->prepared_bindings.valid = true;
     }
+    IREE_TRACE_ZONE_END(z1);
+  } else {
+    IREE_TRACE_ZONE_APPEND_TEXT(z0, "bindings unchanged");
   }
   if (iree_status_is_ok(status)) {
     *out_invocation = invocation;
@@ -752,6 +771,7 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
   } else {
     iree_hal_amd_xdna_invocation_release(invocation);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -764,6 +784,7 @@ iree_status_t iree_hal_amd_xdna_invocation_prepare_measurement(
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "XDNA function has no declared timer interval");
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
   const uint8_t* command =
       invocation->storage[range->allocation_use].mapping.data +
       range->byte_offset;
@@ -771,8 +792,10 @@ iree_status_t iree_hal_amd_xdna_invocation_prepare_measurement(
       invocation->measurement;
   iree_byte_span_t changed = iree_byte_span_empty();
   if (!measurement) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        function->host_allocator, sizeof(*measurement), (void**)&measurement));
+    IREE_TRACE_ZONE_APPEND_TEXT(z0, "grow measurement storage");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_allocator_malloc(function->host_allocator,
+                                  sizeof(*measurement), (void**)&measurement));
     iree_status_t status = iree_hal_amd_xdna_command_arena_allocate_range(
         function->command_arena,
         range->byte_length + IREE_HAL_AMD_XDNA_MEASUREMENT_EXTRA_BYTES,
@@ -794,6 +817,7 @@ iree_status_t iree_hal_amd_xdna_invocation_prepare_measurement(
       iree_hal_amd_xdna_command_arena_release(function->command_arena,
                                               &measurement->allocation);
       iree_allocator_free(function->host_allocator, measurement);
+      IREE_TRACE_ZONE_END(z0);
       return status;
     }
     measurement->command = (amdf_xdna_kernel_command_t){
@@ -803,21 +827,25 @@ iree_status_t iree_hal_amd_xdna_invocation_prepare_measurement(
     };
     invocation->measurement = measurement;
   } else if (!measurement->bindings_valid) {
+    IREE_TRACE_ZONE_APPEND_TEXT(z0, "patch measured bindings");
     changed = iree_hal_amd_xdna_executable_measurement_patch(
         iree_hal_amd_xdna_image_tables(function->image), &function->record,
         range, command, measurement->allocation.contents.data);
   }
   if (changed.data_length) {
-    IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
-        function->context->api->host_mapping_cache_control(
-            measurement->allocation.mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
-            measurement->allocation.memory_byte_offset +
-                (changed.data - measurement->allocation.contents.data),
-            changed.data_length),
-        "host_mapping_cache_control(measurement)"));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, IREE_HAL_AMD_STATUS_FROM_AMDF(
+                function->context->api->host_mapping_cache_control(
+                    measurement->allocation.mapping,
+                    AMDF_HOST_CACHE_OPERATION_FLUSH,
+                    measurement->allocation.memory_byte_offset +
+                        (changed.data - measurement->allocation.contents.data),
+                    changed.data_length),
+                "host_mapping_cache_control(measurement)"));
   }
   measurement->bindings_valid = true;
   *out_command = measurement->command;
+  IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 

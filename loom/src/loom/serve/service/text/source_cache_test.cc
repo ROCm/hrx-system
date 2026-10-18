@@ -6,6 +6,8 @@
 
 #include <cerrno>
 
+#include "iree/base/internal/arena.h"
+#include "iree/vm/test_allocator.h"
 #include "loom/serve/media/image_codec.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 
@@ -15,6 +17,318 @@ using loom_serve::testing::text::Oracle;
 using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 using loom_serve::testing::text::SourceTextServiceTest;
 using loom_serve::testing::text::StalledClient;
+
+class UntaggedTextServiceTest : public SourceTextServiceTest {
+ protected:
+  loom_serve_text_options_t ModelOptions() const override {
+    auto options = SourceTextServiceTest::ModelOptions();
+    options.checkpoint_capacity = 0;
+    return options;
+  }
+};
+
+TEST_F(UntaggedTextServiceTest,
+       InterleavedContinuationsReuseRowsWithoutCheckpointHeadroom) {
+  Start();
+  const std::vector<std::string> prompts = {"abxa", std::string(60, 'b')};
+  std::vector<std::string> replies;
+  for (const auto& prompt : prompts) {
+    const auto response = Read(Send(Request(Message("user", prompt), 2)));
+    replies.push_back(Content(response));
+    EXPECT_EQ(replies.back(), Oracle::Complete(prompt, 2));
+    EXPECT_NE(response.find(R"("cached_tokens":0})"), std::string::npos);
+  }
+  // Two never-used rows are older than either retained history. Continuations
+  // must find their exact rows, without requiring a session header or a pin.
+  for (size_t i : {1u, 0u}) {
+    const auto response = Read(Send(Request(
+        Message("user", prompts[i]) + "," + Message("assistant", replies[i]) +
+            "," + Message("user", "b"),
+        2)));
+    EXPECT_EQ(Content(response),
+              Oracle::Complete(prompts[i] + replies[i] + "#b", 2));
+    EXPECT_NE(response.find("\"cached_tokens\":" +
+                            std::to_string(prompts[i].size() + 1) + "}"),
+              std::string::npos)
+        << response;
+  }
+}
+
+TEST_F(UntaggedTextServiceTest, NamedAndUntaggedHistoriesStayIndependent) {
+  Start();
+  const std::string named_prompt = "abxa";
+  const auto named_reply = Content(Read(Send(
+      Request(Message("user", named_prompt), 2), "X-Loom-Session: named\r\n")));
+  const auto named_history =
+      Message("user", named_prompt) + "," + Message("assistant", named_reply);
+  const auto anonymous =
+      Read(Send(Request(named_history + "," + Message("user", "b"), 2)));
+  EXPECT_EQ(Content(anonymous),
+            Oracle::Complete(named_prompt + named_reply + "#b", 2));
+  EXPECT_NE(anonymous.find(R"("cached_tokens":0})"), std::string::npos);
+
+  const std::string prompt = "bxxb";
+  const auto reply = Content(Read(Send(Request(Message("user", prompt), 2))));
+  const auto adopting = Read(
+      Send(Request(Message("user", prompt) + "," + Message("assistant", reply) +
+                       "," + Message("user", "b"),
+                   2),
+           "X-Loom-Session: new\r\n"));
+  EXPECT_EQ(Content(adopting), Oracle::Complete(prompt + reply + "#b", 2));
+  EXPECT_NE(adopting.find(R"("cached_tokens":0})"), std::string::npos);
+
+  const auto continued =
+      Read(Send(Request(named_history + "," + Message("user", "x"), 2),
+                "X-Loom-Session: named\r\n"));
+  EXPECT_EQ(Content(continued),
+            Oracle::Complete(named_prompt + named_reply + "#x", 2));
+  EXPECT_NE(continued.find(R"("cached_tokens":5})"), std::string::npos);
+}
+
+TEST_F(UntaggedTextServiceTest,
+       RejectedContinuationPreservesHistoryAndEditedHistoryReplays) {
+  Start();
+  const std::string prompt = "abxa";
+  const auto reply = Content(Read(Send(Request(Message("user", prompt), 2))));
+  const auto history =
+      Message("user", prompt) + "," + Message("assistant", reply);
+  const auto rejected =
+      Read(Send(Request(history + "," + Message("user", "?"), 2)));
+  EXPECT_EQ(rejected.find("HTTP/1.1 400"), 0u) << rejected;
+  const auto edited = Read(
+      Send(Request(Message("user", "xbxa") + "," + Message("assistant", reply) +
+                       "," + Message("user", "b"),
+                   2)));
+  EXPECT_EQ(Content(edited), Oracle::Complete("xbxa" + reply + "#b", 2));
+  EXPECT_NE(edited.find(R"("cached_tokens":0})"), std::string::npos);
+  const auto continued =
+      Read(Send(Request(history + "," + Message("user", "b"), 2)));
+  EXPECT_EQ(Content(continued), Oracle::Complete(prompt + reply + "#b", 2));
+  EXPECT_NE(continued.find(R"("cached_tokens":5})"), std::string::npos);
+
+  // Advancing an idle row is not an implicit checkpoint. A sibling branch at
+  // the old endpoint replays once the previous native state has advanced.
+  const auto rewind =
+      Read(Send(Request(history + "," + Message("user", "x"), 2)));
+  EXPECT_EQ(Content(rewind), Oracle::Complete(prompt + reply + "#x", 2));
+  EXPECT_NE(rewind.find(R"("cached_tokens":0})"), std::string::npos);
+}
+
+TEST_F(UntaggedTextServiceTest, ActiveAndCancelledCompletionsCannotBeReused) {
+  Start();
+  loom_serve::testing::StalledHttpClient active;
+  const std::string prompt = "abxa";
+  const auto reply = Oracle::Complete(prompt, 1);
+  ASSERT_NO_FATAL_FAILURE(active.Send(server_, "/v1/chat/completions",
+                                      Request(Message("user", prompt), 1)));
+  WaitModel("fixture-text",
+            R"("phase":"idle","queued_requests":0,"active_requests":1)");
+  const auto history =
+      Message("user", prompt) + "," + Message("assistant", reply);
+  const auto peer =
+      Read(Send(Request(history + "," + Message("user", "b"), 2)));
+  EXPECT_EQ(Content(peer), Oracle::Complete(prompt + reply + "#b", 2));
+  EXPECT_NE(peer.find(R"("cached_tokens":0})"), std::string::npos);
+  ASSERT_NO_FATAL_FAILURE(active.Close());
+  WaitModel("fixture-text",
+            R"("phase":"idle","queued_requests":0,"active_requests":0)");
+  const auto retry =
+      Read(Send(Request(history + "," + Message("user", "x"), 2)));
+  EXPECT_EQ(Content(retry), Oracle::Complete(prompt + reply + "#x", 2));
+  EXPECT_NE(retry.find(R"("cached_tokens":0})"), std::string::npos);
+}
+
+TEST_F(UntaggedTextServiceTest, LongestCompletedHistoryWins) {
+  Start();
+  const std::string prompt = "abxa";
+  loom_serve::testing::StalledHttpClient shorter;
+  ASSERT_NO_FATAL_FAILURE(shorter.Send(server_, "/v1/chat/completions",
+                                       Request(Message("user", prompt), 1)));
+  WaitModel("fixture-text",
+            R"("phase":"idle","queued_requests":0,"active_requests":1)");
+  const auto longer = Content(Read(Send(Request(Message("user", prompt), 2))));
+  EXPECT_EQ(longer, Oracle::Complete(prompt, 2));
+  EXPECT_EQ(Content(shorter.Read()), Oracle::Complete(prompt, 1));
+  ASSERT_NO_FATAL_FAILURE(shorter.Close());
+  WaitModel("fixture-text",
+            R"("phase":"idle","queued_requests":0,"active_requests":0)");
+  const auto response = Read(Send(Request(Message("user", prompt) + "," +
+                                              Message("assistant", longer) +
+                                              "," + Message("user", "b"),
+                                          2)));
+  EXPECT_EQ(Content(response), Oracle::Complete(prompt + longer + "#b", 2));
+  EXPECT_NE(response.find(R"("cached_tokens":5})"), std::string::npos);
+}
+
+TEST_F(UntaggedTextServiceTest, DisplacedHistoryReplaysWithoutExtraCache) {
+  Start();
+  const std::string prompt = "abxa";
+  const auto reply = Content(Read(Send(Request(Message("user", prompt), 2))));
+  for (const auto& other : {"baab", "xbxa", "babb", "xxab"}) {
+    EXPECT_EQ(Content(Read(Send(Request(Message("user", other), 2)))),
+              Oracle::Complete(other, 2));
+  }
+  const auto replay = Read(
+      Send(Request(Message("user", prompt) + "," + Message("assistant", reply) +
+                       "," + Message("user", "b"),
+                   2)));
+  EXPECT_EQ(Content(replay), Oracle::Complete(prompt + reply + "#b", 2));
+  EXPECT_NE(replay.find(R"("cached_tokens":0})"), std::string::npos);
+}
+
+TEST_F(SourceTextServiceTest, StreamingBatchesReuseScratchWithoutHeapChurn) {
+  const auto* policy = loom_serve_text_model_chat_policy(model_);
+  const std::string body = Request(Message("user", "a"), 32);
+  iree::vm::testing::CountingAllocator allocator;
+  loom_serve_text_chat_t chats[8] = {};
+  for (auto& chat : chats) {
+    IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+        policy, policy->name, iree_make_cstring_view(body.c_str()), 1, 32,
+        allocator.allocator(), &chat));
+    IREE_ASSERT_OK(iree_string_builder_reserve(&chat.output.content, 128));
+  }
+  const auto allocation_count = allocator.allocation_count();
+  const auto free_count = allocator.free_count();
+  const std::string response(32, 'b');
+  for (size_t length = 1; length <= response.size(); ++length) {
+    // Like the service, one batch owns an arena shared by all its rows. The
+    // next batch may run on a different worker and borrow the returned blocks.
+    iree_arena_allocator_t arena;
+    iree_arena_initialize(loom_serve_host_block_pool(host_), &arena);
+    for (auto& chat : chats) {
+      loom_serve_text_chat_output_t output;
+      IREE_ASSERT_OK(loom_serve_text_chat_output_next(
+          &chat, iree_make_string_view(response.data(), length),
+          LOOM_SERVE_TEXT_CHAT_OUTPUT_STREAMING, iree_arena_allocator(&arena),
+          &output));
+      EXPECT_TRUE(output.advanced);
+      EXPECT_EQ(output.kind, LOOM_SERVE_TEXT_CHAT_OUTPUT_CONTENT);
+      EXPECT_TRUE(iree_string_view_equal(output.text, IREE_SV("b")));
+    }
+    iree_arena_deinitialize(&arena);
+  }
+  EXPECT_EQ(allocator.allocation_count(), allocation_count);
+  EXPECT_EQ(allocator.free_count(), free_count);
+  for (auto& chat : chats) {
+    EXPECT_TRUE(iree_string_view_equal(
+        iree_string_builder_view(&chat.output.content),
+        iree_make_string_view(response.data(), response.size())));
+    loom_serve_text_chat_deinitialize(&chat);
+  }
+}
+
+TEST_F(SourceTextServiceTest,
+       CompletionAliasSurvivesBatchAndRequestRetirement) {
+  const auto* policy = loom_serve_text_model_chat_policy(model_);
+  const std::string body = Request(Message("user", "abx"), 4);
+  loom_serve_text_chat_t chat = {};
+  IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+      policy, policy->name, iree_make_cstring_view(body.c_str()), 1, 4,
+      host_allocator_, &chat));
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(loom_serve_host_block_pool(host_), &arena);
+  loom_serve_text_tool_calls_t tools;
+  loom_serve_text_tool_calls_initialize(host_allocator_, &tools);
+  loom_serve_text_chat_scratch_t scratch;
+  loom_serve_text_chat_scratch_initialize(host_allocator_, &scratch);
+  loom_serve_text_chat_completion_t completion = {};
+  // The fixture returns the prompt itself for an empty response. That source
+  // alias must keep owned storage, not retain a temporary argument wrapper.
+  IREE_ASSERT_OK(loom_serve_text_chat_complete(
+      &chat, iree_string_view_empty(), 1, &tools, &scratch,
+      iree_arena_allocator(&arena), &completion));
+  loom_serve_text_chat_deinitialize(&chat);
+  iree_arena_reset(&arena);
+  void* overwritten = nullptr;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 4096, &overwritten));
+  std::memset(overwritten, 0x5a, 4096);
+  EXPECT_TRUE(iree_string_view_equal(completion.transcript, IREE_SV("abx")));
+  EXPECT_TRUE(completion.reusable);
+  loom_serve_text_chat_completion_deinitialize(&completion);
+  loom_serve_text_chat_scratch_deinitialize(&scratch);
+  loom_serve_text_tool_calls_deinitialize(&tools);
+  iree_arena_deinitialize(&arena);
+}
+
+TEST_F(SourceTextServiceTest, OutputScratchFailureLeavesParserUnadvanced) {
+  const auto* policy = loom_serve_text_model_chat_policy(model_);
+  const std::string body = Request(Message("user", "a"), 4);
+  loom_serve_text_chat_t chat = {};
+  IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+      policy, policy->name, iree_make_cstring_view(body.c_str()), 1, 4,
+      host_allocator_, &chat));
+  iree::vm::testing::CountingAllocator allocator(1);
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(64 * 1024, allocator.allocator(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+  loom_serve_text_chat_output_t output;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_serve_text_chat_output_next(&chat, IREE_SV("b"),
+                                       LOOM_SERVE_TEXT_CHAT_OUTPUT_STREAMING,
+                                       iree_arena_allocator(&arena), &output));
+  EXPECT_EQ(chat.output.cursor, 0u);
+  EXPECT_EQ(iree_string_builder_size(&chat.output.content), 0u);
+  EXPECT_FALSE(output.advanced);
+  iree_arena_reset(&arena);
+  IREE_ASSERT_OK(loom_serve_text_chat_output_next(
+      &chat, IREE_SV("b"), LOOM_SERVE_TEXT_CHAT_OUTPUT_STREAMING,
+      iree_arena_allocator(&arena), &output));
+  EXPECT_TRUE(output.advanced);
+  EXPECT_TRUE(iree_string_view_equal(output.text, IREE_SV("b")));
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+  loom_serve_text_chat_deinitialize(&chat);
+}
+
+TEST_F(SourceTextServiceTest, CompletionFormattingReusesCapacityAcrossRows) {
+  const auto* policy = loom_serve_text_model_chat_policy(model_);
+  const std::string body = Request(Message("user", "a"), 4);
+  iree::vm::testing::CountingAllocator allocator;
+  loom_serve_text_chat_scratch_t scratch;
+  loom_serve_text_chat_scratch_initialize(allocator.allocator(), &scratch);
+  loom_serve_text_tool_calls_t tools;
+  loom_serve_text_tool_calls_initialize(allocator.allocator(), &tools);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(loom_serve_host_block_pool(host_), &arena);
+  iree_host_size_t warm_allocations = 0;
+  for (size_t row = 0; row < 8; ++row) {
+    loom_serve_text_chat_t chat = {};
+    IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+        policy, policy->name, iree_make_cstring_view(body.c_str()), row + 1, 4,
+        host_allocator_, &chat));
+    // Prior-row formatting must not leak into the next row, even when its
+    // source parser returns no calls and never touches these builders itself.
+    IREE_ASSERT_OK(iree_string_builder_append_cstring(&scratch.arguments,
+                                                      "prior arguments"));
+    IREE_ASSERT_OK(iree_string_builder_append_cstring(&scratch.rendered,
+                                                      "prior tool calls"));
+    IREE_ASSERT_OK(loom_serve_text_tool_calls_append(
+        &tools, row + 1, IREE_SV("prior"), IREE_SV("{}")));
+    loom_serve_text_chat_completion_t completion = {};
+    IREE_ASSERT_OK(loom_serve_text_chat_complete(
+        &chat, IREE_SV("b"), row + 1, &tools, &scratch,
+        iree_arena_allocator(&arena), &completion));
+    if (row == 0) {
+      warm_allocations = allocator.allocation_count();
+    }
+    EXPECT_EQ(allocator.allocation_count(), warm_allocations);
+    EXPECT_EQ(allocator.free_count(), 0u);
+    EXPECT_EQ(tools.count, 0u);
+    EXPECT_TRUE(iree_string_view_equal(
+        iree_string_builder_view(&scratch.parsed), IREE_SV("[]")));
+    EXPECT_EQ(iree_string_builder_size(&scratch.rendered), 0u);
+    EXPECT_EQ(iree_string_builder_size(&scratch.arguments), 0u);
+    loom_serve_text_chat_deinitialize(&chat);
+    iree_arena_reset(&arena);
+    EXPECT_TRUE(iree_string_view_equal(completion.transcript, IREE_SV("ab")));
+    loom_serve_text_chat_completion_deinitialize(&completion);
+  }
+  loom_serve_text_chat_scratch_deinitialize(&scratch);
+  loom_serve_text_tool_calls_deinitialize(&tools);
+  iree_arena_deinitialize(&arena);
+}
 
 TEST_F(SourceTextServiceTest,
        PreparedInputSurvivesScratchReuseAndHistoryEviction) {
@@ -33,9 +347,12 @@ TEST_F(SourceTextServiceTest,
       host_allocator_, &next));
   loom_serve_text_tool_calls_t tools;
   loom_serve_text_tool_calls_initialize(host_allocator_, &tools);
+  loom_serve_text_chat_scratch_t completion_scratch;
+  loom_serve_text_chat_scratch_initialize(host_allocator_, &completion_scratch);
   loom_serve_text_chat_completion_t completion = {};
   IREE_ASSERT_OK(loom_serve_text_chat_complete(&first, IREE_SV("b"), 1, &tools,
-                                               &completion));
+                                               &completion_scratch,
+                                               host_allocator_, &completion));
   const loom_serve_text_input_prefix_t prefix = {
       .completion = &completion,
       .position = 1,
@@ -85,6 +402,7 @@ TEST_F(SourceTextServiceTest,
   loom_serve_text_chat_deinitialize(&next);
   loom_serve_text_chat_deinitialize(&first);
   loom_serve_text_tool_calls_deinitialize(&tools);
+  loom_serve_text_chat_scratch_deinitialize(&completion_scratch);
 }
 
 TEST_F(RegisteredSourceTextServiceTest,
@@ -562,9 +880,12 @@ TEST_F(SourceTextServiceTest, RetainedHistoryRequiresExactOrderedMedia) {
 
   loom_serve_text_tool_calls_t tools;
   loom_serve_text_tool_calls_initialize(host_allocator_, &tools);
+  loom_serve_text_chat_scratch_t completion_scratch;
+  loom_serve_text_chat_scratch_initialize(host_allocator_, &completion_scratch);
   loom_serve_text_chat_completion_t completion = {};
   IREE_ASSERT_OK(loom_serve_text_chat_complete(&first, IREE_SV("b"), 10, &tools,
-                                               &completion));
+                                               &completion_scratch,
+                                               host_allocator_, &completion));
   loom_serve_text_chat_completion_t retained = {};
   loom_serve_text_chat_completion_retain(&completion, &retained);
   loom_serve_text_chat_completion_deinitialize(&completion);
@@ -599,6 +920,7 @@ TEST_F(SourceTextServiceTest, RetainedHistoryRequiresExactOrderedMedia) {
   loom_serve_text_input_deinitialize(&input, host_allocator_);
   loom_serve_text_chat_completion_deinitialize(&retained);
   loom_serve_text_tool_calls_deinitialize(&tools);
+  loom_serve_text_chat_scratch_deinitialize(&completion_scratch);
   loom_serve_text_chat_deinitialize(&different_placement);
   loom_serve_text_chat_deinitialize(&different_detail);
   loom_serve_text_chat_deinitialize(&different_image);

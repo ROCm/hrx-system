@@ -214,6 +214,35 @@ unhandled_rule(name = "must_not_disappear")
                 repo_root=str(repo_root),
             )
 
+    def test_loaded_objc_library_requires_explicit_cmake_projection(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@hrx": ""})
+        build = """
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
+
+objc_library(
+    name = "native_activity",
+    non_arc_srcs = ["activity.m"],
+    tags = ["skip-bazel_to_cmake"],
+)
+"""
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            build,
+            repo_cfg,
+            str(repo_root / "synthetic"),
+            repo_root=str(repo_root),
+        )
+        self.assertNotIn("native_activity", cmake)
+        with self.assertRaisesRegex(
+            NotImplementedError, "objc_library requires an explicit CMake projection"
+        ):
+            bazel_to_cmake_converter.convert_build_file(
+                build.replace('"skip-bazel_to_cmake"', ""),
+                repo_cfg,
+                str(repo_root / "synthetic"),
+                repo_root=str(repo_root),
+            )
+
     def test_loaded_shell_test_honors_explicit_conversion_skip(self):
         repo_root = Path(__file__).resolve().parents[2]
         repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@hrx": ""})

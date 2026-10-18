@@ -157,6 +157,10 @@ function(iree_cc_binary)
   )
   iree_add_data_dependencies(NAME ${_NAME} DATA ${_RULE_DATA}
     OUT_TARGET_DATA _DATA_TARGETS)
+  # Retain the declared link graph for final shared-library composition. The
+  # generated LINK_LIBRARIES also contains object and usage-only expressions.
+  set_property(TARGET ${_NAME} PROPERTY IREE_CC_DEPS "${_RULE_DEPS};${IREE_DEFAULT_LINK_LIBRARIES}")
+  set_property(TARGET ${_NAME} PROPERTY IREE_CC_LINKOPTS "${_RULE_LINKOPTS}")
   iree_target_sanitizer_suppressions("${_NAME}"
     DEPS ${_RULE_DEPS} ${_DATA_TARGETS})
 

@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 41
+#define LOOM_BYTECODE_FORMAT_VERSION 42
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -1223,6 +1223,10 @@ enum loom_bytecode_symbol_flag_bits_e {
   // of source visibility so an explicit export contract can export a private
   // func-like definition without making it a public source symbol.
   LOOM_BYTECODE_SYMBOL_FLAG_EXPORT = 1u << 7,
+  // Concrete definition may coalesce with same-named link-once definitions.
+  // The producer promises equivalent semantics; linking validates contracts
+  // but does not compare bodies.
+  LOOM_BYTECODE_SYMBOL_FLAG_LINK_ONCE = 1u << 8,
 };
 typedef uint16_t loom_bytecode_symbol_flags_t;
 

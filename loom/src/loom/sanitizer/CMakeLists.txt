@@ -18,6 +18,7 @@ loom_cc_library(
     "options.c"
   DEPS
     iree::base
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

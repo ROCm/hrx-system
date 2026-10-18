@@ -5,11 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_config_compatible_with")
+load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 
 package(default_visibility = ["//visibility:public"])
 
-loom_cc_binary(
+loomc_cc_binary(
     name = "loom-import-cxx",
     srcs = ["loom-import-cxx.c"],
     deps = [

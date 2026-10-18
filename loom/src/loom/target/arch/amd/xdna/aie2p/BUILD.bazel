@@ -542,9 +542,13 @@ loom_cc_library(
         "pipeline/configuration.c",
         "pipeline/dma.c",
         "pipeline/native.c",
+        "pipeline/switch.c",
         "pipeline/transport.c",
     ],
-    hdrs = ["pipeline/native.h"],
+    hdrs = [
+        "pipeline/native.h",
+        "pipeline/switch.h",
+    ],
     deps = [
         ":array_abi_layout",
         ":array_plan",
@@ -1247,6 +1251,23 @@ loom_cc_test(
         "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/target/arch/amd/xdna:array_facts",
         "//loom/src/loom/target/arch/amd/xdna:array_registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "pipeline_switch_test",
+    srcs = ["pipeline/switch_test.cc"],
+    deps = [
+        ":array_plan",
+        ":pipeline_native",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target/arch/amd/xdna:array_facts",
+        "//loom/src/loom/target/arch/amd/xdna:array_registers",
+        "//loom/src/loom/testing:diagnostic_matchers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

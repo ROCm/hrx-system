@@ -79,6 +79,12 @@ amdf_status_t amdf_platform_endpoint_open(
        !amdf_endpoint_id_is_equal(id, &endpoint_info.id))) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
   }
+  if (amdf_status_is_ok(status)) {
+    status = amdf_windows_query_host_locality(
+        &instance->host_locality, &instance->kmt, endpoint->adapter,
+        physical_adapter_index, &endpoint->host_numa_node,
+        instance->host_allocator);
+  }
 
   if (amdf_status_is_ok(status)) {
     *out_info = endpoint_info;
@@ -93,6 +99,11 @@ amdf_status_t amdf_platform_endpoint_open(
     amdf_free(instance->host_allocator, endpoint);
   }
   return status;
+}
+
+uint32_t amdf_platform_endpoint_host_numa_node(
+    const amdf_platform_endpoint_t* endpoint) {
+  return endpoint->host_numa_node;
 }
 
 amdf_queue_publication_modes_t

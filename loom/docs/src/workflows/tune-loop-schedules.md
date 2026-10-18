@@ -664,10 +664,13 @@ and cancellation cases, then compare the two named workloads:
 ```shell
 iree-test-loom routed-row-combine.loom --device=amdgpu --sanitizer=access
 
-iree-benchmark-loom routed-row-combine.loom \
-  --compare=@routed_row_combine_serial_n8_t256,@routed_row_combine_pipelined_n8_t256 \
-  --device=amdgpu --measure=dispatch_complete --batch-size=64 \
-  --interleave=ABABA --output=routed-comparison.json
+for policy in serial pipelined; do
+  iree-benchmark-loom routed-row-combine.loom \
+    --benchmark="@routed_row_combine_${policy}_workloads" --sample=2 \
+    --device=amdgpu --measure=dispatch_complete --batch-size=64 \
+    --iterations=16 --warmup-iterations=3 \
+    --output="routed-${policy}.json"
+done
 
 loom-compile routed-row-combine.loom --root=@routed_row_combine_pipelined \
   --target=amdgpu:gfx11-generic --format=amdgpu-hsaco \
@@ -677,12 +680,16 @@ loom-compile-report show routed.report.json
 loom-compile-report suggest routed.report.json
 ```
 
-The `n8_t1`, `n8_t16` and `n8_t256` rows select one, sixteen and 256 tokens
-with eight routes each; `n32` rows exercise a longer recurrence. Each benchmark
-case has one dispatch and an independent analytic expectation. Compare final
-register use, code size, copy waits and JIT cost alongside device time. A partial
-wait can preserve overlap within a body while backedge copies still drain it;
-neither that wait count nor a deeper queue predicts which policy wins.
+Each policy's workload group generates six samples: one, sixteen and 256 tokens
+with eight routes each, followed by the same token counts with 32 routes.
+`--sample=2` selects eight routes and 256 tokens. Each sample invokes one kernel;
+input generation stays outside the measured invocation. Correctness scenarios
+check the ordered recurrence against an independent oracle. Scenario policies
+run in separate invocations; keep machine conditions matched when comparing
+the saved measurements. Compare final register use, code size, copy waits and
+JIT cost alongside device time. A partial wait can preserve overlap within a
+body while backedge copies still drain it; neither that wait count nor a deeper
+queue predicts which policy wins.
 
 ## Pipeline cooperative paged attention
 
@@ -794,11 +801,13 @@ order. These values belong to the caller's workload and target policy.
 ```shell
 iree-test-loom sparse-token-attention.loom --device=amdgpu --sanitizer=access
 
-iree-benchmark-loom sparse-token-attention.loom \
-  --compare=@sparse_token_attention_serial_n128_i256,@sparse_token_attention_pipelined_n128_i256 \
-  --device=amdgpu --measure=dispatch_complete --batch-size=8 \
-  --iterations=16 --warmup-iterations=3 --input-ring-count=1 \
-  --interleave=ABABA --repetitions=2 --output=sparse-comparison.json
+for policy in serial pipelined; do
+  iree-benchmark-loom sparse-token-attention.loom \
+    --benchmark="@sparse_token_attention_${policy}_workloads" --sample=2 \
+    --device=amdgpu --measure=dispatch_complete --batch-size=8 \
+    --iterations=16 --warmup-iterations=3 \
+    --output="sparse-${policy}.json"
+done
 
 loom-compile sparse-token-attention.loom \
   --root=@sparse_token_attention_pipelined --target=amdgpu:gfx1151 \
@@ -817,8 +826,11 @@ can form a payload address, while future K/V loads can overlap the current
 score reduction and PV update. Queue copies can still require completion at
 the backedge. Compare device time, register use, code size and JIT cost at
 matched unroll factors; a larger depth alone does not establish useful overlap.
-The `n128`/`n1024` and `i1`/`i16`/`i256` benchmark suffixes vary selected-token
-and query counts without changing the cache footprint.
+Each workload group generates six samples: 128-token prefixes at 1, 16, and
+256 queries, followed by 1024-token prefixes at the same query counts. The
+cache footprint stays fixed. `--sample=2` selects 128 tokens and 256 queries
+for both policies. Scenario policies run in separate invocations; keep machine
+conditions matched when comparing the saved measurements.
 
 ## Share K/V loads across query heads
 
@@ -850,11 +862,13 @@ workgroups. All callers take policy values through template arguments.
 ```shell
 iree-test-loom grouped-paged-attention.loom --device=amdgpu --sanitizer=access
 
-iree-benchmark-loom grouped-paged-attention.loom \
-  --compare=@grouped_paged_attention_independent_n128_p1024,@grouped_paged_attention_shared_n128_p1024 \
-  --device=amdgpu --measure=dispatch_complete --batch-size=8 \
-  --iterations=16 --warmup-iterations=3 --input-ring-count=1 \
-  --interleave=ABABA --repetitions=2 --output=grouped-comparison.json
+for policy in independent shared; do
+  iree-benchmark-loom grouped-paged-attention.loom \
+    --benchmark="@grouped_paged_attention_${policy}_workloads" --sample=2 \
+    --device=amdgpu --measure=dispatch_complete --batch-size=8 \
+    --iterations=16 --warmup-iterations=3 \
+    --output="grouped-${policy}.json"
+done
 
 loom-compile grouped-paged-attention.loom \
   --root=@grouped_paged_attention_shared --target=amdgpu:gfx1151 \
@@ -864,8 +878,11 @@ loom-compile-report show grouped.report.json
 loom-compile-report suggest grouped.report.json
 ```
 
-The `n128`/`n1024` and `p1`/`p128`/`p1024` rows vary tokens and query pairs
-over the same 64 MiB K/V allocation. Each timing case launches one kernel.
+Each workload group generates six samples: 128-token prefixes at 1, 128, and
+1024 query pairs, followed by 1024-token prefixes at the same pair counts.
+`--sample=2` selects 128 tokens and 1024 pairs over the same 64 MiB K/V
+allocation. Each timing sample launches one kernel. As with sparse attention,
+measure the scenario policies separately under matched machine conditions.
 Independent analytic checks cover both states and all output channels, including
 empty heads, unequal lengths, absent pages and repeated pages. Varied queries
 and pair-owned tables distinguish identity; minimal backing exposes extra reads.

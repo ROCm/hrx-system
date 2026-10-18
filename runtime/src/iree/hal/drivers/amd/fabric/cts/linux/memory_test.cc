@@ -132,6 +132,7 @@ void FabricHostNumaMemoryTest::RunPlacement(bool with_gpu) {
     }
     ASSERT_EQ(status, AMDF_STATUS_OK);
     placement_supported |=
+        amdf_status_is_ok(profile.availability) &&
         (profile.roles & AMDF_MEMORY_PROFILE_ROLE_CREATE) &&
         (profile.allocation.placement_kinds &
          (UINT32_C(1) << AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA));

@@ -11,16 +11,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from loom.target.arch.x86 import native_vector as native
-from loom.target.arch.x86.vector_encoding import (
-    VectorEncodingPrefix,
-    VectorMachineInstruction,
-)
+from loom.target.arch.x86.vector_encoding import VectorMachineInstruction
 from loom.target.arch.x86.vector_families import (
     AVX512_BITWISE_FAMILIES,
     AVX512_DIRECT_BROADCAST_VECTOR_BIT_WIDTHS,
     AVX512_FLOAT_BINARY_FAMILIES,
     AVX512_FLOAT_COMPARE_MNEMONICS,
     AVX512_FLOAT_FMA_MNEMONICS,
+    AVX512_FLOAT_INTEGER_I32_FORMS,
+    AVX512_FLOAT_INTEGER_I64_FORMS,
     AVX512_FLOAT_ROOT_FAMILIES,
     AVX512_INTEGER_BINARY_FAMILIES,
     AVX512_INTEGER_COMPARE_MNEMONICS,
@@ -94,6 +93,7 @@ from .common import (
     _SCHEDULE_VECTOR_I32_ZMM,
     _TWO_LANE_IMMEDIATE,
     _asm,
+    _avx512_descriptor,
     _gpr32_operand,
     _gpr64_operand,
     _gpr64_result,
@@ -112,30 +112,24 @@ from .common import (
     _vector_result,
     _vector_splat_descriptor,
     _vector_zero_descriptor,
+    _vex_descriptor,
     _xmm_operand,
     _xmm_result,
     _zmm_operand,
     _zmm_result,
 )
 from .float_conversion import float_conversion_descriptors
+from .float_integer import (
+    scalar_float_integer_descriptors,
+    vector_float_integer_descriptors,
+)
 from .half_conversion import half_conversion_descriptors
 from .integer_float import integer_float_descriptors
+from .integer_rotation import X86_AVX512_ROTATION_DESCRIPTORS
 from .memory import memory_descriptors
 from .scalar import X86_SCALAR_DESCRIPTOR_SET
 
 _REGISTER_SUFFIXES = {64: "xmm", 128: "xmm", 256: "ymm", 512: "zmm"}
-
-
-def _evex_descriptor(
-    descriptor: Descriptor, instruction: VectorMachineInstruction
-) -> Descriptor:
-    return instruction.bind(descriptor, VectorEncodingPrefix.EVEX)
-
-
-def _vex_descriptor(
-    descriptor: Descriptor, instruction: VectorMachineInstruction
-) -> Descriptor:
-    return instruction.bind(descriptor, VectorEncodingPrefix.VEX)
 
 
 def _direct_broadcast_asm_mnemonic(
@@ -159,7 +153,7 @@ def _zmm_widen_descriptor(
     instruction: VectorMachineInstruction,
 ) -> Descriptor:
     source_suffix = _REGISTER_SUFFIXES[source_bit_width]
-    return _evex_descriptor(
+    return _avx512_descriptor(
         Descriptor(
             key=f"x86.avx512.{mnemonic}.zmm.{source_suffix}",
             mnemonic=mnemonic,
@@ -179,6 +173,7 @@ def _zmm_widen_descriptor(
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         instruction,
+        scalar=False,
     )
 
 
@@ -194,7 +189,7 @@ def _vector_narrow_descriptor(
     source_suffix = _REGISTER_SUFFIXES[source_vector_bit_width]
     result_suffix = _REGISTER_SUFFIXES[result_vector_bit_width]
     lane_count = source_vector_bit_width // family.source.bit_width
-    return _evex_descriptor(
+    return _avx512_descriptor(
         Descriptor(
             key=(f"x86.avx512.{family.mnemonic}.{result_suffix}.{source_suffix}"),
             mnemonic=family.mnemonic,
@@ -215,6 +210,7 @@ def _vector_narrow_descriptor(
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         instruction,
+        scalar=False,
     )
 
 
@@ -231,7 +227,7 @@ def _predicate_conversion_descriptor(
     mnemonic = (
         f"vpmovm2{element_suffix}" if mask_to_carrier else f"vpmov{element_suffix}2m"
     )
-    return _evex_descriptor(
+    return _avx512_descriptor(
         Descriptor(
             key=(
                 f"x86.avx512.{mnemonic}.{register_suffix}.k"
@@ -262,6 +258,7 @@ def _predicate_conversion_descriptor(
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         instruction,
+        scalar=False,
     )
 
 
@@ -286,7 +283,7 @@ def _mask_move_descriptor(
         schedule_class=_SCHEDULE_MASK,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
-    return instruction.bind(descriptor, VectorEncodingPrefix.VEX)
+    return _vex_descriptor(descriptor, instruction)
 
 
 X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
@@ -583,10 +580,24 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
     enum_domains=X86_SCALAR_DESCRIPTOR_SET.enum_domains,
     descriptors=(
         *X86_AVX2_DESCRIPTORS,
+        *X86_AVX512_ROTATION_DESCRIPTORS,
         *integer_float_descriptors(unsigned=True),
+        *scalar_float_integer_descriptors(unsigned=True),
+        *vector_float_integer_descriptors(
+            AVX512_FLOAT_INTEGER_I32_FORMS[-2:], unsigned=False, evex=True
+        ),
+        *vector_float_integer_descriptors(
+            AVX512_FLOAT_INTEGER_I32_FORMS, unsigned=True, evex=True
+        ),
+        *vector_float_integer_descriptors(
+            AVX512_FLOAT_INTEGER_I64_FORMS, unsigned=False, evex=True
+        ),
+        *vector_float_integer_descriptors(
+            AVX512_FLOAT_INTEGER_I64_FORMS, unsigned=True, evex=True
+        ),
         *float_conversion_descriptors(evex=True),
         *half_conversion_descriptors(evex=True),
-        _evex_descriptor(
+        _avx512_descriptor(
             Descriptor(
                 key="x86.avx512.vextractf32x4.xmm.zmm",
                 mnemonic="vextractf32x4",
@@ -603,8 +614,9 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             ),
             native.VEXTRACTF32X4,
+            scalar=False,
         ),
-        _evex_descriptor(
+        _avx512_descriptor(
             Descriptor(
                 key="x86.avx512.vinsertf32x4.zmm.xmm",
                 mnemonic="vinsertf32x4",
@@ -625,8 +637,9 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             ),
             native.VINSERTF32X4,
+            scalar=False,
         ),
-        _evex_descriptor(
+        _avx512_descriptor(
             Descriptor(
                 key="x86.avx512.vextracti64x4.ymm.zmm",
                 mnemonic="vextracti64x4",
@@ -643,8 +656,9 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             ),
             native.VEXTRACTI64X4,
+            scalar=False,
         ),
-        _evex_descriptor(
+        _avx512_descriptor(
             Descriptor(
                 key="x86.avx512.vinserti64x4.zmm.ymm",
                 mnemonic="vinserti64x4",
@@ -665,6 +679,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             ),
             native.VINSERTI64X4,
+            scalar=False,
         ),
         *(
             _vector_narrow_descriptor(family, source_vector_bit_width, instruction)
@@ -675,7 +690,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
             for source_vector_bit_width in (128, 256, 512)
         ),
-        _evex_descriptor(
+        _avx512_descriptor(
             Descriptor(
                 key="x86.avx512.vshufi64x2.zmm",
                 mnemonic="vshufi64x2",
@@ -702,8 +717,9 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             ),
             native.VSHUFI64X2,
+            scalar=False,
         ),
-        _evex_descriptor(
+        _avx512_descriptor(
             Descriptor(
                 key="x86.avx512.vpsrldq.zmm",
                 mnemonic="vpsrldq",
@@ -727,9 +743,10 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             ),
             native.VPSRLDQ,
+            scalar=False,
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_splat_descriptor(
                     vector_bit_width=vector_bit_width,
                     key=(
@@ -752,6 +769,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for (element_bit_width, mnemonic), instruction in zip(
                 (
@@ -766,7 +784,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             for vector_bit_width in AVX512_DIRECT_BROADCAST_VECTOR_BIT_WIDTHS
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_splat_descriptor(
                     vector_bit_width=512,
                     key=f"x86.avx512.{mnemonic}.zmm",
@@ -778,6 +796,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     schedule_class=_SCHEDULE_VECTOR_F32_ZMM,
                 ),
                 instruction,
+                scalar=False,
             )
             for element, mnemonic, instruction in zip(
                 FLOAT_ELEMENTS,
@@ -786,12 +805,13 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 strict=True,
             )
         ),
-        _evex_descriptor(
+        _avx512_descriptor(
             _vector_zero_descriptor(
                 vector_bit_width=512,
                 key="x86.avx512.vxorps.zero.zmm",
             ),
             native.VXORPS,
+            scalar=False,
         ),
         *(
             _zmm_widen_descriptor(
@@ -815,7 +835,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_i32_binary_descriptor(
                     vector_bit_width=vector_bit_width,
                     key=(
@@ -829,6 +849,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for family, instruction in zip(
                 AVX512VL_INTEGER_BINARY_FAMILIES,
@@ -838,7 +859,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             for vector_bit_width in AVX512VL_VECTOR_BIT_WIDTHS
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_i32_binary_descriptor(
                     vector_bit_width=512,
                     key=f"x86.avx512.{family.mnemonic}.zmm",
@@ -849,6 +870,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for family, instruction in zip(
                 AVX512_INTEGER_BINARY_FAMILIES,
@@ -857,7 +879,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_i32_binary_descriptor(
                     vector_bit_width=512,
                     key=f"x86.avx512.{mnemonic}.zmm",
@@ -865,12 +887,13 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     semantic_tag=f"{semantic}.v512",
                 ),
                 instruction,
+                scalar=False,
             )
             for (_, mnemonic, semantic), instruction in zip(
                 AVX512_BITWISE_FAMILIES, native.AVX512_BITWISE, strict=True
             )
         ),
-        _evex_descriptor(
+        _avx512_descriptor(
             _vector_i32_binary_descriptor(
                 vector_bit_width=512,
                 key="x86.avx512.vpshufb.zmm",
@@ -878,9 +901,10 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 semantic_tag="bits.shuffle.bytes.v512",
             ),
             native.VPSHUFB,
+            scalar=False,
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 Descriptor(
                     key=f"x86.avx512.{mnemonic}.zmm",
                     mnemonic=mnemonic,
@@ -899,6 +923,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     flags=(DescriptorFlag.DEAD_REMOVABLE,),
                 ),
                 instruction,
+                scalar=False,
             )
             for mnemonic, element_bit_width, lane_count, instruction in (
                 ("vpermw", 16, 32, native.VPERMW),
@@ -907,7 +932,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 Descriptor(
                     key=f"x86.avx512.{family.mnemonic}.{_REGISTER_SUFFIXES[width]}",
                     mnemonic=family.mnemonic,
@@ -931,6 +956,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     flags=(DescriptorFlag.DEAD_REMOVABLE,),
                 ),
                 instruction,
+                scalar=False,
             )
             for family, instruction in zip(
                 AVX512_UNIFORM_SHIFT_FAMILIES,
@@ -941,7 +967,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 (128, 256, 512) if family in AVX512VL_UNIFORM_SHIFT_FAMILIES else (512,)
             )
         ),
-        _evex_descriptor(
+        _avx512_descriptor(
             Descriptor(
                 key="x86.avx512.vmovdqu64.rodata.zmm",
                 mnemonic="vmovdqu64",
@@ -957,9 +983,10 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             ),
             native.VMOVDQU64,
+            scalar=False,
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_f32_binary_descriptor(
                     vector_bit_width=512,
                     key=f"x86.avx512.{family.mnemonic}.zmm",
@@ -970,6 +997,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for family, instruction in zip(
                 AVX512_FLOAT_BINARY_FAMILIES,
@@ -978,7 +1006,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_float_unary_descriptor(
                     vector_bit_width=vector_bit_width,
                     key=(
@@ -992,6 +1020,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for family, instruction in zip(
                 AVX512_FLOAT_ROOT_FAMILIES,
@@ -1001,13 +1030,14 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             for vector_bit_width in ((128, 256, 512) if family.approximate else (512,))
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _scalar_float_unary_descriptor(
                     key=f"x86.avx512.{family.mnemonic}.xmm",
                     mnemonic=family.mnemonic,
                     semantic_tag=f"{family.semantic}.{family.element.name}",
                 ),
                 instruction,
+                scalar=True,
             )
             for family, instruction in zip(
                 AVX512_SCALAR_FLOAT_ROOT_FAMILIES,
@@ -1016,7 +1046,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_f32_binary_descriptor(
                     vector_bit_width=512,
                     key=f"x86.avx512.{mnemonic}.zmm",
@@ -1026,6 +1056,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for element, instructions in zip(
                 FLOAT_ELEMENTS,
@@ -1042,7 +1073,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_fma_descriptor(
                     vector_bit_width=512,
                     key=(f"x86.avx512.{AVX512_FLOAT_FMA_MNEMONICS[element.name]}.zmm"),
@@ -1052,13 +1083,14 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for element, instruction in zip(
                 FLOAT_ELEMENTS, native.AVX2_FLOAT_FMA, strict=True
             )
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_mask_compare_descriptor(
                     vector_bit_width=vector_bit_width,
                     key=(
@@ -1071,6 +1103,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for vector_bit_width in (128, 256, 512)
             for element, instructions in zip(
@@ -1084,7 +1117,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_mask_compare_descriptor(
                     vector_bit_width=vector_bit_width,
                     key=(
@@ -1099,6 +1132,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for vector_bit_width in (128, 256, 512)
             for element, instruction in zip(
@@ -1106,7 +1140,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
         ),
         *(
-            _evex_descriptor(
+            _avx512_descriptor(
                 _vector_mask_select_descriptor(
                     vector_bit_width=vector_bit_width,
                     key=(
@@ -1129,6 +1163,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                     ),
                 ),
                 instruction,
+                scalar=False,
             )
             for vector_bit_width in (128, 256, 512)
             for mnemonic, instruction in zip(
@@ -1149,7 +1184,9 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             store_schedule_class=_SCHEDULE_MEMORY_STORE_ZMM,
             assembly_suffix="",
             vector_instructions=native.VECTOR_MEMORY,
-            vector_prefix=VectorEncodingPrefix.EVEX,
+            vector_binder=lambda descriptor, instruction: _avx512_descriptor(
+                descriptor, instruction, scalar=False
+            ),
         ),
         *(
             _predicate_conversion_descriptor(

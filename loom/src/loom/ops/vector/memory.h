@@ -233,6 +233,16 @@ bool loom_vector_memory_cache_policy_from_attrs(
     loom_attribute_t cache_scope_attr, loom_attribute_t cache_temporal_attr,
     loom_vector_memory_cache_policy_t* out_policy);
 
+// Builds the all-active form of a verified masked vector memory operation at
+// the builder's insertion point. The caller establishes that every lane is
+// active, either by facts or by enclosing control flow. Dense and compact
+// accesses become ordinary loads/stores; per-lane offsets and atomic semantics
+// are preserved. |cache_policy| is the decoded policy of |op|. Does not replace
+// or erase |op|. Allocation failures are propagated from the operation builder.
+iree_status_t loom_vector_memory_build_unmasked(
+    loom_builder_t* builder, const loom_op_t* op,
+    const loom_vector_memory_cache_policy_t* cache_policy, loom_op_t** out_op);
+
 // Returns the static element extent touched along a view axis. Leading view
 // axes not covered by the vector have extent 1. Trailing axes use the
 // corresponding vector dimension and return false when that dimension is

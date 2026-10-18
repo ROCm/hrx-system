@@ -58,7 +58,7 @@ LOOM_FORCE_INLINE FloatReductions reduce_floats(float value,
 }
 
 // ----
-func.def public inline @reduce_integers(%signed_value: i32, %unsigned_value: i32, %vector_value: vector<4xi32>) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, vector<4xi32>) {
+func.def public linkonce inline @reduce_integers(%signed_value: i32, %unsigned_value: i32, %vector_value: vector<4xi32>) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, vector<4xi32>) {
   %13 = kernel.subgroup.reduce<addi> %signed_value {cluster_size = 16, cluster_stride = 2} : i32
   %14 = kernel.subgroup.reduce<muli> %signed_value : i32
   %15 = kernel.subgroup.reduce<minsi> %signed_value : i32
@@ -72,7 +72,7 @@ func.def public inline @reduce_integers(%signed_value: i32, %unsigned_value: i32
   func.return %13, %14, %15, %16, %17, %18, %19, %20, %21, %22 : i32, i32, i32, i32, i32, i32, i32, i32, i32, vector<4xi32>
 }
 
-func.def public inline @reduce_floats(%value: f32, %vector_value: vector<4xf32>) -> (f32, f32, f32, f32, f32, f32, vector<4xf32>) {
+func.def public linkonce inline @reduce_floats(%value: f32, %vector_value: vector<4xf32>) -> (f32, f32, f32, f32, f32, f32, vector<4xf32>) {
   %32 = kernel.subgroup.reduce<addf> %value {cluster_size = 8} : f32
   %33 = kernel.subgroup.reduce<mulf> %value : f32
   %34 = kernel.subgroup.reduce<minimumf> %value : f32
@@ -117,7 +117,7 @@ LOOM_FORCE_INLINE PreservedCollectives preserve_collectives(float value,
 }
 
 // ----
-func.def public inline @preserve_collectives(%value: f32, %vector: vector<2xf32>) -> (f32, vector<2xf32>, f32, vector<2xf32>) {
+func.def public linkonce inline @preserve_collectives(%value: f32, %vector: vector<2xf32>) -> (f32, vector<2xf32>, f32, vector<2xf32>) {
   %6 = kernel.subgroup.reduce<addf, preserve> %value {cluster_size = 8, cluster_stride = 1} : f32
   %7 = kernel.workgroup.reduce<mulf, preserve> %vector : vector<2xf32>
   %8 = kernel.subgroup.scan<addf, preserve> %value {direction = forward, mode = exclusive} : f32

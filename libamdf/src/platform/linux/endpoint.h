@@ -15,6 +15,8 @@ struct amdf_platform_endpoint_t {
   amdf_platform_instance_t* instance;
   // Immutable identity and PCI properties established on open.
   amdf_endpoint_info_t info;
+  // OS attachment node with online CPUs at open, or UINT32_MAX when unknown.
+  uint32_t host_numa_node;
 };
 
 #ifdef __cplusplus

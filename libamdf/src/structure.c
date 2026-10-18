@@ -18,7 +18,7 @@ _Static_assert(offsetof(amdf_input_structure_t, next) ==
                    offsetof(amdf_output_structure_t, next),
                "input and output structure headers must have one layout");
 
-static amdf_status_t amdf_structure_validate_header(
+amdf_status_t amdf_structure_validate_header(
     const void* structure, amdf_structure_type_t expected_type,
     uint32_t minimum_size) {
   if (structure == NULL) {
@@ -28,6 +28,17 @@ static amdf_status_t amdf_structure_validate_header(
   memcpy(&prefix, structure, sizeof(prefix));
   if (prefix.type != expected_type || prefix.structure_size < minimum_size) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  return AMDF_STATUS_OK;
+}
+
+static amdf_status_t amdf_structure_validate_unextended(
+    const void* structure, amdf_structure_type_t expected_type,
+    uint32_t minimum_size) {
+  const amdf_status_t status =
+      amdf_structure_validate_header(structure, expected_type, minimum_size);
+  if (!amdf_status_is_ok(status)) {
+    return status;
   }
   const void* next = NULL;
   memcpy(&next,
@@ -42,11 +53,13 @@ static amdf_status_t amdf_structure_validate_header(
 amdf_status_t amdf_structure_validate_input(const void* structure,
                                             amdf_structure_type_t expected_type,
                                             uint32_t minimum_size) {
-  return amdf_structure_validate_header(structure, expected_type, minimum_size);
+  return amdf_structure_validate_unextended(structure, expected_type,
+                                            minimum_size);
 }
 
 amdf_status_t amdf_structure_validate_output(
     const void* structure, amdf_structure_type_t expected_type,
     uint32_t minimum_size) {
-  return amdf_structure_validate_header(structure, expected_type, minimum_size);
+  return amdf_structure_validate_unextended(structure, expected_type,
+                                            minimum_size);
 }

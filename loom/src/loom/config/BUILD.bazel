@@ -30,6 +30,8 @@ loom_cc_library(
     name = "text_binding",
     srcs = ["text_binding.c"],
     hdrs = ["text_binding.h"],
+    # Bindings borrow caller-owned text; this library owns no process state.
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",

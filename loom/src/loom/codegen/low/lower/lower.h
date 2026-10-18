@@ -165,9 +165,10 @@ typedef enum loom_low_lower_abi_argument_kind_e {
   LOOM_LOW_LOWER_ABI_ARGUMENT_RESOURCE = 1,
 } loom_low_lower_abi_argument_kind_t;
 
-// Direct arguments use only kind and abi_type. Resource arguments additionally
-// describe the low.resource import; those fields are unused for direct
-// arguments.
+// Direct arguments use kind, abi_type, and optionally body_type when the ABI
+// carrier requires one entry adaptation. Resource arguments additionally
+// describe the low.resource import. Direct body metadata overlaps the
+// resource-only source type so retaining it does not enlarge this record.
 typedef struct loom_low_lower_abi_argument_t {
   // ABI path used for the source argument.
   loom_low_lower_abi_argument_kind_t kind;
@@ -178,9 +179,14 @@ typedef struct loom_low_lower_abi_argument_t {
   loom_low_resource_import_kind_t resource_import_kind;
   // Dense target ABI resource index used when |kind| is RESOURCE.
   int64_t resource_index;
-  // Semantic source type recorded on low.resource. None defaults to the source
-  // argument type.
-  loom_type_t resource_source_type;
+  union {
+    // Selected body carrier for a direct argument requiring entry adaptation.
+    // None means that the ABI carrier is consumed directly or adapted per use.
+    loom_type_t body_type;
+    // Semantic source type recorded on low.resource. None defaults to the
+    // source argument type.
+    loom_type_t resource_source_type;
+  };
   // Optional low.resource builder flags for resource-specific metadata.
   loom_low_resource_build_flags_t resource_build_flags;
   // Static byte extent for byte-addressable resources when the corresponding
@@ -192,8 +198,9 @@ typedef struct loom_low_lower_abi_argument_t {
 } loom_low_lower_abi_argument_t;
 
 // Queries a native direct argument or resource representation. The caller
-// initializes kind to DIRECT and abi_type to none. A resource mapping also
-// supplies the resource fields; they are otherwise unused and uninitialized.
+// initializes kind to DIRECT, abi_type to none, and body_type to none. A
+// resource mapping also supplies the resource fields; they are otherwise
+// unused and uninitialized.
 // Unsupported arguments leave abi_type none without emitting diagnostics;
 // required boundary lowering owns that diagnostic. Allocation failures
 // propagate normally.
@@ -438,6 +445,13 @@ typedef iree_status_t (*loom_low_lower_descriptor_matrix_attrs_fn_t)(
     const loom_low_descriptor_t* descriptor,
     loom_named_attr_slice_t* out_attrs);
 
+typedef iree_status_t (
+    *loom_low_lower_descriptor_matrix_materialize_operand_fn_t)(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, const loom_low_operand_t* descriptor_operand,
+    loom_value_id_t source_value, loom_value_id_t low_value,
+    loom_value_id_t* out_low_value);
+
 typedef struct loom_low_lower_descriptor_matrix_t {
   // Supplies target-specific options for shared source-to-matrix adapters.
   loom_low_lower_descriptor_matrix_options_fn_t options;
@@ -445,6 +459,11 @@ typedef struct loom_low_lower_descriptor_matrix_t {
   loom_low_lower_descriptor_matrix_query_fn_t query;
   // Materializes target-owned immediate attributes for the selected descriptor.
   loom_low_lower_descriptor_matrix_attrs_fn_t attrs;
+  // Adapts a source value's emitted carrier to the selected physical operand
+  // while its source identity and descriptor alternatives are both available.
+  // Planning has already established legality. This runs before destructive
+  // operand copies and group-level descriptor materialization.
+  loom_low_lower_descriptor_matrix_materialize_operand_fn_t materialize_operand;
   // Caller-owned payload passed to descriptor-matrix callbacks.
   void* user_data;
 } loom_low_lower_descriptor_matrix_t;

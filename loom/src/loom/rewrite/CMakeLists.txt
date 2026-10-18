@@ -42,6 +42,22 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
+    cfg_facts_test
+  SRCS
+    "cfg_facts_test.cc"
+  DEPS
+    ::rewriter
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::cfg
+    loom::ops::test
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
     erasure_test
   SRCS
     "erasure_test.cc"

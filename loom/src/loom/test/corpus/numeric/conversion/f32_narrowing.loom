@@ -1,3 +1,83 @@
+// Normalize NaN payload/sign freedom while retaining the quiet bit. Numeric
+// values, signed zero, and infinities remain bitwise observable.
+func.def inline @observe_bfloat_bits(%value: bf16) -> (i16) {
+  %bits = scalar.bitcast %value : bf16 to i16
+  %mask = scalar.constant 32767 : i16
+  %infinity = scalar.constant 32640 : i16
+  %quiet_mask = scalar.constant 64 : i16
+  %magnitude = scalar.andi %bits, %mask : i16
+  %nan = scalar.cmpi ugt, %magnitude, %infinity : i16
+  %quiet = scalar.andi %bits, %quiet_mask : i16
+  %nan_class = scalar.ori %infinity, %quiet : i16
+  %result = scf.select %nan, %nan_class, %bits : i16
+  func.return %result : i16
+}
+
+// Extrema preserve finite input values but may change NaN payloads. Narrowing
+// back to BF16 must retain NaNs and quiet signaling inputs without rerounding
+// the finite values selected from the widened BF16 inputs.
+func.def @narrow_bfloat_extrema(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<64xbf16>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<64xbf16>
+  %destination = buffer.view %output[%base] : buffer -> view<64x4xi16>
+  scf.for %item = [%begin to %end step %step] {
+    %left = view.load %lhs_view[%item] : view<64xbf16> -> bf16
+    %right = view.load %rhs_view[%item] : view<64xbf16> -> bf16
+    %wide_left = scalar.extf %left : bf16 to f32
+    %wide_right = scalar.extf %right : bf16 to f32
+    %minimum = scalar.minimumf %wide_left, %wide_right : f32
+    %maximum = scalar.maximumf %wide_left, %wide_right : f32
+    %minnum = scalar.minnumf %wide_left, %wide_right : f32
+    %maxnum = scalar.maxnumf %wide_left, %wide_right : f32
+    %narrow_minimum = scalar.fptrunc %minimum : f32 to bf16
+    %narrow_maximum = scalar.fptrunc %maximum : f32 to bf16
+    %narrow_minnum = scalar.fptrunc %minnum : f32 to bf16
+    %narrow_maxnum = scalar.fptrunc %maxnum : f32 to bf16
+    %minimum_bits = func.call @observe_bfloat_bits(%narrow_minimum) : (bf16) -> (i16)
+    %maximum_bits = func.call @observe_bfloat_bits(%narrow_maximum) : (bf16) -> (i16)
+    %minnum_bits = func.call @observe_bfloat_bits(%narrow_minnum) : (bf16) -> (i16)
+    %maxnum_bits = func.call @observe_bfloat_bits(%narrow_maxnum) : (bf16) -> (i16)
+    view.store %minimum_bits, %destination[%item, 0] : i16, view<64x4xi16>
+    view.store %maximum_bits, %destination[%item, 1] : i16, view<64x4xi16>
+    view.store %minnum_bits, %destination[%item, 2] : i16, view<64x4xi16>
+    view.store %maxnum_bits, %destination[%item, 3] : i16, view<64x4xi16>
+  }
+  func.return
+}
+
+check.scenario @bfloat_extrema_narrowing_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %left = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<64xi16>
+    %right = check.generate.iota offset(32640) step(1) : tensor<64xi16>
+    %output = check.generate.fill value(123) : tensor<64x4xi16>
+    check.compare<@narrow_bfloat_extrema>(%left, %right, %output) : (tensor<64xi16>, tensor<64xi16>, tensor<64x4xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x4xi16>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %left = check.generate.iota offset(0) step(1) : tensor<64xi16>
+    %right = check.generate.iota offset(-32768) step(1) : tensor<64xi16>
+    %output = check.generate.fill value(123) : tensor<64x4xi16>
+    check.compare<@narrow_bfloat_extrema>(%left, %right, %output) : (tensor<64xi16>, tensor<64xi16>, tensor<64x4xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x4xi16>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %left = check.generate.iota offset(32640) step(1) : tensor<64xi16>
+    %right = check.generate.iota offset(-128) step(1) : tensor<64xi16>
+    %output = check.generate.fill value(123) : tensor<64x4xi16>
+    check.compare<@narrow_bfloat_extrema>(%left, %right, %output) : (tensor<64xi16>, tensor<64xi16>, tensor<64x4xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x4xi16>
+    }
+  }
+  check.return
+}
+
 func.def public @narrow_f32(%input: f32) -> (bf16, f16, f8E4M3, f8E5M2) {
   %bf16 = scalar.fptrunc %input : f32 to bf16
   %f16 = scalar.fptrunc %input : f32 to f16

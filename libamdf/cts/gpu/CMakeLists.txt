@@ -30,6 +30,7 @@ iree_cc_library(
   NAME
     gpu_extension_cases
   SRCS
+    "event_test.cc"
     "gpu_extension_test.cc"
     "user_queue_test.cc"
   DEPS
@@ -41,6 +42,7 @@ iree_cc_library(
     libamdf::cts::gpu::util::command_fixture
     libamdf::cts::util::device_cache
     libamdf::cts::util::provider_headers
+    libamdf::cts::util::wait
   TESTONLY
   ALWAYSLINK
   PUBLIC

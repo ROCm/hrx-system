@@ -28,6 +28,7 @@ loom_check_test_suite(
   NAME
     compiler_test
   SRCS
+    "address_counted_loops.cxx-test"
     "address_values.cxx-test"
     "address_values_invalid.cxx-test"
     "aggregate_constants.cxx-test"
@@ -64,6 +65,7 @@ loom_check_test_suite(
     "class_conversions.cxx-test"
     "class_conversions_invalid.cxx-test"
     "condition_declarations.cxx-test"
+    "condition_loop_cleanup.cxx-test"
     "conditionals.cxx-test"
     "config.cxx-test"
     "config_cleanup.cxx-test"
@@ -145,6 +147,8 @@ loom_check_test_suite(
     "record_memory_invalid.cxx-test"
     "records.cxx-test"
     "records_invalid.cxx-test"
+    "reference_parameters.cxx-test"
+    "reference_parameters_invalid.cxx-test"
     "scalar.cxx-test"
     "scalar_invalid.cxx-test"
     "scalar_templates.cxx-test"
@@ -327,10 +331,10 @@ loom_execution_test(
 endif()
 endif()
 
-if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
+if(LOOM_IMPORT_CXX)
 loom_test_module(
   NAME
-    integer_intrinsics_test_module
+    integer_intrinsics_module
   SRCS
     "integer_intrinsics.cxx"
 )
@@ -342,7 +346,7 @@ loom_execution_test(
   NAME
     integer_intrinsics_test_execute_vm_reference_test
   MODULE
-    "::integer_intrinsics_test_module"
+    "::integer_intrinsics_module"
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
     "loom-execution-profile=vm_reference"
@@ -452,12 +456,29 @@ loom_test_module(
 endif()
 
 if(LOOM_IMPORT_CXX)
+loom_module(
+  NAME
+    function_link_provider_library
+  SRCS
+    "function_link_provider.cxx"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/function_link_helpers.h"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
 loom_test_module(
   NAME
     function_link_module
   SRCS
     "function_link_consumer.cxx"
-    "function_link_provider.cxx"
+  LIBRARIES
+    "::function_link_provider_library"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/function_link_helpers.h"
 )
 endif()
 
@@ -780,6 +801,26 @@ loom_test_module(
   SRCS
     "schedule_values.cxx"
 )
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    address_counted_loops_test_execute_vm_reference_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::address_counted_loops_module"
+  RUNNER_ARGS
+    "--case=address_counted_loops_functions"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+endif()
 endif()
 
 if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
@@ -1136,6 +1177,15 @@ loom_test_module(
   SRCS
     "record_memory.cxx"
     "record_memory_kernels.loom"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    address_counted_loops_module
+  SRCS
+    "address_counted_loops.cxx"
 )
 endif()
 

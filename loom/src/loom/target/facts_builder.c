@@ -125,6 +125,10 @@ void loom_target_facts_builder_apply_requirement(
                                           &effective->storage);
   }
   effective->explicit_fields |= requirement->explicit_fields;
+  if (effective->fact_type->apply_specialization_requirement != NULL) {
+    effective->fact_type->apply_specialization_requirement(requirement,
+                                                           effective);
+  }
   loom_target_facts_builder_rebind(effective);
 }
 

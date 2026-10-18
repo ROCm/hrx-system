@@ -18,6 +18,13 @@ exports_files(["libdrm_headers.BUILD.bazel"])
 # protocols and their source-level helper macros come from these snapshots.
 
 copy_file(
+    name = "_linux_udmabuf_header",
+    src = "@linux_udmabuf_header//file:linux/udmabuf.h",
+    out = "include/linux/udmabuf.h",
+    tags = ["manual"],
+)
+
+copy_file(
     name = "_linux_drm_header",
     src = "@libdrm_headers//:include/drm/drm.h",
     out = "include/drm/drm.h",
@@ -106,6 +113,15 @@ copy_file(
     src = "@libdrm_headers//:include/drm/drm_mode.h",
     out = "include/libdrm/drm_mode.h",
     tags = ["manual"],
+)
+
+cc_library(
+    name = "linux_udmabuf_uapi",
+    hdrs = [":_linux_udmabuf_header"],
+    includes = ["include"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//third_party:__pkg__"],
 )
 
 cc_library(

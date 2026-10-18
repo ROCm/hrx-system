@@ -75,7 +75,7 @@ LOOM_FORCE_INLINE FloatReductions reduce_floats(float value,
 }
 
 // ----
-func.def public inline @reduce_integers(%signed_value: i32, %unsigned_value: i32, %vector_value: vector<4xi32>) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, vector<4xi32>) {
+func.def public linkonce inline @reduce_integers(%signed_value: i32, %unsigned_value: i32, %vector_value: vector<4xi32>) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, vector<4xi32>) {
   %13 = kernel.workgroup.reduce<addi> %signed_value : i32
   %14 = kernel.workgroup.reduce<muli> %signed_value : i32
   %15 = kernel.workgroup.reduce<minsi> %signed_value : i32
@@ -89,7 +89,7 @@ func.def public inline @reduce_integers(%signed_value: i32, %unsigned_value: i32
   func.return %13, %14, %15, %16, %17, %18, %19, %20, %21, %22 : i32, i32, i32, i32, i32, i32, i32, i32, i32, vector<4xi32>
 }
 
-func.def public inline @reduce_floats(%value: f32, %vector_value: vector<4xf32>) -> (f32, f32, f32, f32, f32, f32, vector<4xf32>) {
+func.def public linkonce inline @reduce_floats(%value: f32, %vector_value: vector<4xf32>) -> (f32, f32, f32, f32, f32, f32, vector<4xf32>) {
   %32 = kernel.workgroup.reduce<addf> %value : f32
   %33 = kernel.workgroup.reduce<mulf> %value : f32
   %34 = kernel.workgroup.reduce<minimumf> %value : f32

@@ -82,3 +82,51 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @store_narrow_bf
   OpStore.storage_buffer.bf16 %26, %narrow
   return
 }
+
+// ====
+
+// Min/max retain exact finite formats, not NaN payloads or non-NaN classes.
+// The narrowing needs quieting, but not another rounding sequence.
+func.def @narrow_selected_bfloat(%lhs: bf16, %rhs: bf16) -> (bf16) {
+  %wide_lhs = scalar.extf %lhs : bf16 to f32
+  %wide_rhs = scalar.extf %rhs : bf16 to f32
+  %minimum = scalar.minnumf %wide_lhs, %wide_rhs : f32
+  %narrow = scalar.fptrunc %minimum : f32 to bf16
+  func.return %narrow : bf16
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @narrow_selected_bfloat(%lhs: reg<spirv.id : bf16>, %rhs: reg<spirv.id : bf16>) -> (reg<spirv.id : bf16>) asm {
+  %wide_lhs = OpFConvert.bf16.f32 %lhs
+  %wide_rhs = OpFConvert.bf16.f32 %rhs
+  %12 = OpBitcast.f32.i32 %wide_lhs : reg<spirv.id>
+  %13 = OpBitcast.f32.i32 %wide_rhs : reg<spirv.id>
+  %14 = OpConstant.i32 0 : reg<spirv.id>
+  %15 = OpBitwiseAnd %12, %13 : reg<spirv.id>
+  %16 = OpSLessThan %15, %14 : reg<spirv.id>
+  %17 = OpSLessThan %12, %13 : reg<spirv.id>
+  %18 = OpLogicalNotEqual.bool %17, %16 : reg<spirv.id>
+  %19 = OpSelect %18, %12, %13 : reg<spirv.id>
+  %20 = OpConstant.i32 2147483647 : reg<spirv.id>
+  %21 = OpBitwiseAnd %12, %20 : reg<spirv.id>
+  %22 = OpBitwiseAnd %13, %20 : reg<spirv.id>
+  %23 = OpConstant.i32 2139095040 : reg<spirv.id>
+  %24 = OpSGreaterThan %21, %23 : reg<spirv.id>
+  %25 = OpSGreaterThan %22, %23 : reg<spirv.id>
+  %26 = OpConstant.i32 2143289344 : reg<spirv.id>
+  %27 = OpSelect %25, %26, %13 : reg<spirv.id>
+  %28 = OpSelect %25, %12, %19 : reg<spirv.id>
+  %29 = OpSelect %24, %27, %28 : reg<spirv.id>
+  %minimum = OpBitcast.i32.f32 %29
+  %31 = OpBitcast.f32.i32 %minimum : reg<spirv.id>
+  %32 = OpConstant.i32 16 : reg<spirv.id>
+  %33 = OpShiftRightLogical %31, %32 : reg<spirv.id>
+  %35 = OpBitwiseAnd %31, %20 : reg<spirv.id>
+  %37 = OpSGreaterThan %35, %23 : reg<spirv.id>
+  %38 = OpConstant.i32 64 : reg<spirv.id>
+  %39 = OpBitwiseOr %33, %38 : reg<spirv.id>
+  %40 = OpSelect %37, %39, %33 : reg<spirv.id>
+  %41 = OpBitcast.i32.v2bf16 %40 : reg<spirv.id>
+  %narrow = OpCompositeExtract.v2bf16.bf16 %41, 0
+  return %narrow
+}

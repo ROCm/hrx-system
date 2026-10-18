@@ -1,0 +1,102 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @scalar_float_integer(%single: f32, %double: f64) -> (i32, i64, i1, i32, i64) {
+  %signed_word = scalar.fptosi %single : f32 to i32
+  %signed_wide = scalar.fptosi %double : f64 to i64
+  %unsigned_predicate = scalar.fptoui %single : f32 to i1
+  %unsigned_word = scalar.fptoui %single : f32 to i32
+  %unsigned_wide = scalar.fptoui %double : f64 to i64
+  func.return %signed_word, %signed_wide, %unsigned_predicate, %unsigned_word, %unsigned_wide : i32, i64, i1, i32, i64
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (f32, f64) -> (i32, i64, i1, i32, i64)}) @scalar_float_integer(%single: reg<x86.xmm>, %double: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>) asm {
+  %signed_word = vcvttss2si.gpr32.xmm %single
+  %signed_wide = vcvttsd2si.gpr64.xmm %double
+  %21 = vcvttss2si.gpr32.xmm %single
+  %unsigned_predicate = and.imm.gpr32 %21 {imm32 = 1}
+  %23 = vcvttss2si.gpr64.xmm %single
+  %unsigned_word = mov.trunc.gpr32.gpr64 %23
+  %25 = mov.imm64 4890909195324358656
+  %26 = vmovq.xmm.gpr64 %25
+  %27 = vsubsd.xmm %double, %26
+  %28 = vcvttsd2si.gpr64.xmm %double
+  %29 = vcvttsd2si.gpr64.xmm %27
+  %30 = copy %28 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %31 = sar.imm.gpr64 %30 {shift = 63}
+  %32 = and.gpr64 %29, %31
+  %unsigned_wide = or.gpr64 %28, %32
+  return %signed_word, %signed_wide, %unsigned_predicate, %unsigned_word, %unsigned_wide
+}
+
+// ====
+
+func.def @packed_float_integer(%single: vector<8xf32>, %double: vector<4xf64>) -> (vector<8xi8>, vector<8xi16>, vector<8xi32>, vector<4xi32>) {
+  %signed_byte = vector.fptosi %single : vector<8xf32> to vector<8xi8>
+  %unsigned_half = vector.fptoui %single : vector<8xf32> to vector<8xi16>
+  %unsigned_word = vector.fptoui %single : vector<8xf32> to vector<8xi32>
+  %signed_double_word = vector.fptosi %double : vector<4xf64> to vector<4xi32>
+  func.return %signed_byte, %unsigned_half, %unsigned_word, %signed_double_word : vector<8xi8>, vector<8xi16>, vector<8xi32>, vector<4xi32>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<8xf32>, vector<4xf64>) -> (vector<8xi8>, vector<8xi16>, vector<8xi32>, vector<4xi32>)}) @packed_float_integer(%single: reg<x86.ymm>, %double: reg<x86.ymm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.ymm>, reg<x86.xmm>) asm {
+  %16 = vcvttps2dq.ymm.ymm %single
+  %17 = avx2.vmovdqu.rodata.ymm @__low_rodata_1b0a0b7f
+  %18 = vpshufb.ymm %16, %17
+  %19 = vextractf128.xmm %18, 0
+  %20 = vextractf128.xmm %18, 1
+  %signed_byte = vpunpckldq.xmm %19, %20
+  %23 = avx2.vmovdqu.rodata.ymm @__low_rodata_6e7103bf
+  %24 = vpshufb.ymm %16, %23
+  %25 = vextractf128.xmm %24, 0
+  %26 = vextractf128.xmm %24, 1
+  %unsigned_half = vpunpcklqdq.xmm %25, %26
+  %28 = avx2.vmovdqu.rodata.ymm @__low_rodata_f6ff7dbf
+  %29 = vsubps.ymm %single, %28
+  %31 = vcvttps2dq.ymm.ymm %29
+  %32 = vpsrad.ymm %16, 31
+  %33 = vpand.ymm %31, %32
+  %unsigned_word = vpor.ymm %16, %33
+  %signed_double_word = vcvttpd2dq.xmm.ymm %double
+  return %signed_byte, %unsigned_half, %unsigned_word, %signed_double_word
+}
+
+// ====
+
+func.def @reference_float_integer(%predicate_input: vector<4xf32>, %wide_input: vector<2xf64>) -> (vector<4xi1>, vector<2xi64>) {
+  %predicates = vector.fptoui %predicate_input : vector<4xf32> to vector<4xi1>
+  %wide = vector.fptosi %wide_input : vector<2xf64> to vector<2xi64>
+  func.return %predicates, %wide : vector<4xi1>, vector<2xi64>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xf32>, vector<2xf64>) -> (vector<4xi1>, vector<2xi64>)}) @reference_float_integer(%predicate_input: reg<x86.xmm>, %wide_input: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+  %24 = vpermilps.xmm %predicate_input, 0
+  %25 = vcvttss2si.gpr32.xmm %24
+  %26 = and.imm.gpr32 %25 {imm32 = 1}
+  %27 = vpermilps.xmm %predicate_input, 1
+  %28 = vcvttss2si.gpr32.xmm %27
+  %29 = and.imm.gpr32 %28 {imm32 = 1}
+  %30 = vpermilps.xmm %predicate_input, 2
+  %31 = vcvttss2si.gpr32.xmm %30
+  %32 = and.imm.gpr32 %31 {imm32 = 1}
+  %33 = vpermilps.xmm %predicate_input, 3
+  %34 = vcvttss2si.gpr32.xmm %33
+  %35 = and.imm.gpr32 %34 {imm32 = 1}
+  %36 = neg.gpr32 %26
+  %37 = neg.gpr32 %29
+  %38 = neg.gpr32 %32
+  %39 = neg.gpr32 %35
+  %40 = vmovd.xmm.gpr32 %36
+  %41 = vpinsrd.xmm %40, %37, 1
+  %42 = vpinsrd.xmm %41, %38, 2
+  %predicates = vpinsrd.xmm %42, %39, 3
+  %44 = vpermilpd.xmm %wide_input, 0
+  %45 = vcvttsd2si.gpr64.xmm %44
+  %46 = vpermilpd.xmm %wide_input, 1
+  %47 = vcvttsd2si.gpr64.xmm %46
+  %48 = vmovq.xmm.gpr64 %45
+  %wide = vpinsrq.xmm %48, %47, 1
+  return %predicates, %wide
+}

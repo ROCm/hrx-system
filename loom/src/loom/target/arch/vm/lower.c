@@ -26,6 +26,15 @@ static bool loom_vm_source_type_supported(void* user_data,
                                         loom_type_element_type(type)));
 }
 
+static bool loom_vm_source_vector_carrier_supported(
+    void* user_data, const loom_module_t* module,
+    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
+    loom_type_t type) {
+  (void)fact_table;
+  (void)value_id;
+  return loom_vm_source_type_supported(user_data, module, type);
+}
+
 static iree_status_t loom_vm_map_type(void* user_data,
                                       loom_low_lower_context_t* context,
                                       const loom_op_t* source_op,
@@ -112,6 +121,8 @@ static const loom_low_lower_policy_t kPolicy = {
     .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
     .error_catalog = &loom_error_catalog_core,
     .source_type_supported = {.fn = loom_vm_source_type_supported},
+    .source_vector_carrier_supported =
+        {.fn = loom_vm_source_vector_carrier_supported},
     .map_type = {.fn = loom_vm_map_type},
     .contract = LOOM_VM_CORE_CONTRACT,
     .select_op = {.fn = loom_vm_select_op},

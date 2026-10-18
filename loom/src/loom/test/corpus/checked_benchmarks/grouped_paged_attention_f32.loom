@@ -297,7 +297,7 @@ kernel.def @grouped_paged_attention_shared(%pair_count: index) {
 }
 
 // Distinct queries, pair-owned random tables and unequal lengths distinguish
-// both query/state ownership and pair/table identity. Analytic cases below
+// both query/state ownership and pair/table identity. Analytic trials below
 // separately anchor the scalar states and every output channel.
 check.case public @grouped_paged_attention_varied {
   %pairs = check.param.choice values([1, 4]) name("pairs") : index
@@ -328,152 +328,233 @@ check.case public @grouped_paged_attention_varied {
 // Normalize exp(dot(Q,K)*f32(1/sqrt(128))-max) over the selected rows;
 // output is 4*weighted_mean(row)-37/32+c/32. Each head is checked separately.
 // Minimal backing ends at the union prefix, including the final partial page.
-check.case public @grouped_paged_attention_empty {
-  %pairs = check.literal value(1) : index
-  %lengths = check.generate.iota offset(0) step(0) : tensor<2xi32>
-  %query = check.generate.iota offset(-1.0) step(0.0078125) : tensor<2x128xf32>
-  %pages = check.generate.iota offset(0) step(1) : tensor<1xi32>
-  %keys = check.generate.fill value(nan) : tensor<1x128xf32>
-  %values = check.generate.fill value(nan) : tensor<1x128xf32>
-  %state = check.generate.fill value(-10000.0) : tensor<2x2xf32>
-  %output = check.generate.fill value(-20000.0) : tensor<2x128xf32>
-  kernel.launch @grouped_paged_attention_shared[%pairs](%pairs, %lengths, %query, %pages, %keys, %values, %state, %output) : [index](index, tensor<2xi32>, tensor<2x128xf32>, tensor<1xi32>, tensor<1x128xf32>, tensor<1x128xf32>, tensor<2x2xf32>, tensor<2x128xf32>)
-  %first_state = check.tensor.view %state offset(0) : tensor<2x2xf32> -> tensor<2xf32>
-  %first_output = check.tensor.view %output offset(0) : tensor<2x128xf32> -> tensor<128xf32>
-  %first_expected_state = check.generate.iota offset(-1000000000.0) step(1000000000.0) : tensor<2xf32>
-  %first_expected_output = check.generate.iota offset(0.0) step(0.0) : tensor<128xf32>
-  check.expect.close actual(%first_state) expected(%first_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%first_output) expected(%first_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  %second_state = check.tensor.view %state offset(8) : tensor<2x2xf32> -> tensor<2xf32>
-  %second_output = check.tensor.view %output offset(512) : tensor<2x128xf32> -> tensor<128xf32>
-  %second_expected_state = check.generate.iota offset(-1000000000.0) step(1000000000.0) : tensor<2xf32>
-  %second_expected_output = check.generate.iota offset(0.0) step(0.0) : tensor<128xf32>
-  check.expect.close actual(%second_state) expected(%second_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%second_output) expected(%second_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  check.return
+// Trials are empty, empty first, empty second, ragged, holes and repeats, and
+// absent pages, in that order.
+func.def @grouped_paged_attention_analytic_config(%trial: index) -> (i32, i32, index, index) {
+  %first_length, %second_length, %page_count, %backing_rows = scf.switch %trial -> (i32, i32, index, index) {
+    case 0 {
+      %first = scalar.constant 0 : i32
+      %second = scalar.constant 0 : i32
+      %pages = index.constant 1 : index
+      %rows = index.constant 1 : index
+      scf.yield %first, %second, %pages, %rows : i32, i32, index, index
+    }
+    case 1 {
+      %first = scalar.constant 0 : i32
+      %second = scalar.constant 17 : i32
+      %pages = index.constant 2 : index
+      %rows = index.constant 17 : index
+      scf.yield %first, %second, %pages, %rows : i32, i32, index, index
+    }
+    case 2 {
+      %first = scalar.constant 17 : i32
+      %second = scalar.constant 0 : i32
+      %pages = index.constant 2 : index
+      %rows = index.constant 17 : index
+      scf.yield %first, %second, %pages, %rows : i32, i32, index, index
+    }
+    case 3 {
+      %first = scalar.constant 15 : i32
+      %second = scalar.constant 33 : i32
+      %pages = index.constant 3 : index
+      %rows = index.constant 33 : index
+      scf.yield %first, %second, %pages, %rows : i32, i32, index, index
+    }
+    case 4 {
+      %first = scalar.constant 65 : i32
+      %second = scalar.constant 33 : i32
+      %pages = index.constant 5 : index
+      %rows = index.constant 32 : index
+      scf.yield %first, %second, %pages, %rows : i32, i32, index, index
+    }
+    default {
+      %first = scalar.constant 1024 : i32
+      %second = scalar.constant 17 : i32
+      %pages = index.constant 64 : index
+      %rows = index.constant 1 : index
+      scf.yield %first, %second, %pages, %rows : i32, i32, index, index
+    }
+  }
+  func.return %first_length, %second_length, %page_count, %backing_rows : i32, i32, index, index
 }
 
-check.case public @grouped_paged_attention_empty_first {
-  %pairs = check.literal value(1) : index
-  %lengths = check.generate.iota offset(0) step(17) : tensor<2xi32>
-  %query = check.generate.iota offset(-1.0) step(0.0078125) : tensor<2x128xf32>
-  %pages = check.generate.iota offset(0) step(1) : tensor<2xi32>
-  %keys = check.generate.iota offset(0.0) step(3.0517578125e-05) : tensor<17x128xf32>
-  %values = check.generate.iota offset(-1.15625) step(0.03125) : tensor<17x128xf32>
-  %state = check.generate.fill value(-10000.0) : tensor<2x2xf32>
-  %output = check.generate.fill value(-20000.0) : tensor<2x128xf32>
-  kernel.launch @grouped_paged_attention_shared[%pairs](%pairs, %lengths, %query, %pages, %keys, %values, %state, %output) : [index](index, tensor<2xi32>, tensor<2x128xf32>, tensor<2xi32>, tensor<17x128xf32>, tensor<17x128xf32>, tensor<2x2xf32>, tensor<2x128xf32>)
-  %first_state = check.tensor.view %state offset(0) : tensor<2x2xf32> -> tensor<2xf32>
-  %first_output = check.tensor.view %output offset(0) : tensor<2x128xf32> -> tensor<128xf32>
-  %first_expected_state = check.generate.iota offset(-1000000000.0) step(1000000000.0) : tensor<2xf32>
-  %first_expected_output = check.generate.iota offset(0.0) step(0.0) : tensor<128xf32>
-  check.expect.close actual(%first_state) expected(%first_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%first_output) expected(%first_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  %second_state = check.tensor.view %state offset(8) : tensor<2x2xf32> -> tensor<2xf32>
-  %second_output = check.tensor.view %output offset(512) : tensor<2x128xf32> -> tensor<128xf32>
-  %second_expected_state = check.generate.iota offset(0.36535045582616021) step(13.982199796889542) : tensor<2xf32>
-  %second_expected_output = check.generate.iota offset(32.943623661826734) step(0.03125) : tensor<128xf32>
-  check.expect.close actual(%second_state) expected(%second_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%second_output) expected(%second_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  check.return
+func.def @grouped_paged_attention_analytic_inputs(%trial: index, %first_length: i32, %second_length: i32, %page_count: index, %backing_rows: index, %lengths_buffer: buffer, %query_buffer: buffer, %pages_buffer: buffer, %keys_buffer: buffer, %values_buffer: buffer) {
+  %bounded_page_count = index.assume %page_count [range(%page_count, 1, 64)] : index
+  %bounded_backing_rows = index.assume %backing_rows [range(%backing_rows, 1, 33)] : index
+  %base = index.constant 0 : offset
+  %lengths = buffer.view %lengths_buffer[%base] : buffer -> view<2xi32>
+  %query = buffer.view %query_buffer[%base] : buffer -> view<2x128xf32>
+  %pages = buffer.view %pages_buffer[%base] : buffer -> view<[%bounded_page_count]xi32>
+  %keys = buffer.view %keys_buffer[%base] : buffer -> view<[%bounded_backing_rows]x128xf32>
+  %values = buffer.view %values_buffer[%base] : buffer -> view<[%bounded_backing_rows]x128xf32>
+  %begin = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %head_width = index.constant 128 : index
+  view.store %first_length, %lengths[%begin] : i32, view<2xi32>
+  view.store %second_length, %lengths[%c1] : i32, view<2xi32>
+
+  %query_base = scalar.constant -1.0 : f32
+  %query_step = scalar.constant 0.0078125 : f32
+  scf.for %head = [%begin to %c2 step %c1] {
+    %head_base = index.mul %head, %head_width : index
+    scf.for %channel = [%begin to %head_width step %c1] {
+      %linear = index.add %head_base, %channel : index
+      %linear_i32 = index.cast %linear : index to i32
+      %linear_f32 = scalar.sitofp %linear_i32 : i32 to f32
+      %offset = scalar.mulf %linear_f32, %query_step : f32
+      %value = scalar.addf %query_base, %offset : f32
+      view.store %value, %query[%head, %channel] : f32, view<2x128xf32>
+    }
+  }
+
+  scf.for %position = [%begin to %bounded_page_count step %c1] {
+    %page_id = scf.switch %trial -> (i32) {
+      case 4 {
+        %period = index.constant 3 : index
+        %phase = index.rem %position, %period : index
+        %phase_i32 = index.cast %phase : index to i32
+        %first_page = scalar.constant 1 : i32
+        %value = scalar.subi %first_page, %phase_i32 : i32
+        scf.yield %value : i32
+      }
+      case 5 {
+        %value = scalar.constant -1 : i32
+        scf.yield %value : i32
+      }
+      default {
+        %value = index.cast %position : index to i32
+        scf.yield %value : i32
+      }
+    }
+    view.store %page_id, %pages[%position] : i32, view<[%bounded_page_count]xi32>
+  }
+
+  %first_finite_trial = index.constant 1 : index
+  %finite_trial_end = index.constant 5 : index
+  %after_empty = index.cmp uge, %trial, %first_finite_trial : index
+  %before_absent = index.cmp ult, %trial, %finite_trial_end : index
+  %has_finite_payload = scalar.andi %after_empty, %before_absent : i1
+  scf.if %has_finite_payload {
+    %key_step = scalar.constant 3.0517578125e-05 : f32
+    %value_base = scalar.constant -1.15625 : f32
+    %value_step = scalar.constant 0.03125 : f32
+    scf.for %row = [%begin to %bounded_backing_rows step %c1] {
+      %row_base = index.mul %row, %head_width : index
+      scf.for %channel = [%begin to %head_width step %c1] {
+        %linear = index.add %row_base, %channel : index
+        %linear_i32 = index.cast %linear : index to i32
+        %linear_f32 = scalar.sitofp %linear_i32 : i32 to f32
+        %key = scalar.mulf %linear_f32, %key_step : f32
+        %value_offset = scalar.mulf %linear_f32, %value_step : f32
+        %value = scalar.addf %value_base, %value_offset : f32
+        view.store %key, %keys[%row, %channel] : f32, view<[%bounded_backing_rows]x128xf32>
+        view.store %value, %values[%row, %channel] : f32, view<[%bounded_backing_rows]x128xf32>
+      }
+    }
+  }
+  func.return
 }
 
-check.case public @grouped_paged_attention_empty_second {
-  %pairs = check.literal value(1) : index
-  %lengths = check.generate.iota offset(17) step(-17) : tensor<2xi32>
-  %query = check.generate.iota offset(-1.0) step(0.0078125) : tensor<2x128xf32>
-  %pages = check.generate.iota offset(0) step(1) : tensor<2xi32>
-  %keys = check.generate.iota offset(0.0) step(3.0517578125e-05) : tensor<17x128xf32>
-  %values = check.generate.iota offset(-1.15625) step(0.03125) : tensor<17x128xf32>
-  %state = check.generate.fill value(-10000.0) : tensor<2x2xf32>
-  %output = check.generate.fill value(-20000.0) : tensor<2x128xf32>
-  kernel.launch @grouped_paged_attention_shared[%pairs](%pairs, %lengths, %query, %pages, %keys, %values, %state, %output) : [index](index, tensor<2xi32>, tensor<2x128xf32>, tensor<2xi32>, tensor<17x128xf32>, tensor<17x128xf32>, tensor<2x2xf32>, tensor<2x128xf32>)
-  %first_state = check.tensor.view %state offset(0) : tensor<2x2xf32> -> tensor<2xf32>
-  %first_output = check.tensor.view %output offset(0) : tensor<2x128xf32> -> tensor<128xf32>
-  %first_expected_state = check.generate.iota offset(-0.0073652459449249363) step(14.3179542419297) : tensor<2xf32>
-  %first_expected_output = check.generate.iota offset(28.710964078964228) step(0.03125) : tensor<128xf32>
-  check.expect.close actual(%first_state) expected(%first_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%first_output) expected(%first_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  %second_state = check.tensor.view %state offset(8) : tensor<2x2xf32> -> tensor<2xf32>
-  %second_output = check.tensor.view %output offset(512) : tensor<2x128xf32> -> tensor<128xf32>
-  %second_expected_state = check.generate.iota offset(-1000000000.0) step(1000000000.0) : tensor<2xf32>
-  %second_expected_output = check.generate.iota offset(0.0) step(0.0) : tensor<128xf32>
-  check.expect.close actual(%second_state) expected(%second_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%second_output) expected(%second_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  check.return
+// Precomputed direct-softmax results independently anchor the shared online
+// recurrence while retaining exact empty-head, sparse-page, and backing bounds.
+func.def @grouped_paged_attention_analytic_oracle(%pair_count: index, %lengths_buffer: buffer, %query_buffer: buffer, %pages_buffer: buffer, %keys_buffer: buffer, %values_buffer: buffer, %final_state: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %lengths = buffer.view %lengths_buffer[%base] : buffer -> view<2xi32>
+  %state = buffer.view %final_state[%base] : buffer -> view<2x2xf32>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<2x128xf32>
+  %begin = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %head_width = index.constant 128 : index
+  %first_length = view.load %lengths[%begin] : view<2xi32> -> i32
+  %second_length = view.load %lengths[%c1] : view<2xi32> -> i32
+  %first_count = index.cast %first_length : i32 to index
+  %second_count = index.cast %second_length : i32 to index
+  %empty_max = scalar.constant -1000000000.0 : f32
+  %identity = scalar.constant 0.0 : f32
+  %channel_step = scalar.constant 0.03125 : f32
+  %first_max, %first_sum, %first_base, %first_step, %second_max, %second_sum, %second_base, %second_step = scf.switch %first_count -> (f32, f32, f32, f32, f32, f32, f32, f32) {
+    case 0 {
+      %second_max_value, %second_sum_value, %second_base_value, %second_step_value = scf.switch %second_count -> (f32, f32, f32, f32) {
+        case 0 {
+          scf.yield %empty_max, %identity, %identity, %identity : f32, f32, f32, f32
+        }
+        default {
+          %maximum = scalar.constant 0.36535045582616021 : f32
+          %denominator = scalar.constant 14.347550252715703 : f32
+          %output_base_value = scalar.constant 32.943623661826734 : f32
+          scf.yield %maximum, %denominator, %output_base_value, %channel_step : f32, f32, f32, f32
+        }
+      }
+      scf.yield %empty_max, %identity, %identity, %identity, %second_max_value, %second_sum_value, %second_base_value, %second_step_value : f32, f32, f32, f32, f32, f32, f32, f32
+    }
+    case 15 {
+      %first_max_value = scalar.constant -0.0073652459449249363 : f32
+      %first_sum_value = scalar.constant 12.894316366784969 : f32
+      %first_base_value = scalar.constant 25.184042199991968 : f32
+      %second_max_value = scalar.constant 0.71614170455188741 : f32
+      %second_sum_value = scalar.constant 23.745970511840614 : f32
+      %second_base_value = scalar.constant 70.726438983671713 : f32
+      scf.yield %first_max_value, %first_sum_value, %first_base_value, %channel_step, %second_max_value, %second_sum_value, %second_base_value, %channel_step : f32, f32, f32, f32, f32, f32, f32, f32
+    }
+    case 17 {
+      %maximum = scalar.constant -0.0073652459449249363 : f32
+      %denominator = scalar.constant 14.310588995984775 : f32
+      %output_base_value = scalar.constant 28.710964078964228 : f32
+      scf.yield %maximum, %denominator, %output_base_value, %channel_step, %empty_max, %identity, %identity, %identity : f32, f32, f32, f32, f32, f32, f32, f32
+    }
+    case 65 {
+      %first_max_value = scalar.constant -0.0073652459449249363 : f32
+      %first_sum_value = scalar.constant 33.671659507786266 : f32
+      %first_base_value = scalar.constant 62.349985634426922 : f32
+      %second_max_value = scalar.constant 0.69421725150652946 : f32
+      %second_sum_value = scalar.constant 23.250170431555915 : f32
+      %second_base_value = scalar.constant 68.259307014643795 : f32
+      scf.yield %first_max_value, %first_sum_value, %first_base_value, %channel_step, %second_max_value, %second_sum_value, %second_base_value, %channel_step : f32, f32, f32, f32, f32, f32, f32, f32
+    }
+    default {
+      scf.yield %empty_max, %identity, %identity, %identity, %empty_max, %identity, %identity, %identity : f32, f32, f32, f32, f32, f32, f32, f32
+    }
+  }
+  view.store %first_max, %state[%begin, %begin] : f32, view<2x2xf32>
+  view.store %first_sum, %state[%begin, %c1] : f32, view<2x2xf32>
+  view.store %second_max, %state[%c1, %begin] : f32, view<2x2xf32>
+  view.store %second_sum, %state[%c1, %c1] : f32, view<2x2xf32>
+  scf.for %channel = [%begin to %head_width step %c1] {
+    %channel_i32 = index.cast %channel : index to i32
+    %channel_f32 = scalar.sitofp %channel_i32 : i32 to f32
+    %first_offset = scalar.mulf %channel_f32, %first_step : f32
+    %first_value = scalar.addf %first_base, %first_offset : f32
+    view.store %first_value, %output[%begin, %channel] : f32, view<2x128xf32>
+    %second_offset = scalar.mulf %channel_f32, %second_step : f32
+    %second_value = scalar.addf %second_base, %second_offset : f32
+    view.store %second_value, %output[%c1, %channel] : f32, view<2x128xf32>
+  }
+  func.return
 }
 
-check.case public @grouped_paged_attention_ragged {
-  %pairs = check.literal value(1) : index
-  %lengths = check.generate.iota offset(15) step(18) : tensor<2xi32>
-  %query = check.generate.iota offset(-1.0) step(0.0078125) : tensor<2x128xf32>
-  %pages = check.generate.iota offset(0) step(1) : tensor<3xi32>
-  %keys = check.generate.iota offset(0.0) step(3.0517578125e-05) : tensor<33x128xf32>
-  %values = check.generate.iota offset(-1.15625) step(0.03125) : tensor<33x128xf32>
-  %state = check.generate.fill value(-10000.0) : tensor<2x2xf32>
-  %output = check.generate.fill value(-20000.0) : tensor<2x128xf32>
-  kernel.launch @grouped_paged_attention_shared[%pairs](%pairs, %lengths, %query, %pages, %keys, %values, %state, %output) : [index](index, tensor<2xi32>, tensor<2x128xf32>, tensor<3xi32>, tensor<33x128xf32>, tensor<33x128xf32>, tensor<2x2xf32>, tensor<2x128xf32>)
-  %first_state = check.tensor.view %state offset(0) : tensor<2x2xf32> -> tensor<2xf32>
-  %first_output = check.tensor.view %output offset(0) : tensor<2x128xf32> -> tensor<128xf32>
-  %first_expected_state = check.generate.iota offset(-0.0073652459449249363) step(12.901681612729893) : tensor<2xf32>
-  %first_expected_output = check.generate.iota offset(25.184042199991968) step(0.03125) : tensor<128xf32>
-  check.expect.close actual(%first_state) expected(%first_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%first_output) expected(%first_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  %second_state = check.tensor.view %state offset(8) : tensor<2x2xf32> -> tensor<2xf32>
-  %second_output = check.tensor.view %output offset(512) : tensor<2x128xf32> -> tensor<128xf32>
-  %second_expected_state = check.generate.iota offset(0.71614170455188741) step(23.029828807288727) : tensor<2xf32>
-  %second_expected_output = check.generate.iota offset(70.726438983671713) step(0.03125) : tensor<128xf32>
-  check.expect.close actual(%second_state) expected(%second_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%second_output) expected(%second_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  check.return
-}
-
-check.case public @grouped_paged_attention_holes_and_repeats {
-  %pairs = check.literal value(1) : index
-  %lengths = check.generate.iota offset(65) step(-32) : tensor<2xi32>
-  %query = check.generate.iota offset(-1.0) step(0.0078125) : tensor<2x128xf32>
-  %pages = check.generate.iota offset(1) step(-1) period(3) : tensor<5xi32>
-  %keys = check.generate.iota offset(0.0) step(3.0517578125e-05) : tensor<32x128xf32>
-  %values = check.generate.iota offset(-1.15625) step(0.03125) : tensor<32x128xf32>
-  %state = check.generate.fill value(-10000.0) : tensor<2x2xf32>
-  %output = check.generate.fill value(-20000.0) : tensor<2x128xf32>
-  kernel.launch @grouped_paged_attention_shared[%pairs](%pairs, %lengths, %query, %pages, %keys, %values, %state, %output) : [index](index, tensor<2xi32>, tensor<2x128xf32>, tensor<5xi32>, tensor<32x128xf32>, tensor<32x128xf32>, tensor<2x2xf32>, tensor<2x128xf32>)
-  %first_state = check.tensor.view %state offset(0) : tensor<2x2xf32> -> tensor<2xf32>
-  %first_output = check.tensor.view %output offset(0) : tensor<2x128xf32> -> tensor<128xf32>
-  %first_expected_state = check.generate.iota offset(-0.0073652459449249363) step(33.679024753731191) : tensor<2xf32>
-  %first_expected_output = check.generate.iota offset(62.349985634426922) step(0.03125) : tensor<128xf32>
-  check.expect.close actual(%first_state) expected(%first_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%first_output) expected(%first_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  %second_state = check.tensor.view %state offset(8) : tensor<2x2xf32> -> tensor<2xf32>
-  %second_output = check.tensor.view %output offset(512) : tensor<2x128xf32> -> tensor<128xf32>
-  %second_expected_state = check.generate.iota offset(0.69421725150652946) step(22.555953180049386) : tensor<2xf32>
-  %second_expected_output = check.generate.iota offset(68.259307014643795) step(0.03125) : tensor<128xf32>
-  check.expect.close actual(%second_state) expected(%second_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%second_output) expected(%second_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  check.return
-}
-
-check.case public @grouped_paged_attention_absent {
-  %pairs = check.literal value(1) : index
-  %lengths = check.generate.iota offset(1024) step(-1007) : tensor<2xi32>
-  %query = check.generate.iota offset(-1.0) step(0.0078125) : tensor<2x128xf32>
-  %pages = check.generate.fill value(-1) : tensor<64xi32>
-  %keys = check.generate.fill value(nan) : tensor<1x128xf32>
-  %values = check.generate.fill value(nan) : tensor<1x128xf32>
-  %state = check.generate.fill value(-10000.0) : tensor<2x2xf32>
-  %output = check.generate.fill value(-20000.0) : tensor<2x128xf32>
-  kernel.launch @grouped_paged_attention_shared[%pairs](%pairs, %lengths, %query, %pages, %keys, %values, %state, %output) : [index](index, tensor<2xi32>, tensor<2x128xf32>, tensor<64xi32>, tensor<1x128xf32>, tensor<1x128xf32>, tensor<2x2xf32>, tensor<2x128xf32>)
-  %first_state = check.tensor.view %state offset(0) : tensor<2x2xf32> -> tensor<2xf32>
-  %first_output = check.tensor.view %output offset(0) : tensor<2x128xf32> -> tensor<128xf32>
-  %first_expected_state = check.generate.iota offset(-1000000000.0) step(1000000000.0) : tensor<2xf32>
-  %first_expected_output = check.generate.iota offset(0.0) step(0.0) : tensor<128xf32>
-  check.expect.close actual(%first_state) expected(%first_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%first_output) expected(%first_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
-  %second_state = check.tensor.view %state offset(8) : tensor<2x2xf32> -> tensor<2xf32>
-  %second_output = check.tensor.view %output offset(512) : tensor<2x128xf32> -> tensor<128xf32>
-  %second_expected_state = check.generate.iota offset(-1000000000.0) step(1000000000.0) : tensor<2xf32>
-  %second_expected_output = check.generate.iota offset(0.0) step(0.0) : tensor<128xf32>
-  check.expect.close actual(%second_state) expected(%second_expected_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
-  check.expect.close actual(%second_output) expected(%second_expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
+check.scenario @grouped_paged_attention_analytic {
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %pairs = check.literal value(1) : index
+    %first_length, %second_length, %page_count, %backing_rows = check.generate<@grouped_paged_attention_analytic_config>(%trial) : (index) -> (i32, i32, index, index)
+    %lengths = check.generate.fill value(0) : tensor<2xi32>
+    %query = check.generate.fill value(0.0) : tensor<2x128xf32>
+    %pages = check.generate.fill value(0) : tensor<[%page_count]xi32>
+    %keys = check.generate.fill value(nan) : tensor<[%backing_rows]x128xf32>
+    %values = check.generate.fill value(nan) : tensor<[%backing_rows]x128xf32>
+    check.generate<@grouped_paged_attention_analytic_inputs>(%trial, %first_length, %second_length, %page_count, %backing_rows, %lengths, %query, %pages, %keys, %values) : (index, i32, i32, index, index, tensor<2xi32>, tensor<2x128xf32>, tensor<[%page_count]xi32>, tensor<[%backing_rows]x128xf32>, tensor<[%backing_rows]x128xf32>) -> ()
+    %state = check.generate.fill value(-10000.0) : tensor<2x2xf32>
+    %output = check.generate.fill value(-20000.0) : tensor<2x128xf32>
+    %first_state = check.tensor.view %state offset(0) : tensor<2x2xf32> -> tensor<2xf32>
+    %first_output = check.tensor.view %output offset(0) : tensor<2x128xf32> -> tensor<128xf32>
+    %second_state = check.tensor.view %state offset(8) : tensor<2x2xf32> -> tensor<2xf32>
+    %second_output = check.tensor.view %output offset(512) : tensor<2x128xf32> -> tensor<128xf32>
+    check.compare<@grouped_paged_attention_shared, @grouped_paged_attention_analytic_oracle>[%pairs](%pairs, %lengths, %query, %pages, %keys, %values, %state, %output) : [index](index, tensor<2xi32>, tensor<2x128xf32>, tensor<[%page_count]xi32>, tensor<[%backing_rows]x128xf32>, tensor<[%backing_rows]x128xf32>, tensor<2x2xf32>, tensor<2x128xf32>) -> () {
+      check.expect.close actual(%first_state) expected(%first_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
+      check.expect.close actual(%first_output) expected(%first_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
+      check.expect.close actual(%second_state) expected(%second_state) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2xf32>
+      check.expect.close actual(%second_output) expected(%second_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<128xf32>
+    }
+  }
   check.return
 }

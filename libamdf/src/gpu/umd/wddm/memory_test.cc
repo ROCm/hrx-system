@@ -1077,7 +1077,7 @@ TEST_P(WindowsGpuImportFailureTest, RetainsProgressForOrderedRollback) {
   }
 }
 
-TEST_F(WindowsGpuMemoryTest, SystemStoresRequireFineGrainAndNativeCpuRoute) {
+TEST_F(WindowsGpuMemoryTest, SystemSignalsRequireFineGrainAndNativeCpuRoute) {
   for (uint32_t major : {9u, 11u, 12u}) {
     device_.properties.gfx_ip_major = major;
     for (uint32_t discrete : {0u, 1u}) {
@@ -1098,10 +1098,12 @@ TEST_F(WindowsGpuMemoryTest, SystemStoresRequireFineGrainAndNativeCpuRoute) {
                       AMDF_STATUS_OK);
             const bool supported = ordinal == 0 && major == 11 && coherent &&
                                    (!discrete || platform_atomics);
-            EXPECT_EQ(profile.atomic_operations_32,
-                      supported ? AMDF_ATOMIC_OPERATION_STORE : 0u);
-            EXPECT_EQ(profile.atomic_operations_64,
-                      supported ? AMDF_ATOMIC_OPERATION_STORE : 0u);
+            const amdf_atomic_operations_t operations =
+                supported
+                    ? AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE
+                    : 0u;
+            EXPECT_EQ(profile.atomic_operations_32, operations);
+            EXPECT_EQ(profile.atomic_operations_64, operations);
             EXPECT_NE(profile.visibility.describe_site, nullptr);
           }
         }

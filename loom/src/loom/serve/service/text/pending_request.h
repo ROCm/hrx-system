@@ -43,12 +43,12 @@ typedef struct loom_serve_text_pending_request_t {
   loom_serve_text_receipt_t receipt;
 } loom_serve_text_pending_request_t;
 
-// Finite CPU preparation under an exclusive source invocation loan. Model
-// configuration and pool geometry are immutable, captured by the owner; this
-// call never reads concurrently changing pool usage or acquires device pins.
+// Tokenizes an already-rendered chat under an exclusive source invocation loan.
+// Model configuration and pool geometry are immutable, captured by the owner;
+// this call never reads concurrently changing pool usage or acquires device
+// pins. The selected prefix remains borrowed until admission completes.
 iree_status_t loom_serve_text_pending_request_prepare(
     loom_serve_text_pending_request_t* request, loom_serve_text_model_t* model,
-    iree_string_view_t name, iree_host_size_t default_max_tokens,
     loom_serve_text_input_prefix_t prefix,
     const loom_serve_text_pool_usage_t* geometry, int32_t* scratch,
     iree_allocator_t host_allocator);

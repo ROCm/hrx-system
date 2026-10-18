@@ -381,6 +381,49 @@ TEST_F(MemoryConstructionTest, LiveProfileConstrainsTheConstructedAccessSet) {
   EXPECT_EQ(amdf_memory_destroy(memory), AMDF_STATUS_OK);
 }
 
+TEST_F(MemoryConstructionTest, OptionalAvailabilityPrecedesNativeAcquisition) {
+  FakeDevice devices[2];
+  amdf_memory_device_access_t accesses[2];
+  amdf_memory_access_capabilities_t capabilities[2] = {};
+  for (uint32_t i = 0; i < 2; ++i) {
+    InitializeFakeDevice(i + 1, &instance_, &devices[i]);
+    accesses[i] = devices[i].request;
+    capabilities[i].type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
+    capabilities[i].structure_size = sizeof(capabilities[i]);
+  }
+  devices[1].profile.availability =
+      amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, 13);
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+  };
+  ASSERT_EQ(amdf_memory_scope_query_device_profile(
+                &instance_.system_memory_scope, 0, 2, accesses, &profile,
+                capabilities),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(profile.availability, devices[1].profile.availability);
+  EXPECT_NE(profile.roles & AMDF_MEMORY_PROFILE_ROLE_CREATE, 0u);
+  auto create = MakeMemoryCreateInfo(devices[0]);
+  create.access_count = 2;
+  create.accesses = accesses;
+  auto* const sentinel = reinterpret_cast<amdf_memory_t*>(uintptr_t{1});
+  amdf_memory_t* memory = sentinel;
+  EXPECT_EQ(
+      amdf_memory_create(&instance_.system_memory_scope, &create, &memory),
+      devices[1].profile.availability);
+  EXPECT_EQ(memory, sentinel);
+  EXPECT_EQ(devices[0].create_call_count, 0u);
+  EXPECT_EQ(devices[1].import_call_count, 0u);
+
+  // The independent route remains usable; optional absence is not instance
+  // failure and does not mutate the native device's other capabilities.
+  create.access_count = 1;
+  ASSERT_EQ(
+      amdf_memory_create(&instance_.system_memory_scope, &create, &memory),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_memory_destroy(memory), AMDF_STATUS_OK);
+}
+
 TEST_F(MemoryConstructionTest, LiveProfilePreservesBackingPayloadGeometry) {
   FakeDevice devices[2];
   amdf_memory_device_access_t accesses[2];
@@ -1068,7 +1111,7 @@ TEST_F(MemoryHostBackingTest, RegistrationsBorrowOnePrivateHostOwner) {
         accesses[i] = devices[i].request;
       }
       auto info = MakeHostCreateInfo(accesses);
-      info.required_flags |= flags;
+      info.required_flags |= flags | AMDF_MEMORY_FLAG_HOST_FILE_IO;
       amdf_memory_t* memory = nullptr;
       ASSERT_EQ(
           amdf_memory_create(&instance_.system_memory_scope, &info, &memory),
@@ -1089,6 +1132,7 @@ TEST_F(MemoryHostBackingTest, RegistrationsBorrowOnePrivateHostOwner) {
           .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
       };
       ASSERT_EQ(amdf_memory_map(memory, &map_info, &mapping), AMDF_STATUS_OK);
+      EXPECT_NE(mapping->info.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
       auto* pointer = static_cast<uint8_t*>(mapping->info.pointer);
       EXPECT_EQ(devices[0].registered_host_pointer, pointer);
       if (!coordinated) {
@@ -1102,6 +1146,69 @@ TEST_F(MemoryHostBackingTest, RegistrationsBorrowOnePrivateHostOwner) {
       EXPECT_EQ(devices[1].destroy_call_count, coordinated ? 0u : 1u);
     }
   }
+}
+
+TEST_F(MemoryHostBackingTest, FileEligibilityBelongsToTheOwnedView) {
+  amdf_memory_profile_pair_query_t query = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+      .structure_size = sizeof(query),
+      .required_flags =
+          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO,
+  };
+  query.producer.kind = AMDF_MEMORY_SITE_KIND_FILE_IO;
+  query.producer.value.host_access = AMDF_MEMORY_MAP_FLAG_WRITE;
+  query.consumer.kind = AMDF_MEMORY_SITE_KIND_HOST;
+  query.consumer.value.host_access = AMDF_MEMORY_MAP_FLAG_READ;
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
+  ASSERT_EQ(amdf_memory_scope_query_pair_info(&instance_.system_memory_scope,
+                                              &query, &pair),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(pair.release.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
+  EXPECT_EQ(pair.acquire.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
+  amdf_memory_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .required_flags = query.required_flags,
+      .byte_length = 4096,
+  };
+  amdf_memory_t* owned = nullptr;
+  ASSERT_EQ(amdf_memory_create(&instance_.system_memory_scope, &create, &owned),
+            AMDF_STATUS_OK);
+  amdf_memory_map_info_t map = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+      .structure_size = sizeof(map),
+      .byte_length = create.byte_length,
+      .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+  };
+  amdf_host_mapping_t* view = nullptr;
+  ASSERT_EQ(amdf_memory_map(owned, &map, &view), AMDF_STATUS_OK);
+  EXPECT_NE(view->info.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
+
+  create.memory_profile_ordinal = 1;
+  create.registered_host_pointer = view->info.pointer;
+  create.registered_host_cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
+  amdf_memory_t* borrowed = nullptr;
+  EXPECT_EQ(amdf_status_code(amdf_memory_create(&instance_.system_memory_scope,
+                                                &create, &borrowed)),
+            AMDF_STATUS_CODE_UNSUPPORTED);
+  EXPECT_EQ(borrowed, nullptr);
+  create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+  ASSERT_EQ(
+      amdf_memory_create(&instance_.system_memory_scope, &create, &borrowed),
+      AMDF_STATUS_OK);
+  amdf_host_mapping_t* borrowed_view = nullptr;
+  ASSERT_EQ(amdf_memory_map(borrowed, &map, &borrowed_view), AMDF_STATUS_OK);
+  EXPECT_EQ(borrowed_view->info.pointer, view->info.pointer);
+  EXPECT_EQ(borrowed_view->info.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO,
+            0u);
+  // Equal addresses and declared cacheability cannot recover source provenance.
+  EXPECT_EQ(amdf_host_mapping_destroy(borrowed_view), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_memory_destroy(borrowed), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_host_mapping_destroy(view), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_memory_destroy(owned), AMDF_STATUS_OK);
 }
 
 TEST_F(MemoryHostBackingTest, FailedRegistrationRollsBackWithoutPublication) {

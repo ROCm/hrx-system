@@ -53,6 +53,29 @@ static bool loom_spirv_target_facts_satisfy_specialization_requirement(
                            requirement->storage.config.contract_feature_bits);
 }
 
+static void loom_spirv_target_facts_apply_specialization_requirement(
+    const loom_target_facts_t* requirement, loom_target_facts_t* effective) {
+  if (!loom_target_facts_field_is_explicit(
+          requirement, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE)) {
+    return;
+  }
+  const uint32_t subgroup_size = effective->storage.snapshot.subgroup_size;
+  if (subgroup_size == 0) {
+    return;
+  }
+  loom_spirv_target_facts_t* facts = (loom_spirv_target_facts_t*)effective;
+  const uint32_t maximum_workgroup_size =
+      loom_spirv_target_maximum_workgroup_size(facts, subgroup_size);
+  if (maximum_workgroup_size ==
+      effective->storage.snapshot.max_flat_workgroup_size) {
+    return;
+  }
+  effective->storage.snapshot.max_flat_workgroup_size = maximum_workgroup_size;
+  loom_target_fact_field_set_insert(
+      &effective->explicit_fields,
+      LOOM_TARGET_FACT_FIELD_MAX_FLAT_WORKGROUP_SIZE);
+}
+
 static iree_status_t loom_spirv_target_facts_select_execution(
     const loom_target_facts_t* source, iree_arena_allocator_t* arena,
     const loom_target_facts_t** out_facts) {
@@ -96,5 +119,7 @@ const loom_target_fact_type_t loom_spirv_target_fact_type = {
         loom_target_facts_selector_satisfies_identity_requirement,
     .satisfies_specialization_requirement =
         loom_spirv_target_facts_satisfy_specialization_requirement,
+    .apply_specialization_requirement =
+        loom_spirv_target_facts_apply_specialization_requirement,
     .select_execution = loom_spirv_target_facts_select_execution,
 };

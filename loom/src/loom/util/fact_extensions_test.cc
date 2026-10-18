@@ -63,6 +63,94 @@ TEST_F(FactExtensionsTest, TypedMeetPreservesStableExtension) {
   EXPECT_EQ(uniform.element.range_lo, 7);
 }
 
+TEST_F(FactExtensionsTest, AggregateExactFloatFormats) {
+  loom_value_fact_table_t table = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_F16,
+      LOOM_SCALAR_TYPE_BF16,   LOOM_SCALAR_TYPE_F32,    LOOM_SCALAR_TYPE_F64,
+  };
+  for (const auto left_type : types) {
+    for (const auto right_type : types) {
+      SCOPED_TRACE(::testing::Message()
+                   << "left=" << left_type << " right=" << right_type);
+      loom_value_facts_t lanes[2];
+      const auto unknown = loom_value_facts_unknown();
+      loom_value_facts_eval_float_conversion(left_type, LOOM_SCALAR_TYPE_F64,
+                                             {}, &unknown, &lanes[0]);
+      loom_value_facts_eval_float_conversion(right_type, LOOM_SCALAR_TYPE_F64,
+                                             {}, &unknown, &lanes[1]);
+      loom_value_facts_mark_workgroup_uniform(&lanes[0]);
+      loom_value_facts_mark_workgroup_uniform(&lanes[1]);
+      loom_value_facts_t uniform;
+      IREE_ASSERT_OK(loom_value_facts_make_uniform_element(&table.context,
+                                                           lanes[0], &uniform));
+      EXPECT_EQ(loom_value_facts_exact_float_types(uniform),
+                loom_value_facts_exact_float_types(lanes[0]));
+      EXPECT_FALSE(loom_value_facts_is_subgroup_uniform(uniform));
+
+      loom_value_facts_t aggregate;
+      IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(
+          &table.context, {lanes, IREE_ARRAYSIZE(lanes)}, &aggregate));
+      EXPECT_EQ(loom_value_facts_exact_float_types(aggregate),
+                loom_value_facts_exact_float_types(lanes[0]) &
+                    loom_value_facts_exact_float_types(lanes[1]));
+      EXPECT_FALSE(loom_value_facts_is_subgroup_uniform(aggregate));
+      loom_value_fact_small_static_lanes_t retained;
+      ASSERT_TRUE(loom_value_facts_query_small_static_lanes(
+          &table.context, aggregate, &retained));
+      ASSERT_EQ(retained.count, 2);
+      for (size_t i = 0; i < retained.count; ++i) {
+        EXPECT_TRUE(loom_value_facts_equal(retained.lanes[i], lanes[i]));
+      }
+    }
+  }
+}
+
+TEST_F(FactExtensionsTest, AggregateFormatsRequireEveryComponent) {
+  loom_value_fact_table_t table = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+  loom_value_facts_t lanes[LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT + 1];
+  for (auto& lane : lanes) {
+    lane = loom_value_facts_known_nan();
+  }
+  for (const size_t count :
+       {size_t{0}, size_t{1}, size_t{LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT},
+        IREE_ARRAYSIZE(lanes)}) {
+    loom_value_facts_t aggregate;
+    IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(
+        &table.context, {lanes, count}, &aggregate));
+    EXPECT_EQ(loom_value_facts_exact_float_types(aggregate),
+              count > 0 && count <= LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT
+                  ? LOOM_SCALAR_TYPE_SET_FLOAT
+                  : LOOM_SCALAR_TYPE_SET_NONE);
+  }
+  lanes[0] = loom_value_facts_unknown();
+  loom_value_facts_t aggregate;
+  IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(
+      &table.context, {lanes, 2}, &aggregate));
+  EXPECT_EQ(loom_value_facts_exact_float_types(aggregate),
+            LOOM_SCALAR_TYPE_SET_NONE);
+
+  // Integer topology domains share physical flag bits with float formats.
+  auto coordinate = loom_value_facts_make(0, 31, 1);
+  ASSERT_TRUE(loom_value_facts_mark_topology_domain(
+      &coordinate, LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID,
+      LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE));
+  IREE_ASSERT_OK(loom_value_facts_make_uniform_element(&table.context,
+                                                       coordinate, &aggregate));
+  EXPECT_EQ(loom_value_facts_exact_float_types(aggregate),
+            LOOM_SCALAR_TYPE_SET_NONE);
+  EXPECT_FALSE(loom_value_facts_is_float(aggregate));
+  lanes[0] = coordinate;
+  lanes[1] = coordinate;
+  IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(
+      &table.context, {lanes, 2}, &aggregate));
+  EXPECT_EQ(loom_value_facts_exact_float_types(aggregate),
+            LOOM_SCALAR_TYPE_SET_NONE);
+  EXPECT_FALSE(loom_value_facts_is_float(aggregate));
+}
+
 TEST_F(FactExtensionsTest, TypedMeetPreservesFloatingClassesAcrossTables) {
   loom_value_fact_table_t source = {0};
   loom_value_fact_table_t target = {0};

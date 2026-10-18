@@ -3590,6 +3590,35 @@ class TestSymbolReference:
 
 
 class TestSymbolKernelContract:
+    def test_linkage_requires_declared_enum_attr(self) -> None:
+        with _raises(ValueError, match="does not name an attr"):
+            Op(
+                "test.record",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("name", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="name",
+                    name="record",
+                    interfaces=["record"],
+                    linkage="linkage",
+                ),
+            )
+        with _raises(ValueError, match="must be an enum attr"):
+            Op(
+                "test.record",
+                traits=[SYMBOL_DEFINE],
+                attrs=[
+                    AttrDef("name", ATTR_TYPE_SYMBOL),
+                    AttrDef("linkage", "i64"),
+                ],
+                symbol_def=SymbolDefinition(
+                    field="name",
+                    name="record",
+                    interfaces=["record"],
+                    linkage="linkage",
+                ),
+            )
+
     def test_product_carrier_requires_declared_enum_attr(self) -> None:
         with _raises(ValueError, match="does not name an attr"):
             Op(

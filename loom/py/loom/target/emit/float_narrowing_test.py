@@ -161,11 +161,13 @@ def test_representable_f32_to_bf16_uses_only_reinterpret_and_shift() -> None:
         ),
         ValueRef.operand("input"),
         ValueRef.result("result"),
+        preserve_nan=False,
     )
     bits_emits = build_representable_f32_bits_to_bf16_emits(
         integer_descriptors,
         ValueRef.temporary("input_bits"),
         ValueRef.result("result"),
+        preserve_nan=False,
     )
 
     assert float_emits[0].descriptor is reinterpret
@@ -174,6 +176,32 @@ def test_representable_f32_to_bf16_uses_only_reinterpret_and_shift() -> None:
     assert bits_emits[0].descriptor.key == "test.shift_right_logical.immediate"
     assert bits_emits[0].immediates == {"shift": 16}
     assert bits_emits[0].results == {"dst": ValueRef.result("result")}
+
+
+def test_representable_f32_to_bf16_keeps_nan_handling_without_rounding() -> None:
+    emits = build_representable_f32_bits_to_bf16_emits(
+        _integer_descriptors(immediate_forms=_immediate_forms()),
+        ValueRef.operand("input"),
+        ValueRef.result("result"),
+        preserve_nan=True,
+    )
+
+    assert tuple(emit.descriptor.key for emit in emits) == (
+        "test.shift_right_logical.immediate",
+        "test.bitwise_and.immediate",
+        "test.greater_than.immediate",
+        "test.bitwise_or.immediate",
+        "test.select",
+    )
+    assert emits[0].immediates == {"shift": 16}
+    assert emits[1].immediates == {"value": 0x7FFFFFFF}
+    assert emits[2].immediates == {"value": 0x7F800000}
+    assert emits[3].immediates == {"value": 0x40}
+    assert emits[-1].operands == {
+        "true_value": ValueRef.temporary("nan"),
+        "false_value": ValueRef.temporary("upper"),
+        "condition": ValueRef.temporary("is_nan"),
+    }
 
 
 def test_immediate_forms_fold_literals_and_preserve_live_constants() -> None:

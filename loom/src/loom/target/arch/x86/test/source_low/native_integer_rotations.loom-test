@@ -1,0 +1,173 @@
+// Scalar runtime counts use a private CL copy for each destructive rotate.
+// Immediate counts select the one-instruction form after normalization.
+// RUN: emit source-low target=x86:avx512 output=low
+func.def @scalar_rotations(%value8: i8, %count8: i8, %value16: i16, %count16: i16, %value32: i32, %count32: i32, %value64: i64, %count64: i64, %value_index: index, %count_index: index) -> (i8, i8, i16, i16, i32, i32, i64, i64, index, index, i8, i16, i32, i64, index) {
+  %left8 = scalar.rotli %value8, %count8 : i8
+  %right8 = scalar.rotri %value8, %count8 : i8
+  %left16 = scalar.rotli %value16, %count16 : i16
+  %right16 = scalar.rotri %value16, %count16 : i16
+  %left32 = scalar.rotli %value32, %count32 : i32
+  %right32 = scalar.rotri %value32, %count32 : i32
+  %left64 = scalar.rotli %value64, %count64 : i64
+  %right64 = scalar.rotri %value64, %count64 : i64
+  %left_index = index.rotli %value_index, %count_index : index
+  %right_index = index.rotri %value_index, %count_index : index
+  %c3_i8 = scalar.constant 3 : i8
+  %c5_i16 = scalar.constant 5 : i16
+  %c7_i32 = scalar.constant 7 : i32
+  %c11_i64 = scalar.constant 11 : i64
+  %c13_index = index.constant 13 : index
+  %fixed8 = scalar.rotli %value8, %c3_i8 : i8
+  %fixed16 = scalar.rotri %value16, %c5_i16 : i16
+  %fixed32 = scalar.rotli %value32, %c7_i32 : i32
+  %fixed64 = scalar.rotri %value64, %c11_i64 : i64
+  %fixed_index = index.rotri %value_index, %c13_index : index
+  func.return %left8, %right8, %left16, %right16, %left32, %right32, %left64, %right64, %left_index, %right_index, %fixed8, %fixed16, %fixed32, %fixed64, %fixed_index : i8, i8, i16, i16, i32, i32, i64, i64, index, index, i8, i16, i32, i64, index
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (i8, i8, i16, i16, i32, i32, i64, i64, index, index) -> (i8, i8, i16, i16, i32, i32, i64, i64, index, index, i8, i16, i32, i64, index)}) @scalar_rotations(%value8: reg<x86.gpr32>, %count8: reg<x86.gpr32>, %value16: reg<x86.gpr32>, %count16: reg<x86.gpr32>, %value32: reg<x86.gpr32>, %count32: reg<x86.gpr32>, %value64: reg<x86.gpr64>, %count64: reg<x86.gpr64>, %value_index: reg<x86.gpr64>, %count_index: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %70 = copy %value8 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %71 = copy %count8 : reg<x86.gpr32> -> reg<x86.ecx>
+  %left8 = rol.cl.gpr8 %70, %71
+  %73 = copy %value8 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %74 = copy %count8 : reg<x86.gpr32> -> reg<x86.ecx>
+  %right8 = ror.cl.gpr8 %73, %74
+  %76 = copy %value16 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %77 = copy %count16 : reg<x86.gpr32> -> reg<x86.ecx>
+  %left16 = rol.cl.gpr16 %76, %77
+  %79 = copy %value16 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %80 = copy %count16 : reg<x86.gpr32> -> reg<x86.ecx>
+  %right16 = ror.cl.gpr16 %79, %80
+  %82 = copy %value32 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %83 = copy %count32 : reg<x86.gpr32> -> reg<x86.ecx>
+  %left32 = rol.cl.gpr32 %82, %83
+  %85 = copy %value32 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %86 = copy %count32 : reg<x86.gpr32> -> reg<x86.ecx>
+  %right32 = ror.cl.gpr32 %85, %86
+  %88 = copy %value64 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %89 = copy %count64 : reg<x86.gpr64> -> reg<x86.rcx>
+  %left64 = rol.cl.gpr64 %88, %89
+  %91 = copy %value64 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %92 = copy %count64 : reg<x86.gpr64> -> reg<x86.rcx>
+  %right64 = ror.cl.gpr64 %91, %92
+  %94 = copy %value_index : reg<x86.gpr64> -> reg<x86.gpr64>
+  %95 = copy %count_index : reg<x86.gpr64> -> reg<x86.rcx>
+  %left_index = rol.cl.gpr64 %94, %95
+  %97 = copy %value_index : reg<x86.gpr64> -> reg<x86.gpr64>
+  %98 = copy %count_index : reg<x86.gpr64> -> reg<x86.rcx>
+  %right_index = ror.cl.gpr64 %97, %98
+  %100 = copy %value8 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %fixed8 = rol.imm.gpr8 %100 {amount = 3}
+  %102 = copy %value16 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %fixed16 = ror.imm.gpr16 %102 {amount = 5}
+  %104 = copy %value32 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %fixed32 = rol.imm.gpr32 %104 {amount = 7}
+  %106 = copy %value64 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %fixed64 = ror.imm.gpr64 %106 {amount = 11}
+  %108 = copy %value_index : reg<x86.gpr64> -> reg<x86.gpr64>
+  %fixed_index = ror.imm.gpr64 %108 {amount = 13}
+  return %left8, %right8, %left16, %right16, %left32, %right32, %left64, %right64, %left_index, %right_index, %fixed8, %fixed16, %fixed32, %fixed64, %fixed_index
+}
+
+// ====
+
+// AVX-512 has distinct immediate and per-lane forms for dwords and qwords.
+// Each encoded width is covered because narrow forms additionally require VL.
+// RUN: emit source-low target=x86:avx512 output=low
+func.def @packed_rotations_128(%value32: vector<4xi32>, %count32: vector<4xi32>, %value64: vector<2xi64>, %count64: vector<2xi64>) -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>) {
+  %fixed32 = vector.constant -1 : vector<4xi32>
+  %fixed64 = vector.constant 300 : vector<2xi64>
+  %left32 = vector.rotli %value32, %count32 : vector<4xi32>
+  %right32 = vector.rotri %value32, %count32 : vector<4xi32>
+  %left32_fixed = vector.rotli %value32, %fixed32 : vector<4xi32>
+  %right32_fixed = vector.rotri %value32, %fixed32 : vector<4xi32>
+  %left64 = vector.rotli %value64, %count64 : vector<2xi64>
+  %right64 = vector.rotri %value64, %count64 : vector<2xi64>
+  %left64_fixed = vector.rotli %value64, %fixed64 : vector<2xi64>
+  %right64_fixed = vector.rotri %value64, %fixed64 : vector<2xi64>
+  func.return %left32, %right32, %left32_fixed, %right32_fixed, %left64, %right64, %left64_fixed, %right64_fixed : vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>) -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>)}) @packed_rotations_128(%value32: reg<x86.xmm>, %count32: reg<x86.xmm>, %value64: reg<x86.xmm>, %count64: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %left32 = avx512.vprolvd.xmm %value32, %count32
+  %right32 = avx512.vprorvd.xmm %value32, %count32
+  %left32_fixed = avx512.vprold.xmm %value32 {amount = 31}
+  %right32_fixed = avx512.vprord.xmm %value32 {amount = 31}
+  %left64 = avx512.vprolvq.xmm %value64, %count64
+  %right64 = avx512.vprorvq.xmm %value64, %count64
+  %left64_fixed = avx512.vprolq.xmm %value64 {amount = 44}
+  %right64_fixed = avx512.vprorq.xmm %value64 {amount = 44}
+  return %left32, %right32, %left32_fixed, %right32_fixed, %left64, %right64, %left64_fixed, %right64_fixed
+}
+
+// ====
+
+// RUN: emit source-low target=x86:avx512 output=low
+func.def @packed_rotations_512(%value32: vector<16xi32>, %count32: vector<16xi32>, %value64: vector<8xi64>, %count64: vector<8xi64>) -> (vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<8xi64>, vector<8xi64>, vector<8xi64>, vector<8xi64>) {
+  %fixed32 = vector.constant 7 : vector<16xi32>
+  %fixed64 = vector.constant 11 : vector<8xi64>
+  %left32 = vector.rotli %value32, %count32 : vector<16xi32>
+  %right32 = vector.rotri %value32, %count32 : vector<16xi32>
+  %left32_fixed = vector.rotli %value32, %fixed32 : vector<16xi32>
+  %right32_fixed = vector.rotri %value32, %fixed32 : vector<16xi32>
+  %left64 = vector.rotli %value64, %count64 : vector<8xi64>
+  %right64 = vector.rotri %value64, %count64 : vector<8xi64>
+  %left64_fixed = vector.rotli %value64, %fixed64 : vector<8xi64>
+  %right64_fixed = vector.rotri %value64, %fixed64 : vector<8xi64>
+  func.return %left32, %right32, %left32_fixed, %right32_fixed, %left64, %right64, %left64_fixed, %right64_fixed : vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<8xi64>, vector<8xi64>, vector<8xi64>, vector<8xi64>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<16xi32>, vector<16xi32>, vector<8xi64>, vector<8xi64>) -> (vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<8xi64>, vector<8xi64>, vector<8xi64>, vector<8xi64>)}) @packed_rotations_512(%value32: reg<x86.zmm>, %count32: reg<x86.zmm>, %value64: reg<x86.zmm>, %count64: reg<x86.zmm>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>) asm {
+  %left32 = avx512.vprolvd.zmm %value32, %count32
+  %right32 = avx512.vprorvd.zmm %value32, %count32
+  %left32_fixed = avx512.vprold.zmm %value32 {amount = 7}
+  %right32_fixed = avx512.vprord.zmm %value32 {amount = 7}
+  %left64 = avx512.vprolvq.zmm %value64, %count64
+  %right64 = avx512.vprorvq.zmm %value64, %count64
+  %left64_fixed = avx512.vprolq.zmm %value64 {amount = 11}
+  %right64_fixed = avx512.vprorq.zmm %value64 {amount = 11}
+  return %left32, %right32, %left32_fixed, %right32_fixed, %left64, %right64, %left64_fixed, %right64_fixed
+}
+
+// ====
+
+// Without AVX512VL, narrow packets retain the portable AVX2 composition while
+// the same target can still select native 512-bit rotates.
+// RUN: emit source-low output=low
+x86.target<avx512> @target {features = [-avx512vl]}
+
+func.def target(@target) @rotation_without_vl(%narrow: vector<4xi32>, %wide: vector<16xi32>, %wide_count: vector<16xi32>) -> (vector<4xi32>, vector<16xi32>) {
+  %fixed_count = vector.constant 7 : vector<4xi32>
+  %narrow_result = vector.rotli %narrow, %fixed_count : vector<4xi32>
+  %wide_result = vector.rotli %wide, %wide_count : vector<16xi32>
+  func.return %narrow_result, %wide_result : vector<4xi32>, vector<16xi32>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<4xi32>, vector<16xi32>, vector<16xi32>) -> (vector<4xi32>, vector<16xi32>)}) @rotation_without_vl(%narrow: reg<x86.xmm>, %wide: reg<x86.zmm>, %wide_count: reg<x86.zmm>) -> (reg<x86.xmm>, reg<x86.zmm>) asm {
+  %23 = vpsrld.xmm %narrow, 24
+  %24 = vpslld.xmm %narrow, 7
+  %25 = vpsrld.xmm %23, 1
+  %narrow_result = vpor.xmm %24, %25
+  %wide_result = avx512.vprolvd.zmm %wide, %wide_count
+  return %narrow_result, %wide_result
+}
+
+// ====
+
+// The remaining scalar-right-immediate and 256-bit forms stay authorable in
+// the primary Low assembly surface.
+// RUN: roundtrip
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @rotation_asm(%word: reg<x86.gpr32>, %dwords: reg<x86.ymm>, %dword_counts: reg<x86.ymm>, %qwords: reg<x86.ymm>, %qword_counts: reg<x86.ymm>) -> (reg<x86.gpr32>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) asm {
+  %word_right = ror.imm.gpr32 %word {amount = 9}
+  %dword_left = avx512.vprold.ymm %dwords {amount = 7}
+  %dword_right = avx512.vprorvd.ymm %dwords, %dword_counts
+  %qword_left = avx512.vprolvq.ymm %qwords, %qword_counts
+  %qword_right = avx512.vprorq.ymm %qwords {amount = 11}
+  return %word_right, %dword_left, %dword_right, %qword_left, %qword_right
+}

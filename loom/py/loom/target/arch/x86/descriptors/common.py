@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from loom.target.arch.x86.feature_bits import FEATURE_AVX512_VL
 from loom.target.arch.x86.packed_dot_data import (
     CONTRACT_FLAG_SATURATING,
     NUMERIC_BF16,
@@ -26,6 +27,7 @@ from loom.target.arch.x86.packed_dot_data import (
 from loom.target.arch.x86.vector_encoding import (
     VectorEncodingPrefix,
     VectorMachineInstruction,
+    vector_descriptor_bit_width,
 )
 from loom.target.low_descriptors import (
     AsmForm,
@@ -47,6 +49,8 @@ from loom.target.low_descriptors import (
     Resource,
     ScheduleClass,
 )
+
+from .encoding import Flag
 
 _REG_GPR32 = "x86.gpr32"
 _REG_GPR64 = "x86.gpr64"
@@ -135,6 +139,42 @@ def _vex_descriptor(
     descriptor: Descriptor, instruction: VectorMachineInstruction
 ) -> Descriptor:
     return instruction.bind(descriptor, VectorEncodingPrefix.VEX)
+
+
+def _avx512_descriptor(
+    descriptor: Descriptor,
+    instruction: VectorMachineInstruction,
+    *,
+    scalar: bool,
+    vector_bit_width: int | None = None,
+    required_feature_bits: int = 0,
+) -> Descriptor:
+    """Binds one AVX-512 row and derives its width-dependent feature mask."""
+    if descriptor.feature_mask_words:
+        raise ValueError(f"{descriptor.key}: AVX-512 binding owns feature masks")
+    if required_feature_bits & FEATURE_AVX512_VL:
+        raise ValueError(f"{descriptor.key}: AVX512VL is derived from encoding width")
+    encoding_bit_width = (
+        vector_bit_width
+        if vector_bit_width is not None
+        else vector_descriptor_bit_width(descriptor)
+    )
+    if encoding_bit_width not in (128, 256, 512):
+        raise ValueError(f"{descriptor.key}: AVX-512 binding requires an encoded width")
+    if scalar:
+        if encoding_bit_width != 128:
+            raise ValueError(f"{descriptor.key}: scalar AVX-512 encoding must use XMM")
+    elif encoding_bit_width < 512:
+        required_feature_bits |= FEATURE_AVX512_VL
+    descriptor = replace(
+        descriptor,
+        feature_mask_words=(required_feature_bits,) if required_feature_bits else (),
+    )
+    return instruction.bind(
+        descriptor,
+        VectorEncodingPrefix.EVEX,
+        vector_bit_width=vector_bit_width,
+    )
 
 
 def _descriptor_support_tables(
@@ -293,6 +333,20 @@ def _gpr32_result(field_name: str = "dst") -> Operand:
 
 def _gpr32_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _GPR32_ALT)
+
+
+def _gpr_width_flags(bit_count: int) -> Flag:
+    if bit_count == 8:
+        return Flag.BYTE
+    if bit_count == 16:
+        return Flag.OPERAND_16
+    if bit_count == 64:
+        return Flag.REX_W
+    return Flag(0)
+
+
+def _gpr_width_operand(bit_count: int, field_name: str) -> Operand:
+    return _gpr64_operand(field_name) if bit_count == 64 else _gpr32_operand(field_name)
 
 
 def _xmm_operand(field_name: str) -> Operand:

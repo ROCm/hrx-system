@@ -1325,9 +1325,11 @@ TEST_P(WeightsTest, WarmAdmissionCollectsCompletedPeerRelease) {
     IREE_ASSERT_OK(
         loom_serve_memory_pool_try_commit(pool_, 1, &first, &admitted));
     EXPECT_FALSE(admitted);
-    IREE_ASSERT_OK(loom_serve_residency_cache_query_status(cache));
+    gate.WaitEntered();
     EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(cache));
-    EXPECT_EQ(loom_serve_weights_statistics(plans_[1]).releasing_bytes,
+    // Native backing can outlive the weights' logical return. The pool owns
+    // those bytes while the cache retains the uncollected release interest.
+    EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
               kSlabBytes);
   }
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
@@ -1388,7 +1390,8 @@ TEST_P(WeightsTest, IdleExpiryPreservesPinsAndReloadsWithoutRecompiling) {
               !GetParam());
     EXPECT_TRUE(loom_serve_residency_snapshot(residencies_[1]).active);
     if (GetParam()) {
-      EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).releasing_bytes,
+      gate.WaitEntered();
+      EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
                 kSlabBytes);
     }
     // The independent consumer has no dependency on the held native release.
@@ -1523,7 +1526,8 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
     IREE_ASSERT_OK(
         loom_serve_memory_pool_try_commit(pool_, 1, &range, &admitted));
     EXPECT_FALSE(admitted);
-    EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).releasing_bytes,
+    gate.WaitEntered();
+    EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
               kSlabBytes);
     EXPECT_EQ(state_statistics_.committed_bytes, 0u);
   }

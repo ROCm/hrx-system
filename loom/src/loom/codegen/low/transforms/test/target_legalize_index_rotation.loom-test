@@ -1,0 +1,76 @@
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @index1 {index_bitwidth = 1}
+
+test.target<low_core> @index32 {index_bitwidth = 32}
+
+test.target<low_core> @index64 {index_bitwidth = 64}
+
+func.def target(@index1) @rotate_index1(%value: index, %count: index) -> (index, index) {
+  %left = index.rotli %value, %count : index
+  %right = index.rotri %value, %count : index
+  func.return %left, %right : index, index
+}
+
+func.def target(@index32) @rotate_index32(%value: index, %count: index) -> (index, index) {
+  %left = index.rotli %value, %count : index
+  %right = index.rotri %value, %count : index
+  func.return %left, %right : index, index
+}
+
+func.def target(@index64) @rotate_index64(%value: index, %count: index) -> (index, index) {
+  %left = index.rotli %value, %count : index
+  %right = index.rotri %value, %count : index
+  func.return %left, %right : index, index
+}
+
+// ----
+test.target<low_core> @index1 {index_bitwidth = 1}
+
+test.target<low_core> @index32 {index_bitwidth = 32}
+
+test.target<low_core> @index64 {index_bitwidth = 64}
+
+func.def target(@index1) @rotate_index1(%value: index, %count: index) -> (index, index) {
+  func.return %value, %value : index, index
+}
+
+func.def target(@index32) @rotate_index32(%value: index, %count: index) -> (index, index) {
+  %26 = index.constant 31 : index
+  %27 = index.andi %count, %26 : index
+  %28 = index.constant 0 : index
+  %29 = index.sub %28, %27 : index
+  %30 = index.andi %29, %26 : index
+  %31 = index.shli %value, %27 : index
+  %32 = index.shrui %value, %30 : index
+  %left = index.ori %31, %32 : index
+  %18 = index.constant 31 : index
+  %19 = index.andi %count, %18 : index
+  %20 = index.constant 0 : index
+  %21 = index.sub %20, %19 : index
+  %22 = index.andi %21, %18 : index
+  %23 = index.shli %value, %22 : index
+  %24 = index.shrui %value, %19 : index
+  %right = index.ori %23, %24 : index
+  func.return %left, %right : index, index
+}
+
+func.def target(@index64) @rotate_index64(%value: index, %count: index) -> (index, index) {
+  %42 = index.constant 63 : index
+  %43 = index.andi %count, %42 : index
+  %44 = index.constant 0 : index
+  %45 = index.sub %44, %43 : index
+  %46 = index.andi %45, %42 : index
+  %47 = index.shli %value, %43 : index
+  %48 = index.shrui %value, %46 : index
+  %left = index.ori %47, %48 : index
+  %34 = index.constant 63 : index
+  %35 = index.andi %count, %34 : index
+  %36 = index.constant 0 : index
+  %37 = index.sub %36, %35 : index
+  %38 = index.andi %37, %34 : index
+  %39 = index.shli %value, %38 : index
+  %40 = index.shrui %value, %35 : index
+  %right = index.ori %39, %40 : index
+  func.return %left, %right : index, index
+}

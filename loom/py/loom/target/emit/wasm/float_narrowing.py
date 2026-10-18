@@ -106,11 +106,14 @@ def _f32_to_bf16_rule(
 def _representable_f32_to_bf16_rule(
     descriptors: FloatNarrowingDescriptors,
     type_guard: Callable[[str, TypePattern], Guard],
+    *,
+    preserve_nan: bool,
 ) -> DescriptorRule:
     emits = build_representable_f32_to_bf16_emits(
         descriptors,
         ValueRef.operand("input"),
         ValueRef.result("result"),
+        preserve_nan=preserve_nan,
     )
     return DescriptorRule(
         source_op=scalar_conversion.scalar_fptrunc,
@@ -118,10 +121,14 @@ def _representable_f32_to_bf16_rule(
         guards=(
             type_guard("input", _F32),
             type_guard("result", _BF16),
+            *((Guard.value_not_nan("input"),) if not preserve_nan else ()),
             Guard.value_float_exactly_representable_as("input", "result"),
         ),
         emit=emits,
-        report_key="exactly_representable_binary32_to_bfloat16",
+        report_key=(
+            "exactly_representable_binary32_to_bfloat16"
+            + ("_preserve_nan" if preserve_nan else "")
+        ),
     )
 
 
@@ -246,7 +253,10 @@ def float_narrowing_rules(
     i32_descriptors = f32_descriptors.integer
     i64_descriptors = _integer_narrowing_descriptors(descriptor_lookup, 64)
     rules = [
-        _representable_f32_to_bf16_rule(f32_descriptors, type_guard),
+        _representable_f32_to_bf16_rule(
+            f32_descriptors, type_guard, preserve_nan=False
+        ),
+        _representable_f32_to_bf16_rule(f32_descriptors, type_guard, preserve_nan=True),
         _f32_to_bf16_rule(f32_descriptors, type_guard),
         _f32_to_narrow_float_rule(
             f32_descriptors,

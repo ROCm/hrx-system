@@ -2,7 +2,7 @@
 
 // The feature-aware contract retains the ordinary narrow scalar carrier when
 // native FP16 is absent.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 0, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [-avx512vl]}
 
 func.def target(@target) @identity_without_fp16(%value: f16) -> (f16) {
   func.return %value : f16
@@ -15,7 +15,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // ====
 
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 0, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [-avx512vl]}
 
 func.def target(@target) @root_without_fp16(%value: f16) -> (f16) {
   // ERROR@+1: LOWERING/036 {op_name="scalar.sqrtf", element_type="f16", constraint_key="math.element.native_float"}
@@ -27,7 +27,7 @@ func.def target(@target) @root_without_fp16(%value: f16) -> (f16) {
 
 // Native scalar FP16 retains XMM ownership through arithmetic, conversion,
 // selection, bitcasts, and sign legalization.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @scalar_fp16_family(%lhs: f16, %rhs: f16, %acc: f16, %wide: f32, %condition: i1) -> (f16, f32, f16, i1, f16) {
   %add = scalar.addf %lhs, %rhs : f16
@@ -81,7 +81,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // ====
 
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @fp16_constant() -> (f16) {
   %value = scalar.constant 1.5 : f16
@@ -98,7 +98,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 // ====
 
 // A four-lane FP16 payload occupies the low 64 bits of one XMM register.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @identity_four_lane_fp16(%value: vector<4xf16>) -> (vector<4xf16>) {
   func.return %value : vector<4xf16>
@@ -113,7 +113,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // The complete four-lane family uses the low 64 bits of XMM while wider
 // arithmetic retains the ordinary YMM and ZMM paths.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @vector_fp16_family(%xmm_lhs: vector<4xf16>, %xmm_rhs: vector<4xf16>, %ymm_lhs: vector<16xf16>, %ymm_rhs: vector<16xf16>, %zmm_lhs: vector<32xf16>, %zmm_rhs: vector<32xf16>, %wide: vector<4xf32>, %scalar: f16) -> (vector<4xf16>, vector<16xf16>, vector<32xf16>, vector<4xi1>, vector<4xf32>, vector<4xf16>) {
   %xmm_add = vector.addf %xmm_lhs, %xmm_rhs : vector<4xf16>
@@ -177,7 +177,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // Two packed halves exercise the smallest direct FP16 family, including its
 // word predicate representation, conversions, roots, reductions, and memory.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @two_lane_fp16_family(%lhs: vector<2xf16>, %rhs: vector<2xf16>, %wide: vector<2xf32>, %scalar: f16, %input: buffer, %output: buffer) -> (vector<2xf16>, vector<2xf32>, f16, f16) {
   %add = vector.addf %lhs, %rhs : vector<2xf16>
@@ -234,7 +234,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 // ====
 
 // Scalar memory moves exactly two bytes while preserving the XMM carrier.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @scalar_fp16_memory(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
@@ -259,7 +259,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @sca
 // ====
 
 // Four packed halves transfer exactly eight bytes through the low half of XMM.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @low_xmm_fp16_memory(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
@@ -283,7 +283,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @low
 
 // Lane operations retain scalar FP16 in XMM instead of round-tripping through
 // the ordinary GPR carrier.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @fp16_lane_transport(%values: vector<4xf16>) -> (vector<4xf16>, f16) {
   %lane = vector.extract %values[3] : vector<4xf16> -> f16
@@ -304,7 +304,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // Exact extrema preserve NaNs and signed zero. The guarded forms use the
 // native MIN/MAX instructions only when those distinctions are disabled.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @fp16_extrema(%scalar_lhs: f16, %scalar_rhs: f16, %vector_lhs: vector<4xf16>, %vector_rhs: vector<4xf16>) -> (f16, f16, vector<4xf16>, vector<4xf16>) {
   %scalar_exact = scalar.minimumf %scalar_lhs, %scalar_rhs : f16
@@ -343,7 +343,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // Ordered reductions and dots retain f16 intermediates. Reassociated forms
 // may use packed trees, and guarded extrema may use native MIN/MAX.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @fp16_reductions(%lhs: vector<4xf16>, %rhs: vector<4xf16>, %init: f16) -> (f16, f16, f16, f16) {
   %ordered = vector.reduce<addf> %lhs, %init : vector<4xf16>, f16

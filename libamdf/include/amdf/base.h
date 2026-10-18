@@ -100,8 +100,11 @@ typedef uint32_t amdf_abi_version_t;
 /// Explicit placement of host-owned backing with qualified device accesses.
 #define AMDF_ABI_VERSION_10 ((amdf_abi_version_t)10)
 
+/// Native file-buffer views, optional memory routes, and I/O visibility sites.
+#define AMDF_ABI_VERSION_11 ((amdf_abi_version_t)11)
+
 /// The most recent ABI version described by this header.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_10
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_11
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"
@@ -242,6 +245,8 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO = 23,
   /// Cached stable address and alias-domain facts for one consumer.
   AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_ACCESS_INFO = 24,
+  /// Host CPU locality captured while opening an endpoint.
+  AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY = 25,
 };
 
 /// Identifier of an optional API table compiled into the providing library.
@@ -562,7 +567,7 @@ typedef struct amdf_endpoint_info_t {
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_endpoint_info_t)`.
   uint32_t structure_size;
-  /// Optional output extension chain. No extensions are defined in ABI v1.
+  /// Optional `amdf_endpoint_host_locality_t` output extension.
   void* next;
   /// Opaque identity used to open this endpoint.
   amdf_endpoint_id_t id;
@@ -579,6 +584,26 @@ typedef struct amdf_endpoint_info_t {
   /// Cached native identity for matching other API providers before activation.
   amdf_endpoint_native_identity_t native_identity;
 } amdf_endpoint_info_t;
+
+/// Host CPU locality captured by `endpoint_open` without device activation.
+///
+/// Append to `amdf_endpoint_info_t::next`. This is a native topology hint,
+/// independent of GPU memory placement and queue topology. The caller owns
+/// affinity policy, including application overrides and allowed CPU sets.
+/// The snapshot does not follow later CPU hotplug or topology changes.
+typedef struct amdf_endpoint_host_locality_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_endpoint_host_locality_t)`.
+  uint32_t structure_size;
+  /// Must be NULL; no further endpoint output extensions are defined.
+  void* next;
+  /// OS NUMA node with online host CPUs at the endpoint's attachment, or
+  /// UINT32_MAX when unavailable or when that node has no online CPUs.
+  /// Zero is a valid node. This is neither a GPU memory node nor a Windows
+  /// processor group, and does not imply permission to run on those CPUs.
+  uint32_t numa_node;
+} amdf_endpoint_host_locality_t;
 
 #ifdef __cplusplus
 }  // extern "C"

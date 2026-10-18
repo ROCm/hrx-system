@@ -27,6 +27,7 @@ set(IREE_DEPENDENCY_IDS
   "mimalloc"
   "rdma_core_headers"
   "libdrm_headers"
+  "linux_udmabuf_header"
   "linux_kfd_ioctl_header"
   "linux_kfd_sysfs_header"
   "linux_const_header"
@@ -322,6 +323,23 @@ set(IREE_DEP_LIBDRM_HEADERS_STRIP_PREFIX "libdrm-2.4.134")
 set(IREE_DEP_LIBDRM_HEADERS_BUILD_FILE "//build_tools/third_party/linux_uapi:libdrm_headers.BUILD.bazel")
 set(IREE_DEP_LIBDRM_HEADERS_PATCHES "")
 set(IREE_DEP_LIBDRM_HEADERS_PATCH_ARGS "")
+
+set(IREE_DEP_LINUX_UDMABUF_HEADER_KIND "http_file")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_OWNER "shared")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_MODULE_NAME "linux_udmabuf_header")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_REPO_NAME "linux_udmabuf_header")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_VERSION "")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_SOURCE_URL "")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_URLS
+  "https://raw.githubusercontent.com/torvalds/linux/a90ee4305c4a5df72c11b31dacfdc76e00fcf78a/include/uapi/linux/udmabuf.h"
+)
+set(IREE_DEP_LINUX_UDMABUF_HEADER_SHA256 "a3c84394744eb25490cd3884bfe95e7c0837a79b3ac313516603646cf04612f5")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_STRIP_PREFIX "")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_BUILD_FILE "")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_DOWNLOADED_FILE_PATH "linux/udmabuf.h")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_PATCHES "")
+set(IREE_DEP_LINUX_UDMABUF_HEADER_PATCH_ARGS "")
 
 set(IREE_DEP_LINUX_KFD_IOCTL_HEADER_KIND "http_file")
 set(IREE_DEP_LINUX_KFD_IOCTL_HEADER_OWNER "shared")

@@ -51,6 +51,14 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "host_export",
+    srcs = ["host_export.c"],
+    target_compatible_with = WINDOWS_COMPATIBILITY,
+    visibility = ["//libamdf/src/platform:__pkg__"],
+    deps = ["//libamdf/src/platform:host_export"],
+)
+
+amdf_cc_library(
     name = "host_memory",
     srcs = ["host_memory.c"],
     target_compatible_with = WINDOWS_COMPATIBILITY,
@@ -116,6 +124,17 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "host_locality",
+    srcs = ["host_locality.c"],
+    hdrs = ["host_locality.h"],
+    target_compatible_with = WINDOWS_COMPATIBILITY,
+    deps = [
+        ":kmt_api",
+        "//libamdf/src:allocator",
+    ],
+)
+
+amdf_cc_library(
     name = "instance",
     srcs = ["instance.c"],
     hdrs = ["instance.h"],
@@ -123,6 +142,7 @@ amdf_cc_library(
     visibility = ["//libamdf/src/platform:__pkg__"],
     deps = [
         ":endpoint_snapshot",
+        ":host_locality",
         ":kmt_api",
         "//libamdf/src:allocator",
         "//libamdf/src/platform",
@@ -137,6 +157,7 @@ amdf_cc_library(
     visibility = ["//libamdf/src:__subpackages__"],
     deps = [
         ":endpoint_properties",
+        ":host_locality",
         ":instance",
         "//libamdf/src:allocator",
         "//libamdf/src/platform",
@@ -159,6 +180,19 @@ amdf_cc_test(
     target_compatible_with = WINDOWS_COMPATIBILITY,
     deps = [
         ":device_status",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "host_locality_test",
+    srcs = ["host_locality_test.cc"],
+    target_compatible_with = WINDOWS_COMPATIBILITY,
+    deps = [
+        ":host_locality",
+        ":kmt_api",
+        "//libamdf/src:allocator",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],

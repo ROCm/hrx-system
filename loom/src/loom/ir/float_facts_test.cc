@@ -223,6 +223,59 @@ TEST(FloatFacts, ExactDestinationFormatsMatchNarrowFormatRoundTrips) {
   }
 }
 
+TEST(FloatFacts, NonfiniteValuesDoNotConstrainFiniteDestinationFormats) {
+  const double infinity = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  for (loom_scalar_type_t type = LOOM_SCALAR_TYPE_F8E4M3;
+       type <= LOOM_SCALAR_TYPE_F64; ++type) {
+    SCOPED_TRACE(loom_scalar_type_name(type));
+    for (const double value : {infinity, -infinity, nan}) {
+      const loom_value_facts_t facts =
+          loom_value_facts_exact_float(type, value);
+      ExpectExactFloatTypes(facts, LOOM_SCALAR_TYPE_SET_FLOAT);
+      const bool saturates =
+          type == LOOM_SCALAR_TYPE_F8E4M3 && !std::isnan(value);
+      EXPECT_EQ(loom_value_facts_is_finite(facts), saturates);
+      EXPECT_EQ(loom_value_facts_is_nan(facts), std::isnan(value));
+      EXPECT_EQ(loom_value_facts_is_inf(facts),
+                !std::isnan(value) && !saturates);
+      if (saturates) {
+        EXPECT_DOUBLE_EQ(ExactFloatValue(type, facts),
+                         std::copysign(448.0, value));
+      }
+    }
+  }
+
+  const loom_value_facts_t raw_nan = loom_value_facts_known_nan();
+  ExpectExactFloatTypes(raw_nan, LOOM_SCALAR_TYPE_SET_FLOAT);
+  EXPECT_TRUE(loom_value_facts_is_nan(raw_nan));
+  EXPECT_FALSE(loom_value_facts_is_finite(raw_nan));
+  EXPECT_FALSE(loom_value_facts_is_exact(raw_nan));
+}
+
+TEST(FloatFacts, NonfiniteAlternativesPreserveFiniteRepresentability) {
+  const loom_value_facts_t narrow =
+      loom_value_facts_make_float_range(LOOM_SCALAR_TYPE_BF16, -1.0, 1.0);
+  loom_value_facts_t wide = loom_value_facts_unknown();
+  loom_value_facts_eval_float_conversion(
+      LOOM_SCALAR_TYPE_BF16, LOOM_SCALAR_TYPE_F32, {}, &narrow, &wide);
+  const double infinity = std::numeric_limits<double>::infinity();
+  const loom_value_facts_t alternatives[] = {
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, infinity),
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, -infinity),
+      loom_value_facts_known_nan(),
+  };
+  for (const loom_value_facts_t alternative : alternatives) {
+    loom_value_facts_t joined = loom_value_facts_unknown();
+    loom_value_facts_meet(&wide, &alternative, &joined);
+    ExpectExactFloatTypes(joined, loom_value_facts_exact_float_types(wide));
+    EXPECT_FALSE(loom_value_facts_is_finite(joined));
+    EXPECT_FALSE(loom_value_facts_is_exact(joined));
+    EXPECT_EQ(loom_value_facts_is_not_nan(joined),
+              loom_value_facts_is_not_nan(alternative));
+  }
+}
+
 TEST(FloatFacts, ExactDestinationFormatsMatchWideFormatRoundTrips) {
   constexpr uint32_t kF32Fractions[] = {
       0,

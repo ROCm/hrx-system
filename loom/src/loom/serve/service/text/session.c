@@ -22,6 +22,35 @@ bool loom_serve_text_session_name_valid(iree_string_view_t name) {
   return true;
 }
 
+loom_serve_text_session_t* loom_serve_text_session_select(
+    iree_host_size_t count, loom_serve_text_session_t* sessions,
+    iree_string_view_t name, const loom_serve_text_chat_t* chat) {
+  loom_serve_text_session_t* oldest = NULL;
+  loom_serve_text_session_t* continuation = NULL;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    loom_serve_text_session_t* session = &sessions[i];
+    if (name.size &&
+        iree_string_view_equal(
+            name, iree_make_cstring_view(session->lifetime.name))) {
+      return session;
+    }
+    if (session->request.consumer.self) {
+      continue;
+    }
+    if (!oldest || session->lifetime.serial < oldest->lifetime.serial) {
+      oldest = session;
+    }
+    if (!name.size && chat && !session->lifetime.name[0] &&
+        session->completion.storage && session->completion.reusable &&
+        (!continuation || session->completion.transcript.size >
+                              continuation->completion.transcript.size) &&
+        loom_serve_text_chat_completion_is_prefix(&session->completion, chat)) {
+      continuation = session;
+    }
+  }
+  return continuation ? continuation : oldest;
+}
+
 iree_status_t loom_serve_text_session_initialize(
     loom_serve_text_row_t* row, const iree_tokenizer_t* tokenizer,
     iree_host_size_t context_capacity, iree_allocator_t host_allocator,
@@ -106,13 +135,14 @@ iree_status_t loom_serve_text_session_begin(loom_serve_text_session_t* session,
 static iree_status_t loom_serve_text_emit_output(
     loom_serve_text_session_t* session,
     const loom_serve_text_chat_response_t* response,
-    loom_serve_text_chat_output_phase_t phase, iree_string_builder_t* scratch) {
+    loom_serve_text_chat_output_phase_t phase, iree_string_builder_t* scratch,
+    iree_allocator_t scratch_allocator) {
   iree_status_t status = iree_ok_status();
   loom_serve_text_chat_output_t output;
   do {
     status = loom_serve_text_chat_output_next(
         &session->request.chat, iree_string_builder_view(&session->response),
-        phase, &output);
+        phase, scratch_allocator, &output);
     if (iree_status_is_ok(status) && output.text.size) {
       status = session->request.consumer.vtable->append(
           session->request.consumer.self, response, &output, scratch);
@@ -136,7 +166,9 @@ static iree_status_t loom_serve_text_append_response(
 static iree_status_t loom_serve_text_complete(
     loom_serve_text_session_t* session,
     const loom_serve_text_chat_response_t* response,
-    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls) {
+    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls,
+    loom_serve_text_chat_scratch_t* completion_scratch,
+    iree_allocator_t scratch_allocator) {
   char text[8192];
   iree_host_size_t length = 0;
   IREE_RETURN_IF_ERROR(iree_tokenizer_decode_state_finalize(
@@ -146,11 +178,13 @@ static iree_status_t loom_serve_text_complete(
       session, iree_make_string_view(text, length)));
   if (iree_any_bit_set(response->flags, LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
     IREE_RETURN_IF_ERROR(loom_serve_text_emit_output(
-        session, response, LOOM_SERVE_TEXT_CHAT_OUTPUT_COMPLETE, scratch));
+        session, response, LOOM_SERVE_TEXT_CHAT_OUTPUT_COMPLETE, scratch,
+        scratch_allocator));
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_complete(
       &session->request.chat, iree_string_builder_view(&session->response),
-      session->lifetime.serial, tool_calls, &session->completion));
+      session->lifetime.serial, tool_calls, completion_scratch,
+      scratch_allocator, &session->completion));
   const iree_host_size_t tool_count = tool_calls->count;
   session->request.finish_reason = tool_count ? "tool_calls"
                                    : loom_serve_text_row_is_eos(session->row)
@@ -178,7 +212,9 @@ static iree_status_t loom_serve_text_complete(
 static iree_status_t loom_serve_text_session_decode_tokens(
     loom_serve_text_session_t* session, iree_string_view_t model_name,
     iree_host_size_t count, const int32_t* tokens,
-    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls) {
+    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls,
+    loom_serve_text_chat_scratch_t* completion_scratch,
+    iree_allocator_t scratch_allocator) {
   if (!session->request.output_count) {
     session->request.first_token_time = iree_time_now();
   }
@@ -210,12 +246,13 @@ static iree_status_t loom_serve_text_session_decode_tokens(
         loom_serve_text_row_is_eos(session->row) ||
         session->request.output_count == session->request.chat.max_tokens;
     if (complete) {
-      status =
-          loom_serve_text_complete(session, &response, scratch, tool_calls);
+      status = loom_serve_text_complete(session, &response, scratch, tool_calls,
+                                        completion_scratch, scratch_allocator);
     } else if (iree_any_bit_set(response.flags,
                                 LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
       status = loom_serve_text_emit_output(
-          session, &response, LOOM_SERVE_TEXT_CHAT_OUTPUT_STREAMING, scratch);
+          session, &response, LOOM_SERVE_TEXT_CHAT_OUTPUT_STREAMING, scratch,
+          scratch_allocator);
     }
   }
   return status;
@@ -224,9 +261,12 @@ static iree_status_t loom_serve_text_session_decode_tokens(
 iree_status_t loom_serve_text_session_append_tokens(
     loom_serve_text_session_t* session, iree_string_view_t model_name,
     iree_host_size_t count, const int32_t* tokens,
-    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls) {
+    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls,
+    loom_serve_text_chat_scratch_t* completion_scratch,
+    iree_allocator_t scratch_allocator) {
   iree_status_t status = loom_serve_text_session_decode_tokens(
-      session, model_name, count, tokens, scratch, tool_calls);
+      session, model_name, count, tokens, scratch, tool_calls,
+      completion_scratch, scratch_allocator);
   if (!iree_status_is_ok(status)) {
     // Device work completed, but translation cannot establish client history.
     // The consumer discards the partial stage and preserves the terminal error.

@@ -428,6 +428,72 @@ TEST(EncodingTest, ScalarFloatMemoryWidthsAndAddressForms) {
                        {0xc5, 0x7b, 0x11, 0x53, 0xfc});
 }
 
+TEST(EncodingTest, IntegerRotationFamilyHasExactReferenceBytes) {
+  loom_x86_encoding_operands_t operands = {
+      .immediate = 7,
+      .result = 1,
+      .inputs = {2, 3},
+  };
+
+  // LLVM MC references, in VPROLD, VPROLQ, VPRORD, VPRORQ order.
+  ExpectVectorEncoding(0x9109, 0x2572, operands,
+                       {0x62, 0xf1, 0x75, 0x08, 0x72, 0xca, 0x07});
+  ExpectVectorEncoding(0x9109, 0x3572, operands,
+                       {0x62, 0xf1, 0xf5, 0x08, 0x72, 0xca, 0x07});
+  ExpectVectorEncoding(0x9104, 0x2572, operands,
+                       {0x62, 0xf1, 0x75, 0x08, 0x72, 0xc2, 0x07});
+  ExpectVectorEncoding(0x9104, 0x3572, operands,
+                       {0x62, 0xf1, 0xf5, 0x08, 0x72, 0xc2, 0x07});
+
+  // LLVM MC references, in VPROLVD, VPROLVQ, VPRORVD, VPRORVQ order.
+  ExpectVectorEncoding(0x8210, 0x2615, operands,
+                       {0x62, 0xf2, 0x6d, 0x08, 0x15, 0xcb});
+  ExpectVectorEncoding(0x8210, 0x3615, operands,
+                       {0x62, 0xf2, 0xed, 0x08, 0x15, 0xcb});
+  ExpectVectorEncoding(0x8210, 0x2614, operands,
+                       {0x62, 0xf2, 0x6d, 0x08, 0x14, 0xcb});
+  ExpectVectorEncoding(0x8210, 0x3614, operands,
+                       {0x62, 0xf2, 0xed, 0x08, 0x14, 0xcb});
+}
+
+TEST(EncodingTest, ScalarShiftAndRotationCountOneUseImplicitEncoding) {
+  loom_x86_encoding_operands_t operands = {
+      .immediate = 1,
+      .result = 9,
+  };
+
+  // LLVM MC references cover every scalar width and opcode extension that
+  // uses the shared immediate shift encoding form.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x40c0, operands,
+                 {0x41, 0xd0, 0xc1}, 1u << 9);  // ROL r9b.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x42c0, operands,
+                 {0x41, 0xd0, 0xc9}, 1u << 9);  // ROR r9b.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x20c1, operands,
+                 {0x66, 0x41, 0xd1, 0xc1}, 1u << 9);  // ROL r9w.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x22c1, operands,
+                 {0x66, 0x41, 0xd1, 0xc9}, 1u << 9);  // ROR r9w.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x00c1, operands,
+                 {0x41, 0xd1, 0xc1}, 1u << 9);  // ROL r9d.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x02c1, operands,
+                 {0x41, 0xd1, 0xc9}, 1u << 9);  // ROR r9d.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x10c1, operands,
+                 {0x49, 0xd1, 0xc1}, 1u << 9);  // ROL r9.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x12c1, operands,
+                 {0x49, 0xd1, 0xc9}, 1u << 9);  // ROR r9.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x08c1, operands,
+                 {0x41, 0xd1, 0xe1}, 1u << 9);  // SHL r9d.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x0ac1, operands,
+                 {0x41, 0xd1, 0xe9}, 1u << 9);  // SHR r9d.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x0ec1, operands,
+                 {0x41, 0xd1, 0xf9}, 1u << 9);  // SAR r9d.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x18c1, operands,
+                 {0x49, 0xd1, 0xe1}, 1u << 9);  // SHL r9.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x1ac1, operands,
+                 {0x49, 0xd1, 0xe9}, 1u << 9);  // SHR r9.
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE, 0x1ec1, operands,
+                 {0x49, 0xd1, 0xf9}, 1u << 9);  // SAR r9.
+}
+
 TEST(EncodingTest, EveryVectorRecipeHasExactReferenceBytes) {
   struct Reference {
     uint16_t encoding_format_id;
@@ -550,6 +616,24 @@ TEST(EncodingTest, RegisterDirectionAndWidth) {
                  operands, {0x4d, 0x0f, 0xaf, 0xca}, 1u << 9);
   ExpectEncoding(LOOM_X86_ENCODING_FORM_BINARY_RM_R, 0x01, operands,
                  {0x45, 0x01, 0xd1}, 1u << 9);
+}
+
+TEST(EncodingTest, MandatoryF3UnaryWidthsAndExtendedRegisters) {
+  loom_x86_encoding_operands_t operands = {.result = 1};
+  operands.inputs[0] = 2;
+  ExpectEncoding(
+      LOOM_X86_ENCODING_FORM_UNARY_F3_R_RM,
+      LOOM_X86_ENCODING_OPCODE_0F | 0xbc | LOOM_X86_ENCODING_OPERAND_16,
+      operands, {0xf3, 0x66, 0x0f, 0xbc, 0xca}, 1u << 1);
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_UNARY_F3_R_RM,
+                 LOOM_X86_ENCODING_OPCODE_0F | 0xbd, operands,
+                 {0xf3, 0x0f, 0xbd, 0xca}, 1u << 1);
+
+  operands.result = 9;
+  operands.inputs[0] = 10;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_UNARY_F3_R_RM,
+                 LOOM_X86_ENCODING_OPCODE_0F | 0xb8 | LOOM_X86_ENCODING_REX_W,
+                 operands, {0xf3, 0x4d, 0x0f, 0xb8, 0xca}, 1u << 9);
 }
 
 TEST(EncodingTest, DestructiveUnaryRegisterWidth) {

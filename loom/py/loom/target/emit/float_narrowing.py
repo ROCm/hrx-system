@@ -525,6 +525,7 @@ def build_f32_to_bf16_emits(
         recipe,
         input_bits,
         result_ref,
+        exact_finite_values=False,
         preserve_nan=preserve_nan,
     )
 
@@ -533,14 +534,22 @@ def build_representable_f32_to_bf16_emits(
     descriptors: FloatNarrowingDescriptors,
     input_ref: ValueRef,
     result_ref: ValueRef,
+    *,
+    preserve_nan: bool,
 ) -> tuple[EmitDescriptorOp, ...]:
-    """Narrows a finite F32 value already known to be exact in BF16."""
+    """Narrows F32 whose finite values are exact in BF16, optionally quieting NaNs."""
 
     recipe = _ScalarRecipe(descriptors.integer)
     input_bits = recipe.reinterpret_float_as_integer(
         "input_bits", descriptors.reinterpret_float_as_integer, input_ref
     )
-    return _build_representable_f32_bits_to_bf16_emits(recipe, input_bits, result_ref)
+    return _build_f32_bits_to_bf16_emits(
+        recipe,
+        input_bits,
+        result_ref,
+        exact_finite_values=True,
+        preserve_nan=preserve_nan,
+    )
 
 
 def build_f32_bits_to_bf16_emits(
@@ -556,6 +565,7 @@ def build_f32_bits_to_bf16_emits(
         _ScalarRecipe(descriptors),
         input_bits_ref,
         result_ref,
+        exact_finite_values=False,
         preserve_nan=preserve_nan,
     )
 
@@ -564,27 +574,18 @@ def build_representable_f32_bits_to_bf16_emits(
     descriptors: IntegerNarrowingDescriptors,
     input_bits_ref: ValueRef,
     result_ref: ValueRef,
+    *,
+    preserve_nan: bool,
 ) -> tuple[EmitDescriptorOp, ...]:
-    """Narrows integer-carried F32 bits already known to be exact in BF16."""
+    """Narrows integer-carried F32 bits with exact finite values in BF16."""
 
-    return _build_representable_f32_bits_to_bf16_emits(
-        _ScalarRecipe(descriptors), input_bits_ref, result_ref
-    )
-
-
-def _build_representable_f32_bits_to_bf16_emits(
-    recipe: _ScalarRecipe,
-    input_bits: ValueRef,
-    result_ref: ValueRef,
-) -> tuple[EmitDescriptorOp, ...]:
-    shift = recipe.integer_constant("shift", 16)
-    recipe.integer_binary_to(
+    return _build_f32_bits_to_bf16_emits(
+        _ScalarRecipe(descriptors),
+        input_bits_ref,
         result_ref,
-        recipe.descriptors.integer_shift_right_logical,
-        input_bits,
-        shift,
+        exact_finite_values=True,
+        preserve_nan=preserve_nan,
     )
-    return recipe.finish()
 
 
 def _build_f32_bits_to_bf16_emits(
@@ -592,32 +593,40 @@ def _build_f32_bits_to_bf16_emits(
     input_bits: ValueRef,
     result_ref: ValueRef,
     *,
+    exact_finite_values: bool,
     preserve_nan: bool,
 ) -> tuple[EmitDescriptorOp, ...]:
-    """Builds exact BF16 rounding after F32 bits have been materialized."""
+    """Narrows F32 bits using independent finite-format and NaN guarantees."""
 
     integer_descriptors = recipe.descriptors
     shift = recipe.integer_constant("shift", 16)
-    upper = recipe.integer_binary(
-        "upper", integer_descriptors.integer_shift_right_logical, input_bits, shift
-    )
-    one = recipe.integer_constant("one", 1)
-    retained_lsb = recipe.integer_binary(
-        "retained_lsb", integer_descriptors.integer_bitwise_and, upper, one
-    )
-    rounding_bias = recipe.integer_constant("rounding_bias", 0x7FFF)
-    bias = recipe.integer_binary(
-        "bias", integer_descriptors.integer_add, rounding_bias, retained_lsb
-    )
-    rounded = recipe.integer_binary(
-        "rounded", integer_descriptors.integer_add, input_bits, bias
-    )
-    finite = recipe.integer_binary_to(
-        ValueRef.temporary("finite") if preserve_nan else result_ref,
+    upper = recipe.integer_binary_to(
+        result_ref
+        if exact_finite_values and not preserve_nan
+        else ValueRef.temporary("upper"),
         integer_descriptors.integer_shift_right_logical,
-        rounded,
+        input_bits,
         shift,
     )
+    finite = upper
+    if not exact_finite_values:
+        one = recipe.integer_constant("one", 1)
+        retained_lsb = recipe.integer_binary(
+            "retained_lsb", integer_descriptors.integer_bitwise_and, upper, one
+        )
+        rounding_bias = recipe.integer_constant("rounding_bias", 0x7FFF)
+        bias = recipe.integer_binary(
+            "bias", integer_descriptors.integer_add, rounding_bias, retained_lsb
+        )
+        rounded = recipe.integer_binary(
+            "rounded", integer_descriptors.integer_add, input_bits, bias
+        )
+        finite = recipe.integer_binary_to(
+            ValueRef.temporary("finite") if preserve_nan else result_ref,
+            integer_descriptors.integer_shift_right_logical,
+            rounded,
+            shift,
+        )
 
     if not preserve_nan:
         return recipe.finish()

@@ -23,11 +23,13 @@ class LowAllocationCoveringSpillSearchTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &arena_);
+    iree_arena_initialize(&block_pool_, &decision_arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
   void TearDown() override {
+    iree_arena_deinitialize(&decision_arena_);
     iree_arena_deinitialize(&arena_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
@@ -50,6 +52,8 @@ class LowAllocationCoveringSpillSearchTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t arena_;
+  // Owner of construction indexes and mutable lease availability workspace.
+  iree_arena_allocator_t decision_arena_;
   loom_context_t context_;
 };
 
@@ -420,7 +424,8 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &lease_table, module, function_op, &value_domain, &liveness,
-      &storage_identity, &unit_liveness, &arena_, &storage_leases));
+      &storage_identity, &unit_liveness, &arena_, &decision_arena_,
+      &storage_leases));
   loom_low_allocation_storage_lease_state_record_assignment(
       &storage_leases, &descriptor_set, &liveness, assignments,
       /*assignment_index=*/0, /*value_ordinal=*/1);

@@ -41,7 +41,7 @@ class Pm4DispatchTest : public Pm4CommandTest {
     GpuMemory* code = nullptr;
     ASSERT_NO_FATAL_FAILURE(
         CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_EXECUTE,
-                     code_byte_length, &code));
+                     code_byte_length, &code, AMDF_MEMORY_FLAG_HOST_COHERENT));
     ASSERT_EQ(code->device_address % 256, 0u);
     ASSERT_LE(code->device_address, (UINT64_C(1) << 48) - code_byte_length);
     const uint64_t entry_address = code->device_address + entry_byte_offset;

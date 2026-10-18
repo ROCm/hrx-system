@@ -16,11 +16,11 @@ amdf_status_t amdf_gpu_umd_memory_describe_site(
       family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA &&
       family->format_version == AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1;
   // Host-visible LOCAL apertures require an additional HDP contract. These
-  // payload recipes cover coherent SYSTEM and device-only LOCAL accesses.
+  // payload recipes cover SYSTEM and device-only LOCAL accesses. Host cache
+  // maintenance belongs to the separately queried CPU edge.
   const bool sdma_backing =
-      (query->flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL) != 0
-          ? (query->flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) == 0
-          : (query->flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0;
+      (query->flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL) == 0 ||
+      (query->flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) == 0;
   const bool scoped_sdma = sdma_format && sdma_backing &&
                            (family->roles & AMDF_QUEUE_ROLE_TRANSFER) != 0 &&
                            (family->format_features &

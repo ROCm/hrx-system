@@ -294,7 +294,8 @@ iree_status_t loom_rewriter_build_constant(loom_rewriter_t* rewriter,
 // Recomputes an op's inferred or structured-region result facts, then attempts
 // to fold a side-effect-free op with vtable fact inference to constants.
 // Materializes constants via the rewriter's materialize_constant callback when
-// every result is exact and replaces the original op via RAUW+erase. Sets
+// every result is an exact scalar and replaces the original op via RAUW+erase.
+// Aggregate constants remain owned by dialect-specific patterns. Sets
 // |*out_folded| to true if the op was erased, false otherwise. No-op if
 // analysis is not enabled or the op has no fact inference or region summary
 // interface.

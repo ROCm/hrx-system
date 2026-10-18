@@ -27,29 +27,11 @@ _ensure_runtime_py_on_path()
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
 from loom.gen.support.files import write_text_file as _write_text  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
-from loom.target.arch.x86.feature_bits import (  # noqa: E402
-    FEATURE_AVX10_2,
-    FEATURE_AVX512_BF16,
-    FEATURE_AVX512_VL,
-    FEATURE_AVX512_VNNI,
-    FEATURE_AVX_VNNI,
-    FEATURE_AVX_VNNI_INT8,
-    FEATURE_AVX_VNNI_INT16,
-)
+from loom.target.arch.x86.feature_catalog import X86_FEATURE_INFOS  # noqa: E402
 from loom.target.arch.x86.target_info import (  # noqa: E402
     X86_NATIVE_TARGET_SELECTOR_PROFILE_KEYS,
     X86TargetProfileInfo,
     x86_target_profile_info_by_key,
-)
-
-_FEATURE_BIT_C_NAMES = (
-    (FEATURE_AVX512_VNNI, "LOOM_X86_FEATURE_AVX512_VNNI"),
-    (FEATURE_AVX512_VL, "LOOM_X86_FEATURE_AVX512_VL"),
-    (FEATURE_AVX_VNNI, "LOOM_X86_FEATURE_AVX_VNNI"),
-    (FEATURE_AVX_VNNI_INT8, "LOOM_X86_FEATURE_AVX_VNNI_INT8"),
-    (FEATURE_AVX_VNNI_INT16, "LOOM_X86_FEATURE_AVX_VNNI_INT16"),
-    (FEATURE_AVX10_2, "LOOM_X86_FEATURE_AVX10_2"),
-    (FEATURE_AVX512_BF16, "LOOM_X86_FEATURE_AVX512_BF16"),
 )
 
 
@@ -65,13 +47,18 @@ def _symbol_suffix(profile_key: str) -> str:
 def _feature_bits_expr(feature_bits: int) -> str:
     remaining_bits = feature_bits
     parts: list[str] = []
-    for bit, c_name in _FEATURE_BIT_C_NAMES:
+    for ordinal, info in enumerate(X86_FEATURE_INFOS):
+        bit = 1 << ordinal
         if remaining_bits & bit:
-            parts.append(c_name)
+            parts.append(info.c_feature_macro)
             remaining_bits &= ~bit
     if remaining_bits:
         raise ValueError(f"unknown x86 feature bits 0x{remaining_bits:x}")
     return " | ".join(parts) if parts else "0"
+
+
+def _cpu_feature_bits_expr(features: tuple[str, ...]) -> str:
+    return " | ".join(f"LOOM_X86_CPU_FIELD0_BIT({feature})" for feature in features) or "0"
 
 
 def _snapshot_name(native_bundle_key: str) -> str:
@@ -95,12 +82,21 @@ def _emit_native_profiles_inl(profiles: tuple[X86TargetProfileInfo, ...]) -> str
         *line_comment_header("//", generator="loom.gen.target.arch.x86.x86_target_profiles"),
         "// clang-format off",
         "",
-        "#ifdef LOOM_X86_NATIVE_TARGET_PROFILE",
+        "#ifdef LOOM_X86_TARGET_FEATURE",
     ]
+    lines.extend(f"LOOM_X86_TARGET_FEATURE({info.c_enum_suffix}, {info.c_feature_macro})" for info in X86_FEATURE_INFOS)
+    lines.extend(["#endif", "", "#ifdef LOOM_X86_CPU_FEATURE_MAPPING"])
+    for info in X86_FEATURE_INFOS:
+        cpu_feature_position = f"LOOM_X86_CPU_FIELD0_BIT_POSITION({info.runtime_cpu_suffix})" if info.runtime_cpu_suffix is not None else "UINT8_MAX"
+        lines.append(f"LOOM_X86_CPU_FEATURE_MAPPING({cpu_feature_position})")
+    lines.extend(["#endif", "", "#ifdef LOOM_X86_NATIVE_TARGET_PROFILE"])
     for target_kind, profile in enumerate(profiles, start=1):
         native_bundle_key = profile.native_bundle_key
         if native_bundle_key is None:
             raise ValueError(f"x86 profile {profile.profile_key} has no native bundle")
+        feature_contract_set_key = profile.feature_contract_set_key
+        if feature_contract_set_key is None:
+            raise ValueError(f"x86 profile {profile.profile_key} has no feature contract")
         lines.append(
             "LOOM_X86_NATIVE_TARGET_PROFILE("
             f"{_symbol_suffix(profile.profile_key)}, "
@@ -109,7 +105,11 @@ def _emit_native_profiles_inl(profiles: tuple[X86TargetProfileInfo, ...]) -> str
             f"{_c_arg(native_bundle_key)}, "
             f"{_c_arg(_snapshot_name(native_bundle_key))}, "
             f"{_c_arg(profile.descriptor_set_key)}, "
-            f"{_feature_bits_expr(profile.contract_feature_bits)})"
+            f"{_c_arg(feature_contract_set_key)}, "
+            f"{_feature_bits_expr(profile.contract_feature_bits)}, "
+            f"{_feature_bits_expr(profile.supported_feature_bits)}, "
+            f"{_cpu_feature_bits_expr(profile.required_cpu_features)}, "
+            f"{profile.automatic_priority})"
         )
     lines.extend(["#endif", "", "// clang-format on", ""])
     return "\n".join(lines)

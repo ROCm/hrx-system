@@ -175,7 +175,7 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
   const auto worker_symbol = Symbol("worker");
   loom_op_t* worker;
   IREE_ASSERT_OK(loom_func_def_build(
-      &builder_, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(), 0,
+      &builder_, 0, 0, /*linkage=*/0, 0, 0, 0, 0, 0, loom_symbol_ref_null(), 0,
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), worker_symbol, arguments, 2, nullptr, 0,
       nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &worker));

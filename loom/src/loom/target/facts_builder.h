@@ -43,8 +43,8 @@ iree_status_t loom_target_facts_builder_project_worker(
     const loom_target_facts_t* source, iree_arena_allocator_t* arena,
     const loom_target_facts_t** out_facts);
 
-// Applies every explicit common field in |requirement| to |effective| and
-// unions the explicit field sets.
+// Applies every explicit common field in |requirement| to |effective|, unions
+// the explicit field sets, and completes family-owned and derived facts.
 //
 // The caller must first prove that |effective| satisfies |requirement|.
 void loom_target_facts_builder_apply_requirement(

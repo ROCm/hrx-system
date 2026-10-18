@@ -385,6 +385,56 @@ The native driver may allocate wait state. Synchronous `kernel_queue_wait` retai
 its separate private event and serialization, so it can coexist with caller-event
 registration without stealing a wake.
 
+## Native GPU wake events
+
+GPU extension version 3 exposes an explicitly owned native event for observing
+device-produced work without a library-owned completion worker. A live device
+advertises `AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS` when it supports this service.
+The Linux KFD provider supplies signal-mailbox and interrupt operands for USER
+queues. Windows reports this service unsupported; its KERNEL queue completion
+uses the monitored-fence notification contract above.
+
+The caller creates an event while preparing its observation worker:
+
+```c
+const amdf_gpu_event_create_info_t create = {
+    .type = AMDF_STRUCTURE_TYPE_GPU_EVENT_CREATE_INFO,
+    .structure_size = sizeof(create),
+};
+amdf_gpu_event_t* event = NULL;
+amdf_status_t status = gpu->event_create(device, &create, &event);
+```
+
+After successful creation, `event_query_info` copies the immutable native
+format, device/reset identity, publication modes, mailbox address, trigger
+payload, and interrupt context. The runtime selects a producer compatible with
+those facts and encodes its own command or shader notification. The
+[native notification reference](../../docs/reference/amd/gpu/notifications.md)
+describes the hardware mechanisms. A mailbox write alone does not wake the
+host, and another device cannot assume access to the returned address.
+
+Application completion values remain separate from the event. A producer
+publishes its completion record with the required release ordering before
+issuing the notification. `event_wait` blocks the calling thread for the
+requested relative timeout, and `event_signal` lets host control wake that
+same observer. Signals may coalesce. Every wake, including host interruption,
+prompts an acquire and recheck of the authoritative records; it identifies
+neither a completed dispatch nor a count of completed work. One event can serve
+several queues or batches under that caller-owned protocol.
+
+The caller serializes waits on one event, while signaling may be concurrent.
+Waiting creates no library worker, timer, or allocation and does not actively
+poll; native wait-state allocation remains a driver operation. Timeout or
+device-loss status establishes neither quiescence nor cancellation.
+
+Before `event_destroy`, the caller stops new producers and joins every host
+call and device notification tail. A completed record may precede the native
+notification, so record completion alone does not retire the event. Native
+destruction failure leaves the event live for retry and keeps its device busy.
+Shared native event backing belongs to the instance's selected native lifetime;
+PROCESS lifetime requires coordination with other primary native clients.
+There is no per-dispatch registration or library tracking of producers.
+
 ## USER completion and release
 
 AQL completion and barrier dependencies reference complete native 64-byte AMD
@@ -410,8 +460,13 @@ There are distinct reuse boundaries:
 | Observation | Storage it permits the caller to reuse |
 | --- | --- |
 | Acquired native read index, or successful `user_queue_wait_consumed` | Consumed packet slots in the command ring. |
+| Confirmed primary-ring PM4 `RELEASE_MEM` completion at a retained ring position | The consumed command prefix through that release packet, without waiting for read-index writeback. |
 | Native execution completion with the required visibility | Complete executable images, kernargs, payloads and completion storage whose final use has completed. |
 | Successful `user_queue_destroy`, after execution completion and mapping release | The queue's borrowed scratch backing. |
+
+Completion-based PM4 ring reuse still leaves one dword free relative to the
+proven consumed prefix. An earlier marker does not cover later notification
+packets or padding, and packet consumption does not retire referenced storage.
 
 `user_queue_query_status` samples progress and terminal state. The KFD provider
 can enter the driver to inspect VM faults, and also observes firmware queue

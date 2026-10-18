@@ -13,6 +13,9 @@ from collections.abc import Sequence
 from loom.gen.support.c import c_identifier, c_pascal_identifier
 from loom.gen.support.generated_file import line_comment_header
 from loom.gen.target.contracts.lower_rule_spelling import generated_symbol_name
+from loom.gen.target.contracts.lower_rules import (
+    required_primary_descriptor_feature_class,
+)
 from loom.target.contracts import CompiledContractFragment, ContractFragment, ContractSystem
 from loom.target.contracts.compile import compile_contract_index
 from loom.target.contracts.lower_rule_tables import CompiledLowerRuleSet
@@ -20,6 +23,16 @@ from loom.target.contracts.selection import (
     compile_contract_selection_index,
     contract_selection_blob_words,
     pack_contract_selection_index,
+)
+
+_LOWER_RULE_SYSTEMS = frozenset(
+    (
+        ContractSystem.DESCRIPTOR_RULE,
+        ContractSystem.DESCRIPTOR_RULE_LOWERING_ONLY,
+        ContractSystem.VALUE_ALIAS,
+        ContractSystem.VALUE_ELIDE,
+        ContractSystem.RECIPE_RULE,
+    )
 )
 
 
@@ -64,7 +77,10 @@ def generate_contract_index(
         elif any(case.system not in (ContractSystem.DESCRIPTOR_MATRIX, ContractSystem.UNSUPPORTED) for case in compiled.cases):
             raise ValueError(f"fragment '{table.name}' requires a lower-rule pool")
         fragment_symbol = f"loom_{c_identifier(table.name).lower()}_contract_fragment"
-        bindings.append(f"{{&{fragment_symbol}, {rule_set_index}}}")
+        required_feature_class = 0
+        if lower_rules is not None and len(compiled.cases) == len(lower_rules.rules) and all(case.system in _LOWER_RULE_SYSTEMS for case in compiled.cases):
+            required_feature_class = required_primary_descriptor_feature_class(lower_rules)
+        bindings.append(f"{{&{fragment_symbol}, {rule_set_index}, {required_feature_class}}}")
     source_graph_root_op_kinds = tuple(sorted({op_kind for _, _, lower_rules in fragments if lower_rules is not None for op_kind in lower_rules.source_graph_root_op_kinds}))
 
     def array(c_type: str, suffix: str, rows: Sequence[str]) -> str:

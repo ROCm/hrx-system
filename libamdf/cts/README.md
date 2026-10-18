@@ -53,6 +53,31 @@ The corpus selects advertised queue families; Windows SDMA requires an
 HWS-enabled engine. File handles, completion ports and native I/O remain owned
 by the caller, outside libamdf.
 
+The [Linux file-pool corpus](gpu/linux/file_pool_test.cc) uses the owned
+`HOST_FILE_IO` allocation contract through PM4, AQL, and SDMA. Buffered and direct
+file requests use a fixed io_uring registration of the original host view while
+GPU aliases rebind independent slots. Source-only and default-address cases
+check repeated load/compute/write generations, full file and memory guards, and
+terminal cancellation before reuse. A separate ownership case accesses one
+pool through two logical devices on the same endpoint, binds independent slabs
+into one stable GPU virtual region, and checks both native attachment releases.
+The ordinary corpus shares its cached physical device; only that ownership
+case creates a second logical device.
+
+Linux file-pool execution requires access to udmabuf and its size-limit query,
+plus permission and locked-memory budget for io_uring buffer registration.
+Direct cases require a disk-backed `TEST_TMPDIR` and compatible file geometry;
+the case records that geometry and filesystem type. On Btrfs its private,
+unlinked test file disables copy-on-write before allocating extents so that
+checksummed-write fallback does not turn the direct case into buffered I/O.
+Missing optional services produce an explicit skip on CI and user machines.
+An unavailable allocation profile retains its native reason; the corpus checks
+that allocation reports that reason without publishing an output. Available
+profiles proceed through the full workload, where allocation, data, and cleanup
+failures fail the test. Positive qualification runs on provisioned machines name
+required cases so that absence cannot pass as execution. The native file helper
+owns file/ring setup and cleanup, outside the library under test.
+
 ## Build and resource selection
 
 Shader-bearing corpora compile their fixtures with Loom during the build.

@@ -203,7 +203,7 @@ static iree_status_t loom_wasm_map_argument(
   *out_argument = (loom_low_lower_abi_argument_t){
       .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
       .abi_type = loom_type_none(),
-      .resource_source_type = loom_type_none(),
+      .body_type = loom_type_none(),
   };
   if (loom_type_is_vector(source_type) &&
       !loom_wasm_vector_type_is_callable(source_type)) {

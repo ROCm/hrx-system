@@ -71,6 +71,19 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
 iree_cc_library(
   NAME
+    host_export
+  SRCS
+    "host_export.c"
+  DEPS
+    amdf::headers
+    libamdf::src::platform::host_export
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
     host_memory
   SRCS
     "host_memory.c"
@@ -164,6 +177,22 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
 iree_cc_library(
   NAME
+    host_locality
+  HDRS
+    "host_locality.h"
+  SRCS
+    "host_locality.c"
+  DEPS
+    ::kmt_api
+    amdf::headers
+    libamdf::src::allocator
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
     instance
   HDRS
     "instance.h"
@@ -171,6 +200,7 @@ iree_cc_library(
     "instance.c"
   DEPS
     ::endpoint_snapshot
+    ::host_locality
     ::kmt_api
     amdf::headers
     libamdf::src::allocator
@@ -189,6 +219,7 @@ iree_cc_library(
     "endpoint.c"
   DEPS
     ::endpoint_properties
+    ::host_locality
     ::instance
     amdf::headers
     libamdf::src::allocator
@@ -220,6 +251,24 @@ iree_cc_test(
     amdf::headers
     iree::third_party::google_test
     iree::third_party::google_test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
+iree_cc_test(
+  NAME
+    host_locality_test
+  SRCS
+    "host_locality_test.cc"
+  DEPS
+    ::host_locality
+    ::kmt_api
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+    libamdf::src::allocator
   LABELS
     "iree-build-requirement=libamdf"
 )

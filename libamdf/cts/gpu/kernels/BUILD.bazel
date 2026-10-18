@@ -44,6 +44,7 @@ exports_files([
     "lds_exchange.loom",
     "pattern_fill_unaligned.loom",
     "private_roundtrip.loom",
+    "program_atomic.loom",
     "resident_channels.loom",
     "resident_exchange.loom",
     "resident_npu_initiated.loom",
@@ -120,6 +121,53 @@ amdf_cc_library(
     name = "image",
     testonly = True,
     hdrs = ["image.h"],
+)
+
+amdf_cc_library(
+    name = "shader_event",
+    testonly = True,
+    hdrs = ["shader_event.h"],
+)
+
+amdf_cc_library(
+    name = "program_atomic",
+    testonly = True,
+    hdrs = ["program_atomic.h"],
+)
+
+amdf_cts_gpu_kernel_set(
+    name = "program_atomic_kernels",
+    srcs = ["program_atomic.loom"],
+    entry_point = "program_atomic",
+    namespace = "kernels::program_atomic",
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
+)
+
+# Native interrupt fragments are selected with the physical compiler profile.
+# A restricted compiler needs only its own representation vocabulary.
+_SHADER_EVENT_SOURCE_BY_CAPABILITY = {
+    "descriptor_set_cdna2_core": "shader_event/cdna2.loom",
+    "descriptor_set_cdna3_core": "shader_event/cdna3.loom",
+    "descriptor_set_cdna4_core": "shader_event/cdna4.loom",
+    "descriptor_set_rdna3_5_core": "shader_event/rdna35.loom",
+    "descriptor_set_rdna3_core": "shader_event/rdna3.loom",
+    "descriptor_set_rdna4_core": "shader_event/rdna4.loom",
+    "descriptor_set_rdna4_gfx1250_a0_core": "shader_event/gfx1250_a0.loom",
+    "descriptor_set_rdna4_gfx1251_core": "shader_event/gfx1251.loom",
+    "descriptor_set_rdna4_gfx125x_core": "shader_event/gfx1250.loom",
+    "descriptor_set_rdna4m_core": "shader_event/rdna4m.loom",
+}
+
+amdf_cts_gpu_kernel_set(
+    name = "shader_event_kernels",
+    srcs = ["shader_event/kernel.loom"],
+    entry_point = "shader_event",
+    namespace = "kernels::shader_event",
+    target_srcs = {
+        target: _SHADER_EVENT_SOURCE_BY_CAPABILITY[LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target]]
+        for target in AMDF_CTS_GPU_KERNEL_TARGETS
+    },
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
 )
 
 amdf_cc_library(
@@ -547,6 +595,10 @@ amdf_cc_test(
         ":private_roundtrip",
         ":private_roundtrip_kernels",
         ":product_test",
+        ":program_atomic",
+        ":program_atomic_kernels",
+        ":shader_event",
+        ":shader_event_kernels",
         ":transform",
         ":transform_alternate_kernels",
         ":transform_kernels",

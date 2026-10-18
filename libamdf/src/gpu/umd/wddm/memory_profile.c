@@ -123,21 +123,25 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
     profile.memory_class = AMDF_MEMORY_CLASS_SYSTEM;
     profile.roles =
         AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
-    profile.guaranteed_flags =
-        AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+    profile.guaranteed_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
+                               AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                               AMDF_MEMORY_FLAG_HOST_FILE_IO;
     profile.supported_flags = profile.guaranteed_flags |
                               AMDF_MEMORY_FLAG_QUEUE_STORAGE |
                               AMDF_MEMORY_FLAG_MAPPING_SOURCE;
     if (capabilities->cache_coherent_memory_supported) {
       profile.supported_flags |= AMDF_MEMORY_FLAG_HOST_COHERENT;
-      // GFX11 fine-grained SYSTEM mappings forward integer exchange to the
-      // fabric. Integrated processors have an internal CPU route; discrete
-      // processors additionally require native platform AtomicOps support.
+      // GFX11 fine-grained SYSTEM mappings support native atomic stores and
+      // wait loads. Integrated processors have an internal CPU route;
+      // discrete processors additionally require native platform AtomicOps
+      // support. Wait comparisons remain an independent queue capability.
       if (properties->gfx_ip_major == 11 &&
           (properties->is_discrete == 0 ||
            properties->supports_platform_atomics != 0)) {
-        profile.atomic_operations_32 = AMDF_ATOMIC_OPERATION_STORE;
-        profile.atomic_operations_64 = AMDF_ATOMIC_OPERATION_STORE;
+        profile.atomic_operations_32 =
+            AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE;
+        profile.atomic_operations_64 =
+            AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE;
       }
     }
     profile.visibility.describe_site =
@@ -146,6 +150,7 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
         AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
     profile.allocation = allocation;
     profile.host_mapping = host_mapping;
+    profile.host_mapping.features = AMDF_HOST_MAPPING_FEATURE_FILE_IO;
   } else if (memory_profile_ordinal == 1) {
     profile.memory_class = AMDF_MEMORY_CLASS_LOCAL;
     profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;

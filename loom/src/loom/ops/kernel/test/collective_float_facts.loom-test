@@ -1,0 +1,360 @@
+// RUN: pass canonicalize
+
+// Variadic results retain independent format sets, not just the first input's.
+kernel.def @source_formats() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%e4m3: f8E4M3, %e5m2: f8E5M2, %half: f16, %bfloat: bf16, %single: f32, %integer: i64) {
+  %wide_e4m3 = scalar.extf %e4m3 : f8E4M3 to f64
+  %wide_e5m2 = scalar.extf %e5m2 : f8E5M2 to f64
+  %wide_half = scalar.extf %half : f16 to f64
+  %wide_bfloat = scalar.extf %bfloat : bf16 to f64
+  %wide_single = scalar.extf %single : f32 to f64
+  %double = scalar.sitofp %integer : i64 to f64
+  %minimum_e4m3, %minimum_e5m2, %minimum_half, %minimum_bfloat, %minimum_single, %minimum_double = kernel.workgroup.reduce<minimumf, preserve> %wide_e4m3, %wide_e5m2, %wide_half, %wide_bfloat, %wide_single, %double : f64, f64, f64, f64, f64, f64
+  %e4m3_types = test.fact_exact_float_types %minimum_e4m3 : f64 -> i64
+  %e5m2_types = test.fact_exact_float_types %minimum_e5m2 : f64 -> i64
+  %half_types = test.fact_exact_float_types %minimum_half : f64 -> i64
+  %bfloat_types = test.fact_exact_float_types %minimum_bfloat : f64 -> i64
+  %single_types = test.fact_exact_float_types %minimum_single : f64 -> i64
+  %double_types = test.fact_exact_float_types %minimum_double : f64 -> i64
+  test.use %e4m3_types, %e5m2_types, %half_types, %bfloat_types, %single_types, %double_types : i64, i64, i64, i64, i64, i64
+  kernel.return
+}
+
+// ----
+kernel.def @source_formats() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%e4m3: f8E4M3, %e5m2: f8E5M2, %half: f16, %bfloat: bf16, %single: f32, %integer: i64) {
+  %wide_e4m3 = scalar.extf %e4m3 : f8E4M3 to f64
+  %wide_e5m2 = scalar.extf %e5m2 : f8E5M2 to f64
+  %wide_half = scalar.extf %half : f16 to f64
+  %wide_bfloat = scalar.extf %bfloat : bf16 to f64
+  %wide_single = scalar.extf %single : f32 to f64
+  %double = scalar.sitofp %integer : i64 to f64
+  %minimum_e4m3, %minimum_e5m2, %minimum_half, %minimum_bfloat, %minimum_single, %minimum_double = kernel.workgroup.reduce<minimumf, preserve> %wide_e4m3, %wide_e5m2, %wide_half, %wide_bfloat, %wide_single, %double : f64, f64, f64, f64, f64, f64
+  %e4m3_types = scalar.constant 15616 : i64
+  %e5m2_types = scalar.constant 15872 : i64
+  %half_types = scalar.constant 13312 : i64
+  %bfloat_types = scalar.constant 14336 : i64
+  %single_types = scalar.constant 12288 : i64
+  %double_types = scalar.constant 8192 : i64
+  test.use %e4m3_types, %e5m2_types, %half_types, %bfloat_types, %single_types, %double_types : i64, i64, i64, i64, i64, i64
+  kernel.return
+}
+
+// ====
+
+// NaN-capable BF16 values remain exactly representable after all extrema.
+// Native/preserve, clusters, direction, and scope do not change that guarantee.
+kernel.def @extrema_kinds_and_prefixes() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: bf16) {
+  %value = scalar.extf %input : bf16 to f32
+  %minimum = kernel.subgroup.reduce<minimumf> %value : f32
+  %maximum = kernel.subgroup.reduce<maximumf, preserve> %value {cluster_size = 8, cluster_stride = 2} : f32
+  %minnum = kernel.subgroup.reduce<minnumf, preserve> %value : f32
+  %maxnum = kernel.subgroup.reduce<maxnumf> %value {cluster_size = 8} : f32
+  %inclusive_minimum = kernel.subgroup.scan<minimumf> %value {direction = forward, mode = inclusive} : f32
+  %inclusive_maximum = kernel.workgroup.scan<maximumf, preserve> %value {direction = reverse, mode = inclusive} : f32
+  %inclusive_minnum = kernel.workgroup.scan<minnumf> %value {direction = forward, mode = inclusive} : f32
+  %inclusive_maxnum = kernel.subgroup.scan<maxnumf, preserve> %value {cluster_size = 8, cluster_stride = 2, direction = reverse, mode = inclusive} : f32
+  %exclusive_minimum = kernel.workgroup.scan<minimumf, preserve> %value {direction = reverse, mode = exclusive} : f32
+  %exclusive_maximum = kernel.subgroup.scan<maximumf> %value {direction = forward, mode = exclusive} : f32
+  %exclusive_minnum = kernel.subgroup.scan<minnumf> %value {cluster_size = 8, cluster_stride = 2, direction = reverse, mode = exclusive} : f32
+  %exclusive_maxnum = kernel.workgroup.scan<maxnumf, preserve> %value {direction = forward, mode = exclusive} : f32
+  %minimum_types = test.fact_exact_float_types %minimum : f32 -> i64
+  %maximum_types = test.fact_exact_float_types %maximum : f32 -> i64
+  %minnum_types = test.fact_exact_float_types %minnum : f32 -> i64
+  %maxnum_types = test.fact_exact_float_types %maxnum : f32 -> i64
+  %inclusive_minimum_types = test.fact_exact_float_types %inclusive_minimum : f32 -> i64
+  %inclusive_maximum_types = test.fact_exact_float_types %inclusive_maximum : f32 -> i64
+  %inclusive_minnum_types = test.fact_exact_float_types %inclusive_minnum : f32 -> i64
+  %inclusive_maxnum_types = test.fact_exact_float_types %inclusive_maxnum : f32 -> i64
+  %exclusive_minimum_types = test.fact_exact_float_types %exclusive_minimum : f32 -> i64
+  %exclusive_maximum_types = test.fact_exact_float_types %exclusive_maximum : f32 -> i64
+  %exclusive_minnum_types = test.fact_exact_float_types %exclusive_minnum : f32 -> i64
+  %exclusive_maxnum_types = test.fact_exact_float_types %exclusive_maxnum : f32 -> i64
+  test.use %minimum_types, %maximum_types, %minnum_types, %maxnum_types, %inclusive_minimum_types, %inclusive_maximum_types, %inclusive_minnum_types, %inclusive_maxnum_types, %exclusive_minimum_types, %exclusive_maximum_types, %exclusive_minnum_types, %exclusive_maxnum_types : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+  kernel.return
+}
+
+// ----
+kernel.def @extrema_kinds_and_prefixes() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: bf16) {
+  %value = scalar.extf %input : bf16 to f32
+  %minimum = kernel.subgroup.reduce<minimumf> %value : f32
+  %maximum = kernel.subgroup.reduce<maximumf, preserve> %value {cluster_size = 8, cluster_stride = 2} : f32
+  %minnum = kernel.subgroup.reduce<minnumf, preserve> %value : f32
+  %maxnum = kernel.subgroup.reduce<maxnumf> %value {cluster_size = 8} : f32
+  %inclusive_minimum = kernel.subgroup.scan<minimumf> %value {direction = forward, mode = inclusive} : f32
+  %inclusive_maximum = kernel.workgroup.scan<maximumf, preserve> %value {direction = reverse, mode = inclusive} : f32
+  %inclusive_minnum = kernel.workgroup.scan<minnumf> %value {direction = forward, mode = inclusive} : f32
+  %inclusive_maxnum = kernel.subgroup.scan<maxnumf, preserve> %value {cluster_size = 8, cluster_stride = 2, direction = reverse, mode = inclusive} : f32
+  %exclusive_minimum = kernel.workgroup.scan<minimumf, preserve> %value {direction = reverse, mode = exclusive} : f32
+  %exclusive_maximum = kernel.subgroup.scan<maximumf> %value {direction = forward, mode = exclusive} : f32
+  %exclusive_minnum = kernel.subgroup.scan<minnumf> %value {cluster_size = 8, cluster_stride = 2, direction = reverse, mode = exclusive} : f32
+  %exclusive_maxnum = kernel.workgroup.scan<maxnumf, preserve> %value {direction = forward, mode = exclusive} : f32
+  %minimum_types = scalar.constant 14336 : i64
+  %maximum_types = scalar.constant 14336 : i64
+  %minnum_types = scalar.constant 14336 : i64
+  %maxnum_types = scalar.constant 14336 : i64
+  %inclusive_minimum_types = scalar.constant 14336 : i64
+  %inclusive_maximum_types = scalar.constant 14336 : i64
+  %inclusive_minnum_types = scalar.constant 14336 : i64
+  %inclusive_maxnum_types = scalar.constant 14336 : i64
+  %exclusive_minimum_types = scalar.constant 14336 : i64
+  %exclusive_maximum_types = scalar.constant 14336 : i64
+  %exclusive_minnum_types = scalar.constant 14336 : i64
+  %exclusive_maxnum_types = scalar.constant 14336 : i64
+  test.use %minimum_types, %maximum_types, %minnum_types, %maxnum_types, %inclusive_minimum_types, %inclusive_maximum_types, %inclusive_minnum_types, %inclusive_maxnum_types, %exclusive_minimum_types, %exclusive_maximum_types, %exclusive_minnum_types, %exclusive_maxnum_types : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+  kernel.return
+}
+
+// ====
+
+// Exclusive scans include a typed empty prefix. E4M3 saturates its seed to
+// signed 448; every other format introduces infinity and loses FINITE.
+kernel.def @typed_empty_prefixes() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%integer: i8) {
+  %e4m3 = scalar.sitofp %integer : i8 to f8E4M3
+  %e5m2 = scalar.sitofp %integer : i8 to f8E5M2
+  %half = scalar.sitofp %integer : i8 to f16
+  %bfloat = scalar.sitofp %integer : i8 to bf16
+  %single = scalar.sitofp %integer : i8 to f32
+  %double = scalar.sitofp %integer : i8 to f64
+  %prefix_e4m3 = kernel.subgroup.scan<minnumf> %e4m3 {direction = forward, mode = exclusive} : f8E4M3
+  %prefix_e5m2 = kernel.workgroup.scan<maxnumf> %e5m2 {direction = reverse, mode = exclusive} : f8E5M2
+  %prefix_half = kernel.subgroup.scan<maximumf> %half {direction = forward, mode = exclusive} : f16
+  %prefix_bfloat = kernel.workgroup.scan<minimumf> %bfloat {direction = reverse, mode = exclusive} : bf16
+  %prefix_single = kernel.subgroup.scan<minnumf> %single {direction = forward, mode = exclusive} : f32
+  %prefix_double = kernel.workgroup.scan<maxnumf> %double {direction = reverse, mode = exclusive} : f64
+  %e4m3_finite = test.fact_finite %prefix_e4m3 : f8E4M3 -> i1
+  %e5m2_finite = test.fact_finite %prefix_e5m2 : f8E5M2 -> i1
+  %half_finite = test.fact_finite %prefix_half : f16 -> i1
+  %bfloat_finite = test.fact_finite %prefix_bfloat : bf16 -> i1
+  %single_finite = test.fact_finite %prefix_single : f32 -> i1
+  %double_finite = test.fact_finite %prefix_double : f64 -> i1
+  %single_types = test.fact_exact_float_types %prefix_single : f32 -> i64
+  %double_types = test.fact_exact_float_types %prefix_double : f64 -> i64
+  %single_nan = scalar.isnanf %prefix_single : f32
+  %e4m3_upper_bits = test.fact_range_hi %prefix_e4m3 : f8E4M3 -> i64
+  %e4m3_upper = scalar.bitcast %e4m3_upper_bits : i64 to f64
+  test.use %e4m3_finite, %e5m2_finite, %half_finite, %bfloat_finite, %single_finite, %double_finite, %single_types, %double_types, %single_nan, %e4m3_upper : i1, i1, i1, i1, i1, i1, i64, i64, i1, f64
+  kernel.return
+}
+
+// ----
+kernel.def @typed_empty_prefixes() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%integer: i8) {
+  %e4m3 = scalar.sitofp %integer : i8 to f8E4M3
+  %e5m2 = scalar.sitofp %integer : i8 to f8E5M2
+  %half = scalar.sitofp %integer : i8 to f16
+  %bfloat = scalar.sitofp %integer : i8 to bf16
+  %single = scalar.sitofp %integer : i8 to f32
+  %double = scalar.sitofp %integer : i8 to f64
+  %prefix_e4m3 = kernel.subgroup.scan<minnumf> %e4m3 {direction = forward, mode = exclusive} : f8E4M3
+  %prefix_e5m2 = kernel.workgroup.scan<maxnumf> %e5m2 {direction = reverse, mode = exclusive} : f8E5M2
+  %prefix_half = kernel.subgroup.scan<maximumf> %half {direction = forward, mode = exclusive} : f16
+  %prefix_bfloat = kernel.workgroup.scan<minimumf> %bfloat {direction = reverse, mode = exclusive} : bf16
+  %prefix_single = kernel.subgroup.scan<minnumf> %single {direction = forward, mode = exclusive} : f32
+  %prefix_double = kernel.workgroup.scan<maxnumf> %double {direction = reverse, mode = exclusive} : f64
+  %e4m3_finite = scalar.constant true : i1
+  %e5m2_finite = scalar.constant false : i1
+  %half_finite = scalar.constant false : i1
+  %bfloat_finite = scalar.constant false : i1
+  %single_finite = scalar.constant false : i1
+  %double_finite = scalar.constant false : i1
+  %single_types = scalar.constant 15360 : i64
+  %double_types = scalar.constant 15360 : i64
+  %single_nan = scalar.constant false : i1
+  %e4m3_upper = scalar.constant 448.0 : f64
+  test.use %e4m3_finite, %e5m2_finite, %half_finite, %bfloat_finite, %single_finite, %double_finite, %single_types, %double_types, %single_nan, %e4m3_upper : i1, i1, i1, i1, i1, i1, i64, i64, i1, f64
+  kernel.return
+}
+
+// ====
+
+// Extrema retain finite intervals; sums/products must not inherit either the
+// interval or the input's exact-format set, even in preserve mode.
+kernel.def @finite_extrema_and_arithmetic() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%integer: i8) {
+  %value = scalar.sitofp %integer : i8 to f32
+  %minimum = kernel.workgroup.reduce<minnumf> %value : f32
+  %maximum = kernel.workgroup.reduce<maximumf> %value : f32
+  %maxnum = kernel.workgroup.reduce<maxnumf, preserve> %value : f32
+  %prefix = kernel.subgroup.scan<minimumf, preserve> %value {direction = forward, mode = inclusive} : f32
+  %sum = kernel.subgroup.reduce<addf, preserve> %value : f32
+  %product = kernel.workgroup.reduce<mulf> %value : f32
+  %sum_prefix = kernel.workgroup.scan<addf> %value {direction = forward, mode = inclusive} : f32
+  %product_prefix = kernel.subgroup.scan<mulf, preserve> %value {direction = reverse, mode = exclusive} : f32
+  %minimum_finite = test.fact_finite %minimum : f32 -> i1
+  %maximum_types = test.fact_exact_float_types %maximum : f32 -> i64
+  %maxnum_types = test.fact_exact_float_types %maxnum : f32 -> i64
+  %prefix_finite = test.fact_finite %prefix : f32 -> i1
+  %minimum_lo_bits = test.fact_range_lo %minimum : f32 -> i64
+  %maximum_hi_bits = test.fact_range_hi %maximum : f32 -> i64
+  %minimum_lo = scalar.bitcast %minimum_lo_bits : i64 to f64
+  %maximum_hi = scalar.bitcast %maximum_hi_bits : i64 to f64
+  %sum_types = test.fact_exact_float_types %sum : f32 -> i64
+  %product_types = test.fact_exact_float_types %product : f32 -> i64
+  %sum_prefix_types = test.fact_exact_float_types %sum_prefix : f32 -> i64
+  %product_prefix_types = test.fact_exact_float_types %product_prefix : f32 -> i64
+  test.use %minimum_finite, %maximum_types, %maxnum_types, %prefix_finite, %minimum_lo, %maximum_hi, %sum_types, %product_types, %sum_prefix_types, %product_prefix_types : i1, i64, i64, i1, f64, f64, i64, i64, i64, i64
+  kernel.return
+}
+
+// ----
+kernel.def @finite_extrema_and_arithmetic() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%integer: i8) {
+  %value = scalar.sitofp %integer : i8 to f32
+  %minimum = kernel.workgroup.reduce<minnumf> %value : f32
+  %maximum = kernel.workgroup.reduce<maximumf> %value : f32
+  %maxnum = kernel.workgroup.reduce<maxnumf, preserve> %value : f32
+  %prefix = kernel.subgroup.scan<minimumf, preserve> %value {direction = forward, mode = inclusive} : f32
+  %sum = kernel.subgroup.reduce<addf, preserve> %value : f32
+  %product = kernel.workgroup.reduce<mulf> %value : f32
+  %sum_prefix = kernel.workgroup.scan<addf> %value {direction = forward, mode = inclusive} : f32
+  %product_prefix = kernel.subgroup.scan<mulf, preserve> %value {direction = reverse, mode = exclusive} : f32
+  %minimum_finite = scalar.constant true : i1
+  %maximum_types = scalar.constant 15360 : i64
+  %maxnum_types = scalar.constant 15360 : i64
+  %prefix_finite = scalar.constant true : i1
+  %minimum_lo = scalar.constant -128.0 : f64
+  %maximum_hi = scalar.constant 127.0 : f64
+  %sum_types = scalar.constant 0 : i64
+  %product_types = scalar.constant 0 : i64
+  %sum_prefix_types = scalar.constant 0 : i64
+  %product_prefix_types = scalar.constant 0 : i64
+  test.use %minimum_finite, %maximum_types, %maxnum_types, %prefix_finite, %minimum_lo, %maximum_hi, %sum_types, %product_types, %sum_prefix_types, %product_prefix_types : i1, i64, i64, i1, f64, f64, i64, i64, i64, i64
+  kernel.return
+}
+
+// ====
+
+// The two components have different format sets. Empty prefixes must not
+// retain the uniform input distribution inside either stored element record.
+kernel.def @distinct_vector_components() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%bfloat: bf16, %half: f16) {
+  %wide_bfloat = scalar.extf %bfloat : bf16 to f32
+  %wide_half = scalar.extf %half : f16 to f32
+  %values = vector.from_elements %wide_bfloat, %wide_half : vector<2xf32>
+  %minimum = kernel.subgroup.reduce<minimumf> %values : vector<2xf32>
+  %inclusive = kernel.workgroup.scan<maxnumf> %values {direction = reverse, mode = inclusive} : vector<2xf32>
+  %exclusive = kernel.workgroup.scan<minnumf> %values {direction = forward, mode = exclusive} : vector<2xf32>
+  %minimum_bfloat = vector.extract %minimum[0] : vector<2xf32> -> f32
+  %minimum_half = vector.extract %minimum[1] : vector<2xf32> -> f32
+  %inclusive_half = vector.extract %inclusive[1] : vector<2xf32> -> f32
+  %exclusive_bfloat = vector.extract %exclusive[0] : vector<2xf32> -> f32
+  %exclusive_half = vector.extract %exclusive[1] : vector<2xf32> -> f32
+  %minimum_bfloat_types = test.fact_exact_float_types %minimum_bfloat : f32 -> i64
+  %minimum_half_types = test.fact_exact_float_types %minimum_half : f32 -> i64
+  %inclusive_half_types = test.fact_exact_float_types %inclusive_half : f32 -> i64
+  %exclusive_bfloat_types = test.fact_exact_float_types %exclusive_bfloat : f32 -> i64
+  %exclusive_half_types = test.fact_exact_float_types %exclusive_half : f32 -> i64
+  %exclusive_bfloat_uniform = test.fact_subgroup_uniform %exclusive_bfloat : f32 -> i1
+  %exclusive_half_uniform = test.fact_workgroup_uniform %exclusive_half : f32 -> i1
+  test.use %minimum_bfloat_types, %minimum_half_types, %inclusive_half_types, %exclusive_bfloat_types, %exclusive_half_types, %exclusive_bfloat_uniform, %exclusive_half_uniform : i64, i64, i64, i64, i64, i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @distinct_vector_components() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%bfloat: bf16, %half: f16) {
+  %wide_bfloat = scalar.extf %bfloat : bf16 to f32
+  %wide_half = scalar.extf %half : f16 to f32
+  %values = vector.from_elements %wide_bfloat, %wide_half : vector<2xf32>
+  %minimum = kernel.subgroup.reduce<minimumf> %values : vector<2xf32>
+  %inclusive = kernel.workgroup.scan<maxnumf> %values {direction = reverse, mode = inclusive} : vector<2xf32>
+  %exclusive = kernel.workgroup.scan<minnumf> %values {direction = forward, mode = exclusive} : vector<2xf32>
+  %minimum_bfloat_types = scalar.constant 14336 : i64
+  %minimum_half_types = scalar.constant 13312 : i64
+  %inclusive_half_types = scalar.constant 13312 : i64
+  %exclusive_bfloat_types = scalar.constant 14336 : i64
+  %exclusive_half_types = scalar.constant 13312 : i64
+  %exclusive_bfloat_uniform = scalar.constant false : i1
+  %exclusive_half_uniform = scalar.constant false : i1
+  test.use %minimum_bfloat_types, %minimum_half_types, %inclusive_half_types, %exclusive_bfloat_types, %exclusive_half_types, %exclusive_bfloat_uniform, %exclusive_half_uniform : i64, i64, i64, i64, i64, i1, i1
+  kernel.return
+}
+
+// ====
+
+// Uniform-element summaries remain bounded even for wide vectors. Dense
+// integer-conversion envelopes survive independently of extension payloads.
+kernel.def @uniform_vector_components() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%integer: i8, %input: vector<32xi8>, %unknown: vector<32xf32>) {
+  %values = vector.sitofp %input : vector<32xi8> to vector<32xf32>
+  %scalar = scalar.sitofp %integer : i8 to f32
+  %uniform_values = vector.splat %scalar : vector<32xf32>
+  %minimum = kernel.workgroup.reduce<minnumf> %values : vector<32xf32>
+  %uniform_minimum = kernel.subgroup.reduce<minnumf> %uniform_values : vector<32xf32>
+  %exclusive = kernel.subgroup.scan<maxnumf, preserve> %uniform_values {direction = reverse, mode = exclusive} : vector<32xf32>
+  %dense_exclusive = kernel.workgroup.scan<maxnumf> %values {direction = forward, mode = exclusive} : vector<32xf32>
+  %unknown_prefix = kernel.workgroup.scan<minimumf> %unknown {direction = forward, mode = exclusive} : vector<32xf32>
+  %minimum_element = vector.extract %uniform_minimum[17] : vector<32xf32> -> f32
+  %exclusive_element = vector.extract %exclusive[17] : vector<32xf32> -> f32
+  %minimum_types = test.fact_exact_float_types %minimum : vector<32xf32> -> i64
+  %minimum_element_types = test.fact_exact_float_types %minimum_element : f32 -> i64
+  %exclusive_types = test.fact_exact_float_types %dense_exclusive : vector<32xf32> -> i64
+  %exclusive_element_types = test.fact_exact_float_types %exclusive_element : f32 -> i64
+  %exclusive_finite = test.fact_finite %exclusive_element : f32 -> i1
+  %exclusive_uniform = test.fact_subgroup_uniform %exclusive_element : f32 -> i1
+  %unknown_types = test.fact_exact_float_types %unknown_prefix : vector<32xf32> -> i64
+  test.use %minimum_types, %minimum_element_types, %exclusive_types, %exclusive_element_types, %exclusive_finite, %exclusive_uniform, %unknown_types : i64, i64, i64, i64, i1, i1, i64
+  kernel.return
+}
+
+// ----
+kernel.def @uniform_vector_components() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%integer: i8, %input: vector<32xi8>, %unknown: vector<32xf32>) {
+  %values = vector.sitofp %input : vector<32xi8> to vector<32xf32>
+  %scalar = scalar.sitofp %integer : i8 to f32
+  %uniform_values = vector.splat %scalar : vector<32xf32>
+  %minimum = kernel.workgroup.reduce<minnumf> %values : vector<32xf32>
+  %uniform_minimum = kernel.subgroup.reduce<minnumf> %uniform_values : vector<32xf32>
+  %exclusive = kernel.subgroup.scan<maxnumf, preserve> %uniform_values {direction = reverse, mode = exclusive} : vector<32xf32>
+  %dense_exclusive = kernel.workgroup.scan<maxnumf> %values {direction = forward, mode = exclusive} : vector<32xf32>
+  %unknown_prefix = kernel.workgroup.scan<minimumf> %unknown {direction = forward, mode = exclusive} : vector<32xf32>
+  %minimum_types = scalar.constant 15360 : i64
+  %minimum_element_types = scalar.constant 15360 : i64
+  %exclusive_types = scalar.constant 15360 : i64
+  %exclusive_element_types = scalar.constant 15360 : i64
+  %exclusive_finite = scalar.constant false : i1
+  %exclusive_uniform = scalar.constant false : i1
+  %unknown_types = scalar.constant 0 : i64
+  test.use %minimum_types, %minimum_element_types, %exclusive_types, %exclusive_element_types, %exclusive_finite, %exclusive_uniform, %unknown_types : i64, i64, i64, i64, i1, i1, i64
+  kernel.return
+}

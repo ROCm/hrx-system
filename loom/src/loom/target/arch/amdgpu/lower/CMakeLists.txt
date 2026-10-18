@@ -121,7 +121,10 @@ loom_cc_library(
     "sanitizer.h"
     "sanitizer_access.h"
     "sanitizer_race.h"
+    "sanitizer_race_history_policy.h"
     "sanitizer_race_report.h"
+    "sanitizer_race_shadow_layout.h"
+    "sanitizer_race_state.h"
     "sanitizer_report.h"
     "sanitizer_ubsan_report.h"
     "signal.h"
@@ -238,7 +241,11 @@ loom_cc_library(
     "sanitizer.c"
     "sanitizer_access.c"
     "sanitizer_race.c"
+    "sanitizer_race_history_policy.c"
+    "sanitizer_race_plan.c"
     "sanitizer_race_report.c"
+    "sanitizer_race_shadow_layout.c"
+    "sanitizer_race_state.c"
     "sanitizer_report.c"
     "sanitizer_ubsan_report.c"
     "signal.c"
@@ -634,6 +641,21 @@ loom_cc_test(
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::registers
     loom::verify
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    sanitizer_race_history_policy_test
+  SRCS
+    "sanitizer_race_history_policy_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
 )

@@ -8,9 +8,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from types import MappingProxyType
 
 from loom.ir import ScalarTypeKind
 from loom.stable_id import stable_id_from_string
@@ -793,6 +795,10 @@ class DescriptorSet:
     resources: tuple[Resource, ...]
     schedule_classes: tuple[ScheduleClass, ...]
     descriptors: tuple[Descriptor, ...]
+    # First descriptor indexed by source key for contract lookup.
+    _descriptors_by_key: Mapping[str, Descriptor] = field(
+        init=False, repr=False, compare=False, hash=False
+    )
     # Dense target-table storage ordinal shared by views over the same tables.
     descriptor_set_ordinal: int | None = None
     physical_registers: tuple[PhysicalRegister, ...] = ()
@@ -811,6 +817,13 @@ class DescriptorSet:
     requires_structured_control_flow: bool = False
 
     def __post_init__(self) -> None:
+        descriptors_by_key: dict[str, Descriptor] = {}
+        for descriptor in self.descriptors:
+            descriptors_by_key.setdefault(descriptor.key, descriptor)
+        object.__setattr__(
+            self, "_descriptors_by_key", MappingProxyType(descriptors_by_key)
+        )
+
         canonical_target_contract_keys = tuple(
             sorted(set(self.supported_target_contract_keys))
         )
@@ -864,6 +877,11 @@ class DescriptorSet:
                     f"'{descriptor.key}' category '{descriptor.category.key}' "
                     "is not declared in categories"
                 )
+
+    def descriptor_by_key(self, key: str) -> Descriptor | None:
+        """Returns the first descriptor with `key`, if present."""
+
+        return self._descriptors_by_key.get(key)
 
 
 def target_relative_name(target_key: str | None, name: str) -> str:

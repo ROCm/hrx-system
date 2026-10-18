@@ -16,6 +16,7 @@ class FuncBuilder(DialectBuilder):
         self,
         *,
         visibility: str | None = ...,
+        linkage: str | None = ...,
         retain: str | None = ...,
         cc: str | None = ...,
         effect_contract: str | None = ...,

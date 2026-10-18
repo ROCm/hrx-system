@@ -147,10 +147,17 @@ static void loom_link_plan_materialization_scatter_target_symbols(
         !iree_any_bit_set(source_symbol->flags, LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
       iree_host_size_t* target_source_definition =
           &target_source_definitions[target_symbol.symbol_id];
-      IREE_ASSERT(*target_source_definition ==
-                      LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL ||
-                  *target_source_definition == source_symbol->ordinal);
-      *target_source_definition = source_symbol->ordinal;
+      if (*target_source_definition == LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+        *target_source_definition = source_symbol->ordinal;
+      } else if (*target_source_definition != source_symbol->ordinal) {
+        const loom_link_module_index_symbol_t* retained_source_symbol =
+            loom_link_module_index_symbol_at(index, *target_source_definition);
+        IREE_ASSERT(retained_source_symbol);
+        IREE_ASSERT(iree_any_bit_set(retained_source_symbol->flags,
+                                     LOOM_LINK_SYMBOL_FLAG_LINK_ONCE) &&
+                    iree_any_bit_set(source_symbol->flags,
+                                     LOOM_LINK_SYMBOL_FLAG_LINK_ONCE));
+      }
     }
     if (source_configuration_functions &&
         loom_symbol_ref_is_valid(source_configuration_functions[i])) {

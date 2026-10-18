@@ -288,6 +288,12 @@ loom_low_lower_descriptor_ref_t loom_low_lower_rule_primary_descriptor_ref(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule);
 
+// Returns whether every target feature in |feature_class| is available.
+// Zero is the featureless class; the dynamic class is not accepted here.
+bool loom_low_lower_rule_primary_feature_class_available(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_lower_rule_set_t* rule_set, uint8_t feature_class);
+
 typedef uint8_t loom_low_lower_rule_primary_descriptor_status_t;
 enum loom_low_lower_rule_primary_descriptor_status_e {
   // The rule has no primary descriptor or it is ready for selection.

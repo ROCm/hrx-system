@@ -86,6 +86,17 @@ iree_executable_test(
     ]
 ]
 
+# Public C++ integer intrinsics execute through the native x86 task path.
+loom_test(
+    name = "integer_intrinsics_test",
+    benchmark_smoke = False,
+    execution_profiles = [_X86_TASK_HARDWARE_PROFILE],
+    module = "//loom/src/loom/import/cxx/test:integer_intrinsics_module",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+    ]) + ["@platforms//cpu:x86_64"],
+)
+
 # Executes the complete shared integer bit-count family through the task HAL.
 iree_executable_test(
     name = "integer_bit_counts_scenario_test",
@@ -128,8 +139,10 @@ iree_executable_test(
         ("scalar_loop", "//loom/src/loom/test/corpus/control:loop/scalar_state.loom", "scalar_loop_state_values"),
         ("scalar_arithmetic", "//loom/src/loom/test/corpus/numeric:integer/scalar_observations.loom", "scalar_i32_arithmetic_values"),
         ("portable_index_arithmetic", "//loom/src/loom/test/corpus/numeric:integer/scalar_observations.loom", "portable_index_arithmetic_values"),
+        ("portable_index_bitwise", "//loom/src/loom/test/corpus/numeric:integer/scalar_observations.loom", "portable_index_bitwise_values"),
         ("scalar_bitfield", "//loom/src/loom/test/corpus/numeric:integer/scalar_observations.loom", "scalar_i32_bitfield_values"),
         ("bitfield", "//loom/src/loom/test/corpus/numeric:integer/bitfield.loom", "bitfield_values"),
+        ("integer_rotations", "//loom/src/loom/test/corpus/numeric:integer/rotation.loom", "integer_rotation_values"),
         ("scalar_integer_float", "//loom/src/loom/test/corpus/numeric:conversion/conversion.loom", "scalar_integer_float_values"),
         ("wide_integer_conversion", "//loom/src/loom/test/corpus/numeric:vector/conversion.loom", "wide_integer_values"),
         ("packed_float_widening", "//loom/src/loom/test/corpus/numeric:conversion/narrow_widening.loom", "packed_f32_to_f64_values"),
@@ -139,10 +152,12 @@ iree_executable_test(
         ("half_widening", "//loom/src/loom/test/corpus/numeric:conversion/narrow_widening.loom", "float16_to_f32_all_bits"),
         ("packet_concatenation", "//loom/src/loom/test/corpus/numeric:vector/concatenation.loom", "packet_concatenation_values"),
         ("bfloat_widening", "//loom/src/loom/test/corpus/numeric:conversion/narrow_widening.loom", "bfloat_to_f32_all_bits"),
+        ("bfloat_extrema_narrowing", "//loom/src/loom/test/corpus/numeric:conversion/f32_narrowing.loom", "bfloat_extrema_narrowing_values"),
         ("bfloat_double_widening", "//loom/src/loom/test/corpus/numeric:conversion/narrow_widening.loom", "bfloat_to_f64_all_bits"),
         ("uniform_word_shifts", "//loom/src/loom/test/corpus/numeric:vector/integer_bitwise.loom", "uniform_word_shift_values"),
         ("uniform_dword_shifts", "//loom/src/loom/test/corpus/numeric:vector/integer_bitwise.loom", "uniform_dword_shift_values"),
         ("uniform_qword_shifts", "//loom/src/loom/test/corpus/numeric:vector/integer_bitwise.loom", "uniform_qword_shift_values"),
+        ("native_i16_count_carriers", ":test/x86_native_i16_count_carriers.loom", "x86_native_i16_count_carrier_values"),
         ("rodata", "//loom/src/loom/test/corpus/function:rodata.loom", "rodata_values"),
         ("scalar_division", "//loom/src/loom/test/corpus/numeric:integer/constant_division.loom", "constant_scalar_quotient_values"),
         ("float_roots", "//loom/src/loom/test/corpus/numeric:float/roots.loom", "root_values"),
@@ -151,6 +166,8 @@ iree_executable_test(
         ("float64_approximate_roots", "//loom/src/loom/tooling/target/cpu:test/x86_approximate_roots.loom", "x86_root_f64_approximate_values"),
         ("float_approximate_root_guards", "//loom/src/loom/tooling/target/cpu:test/x86_approximate_roots.loom", "x86_root_approximate_guard_values"),
         ("float_exponential", "//loom/src/loom/test/corpus/numeric:float/exponential.loom", "exponential_values"),
+        ("floating_integer", "//loom/src/loom/test/corpus/numeric:conversion/integer_floating.loom", "floating_integer_values"),
+        ("wide_floating_integer", "//loom/src/loom/test/corpus/numeric:conversion/integer_floating.loom", "wide_floating_integer_values"),
         ("float_turns", "//loom/src/loom/test/corpus/numeric:float/turns.loom", "turn_approximate_values"),
         ("float_activations", "//loom/src/loom/test/corpus/numeric:float/activations.loom", "activation_core_values"),
     ]

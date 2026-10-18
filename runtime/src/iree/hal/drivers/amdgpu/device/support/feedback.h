@@ -77,11 +77,13 @@ iree_hal_amdgpu_feedback_try_reserve(
       (iree_amdgpu_scoped_atomic_uint64_t*)&channel->read_tail;
 
   while (true) {
-    const uint64_t head = iree_amdgpu_scoped_atomic_load(
-        reservation_head, iree_amdgpu_memory_order_relaxed,
-        iree_amdgpu_memory_scope_system);
+    // Acquire the consumer position first: a newer tail paired with an older
+    // head can underflow the occupancy while other producers are being drained.
     const uint64_t tail = iree_amdgpu_scoped_atomic_load(
         read_tail, iree_amdgpu_memory_order_acquire,
+        iree_amdgpu_memory_scope_system);
+    const uint64_t head = iree_amdgpu_scoped_atomic_load(
+        reservation_head, iree_amdgpu_memory_order_relaxed,
         iree_amdgpu_memory_scope_system);
     const uint64_t used_capacity = head - tail;
     if (used_capacity > ring_capacity ||

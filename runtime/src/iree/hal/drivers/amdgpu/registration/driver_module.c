@@ -103,19 +103,9 @@ IREE_FLAG(string, amdgpu_tsan_report_policy, "fail-device",
           "AMDGPU TSAN report policy: all policies emit device events and "
           "stop the offending kernel path; 'report-only' keeps the logical "
           "device usable, while 'fail-device' then fails the logical device.");
-IREE_FLAG(
-    int32_t, amdgpu_tsan_memory_granule_shift,
-    IREE_HAL_AMDGPU_TSAN_DEFAULT_MEMORY_GRANULE_SHIFT,
-    "Log2 local-memory bytes represented by one AMDGPU TSAN shadow entry.");
-IREE_FLAG(
-    int32_t, amdgpu_tsan_workgroup_local_memory_size,
-    IREE_HAL_AMDGPU_TSAN_DEFAULT_WORKGROUP_LOCAL_MEMORY_SIZE,
-    "Local-memory byte capacity represented by each AMDGPU TSAN workgroup "
-    "shadow. Zero uses the backend-selected group segment limit.");
-IREE_FLAG(int32_t, amdgpu_tsan_workgroup_capacity,
-          IREE_HAL_AMDGPU_TSAN_DEFAULT_WORKGROUP_CAPACITY,
-          "Maximum workgroup ordinals represented by one AMDGPU TSAN dispatch "
-          "shadow.");
+IREE_FLAG(int64_t, amdgpu_tsan_shadow_size,
+          IREE_HAL_AMDGPU_TSAN_DEFAULT_SHADOW_SIZE,
+          "Queue-local AMDGPU TSAN shadow arena size in bytes.");
 
 IREE_FLAG(bool, amdgpu_suppress_device_fine_memory, false,
           "Suppresses fine-grained GPU-local memory pools even when reported "
@@ -336,35 +326,9 @@ static iree_status_t iree_hal_amdgpu_driver_factory_try_create(
                             "unrecognized TSAN report policy: '%s'",
                             FLAG_amdgpu_tsan_report_policy);
   }
-  if (FLAG_amdgpu_tsan_memory_granule_shift < 0 ||
-      FLAG_amdgpu_tsan_memory_granule_shift >
-          IREE_HAL_AMDGPU_TSAN_MAX_MEMORY_GRANULE_SHIFT) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "amdgpu_tsan_memory_granule_shift must be between 0 and %u "
-        "(got %d)",
-        IREE_HAL_AMDGPU_TSAN_MAX_MEMORY_GRANULE_SHIFT,
-        FLAG_amdgpu_tsan_memory_granule_shift);
-  }
-  device_options->tsan.memory_granule_shift =
-      (uint32_t)FLAG_amdgpu_tsan_memory_granule_shift;
-  if (FLAG_amdgpu_tsan_workgroup_local_memory_size < 0) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "amdgpu_tsan_workgroup_local_memory_size must be non-negative "
-        "(got %d)",
-        FLAG_amdgpu_tsan_workgroup_local_memory_size);
-  }
-  device_options->tsan.workgroup_local_memory_size =
-      (uint32_t)FLAG_amdgpu_tsan_workgroup_local_memory_size;
-  if (FLAG_amdgpu_tsan_workgroup_capacity < 0) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "amdgpu_tsan_workgroup_capacity must be "
-                            "non-negative (got %d)",
-                            FLAG_amdgpu_tsan_workgroup_capacity);
-  }
-  device_options->tsan.workgroup_capacity =
-      (uint32_t)FLAG_amdgpu_tsan_workgroup_capacity;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_flag_int64_to_device_size(
+      "amdgpu_tsan_shadow_size", FLAG_amdgpu_tsan_shadow_size,
+      &device_options->tsan.shadow_size));
 
   device_options->suppress_device_fine_memory =
       FLAG_amdgpu_suppress_device_fine_memory;

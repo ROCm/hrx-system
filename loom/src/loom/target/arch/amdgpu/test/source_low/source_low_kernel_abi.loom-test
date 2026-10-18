@@ -159,3 +159,149 @@ kernel.def target(@target) export("scalar_argument_payloads") @scalar_argument_p
 low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 16, direct_arg_count = 13, direct_arg_names = {arg0 = "flag", arg1 = "i8", arg10 = "f64", arg11 = "index", arg12 = "offset", arg2 = "i16", arg3 = "i32", arg4 = "i64", arg5 = "f8e4", arg6 = "f8e5", arg7 = "f16", arg8 = "bf16", arg9 = "f32"}, direct_arg_offsets = [0, 4, 8, 12, 16, 24, 28, 32, 36, 40, 44, 52, 56], direct_arg_parameter_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], direct_arg_payload_sizes = [1, 1, 2, 4, 8, 1, 1, 2, 2, 4, 8, 4, 8], direct_arg_sizes = [4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 8, 4, 8], parameter_count = 14, resource_count = 1, resource_offsets = [64], resource_parameter_indices = [13], uses_kernarg_segment_ptr = true}) export("scalar_argument_payloads") workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_argument_payloads(%flag: reg<amdgpu.sgpr>, %i8: reg<amdgpu.sgpr>, %i16: reg<amdgpu.sgpr>, %i32: reg<amdgpu.sgpr>, %i64: reg<amdgpu.sgpr x2>, %f8e4: reg<amdgpu.sgpr>, %f8e5: reg<amdgpu.sgpr>, %f16: reg<amdgpu.sgpr>, %bf16: reg<amdgpu.sgpr>, %f32: reg<amdgpu.sgpr>, %f64: reg<amdgpu.sgpr x2>, %index: reg<amdgpu.sgpr>, %offset: reg<amdgpu.sgpr x2>) asm {
   return
 }
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) export("vector_argument_payloads") @vector_argument_payloads() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%i1: vector<3xi1>, %i8: vector<5xi8>, %i16: vector<3xi16>, %i32: vector<3xi32>, %i64: vector<3xi64>, %f8e4: vector<5xf8E4M3>, %f8e5: vector<5xf8E5M2>, %f16: vector<3xf16>, %bf16: vector<3xbf16>, %f32: vector<3xf32>, %f64: vector<3xf64>, %output: buffer) {
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 31, direct_arg_count = 11, direct_arg_names = {arg0 = "i1", arg1 = "i8", arg10 = "f64", arg2 = "i16", arg3 = "i32", arg4 = "i64", arg5 = "f8e4", arg6 = "f8e5", arg7 = "f16", arg8 = "bf16", arg9 = "f32"}, direct_arg_offsets = [0, 4, 12, 20, 32, 56, 64, 72, 80, 88, 100], direct_arg_parameter_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], direct_arg_payload_sizes = [3, 5, 6, 12, 24, 5, 5, 6, 6, 12, 24], direct_arg_sizes = [4, 8, 8, 12, 24, 8, 8, 8, 8, 12, 24], parameter_count = 12, resource_count = 1, resource_offsets = [128], resource_parameter_indices = [11], uses_kernarg_segment_ptr = true}) export("vector_argument_payloads") workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @vector_argument_payloads(%i1: reg<amdgpu.sgpr>, %i8: reg<amdgpu.sgpr x2>, %i16: reg<amdgpu.sgpr x2>, %i32: reg<amdgpu.sgpr x3>, %i64: reg<amdgpu.sgpr x6>, %f8e4: reg<amdgpu.sgpr x2>, %f8e5: reg<amdgpu.sgpr x2>, %f16: reg<amdgpu.sgpr x2>, %bf16: reg<amdgpu.sgpr x2>, %f32: reg<amdgpu.sgpr x3>, %f64: reg<amdgpu.sgpr x6>) asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// Vectors wider than one target carrier are projected before ABI mapping. The
+// resulting packets remain one dense constant stream for the original source
+// arguments.
+kernel.def target(@target) export("projected_vector_argument_payloads") @projected_vector_argument_payloads() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: vector<33xf32>, %predicates: vector<33xi1>, %output: buffer) {
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 42, direct_arg_count = 4, direct_arg_names = {arg0 = "", arg1 = "", arg2 = "", arg3 = ""}, direct_arg_offsets = [0, 128, 132, 164], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_payload_sizes = [128, 4, 32, 1], direct_arg_sizes = [128, 4, 32, 4], parameter_count = 5, resource_count = 1, resource_offsets = [168], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) export("projected_vector_argument_payloads") workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @projected_vector_argument_payloads(%8: reg<amdgpu.sgpr x32>, %9: reg<amdgpu.sgpr>, %10: reg<amdgpu.sgpr x8>, %11: reg<amdgpu.sgpr>) asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) export("used_vector_arguments_wave32") @used_vector_arguments_wave32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: vector<8xf32>, %predicates: vector<4xi1>, %output: buffer) {
+  %value = vector.extract %values[0] : vector<8xf32> -> f32
+  %predicate = vector.extract %predicates[0] : vector<4xi1> -> i1
+  %fallback = scalar.constant 0.0 : f32
+  %selected = scf.select %predicate, %value, %fallback : f32
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<1xf32>
+  view.store %selected, %view[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 9, direct_arg_count = 2, direct_arg_names = {arg0 = "values", arg1 = "predicates"}, direct_arg_offsets = [0, 32], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [32, 4], parameter_count = 3, resource_count = 1, resource_offsets = [40], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) export("used_vector_arguments_wave32") workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @used_vector_arguments_wave32(%values: reg<amdgpu.sgpr x8>, %predicates$11: reg<amdgpu.sgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = s_mov_b64_exec_read
+  %14 = slice %13[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = slice %13[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = s_mov_b32 0
+  %17 = s_bfe_u32_lit %predicates$11, 524288
+  %18 = s_cmp_lg_i32_src1_inline %17 {rhs = 0}
+  %19 = s_cselect_b32 %14, %16, %18
+  %20 = s_cselect_b32 %15, %16, %18
+  %21 = s_bfe_u32_lit %predicates$11, 524296
+  %22 = s_cmp_lg_i32_src1_inline %21 {rhs = 0}
+  %23 = s_cselect_b32 %14, %16, %22
+  %24 = s_cselect_b32 %15, %16, %22
+  %25 = s_bfe_u32_lit %predicates$11, 524304
+  %26 = s_cmp_lg_i32_src1_inline %25 {rhs = 0}
+  %27 = s_cselect_b32 %14, %16, %26
+  %28 = s_cselect_b32 %15, %16, %26
+  %29 = s_lshr_b32_rhs_inline %predicates$11, 24
+  %30 = s_cmp_lg_i32_src1_inline %29 {rhs = 0}
+  %31 = s_cselect_b32 %14, %16, %30
+  %32 = s_cselect_b32 %15, %16, %30
+  %predicates$33 = concat(%19, %20, %23, %24, %27, %28, %31, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x8>
+  %value = slice %values[0] : reg<amdgpu.sgpr x8> -> reg<amdgpu.vgpr>
+  %predicate = slice %predicates$33[0] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr x2>
+  %selected = v_cndmask_b32_src0_inline %value, %predicate {false_value = 0}
+  %38 = v_mov_b32 0
+  global_store_b32_saddr %38, %selected, %view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// Scalar and vector predicate arguments share the entry EXEC read and zero
+// constant when their bodies require native lane masks.
+kernel.def target(@target) export("multiple_predicate_arguments") @multiple_predicate_arguments() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%select_lhs: i1, %lhs: vector<2xi1>, %rhs: vector<2xi1>, %output: buffer) {
+  %lhs_lane = vector.extract %lhs[0] : vector<2xi1> -> i1
+  %rhs_lane = vector.extract %rhs[1] : vector<2xi1> -> i1
+  %lhs_word = scalar.extui %lhs_lane : i1 to i32
+  %rhs_word = scalar.extui %rhs_lane : i1 to i32
+  %selected = scf.select %select_lhs, %lhs_word, %rhs_word : i32
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %selected, %view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 3, direct_arg_count = 3, direct_arg_names = {arg0 = "select_lhs", arg1 = "lhs", arg2 = "rhs"}, direct_arg_offsets = [0, 4, 8], direct_arg_parameter_indices = [0, 1, 2], direct_arg_payload_sizes = [1, 2, 2], direct_arg_sizes = [4, 4, 4], parameter_count = 4, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [3], uses_kernarg_segment_ptr = true}) export("multiple_predicate_arguments") workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @multiple_predicate_arguments(%select_lhs$18: reg<amdgpu.sgpr>, %lhs$19: reg<amdgpu.sgpr>, %rhs$20: reg<amdgpu.sgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %22 = s_mov_b64_exec_read
+  %23 = slice %22[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = slice %22[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = s_mov_b32 0
+  %26 = s_bfe_u32_lit %select_lhs$18, 524288
+  %27 = s_cmp_lg_i32_src1_inline %26 {rhs = 0}
+  %28 = s_cselect_b32 %23, %25, %27
+  %29 = s_cselect_b32 %24, %25, %27
+  %select_lhs$30 = concat(%28, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %31 = s_bfe_u32_lit %lhs$19, 524288
+  %32 = s_cmp_lg_i32_src1_inline %31 {rhs = 0}
+  %33 = s_cselect_b32 %23, %25, %32
+  %34 = s_cselect_b32 %24, %25, %32
+  %35 = s_bfe_u32_lit %lhs$19, 524296
+  %36 = s_cmp_lg_i32_src1_inline %35 {rhs = 0}
+  %37 = s_cselect_b32 %23, %25, %36
+  %38 = s_cselect_b32 %24, %25, %36
+  %lhs$39 = concat(%33, %34, %37, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %40 = s_bfe_u32_lit %rhs$20, 524288
+  %41 = s_cmp_lg_i32_src1_inline %40 {rhs = 0}
+  %42 = s_cselect_b32 %23, %25, %41
+  %43 = s_cselect_b32 %24, %25, %41
+  %44 = s_bfe_u32_lit %rhs$20, 524296
+  %45 = s_cmp_lg_i32_src1_inline %44 {rhs = 0}
+  %46 = s_cselect_b32 %23, %25, %45
+  %47 = s_cselect_b32 %24, %25, %45
+  %rhs$48 = concat(%42, %43, %46, %47) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %lhs_lane = slice %lhs$39[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
+  %rhs_lane = slice %rhs$48[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
+  %lhs_word = v_cndmask_b32_src0_lit_src1_inline %lhs_lane {imm32 = 0, true_value = 1}
+  %rhs_word = v_cndmask_b32_src0_lit_src1_inline %rhs_lane {imm32 = 0, true_value = 1}
+  %selected = v_cndmask_b32 %rhs_word, %lhs_word, %select_lhs$30
+  %56 = v_mov_b32 0
+  global_store_b32_saddr %56, %selected, %view
+  return
+}

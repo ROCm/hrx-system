@@ -82,6 +82,8 @@ void iree_hal_amd_xdna_operation_wake_acceptance_waiters(
 
 iree_status_t iree_hal_amd_xdna_operation_signal(
     iree_hal_amd_xdna_operation_t* operation, iree_hal_device_t* queue_device) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, operation->signals.count);
   const iree_async_frontier_t* frontier =
       iree_hal_amd_xdna_frontier_state_as_frontier(&operation->frontier);
   for (iree_host_size_t i = 0; i < operation->signals.count; ++i) {
@@ -96,9 +98,11 @@ iree_status_t iree_hal_amd_xdna_operation_signal(
       status = iree_hal_semaphore_signal(semaphore, value, frontier);
     }
     if (!iree_status_is_ok(status)) {
+      IREE_TRACE_ZONE_END(z0);
       return status;
     }
   }
+  IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 
@@ -106,6 +110,8 @@ iree_status_t iree_hal_amd_xdna_operation_signal(
 // releases its public device reference inline.
 void iree_hal_amd_xdna_operation_complete(
     iree_hal_amd_xdna_operation_t* operation) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, operation->kind);
   iree_hal_amd_xdna_operation_t* acceptance_waiters =
       iree_hal_amd_xdna_operation_unregister_producers(operation);
   if (!iree_status_is_ok(operation->status)) {
@@ -116,7 +122,9 @@ void iree_hal_amd_xdna_operation_complete(
   if (operation->profile) {
     iree_hal_amd_xdna_operation_profile_complete(operation);
   }
+  IREE_TRACE_ZONE_BEGIN_NAMED(z1, "iree_hal_amd_xdna_release_resources");
   iree_hal_amd_xdna_operation_release_resources(operation);
+  IREE_TRACE_ZONE_END(z1);
   if (iree_status_is_ok(operation->status)) {
     operation->status =
         iree_hal_amd_xdna_operation_signal(operation, operation->device);
@@ -127,6 +135,7 @@ void iree_hal_amd_xdna_operation_complete(
   iree_hal_semaphore_list_release(operation->signals);
   iree_hal_amd_xdna_operation_deallocate(operation);
   iree_hal_amd_xdna_operation_wake_acceptance_waiters(acceptance_waiters);
+  IREE_TRACE_ZONE_END(z0);
 }
 
 iree_status_t iree_hal_amd_xdna_operation_resolve_waits(
@@ -388,6 +397,8 @@ static bool iree_hal_amd_xdna_operation_defer_for_acceptance(
 // every unrelated unresolved wait registers its ordinary semaphore timepoint.
 void iree_hal_amd_xdna_operation_admit(iree_hal_amd_xdna_operation_t* operation,
                                        iree_status_t status) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, operation->kind);
   iree_hal_amd_xdna_queue_t* queue = operation->queue;
   if (iree_status_is_ok(status) &&
       !iree_status_is_ok(iree_hal_amd_xdna_queue_failure_status(queue))) {
@@ -408,12 +419,16 @@ void iree_hal_amd_xdna_operation_admit(iree_hal_amd_xdna_operation_t* operation,
     if (iree_hal_amd_xdna_operation_has_dispatch(operation) &&
         iree_hal_amd_xdna_operation_defer_for_acceptance(operation,
                                                          deferred_wait_index)) {
+      IREE_TRACE_ZONE_APPEND_TEXT(z0, "await producer acceptance");
     } else {
+      IREE_TRACE_ZONE_APPEND_TEXT(z0, "await semaphore");
       iree_hal_amd_xdna_operation_register_waits(operation);
     }
+    IREE_TRACE_ZONE_END(z0);
     return;
   }
   iree_hal_amd_xdna_queue_enqueue_ready(operation, status);
+  IREE_TRACE_ZONE_END(z0);
 }
 
 void iree_hal_amd_xdna_queue_retry_acceptance_waiters(

@@ -128,6 +128,8 @@ def emit_array_facts() -> str:
                 f"        .lock_count = {tile.lock_count},",
                 f"        .lock_value_minimum = {tile.lock_value_minimum},",
                 f"        .lock_value_maximum = {tile.lock_value_maximum},",
+                f"        .packet_arbiter_count = {tile.packet_arbiter_count},",
+                f"        .packet_master_select_count = {tile.packet_master_select_count},",
                 f"        .register_module_bits = {register_module_bits},",
                 "        .array_resources = {",
                 f"            .physical_tile_count = {resource_totals.physical_tile_count},",

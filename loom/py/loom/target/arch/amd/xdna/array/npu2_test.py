@@ -76,6 +76,11 @@ def test_npu2_topology_and_resource_domains_are_complete() -> None:
         (TileKind.MEMORY, 1, 1),
         (TileKind.COMPUTE, 2, 4),
     )
+    # The three-bit arbiter encoding includes two unimplemented values.
+    assert tuple(
+        (tile.packet_arbiter_count, tile.packet_master_select_count)
+        for tile in family.tiles
+    ) == ((6, 4), (6, 4), (6, 4))
     assert {event.module: event.event_count for event in family.events} == {
         RegisterModule.CORE: 128,
         RegisterModule.COMPUTE_MEMORY: 128,
@@ -101,6 +106,28 @@ def test_npu2_topology_and_resource_domains_are_complete() -> None:
 def test_validator_rejects_physical_plan_carrier_overflow() -> None:
     with pytest.raises(ValueError, match="physical-plan carrier overflows"):
         validate_array_family(replace(NPU2_ARRAY_FAMILY, column_count=(1 << 16) - 1))
+
+
+@pytest.mark.parametrize("tile_kind", tuple(TileKind))
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("packet_arbiter_count", 0),
+        ("packet_arbiter_count", 9),
+        ("packet_master_select_count", 0),
+        ("packet_master_select_count", 5),
+    ],
+)
+def test_validator_rejects_unencodable_packet_resources(
+    tile_kind: TileKind, field: str, value: int
+) -> None:
+    family = NPU2_ARRAY_FAMILY
+    tiles = tuple(
+        replace(tile, **{field: value}) if tile.kind is tile_kind else tile
+        for tile in family.tiles
+    )
+    with pytest.raises(ValueError, match="invalid packet-switch resources"):
+        validate_array_family(replace(family, tiles=tiles))
 
 
 def test_npu2_memory_distinguishes_local_storage_from_load_apertures() -> None:

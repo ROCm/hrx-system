@@ -361,6 +361,30 @@ static iree_status_t loom_amdgpu_feedback_build_vgpr64_add(
   return iree_ok_status();
 }
 
+// Vector compares define only the active wave width. Intersect with EXEC
+// before exposing an SGPRx2 mask to 64-bit scalar control flow: in wave32 the
+// otherwise undefined upper register can make a failed CAS appear successful.
+static iree_status_t loom_amdgpu_feedback_build_active_mask(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    loom_value_id_t mask, loom_location_id_t location,
+    loom_value_id_t* out_mask) {
+  loom_type_t mask_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_build_register_type(
+      descriptor_set, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2, &mask_type));
+  loom_op_t* exec_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_build_descriptor_op(
+      builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC_READ,
+      NULL, 0, &mask_type, 1, location, &exec_op));
+  const loom_value_id_t operands[] = {
+      mask, loom_value_slice_get(loom_low_op_results(exec_op), 0)};
+  loom_op_t* and_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_build_descriptor_op(
+      builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64, operands,
+      IREE_ARRAYSIZE(operands), &mask_type, 1, location, &and_op));
+  *out_mask = loom_value_slice_get(loom_low_op_results(and_op), 0);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_feedback_build_vgpr64_equal_mask(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_value_id_t lhs, loom_value_id_t rhs, loom_location_id_t location,
@@ -415,8 +439,9 @@ static iree_status_t loom_amdgpu_feedback_build_vgpr64_equal_mask(
       builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64,
       and_operands, IREE_ARRAYSIZE(and_operands), &mask_type,
       /*result_count=*/1, location, &and_op));
-  *out_mask = loom_value_slice_get(loom_low_op_results(and_op), 0);
-  return iree_ok_status();
+  return loom_amdgpu_feedback_build_active_mask(
+      builder, descriptor_set,
+      loom_value_slice_get(loom_low_op_results(and_op), 0), location, out_mask);
 }
 
 static iree_status_t loom_amdgpu_feedback_build_sgpr64_nonzero_scc(
@@ -698,8 +723,9 @@ static iree_status_t loom_amdgpu_feedback_build_vgpr_u32_ule_mask(
       builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULE_U32,
       operands, IREE_ARRAYSIZE(operands), &mask_type, /*result_count=*/1,
       location, &op));
-  *out_mask = loom_value_slice_get(loom_low_op_results(op), 0);
-  return iree_ok_status();
+  return loom_amdgpu_feedback_build_active_mask(
+      builder, descriptor_set, loom_value_slice_get(loom_low_op_results(op), 0),
+      location, out_mask);
 }
 
 static iree_status_t loom_amdgpu_feedback_build_capacity_available_scc(
@@ -1352,12 +1378,15 @@ iree_status_t loom_amdgpu_build_feedback_reservation(
   IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
       builder, continuation_block, mask_type, &reserved_mask_arg));
 
-  loom_value_id_t reservation_head = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_reservation_head_load(
-      builder, descriptor_set, channel_base, location, &reservation_head));
+  // Acquire the consumer position before sampling the producer position. A
+  // newer tail paired with an older head would underflow the occupancy and
+  // incorrectly report a full channel while other producers are being drained.
   loom_value_id_t read_tail = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_read_tail_acquire_load(
       builder, descriptor_set, channel_base, location, &read_tail));
+  loom_value_id_t reservation_head = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_reservation_head_load(
+      builder, descriptor_set, channel_base, location, &reservation_head));
   loom_value_id_t has_capacity = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_build_capacity_available_scc(
       builder, descriptor_set, ring_capacity, reservation_head, read_tail,

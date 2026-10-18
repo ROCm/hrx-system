@@ -3004,6 +3004,17 @@ void loom_module_link_symbol_defining_op(loom_module_t* module, loom_op_t* op,
         symbol->flags |= LOOM_SYMBOL_FLAG_PUBLIC;
       }
     }
+    symbol->flags &= (loom_symbol_flags_t)~LOOM_SYMBOL_FLAG_LINK_ONCE;
+    const uint8_t linkage_attr_index_plus_one =
+        vtable->symbol_def->linkage_attr_index_plus_one;
+    if (linkage_attr_index_plus_one) {
+      const uint8_t linkage_attr_index = linkage_attr_index_plus_one - 1;
+      if (linkage_attr_index < op->attribute_count &&
+          loom_attr_as_enum(attrs[linkage_attr_index]) ==
+              LOOM_SYMBOL_LINKAGE_LINK_ONCE) {
+        symbol->flags |= LOOM_SYMBOL_FLAG_LINK_ONCE;
+      }
+    }
     symbol->flags &= (loom_symbol_flags_t)~LOOM_SYMBOL_FLAG_RETAIN;
     const uint8_t retain_attr_index_plus_one =
         vtable->symbol_def->retain_attr_index_plus_one;

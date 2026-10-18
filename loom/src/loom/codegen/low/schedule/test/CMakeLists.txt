@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "hazards.loom-test"
     "memory_access_flags.loom-test"
     "memory_frontier.loom-test"
     "packing_completion.loom-test"

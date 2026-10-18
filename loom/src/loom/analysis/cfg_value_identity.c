@@ -1349,6 +1349,7 @@ static uint32_t loom_cfg_value_identity_register_value_node(
       loom_cfg_value_identity_refinement_mapped_value(refinement, value_id);
   const loom_value_ordinal_t ordinal = loom_local_value_domain_ordinal(
       refinement->table->value_domain, value_id);
+  IREE_ASSERT_LT(ordinal, refinement->table->representative_count);
   uint32_t node = nodes_by_ordinal[ordinal];
   if (node == LOOM_CFG_VALUE_IDENTITY_INVALID) {
     node = (*inout_value_count)++;
@@ -2015,7 +2016,6 @@ iree_status_t loom_cfg_value_identity_table_update(
   IREE_ASSERT_ARGUMENT(dominance);
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_EQ(table->value_domain->module, region->graph.module);
-  IREE_ASSERT_EQ(table->representative_count, table->value_domain->value_count);
 
   const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(arena);
   loom_cfg_value_identity_projection_t projection = {0};

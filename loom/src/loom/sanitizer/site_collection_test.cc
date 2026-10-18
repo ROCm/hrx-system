@@ -109,9 +109,9 @@ class SiteCollectionTest : public ::testing::Test {
     loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
     IREE_ASSERT_OK(loom_module_intern_type(module_, index_type, &index_type));
     IREE_ASSERT_OK(loom_kernel_def_build(
-        &module_builder, 0, 0, loom_symbol_ref_null(), LOOM_STRING_ID_INVALID,
-        0, callee, &index_type, 1, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN,
-        &func_op_));
+        &module_builder, 0, /*linkage=*/0, 0, loom_symbol_ref_null(),
+        LOOM_STRING_ID_INVALID, 0, callee, &index_type, 1, NULL, 0, NULL, 0,
+        LOOM_LOCATION_UNKNOWN, &func_op_));
     loom_region_t* config = loom_kernel_def_config(func_op_);
     loom_builder_t config_builder;
     loom_builder_initialize(module_, &module_->arena,

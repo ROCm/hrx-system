@@ -1,0 +1,21 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Complete the mailbox store before issuing the native shader interrupt.
+template.decl @shader_event_interrupt(%context: i32)
+
+low.func.def target<amdgpu.cdna4.core> @shader_event_cdna4(%context: reg<amdgpu.sgpr>) asm {
+  s_waitcnt {vmcnt = 0}
+  %payload = s_mov_b32_m0 %context
+  s_sendmsg %payload {message = 1}
+  return
+}
+
+amdgpu.target<gfx950> @shader_event_gfx950_target
+template.def<@shader_event_interrupt> target(@shader_event_gfx950_target) @shader_event_gfx950_impl(%context: i32) {
+  low.invoke @shader_event_cdna4(%context) : (i32) -> ()
+  template.return
+}

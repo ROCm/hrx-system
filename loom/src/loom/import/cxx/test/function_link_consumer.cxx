@@ -6,10 +6,17 @@
 
 #include <loomcxx/check.h>
 
+#include "function_link_helpers.h"
+
 [[loom::symbol("library.adjust")]] unsigned adjust(unsigned value);
 
-unsigned apply_adjustment(unsigned value) { return adjust(value); }
+static unsigned local_adjust(unsigned value) { return value + 11u; }
+
+unsigned apply_adjustment(unsigned value) {
+  return adjust(value) + shared_inline(value) + shared_template<7u>(value) +
+         local_adjust(value);
+}
 
 LOOM_CHECK_CASE(function_link) {
-  loom::check::expect_equal(apply_adjustment(14u), 43u);
+  loom::check::expect_equal(apply_adjustment(2u), 56u);
 }

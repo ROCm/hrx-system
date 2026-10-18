@@ -41,6 +41,8 @@ loom_cc_library(
         "format.h",
         "program.h",
     ],
+    # Serialized command readers own neither compiler IR nor process state.
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
     visibility = [
         "//loom/binding/c/test/target/amdgpu:__pkg__",
         "//loom/src/loom/serve/runtime/program:__pkg__",

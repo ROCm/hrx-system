@@ -121,8 +121,8 @@ if(WIN32 AND IREE_ARCH STREQUAL "x86_64")
   # CMake + MASM does not work well and CMake ends up passing all our C/C++
   # flags confusing MASM. We invoke MASM directly (ml.exe/ml64.exe) to keep it
   # quiet.
-  target_sources(iree_hal_drivers_task_executable_elf_arch PRIVATE
-    "arch/x86_64_msvc.obj")
+  iree_cc_library_add_external_objects(iree_hal_drivers_task_executable_elf_arch
+    "${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj")
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm

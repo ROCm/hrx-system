@@ -171,6 +171,31 @@ TEST(SdmaEncodingTest, FenceFieldsFollowTheAdvertisedEncoding) {
   }
 }
 
+TEST(SdmaEncodingTest, NativeEventMailboxAndInterruptKeepDistinctOperands) {
+  constexpr std::array<uint32_t, 4> kHeaders = {0x00000005, 0x00030005,
+                                                0x00130005, 0x03130005};
+  const amdf_gpu_event_info_t event = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_EVENT_INFO,
+      .structure_size = sizeof(event),
+      .mailbox_address = UINT64_C(0x1234567887654320),
+      .trigger_data = 23,
+      .interrupt_context = 11,
+  };
+  for (size_t i = 0; i < kFeatures.size(); ++i) {
+    SCOPED_TRACE(kFeatures[i]);
+    std::array<uint32_t, 7> words;
+    words.fill(0x9ac7135b);
+    SdmaCommandWriter commands(words.data(), kFeatures[i]);
+    commands.NotifyKfdEvent(event);
+    // ROCr's notification tail writes one mailbox DWORD before the separate
+    // TRAP context. FENCE memory policy follows the queue's native layout.
+    const std::array<uint32_t, 7> expected = {
+        kHeaders[i], 0x87654320, 0x12345678, 23, 6, 11, 0x9ac7135b};
+    EXPECT_EQ(commands.word_count(), 6u);
+    EXPECT_EQ(words, expected);
+  }
+}
+
 TEST(SdmaEncodingTest, MemoryEqualityPollWaitsWithoutFiniteRetryLimit) {
   constexpr std::array<uint32_t, 4> kRetryScopes = {0x0fff0004, 0x0fff0004,
                                                     0x0fff0004, 0x3fff0004};

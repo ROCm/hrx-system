@@ -162,6 +162,7 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::target::registers
+    loom::util::adaptive_sort
     loom::util::cfg_execution
     loom::util::cfg_graph
     loom::util::cfg_loop

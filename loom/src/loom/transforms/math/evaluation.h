@@ -31,6 +31,9 @@ typedef enum loom_math_evaluation_unary_op_e {
   LOOM_MATH_EVALUATION_UNARY_TRUNCF = 7,
   LOOM_MATH_EVALUATION_UNARY_SQRTF = 8,
   LOOM_MATH_EVALUATION_UNARY_RSQRTF = 9,
+  LOOM_MATH_EVALUATION_UNARY_SINF = 10,
+  LOOM_MATH_EVALUATION_UNARY_COSF = 11,
+  LOOM_MATH_EVALUATION_UNARY_ROUNDEVENF = 12,
 } loom_math_evaluation_unary_op_t;
 
 typedef enum loom_math_evaluation_binary_op_e {
@@ -130,6 +133,11 @@ iree_status_t loom_math_evaluation_build_clamp(
 
 // Compares two values with ordered-greater-or-equal semantics.
 iree_status_t loom_math_evaluation_build_ordered_greater_equal(
+    loom_math_evaluation_t* evaluation, const loom_math_evaluation_value_t* lhs,
+    const loom_math_evaluation_value_t* rhs, loom_value_id_t* out_value);
+
+// Compares two values with ordered-equal semantics.
+iree_status_t loom_math_evaluation_build_ordered_equal(
     loom_math_evaluation_t* evaluation, const loom_math_evaluation_value_t* lhs,
     const loom_math_evaluation_value_t* rhs, loom_value_id_t* out_value);
 

@@ -348,8 +348,10 @@ loom_cc_library(
   NAME
     target_legalization
   HDRS
+    "memory_legalization.h"
     "target_legalization.h"
   SRCS
+    "memory_legalization.c"
     "target_legalization.c"
   DEPS
     ::bitstream_packet_legalization
@@ -362,6 +364,7 @@ loom_cc_library(
     loom::ops::kernel
     loom::ops::scf
     loom::ops::vector
+    loom::rewrite::rewriter
     loom::target::legalization
     loom::util::fact_table
     loom::util::numeric_format

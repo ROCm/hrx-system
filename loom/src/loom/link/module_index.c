@@ -23,6 +23,8 @@ typedef struct loom_link_module_index_name_map_entry_t {
   iree_host_size_t last_symbol_ordinal;
   // First global symbol in canonical enumeration order, or INVALID_ORDINAL.
   iree_host_size_t first_global_ordinal;
+  // First global link-once definition in canonical order, or INVALID_ORDINAL.
+  iree_host_size_t first_link_once_definition_ordinal;
   // Dense template family ordinal for this global name, or invalid when this
   // name has not been used as a family identity.
   loom_link_template_family_ordinal_t template_family_ordinal;
@@ -344,6 +346,8 @@ static void loom_link_index_name_map_initialize(
         .first_symbol_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
         .last_symbol_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
         .first_global_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+        .first_link_once_definition_ordinal =
+            LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
         .template_family_ordinal = LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID,
         .family_extension_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
     };
@@ -526,6 +530,8 @@ static iree_status_t loom_link_index_insert_symbol_name(
         .first_symbol_ordinal = symbol_ordinal,
         .last_symbol_ordinal = symbol_ordinal,
         .first_global_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+        .first_link_once_definition_ordinal =
+            LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
         .template_family_ordinal = LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID,
         .family_extension_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
     };
@@ -541,6 +547,16 @@ static iree_status_t loom_link_index_insert_symbol_name(
        loom_link_index_symbol_canonically_precedes(
            index, symbol_ordinal, entry->first_global_ordinal))) {
     entry->first_global_ordinal = symbol_ordinal;
+  }
+  if (symbol->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL &&
+      iree_all_bits_set(symbol->flags,
+                        LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION |
+                            LOOM_LINK_SYMBOL_FLAG_LINK_ONCE) &&
+      (entry->first_link_once_definition_ordinal ==
+           LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL ||
+       loom_link_index_symbol_canonically_precedes(
+           index, symbol_ordinal, entry->first_link_once_definition_ordinal))) {
+    entry->first_link_once_definition_ordinal = symbol_ordinal;
   }
   return iree_ok_status();
 }
@@ -946,6 +962,9 @@ static loom_link_symbol_flags_t loom_link_materialized_symbol_flags(
   if (iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_RETAIN)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_RETAIN;
   }
+  if (iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_LINK_ONCE)) {
+    flags |= LOOM_LINK_SYMBOL_FLAG_LINK_ONCE;
+  }
   loom_func_like_t func = loom_func_like_cast(module, symbol->defining_op);
   const bool has_import =
       loom_func_like_isa(func) &&
@@ -1020,6 +1039,9 @@ static loom_link_symbol_flags_t loom_link_bytecode_symbol_flags(
   }
   if (iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_RETAIN)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_RETAIN;
+  }
+  if (iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_LINK_ONCE)) {
+    flags |= LOOM_LINK_SYMBOL_FLAG_LINK_ONCE;
   }
   return flags;
 }
@@ -1764,6 +1786,37 @@ const loom_link_module_index_symbol_t* loom_link_module_index_lookup_global(
                                  LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL
           ? loom_link_module_index_symbol_at(index,
                                              local_entry->first_global_ordinal)
+          : NULL;
+  if (base_symbol == NULL) {
+    return local_symbol;
+  }
+  if (local_symbol == NULL) {
+    return base_symbol;
+  }
+  return loom_link_index_symbol_canonically_precedes(
+             index, local_symbol->ordinal, base_symbol->ordinal)
+             ? local_symbol
+             : base_symbol;
+}
+
+const loom_link_module_index_symbol_t*
+loom_link_module_index_lookup_link_once_definition(
+    const loom_link_module_index_t* index, iree_string_view_t name) {
+  if (!index) {
+    return NULL;
+  }
+  const loom_link_module_index_symbol_t* base_symbol =
+      index->base.index != NULL
+          ? loom_link_module_index_lookup_link_once_definition(
+                index->base.index, name)
+          : NULL;
+  const loom_link_module_index_name_map_entry_t* local_entry =
+      loom_link_index_lookup_local_name_entry(index, name);
+  const loom_link_module_index_symbol_t* local_symbol =
+      local_entry != NULL && local_entry->first_link_once_definition_ordinal !=
+                                 LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL
+          ? loom_link_module_index_symbol_at(
+                index, local_entry->first_link_once_definition_ordinal)
           : NULL;
   if (base_symbol == NULL) {
     return local_symbol;

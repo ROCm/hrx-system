@@ -31,7 +31,9 @@ class ResidentImportedExchangeTest
 TEST_P(ResidentImportedExchangeTest, CausalRoundTrip) {
   const auto& parameters = GetParam();
   ResidentImportPlan import_plan;
-  ASSERT_NO_FATAL_FAILURE(import_plan.Find(api_, system_scope_, accesses_[1],
+  auto gpu_access = accesses_[1];
+  gpu_access.requirements.flags |= AMDF_MEMORY_FLAG_QUEUE_STORAGE;
+  ASSERT_NO_FATAL_FAILURE(import_plan.Find(api_, system_scope_, gpu_access,
                                            accesses_[0], parameters.transport,
                                            parameters.source_offset));
   if (IsSkipped()) {

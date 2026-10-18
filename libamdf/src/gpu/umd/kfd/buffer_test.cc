@@ -6,6 +6,7 @@
 
 #include "libamdf/src/gpu/umd/kfd/buffer.h"
 
+#include <drm/drm.h>
 #include <errno.h>
 #include <linux/kfd_ioctl.h>
 #include <sys/mman.h>
@@ -51,6 +52,18 @@ struct NativeBufferState {
   uint32_t mapped_gpu_count = 0;
   // Persistent free error before consuming the allocation, or zero.
   int free_error = 0;
+  // Import failure before native ownership is established.
+  int import_error = 0;
+  // Fresh DMA-BUF descriptor borrowed by addressless residency preparation.
+  int import_descriptor = -1;
+  // Exact failure establishing the render-file source, or zero.
+  int prime_error = 0;
+  // Exact failure releasing the render-file source, or zero.
+  int gem_close_error = 0;
+  // Whether the render-file GEM reference remains live.
+  bool gem_live = false;
+  // Number of terminal render-source release attempts.
+  uint32_t gem_close_count = 0;
   // Export failure before producing a descriptor, or zero when not exercised.
   int export_error = 0;
   // Number of backing identity export attempts.
@@ -90,6 +103,33 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
   if (native_state == nullptr) {
     return __real_ioctl(descriptor, request, argument);
   }
+  if (request == DRM_IOCTL_PRIME_FD_TO_HANDLE) {
+    auto* import = static_cast<drm_prime_handle*>(argument);
+    EXPECT_EQ(descriptor, native_state->import_descriptor);
+    EXPECT_EQ(import->fd, native_state->import_descriptor);
+    EXPECT_TRUE(native_state->allocation_live);
+    EXPECT_FALSE(native_state->gem_live);
+    if (native_state->prime_error != 0) {
+      errno = native_state->prime_error;
+      return -1;
+    }
+    native_state->gem_live = true;
+    import->handle = 0x7654;
+    return 0;
+  }
+  if (request == DRM_IOCTL_GEM_CLOSE) {
+    EXPECT_EQ(descriptor, native_state->import_descriptor);
+    EXPECT_EQ(static_cast<drm_gem_close*>(argument)->handle, 0x7654u);
+    EXPECT_TRUE(native_state->allocation_live);
+    EXPECT_TRUE(native_state->gem_live);
+    ++native_state->gem_close_count;
+    if (native_state->gem_close_error != 0) {
+      errno = native_state->gem_close_error;
+      return -1;
+    }
+    native_state->gem_live = false;
+    return 0;
+  }
   EXPECT_EQ(descriptor, 17);
   if (request != AMDKFD_IOC_EXPORT_DMABUF) {
     // Native completion includes the flush after KFD drops its own mutex.
@@ -101,6 +141,21 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
     }
   }
   switch (request) {
+    case AMDKFD_IOC_IMPORT_DMABUF: {
+      auto* import = static_cast<kfd_ioctl_import_dmabuf_args*>(argument);
+      EXPECT_EQ(import->gpu_id, 19u);
+      EXPECT_EQ(import->va_addr, 0u);
+      EXPECT_EQ(import->dmabuf_fd,
+                static_cast<uint32_t>(native_state->import_descriptor));
+      EXPECT_FALSE(native_state->allocation_live);
+      if (native_state->import_error != 0) {
+        errno = native_state->import_error;
+        return -1;
+      }
+      import->handle = 0x1234;
+      native_state->allocation_live = true;
+      return 0;
+    }
     case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU: {
       auto* allocate =
           static_cast<kfd_ioctl_alloc_memory_of_gpu_args*>(argument);
@@ -176,6 +231,7 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
       EXPECT_EQ(release->handle, 0x1234u);
       EXPECT_TRUE(native_state->allocation_live);
       EXPECT_FALSE(native_state->access_live);
+      EXPECT_FALSE(native_state->gem_live);
       ++native_state->free_count;
       if (native_state->free_error != 0) {
         errno = native_state->free_error;
@@ -261,6 +317,32 @@ class KfdBufferNativeTest : public ::testing::Test {
     return status;
   }
 
+  amdf_status_t PrepareOwnedImport(amdf_gpu_umd_memory_t** memory,
+                                   amdf_gpu_umd_memory_result_t* result) {
+    device_.native_lifetime = AMDF_NATIVE_LIFETIME_INSTANCE;
+    device_.topology.sdma.engine_count = 1;
+    native_.import_descriptor = device_.render_descriptor;
+    amdf_memory_native_profile_t profile;
+    const auto status =
+        amdf_gpu_umd_device_query_memory_profile(&device_, 2, &profile);
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    const amdf_memory_native_import_info_t import = {
+        .device_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+        .required_flags = AMDF_MEMORY_FLAG_MAPPING_SOURCE,
+        .origin = AMDF_MEMORY_NATIVE_IMPORT_ORIGIN_CONSTRUCTION,
+        .minimum_alignment = 4096,
+    };
+    const amdf_external_memory_t exported = {
+        .type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
+        .payload = {.file_descriptor = native_.import_descriptor},
+        .byte_length = 4096,
+    };
+    return amdf_gpu_umd_memory_prepare_import(&device_, &profile, &import,
+                                              &exported, memory, result);
+  }
+
   void ReleaseLeakedReservation() {
     // There is no real kernel allocation in this dependency model. Verify that
     // production rollback preserved its reservation, then reclaim the known
@@ -286,6 +368,89 @@ class KfdBufferNativeTest : public ::testing::Test {
   // One buffer header, plus a memory header when exercising its native owner.
   uint32_t expected_metadata_free_count_ = 1;
 };
+
+TEST_F(KfdBufferNativeTest, ImportsResidencyWithoutAnImplicitDeviceMapping) {
+  native_.import_descriptor = device_.render_descriptor;
+  ASSERT_EQ(amdf_gpu_kfd_buffer_prepare_import(
+                &device_, native_.import_descriptor, 4096, &buffer_),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_kfd_buffer_handle(buffer_), 0x1234u);
+  EXPECT_EQ(amdf_gpu_kfd_buffer_byte_length(buffer_), 4096u);
+  EXPECT_TRUE(native_.map_progress.empty());
+  EXPECT_FALSE(native_.access_live);
+  EXPECT_EQ(native_.address, 0u);
+  ASSERT_EQ(Destroy(), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.free_count, 1u);
+  EXPECT_TRUE(native_.unmap_progress.empty());
+  EXPECT_EQ(lseek(native_.import_descriptor, 0, SEEK_END), 4096)
+      << "preparation and teardown borrow the export descriptor";
+}
+
+TEST_F(KfdBufferNativeTest, FailedImportRetainsOnlyItsMetadataOwner) {
+  native_.import_descriptor = device_.render_descriptor;
+  native_.import_error = ENOMEM;
+  EXPECT_EQ(amdf_gpu_kfd_buffer_prepare_import(
+                &device_, native_.import_descriptor, 4096, &buffer_),
+            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM));
+  ASSERT_NE(buffer_, nullptr);
+  EXPECT_FALSE(native_.allocation_live);
+  ASSERT_EQ(Destroy(), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.free_count, 0u);
+  EXPECT_TRUE(native_.unmap_progress.empty());
+}
+
+TEST_F(KfdBufferNativeTest, ImportedSourceReleasesGemBeforeResidency) {
+  expected_metadata_free_count_ = 2;
+  amdf_gpu_umd_memory_t* memory = nullptr;
+  amdf_gpu_umd_memory_result_t result = {};
+  ASSERT_EQ(PrepareOwnedImport(&memory, &result), AMDF_STATUS_OK);
+  EXPECT_EQ(result.flags, AMDF_MEMORY_FLAG_MAPPING_SOURCE);
+  EXPECT_EQ(result.device_address, 0u);
+  EXPECT_EQ(result.byte_length, 4096u);
+  EXPECT_TRUE(native_.gem_live);
+  EXPECT_TRUE(native_.map_progress.empty());
+  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.gem_close_count, 1u);
+  EXPECT_EQ(native_.free_count, 1u);
+}
+
+TEST_F(KfdBufferNativeTest, FailedRenderImportRollsBackKfdOwnership) {
+  expected_metadata_free_count_ = 2;
+  native_.prime_error = ENOMEM;
+  amdf_gpu_umd_memory_t* memory = nullptr;
+  amdf_gpu_umd_memory_result_t result;
+  std::memset(&result, 0xA5, sizeof(result));
+  const auto original = result;
+  EXPECT_EQ(PrepareOwnedImport(&memory, &result),
+            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM));
+  ASSERT_NE(memory, nullptr);
+  EXPECT_EQ(std::memcmp(&result, &original, sizeof(result)), 0);
+  EXPECT_TRUE(native_.allocation_live);
+  EXPECT_FALSE(native_.gem_live);
+  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.gem_close_count, 0u);
+  EXPECT_EQ(native_.free_count, 1u);
+}
+
+TEST_F(KfdBufferNativeTest, FailedImportedSourceReleaseRetainsResidency) {
+  expected_metadata_free_count_ = 2;
+  amdf_gpu_umd_memory_t* memory = nullptr;
+  amdf_gpu_umd_memory_result_t result = {};
+  ASSERT_EQ(PrepareOwnedImport(&memory, &result), AMDF_STATUS_OK);
+  native_.gem_close_error = EIO;
+  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory),
+            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
+  EXPECT_EQ(native_.free_count, 0u);
+  EXPECT_TRUE(native_.allocation_live);
+  EXPECT_TRUE(native_.gem_live);
+  amdf_gpu_umd_memory_abandon(memory);
+  EXPECT_EQ(native_.gem_close_count, 1u);
+  EXPECT_EQ(native_.free_count, 0u);
+  // These are dependency-model owners, not real native resources. Discard
+  // their modeled state after proving that production cleanup retained them.
+  native_.allocation_live = false;
+  native_.gem_live = false;
+}
 
 TEST_F(KfdBufferNativeTest, CompletesInterruptedMapWithNativeProgress) {
   native_.map_interruptions = 2;

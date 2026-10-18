@@ -81,7 +81,8 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
         {
             .access = kReadWrite,
             .flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
-                     AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+                     AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                     AMDF_MEMORY_FLAG_QUEUE_STORAGE,
         }};
     amdf_memory_create_info_t creation = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,

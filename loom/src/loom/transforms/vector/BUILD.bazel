@@ -320,8 +320,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "target_legalization",
-    srcs = ["target_legalization.c"],
-    hdrs = ["target_legalization.h"],
+    srcs = [
+        "memory_legalization.c",
+        "target_legalization.c",
+    ],
+    hdrs = [
+        "memory_legalization.h",
+        "target_legalization.h",
+    ],
     deps = [
         ":bitstream_packet_legalization",
         ":cast_packet_legalization",
@@ -332,6 +338,7 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/vector",
+        "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:numeric_format",

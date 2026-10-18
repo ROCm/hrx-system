@@ -40,7 +40,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/../sanitizer/iree_sanitizer_suppressions.cmak
 # Source libraries record IREE_CC_OBJECT_TARGET as the native target that owns
 # compilation and exposes TARGET_OBJECTS. Ordinary libraries own their objects;
 # ALWAYSLINK libraries use a separate object target. Header-only libraries have
-# no object target.
+# no object target. IREE_CC_OBJECTS retains the complete direct object set,
+# including objects produced by custom commands outside native compilation.
 #
 # iree_cc_library(
 #   NAME
@@ -71,7 +72,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../sanitizer/iree_sanitizer_suppressions.cmak
 function(iree_cc_library)
   cmake_parse_arguments(
     _RULE
-    "PUBLIC;TESTONLY;SHARED;ALWAYSLINK"
+    "PUBLIC;TESTONLY;SHARED;ALWAYSLINK;LINKABLE_MORE_THAN_ONCE"
     "PACKAGE;NAME;WINDOWS_DEF_FILE;CXX_STANDARD"
     "HDRS;TEXTUAL_HDRS;SRCS;COPTS;CXX_FEATURES;DEFINES;LINKOPTS;DATA;DEPS;INCLUDES;SYSTEM_INCLUDES;SANITIZER_SUPPRESSIONS"
     ${ARGN}
@@ -196,7 +197,8 @@ function(iree_cc_library)
 
     # Keep track of objects transitively in our special property.
     set_property(TARGET ${_NAME} PROPERTY
-      INTERFACE_IREE_TRANSITIVE_OBJECTS "$<TARGET_OBJECTS:${_NAME}>")
+      INTERFACE_IREE_TRANSITIVE_OBJECTS
+      "$<GENEX_EVAL:$<TARGET_PROPERTY:${_NAME},IREE_CC_OBJECTS>>")
     _iree_cc_library_add_object_deps(${_NAME} ${_RULE_DEPS})
 
     # Wrap whole lists to preserve conditions spanning multiple directories.
@@ -261,7 +263,7 @@ function(iree_cc_library)
     iree_set_cxx_options(${_NAME} "${_RULE_CXX_STANDARD}" ${_RULE_CXX_FEATURES})
   elseif(NOT _RULE_IS_INTERFACE AND _RULE_ALWAYSLINK)
     # ALWAYSLINK library: OBJECT for compilation, INTERFACE for propagation.
-    # The INTERFACE library propagates $<TARGET_OBJECTS:...> directly, ensuring
+    # The INTERFACE library propagates the complete direct object set, ensuring
     # all objects are always included in the final binary. STATIC archives let
     # the linker strip unreferenced objects (dropping static init registrations);
     # propagating objects directly bypasses the archive and eliminates that
@@ -278,13 +280,14 @@ function(iree_cc_library)
     )
 
     set_property(TARGET ${_NAME} PROPERTY
-      INTERFACE_IREE_TRANSITIVE_OBJECTS "$<TARGET_OBJECTS:${_COMPILE_TARGET}>")
+      INTERFACE_IREE_TRANSITIVE_OBJECTS
+      "$<GENEX_EVAL:$<TARGET_PROPERTY:${_NAME},IREE_CC_OBJECTS>>")
     _iree_cc_library_add_object_deps(${_NAME} ${_RULE_DEPS})
 
     # INTERFACE library propagates objects and link dependencies to consumers.
     target_link_libraries(${_NAME}
       INTERFACE
-        $<TARGET_OBJECTS:${_COMPILE_TARGET}>
+        "$<GENEX_EVAL:$<TARGET_PROPERTY:${_NAME},IREE_CC_OBJECTS>>"
         ${_RULE_DEPS}
         ${IREE_THREADS_DEPS}
         ${IREE_DEFAULT_LINK_LIBRARIES}
@@ -396,6 +399,8 @@ function(iree_cc_library)
 
   if(NOT _RULE_IS_INTERFACE)
     set_property(TARGET ${_NAME} PROPERTY IREE_CC_OBJECT_TARGET ${_COMPILE_TARGET})
+    set_property(TARGET ${_NAME} PROPERTY IREE_CC_OBJECTS
+      "$<TARGET_OBJECTS:${_COMPILE_TARGET}>")
   endif()
 
   # Order compilation after any registered producers of generated sources or
@@ -444,9 +449,28 @@ function(iree_cc_library)
       iree_add_alias_library(${_PACKAGE_NS} ${_NAME})
     endif()
   endif()
+  # Retain the declared link graph for final shared-library composition. The
+  # generated LINK_LIBRARIES also contains object and usage-only expressions.
+  set_property(TARGET ${_NAME} PROPERTY IREE_CC_DEPS "${_RULE_DEPS}")
+  if(NOT _RULE_IS_INTERFACE)
+    set_property(TARGET ${_NAME} APPEND PROPERTY IREE_CC_DEPS
+      ${IREE_THREADS_DEPS} ${IREE_DEFAULT_LINK_LIBRARIES})
+  endif()
+  set_property(TARGET ${_NAME} PROPERTY IREE_CC_LINKOPTS "${_RULE_LINKOPTS}")
+  set_property(TARGET ${_NAME} PROPERTY IREE_CC_LINKABLE_MORE_THAN_ONCE
+    "${_RULE_LINKABLE_MORE_THAN_ONCE}")
   iree_target_sanitizer_suppressions("${_NAME}"
     DEPS ${_RULE_DEPS} ${_DATA_TARGETS}
     SUPPRESSIONS ${_RULE_SANITIZER_SUPPRESSIONS})
+endfunction()
+
+# Attaches precompiled objects to their source library and retained object set.
+# TARGET_OBJECTS includes native compilation outputs but omits external objects
+# supplied through target_sources, such as custom-command MASM thunks.
+function(iree_cc_library_add_external_objects target)
+  get_target_property(_COMPILE_TARGET ${target} IREE_CC_OBJECT_TARGET)
+  target_sources(${_COMPILE_TARGET} PRIVATE ${ARGN})
+  set_property(TARGET ${target} APPEND PROPERTY IREE_CC_OBJECTS ${ARGN})
 endfunction()
 
 # _iree_cc_library_add_object_deps()

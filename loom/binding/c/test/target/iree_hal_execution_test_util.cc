@@ -607,20 +607,19 @@ void RunIreeHalKernelExecutionTest(
   });
 }
 
-void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution) {
-  EXPECT_EQ(execution.launch_config.workgroup_size.x, 1u);
-  EXPECT_EQ(execution.launch_config.workgroup_size.y, 1u);
-  EXPECT_EQ(execution.launch_config.workgroup_size.z, 1u);
-  const uint64_t constants[] = {4};
-  std::array<int32_t, 2> input = {7, 10};
-  std::array<int32_t, 2> output = {0, 0};
+void ExecuteIreeHalKernelWithBuffers(const IreeHalKernelExecution& execution,
+                                     const iree_const_byte_span_t constants,
+                                     const iree_const_byte_span_t input_data,
+                                     const iree_byte_span_t output_data) {
+  ASSERT_GT(input_data.data_length, 0u);
+  ASSERT_GT(output_data.data_length, 0u);
   iree_hal_buffer_t* input_buffer = nullptr;
-  IREE_ASSERT_OK(
-      AllocateStorageBuffer(execution.pool, sizeof(input), &input_buffer));
+  IREE_ASSERT_OK(AllocateStorageBuffer(execution.pool, input_data.data_length,
+                                       &input_buffer));
   HalBufferPtr input_buffer_ptr(input_buffer);
   iree_hal_buffer_t* output_buffer = nullptr;
-  IREE_ASSERT_OK(
-      AllocateStorageBuffer(execution.pool, sizeof(output), &output_buffer));
+  IREE_ASSERT_OK(AllocateStorageBuffer(execution.pool, output_data.data_length,
+                                       &output_buffer));
   HalBufferPtr output_buffer_ptr(output_buffer);
 
   iree_hal_semaphore_t* transfer_semaphore = nullptr;
@@ -637,15 +636,15 @@ void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution) {
   };
   iree_hal_transfer_operation_t upload_operations[2] = {};
   upload_operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
-  upload_operations[0].upload.source = input.data();
+  upload_operations[0].upload.source = input_data.data;
   upload_operations[0].upload.target_buffer = input_buffer_ptr.get();
   upload_operations[0].upload.target_offset = 0;
-  upload_operations[0].upload.length = sizeof(input);
+  upload_operations[0].upload.length = input_data.data_length;
   upload_operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
-  upload_operations[1].upload.source = output.data();
+  upload_operations[1].upload.source = output_data.data;
   upload_operations[1].upload.target_buffer = output_buffer_ptr.get();
   upload_operations[1].upload.target_offset = 0;
-  upload_operations[1].upload.length = sizeof(output);
+  upload_operations[1].upload.length = output_data.data_length;
   uint64_t completion_value = 0;
   iree_status_t status = iree_hal_queue_transfer(
       execution.transfer_queue, iree_hal_semaphore_list_empty(), upload_signal,
@@ -664,10 +663,9 @@ void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution) {
   };
   if (iree_status_is_ok(status)) {
     completion_value = upload_value;
-    status = DispatchIreeHalKernel(
-        execution, iree_make_const_byte_span(constants, sizeof(constants)),
-        input_buffer_ptr.get(), output_buffer_ptr.get(), dispatch_wait,
-        dispatch_signal);
+    status = DispatchIreeHalKernel(execution, constants, input_buffer_ptr.get(),
+                                   output_buffer_ptr.get(), dispatch_wait,
+                                   dispatch_signal);
   }
 
   uint64_t download_value = 3;
@@ -685,8 +683,9 @@ void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution) {
     completion_value = dispatch_value;
     status = iree_hal_queue_download(execution.transfer_queue, download_wait,
                                      download_signal, output_buffer_ptr.get(),
-                                     /*source_offset=*/0, output.data(),
-                                     sizeof(output), /*barriers=*/NULL);
+                                     /*source_offset=*/0, output_data.data,
+                                     output_data.data_length,
+                                     /*barriers=*/NULL);
   }
   if (iree_status_is_ok(status)) {
     completion_value = download_value;
@@ -698,6 +697,19 @@ void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution) {
                                         IREE_ASYNC_WAIT_FLAG_NONE));
   }
   IREE_ASSERT_OK(status);
+}
+
+void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution) {
+  EXPECT_EQ(execution.launch_config.workgroup_size.x, 1u);
+  EXPECT_EQ(execution.launch_config.workgroup_size.y, 1u);
+  EXPECT_EQ(execution.launch_config.workgroup_size.z, 1u);
+  const uint64_t constants[] = {4};
+  std::array<int32_t, 2> input = {7, 10};
+  std::array<int32_t, 2> output = {0, 0};
+  ExecuteIreeHalKernelWithBuffers(
+      execution, iree_make_const_byte_span(constants, sizeof(constants)),
+      iree_make_const_byte_span(input.data(), sizeof(input)),
+      iree_make_byte_span(output.data(), sizeof(output)));
   EXPECT_EQ(output[0], 0);
   EXPECT_EQ(output[1], 20);
 }

@@ -806,7 +806,8 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
         LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION |
         LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY |
         LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES |
-        LOOM_BYTECODE_SYMBOL_FLAG_EXPORT)) {
+        LOOM_BYTECODE_SYMBOL_FLAG_EXPORT |
+        LOOM_BYTECODE_SYMBOL_FLAG_LINK_ONCE)) {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
         IREE_SV("flags"), kind_offset + 2,
@@ -825,6 +826,15 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
         &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
         IREE_SV("flags"), kind_offset + 2,
         IREE_SV("predicates_flag_requires_function_symbol_kind"));
+  }
+  if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_LINK_ONCE) &&
+      (kind != LOOM_BYTECODE_SYMBOL_FUNC_DEF ||
+       iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION |
+                                   LOOM_BYTECODE_SYMBOL_FLAG_IMPORT))) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+        IREE_SV("flags"), kind_offset + 2,
+        IREE_SV("link_once_flag_requires_concrete_function_definition"));
   }
   const bool is_import =
       iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_IMPORT);

@@ -88,8 +88,9 @@ class PeerSdmaSystemTest : public GpuPeerDeviceFixture {
       accesses_[i].device = devices_[i];
       accesses_[i].requirements.access =
           AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
-      accesses_[i].requirements.flags =
-          AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+      accesses_[i].requirements.flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                        AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                        AMDF_MEMORY_FLAG_QUEUE_STORAGE;
       accesses_[i].requirements.address_kinds = UINT64_C(1)
                                                 << AMDF_MEMORY_ADDRESS_GPU;
       RecordProperty("sdma_format_features_" + std::to_string(i),

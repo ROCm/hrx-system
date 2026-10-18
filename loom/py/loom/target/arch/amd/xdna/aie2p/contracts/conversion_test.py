@@ -2805,11 +2805,27 @@ def test_exact_bfloat_value_program_uses_only_shift() -> None:
         guard.kind is GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS
         for guard in rule.guards
     )
+    assert any(guard.kind is GuardKind.VALUE_NOT_NAN for guard in rule.guards)
     assert tuple(emit.descriptor.key for emit in rule.emit) == (
         "amd.xdna.aie2p.constant.i32.short",
         "amd.xdna.aie2p.lshl.i32",
     )
     assert _evaluate(rule, 0xC2F60000) == 0xC2F6
+
+
+def test_exact_finite_bfloat_values_preserve_nan_class_and_quieting() -> None:
+    rule = _rule("exactly_representable_binary32_to_bfloat16_preserve_nan")
+    assert any(
+        guard.kind is GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS
+        for guard in rule.guards
+    )
+    assert not any(guard.kind is GuardKind.VALUE_NOT_NAN for guard in rule.guards)
+    assert not any("add.i32" in emit.descriptor.key for emit in rule.emit)
+    for payload in range(1 << 16):
+        bits = payload << 16
+        assert _evaluate(rule, bits) == _reference_f32_to_bf16(bits), hex(bits)
+    for bits in (0x7F800001, 0xFF800001, 0x7FBFFFFF, 0xFFFFFFFF):
+        assert _evaluate(rule, bits) == _reference_f32_to_bf16(bits), hex(bits)
 
 
 def test_binary32_to_f16_program_matches_rounding_oracle() -> None:

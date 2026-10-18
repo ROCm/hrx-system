@@ -27,6 +27,8 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading:latency",
+        "//runtime/src/iree/base/tooling:flags",
         "//third_party:google_benchmark",
     ],
 )
@@ -37,7 +39,6 @@ iree_runtime_cc_library(
     srcs = ["benchmark_main.c"],
     deps = [
         ":benchmark",
-        "//runtime/src/iree/base/tooling:flags",
     ],
 )
 

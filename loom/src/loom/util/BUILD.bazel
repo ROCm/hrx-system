@@ -109,6 +109,8 @@ loom_cc_library(
     name = "json",
     srcs = ["json.c"],
     hdrs = ["json.h"],
+    # JSON formatting writes to the caller-provided stream.
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
     deps = [
         ":stream",
         "//runtime/src/iree/base",
@@ -442,6 +444,8 @@ loom_cc_library(
     name = "stream",
     srcs = ["stream.c"],
     hdrs = ["stream.h"],
+    # Streams carry caller-owned callbacks and state.
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
     deps = [
         "//runtime/src/iree/base",
     ],

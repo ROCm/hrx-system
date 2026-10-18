@@ -133,8 +133,10 @@ iree_status_t iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
 // |import_allocator| is an optional borrowed native attachment service. It is
 // required only when the provider admits external storage. The provider
 // borrows |device|, |import_allocator|, |libhsa|, |options.asan_state|, and
-// |buffer_pool|; the owning physical/logical device must outlive the provider
-// and every pool/buffer created from it.
+// |buffer_pool|. These objects must outlive all native operations and wrapped
+// buffers. A release completion may destroy the device: native queue closure
+// drains other queued operations before their borrowed state is destroyed. The
+// worker retains the provider itself until that completion returns.
 iree_status_t iree_hal_amdgpu_slab_provider_create(
     iree_hal_device_t* device, iree_hal_allocator_t* import_allocator,
     const iree_hal_amdgpu_libhsa_t* libhsa,

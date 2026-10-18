@@ -134,6 +134,13 @@ http_archive(
 _LINUX_UAPI_URL = "https://raw.githubusercontent.com/torvalds/linux/a90ee4305c4a5df72c11b31dacfdc76e00fcf78a/include/uapi/linux/"
 
 http_file(
+    name = "linux_udmabuf_header",
+    downloaded_file_path = "linux/udmabuf.h",
+    sha256 = "a3c84394744eb25490cd3884bfe95e7c0837a79b3ac313516603646cf04612f5",
+    url = _LINUX_UAPI_URL + "udmabuf.h",
+)
+
+http_file(
     name = "linux_kfd_ioctl_header",
     downloaded_file_path = "linux/kfd_ioctl.h",
     sha256 = "db48398039c14702df2b51b2461d80d36f7160479d45700b7e826051b1d2a997",

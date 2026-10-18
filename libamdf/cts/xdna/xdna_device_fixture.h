@@ -91,6 +91,7 @@ class XdnaDeviceFixture : public ::testing::Test {
 
   uint32_t FindMemoryProfileOrdinal(amdf_memory_profile_roles_t required_roles,
                                     amdf_memory_flags_t required_flags) const {
+    amdf_status_t unavailable = AMDF_STATUS_OK;
     for (uint32_t ordinal = 0;; ++ordinal) {
       amdf_memory_profile_t profile = {};
       profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
@@ -114,10 +115,16 @@ class XdnaDeviceFixture : public ::testing::Test {
       }
       if ((profile.roles & required_roles) == required_roles &&
           (required_flags & ~profile.supported_flags) == 0) {
+        if (!amdf_status_is_ok(profile.availability)) {
+          unavailable = profile.availability;
+          continue;
+        }
         return ordinal;
       }
     }
-    ADD_FAILURE() << "no matching memory profile";
+    ADD_FAILURE() << "no available matching memory profile: domain="
+                  << amdf_status_domain(unavailable)
+                  << " code=" << amdf_status_code(unavailable);
     return AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
   }
 

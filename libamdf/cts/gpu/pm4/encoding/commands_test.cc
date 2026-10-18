@@ -172,6 +172,36 @@ TEST(Pm4EncodingTest, ComputeBindingAppliesOnlyTheNativeQueueTrapRequirements) {
   }
 }
 
+TEST(Pm4EncodingTest, SystemReleaseInterruptPreservesTargetCachePolicy) {
+  const struct {
+    // Target family selecting the native release representation.
+    std::array<uint32_t, 2> target;
+    // Complete native event/index/GCR word.
+    uint32_t release;
+  } cases[] = {
+      {{11, 0}, 0x0030e528}, {{11, 5}, 0x0030e528}, {{11, 7}, 0x0030e528},
+      {{12, 0}, 0x00304528}, {{12, 5}, 0x01706528},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << test.target[0] << '.' << test.target[1]);
+    std::array<uint32_t, 10> words;
+    words.fill(0x24681357);
+    Pm4CommandWriter commands(words.data() + 1,
+                              Profile(test.target[0], test.target[1]));
+    commands.ReleaseSystemInterrupt32(UINT64_C(0x0000456789abcd00), 0x89abcdef,
+                                      0x76543210);
+    const std::array<uint32_t, 8> expected = {
+        0xc0064900, test.release, 0x22010000, 0x89abcd00,
+        0x4567,     0x89abcdef,   0,          0x76543210,
+    };
+    ASSERT_EQ(commands.word_count(), expected.size());
+    ExpectWords(words.data() + 1, expected);
+    EXPECT_EQ(words.front(), 0x24681357u);
+    EXPECT_EQ(words.back(), 0x24681357u);
+  }
+}
+
 TEST(Pm4EncodingTest, OrderedDataAcquirePreservesTargetCachePolicy) {
   const struct {
     // Compiler target family selecting the native compute representation.

@@ -101,6 +101,19 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "event",
+    srcs = ["event.c"],
+    hdrs = ["event.h"],
+    deps = [
+        ":device",
+        "//libamdf/src:allocator",
+        "//libamdf/src:device",
+        "//libamdf/src:structure",
+        "//libamdf/src/gpu/umd:event",
+    ],
+)
+
+amdf_cc_library(
     name = "extension",
     srcs = ["extension.c"],
     hdrs = ["extension.h"],
@@ -109,6 +122,7 @@ amdf_cc_library(
         ":clock",
         ":device",
         ":endpoint_profile",
+        ":event",
         ":kernel_queue",
         ":user_queue",
         "//libamdf/src:endpoint",

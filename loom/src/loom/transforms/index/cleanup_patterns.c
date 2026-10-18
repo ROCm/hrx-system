@@ -100,46 +100,37 @@ static iree_status_t loom_index_symbolic_cmp_pattern(
   loom_cleanup_pattern_context_t* cleanup_context =
       (loom_cleanup_pattern_context_t*)context;
 
-  const loom_value_id_t lhs = loom_index_cmp_lhs(op);
-  const loom_value_id_t rhs = loom_index_cmp_rhs(op);
+  loom_condition_integer_comparison_t comparison;
+  if (!loom_condition_integer_comparison_describe(rewriter->module, op,
+                                                  &comparison)) {
+    return iree_ok_status();
+  }
   const loom_type_t operand_type =
-      loom_module_value_type(rewriter->module, lhs);
+      loom_module_value_type(rewriter->module, comparison.lhs);
   if (!loom_type_is_scalar(operand_type)) {
     return iree_ok_status();
   }
-  const loom_value_facts_t lhs_facts = loom_rewriter_value_facts(rewriter, lhs);
-  const loom_value_facts_t rhs_facts = loom_rewriter_value_facts(rewriter, rhs);
-  const loom_fact_context_t* fact_context =
-      rewriter->fact_table ? &rewriter->fact_table->context : NULL;
-  if (!loom_index_cmp_facts_fit_target_carrier(
-          fact_context, loom_type_element_type(operand_type),
-          loom_index_cmp_predicate(op), &lhs_facts, &rhs_facts)) {
-    return iree_ok_status();
-  }
-
-  loom_condition_integer_relation_t relation_storage[1];
-  loom_condition_fact_set_t condition_facts;
-  loom_condition_fact_set_initialize(
-      relation_storage, IREE_ARRAYSIZE(relation_storage), &condition_facts);
-  bool complete = false;
-  IREE_RETURN_IF_ERROR(loom_condition_facts_query(
-      &cleanup_context->symbolic_expression_context->condition_query,
-      rewriter->fact_table, loom_op_const_results(op)[0],
-      /*assumed_truth=*/true, &condition_facts, &complete));
-  if (!complete || condition_facts.integer_relation_count != 1) {
-    return iree_ok_status();
-  }
-  const loom_condition_integer_relation_t* relation =
-      &condition_facts.integer_relations[0];
-  if (relation->left.kind != LOOM_CONDITION_INTEGER_OPERAND_VALUE ||
-      relation->right.kind != LOOM_CONDITION_INTEGER_OPERAND_VALUE) {
+  const loom_value_facts_t lhs_facts =
+      loom_rewriter_value_facts(rewriter, comparison.lhs);
+  const loom_value_facts_t rhs_facts =
+      loom_rewriter_value_facts(rewriter, comparison.rhs);
+  loom_condition_integer_relation_t relation = {
+      .left = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+               .value_id = comparison.lhs},
+      .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                .value_id = comparison.rhs},
+  };
+  if (!loom_condition_integer_comparison_equivalent_relation(
+          &comparison,
+          rewriter->fact_table ? &rewriter->fact_table->context : NULL,
+          /*assumed_truth=*/true, &lhs_facts, &rhs_facts, &relation.relation)) {
     return iree_ok_status();
   }
 
   loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_value_relation(
-      cleanup_context->symbolic_expression_context, relation->relation,
-      relation->left.value_id, relation->right.value_id, &proof));
+      cleanup_context->symbolic_expression_context, relation.relation,
+      relation.left.value_id, relation.right.value_id, &proof));
   if (proof == LOOM_SYMBOLIC_PROOF_UNKNOWN) {
     return iree_ok_status();
   }

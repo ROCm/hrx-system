@@ -57,6 +57,23 @@ amdf_memory_site_description_t amdf_memory_describe_host_site(
   return description;
 }
 
+amdf_memory_site_description_t amdf_memory_describe_file_site(
+    amdf_memory_map_flags_t access) {
+  amdf_memory_site_description_t description = {
+      .capabilities = AMDF_MEMORY_SITE_CAPABILITY_RELEASE_COST_KNOWN |
+                      AMDF_MEMORY_SITE_CAPABILITY_ACQUIRE_COST_KNOWN,
+      .release = {.kind = AMDF_CACHE_TRANSITION_KIND_NONE},
+      .acquire = {.kind = AMDF_CACHE_TRANSITION_KIND_NONE},
+  };
+  if ((access & AMDF_MEMORY_MAP_FLAG_READ) != 0) {
+    description.capabilities |= AMDF_MEMORY_SITE_CAPABILITY_READ;
+  }
+  if ((access & AMDF_MEMORY_MAP_FLAG_WRITE) != 0) {
+    description.capabilities |= AMDF_MEMORY_SITE_CAPABILITY_WRITE;
+  }
+  return description;
+}
+
 amdf_status_t amdf_memory_pair_compose(
     const amdf_memory_site_description_t* producer,
     const amdf_memory_site_description_t* consumer,

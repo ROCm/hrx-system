@@ -231,6 +231,27 @@ amdf_cc_test(
     ],
 )
 
+amdf_cc_test(
+    name = "event_test",
+    srcs = ["event_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=ioctl",
+        "-Wl,--wrap=amdf_gpu_kfd_instance_create_event",
+    ],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        ":event",
+        ":instance",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd:event",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
 amdf_cc_library(
     name = "doorbell",
     srcs = ["doorbell.c"],
@@ -332,6 +353,7 @@ amdf_cc_test(
         "//libamdf/src/gpu/umd:memory",
         "//third_party:google_test",
         "//third_party:google_test_main",
+        "//third_party:linux_drm_uapi",
         "//third_party:linux_kfd_uapi",
     ],
 )
@@ -350,9 +372,14 @@ amdf_cc_library(
     ],
 )
 
+# Imported allocations own a default reservation, while reservation updates use
+# allocation-owned GEM sources. Both implementations belong to one archive.
 amdf_cc_library(
     name = "memory",
-    srcs = ["memory.c"],
+    srcs = [
+        "memory.c",
+        "memory_reservation.c",
+    ],
     hdrs = ["memory.h"],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
@@ -363,9 +390,11 @@ amdf_cc_library(
         ":topology",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:memory",
+        "//libamdf/src/gpu/umd:memory_reservation",
         "//libamdf/src/platform/linux:dma_buf",
         "//libamdf/src/platform/linux:file",
         "//libamdf/src/platform/linux:host_cache",
+        "//third_party:linux_amdgpu_uapi",
         "//third_party:linux_drm_uapi",
         "//third_party:linux_kfd_uapi",
     ],
@@ -388,23 +417,6 @@ amdf_cc_test(
     ],
 )
 
-amdf_cc_library(
-    name = "memory_reservation",
-    srcs = ["memory_reservation.c"],
-    target_compatible_with = KFD_COMPATIBILITY,
-    deps = [
-        ":buffer",
-        ":device_state",
-        ":memory",
-        "//libamdf/src:allocator",
-        "//libamdf/src/gpu/umd:memory_reservation",
-        "//libamdf/src/platform/linux:file",
-        "//third_party:linux_amdgpu_uapi",
-        "//third_party:linux_drm_uapi",
-        "//third_party:linux_kfd_uapi",
-    ],
-)
-
 amdf_cc_test(
     name = "memory_reservation_test",
     srcs = ["memory_reservation_test.cc"],
@@ -412,7 +424,7 @@ amdf_cc_test(
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
         ":device_state",
-        ":memory_reservation",
+        ":memory",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:memory_reservation",
         "//libamdf/src/platform/linux:file",
@@ -498,6 +510,21 @@ amdf_cc_test(
 )
 
 amdf_cc_library(
+    name = "event",
+    srcs = ["event.c"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        ":instance",
+        "//libamdf/src:allocator",
+        "//libamdf/src:wait",
+        "//libamdf/src/gpu/umd:event",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_library(
     name = "kfd",
     target_compatible_with = KFD_COMPATIBILITY,
     visibility = ["//libamdf/src/gpu/umd:__pkg__"],
@@ -506,10 +533,10 @@ amdf_cc_library(
         ":clock",
         ":device",
         ":endpoint_profile",
+        ":event",
         ":instance",
         ":kernel_queue",
         ":memory",
-        ":memory_reservation",
         ":user_queue",
     ],
 )

@@ -96,6 +96,21 @@ static bool loom_vector_facts_query_small_lanes(
   return loom_value_facts_query_small_static_lanes(context, facts, out_lanes);
 }
 
+// Numeric fields describe every element, independently of vector structure or
+// which invocation selects an element. The fact owner derives the result's
+// execution distribution from the source and any dynamic indices.
+static loom_value_facts_t loom_vector_numeric_element_facts(
+    loom_value_facts_t facts) {
+  facts.extension_id = LOOM_VALUE_FACT_EXTENSION_ID_NONE;
+  facts.flags &=
+      ~(LOOM_VALUE_FACT_DISTRIBUTION_MASK | LOOM_VALUE_FACT_LANE_PREDICATE |
+        LOOM_VALUE_FACT_SUBGROUP_LANE_MASK);
+  if (!loom_value_facts_is_float(facts)) {
+    facts.flags &= ~LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK;
+  }
+  return facts;
+}
+
 static bool loom_vector_facts_query_iota_lane(
     const loom_fact_context_t* context, loom_value_facts_t facts,
     iree_host_size_t lane, loom_value_facts_t* out_element) {
@@ -2092,6 +2107,7 @@ iree_status_t loom_vector_extract_facts(loom_fact_context_t* context,
                                         const loom_op_t* op,
                                         const loom_value_facts_t* operand_facts,
                                         loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_vector_numeric_element_facts(operand_facts[0]);
   loom_type_t source_type =
       loom_module_value_type(module, loom_vector_extract_source(op));
   loom_value_id_t result_id = loom_vector_extract_result(op);
@@ -2104,7 +2120,7 @@ iree_status_t loom_vector_extract_facts(loom_fact_context_t* context,
   for (uint16_t i = 0; i < static_indices.count; ++i) {
     if (static_indices.i64_array[i] == INT64_MIN ||
         static_indices.i64_array[i] < 0) {
-      return loom_vector_make_unknown_facts(result_facts);
+      return iree_ok_status();
     }
   }
 
@@ -2135,11 +2151,15 @@ iree_status_t loom_vector_extract_facts(loom_fact_context_t* context,
       return loom_vector_make_unknown_facts(result_facts);
     }
     iree_host_size_t lane = 0;
+    loom_value_facts_t element = loom_value_facts_unknown();
     if (!loom_vector_static_ordinal_from_indices(source_type, source_indices,
                                                  &lane) ||
         !loom_vector_facts_query_lane(context, operand_facts[0], lane,
-                                      &result_facts[0])) {
-      return loom_vector_make_unknown_facts(result_facts);
+                                      &element)) {
+      return iree_ok_status();
+    }
+    if (!loom_value_facts_is_unknown(element)) {
+      result_facts[0] = element;
     }
     return iree_ok_status();
   }
@@ -2153,7 +2173,7 @@ iree_status_t loom_vector_extract_facts(loom_fact_context_t* context,
   iree_host_size_t result_lane_count = 0;
   if (!loom_vector_type_static_lane_count(result_type, &result_lane_count) ||
       result_lane_count > LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT) {
-    return loom_vector_make_unknown_facts(result_facts);
+    return iree_ok_status();
   }
 
   loom_value_facts_t lanes[LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT] = {{0}};
@@ -2170,7 +2190,7 @@ iree_status_t loom_vector_extract_facts(loom_fact_context_t* context,
                                                  &source_lane) ||
         !loom_vector_facts_query_lane(context, operand_facts[0], source_lane,
                                       &lanes[result_lane])) {
-      return loom_vector_make_unknown_facts(result_facts);
+      return iree_ok_status();
     }
   }
   return loom_vector_make_small_static_lane_facts(
@@ -3909,9 +3929,39 @@ iree_status_t loom_vector_index_cast_facts(
 }
 
 typedef struct loom_vector_float_conversion_transfer_t {
+  // Scalar type before conversion.
   loom_scalar_type_t source_type;
+  // Authored source/result denormal handling.
   loom_float_conversion_policy_t policy;
 } loom_vector_float_conversion_transfer_t;
+
+// Retain the existing bounded component/fragment extension independently of
+// the numeric envelope. Conversions can establish facts from the source and
+// destination types even when no component values are known.
+static iree_status_t loom_vector_conversion_summary_facts(
+    loom_fact_context_t* context, loom_scalar_type_t result_type,
+    const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts,
+    loom_vector_float_unary_fact_transfer_fn_t transfer_fn,
+    const void* user_data) {
+  IREE_RETURN_IF_ERROR(loom_vector_float_unary_summary_facts(
+      context, result_type, operand_facts, result_facts, transfer_fn,
+      user_data));
+  loom_value_facts_t source = operand_facts[0];
+  (void)loom_vector_facts_query_uniform_element(context, source, &source);
+  source = loom_vector_numeric_element_facts(source);
+  loom_value_facts_t envelope = loom_value_facts_unknown();
+  transfer_fn(result_type, &source, user_data, &envelope);
+  envelope.flags |=
+      result_facts[0].flags & LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK;
+  if (loom_value_facts_is_float(envelope)) {
+    loom_value_facts_set_exact_float_types(
+        &envelope, loom_value_facts_exact_float_types(envelope) |
+                       loom_value_facts_exact_float_types(result_facts[0]));
+  }
+  envelope.extension_id = result_facts[0].extension_id;
+  result_facts[0] = envelope;
+  return iree_ok_status();
+}
 
 static void loom_vector_float_conversion_transfer(
     loom_scalar_type_t result_type, const loom_value_facts_t* input,
@@ -3943,7 +3993,7 @@ iree_status_t loom_vector_extf_facts(loom_fact_context_t* context,
           loom_module_value_type(module, loom_vector_extf_input(op))),
       .policy = policy,
   };
-  IREE_RETURN_IF_ERROR(loom_vector_float_unary_summary_facts(
+  IREE_RETURN_IF_ERROR(loom_vector_conversion_summary_facts(
       context, loom_vector_result_element_type(module, op), operand_facts,
       result_facts, loom_vector_float_conversion_transfer, &transfer));
 
@@ -3971,7 +4021,7 @@ iree_status_t loom_vector_fptrunc_facts(loom_fact_context_t* context,
           loom_module_value_type(module, loom_vector_fptrunc_input(op))),
       .policy = loom_vector_float_conversion_policy(op),
   };
-  IREE_RETURN_IF_ERROR(loom_vector_float_unary_summary_facts(
+  IREE_RETURN_IF_ERROR(loom_vector_conversion_summary_facts(
       context, loom_vector_result_element_type(module, op), operand_facts,
       result_facts, loom_vector_float_conversion_transfer, &transfer));
   return loom_vector_try_define_same_lane_origin(context, module,
@@ -4086,22 +4136,9 @@ static iree_status_t loom_vector_integer_to_float_facts(
       .source_type = source_type,
       .kind = kind,
   };
-  IREE_RETURN_IF_ERROR(loom_vector_float_unary_summary_facts(
+  return loom_vector_conversion_summary_facts(
       context, result_type, operand_facts, result_facts,
-      loom_vector_integer_to_float_transfer, &transfer));
-
-  // Aggregate extensions retain exact uniform or small-lane details. The root
-  // fact independently carries one constant-time envelope for every lane so
-  // later target planning does not scan or rediscover vector producers.
-  loom_value_facts_t source_envelope = operand_facts[0];
-  (void)loom_vector_facts_query_uniform_element(context, operand_facts[0],
-                                                &source_envelope);
-  loom_value_facts_t result_envelope = loom_value_facts_unknown();
-  loom_value_facts_eval_integer_to_float(source_type, result_type, kind,
-                                         &source_envelope, &result_envelope);
-  result_envelope.extension_id = result_facts[0].extension_id;
-  result_facts[0] = result_envelope;
-  return iree_ok_status();
+      loom_vector_integer_to_float_transfer, &transfer);
 }
 
 iree_status_t loom_vector_sitofp_facts(loom_fact_context_t* context,

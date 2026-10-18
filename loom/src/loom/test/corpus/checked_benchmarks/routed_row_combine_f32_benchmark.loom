@@ -2,82 +2,65 @@ kernel.decl @routed_row_combine_serial(%workload_token_count: index) launch(%rou
 
 kernel.decl @routed_row_combine_pipelined(%workload_token_count: index) launch(%route_count: index, %launch_token_count: index, %route_ids: buffer, %route_weights: buffer, %row_buffer: buffer, %combined_rows: buffer)
 
-// Analytic timing inputs span the row pool: row IDs descend through 4095..0,
-// weights alternate -1,+1, and payload(row,channel)=row+channel/1024-0.5.
-// Every consecutive route pair contributes exactly -1, giving -4 for eight
-// routes and -16 for 32. Each row below times exactly one kernel launch.
-check.case public @routed_row_combine_serial_n8 {
-  %count = check.literal value(8) : index
-  %tokens = check.param.choice values([1, 16, 256]) name("tokens") : index
-  %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
-  %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
-  %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
-  %actual = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
-  %expected = check.generate.fill value(-4.0) : tensor<[%tokens]x1024xf32>
-  kernel.launch @routed_row_combine_serial[%tokens](%count, %tokens, %ids, %weights, %rows, %actual) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%tokens]x1024xf32>
+// Twelve benchmark samples cover serial and pipelined policies, 8 and 32
+// routes, and 1, 16, and 256 tokens. Values span the row pool: row IDs descend
+// through 4095..0, weights alternate -1,+1, and
+// payload(row,channel)=row+channel/1024-0.5. Each policy shares one product.
+func.def @routed_row_combine_benchmark_config(%trial: index) -> (index, index) {
+  %samples_per_count = index.constant 3 : index
+  %token_ordinal = index.rem %trial, %samples_per_count : index
+  %count_ordinal = index.div %trial, %samples_per_count : index
+  %tokens = scf.switch %token_ordinal -> (index) {
+    case 0 {
+      %value = index.constant 1 : index
+      scf.yield %value : index
+    }
+    case 1 {
+      %value = index.constant 16 : index
+      scf.yield %value : index
+    }
+    default {
+      %value = index.constant 256 : index
+      scf.yield %value : index
+    }
+  }
+  %count = scf.switch %count_ordinal -> (index) {
+    case 0 {
+      %value = index.constant 8 : index
+      scf.yield %value : index
+    }
+    default {
+      %value = index.constant 32 : index
+      scf.yield %value : index
+    }
+  }
+  func.return %count, %tokens : index, index
+}
+
+check.scenario @routed_row_combine_serial_benchmark {
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %count, %tokens = check.generate<@routed_row_combine_benchmark_config>(%trial) : (index) -> (index, index)
+    %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
+    %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
+    %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
+    %output = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
+    check.invoke<@routed_row_combine_serial>[%tokens](%count, %tokens, %ids, %weights, %rows, %output) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>) -> ()
+  }
   check.return
 }
 
-check.benchmark<@routed_row_combine_serial_n8> @routed_row_combine_serial_n8_t1 {tokens = 1}
+check.benchmark<@routed_row_combine_serial_benchmark> @routed_row_combine_serial_workloads
 
-check.benchmark<@routed_row_combine_serial_n8> @routed_row_combine_serial_n8_t16 {tokens = 16}
-
-check.benchmark<@routed_row_combine_serial_n8> @routed_row_combine_serial_n8_t256 {tokens = 256}
-
-check.case public @routed_row_combine_pipelined_n8 {
-  %count = check.literal value(8) : index
-  %tokens = check.param.choice values([1, 16, 256]) name("tokens") : index
-  %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
-  %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
-  %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
-  %actual = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
-  %expected = check.generate.fill value(-4.0) : tensor<[%tokens]x1024xf32>
-  kernel.launch @routed_row_combine_pipelined[%tokens](%count, %tokens, %ids, %weights, %rows, %actual) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%tokens]x1024xf32>
+check.scenario @routed_row_combine_pipelined_benchmark {
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %count, %tokens = check.generate<@routed_row_combine_benchmark_config>(%trial) : (index) -> (index, index)
+    %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
+    %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
+    %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
+    %output = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
+    check.invoke<@routed_row_combine_pipelined>[%tokens](%count, %tokens, %ids, %weights, %rows, %output) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>) -> ()
+  }
   check.return
 }
 
-check.benchmark<@routed_row_combine_pipelined_n8> @routed_row_combine_pipelined_n8_t1 {tokens = 1}
-
-check.benchmark<@routed_row_combine_pipelined_n8> @routed_row_combine_pipelined_n8_t16 {tokens = 16}
-
-check.benchmark<@routed_row_combine_pipelined_n8> @routed_row_combine_pipelined_n8_t256 {tokens = 256}
-
-check.case public @routed_row_combine_serial_n32 {
-  %count = check.literal value(32) : index
-  %tokens = check.param.choice values([1, 16, 256]) name("tokens") : index
-  %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
-  %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
-  %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
-  %actual = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
-  %expected = check.generate.fill value(-16.0) : tensor<[%tokens]x1024xf32>
-  kernel.launch @routed_row_combine_serial[%tokens](%count, %tokens, %ids, %weights, %rows, %actual) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%tokens]x1024xf32>
-  check.return
-}
-
-check.benchmark<@routed_row_combine_serial_n32> @routed_row_combine_serial_n32_t1 {tokens = 1}
-
-check.benchmark<@routed_row_combine_serial_n32> @routed_row_combine_serial_n32_t16 {tokens = 16}
-
-check.benchmark<@routed_row_combine_serial_n32> @routed_row_combine_serial_n32_t256 {tokens = 256}
-
-check.case public @routed_row_combine_pipelined_n32 {
-  %count = check.literal value(32) : index
-  %tokens = check.param.choice values([1, 16, 256]) name("tokens") : index
-  %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
-  %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
-  %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
-  %actual = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
-  %expected = check.generate.fill value(-16.0) : tensor<[%tokens]x1024xf32>
-  kernel.launch @routed_row_combine_pipelined[%tokens](%count, %tokens, %ids, %weights, %rows, %actual) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%tokens]x1024xf32>
-  check.return
-}
-
-check.benchmark<@routed_row_combine_pipelined_n32> @routed_row_combine_pipelined_n32_t1 {tokens = 1}
-
-check.benchmark<@routed_row_combine_pipelined_n32> @routed_row_combine_pipelined_n32_t16 {tokens = 16}
-
-check.benchmark<@routed_row_combine_pipelined_n32> @routed_row_combine_pipelined_n32_t256 {tokens = 256}
+check.benchmark<@routed_row_combine_pipelined_benchmark> @routed_row_combine_pipelined_workloads

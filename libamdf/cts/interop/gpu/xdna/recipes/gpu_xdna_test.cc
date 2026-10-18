@@ -208,8 +208,10 @@ class GpuXdnaRecipeTest : public GpuXdnaDeviceFixture {
     ASSERT_NO_FATAL_FAILURE(
         QueryProfilePairs(create, 1, kGpuXdnaJointEdges, joint_pairs));
 
-    const std::span<const amdf_memory_device_access_t> gpu_access(&accesses_[1],
-                                                                  1);
+    auto staging_access = accesses_[1];
+    staging_access.requirements.flags |= AMDF_MEMORY_FLAG_QUEUE_STORAGE;
+    const std::span<const amdf_memory_device_access_t> gpu_access(
+        &staging_access, 1);
     amdf_memory_profile_t staging_profile = {};
     ASSERT_NO_FATAL_FAILURE(FindProfile(
         gpu_access, AMDF_MEMORY_PROFILE_ROLE_CREATE, &staging_profile));

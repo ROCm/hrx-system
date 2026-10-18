@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "libamdf/src/platform/host_memory.h"
 
+#include <fcntl.h>
 #include <limits.h>
 #include <linux/mempolicy.h>
 #include <sys/mman.h>
@@ -23,13 +24,16 @@ enum { AMDF_LINUX_MADV_POPULATE_WRITE = 23 };
 
 amdf_status_t amdf_platform_host_backing_create(
     uint64_t byte_length, amdf_platform_host_backing_t* out_backing) {
-  int descriptor = memfd_create("libamdf", MFD_CLOEXEC);
+  int descriptor = memfd_create("libamdf", MFD_CLOEXEC | MFD_ALLOW_SEALING);
   if (descriptor < 0) {
     return amdf_linux_error(errno);
   }
   amdf_status_t status = AMDF_STATUS_OK;
   void* pointer = MAP_FAILED;
   if (ftruncate(descriptor, (off_t)byte_length) != 0) {
+    status = amdf_linux_error(errno);
+  } else if (fcntl(descriptor, F_ADD_SEALS,
+                   F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
     status = amdf_linux_error(errno);
   } else {
     pointer = mmap(NULL, (size_t)byte_length, PROT_READ | PROT_WRITE,

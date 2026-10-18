@@ -30,9 +30,11 @@ void GpuMemory::Initialize(const amdf_api_t* api, amdf_memory_scope_t* scope,
   ASSERT_EQ(access_info.flags & attachment.requirements.flags,
             attachment.requirements.flags);
   ASSERT_GE(info.alignment, creation.minimum_alignment);
-  ASSERT_EQ(api->memory_query_address(memory, 0, AMDF_MEMORY_ADDRESS_GPU,
-                                      &device_address),
-            AMDF_STATUS_OK);
+  if ((access_info.flags & AMDF_MEMORY_FLAG_DEVICE_ADDRESS) != 0) {
+    ASSERT_EQ(api->memory_query_address(memory, 0, AMDF_MEMORY_ADDRESS_GPU,
+                                        &device_address),
+              AMDF_STATUS_OK);
+  }
 
   if ((creation.required_flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) == 0) {
     return;
@@ -49,10 +51,8 @@ void GpuMemory::Initialize(const amdf_api_t* api, amdf_memory_scope_t* scope,
   ASSERT_EQ(api->host_mapping_query_info(mapping, &host), AMDF_STATUS_OK);
   ASSERT_NE(host.pointer, nullptr);
   ASSERT_EQ(host.byte_length, creation.byte_length);
-  ASSERT_EQ(host.cacheability,
-            (access_info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0
-                ? AMDF_HOST_CACHEABILITY_WRITE_BACK
-                : AMDF_HOST_CACHEABILITY_WRITE_COMBINED);
+  // CPU cacheability and GPU coherence are independent properties. Each
+  // witness uses the returned host policy instead of inferring it from flags.
   // Initialization performs no cache maintenance. Each witness supplies its
   // own publication and visibility operations, including qualified no-ops.
 }
@@ -96,4 +96,31 @@ amdf_memory_site_t GpuMemory::DeviceSite(uint32_t queue_family_ordinal) const {
   site.value.device.memory = memory;
   site.value.device.queue_family_ordinal = queue_family_ordinal;
   return site;
+}
+
+void GpuMemory::TransferHostCache(const amdf_api_t* api,
+                                  uint32_t queue_family_ordinal,
+                                  amdf_host_cache_operation_t operation) const {
+  const auto host_site = HostSite();
+  const auto device_site = DeviceSite(queue_family_ordinal);
+  const bool flush = operation == AMDF_HOST_CACHE_OPERATION_FLUSH;
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
+  ASSERT_EQ(
+      api->memory_query_pair_info(flush ? &host_site : &device_site,
+                                  flush ? &device_site : &host_site, &pair),
+      AMDF_STATUS_OK);
+  ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
+  const auto& transition = flush ? pair.release : pair.acquire;
+  if (transition.kind != AMDF_CACHE_TRANSITION_KIND_NONE) {
+    ASSERT_TRUE(transition.executor ==
+                    AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT ||
+                transition.executor == AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API);
+    ASSERT_EQ(transition.host_operation, operation);
+    ASSERT_EQ(api->host_mapping_cache_control(mapping, operation, 0,
+                                              info.byte_length),
+              AMDF_STATUS_OK);
+  }
 }

@@ -121,6 +121,15 @@ memory operation masks, queue operation support, and SYSTEM atomic reach in
 both directions. Other operations, backings, and mapping policies require
 their own contracts; payload visibility remains independent of atomic reach.
 
+The shader-event cases in [PM4](pm4/shader_event_test.cc) and
+[AQL](aql/shader_event_test.cc) isolate native notification from queue
+completion. One finite shader publishes an authoritative generation and
+payload, then signals its KFD event mailbox with a native shader interrupt.
+Eight epochs check payload guards and native event reuse before separately
+joining execution and ring retirement. The shader's mailbox value and interrupt
+context are independent queried operands. No host signal or command-processor
+event can satisfy the wake oracle.
+
 Each `encoding/` package has one plain host-test binary. Package policy removes
 the GPU execution requirement for these exact packages, so byte-layout checks
 run without a GPU and do not reserve a GPU slot. GPU-family build enablement

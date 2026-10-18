@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/lower/rule_match.h"
 
+#include <limits>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -993,6 +995,97 @@ TEST_F(LowLowerRuleMatchTest, MatchesFloatingPowersInExponentRange) {
         &match_context, &rule_set, op, &selection));
     EXPECT_EQ(selection.rule != nullptr, test_case.matches)
         << "value=" << test_case.value;
+  }
+}
+
+TEST_F(LowLowerRuleMatchTest, SeparatesExactFiniteValuesFromNanExclusion) {
+  loom_low_lower_guard_t guards[2] = {};
+  guards[0].kind = LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS;
+  guards[0].diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
+  guards[0].selector.value.other_value_ref_index = 1;
+  guards[1].kind = LOOM_LOW_LOWER_GUARD_VALUE_NOT_NAN;
+  guards[1].diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
+  const loom_low_lower_guard_ref_t guard_refs[] = {0, 1};
+  const loom_low_lower_value_ref_t value_refs[] = {
+      {.kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND},
+      {.kind = LOOM_LOW_LOWER_VALUE_REF_RESULT},
+  };
+  loom_low_lower_rule_t rule = {};
+  const loom_low_lower_rule_span_t span = {
+      .source_op_kind = LOOM_OP_SCALAR_FPTRUNC,
+      .rule_start = 0,
+      .rule_count = 1,
+  };
+  const loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = &rule,
+      .rule_count = 1,
+      .value_refs = value_refs,
+      .value_ref_count = IREE_ARRAYSIZE(value_refs),
+      .guards = guards,
+      .guard_count = IREE_ARRAYSIZE(guards),
+      .guard_refs = guard_refs,
+      .guard_ref_count = IREE_ARRAYSIZE(guard_refs),
+  };
+  const auto widened = [](loom_value_facts_t input) {
+    loom_value_facts_t result = {};
+    loom_value_facts_eval_float_conversion(
+        LOOM_SCALAR_TYPE_BF16, LOOM_SCALAR_TYPE_F32, {}, &input, &result);
+    return result;
+  };
+  const double infinity = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  struct Case {
+    // A source value satisfying the supplied facts.
+    double value;
+    // Retained producer facts, possibly less precise than the constant.
+    loom_value_facts_t facts;
+    // Finite values need no BF16 rounding.
+    bool exact_finite_values;
+    // The independent class predicate excludes NaNs.
+    bool not_nan;
+  };
+  const Case cases[] = {
+      {0.0, loom_value_facts_unknown(), false, false},
+      {0.0, widened(loom_value_facts_unknown()), true, false},
+      {1.0, widened(loom_value_facts_exact_float(LOOM_SCALAR_TYPE_BF16, 1.0)),
+       true, true},
+      {infinity,
+       widened(loom_value_facts_exact_float(LOOM_SCALAR_TYPE_BF16, infinity)),
+       true, true},
+      {nan, widened(loom_value_facts_known_nan()), true, false},
+      {1.0009765625,
+       loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0009765625), false,
+       true},
+  };
+  for (const Case& test_case : cases) {
+    const loom_value_id_t input =
+        loom_scalar_constant_result(BuildFloatConstant(test_case.value));
+    const loom_op_t* source_op = BuildFloatTruncate(0, input);
+    loom_value_fact_table_t facts = {};
+    IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &module_->arena,
+                                                    module_->values.count));
+    IREE_ASSERT_OK(
+        loom_value_fact_table_define(&facts, input, test_case.facts));
+    loom_low_lower_rule_match_context_t match_context = {
+        .module = module_,
+        .fact_table = &facts,
+    };
+    for (bool require_not_nan : {false, true}) {
+      rule.guard_count = require_not_nan ? 2 : 1;
+      loom_low_lower_rule_selection_t selection = {};
+      IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+          &match_context, &rule_set, source_op, &selection));
+      EXPECT_EQ(selection.rule != nullptr,
+                test_case.exact_finite_values &&
+                    (!require_not_nan || test_case.not_nan));
+    }
+    match_context.fact_table = nullptr;
+    loom_low_lower_rule_selection_t selection = {};
+    IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+        &match_context, &rule_set, source_op, &selection));
+    EXPECT_EQ(selection.rule, nullptr);
   }
 }
 

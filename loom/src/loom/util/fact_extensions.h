@@ -514,7 +514,8 @@ iree_status_t loom_value_fact_table_widen_for_type(
 //===----------------------------------------------------------------------===//
 
 // Creates facts for a vector whose every lane has |element| facts. Float
-// predicates common to every lane are also available directly on the vector.
+// predicates and exact destination formats common to every lane are also
+// available directly on the vector. Execution distribution remains separate.
 iree_status_t loom_value_facts_make_uniform_element(
     loom_fact_context_t* context, loom_value_facts_t element,
     loom_value_facts_t* out);
@@ -526,9 +527,9 @@ bool loom_value_facts_query_uniform_element(
     loom_value_fact_uniform_element_t* out);
 
 // Creates facts for a small all-static vector with explicit per-lane facts.
-// Float predicates common to every lane are also available directly on the
-// vector. Vectors with more than LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT lanes
-// degrade to unknown facts.
+// Float predicates and exact destination formats common to every lane are also
+// available directly on the vector. Vectors with more than
+// LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT lanes degrade to unknown facts.
 iree_status_t loom_value_facts_make_small_static_lanes(
     loom_fact_context_t* context, loom_value_fact_small_static_lanes_t lanes,
     loom_value_facts_t* out);

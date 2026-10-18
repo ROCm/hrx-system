@@ -10,6 +10,42 @@
       "stdout": {"contains": ["BM_Success"], "not_contains": ["ERROR OCCURRED"]}
     },
     {
+      "name": "invalid CPU latency policy fails before running benchmarks",
+      "run": {
+        "tool": "benchmark",
+        "args": ["--benchmark_filter=BM_Success", "--benchmark_min_time=1x", "--benchmark_cpu_latency_us=-2"]
+      },
+      "exit": 1,
+      "stderr": {"contains": ["--benchmark_cpu_latency_us must be -1 or nonnegative"]},
+      "stdout": {"not_contains": ["BM_Success"]}
+    },
+    {
+      "name": "requested and applied CPU latency policy are recorded",
+      "run": {
+        "tool": "benchmark",
+        "args": ["--benchmark_filter=BM_Success", "--benchmark_min_time=1x", "--benchmark_cpu_latency_us=-1", "--benchmark_format=json"]
+      },
+      "stdout": {"contains": ["\"cpu_latency_us\": \"default\"", {"regex": "\"low_latency_applied\": \"(true|false)\""}, "\"low_latency_requested\": \"true\"", "BM_Success"]},
+      "stderr": {"not_contains": ["PERMISSION_DENIED", "UNIMPLEMENTED"]}
+    },
+    {
+      "name": "explicit opt-out leaves power policy unchanged",
+      "run": {
+        "tool": "benchmark",
+        "args": ["--benchmark_low_latency=false", "--benchmark_filter=BM_Success", "--benchmark_min_time=1x", "--benchmark_format=json"]
+      },
+      "stdout": {"contains": ["\"low_latency_applied\": \"false\"", "\"low_latency_requested\": \"false\"", "BM_Success"]},
+      "stderr": {"not_contains": ["latency-sensitive power policy is unavailable"]}
+    },
+    {
+      "name": "explicit zero overrides opt-out and is recorded",
+      "run": {
+        "tool": "benchmark",
+        "args": ["--benchmark_low_latency=false", "--benchmark_cpu_latency_us=0", "--benchmark_filter=BM_Success", "--benchmark_min_time=1x", "--benchmark_format=json"]
+      },
+      "stdout": {"contains": ["\"cpu_latency_us\": \"0\"", {"regex": "\"low_latency_applied\": \"(true|false)\""}, "\"low_latency_requested\": \"true\"", "BM_Success"]}
+    },
+    {
       "name": "reported C++ error",
       "run": {
         "tool": "benchmark",
@@ -59,7 +95,8 @@
         "tool": "benchmark",
         "args": ["--benchmark_filter=BM_Error", "--benchmark_list_tests=true"]
       },
-      "stdout": {"contains": ["BM_Error"], "not_contains": ["C++ benchmark failed"]}
+      "stdout": {"contains": ["BM_Error"], "not_contains": ["C++ benchmark failed"]},
+      "stderr": {"not_contains": ["latency-sensitive power policy is unavailable"]}
     },
     {
       "name": "JSON and file reports preserve failures",

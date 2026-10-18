@@ -168,7 +168,8 @@ static iree_status_t loom_low_allocation_repair_fragmentation(
     status = loom_low_allocation_storage_lease_state_initialize(
         &state->options->storage_leases, state->module, state->function_op,
         value_domain, &state->liveness, &state->storage_identity,
-        &state->unit_liveness, &scratch_arena, &scratch_storage_leases);
+        &state->unit_liveness, &scratch_arena, decision_arena,
+        &scratch_storage_leases);
   }
 
   loom_low_allocation_interval_assignment_result_t scratch_result = {0};
@@ -752,7 +753,7 @@ static iree_status_t loom_low_allocate_function_impl(
     status = loom_low_allocation_storage_lease_state_initialize(
         &options->storage_leases, model->context.module,
         model->context.function_op, value_domain, &state.liveness,
-        &state.storage_identity, &state.unit_liveness, arena,
+        &state.storage_identity, &state.unit_liveness, arena, &decision_arena,
         &state.storage_leases);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {

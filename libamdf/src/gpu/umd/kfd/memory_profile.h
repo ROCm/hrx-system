@@ -16,6 +16,14 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Owned SYSTEM profiles precede optional LOCAL and registered profiles.
+// Both snoop CPU caches; only control backing uses KFD's coherent GPU policy.
+enum amdf_gpu_kfd_memory_profile_ordinal_e {
+  AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CACHED = 0,
+  AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL = 1,
+  AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_COUNT = 2,
+};
+
 // Derives complete memory capabilities from qualified topology and host facts.
 // This metadata query performs no native operation or device activation.
 amdf_status_t amdf_gpu_kfd_query_memory_profile(

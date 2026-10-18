@@ -276,9 +276,66 @@ amdf_status_t amdf_platform_endpoint_enumerate(
 
 enum { AMDF_LINUX_DEVICE_PATH_CAPACITY = 64 };
 
+// PCI attachment may name a memory-only NUMA node. CPU affinity requires an
+// online CPU at that node; sysfs cpulist is already filtered by the kernel's
+// online mask. cpumap_print_list_to_buf subtracts its terminating byte even
+// from short reads, so two bytes are needed to observe the first character.
+static amdf_status_t amdf_linux_endpoint_query_host_numa_node(
+    int sysfs_directory, int device_directory, uint32_t* out_node) {
+  char text[32];
+  amdf_status_t status = amdf_linux_read_attribute(
+      device_directory, "device/numa_node", text, sizeof(text));
+  if (status == amdf_linux_error(ENOENT)) {
+    *out_node = UINT32_MAX;
+    return AMDF_STATUS_OK;
+  }
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  char* end = NULL;
+  errno = 0;
+  const long node = strtol(text, &end, 10);
+  if (errno || end == text || (*end != '\n' && *end != 0) ||
+      (*end == '\n' && end[1] != 0) || node < -1 || node >= UINT32_MAX) {
+    return amdf_linux_error(EPROTO);
+  }
+  if (node == -1) {
+    *out_node = UINT32_MAX;
+    return AMDF_STATUS_OK;
+  }
+  char path[64];
+  snprintf(path, sizeof(path), "devices/system/node/node%u/cpulist",
+           (uint32_t)node);
+  int descriptor = openat(sysfs_directory, path, O_RDONLY | O_CLOEXEC);
+  if (descriptor < 0) {
+    if (errno != ENOENT) {
+      return amdf_linux_error(errno);
+    }
+    *out_node = UINT32_MAX;
+    return AMDF_STATUS_OK;
+  }
+  char prefix[2] = {0};
+  ssize_t length;
+  do {
+    length = read(descriptor, prefix, sizeof(prefix));
+  } while (length < 0 && errno == EINTR);
+  status = length < 0 ? amdf_linux_error(errno) : AMDF_STATUS_OK;
+  if (length > 0 && prefix[0] != '\n' && (prefix[0] < '0' || prefix[0] > '9')) {
+    status = amdf_linux_error(EPROTO);
+  }
+  const amdf_status_t close_status = amdf_linux_file_close(&descriptor);
+  if (!amdf_status_is_ok(close_status)) {
+    status = close_status;
+  }
+  if (amdf_status_is_ok(status)) {
+    *out_node = length > 0 && prefix[0] != '\n' ? (uint32_t)node : UINT32_MAX;
+  }
+  return status;
+}
+
 static amdf_status_t amdf_linux_resolve_endpoint(
     amdf_platform_instance_t* instance, const amdf_endpoint_id_t* id,
-    amdf_endpoint_info_t* info,
+    amdf_endpoint_info_t* info, uint32_t* out_host_numa_node,
     char device_path[AMDF_LINUX_DEVICE_PATH_CAPACITY]) {
   char path[64];
   snprintf(path, sizeof(path), "dev/char/%u:%u", (uint32_t)(id->words[0] >> 32),
@@ -290,15 +347,19 @@ static amdf_status_t amdf_linux_resolve_endpoint(
                            : amdf_linux_error(errno);
   }
   amdf_status_t status = amdf_linux_query_endpoint(node, info);
+  if (amdf_status_is_ok(status) && !amdf_endpoint_id_is_equal(id, &info->id)) {
+    status = amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
+  }
+  if (amdf_status_is_ok(status) && out_host_numa_node != NULL) {
+    status = amdf_linux_endpoint_query_host_numa_node(
+        instance->sysfs_descriptor, node, out_host_numa_node);
+  }
   const amdf_status_t close_status = amdf_linux_file_close(&node);
   if (!amdf_status_is_ok(close_status)) {
     status = close_status;
   }
   if (!amdf_status_is_ok(status)) {
     return status;
-  }
-  if (!amdf_endpoint_id_is_equal(id, &info->id)) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
   }
   char link[512];
   ssize_t length =
@@ -387,8 +448,8 @@ amdf_status_t amdf_platform_endpoint_open(
   }
   endpoint->instance = instance;
   char device_path[AMDF_LINUX_DEVICE_PATH_CAPACITY];
-  status =
-      amdf_linux_resolve_endpoint(instance, id, &endpoint->info, device_path);
+  status = amdf_linux_resolve_endpoint(instance, id, &endpoint->info,
+                                       &endpoint->host_numa_node, device_path);
   if (amdf_status_is_ok(status)) {
     *out_info = endpoint->info;
     *out_endpoint = endpoint;
@@ -398,12 +459,17 @@ amdf_status_t amdf_platform_endpoint_open(
   return status;
 }
 
+uint32_t amdf_platform_endpoint_host_numa_node(
+    const amdf_platform_endpoint_t* endpoint) {
+  return endpoint->host_numa_node;
+}
+
 amdf_status_t amdf_linux_endpoint_open_file(
     const amdf_platform_endpoint_t* endpoint, int* out_descriptor) {
   amdf_endpoint_info_t info;
   char device_path[AMDF_LINUX_DEVICE_PATH_CAPACITY];
   const amdf_status_t status = amdf_linux_resolve_endpoint(
-      endpoint->instance, &endpoint->info.id, &info, device_path);
+      endpoint->instance, &endpoint->info.id, &info, NULL, device_path);
   if (!amdf_status_is_ok(status)) {
     return status;
   }

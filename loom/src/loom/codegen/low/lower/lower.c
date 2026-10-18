@@ -637,57 +637,62 @@ static loom_value_id_t loom_low_lower_descriptor_matrix_auxiliary_source_value(
 }
 
 static iree_status_t loom_low_lower_descriptor_matrix_packet_value(
-    loom_low_lower_context_t* context,
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_descriptor_matrix_plan_t* plan,
-    loom_low_operand_source_binding_t source_binding, loom_value_id_t low_lhs,
-    loom_value_id_t low_rhs, loom_value_id_t low_init,
+    const loom_low_operand_t* descriptor_operand, loom_value_id_t source_lhs,
+    loom_value_id_t source_rhs, loom_value_id_t source_init,
     loom_value_id_t* out_low_value) {
-  switch (source_binding) {
+  loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
+  switch (descriptor_operand->source_binding) {
     case LOOM_LOW_OPERAND_SOURCE_BINDING_LHS:
-      *out_low_value = low_lhs;
-      return iree_ok_status();
+      source_value = source_lhs;
+      break;
     case LOOM_LOW_OPERAND_SOURCE_BINDING_RHS:
-      *out_low_value = low_rhs;
-      return iree_ok_status();
+      source_value = source_rhs;
+      break;
     case LOOM_LOW_OPERAND_SOURCE_BINDING_ACCUMULATOR:
-      *out_low_value = low_init;
-      return iree_ok_status();
-    case LOOM_LOW_OPERAND_SOURCE_BINDING_SPARSE_METADATA: {
-      const loom_value_id_t source_value =
-          loom_low_lower_descriptor_matrix_sparse_source_value(
-              &plan->contract_request);
-      *out_low_value = loom_low_lower_lookup_value(context, source_value);
-      return iree_ok_status();
-    }
-    case LOOM_LOW_OPERAND_SOURCE_BINDING_LHS_SCALE: {
-      const loom_value_id_t source_value =
-          loom_low_lower_descriptor_matrix_auxiliary_source_value(
-              &plan->contract_request.lhs,
-              LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
-      *out_low_value = loom_low_lower_lookup_value(context, source_value);
-      return iree_ok_status();
-    }
-    case LOOM_LOW_OPERAND_SOURCE_BINDING_RHS_SCALE: {
-      const loom_value_id_t source_value =
-          loom_low_lower_descriptor_matrix_auxiliary_source_value(
-              &plan->contract_request.rhs,
-              LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
-      *out_low_value = loom_low_lower_lookup_value(context, source_value);
-      return iree_ok_status();
-    }
+      source_value = source_init;
+      break;
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_SPARSE_METADATA:
+      source_value = loom_low_lower_descriptor_matrix_sparse_source_value(
+          &plan->contract_request);
+      break;
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_LHS_SCALE:
+      source_value = loom_low_lower_descriptor_matrix_auxiliary_source_value(
+          &plan->contract_request.lhs,
+          LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
+      break;
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_RHS_SCALE:
+      source_value = loom_low_lower_descriptor_matrix_auxiliary_source_value(
+          &plan->contract_request.rhs,
+          LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
+      break;
     case LOOM_LOW_OPERAND_SOURCE_BINDING_NONE:
     default:
       IREE_ASSERT_UNREACHABLE(
           "descriptor-matrix selected packet operand has no source binding");
       IREE_BUILTIN_UNREACHABLE();
   }
+
+  const loom_value_id_t low_value =
+      loom_low_lower_lookup_value(context, source_value);
+  const loom_low_lower_descriptor_matrix_t* descriptor_matrix =
+      &context->policy->descriptor_matrix;
+  if (descriptor_matrix->materialize_operand == NULL) {
+    *out_low_value = low_value;
+    return iree_ok_status();
+  }
+  return descriptor_matrix->materialize_operand(
+      descriptor_matrix->user_data, context, source_op, descriptor_operand,
+      source_value, low_value, out_low_value);
 }
 
 static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
-    loom_low_lower_context_t* context,
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_descriptor_matrix_plan_t* plan,
-    loom_value_id_t low_lhs, loom_value_id_t low_rhs, loom_value_id_t low_init,
-    loom_value_id_t** out_operands, iree_host_size_t* out_operand_count) {
+    loom_value_id_t source_lhs, loom_value_id_t source_rhs,
+    loom_value_id_t source_init, loom_value_id_t** out_operands,
+    iree_host_size_t* out_operand_count) {
   *out_operands = NULL;
   *out_operand_count = 0;
   const loom_low_descriptor_set_t* descriptor_set = context->descriptor_set;
@@ -717,7 +722,7 @@ static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_packet_value(
-        context, plan, operand->source_binding, low_lhs, low_rhs, low_init,
+        context, source_op, plan, operand, source_lhs, source_rhs, source_init,
         &operands[operand->source_value_index]));
   }
 
@@ -865,19 +870,16 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_vector_mma(
     IREE_BUILTIN_UNREACHABLE();
   }
 
-  loom_value_id_t low_lhs =
-      loom_low_lower_lookup_value(context, loom_vector_mma_lhs(source_op));
-  loom_value_id_t low_rhs =
-      loom_low_lower_lookup_value(context, loom_vector_mma_rhs(source_op));
+  loom_value_id_t source_lhs = loom_vector_mma_lhs(source_op);
+  loom_value_id_t source_rhs = loom_vector_mma_rhs(source_op);
   if (iree_any_bit_set(
           plan->transform_flags,
           LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_TRANSFORM_TRANSPOSE_MN)) {
-    const loom_value_id_t exchanged_lhs = low_lhs;
-    low_lhs = low_rhs;
-    low_rhs = exchanged_lhs;
+    const loom_value_id_t exchanged_lhs = source_lhs;
+    source_lhs = source_rhs;
+    source_rhs = exchanged_lhs;
   }
-  loom_value_id_t low_init =
-      loom_low_lower_lookup_value(context, loom_vector_mma_init(source_op));
+  const loom_value_id_t source_init = loom_vector_mma_init(source_op);
 
   const loom_value_id_t result = loom_vector_mma_result(source_op);
   const loom_type_t result_low_type =
@@ -886,7 +888,8 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_vector_mma(
   loom_value_id_t* operands = NULL;
   iree_host_size_t operand_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_packet_operands(
-      context, plan, low_lhs, low_rhs, low_init, &operands, &operand_count));
+      context, source_op, plan, source_lhs, source_rhs, source_init, &operands,
+      &operand_count));
   IREE_RETURN_IF_ERROR(
       loom_low_lower_descriptor_matrix_copy_destructive_operands(
           context, source_op, plan, operands));

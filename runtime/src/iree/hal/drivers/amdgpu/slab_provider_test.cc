@@ -7,7 +7,9 @@
 #include "iree/hal/drivers/amdgpu/slab_provider.h"
 
 #include <array>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
@@ -15,6 +17,7 @@
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
+#include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -57,9 +60,13 @@ iree_hal_amdgpu_topology_t SlabProviderTest::topology_;
 
 class TestLogicalDevice {
  public:
-  ~TestLogicalDevice() {
+  ~TestLogicalDevice() { Reset(); }
+
+  void Reset() {
     iree_hal_device_release(base_device);
+    base_device = nullptr;
     iree_hal_device_group_release(device_group);
+    device_group = nullptr;
   }
 
   iree_status_t Initialize(
@@ -164,6 +171,122 @@ TEST_F(SlabProviderTest, CapturesAccessBeforeNativeAcquisition) {
     iree_hal_slab_provider_release_slab_sync(provider, &slab);
     iree_hal_slab_provider_release(provider);
   }
+}
+
+TEST_F(SlabProviderTest, NativeReleaseCanDestroySanitizedDevice) {
+  iree_hal_amdgpu_logical_device_options_t device_options;
+  iree_hal_amdgpu_logical_device_options_initialize(&device_options);
+  device_options.asan.enabled = true;
+  if (iree_hal_amdgpu_logical_device_options_query_host_compatibility(
+          &device_options) ==
+      IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_HOST_TSAN_ASAN) {
+    GTEST_SKIP()
+        << "AMDGPU ASAN is not supported in host ThreadSanitizer builds";
+  }
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&device_options, &libhsa_, &topology_,
+                                        host_allocator_));
+  auto* device = test_device.device();
+  auto* physical_device = device->physical_devices[0];
+  auto* native_api = &device->system->libhsa;
+  const auto memory_pool =
+      physical_device->coarse_block_pools.large.memory_pool;
+  const auto family_affinity = iree_hal_make_queue_family_affinity(0);
+  iree_hal_amdgpu_slab_provider_memory_pool_properties_t properties;
+  IREE_ASSERT_OK(iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
+      native_api, memory_pool, &properties));
+  iree_hal_amdgpu_access_agent_list_t agents;
+  IREE_ASSERT_OK(iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
+      &device->system->topology, family_affinity, &agents));
+  iree_hal_amdgpu_slab_provider_options_t options = {
+      .allocation_queue = physical_device->allocation_queue,
+      .flags = IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_SHADOW |
+               IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_VMM,
+      .memory_pool = memory_pool,
+      .asan_state = &device->asan,
+      .owned =
+          {
+              .memory_type = properties.memory_type,
+              .supported_usage = properties.supported_usage,
+          },
+      .exposed =
+          {
+              .memory_type = properties.memory_type,
+              .supported_usage = properties.supported_usage,
+          },
+      .access =
+          {
+              .queue_family_affinity = family_affinity,
+              .agent_count = agents.count,
+              .agents = agents.values,
+          },
+  };
+  iree_hal_slab_provider_t* provider = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_slab_provider_create(
+      test_device.hal_device(), /*import_allocator=*/nullptr, native_api,
+      options, 0, &physical_device->materialized_buffer_pool,
+      IREE_SV("sanitized-native-retirement"), host_allocator_, &provider));
+  std::array<iree_hal_slab_t, 2> slabs = {};
+  for (auto& slab : slabs) {
+    IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab_sync(
+        provider, 128, /*min_alignment=*/1, &slab));
+  }
+
+  struct ReleaseState {
+    // Owner whose final reference is released from the native callback.
+    TestLogicalDevice* device;
+    // Initial provider reference transferred to the first callback.
+    iree_hal_slab_provider_t* provider;
+    // Second native release enqueued before device destruction begins.
+    iree_hal_slab_release_request_t followup = {};
+    // Publishes completion of device destruction to the test thread.
+    std::mutex mutex;
+    // Wakes the test thread when the first callback finishes its work.
+    std::condition_variable condition;
+    // Protected by mutex; request storage remains live until this is true.
+    bool completed = false;
+    // Set by the nested callback before completed is published.
+    bool followup_completed = false;
+  } state = {.device = &test_device, .provider = provider};
+  state.followup = {
+      .count = 1,
+      .slabs = &slabs[1],
+      .completion =
+          {
+              .fn =
+                  [](void* user_data) {
+                    static_cast<ReleaseState*>(user_data)->followup_completed =
+                        true;
+                  },
+              .user_data = &state,
+          },
+  };
+  iree_hal_slab_release_request_t first = {
+      .count = 1,
+      .slabs = &slabs[0],
+      .completion =
+          {
+              .fn =
+                  [](void* user_data) {
+                    auto& state = *static_cast<ReleaseState*>(user_data);
+                    // One worker owns both releases. The second cannot run
+                    // before Reset: closing the native queue during destruction
+                    // must drain it inline.
+                    iree_hal_slab_provider_release_slabs(state.provider,
+                                                         &state.followup);
+                    iree_hal_slab_provider_release(state.provider);
+                    state.device->Reset();
+                    std::lock_guard<std::mutex> lock(state.mutex);
+                    state.completed = true;
+                    state.condition.notify_one();
+                  },
+              .user_data = &state,
+          },
+  };
+  iree_hal_slab_provider_release_slabs(provider, &first);
+  std::unique_lock<std::mutex> lock(state.mutex);
+  state.condition.wait(lock, [&state] { return state.completed; });
+  EXPECT_TRUE(state.followup_completed);
 }
 
 }  // namespace

@@ -278,10 +278,12 @@ static iree_status_t iree_hal_amd_xdna_execution_transfer(
 
 uint32_t iree_hal_amd_xdna_operation_execute_host(
     iree_hal_amd_xdna_operation_t* operation) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, operation->kind);
   uint32_t count = 0;
   switch (operation->kind) {
     case IREE_HAL_AMD_XDNA_OPERATION_HOST_CALL: {
-      IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_xdna_host_call");
+      IREE_TRACE_ZONE_BEGIN_NAMED(z1, "iree_hal_amd_xdna_host_call");
       iree_hal_host_call_context_t context = {
           .queue = (iree_hal_queue_t*)operation->queue,
           .signal_semaphore_list = operation->signals,
@@ -290,7 +292,7 @@ uint32_t iree_hal_amd_xdna_operation_execute_host(
           operation->host_call.call.fn(operation->host_call.call.user_data,
                                        operation->host_call.args, &context);
       count = 1;
-      IREE_TRACE_ZONE_END(z0);
+      IREE_TRACE_ZONE_END(z1);
       if (iree_status_is_deferred(operation->status)) {
         // The callback owns terminal publication through its cloned list.
         // Retire only our captured references and callback-state resource.
@@ -341,6 +343,8 @@ uint32_t iree_hal_amd_xdna_operation_execute_host(
     case IREE_HAL_AMD_XDNA_OPERATION_DISPATCH:
       IREE_BUILTIN_UNREACHABLE();
   }
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, count);
+  IREE_TRACE_ZONE_END(z0);
   return count;
 }
 

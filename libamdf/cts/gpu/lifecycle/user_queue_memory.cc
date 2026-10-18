@@ -97,14 +97,15 @@ class UserQueueMemoryScenario {
                                 amdf_memory_info_t& memory_info,
                                 amdf_memory_access_info_t& access_info,
                                 amdf_host_mapping_t*& mapping,
-                                amdf_host_mapping_info_t& mapping_info) {
+                                amdf_host_mapping_info_t& mapping_info,
+                                amdf_memory_flags_t flags) {
     constexpr amdf_memory_flags_t kRequiredFlags =
         AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_SHAREABLE;
     const amdf_memory_device_access_t access = {
         device_,
         {
             .access = device_access,
-            .flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
+            .flags = flags | AMDF_MEMORY_FLAG_HOST_COHERENT |
                      AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
         }};
     const uint32_t profile_ordinal = FindGpuMemoryProfileOrdinal(
@@ -262,11 +263,11 @@ void UserQueueMemoryScenario::RunCopiesBetweenExactAccessAttachments(
 
   ASSERT_NO_FATAL_FAILURE(CreateMappedSystemMemory(
       AMDF_MEMORY_ACCESS_READ, source_memory_, source_memory_info_,
-      source_access_info_, source_mapping_, source_mapping_info_));
+      source_access_info_, source_mapping_, source_mapping_info_, 0));
   ASSERT_NO_FATAL_FAILURE(CreateMappedSystemMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, target_memory_,
       target_memory_info_, target_access_info_, target_mapping_,
-      target_mapping_info_));
+      target_mapping_info_, AMDF_MEMORY_FLAG_QUEUE_STORAGE));
   uint64_t source_address = 0;
   uint64_t target_address = 0;
   ASSERT_EQ(api_->memory_query_address(

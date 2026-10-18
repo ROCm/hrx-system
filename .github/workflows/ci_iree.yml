@@ -78,10 +78,7 @@ jobs:
             command: iree-bazel-cpu-asan
             platform_coverage: true
             runner: azure-linux-scale-rocm
-            host_ar: ar
-            host_cc: clang
-            host_cxx: clang++
-            install_compiler_rt: true
+            host_toolchain: rocm
           - name: Clang / TSAN
             kind: cpu
             command: iree-bazel-cpu-tsan
@@ -229,8 +226,8 @@ jobs:
             echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
             echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
           } >> "$GITHUB_ENV"
-          case "${{ matrix.kind }}" in
-            amdgpu|amd_client)
+          case "${{ matrix.kind }}/${{ matrix.host_toolchain }}" in
+            amdgpu/*|amd_client/*|*/rocm)
               {
                 echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
                 echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
@@ -312,7 +309,7 @@ jobs:
             "${AR}" --version
           else
             expect_rocm=()
-            if [[ "${{ matrix.kind }}" == amdgpu ]]; then
+            if [[ "${{ matrix.kind }}" == amdgpu || "${{ matrix.host_toolchain }}" == rocm ]]; then
               expect_rocm=(--expect-rocm)
             fi
             bash .github/scripts/check_host_toolchain.sh "${expect_rocm[@]}"
@@ -831,9 +828,7 @@ jobs:
             command: iree-cmake-cpu
             platform_coverage: true
             runner: azure-linux-scale-rocm
-            host_ar: ar
-            host_cc: clang
-            host_cxx: clang++
+            host_toolchain: rocm
           - name: Clang / Sanitizer Smoke
             kind: cpu
             command: iree-cmake-sanitizer-smoke
@@ -899,7 +894,7 @@ jobs:
             echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
             echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
           } >> "$GITHUB_ENV"
-          if [[ "${{ matrix.kind }}" == amdgpu ]]; then
+          if [[ "${{ matrix.kind }}" == amdgpu || "${{ matrix.host_toolchain }}" == rocm ]]; then
             {
               echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
               echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
@@ -958,7 +953,7 @@ jobs:
             "${AR}" --version
           else
             expect_rocm=()
-            if [[ "${{ matrix.kind }}" == amdgpu ]]; then
+            if [[ "${{ matrix.kind }}" == amdgpu || "${{ matrix.host_toolchain }}" == rocm ]]; then
               expect_rocm=(--expect-rocm)
             fi
             bash .github/scripts/check_host_toolchain.sh "${expect_rocm[@]}"

@@ -636,9 +636,9 @@ static iree_status_t loom_check_test_low_schedule_append_predecessors(
   for (uint32_t producer_node = 0; producer_node < schedule->node_count;
        ++producer_node) {
     bool is_predecessor = false;
-    for (iree_host_size_t i = 0; i < schedule->dependencies.count; ++i) {
+    for (iree_host_size_t i = 0; i < schedule->dependency_count; ++i) {
       const loom_low_schedule_dependency_t* dependency =
-          loom_low_schedule_dependency_graph_at(&schedule->dependencies,
+          loom_low_schedule_dependency_graph_at(schedule->dependency_graph,
                                                 (uint32_t)i);
       if (dependency->kind == query->kind &&
           dependency->minimum_issue_separation_cycles >=
@@ -721,9 +721,9 @@ static bool loom_check_test_low_schedule_has_predecessor(
     const loom_low_schedule_table_t* schedule,
     const loom_check_test_low_schedule_dependency_query_t* query,
     uint32_t consumer_node) {
-  for (iree_host_size_t i = 0; i < schedule->dependencies.count; ++i) {
+  for (iree_host_size_t i = 0; i < schedule->dependency_count; ++i) {
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_dependency_graph_at(&schedule->dependencies,
+        loom_low_schedule_dependency_graph_at(schedule->dependency_graph,
                                               (uint32_t)i);
     if (dependency->kind == query->kind &&
         dependency->minimum_issue_separation_cycles >=
@@ -773,9 +773,9 @@ static iree_status_t loom_check_test_low_schedule_append_timing(
         schedule->node_count);
   }
   const loom_low_schedule_dependency_t* match = NULL;
-  for (iree_host_size_t i = 0; i < schedule->dependencies.count; ++i) {
+  for (iree_host_size_t i = 0; i < schedule->dependency_count; ++i) {
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_dependency_graph_at(&schedule->dependencies,
+        loom_low_schedule_dependency_graph_at(schedule->dependency_graph,
                                               (uint32_t)i);
     if (dependency->kind != options->dependency_query.kind ||
         dependency->minimum_issue_separation_cycles <
@@ -830,9 +830,9 @@ static iree_status_t loom_check_test_low_schedule_append_edges(
                               schedule->node_count);
     }
     const loom_low_schedule_dependency_t* match = NULL;
-    for (iree_host_size_t i = 0; i < schedule->dependencies.count; ++i) {
+    for (iree_host_size_t i = 0; i < schedule->dependency_count; ++i) {
       const loom_low_schedule_dependency_t* dependency =
-          loom_low_schedule_dependency_graph_at(&schedule->dependencies,
+          loom_low_schedule_dependency_graph_at(schedule->dependency_graph,
                                                 (uint32_t)i);
       if (dependency->kind != query.dependency.kind ||
           dependency->minimum_issue_separation_cycles <
@@ -1088,7 +1088,8 @@ static iree_status_t loom_check_test_low_schedule_build(
       .diagnostic_flags = options->schedule_diagnostic_flags,
       .flags = options->schedule_flags |
                LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS |
-               LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS,
+               LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS |
+               LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES,
       .strategy = options->schedule_strategy,
   };
   loom_low_function_model_t model = {0};

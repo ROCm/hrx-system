@@ -73,6 +73,64 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    latency_test
+  SRCS
+    "latency_test.cc"
+  DEPS
+    ::latency
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+iree_cc_library(
+  NAME
+    latency_test_library.dll
+  SRCS
+    "latency_test_library.c"
+  DEPS
+    ::latency
+    iree::base
+  TESTONLY
+  SHARED
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+iree_c_embed_data(
+  NAME
+    latency_test_library
+  SRCS
+    "$<TARGET_FILE:iree::base::threading::latency_test_library.dll>"
+  C_FILE_OUTPUT
+    "latency_test_library_embed.c"
+  H_FILE_OUTPUT
+    "latency_test_library_embed.h"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+iree_cc_test(
+  NAME
+    latency_win32_test
+  SRCS
+    "latency_win32_test.cc"
+  DEPS
+    ::latency
+    ::latency_test_library
+    iree::base
+    iree::base::internal::dynamic_library
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+iree_cc_test(
+  NAME
     futex_test
   SRCS
     "futex_test.cc"
@@ -184,3 +242,29 @@ iree_cc_binary_benchmark(
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+
+# Native macOS activities use Foundation. Keep that dependency isolated from
+# the basic threading primitives and enable Objective-C only on macOS builds.
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  enable_language(OBJC)
+  set(_IREE_LATENCY_PLATFORM_SRCS "latency_darwin.m")
+  set(_IREE_LATENCY_PLATFORM_LIBS "-framework Foundation")
+endif()
+iree_cc_library(
+  NAME
+    latency
+  HDRS
+    "latency.h"
+  SRCS
+    "latency.c"
+    "latency_win32.c"
+    ${_IREE_LATENCY_PLATFORM_SRCS}
+  COPTS
+    "$<$<COMPILE_LANGUAGE:OBJC>:-fno-objc-arc>"
+  DEPS
+    iree::base
+    ${_IREE_LATENCY_PLATFORM_LIBS}
+  PUBLIC
+)
+unset(_IREE_LATENCY_PLATFORM_SRCS)
+unset(_IREE_LATENCY_PLATFORM_LIBS)

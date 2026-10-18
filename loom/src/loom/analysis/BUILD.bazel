@@ -357,6 +357,7 @@ loom_cc_library(
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table_api",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -370,6 +371,22 @@ loom_cc_test(
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
+        "//loom/src/loom/target:facts",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "condition_affine_preimage_test",
+    srcs = ["condition_affine_preimage_test.cc"],
+    deps = [
+        ":condition_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
         "//loom/src/loom/target:facts",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",

@@ -67,7 +67,8 @@ typedef struct loom_conditioned_value_facts_t {
   iree_arena_allocator_t arena;
   // Temporary function-local value identity domain.
   loom_local_value_domain_t domain;
-  // Exact CFG forwarding identities, independent of numeric ranges.
+  // Exact identity representatives. CFG identities are discovered first and
+  // then composed in place with retained fact identities for O(1) lookup.
   loom_cfg_value_identity_table_t identities;
   // Reusable recursive condition query over this immutable function.
   loom_condition_query_t query;
@@ -410,6 +411,39 @@ static void loom_conditioned_value_facts_canonicalize_facts(
   }
 }
 
+// Composes the two exact-identity domains once before indexing conditions.
+// Both mappings select an available predecessor identity, so alternating them
+// reaches a fixed point. Reusing the CFG table storage keeps operand lookup
+// O(1) without allocating another value-sized index.
+static void loom_conditioned_value_facts_compose_identities(
+    loom_conditioned_value_facts_t* state) {
+  for (loom_value_ordinal_t ordinal = 0; ordinal < state->domain.value_count;
+       ++ordinal) {
+    const loom_value_id_t original = state->domain.value_ids[ordinal];
+    loom_value_id_t canonical = original;
+    for (iree_host_size_t depth = 0;; ++depth) {
+      IREE_ASSERT_LT(depth, state->domain.value_count);
+      const loom_value_id_t next = loom_cfg_value_identity_table_lookup(
+          &state->identities,
+          loom_value_fact_table_query_identity(state->table, canonical));
+      if (next == canonical) {
+        break;
+      }
+      canonical = next;
+    }
+    state->identities.representatives[ordinal] =
+        canonical == original ? LOOM_VALUE_ID_INVALID : canonical;
+  }
+}
+
+static bool loom_conditioned_value_facts_operand_needs_update(
+    const loom_conditioned_value_facts_t* state,
+    loom_condition_integer_operand_t operand) {
+  return operand.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
+         !loom_value_facts_is_exact(
+             loom_value_fact_table_lookup(state->table, operand.value_id));
+}
+
 static iree_status_t loom_conditioned_value_facts_prepare_local_scope(
     loom_conditioned_value_facts_t* state,
     loom_conditioned_value_facts_local_scope_t* scope) {
@@ -421,14 +455,15 @@ static iree_status_t loom_conditioned_value_facts_prepare_local_scope(
   for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
     const loom_condition_integer_relation_t* relation =
         &facts->integer_relations[i];
-    update_count +=
-        relation->left.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE ? 1 : 0;
-    update_count +=
-        relation->right.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
-                (relation->left.kind != LOOM_CONDITION_INTEGER_OPERAND_VALUE ||
-                 relation->right.value_id != relation->left.value_id)
-            ? 1
-            : 0;
+    const bool update_left = loom_conditioned_value_facts_operand_needs_update(
+        state, relation->left);
+    update_count += update_left ? 1 : 0;
+    update_count += loom_conditioned_value_facts_operand_needs_update(
+                        state, relation->right) &&
+                            (!update_left || relation->right.value_id !=
+                                                 relation->left.value_id)
+                        ? 1
+                        : 0;
   }
   if (!update_count) {
     return iree_ok_status();
@@ -440,7 +475,9 @@ static iree_status_t loom_conditioned_value_facts_prepare_local_scope(
   for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
     const loom_condition_integer_relation_t* relation =
         &facts->integer_relations[i];
-    if (relation->left.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE) {
+    const bool update_left = loom_conditioned_value_facts_operand_needs_update(
+        state, relation->left);
+    if (update_left) {
       scope->updates[scope->update_count++] =
           (loom_conditioned_value_facts_active_update_t){
               .relation = relation,
@@ -448,9 +485,9 @@ static iree_status_t loom_conditioned_value_facts_prepare_local_scope(
                   &state->domain, relation->left.value_id),
           };
     }
-    if (relation->right.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
-        (relation->left.kind != LOOM_CONDITION_INTEGER_OPERAND_VALUE ||
-         relation->right.value_id != relation->left.value_id)) {
+    if (loom_conditioned_value_facts_operand_needs_update(state,
+                                                          relation->right) &&
+        (!update_left || relation->right.value_id != relation->left.value_id)) {
       scope->updates[scope->update_count++] =
           (loom_conditioned_value_facts_active_update_t){
               .relation = relation,
@@ -506,14 +543,6 @@ static iree_status_t loom_conditioned_value_facts_solve(
           &state->arena));
     }
   }
-  for (loom_conditioned_value_facts_local_scope_t* local_scope =
-           state->local_scopes;
-       local_scope; local_scope = local_scope->next) {
-    if (local_scope->facts) {
-      loom_conditioned_value_facts_canonicalize_facts(&state->identities,
-                                                      local_scope->facts);
-    }
-  }
   bool has_conditions = state->table->condition_integer_projection_count != 0 ||
                         state->local_condition_scope_count != 0;
   for (loom_conditioned_value_facts_region_t* entry = state->regions; entry;
@@ -549,8 +578,6 @@ static iree_status_t loom_conditioned_value_facts_solve(
           state, loom_cfg_cond_br_condition(edge->terminator),
           edge->successor_index == 0, &facts));
       if (facts) {
-        loom_conditioned_value_facts_canonicalize_facts(&state->identities,
-                                                        facts);
         entry->local_scopes[block].facts = facts;
         ++state->local_condition_scope_count;
         has_conditions = true;
@@ -559,6 +586,15 @@ static iree_status_t loom_conditioned_value_facts_solve(
   }
   if (!has_conditions) {
     return iree_ok_status();
+  }
+  loom_conditioned_value_facts_compose_identities(state);
+  for (loom_conditioned_value_facts_local_scope_t* local_scope =
+           state->local_scopes;
+       local_scope; local_scope = local_scope->next) {
+    if (local_scope->facts) {
+      loom_conditioned_value_facts_canonicalize_facts(&state->identities,
+                                                      local_scope->facts);
+    }
   }
   if (state->local_condition_scope_count) {
     IREE_RETURN_IF_ERROR(

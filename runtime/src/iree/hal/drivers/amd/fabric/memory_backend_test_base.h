@@ -67,6 +67,8 @@ struct FakeNative {
     uint32_t device_ordinal;
     // Native profile result used to exercise absent routes and query failures.
     amdf_status_t profile_status = AMDF_STATUS_OK;
+    // Cached prerequisites for the allocation, import, and placement profiles.
+    std::array<amdf_status_t, 3> profile_availability = {};
   };
 
   FakeNative() {
@@ -178,6 +180,7 @@ struct FakeNative {
     }
     ++self->profile_query_count;
     out_profile->ordinal = profile_ordinal;
+    out_profile->availability = storage->profile_availability[profile_ordinal];
     out_profile->memory_class = storage->memory_class;
     out_profile->roles =
         AMDF_MEMORY_PROFILE_ROLE_CREATE |
@@ -272,6 +275,11 @@ struct FakeNative {
     EXPECT_EQ(query->external_memory_provenance.words[0], 0u);
     EXPECT_EQ(query->external_memory_provenance.words[1], 0u);
     ++self->pair_query_count;
+    const auto availability =
+        storage->profile_availability[query->memory_profile_ordinal];
+    if (!amdf_status_is_ok(availability)) {
+      return availability;
+    }
     if (imported && (query->producer.kind == AMDF_MEMORY_SITE_KIND_HOST ||
                      query->consumer.kind == AMDF_MEMORY_SITE_KIND_HOST)) {
       return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);

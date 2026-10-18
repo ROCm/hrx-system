@@ -81,7 +81,8 @@ static iree_status_t iree_hal_amd_xdna_context_select_memory_source(
     }
     IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
         status, "memory_scope_query_device_profile"));
-    if (iree_all_bits_set(profile.roles,
+    if (amdf_status_is_ok(profile.availability) &&
+        iree_all_bits_set(profile.roles,
                           AMDF_MEMORY_PROFILE_ROLE_CREATE |
                               AMDF_MEMORY_PROFILE_ROLE_HOST_MAP) &&
         iree_all_bits_set(profile.supported_flags,

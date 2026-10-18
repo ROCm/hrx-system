@@ -178,7 +178,7 @@ iree_status_t loom_control_participant_zeros_for_cfg(
 
   // Only identities with an unguarded path from entry propagate. Each bit can
   // be added to a block once; queued blocks combine all pending additions.
-  enum { kQueued = 1u << 7 };
+  const loom_control_participant_zeros_t kQueued = 1u << 7;
   enum { kWorklistEntriesPerSegment = 2048 };
   loom_segmented_storage_t worklist;
   loom_segmented_storage_initialize(

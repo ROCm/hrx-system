@@ -25,6 +25,11 @@ struct GpuMemory {
   amdf_memory_site_t HostSite() const;
   amdf_memory_site_t DeviceSite(uint32_t queue_family_ordinal) const;
 
+  // Applies the queried CPU side of a whole-backing host/device transition.
+  // The witness owns ordering and the corresponding device cache operation.
+  void TransferHostCache(const amdf_api_t* api, uint32_t queue_family_ordinal,
+                         amdf_host_cache_operation_t operation) const;
+
   // Allocation retained until every accessing queue has been retired.
   amdf_memory_t* memory = nullptr;
   // Optional host view released before the allocation.

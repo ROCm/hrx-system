@@ -132,8 +132,8 @@ typedef struct amdf_api_t {
   /// Destroys a materialized device after its dependent resources are released.
   ///
   /// The caller must have exclusive access. Returns
-  /// `AMDF_STATUS_CODE_BUSY` without native mutation while a queue or context
-  /// remains live. Memory lifetimes are caller preconditions:
+  /// `AMDF_STATUS_CODE_BUSY` without native mutation while a queue, queue
+  /// mapping, event, or context borrows it. Memory lifetimes are preconditions:
   /// dependent memory must already be destroyed, and libamdf neither retains
   /// the device through memory nor tracks memory to diagnose premature device
   /// destruction. Violating that precondition is undefined behavior.
@@ -187,6 +187,9 @@ typedef struct amdf_api_t {
   /// input in caller order. Failure leaves all outputs unchanged. An ordinal
   /// outside the scope's profile count returns OUT_OF_RANGE; a valid profile
   /// unable to satisfy the complete access set returns UNSUPPORTED.
+  /// An optional route with unavailable native prerequisites still returns
+  /// its complete profile with a non-OK availability status. Other profiles
+  /// remain queryable; construction returns the selected route's reason.
   ///
   /// This thread-safe cold planning query consumes native facts retained at
   /// activation. It performs no native operation, mapping or synchronization.
@@ -289,7 +292,8 @@ typedef struct amdf_api_t {
 
   /// Copies the exact directional relation between two concrete access sites.
   ///
-  /// Each site names either a device access and queue family or a host mapping.
+  /// Each site names a device access and queue family, CPU access through a
+  /// host mapping, or native file-buffer access through a FILE_IO view.
   /// An out-of-range access ordinal returns OUT_OF_RANGE. Sites on one memory
   /// handle share backing directly, including CPU-only memory without a
   /// physical identity. Different memory handles must belong to one provider
@@ -304,6 +308,11 @@ typedef struct amdf_api_t {
   /// in the resource. The result describes visibility over corresponding bytes
   /// reachable by both sites; callers select those ranges and provide ordering.
   /// It does not establish synchronization or report host atomic capabilities.
+  /// FILE_IO requires native I/O completion after a file read and prior
+  /// producer release/completion before a file write. Before overwriting a
+  /// reused slot, the caller also retires its readers and releases prior
+  /// device writes. File completion is neither device cache maintenance nor
+  /// storage durability. Queue sites do not qualify in-program shader fences.
   /// A reservation host site supplies source_memory explicitly. Its answer is
   /// conditional on the caller installing corresponding bytes of that backing;
   /// the query neither checks current bindings nor discovers a source by VA.

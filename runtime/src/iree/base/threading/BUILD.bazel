@@ -4,7 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
@@ -51,6 +53,35 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "latency",
+    srcs = [
+        "latency.c",
+        "latency_win32.c",
+    ],
+    hdrs = ["latency.h"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        "//runtime/src/iree/base",
+    ] + select({
+        "@platforms//os:macos": [":latency_darwin"],
+        "//conditions:default": [],
+    }),
+)
+
+objc_library(
+    name = "latency_darwin",
+    hdrs = ["latency.h"],
+    non_arc_srcs = ["latency_darwin.m"],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = ["@platforms//os:macos"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//runtime/src/iree/base",
+        "@iree_macos_toolchain//:Foundation",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "thread",
     srcs = [
         "thread.c",
@@ -82,6 +113,55 @@ iree_runtime_cc_test(
     srcs = ["call_once_test.cc"],
     deps = [
         ":threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "latency_test",
+    srcs = ["latency_test.cc"],
+    deps = [
+        ":latency",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_binary(
+    name = "latency_test_library.dll",
+    testonly = True,
+    srcs = ["latency_test_library.c"],
+    linkshared = True,
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":latency",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_c_embed_data(
+    name = "latency_test_library",
+    testonly = True,
+    srcs = [":latency_test_library.dll"],
+    c_file_output = "latency_test_library_embed.c",
+    flatten = True,
+    h_file_output = "latency_test_library_embed.h",
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:private"],
+)
+
+iree_runtime_cc_test(
+    name = "latency_win32_test",
+    srcs = ["latency_win32_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":latency",
+        ":latency_test_library",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:dynamic_library",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

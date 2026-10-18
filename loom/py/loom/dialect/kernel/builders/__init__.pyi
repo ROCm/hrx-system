@@ -14,6 +14,7 @@ class KernelBuilder(DialectBuilder):
     def def_(
         self,
         *,
+        linkage: str | None = ...,
         retain: str | None = ...,
         target: str | None = ...,
         export_symbol: str | None = ...,

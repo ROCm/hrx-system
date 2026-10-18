@@ -183,6 +183,8 @@ enum loom_low_schedule_flag_bits_e {
   // external prerequisites. Allocation repair enables this while retrying a
   // rematerialized program; spill insertion resets that scheduling policy.
   LOOM_LOW_SCHEDULE_FLAG_ORDER_STRUCTURAL_SETUP = 1u << 7,
+  // Retains every raw dependency row for complete schedule inspection.
+  LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES = 1u << 8,
 };
 typedef uint32_t loom_low_schedule_flags_t;
 
@@ -576,36 +578,14 @@ typedef struct loom_low_schedule_memory_completion_edge_t {
   uint32_t consumer_effect_use;
 } loom_low_schedule_memory_completion_edge_t;
 
-// Descriptor hazard row recorded in scheduled order. These rows are passive
-// facts: target overlays consume them to insert waits, enforce distances, or
-// record richer backend diagnostics.
+// Selected descriptor hazard recorded in scheduled order. Timing belongs to
+// the scheduled node; immutable hazard fields belong to the target descriptor
+// set. These identities remain valid when a retained block's old frame retires.
 typedef struct loom_low_schedule_hazard_use_t {
   // Scheduled node carrying the hazard row.
   uint32_t node_index;
-  // Region block containing |node_index|.
-  uint32_t block_index;
-  // Scheduled ordinal within |block_index|.
-  uint32_t scheduled_ordinal;
-  // Abstract issue cycle within |block_index|.
-  uint32_t issue_cycle;
-  // Hazard row ordinal within the node's schedule class.
-  uint16_t hazard_ordinal;
-  // Hazard kind used by schedule policy and verification.
-  loom_low_hazard_kind_t kind;
-  // Interpretation of reference_id.
-  loom_low_hazard_reference_kind_t reference_kind;
-  // Resource, counter, or target-owned hazard identifier.
-  uint16_t reference_id;
-  // Borrowed stable resource name when reference_kind is RESOURCE.
-  iree_string_view_t resource_name;
-  // Producer pipeline stage participating in the hazard.
-  uint16_t producer_stage;
-  // Consumer pipeline stage participating in the hazard.
-  uint16_t consumer_stage;
-  // Required distance or target-owned hazard value.
-  uint16_t distance;
-  // Hazard flags for target-owned refinements.
-  loom_low_hazard_flags_t hazard_flags;
+  // Absolute index in the target descriptor set's hazard table.
+  uint32_t hazard_index;
 } loom_low_schedule_hazard_use_t;
 
 // Minimum-distance hazard gap recorded after scheduling. These rows identify
@@ -873,11 +853,12 @@ typedef struct loom_low_schedule_table_t {
   iree_host_size_t call_node_count;
   // Authored per-instance scope identities and control-flow entry states.
   loom_low_schedule_scopes_t scopes;
-  // Stable ordering dependency graph consumed by scheduling and target
-  // planning.
-  loom_low_schedule_dependency_graph_t dependencies;
-  // Exact contiguous range of memory-effect dependency rows.
-  loom_low_schedule_dependency_range_t effect_dependencies;
+  // Number of raw ordering dependencies used to construct the schedule.
+  iree_host_size_t dependency_count;
+  // Complete raw dependency graph, present only with RETAIN_DEPENDENCIES.
+  const loom_low_schedule_dependency_graph_t* dependency_graph;
+  // Exact memory-effect range with segments owned by this schedule's arena.
+  loom_low_schedule_dependency_slice_t effect_dependencies;
   // Immutable outgoing groups owned by the scheduling arena. Present only
   // when RETAIN_DEPENDENCY_INDEX was requested; construction never rebuilds it.
   const loom_low_schedule_dependency_index_t* dependency_index;

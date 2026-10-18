@@ -60,6 +60,9 @@ class TargetConverter:
                 "//third_party:amdf_wkmi": ["iree::third_party::amdf_wkmi"],
                 # Driver protocol headers are private build inputs, not
                 # dependencies of the installed libamdf static interface.
+                "//third_party:linux_udmabuf_uapi": [
+                    "$<BUILD_LOCAL_INTERFACE:iree::third_party::linux_udmabuf_uapi>"
+                ],
                 "//third_party:linux_drm_uapi": [
                     "$<BUILD_LOCAL_INTERFACE:iree::third_party::linux_drm_uapi>"
                 ],

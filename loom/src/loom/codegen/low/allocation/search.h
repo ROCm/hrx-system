@@ -48,6 +48,10 @@ typedef struct loom_low_allocation_search_context_t {
   loom_low_allocation_target_constraints_t* target_constraints;
   // Current assignment lookup table.
   const loom_low_allocation_assignment_map_t* assignment_map;
+  // Exact locations required by a replay, indexed by current value ordinal.
+  // Null leaves location selection unconstrained by a previous allocation.
+  const loom_low_allocation_assignment_t* const*
+      retained_assignments_by_value_ordinal;
   // Function-local structural and concrete-location placement relations.
   const loom_low_placement_table_t* placement;
   // Allocation-owned bound instruction preferences, or NULL when absent.

@@ -1,0 +1,8 @@
+func.def public linkonce @header_identity(%value: i32) -> (i32) {
+  %result = func.call @local_identity(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def @local_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}

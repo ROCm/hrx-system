@@ -295,6 +295,9 @@ iree_status_t loom_bytecode_symbols_predeclare(
     if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_RETAIN)) {
       symbol->flags |= LOOM_SYMBOL_FLAG_RETAIN;
     }
+    if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_LINK_ONCE)) {
+      symbol->flags |= LOOM_SYMBOL_FLAG_LINK_ONCE;
+    }
   }
   return iree_ok_status();
 }

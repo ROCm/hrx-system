@@ -20,6 +20,7 @@
 #include "loom/ops/vector/transpose.h"
 #include "loom/transforms/vector/bitstream_packet_legalization.h"
 #include "loom/transforms/vector/cast_packet_legalization.h"
+#include "loom/transforms/vector/memory_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/packet_plan.h"
 #include "loom/transforms/vector/reduction_legalization.h"
@@ -788,40 +789,6 @@ static iree_status_t loom_vector_legalize_rotation(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
   };
-  return iree_ok_status();
-}
-
-static iree_status_t loom_vector_legalize_non_dense_memory(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  (void)entry;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_rewrite_op(
-      context->pass, context->rewriter, op, &rewritten));
-  if (rewritten) {
-    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_vector_legalize_atomic(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  (void)entry;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_atomic_to_scalar_rewrite_op(
-      context->pass, context->rewriter, op, &rewritten));
-  if (rewritten) {
-    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
-  }
   return iree_ok_status();
 }
 

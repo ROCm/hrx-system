@@ -10,17 +10,9 @@
 
 iree_status_t loom_serve_text_pending_request_prepare(
     loom_serve_text_pending_request_t* request, loom_serve_text_model_t* model,
-    iree_string_view_t name, iree_host_size_t default_max_tokens,
     loom_serve_text_input_prefix_t prefix,
     const loom_serve_text_pool_usage_t* geometry, int32_t* scratch,
     iree_allocator_t host_allocator) {
-  const iree_time_t start = iree_time_now();
-  if (!request->chat.policy) {
-    IREE_RETURN_IF_ERROR(loom_serve_text_chat_initialize(
-        loom_serve_text_model_chat_policy(model), name, request->body,
-        request->receipt.serial, default_max_tokens, host_allocator,
-        &request->chat));
-  }
   const iree_host_size_t capacity =
       loom_serve_text_model_context_capacity(model);
   IREE_RETURN_IF_ERROR(loom_serve_text_input_prepare(
@@ -39,7 +31,6 @@ iree_status_t loom_serve_text_pending_request_prepare(
         reservation, geometry->capacity);
   }
   request->reservation = reservation;
-  request->prepare_duration += iree_time_now() - start;
   return iree_ok_status();
 }
 

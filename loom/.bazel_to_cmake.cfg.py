@@ -90,6 +90,7 @@ def _loom_amdgpu_config_cmake_options():
 
 
 _LOOM_CONFIG_CMAKE_OPTIONS = {
+    "//loom/config:shared_tools_enabled": "LOOM_LINK_SHARED_TOOLS",
     "//loom/config/emit:amdgpu": "LOOM_EMIT_AMDGPU",
     "//loom/config/emit:spirv": "LOOM_EMIT_SPIRV",
     "//loom/config/emit:wasm": "LOOM_EMIT_WASM",
@@ -820,6 +821,32 @@ class LoomBuildFileFunctions(
             ),
         )
 
+    def loomc_cc_binary(self, **kwargs):
+        self._emit_rewritten_cmake_rule(
+            "loom_cc_binary", "loomc_cc_binary", lambda: self.loom_cc_binary(**kwargs)
+        )
+
+    def loomc_interop_headers(self, name, deps):
+        self._converter.body += (
+            "loomc_interop_headers(\n"
+            + self._convert_string_arg_block("NAME", name, quote=False)
+            + self._convert_target_list_block("DEPS", deps)
+            + ")\n\n"
+        )
+
+    def loomc_shared_libraries(self, name, components, runtime_deps):
+        components_block, variables_block = self._convert_platform_select_deps(
+            name, components, "COMPONENTS"
+        )
+        self._converter.body += (
+            variables_block
+            + "loomc_shared_libraries(\n"
+            + self._convert_string_arg_block("NAME", name, quote=False)
+            + components_block
+            + self._convert_target_list_block("RUNTIME_DEPS", runtime_deps)
+            + ")\n\n"
+        )
+
     def loom_cc_test(self, deps=[], resource_group=None, **kwargs):
         if resource_group:
             kwargs["resource_group"] = resource_group
@@ -1211,6 +1238,10 @@ class LoomBuildFileFunctions(
         deps_block = self._convert_target_list_block("DEPS", deps)
         testonly_block = self._convert_option_block("TESTONLY", testonly)
 
+        duplicate_safe_block = self._convert_option_block(
+            "LINKABLE_MORE_THAN_ONCE", "LINKABLE_MORE_THAN_ONCE" in (tags or [])
+        )
+
         self._emit_platform_guard_begin(target_compatible_with)
         if platform_args_block:
             self._converter.body += platform_args_block
@@ -1234,6 +1265,7 @@ class LoomBuildFileFunctions(
             f"{extra_outputs_block}"
             f"{deps_block}"
             f"{testonly_block}"
+            f"{duplicate_safe_block}"
             f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)

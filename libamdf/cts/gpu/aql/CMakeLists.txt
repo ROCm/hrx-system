@@ -115,9 +115,11 @@ iree_cc_library(
     "lds_test.cc"
     "pattern_fill_test.cc"
     "private_test.cc"
+    "program_atomic_test.cc"
     "publication_test.cc"
     "resource_test.cc"
     "scope_test.cc"
+    "shader_event_test.cc"
     "timestamp_test.cc"
     "transfer_test.cc"
     "workset_test.cc"
@@ -141,10 +143,14 @@ iree_cc_library(
     libamdf::cts::gpu::kernels::pattern_fill_unaligned_kernels
     libamdf::cts::gpu::kernels::private_roundtrip
     libamdf::cts::gpu::kernels::private_roundtrip_kernels
+    libamdf::cts::gpu::kernels::shader_event
+    libamdf::cts::gpu::kernels::shader_event_kernels
     libamdf::cts::gpu::kernels::transform
     libamdf::cts::gpu::kernels::transform_alternate_kernels
     libamdf::cts::gpu::kernels::transform_kernels
     libamdf::cts::gpu::pm4::encoding::memory_commands
+    libamdf::cts::gpu::util::program_atomic_fixture
+    libamdf::cts::gpu::util::shader_event_fixture
   TESTONLY
   ALWAYSLINK
   PUBLIC

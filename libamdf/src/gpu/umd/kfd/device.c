@@ -43,6 +43,7 @@ amdf_status_t amdf_gpu_umd_device_create(
     return status;
   }
   device->host_allocator = host_allocator;
+  device->instance = instance;
   device->descriptor = -1;
   device->render_descriptor = -1;
   device->memory_mutex = amdf_gpu_kfd_instance_memory_mutex(instance);
@@ -76,6 +77,7 @@ amdf_status_t amdf_gpu_umd_device_create(
         .id = {.words = {endpoint->info.id.words[0], (uintptr_t)device}},
         .reset_epoch = 1,
         .features = device->topology.memory_features |
+                    AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS |
                     AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION |
                     (native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS
                          ? AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION

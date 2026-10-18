@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "iree/base/internal/arena.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
@@ -263,9 +264,15 @@ static iree_status_t loom_serve_text_request_check_run(
   }
   iree_string_builder_t tool_calls;
   iree_string_builder_initialize(host_allocator, &tool_calls);
+  loom_serve_text_chat_scratch_t scratch;
+  loom_serve_text_chat_scratch_initialize(host_allocator, &scratch);
   loom_serve_text_tool_calls_t calls;
   loom_serve_text_tool_calls_initialize(host_allocator, &calls);
   loom_serve_text_chat_completion_t completion = {0};
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(64 * 1024, host_allocator, &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
   if (iree_status_is_ok(status) && response && FLAG_response_chunk_size) {
     const iree_string_view_t text =
         loom_serve_text_request_check_file_text(response);
@@ -277,26 +284,31 @@ static iree_status_t loom_serve_text_request_check_run(
       do {
         status = loom_serve_text_chat_output_next(
             &chat, iree_string_view_substr(text, 0, length),
-            LOOM_SERVE_TEXT_CHAT_OUTPUT_STREAMING, &output);
+            LOOM_SERVE_TEXT_CHAT_OUTPUT_STREAMING, iree_arena_allocator(&arena),
+            &output);
       } while (iree_status_is_ok(status) && output.advanced);
+      iree_arena_reset(&arena);
     }
   }
   if (iree_status_is_ok(status) && response) {
     status = loom_serve_text_chat_complete(
         &chat, loom_serve_text_request_check_file_text(response), 1, &calls,
-        &completion);
+        &scratch, iree_arena_allocator(&arena), &completion);
   }
   if (iree_status_is_ok(status) && response) {
     status = loom_serve_text_tool_calls_write_json(
         &calls, iree_any_bit_set(chat.flags, LOOM_SERVE_TEXT_CHAT_FLAG_STREAM),
         &tool_calls);
   }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_request_check_report(
         &chat, token_count, tokens, media_span_count, media_spans,
         response ? &completion : NULL, iree_string_builder_view(&tool_calls));
   }
   loom_serve_text_chat_completion_deinitialize(&completion);
+  loom_serve_text_chat_scratch_deinitialize(&scratch);
   loom_serve_text_tool_calls_deinitialize(&calls);
   iree_string_builder_deinitialize(&tool_calls);
   iree_io_file_contents_free(response);

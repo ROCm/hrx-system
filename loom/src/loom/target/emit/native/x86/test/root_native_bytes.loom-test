@@ -78,7 +78,7 @@ code: 62 f1 7c 48 51 c0 62 f1 fd 48 51 c0 62 f2 7d 48 4e c0 62 f2 fd 48 4e c0 c3
 // ====
 
 // RUN: emit x86-native-bytes @fp16_xmm
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 low.func.def target<x86.avx512_features.core>(@target) @fp16_xmm(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %sqrt = vsqrtph.xmm %input
@@ -93,8 +93,38 @@ code: 62 f5 7c 08 51 c0 62 f6 7d 08 4e c0 62 f5 7e 08 51 c0 62 f6 7d 08 4f c0 c3
 
 // ====
 
+// RUN: emit x86-native-bytes @bmi2_i32
+x86.target<scalar> @target {features = [bmi2]}
+
+low.func.def target<x86.scalar.core>(@target) @bmi2_i32(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  %left = shlx.gpr32 %lhs, %rhs
+  %signed = sarx.gpr32 %lhs, %rhs
+  %unsigned = shrx.gpr32 %lhs, %rhs
+  return %left, %signed, %unsigned
+}
+
+// ----
+code: 41 57 4d 8b fa c4 e2 49 f7 c7 c4 e2 4a f7 cf c4 e2 4b f7 d7 41 89 17 8b d1 41 5f c3
+
+// ====
+
+// RUN: emit x86-native-bytes @bmi2_i64
+x86.target<scalar> @target {features = [bmi2]}
+
+low.func.def target<x86.scalar.core>(@target) @bmi2_i64(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %left = shlx.gpr64 %lhs, %rhs
+  %signed = sarx.gpr64 %lhs, %rhs
+  %unsigned = shrx.gpr64 %lhs, %rhs
+  return %left, %signed, %unsigned
+}
+
+// ----
+code: 41 57 4d 8b fa c4 e2 c9 f7 c7 c4 e2 ca f7 cf c4 e2 cb f7 d7 49 89 17 48 8b d1 41 5f c3
+
+// ====
+
 // RUN: emit x86-native-bytes @fp16_ymm
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 low.func.def target<x86.avx512_features.core>(@target) @fp16_ymm(%input: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   %sqrt = vsqrtph.ymm %input
@@ -108,7 +138,7 @@ code: 62 f5 7c 28 51 c0 62 f6 7d 28 4e c0 c3
 // ====
 
 // RUN: emit x86-native-bytes @fp16_zmm
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 low.func.def target<x86.avx512_features.core>(@target) @fp16_zmm(%input: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
   %sqrt = vsqrtph %input
@@ -118,3 +148,51 @@ low.func.def target<x86.avx512_features.core>(@target) @fp16_zmm(%input: reg<x86
 
 // ----
 code: 62 f5 7c 48 51 c0 62 f6 7d 48 4e c0 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @native_counts_i16 fixed=%input:physical_register:7:1 fixed=%leading:physical_register:9:1 fixed=%trailing:physical_register:10:1 fixed=%population:physical_register:0:1
+x86.target<scalar> @target {features = [bmi, popcnt, lzcnt]}
+
+low.func.def target<x86.scalar.core>(@target) @native_counts_i16() -> (reg<x86.gpr32>) asm {
+  %input = mov.imm32 65535
+  %leading = lzcnt.gpr16 %input
+  %trailing = tzcnt.gpr16 %leading
+  %population = popcnt.gpr16 %trailing
+  return %population
+}
+
+// ----
+code: bf ff ff 00 00 f3 66 44 0f bd cf f3 66 45 0f bc d1 f3 66 41 0f b8 c2 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @native_counts_i32 fixed=%input:physical_register:7:1 fixed=%leading:physical_register:9:1 fixed=%trailing:physical_register:10:1 fixed=%population:physical_register:0:1
+x86.target<scalar> @target {features = [bmi, popcnt, lzcnt]}
+
+low.func.def target<x86.scalar.core>(@target) @native_counts_i32() -> (reg<x86.gpr32>) asm {
+  %input = mov.imm32 2147483647
+  %leading = lzcnt.gpr32 %input
+  %trailing = tzcnt.gpr32 %leading
+  %population = popcnt.gpr32 %trailing
+  return %population
+}
+
+// ----
+code: bf ff ff ff 7f f3 44 0f bd cf f3 45 0f bc d1 f3 41 0f b8 c2 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @native_counts_i64 fixed=%input:physical_register:7:1 fixed=%leading:physical_register:9:1 fixed=%trailing:physical_register:10:1 fixed=%population:physical_register:0:1
+x86.target<scalar> @target {features = [bmi, popcnt, lzcnt]}
+
+low.func.def target<x86.scalar.core>(@target) @native_counts_i64() -> (reg<x86.gpr64>) asm {
+  %input = mov.imm64 42
+  %leading = lzcnt.gpr64 %input
+  %trailing = tzcnt.gpr64 %leading
+  %population = popcnt.gpr64 %trailing
+  return %population
+}
+
+// ----
+code: bf 2a 00 00 00 f3 4c 0f bd cf f3 4d 0f bc d1 f3 49 0f b8 c2 c3

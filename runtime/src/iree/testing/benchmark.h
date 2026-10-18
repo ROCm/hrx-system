@@ -273,13 +273,20 @@ iree_benchmark_def_t* iree_make_function_benchmark(iree_benchmark_fn_t fn);
 // Benchmark infra management
 //===----------------------------------------------------------------------===//
 
-// Initializes the benchmark framework.
+// Parses IREE and Google Benchmark flags and initializes the framework.
 // Must be called before any other iree_benchmark_* functions.
 void iree_benchmark_initialize(int* argc, char** argv);
 
 // Runs all registered benchmarks specified by the command line flags.
 // Must be called after iree_benchmark_initialize and zero or more benchmarks
 // have been registered with iree_benchmark_register.
+// Native latency-sensitive host power management is requested across the run by
+// default. --benchmark_low_latency=false selects normal power policy instead;
+// --benchmark_cpu_latency_us optionally requests a numeric CPU idle latency
+// limit on supported platforms and implies low-latency mode. Acquisition
+// failure warns and leaves power policy unchanged while benchmarks continue.
+// Results record low_latency_requested, low_latency_applied, and the requested
+// cpu_latency_us. Listing benchmarks does not acquire a power-management scope.
 // Returns false if no benchmarks matched or a reported run failed. A run
 // skipped without an error is successful. The disabled benchmark backend
 // returns true without running anything.

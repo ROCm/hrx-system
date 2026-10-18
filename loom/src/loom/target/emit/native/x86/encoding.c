@@ -88,6 +88,22 @@ static void loom_x86_encode_sign_extended_immediate(
   loom_x86_encode_integer(instruction, (uint64_t)immediate, immediate_length);
 }
 
+// Encodes a scalar shift or rotate immediate using the implicit-count opcode
+// when the count is one. Both opcodes implement the same descriptor semantics
+// and allocation constraints, so the shortest byte form is an encoding choice.
+static void loom_x86_encode_shift_immediate(
+    loom_x86_encoded_instruction_t* instruction, uint16_t encoding_id,
+    uint8_t extension, uint8_t result, int64_t immediate) {
+  const bool implicit_count = immediate == 1;
+  if (implicit_count) {
+    encoding_id = (uint16_t)(encoding_id + 0x10);
+  }
+  loom_x86_encode_registers(instruction, encoding_id, extension, result);
+  if (!implicit_count) {
+    loom_x86_encode_byte(instruction, (uint8_t)immediate);
+  }
+}
+
 // Encodes the architectural immediate width of CMP. Byte comparisons always
 // carry an imm8; halfword comparisons use imm8 sign extension or imm16; word
 // and doubleword comparisons use imm8 sign extension or imm32.
@@ -166,6 +182,9 @@ static uint8_t loom_x86_select_vector_register(
   }
   if (selector == LOOM_X86_VECTOR_REGISTER_NONE) {
     return 0;
+  }
+  if (selector == LOOM_X86_VECTOR_REGISTER_FIXED_1) {
+    return 1;
   }
   return (uint8_t)(selector - 3 +
                    (selector == LOOM_X86_VECTOR_REGISTER_FIXED_6));
@@ -455,13 +474,17 @@ void loom_x86_encode_instruction(
                                               operands->immediate);
       break;
     case LOOM_X86_ENCODING_FORM_SHIFT_IMMEDIATE:
-      loom_x86_encode_registers(instruction, encoding_id, extension, result);
-      loom_x86_encode_byte(instruction, (uint8_t)operands->immediate);
+      loom_x86_encode_shift_immediate(instruction, encoding_id, extension,
+                                      result, operands->immediate);
       break;
     case LOOM_X86_ENCODING_FORM_SHIFT_COUNT:
       loom_x86_encode_registers(instruction, encoding_id, extension, result);
       break;
     case LOOM_X86_ENCODING_FORM_UNARY_R_RM:
+      loom_x86_encode_registers(instruction, encoding_id, result, lhs);
+      break;
+    case LOOM_X86_ENCODING_FORM_UNARY_F3_R_RM:
+      loom_x86_encode_byte(instruction, 0xf3);
       loom_x86_encode_registers(instruction, encoding_id, result, lhs);
       break;
     case LOOM_X86_ENCODING_FORM_SELECT:

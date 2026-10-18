@@ -93,17 +93,6 @@ typedef struct iree_hal_amdgpu_aql_command_buffer_rodata_segment_t {
   uint32_t reserved0;
 } iree_hal_amdgpu_aql_command_buffer_rodata_segment_t;
 
-typedef struct iree_hal_amdgpu_aql_command_buffer_tsan_shadow_span_t {
-  // Next TSAN shadow span in recording order.
-  struct iree_hal_amdgpu_aql_command_buffer_tsan_shadow_span_t* next;
-  // Recorded command-buffer block this shadow span describes.
-  const iree_hal_amdgpu_command_buffer_block_header_t* header;
-  // Recording-time number of live shadow slots before the next dispatch.
-  uint32_t live_shadow_slot_count;
-  // Maximum simultaneously live shadow slots required by this block.
-  uint32_t max_live_shadow_slot_count;
-} iree_hal_amdgpu_aql_command_buffer_tsan_shadow_span_t;
-
 typedef struct iree_hal_amdgpu_aql_command_buffer_rodata_segment_page_t {
   // Next page in ordinal order.
   struct iree_hal_amdgpu_aql_command_buffer_rodata_segment_page_t* next;
@@ -234,18 +223,6 @@ typedef struct iree_hal_amdgpu_aql_command_buffer_t {
     // Total retained dispatch summaries across all blocks.
     uint32_t count;
   } dispatch_summaries;
-  // Recording-time sidecars retained for TSAN shadow overlap throttling.
-  struct {
-    // Block-level TSAN shadow span list.
-    struct {
-      // First block with a TSAN shadow span.
-      iree_hal_amdgpu_aql_command_buffer_tsan_shadow_span_t* first;
-      // Current recording block with a TSAN shadow span.
-      iree_hal_amdgpu_aql_command_buffer_tsan_shadow_span_t* current;
-    } block;
-    // Number of queue-local shadow slots available to one live block span.
-    uint32_t shadow_slot_count;
-  } tsan_shadow_spans;
   // Builder used only during begin/end recording.
   iree_hal_amdgpu_aql_program_builder_t builder;
   // Program produced by end() and consumed by queue execution.
@@ -321,8 +298,6 @@ static void iree_hal_amdgpu_aql_command_buffer_reset_resources(
   command_buffer->dispatch_summaries.block.first = NULL;
   command_buffer->dispatch_summaries.block.current = NULL;
   command_buffer->dispatch_summaries.count = 0;
-  command_buffer->tsan_shadow_spans.block.first = NULL;
-  command_buffer->tsan_shadow_spans.block.current = NULL;
 }
 
 static void iree_hal_amdgpu_aql_command_buffer_discard_recording(
@@ -819,7 +794,6 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
     iree_host_size_t binding_capacity, iree_host_size_t device_ordinal,
     iree_host_size_t queue_count_per_physical_device,
     iree_hal_amdgpu_grid_sync_strategy_t grid_sync_strategy,
-    uint32_t tsan_shadow_slot_count,
     iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
         prepublished_kernarg_storage,
     void* hostcall_buffer,
@@ -913,7 +887,6 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
       (uint32_t)queue_count_per_physical_device;
   command_buffer->grid_sync_strategy = grid_sync_strategy;
   command_buffer->hostcall_buffer = hostcall_buffer;
-  command_buffer->tsan_shadow_spans.shadow_slot_count = tsan_shadow_slot_count;
   command_buffer->prepublished_kernargs.storage = prepublished_kernarg_storage;
   command_buffer->prepublished_kernargs.templates.max_alignment = 1;
   iree_arena_initialize(program_block_pool, &command_buffer->recording_arena);
@@ -1942,6 +1915,7 @@ typedef enum iree_hal_amdgpu_aql_dispatch_plan_flag_bits_e {
   IREE_HAL_AMDGPU_AQL_DISPATCH_PLAN_FLAG_CUSTOM_DIRECT_ARGUMENTS = 1u << 0,
   IREE_HAL_AMDGPU_AQL_DISPATCH_PLAN_FLAG_INDIRECT_PARAMETERS = 1u << 1,
   IREE_HAL_AMDGPU_AQL_DISPATCH_PLAN_FLAG_QUEUE_SCOPED_KERNEL_OBJECT = 1u << 2,
+  IREE_HAL_AMDGPU_AQL_DISPATCH_PLAN_FLAG_TSAN = 1u << 3,
 } iree_hal_amdgpu_aql_dispatch_plan_flag_bits_t;
 
 typedef uint32_t iree_hal_amdgpu_aql_dispatch_plan_flags_t;
@@ -2033,10 +2007,10 @@ static bool iree_hal_amdgpu_aql_dispatch_plan_uses_queue_scoped_kernel_object(
       IREE_HAL_AMDGPU_AQL_DISPATCH_PLAN_FLAG_QUEUE_SCOPED_KERNEL_OBJECT);
 }
 
-static bool iree_hal_amdgpu_aql_dispatch_plan_uses_tsan_shadow_slot(
+static bool iree_hal_amdgpu_aql_dispatch_plan_uses_tsan(
     const iree_hal_amdgpu_aql_dispatch_plan_t* plan) {
-  return iree_hal_amdgpu_aql_dispatch_plan_uses_queue_scoped_kernel_object(
-      plan);
+  return iree_any_bit_set(plan->flags,
+                          IREE_HAL_AMDGPU_AQL_DISPATCH_PLAN_FLAG_TSAN);
 }
 
 static iree_status_t
@@ -2082,48 +2056,6 @@ iree_hal_amdgpu_aql_command_buffer_record_queue_kernel_objects(
     *out_queue_kernel_objects = queue_kernel_objects;
   }
   return status;
-}
-
-static iree_status_t iree_hal_amdgpu_aql_command_buffer_ensure_tsan_shadow_span(
-    iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
-    iree_hal_amdgpu_aql_command_buffer_tsan_shadow_span_t** out_shadow_span) {
-  *out_shadow_span = command_buffer->tsan_shadow_spans.block.current;
-  const iree_hal_amdgpu_command_buffer_block_header_t* current_header =
-      command_buffer->builder.current_block.header;
-  if (*out_shadow_span && (*out_shadow_span)->header == current_header) {
-    return iree_ok_status();
-  }
-
-  iree_hal_amdgpu_aql_command_buffer_tsan_shadow_span_t* shadow_span = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(&command_buffer->recording_arena,
-                                           sizeof(*shadow_span),
-                                           (void**)&shadow_span));
-  memset(shadow_span, 0, sizeof(*shadow_span));
-  shadow_span->header = current_header;
-  if (command_buffer->tsan_shadow_spans.block.current) {
-    command_buffer->tsan_shadow_spans.block.current->next = shadow_span;
-  } else {
-    command_buffer->tsan_shadow_spans.block.first = shadow_span;
-  }
-  command_buffer->tsan_shadow_spans.block.current = shadow_span;
-  *out_shadow_span = shadow_span;
-  return iree_ok_status();
-}
-
-static bool iree_hal_amdgpu_aql_command_buffer_tsan_should_force_barrier(
-    const iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
-    const iree_hal_amdgpu_aql_dispatch_plan_t* plan) {
-  if (!iree_hal_amdgpu_aql_dispatch_plan_uses_tsan_shadow_slot(plan)) {
-    return false;
-  }
-  const iree_hal_amdgpu_aql_command_buffer_tsan_shadow_span_t* shadow_span =
-      command_buffer->tsan_shadow_spans.block.current;
-  if (!shadow_span ||
-      shadow_span->header != command_buffer->builder.current_block.header) {
-    return false;
-  }
-  return shadow_span->live_shadow_slot_count >=
-         command_buffer->tsan_shadow_spans.shadow_slot_count;
 }
 
 typedef struct iree_hal_amdgpu_aql_dispatch_layout_t {
@@ -2224,6 +2156,9 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
   if (iree_hal_dispatch_uses_indirect_parameters(inputs->flags)) {
     out_plan->flags |=
         IREE_HAL_AMDGPU_AQL_DISPATCH_PLAN_FLAG_INDIRECT_PARAMETERS;
+  }
+  if (iree_hal_amdgpu_executable_uses_tsan(inputs->executable)) {
+    out_plan->flags |= IREE_HAL_AMDGPU_AQL_DISPATCH_PLAN_FLAG_TSAN;
   }
   out_plan->kernarg_storage_mode =
       IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_NATIVE_INLINE;
@@ -2642,43 +2577,6 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_record_dispatch_summary(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdgpu_aql_command_buffer_record_tsan_shadow_span(
-    iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
-    const iree_hal_amdgpu_aql_dispatch_plan_t* plan,
-    const iree_hal_amdgpu_command_buffer_dispatch_command_t* dispatch_command) {
-  if (!iree_hal_amdgpu_aql_dispatch_plan_uses_tsan_shadow_slot(plan)) {
-    return iree_ok_status();
-  }
-  if (IREE_UNLIKELY(command_buffer->tsan_shadow_spans.shadow_slot_count == 0)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "TSAN command-buffer dispatch requires queue shadow slots");
-  }
-
-  iree_hal_amdgpu_aql_command_buffer_tsan_shadow_span_t* shadow_span = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_aql_command_buffer_ensure_tsan_shadow_span(command_buffer,
-                                                                 &shadow_span));
-  if (iree_any_bit_set(
-          dispatch_command->header.flags,
-          IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER)) {
-    shadow_span->live_shadow_slot_count = 0;
-  }
-  if (IREE_UNLIKELY(shadow_span->live_shadow_slot_count >=
-                    command_buffer->tsan_shadow_spans.shadow_slot_count)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "TSAN command-buffer block requires more than %u live shadow slots",
-        command_buffer->tsan_shadow_spans.shadow_slot_count);
-  }
-
-  ++shadow_span->live_shadow_slot_count;
-  shadow_span->max_live_shadow_slot_count =
-      iree_max(shadow_span->max_live_shadow_slot_count,
-               shadow_span->live_shadow_slot_count);
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_amdgpu_aql_command_buffer_append_dispatch_command(
     iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
     const iree_hal_amdgpu_aql_dispatch_inputs_t* inputs,
@@ -2698,8 +2596,7 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_append_dispatch_command(
                   command_buffer, layout)
           ? IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER
           : IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_NONE;
-  if (iree_hal_amdgpu_aql_command_buffer_tsan_should_force_barrier(
-          command_buffer, plan)) {
+  if (iree_hal_amdgpu_aql_dispatch_plan_uses_tsan(plan)) {
     command_flags |= IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER;
   }
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_aql_program_builder_append_command(
@@ -3022,9 +2919,6 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_dispatch(
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_aql_command_buffer_record_dispatch_summary(
           command_buffer, dispatch_command, &layout));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_aql_command_buffer_record_tsan_shadow_span(
-          command_buffer, &plan, dispatch_command));
   return iree_ok_status();
 }
 

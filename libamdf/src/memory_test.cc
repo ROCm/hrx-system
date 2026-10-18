@@ -150,6 +150,69 @@ TEST_F(MemoryTest, HostSitesUseTheSelectedPeerAndPreserveNativeApiOperations) {
   EXPECT_EQ(amdf_memory_destroy(memory), AMDF_STATUS_OK);
 }
 
+TEST_F(MemoryTest, FileSitesRequireTheViewFeatureAndPreserveDeviceTransitions) {
+  FakeDevice device;
+  InitializeFakeDevice(1, &instance_, &device);
+  const auto create = MakeMemoryCreateInfo(device);
+  amdf_memory_t* memory = nullptr;
+  ASSERT_EQ(
+      amdf_memory_create(&instance_.system_memory_scope, &create, &memory),
+      AMDF_STATUS_OK);
+  auto* native = static_cast<FakeMemory*>(memory->accesses[0].native);
+  native->site_description.release.kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL;
+  native->site_description.release.executor =
+      AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE;
+  native->site_description.release.operation =
+      AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM;
+
+  amdf_host_mapping_t mapping = {.memory = memory};
+  mapping.info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+  mapping.info.cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
+  mapping.info.flush.kind = AMDF_CACHE_TRANSITION_KIND_RANGE;
+  mapping.info.flush.executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+  mapping.info.flush.host_operation = AMDF_HOST_CACHE_OPERATION_FLUSH;
+  mapping.info.invalidate = mapping.info.flush;
+  mapping.info.invalidate.host_operation = AMDF_HOST_CACHE_OPERATION_INVALIDATE;
+  amdf_memory_site_t file = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(file),
+      .kind = AMDF_MEMORY_SITE_KIND_FILE_IO,
+  };
+  file.value.host.mapping = &mapping;
+  const auto gpu = MakeMemorySite(memory, 3);
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
+  const auto original = pair;
+  EXPECT_EQ(amdf_status_code(amdf_memory_query_pair_info(&file, &gpu, &pair)),
+            AMDF_STATUS_CODE_UNSUPPORTED);
+  EXPECT_EQ(std::memcmp(&pair, &original, sizeof(pair)), 0);
+  EXPECT_EQ(native->site_description_count, 0u);
+
+  mapping.info.features = AMDF_HOST_MAPPING_FEATURE_FILE_IO;
+  ASSERT_EQ(amdf_memory_query_pair_info(&file, &gpu, &pair), AMDF_STATUS_OK);
+  EXPECT_EQ(pair.release.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
+  ExpectCacheTransitionEqual(pair.acquire, native->site_description.acquire);
+  EXPECT_EQ(pair.atomic_reach.scope_32, AMDF_ATOMIC_SCOPE_NONE);
+  EXPECT_EQ(pair.atomic_reach.scope_64, AMDF_ATOMIC_SCOPE_NONE);
+  ASSERT_EQ(amdf_memory_query_pair_info(&gpu, &file, &pair), AMDF_STATUS_OK);
+  ExpectCacheTransitionEqual(pair.release, native->site_description.release);
+  EXPECT_EQ(pair.acquire.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
+
+  file.kind = AMDF_MEMORY_SITE_KIND_HOST;
+  ASSERT_EQ(amdf_memory_query_pair_info(&file, &gpu, &pair), AMDF_STATUS_OK);
+  ExpectCacheTransitionEqual(pair.release, mapping.info.flush);
+  file.kind = AMDF_MEMORY_SITE_KIND_FILE_IO;
+  mapping.info.flags = AMDF_MEMORY_MAP_FLAG_READ;
+  EXPECT_EQ(amdf_status_code(amdf_memory_query_pair_info(&file, &gpu, &pair)),
+            AMDF_STATUS_CODE_UNSUPPORTED);
+  ASSERT_EQ(amdf_memory_query_pair_info(&gpu, &file, &pair), AMDF_STATUS_OK);
+  EXPECT_EQ(pair.acquire.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
+  EXPECT_EQ(native->last_queue_family_ordinal, 3u);
+  EXPECT_EQ(amdf_memory_destroy(memory), AMDF_STATUS_OK);
+}
+
 TEST_F(MemoryTest, HostAtomicReachUsesOnlyTheExactPeersSystemWidths) {
   FakeDevice devices[2];
   amdf_memory_device_access_t accesses[2];

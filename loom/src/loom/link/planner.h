@@ -203,7 +203,8 @@ const loom_link_plan_symbol_t* loom_link_plan_symbol_at(
 // Returns the index-wide symbol ordinal defining the construction identity of
 // selected symbol |ordinal|, or INVALID_ORDINAL when |ordinal| is out of range.
 // A declaration resolved to a concrete definition shares that definition's
-// identity; every other selected symbol retains its own identity.
+// identity. Repeated link-once definitions share their canonical indexed
+// representative; every other selected symbol retains its own identity.
 iree_host_size_t loom_link_plan_symbol_identity_ordinal(
     const loom_link_plan_t* plan, iree_host_size_t ordinal);
 

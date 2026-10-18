@@ -605,6 +605,7 @@ class CiTest(unittest.TestCase):
                 "Test repository",
                 "Run dynamic library environment smoke",
                 "Run executable alias smoke",
+                "Test shared Loom tools",
             ],
         )
         configure_step = steps[0]
@@ -634,6 +635,11 @@ class CiTest(unittest.TestCase):
                 "--help",
             ),
         )
+        self.assertIn("--//loom/config:shared_tools", steps[6].argv)
+        self.assertIn("//loom/src/loom/tools/loom-opt:execution_test", steps[6].argv)
+        self.assertIn("//loom/src/loom/tooling/target/cpu/serve:all", steps[6].argv)
+        for step in steps[:6]:
+            self.assertNotIn("--//loom/config:shared_tools", step.argv)
 
     def test_bazel_repository_integration_skips_ordinary_repository_build(self):
         args = ci.parse_arguments(["iree-bazel-repository-integration"])
@@ -1089,6 +1095,13 @@ class CiTest(unittest.TestCase):
         self.assertFalse(any("--config=ubsan" in line for line in command_lines))
         self.assertFalse(any("--config=tsan" in line for line in command_lines))
         self.assertFalse(any("--config=msan" in line for line in command_lines))
+        shared_step = next(
+            step for step in steps if step.name == "Test shared Loom tools"
+        )
+        self.assertIn("--//loom/config/import:enable=cxx", shared_step.argv)
+        self.assertIn(
+            "//loom/src/loom/tools/loom-import-cxx:execution_test", shared_step.argv
+        )
 
     def test_bazel_cpu_msan_command_builds_without_tests(self):
         args = ci.parse_arguments(
@@ -1539,6 +1552,30 @@ fi
                 for step in test_steps
             )
         )
+
+    def test_cmake_cpu_qualifies_static_then_shared_in_the_same_tree(self):
+        steps = ci.steps_from_args(ci.parse_arguments(["iree-cmake-cpu"]))
+        configure_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.name == "Configure shared Loom tools"
+        )
+        self.assertTrue(
+            any(step.name == "Test IREE CMake" for step in steps[:configure_index])
+        )
+        for step in steps[:configure_index]:
+            self.assertNotIn("-DLOOM_LINK_SHARED_TOOLS=ON", step.argv)
+        for step in steps[configure_index:]:
+            self.assertTrue(self.uses_cmake_build_dir(step, "iree-cmake-cpu"))
+        self.assertNotIn("--fresh", steps[configure_index].argv)
+        self.assertIn("-DLOOM_LINK_SHARED_TOOLS=ON", steps[configure_index].argv)
+        self.assertIn("-DLOOM_IMPORT_CXX=ON", steps[configure_index].argv)
+        self.assertIn("loom-import-cxx", steps[configure_index + 1].argv)
+        self.assertIn(
+            "loom_tooling_target_cpu_serve_loom-serve-test-tool",
+            steps[configure_index + 1].argv,
+        )
+        self.assertEqual(steps[-1].name, "Test shared Loom tools")
 
     def test_cmake_cpu_sanitizers_command_runs_each_configuration(self):
         args = ci.parse_arguments(["iree-cmake-cpu-sanitizers"])

@@ -11,11 +11,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from loom.target.arch.x86 import native_vector as native
-from loom.target.arch.x86.feature_bits import (
-    FEATURE_AVX512_BF16,
-    FEATURE_AVX512_VL,
-)
-from loom.target.arch.x86.vector_encoding import VectorEncodingPrefix
+from loom.target.arch.x86.feature_bits import FEATURE_AVX512_BF16
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
@@ -35,6 +31,7 @@ from .common import (
     _SCHEDULE_MEMORY_LOAD_YMM,
     _SCHEDULE_MEMORY_LOAD_ZMM,
     _asm,
+    _avx512_descriptor,
     _descriptor_support_tables,
     _evex_writemask_operand,
     _gpr64_resource,
@@ -52,13 +49,6 @@ _MEMORY_SCHEDULES = {
     256: _SCHEDULE_MEMORY_LOAD_YMM,
     512: _SCHEDULE_MEMORY_LOAD_ZMM,
 }
-
-
-def _required_feature_bits(vector_bit_width: int) -> int:
-    feature_bits = FEATURE_AVX512_BF16
-    if vector_bit_width < 512:
-        feature_bits |= FEATURE_AVX512_VL
-    return feature_bits
 
 
 def _load_effect(memory_source: native.EvexMemorySource, width_bits: int) -> Effect:
@@ -160,7 +150,6 @@ def _conversion_descriptor(
             if memory_source is not native.EvexMemorySource.NONE
             else _vector_f32_schedule_class(vector_bit_width)
         ),
-        feature_mask_words=(_required_feature_bits(vector_bit_width),),
         flags=(
             (DescriptorFlag.SIDE_EFFECTING,)
             if memory_source is not native.EvexMemorySource.NONE
@@ -173,10 +162,12 @@ def _conversion_descriptor(
         memory_source=memory_source,
         indexed=indexed,
     )
-    return instruction.bind(
+    return _avx512_descriptor(
         descriptor,
-        VectorEncodingPrefix.EVEX,
+        instruction,
+        scalar=False,
         vector_bit_width=vector_bit_width,
+        required_feature_bits=FEATURE_AVX512_BF16,
     )
 
 

@@ -94,27 +94,16 @@ typedef enum iree_hal_amdgpu_pm4_command_buffer_publication_mode_e {
 #define IREE_HAL_AMDGPU_ASAN_DEFAULT_QUARANTINE_SIZE \
   ((iree_device_size_t)256 * 1024 * 1024)
 
-// Device-visible TSAN shadow entry size in bytes.
-#define IREE_HAL_AMDGPU_TSAN_SHADOW_ENTRY_SIZE 8u
+// Queue-local TSAN shadow arena size used by default. Instrumented dispatches
+// serialize on each queue and consume this arena from byte zero.
+#define IREE_HAL_AMDGPU_TSAN_DEFAULT_SHADOW_SIZE \
+  ((iree_device_size_t)512 * 1024 * 1024)
 
-// Per-workgroup TSAN shadow header size in bytes.
-#define IREE_HAL_AMDGPU_TSAN_WORKGROUP_SHADOW_HEADER_SIZE 8u
-
-// Default log2 local-memory bytes represented by one TSAN shadow entry.
-#define IREE_HAL_AMDGPU_TSAN_DEFAULT_MEMORY_GRANULE_SHIFT 2u
-
-// Maximum log2 local-memory bytes represented by one TSAN shadow entry.
-#define IREE_HAL_AMDGPU_TSAN_MAX_MEMORY_GRANULE_SHIFT 16u
-
-// Default local-memory byte capacity represented for each workgroup.
-// Zero selects the backend default group segment limit.
-#define IREE_HAL_AMDGPU_TSAN_DEFAULT_WORKGROUP_LOCAL_MEMORY_SIZE 0u
-
-// Default number of workgroup ordinals represented by one dispatch shadow.
-#define IREE_HAL_AMDGPU_TSAN_DEFAULT_WORKGROUP_CAPACITY 256u
-
-// Default number of queue-local dispatch shadow slots.
-#define IREE_HAL_AMDGPU_TSAN_DEFAULT_SHADOW_SLOT_COUNT 16u
+// Maximum queue-local TSAN shadow arena size. Instrumented accesses use a
+// 32-bit unsigned byte offset from the arena base, making 2^32 bytes the
+// largest representable exclusive range.
+#define IREE_HAL_AMDGPU_TSAN_MAX_SHADOW_SIZE \
+  ((iree_device_size_t)UINT32_MAX + 1)
 
 // Host-build compatibility for an AMDGPU logical-device option set.
 typedef uint32_t iree_hal_amdgpu_logical_device_host_compatibility_t;
@@ -307,20 +296,8 @@ typedef struct iree_hal_amdgpu_logical_device_options_t {
     // Policy applied after a valid TSAN report is emitted.
     iree_hal_amdgpu_tsan_report_policy_t report_policy;
 
-    // Log2 local-memory bytes represented by one shadow entry.
-    uint32_t memory_granule_shift;
-
-    // Local-memory byte capacity represented for each workgroup. Zero selects
-    // the backend default group segment limit.
-    uint32_t workgroup_local_memory_size;
-
-    // Maximum workgroup ordinals represented by one dispatch shadow.
-    uint32_t workgroup_capacity;
-
-    // Number of queue-local dispatch shadow slots available. Command-buffer
-    // recording may insert execution barriers when a TSAN-instrumented span
-    // would otherwise exceed this window.
-    uint32_t shadow_slot_count;
+    // Queue-local shadow arena size in bytes.
+    iree_device_size_t shadow_size;
   } tsan;
 
   // Preallocates a reasonable number of resources in pools to reduce initial

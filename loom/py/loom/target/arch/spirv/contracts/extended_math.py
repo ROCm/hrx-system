@@ -36,6 +36,8 @@ from loom.target.contracts import (
 )
 
 _SCALAR_SOURCE_OPS = {
+    "sinf": scalar_math.scalar_sinf,
+    "cosf": scalar_math.scalar_cosf,
     "expf": scalar_math.scalar_expf,
     "logf": scalar_math.scalar_logf,
     "exp2f": scalar_math.scalar_exp2f,
@@ -45,6 +47,8 @@ _SCALAR_SOURCE_OPS = {
 }
 
 _VECTOR_SOURCE_OPS = {
+    "sinf": vector.vector_sinf,
+    "cosf": vector.vector_cosf,
     "expf": vector.vector_expf,
     "logf": vector.vector_logf,
     "exp2f": vector.vector_exp2f,

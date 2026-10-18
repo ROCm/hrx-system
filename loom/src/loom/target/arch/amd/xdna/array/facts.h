@@ -209,6 +209,10 @@ typedef struct loom_xdna_tile_facts_t {
   int8_t lock_value_minimum;
   // Maximum signed lock value.
   int8_t lock_value_maximum;
+  // Implemented packet arbiters; the register encoding can name more.
+  uint8_t packet_arbiter_count;
+  // Independent destination selections within each packet arbiter.
+  uint8_t packet_master_select_count;
   // Bit set of configuration-register modules present on the tile.
   uint8_t register_module_bits;
   // Aggregate resources across all physical tiles of this kind.

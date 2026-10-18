@@ -11,6 +11,7 @@ load(
     "loom_cc_library",
     "loom_config_compatible_with",
 )
+load(":shared.bzl", "loomc_interop_headers", "loomc_shared_libraries")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -328,7 +329,14 @@ loom_cc_library(
     hdrs = ["include/loomc/interop.h"],
     includes = ["include"],
     deps = [
+        ":interop_headers",
         ":loomc",
+    ],
+)
+
+loomc_interop_headers(
+    name = "interop_headers",
+    deps = [
         "//loom/src/loom/error:source",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:registry",
@@ -418,4 +426,114 @@ iree_cmake_extra_content(
 endif()
 """,
     inline = True,
+)
+
+# One configured binding inventory serves the installed SDK and shared tools.
+# Static callers continue selecting the individual component targets above.
+loomc_shared_libraries(
+    name = "loomc_shared",
+    components = [
+        ":base",
+        ":loomc",
+        ":task_pool",
+        ":task_queue",
+        "//loom/binding/c/target/configured:ir",
+        "//loom/binding/c/target/configured",
+        "//loom/binding/c/target/cmd",
+        "//loom/binding/c/target/cpu:iree_hal",
+        "//loom/binding/c/target/iree_hal",
+    ] + select({
+        "//loom/config/import:cxx": [
+            "//loom/binding/c/import/cxx",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target:amdgpu_artifacts": [
+            "//loom/binding/c/target/amdgpu",
+            "//loom/binding/c/target/amdgpu:iree_hal",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target:xdna_artifacts": [
+            "//loom/binding/c/target/amd/xdna",
+            "//loom/binding/c/target/amd/xdna:iree_hal",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target:spirv_artifacts": [
+            "//loom/binding/c/target/spirv",
+            "//loom/binding/c/target/spirv/vulkaninfo",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target:spirv_vulkan_artifacts": [
+            "//loom/binding/c/target/spirv:iree_hal",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/execute:spirv_vulkan_hal": [
+            "//loom/binding/c/target/spirv/vulkan",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target/arch:vm": [
+            "//loom/binding/c/target/vm",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target:wasm_artifacts": [
+            "//loom/binding/c/target/wasm",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target/arch:x86": [
+            "//loom/binding/c/target/x86",
+        ],
+        "//conditions:default": [],
+    }),
+    runtime_deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/async/util:proactor_thread",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base:cpu_data",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/base/internal:fpu_state",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task:device_spec",
+        "//runtime/src/iree/hal/drivers/task/executable:loader",
+        "//runtime/src/iree/hal/drivers/task/executable/library:abi",
+        "//runtime/src/iree/hal/memory:slab_cache",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/math",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/net:carrier",
+        "//runtime/src/iree/net/carrier/stream",
+        "//runtime/src/iree/schemas:xdna_executable",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/tokenizer/vocab",
+        "//runtime/src/iree/tooling:device_flags",
+        "//runtime/src/iree/tooling:device_profiling",
+        "//runtime/src/iree/tooling:device_util",
+        "//runtime/src/iree/tooling:parameter_util",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+        "//runtime/src/iree/vm/bytecode:wire",
+    ],
 )

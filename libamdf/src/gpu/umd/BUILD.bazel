@@ -116,6 +116,13 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "event",
+    hdrs = ["event.h"],
+    visibility = ["//libamdf/src/gpu:__subpackages__"],
+    deps = [":device"],
+)
+
+amdf_cc_library(
     name = "umd",
     target_compatible_with = ["@platforms//cpu:x86_64"] + select({
         "@platforms//os:linux": [],
@@ -126,6 +133,7 @@ amdf_cc_library(
     deps = [
         ":device",
         ":endpoint_profile",
+        ":event",
         ":instance",
         ":kernel_queue",
         ":memory",

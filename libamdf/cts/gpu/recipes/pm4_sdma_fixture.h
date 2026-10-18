@@ -96,7 +96,7 @@ class Pm4SdmaTest : public Pm4DispatchTest {
   amdf_queue_family_info_t sdma_family_ = {};
 
  private:
-  void SelectCreation(Backing& backing);
+  void SelectCreation(Backing& backing, amdf_memory_flags_t flags);
   amdf_memory_profile_site_t ProfileSite(Site site,
                                          amdf_memory_map_flags_t host_access);
   amdf_memory_site_t ConcreteSite(const GpuMemory& memory, Site site);

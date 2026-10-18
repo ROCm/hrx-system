@@ -2041,6 +2041,8 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
             .options = loom_amdgpu_descriptor_matrix_options,
             .query = loom_amdgpu_descriptor_matrix_query,
             .attrs = loom_amdgpu_descriptor_matrix_attrs,
+            .materialize_operand =
+                loom_amdgpu_descriptor_matrix_materialize_operand,
             .user_data = NULL,
         },
     .source_plan_observer = &loom_amdgpu_source_representation_observer,

@@ -14,6 +14,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
+#include "loom/target/arch/amdgpu/lower/abi.h"
 #include "loom/target/arch/amdgpu/lower/cluster_preamble.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -24,6 +25,7 @@
 #include "loom/target/arch/amdgpu/lower/source_alloca_layout.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/lower/workgroup_storage.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -32,6 +34,7 @@
 #define LOOM_AMDGPU_DISPATCH_PACKET_GRID_SIZE_X_OFFSET 12u
 #define LOOM_AMDGPU_DISPATCH_PACKET_GRID_SIZE_Y_OFFSET 16u
 #define LOOM_AMDGPU_DISPATCH_PACKET_GRID_SIZE_Z_OFFSET 20u
+#define LOOM_AMDGPU_DISPATCH_PACKET_GROUP_SEGMENT_SIZE_OFFSET 28u
 
 typedef enum loom_amdgpu_preamble_query_kind_e {
   LOOM_AMDGPU_PREAMBLE_QUERY_KIND_NONE = 0,
@@ -1551,10 +1554,11 @@ static iree_status_t loom_amdgpu_emit_workgroup_count(
       out_low_value_id);
 }
 
-iree_status_t loom_amdgpu_emit_current_workgroup_linear_id(
+iree_status_t loom_amdgpu_emit_current_workgroup_linear_id_u64_checked(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_type_t result_type, loom_value_id_t* out_linear_id) {
+    loom_value_id_t* out_linear_id, loom_value_id_t* out_overflow) {
   *out_linear_id = LOOM_VALUE_ID_INVALID;
+  *out_overflow = LOOM_VALUE_ID_INVALID;
 
   loom_value_id_t workgroup_x = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_current_workgroup_id(
@@ -1568,35 +1572,63 @@ iree_status_t loom_amdgpu_emit_current_workgroup_linear_id(
 
   const loom_value_id_t dispatch_ptr =
       loom_amdgpu_lookup_dispatch_ptr_live_in(context);
+  loom_type_t sgpr_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &sgpr_type));
   loom_value_id_t workgroup_count_x = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_workgroup_count(
-      context, source_op, dispatch_ptr, LOOM_KERNEL_DIMENSION_X, result_type,
+      context, source_op, dispatch_ptr, LOOM_KERNEL_DIMENSION_X, sgpr_type,
       &workgroup_count_x));
   loom_value_id_t workgroup_count_y = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_workgroup_count(
-      context, source_op, dispatch_ptr, LOOM_KERNEL_DIMENSION_Y, result_type,
+      context, source_op, dispatch_ptr, LOOM_KERNEL_DIMENSION_Y, sgpr_type,
       &workgroup_count_y));
 
-  loom_value_id_t scaled_y = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MUL_I32, workgroup_y,
-      workgroup_count_x, result_type, &scaled_y));
-  loom_value_id_t linear_id = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_U32, workgroup_x,
-      scaled_y, result_type, &linear_id));
+  loom_value_id_t workgroup_z_count_y = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_emit_i64_mul_lo(context, source_op, workgroup_z,
+                                  workgroup_count_y, &workgroup_z_count_y));
+  loom_value_id_t workgroup_y_u64 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_from_u32(
+      context, source_op, workgroup_y, &workgroup_y_u64));
+  loom_value_id_t workgroup_zy = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t row_overflow = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_add_checked(
+      context, source_op, workgroup_z_count_y, workgroup_y_u64, &workgroup_zy,
+      &row_overflow));
 
-  loom_value_id_t workgroup_xy_count = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t workgroup_count_x_u64 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_from_u32(
+      context, source_op, workgroup_count_x, &workgroup_count_x_u64));
+  loom_value_id_t scaled_zy = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t scale_overflow = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_mul_checked(
+      context, source_op, workgroup_zy, workgroup_count_x_u64, &scaled_zy,
+      &scale_overflow));
+  loom_value_id_t workgroup_x_u64 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_from_u32(
+      context, source_op, workgroup_x, &workgroup_x_u64));
+  loom_value_id_t add_overflow = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_add_checked(
+      context, source_op, scaled_zy, workgroup_x_u64, out_linear_id,
+      &add_overflow));
+  loom_value_id_t overflow = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MUL_I32,
-      workgroup_count_x, workgroup_count_y, result_type, &workgroup_xy_count));
-  loom_value_id_t scaled_z = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MUL_I32, workgroup_z,
-      workgroup_xy_count, result_type, &scaled_z));
-  return loom_amdgpu_emit_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_U32, linear_id,
-      scaled_z, result_type, out_linear_id);
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B32, row_overflow,
+      scale_overflow, sgpr_type, &overflow));
+  return loom_amdgpu_emit_binary(context, source_op,
+                                 LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B32, overflow,
+                                 add_overflow, sgpr_type, out_overflow);
+}
+
+iree_status_t loom_amdgpu_emit_current_group_segment_size(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t* out_group_segment_size) {
+  loom_type_t sgpr_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &sgpr_type));
+  return loom_amdgpu_emit_dispatch_packet_dword(
+      context, source_op, loom_amdgpu_lookup_dispatch_ptr_live_in(context),
+      LOOM_AMDGPU_DISPATCH_PACKET_GROUP_SEGMENT_SIZE_OFFSET, sgpr_type,
+      out_group_segment_size);
 }
 
 iree_status_t loom_amdgpu_plan_entry_setup(void* user_data,
@@ -1700,7 +1732,8 @@ iree_status_t loom_amdgpu_emit_entry_setup(void* user_data,
           context, source_op, source_result, low_count));
     }
   }
-  return loom_amdgpu_sanitizer_race_emit_entry_setup(context);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_emit_entry_setup(context));
+  return loom_amdgpu_emit_hal_kernel_predicate_argument_setup(context);
 }
 
 iree_status_t loom_amdgpu_lower_preamble_op(

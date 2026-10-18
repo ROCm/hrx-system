@@ -2355,8 +2355,21 @@ enum loom_symbol_flag_bits_e {
   LOOM_SYMBOL_FLAG_PUBLIC = 1u << 0,
   // Symbol must be preserved by ordinary symbol DCE even when unreachable.
   LOOM_SYMBOL_FLAG_RETAIN = 1u << 1,
+  // Concrete definition may be coalesced with same-named link-once definitions;
+  // producers promise equivalent semantics.
+  LOOM_SYMBOL_FLAG_LINK_ONCE = 1u << 2,
 };
 typedef uint16_t loom_symbol_flags_t;
+
+// Source/module linkage policy for concrete symbol definitions.
+typedef enum loom_symbol_linkage_e {
+  // Ordinary strong definition; another concrete definition is an error.
+  LOOM_SYMBOL_LINKAGE_DEFAULT = 0,
+  // Repeated same-named definitions share one linked identity. The producer
+  // promises equivalent semantics; linking validates contracts, not bodies.
+  LOOM_SYMBOL_LINKAGE_LINK_ONCE = 1,
+  LOOM_SYMBOL_LINKAGE_COUNT_ = 2,
+} loom_symbol_linkage_t;
 
 //===----------------------------------------------------------------------===//
 // Symbol

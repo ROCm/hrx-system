@@ -516,3 +516,24 @@ func.def @fragment_numeric_envelope(%input: vector<4xi32>, %value: f32, %unknown
   %unknown_nan = vector.isnanf %unknown_fragment : vector<4xf32> -> vector<4xi1>
   func.return %is_finite, %is_nan, %unknown_nan : vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
+
+// ====
+
+// Exact element envelopes do not route aggregate results to scalar constant
+// materialization. Signed and unsigned conversions still fold as vectors.
+func.def @constant_conversions() -> (vector<4xf32>, vector<4xf32>, vector<4xbf16>) {
+  %integer = vector.constant 17 : vector<4xi32>
+  %byte = vector.constant -1 : vector<4xi8>
+  %wide = vector.sitofp %integer : vector<4xi32> to vector<4xf32>
+  %unsigned = vector.uitofp %byte : vector<4xi8> to vector<4xf32>
+  %narrow = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
+  func.return %wide, %unsigned, %narrow : vector<4xf32>, vector<4xf32>, vector<4xbf16>
+}
+
+// ----
+func.def @constant_conversions() -> (vector<4xf32>, vector<4xf32>, vector<4xbf16>) {
+  %wide = vector.constant 17.0 : vector<4xf32>
+  %unsigned = vector.constant 255.0 : vector<4xf32>
+  %narrow = vector.constant 17.0 : vector<4xbf16>
+  func.return %wide, %unsigned, %narrow : vector<4xf32>, vector<4xf32>, vector<4xbf16>
+}

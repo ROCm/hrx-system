@@ -226,7 +226,7 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
       &builder,
       LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY |
           LOOM_FUNC_DEF_BUILD_FLAG_HAS_EFFECT_CONTRACT,
-      LOOM_FUNC_VISIBILITY_PUBLIC, /*retain=*/0, /*cc=*/0,
+      LOOM_FUNC_VISIBILITY_PUBLIC, /*linkage=*/0, /*retain=*/0, /*cc=*/0,
       LOOM_CALLABLE_EFFECT_CONTRACT_PURE, /*temperature=*/0,
       /*inline_policy=*/0, loom_symbol_ref_null(), /*abi=*/0,
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
@@ -399,7 +399,7 @@ iree_status_t loom_kernel_launch_config_program_capture_static(
       &builder,
       LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY |
           LOOM_FUNC_DEF_BUILD_FLAG_HAS_EFFECT_CONTRACT,
-      LOOM_FUNC_VISIBILITY_PUBLIC, /*retain=*/0, /*cc=*/0,
+      LOOM_FUNC_VISIBILITY_PUBLIC, /*linkage=*/0, /*retain=*/0, /*cc=*/0,
       LOOM_CALLABLE_EFFECT_CONTRACT_PURE, /*temperature=*/0,
       /*inline_policy=*/0, loom_symbol_ref_null(), /*abi=*/0,
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,

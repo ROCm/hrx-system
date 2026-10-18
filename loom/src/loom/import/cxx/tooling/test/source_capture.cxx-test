@@ -6,7 +6,7 @@ extern "C" int captured_sum(int left, int right) {
 }
 
 // ----
-func.def public @source_sum(%left: i32, %right: i32) -> (i32) {
+func.def public linkonce @source_sum(%left: i32, %right: i32) -> (i32) {
   %3 = scalar.addi %left, %right : i32 loc("loom/src/loom/import/cxx/tooling/test/source_capture.h":11:18 to 11:28)
   func.return %3 : i32 loc("loom/src/loom/import/cxx/tooling/test/source_capture.h":11:11 to 11:42)
 } loc("loom/src/loom/import/cxx/tooling/test/source_capture.h":10:1 to 12:2)

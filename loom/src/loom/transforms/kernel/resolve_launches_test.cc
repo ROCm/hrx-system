@@ -67,7 +67,8 @@ class ResolveLaunchesTest : public ::testing::Test {
     loom_op_t* function = nullptr;
     IREE_CHECK_OK(loom_func_def_build(
         &module_builder_, LOOM_FUNC_DEF_BUILD_FLAG_HAS_EFFECT_CONTRACT,
-        /*visibility=*/0, /*retain=*/0, /*cc=*/0, effect_contract,
+        /*visibility=*/0, /*linkage=*/0, /*retain=*/0, /*cc=*/0,
+        effect_contract,
         /*temperature=*/0, /*inline_policy=*/0, loom_symbol_ref_null(),
         /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), symbol, &workload_type, 1, result_types,

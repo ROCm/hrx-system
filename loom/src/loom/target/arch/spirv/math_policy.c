@@ -17,6 +17,8 @@
   _(OP_NATIVE_ARITHMETIC, op_native_arithmetic, "math.op.native_arithmetic") \
   _(RECIPE_INVERSE_HYPERBOLIC_F32, recipe_inverse_hyperbolic_f32,            \
     "math.recipe.inverse_hyperbolic_f32")                                    \
+  _(RECIPE_TRIGONOMETRIC_F32, recipe_trigonometric_f32,                      \
+    "math.recipe.trigonometric_f32")                                         \
   _(RECIPE_WIDEN_F32_ROUND, recipe_widen_f32_round,                          \
     "math.recipe.widen_f32_round")                                           \
   _(ROOT_AFN, root_afn, "math.root.afn")                                     \
@@ -26,7 +28,10 @@
   _(TRANSCENDENTAL_AFN, transcendental_afn, "math.transcendental.afn")       \
   _(TRANSCENDENTAL_AFN_F32, transcendental_afn_f32,                          \
     "math.transcendental.afn_f32")                                           \
-  _(TRANSCENDENTAL_F32, transcendental_f32, "math.transcendental.f32")
+  _(TRANSCENDENTAL_F32, transcendental_f32, "math.transcendental.f32")       \
+  _(TRIGONOMETRIC_F32_EVALUATION, trigonometric_f32_evaluation,              \
+    "math.trigonometric.f32_evaluation")                                     \
+  _(TRIGONOMETRIC_F16_F32, trigonometric_f16_f32, "math.trigonometric.f16_f32")
 
 enum loom_spirv_math_constraint_e {
   LOOM_SPIRV_MATH_CONSTRAINT_NONE = 0,
@@ -114,6 +119,26 @@ static const loom_target_math_policy_direct_rule_t
             LOOM_TARGET_MATH_RECIPE_UNKNOWN, LOOM_SPIRV_MATH_EVALUATION_NONE,
             LOOM_SPIRV_MATH_CONSTRAINT_OP_NATIVE_ARITHMETIC,
             LOOM_SPIRV_MATH_CONSTRAINT_NONE),
+#define LOOM_SPIRV_MATH_TRIGONOMETRIC_RULE(op_)                            \
+  [LOOM_TARGET_MATH_OP_##op_] = LOOM_SPIRV_MATH_DIRECT_RULE(               \
+      LOOM_SCALAR_TYPE_SET_F16 | LOOM_SCALAR_TYPE_SET_F32,                 \
+      LOOM_TARGET_MATH_FASTMATH_FLAG_AFN, LOOM_TARGET_MATH_RECIPE_UNKNOWN, \
+      LOOM_SPIRV_MATH_EVALUATION_NONE,                                     \
+      LOOM_SPIRV_MATH_CONSTRAINT_TRIGONOMETRIC_F16_F32,                    \
+      LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN)
+        LOOM_SPIRV_MATH_TRIGONOMETRIC_RULE(SINF),
+        LOOM_SPIRV_MATH_TRIGONOMETRIC_RULE(COSF),
+#undef LOOM_SPIRV_MATH_TRIGONOMETRIC_RULE
+#define LOOM_SPIRV_MATH_TURNS_RULE(op_)                             \
+  [LOOM_TARGET_MATH_OP_##op_] = LOOM_SPIRV_MATH_DIRECT_RULE(        \
+      LOOM_SCALAR_TYPE_SET_F32, LOOM_TARGET_MATH_FASTMATH_FLAG_AFN, \
+      LOOM_TARGET_MATH_RECIPE_TRIGONOMETRIC_F32,                    \
+      LOOM_SPIRV_MATH_EVALUATION_SOURCE_F32,                        \
+      LOOM_SPIRV_MATH_CONSTRAINT_RECIPE_TRIGONOMETRIC_F32,          \
+      LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN)
+        LOOM_SPIRV_MATH_TURNS_RULE(SINTURNSF),
+        LOOM_SPIRV_MATH_TURNS_RULE(COSTURNSF),
+#undef LOOM_SPIRV_MATH_TURNS_RULE
         [LOOM_TARGET_MATH_OP_EXP2F] = LOOM_SPIRV_MATH_DIRECT_RULE(
             LOOM_SCALAR_TYPE_SET_F32, LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
             LOOM_TARGET_MATH_RECIPE_UNKNOWN, LOOM_SPIRV_MATH_EVALUATION_NONE,
@@ -185,6 +210,7 @@ static const loom_target_math_policy_direct_rule_t
 enum loom_spirv_math_rule_e {
   LOOM_SPIRV_MATH_RULE_ARITHMETIC_BF16 = 0,
   LOOM_SPIRV_MATH_RULE_INVERSE_NARROW,
+  LOOM_SPIRV_MATH_RULE_TRIGONOMETRIC_NARROW,
   LOOM_SPIRV_MATH_RULE_COUNT_,
 };
 
@@ -210,6 +236,18 @@ static const loom_target_math_policy_rule_t
                     LOOM_SPIRV_MATH_CONSTRAINT_RECIPE_INVERSE_HYPERBOLIC_F32,
                 .permission_constraint =
                     LOOM_SPIRV_MATH_CONSTRAINT_INVERSE_HYPERBOLIC_AFN,
+            },
+        [LOOM_SPIRV_MATH_RULE_TRIGONOMETRIC_NARROW] =
+            {
+                .match =
+                    LOOM_SPIRV_MATH_MATCH(LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
+                                          LOOM_TARGET_MATH_FASTMATH_FLAG_AFN),
+                .recipe = LOOM_TARGET_MATH_RECIPE_TRIGONOMETRIC_F32,
+                .evaluation = LOOM_SPIRV_MATH_EVALUATION_WIDENED_F32,
+                .decision_constraint =
+                    LOOM_SPIRV_MATH_CONSTRAINT_RECIPE_TRIGONOMETRIC_F32,
+                .permission_constraint =
+                    LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN,
             },
 };
 
@@ -243,6 +281,17 @@ static const loom_target_math_policy_rule_span_t
         LOOM_SPIRV_MATH_FALLBACK(SQRTF, ROOT_F16_F32_F64),
         LOOM_SPIRV_MATH_FALLBACK(RSQRTF, ROOT_F16_F32_F64),
 #undef LOOM_SPIRV_MATH_FALLBACK
+#define LOOM_SPIRV_MATH_TRIGONOMETRIC_SPAN(op_, constraint_)             \
+  [LOOM_TARGET_MATH_OP_##op_] =                                          \
+      LOOM_SPIRV_MATH_SPAN(LOOM_SPIRV_MATH_RULE_TRIGONOMETRIC_NARROW, 1, \
+                           LOOM_SPIRV_MATH_CONSTRAINT_##constraint_)
+        LOOM_SPIRV_MATH_TRIGONOMETRIC_SPAN(SINF, TRIGONOMETRIC_F16_F32),
+        LOOM_SPIRV_MATH_TRIGONOMETRIC_SPAN(COSF, TRIGONOMETRIC_F16_F32),
+        LOOM_SPIRV_MATH_TRIGONOMETRIC_SPAN(SINTURNSF,
+                                           TRIGONOMETRIC_F32_EVALUATION),
+        LOOM_SPIRV_MATH_TRIGONOMETRIC_SPAN(COSTURNSF,
+                                           TRIGONOMETRIC_F32_EVALUATION),
+#undef LOOM_SPIRV_MATH_TRIGONOMETRIC_SPAN
 #define LOOM_SPIRV_MATH_INVERSE_SPAN(op_)             \
   [LOOM_TARGET_MATH_OP_##op_] = LOOM_SPIRV_MATH_SPAN( \
       LOOM_SPIRV_MATH_RULE_INVERSE_NARROW, 1,         \

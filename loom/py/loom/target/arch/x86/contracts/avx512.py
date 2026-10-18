@@ -16,6 +16,10 @@ from loom.target.arch.x86.contracts.avx512_predicate import (
     avx512_predicate_rules,
 )
 from loom.target.arch.x86.contracts.float_conversion import float_conversion_rules
+from loom.target.arch.x86.contracts.float_integer import (
+    avx512_scalar_float_integer_rules,
+    avx512_vector_float_integer_rules,
+)
 from loom.target.arch.x86.contracts.float_narrowing import packed_bfloat_narrowing_rules
 from loom.target.arch.x86.contracts.float_roots import (
     scalar_float_root_rules,
@@ -32,6 +36,9 @@ from loom.target.arch.x86.contracts.half_conversion import half_conversion_rules
 from loom.target.arch.x86.contracts.integer_float import avx512_integer_float_rules
 from loom.target.arch.x86.contracts.integer_reduction import (
     avx512_integer_reduction_rules,
+)
+from loom.target.arch.x86.contracts.integer_rotation import (
+    avx512_vector_rotation_rules,
 )
 from loom.target.arch.x86.contracts.lane_movement import (
     avx512_lane_movement_rules,
@@ -97,6 +104,8 @@ def _cases() -> Sequence[ContractCase]:
     )
     return (
         *avx512_integer_float_rules(_descriptor),
+        *avx512_scalar_float_integer_rules(_descriptor),
+        *avx512_vector_float_integer_rules(_descriptor),
         *float_conversion_rules(_descriptor, evex=True),
         *packed_bfloat_narrowing_rules(_descriptor, evex=True),
         *half_conversion_rules(_descriptor, evex=True),
@@ -109,6 +118,7 @@ def _cases() -> Sequence[ContractCase]:
         ),
         *avx512_vector_integer_narrowing_rules(_descriptor),
         *avx512_vector_integer_count_rules(_descriptor),
+        *avx512_vector_rotation_rules(_descriptor),
         *avx512_predicate_rules(_descriptor),
         *avx512_vector_arithmetic_rules(_descriptor),
         *scalar_float_root_rules(

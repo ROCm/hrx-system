@@ -1,5 +1,36 @@
 // RUN: pass canonicalize
 
+// Uniform rotate counts retain their direction while normalizing modulo the
+// lane width. Every count is an identity for one-bit lanes.
+func.def @rotate_counts_normalize(%words: vector<4xi32>, %wide: vector<2xi64>, %bits: vector<8xi1>) -> (vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<8xi1>) {
+  %negative_word = vector.constant -1 : vector<4xi32>
+  %large_word = vector.constant 257 : vector<4xi32>
+  %large_wide = vector.constant 300 : vector<2xi64>
+  %negative_wide = vector.constant -1 : vector<2xi64>
+  %bit_counts = vector.constant true : vector<8xi1>
+  %word_left = vector.rotli %words, %negative_word : vector<4xi32>
+  %word_right = vector.rotri %words, %large_word : vector<4xi32>
+  %wide_left = vector.rotli %wide, %large_wide : vector<2xi64>
+  %wide_right = vector.rotri %wide, %negative_wide : vector<2xi64>
+  %bit_right = vector.rotri %bits, %bit_counts : vector<8xi1>
+  func.return %word_left, %word_right, %wide_left, %wide_right, %bit_right : vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<8xi1>
+}
+
+// ----
+func.def @rotate_counts_normalize(%words: vector<4xi32>, %wide: vector<2xi64>, %bits: vector<8xi1>) -> (vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<8xi1>) {
+  %21 = vector.constant 31 : vector<4xi32>
+  %word_left = vector.rotli %words, %21 : vector<4xi32>
+  %20 = vector.constant 1 : vector<4xi32>
+  %word_right = vector.rotri %words, %20 : vector<4xi32>
+  %19 = vector.constant 44 : vector<2xi64>
+  %wide_left = vector.rotli %wide, %19 : vector<2xi64>
+  %18 = vector.constant 63 : vector<2xi64>
+  %wide_right = vector.rotri %wide, %18 : vector<2xi64>
+  func.return %word_left, %word_right, %wide_left, %wide_right, %bits : vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<8xi1>
+}
+
+// ====
+
 // A static result refinement propagates its extent back through the source
 // producer without changing the value carried by the refinement edge.
 func.def @refine_propagates_static_shape(%width: index, %value: i32) -> (vector<8xi32>) {

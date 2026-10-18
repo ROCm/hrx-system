@@ -120,6 +120,34 @@ constexpr std::array<WaitCase, 25> kWaitCases = {{
 class Pm4WaitTest : public Pm4CommandTest,
                     public ::testing::WithParamInterface<WaitCase> {
  protected:
+  Pm4WaitTest() : Pm4CommandTest(AMDF_QUEUE_ROLE_ATOMIC) {}
+
+  enum class Producer { kCopy, kAtomicStore, kHostStore };
+  void RunHandoff(Producer producer_kind);
+
+  void ReleaseWait() {
+    if (pending_control_ == nullptr) {
+      return;
+    }
+    const auto address =
+        reinterpret_cast<uintptr_t>(pending_control_->host.pointer);
+    if (GetParam().byte_length == 4) {
+      GpuStoreRelease<uint32_t>(address,
+                                static_cast<uint32_t>(GetParam().final_value));
+    } else {
+      GpuStoreRelease<uint64_t>(address, GetParam().final_value);
+    }
+    pending_control_ = nullptr;
+  }
+
+  void TearDown() override {
+    // An early assertion can leave the consumer published without its
+    // producer. Release that finite wait before retiring either queue or
+    // releasing any of their backing. This does not establish completion.
+    ReleaseWait();
+    Pm4CommandTest::TearDown();
+  }
+
   void EmitWait(Pm4CommandWriter& commands, uint64_t address) {
     const auto& parameters = GetParam();
     RecordProperty("wait_operand_byte_length", parameters.byte_length);
@@ -137,6 +165,9 @@ class Pm4WaitTest : public Pm4CommandTest,
                             parameters.comparison, parameters.mask);
     }
   }
+
+  // Case-owned control backing retained through the consumer's final use.
+  GpuMemory* pending_control_ = nullptr;
 };
 
 TEST_P(Pm4WaitTest, AlreadySatisfiedOperandAllowsFollowingWork) {
@@ -175,7 +206,7 @@ TEST_P(Pm4WaitTest, AlreadySatisfiedOperandAllowsFollowingWork) {
   EXPECT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
 }
 
-TEST_P(Pm4WaitTest, ConsumerWaitPrecedesProducerPublication) {
+void Pm4WaitTest::RunHandoff(Producer producer_kind) {
   constexpr uint64_t kPayload = UINT64_C(0x2468ace013579bdf);
   constexpr amdf_memory_access_t kReadWrite =
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
@@ -190,6 +221,38 @@ TEST_P(Pm4WaitTest, ConsumerWaitPrecedesProducerPublication) {
   ASSERT_NO_FATAL_FAILURE(CreateMemory(kReadWrite, kMemoryByteLength, &target));
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(kReadWrite, kMemoryByteLength, &control));
+  if (producer_kind != Producer::kCopy) {
+    constexpr auto kOperations =
+        AMDF_ATOMIC_OPERATION_STORE | AMDF_ATOMIC_OPERATION_WAIT;
+    const auto operations =
+        GetParam().byte_length == 4
+            ? control->access_info.atomic_operations_32 &
+                  family_.atomic_capabilities.operations_without_dispatch_32
+            : control->access_info.atomic_operations_64 &
+                  family_.atomic_capabilities.operations_without_dispatch_64;
+    if ((operations & kOperations) != kOperations) {
+      GTEST_SKIP() << "queue and backing do not qualify native store/wait";
+    }
+    const auto device_site = control->DeviceSite(family_.ordinal);
+    const auto producer_site = producer_kind == Producer::kHostStore
+                                   ? control->HostSite()
+                                   : device_site;
+    amdf_memory_pair_info_t pair = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+        .structure_size = sizeof(pair),
+    };
+    ASSERT_EQ(api_->memory_query_pair_info(&producer_site, &device_site, &pair),
+              AMDF_STATUS_OK);
+    const auto reach = GetParam().byte_length == 4 ? pair.atomic_reach.scope_32
+                                                   : pair.atomic_reach.scope_64;
+    const auto required_scope = producer_kind == Producer::kHostStore
+                                    ? AMDF_ATOMIC_SCOPE_SYSTEM
+                                    : AMDF_ATOMIC_SCOPE_DEVICE;
+    if (reach < required_scope) {
+      GTEST_SKIP() << "backing does not qualify producer/consumer atomic reach";
+    }
+    RecordProperty("atomic_reach", reach);
+  }
   auto* input = static_cast<uint64_t*>(source->host.pointer);
   auto* milestones = static_cast<uint64_t*>(control->host.pointer);
   auto expected_source = MakeGuardWords(UINT64_C(0x6d2ac491579b03e8));
@@ -229,22 +292,36 @@ TEST_P(Pm4WaitTest, ConsumerWaitPrecedesProducerPublication) {
 
   GpuCommandQueue* producer = nullptr;
   GpuCommandQueue* consumer = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&producer));
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&consumer));
-  ASSERT_GE(producer->words().size_bytes(), 256u);
-  ASSERT_GT(consumer->words().size_bytes(), 256u);
-  Pm4CommandWriter produce(producer->words().data(), *pm4_profile_);
-  produce.SystemBarrier();
-  produce.CopyData64(source->device_address + 64, intermediate->device_address);
-  produce.SystemBarrier();
-  if (GetParam().byte_length == 4) {
-    produce.CopyData32(source->device_address, control->device_address);
-  } else {
-    produce.CopyData64(source->device_address, control->device_address);
+  if (producer_kind != Producer::kHostStore) {
+    ASSERT_NO_FATAL_FAILURE(CreateQueue(&producer));
   }
-  produce.SystemBarrier();
-  produce.WriteData32(control->device_address + 128, 1);
-  produce.PadToEightWords();
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(&consumer));
+  ASSERT_GT(consumer->words().size_bytes(), 256u);
+  size_t producer_word_count = 0;
+  if (producer != nullptr) {
+    ASSERT_GE(producer->words().size_bytes(), 256u);
+    Pm4CommandWriter produce(producer->words().data(), *pm4_profile_);
+    produce.SystemBarrier();
+    produce.CopyData64(source->device_address + 64,
+                       intermediate->device_address);
+    produce.SystemBarrier();
+    if (producer_kind == Producer::kAtomicStore) {
+      if (GetParam().byte_length == 4) {
+        produce.AtomicStore32(control->device_address,
+                              static_cast<uint32_t>(GetParam().final_value));
+      } else {
+        produce.AtomicStore64(control->device_address, GetParam().final_value);
+      }
+    } else if (GetParam().byte_length == 4) {
+      produce.CopyData32(source->device_address, control->device_address);
+    } else {
+      produce.CopyData64(source->device_address, control->device_address);
+    }
+    produce.SystemBarrier();
+    produce.WriteData32(control->device_address + 128, 1);
+    produce.PadToEightWords();
+    producer_word_count = produce.word_count();
+  }
 
   Pm4CommandWriter consume(consumer->words().data(), *pm4_profile_);
   consume.SystemBarrier();
@@ -259,6 +336,7 @@ TEST_P(Pm4WaitTest, ConsumerWaitPrecedesProducerPublication) {
   // Readiness belongs to the consumer's confirmed prefix. The host then
   // publishes the finite producer, without any sleep or intermediate host
   // retirement that could substitute for the tested memory dependency.
+  pending_control_ = control;
   ASSERT_NO_FATAL_FAILURE(
       consumer->Publish(api_, gpu_api_, consume.word_count()));
   ASSERT_TRUE(
@@ -266,8 +344,14 @@ TEST_P(Pm4WaitTest, ConsumerWaitPrecedesProducerPublication) {
   EXPECT_EQ(
       GpuLoadAcquire<uint32_t>(reinterpret_cast<uintptr_t>(milestones + 24)),
       0u);
-  ASSERT_NO_FATAL_FAILURE(
-      producer->Publish(api_, gpu_api_, produce.word_count()));
+  if (producer_kind == Producer::kHostStore) {
+    std::memcpy(intermediate->host.pointer, &kPayload, sizeof(kPayload));
+    GpuStoreRelease<uint32_t>(reinterpret_cast<uintptr_t>(milestones + 16), 1);
+    ReleaseWait();
+  } else {
+    ASSERT_NO_FATAL_FAILURE(
+        producer->Publish(api_, gpu_api_, producer_word_count));
+  }
   ASSERT_TRUE(
       GpuWaitEqual<uint32_t>(reinterpret_cast<uintptr_t>(milestones + 24), 1));
   // The consumer's own marker must suffice for observing its output.
@@ -278,8 +362,22 @@ TEST_P(Pm4WaitTest, ConsumerWaitPrecedesProducerPublication) {
   EXPECT_EQ(ReadWords(*control), expected_control);
   EXPECT_EQ(ReadWords(*source), expected_source);
   RecordProperty("memory_checked_bytes", 4 * kMemoryByteLength);
-  EXPECT_NO_FATAL_FAILURE(producer->WaitRetired(api_));
+  if (producer != nullptr) {
+    EXPECT_NO_FATAL_FAILURE(producer->WaitRetired(api_));
+  }
   EXPECT_NO_FATAL_FAILURE(consumer->WaitRetired(api_));
+}
+
+TEST_P(Pm4WaitTest, ConsumerWaitPrecedesProducerPublication) {
+  RunHandoff(Producer::kCopy);
+}
+
+TEST_P(Pm4WaitTest, NativeAtomicStoreReleasesWaitingConsumer) {
+  RunHandoff(Producer::kAtomicStore);
+}
+
+TEST_P(Pm4WaitTest, HostStoreReleasesWaitingConsumer) {
+  RunHandoff(Producer::kHostStore);
 }
 
 INSTANTIATE_TEST_SUITE_P(Comparison, Pm4WaitTest,

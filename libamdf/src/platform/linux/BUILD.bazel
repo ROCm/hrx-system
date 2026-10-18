@@ -26,6 +26,19 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "host_export",
+    srcs = ["host_export.c"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//libamdf/src/platform:__pkg__"],
+    deps = [
+        ":dma_buf",
+        ":file",
+        "//libamdf/src/platform:host_export",
+        "//third_party:linux_udmabuf_uapi",
+    ],
+)
+
+amdf_cc_library(
     name = "host_memory",
     srcs = ["host_memory.c"],
     target_compatible_with = ["@platforms//os:linux"],
@@ -96,6 +109,7 @@ amdf_cc_library(
     visibility = ["//libamdf/src/platform:__pkg__"],
     deps = [
         ":file",
+        ":host_export",
         "//libamdf/src:allocator",
         "//libamdf/src/platform",
     ],
@@ -135,6 +149,24 @@ amdf_cc_library(
     deps = [
         ":endpoint",
         ":instance",
+    ],
+)
+
+amdf_cc_test(
+    name = "host_export_test",
+    srcs = ["host_export_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=open",
+        "-Wl,--wrap=ioctl",
+    ],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":host_export",
+        ":host_memory",
+        "//libamdf/src/platform:host_export",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_udmabuf_uapi",
     ],
 )
 

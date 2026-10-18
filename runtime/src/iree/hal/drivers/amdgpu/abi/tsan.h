@@ -21,17 +21,14 @@
 // ABI version for |iree_hal_amdgpu_tsan_report_t|.
 #define IREE_HAL_AMDGPU_TSAN_REPORT_ABI_VERSION_0 0u
 
-// ABI version for |iree_hal_amdgpu_tsan_queue_state_t|.
-#define IREE_HAL_AMDGPU_TSAN_QUEUE_STATE_ABI_VERSION_0 0u
-
 // Bitfield specifying properties of the TSAN configuration.
 typedef uint32_t iree_hal_amdgpu_tsan_config_flags_t;
 enum iree_hal_amdgpu_tsan_config_flag_bits_t {
   IREE_HAL_AMDGPU_TSAN_CONFIG_FLAG_NONE = 0u,
   // TSAN race checking is enabled for the owning logical device.
   IREE_HAL_AMDGPU_TSAN_CONFIG_FLAG_ENABLED = 1u << 0,
-  // Queue-scoped TSAN state is available through queue-local config fields.
-  IREE_HAL_AMDGPU_TSAN_CONFIG_FLAG_QUEUE_STATE = 1u << 1,
+  // Queue-scoped TSAN shadow storage is available.
+  IREE_HAL_AMDGPU_TSAN_CONFIG_FLAG_QUEUE_SHADOW = 1u << 1,
 };
 
 // TSAN check kind that triggered a report.
@@ -42,6 +39,9 @@ enum iree_hal_amdgpu_tsan_check_kind_bits_t {
   // Conflicting accesses to the same memory location were observed without
   // intervening synchronization.
   IREE_HAL_AMDGPU_TSAN_CHECK_KIND_DATA_RACE = 1u,
+  // The dispatch requires more workgroup shadow bytes than the queue arena
+  // provides.
+  IREE_HAL_AMDGPU_TSAN_CHECK_KIND_SHADOW_CAPACITY = 2u,
 };
 
 // TSAN memory space containing the observed address.
@@ -87,17 +87,9 @@ enum iree_hal_amdgpu_tsan_report_flag_bits_t {
   IREE_HAL_AMDGPU_TSAN_REPORT_FLAG_CURRENT_WORKITEM_LINEAR = 1u << 3,
 };
 
-// Bitfield specifying properties of queue-owned TSAN state.
-typedef uint32_t iree_hal_amdgpu_tsan_queue_state_flags_t;
-enum iree_hal_amdgpu_tsan_queue_state_flag_bits_t {
-  IREE_HAL_AMDGPU_TSAN_QUEUE_STATE_FLAG_NONE = 0u,
-};
-
 // Runtime-published TSAN configuration read by instrumented device code.
 //
-// Queue-scoped executable variants publish queue-specific shadow storage so
-// device code can derive a queue-local dispatch slot from the dispatch ID
-// without host per-dispatch mutation.
+// Queue-scoped executable variants publish the queue's serialized shadow arena.
 typedef struct IREE_AMDGPU_ALIGNAS(8) iree_hal_amdgpu_tsan_config_t {
   // Size of this record in bytes for forward-compatible parsing.
   uint32_t record_length;
@@ -105,108 +97,29 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_hal_amdgpu_tsan_config_t {
   uint32_t abi_version;
   // Flags describing enabled TSAN runtime facilities.
   iree_hal_amdgpu_tsan_config_flags_t flags;
-  // Log2 application memory bytes represented by one shadow entry.
-  uint32_t memory_granule_shift;
-  // Device-visible base of the queue or device shadow allocation.
-  uint64_t shadow_base;
-  // Total bytes in the shadow allocation.
-  uint64_t shadow_size;
-  // Bytes reserved for one dispatch slot.
-  uint64_t dispatch_shadow_stride;
-  // Bytes reserved for one workgroup inside a dispatch slot.
-  uint64_t workgroup_shadow_stride;
-  // Maximum workgroup ordinals represented by one dispatch slot.
-  uint32_t workgroup_capacity;
-  // Bytes in each shadow entry.
-  uint32_t shadow_entry_size;
-  // Host-observed base of the owning queue AQL ring, or 0 when unavailable.
-  // This is metadata, not a device-addressing contract.
-  uint64_t queue_aql_base;
-  // Power-of-two AQL packet slot mask for host packet IDs.
-  uint64_t queue_aql_slot_mask;
-  // Device-visible iree_hal_amdgpu_tsan_queue_state_t pointer, or zero.
-  uint64_t queue_state_base;
-  // Number of queue-local dispatch shadow slots available.
-  uint32_t shadow_slot_count;
-  // Reserved for future TSAN runtime state. Must be zero.
+  // Reserved for future TSAN configuration. Must be zero.
   uint32_t reserved0;
-  // Reserved for future TSAN runtime state. Must be zero.
-  uint64_t reserved1;
+  // Device-visible base of the queue shadow arena.
+  uint64_t shadow_base;
+  // Total bytes in the queue shadow arena.
+  uint64_t shadow_size;
 } iree_hal_amdgpu_tsan_config_t;
-IREE_AMDGPU_STATIC_ASSERT(sizeof(iree_hal_amdgpu_tsan_config_t) == 96,
+IREE_AMDGPU_STATIC_ASSERT(sizeof(iree_hal_amdgpu_tsan_config_t) == 32,
                           "TSAN config size is part of the device ABI");
 IREE_AMDGPU_STATIC_ASSERT(
     IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_tsan_config_t, shadow_base) == 16,
     "TSAN config shadow fields must follow the fixed header");
-IREE_AMDGPU_STATIC_ASSERT(
-    IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_tsan_config_t, queue_state_base) == 72,
-    "TSAN config queue state fields must follow the queue AQL fields");
-IREE_AMDGPU_STATIC_ASSERT(
-    IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_tsan_config_t, reserved1) == 88,
-    "TSAN config reserved tail must keep the fixed layout");
-
-// Queue-owned TSAN state read by instrumented kernels.
-//
-// One state record exists for each logical AMDGPU host queue when queue-scoped
-// TSAN support is enabled. The record owns the stable queue shadow geometry
-// used by payload kernels.
-typedef struct IREE_AMDGPU_ALIGNAS(8) iree_hal_amdgpu_tsan_queue_state_t {
-  // Size of this record in bytes for forward-compatible parsing.
-  uint32_t record_length;
-  // ABI version of this record layout.
-  uint32_t abi_version;
-  // Flags from iree_hal_amdgpu_tsan_queue_state_flag_bits_t.
-  iree_hal_amdgpu_tsan_queue_state_flags_t flags;
-  // Flattened logical queue ordinal in the owning HAL device.
-  uint32_t queue_ordinal;
-  // Physical GPU device ordinal owning this queue.
-  uint32_t physical_device_ordinal;
-  // Queue ordinal relative to |physical_device_ordinal|.
-  uint32_t physical_queue_ordinal;
-  // Reserved for future queue state. Must be zero.
-  uint32_t reserved0;
-  // Number of queue-local dispatch shadow slots available.
-  uint32_t shadow_slot_count;
-  // Host-observed base address of the HSA AQL packet ring. This is metadata,
-  // not a device-addressing contract.
-  uint64_t aql_ring_base;
-  // Power-of-two packet-ring slot mask for host packet IDs.
-  uint64_t aql_ring_mask;
-  // Reserved for future queue state. Must be zero.
-  uint64_t reserved1;
-  // Device-visible base of this queue's shadow allocation.
-  uint64_t shadow_base;
-  // Total bytes in this queue's shadow allocation.
-  uint64_t shadow_size;
-  // Bytes reserved for one dispatch shadow slot.
-  uint64_t dispatch_shadow_stride;
-  // Bytes reserved for one workgroup inside a dispatch shadow slot.
-  uint64_t workgroup_shadow_stride;
-  // Maximum workgroup ordinals represented by one dispatch shadow slot.
-  uint32_t workgroup_capacity;
-  // Bytes in each shadow entry.
-  uint32_t shadow_entry_size;
-  // Log2 application memory bytes represented by one shadow entry.
-  uint32_t memory_granule_shift;
-  // Reserved for future queue state. Must be zero.
-  uint32_t reserved2;
-  // Reserved for future queue state. Must be zero.
-  uint64_t reserved3;
-} iree_hal_amdgpu_tsan_queue_state_t;
-IREE_AMDGPU_STATIC_ASSERT(sizeof(iree_hal_amdgpu_tsan_queue_state_t) == 112,
-                          "TSAN queue state size is part of the device ABI");
-IREE_AMDGPU_STATIC_ASSERT(
-    IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_tsan_queue_state_t, aql_ring_base) ==
-        32,
-    "TSAN queue state AQL fields must follow the fixed header");
-IREE_AMDGPU_STATIC_ASSERT(
-    IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_tsan_queue_state_t, shadow_base) == 56,
-    "TSAN queue state shadow fields must follow AQL geometry fields");
 
 // TSAN shadow entry bit layout used for workgroup-local memory race detection.
 enum iree_hal_amdgpu_tsan_shadow_entry_layout_t {
-  // Byte length of each TSAN local-memory shadow entry.
-  IREE_HAL_AMDGPU_TSAN_SHADOW_ENTRY_BYTE_LENGTH = 8u,
+  // Byte length of one encoded access history.
+  IREE_HAL_AMDGPU_TSAN_SHADOW_HISTORY_BYTE_LENGTH = 8u,
+  // Access histories retained for each application byte.
+  IREE_HAL_AMDGPU_TSAN_SHADOW_HISTORY_COUNT = 2u,
+  // Byte length of each application-byte shadow cell.
+  IREE_HAL_AMDGPU_TSAN_SHADOW_CELL_BYTE_LENGTH =
+      IREE_HAL_AMDGPU_TSAN_SHADOW_HISTORY_BYTE_LENGTH *
+      IREE_HAL_AMDGPU_TSAN_SHADOW_HISTORY_COUNT,
   // Per-workgroup shadow header byte length.
   IREE_HAL_AMDGPU_TSAN_WORKGROUP_SHADOW_HEADER_BYTE_LENGTH = 8u,
   // Offset of the low 32-bit per-workgroup barrier epoch inside the shadow
@@ -249,17 +162,12 @@ enum iree_hal_amdgpu_tsan_shadow_access_kind_bits_t {
   IREE_HAL_AMDGPU_TSAN_SHADOW_ACCESS_KIND_ATOMIC = 4u,
 };
 
-// Kernargs for the queue-local TSAN state initialization dispatch.
+// Kernargs for the queue-local TSAN shadow initialization dispatch.
 //
 // Queue creation submits one initializer dispatch before user work can enter
-// the AQL ring. The dispatch clears shadow storage, then publishes the
-// immutable queue header from |queue_state_template|. Host code keeps an
-// identical mirror for cold executable-global publication and never reads this
-// device allocation back.
+// the AQL ring. The dispatch clears the complete serialized arena.
 typedef struct IREE_AMDGPU_ALIGNAS(8)
-    iree_hal_amdgpu_tsan_queue_initialize_args_t {
-  // Device pointer to the queue-owned TSAN state header.
-  iree_hal_amdgpu_tsan_queue_state_t* queue_state;
+    iree_hal_amdgpu_tsan_shadow_initialize_args_t {
   // Device pointer to queue-local shadow storage.
   void* shadow_base;
   // Byte length of |shadow_base|.
@@ -270,33 +178,13 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   uint32_t reserved0;
   // Total workitems launched by the shadow clear dispatch.
   uint64_t clear_byte_stride;
-  // Device pointer to the queue header template in this kernarg record.
-  const iree_hal_amdgpu_tsan_queue_state_t* queue_state_template;
-  // Header value written to |queue_state| after mutable storage is cleared.
-  iree_hal_amdgpu_tsan_queue_state_t queue_state_template_value;
-} iree_hal_amdgpu_tsan_queue_initialize_args_t;
+} iree_hal_amdgpu_tsan_shadow_initialize_args_t;
 IREE_AMDGPU_STATIC_ASSERT(
-    sizeof(iree_hal_amdgpu_tsan_queue_initialize_args_t) == 160,
-    "TSAN queue initialize args size is part of the device ABI");
-IREE_AMDGPU_STATIC_ASSERT(
-    IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_tsan_queue_initialize_args_t,
-                         queue_state_template_value) == 48,
-    "TSAN queue initialize args template follows clear geometry fields");
+    sizeof(iree_hal_amdgpu_tsan_shadow_initialize_args_t) == 32,
+    "TSAN shadow initialize args size is part of the device ABI");
 
-// TSAN diagnostic payload carried by feedback packets of kind TSAN.
-//
-// The generic feedback packet header carries common source attribution used by
-// all feedback packet kinds. This payload carries the TSAN-specific current and
-// prior access attribution needed to explain the conflict.
-typedef struct IREE_AMDGPU_ALIGNAS(8) iree_hal_amdgpu_tsan_report_t {
-  // Size of this record in bytes for forward-compatible parsing.
-  uint32_t record_length;
-  // ABI version of this record layout.
-  uint32_t abi_version;
-  // Check kind that triggered the report.
-  iree_hal_amdgpu_tsan_check_kind_t check_kind;
-  // Flags describing optional report fields.
-  iree_hal_amdgpu_tsan_report_flags_t flags;
+// TSAN data-race report details.
+typedef struct IREE_AMDGPU_ALIGNAS(8) iree_hal_amdgpu_tsan_data_race_report_t {
   // Memory space containing |memory_address|.
   iree_hal_amdgpu_tsan_memory_space_t memory_space;
   // Access kind performed by the reporting workitem.
@@ -323,6 +211,61 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_hal_amdgpu_tsan_report_t {
   uint32_t prior_workgroup_id[3];
   // Workitem id that produced the prior access.
   uint32_t prior_workitem_id[3];
+} iree_hal_amdgpu_tsan_data_race_report_t;
+IREE_AMDGPU_STATIC_ASSERT(
+    sizeof(iree_hal_amdgpu_tsan_data_race_report_t) == 104,
+    "TSAN data-race report size is part of the device ABI");
+
+// TSAN queue-shadow capacity report details.
+typedef struct IREE_AMDGPU_ALIGNAS(8)
+    iree_hal_amdgpu_tsan_shadow_capacity_report_t {
+  // Total bytes available in the queue shadow arena.
+  uint64_t shadow_size;
+  // Exclusive byte end required by the first workgroup outside the arena.
+  uint64_t required_shadow_end;
+  // Bytes required by each workgroup for this dispatch.
+  uint64_t workgroup_shadow_stride;
+  // Flattened ordinal of the first workgroup outside the arena.
+  uint64_t workgroup_ordinal;
+  // Final group-segment byte size carried by the dispatch packet.
+  uint32_t workgroup_local_memory_size;
+  // Bytes in each application-byte shadow cell.
+  uint32_t shadow_cell_size;
+  // Access histories retained in each shadow cell.
+  uint32_t shadow_history_count;
+  // Reserved for future capacity report fields. Must be zero.
+  uint32_t reserved0;
+  // Workgroup id that observed the capacity failure.
+  uint32_t current_workgroup_id[3];
+  // Workitem id that produced the report.
+  uint32_t current_workitem_id[3];
+  // Reserved for future capacity report fields. Must be zero.
+  uint64_t reserved1[4];
+} iree_hal_amdgpu_tsan_shadow_capacity_report_t;
+IREE_AMDGPU_STATIC_ASSERT(
+    sizeof(iree_hal_amdgpu_tsan_shadow_capacity_report_t) == 104,
+    "TSAN shadow-capacity report size is part of the device ABI");
+
+// TSAN diagnostic payload carried by feedback packets of kind TSAN.
+//
+// The generic feedback packet header carries common source attribution used by
+// all feedback packet kinds. |check_kind| selects exactly one detail variant.
+typedef struct IREE_AMDGPU_ALIGNAS(8) iree_hal_amdgpu_tsan_report_t {
+  // Size of this record in bytes for forward-compatible parsing.
+  uint32_t record_length;
+  // ABI version of this record layout.
+  uint32_t abi_version;
+  // Check kind selecting the active detail variant.
+  iree_hal_amdgpu_tsan_check_kind_t check_kind;
+  // Flags describing optional report fields.
+  iree_hal_amdgpu_tsan_report_flags_t flags;
+  // Check-specific report details.
+  union {
+    // Details for IREE_HAL_AMDGPU_TSAN_CHECK_KIND_DATA_RACE.
+    iree_hal_amdgpu_tsan_data_race_report_t data_race;
+    // Details for IREE_HAL_AMDGPU_TSAN_CHECK_KIND_SHADOW_CAPACITY.
+    iree_hal_amdgpu_tsan_shadow_capacity_report_t shadow_capacity;
+  } detail;
 } iree_hal_amdgpu_tsan_report_t;
 IREE_AMDGPU_STATIC_ASSERT(sizeof(iree_hal_amdgpu_tsan_report_t) == 120,
                           "TSAN report payload size is part of the ABI");

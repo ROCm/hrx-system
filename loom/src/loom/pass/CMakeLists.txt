@@ -18,6 +18,7 @@ loom_cc_library(
     "environment.c"
   DEPS
     iree::base
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -163,6 +164,7 @@ loom_cc_library(
   DEPS
     ::types
     iree::base
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -251,6 +253,7 @@ loom_cc_library(
     iree::base
     loom::util::json
     loom::util::stream
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

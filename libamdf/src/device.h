@@ -56,8 +56,8 @@ struct amdf_device_t {
   amdf_instance_t* provider_instance;
   // Exact engine family implementing this device.
   amdf_engine_kind_t engine_kind;
-  // Number of live queues, programs, and contexts borrowing this device.
-  // Memory dependencies are caller preconditions and are not counted.
+  // Number of queues, queue mappings, events, and contexts borrowing this
+  // device. Memory dependencies are caller preconditions and are not counted.
   amdf_child_tracker_t children;
 };
 

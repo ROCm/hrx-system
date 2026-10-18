@@ -433,7 +433,15 @@ func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %ph
 }
 
 func.def public @complete_text(%prompt: buffer, %response: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
-  %result = func.call @join(%prompt, %response) : (buffer, buffer) -> (buffer)
+  %c0 = index.constant 0 : offset
+  %length = buffer.length %response
+  %empty = index.cmp eq, %length, %c0 : offset
+  %result = scf.if %empty -> (buffer) {
+    scf.yield %prompt : buffer
+  } else {
+    %joined = func.call @join(%prompt, %response) : (buffer, buffer) -> (buffer)
+    scf.yield %joined : buffer
+  }
   %reusable = scalar.constant 1 : i32
   func.return %result, %reusable : buffer, i32
 }

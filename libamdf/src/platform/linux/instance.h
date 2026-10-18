@@ -19,6 +19,8 @@ struct amdf_platform_instance_t {
   int sysfs_descriptor;
   // Qualified native host page length in bytes, cached before discovery.
   size_t page_size;
+  // Optional owned-page exporter and its cached availability and limits.
+  amdf_platform_host_export_t host_export;
   // Serializes cold native connection preparation and device teardown.
   pthread_mutex_t native_mutex;
 };

@@ -25,6 +25,8 @@ typedef struct amdf_gpu_kfd_hdp_t amdf_gpu_kfd_hdp_t;
 struct amdf_gpu_umd_device_t {
   // Host allocator copied for device and child metadata.
   amdf_allocator_t host_allocator;
+  // Native connection owner for shared event backing and terminal sources.
+  amdf_gpu_umd_instance_t* instance;
   // Borrowed instance KFD file selecting the primary or secondary context.
   int descriptor;
   // Borrowed instance render file whose VM is acquired by the KFD context.

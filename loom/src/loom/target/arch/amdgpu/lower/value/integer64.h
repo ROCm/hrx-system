@@ -48,6 +48,30 @@ iree_status_t loom_amdgpu_emit_sgpr64_binary_carry(
     loom_amdgpu_descriptor_ref_t high_descriptor_ref, loom_value_id_t low_lhs,
     loom_value_id_t low_rhs, loom_value_id_t* out_low_result);
 
+// Adds two SGPR pairs and returns both the low 64-bit sum and a normalized
+// one-word overflow value. |out_overflow| is zero when the mathematical sum is
+// representable in 64 bits and one otherwise.
+iree_status_t loom_amdgpu_emit_sgpr64_add_checked(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_lhs, loom_value_id_t low_rhs,
+    loom_value_id_t* out_low_sum, loom_value_id_t* out_overflow);
+
+// Multiplies two SGPR pairs and returns both the low 64-bit product and a
+// one-word overflow indicator. |out_overflow| is zero when the mathematical
+// product is representable in 64 bits and nonzero otherwise.
+iree_status_t loom_amdgpu_emit_sgpr64_mul_checked(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_lhs, loom_value_id_t low_rhs,
+    loom_value_id_t* out_low_product, loom_value_id_t* out_overflow);
+
+// Compares two unsigned SGPR pairs and returns SCC true when |low_lhs| is less
+// than or equal to |low_rhs|.
+iree_status_t loom_amdgpu_emit_sgpr64_ule_scc(loom_low_lower_context_t* context,
+                                              const loom_op_t* source_op,
+                                              loom_value_id_t low_lhs,
+                                              loom_value_id_t low_rhs,
+                                              loom_value_id_t* out_low_scc);
+
 // Emits the low 64 bits of a product from one- or two-unit operands in the same
 // SGPR or VGPR class. One-unit inputs are unsigned words with an implicit zero
 // high word. The result always has two units; absent cross products are

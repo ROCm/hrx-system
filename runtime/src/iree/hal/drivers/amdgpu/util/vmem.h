@@ -160,7 +160,7 @@ typedef struct iree_hal_amdgpu_vmem_ringbuffer_t {
   // May be larger than the requested size if adjusted to the minimum allocation
   // granule.
   iree_device_size_t capacity;
-  // Physical allocation of the pinned ringbuffer memory.
+  // Physical allocation backing the ringbuffer memory.
   // This is sized to the requested capacity of the ringbuffer.
   hsa_amd_vmem_alloc_handle_t alloc_handle;
   // Base virtual address pointer of the ringbuffer. This is the start of the

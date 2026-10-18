@@ -208,59 +208,226 @@ kernel.def @tsan_workgroup_384_barrier_safe_write() {
   kernel.return
 }
 
-check.case @tsan_workgroup_write_race_case {
-  %output = check.generate.fill value(0) : tensor<1xi32>
-  kernel.launch @tsan_workgroup_write_race(%output) : (tensor<1xi32>)
-  %expected = check.generate.fill value(1) : tensor<1xi32>
-  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
-  check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", prior_access = "write"}, type = "tsan_report"}
+// Adjacent byte and half-word writes cover the complete scalar subword family.
+// The barrier makes the readback a distinct epoch so only false sharing in the
+// initial stores can produce an event.
+kernel.def @tsan_workgroup_adjacent_subword_writes() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%i8_output: buffer, %f16_output: buffer, %bf16_output: buffer) {
+  %base = index.constant 0 : offset
+  %i8_bytes = index.constant 2 : offset
+  %half_bytes = index.constant 4 : offset
+  %i8_value = scalar.constant 3 : i8
+  %f16_value = scalar.constant 5.0 : f16
+  %bf16_value = scalar.constant 7.0 : bf16
+  %lane = kernel.workitem.id<x> : index
+
+  %i8_global = buffer.assume.memory_space<global> %i8_output : buffer
+  %f16_global = buffer.assume.memory_space<global> %f16_output : buffer
+  %bf16_global = buffer.assume.memory_space<global> %bf16_output : buffer
+  %i8_output_view = buffer.view %i8_global[%base] : buffer -> view<2xi8>
+  %f16_output_view = buffer.view %f16_global[%base] : buffer -> view<2xf16>
+  %bf16_output_view = buffer.view %bf16_global[%base] : buffer -> view<2xbf16>
+
+  %i8_scratch = buffer.alloca<workgroup> align(1) %i8_bytes : buffer
+  %f16_scratch = buffer.alloca<workgroup> align(2) %half_bytes : buffer
+  %bf16_scratch = buffer.alloca<workgroup> align(2) %half_bytes : buffer
+  %i8_view = buffer.view %i8_scratch[%base] : buffer -> view<2xi8>
+  %f16_view = buffer.view %f16_scratch[%base] : buffer -> view<2xf16>
+  %bf16_view = buffer.view %bf16_scratch[%base] : buffer -> view<2xbf16>
+  view.store %i8_value, %i8_view[%lane] : i8, view<2xi8>
+  view.store %f16_value, %f16_view[%lane] : f16, view<2xf16>
+  view.store %bf16_value, %bf16_view[%lane] : bf16, view<2xbf16>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %i8_result = view.load %i8_view[%lane] : view<2xi8> -> i8
+  %f16_result = view.load %f16_view[%lane] : view<2xf16> -> f16
+  %bf16_result = view.load %bf16_view[%lane] : view<2xbf16> -> bf16
+  view.store %i8_result, %i8_output_view[%lane] : i8, view<2xi8>
+  view.store %f16_result, %f16_output_view[%lane] : f16, view<2xf16>
+  view.store %bf16_result, %bf16_output_view[%lane] : bf16, view<2xbf16>
+  kernel.return
+}
+
+// Two compatible readers must both survive in history. The second reader's
+// same-workitem write conflicts with the first reader even though it is
+// compatible with the most recent access.
+kernel.def @tsan_workgroup_two_readers_then_writer() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %first_lane = index.constant 0 : index
+  %second_lane = index.constant 1 : index
+  %bytes = index.constant 4 : offset
+  %initial_value = scalar.constant 1 : i32
+  %write_value = scalar.constant 2 : i32
+  %lane = kernel.workitem.id<x> : index
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %global[%base] : buffer -> view<2xi32>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi32>
+  %is_first_lane = index.cmp eq, %lane, %first_lane : index
+  scf.if %is_first_lane {
+    view.store %initial_value, %scratch_view[%first_lane] : i32, view<1xi32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.if %is_first_lane {
+    %first_result = view.load %scratch_view[%first_lane] : view<1xi32> -> i32
+    view.store %first_result, %output_view[%first_lane] : i32, view<2xi32>
+  }
+  %is_second_lane = index.cmp eq, %lane, %second_lane : index
+  scf.if %is_second_lane {
+    %second_result = view.load %scratch_view[%first_lane] : view<1xi32> -> i32
+    view.store %second_result, %output_view[%second_lane] : i32, view<2xi32>
+  }
+  scf.if %is_second_lane {
+    view.store %write_value, %scratch_view[%first_lane] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+func.def @tsan_expected_i32_one(%output: buffer) {
+  %base = index.constant 0 : offset
+  %value = scalar.constant 1 : i32
+  %view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %value, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @tsan_expected_i32_pair_one(%output: buffer) {
+  %base = index.constant 0 : offset
+  %value = scalar.constant 1 : i32
+  %view = buffer.view %output[%base] : buffer -> view<2xi32>
+  view.store %value, %view[0] : i32, view<2xi32>
+  view.store %value, %view[1] : i32, view<2xi32>
+  func.return
+}
+
+func.def @tsan_expected_i32_two(%output: buffer) {
+  %base = index.constant 0 : offset
+  %value = scalar.constant 2 : i32
+  %view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %value, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @tsan_expected_subword_pairs(%i8_output: buffer, %f16_output: buffer, %bf16_output: buffer) {
+  %base = index.constant 0 : offset
+  %i8_value = scalar.constant 3 : i8
+  %f16_value = scalar.constant 5.0 : f16
+  %bf16_value = scalar.constant 7.0 : bf16
+  %i8_view = buffer.view %i8_output[%base] : buffer -> view<2xi8>
+  %f16_view = buffer.view %f16_output[%base] : buffer -> view<2xf16>
+  %bf16_view = buffer.view %bf16_output[%base] : buffer -> view<2xbf16>
+  view.store %i8_value, %i8_view[0] : i8, view<2xi8>
+  view.store %i8_value, %i8_view[1] : i8, view<2xi8>
+  view.store %f16_value, %f16_view[0] : f16, view<2xf16>
+  view.store %f16_value, %f16_view[1] : f16, view<2xf16>
+  view.store %bf16_value, %bf16_view[0] : bf16, view<2xbf16>
+  view.store %bf16_value, %bf16_view[1] : bf16, view<2xbf16>
+  func.return
+}
+
+func.def @tsan_expected_no_output() {
+  func.return
+}
+
+check.scenario @tsan_workgroup_write_race_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@tsan_workgroup_write_race, @tsan_expected_i32_one>(%output) : (tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+      check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", prior_access = "write"}, type = "tsan_report"}
+    }
+  }
   check.return
 }
 
-check.case @tsan_workgroup_wide_upper_half_write_race_case {
-  %output = check.generate.fill value(0) : tensor<2xi32>
-  kernel.launch @tsan_workgroup_wide_upper_half_write_race(%output) : (tensor<2xi32>)
-  %expected = check.generate.fill value(1) : tensor<2xi32>
-  check.expect.equal actual(%output) expected(%expected) : tensor<2xi32>
-  check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", memory_address = 4, prior_access = "write"}, type = "tsan_report"}
+check.scenario @tsan_workgroup_wide_upper_half_write_race_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<2xi32>
+    check.compare<@tsan_workgroup_wide_upper_half_write_race, @tsan_expected_i32_pair_one>(%output) : (tensor<2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
+      check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", memory_address = 4, prior_access = "write"}, type = "tsan_report"}
+    }
+  }
   check.return
 }
 
-check.case @tsan_workgroup_wide_current_write_race_case {
-  %output = check.generate.fill value(0) : tensor<2xi32>
-  kernel.launch @tsan_workgroup_wide_current_write_race(%output) : (tensor<2xi32>)
-  %expected = check.generate.fill value(1) : tensor<2xi32>
-  check.expect.equal actual(%output) expected(%expected) : tensor<2xi32>
-  check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 8, check = "data_race", current_access = "write", memory = "workgroup", memory_address = 0, prior_access = "write"}, type = "tsan_report"}
+check.scenario @tsan_workgroup_wide_current_write_race_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<2xi32>
+    check.compare<@tsan_workgroup_wide_current_write_race, @tsan_expected_i32_pair_one>(%output) : (tensor<2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
+      check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 8, check = "data_race", current_access = "write", memory = "workgroup", memory_address = 0, prior_access = "write"}, type = "tsan_report"}
+    }
+  }
   check.return
 }
 
-check.case @tsan_workgroup_adjacent_wide_writes_case {
-  %output = check.generate.fill value(0) : tensor<2xi32>
-  kernel.launch @tsan_workgroup_adjacent_wide_writes(%output) : (tensor<2xi32>)
-  %expected = check.generate.fill value(1) : tensor<2xi32>
-  check.expect.equal actual(%output) expected(%expected) : tensor<2xi32>
+check.scenario @tsan_workgroup_two_readers_then_writer_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<2xi32>
+    check.compare<@tsan_workgroup_two_readers_then_writer, @tsan_expected_i32_pair_one>(%output) : (tensor<2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
+      check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", memory_address = 0, prior_access = "read"}, type = "tsan_report"}
+    }
+  }
   check.return
 }
 
-check.case @tsan_workgroup_barrier_safe_write_case {
-  %output = check.generate.fill value(0) : tensor<1xi32>
-  kernel.launch @tsan_workgroup_barrier_safe_write(%output) : (tensor<1xi32>)
-  %expected = check.generate.fill value(2) : tensor<1xi32>
-  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+check.scenario @tsan_workgroup_adjacent_wide_writes_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<2xi32>
+    check.compare<@tsan_workgroup_adjacent_wide_writes, @tsan_expected_i32_pair_one>(%output) : (tensor<2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
+    }
+  }
   check.return
 }
 
-check.case @tsan_workgroup_192_distant_write_race_case {
-  kernel.launch @tsan_workgroup_192_distant_write_race() : ()
-  check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", prior_access = "write"}, type = "tsan_report"}
+check.scenario @tsan_workgroup_adjacent_subword_writes_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %i8_output = check.generate.fill value(0) : tensor<2xi8>
+    %f16_output = check.generate.fill value(0.0) : tensor<2xf16>
+    %bf16_output = check.generate.fill value(0.0) : tensor<2xbf16>
+    check.compare<@tsan_workgroup_adjacent_subword_writes, @tsan_expected_subword_pairs>(%i8_output, %f16_output, %bf16_output) : (tensor<2xi8>, tensor<2xf16>, tensor<2xbf16>) -> () {
+      check.expect.bitwise actual(%i8_output) expected(%i8_output) : tensor<2xi8>
+      check.expect.bitwise actual(%f16_output) expected(%f16_output) : tensor<2xf16>
+      check.expect.bitwise actual(%bf16_output) expected(%bf16_output) : tensor<2xbf16>
+    }
+  }
   check.return
 }
 
-check.case @tsan_workgroup_384_barrier_safe_write_case {
-  %output = check.generate.fill value(0) : tensor<1xi32>
-  kernel.launch @tsan_workgroup_384_barrier_safe_write(%output) : (tensor<1xi32>)
-  %expected = check.generate.fill value(2) : tensor<1xi32>
-  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+check.scenario @tsan_workgroup_barrier_safe_write_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@tsan_workgroup_barrier_safe_write, @tsan_expected_i32_two>(%output) : (tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @tsan_workgroup_192_distant_write_race_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    check.compare<@tsan_workgroup_192_distant_write_race, @tsan_expected_no_output>() : () -> () {
+      check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", prior_access = "write"}, type = "tsan_report"}
+    }
+  }
+  check.return
+}
+
+check.scenario @tsan_workgroup_384_barrier_safe_write_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@tsan_workgroup_384_barrier_safe_write, @tsan_expected_i32_two>(%output) : (tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
   check.return
 }

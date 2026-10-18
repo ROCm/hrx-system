@@ -42,14 +42,20 @@ amdf_status_t amdf_platform_instance_create(
     amdf_free(host_allocator, instance);
     return status;
   }
+  amdf_platform_host_export_initialize(&instance->host_export);
   *out_instance = instance;
   return AMDF_STATUS_OK;
 }
 
 amdf_status_t amdf_platform_instance_destroy(
     amdf_platform_instance_t* instance) {
-  const amdf_status_t status =
+  amdf_status_t status =
+      amdf_platform_host_export_deinitialize(&instance->host_export);
+  const amdf_status_t close_status =
       amdf_linux_file_close(&instance->sysfs_descriptor);
+  if (amdf_status_is_ok(status)) {
+    status = close_status;
+  }
   if (amdf_status_is_ok(status)) {
     const int mutex_error = pthread_mutex_destroy(&instance->native_mutex);
     amdf_assert(mutex_error == 0);
@@ -69,6 +75,11 @@ void amdf_platform_instance_lock_native(amdf_platform_instance_t* instance) {
 uint64_t amdf_platform_instance_host_allocation_granularity(
     const amdf_platform_instance_t* instance) {
   return instance->page_size;
+}
+
+const amdf_platform_host_export_t* amdf_platform_instance_host_export(
+    const amdf_platform_instance_t* instance) {
+  return &instance->host_export;
 }
 
 void amdf_platform_instance_unlock_native(amdf_platform_instance_t* instance) {

@@ -53,6 +53,7 @@ iree_py_library(
         "cache.py",
         "combining.py",
         "memory.py",
+        "symbol.py",
     ],
     deps = ["//loom/py/loom:core"],
 )

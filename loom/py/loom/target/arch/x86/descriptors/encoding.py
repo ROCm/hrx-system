@@ -50,6 +50,7 @@ class Form(IntEnum):
     COMPARE_IMMEDIATE_PREDICATE = 36
     COMPARE_BRANCH = 37
     COMPARE_IMMEDIATE_BRANCH = 38
+    UNARY_F3_R_RM = 39
 
 
 class Flag(IntFlag):

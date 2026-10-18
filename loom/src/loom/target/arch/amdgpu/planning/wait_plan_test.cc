@@ -114,7 +114,7 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     schedule_.value_count = 4;
     schedule_.value_ids = block->arg_ids;
     schedule_.value_producer_nodes = value_producer_nodes_;
-    loom_low_schedule_dependency_graph_initialize(&schedule_.dependencies);
+    loom_low_schedule_dependency_graph_initialize(&effect_dependencies_);
     const uint32_t locations[] = {0, 8, 4, 16};
     for (uint32_t i = 0; i < 4; ++i) {
       value_producer_nodes_[i] = LOOM_LOW_SCHEDULE_NODE_NONE;
@@ -168,22 +168,17 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   }
 
   void MemoryDependency(uint32_t producer, uint32_t consumer) {
-    if (schedule_.effect_dependencies.count == 0) {
-      schedule_.effect_dependencies.start =
-          static_cast<uint32_t>(schedule_.dependencies.count);
-    } else {
-      IREE_ASSERT_EQ(schedule_.dependencies.count,
-                     schedule_.effect_dependencies.start +
-                         schedule_.effect_dependencies.count);
-    }
-    loom_low_schedule_dependency_t dependency = {
+    const loom_low_schedule_dependency_t dependency = {
         .producer_node = producer,
         .consumer_node = consumer,
         .kind = LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT,
     };
     IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append(
-        &schedule_.dependencies, dependency, &module_->arena));
-    ++schedule_.effect_dependencies.count;
+        &effect_dependencies_, dependency, &module_->arena));
+    IREE_ASSERT_OK(loom_low_schedule_dependency_graph_retain_range(
+        &effect_dependencies_,
+        {0, static_cast<uint32_t>(effect_dependencies_.count)}, &module_->arena,
+        &schedule_.effect_dependencies));
   }
 
   void MemoryCompletion(uint32_t producer_effect, uint32_t consumer_effect) {
@@ -227,7 +222,6 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
 
     loom_builder_set_block(&builder_, successor);
     const uint32_t consumer_effect = static_cast<uint32_t>(effects_.size());
-    const iree_host_size_t consumer_hazard = hazards_.size();
     Tensor();
     const uint32_t consumer_node = static_cast<uint32_t>(nodes_.size() - 1);
     nodes_[consumer_node].block_index = 1;
@@ -236,10 +230,6 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
       effects_[i].block_index = 1;
       effects_[i].scheduled_ordinal = 0;
       effects_[i].flags |= LOOM_LOW_SCHEDULE_EFFECT_USE_FLAG_REFINED_MEMORY;
-    }
-    for (iree_host_size_t i = consumer_hazard; i < hazards_.size(); ++i) {
-      hazards_[i].block_index = 1;
-      hazards_[i].scheduled_ordinal = 0;
     }
 
     FinalizeSchedule();
@@ -407,19 +397,10 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
       effects_.push_back(use);
     }
     for (uint16_t i = 0; i < node.schedule_class->hazard_count; ++i) {
-      const auto& hazard =
-          descriptors_->hazards[node.schedule_class->hazard_start + i];
       loom_low_schedule_hazard_use_t use = {
           .node_index = node.source_ordinal,
-          .scheduled_ordinal = node.scheduled_ordinal,
-          .hazard_ordinal = i,
-          .kind = hazard.kind,
-          .reference_kind = hazard.reference_kind,
-          .reference_id = hazard.reference_id,
-          .producer_stage = hazard.producer_stage,
-          .consumer_stage = hazard.consumer_stage,
-          .distance = hazard.distance,
-          .hazard_flags = hazard.flags,
+          .hazard_index =
+              static_cast<uint32_t>(node.schedule_class->hazard_start + i),
       };
       hazards_.push_back(use);
     }
@@ -459,6 +440,8 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   std::vector<uint32_t> order_;
   // Descriptor memory and counter effects.
   std::vector<loom_low_schedule_effect_use_t> effects_;
+  // Memory ordering edges retained independently of the scheduler graph.
+  loom_low_schedule_dependency_graph_t effect_dependencies_;
   // Exact cross-block memory completions retained by the generic scheduler.
   std::vector<loom_low_schedule_memory_completion_edge_t> memory_completions_;
   // Descriptor counter hazards.

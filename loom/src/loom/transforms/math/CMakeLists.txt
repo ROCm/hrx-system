@@ -29,6 +29,8 @@ loom_cc_library(
     "patterns.c"
     "patterns.h"
     "patterns_elementwise.c"
+    "trigonometry.c"
+    "trigonometry.h"
   DEPS
     iree::base
     iree::base::internal::arena

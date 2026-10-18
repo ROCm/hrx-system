@@ -125,24 +125,40 @@ def test_rules_fold_static_literals_and_copy_dynamic_shift_counts(
     "descriptor_set",
     [X86_AVX2_DESCRIPTOR_SET, X86_AVX512_CORE_DESCRIPTOR_SET],
 )
-def test_exact_bfloat_value_rule_uses_move_and_shift(
+@pytest.mark.parametrize("preserve_nan", [False, True])
+def test_exact_bfloat_value_rule_separates_rounding_from_nan_handling(
     descriptor_set: DescriptorSet,
+    preserve_nan: bool,
 ) -> None:
+    report_key = "exactly_representable_binary32_to_bfloat16" + (
+        "_preserve_nan" if preserve_nan else ""
+    )
     rule = next(
-        rule
-        for rule in _rules(descriptor_set)
-        if rule.report_key == "exactly_representable_binary32_to_bfloat16"
+        rule for rule in _rules(descriptor_set) if rule.report_key == report_key
     )
 
     assert any(
         guard.kind is GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS
         for guard in rule.guards
     )
+    assert (
+        any(guard.kind is GuardKind.VALUE_NOT_NAN for guard in rule.guards)
+        != preserve_nan
+    )
     assert tuple(emit.descriptor.key for emit in rule.emit) == (
         "x86.avx2.vmovd.gpr32.xmm",
         "x86.scalar.shr.imm.gpr32",
+    ) + (
+        (
+            "x86.scalar.and.imm.gpr32",
+            "x86.scalar.cmp.sgt.imm.gpr32",
+            "x86.scalar.or.imm.gpr32",
+            "x86.scalar.select.gpr32",
+        )
+        if preserve_nan
+        else ()
     )
-    assert rule.emit[-1].immediates == {"shift": 16}
+    assert rule.emit[1].immediates == {"shift": 16}
 
 
 @pytest.mark.parametrize(

@@ -136,7 +136,18 @@ TEST(LivenessDataflowTest, MatchesDenseFixedPointAcrossGeneratedCfgs) {
     }
 
     std::vector<loom_cfg_block_info_t> graph_blocks(block_count);
+    std::vector<uint16_t> successor_indices;
     std::vector<uint16_t> predecessor_indices;
+    for (uint16_t source = 0; source < block_count; ++source) {
+      graph_blocks[source].successor_start = successor_indices.size();
+      for (uint16_t target = 0; target < block_count; ++target) {
+        if (edges[source][target]) {
+          successor_indices.push_back(target);
+        }
+      }
+      graph_blocks[source].successor_count =
+          successor_indices.size() - graph_blocks[source].successor_start;
+    }
     for (uint16_t target = 0; target < block_count; ++target) {
       graph_blocks[target].predecessor_start = predecessor_indices.size();
       for (uint16_t source = 0; source < block_count; ++source) {
@@ -152,7 +163,7 @@ TEST(LivenessDataflowTest, MatchesDenseFixedPointAcrossGeneratedCfgs) {
         .region = nullptr,
         .blocks = graph_blocks.data(),
         .edges = nullptr,
-        .successor_indices = nullptr,
+        .successor_indices = successor_indices.data(),
         .successor_edge_indices = nullptr,
         .predecessor_indices = predecessor_indices.data(),
         .predecessor_edge_indices = nullptr,
@@ -173,6 +184,7 @@ TEST(LivenessDataflowTest, MatchesDenseFixedPointAcrossGeneratedCfgs) {
     IREE_ASSERT_OK(loom_liveness_dataflow_solve(
         &graph, value_ids.data(), value_count, transfers.data(), block_count,
         relations.data(), &result_arena, &scratch_arena));
+    iree_arena_deinitialize(&scratch_arena);
 
     const DenseLivenessResult expected =
         SolveDenseReference(edges, uses, definitions);
@@ -197,10 +209,85 @@ TEST(LivenessDataflowTest, MatchesDenseFixedPointAcrossGeneratedCfgs) {
                 expected_live_out)
           << "seed=" << seed << ", block=" << block_index;
     }
-    iree_arena_deinitialize(&scratch_arena);
     iree_arena_deinitialize(&result_arena);
   }
 
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST(LivenessDataflowTest, SharesCompleteSuccessorSetsAcrossBranchesAndLoops) {
+  // Block0 has a proper live-out union. Block1's two-successor union equals
+  // block3's live-in set, block2 loops to itself, and block3 forwards to
+  // block4.
+  const loom_value_id_t value_ids[] = {101, 303, 707};
+  const loom_value_ordinal_t block0_definitions[] = {0, 2};
+  const loom_value_ordinal_t block1_definitions[] = {1};
+  const loom_value_ordinal_t block1_uses[] = {0};
+  const loom_value_ordinal_t block2_uses[] = {2};
+  const loom_value_ordinal_t block3_uses[] = {1};
+  const loom_value_ordinal_t block4_uses[] = {0};
+  const loom_liveness_block_transfer_t transfers[] = {
+      {nullptr, 0, block0_definitions, IREE_ARRAYSIZE(block0_definitions)},
+      {block1_uses, IREE_ARRAYSIZE(block1_uses), block1_definitions,
+       IREE_ARRAYSIZE(block1_definitions)},
+      {block2_uses, IREE_ARRAYSIZE(block2_uses), nullptr, 0},
+      {block3_uses, IREE_ARRAYSIZE(block3_uses), nullptr, 0},
+      {block4_uses, IREE_ARRAYSIZE(block4_uses), nullptr, 0},
+  };
+  uint16_t successor_indices[] = {1, 2, 3, 4, 2, 4};
+  uint16_t predecessor_indices[] = {0, 0, 2, 1, 1, 3};
+  loom_cfg_block_info_t graph_blocks[IREE_ARRAYSIZE(transfers)] = {};
+  const uint16_t successor_counts[] = {2, 2, 1, 1, 0};
+  const uint16_t predecessor_counts[] = {0, 1, 2, 1, 2};
+  for (uint16_t i = 0; i < IREE_ARRAYSIZE(graph_blocks); ++i) {
+    graph_blocks[i].successor_count = successor_counts[i];
+    graph_blocks[i].predecessor_count = predecessor_counts[i];
+    if (i != 0) {
+      graph_blocks[i].successor_start =
+          graph_blocks[i - 1].successor_start + successor_counts[i - 1];
+      graph_blocks[i].predecessor_start =
+          graph_blocks[i - 1].predecessor_start + predecessor_counts[i - 1];
+    }
+  }
+  const loom_cfg_graph_t graph = {
+      .blocks = graph_blocks,
+      .successor_indices = successor_indices,
+      .predecessor_indices = predecessor_indices,
+      .block_count = IREE_ARRAYSIZE(graph_blocks),
+  };
+  loom_liveness_block_relation_t relations[IREE_ARRAYSIZE(transfers)] = {};
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t result_arena;
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool, &result_arena);
+  iree_arena_initialize(&block_pool, &scratch_arena);
+  IREE_ASSERT_OK(loom_liveness_dataflow_solve(
+      &graph, value_ids, IREE_ARRAYSIZE(value_ids), transfers,
+      IREE_ARRAYSIZE(transfers), relations, &result_arena, &scratch_arena));
+  iree_arena_deinitialize(&scratch_arena);
+
+  EXPECT_EQ(
+      CopyValues(relations[0].live_out_values, relations[0].live_out_count),
+      (std::vector<loom_value_id_t>{101, 707}));
+  EXPECT_NE(relations[0].live_out_values, relations[1].live_in_values);
+  EXPECT_NE(relations[0].live_out_values, relations[2].live_in_values);
+  EXPECT_EQ(
+      CopyValues(relations[1].live_out_values, relations[1].live_out_count),
+      (std::vector<loom_value_id_t>{101, 303}));
+  EXPECT_EQ(relations[1].live_out_values, relations[3].live_in_values);
+  EXPECT_EQ(
+      CopyValues(relations[2].live_out_values, relations[2].live_out_count),
+      (std::vector<loom_value_id_t>{707}));
+  EXPECT_EQ(relations[2].live_out_values, relations[2].live_in_values);
+  EXPECT_EQ(
+      CopyValues(relations[3].live_out_values, relations[3].live_out_count),
+      (std::vector<loom_value_id_t>{101}));
+  EXPECT_EQ(relations[3].live_out_values, relations[4].live_in_values);
+  EXPECT_EQ(relations[4].live_out_count, 0u);
+  EXPECT_EQ(relations[4].live_out_values, nullptr);
+
+  iree_arena_deinitialize(&result_arena);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 

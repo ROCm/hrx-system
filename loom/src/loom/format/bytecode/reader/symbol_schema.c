@@ -108,6 +108,11 @@ bool loom_bytecode_symbol_func_metadata_attr_is_shared(
   if (loom_bytecode_symbol_attr_is_identity(vtable, attr_index)) {
     return true;
   }
+  if (vtable->symbol_def &&
+      attr_index ==
+          loom_symbol_definition_linkage_attr_index(vtable->symbol_def)) {
+    return true;
+  }
   iree_string_view_t name =
       loom_attr_descriptor_name(&vtable->attr_descriptors[attr_index]);
   if (iree_string_view_equal(name, IREE_SV("import_module")) ||

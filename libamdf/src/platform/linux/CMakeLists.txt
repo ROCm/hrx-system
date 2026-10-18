@@ -26,6 +26,22 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND AMDF_BUILD)
 iree_cc_library(
   NAME
+    host_export
+  SRCS
+    "host_export.c"
+  DEPS
+    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_udmabuf_uapi>
+    ::dma_buf
+    ::file
+    amdf::headers
+    libamdf::src::platform::host_export
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
     host_memory
   SRCS
     "host_memory.c"
@@ -118,6 +134,7 @@ iree_cc_library(
     "instance.c"
   DEPS
     ::file
+    ::host_export
     amdf::headers
     libamdf::src::allocator
     libamdf::src::platform
@@ -170,6 +187,28 @@ iree_cc_library(
     ::instance
     amdf::headers
   PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND AMDF_BUILD)
+iree_cc_test(
+  NAME
+    host_export_test
+  SRCS
+    "host_export_test.cc"
+  LINKOPTS
+    "-Wl,--wrap=open"
+    "-Wl,--wrap=ioctl"
+  DEPS
+    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_udmabuf_uapi>
+    ::host_export
+    ::host_memory
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+    libamdf::src::platform::host_export
+  LABELS
+    "iree-build-requirement=libamdf"
 )
 endif()
 

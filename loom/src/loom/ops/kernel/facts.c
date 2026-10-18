@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/ir/float_facts.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/types.h"
@@ -1092,6 +1093,65 @@ static uint32_t loom_kernel_max_active_subgroup_size(
   return count;
 }
 
+// Extrema select an input value under both native and preserve contracts.
+// Idempotence alone is insufficient: bitwise combines need not select either
+// operand, and arithmetic combines may introduce new floating-point values.
+static bool loom_kernel_combining_is_float_extremum(
+    loom_combining_kind_t kind) {
+  return kind == LOOM_COMBINING_KIND_MINIMUMF ||
+         kind == LOOM_COMBINING_KIND_MAXIMUMF ||
+         kind == LOOM_COMBINING_KIND_MINNUMF ||
+         kind == LOOM_COMBINING_KIND_MAXNUMF;
+}
+
+static loom_value_facts_t loom_kernel_empty_prefix_element_facts(
+    loom_value_facts_t input, loom_value_facts_t seed) {
+  loom_value_facts_t result = loom_value_facts_unknown();
+  loom_value_facts_meet_float(&input, &seed, &result);
+  // Even uniform inputs can differ from the empty-prefix seed. Element
+  // extraction consumes this distribution independently of the outer vector.
+  loom_value_facts_mark_lane_varying(&result);
+  return result;
+}
+
+// An exclusive prefix is either empty or an extremum of authored inputs. Join
+// the typed seed without combining it into the nonempty result. Reuse the
+// existing bounded summaries rather than allocating facts per vector element.
+static iree_status_t loom_kernel_float_exclusive_scan_facts(
+    loom_fact_context_t* context, loom_type_t type, loom_combining_kind_t kind,
+    loom_value_facts_t input, loom_value_facts_t* out) {
+  double seed_value = 0.0;
+  (void)loom_combining_kind_float_scan_seed(kind, &seed_value);
+  const loom_value_facts_t seed =
+      loom_value_facts_exact_float(loom_type_element_type(type), seed_value);
+  *out = loom_kernel_empty_prefix_element_facts(input, seed);
+  if (loom_type_is_scalar(type)) {
+    return iree_ok_status();
+  }
+
+  loom_value_facts_t extension = loom_value_facts_unknown();
+  loom_value_fact_uniform_element_t uniform = {0};
+  loom_value_fact_small_static_lanes_t lanes = {0};
+  if (loom_value_facts_query_uniform_element(context, input, &uniform)) {
+    IREE_RETURN_IF_ERROR(loom_value_facts_make_uniform_element(
+        context, loom_kernel_empty_prefix_element_facts(uniform.element, seed),
+        &extension));
+  } else if (loom_value_facts_query_small_static_lanes(context, input,
+                                                       &lanes)) {
+    loom_value_facts_t joined[LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT];
+    for (iree_host_size_t i = 0; i < lanes.count; ++i) {
+      joined[i] = loom_kernel_empty_prefix_element_facts(lanes.lanes[i], seed);
+    }
+    IREE_RETURN_IF_ERROR(loom_value_facts_make_small_static_lanes(
+        context,
+        (loom_value_fact_small_static_lanes_t){.lanes = joined,
+                                               .count = lanes.count},
+        &extension));
+  }
+  out->extension_id = extension.extension_id;
+  return iree_ok_status();
+}
+
 iree_status_t loom_kernel_subgroup_reduce_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
@@ -1100,14 +1160,17 @@ iree_status_t loom_kernel_subgroup_reduce_facts(
       loom_kernel_subgroup_reduce_has_cluster_size(op);
   const bool has_cluster_stride =
       loom_kernel_subgroup_reduce_has_cluster_stride(op);
+  const loom_combining_kind_t kind = loom_kernel_subgroup_reduce_kind(op);
   result_facts[0] = loom_value_facts_unknown();
-  if (loom_kernel_subgroup_reduce_kind(op) == LOOM_COMBINING_KIND_ADDI) {
+  if (kind == LOOM_COMBINING_KIND_ADDI) {
     const uint32_t maximum_count = loom_kernel_max_active_subgroup_size(
         context, module,
         has_cluster_size ? loom_kernel_subgroup_reduce_cluster_size(op) : 0);
     result_facts[0] = loom_kernel_integer_sum_facts(
         module, loom_kernel_subgroup_reduce_result(op), operand_facts[0], 1,
         maximum_count);
+  } else if (loom_kernel_combining_is_float_extremum(kind)) {
+    result_facts[0] = operand_facts[0];
   }
   if (!has_cluster_size && !has_cluster_stride) {
     loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
@@ -1119,8 +1182,10 @@ iree_status_t loom_kernel_workgroup_reduce_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
+  const loom_combining_kind_t kind = loom_kernel_workgroup_reduce_kind(op);
+  const bool is_float_extremum = loom_kernel_combining_is_float_extremum(kind);
   const uint32_t maximum_count =
-      loom_kernel_workgroup_reduce_kind(op) == LOOM_COMBINING_KIND_ADDI
+      kind == LOOM_COMBINING_KIND_ADDI
           ? loom_kernel_context_max_flat_workgroup_size(context, module)
           : 0;
   uint32_t exact_count = 0;
@@ -1131,11 +1196,15 @@ iree_status_t loom_kernel_workgroup_reduce_facts(
           : 1;
   const loom_value_slice_t results = loom_kernel_workgroup_reduce_results(op);
   for (iree_host_size_t i = 0; i < results.count; ++i) {
-    result_facts[i] = maximum_count != 0
-                          ? loom_kernel_integer_sum_facts(
-                                module, results.values[i], operand_facts[i],
-                                minimum_count, maximum_count)
-                          : loom_value_facts_unknown();
+    if (is_float_extremum) {
+      result_facts[i] = operand_facts[i];
+    } else if (maximum_count != 0) {
+      result_facts[i] = loom_kernel_integer_sum_facts(
+          module, results.values[i], operand_facts[i], minimum_count,
+          maximum_count);
+    } else {
+      result_facts[i] = loom_value_facts_unknown();
+    }
     loom_value_facts_mark_workgroup_uniform(&result_facts[i]);
   }
   return iree_ok_status();
@@ -1169,20 +1238,22 @@ iree_status_t loom_kernel_scan_facts(loom_fact_context_t* context,
   const loom_combining_kind_t kind = subgroup
                                          ? loom_kernel_subgroup_scan_kind(op)
                                          : loom_kernel_workgroup_scan_kind(op);
+  const bool exclusive = subgroup
+                             ? loom_kernel_subgroup_scan_mode(op) ==
+                                   LOOM_KERNEL_SUBGROUP_SCAN_MODE_EXCLUSIVE
+                             : loom_kernel_workgroup_scan_mode(op) ==
+                                   LOOM_KERNEL_WORKGROUP_SCAN_MODE_EXCLUSIVE;
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_op_const_results(op)[0]);
   if (kind == LOOM_COMBINING_KIND_ADDI) {
-    bool exclusive = false;
     uint32_t maximum_count = 0;
     if (subgroup) {
-      exclusive = loom_kernel_subgroup_scan_mode(op) ==
-                  LOOM_KERNEL_SUBGROUP_SCAN_MODE_EXCLUSIVE;
       maximum_count = loom_kernel_max_active_subgroup_size(
           context, module,
           loom_kernel_subgroup_scan_has_cluster_size(op)
               ? loom_kernel_subgroup_scan_cluster_size(op)
               : 0);
     } else {
-      exclusive = loom_kernel_workgroup_scan_mode(op) ==
-                  LOOM_KERNEL_WORKGROUP_SCAN_MODE_EXCLUSIVE;
       maximum_count =
           loom_kernel_context_max_flat_workgroup_size(context, module);
     }
@@ -1191,9 +1262,14 @@ iree_status_t loom_kernel_scan_facts(loom_fact_context_t* context,
           module, loom_op_const_results(op)[0], operand_facts[0],
           exclusive ? 0 : 1, maximum_count - (exclusive ? 1 : 0));
     }
+  } else if (loom_kernel_combining_is_float_extremum(kind)) {
+    if (exclusive) {
+      IREE_RETURN_IF_ERROR(loom_kernel_float_exclusive_scan_facts(
+          context, result_type, kind, operand_facts[0], &result_facts[0]));
+    } else {
+      result_facts[0] = operand_facts[0];
+    }
   }
-  const loom_type_t result_type =
-      loom_module_value_type(module, loom_op_const_results(op)[0]);
   if (loom_type_is_scalar(result_type) &&
       loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_I1) {
     loom_value_facts_mark_lane_predicate(&result_facts[0]);

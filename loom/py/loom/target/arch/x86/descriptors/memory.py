@@ -8,10 +8,9 @@
 
 from __future__ import annotations
 
-from loom.target.arch.x86.vector_encoding import (
-    VectorEncodingPrefix,
-    VectorMachineInstruction,
-)
+from collections.abc import Callable
+
+from loom.target.arch.x86.vector_encoding import VectorMachineInstruction
 from loom.target.low_descriptors import (
     Descriptor,
     DescriptorFlag,
@@ -76,7 +75,8 @@ def memory_descriptors(
     assembly_suffix: str,
     encoding_ids: tuple[int, int] | None = None,
     vector_instructions: tuple[VectorMachineInstruction, ...] | None = None,
-    vector_prefix: VectorEncodingPrefix | None = None,
+    vector_binder: Callable[[Descriptor, VectorMachineInstruction], Descriptor]
+    | None = None,
 ) -> tuple[Descriptor, ...]:
     """Declares static/indexed loads followed by static/indexed stores."""
     register_alternatives = (RegClassAlt(register_class),)
@@ -135,11 +135,13 @@ def memory_descriptors(
                 )
             )
     if vector_instructions is None:
+        if vector_binder is not None:
+            raise ValueError("vector binder requires native instruction facts")
         return tuple(descriptors)
-    if vector_prefix is None or len(vector_instructions) != len(descriptors):
+    if vector_binder is None or len(vector_instructions) != len(descriptors):
         raise ValueError("vector memory descriptors require complete native facts")
     return tuple(
-        instruction.bind(descriptor, vector_prefix)
+        vector_binder(descriptor, instruction)
         for descriptor, instruction in zip(
             descriptors, vector_instructions, strict=True
         )

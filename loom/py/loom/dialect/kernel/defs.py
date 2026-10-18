@@ -42,6 +42,7 @@ from loom.dialect.atomic import AtomicOrdering, AtomicScope
 from loom.dialect.cache import CacheScope, CacheTemporal
 from loom.dialect.combining import CombiningKind
 from loom.dialect.memory import MemorySpace
+from loom.dialect.symbol import Linkage
 from loom.dialect.target.defs import ExportLinkage
 from loom.dsl import (
     ANY,
@@ -260,6 +261,10 @@ _ENTRY_RETAIN_FORMAT: list[FormatElement] = [
     OptionalGroup([Attr("retain")], anchor="retain"),
 ]
 
+_ENTRY_LINKAGE_FORMAT: list[FormatElement] = [
+    OptionalGroup([Attr("linkage")], anchor="linkage"),
+]
+
 _ENTRY_TARGET_FORMAT: list[FormatElement] = [
     OptionalGroup(
         [kw("target"), GLUE, LPAREN, SymbolRef("target"), GLUE, RPAREN],
@@ -317,13 +322,18 @@ kernel_def = Op(
     phase=OpPhase.EXECUTABLE,
     doc=("Dispatchable source-level kernel entry. Kernel entries own launch and export contracts; ordinary func.def bodies remain helper/callable code."),
     traits=[SYMBOL_DEFINE, ISOLATED_FROM_ABOVE],
-    attrs=list(_ENTRY_ATTRS),
+    attrs=[
+        _ENTRY_ATTRS[0],
+        AttrDef("linkage", "enum", enum_def=Linkage, optional=True),
+        *_ENTRY_ATTRS[1:],
+    ],
     symbol_def=SymbolDefinition(
         field="callee",
         name="kernel",
         interfaces=["func_like", "kernel", "kernel_entry"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
+        linkage="linkage",
         retain="retain",
         kernel_contract=SymbolKernelContract(workload_region="config"),
     ),
@@ -363,6 +373,7 @@ kernel_def = Op(
     ],
     verify="loom_kernel_def_verify",
     format=[
+        *_ENTRY_LINKAGE_FORMAT,
         *_ENTRY_RETAIN_FORMAT,
         *_ENTRY_TARGET_FORMAT,
         *_ENTRY_EXPORT_FORMAT,

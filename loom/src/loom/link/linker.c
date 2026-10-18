@@ -1326,6 +1326,12 @@ static iree_status_t loom_linker_duplicate_concrete_status(
                           (int)name.size, name.data);
 }
 
+static bool loom_link_symbols_are_link_once_definitions(
+    const loom_symbol_t* target_symbol, const loom_symbol_t* source_symbol) {
+  return iree_any_bit_set(target_symbol->flags, LOOM_SYMBOL_FLAG_LINK_ONCE) &&
+         iree_any_bit_set(source_symbol->flags, LOOM_SYMBOL_FLAG_LINK_ONCE);
+}
+
 static iree_status_t loom_linker_clone_or_merge_symbol_op(
     loom_linker_source_t* source, uint16_t source_symbol_id,
     loom_symbol_ref_t target_ref, loom_linker_symbol_output_t source_output) {
@@ -1388,6 +1394,15 @@ static iree_status_t loom_linker_clone_or_merge_symbol_op(
   }
 
   if (source_declaration) {
+    IREE_RETURN_IF_ERROR(loom_link_merge_symbol_contract(
+        linker, source, source->module, source_op, source->arena, target_ref,
+        target_op, output == LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED));
+    return loom_linker_commit_symbol_output(source, root_module, root_op,
+                                            target_ref, target_op, output);
+  }
+
+  if (loom_link_symbols_are_link_once_definitions(target_symbol,
+                                                  source_symbol)) {
     IREE_RETURN_IF_ERROR(loom_link_merge_symbol_contract(
         linker, source, source->module, source_op, source->arena, target_ref,
         target_op, output == LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED));

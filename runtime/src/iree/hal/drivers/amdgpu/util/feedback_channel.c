@@ -21,15 +21,10 @@ static iree_status_t iree_hal_amdgpu_feedback_channel_validate_params(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU feedback channel requires a device agent");
   }
-  if (IREE_UNLIKELY(!params->control_memory_pool.handle)) {
+  if (IREE_UNLIKELY(!params->host_memory_pool.handle)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU feedback channel requires a control memory pool");
-  }
-  if (IREE_UNLIKELY(!params->ring_memory_pool.handle)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU feedback channel requires a ring memory pool");
+        "AMDGPU feedback channel requires a host memory pool");
   }
   if (IREE_UNLIKELY(!params->topology)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -74,10 +69,9 @@ iree_status_t iree_hal_amdgpu_feedback_channel_initialize(
 
   iree_status_t status =
       iree_hal_amdgpu_vmem_ringbuffer_initialize_with_topology(
-          params->libhsa, params->device_agent, params->ring_memory_pool,
-          IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_PINNED_HOST, capacity,
-          params->topology, IREE_HAL_AMDGPU_ACCESS_MODE_SHARED,
-          &out_channel->ringbuffer);
+          params->libhsa, params->device_agent, params->host_memory_pool,
+          IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_DEFAULT, capacity, params->topology,
+          IREE_HAL_AMDGPU_ACCESS_MODE_SHARED, &out_channel->ringbuffer);
 
   if (iree_status_is_ok(status) &&
       !iree_device_size_is_power_of_two(out_channel->ringbuffer.capacity)) {
@@ -89,7 +83,7 @@ iree_status_t iree_hal_amdgpu_feedback_channel_initialize(
 
   if (iree_status_is_ok(status)) {
     status = iree_hsa_amd_memory_pool_allocate(
-        IREE_LIBHSA(params->libhsa), params->control_memory_pool,
+        IREE_LIBHSA(params->libhsa), params->host_memory_pool,
         sizeof(*out_channel->control), HSA_AMD_MEMORY_POOL_STANDARD_FLAG,
         (void**)&out_channel->control);
   }

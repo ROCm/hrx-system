@@ -319,7 +319,8 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
       ASSERT_NO_FATAL_FAILURE(CreateShaderMemory(
           i == kSdmaSource ? AMDF_MEMORY_ACCESS_READ
                            : AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-          lengths[i], buffer.memory, buffer.address, release));
+          lengths[i], buffer.memory, buffer.address, release,
+          i == kSdmaCompletion ? AMDF_MEMORY_FLAG_QUEUE_STORAGE : 0));
       buffer.expected.assign(buffer.memory.bytes().size(), 0x75u - 17u * i);
       if (i == kSdmaSource) {
         for (uint32_t page = 0; page < 8; ++page) {
@@ -431,6 +432,10 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
                       const ExchangePlan& plan,
                       const ResidentImportPlan* import_plan) {
     const auto shape = plan.shape;
+    // Resident channels carry live generation cells alongside their payloads.
+    // Host coherence alone does not qualify concurrent device polling.
+    auto accesses = accesses_;
+    accesses[1].requirements.flags |= AMDF_MEMORY_FLAG_QUEUE_STORAGE;
     amdf_memory_profile_t profile = {};
     amdf_memory_create_info_t create = {};
     amdf_memory_construction_capabilities_t geometry = {};
@@ -441,7 +446,7 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
           (features_ & AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION) == 0) {
         GTEST_SKIP() << "GPU host registration is not advertised";
       }
-      ASSERT_NO_FATAL_FAILURE(FindProfile(accesses_, role, &profile));
+      ASSERT_NO_FATAL_FAILURE(FindProfile(accesses, role, &profile));
       if (profile.ordinal == AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN) {
         GTEST_SKIP() << "joint backing construction is not advertised";
       }
@@ -452,8 +457,8 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
       create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
       create.structure_size = sizeof(create);
       create.memory_profile_ordinal = profile.ordinal;
-      create.access_count = accesses_.size();
-      create.accesses = accesses_.data();
+      create.access_count = accesses.size();
+      create.accesses = accesses.data();
       create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
       create.minimum_alignment = geometry.minimum_alignment;
       if (role == AMDF_MEMORY_PROFILE_ROLE_REGISTER) {
@@ -501,7 +506,7 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
         }
         ASSERT_NO_FATAL_FAILURE(
             buffer.memory.Create(api_, system_scope_, create));
-        ASSERT_NO_FATAL_FAILURE(CheckAccesses(buffer.memory, accesses_));
+        ASSERT_NO_FATAL_FAILURE(CheckAccesses(buffer.memory, accesses));
         ASSERT_NO_FATAL_FAILURE(CheckConcretePairs(
             buffer.memory, 1, kGpuXdnaJointEdges, profile_pairs));
         ASSERT_EQ(api_->memory_query_address(buffer.memory.memory, 0,
@@ -788,9 +793,9 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
               arguments_.bytes().begin());
     ASSERT_EQ(HostTransition(arguments_, release), AMDF_STATUS_OK);
     uint64_t completion_address = 0;
-    ASSERT_NO_FATAL_FAILURE(
-        CreateShaderMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                           64, completion_, completion_address, release));
+    ASSERT_NO_FATAL_FAILURE(CreateShaderMemory(
+        AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 64, completion_,
+        completion_address, release, AMDF_MEMORY_FLAG_QUEUE_STORAGE));
     ASSERT_EQ(completion_address % 64, 0u);
     ASSERT_EQ(reinterpret_cast<uintptr_t>(completion_.host.pointer) % 64, 0u);
     ASSERT_EQ(completion_.host.cacheability, AMDF_HOST_CACHEABILITY_WRITE_BACK);

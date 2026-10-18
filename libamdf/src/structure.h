@@ -25,6 +25,11 @@ amdf_status_t amdf_structure_validate_output(
     const void* structure, amdf_structure_type_t expected_type,
     uint32_t minimum_size);
 
+// Validates a common header whose owner validates its supported extensions.
+amdf_status_t amdf_structure_validate_header(
+    const void* structure, amdf_structure_type_t expected_type,
+    uint32_t minimum_size);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

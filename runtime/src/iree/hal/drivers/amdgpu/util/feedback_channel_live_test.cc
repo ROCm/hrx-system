@@ -29,14 +29,17 @@ namespace {
 constexpr char kTestCodeObjectBaseName[] = "feedback_channel_test_kernels";
 constexpr uint64_t kExecutableId = 0x454845434944ull;
 constexpr uint64_t kMagic = 0x4644424752494E47ull;
-constexpr uint16_t kWorkgroupSize[3] = {64, 1, 1};
-constexpr uint32_t kDispatchGridSize[3] = {64, 1, 1};
+constexpr uint32_t kProducerCount = 2;
+constexpr uint16_t kWorkgroupSize[3] = {128, 1, 1};
+constexpr uint32_t kDispatchGridSize[3] = {128, 1, 1};
 
 struct FeedbackKernargs {
   // Device-readable pointer to the feedback configuration.
   const iree_hal_amdgpu_feedback_config_t* config;
   // Magic value copied into each emitted payload.
   uint64_t magic;
+  // Host-visible flag used to hold the dispatch during a concurrent drain.
+  iree_atomic_uint32_t* release_flag;
 };
 
 struct FeedbackPayload {
@@ -48,13 +51,18 @@ struct FeedbackPayload {
   uint32_t workitem_id_x;
   // Dispatch packet pointer captured by the kernel.
   uint64_t dispatch_ptr;
+  // Values spanning the remaining cache lines of a TSAN-sized payload.
+  uint64_t markers[12];
 };
+static_assert(sizeof(FeedbackPayload) == 120);
 
 struct alignas(64) LiveMemory {
   // Device-readable copy of the channel configuration.
   iree_hal_amdgpu_feedback_config_t config;
   // Kernel argument storage.
   FeedbackKernargs kernargs;
+  // Releases device producers after the host drain.
+  iree_atomic_uint32_t release_flag;
 };
 
 struct KernelInfo {
@@ -294,23 +302,19 @@ std::string FeedbackChannelLiveTest::agent_exact_target;
 std::string FeedbackChannelLiveTest::agent_code_object_target;
 iree_const_byte_span_t FeedbackChannelLiveTest::test_code_object_data;
 
-TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
+TEST_F(FeedbackChannelLiveTest, ConcurrentDrainPreservesWidePayload) {
   hsa_agent_t cpu_agent = topology.cpu_agents[0];
   hsa_agent_t gpu_agent = topology.gpu_agents[0];
 
-  hsa_amd_memory_pool_t control_memory_pool = {};
+  hsa_amd_memory_pool_t host_memory_pool = {};
   IREE_ASSERT_OK(iree_hal_amdgpu_find_fine_global_memory_pool(
-      &libhsa, cpu_agent, &control_memory_pool));
-  hsa_amd_memory_pool_t ring_memory_pool = {};
-  IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
-      &libhsa, gpu_agent, &ring_memory_pool));
+      &libhsa, cpu_agent, &host_memory_pool));
 
   iree_hal_amdgpu_feedback_channel_t channel = {};
   iree_hal_amdgpu_feedback_channel_params_t channel_params = {
       .libhsa = &libhsa,
       .device_agent = gpu_agent,
-      .control_memory_pool = control_memory_pool,
-      .ring_memory_pool = ring_memory_pool,
+      .host_memory_pool = host_memory_pool,
       .topology = &topology,
       .minimum_capacity = 4 * 1024,
   };
@@ -347,7 +351,7 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
 
   LiveMemory* memory = nullptr;
   IREE_ASSERT_OK(iree_hsa_amd_memory_pool_allocate(
-      IREE_LIBHSA(&libhsa), control_memory_pool, sizeof(LiveMemory),
+      IREE_LIBHSA(&libhsa), host_memory_pool, sizeof(LiveMemory),
       HSA_AMD_MEMORY_POOL_STANDARD_FLAG, reinterpret_cast<void**>(&memory)));
   IREE_ASSERT_OK(iree_hsa_amd_agents_allow_access(IREE_LIBHSA(&libhsa),
                                                   /*num_agents=*/1, &gpu_agent,
@@ -356,6 +360,8 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
   memory->config.source_context = kExecutableId;
   memory->kernargs.config = &memory->config;
   memory->kernargs.magic = kMagic;
+  memory->kernargs.release_flag = &memory->release_flag;
+  iree_atomic_store(&memory->release_flag, 0, iree_memory_order_relaxed);
 
   QueueError queue_error;
   hsa_queue_t* queue = nullptr;
@@ -393,22 +399,26 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
           IREE_LIBHSA(&libhsa), channel.notify_signal, HSA_SIGNAL_CONDITION_NE,
           /*compare_value=*/0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
   EXPECT_GT(feedback_signal_value, 0);
-  EXPECT_EQ(
-      iree_hsa_signal_wait_scacquire(
-          IREE_LIBHSA(&libhsa), completion_signal, HSA_SIGNAL_CONDITION_EQ,
-          /*compare_value=*/0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
-      0);
 
   LiveDrainState drain_state;
   iree_host_size_t packet_count = 0;
-  IREE_ASSERT_OK(iree_hal_amdgpu_feedback_channel_drain(
-      &channel, kWorkgroupSize[0], CaptureLivePacket, &drain_state,
-      &packet_count));
-  ASSERT_EQ(packet_count, kWorkgroupSize[0]);
-  ASSERT_EQ(drain_state.packets.size(), kWorkgroupSize[0]);
-  ASSERT_EQ(drain_state.payloads.size(), kWorkgroupSize[0]);
+  iree_status_t drain_status = iree_hal_amdgpu_feedback_channel_drain(
+      &channel, kProducerCount, CaptureLivePacket, &drain_state, &packet_count);
 
-  std::vector<bool> seen_workitems(kWorkgroupSize[0], false);
+  // Always release the dispatch before asserting drain results so a failing
+  // visibility check cannot leave a device workgroup spinning.
+  iree_atomic_store(&memory->release_flag, 1, iree_memory_order_release);
+  const hsa_signal_value_t completion_signal_value =
+      iree_hsa_signal_wait_scacquire(
+          IREE_LIBHSA(&libhsa), completion_signal, HSA_SIGNAL_CONDITION_EQ,
+          /*compare_value=*/0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  IREE_ASSERT_OK(drain_status);
+  EXPECT_EQ(completion_signal_value, 0);
+  ASSERT_EQ(packet_count, kProducerCount);
+  ASSERT_EQ(drain_state.packets.size(), kProducerCount);
+  ASSERT_EQ(drain_state.payloads.size(), kProducerCount);
+
   for (iree_host_size_t i = 0; i < packet_count; ++i) {
     const iree_hal_amdgpu_feedback_packet_t& packet = drain_state.packets[i];
     const FeedbackPayload& payload = drain_state.payloads[i];
@@ -416,17 +426,18 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
     EXPECT_EQ(packet.flags, IREE_HAL_AMDGPU_FEEDBACK_PACKET_FLAG_ASYNC);
     EXPECT_EQ(packet.header_length, sizeof(iree_hal_amdgpu_feedback_packet_t));
     EXPECT_EQ(packet.source_workgroup_id_x, 0u);
-    EXPECT_LT(packet.source_workitem_id_x, kWorkgroupSize[0]);
+    EXPECT_EQ(packet.source_workitem_id_x, i * 64);
     EXPECT_NE(packet.source_dispatch_ptr, 0u);
     EXPECT_EQ(packet.source_context, kExecutableId);
     EXPECT_EQ(payload.magic, kMagic);
     EXPECT_EQ(payload.workgroup_id_x, packet.source_workgroup_id_x);
     EXPECT_EQ(payload.workitem_id_x, packet.source_workitem_id_x);
     EXPECT_EQ(payload.dispatch_ptr, packet.source_dispatch_ptr);
-    seen_workitems[packet.source_workitem_id_x] = true;
-  }
-  for (uint32_t i = 0; i < kWorkgroupSize[0]; ++i) {
-    EXPECT_TRUE(seen_workitems[i]) << "missing workitem " << i;
+    for (iree_host_size_t marker = 0; marker < IREE_ARRAYSIZE(payload.markers);
+         ++marker) {
+      EXPECT_EQ(payload.markers[marker],
+                kMagic + (uint64_t{i * 64} << 32) + marker);
+    }
   }
   EXPECT_EQ(channel.control->dropped_packet_count, 0u);
   EXPECT_EQ(channel.control->read_tail, channel.control->reservation_head);

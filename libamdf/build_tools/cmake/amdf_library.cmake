@@ -47,6 +47,7 @@ function(amdf_declare_library)
 
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include("${PROJECT_SOURCE_DIR}/build_tools/third_party/linux_uapi/linux_uapi.cmake")
+    iree_configure_linux_udmabuf_uapi()
     iree_configure_linux_drm_uapi()
     if(AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA)
       iree_configure_linux_amdgpu_uapi()

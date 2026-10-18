@@ -737,7 +737,8 @@ static iree_status_t loom_run_hal_testbench_scenario_build_function_adapter(
                           &builder);
   loom_op_t* adapter_op = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_def_build(
-      &builder, build_flags, /*retain=*/0, target, LOOM_STRING_ID_INVALID,
+      &builder, build_flags, /*linkage=*/0, /*retain=*/0, target,
+      LOOM_STRING_ID_INVALID,
       /*export_linkage=*/0, adapter_ref, /*config_arg_types=*/NULL,
       /*config_arg_types_count=*/0, argument_types, adapted_argument_count,
       predicates, predicate_count, function.op->location, &adapter_op));

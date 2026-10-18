@@ -4,6 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import pytest
+
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import bitwise, conversion
 from loom.dialect.scf import defs as scf
@@ -153,22 +155,43 @@ def test_scalar_float_narrowing_rules_cover_the_complete_type_matrix() -> None:
     assert actual_pairs == expected_pairs
 
 
-def test_exact_bfloat_value_rule_uses_reinterpret_and_shift() -> None:
+@pytest.mark.parametrize("preserve_nan", [False, True])
+def test_exact_bfloat_value_rule_separates_rounding_from_nan_handling(
+    preserve_nan: bool,
+) -> None:
+    report_key = "exactly_representable_binary32_to_bfloat16" + (
+        "_preserve_nan" if preserve_nan else ""
+    )
     rule = next(
         rule
         for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases
-        if isinstance(rule, DescriptorRule)
-        and rule.report_key == "exactly_representable_binary32_to_bfloat16"
+        if isinstance(rule, DescriptorRule) and rule.report_key == report_key
     )
 
     assert any(
         guard.kind is GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS
         for guard in rule.guards
     )
+    assert (
+        any(guard.kind is GuardKind.VALUE_NOT_NAN for guard in rule.guards)
+        != preserve_nan
+    )
     assert tuple(emit.descriptor.key for emit in rule.emit) == (
         "wasm.i32.reinterpret_f32",
         "wasm.i32.const",
         "wasm.i32.shr_u",
+    ) + (
+        (
+            "wasm.i32.const",
+            "wasm.i32.and",
+            "wasm.i32.const",
+            "wasm.i32.gt_u",
+            "wasm.i32.const",
+            "wasm.i32.or",
+            "wasm.i32.select",
+        )
+        if preserve_nan
+        else ()
     )
     assert rule.emit[1].immediates == {"i32_value": 16}
 

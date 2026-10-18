@@ -495,12 +495,27 @@ TEST_F(ElasticTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {
             static_cast<loom_serve_text_model_t*>(payload));
       },
       model_, iree_infinite_timeout()));
-  IREE_ASSERT_OK(loom_serve_text_model_free_retired(model_));
-  model_ = nullptr;
-  iree_notification_deinitialize(&notification);
+  {
+    // Consumers have retired, but returning their backing does not wait for
+    // native FREE. Hold that boundary so accounting cannot race the release.
+    loom_serve::testing::ScopedNativeHold gate(device_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
+    IREE_ASSERT_OK(loom_serve_text_model_free_retired(model_));
+    model_ = nullptr;
+    iree_notification_deinitialize(&notification);
+    gate.WaitEntered();
+    const auto memory = loom_serve_device_memory_statistics(device_);
+    EXPECT_EQ(memory.retained.reserved_bytes, 0u);
+    EXPECT_EQ(memory.retained.pending_bytes, 0u);
+    EXPECT_GT(memory.retained.releasing_bytes, 0u);
+    EXPECT_EQ(memory.retained.committed_bytes, memory.retained.releasing_bytes);
+  }
+  // Physical capacity returns at the outer pool join, not model retirement.
+  IREE_ASSERT_OK(
+      loom_serve_memory_pool_await(loom_serve_device_memory_pool(device_)));
   const auto memory = loom_serve_device_memory_statistics(device_);
-  EXPECT_EQ(memory.retained.reserved_bytes, 0u);
   EXPECT_EQ(memory.retained.committed_bytes, 0u);
+  EXPECT_EQ(memory.retained.releasing_bytes, 0u);
 
   // Same host, queues, and parameter pool remain available to the replacement.
   IREE_ASSERT_OK(loom_serve_text_model_allocate(device_, &options,

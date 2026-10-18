@@ -65,6 +65,7 @@ enum amdf_memory_flag_bits_e {
   /// The allocation can hold directly published user-mode queue state.
   AMDF_MEMORY_FLAG_QUEUE_STORAGE = UINT64_C(1) << 3,
   /// Host and device access requires no explicit host cache transition.
+  /// Device cache transitions and atomic access are separate capabilities.
   AMDF_MEMORY_FLAG_HOST_COHERENT = UINT64_C(1) << 4,
   /// A stable device address is established before creation returns.
   AMDF_MEMORY_FLAG_DEVICE_ADDRESS = UINT64_C(1) << 5,
@@ -76,6 +77,12 @@ enum amdf_memory_flag_bits_e {
   /// Native source handles are prepared during construction. This property
   /// does not follow from HOST_VISIBLE or a device's MAPPING_SOURCE access.
   AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE = UINT64_C(1) << 7,
+  /// memory_map supplies ordinary host pages usable as native file-I/O
+  /// buffers, including page-pinned direct I/O. File alignment, resource
+  /// admission, completion, and durability remain caller responsibilities.
+  /// This does not imply storage-to-VRAM, RDMA, or absence of storage-stack
+  /// copies. Other aliases do not inherit this property.
+  AMDF_MEMORY_FLAG_HOST_FILE_IO = UINT64_C(1) << 8,
 };
 
 /// Exact page-table access granted to one memory attachment or projection.
@@ -461,6 +468,17 @@ typedef struct amdf_memory_access_capabilities_t {
   amdf_memory_address_kinds_t address_kinds;
 } amdf_memory_access_capabilities_t;
 
+/// Properties established for an exact host view.
+typedef uint32_t amdf_host_mapping_features_t;
+enum amdf_host_mapping_feature_bits_e {
+  /// Native file operations can access and pin this ordinary host view.
+  /// File completion publishes reads into the buffer; file writes consume
+  /// previously system-visible bytes. FILE_IO pair queries describe the
+  /// device-side visibility operations. The caller retains the mapping and
+  /// backing until every accepted I/O and final reader has completed.
+  AMDF_HOST_MAPPING_FEATURE_FILE_IO = UINT32_C(1) << 0,
+};
+
 /// Range and access capabilities of explicit host mappings.
 typedef struct amdf_host_mapping_capabilities_t {
   /// Maximum logical mapping length in bytes.
@@ -471,8 +489,8 @@ typedef struct amdf_host_mapping_capabilities_t {
   uint64_t byte_length_granularity;
   /// Host read and write requests accepted by the profile.
   amdf_memory_map_flags_t supported_access;
-  /// Reserved for future use and always zero.
-  uint32_t reserved;
+  /// Features guaranteed for views returned by memory_map on this profile.
+  amdf_host_mapping_features_t features;
 } amdf_host_mapping_capabilities_t;
 
 /// Immutable construction and transport capabilities of one memory profile.
@@ -500,6 +518,11 @@ typedef struct amdf_memory_profile_t {
   amdf_memory_flags_t guaranteed_flags;
   /// Properties which callers may require from this profile.
   amdf_memory_flags_t supported_flags;
+  /// Cached native prerequisite status. OK means the construction route was
+  /// available at discovery, not that capacity is reserved. An unavailable
+  /// optional route retains its native reason without failing profile queries
+  /// or unrelated routes. Construction remains authoritative.
+  amdf_status_t availability;
   /// Provider-owned physical allocation limits, or all-zero without CREATE.
   amdf_memory_construction_capabilities_t allocation;
   /// Caller-owned host registration limits, or all-zero without REGISTER.
@@ -559,7 +582,7 @@ typedef struct amdf_memory_create_info_t {
   /// Number of entries in accesses; zero requests CPU-only system memory.
   uint32_t access_count;
   /// Required backing properties: HOST_VISIBLE, DEVICE_LOCAL, SHAREABLE and
-  /// HOST_MAPPING_SOURCE.
+  /// HOST_MAPPING_SOURCE and HOST_FILE_IO.
   amdf_memory_flags_t required_flags;
   /// Logical byte length established for every requested consumer. Native
   /// allocation rounding is reported separately and grants no additional
@@ -866,8 +889,8 @@ typedef struct amdf_host_mapping_info_t {
   uint64_t byte_length_granularity;
   /// Host cache-line length in bytes, or zero when not applicable.
   uint32_t cache_line_size;
-  /// Reserved for future use and always zero.
-  uint32_t reserved;
+  /// Properties of this exact view, independent of other aliases or bindings.
+  amdf_host_mapping_features_t features;
   /// Available host flush operation, independent of any consumer's coherence.
   /// UNKNOWN means unsupported; NONE means no cache operation is necessary.
   amdf_cache_transition_t flush;
@@ -883,9 +906,15 @@ enum amdf_memory_site_kind_e {
   AMDF_MEMORY_SITE_KIND_DEVICE = 0,
   /// A live host mapping, including its range and CPU cache behavior.
   AMDF_MEMORY_SITE_KIND_HOST = 1,
+  /// OS-managed native file-buffer access through value.host.mapping. The
+  /// view must report FILE_IO. A file read is a memory producer; a file write
+  /// is a memory consumer. The caller supplies I/O completion and excludes
+  /// conflicting access. This site owns no file, queue, or I/O request and
+  /// does not describe raw-controller DMA or mutual atomic access.
+  AMDF_MEMORY_SITE_KIND_FILE_IO = 2,
 };
 
-/// One concrete device access or host mapping in a pair query.
+/// One concrete device, CPU, or native file-buffer access in a pair query.
 typedef struct amdf_memory_site_t {
   /// Must be `AMDF_STRUCTURE_TYPE_MEMORY_SITE`.
   amdf_structure_type_t type;
@@ -908,7 +937,7 @@ typedef struct amdf_memory_site_t {
       /// Exact queue family used for access and cache transitions.
       uint32_t queue_family_ordinal;
     } device;
-    /// Host view and the backing being qualified for that view.
+    /// CPU or file-buffer view and the backing being qualified for that view.
     struct {
       /// Live mapping supplying the address range and immutable cache policy.
       amdf_host_mapping_t* mapping;
@@ -923,8 +952,8 @@ typedef struct amdf_memory_site_t {
 
 /// One prospective access within a scope/profile construction contract.
 /// DEVICE names an exact queue family; it does not qualify shader/program-side
-/// cache operations. HOST names a view created through memory_map on that
-/// backing.
+/// cache operations. HOST and FILE_IO name a view created through memory_map
+/// on that backing; FILE_IO additionally requires its reported view feature.
 typedef struct amdf_memory_profile_site_t {
   /// Selects the active member of value.
   amdf_memory_site_kind_t kind;

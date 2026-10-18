@@ -62,6 +62,17 @@ class VectorBinaryFamily:
 
 
 @dataclass(frozen=True, slots=True)
+class VectorRotationFamily:
+    """One packed rotation with immediate and per-lane machine forms."""
+
+    source_operation: str
+    immediate_mnemonic: str
+    variable_mnemonic: str
+    semantic: str
+    element: VectorElement
+
+
+@dataclass(frozen=True, slots=True)
 class FloatRootFamily:
     """Square-root operation row with its source precision contract."""
 
@@ -70,6 +81,23 @@ class FloatRootFamily:
     semantic: str
     element: VectorElement
     approximate: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FloatIntegerVectorForm:
+    """One native floating-to-integer packet shape."""
+
+    source: VectorElement
+    result_bit_width: int
+    lane_count: int
+
+    @property
+    def source_vector_bit_width(self) -> int:
+        return self.source.bit_width * self.lane_count
+
+    @property
+    def result_vector_bit_width(self) -> int:
+        return self.result_bit_width * self.lane_count
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +183,24 @@ X86_VECTOR_INTEGER_NARROWING_FAMILIES = (
 FLOAT_ELEMENTS = (
     VectorElement("f32", 32),
     VectorElement("f64", 64),
+)
+
+AVX2_FLOAT_INTEGER_I32_FORMS = tuple(
+    FloatIntegerVectorForm(source, 32, lane_count)
+    for source, lane_counts in zip(FLOAT_ELEMENTS, ((4, 8), (2, 4)), strict=True)
+    for lane_count in lane_counts
+)
+
+AVX512_FLOAT_INTEGER_I32_FORMS = (
+    *AVX2_FLOAT_INTEGER_I32_FORMS,
+    FloatIntegerVectorForm(FLOAT_ELEMENTS[0], 32, 16),
+    FloatIntegerVectorForm(FLOAT_ELEMENTS[1], 32, 8),
+)
+
+AVX512_FLOAT_INTEGER_I64_FORMS = tuple(
+    FloatIntegerVectorForm(source, 64, lane_count)
+    for source in FLOAT_ELEMENTS
+    for lane_count in (2, 4, 8)
 )
 
 FP16_ELEMENT = VectorElement("f16", 16)
@@ -251,6 +297,21 @@ AVX512VL_UNIFORM_SHIFT_FAMILIES = (
 AVX512_UNIFORM_SHIFT_FAMILIES = (
     *AVX2_UNIFORM_SHIFT_FAMILIES,
     *AVX512VL_UNIFORM_SHIFT_FAMILIES,
+)
+
+AVX512_ROTATION_FAMILIES = tuple(
+    VectorRotationFamily(
+        source_operation,
+        f"{immediate_mnemonic}{suffix}",
+        f"{variable_mnemonic}{suffix}",
+        semantic,
+        element,
+    )
+    for source_operation, immediate_mnemonic, variable_mnemonic, semantic in (
+        ("rotli", "vprol", "vprolv", "integer.rotl"),
+        ("rotri", "vpror", "vprorv", "integer.rotr"),
+    )
+    for element, suffix in zip(INTEGER_ELEMENTS[2:], ("d", "q"), strict=True)
 )
 
 # AVX-512BW extends the word variable shifts while AVX-512DQ completes the
@@ -582,6 +643,22 @@ def validate_vector_families() -> None:
         for family in AVX512VL_INTEGER_BINARY_FAMILIES
     } != set(avx512_keys) - _AVX2_INTEGER_BINARY_KEYS:
         raise ValueError("AVX-512VL rows must contain exactly the non-AVX2 cells")
+    if {
+        (family.source_operation, family.element.name)
+        for family in AVX512_ROTATION_FAMILIES
+    } != {
+        (operation, element)
+        for operation in ("rotli", "rotri")
+        for element in ("i32", "i64")
+    }:
+        raise ValueError("AVX-512 rotation rows must cover i32/i64 left and right")
+    rotation_mnemonics = {
+        mnemonic
+        for family in AVX512_ROTATION_FAMILIES
+        for mnemonic in (family.immediate_mnemonic, family.variable_mnemonic)
+    }
+    if len(rotation_mnemonics) != 2 * len(AVX512_ROTATION_FAMILIES):
+        raise ValueError("AVX-512 rotation rows must use unique machine mnemonics")
     if set(AVX512_INTEGER_COMPARE_MNEMONICS) != {
         element.name for element in INTEGER_ELEMENTS
     }:

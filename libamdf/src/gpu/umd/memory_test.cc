@@ -132,10 +132,18 @@ TEST(GpuMemoryPairTest, SdmaPayloadPoliciesExcludeHostVisibleLocalApertures) {
         AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE}) {
     SCOPED_TRACE(feature);
     family.format_features = feature;
-    query.flags = AMDF_MEMORY_FLAG_DEVICE_LOCAL;
     amdf_memory_site_description_t description = {};
-    ASSERT_EQ(amdf_gpu_umd_memory_describe_site(&query, &description),
-              AMDF_STATUS_OK);
+    for (const amdf_memory_flags_t flags :
+         {amdf_memory_flags_t{0},
+          amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT},
+          amdf_memory_flags_t{AMDF_MEMORY_FLAG_DEVICE_LOCAL}}) {
+      SCOPED_TRACE(flags);
+      query.flags = flags;
+      ASSERT_EQ(amdf_gpu_umd_memory_describe_site(&query, &description),
+                AMDF_STATUS_OK);
+      EXPECT_EQ(description.atomic_reach.scope_32, AMDF_ATOMIC_SCOPE_NONE);
+      EXPECT_EQ(description.atomic_reach.scope_64, AMDF_ATOMIC_SCOPE_NONE);
+    }
     for (const auto flags :
          {AMDF_MEMORY_FLAG_DEVICE_LOCAL | AMDF_MEMORY_FLAG_HOST_VISIBLE,
           AMDF_MEMORY_FLAG_DEVICE_LOCAL | AMDF_MEMORY_FLAG_HOST_VISIBLE |

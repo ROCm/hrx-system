@@ -127,7 +127,7 @@ static iree_status_t loom_low_schedule_setup_order_append(
           .value_operand_index = LOOM_LOW_ID_NONE,
           .kind = LOOM_LOW_SCHEDULE_DEPENDENCY_ORDER,
       },
-      state->arena);
+      state->dependency_arena);
 }
 
 iree_status_t loom_low_schedule_setup_order_finish(

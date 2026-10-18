@@ -17,6 +17,7 @@ iree_py_library(
     "defs.py"
   DEPS
     loom::py::loom::core
+    loom::py::loom::dialect::shared
     loom::py::loom::dialect::target::target
 )
 

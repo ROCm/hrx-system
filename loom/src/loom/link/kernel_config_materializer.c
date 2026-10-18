@@ -350,7 +350,7 @@ static iree_status_t loom_link_kernel_config_build_helper(
   loom_op_t* helper_op = NULL;
   IREE_RETURN_IF_ERROR(loom_func_def_build(
       builder, build_flags,
-      /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+      /*visibility=*/0, /*linkage=*/0, /*retain=*/0, /*cc=*/0,
       LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED,
       /*temperature=*/0, LOOM_INLINE_POLICY_INLINE, target_ref,
       /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
@@ -803,7 +803,7 @@ static iree_status_t loom_link_kernel_config_build_ir_helper(
   loom_op_t* helper_op = NULL;
   IREE_RETURN_IF_ERROR(loom_func_def_build(
       builder, build_flags,
-      /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+      /*visibility=*/0, /*linkage=*/0, /*retain=*/0, /*cc=*/0,
       LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED,
       /*temperature=*/0, LOOM_INLINE_POLICY_INLINE, target,
       /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,

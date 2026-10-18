@@ -30,7 +30,27 @@ void CheckSystemTransition(const amdf_cache_transition_t& transition,
   ASSERT_EQ(transition.range_granularity, 0u);
 }
 
-void CheckSystemPair(const amdf_api_t* api, const amdf_memory_site_t& producer,
+void CheckHostTransition(const amdf_cache_transition_t& transition,
+                         const GpuMemory& memory,
+                         amdf_host_cache_operation_t operation) {
+  if ((memory.access_info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0) {
+    CheckSystemTransition(transition, AMDF_CACHE_OPERATION_NONE);
+  } else {
+    const auto& expected = operation == AMDF_HOST_CACHE_OPERATION_FLUSH
+                               ? memory.host.flush
+                               : memory.host.invalidate;
+    EXPECT_EQ(transition.kind, expected.kind);
+    EXPECT_EQ(transition.executor, expected.executor);
+    EXPECT_EQ(transition.host_operation, operation);
+    EXPECT_EQ(transition.host_instruction, expected.host_instruction);
+    EXPECT_EQ(transition.host_fence_before, expected.host_fence_before);
+    EXPECT_EQ(transition.host_fence_after, expected.host_fence_after);
+    EXPECT_EQ(transition.range_granularity, expected.range_granularity);
+  }
+}
+
+void CheckSystemPair(const amdf_api_t* api, const GpuMemory& memory,
+                     const amdf_memory_site_t& producer,
                      const amdf_memory_site_t& consumer) {
   amdf_memory_pair_info_t pair = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
@@ -39,17 +59,53 @@ void CheckSystemPair(const amdf_api_t* api, const amdf_memory_site_t& producer,
   ASSERT_EQ(api->memory_query_pair_info(&producer, &consumer, &pair),
             AMDF_STATUS_OK);
   ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
-  ASSERT_NO_FATAL_FAILURE(CheckSystemTransition(
-      pair.release, producer.kind == AMDF_MEMORY_SITE_KIND_DEVICE
-                        ? AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM
-                        : AMDF_CACHE_OPERATION_NONE));
-  ASSERT_NO_FATAL_FAILURE(CheckSystemTransition(
-      pair.acquire, consumer.kind == AMDF_MEMORY_SITE_KIND_DEVICE
-                        ? AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM
-                        : AMDF_CACHE_OPERATION_NONE));
+  if (producer.kind == AMDF_MEMORY_SITE_KIND_DEVICE) {
+    ASSERT_NO_FATAL_FAILURE(CheckSystemTransition(
+        pair.release, AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM));
+  } else {
+    ASSERT_NO_FATAL_FAILURE(CheckHostTransition(
+        pair.release, memory, AMDF_HOST_CACHE_OPERATION_FLUSH));
+  }
+  if (consumer.kind == AMDF_MEMORY_SITE_KIND_DEVICE) {
+    ASSERT_NO_FATAL_FAILURE(CheckSystemTransition(
+        pair.acquire, AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM));
+  } else {
+    ASSERT_NO_FATAL_FAILURE(CheckHostTransition(
+        pair.acquire, memory, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
+  }
 }
 
-TEST_F(Pm4DispatchTest, CoherentSystemShaderHandoffAcrossQueues) {
+class Pm4SystemHandoffTest
+    : public Pm4DispatchTest,
+      public ::testing::WithParamInterface<amdf_memory_flags_t> {
+ protected:
+  void TearDown() override {
+    // A failed readiness check or producer publication must not leave the
+    // consumer waiting for work that the test will never submit. The backing
+    // stays alive through the base fixture's native queue teardown.
+    if (pending_gate_.host_address != 0) {
+      GpuStoreRelease<uint32_t>(pending_gate_.host_address,
+                                pending_gate_.value);
+    }
+    Pm4DispatchTest::TearDown();
+  }
+
+  void CreatePayload(amdf_memory_access_t access, uint64_t byte_length,
+                     GpuMemory** out_memory) {
+    ASSERT_NO_FATAL_FAILURE(
+        CreateMemory(access, byte_length, out_memory, GetParam()));
+  }
+
+  // Accepted consumer work whose producer may not yet have been submitted.
+  struct {
+    // Host address in fixture-owned coherent control storage, or zero.
+    uint64_t host_address = 0;
+    // Exact value satisfying the current consumer's wait.
+    uint32_t value = 0;
+  } pending_gate_;
+};
+
+TEST_P(Pm4SystemHandoffTest, ShaderHandoffAcrossQueues) {
   const auto* kernel_product =
       kernels::transform::kKernels.Find(gpu_endpoint_info_);
   ASSERT_NE(kernel_product, nullptr)
@@ -81,12 +137,12 @@ TEST_F(Pm4DispatchTest, CoherentSystemShaderHandoffAcrossQueues) {
   GpuMemory* arguments = nullptr;
   GpuMemory* control = nullptr;
   GpuMemory* code = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateMemory(
+  ASSERT_NO_FATAL_FAILURE(CreatePayload(
       AMDF_MEMORY_ACCESS_READ, kPayloadWordCount * sizeof(uint32_t), &input));
-  ASSERT_NO_FATAL_FAILURE(CreateMemory(
+  ASSERT_NO_FATAL_FAILURE(CreatePayload(
       kReadWrite, kPayloadWordCount * sizeof(uint32_t), &intermediate));
   ASSERT_NO_FATAL_FAILURE(
-      CreateMemory(kReadWrite, kPayloadWordCount * sizeof(uint32_t), &output));
+      CreatePayload(kReadWrite, kPayloadWordCount * sizeof(uint32_t), &output));
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ, kPageWordCount * sizeof(uint32_t), &arguments));
   ASSERT_NO_FATAL_FAILURE(
@@ -105,19 +161,24 @@ TEST_F(Pm4DispatchTest, CoherentSystemShaderHandoffAcrossQueues) {
                                          "pm4_handoff", &code));
   ASSERT_EQ(arguments->device_address % kernel.arguments.alignment, 0u);
   ASSERT_EQ(control->device_address % 64, 0u);
+  RecordProperty(
+      "payload_is_host_coherent",
+      (input->access_info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0);
   const std::array<GpuMemory*, 6> backings = {input,     intermediate, output,
                                               arguments, control,      code};
   for (const auto* memory : backings) {
     SCOPED_TRACE(memory->device_address);
-    ASSERT_NO_FATAL_FAILURE(CheckSystemPair(
-        api_, memory->HostSite(), memory->DeviceSite(family_.ordinal)));
+    ASSERT_NO_FATAL_FAILURE(
+        CheckSystemPair(api_, *memory, memory->HostSite(),
+                        memory->DeviceSite(family_.ordinal)));
   }
-  ASSERT_NO_FATAL_FAILURE(
-      CheckSystemPair(api_, intermediate->DeviceSite(family_.ordinal),
-                      intermediate->DeviceSite(family_.ordinal)));
+  ASSERT_NO_FATAL_FAILURE(CheckSystemPair(
+      api_, *intermediate, intermediate->DeviceSite(family_.ordinal),
+      intermediate->DeviceSite(family_.ordinal)));
   for (const auto* memory : {intermediate, output}) {
-    ASSERT_NO_FATAL_FAILURE(CheckSystemPair(
-        api_, memory->DeviceSite(family_.ordinal), memory->HostSite()));
+    ASSERT_NO_FATAL_FAILURE(CheckSystemPair(api_, *memory,
+                                            memory->DeviceSite(family_.ordinal),
+                                            memory->HostSite()));
   }
 
   std::array<uint32_t, kPageWordCount> expected_control;
@@ -239,8 +300,16 @@ TEST_F(Pm4DispatchTest, CoherentSystemShaderHandoffAcrossQueues) {
     std::array<uint32_t, kPageWordCount> observed_producer_commands;
     std::array<uint32_t, kPageWordCount> observed_consumer_commands;
 
+    for (const auto* memory : {input, intermediate, output}) {
+      ASSERT_NO_FATAL_FAILURE(memory->TransferHostCache(
+          api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_FLUSH));
+    }
+
     const uint64_t producer_frontier = (epoch + 1) * kProducerWordsPerEpoch;
     const uint64_t consumer_frontier = (epoch + 1) * kConsumerWordsPerEpoch;
+    pending_gate_.host_address =
+        reinterpret_cast<uintptr_t>(control_words + kGateWord);
+    pending_gate_.value = epoch + 1;
     ASSERT_NO_FATAL_FAILURE(
         consumer->Publish(api_, gpu_api_, consumer_frontier));
     ASSERT_TRUE(GpuWaitEqual<uint32_t>(
@@ -260,6 +329,8 @@ TEST_F(Pm4DispatchTest, CoherentSystemShaderHandoffAcrossQueues) {
     ASSERT_TRUE(GpuWaitEqual<uint32_t>(
         reinterpret_cast<uintptr_t>(control_words + kConsumerCompletionWord),
         epoch + 1));
+    ASSERT_NO_FATAL_FAILURE(output->TransferHostCache(
+        api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
     std::memcpy(observed_output.data(), output->host.pointer,
                 sizeof(observed_output));
     // Output is already captured. Independently join the producer's remaining
@@ -267,6 +338,8 @@ TEST_F(Pm4DispatchTest, CoherentSystemShaderHandoffAcrossQueues) {
     ASSERT_TRUE(GpuWaitEqual<uint32_t>(
         reinterpret_cast<uintptr_t>(control_words + kProducerCompletionWord),
         epoch + 1));
+    ASSERT_NO_FATAL_FAILURE(intermediate->TransferHostCache(
+        api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
     std::memcpy(observed_intermediate.data(), intermediate->host.pointer,
                 sizeof(observed_intermediate));
     std::memcpy(observed_input.data(), input->host.pointer,
@@ -336,5 +409,12 @@ TEST_F(Pm4DispatchTest, CoherentSystemShaderHandoffAcrossQueues) {
   RecordProperty("pm4_handoff_consumer_command_word_count",
                  std::to_string(consume.word_count()));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    PayloadPolicy, Pm4SystemHandoffTest,
+    ::testing::Values(amdf_memory_flags_t{0},
+                      amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT},
+                      amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                          AMDF_MEMORY_FLAG_QUEUE_STORAGE}));
 
 }  // namespace

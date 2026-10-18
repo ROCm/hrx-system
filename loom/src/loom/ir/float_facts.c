@@ -185,7 +185,9 @@ static loom_scalar_type_set_t loom_float_exact_value_destinations(
   loom_scalar_type_set_t result =
       loom_float_type_exact_destinations(source_type);
   if (!isfinite(value)) {
-    return result;
+    // The guarantee covers finite values only. A nonfinite alternative must
+    // not weaken the representability of finite values at a later join.
+    return LOOM_SCALAR_TYPE_SET_FLOAT;
   }
   if (value == 0.0) {
     return LOOM_SCALAR_TYPE_SET_FLOAT;
@@ -322,6 +324,7 @@ loom_value_facts_t loom_value_facts_known_nan(void) {
   loom_value_facts_t facts = loom_value_facts_unknown();
   facts.flags = LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NAN |
                 LOOM_VALUE_FACT_NOT_INF | LOOM_VALUE_FACT_NOT_SUBNORMAL;
+  loom_value_facts_set_exact_float_types(&facts, LOOM_SCALAR_TYPE_SET_FLOAT);
   return facts;
 }
 

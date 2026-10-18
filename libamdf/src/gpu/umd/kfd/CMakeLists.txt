@@ -288,6 +288,32 @@ iree_cc_test(
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    event_test
+  SRCS
+    "event_test.cc"
+  LINKOPTS
+    "-Wl,--wrap=ioctl"
+    "-Wl,--wrap=amdf_gpu_kfd_instance_create_event"
+  DEPS
+    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_kfd_uapi>
+    ::device_state
+    ::event
+    ::instance
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+    libamdf::src::allocator
+    libamdf::src::gpu::umd::event
+    libamdf::src::platform::linux::file
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_library(
   NAME
     doorbell
@@ -415,6 +441,7 @@ iree_cc_test(
   LINKOPTS
     "-Wl,--wrap=ioctl"
   DEPS
+    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_drm_uapi>
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_kfd_uapi>
     ::buffer
     ::device_state
@@ -457,7 +484,9 @@ iree_cc_library(
     "memory.h"
   SRCS
     "memory.c"
+    "memory_reservation.c"
   DEPS
+    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_amdgpu_uapi>
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_drm_uapi>
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_kfd_uapi>
     ::buffer
@@ -468,6 +497,7 @@ iree_cc_library(
     amdf::headers
     libamdf::src::allocator
     libamdf::src::gpu::umd::memory
+    libamdf::src::gpu::umd::memory_reservation
     libamdf::src::platform::linux::dma_buf
     libamdf::src::platform::linux::file
     libamdf::src::platform::linux::host_cache
@@ -499,27 +529,6 @@ iree_cc_test(
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
-iree_cc_library(
-  NAME
-    memory_reservation
-  SRCS
-    "memory_reservation.c"
-  DEPS
-    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_amdgpu_uapi>
-    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_drm_uapi>
-    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_kfd_uapi>
-    ::buffer
-    ::device_state
-    ::memory
-    amdf::headers
-    libamdf::src::allocator
-    libamdf::src::gpu::umd::memory_reservation
-    libamdf::src::platform::linux::file
-  PUBLIC
-)
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_test(
   NAME
     memory_reservation_test
@@ -532,7 +541,7 @@ iree_cc_test(
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_drm_uapi>
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_kfd_uapi>
     ::device_state
-    ::memory_reservation
+    ::memory
     amdf::headers
     iree::third_party::google_test
     iree::third_party::google_test_main
@@ -645,16 +654,35 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_library(
   NAME
+    event
+  SRCS
+    "event.c"
+  DEPS
+    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_kfd_uapi>
+    ::device_state
+    ::instance
+    amdf::headers
+    libamdf::src::allocator
+    libamdf::src::gpu::umd::event
+    libamdf::src::platform::linux::file
+    libamdf::src::wait
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
     kfd
   DEPS
     ::buffer
     ::clock
     ::device
     ::endpoint_profile
+    ::event
     ::instance
     ::kernel_queue
     ::memory
-    ::memory_reservation
     ::user_queue
     amdf::headers
   PUBLIC

@@ -152,7 +152,7 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 // Host selection uses the feature-aware descriptor view even when no optional
 // packed-dot features are present. Its rule index must stay within AVX2.
 // RUN: emit source-low output=low
-x86.target<avx2> @target {contract_feature_bits = 0, contract_set_key = "x86.avx2_features.core"}
+x86.target<avx2> @target {features = []}
 
 func.def target(@target) @host_avx2_counts(%values: vector<8xi32>, %raw_count: i32) -> (vector<8xi32>, vector<8xi32>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 31)] : i32
@@ -176,7 +176,7 @@ low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_la
 // AVX512 host selection also admits base AVX2 shift forms through its shared
 // descriptor view, independently of the optional feature bits.
 // RUN: emit source-low output=low
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 0, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [-avx512vl]}
 
 func.def target(@target) @host_avx512_counts(%values: vector<8xi32>, %raw_count: i32) -> (vector<8xi32>, vector<8xi32>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 31)] : i32

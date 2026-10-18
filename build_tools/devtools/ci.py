@@ -643,7 +643,26 @@ def repository_integration_steps(
             program_args=("--help",),
             bazel_options=ci_config.REPOSITORY_BAZEL_OPTIONS,
         ),
+        shared_tool_bazel_step(bazel_options=ci_config.REPOSITORY_BAZEL_OPTIONS),
     ]
+
+
+def shared_tool_bazel_step(
+    config: str | None = None, bazel_options: tuple[str, ...] = ()
+) -> CiStep:
+    return bazel_test_step(
+        "Test shared Loom tools",
+        (
+            "//loom/src/loom/tools/loom-compile:execution_test",
+            "//loom/src/loom/tools/loom-opt:execution_test",
+            "//loom/src/loom/tools/loom-import-cxx:execution_test",
+            "//loom/src/loom/tools/loom-import-cxx:export_roundtrip_test",
+            "//loom/src/loom/tools/loom-serve:execution_test",
+            "//loom/src/loom/tooling/target/cpu/serve:all",
+        ),
+        config=config,
+        bazel_options=bazel_options + ("--//loom/config:shared_tools",),
+    )
 
 
 def cpu_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
@@ -656,7 +675,7 @@ def cpu_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
 def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     scoped_targets = targets + ci_config.CPU_BAZEL_TARGET_EXCLUDES
     if config in ci_config.SANITIZER_TEST_CONFIGS:
-        return [
+        steps = [
             *platform_coverage_build_steps(
                 bazel_build_step(
                     f"Build IREE with {config.upper()}",
@@ -672,6 +691,14 @@ def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
                 test_language_filters=ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS,
             ),
         ]
+        if config == "asan":
+            steps.append(
+                shared_tool_bazel_step(
+                    config=config,
+                    bazel_options=("--//loom/config/import:enable=cxx",),
+                )
+            )
+        return steps
     if config in ci_config.SANITIZER_BUILD_CONFIGS:
         return [
             bazel_build_step(
@@ -904,6 +931,38 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
                     ),
                 ),
             )
+        )
+    if sanitizer is None:
+        # Reuse the static qualification tree so both final-link modes are
+        # exercised without another compilation tree or worker job.
+        steps.extend(
+            [
+                CiStep(
+                    "Configure shared Loom tools",
+                    cmake_dev_command(
+                        command_name,
+                        "configure",
+                        "-DLOOM_LINK_SHARED_TOOLS=ON",
+                        "-DLOOM_IMPORT_CXX=ON",
+                    ),
+                ),
+                cmake_build_step(
+                    command_name,
+                    "Build shared Loom tools",
+                    (
+                        "loom-compile",
+                        "loom-opt",
+                        "loom-import-cxx",
+                        "loom-serve",
+                        "loom_tooling_target_cpu_serve_loom-serve-test-tool",
+                    ),
+                ),
+                cmake_test_step(
+                    command_name,
+                    "Test shared Loom tools",
+                    regex=r"^(loom/tools/(loom-compile|loom-opt|loom-import-cxx|loom-serve)/(execution_test|export_roundtrip_test)|loom/tooling/target/cpu/serve/serve_command_test)$",
+                ),
+            ]
         )
     return steps
 

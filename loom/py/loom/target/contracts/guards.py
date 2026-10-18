@@ -681,7 +681,10 @@ class Guard:
         *,
         diagnostic: GuardDiagnostic | None = None,
     ) -> Self:
-        """Requires finite values exact in another value's float element type."""
+        """Requires finite values exact in the other value's float element type.
+
+        NaN and infinity remain possible and need independent class guards.
+        """
         return cls(
             kind=GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS,
             field=field,

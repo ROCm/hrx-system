@@ -1304,6 +1304,59 @@ TEST_F(LinkPlannerTest, LinkDeclarationMayUsePrivateOwnerDefinition) {
             callee_def->ordinal);
 }
 
+TEST_F(LinkPlannerTest, LinkOnceDefinitionsKeepSourceLocalDependencies) {
+  loom_module_t* first =
+      Parse(Fixture(IREE_SV("link_once_source_local_dependencies_first.loom")));
+  loom_module_t* second = Parse(
+      Fixture(IREE_SV("link_once_source_local_dependencies_second.loom")));
+  const std::vector<uint8_t> second_bytecode = WriteModule(second);
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), first, IREE_SV("first"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddBytecode(index.get(), second_bytecode, IREE_SV("second"),
+              LOOM_LINK_PROVIDER_ROLE_INPUT);
+  const loom_link_plan_options_t options = {
+      .mode = LOOM_LINK_PLAN_LINK,
+      .include_input_exports = true,
+  };
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  const loom_link_module_index_symbol_t* first_definition =
+      loom_link_module_index_lookup_global(index.get(),
+                                           IREE_SV("header_identity"));
+  ASSERT_NE(first_definition, nullptr);
+  const loom_link_module_index_symbol_t* second_definition =
+      loom_link_module_index_next_global_duplicate(index.get(),
+                                                   first_definition);
+  ASSERT_NE(second_definition, nullptr);
+  const loom_link_plan_symbol_t* first_selection =
+      FindPlannedSymbol(plan.get(), first_definition);
+  const loom_link_plan_symbol_t* second_selection =
+      FindPlannedSymbol(plan.get(), second_definition);
+  ASSERT_NE(first_selection, nullptr);
+  ASSERT_NE(second_selection, nullptr);
+  EXPECT_EQ(loom_link_plan_symbol_identity_ordinal(plan.get(),
+                                                   first_selection->ordinal),
+            first_definition->ordinal);
+  EXPECT_EQ(loom_link_plan_symbol_identity_ordinal(plan.get(),
+                                                   second_selection->ordinal),
+            first_definition->ordinal);
+
+  const loom_link_module_index_module_t* first_module =
+      loom_link_module_index_module_at(index.get(), 0);
+  const loom_link_module_index_module_t* second_module =
+      loom_link_module_index_module_at(index.get(), 1);
+  ASSERT_NE(first_module, nullptr);
+  ASSERT_NE(second_module, nullptr);
+  EXPECT_TRUE(ContainsSymbol(
+      plan.get(), loom_link_module_index_lookup_private(
+                      index.get(), first_module, IREE_SV("local_identity"))));
+  EXPECT_TRUE(ContainsSymbol(
+      plan.get(), loom_link_module_index_lookup_private(
+                      index.get(), second_module, IREE_SV("local_identity"))));
+}
+
 TEST_F(LinkPlannerTest, UnresolvedDeclarationIgnoresPrivateLibraryDefinition) {
   loom_module_t* harness =
       Parse(Fixture(IREE_SV("unresolved_declaration_ignores_private_library_"

@@ -1284,9 +1284,8 @@ static iree_status_t loom_amdgpu_wait_plan_build_dependency_links(
   }
   for (uint32_t i = 0; i < schedule->effect_dependencies.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_visit_effect_dependency_link(
-        builder,
-        loom_low_schedule_dependency_range_at(
-            &schedule->dependencies, schedule->effect_dependencies, i)));
+        builder, loom_low_schedule_dependency_slice_at(
+                     &schedule->effect_dependencies, i)));
   }
   for (iree_host_size_t i = 0; i < schedule->memory_completion_edge_count;
        ++i) {

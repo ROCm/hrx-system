@@ -24,6 +24,7 @@ loom_cc_test(
     loom::format::text::printer
     loom::import::cxx::source::catalog
     loom::import::cxx::source::preamble
+    loom::ops::func
     loom::ops::op_registry
     loom::target::test::descriptors
   LABELS

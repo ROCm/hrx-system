@@ -319,6 +319,24 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
+    math_policy_test
+  SRCS
+    "math_policy_test.cc"
+  DEPS
+    ::math_policy
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::target::math_policy
+    loom::target::types
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
     module_contract
@@ -571,6 +589,7 @@ loom_check_test_suite(
     "test/source_low/numeric_rounding.loom-test"
     "test/source_low/numeric_scalar_f32.loom-test"
     "test/source_low/numeric_scalar_f32_values.loom-test"
+    "test/source_low/numeric_trigonometry.loom-test"
     "test/source_low/numeric_unsigned_remainder.loom-test"
     "test/source_low/ordinary_vector_alu.loom-test"
     "test/source_low/ordinary_vector_concat.loom-test"

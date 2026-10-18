@@ -116,6 +116,33 @@ void amdf_gpu_kfd_buffer_abandon(amdf_gpu_kfd_buffer_t* buffer) {
   amdf_free(buffer->device->host_allocator, buffer);
 }
 
+amdf_status_t amdf_gpu_kfd_buffer_prepare_import(
+    amdf_gpu_umd_device_t* device, int descriptor, size_t byte_length,
+    amdf_gpu_kfd_buffer_t** buffer_state) {
+  amdf_gpu_kfd_buffer_t* buffer = NULL;
+  amdf_status_t status =
+      amdf_calloc(device->host_allocator, sizeof(*buffer),
+                  amdf_alignof(amdf_gpu_kfd_buffer_t), (void**)&buffer);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  buffer->device = device;
+  buffer->byte_length = byte_length;
+  *buffer_state = buffer;
+  struct kfd_ioctl_import_dmabuf_args import = {
+      .va_addr = 0,
+      .gpu_id = device->topology.gpu_id,
+      .dmabuf_fd = (uint32_t)descriptor,
+  };
+  if (amdf_gpu_kfd_buffer_ioctl(device, AMDKFD_IOC_IMPORT_DMABUF, &import) !=
+      0) {
+    status = amdf_linux_error(errno);
+  } else {
+    buffer->handle = import.handle;
+  }
+  return status;
+}
+
 amdf_status_t amdf_gpu_kfd_buffer_prepare(
     amdf_gpu_umd_device_t* device,
     const amdf_gpu_kfd_buffer_create_info_t* create_info,

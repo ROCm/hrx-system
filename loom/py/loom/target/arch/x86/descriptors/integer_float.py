@@ -14,6 +14,7 @@ from loom.target.low_descriptors import Descriptor, DescriptorFlag
 from .common import (
     _SCHEDULE_VECTOR_F32_XMM,
     _asm,
+    _avx512_descriptor,
     _gpr32_operand,
     _gpr64_operand,
     _xmm_operand,
@@ -23,7 +24,6 @@ from .common import (
 
 def integer_float_descriptors(*, unsigned: bool) -> tuple[Descriptor, ...]:
     descriptors = []
-    prefix = VectorEncodingPrefix.EVEX if unsigned else VectorEncodingPrefix.VEX
     feature = "avx512" if unsigned else "avx2"
     for element in FLOAT_ELEMENTS:
         for width, operand in ((32, _gpr32_operand), (64, _gpr64_operand)):
@@ -50,5 +50,9 @@ def integer_float_descriptors(*, unsigned: bool) -> tuple[Descriptor, ...]:
                 schedule_class=_SCHEDULE_VECTOR_F32_XMM,
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             )
-            descriptors.append(instruction.bind(descriptor, prefix))
+            descriptors.append(
+                _avx512_descriptor(descriptor, instruction, scalar=True)
+                if unsigned
+                else instruction.bind(descriptor, VectorEncodingPrefix.VEX)
+            )
     return tuple(descriptors)

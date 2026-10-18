@@ -87,6 +87,10 @@ class SdmaCommandWriter {
   void Fill32(uint64_t target, uint32_t pattern, uint32_t byte_length);
   // Writes an aligned coherent completion word after preceding transfers.
   void Fence32(uint64_t address, uint32_t value);
+  // Publishes a KFD_SIGNAL v1 mailbox and its interrupt after the caller's
+  // payload completion. The event context fits the native 28-bit TRAP field.
+  // Event ownership extends through consumption of this notification tail.
+  void NotifyKfdEvent(const amdf_gpu_event_info_t& event);
   // Waits for an aligned coherent word using a masked comparison. The reference
   // value has no bits outside the mask. POLL_REGMEM scope follows the family;
   // the native retry-forever value leaves valid work without a deadline.

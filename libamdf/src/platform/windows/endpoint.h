@@ -21,6 +21,8 @@ struct amdf_platform_endpoint_t {
   uint32_t physical_adapter_index;
   // Opaque public identity cached when the endpoint was opened.
   amdf_endpoint_id_t id;
+  // OS attachment node with online CPUs at open, or UINT32_MAX when unknown.
+  uint32_t host_numa_node;
 };
 
 #endif  // AMDF_SRC_PLATFORM_WINDOWS_ENDPOINT_H_

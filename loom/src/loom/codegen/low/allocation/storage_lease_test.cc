@@ -29,11 +29,13 @@ class LowAllocationStorageLeaseTest : public ::testing::Test {
     iree_arena_block_pool_initialize(/*block_size=*/4096,
                                      iree_allocator_system(), &block_pool_);
     iree_arena_initialize(&block_pool_, &arena_);
+    iree_arena_initialize(&block_pool_, &decision_arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
   void TearDown() override {
+    iree_arena_deinitialize(&decision_arena_);
     iree_arena_deinitialize(&arena_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
@@ -72,6 +74,8 @@ class LowAllocationStorageLeaseTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
   // Owner of allocation state and local value-domain storage.
   iree_arena_allocator_t arena_;
+  // Owner of construction indexes and mutable lease availability workspace.
+  iree_arena_allocator_t decision_arena_;
   // Context used to construct valid module-local values.
   loom_context_t context_;
 };
@@ -319,7 +323,7 @@ class LowAllocationStoragePressureSummaryTest
     IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
         &scenario->lease_table, scenario->module, scenario->function_op,
         &scenario->value_domain, &scenario->liveness, &storage_identity,
-        &scenario->unit_liveness, &arena_, &scenario->state));
+        &scenario->unit_liveness, &arena_, &decision_arena_, &scenario->state));
   }
 
   void RecordAssignments(const loom_low_descriptor_set_t* descriptor_set,
@@ -336,6 +340,59 @@ class LowAllocationStoragePressureSummaryTest
     loom_module_free(scenario->module);
   }
 };
+
+TEST_F(LowAllocationStoragePressureSummaryTest,
+       RetainedIndexSurvivesResultTransferAndDecisionRetirement) {
+  const loom_low_reg_class_t reg_classes[] = {RegClass(/*alias_set_id=*/1)};
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+  const loom_low_storage_lease_flags_t record_flags[] = {
+      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE,
+      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE,
+  };
+  const uint16_t descriptor_reg_class_ids[] = {0, 0};
+  const uint32_t unit_counts[] = {16, 16};
+  const uint32_t start_points[] = {10, 30};
+  const uint32_t end_points[] = {20, 100};
+  PressureSummaryScenario scenario;
+  InitializeScenario(&descriptor_set, IREE_ARRAYSIZE(record_flags),
+                     record_flags, descriptor_reg_class_ids, unit_counts,
+                     start_points, end_points, &scenario);
+  RecordAssignments(&descriptor_set, &scenario);
+  IREE_ASSERT_OK(
+      loom_low_allocation_storage_lease_state_finalize(&scenario.state));
+
+  // A winning coloring transfers its result before the allocator retires
+  // decision state. Final wait planning still queries these retained leases.
+  iree_arena_allocator_t retained_arena;
+  iree_arena_initialize(&block_pool_, &retained_arena);
+  iree_arena_transfer(&arena_, &retained_arena);
+  iree_arena_reset(&decision_arena_);
+  const auto* index = scenario.state.unit_index;
+  EXPECT_EQ(index->instances, scenario.state.instances);
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(record_flags); ++i) {
+    const auto& lease = scenario.state.instances[i];
+    EXPECT_EQ(lease.value_id, scenario.value_ids[i]);
+    EXPECT_EQ(lease.start_point, start_points[i]);
+    EXPECT_EQ(lease.end_point, end_points[i]);
+    loom_low_allocation_storage_lease_unit_query_t query = {};
+    loom_low_allocation_storage_lease_unit_query_initialize(
+        index, &descriptor_set, /*descriptor_reg_class_id=*/0,
+        LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+        /*location_base=*/i * 16, /*location_count=*/1,
+        /*minimum_end_point=*/start_points[i] + 1,
+        /*start_point_limit=*/end_points[i], /*selection=*/nullptr, &query);
+    uint32_t lease_index = UINT32_MAX;
+    EXPECT_TRUE(loom_low_allocation_storage_lease_unit_query_next(
+        &query, &lease_index));
+    EXPECT_EQ(lease_index, i);
+    EXPECT_FALSE(loom_low_allocation_storage_lease_unit_query_next(
+        &query, &lease_index));
+  }
+
+  DeinitializeScenario(&scenario);
+  iree_arena_deinitialize(&retained_arena);
+}
 
 TEST_F(LowAllocationStoragePressureSummaryTest,
        TracksEarliestIndexedPressureLeaseAcrossExpiration) {
@@ -703,7 +760,7 @@ class LowAllocationStorageIdentityTest : public LowAllocationStorageLeaseTest {
         &scenario->lease_table, scenario->module, scenario->function_op,
         &scenario->value_domain, &scenario->liveness,
         &scenario->storage_identity, &scenario->unit_liveness, &arena_,
-        &scenario->state));
+        &decision_arena_, &scenario->state));
   }
 
   void DeinitializeScenario(StorageIdentityScenario* scenario) {
@@ -894,7 +951,7 @@ TEST_F(LowAllocationStorageIdentityTest,
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &empty_lease_table, scenario.module, scenario.function_op,
       &scenario.value_domain, &scenario.liveness, &no_lease_identity,
-      &scenario.unit_liveness, &arena_, &no_lease_state));
+      &scenario.unit_liveness, &arena_, &decision_arena_, &no_lease_state));
   EXPECT_EQ(no_lease_state.identity_origins, nullptr);
 
   // Leases without structural aliases keep the original lease-only footprint.
@@ -911,7 +968,7 @@ TEST_F(LowAllocationStorageIdentityTest,
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &scenario.lease_table, scenario.module, scenario.function_op,
       &scenario.value_domain, &scenario.liveness, &no_alias_identity,
-      &scenario.unit_liveness, &arena_, &no_alias_state));
+      &scenario.unit_liveness, &arena_, &decision_arena_, &no_alias_state));
   EXPECT_EQ(no_alias_state.identity_origins, nullptr);
 
   DeinitializeScenario(&scenario);
@@ -1395,7 +1452,7 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
   loom_low_allocation_storage_lease_state_t state = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &lease_table, module, function_op, &value_domain, &liveness,
-      &storage_identity, &unit_liveness, &arena_, &state));
+      &storage_identity, &unit_liveness, &arena_, &decision_arena_, &state));
 
   const loom_low_allocation_assignment_t leased_assignment = Assignment(
       /*value_id=*/value_ids[0], /*descriptor_reg_class_id=*/0,
@@ -1510,6 +1567,14 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
     EXPECT_EQ(action->lease_record_index, 0u);
   }
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_finalize(&state));
+  iree_arena_reset(&decision_arena_);
+  if (maps_to_packet) {
+    // Final wait planning consumes the retained instance and release action
+    // after every mutable lease-construction index has been retired.
+    EXPECT_EQ(lease->release_action_index, 0u);
+    EXPECT_EQ(state.release_actions[0].insertion_packet_index,
+              point.packet_index);
+  }
 
   loom_local_value_domain_release(&value_domain);
   loom_module_free(module);
@@ -1590,7 +1655,7 @@ TEST_F(LowAllocationStorageLeaseTest,
   loom_low_allocation_storage_lease_state_t state = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &lease_table, module, function_op, &value_domain, &liveness,
-      &storage_identity, &unit_liveness, &arena_, &state));
+      &storage_identity, &unit_liveness, &arena_, &decision_arena_, &state));
   const loom_low_allocation_assignment_t leased_assignment = Assignment(
       /*value_id=*/value_ids[0], /*descriptor_reg_class_id=*/0,
       /*start_point=*/0, /*end_point=*/1, /*location_base=*/10,
@@ -1677,7 +1742,7 @@ TEST_F(LowAllocationStorageLeaseTest, RejectsLeaseOutsideAllocationLiveness) {
       loom_low_allocation_storage_lease_state_initialize(
           &lease_table, module, function_op, &allocation_value_domain,
           &allocation_liveness, &storage_identity, &unit_liveness, &arena_,
-          &state));
+          &decision_arena_, &state));
 
   loom_local_value_domain_release(&allocation_value_domain);
   loom_module_free(module);

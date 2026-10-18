@@ -67,6 +67,8 @@ static iree_status_t iree_hal_amd_xdna_operation_prepare_frontier_wait(
 
 static iree_status_t iree_hal_amd_xdna_operation_prepare_alloca_storage(
     iree_hal_amd_xdna_operation_t* operation) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, operation->alloca.request_count);
   iree_status_t status = iree_ok_status();
   const bool has_reservation_views = iree_hal_pool_query_reservation_views(
       operation->alloca.pool, operation->alloca.request_count,
@@ -121,11 +123,14 @@ static iree_status_t iree_hal_amd_xdna_operation_prepare_alloca_storage(
     }
     iree_hal_amd_xdna_operation_release_alloca_reservations(operation);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
 static void iree_hal_amd_xdna_operation_execute_dealloca(
     iree_hal_amd_xdna_operation_t* operation) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, operation->dealloca.buffer_count);
   for (iree_host_size_t i = 0; i < operation->dealloca.buffer_count; ++i) {
     iree_hal_pool_t* source_pool = NULL;
     iree_hal_buffer_allocation_take_dealloca_reservation(
@@ -145,6 +150,7 @@ static void iree_hal_amd_xdna_operation_execute_dealloca(
   iree_hal_pool_release_reservations(
       operation->dealloca.pool, operation->dealloca.buffer_count,
       operation->dealloca.reservations, /*death_frontier=*/NULL);
+  IREE_TRACE_ZONE_END(z0);
 }
 
 // A signal can resume memory work while its producer holds queue state.
@@ -175,6 +181,8 @@ static void iree_hal_amd_xdna_memory_wait_complete(void* user_data,
 
 static void iree_hal_amd_xdna_memory_finish_acquire(
     iree_hal_amd_xdna_operation_t* operation) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, operation->alloca.request_count);
   iree_hal_amd_xdna_memory_wait_t* wait = operation->alloca.memory_wait;
   iree_status_t status = operation->alloca.acquire_status;
   operation->alloca.acquire_status = iree_ok_status();
@@ -189,17 +197,23 @@ static void iree_hal_amd_xdna_memory_finish_acquire(
     iree_hal_pool_wait_abort(wait->capacity_wait);
     wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE;
     iree_hal_amd_xdna_memory_complete(operation, status);
+    IREE_TRACE_ZONE_END(z0);
     return;
   }
 
   switch (operation->alloca.acquire_result) {
     case IREE_HAL_POOL_ACQUIRE_OK:
     case IREE_HAL_POOL_ACQUIRE_OK_FRESH:
+      IREE_TRACE_ZONE_APPEND_TEXT(
+          z0, operation->alloca.acquire_result == IREE_HAL_POOL_ACQUIRE_OK
+                  ? "reuse frontier satisfied"
+                  : "no reuse frontier");
       iree_hal_pool_wait_abort(wait->capacity_wait);
       wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE;
       status = iree_hal_amd_xdna_operation_prepare_alloca_storage(operation);
       break;
     case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT:
+      IREE_TRACE_ZONE_APPEND_TEXT(z0, "await reuse frontier");
       iree_hal_pool_wait_abort(wait->capacity_wait);
       wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE;
       status = iree_hal_amd_xdna_operation_prepare_frontier_wait(operation);
@@ -210,6 +224,7 @@ static void iree_hal_amd_xdna_memory_finish_acquire(
             iree_hal_amd_xdna_memory_wait_complete, operation,
             &wait->frontier_waiter);
         if (iree_status_is_ok(status)) {
+          IREE_TRACE_ZONE_END(z0);
           return;
         }
         wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE;
@@ -217,6 +232,10 @@ static void iree_hal_amd_xdna_memory_finish_acquire(
       break;
     case IREE_HAL_POOL_ACQUIRE_EXHAUSTED:
     case IREE_HAL_POOL_ACQUIRE_OVER_BUDGET:
+      IREE_TRACE_ZONE_APPEND_TEXT(z0, operation->alloca.acquire_result ==
+                                              IREE_HAL_POOL_ACQUIRE_EXHAUSTED
+                                          ? "await capacity"
+                                          : "await budget");
       wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_CAPACITY;
       iree_hal_pool_wait_commit(
           wait->capacity_wait, iree_infinite_timeout(),
@@ -224,9 +243,11 @@ static void iree_hal_amd_xdna_memory_finish_acquire(
               .fn = iree_hal_amd_xdna_memory_wait_complete,
               .user_data = operation,
           });
+      IREE_TRACE_ZONE_END(z0);
       return;
   }
   iree_hal_amd_xdna_memory_complete(operation, status);
+  IREE_TRACE_ZONE_END(z0);
 }
 
 static void iree_hal_amd_xdna_memory_acquire_complete(
@@ -243,19 +264,24 @@ static void iree_hal_amd_xdna_memory_acquire_complete(
 
 void iree_hal_amd_xdna_operation_issue_memory(
     iree_hal_amd_xdna_operation_t* operation, iree_status_t status) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, operation->kind);
   status = iree_hal_amd_xdna_memory_check_failure(operation, status);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_xdna_memory_complete(operation, status);
+    IREE_TRACE_ZONE_END(z0);
     return;
   }
   if (operation->kind == IREE_HAL_AMD_XDNA_OPERATION_DEALLOCA) {
     iree_hal_amd_xdna_operation_execute_dealloca(operation);
     iree_hal_amd_xdna_memory_complete(operation, iree_ok_status());
+    IREE_TRACE_ZONE_END(z0);
     return;
   }
   if (operation->alloca.reservations_held) {
     status = iree_hal_amd_xdna_operation_prepare_alloca_storage(operation);
     iree_hal_amd_xdna_memory_complete(operation, status);
+    IREE_TRACE_ZONE_END(z0);
     return;
   }
 
@@ -278,6 +304,7 @@ void iree_hal_amd_xdna_operation_issue_memory(
     iree_hal_pool_wait_abort(wait->capacity_wait);
     wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE;
     iree_hal_amd_xdna_memory_complete(operation, status);
+    IREE_TRACE_ZONE_END(z0);
     return;
   }
   // No input/output storage can be released until both submission and its
@@ -286,6 +313,7 @@ void iree_hal_amd_xdna_operation_issue_memory(
                             iree_memory_order_acq_rel) == 1) {
     iree_hal_amd_xdna_memory_finish_acquire(operation);
   }
+  IREE_TRACE_ZONE_END(z0);
 }
 
 static iree_status_t iree_hal_amd_xdna_validate_alloca_request(

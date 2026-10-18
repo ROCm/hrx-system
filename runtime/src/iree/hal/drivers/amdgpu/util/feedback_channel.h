@@ -24,10 +24,8 @@ typedef struct iree_hal_amdgpu_feedback_channel_params_t {
   const iree_hal_amdgpu_libhsa_t* libhsa;
   // Physical GPU agent that will publish packets into this channel.
   hsa_agent_t device_agent;
-  // CPU fine-grained memory pool used for the control block.
-  hsa_amd_memory_pool_t control_memory_pool;
-  // GPU global memory pool used to create the pinned VMM packet ring.
-  hsa_amd_memory_pool_t ring_memory_pool;
+  // CPU fine-grained memory pool used for channel control and packet storage.
+  hsa_amd_memory_pool_t host_memory_pool;
   // Topology used to grant ring access to CPU and GPU agents.
   const iree_hal_amdgpu_topology_t* topology;
   // Minimum packet ring capacity in bytes.
@@ -44,7 +42,7 @@ typedef struct iree_hal_amdgpu_feedback_channel_t {
   hsa_signal_t notify_signal;
   // Device-visible control block allocated from host fine-grained memory.
   iree_hal_amdgpu_feedback_channel_header_t* control;
-  // Mirrored VMM packet ring allocated from pinned host memory.
+  // Mirrored VMM packet ring allocated from fine-grained host memory.
   iree_hal_amdgpu_vmem_ringbuffer_t ringbuffer;
 } iree_hal_amdgpu_feedback_channel_t;
 
@@ -52,7 +50,7 @@ typedef struct iree_hal_amdgpu_feedback_channel_t {
 typedef iree_status_t(IREE_API_PTR* iree_hal_amdgpu_feedback_drain_fn_t)(
     const iree_hal_amdgpu_feedback_packet_t* packet, void* user_data);
 
-// Initializes |out_channel| with a host-pinned, device-writable packet ring.
+// Initializes |out_channel| with a fine-grained, device-writable packet ring.
 iree_status_t iree_hal_amdgpu_feedback_channel_initialize(
     const iree_hal_amdgpu_feedback_channel_params_t* params,
     iree_hal_amdgpu_feedback_channel_t* out_channel);

@@ -419,6 +419,76 @@ bool loom_vector_memory_cache_policy_from_op(
       out_policy);
 }
 
+iree_status_t loom_vector_memory_build_unmasked(
+    loom_builder_t* builder, const loom_op_t* op,
+    const loom_vector_memory_cache_policy_t* cache_policy, loom_op_t** out_op) {
+  const loom_memory_access_t access =
+      loom_memory_access_cast(builder->module, op);
+  const loom_value_id_t view = loom_memory_access_view(access);
+  const loom_value_slice_t indices = loom_memory_access_dynamic_indices(access);
+  const loom_attribute_t static_indices =
+      loom_memory_access_static_indices(access);
+  const loom_type_t result_type =
+      op->result_count ? loom_module_value_type(builder->module,
+                                                loom_op_const_results(op)[0])
+                       : (loom_type_t){0};
+  switch (op->kind) {
+    case LOOM_OP_VECTOR_LOAD_MASK:
+    case LOOM_OP_VECTOR_LOAD_EXPAND:
+      return loom_vector_load_build(
+          builder, cache_policy->build_flags, /*instance_flags=*/0, view,
+          indices.values, indices.count, static_indices.i64_array,
+          static_indices.count, cache_policy->cache_scope,
+          cache_policy->cache_temporal, result_type, op->location, out_op);
+    case LOOM_OP_VECTOR_STORE_MASK:
+    case LOOM_OP_VECTOR_STORE_COMPRESS:
+      return loom_vector_store_build(
+          builder, cache_policy->build_flags, /*instance_flags=*/0,
+          loom_memory_access_value(access), view, indices.values, indices.count,
+          static_indices.i64_array, static_indices.count,
+          cache_policy->cache_scope, cache_policy->cache_temporal, op->location,
+          out_op);
+    case LOOM_OP_VECTOR_GATHER_MASK:
+      return loom_vector_gather_build(
+          builder, cache_policy->build_flags, view, indices.values,
+          indices.count, static_indices.i64_array, static_indices.count,
+          loom_memory_access_offsets(access), cache_policy->cache_scope,
+          cache_policy->cache_temporal, result_type, op->location, out_op);
+    case LOOM_OP_VECTOR_SCATTER_MASK:
+      return loom_vector_scatter_build(
+          builder, cache_policy->build_flags, loom_memory_access_value(access),
+          view, indices.values, indices.count, static_indices.i64_array,
+          static_indices.count, loom_memory_access_offsets(access),
+          cache_policy->cache_scope, cache_policy->cache_temporal, op->location,
+          out_op);
+    case LOOM_OP_VECTOR_ATOMIC_RMW_MASK:
+      return loom_vector_atomic_rmw_build(
+          builder, cache_policy->build_flags,
+          loom_vector_atomic_rmw_mask_kind(op),
+          loom_vector_atomic_rmw_mask_memory_flags(op),
+          loom_memory_access_value(access), view, indices.values, indices.count,
+          static_indices.i64_array, static_indices.count,
+          loom_memory_access_offsets(access),
+          loom_vector_atomic_rmw_mask_ordering(op),
+          loom_vector_atomic_rmw_mask_scope(op), cache_policy->cache_scope,
+          cache_policy->cache_temporal, result_type, op->location, out_op);
+    case LOOM_OP_VECTOR_ATOMIC_REDUCE_MASK:
+      return loom_vector_atomic_reduce_build(
+          builder, cache_policy->build_flags,
+          loom_vector_atomic_reduce_mask_kind(op),
+          loom_vector_atomic_reduce_mask_memory_flags(op),
+          loom_memory_access_value(access), view, indices.values, indices.count,
+          static_indices.i64_array, static_indices.count,
+          loom_memory_access_offsets(access),
+          loom_vector_atomic_reduce_mask_ordering(op),
+          loom_vector_atomic_reduce_mask_scope(op), cache_policy->cache_scope,
+          cache_policy->cache_temporal, op->location, out_op);
+    default:
+      IREE_ASSERT_UNREACHABLE("expected a masked vector memory operation");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
 bool loom_vector_memory_access_static_axis_extent(
     const loom_vector_memory_access_t* access, uint8_t view_axis,
     int64_t* out_extent) {

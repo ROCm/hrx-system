@@ -82,13 +82,15 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
       loom_low_schedule_structural_model_list_t structural_models,
       loom_low_emission_frame_t* out_frame,
       loom_low_schedule_strategy_t schedule_strategy =
-          LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
+          LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+      loom_low_schedule_flags_t schedule_flags = 0) {
     loom_block_t* module_block = loom_module_block(module);
     IREE_ASSERT_EQ(module_block->op_count, 1);
     loom_low_emission_frame_options_t options = {
         .descriptor_registry = &registry_.registry,
         .schedule_structural_models = structural_models,
         .schedule_strategy = schedule_strategy,
+        .schedule_flags = schedule_flags,
     };
     bool accepted = false;
     iree_status_t status =
@@ -96,6 +98,8 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
                                       &options, &arena_, out_frame, &accepted);
     if (iree_status_is_ok(status)) {
       EXPECT_TRUE(accepted);
+      // Returned frames own their rows after scheduler and trial scratch dies.
+      iree_arena_block_pool_trim(&block_pool_);
     }
     return status;
   }
@@ -656,6 +660,8 @@ low.func.def target<test.low.core> @physical_reuse(%seed: reg<test.phys>) -> (re
   ASSERT_EQ(frame.schedule.error_count, 0u);
   ASSERT_EQ(frame.allocation.error_count, 0u);
   // Physical timing consumes the retained index after scheduler scratch dies.
+  EXPECT_EQ(frame.schedule.dependency_graph, nullptr);
+  ASSERT_NE(frame.schedule.dependency_index, nullptr);
   iree_arena_block_pool_trim(&block_pool_);
   loom_low_physical_issue_t issue = {};
   IREE_ASSERT_OK(
@@ -1299,6 +1305,8 @@ low.func.def target<test.low.core> @dependency_cycle(%lhs: reg<test.schedule_sta
 TEST_F(LowEmissionFrameTest, GuardedMotionReplaysRetainedLocations) {
   ModulePtr module = ParseModule(R"(
 low.func.def target<test.low.core> @guarded_store(%base: reg<test.ptr>, %origin: reg<test.i32>, %pixel: reg<test.i32>, %color: reg<test.i32 x4>) asm {
+  test.store.index.v4i32 %base, %origin, %color
+  %loaded = test.counter_load.v4i32 %base
   %condition = test.event.fast.i32 %origin, %pixel
   low.cond_br %condition, ^store, ^done : reg<test.i32>
 ^store:
@@ -1313,6 +1321,8 @@ low.func.def target<test.low.core> @guarded_store(%base: reg<test.ptr>, %origin:
   loom_region_t* body = loom_low_func_def_body(function);
   loom_block_t* entry_block = loom_region_block(body, 0);
   loom_block_t* guarded_block = loom_region_block(body, 1);
+  loom_op_t* initial_store = entry_block->first_op;
+  loom_op_t* load = loom_block_op(entry_block, 1);
   loom_op_t* branch = entry_block->last_op;
   loom_op_t* index = loom_block_op(guarded_block, 0);
 
@@ -1333,6 +1343,27 @@ low.func.def target<test.low.core> @guarded_store(%base: reg<test.ptr>, %origin:
   EXPECT_EQ(statistics.frame_build_count, 2u);
   EXPECT_EQ(statistics.allocation_run_count, 2u);
   EXPECT_EQ(statistics.retained_location_replay_count, 1u);
+
+  // Accepted motion retires the original frame. Its replacement owns the
+  // effect and hazard rows consumed after trial and scheduling scratch expire.
+  iree_arena_block_pool_trim(&block_pool_);
+  ASSERT_EQ(frame.schedule.effect_dependencies.count, 2u);
+  const auto* dependency = loom_low_schedule_dependency_slice_at(
+      &frame.schedule.effect_dependencies, 0);
+  EXPECT_EQ(frame.schedule.nodes[dependency->producer_node].op, initial_store);
+  EXPECT_EQ(frame.schedule.nodes[dependency->consumer_node].op, load);
+  dependency = loom_low_schedule_dependency_slice_at(
+      &frame.schedule.effect_dependencies, 1);
+  EXPECT_EQ(frame.schedule.nodes[dependency->producer_node].op, initial_store);
+  // Cross-block effect timing is enforced at the source terminator.
+  EXPECT_EQ(frame.schedule.nodes[dependency->consumer_node].op, branch);
+  ASSERT_EQ(frame.schedule.hazard_use_count, 1u);
+  const auto& hazard_use = frame.schedule.hazard_uses[0];
+  EXPECT_EQ(frame.schedule.nodes[hazard_use.node_index].op, load);
+  const auto& hazard =
+      frame.schedule.target.descriptor_set->hazards[hazard_use.hazard_index];
+  EXPECT_EQ(hazard.kind, LOOM_LOW_HAZARD_KIND_WAIT_COUNTER);
+  EXPECT_EQ(hazard.reference_id, 0u);
 }
 
 TEST_F(LowEmissionFrameTest, ProvenNoOpGuardedMotionSkipsTrialFrame) {
@@ -1410,9 +1441,8 @@ low.func.def target<test.low.core> @directional_effect(%address: reg<test.ptr>, 
   const loom_low_schedule_dependency_t* barrier_to_load = nullptr;
   for (uint32_t i = 0; i < frame.schedule.effect_dependencies.count; ++i) {
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_dependency_range_at(
-            &frame.schedule.dependencies, frame.schedule.effect_dependencies,
-            i);
+        loom_low_schedule_dependency_slice_at(
+            &frame.schedule.effect_dependencies, i);
     EXPECT_EQ(dependency->kind, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT);
     if (dependency->separation_source !=
         LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR) {
@@ -1431,6 +1461,21 @@ low.func.def target<test.low.core> @directional_effect(%address: reg<test.ptr>, 
   EXPECT_EQ(barrier_to_load->minimum_issue_separation_cycles, 2);
   EXPECT_NE(store_to_barrier->consumer_event_id,
             barrier_to_load->producer_event_id);
+  EXPECT_EQ(frame.schedule.dependency_graph, nullptr);
+  EXPECT_GT(frame.schedule.dependency_count,
+            frame.schedule.effect_dependencies.count);
+
+  const auto dependency_count = frame.schedule.dependency_count;
+  const auto effect_dependency_count = frame.schedule.effect_dependencies.count;
+  loom_low_emission_frame_t inspected_frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &inspected_frame,
+                            LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+                            LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES));
+  ASSERT_NE(inspected_frame.schedule.dependency_graph, nullptr);
+  EXPECT_EQ(inspected_frame.schedule.dependency_count, dependency_count);
+  EXPECT_EQ(inspected_frame.schedule.dependency_graph->count, dependency_count);
+  EXPECT_EQ(inspected_frame.schedule.effect_dependencies.count,
+            effect_dependency_count);
 }
 
 TEST_F(LowEmissionFrameTest, EffectTimingCrossesDirectCfgEdge) {
@@ -1456,9 +1501,8 @@ low.func.def target<test.low.core> @direct_effect_edge(%address: reg<test.ptr>, 
   const loom_low_schedule_dependency_t* boundary_dependency = nullptr;
   for (uint32_t i = 0; i < frame.schedule.effect_dependencies.count; ++i) {
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_dependency_range_at(
-            &frame.schedule.dependencies, frame.schedule.effect_dependencies,
-            i);
+        loom_low_schedule_dependency_slice_at(
+            &frame.schedule.effect_dependencies, i);
     EXPECT_EQ(dependency->kind, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT);
     if (dependency->producer_node == 0 && dependency->consumer_node == 1 &&
         dependency->separation_source ==
@@ -1503,9 +1547,8 @@ low.func.def target<test.low.core> @diamond_effect_edge(%condition: reg<test.i32
   bool found_write_requirement = false;
   for (uint32_t i = 0; i < frame.schedule.effect_dependencies.count; ++i) {
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_dependency_range_at(
-            &frame.schedule.dependencies, frame.schedule.effect_dependencies,
-            i);
+        loom_low_schedule_dependency_slice_at(
+            &frame.schedule.effect_dependencies, i);
     EXPECT_EQ(dependency->kind, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT);
     if (dependency->producer_node != 0 || dependency->consumer_node != 1 ||
         dependency->separation_source !=
@@ -1543,9 +1586,8 @@ low.func.def target<test.low.core> @loop_effect_edge(%condition: reg<test.i32>, 
   const loom_low_schedule_dependency_t* backedge_dependency = nullptr;
   for (uint32_t i = 0; i < frame.schedule.effect_dependencies.count; ++i) {
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_dependency_range_at(
-            &frame.schedule.dependencies, frame.schedule.effect_dependencies,
-            i);
+        loom_low_schedule_dependency_slice_at(
+            &frame.schedule.effect_dependencies, i);
     EXPECT_EQ(dependency->kind, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT);
     if (dependency->producer_node == 2 && dependency->consumer_node == 3 &&
         dependency->separation_source ==

@@ -16,6 +16,7 @@ iree_cc_library(
   SRCS
     "cache_test.cc"
     "copy_test.cc"
+    "event_test.cc"
     "fill_test.cc"
     "queued_mapping_test.cc"
     "rectangular_copy_test.cc"

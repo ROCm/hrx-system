@@ -13,5 +13,6 @@ package(
 exports_files([
     "amdgpu_asan_actual.loom",
     "amdgpu_tsan_actual.loom",
+    "amdgpu_tsan_capacity.loom",
     "amdgpu_ubsan_actual.loom",
 ])

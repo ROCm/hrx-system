@@ -38,6 +38,23 @@ kernel.def @empty_kernel() {
 
 // ====
 
+kernel.def linkonce @header_kernel() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%buffer: buffer) {
+  kernel.return
+}
+
+// ----
+kernel.def linkonce @header_kernel() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%buffer: buffer) {
+  kernel.return
+}
+
+// ====
+
 kernel.def @clustered_kernel() {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index

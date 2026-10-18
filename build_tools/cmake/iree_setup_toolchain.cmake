@@ -88,6 +88,30 @@ macro(iree_setup_toolchain)
   # Linker setup
   #-----------------------------------------------------------------------------
 
+  if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+      CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    # CMake invokes the MSVC-style linker directly, bypassing Clang's driver
+    # runtime selection. Ordinary wide arithmetic can require these builtins
+    # in both executables and shared libraries.
+    set(_iree_clang_target)
+    if(CMAKE_CXX_COMPILER_TARGET)
+      set(_iree_clang_target "/clang:--target=${CMAKE_CXX_COMPILER_TARGET}")
+    endif()
+    execute_process(
+      COMMAND "${CMAKE_CXX_COMPILER}" ${_iree_clang_target}
+        /clang:--rtlib=compiler-rt /clang:--print-libgcc-file-name
+      OUTPUT_VARIABLE _iree_compiler_builtins
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      COMMAND_ERROR_IS_FATAL ANY)
+    if(NOT EXISTS "${_iree_compiler_builtins}")
+      message(FATAL_ERROR
+        "Clang's Windows compiler runtime is missing: ${_iree_compiler_builtins}")
+    endif()
+    file(TO_CMAKE_PATH "${_iree_compiler_builtins}" _iree_compiler_builtins)
+    string(APPEND CMAKE_C_STANDARD_LIBRARIES " \"${_iree_compiler_builtins}\"")
+    string(APPEND CMAKE_CXX_STANDARD_LIBRARIES " \"${_iree_compiler_builtins}\"")
+  endif()
+
   if(IREE_ENABLE_LLD)
     if(IREE_USE_LINKER)
       message(FATAL_ERROR "IREE_ENABLE_LLD and IREE_USE_LINKER can't be set at the same time")

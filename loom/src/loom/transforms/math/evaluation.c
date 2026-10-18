@@ -82,6 +82,8 @@ struct loom_math_evaluation_lane_ops_t {
   loom_math_evaluation_cmpf_build_fn_t cmpf;
   // Ordered-greater-or-equal predicate for the selected dialect.
   uint8_t cmpf_ordered_greater_equal_predicate;
+  // Ordered-equal predicate for the selected dialect.
+  uint8_t cmpf_ordered_equal_predicate;
   // Selects values in the scalar or vector lane domain.
   loom_math_evaluation_select_build_fn_t select;
   // Builds lane-wise floating-point absolute value.
@@ -106,6 +108,12 @@ struct loom_math_evaluation_lane_ops_t {
   loom_math_evaluation_unary_build_fn_t sqrtf;
   // Builds a lane-wise floating-point reciprocal square root.
   loom_math_evaluation_unary_build_fn_t rsqrtf;
+  // Builds lane-wise sine over radians.
+  loom_math_evaluation_unary_build_fn_t sinf;
+  // Builds lane-wise cosine over radians.
+  loom_math_evaluation_unary_build_fn_t cosf;
+  // Builds lane-wise rounding to the nearest even integer.
+  loom_math_evaluation_unary_build_fn_t roundevenf;
 };
 
 static iree_status_t loom_math_evaluation_scalar_clampf_build(
@@ -163,6 +171,7 @@ static const loom_math_evaluation_lane_ops_t kScalarLaneOps = {
     .clampf = loom_math_evaluation_scalar_clampf_build,
     .cmpf = loom_math_evaluation_scalar_cmpf_build,
     .cmpf_ordered_greater_equal_predicate = LOOM_SCALAR_CMPF_PREDICATE_OGE,
+    .cmpf_ordered_equal_predicate = LOOM_SCALAR_CMPF_PREDICATE_OEQ,
     .select = loom_scf_select_build,
     .absf = loom_scalar_absf_build,
     .copysignf = loom_math_evaluation_scalar_copysignf_build,
@@ -175,6 +184,9 @@ static const loom_math_evaluation_lane_ops_t kScalarLaneOps = {
     .truncf = loom_scalar_truncf_build,
     .sqrtf = loom_scalar_sqrtf_build,
     .rsqrtf = loom_scalar_rsqrtf_build,
+    .sinf = loom_scalar_sinf_build,
+    .cosf = loom_scalar_cosf_build,
+    .roundevenf = loom_scalar_roundevenf_build,
 };
 
 static const loom_math_evaluation_lane_ops_t kVectorLaneOps = {
@@ -187,6 +199,7 @@ static const loom_math_evaluation_lane_ops_t kVectorLaneOps = {
     .clampf = loom_math_evaluation_vector_clampf_build,
     .cmpf = loom_math_evaluation_vector_cmpf_build,
     .cmpf_ordered_greater_equal_predicate = LOOM_VECTOR_CMPF_PREDICATE_OGE,
+    .cmpf_ordered_equal_predicate = LOOM_VECTOR_CMPF_PREDICATE_OEQ,
     .select = loom_vector_select_build,
     .absf = loom_vector_absf_build,
     .copysignf = loom_vector_copysignf_build,
@@ -199,6 +212,9 @@ static const loom_math_evaluation_lane_ops_t kVectorLaneOps = {
     .truncf = loom_vector_truncf_build,
     .sqrtf = loom_vector_sqrtf_build,
     .rsqrtf = loom_vector_rsqrtf_build,
+    .sinf = loom_vector_sinf_build,
+    .cosf = loom_vector_cosf_build,
+    .roundevenf = loom_vector_roundevenf_build,
 };
 
 static loom_type_t loom_math_evaluation_type_with_element(
@@ -593,6 +609,15 @@ iree_status_t loom_math_evaluation_build_unary(
     case LOOM_MATH_EVALUATION_UNARY_RSQRTF:
       build = evaluation->lane_ops->rsqrtf;
       break;
+    case LOOM_MATH_EVALUATION_UNARY_SINF:
+      build = evaluation->lane_ops->sinf;
+      break;
+    case LOOM_MATH_EVALUATION_UNARY_COSF:
+      build = evaluation->lane_ops->cosf;
+      break;
+    case LOOM_MATH_EVALUATION_UNARY_ROUNDEVENF:
+      build = evaluation->lane_ops->roundevenf;
+      break;
   }
   IREE_ASSERT(build != NULL);
   uint8_t recipe_fastmath_flags =
@@ -709,19 +734,35 @@ iree_status_t loom_math_evaluation_build_clamp(
   return iree_ok_status();
 }
 
-iree_status_t loom_math_evaluation_build_ordered_greater_equal(
-    loom_math_evaluation_t* evaluation, const loom_math_evaluation_value_t* lhs,
+static iree_status_t loom_math_evaluation_build_comparison(
+    loom_math_evaluation_t* evaluation, uint8_t predicate,
+    const loom_math_evaluation_value_t* lhs,
     const loom_math_evaluation_value_t* rhs, loom_value_id_t* out_value) {
   const loom_type_t mask_type = loom_math_evaluation_type_with_element(
       evaluation->value_type, LOOM_SCALAR_TYPE_I1);
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(evaluation->lane_ops->cmpf(
-      &evaluation->rewriter->builder, evaluation->fastmath_flags,
-      evaluation->lane_ops->cmpf_ordered_greater_equal_predicate,
+      &evaluation->rewriter->builder, evaluation->fastmath_flags, predicate,
       lhs->accumulator, rhs->accumulator, evaluation->value_type, mask_type,
       evaluation->location, &op));
   *out_value = loom_op_results(op)[0];
   return iree_ok_status();
+}
+
+iree_status_t loom_math_evaluation_build_ordered_greater_equal(
+    loom_math_evaluation_t* evaluation, const loom_math_evaluation_value_t* lhs,
+    const loom_math_evaluation_value_t* rhs, loom_value_id_t* out_value) {
+  return loom_math_evaluation_build_comparison(
+      evaluation, evaluation->lane_ops->cmpf_ordered_greater_equal_predicate,
+      lhs, rhs, out_value);
+}
+
+iree_status_t loom_math_evaluation_build_ordered_equal(
+    loom_math_evaluation_t* evaluation, const loom_math_evaluation_value_t* lhs,
+    const loom_math_evaluation_value_t* rhs, loom_value_id_t* out_value) {
+  return loom_math_evaluation_build_comparison(
+      evaluation, evaluation->lane_ops->cmpf_ordered_equal_predicate, lhs, rhs,
+      out_value);
 }
 
 iree_status_t loom_math_evaluation_build_positive_normal_finite_condition(

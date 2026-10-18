@@ -22,8 +22,11 @@ extern "C" {
 /// First version exposing nominal queue-clock units and native clock samples.
 #define AMDF_GPU_EXTENSION_VERSION_2 2u
 
+/// Adds native GPU events and caller-owned blocking observation.
+#define AMDF_GPU_EXTENSION_VERSION_3 3u
+
 /// The most recent GPU extension version described by this header.
-#define AMDF_GPU_EXTENSION_VERSION_LATEST AMDF_GPU_EXTENSION_VERSION_2
+#define AMDF_GPU_EXTENSION_VERSION_LATEST AMDF_GPU_EXTENSION_VERSION_3
 
 /// An `amdf_gpu_endpoint_info_t` output structure.
 #define AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO \
@@ -48,6 +51,13 @@ extern "C" {
 #define AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO \
   ((amdf_structure_type_t)0x00020007u)
 
+/// An `amdf_gpu_event_create_info_t` input structure.
+#define AMDF_STRUCTURE_TYPE_GPU_EVENT_CREATE_INFO \
+  ((amdf_structure_type_t)0x00020008u)
+
+/// An `amdf_gpu_event_info_t` output structure.
+#define AMDF_STRUCTURE_TYPE_GPU_EVENT_INFO ((amdf_structure_type_t)0x00020009u)
+
 /// Features available on a live device under its instance's lifetime policy.
 typedef uint64_t amdf_gpu_device_features_t;
 enum amdf_gpu_device_feature_bits_e {
@@ -61,6 +71,9 @@ enum amdf_gpu_device_feature_bits_e {
   AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY = UINT64_C(1) << 2,
   /// LOCAL allocations support HOST_VISIBLE together with DEVICE_LOCAL.
   AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY = UINT64_C(1) << 3,
+  /// Native GPU events provide device producer operands, CPU signaling and
+  /// blocking host observation without a library-owned worker.
+  AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS = UINT64_C(1) << 4,
 };
 
 /// Immutable target identity and compute topology of one GPU endpoint.
@@ -223,6 +236,13 @@ typedef struct amdf_gpu_device_info_t {
 /// reused; command completion requires a separate fence.
 /// Each publication ends on an eight-dword boundary, padded with type-3 NOP
 /// packets when necessary; packets never straddle ring wrap.
+/// A confirmed completion written by a primary-ring RELEASE_MEM also proves
+/// consumption of the command prefix through that release packet. A producer
+/// retaining that exact position may reclaim this prefix without waiting for
+/// the native read-index writeback. It must still leave one dword free relative
+/// to the proven consumed prefix. Later notification packets and padding are
+/// not covered by the earlier marker. Reclaiming referenced code, arguments or
+/// payloads additionally requires their own execution and visibility join.
 /// Kernel publication accepts an immutable dword-aligned first-level IB.
 /// A USER primary ring can call a first-level IB and resume after it. KERNEL
 /// submits that IB directly; placing the ring's call inside a KERNEL buffer
@@ -552,6 +572,64 @@ typedef struct amdf_gpu_kernel_queue_submission_info_t {
   const amdf_gpu_kernel_command_t* commands;
 } amdf_gpu_kernel_queue_submission_info_t;
 
+/// An explicitly owned native wake resource, independent of completion values.
+typedef struct amdf_gpu_event_t amdf_gpu_event_t;
+
+/// Native producer protocol returned by an event's immutable information.
+typedef uint32_t amdf_gpu_event_format_t;
+enum amdf_gpu_event_format_e {
+  /// No device producer protocol; never returned by successful construction.
+  AMDF_GPU_EVENT_FORMAT_NONE = 0,
+  /// KFD signal mailbox and interrupt protocol, version 1. The mailbox is an
+  /// eight-byte native slot. Producers write trigger_data to its low DWORD,
+  /// then issue a native interrupt carrying interrupt_context after that write
+  /// is visible. A qualified native AMD signal producer may instead write all
+  /// eight bytes. The native consumer owns slot acknowledgment/reset.
+  ///
+  /// Queue/ISA-specific encoding and interrupt context widths remain separate
+  /// producer contracts. The format does not make a mailbox write alone wake
+  /// the host, grant another device access, or define application completion.
+  AMDF_GPU_EVENT_FORMAT_KFD_SIGNAL = 1,
+};
+
+/// Parameters for one device-native event, shared by any of its queues.
+typedef struct amdf_gpu_event_create_info_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_GPU_EVENT_CREATE_INFO`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_gpu_event_create_info_t)`.
+  uint32_t structure_size;
+  /// Optional input extension chain. No extensions are currently defined.
+  const void* next;
+  /// Reserved for compatible growth and must be zero.
+  uint64_t reserved;
+} amdf_gpu_event_create_info_t;
+
+/// Immutable native producer operands, valid until event destruction or reset.
+typedef struct amdf_gpu_event_info_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_GPU_EVENT_INFO`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_gpu_event_info_t)`.
+  uint32_t structure_size;
+  /// Optional output extension chain. No extensions are currently defined.
+  void* next;
+  /// Exact device address/interrupt domain in which these operands are valid.
+  amdf_device_id_t device_id;
+  /// Device reset epoch associated with the native resource.
+  uint64_t reset_epoch;
+  /// Native producer representation; it is not an operating-system selector.
+  amdf_gpu_event_format_t format;
+  /// Version of the native representation; KFD_SIGNAL currently uses one.
+  uint32_t format_version;
+  /// Queue publication mechanisms qualified to use these native operands.
+  amdf_queue_publication_modes_t publication_modes;
+  /// Native mailbox address in the exact producer device's address domain.
+  uint64_t mailbox_address;
+  /// Native mailbox payload, independent of any application completion value.
+  uint32_t trigger_data;
+  /// Native interrupt payload, not an application signal value or counter.
+  uint32_t interrupt_context;
+} amdf_gpu_event_info_t;
+
 /// Immutable entry-point table for one negotiated GPU extension version.
 ///
 /// Tables grow only by appending fields. The table and every function pointer
@@ -705,6 +783,57 @@ typedef struct amdf_gpu_api_t {
   amdf_status_t(AMDF_CALL* device_query_clock_sample)(
       amdf_device_t* device, uint32_t queue_family_ordinal,
       amdf_observation_clock_sample_t* out_sample);
+
+  /// Creates one native GPU event. Requires GPU extension version 3.
+  ///
+  /// The event borrows device, which must outlive it. device_destroy returns
+  /// BUSY while an event remains live, including after failed event
+  /// destruction. Construction may allocate, map native connection state, and
+  /// enter the driver; it creates no worker, queue, completion value, or
+  /// per-dispatch subscription. Shared native event backing follows the
+  /// instance's native lifetime, not an individual event's lifetime. PROCESS
+  /// lifetime requires coordination with other primary native clients. Failure
+  /// leaves out_event unchanged; partial native connection preparation remains
+  /// with its live instance for retry or teardown. Unsupported providers return
+  /// UNSUPPORTED without substituting polling.
+  amdf_status_t(AMDF_CALL* event_create)(
+      amdf_device_t* device, const amdf_gpu_event_create_info_t* create_info,
+      amdf_gpu_event_t** out_event);
+
+  /// Copies immutable producer operands without allocation, locking, native
+  /// calls or ownership updates. The caller initializes out_info and its chain.
+  /// Failure leaves out_info unchanged.
+  amdf_status_t(AMDF_CALL* event_query_info)(amdf_gpu_event_t* event,
+                                             amdf_gpu_event_info_t* out_info);
+
+  /// Wakes a host observer after the caller publishes its own work/stop state.
+  /// Signals may coalesce and are not counted work credits. This may enter the
+  /// driver and is thread-safe with waiting, querying and other signals. It
+  /// does not publish application payloads or signal a GPU execution
+  /// dependency.
+  amdf_status_t(AMDF_CALL* event_signal)(amdf_gpu_event_t* event);
+
+  /// Blocks this caller until a notification, native failure, host interruption
+  /// or relative nanosecond timeout. Zero observes without blocking;
+  /// AMDF_TIMEOUT_INFINITE imposes no deadline. Timeout returns
+  /// DEADLINE_EXCEEDED. Success is a wake hint: the caller acquires/rechecks
+  /// its authoritative predicates, including after interrupted, spurious or
+  /// coalesced wakes. It never proves execution completion.
+  ///
+  /// Waits on one event are serialized by the caller; signals may be
+  /// concurrent. The operation creates no worker, timer or library allocation,
+  /// and does not actively poll. Native kernel wait resources may be allocated.
+  /// Native context failure is reported as DEVICE_LOST; neither that result nor
+  /// a timeout establishes quiescence or cancels already-accepted work.
+  amdf_status_t(AMDF_CALL* event_wait)(amdf_gpu_event_t* event,
+                                       uint64_t timeout_nanoseconds);
+
+  /// Destroys an event after all producer uses (including notification tails)
+  /// and host calls/waits have ended. The caller owns that synchronization;
+  /// this does not wait for device work or track producer lifetimes. Success
+  /// consumes the event; a native release failure preserves it for retry.
+  /// Shared native connection backing remains with its instance.
+  amdf_status_t(AMDF_CALL* event_destroy)(amdf_gpu_event_t* event);
 } amdf_gpu_api_t;
 
 #ifdef __cplusplus

@@ -9,9 +9,9 @@
           "--compiler={tool:loom-compile}",
           "--require-all-roots",
           "--expected-root=@unsupported_vector_one",
-          "--expected-diagnostic=TARGET/033",
+          "--expected-diagnostic=TARGET/031",
           "--expected-root=@unsupported_vector_two",
-          "--expected-diagnostic=TARGET/033",
+          "--expected-diagnostic=TARGET/031",
           "--stamp-output={tmp}/all_roots.stamp",
           "{srcdir}/testdata/all_roots_xfail.loom",
           "--target=vm:core"
@@ -23,8 +23,8 @@
         {
           "path": "{tmp}/all_roots.stamp",
           "contains": [
-            "@unsupported_vector_one TARGET/033",
-            "@unsupported_vector_two TARGET/033"
+            "@unsupported_vector_one TARGET/031",
+            "@unsupported_vector_two TARGET/031"
           ]
         }
       ]
@@ -37,7 +37,7 @@
           "--compiler={tool:loom-compile}",
           "--require-all-roots",
           "--expected-root=@unsupported_vector_one",
-          "--expected-diagnostic=TARGET/033",
+          "--expected-diagnostic=TARGET/031",
           "--stamp-output={tmp}/incomplete.stamp",
           "{srcdir}/testdata/all_roots_xfail.loom",
           "--target=vm:core"
@@ -60,9 +60,9 @@
         "args": [
           "--compiler={tool:loom-compile}",
           "--expected-root=@unsupported_vector_one",
-          "--expected-diagnostic=TARGET/033",
+          "--expected-diagnostic=TARGET/031",
           "--expected-root=@unsupported_vector_two",
-          "--expected-diagnostic=TARGET/033",
+          "--expected-diagnostic=TARGET/031",
           "--stamp-output={tmp}/expected.stamp",
           "{srcdir}/testdata/diagnostic_xfails.loom",
           "--target=vm:core"
@@ -74,8 +74,8 @@
         {
           "path": "{tmp}/expected.stamp",
           "contains": [
-            "@unsupported_vector_one TARGET/033",
-            "@unsupported_vector_two TARGET/033"
+            "@unsupported_vector_one TARGET/031",
+            "@unsupported_vector_two TARGET/031"
           ]
         }
       ]
@@ -87,7 +87,7 @@
         "args": [
           "--compiler={tool:loom-compile}",
           "--expected-root=@unsupported_vector_one",
-          "--expected-diagnostic=TYPE/001,TARGET/033",
+          "--expected-diagnostic=TYPE/001,TARGET/031",
           "--stamp-output={tmp}/alternatives.stamp",
           "{srcdir}/testdata/diagnostic_xfails.loom",
           "--target=vm:core"
@@ -99,7 +99,7 @@
         {
           "path": "{tmp}/alternatives.stamp",
           "contains": [
-            "@unsupported_vector_one TYPE/001,TARGET/033"
+            "@unsupported_vector_one TYPE/001,TARGET/031"
           ]
         }
       ]
@@ -121,8 +121,8 @@
       "stderr": {
         "contains": [
           "loom-compile stderr:",
-          "TARGET/033",
-          "wrong diagnostic: expected TYPE/001, received TARGET/033"
+          "TARGET/031",
+          "wrong diagnostic: expected TYPE/001, received TARGET/031"
         ]
       },
       "files": [{"path": "{tmp}/wrong.stamp", "exists": false}]
@@ -134,16 +134,16 @@
         "args": [
           "--compiler={tool:loom-compile}",
           "--expected-root=@unsupported_vector_one",
-          "--expected-diagnostic=TARGET/033",
+          "--expected-diagnostic=TARGET/031",
           "--expected-root=@valid",
-          "--expected-diagnostic=TARGET/033",
+          "--expected-diagnostic=TARGET/031",
           "--stamp-output={tmp}/xpass.stamp",
           "{srcdir}/testdata/diagnostic_xfails.loom",
           "--target=vm:core"
         ]
       },
       "exit": 1,
-      "stderr": {"contains": ["XPASS", "TARGET/033"]},
+      "stderr": {"contains": ["XPASS", "TARGET/031"]},
       "files": [{"path": "{tmp}/xpass.stamp", "exists": false}]
     },
     {
@@ -153,7 +153,7 @@
         "args": [
           "--compiler={tool:loom-compile}",
           "--expected-root=@renamed",
-          "--expected-diagnostic=TARGET/033",
+          "--expected-diagnostic=TARGET/031",
           "--stamp-output={tmp}/missing.stamp",
           "{srcdir}/testdata/diagnostic_xfails.loom",
           "--target=vm:core"

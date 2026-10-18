@@ -10,10 +10,16 @@
 #include "amdf/amdf.h"
 #include "libamdf/src/memory_pair.h"
 
+// Construction-only import of a fresh export of platform-owned pages. This
+// native consumer role is never a public backing profile or foreign import
+// capability: every attachment receives an independently closeable transport.
+#define AMDF_MEMORY_NATIVE_PROFILE_ROLE_HOST_IMPORT (UINT32_C(1) << 31)
+
 // Properties of physical backing, independent of a consumer's access.
-#define AMDF_MEMORY_BACKING_FLAGS                                  \
-  (AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_LOCAL | \
-   AMDF_MEMORY_FLAG_SHAREABLE | AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE)
+#define AMDF_MEMORY_BACKING_FLAGS                                      \
+  (AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_LOCAL |     \
+   AMDF_MEMORY_FLAG_SHAREABLE | AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE | \
+   AMDF_MEMORY_FLAG_HOST_FILE_IO)
 
 // Properties established separately for each device consumer.
 #define AMDF_MEMORY_ACCESS_FLAGS                                     \
@@ -34,6 +40,9 @@ typedef struct amdf_memory_native_profile_t {
   amdf_memory_flags_t guaranteed_flags;
   // Backing and access properties the native operation can establish.
   amdf_memory_flags_t supported_flags;
+  // Cached optional-provider prerequisite status; construction is
+  // authoritative.
+  amdf_status_t availability;
   // Permissions unconditionally established by this native operation.
   amdf_memory_access_t guaranteed_device_access;
   // Permissions that can be requested from this native operation.

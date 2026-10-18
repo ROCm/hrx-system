@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/base/api.h"
+#include "iree/base/tooling/flags.h"
 #include "iree/testing/benchmark.h"
 
 void iree_benchmark_use_ptr(char const volatile* x) {}
@@ -43,6 +44,8 @@ iree_benchmark_def_t* iree_make_function_benchmark(iree_benchmark_fn_t fn) {
   return NULL;
 }
 
-void iree_benchmark_initialize(int* argc, char** argv) {}
+void iree_benchmark_initialize(int* argc, char** argv) {
+  iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_UNDEFINED_OK, argc, &argv);
+}
 
 bool iree_benchmark_run_specified(void) { return true; }

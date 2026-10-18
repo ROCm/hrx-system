@@ -68,6 +68,14 @@ iree_status_t loom_amdgpu_descriptor_matrix_attrs(
     const loom_low_descriptor_t* descriptor,
     loom_named_attr_slice_t* out_attrs);
 
+// Adapts a matrix source carrier to the register classes accepted by its
+// selected physical descriptor operand.
+iree_status_t loom_amdgpu_descriptor_matrix_materialize_operand(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, const loom_low_operand_t* descriptor_operand,
+    loom_value_id_t source_value, loom_value_id_t low_value,
+    loom_value_id_t* out_low_value);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -99,7 +99,8 @@ class LowLowerReportTest : public ::testing::Test {
     const loom_type_t argument_types[] = {i32_type, i32_type};
     loom_op_t* function_op = nullptr;
     IREE_ASSERT_OK(loom_func_def_build(
-        &module_builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
+        &module_builder, /*build_flags=*/0, /*visibility=*/0, /*linkage=*/0,
+        /*retain=*/0,
         /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
         loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,

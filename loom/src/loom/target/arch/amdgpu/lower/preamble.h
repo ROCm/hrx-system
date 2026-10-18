@@ -65,10 +65,19 @@ iree_status_t loom_amdgpu_lookup_current_workitem_id(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_kernel_dimension_t dimension, loom_value_id_t* out_low_value_id);
 
-// Emits the current workgroup id flattened with dynamic launch dimensions.
-iree_status_t loom_amdgpu_emit_current_workgroup_linear_id(
+// Emits the current workgroup id flattened with the final dynamic launch
+// dimensions as an unsigned SGPR pair. |out_overflow| is a normalized SGPR
+// word that is nonzero when the three-dimensional ordinal exceeds 64 bits.
+iree_status_t loom_amdgpu_emit_current_workgroup_linear_id_u64_checked(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_type_t result_type, loom_value_id_t* out_linear_id);
+    loom_value_id_t* out_linear_id, loom_value_id_t* out_overflow);
+
+// Loads the final group-segment byte size from the active dispatch packet.
+// This includes fixed and dynamic workgroup-local memory after indirect packet
+// patching.
+iree_status_t loom_amdgpu_emit_current_group_segment_size(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t* out_group_segment_size);
 
 // Emits the current workitem id flattened within the static workgroup.
 iree_status_t loom_amdgpu_emit_current_workitem_linear_id(

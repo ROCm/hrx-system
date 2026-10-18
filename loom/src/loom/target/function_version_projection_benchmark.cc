@@ -123,7 +123,8 @@ static loom_func_like_t AddFunction(loom_module_t* module,
       loom_symbol_ref_is_valid(target_ref) ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_TARGET
                                            : 0;
   IREE_CHECK_OK(loom_func_def_build(
-      module_builder, build_flags, /*visibility=*/0, /*retain=*/0,
+      module_builder, build_flags, /*visibility=*/0, /*linkage=*/0,
+      /*retain=*/0,
       /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
       target_ref, /*abi=*/0, loom_named_attr_slice_empty(),
       /*export_symbol=*/LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),

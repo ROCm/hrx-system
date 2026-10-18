@@ -38,6 +38,7 @@ loom_library(
 loom_check_test_suite(
     name = "compiler_test",
     srcs = [
+        "address_counted_loops.cxx-test",
         "address_values.cxx-test",
         "address_values_invalid.cxx-test",
         "aggregate_constants.cxx-test",
@@ -74,6 +75,7 @@ loom_check_test_suite(
         "class_conversions.cxx-test",
         "class_conversions_invalid.cxx-test",
         "condition_declarations.cxx-test",
+        "condition_loop_cleanup.cxx-test",
         "conditionals.cxx-test",
         "config.cxx-test",
         "config_cleanup.cxx-test",
@@ -155,6 +157,8 @@ loom_check_test_suite(
         "record_memory_invalid.cxx-test",
         "records.cxx-test",
         "records_invalid.cxx-test",
+        "reference_parameters.cxx-test",
+        "reference_parameters_invalid.cxx-test",
         "scalar.cxx-test",
         "scalar_invalid.cxx-test",
         "scalar_templates.cxx-test",
@@ -262,6 +266,7 @@ loom_check_test(
 )
 
 _AUTHORED_HOST_SOURCES = [
+    "address_counted_loops",
     "assumptions",
     "comparison_functions",
     "constant_loops",
@@ -323,10 +328,16 @@ loom_test(
     target_compatible_with = _HOST_COMPATIBILITY,
 )
 
+loom_test_module(
+    name = "integer_intrinsics_module",
+    srcs = ["integer_intrinsics.cxx"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
 loom_test(
     name = "integer_intrinsics_test",
-    srcs = ["integer_intrinsics.cxx"],
     execution_profiles = [VM_REFERENCE_PROFILE],
+    module = ":integer_intrinsics_module",
     target_compatible_with = _HOST_COMPATIBILITY,
 )
 
@@ -369,13 +380,19 @@ loom_test_module(
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
+loom_library(
+    name = "function_link_provider_library",
+    srcs = ["function_link_provider.cxx"],
+    data = ["function_link_helpers.h"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
 loom_test_module(
     name = "function_link_module",
-    srcs = [
-        "function_link_consumer.cxx",
-        "function_link_provider.cxx",
-    ],
+    srcs = ["function_link_consumer.cxx"],
+    data = ["function_link_helpers.h"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    deps = [":function_link_provider_library"],
 )
 
 loom_test(
@@ -604,6 +621,7 @@ loom_test_module(
         target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
     )
     for source in [
+        "address_counted_loops",
         "assumptions",
         "barrier_helpers",
         "borrowed_storage",

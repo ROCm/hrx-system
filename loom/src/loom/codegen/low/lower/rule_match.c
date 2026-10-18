@@ -158,7 +158,7 @@ static bool loom_low_lower_rule_descriptor_features_available(
   return true;
 }
 
-static bool loom_low_lower_rule_primary_feature_class_available(
+bool loom_low_lower_rule_primary_feature_class_available(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, uint8_t feature_class) {
   if (feature_class == 0) {
@@ -1275,7 +1275,6 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       const loom_value_facts_t facts =
           loom_value_fact_table_lookup(match_context->fact_table, value_id);
       *out_matches =
-          loom_value_facts_is_finite(facts) &&
           loom_value_facts_is_exact_float_type(facts, destination_type);
       return iree_ok_status();
     }

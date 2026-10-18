@@ -1,6 +1,7 @@
 # Linux syscall and driver protocol headers
 
-This package provides compile-time I/O, DRM, AMDGPU, KFD, and XDNA protocol headers.
+This package provides compile-time I/O, udmabuf, DRM, AMDGPU, KFD, and XDNA
+protocol headers.
 It builds no driver or libdrm library and introduces no runtime dependency.
 Consumers use the `//third_party:linux_*_uapi` facades; the source identities and
 checksums live in `../deps.MODULE.bazel` and the generated root CMake lock.
@@ -10,6 +11,8 @@ updates together; each file retains its own content checksum.
 
 The header sources have distinct export contracts:
 
+- udmabuf uses Linux's public memfd-to-DMA-BUF export definitions. The separate
+  target needs neither GPU driver headers nor io_uring declarations.
 - DRM and AMDGPU use libdrm's exported userspace headers. Raw kernel DRM headers
   contain kernel annotations and are not directly usable as application headers.
 - KFD uses Linux's public ioctl and topology definitions.

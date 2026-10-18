@@ -19,6 +19,7 @@ iree_py_library(
     ],
     deps = [
         "//loom/py/loom:core",
+        "//loom/py/loom/dialect:shared",
         "//loom/py/loom/dialect/target",
     ],
 )

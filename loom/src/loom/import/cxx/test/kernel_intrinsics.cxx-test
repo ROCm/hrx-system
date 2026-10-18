@@ -68,7 +68,7 @@ void guarded_barrier(const unsigned* header) {
   }
 }
 // ----
-func.def public inline @header_enables_barrier(%header: buffer, %header_byte_offset: offset) -> (i1) {
+func.def public linkonce inline @header_enables_barrier(%header: buffer, %header_byte_offset: offset) -> (i1) {
   %7 = index.cast %header_byte_offset : offset to i64
   %9 = scalar.assume %7 [range(%7, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset

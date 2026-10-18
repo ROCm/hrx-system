@@ -236,7 +236,7 @@ unsigned entry(unsigned count) {
 // RUN: verify
 // Invalid loop schedules are not silently discarded.
 unsigned entry(unsigned count) {
-  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping unsigned counted for loop"
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
   [[loom::unroll]] for (int i = 0; i < (int)count; ++i) {}
   return count;
 }
@@ -245,7 +245,7 @@ unsigned entry(unsigned count) {
 // RUN: verify
 // Invalid loop schedules are not silently discarded.
 unsigned entry(unsigned count) {
-  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping unsigned counted for loop"
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
   [[loom::unroll]] for (unsigned i = 0; i < 20ULL; ++i) {}
   return count;
 }
@@ -254,7 +254,7 @@ unsigned entry(unsigned count) {
 // RUN: verify
 // Invalid loop schedules are not silently discarded.
 unsigned entry(unsigned count) {
-  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping unsigned counted for loop"
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
   [[loom::unroll]] for (unsigned i = 0; i < (count + 0u); ++i) {}
   return count;
 }
@@ -278,7 +278,7 @@ unsigned entry(unsigned count, unsigned stop) {
 // RUN: verify
 // Invalid loop schedules are not silently discarded.
 unsigned entry(unsigned count) {
-  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping unsigned counted for loop"
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
   [[loom::unroll]] for (unsigned i = 0; i < (count = 20u); ++i) {}
   return count;
 }
@@ -287,7 +287,7 @@ unsigned entry(unsigned count) {
 // RUN: verify
 // Invalid loop schedules are not silently discarded.
 unsigned entry(unsigned count) {
-  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping unsigned counted for loop"
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
   [[loom::unroll]] for (unsigned i = 0; i < 20u; i += count) {}
   return count;
 }
@@ -296,7 +296,7 @@ unsigned entry(unsigned count) {
 // RUN: verify
 // Invalid loop schedules are not silently discarded.
 unsigned entry(unsigned count) {
-  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping unsigned counted for loop"
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
   [[loom::unroll]] for (unsigned i = 0; i < ~0u; i += (1u << 2)) {}
   return count;
 }

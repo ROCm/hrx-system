@@ -94,7 +94,8 @@ class GpuXdnaDeviceFixture : public GpuDeviceFixture {
   void CreateShaderMemory(amdf_memory_access_t device_access,
                           uint64_t byte_length, CtsMappedMemory& memory,
                           uint64_t& address,
-                          amdf_cache_transition_t& host_release);
+                          amdf_cache_transition_t& host_release,
+                          amdf_memory_flags_t flags = 0);
 
   // Exact native GPU facts retained by passive endpoint matching.
   amdf_gpu_endpoint_info_t gpu_endpoint_info_ = {};

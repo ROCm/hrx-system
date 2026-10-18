@@ -4,9 +4,80 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cerrno>
+
 #include "iree/hal/drivers/amd/fabric/memory_backend_test_base.h"
 
 namespace iree::hal::amd::fabric {
+
+TEST_F(MemoryBackendTest, UnavailableProfilesPreserveAvailableAllocation) {
+  native_.host_placement_enabled = true;
+  for (const int error : {ENOENT, EACCES}) {
+    SCOPED_TRACE(error);
+    for (uint32_t unavailable_ordinal : {0u, 1u}) {
+      SCOPED_TRACE(unavailable_ordinal);
+      native_.system_scope.profile_availability = {};
+      native_.system_scope.profile_availability[unavailable_ordinal] =
+          amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, error);
+      const int pair_queries = native_.pair_query_count;
+      iree_hal_pool_t* pool = nullptr;
+      IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
+      EXPECT_EQ(native_.pair_query_count - pair_queries, 9);
+      iree_hal_buffer_t* buffer = nullptr;
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          pool, iree_hal_make_pool_reservation_request(64, 64),
+          iree_infinite_timeout(), &buffer));
+      EXPECT_EQ(native_.created_profile_ordinal, 1u - unavailable_ordinal);
+      iree_hal_buffer_release(buffer);
+      iree_hal_pool_release(pool);
+      native_.AwaitEmpty();
+    }
+  }
+}
+
+TEST_F(MemoryBackendTest, UnavailableAllocationDoesNotProducePlan) {
+  native_.system_scope.profile_availability[0] =
+      amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOENT);
+  iree_hal_pool_t* pool = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
+  EXPECT_EQ(pool, nullptr);
+  EXPECT_EQ(native_.pair_query_count, 0);
+  EXPECT_EQ(native_.create_count, 0);
+}
+
+TEST_F(MemoryBackendTest, UnavailableImportDoesNotProducePlan) {
+  for (const bool native_transport : {false, true}) {
+    SCOPED_TRACE(native_transport);
+    native_.registration_enabled = !native_transport;
+    native_.native_transport_enabled = native_transport;
+    native_.system_scope.profile_availability[1] =
+        amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EACCES);
+    const iree_hal_pool_import_class_t import_class = {
+        .storage_class = {native_transport
+                              ? IREE_HAL_EXTERNAL_STORAGE_TYPE_DMA_BUF_FD
+                              : IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER,
+                          {0, 0}},
+    };
+    pool_options_.imports = {1, &import_class};
+    iree_hal_pool_t* pool = nullptr;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                          CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
+    EXPECT_EQ(pool, nullptr);
+    EXPECT_EQ(native_.pair_query_count, 0);
+    EXPECT_EQ(native_.create_count, 0);
+  }
+}
+
+TEST_F(MemoryBackendTest, ProfileQueryErrorsRemainFatal) {
+  native_.system_scope.profile_status =
+      amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EACCES);
+  iree_hal_pool_t* pool = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
+  EXPECT_EQ(pool, nullptr);
+  EXPECT_EQ(native_.pair_query_count, 0);
+}
 
 TEST_F(MemoryBackendTest, PublishesCanonicalPerDeviceBindings) {
   iree_hal_pool_t* pool = nullptr;

@@ -14,8 +14,8 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Populates a builtin dispatch packet and kernargs that initializes queue-local
-// TSAN state before user work can consume it.
+// Populates a builtin dispatch packet and kernargs that clears queue-local TSAN
+// shadow storage before user work can consume it.
 //
 // |max_workgroup_count| bounds the resident clear grid. The kernel covers
 // larger shadow allocations with a grid-stride loop.
@@ -25,26 +25,22 @@ extern "C" {
 // private storage for the caller's atomic publication.
 // The caller owns packet header commit and barrier placement.
 // |max_workgroup_count| must be non-zero.
-void iree_hal_amdgpu_device_tsan_emplace_queue_initialize(
+void iree_hal_amdgpu_device_tsan_emplace_shadow_initialize(
     const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
-        queue_initialize_kernel_args,
-    const iree_hal_amdgpu_tsan_queue_initialize_args_t* IREE_AMDGPU_RESTRICT
-        queue_initialize_args,
+        shadow_initialize_kernel_args,
+    const iree_hal_amdgpu_tsan_shadow_initialize_args_t* IREE_AMDGPU_RESTRICT
+        shadow_initialize_args,
     uint32_t max_workgroup_count,
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr, uint16_t* out_setup);
 
 #if defined(IREE_AMDGPU_TARGET_DEVICE)
 
-// Device builtin that initializes queue-local TSAN state.
-IREE_AMDGPU_ATTRIBUTE_KERNEL void
-iree_hal_amdgpu_device_tsan_initialize_queue_state(
-    iree_hal_amdgpu_tsan_queue_state_t* IREE_AMDGPU_RESTRICT queue_state,
+// Device builtin that clears queue-local TSAN shadow storage.
+IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_tsan_initialize_shadow(
     uint8_t* IREE_AMDGPU_RESTRICT shadow_base, uint64_t shadow_size,
     uint32_t clear_workgroup_size, uint32_t reserved0,
-    uint64_t clear_byte_stride,
-    const iree_hal_amdgpu_tsan_queue_state_t* IREE_AMDGPU_RESTRICT
-        queue_state_template);
+    uint64_t clear_byte_stride);
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE
 

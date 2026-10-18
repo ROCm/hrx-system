@@ -11,15 +11,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from loom.target.arch.x86 import native_vector as native
-from loom.target.arch.x86.vector_encoding import (
-    VectorEncodingPrefix,
-    VectorMachineInstruction,
-)
+from loom.target.arch.x86.vector_encoding import VectorMachineInstruction
 from loom.target.arch.x86.vector_families import (
     AVX2_BITWISE_FAMILIES,
     AVX2_FLOAT_BINARY_FAMILIES,
     AVX2_FLOAT_COMPARE_MNEMONICS,
     AVX2_FLOAT_FMA_MNEMONICS,
+    AVX2_FLOAT_INTEGER_I32_FORMS,
     AVX2_FLOAT_ROOT_FAMILIES,
     AVX2_INTEGER_BINARY_FAMILIES,
     AVX2_INTEGER_COMPARE_MNEMONICS,
@@ -100,6 +98,10 @@ from .common import (
     _xmm_result,
 )
 from .float_conversion import float_conversion_descriptors
+from .float_integer import (
+    scalar_float_integer_descriptors,
+    vector_float_integer_descriptors,
+)
 from .integer_float import integer_float_descriptors
 from .memory import memory_descriptors
 from .scalar import (
@@ -1262,7 +1264,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
         assembly_suffix=".xmm",
         vector_instructions=native.VECTOR_MEMORY,
-        vector_prefix=VectorEncodingPrefix.VEX,
+        vector_binder=_vex_descriptor,
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",
@@ -1276,7 +1278,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
         assembly_suffix=".xmm",
         vector_instructions=native.XMM_DWORD_MEMORY,
-        vector_prefix=VectorEncodingPrefix.VEX,
+        vector_binder=_vex_descriptor,
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",
@@ -1290,7 +1292,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
         assembly_suffix=".xmm",
         vector_instructions=native.XMM_QWORD_MEMORY,
-        vector_prefix=VectorEncodingPrefix.VEX,
+        vector_binder=_vex_descriptor,
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",
@@ -1304,7 +1306,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         store_schedule_class=_SCHEDULE_MEMORY_STORE_YMM,
         assembly_suffix=".ymm",
         vector_instructions=native.VECTOR_MEMORY,
-        vector_prefix=VectorEncodingPrefix.VEX,
+        vector_binder=_vex_descriptor,
     ),
 )
 
@@ -1314,6 +1316,10 @@ X86_AVX2_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
     *X86_AVX2_VECTOR_DESCRIPTORS,
     *integer_float_descriptors(unsigned=False),
+    *scalar_float_integer_descriptors(unsigned=False),
+    *vector_float_integer_descriptors(
+        AVX2_FLOAT_INTEGER_I32_FORMS, unsigned=False, evex=False
+    ),
     *float_conversion_descriptors(evex=False),
     *X86_SCALAR_SUFFIX_DESCRIPTORS,
 )

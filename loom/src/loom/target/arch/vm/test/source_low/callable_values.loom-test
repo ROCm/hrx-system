@@ -1,8 +1,8 @@
 // RUN: emit source-low target=vm:core output=low
 
-// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<1xi32>"}
+// ERROR@+1: TARGET/031 {op_name="func.def", actual_type="vector<1xi32>", type_constraint="vector.target_carrier"}
 func.def public @call_mixed_i32(%input: vector<1xi32>, %delta: i32) -> (i32, i32) {
-  // ERROR@+1: TARGET/001 {op_name="vector.extract"}
+  // ERROR@+1: TARGET/031 {op_name="vector.extract", type_constraint="vector.target_carrier"}
   %value = vector.extract %input[0] : vector<1xi32> -> i32
   %mixed = func.call @add_i32(%value, %delta) : (i32, i32) -> (i32)
   %uniform = func.call @add_i32(%delta, %delta) : (i32, i32) -> (i32)
@@ -19,9 +19,9 @@ func.def @add_i32(%value: i32, %delta: i32) -> (i32) {
 
 // ====
 
-// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<1xi64>"}
+// ERROR@+1: TARGET/031 {op_name="func.def", actual_type="vector<1xi64>", type_constraint="vector.target_carrier"}
 func.def public @call_mixed_i64(%input: vector<1xi64>, %delta: i64) -> (i64, i64) {
-  // ERROR@+1: TARGET/001 {op_name="vector.extract"}
+  // ERROR@+1: TARGET/031 {op_name="vector.extract", type_constraint="vector.target_carrier"}
   %value = vector.extract %input[0] : vector<1xi64> -> i64
   %mixed = func.call @add_i64(%value, %delta) : (i64, i64) -> (i64)
   %uniform = func.call @add_i64(%delta, %delta) : (i64, i64) -> (i64)
@@ -68,9 +68,9 @@ low.func.def public target<vm.core> abi(vm_function) @call_vector_result(%input:
 
 // ====
 
-// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<1xi32>"}
+// ERROR@+1: TARGET/031 {op_name="func.def", actual_type="vector<1xi32>", type_constraint="vector.target_carrier"}
 func.def public @call_loop(%input: vector<1xi32>, %delta: i32, %count: index) -> (i32) {
-  // ERROR@+1: TARGET/001 {op_name="vector.extract"}
+  // ERROR@+1: TARGET/031 {op_name="vector.extract", type_constraint="vector.target_carrier"}
   %value = vector.extract %input[0] : vector<1xi32> -> i32
   %result = func.call @repeat_add(%value, %delta, %count) : (i32, i32, index) -> (i32)
   func.return %result : i32

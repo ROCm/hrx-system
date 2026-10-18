@@ -109,6 +109,13 @@ alias(
 )
 
 alias(
+    name = "linux_udmabuf_uapi",
+    actual = "//build_tools/third_party/linux_uapi:linux_udmabuf_uapi",
+    tags = ["manual"],
+    visibility = [":libamdf_users"],
+)
+
+alias(
     name = "linux_drm_uapi",
     actual = "//build_tools/third_party/linux_uapi:linux_drm_uapi",
     tags = ["manual"],

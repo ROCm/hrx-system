@@ -1314,15 +1314,26 @@ TEST_F(AmdgpuFeedbackTest, BuildsSingleReservationAttempt) {
   ASSERT_EQ(compare_ops.size(), 2u);
   std::vector<loom_op_t*> and_ops =
       OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64);
-  ASSERT_EQ(and_ops.size(), 1u);
+  ASSERT_EQ(and_ops.size(), 2u);
   loom_value_slice_t and_operands = loom_low_op_operands(and_ops[0]);
   ASSERT_EQ(and_operands.count, 2u);
   EXPECT_EQ(and_operands.values[0],
             loom_value_slice_get(loom_low_op_results(compare_ops[0]), 0));
   EXPECT_EQ(and_operands.values[1],
             loom_value_slice_get(loom_low_op_results(compare_ops[1]), 0));
-  EXPECT_EQ(attempt.cas_succeeded,
+  // Wave32 vector comparisons do not define the upper half of an SGPRx2.
+  // The scalar branch and subsequent EXEC update require an active-lane mask.
+  std::vector<loom_op_t*> exec_ops =
+      OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC_READ);
+  ASSERT_EQ(exec_ops.size(), 1u);
+  loom_value_slice_t active_operands = loom_low_op_operands(and_ops[1]);
+  ASSERT_EQ(active_operands.count, 2u);
+  EXPECT_EQ(active_operands.values[0],
             loom_value_slice_get(loom_low_op_results(and_ops[0]), 0));
+  EXPECT_EQ(active_operands.values[1],
+            loom_value_slice_get(loom_low_op_results(exec_ops[0]), 0));
+  EXPECT_EQ(attempt.cas_succeeded,
+            loom_value_slice_get(loom_low_op_results(and_ops[1]), 0));
 }
 
 TEST_F(AmdgpuFeedbackTest, BuildsReservationCfgWithHotFallthrough) {
@@ -1393,16 +1404,30 @@ TEST_F(AmdgpuFeedbackTest, BuildsReservationCfgWithHotFallthrough) {
   EXPECT_EQ(loom_low_br_dest(dropped_terminator), continuation_block);
   ASSERT_EQ(loom_low_br_args(dropped_terminator).count, 3u);
 
-  EXPECT_NE(FindGlobalLoadSaddrInBlock(
-                check_block, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B64_SADDR,
-                channel_values.address,
-                LOOM_AMDGPU_FEEDBACK_CHANNEL_RESERVATION_HEAD_OFFSET),
-            nullptr);
-  EXPECT_NE(FindGlobalLoadSaddrInBlock(
-                check_block, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B64_SADDR,
-                channel_values.address,
-                LOOM_AMDGPU_FEEDBACK_CHANNEL_READ_TAIL_OFFSET),
-            nullptr);
+  const loom_op_t* head_load = FindGlobalLoadSaddrInBlock(
+      check_block, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B64_SADDR,
+      channel_values.address,
+      LOOM_AMDGPU_FEEDBACK_CHANNEL_RESERVATION_HEAD_OFFSET);
+  const loom_op_t* tail_load = FindGlobalLoadSaddrInBlock(
+      check_block, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B64_SADDR,
+      channel_values.address, LOOM_AMDGPU_FEEDBACK_CHANNEL_READ_TAIL_OFFSET);
+  ASSERT_NE(head_load, nullptr);
+  ASSERT_NE(tail_load, nullptr);
+  // Tail's acquire must precede the head load so concurrent consumption cannot
+  // produce a head older than the sampled tail and underflow the occupancy.
+  const loom_op_t* next_op = tail_load->next_op;
+  while (next_op && next_op != head_load) {
+    next_op = next_op->next_op;
+  }
+  EXPECT_EQ(next_op, head_load);
+  auto capacity_masks = OpsForDescriptorRefInBlock(
+      check_block, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64);
+  ASSERT_EQ(capacity_masks.size(), 1u);
+  const auto* active_mask =
+      DefiningOp(loom_low_op_operands(capacity_masks[0]).values[1]);
+  ASSERT_NE(active_mask, nullptr);
+  ExpectLowOpDescriptorRef(active_mask,
+                           LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC_READ);
   ASSERT_EQ(OpsForDescriptorRefInBlock(check_block,
                                        LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULE_U32)
                 .size(),

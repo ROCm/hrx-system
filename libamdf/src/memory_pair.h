@@ -104,6 +104,12 @@ amdf_memory_site_description_t amdf_memory_describe_host_site(
     const amdf_memory_host_description_t* host, amdf_memory_map_flags_t access,
     bool coherent, const amdf_memory_site_description_t* device_peer);
 
+// Describes a previously qualified ordinary native file-buffer view. Native
+// I/O completion/submission supplies the file-side publication/consumption
+// boundary; GPU/CPU peer operations and caller scheduling remain independent.
+amdf_memory_site_description_t amdf_memory_describe_file_site(
+    amdf_memory_map_flags_t access);
+
 // Composes two local descriptions of already-established shared backing reach.
 // The caller validates output storage; failure leaves it unchanged. Unsupported
 // permissions or transitions are ordinary capability misses, not no-ops.

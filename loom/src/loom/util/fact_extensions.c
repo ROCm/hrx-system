@@ -829,6 +829,10 @@ iree_status_t loom_value_facts_make_uniform_element(
   entry.payload.uniform_element.element = element;
   IREE_RETURN_IF_ERROR(loom_value_facts_make_extension(context, &entry, out));
   out->flags |= element.flags & LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK;
+  if (loom_value_facts_is_float(element)) {
+    loom_value_facts_set_exact_float_types(
+        out, loom_value_facts_exact_float_types(element));
+  }
   return iree_ok_status();
 }
 
@@ -858,11 +862,17 @@ iree_status_t loom_value_facts_make_small_static_lanes(
   entry.payload.small_static_lanes = lanes;
   IREE_RETURN_IF_ERROR(loom_value_facts_make_extension(context, &entry, out));
   if (lanes.count > 0) {
-    uint32_t common_float_predicates = LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK;
-    for (iree_host_size_t i = 0; i < lanes.count; ++i) {
-      common_float_predicates &= lanes.lanes[i].flags;
+    // Intersect flags before decoding formats so this stays one bitwise
+    // reduction. The first component's numeric payload is not projected.
+    loom_value_facts_t common = lanes.lanes[0];
+    for (iree_host_size_t i = 1; i < lanes.count; ++i) {
+      common.flags &= lanes.lanes[i].flags;
     }
-    out->flags |= common_float_predicates;
+    out->flags |= common.flags & LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK;
+    if (loom_value_facts_is_float(*out)) {
+      loom_value_facts_set_exact_float_types(
+          out, loom_value_facts_exact_float_types(common));
+    }
   }
   return iree_ok_status();
 }

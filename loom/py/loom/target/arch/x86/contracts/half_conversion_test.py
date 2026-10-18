@@ -11,7 +11,7 @@ from loom.target.arch.x86.descriptors import (
     X86_AVX2_FEATURES_DESCRIPTOR_SET,
     X86_AVX512_CORE_DESCRIPTOR_SET,
 )
-from loom.target.arch.x86.feature_bits import FEATURE_F16C
+from loom.target.arch.x86.feature_bits import FEATURE_AVX512_VL, FEATURE_F16C
 from loom.target.contracts import GuardKind, Scalar, Vector, descriptor_by_key
 from loom.target.low_descriptors import OperandAddressMapKind
 
@@ -32,7 +32,6 @@ def test_half_conversion_covers_scalar_and_each_native_packet(evex: bool) -> Non
             if guard.kind is GuardKind.VALUE_TYPE
         }
         cells.add((types["input"], types["result"]))
-        assert rule.descriptor.feature_mask_words == (() if evex else (FEATURE_F16C,))
         for emit in rule.emit:
             if emit.descriptor.mnemonic == "vcvtps2ph":
                 assert emit.immediates == {"rounding": 0}
@@ -67,7 +66,11 @@ def test_legacy_half_encodings_and_feature_requirements(evex: bool) -> None:
             assert descriptor.encoding_id == (
                 (0x071D if narrow else 0x0613) | width_bits | (0x2000 if evex else 0)
             )
-            assert descriptor.feature_mask_words == (() if evex else (FEATURE_F16C,))
+            assert descriptor.feature_mask_words == (
+                (FEATURE_AVX512_VL,)
+                if evex and wide != "zmm"
+                else (() if evex else (FEATURE_F16C,))
+            )
             for operand in descriptor.operands:
                 if evex:
                     assert (

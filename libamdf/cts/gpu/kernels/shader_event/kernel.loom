@@ -1,0 +1,25 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// The native mailbox write and interrupt are distinct from the record value.
+// The caller supplies both native operands; no event-ID equality is assumed.
+template.decl @shader_event_interrupt(%context: i32)
+
+kernel.def export("shader_event") @shader_event() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%record: buffer, %mailbox: buffer, %value: i64, %trigger: i64, %context: i32) {
+  %origin = index.constant 0 : offset
+  %result = buffer.view %record[%origin] : buffer -> view<2xi64>
+  %slot = buffer.view %mailbox[%origin] : buffer -> view<1xi64>
+  %mask = scalar.constant 1311768467463790320 : i64
+  %payload = scalar.xori %value, %mask : i64
+  view.store %payload, %result[0] : i64, view<2xi64>
+  view.atomic.store %value, %result[1] {ordering = release, scope = system} : i64, view<2xi64>
+  view.atomic.store %trigger, %slot[0] {ordering = release, scope = system} : i64, view<1xi64>
+  template.apply<@shader_event_interrupt>(%context) : (i32) -> ()
+  kernel.return
+}

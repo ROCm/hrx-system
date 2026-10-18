@@ -1,0 +1,18 @@
+// RUN: verify
+
+// ERROR@+1: X86/006 {attribute_name="contract_set_key"}
+x86.target<avx2> @raw_key {contract_set_key = "x86.avx2_features.core"}
+
+// ====
+
+// ERROR@+1: X86/006 {attribute_name="contract_feature_bits"}
+x86.target<avx2> @raw_bits {contract_feature_bits = 4}
+
+// ====
+
+// ERROR@+1: X86/007 {feature_name="avx512bf16", selector_name="scalar"}
+x86.target<scalar> @unsupported_positive {features = [avx512bf16]}
+
+// ====
+
+x86.target<scalar> @unsupported_negative {features = [-avx512bf16]}

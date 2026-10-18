@@ -34,6 +34,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::core_headers
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

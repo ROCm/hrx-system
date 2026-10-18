@@ -1709,13 +1709,13 @@ test.target<quirky> @target32
 test.target<low_core> @target64
 
 func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, index, index, index, index) {
+  %c8 = index.constant 8 : index
   %count = index.constant 31 : index
-  %52 = index.constant 24 : index
-  %rotate = index.rotli %x, %52 : index
-  %50 = index.constant 1 : index
-  %rotate_wrapped = index.rotli %x, %50 : index
-  %48 = index.constant 1 : index
-  %rotate_negative = index.rotli %x, %48 : index
+  %rotate = index.rotri %x, %c8 : index
+  %49 = index.constant 1 : index
+  %rotate_wrapped = index.rotli %x, %49 : index
+  %48 = index.constant 31 : index
+  %rotate_negative = index.rotri %x, %48 : index
   %46 = index.constant 3 : index
   %multiply = index.shli %x, %46 : index
   %44 = index.constant 3 : index
@@ -1724,17 +1724,17 @@ func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, 
 }
 
 func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, index, index, index, index) {
+  %c8 = index.constant 8 : index
   %count = index.constant 63 : index
-  %63 = index.constant 56 : index
-  %rotate = index.rotli %x, %63 : index
-  %61 = index.constant 1 : index
-  %rotate_wrapped = index.rotli %x, %61 : index
-  %59 = index.constant 1 : index
-  %rotate_negative = index.rotli %x, %59 : index
-  %57 = index.constant 3 : index
-  %multiply = index.shli %x, %57 : index
-  %55 = index.constant 3 : index
-  %outer_shift = index.shli %x, %55 : index
+  %rotate = index.rotri %x, %c8 : index
+  %56 = index.constant 1 : index
+  %rotate_wrapped = index.rotli %x, %56 : index
+  %55 = index.constant 63 : index
+  %rotate_negative = index.rotri %x, %55 : index
+  %53 = index.constant 3 : index
+  %multiply = index.shli %x, %53 : index
+  %51 = index.constant 3 : index
+  %outer_shift = index.shli %x, %51 : index
   func.return %count, %rotate, %x, %rotate_wrapped, %rotate_negative, %multiply, %outer_shift : index, index, index, index, index, index, index
 }
 

@@ -78,6 +78,7 @@ inline uint32_t FindGpuMemoryProfileOrdinal(
                   << " code=" << amdf_status_code(scope_status);
     return AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
   }
+  amdf_status_t unavailable = AMDF_STATUS_OK;
   for (uint32_t ordinal = 0; ordinal < scope_info.memory_profile_count;
        ++ordinal) {
     amdf_memory_profile_t profile = {};
@@ -99,10 +100,16 @@ inline uint32_t FindGpuMemoryProfileOrdinal(
     }
     if ((profile.roles & required_roles) == required_roles &&
         (required_flags & ~profile.supported_flags) == 0) {
+      if (!amdf_status_is_ok(profile.availability)) {
+        unavailable = profile.availability;
+        continue;
+      }
       return ordinal;
     }
   }
-  ADD_FAILURE() << "no matching memory profile";
+  ADD_FAILURE() << "no available matching memory profile: domain="
+                << amdf_status_domain(unavailable)
+                << " code=" << amdf_status_code(unavailable);
   return AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
 }
 

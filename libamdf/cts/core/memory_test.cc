@@ -135,11 +135,13 @@ TEST_F(HostMemoryTest, AllocatesOneBackingWithoutAnAccelerator) {
   ASSERT_NO_FATAL_FAILURE(
       FindProfile(AMDF_MEMORY_PROFILE_ROLE_CREATE, &profile));
   EXPECT_EQ(profile.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
+  EXPECT_EQ(profile.availability, AMDF_STATUS_OK);
   amdf_memory_create_info_t create_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
       .structure_size = sizeof(create_info),
       .memory_profile_ordinal = profile.ordinal,
-      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .required_flags =
+          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO,
       .byte_length = profile.allocation.minimum_alignment + 37,
   };
   const auto& geometry = profile.allocation;
@@ -165,7 +167,7 @@ TEST_F(HostMemoryTest, AllocatesOneBackingWithoutAnAccelerator) {
   EXPECT_EQ(info.access_count, 0u);
   EXPECT_EQ(info.byte_length, create_info.byte_length);
   EXPECT_EQ(info.memory_profile_ordinal, profile.ordinal);
-  EXPECT_EQ(info.flags, AMDF_MEMORY_FLAG_HOST_VISIBLE);
+  EXPECT_EQ(info.flags, create_info.required_flags);
   EXPECT_EQ(info.native_allocation_byte_length, native_byte_length);
   EXPECT_EQ(info.native_allocation_granularity, granularity);
   EXPECT_EQ(info.source_byte_offset, geometry.native_byte_length_prefix);
@@ -173,6 +175,8 @@ TEST_F(HostMemoryTest, AllocatesOneBackingWithoutAnAccelerator) {
   ASSERT_NO_FATAL_FAILURE(Map(memory, 0, info.byte_length, &first));
   amdf_host_mapping_info_t interior = {};
   ASSERT_NO_FATAL_FAILURE(Map(memory, 17, info.byte_length - 17, &interior));
+  EXPECT_EQ(first.features, AMDF_HOST_MAPPING_FEATURE_FILE_IO);
+  EXPECT_EQ(interior.features, first.features);
   EXPECT_EQ(interior.pointer, static_cast<uint8_t*>(first.pointer) + 17);
   std::memset(first.pointer, 0x53, info.byte_length);
   std::memset(interior.pointer, 0x7b, interior.byte_length);
@@ -242,6 +246,7 @@ TEST_F(HostMemoryTest, BorrowsCallerStorageWithoutTakingOwnership) {
   memories_.push_back(memory);
   amdf_host_mapping_info_t info = {};
   ASSERT_NO_FATAL_FAILURE(Map(memory, 0, create_info.byte_length, &info));
+  EXPECT_EQ(info.features, 0u);
   EXPECT_EQ(info.pointer, storage_.data() + 1);
   std::memset(info.pointer, 0x19, info.byte_length);
   ASSERT_EQ(api_->host_mapping_destroy(mappings_.back()), AMDF_STATUS_OK);

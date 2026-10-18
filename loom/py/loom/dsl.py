@@ -765,6 +765,7 @@ class SymbolDefinition:
     visibility: Optional enum attribute carrying generic public/private symbol
         visibility. FuncLike symbols inherit the visibility field declared by
         their FuncLike interface when this is absent.
+    linkage: Optional enum attribute carrying source/module definition linkage.
     retain: Optional enum attribute that marks symbols which ordinary symbol
         DCE must preserve even when unreachable.
     product_carrier: Optional enum attribute that classifies the product
@@ -784,6 +785,7 @@ class SymbolDefinition:
     bytecode_kind: str = "LOOM_SYMBOL_NONE"
     fact_domain: str | None = None
     visibility: str | None = None
+    linkage: str | None = None
     retain: str | None = None
     product_carrier: str | None = None
     flags: tuple[SymbolDefinitionFlag, ...] = ()
@@ -799,6 +801,7 @@ class SymbolDefinition:
         bytecode_kind: str = "LOOM_SYMBOL_NONE",
         fact_domain: str | None = None,
         visibility: str | None = None,
+        linkage: str | None = None,
         retain: str | None = None,
         product_carrier: str | None = None,
         flags: list[SymbolDefinitionFlag] | tuple[SymbolDefinitionFlag, ...] = (),
@@ -813,6 +816,8 @@ class SymbolDefinition:
             raise ValueError("SymbolDefinition: name must be non-empty")
         if visibility is not None and not visibility:
             raise ValueError("SymbolDefinition: visibility must be non-empty")
+        if linkage is not None and not linkage:
+            raise ValueError("SymbolDefinition: linkage must be non-empty")
         if retain is not None and not retain:
             raise ValueError("SymbolDefinition: retain must be non-empty")
         if product_carrier is not None and not product_carrier:
@@ -874,6 +879,7 @@ class SymbolDefinition:
         object.__setattr__(self, "bytecode_kind", bytecode_kind)
         object.__setattr__(self, "fact_domain", fact_domain)
         object.__setattr__(self, "visibility", visibility)
+        object.__setattr__(self, "linkage", linkage)
         object.__setattr__(self, "retain", retain)
         object.__setattr__(self, "product_carrier", product_carrier)
         object.__setattr__(self, "flags", frozen_flags)
@@ -6548,6 +6554,53 @@ def _validate_signature_only_results(
         )
 
 
+def _validate_symbol_definition_attr(
+    op_name: str,
+    attrs: tuple[AttrDef, ...],
+    field: str,
+    role: str,
+    expected_type: str,
+) -> None:
+    attr = next((attr for attr in attrs if attr.name == field), None)
+    if attr is None:
+        raise ValueError(
+            f"Op '{op_name}': symbol_def {role} '{field}' does not name an attr"
+        )
+    if attr.attr_type != expected_type:
+        article = "an" if expected_type[0] in "aeiou" else "a"
+        raise ValueError(
+            f"Op '{op_name}': symbol_def {role} '{field}' must be "
+            f"{article} {expected_type} attr"
+        )
+
+
+def _validate_symbol_definition(
+    op_name: str,
+    symbol_def: SymbolDefinition | None,
+    attrs: tuple[AttrDef, ...],
+    traits: tuple[Trait, ...],
+) -> None:
+    has_symbol_define = any(trait.name == "SymbolDefine" for trait in traits)
+    if has_symbol_define and symbol_def is None:
+        raise ValueError(f"Op '{op_name}': SYMBOL_DEFINE requires symbol_def")
+    if symbol_def is None:
+        return
+    if not has_symbol_define:
+        raise ValueError(f"Op '{op_name}': symbol_def requires SYMBOL_DEFINE trait")
+    _validate_symbol_definition_attr(
+        op_name, attrs, symbol_def.field, "field", ATTR_TYPE_SYMBOL
+    )
+    for role, field in (
+        ("retain", symbol_def.retain),
+        ("linkage", symbol_def.linkage),
+        ("product_carrier", symbol_def.product_carrier),
+    ):
+        if field is not None:
+            _validate_symbol_definition_attr(
+                op_name, attrs, field, role, ATTR_TYPE_ENUM
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class Op:
     """A complete operation declaration.
@@ -6736,60 +6789,7 @@ class Op:
         )
         object.__setattr__(self, "legacy_formats", frozen_legacy_formats)
         object.__setattr__(self, "examples", tuple(examples))
-        has_symbol_define = any(trait.name == "SymbolDefine" for trait in traits)
-        if has_symbol_define and symbol_def is None:
-            raise ValueError(f"Op '{name}': SYMBOL_DEFINE requires symbol_def")
-        if symbol_def is not None and not has_symbol_define:
-            raise ValueError(f"Op '{name}': symbol_def requires SYMBOL_DEFINE trait")
-        if symbol_def is not None:
-            defining_attr = next(
-                (attr for attr in frozen_attrs if attr.name == symbol_def.field),
-                None,
-            )
-            if defining_attr is None:
-                raise ValueError(
-                    f"Op '{name}': symbol_def field '{symbol_def.field}' "
-                    "does not name an attr"
-                )
-            if defining_attr.attr_type != ATTR_TYPE_SYMBOL:
-                raise ValueError(
-                    f"Op '{name}': symbol_def field '{symbol_def.field}' "
-                    "must be a symbol attr"
-                )
-            if symbol_def.retain is not None:
-                retain_attr = next(
-                    (attr for attr in frozen_attrs if attr.name == symbol_def.retain),
-                    None,
-                )
-                if retain_attr is None:
-                    raise ValueError(
-                        f"Op '{name}': symbol_def retain '{symbol_def.retain}' "
-                        "does not name an attr"
-                    )
-                if retain_attr.attr_type != ATTR_TYPE_ENUM:
-                    raise ValueError(
-                        f"Op '{name}': symbol_def retain '{symbol_def.retain}' "
-                        "must be an enum attr"
-                    )
-            if symbol_def.product_carrier is not None:
-                product_carrier_attr = next(
-                    (
-                        attr
-                        for attr in frozen_attrs
-                        if attr.name == symbol_def.product_carrier
-                    ),
-                    None,
-                )
-                if product_carrier_attr is None:
-                    raise ValueError(
-                        f"Op '{name}': symbol_def product_carrier "
-                        f"'{symbol_def.product_carrier}' does not name an attr"
-                    )
-                if product_carrier_attr.attr_type != ATTR_TYPE_ENUM:
-                    raise ValueError(
-                        f"Op '{name}': symbol_def product_carrier "
-                        f"'{symbol_def.product_carrier}' must be an enum attr"
-                    )
+        _validate_symbol_definition(name, symbol_def, frozen_attrs, tuple(traits))
         func_like = next(
             (
                 interface

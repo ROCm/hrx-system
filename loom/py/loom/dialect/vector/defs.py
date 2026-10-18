@@ -3168,6 +3168,7 @@ vector_rotli = _lanewise_binary(
     doc="Lanewise left rotate of same-typed integer vector operands. Each count is reduced modulo the element width; one-bit rotation is identity.",
     facts="loom_vector_rotli_facts",
     traits=[SAFE_TO_SPECULATE],
+    canonicalize="loom_vector_rotation_canonicalize",
     eager_execution_cost=1,
 )
 
@@ -3177,6 +3178,7 @@ vector_rotri = _lanewise_binary(
     doc="Lanewise right rotate of same-typed integer vector operands. Each count is reduced modulo the element width; one-bit rotation is identity.",
     facts="loom_vector_rotri_facts",
     traits=[SAFE_TO_SPECULATE],
+    canonicalize="loom_vector_rotation_canonicalize",
     eager_execution_cost=1,
 )
 
@@ -3840,6 +3842,7 @@ vector_uitofp = _vector_cast(
     result_constraint=FLOAT_ELEMENT,
     doc=("Lanewise unsigned integer to floating-point conversion with unchanged shape."),
     facts="loom_vector_uitofp_facts",
+    canonicalize="loom_vector_uniform_result_canonicalize",
     traits=[SAFE_TO_SPECULATE],
     eager_execution_cost=1,
 )

@@ -325,8 +325,10 @@ TEST_P(HostReservationTest, QualifiesExplicitSourceWithoutDiscoveringBindings) {
   ASSERT_NO_FATAL_FAILURE(View(0, unit_, &view, &pointer));
   amdf_memory_t* memory = nullptr;
   uint32_t* source = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      Allocate(unit_, capabilities_.required_source_flags, &memory, &source));
+  ASSERT_NO_FATAL_FAILURE(Allocate(
+      unit_,
+      capabilities_.required_source_flags | AMDF_MEMORY_FLAG_HOST_FILE_IO,
+      &memory, &source));
   amdf_memory_site_t producer = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
       .structure_size = sizeof(producer),
@@ -351,6 +353,28 @@ TEST_P(HostReservationTest, QualifiesExplicitSourceWithoutDiscoveringBindings) {
   EXPECT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
   EXPECT_EQ(pair.release.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
   EXPECT_EQ(pair.acquire.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
+  // Backing eligibility belongs to the original view, not every alias.
+  amdf_host_mapping_info_t mapping_info = {
+      .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
+      .structure_size = sizeof(mapping_info),
+  };
+  ASSERT_EQ(
+      api_->host_mapping_query_info(consumer.value.host.mapping, &mapping_info),
+      AMDF_STATUS_OK);
+  EXPECT_NE(mapping_info.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
+  ASSERT_EQ(api_->host_mapping_query_info(view, &mapping_info), AMDF_STATUS_OK);
+  EXPECT_EQ(mapping_info.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
+  producer.kind = AMDF_MEMORY_SITE_KIND_FILE_IO;
+  const auto host_pair = pair;
+  EXPECT_EQ(amdf_status_code(
+                api_->memory_query_pair_info(&producer, &consumer, &pair)),
+            AMDF_STATUS_CODE_UNSUPPORTED);
+  EXPECT_EQ(std::memcmp(&pair, &host_pair, sizeof(pair)), 0);
+  producer.kind = AMDF_MEMORY_SITE_KIND_HOST;
+  consumer.kind = AMDF_MEMORY_SITE_KIND_FILE_IO;
+  ASSERT_EQ(api_->memory_query_pair_info(&producer, &consumer, &pair),
+            AMDF_STATUS_OK);
+  EXPECT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
   amdf_memory_t* anonymous = nullptr;
   uint32_t* anonymous_pointer = nullptr;
   ASSERT_NO_FATAL_FAILURE(Allocate(unit_, 0, &anonymous, &anonymous_pointer));

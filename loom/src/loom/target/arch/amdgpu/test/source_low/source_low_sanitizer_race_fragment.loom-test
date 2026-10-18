@@ -6,16 +6,13 @@ kernel.def target(@target) @race_fragment_shared_store() {
   %c1 = index.constant 1 : index
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%output: buffer) {
+} launch() {
   %c0 = index.constant 0 : index
-  %c8 = index.constant 8 : index
   %c16 = index.constant 16 : index
   %base = index.constant 0 : offset
   %stage_bytes = index.constant 512 : offset
   %stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
   %stage_view = buffer.view %stage[%base] : buffer -> view<16x16xbf16>
-  %stage_packet_view = buffer.view %stage[%base] : buffer -> view<256xbf16>
-  %output_view = buffer.view %output[%base] : buffer -> view<256xbf16>
   %operand = vector.constant 1.0 : vector<16xbf16>
   %initial_values = vector.constant 0.0 : vector<8xf32>
   %lhs = vector.fragment<lhs> %operand shape [%c16, %c16] : vector<16xbf16>
@@ -23,32 +20,18 @@ kernel.def target(@target) @race_fragment_shared_store() {
   %initial = vector.fragment<init> %initial_values shape [%c16, %c16] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   vector.fragment.store<result> %result, %stage_view[%c0, %c0] shape [%c16, %c16] : vector<8xf32>, view<16x16xbf16>
-  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %thread = kernel.workitem.id<x> : index
-  %packet = index.mul %thread, %c8 : index
-  %values = vector.load %stage_packet_view[%packet] : view<256xbf16> -> vector<8xbf16>
-  vector.store %values, %output_view[%packet] : vector<8xbf16>, view<256xbf16>
   kernel.return
 }
 
 // ----
-// The race observation must use the fragment store's target-selected lane and
-// register addresses. Scalarizing the source fragment would lose that mapping.
+// This GFX11 fragment store's physical accesses form three contiguous
+// byte-width groups. Each group shares one packet-selection loop and one
+// static CAS body; the per-byte walk and bounded retry are loops as well.
 CHECK: low.kernel.def * @race_fragment_shared_store() asm {
-CHECK: *{symbol = @iree_tsan_config}
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: ds_write* *
+CHECK-COUNT-3: * = global_atomic_cmpswap_b64_rtn_saddr *
 CHECK-NOT: *sanitizer.race.fragment_access*
 
 // ====
-
 amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
 
 kernel.def target(@target) @race_fragment_shared_load() {
@@ -69,23 +52,13 @@ kernel.def target(@target) @race_fragment_shared_load() {
 }
 
 // ----
-// A load is observed after its physical read while retaining the selected
-// fragment representation for its real consumer.
+// The matching fragment load shares its observations across three contiguous
+// byte-width groups.
 CHECK: low.kernel.def * @race_fragment_shared_load() asm {
-CHECK: * = ds_read* *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: * = global_atomic_swap_b64_rtn_saddr *
-CHECK: global_store* *
+CHECK-COUNT-3: * = global_atomic_cmpswap_b64_rtn_saddr *
 CHECK-NOT: *sanitizer.race.fragment_access*
 
 // ====
-
 // RUN: with-checks emit source-low output=low sanitizer=race sanitizer-reporting=trap
 
 amdgpu.target<gfx950> @target
@@ -116,59 +89,10 @@ kernel.def target(@target) @race_crosslane_fragment_publication() {
 }
 
 // ----
-// Each physical B32 publication is one four-byte TSAN range. Its range loop
-// stays nested under the even-lane publisher EXEC selected by the real
-// epilogue, and the physical write restores that enclosing EXEC afterward.
+// Four cross-lane B32 publications remain four physical stores while sharing
+// one observation body. Neither the packet loop, byte walk, nor retry policy
+// duplicates that body.
 CHECK: low.kernel.def * @race_crosslane_fragment_publication(* asm {
-CHECK: %first = v_mfma_f32_16x16x16_bf16 *
-CHECK: * = v_cmp_eq_i32_src1_inline * {rhs = 0}
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: * = v_add_u32* *, 3
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: ^*(*reg<amdgpu.vgpr>*):
-CHECK: * = v_cmp_ne_i32 *
-CHECK: * = v_cndmask_b32 *
-CHECK: low.cond_br *
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: * = global_atomic_swap_x2_rtn_saddr *
-CHECK: s_mov_b64_exec *
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: s_mov_b64_exec *
-CHECK: * = v_add_u32* *, 32
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: * = v_add_u32* *, 3
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: * = v_cmp_ne_i32 *
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: * = global_atomic_swap_x2_rtn_saddr *
-CHECK: s_mov_b64_exec *
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: s_mov_b64_exec *
-CHECK: * = v_add_u32* *, 64
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: * = v_add_u32* *, 3
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: * = v_cmp_ne_i32 *
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: * = global_atomic_swap_x2_rtn_saddr *
-CHECK: s_mov_b64_exec *
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: s_mov_b64_exec *
-CHECK: * = v_add_u32* *, 96
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: * = v_add_u32* *, 3
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: * = v_cmp_ne_i32 *
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: * = global_atomic_swap_x2_rtn_saddr *
-CHECK: s_mov_b64_exec *
-CHECK: low.br ^*(*reg<amdgpu.vgpr>*)
-CHECK: s_mov_b64_exec *
-CHECK: * = v_mov_b32_dpp *
-CHECK: *, * = s_and_saveexec_b64 *
-CHECK: ds_write_b32 *
-CHECK: ds_write_b32 * {offset = 32}
-CHECK: ds_write_b32 * {offset = 64}
-CHECK: ds_write_b32 * {offset = 96}
-CHECK: s_mov_b64_exec *
+CHECK-COUNT-1: * = global_atomic_cmpswap_x2_rtn_saddr *
+CHECK-COUNT-4: ds_write_b32 *
 CHECK-NOT: *sanitizer.race.fragment_access*

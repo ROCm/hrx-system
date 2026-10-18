@@ -268,10 +268,24 @@ decoding and projection; it does not require a separate image-feature cache.
 
 ### Retained conversations
 
+Untagged requests can reuse a matching completed conversation still resident
+in an idle execution row. The server selects the longest reusable canonical
+history, including exact ordered image identity, and processes only the new
+suffix. This works without configuring extra cache or checkpoint capacity.
+Active requests and named sessions are not candidates for this automatic row
+selection. Reuse does not assign a persistent session identity to the client.
+
 `X-Loom-Session: SESSION` requests best-effort reuse of a named history. Requests
 still supply full history. On an ordinary cache miss the server can replay that
 history; a session name is not a durable chat database. Streaming and JSON turns
 can alternate without changing the continuation contract.
+
+Usage reports reused tokens in `prompt_tokens_details.cached_tokens`. Edited
+history, source-ineligible completions, and evicted state replay normally.
+An idle row advances in place; retaining an older branch point requires an
+explicit checkpoint. `session_cache_capacity` retains additional named
+histories beyond execution rows, while `prefix_cache_capacity` captures shared
+intermediate input prefixes. Both remain separately configured limits.
 
 `X-Loom-Checkpoint: NAME` requests an explicit immutable endpoint for the
 destination session. It is not best effort: an unknown name returns 404 and a

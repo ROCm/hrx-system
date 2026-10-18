@@ -370,15 +370,7 @@ typedef struct iree_hal_amdgpu_host_queue_t {
 
   // Queue-owned TSAN state used by instrumented command buffers.
   struct {
-    // Base pointer returned by HSA for the combined TSAN allocation.
-    IREE_AMDGPU_DEVICE_PTR void* allocation_base;
-    // Total byte length of |allocation_base|.
-    iree_device_size_t allocation_size;
-    // Host-owned mirror of the device queue state header.
-    iree_hal_amdgpu_tsan_queue_state_t host_state;
-    // Device-visible queue state header inside |allocation_base|.
-    IREE_AMDGPU_DEVICE_PTR iree_hal_amdgpu_tsan_queue_state_t* queue_state;
-    // Queue-local dispatch shadow storage inside |allocation_base|.
+    // Queue-local serialized shadow arena returned by HSA.
     IREE_AMDGPU_DEVICE_PTR void* shadow_base;
     // Byte length of |shadow_base|.
     iree_device_size_t shadow_size;
@@ -898,10 +890,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_write(
 iree_status_t iree_hal_amdgpu_host_queue_initialize_tsan_state(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_tsan_memory_policy_t* memory_policy,
-    iree_device_size_t workgroup_shadow_stride,
-    iree_device_size_t dispatch_shadow_stride, uint32_t workgroup_capacity,
-    uint32_t shadow_entry_size, uint32_t memory_granule_shift,
-    uint32_t shadow_slot_count);
+    iree_device_size_t shadow_size);
 
 // Deinitializes queue-owned TSAN state if present.
 void iree_hal_amdgpu_host_queue_deinitialize_tsan_state(

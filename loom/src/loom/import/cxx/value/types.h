@@ -306,7 +306,10 @@ class Types {
                     std::span<const loom_value_id_t> identities,
                     BoundTypeStorage& storage,
                     std::vector<loom_type_t>& output);
+  // Removes top-level cv-qualification while retaining any reference wrapper.
   const cxx::Type* unqualified(const cxx::Type* type);
+  // Returns the unqualified object type denoted by a value or reference.
+  const cxx::Type* unqualified_value(const cxx::Type* type);
   // Returns the resolved native C++ vector representation, or null for a
   // scalar or class-backed semantic vector.
   const cxx::VectorType* native_vector(const cxx::Type* type);

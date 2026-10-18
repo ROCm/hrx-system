@@ -224,6 +224,16 @@ iree_status_t loom_value_fact_cfg_region_initialize(
                                            (void**)&out_region->control));
   IREE_RETURN_IF_ERROR(loom_value_fact_control_initialize(
       &out_region->control_structure, arena, out_region->control));
+  out_region->control_flow.dirty.bit_count =
+      out_region->graph.block_count
+          ? (iree_host_size_t)out_region->graph.blocks[0].component + 1
+          : 0;
+  const iree_host_size_t dirty_word_count =
+      iree_bitmap_calculate_words(out_region->control_flow.dirty.bit_count);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, dirty_word_count, sizeof(*out_region->control_flow.dirty.words),
+      (void**)&out_region->control_flow.dirty.words));
+  iree_bitmap_reset_all(out_region->control_flow.dirty);
   if (!out_region->graph.has_cycles) {
     return iree_ok_status();
   }
@@ -236,13 +246,6 @@ iree_status_t loom_value_fact_cfg_region_initialize(
   memset(out_region->control_flow.anchors, 0,
          out_region->control_flow.components.count *
              sizeof(*out_region->control_flow.anchors));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, out_region->control_flow.components.count,
-      sizeof(*out_region->control_flow.dirty),
-      (void**)&out_region->control_flow.dirty));
-  memset(out_region->control_flow.dirty, 0,
-         out_region->control_flow.components.count *
-             sizeof(*out_region->control_flow.dirty));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, out_region->control_flow.components.count,
       sizeof(*out_region->control_flow.forwarding),

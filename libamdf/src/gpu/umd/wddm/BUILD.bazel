@@ -148,6 +148,13 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "event",
+    srcs = ["event.c"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = ["//libamdf/src/gpu/umd:event"],
+)
+
+amdf_cc_library(
     name = "wddm",
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//libamdf/src/gpu/umd:__pkg__"],
@@ -155,6 +162,7 @@ amdf_cc_library(
         ":clock",
         ":device",
         ":endpoint_profile",
+        ":event",
         ":instance",
         ":kernel_queue",
         ":memory",

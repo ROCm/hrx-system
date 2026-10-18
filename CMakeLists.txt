@@ -255,6 +255,7 @@ add_subdirectory(runtime/src)
 add_subdirectory(experimental EXCLUDE_FROM_ALL)
 
 if(LOOM_BUILD)
+  include("${PROJECT_SOURCE_DIR}/loom/binding/c/cmake/loomc_shared.cmake")
   include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_module.cmake")
   include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_test.cmake")
   include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_corpus.cmake")

@@ -1,0 +1,211 @@
+// RUN: pass target-legalize{mode=eager},dce
+
+test.target<low_core> @target
+
+// The predicate is uniform across vector elements, not necessarily workitems.
+// One guard retains the complete multidimensional access and its passthrough.
+func.def target(@target) @dense_packets(%input: view<8x16xbf16>, %output: view<8x16xbf16>, %row: index, %column: index, %active: i1, %previous: vector<2x4xbf16>) -> (vector<2x4xbf16>) {
+  %mask = vector.splat %active : vector<2x4xi1>
+  %value = vector.load.mask %input[%row, %column], %mask, %previous {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16>, vector<2x4xi1>, vector<2x4xbf16>
+  vector.store.mask %value, %output[%row, %column], %mask {cache_scope = system, cache_temporal = writeback} : vector<2x4xbf16>, view<8x16xbf16>, vector<2x4xi1>
+  func.return %value : vector<2x4xbf16>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @dense_packets(%input: view<8x16xbf16>, %output: view<8x16xbf16>, %row: index, %column: index, %active: i1, %previous: vector<2x4xbf16>) -> (vector<2x4xbf16>) {
+  %value = scf.if %active -> (vector<2x4xbf16>) {
+    %10 = vector.load %input[%row, %column] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> vector<2x4xbf16>
+    scf.yield %10 : vector<2x4xbf16>
+  } else {
+    scf.yield %previous : vector<2x4xbf16>
+  }
+  scf.if %active {
+    vector.store %value, %output[%row, %column] {cache_scope = system, cache_temporal = writeback} : vector<2x4xbf16>, view<8x16xbf16>
+  }
+  func.return %value : vector<2x4xbf16>
+}
+
+// ====
+
+test.target<low_core> @target
+
+// An all-active compact access has the same footprint as a dense access.
+func.def target(@target) @compact_packets(%input: view<32xi8>, %output: view<32xi8>, %origin: index, %active: i1, %previous: vector<7xi8>) -> (vector<7xi8>) {
+  %mask = vector.splat %active : vector<7xi1>
+  %value = vector.load.expand %input[%origin], %mask, %previous : view<32xi8>, vector<7xi1>, vector<7xi8>
+  vector.store.compress %value, %output[%origin], %mask : vector<7xi8>, view<32xi8>, vector<7xi1>
+  func.return %value : vector<7xi8>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @compact_packets(%input: view<32xi8>, %output: view<32xi8>, %origin: index, %active: i1, %previous: vector<7xi8>) -> (vector<7xi8>) {
+  %value = scf.if %active -> (vector<7xi8>) {
+    %9 = vector.load %input[%origin] : view<32xi8> -> vector<7xi8>
+    scf.yield %9 : vector<7xi8>
+  } else {
+    scf.yield %previous : vector<7xi8>
+  }
+  scf.if %active {
+    vector.store %value, %output[%origin] : vector<7xi8>, view<32xi8>
+  }
+  func.return %value : vector<7xi8>
+}
+
+// ====
+
+test.target<low_core> @target
+
+// Offsets remain per element. The target's gather/scatter realization runs
+// inside one guard instead of creating a separate guard for every element.
+func.def target(@target) @indexed_packets(%input: view<32xf32>, %output: view<32xf32>, %origin: index, %offsets: vector<2xi32>, %active: i1, %previous: vector<2xf32>) -> (vector<2xf32>) {
+  %mask = vector.splat %active : vector<2xi1>
+  %value = vector.gather.mask %input[%origin][%offsets], %mask, %previous {cache_scope = device, cache_temporal = regular} : view<32xf32>, vector<2xi32>, vector<2xi1>, vector<2xf32>
+  vector.scatter.mask %value, %output[%origin][%offsets], %mask {cache_scope = system, cache_temporal = non_temporal} : vector<2xf32>, view<32xf32>, vector<2xi32>, vector<2xi1>
+  func.return %value : vector<2xf32>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @indexed_packets(%input: view<32xf32>, %output: view<32xf32>, %origin: index, %offsets: vector<2xi32>, %active: i1, %previous: vector<2xf32>) -> (vector<2xf32>) {
+  %value = scf.if %active -> (vector<2xf32>) {
+    %19 = vector.extract %offsets[0] : vector<2xi32> -> i32
+    %20 = index.cast %19 : i32 to index
+    %21 = index.add %origin, %20 : index
+    %22 = view.load %input[%21] {cache_scope = device, cache_temporal = regular} : view<32xf32> -> f32
+    %23 = vector.extract %offsets[1] : vector<2xi32> -> i32
+    %24 = index.cast %23 : i32 to index
+    %25 = index.add %origin, %24 : index
+    %26 = view.load %input[%25] {cache_scope = device, cache_temporal = regular} : view<32xf32> -> f32
+    %27 = vector.from_elements %22, %26 : vector<2xf32>
+    scf.yield %27 : vector<2xf32>
+  } else {
+    scf.yield %previous : vector<2xf32>
+  }
+  scf.if %active {
+    %9 = vector.extract %value[0] : vector<2xf32> -> f32
+    %10 = vector.extract %offsets[0] : vector<2xi32> -> i32
+    %11 = index.cast %10 : i32 to index
+    %12 = index.add %origin, %11 : index
+    %13 = vector.extract %value[1] : vector<2xf32> -> f32
+    %14 = vector.extract %offsets[1] : vector<2xi32> -> i32
+    %15 = index.cast %14 : i32 to index
+    %16 = index.add %origin, %15 : index
+    view.store %9, %output[%12] {cache_scope = system, cache_temporal = non_temporal} : f32, view<32xf32>
+    view.store %13, %output[%16] {cache_scope = system, cache_temporal = non_temporal} : f32, view<32xf32>
+  }
+  func.return %value : vector<2xf32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+// Guard formation preserves atomic kind, numerical flags, ordering, scope, and cache policy.
+func.def target(@target) @atomic_packets(%view: view<8xf32>, %value: vector<2xf32>, %offsets: vector<2xi32>, %active: i1, %previous: vector<2xf32>) -> (vector<2xf32>) {
+  %mask = vector.splat %active : vector<2xi1>
+  %old = vector.atomic.rmw.mask<addf, noftz> %value, %view[3][%offsets], %mask, %previous {cache_scope = device, cache_temporal = regular, ordering = acq_rel, scope = device} : vector<2xf32>, view<8xf32>, vector<2xi32>, vector<2xi1>, vector<2xf32>
+  vector.atomic.reduce.mask<addf, noftz> %value, %view[3][%offsets], %mask {cache_scope = system, cache_temporal = non_temporal, ordering = release, scope = system} : vector<2xf32>, view<8xf32>, vector<2xi32>, vector<2xi1>
+  func.return %old : vector<2xf32>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @atomic_packets(%view: view<8xf32>, %value: vector<2xf32>, %offsets: vector<2xi32>, %active: i1, %previous: vector<2xf32>) -> (vector<2xf32>) {
+  %old = scf.if %active -> (vector<2xf32>) {
+    %20 = vector.extract %value[0] : vector<2xf32> -> f32
+    %21 = vector.extract %offsets[0] : vector<2xi32> -> i32
+    %22 = index.cast %21 : i32 to index
+    %23 = index.constant 3 : index
+    %24 = index.add %23, %22 : index
+    %25 = view.atomic.rmw<addf, noftz> %20, %view[%24] {cache_scope = device, cache_temporal = regular, ordering = acq_rel, scope = device} : f32, view<8xf32> -> f32
+    %26 = vector.extract %value[1] : vector<2xf32> -> f32
+    %27 = vector.extract %offsets[1] : vector<2xi32> -> i32
+    %28 = index.cast %27 : i32 to index
+    %29 = index.constant 3 : index
+    %30 = index.add %29, %28 : index
+    %31 = view.atomic.rmw<addf, noftz> %26, %view[%30] {cache_scope = device, cache_temporal = regular, ordering = acq_rel, scope = device} : f32, view<8xf32> -> f32
+    %32 = vector.from_elements %25, %31 : vector<2xf32>
+    scf.yield %32 : vector<2xf32>
+  } else {
+    scf.yield %previous : vector<2xf32>
+  }
+  scf.if %active {
+    %8 = vector.extract %value[0] : vector<2xf32> -> f32
+    %9 = vector.extract %offsets[0] : vector<2xi32> -> i32
+    %10 = index.cast %9 : i32 to index
+    %11 = index.constant 3 : index
+    %12 = index.add %11, %10 : index
+    view.atomic.reduce<addf, noftz> %8, %view[%12] {cache_scope = system, cache_temporal = non_temporal, ordering = release, scope = system} : f32, view<8xf32>
+    %13 = vector.extract %value[1] : vector<2xf32> -> f32
+    %14 = vector.extract %offsets[1] : vector<2xi32> -> i32
+    %15 = index.cast %14 : i32 to index
+    %16 = index.constant 3 : index
+    %17 = index.add %16, %15 : index
+    view.atomic.reduce<addf, noftz> %13, %view[%17] {cache_scope = system, cache_temporal = non_temporal, ordering = release, scope = system} : f32, view<8xf32>
+  }
+  func.return %old : vector<2xf32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+// Uniformity comes from retained value facts, including non-splat producers.
+func.def target(@target) @repeated_predicate(%input: view<16xi32>, %active: i1, %previous: vector<4xi32>) -> (vector<4xi32>) {
+  %mask = vector.from_elements %active, %active, %active, %active : vector<4xi1>
+  %value = vector.load.mask %input[0], %mask, %previous : view<16xi32>, vector<4xi1>, vector<4xi32>
+  func.return %value : vector<4xi32>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @repeated_predicate(%input: view<16xi32>, %active: i1, %previous: vector<4xi32>) -> (vector<4xi32>) {
+  %value = scf.if %active -> (vector<4xi32>) {
+    %7 = vector.load %input[0] : view<16xi32> -> vector<4xi32>
+    scf.yield %7 : vector<4xi32>
+  } else {
+    scf.yield %previous : vector<4xi32>
+  }
+  func.return %value : vector<4xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+// Different element predicates still require independent guarded accesses.
+func.def target(@target) @nonuniform_predicates(%input: view<16xi16>, %mask: vector<2xi1>, %previous: vector<2xi16>) -> (vector<2xi16>) {
+  %value = vector.load.mask %input[0], %mask, %previous : view<16xi16>, vector<2xi1>, vector<2xi16>
+  func.return %value : vector<2xi16>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @nonuniform_predicates(%input: view<16xi16>, %mask: vector<2xi1>, %previous: vector<2xi16>) -> (vector<2xi16>) {
+  %5 = vector.extract %mask[0] : vector<2xi1> -> i1
+  %6 = scf.if %5 -> (i16) {
+    %7 = view.load %input[0] : view<16xi16> -> i16
+    scf.yield %7 : i16
+  } else {
+    %8 = vector.extract %previous[0] : vector<2xi16> -> i16
+    scf.yield %8 : i16
+  }
+  %9 = vector.extract %mask[1] : vector<2xi1> -> i1
+  %10 = scf.if %9 -> (i16) {
+    %11 = view.load %input[1] : view<16xi16> -> i16
+    scf.yield %11 : i16
+  } else {
+    %12 = vector.extract %previous[1] : vector<2xi16> -> i16
+    scf.yield %12 : i16
+  }
+  %value = vector.from_elements %6, %10 : vector<2xi16>
+  func.return %value : vector<2xi16>
+}

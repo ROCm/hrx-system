@@ -45,7 +45,8 @@ typedef struct loom_liveness_block_relation_t {
   const loom_value_id_t* live_in_values;
   // Number of entries in |live_in_values|.
   iree_host_size_t live_in_count;
-  // Values live at block exit in region-local ordinal order.
+  // Values live at block exit in region-local ordinal order. May share the
+  // result-arena-owned live-in list of a successor with the same value set.
   const loom_value_id_t* live_out_values;
   // Number of entries in |live_out_values|.
   iree_host_size_t live_out_count;

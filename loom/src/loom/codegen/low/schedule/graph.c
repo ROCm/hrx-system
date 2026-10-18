@@ -330,7 +330,7 @@ static iree_status_t loom_low_schedule_append_dependency(
           .separation_source = timing.separation_source,
           .model_quality = (uint8_t)timing.model_quality,
       },
-      state->arena);
+      state->dependency_arena);
 }
 
 iree_status_t loom_low_schedule_add_dependency(
@@ -1789,7 +1789,13 @@ iree_status_t loom_low_schedule_build_dependencies(
   }
   IREE_ASSERT_LE(state->dependencies.count, UINT32_MAX);
   state->effect_dependencies.start = (uint32_t)state->dependencies.count;
-  IREE_RETURN_IF_ERROR(loom_low_schedule_build_effect_dependencies(state));
+  // Final wait planning retains these segments after scheduling scratch is
+  // released. A partial first segment is retained separately at publication.
+  iree_arena_allocator_t* dependency_arena = state->dependency_arena;
+  state->dependency_arena = state->arena;
+  iree_status_t status = loom_low_schedule_build_effect_dependencies(state);
+  state->dependency_arena = dependency_arena;
+  IREE_RETURN_IF_ERROR(status);
   IREE_ASSERT_LE(state->dependencies.count, UINT32_MAX);
   state->effect_dependencies.count =
       (uint32_t)state->dependencies.count - state->effect_dependencies.start;

@@ -282,7 +282,9 @@ iree_cc_library(
     ::memory_profile
     ::memory_resource
     amdf::headers
+    libamdf::src::platform::host_export
     libamdf::src::platform::host_memory
+    libamdf::src::platform::native_host_export
     libamdf::src::platform::native_host_memory
   PUBLIC
 )
@@ -310,6 +312,7 @@ iree_cc_library(
     ::memory_scope_state
     ::structure
     amdf::headers
+    libamdf::src::platform
   PUBLIC
 )
 endif()

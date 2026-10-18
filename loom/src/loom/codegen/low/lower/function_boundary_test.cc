@@ -155,7 +155,8 @@ TEST_F(LowLowerFunctionBoundaryTest,
   const loom_type_t argument_types[] = {loom_type_buffer(), i32_type};
   loom_op_t* source_op = nullptr;
   IREE_ASSERT_OK(loom_func_def_build(
-      &module_builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
+      &module_builder, /*build_flags=*/0, /*visibility=*/0, /*linkage=*/0,
+      /*retain=*/0,
       /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
       loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,
@@ -390,7 +391,8 @@ TEST_P(LowLowerResultMappingTest, DefinitionConsumesPreparedBoundary) {
                           &builder);
   loom_op_t* source_op = nullptr;
   IREE_ASSERT_OK(loom_func_def_build(
-      &builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+      &builder, /*build_flags=*/0, /*visibility=*/0, /*linkage=*/0,
+      /*retain=*/0, /*cc=*/0,
       /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
       loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,
@@ -523,7 +525,8 @@ TEST_P(LowLowerArgumentQueryTest, OnlyRequiredArgumentsEmitDiagnostics) {
   };
   loom_op_t* source_op = nullptr;
   IREE_ASSERT_OK(loom_func_def_build(
-      &builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+      &builder, /*build_flags=*/0, /*visibility=*/0, /*linkage=*/0,
+      /*retain=*/0, /*cc=*/0,
       /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
       loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),

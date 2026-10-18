@@ -20,6 +20,8 @@
 #include "loom/target/arch/x86/contracts/avx512_lower_rules.h"
 #include "loom/target/arch/x86/contracts/avx_ne_convert.h"
 #include "loom/target/arch/x86/contracts/avx_ne_convert_lower_rules.h"
+#include "loom/target/arch/x86/contracts/bmi2.h"
+#include "loom/target/arch/x86/contracts/bmi2_lower_rules.h"
 #include "loom/target/arch/x86/contracts/f16c.h"
 #include "loom/target/arch/x86/contracts/f16c_lower_rules.h"
 #include "loom/target/arch/x86/contracts/packed_dot.h"
@@ -484,7 +486,7 @@ static iree_status_t loom_x86_map_scalar_argument(
   *out_argument = (loom_low_lower_abi_argument_t){
       .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
       .abi_type = loom_type_none(),
-      .resource_source_type = loom_type_none(),
+      .body_type = loom_type_none(),
   };
   return loom_x86_map_scalar_type(user_data, context, source_function_op,
                                   source_type, &out_argument->abi_type);
@@ -501,7 +503,7 @@ static iree_status_t loom_x86_map_avx512_argument(
   *out_argument = (loom_low_lower_abi_argument_t){
       .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
       .abi_type = loom_type_none(),
-      .resource_source_type = loom_type_none(),
+      .body_type = loom_type_none(),
   };
   return loom_x86_map_avx512_type(user_data, context, source_function_op,
                                   source_type, &out_argument->abi_type);
@@ -518,7 +520,7 @@ static iree_status_t loom_x86_map_avx2_argument(
   *out_argument = (loom_low_lower_abi_argument_t){
       .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
       .abi_type = loom_type_none(),
-      .resource_source_type = loom_type_none(),
+      .body_type = loom_type_none(),
   };
   return loom_x86_map_avx2_type(user_data, context, source_function_op,
                                 source_type, &out_argument->abi_type);
@@ -535,7 +537,7 @@ static iree_status_t loom_x86_map_avx2_features_argument(
   *out_argument = (loom_low_lower_abi_argument_t){
       .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
       .abi_type = loom_type_none(),
-      .resource_source_type = loom_type_none(),
+      .body_type = loom_type_none(),
   };
   return loom_x86_map_avx2_features_type(user_data, context, source_function_op,
                                          source_type, &out_argument->abi_type);
@@ -610,7 +612,7 @@ static iree_status_t loom_x86_map_avx512_features_argument(
   *out_argument = (loom_low_lower_abi_argument_t){
       .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
       .abi_type = loom_type_none(),
-      .resource_source_type = loom_type_none(),
+      .body_type = loom_type_none(),
   };
   return loom_x86_map_avx512_features_type(user_data, context,
                                            source_function_op, source_type,

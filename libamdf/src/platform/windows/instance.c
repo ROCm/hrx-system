@@ -24,8 +24,17 @@ amdf_status_t amdf_platform_instance_create(
   InitializeSRWLock(&instance->native_lock);
   status = amdf_kmt_api_initialize(&instance->kmt);
   if (amdf_status_is_ok(status)) {
+    status =
+        amdf_windows_host_locality_api_initialize(&instance->host_locality);
+  }
+  if (amdf_status_is_ok(status)) {
     *out_instance = instance;
   } else {
+    const amdf_status_t close_status =
+        amdf_kmt_api_deinitialize(&instance->kmt);
+    if (!amdf_status_is_ok(close_status)) {
+      status = close_status;
+    }
     amdf_free(host_allocator, instance);
   }
   return status;
@@ -43,13 +52,23 @@ uint64_t amdf_platform_instance_host_allocation_granularity(
   return info.dwAllocationGranularity;
 }
 
+const amdf_platform_host_export_t* amdf_platform_instance_host_export(
+    const amdf_platform_instance_t* instance) {
+  (void)instance;
+  return NULL;
+}
+
 void amdf_platform_instance_unlock_native(amdf_platform_instance_t* instance) {
   ReleaseSRWLockExclusive(&instance->native_lock);
 }
 
 amdf_status_t amdf_platform_instance_destroy(
     amdf_platform_instance_t* instance) {
-  const amdf_status_t status = amdf_kmt_api_deinitialize(&instance->kmt);
+  amdf_status_t status =
+      amdf_windows_host_locality_api_deinitialize(&instance->host_locality);
+  if (amdf_status_is_ok(status)) {
+    status = amdf_kmt_api_deinitialize(&instance->kmt);
+  }
   if (amdf_status_is_ok(status)) {
     const amdf_allocator_t host_allocator = instance->host_allocator;
     amdf_free(host_allocator, instance);

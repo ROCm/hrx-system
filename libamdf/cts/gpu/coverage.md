@@ -38,6 +38,7 @@ identity, independent observation and checked retirement.
 | Device-generated lookahead | [Independent readers and slot reuse](recipes/device_sdma_lookahead_test.cc) | Two finite AQL queues and GPU-authored SDMA uploads; native dependencies join one/two readers before cyclic slot reuse. SYSTEM/LOCAL, 1/2/4 slots, row/block extents, per-reader output oracles, final input tails/guards and SDMA wrap. Start/completion observations distinguish interleaving from the one-slot serial control without imposing a scheduling guarantee. |
 | Physical peer construction and SDMA | [joint memory](peer/memory_group_test.cc), [SYSTEM round trips](peer/sdma_system_test.cc) | Explicit endpoint selection, joint attachment, changing bidirectional device-driven payloads and complete backing/command checks before retirement. |
 | Physical peer AQL | [native signals and peer-local memory](peer/aql/local_memory_test.cc) | Both signal directions, both LOCAL memory owners and producers, queried SYSTEM scopes, consumer-first dependency, changing transforms and complete output before independent joins. |
+| Owned file-buffer pools | [Linux file pools](linux/file_pool_test.cc), [Windows file I/O](windows/file_io_test.cc) | Native file reads, GPU consumption/production, and file writes share original host views and rebound GPU aliases. Full file/pool guards, repeated generations, source-only/default addresses, cancellation retirement, and independent attachments cover visibility and ownership. Optional native admission is recorded separately from executed results. |
 | GPU initiated file transfers | [Linux io_uring](linux/io_uring/README.md) | One-credit causal round trips and three-credit concurrent gathers, key-based deduplication, retained final readers, independent peer slot reuse, CQ ticket identity, scattered write/reload, short reads/EOF and stop-and-drain errors. Complete file/payload/guard oracles cover buffered/direct paths. Logical consumers share one invocation; durability and independently dispatched matmuls are separate contracts. |
 | Matched file I/O latency | [Completion-driven comparison](linux/io_uring/file_latency_test.cc) | Identical native/host-relayed programs, one/four causal streams, 4 KiB through 4 MiB transfers, sparse arrivals, payload/file oracles and shader/DRM clock brackets. Optimized broker-managed samples are distinct from CTS timing. |
 | CPU/NPU execution | [CPU/XDNA recipes](../xdna/recipes/README.md) | Allocated/registered backing, queried host publication/acquisition, changed arithmetic outputs, full guards and native retirement. |
@@ -116,8 +117,11 @@ in an encoder.
 
 ## Build and select required cases
 
-Ordinary GPU corpora have the following process-lifetime test targets. Appending
-`_instance` selects a second invocation of the same dynamic executable.
+Ordinary GPU corpora have the following process-lifetime test targets. Focused
+ownership checks can use the same executable with
+`--amdf_native_lifetime=instance`. Packages that explicitly list both native
+lifetimes also provide an `_instance` test target; ordinary corpora do not
+duplicate every case across lifetimes.
 
 | Corpus | Bazel target |
 | --- | --- |
@@ -129,6 +133,8 @@ Ordinary GPU corpora have the following process-lifetime test targets. Appending
 | Peer construction and SDMA | `//libamdf/cts/gpu/peer:peer_dynamic` |
 | Peer AQL | `//libamdf/cts/gpu/peer/aql:aql_dynamic` |
 | Linux GPU file transfers | `//libamdf/cts/gpu/linux/io_uring:file_io_dynamic` |
+| Linux owned file pools | `//libamdf/cts/gpu/linux:file_pool_dynamic` |
+| Windows file I/O and pools | `//libamdf/cts/gpu/windows:file_io_dynamic` |
 | CPU/NPU recipes | `//libamdf/cts/xdna/recipes:execution_dynamic` |
 | GPU/NPU recipes | `//libamdf/cts/interop/gpu/xdna/recipes:execution_dynamic` |
 

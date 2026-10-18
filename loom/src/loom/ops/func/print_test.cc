@@ -129,8 +129,8 @@ TEST_F(FuncPrinterTest, Definition) {
   loom_type_t result_types[] = {f32};
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_func_def_build(
-      &builder_, LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY, 1, 0, 0, 0, 0, 0,
-      loom_symbol_ref_null(), 0, loom_named_attr_slice_empty(),
+      &builder_, LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY, 1, /*linkage=*/0, 0,
+      0, 0, 0, 0, loom_symbol_ref_null(), 0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), callee, arg_types,
       1, result_types, 1, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
   EXPECT_EQ(PrintOp(op),

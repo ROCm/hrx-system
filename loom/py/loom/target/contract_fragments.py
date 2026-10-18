@@ -143,6 +143,13 @@ CONTRACT_FRAGMENT_REGISTRATIONS = (
         aliases=("wasm_core_simd128",),
     ),
     ContractFragmentRegistration(
+        key="x86.bmi2",
+        module_name="loom.target.arch.x86.contracts.bmi2",
+        symbol_name="X86_BMI2_CONTRACT_FRAGMENT",
+        dialect_ops_symbol_name="X86_BMI2_CONTRACT_DIALECT_OPS",
+        aliases=("x86_bmi2",),
+    ),
+    ContractFragmentRegistration(
         key="x86.scalar",
         module_name="loom.target.arch.x86.contracts.scalar",
         symbol_name="X86_SCALAR_CONTRACT_FRAGMENT",

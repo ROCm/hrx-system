@@ -62,12 +62,11 @@ amdf_status_t Pm4SdmaTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
   return AMDF_STATUS_OK;
 }
 
-void Pm4SdmaTest::SelectCreation(Backing& backing) {
+void Pm4SdmaTest::SelectCreation(Backing& backing, amdf_memory_flags_t flags) {
   backing.attachment = {device_,
                         {
                             .access = backing.access,
-                            .flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
-                                     AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+                            .flags = flags | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
                         }};
   auto& creation = backing.creation;
   creation.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
@@ -189,8 +188,11 @@ void Pm4SdmaTest::PrepareCoherentHandoff(
     Pm4ComputeProgram* out_program,
     std::array<amdf_cache_operations_t, kTransferPhaseCount>*
         inout_operations) {
-  for (auto& backing : backings) {
-    ASSERT_NO_FATAL_FAILURE(SelectCreation(backing));
+  for (size_t i = 0; i < backings.size(); ++i) {
+    const auto flags =
+        AMDF_MEMORY_FLAG_HOST_COHERENT |
+        (i == kControl ? AMDF_MEMORY_FLAG_QUEUE_STORAGE : UINT64_C(0));
+    ASSERT_NO_FATAL_FAILURE(SelectCreation(backings[i], flags));
   }
   RecordProperty("pm4_sdma_pair_query_mode",
                  query_kind == PairQuery::kProfile ? "profile" : "concrete");

@@ -65,6 +65,16 @@ bool loom_condition_integer_comparison_relation(
     const loom_condition_integer_comparison_t* comparison,
     loom_symbolic_integer_relation_t* out_relation, bool* out_unsigned_order);
 
+// Returns the mathematical integer relation equivalent to one comparison
+// outcome under the provided ambient facts. Unsigned carrier order is
+// translated only when the complete operand ranges make the translated
+// relation equivalent without additional edge-local assumptions.
+bool loom_condition_integer_comparison_equivalent_relation(
+    const loom_condition_integer_comparison_t* comparison,
+    const loom_fact_context_t* context, bool assumed_truth,
+    const loom_value_facts_t* lhs_facts, const loom_value_facts_t* rhs_facts,
+    loom_symbolic_integer_relation_t* out_relation);
+
 // Proves comparison truth from operand facts in the comparison's original
 // scalar or target carrier domain. Returns false when the facts cannot decide
 // the result. Evaluation reads no IR and allocates no storage.

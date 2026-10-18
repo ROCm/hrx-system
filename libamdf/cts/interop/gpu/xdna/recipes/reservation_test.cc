@@ -282,9 +282,11 @@ class FabricReservationTest : public GpuXdnaDeviceFixture,
   }
 
   void PrepareExecution() {
+    auto staging_access = accesses_[1];
+    staging_access.requirements.flags |= AMDF_MEMORY_FLAG_QUEUE_STORAGE;
     amdf_memory_profile_t profile = {};
     ASSERT_NO_FATAL_FAILURE(FindProfile(
-        {&accesses_[1], 1}, AMDF_MEMORY_PROFILE_ROLE_CREATE, &profile));
+        {&staging_access, 1}, AMDF_MEMORY_PROFILE_ROLE_CREATE, &profile));
     ASSERT_NE(profile.ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
     amdf_memory_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
@@ -294,7 +296,7 @@ class FabricReservationTest : public GpuXdnaDeviceFixture,
         .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
         .byte_length = unit_,
         .minimum_alignment = unit_,
-        .accesses = &accesses_[1],
+        .accesses = &staging_access,
     };
     ASSERT_NO_FATAL_FAILURE(staging_.Create(api_, system_scope_, create));
     ASSERT_EQ(

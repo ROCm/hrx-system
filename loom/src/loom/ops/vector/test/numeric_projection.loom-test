@@ -1,0 +1,213 @@
+// RUN: pass canonicalize
+
+// Wide conversions need one numeric summary, not a fact per component. Each
+// floating format contributes its own representability set after widening.
+func.def @widening_formats(%e4m3: vector<32xf8E4M3>, %e5m2: vector<32xf8E5M2>, %half: vector<32xf16>, %bfloat: vector<32xbf16>, %single: vector<32xf32>, %index: index) -> (i64, i64, i64, i64, i64) {
+  %wide_e4m3 = vector.extf %e4m3 : vector<32xf8E4M3> to vector<32xf64>
+  %wide_e5m2 = vector.extf %e5m2 : vector<32xf8E5M2> to vector<32xf64>
+  %wide_half = vector.extf %half : vector<32xf16> to vector<32xf64>
+  %wide_bfloat = vector.extf %bfloat : vector<32xbf16> to vector<32xf64>
+  %wide_single = vector.extf %single : vector<32xf32> to vector<32xf64>
+  %e4m3_element = vector.extract %wide_e4m3[%index] : vector<32xf64> -> f64
+  %e5m2_element = vector.extract %wide_e5m2[%index] : vector<32xf64> -> f64
+  %half_element = vector.extract %wide_half[%index] : vector<32xf64> -> f64
+  %bfloat_element = vector.extract %wide_bfloat[%index] : vector<32xf64> -> f64
+  %single_element = vector.extract %wide_single[%index] : vector<32xf64> -> f64
+  %e4m3_types = test.fact_exact_float_types %e4m3_element : f64 -> i64
+  %e5m2_types = test.fact_exact_float_types %e5m2_element : f64 -> i64
+  %half_types = test.fact_exact_float_types %half_element : f64 -> i64
+  %bfloat_types = test.fact_exact_float_types %bfloat_element : f64 -> i64
+  %single_types = test.fact_exact_float_types %single_element : f64 -> i64
+  func.return %e4m3_types, %e5m2_types, %half_types, %bfloat_types, %single_types : i64, i64, i64, i64, i64
+}
+
+// ----
+func.def @widening_formats(%e4m3: vector<32xf8E4M3>, %e5m2: vector<32xf8E5M2>, %half: vector<32xf16>, %bfloat: vector<32xbf16>, %single: vector<32xf32>, %index: index) -> (i64, i64, i64, i64, i64) {
+  %e4m3_types = scalar.constant 15616 : i64
+  %e5m2_types = scalar.constant 15872 : i64
+  %half_types = scalar.constant 13312 : i64
+  %bfloat_types = scalar.constant 14336 : i64
+  %single_types = scalar.constant 12288 : i64
+  func.return %e4m3_types, %e5m2_types, %half_types, %bfloat_types, %single_types : i64, i64, i64, i64, i64
+}
+
+// ====
+
+// Narrowing establishes the destination's formats even for unknown inputs.
+func.def @narrowing_formats(%input: vector<32xf64>, %index: index) -> (i64, i64, i64, i64, i64) {
+  %e4m3 = vector.fptrunc %input : vector<32xf64> to vector<32xf8E4M3>
+  %e5m2 = vector.fptrunc %input : vector<32xf64> to vector<32xf8E5M2>
+  %half = vector.fptrunc %input : vector<32xf64> to vector<32xf16>
+  %bfloat = vector.fptrunc %input : vector<32xf64> to vector<32xbf16>
+  %single = vector.fptrunc %input : vector<32xf64> to vector<32xf32>
+  %e4m3_element = vector.extract %e4m3[%index] : vector<32xf8E4M3> -> f8E4M3
+  %e5m2_element = vector.extract %e5m2[%index] : vector<32xf8E5M2> -> f8E5M2
+  %half_element = vector.extract %half[%index] : vector<32xf16> -> f16
+  %bfloat_element = vector.extract %bfloat[%index] : vector<32xbf16> -> bf16
+  %single_element = vector.extract %single[%index] : vector<32xf32> -> f32
+  %e4m3_types = test.fact_exact_float_types %e4m3_element : f8E4M3 -> i64
+  %e5m2_types = test.fact_exact_float_types %e5m2_element : f8E5M2 -> i64
+  %half_types = test.fact_exact_float_types %half_element : f16 -> i64
+  %bfloat_types = test.fact_exact_float_types %bfloat_element : bf16 -> i64
+  %single_types = test.fact_exact_float_types %single_element : f32 -> i64
+  func.return %e4m3_types, %e5m2_types, %half_types, %bfloat_types, %single_types : i64, i64, i64, i64, i64
+}
+
+// ----
+func.def @narrowing_formats(%input: vector<32xf64>, %index: index) -> (i64, i64, i64, i64, i64) {
+  %e4m3_types = scalar.constant 15616 : i64
+  %e5m2_types = scalar.constant 15872 : i64
+  %half_types = scalar.constant 13312 : i64
+  %bfloat_types = scalar.constant 14336 : i64
+  %single_types = scalar.constant 12288 : i64
+  func.return %e4m3_types, %e5m2_types, %half_types, %bfloat_types, %single_types : i64, i64, i64, i64, i64
+}
+
+// ====
+
+// Complete byte domains are exactly representable in all formats >= 16 bits.
+// The complete I64 domain cannot claim those same narrow-format guarantees.
+func.def @integer_formats(%bytes: vector<32xi8>, %integers: vector<32xi64>, %index: index) -> (i64, i64, i64, i1) {
+  %signed = vector.sitofp %bytes : vector<32xi8> to vector<32xf32>
+  %unsigned = vector.uitofp %bytes : vector<32xi8> to vector<32xf32>
+  %wide = vector.sitofp %integers : vector<32xi64> to vector<32xf64>
+  %signed_element = vector.extract %signed[17] : vector<32xf32> -> f32
+  %unsigned_element = vector.extract %unsigned[%index] : vector<32xf32> -> f32
+  %wide_element = vector.extract %wide[%index] : vector<32xf64> -> f64
+  %signed_types = test.fact_exact_float_types %signed_element : f32 -> i64
+  %unsigned_types = test.fact_exact_float_types %unsigned_element : f32 -> i64
+  %wide_types = test.fact_exact_float_types %wide_element : f64 -> i64
+  %finite = test.fact_finite %unsigned_element : f32 -> i1
+  func.return %signed_types, %unsigned_types, %wide_types, %finite : i64, i64, i64, i1
+}
+
+// ----
+func.def @integer_formats(%bytes: vector<32xi8>, %integers: vector<32xi64>, %index: index) -> (i64, i64, i64, i1) {
+  %signed_types = scalar.constant 15360 : i64
+  %unsigned_types = scalar.constant 15360 : i64
+  %wide_types = scalar.constant 8192 : i64
+  %finite = scalar.constant true : i1
+  func.return %signed_types, %unsigned_types, %wide_types, %finite : i64, i64, i64, i1
+}
+
+// ====
+
+// Assembly intersects all component formats. Mixing BF16 and F16 cannot
+// promise either narrow format, while two BF16 components retain BF16.
+func.def @assembled_formats(%left: bf16, %right: bf16, %half: f16, %index: index) -> (i64, i64) {
+  %left_wide = scalar.extf %left : bf16 to f32
+  %right_wide = scalar.extf %right : bf16 to f32
+  %half_wide = scalar.extf %half : f16 to f32
+  %bfloat = vector.from_elements %left_wide, %right_wide : vector<2xf32>
+  %mixed = vector.from_elements %left_wide, %half_wide : vector<2xf32>
+  %bfloat_element = vector.extract %bfloat[%index] : vector<2xf32> -> f32
+  %mixed_element = vector.extract %mixed[%index] : vector<2xf32> -> f32
+  %bfloat_types = test.fact_exact_float_types %bfloat_element : f32 -> i64
+  %mixed_types = test.fact_exact_float_types %mixed_element : f32 -> i64
+  func.return %bfloat_types, %mixed_types : i64, i64
+}
+
+// ----
+func.def @assembled_formats(%left: bf16, %right: bf16, %half: f16, %index: index) -> (i64, i64) {
+  %bfloat_types = scalar.constant 14336 : i64
+  %mixed_types = scalar.constant 12288 : i64
+  func.return %bfloat_types, %mixed_types : i64, i64
+}
+
+// ====
+
+// Fragment interpretation survives conversion but cannot leak onto a scalar.
+func.def @fragment_conversion(%input: vector<32xbf16>, %index: index) -> (vector<32xf32>, i64) {
+  %extent = index.constant 16 : index
+  %fragment = vector.fragment<result> %input shape [%extent, %extent] : vector<32xbf16>
+  %wide = vector.extf %fragment : vector<32xbf16> to vector<32xf32>
+  %element = vector.extract %wide[%index] : vector<32xf32> -> f32
+  %element_types = test.fact_exact_float_types %element : f32 -> i64
+  func.return %wide, %element_types : vector<32xf32>, i64
+}
+
+// ----
+func.def @fragment_conversion(%input: vector<32xbf16>, %index: index) -> (vector<32xf32>, i64) {
+  %extent = index.constant 16 : index
+  %fragment = vector.fragment<result> %input shape [%extent, %extent] : vector<32xbf16>
+  %wide = vector.extf %fragment : vector<32xbf16> to vector<32xf32>
+  %element_types = scalar.constant 14336 : i64
+  func.return %wide, %element_types : vector<32xf32>, i64
+}
+
+// ====
+
+// Static and dynamic rank-reducing selections retain facts beyond the bounded
+// component representation, including through a subsequent scalar extraction.
+func.def @tail_vectors(%input: vector<4x32xbf16>, %index: index) -> (i64, i64) {
+  %wide = vector.extf %input : vector<4x32xbf16> to vector<4x32xf32>
+  %dynamic_row = vector.extract %wide[%index] : vector<4x32xf32> -> vector<32xf32>
+  %fixed_row = vector.extract %wide[2] : vector<4x32xf32> -> vector<32xf32>
+  %dynamic_element = vector.extract %dynamic_row[17] : vector<32xf32> -> f32
+  %fixed_element = vector.extract %fixed_row[%index] : vector<32xf32> -> f32
+  %dynamic_types = test.fact_exact_float_types %dynamic_element : f32 -> i64
+  %fixed_types = test.fact_exact_float_types %fixed_element : f32 -> i64
+  func.return %dynamic_types, %fixed_types : i64, i64
+}
+
+// ----
+func.def @tail_vectors(%input: vector<4x32xbf16>, %index: index) -> (i64, i64) {
+  %dynamic_types = scalar.constant 14336 : i64
+  %fixed_types = scalar.constant 14336 : i64
+  func.return %dynamic_types, %fixed_types : i64, i64
+}
+
+// ====
+
+// A subgroup-uniform vector need not have equal components. The varying index
+// participates in distribution inference even when numeric facts are retained.
+kernel.def @selection_distribution() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: vector<32xi8>) {
+  %index = kernel.subgroup.lane.id : index
+  %values = vector.sitofp %input : vector<32xi8> to vector<32xf32>
+  %minimum = kernel.subgroup.reduce<minnumf> %values : vector<32xf32>
+  %dynamic = vector.extract %minimum[%index] : vector<32xf32> -> f32
+  %fixed = vector.extract %minimum[7] : vector<32xf32> -> f32
+  %dynamic_uniform = test.fact_subgroup_uniform %dynamic : f32 -> i1
+  %fixed_uniform = test.fact_subgroup_uniform %fixed : f32 -> i1
+  %types = test.fact_exact_float_types %dynamic : f32 -> i64
+  test.use %dynamic_uniform, %fixed_uniform, %types : i1, i1, i64
+  kernel.return
+}
+
+// ----
+kernel.def @selection_distribution() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: vector<32xi8>) {
+  %values = vector.sitofp %input : vector<32xi8> to vector<32xf32>
+  %minimum = kernel.subgroup.reduce<minnumf> %values : vector<32xf32>
+  %dynamic_uniform = scalar.constant false : i1
+  %fixed_uniform = scalar.constant true : i1
+  %types = scalar.constant 15360 : i64
+  test.use %dynamic_uniform, %fixed_uniform, %types : i1, i1, i64
+  kernel.return
+}
+
+// ====
+
+// Arithmetic may introduce values outside the original narrow format.
+func.def @arithmetic_changes_values(%input: vector<32xbf16>, %delta: vector<32xf32>, %index: index) -> (i64, i64) {
+  %wide = vector.extf %input : vector<32xbf16> to vector<32xf32>
+  %sum = vector.addf %wide, %delta : vector<32xf32>
+  %element = vector.extract %sum[%index] : vector<32xf32> -> f32
+  %source_types = test.fact_exact_float_types %wide : vector<32xf32> -> i64
+  %element_types = test.fact_exact_float_types %element : f32 -> i64
+  func.return %source_types, %element_types : i64, i64
+}
+
+// ----
+func.def @arithmetic_changes_values(%input: vector<32xbf16>, %delta: vector<32xf32>, %index: index) -> (i64, i64) {
+  %source_types = scalar.constant 14336 : i64
+  %element_types = scalar.constant 0 : i64
+  func.return %source_types, %element_types : i64, i64
+}

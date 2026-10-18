@@ -68,22 +68,27 @@ typedef struct loom_low_allocation_storage_lease_state_t {
   // Borrowed stable assignment array after the first leased assignment is
   // published. Every materialized lease indexes this array.
   const loom_low_allocation_assignment_t* assignments;
-  // Mutable assignment-backed storage-lease records being built.
+  // Result-arena-owned assignment-backed storage-lease records being built.
   loom_low_allocation_storage_lease_t* instances;
-  // Mutable allocator-requested storage release actions being built.
+  // Result-arena-owned allocator-requested storage release actions being built.
   loom_low_storage_release_action_t* release_actions;
-  // Storage-lease record heads indexed by allocation-local value ordinal.
+  // Decision-arena-owned record heads indexed by allocation-local value
+  // ordinal.
   uint32_t* record_heads_by_value_ordinal;
-  // Next storage-lease record index for the same allocation-local value.
+  // Decision-arena-owned next record indices for the same allocation-local
+  // value.
   uint32_t* next_record_indices;
-  // True when the storage-lease record has a materialized instance.
+  // Decision-arena-owned flags marking records with a materialized instance.
   uint8_t* instance_written;
-  // Temporal index for materialized register-like storage-lease units.
+  // Result-arena-owned temporal index for materialized register-like lease
+  // units.
   loom_low_allocation_storage_lease_unit_index_t* unit_index;
-  // Min-heap of materialized lease ordinals keyed by mutable end point. The
-  // heap is absent for small lease tables where linear probing is cheaper.
+  // Decision-arena-owned min-heap of materialized lease ordinals keyed by
+  // mutable end point. Absent for small lease tables where linear probing is
+  // cheaper.
   uint32_t* availability_expiration_heap;
-  // Heap positions by lease ordinal, or UINT32_MAX when not present.
+  // Decision-arena-owned heap positions by lease ordinal, or UINT32_MAX when
+  // not present.
   uint32_t* availability_expiration_positions;
   // Monotone candidate start represented by ordered availability summaries.
   uint32_t availability_start_point;
@@ -102,7 +107,10 @@ typedef struct loom_low_allocation_storage_lease_state_t {
 } loom_low_allocation_storage_lease_state_t;
 
 // Initializes |out_state| and builds the value-to-lease-record index for
-// |lease_table|. Empty lease tables leave |out_state| inert.
+// |lease_table|. Empty lease tables leave |out_state| inert. Instances, release
+// actions, and the temporal unit index belong to |result_arena|. Construction
+// indexes and expiration workspace belong to |decision_arena|, which must
+// remain live until lease finalization and register numbering finish.
 iree_status_t loom_low_allocation_storage_lease_state_initialize(
     const loom_low_storage_lease_table_t* lease_table,
     const loom_module_t* module, const loom_op_t* function_op,
@@ -110,7 +118,8 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
     const loom_liveness_analysis_t* liveness,
     const loom_low_allocation_storage_identity_t* storage_identity,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
-    iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* result_arena,
+    iree_arena_allocator_t* decision_arena,
     loom_low_allocation_storage_lease_state_t* out_state);
 
 // Returns true when |candidate| conflicts with materialized storage leases

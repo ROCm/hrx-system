@@ -34,6 +34,7 @@ loom_cc_library(
     "target_records.c"
   DEPS
     iree::base
+    iree::schemas::cpu_data
     loom::target::arch::x86::feature_bits
     loom::target::types
   PUBLIC

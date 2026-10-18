@@ -594,11 +594,20 @@ check.case @device_event {
       .record_length = sizeof(tsan_report),
       .abi_version = IREE_HAL_DEVICE_TSAN_REPORT_ABI_VERSION_0,
       .check_kind = IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE,
-      .memory_space = IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_WORKGROUP,
-      .current_access_kind = IREE_HAL_DEVICE_TSAN_ACCESS_KIND_WRITE,
-      .prior_access_kind = IREE_HAL_DEVICE_TSAN_ACCESS_KIND_READ,
-      .access_length = 4,
-      .memory_address = 12,
+      .detail =
+          {
+              .data_race =
+                  {
+                      .memory_space =
+                          IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_WORKGROUP,
+                      .current_access_kind =
+                          IREE_HAL_DEVICE_TSAN_ACCESS_KIND_WRITE,
+                      .prior_access_kind =
+                          IREE_HAL_DEVICE_TSAN_ACCESS_KIND_READ,
+                      .access_length = 4,
+                      .memory_address = 12,
+                  },
+          },
   };
   iree_hal_device_event_t tsan_event = iree_hal_device_event_default();
   tsan_event.type = IREE_HAL_DEVICE_EVENT_TYPE_TSAN_REPORT;

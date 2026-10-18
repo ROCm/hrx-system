@@ -153,12 +153,8 @@ func.def @while_rotation(%input: buffer, %count: index) -> (f32) {
   %step = index.constant 1 : index
   %base0 = index.constant 0 : offset
   %base1 = index.constant 64 : offset
-  %last0_offset, %last1_offset, %last_i = scf.while(%a_offset = %base0 : offset, %b_offset = %base1 : offset, %i = %begin : index) -> (offset, offset, index) {
-    %more = index.cmp slt, %i, %count : index
-    scf.condition %more, %a_offset, %b_offset, %i : i1, offset, offset, index
-  } do(%current0_offset: offset, %current1_offset: offset, %current_i: index) {
-    %next = index.add %current_i, %step : index
-    scf.yield %current1_offset, %current0_offset, %next : offset, offset, index
+  %last0_offset, %last1_offset = scf.for %current_i = [%begin to %count step %step](%current0_offset = %base0 : offset, %current1_offset = %base1 : offset) -> (offset, offset) {
+    scf.yield %current1_offset, %current0_offset : offset, offset
   }
   %last0 = buffer.view %input[%last0_offset] : buffer -> view<16xf32>
   %result = view.load %last0[0] : view<16xf32> -> f32

@@ -11,13 +11,32 @@ package(
     licenses = ["notice"],
 )
 
+py_binary(
+    name = "shared_exports",
+    srcs = ["shared_exports.py"],
+    visibility = ["//loom/binding/c:__pkg__"],
+)
+
+py_test(
+    name = "shared_exports_test",
+    srcs = [
+        "shared_exports.py",
+        "shared_exports_test.py",
+    ],
+)
+
 py_test(
     name = "bazel_to_cmake_config_test",
     srcs = ["bazel_to_cmake/config_test.py"],
     data = [
         "bazel_to_cmake/loom_corpus.py",
         "//:loom/.bazel_to_cmake.cfg.py",
+        "//build_tools/bazel:package_policy.bzl",
+        "//build_tools/bazel:requirements.bzl",
+        "//build_tools/vulkan/requirements:defs.bzl",
         "//loom/build_tools/amdgpu:target_config.bzl",
+        "//loom/requirements:defs.bzl",
+        "//loom/requirements:package_policy.bzl",
     ],
     main = "bazel_to_cmake/config_test.py",
     tags = ["manual"],

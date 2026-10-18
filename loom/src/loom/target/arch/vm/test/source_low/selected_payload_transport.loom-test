@@ -1,8 +1,8 @@
 // RUN: pass target=vm:core source-to-low
 
-// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
+// ERROR@+1: TARGET/031 {op_name="func.def", type_constraint="vector.target_carrier", actual_type="vector<4xi32>"}
 func.def public @selected_truncated(%input: vector<4xi32>, %left: i64, %right: i64) -> (i32) {
-  // ERROR@+1: TARGET/001 {op_name="vector.extract"}
+  // ERROR@+1: TARGET/031 {op_name="vector.extract", type_constraint="vector.target_carrier"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32
   %condition = scalar.cmpi sgt, %value, %threshold : i32

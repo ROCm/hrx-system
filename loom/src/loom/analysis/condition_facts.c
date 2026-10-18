@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/context.h"
 #include "loom/ops/index/carrier.h"
 #include "loom/ops/index/compare.h"
@@ -688,6 +689,20 @@ static bool loom_condition_integer_comparison_normalize_relation(
   return true;
 }
 
+bool loom_condition_integer_comparison_equivalent_relation(
+    const loom_condition_integer_comparison_t* comparison,
+    const loom_fact_context_t* context, bool assumed_truth,
+    const loom_value_facts_t* lhs_facts, const loom_value_facts_t* rhs_facts,
+    loom_symbolic_integer_relation_t* out_relation) {
+  loom_value_facts_t normalized_lhs = *lhs_facts;
+  loom_value_facts_t normalized_rhs = *rhs_facts;
+  return loom_condition_integer_comparison_normalize_relation(
+             comparison, context, assumed_truth, &normalized_lhs,
+             &normalized_rhs, out_relation) &&
+         loom_value_facts_equal(normalized_lhs, *lhs_facts) &&
+         loom_value_facts_equal(normalized_rhs, *rhs_facts);
+}
+
 void loom_condition_integer_comparison_refine_facts(
     const loom_condition_integer_comparison_t* comparison,
     const loom_fact_context_t* context, bool assumed_truth,
@@ -704,23 +719,163 @@ void loom_condition_integer_comparison_refine_facts(
                                          lhs_facts, rhs_facts);
 }
 
-// Derives numeric consequences while the condition owner visits a comparison.
-// Consumers retain and index the resulting dividend relations; they do not
-// search quotient users when querying an address's bounds.
-static iree_status_t loom_condition_facts_derive_quotient_preimage(
+// Retains the interval endpoints that one edge proves for |value|. The
+// ambient fact table remains immutable; consumers apply these relations only
+// while visiting the selected edge.
+static iree_status_t loom_condition_facts_append_range_refinement(
+    loom_value_id_t value, loom_value_facts_t ambient_facts,
+    loom_value_facts_t refined_facts, loom_condition_fact_set_t* facts,
+    loom_condition_derivation_t* out_derivation, bool* out_complete) {
+  if (refined_facts.range_lo > ambient_facts.range_lo) {
+    const loom_condition_integer_relation_t lower = {
+        .relation = LOOM_SYMBOLIC_INTEGER_RELATION_GE,
+        .left = loom_condition_value_operand(value),
+        .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+                  .value_id = LOOM_VALUE_ID_INVALID,
+                  .constant = refined_facts.range_lo},
+    };
+    IREE_RETURN_IF_ERROR(loom_condition_fact_set_append_integer_relation(
+        facts, out_derivation, lower, out_complete));
+  }
+  if (refined_facts.range_hi < ambient_facts.range_hi) {
+    const loom_condition_integer_relation_t upper = {
+        .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LE,
+        .left = loom_condition_value_operand(value),
+        .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+                  .value_id = LOOM_VALUE_ID_INVALID,
+                  .constant = refined_facts.range_hi},
+    };
+    IREE_RETURN_IF_ERROR(loom_condition_fact_set_append_integer_relation(
+        facts, out_derivation, upper, out_complete));
+  }
+  return iree_ok_status();
+}
+
+// Computes the complete mathematical interval of one addition or subtraction.
+// Failure means an endpoint escaped the signed fact lattice; callers must not
+// mistake its saturated representation for a no-wrap proof.
+static bool loom_condition_facts_compute_affine_result(
+    loom_op_kind_t kind, loom_value_facts_t lhs_facts,
+    loom_value_facts_t rhs_facts, loom_value_facts_t* out_result_facts) {
+  int64_t lower = 0;
+  int64_t upper = 0;
+  if (kind == LOOM_OP_INDEX_ADD || kind == LOOM_OP_SCALAR_ADDI) {
+    if (!iree_checked_add_i64(lhs_facts.range_lo, rhs_facts.range_lo, &lower) ||
+        !iree_checked_add_i64(lhs_facts.range_hi, rhs_facts.range_hi, &upper)) {
+      return false;
+    }
+  } else {
+    IREE_ASSERT(kind == LOOM_OP_INDEX_SUB || kind == LOOM_OP_SCALAR_SUBI);
+    if (!iree_checked_sub_i64(lhs_facts.range_lo, rhs_facts.range_hi, &lower) ||
+        !iree_checked_sub_i64(lhs_facts.range_hi, rhs_facts.range_lo, &upper)) {
+      return false;
+    }
+  }
+  *out_result_facts = loom_value_facts_make(lower, upper, /*known_divisor=*/1);
+  return true;
+}
+
+// Returns true when |op|'s carrier preserves its mathematical add/subtract
+// result. Index arithmetic is mathematical by definition. Fixed-width scalar
+// arithmetic must either promise signed no-wrap or prove it over the entire
+// ambient interval. Offset arithmetic must prove that reducing the complete
+// interval into the selected unsigned carrier is an identity.
+static bool loom_condition_facts_affine_result_is_mathematical(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t quotient_value, loom_value_facts_t quotient_facts,
+    const loom_op_t* op, loom_value_facts_t mathematical_result_facts) {
+  const loom_scalar_type_t scalar_type = loom_type_element_type(
+      loom_module_value_type(module, loom_op_const_results(op)[0]));
+  if (op->kind == LOOM_OP_INDEX_ADD || op->kind == LOOM_OP_INDEX_SUB) {
+    if (scalar_type == LOOM_SCALAR_TYPE_INDEX) {
+      return true;
+    }
+    IREE_ASSERT_EQ(scalar_type, LOOM_SCALAR_TYPE_OFFSET);
+    int32_t bit_count = loom_index_target_carrier_bitwidth(
+        fact_table ? &fact_table->context : NULL, scalar_type);
+    if (bit_count == 0) {
+      bit_count = 64;
+    }
+    return bit_count > 0 && loom_value_facts_fit_unsigned_bit_count(
+                                mathematical_result_facts, (uint8_t)bit_count);
+  }
+
+  IREE_ASSERT(op->kind == LOOM_OP_SCALAR_ADDI ||
+              op->kind == LOOM_OP_SCALAR_SUBI);
+  const int32_t bit_count = loom_scalar_type_bitwidth(scalar_type);
+  if (bit_count <= 1) {
+    // Boolean facts use numeric [0,1], while signed i1 arithmetic interprets
+    // raw one as -1. Its inverse is not a mathematical interval in this view.
+    return false;
+  }
+  return iree_any_bit_set(op->instance_flags, LOOM_INTEGER_OVERFLOW_FLAG_NSW) ||
+         loom_value_facts_fit_signed_bit_count(mathematical_result_facts,
+                                               (uint8_t)bit_count);
+}
+
+// Maps a refined add/subtract result back to both operands. This is owned by
+// condition derivation: downstream bounds consumers receive indexed operand
+// relations and never rediscover the defining expression.
+static iree_status_t loom_condition_facts_derive_affine_preimage(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_op_t* op, loom_value_facts_t result_facts,
     loom_condition_fact_set_t* facts,
     loom_condition_derivation_t* out_derivation, bool* out_complete) {
-  const loom_value_facts_t ambient_quotient =
-      loom_condition_lookup_facts(fact_table, quotient_value);
-  if (quotient_facts.range_lo == ambient_quotient.range_lo &&
-      quotient_facts.range_hi == ambient_quotient.range_hi) {
+  const loom_value_id_t lhs = loom_op_const_operands(op)[0];
+  const loom_value_id_t rhs = loom_op_const_operands(op)[1];
+  const loom_value_facts_t lhs_facts =
+      loom_condition_lookup_facts(fact_table, lhs);
+  const loom_value_facts_t rhs_facts =
+      loom_condition_lookup_facts(fact_table, rhs);
+  loom_value_facts_t mathematical_result_facts;
+  if (!loom_condition_facts_compute_affine_result(
+          op->kind, lhs_facts, rhs_facts, &mathematical_result_facts) ||
+      !loom_condition_facts_affine_result_is_mathematical(
+          module, fact_table, op, mathematical_result_facts)) {
     return iree_ok_status();
   }
-  quotient_value =
-      loom_value_fact_table_query_identity(fact_table, quotient_value);
-  const loom_value_t* value = loom_module_value(module, quotient_value);
+
+  loom_value_facts_t lhs_preimage;
+  loom_value_facts_t rhs_preimage;
+  bool has_lhs_preimage = false;
+  bool has_rhs_preimage = false;
+  if (op->kind == LOOM_OP_INDEX_ADD || op->kind == LOOM_OP_SCALAR_ADDI) {
+    has_lhs_preimage = loom_condition_facts_compute_affine_result(
+        LOOM_OP_SCALAR_SUBI, result_facts, rhs_facts, &lhs_preimage);
+    has_rhs_preimage = loom_condition_facts_compute_affine_result(
+        LOOM_OP_SCALAR_SUBI, result_facts, lhs_facts, &rhs_preimage);
+  } else {
+    has_lhs_preimage = loom_condition_facts_compute_affine_result(
+        LOOM_OP_SCALAR_ADDI, result_facts, rhs_facts, &lhs_preimage);
+    has_rhs_preimage = loom_condition_facts_compute_affine_result(
+        LOOM_OP_SCALAR_SUBI, lhs_facts, result_facts, &rhs_preimage);
+  }
+  if (has_lhs_preimage) {
+    IREE_RETURN_IF_ERROR(loom_condition_facts_append_range_refinement(
+        lhs, lhs_facts, lhs_preimage, facts, out_derivation, out_complete));
+  }
+  if (has_rhs_preimage) {
+    IREE_RETURN_IF_ERROR(loom_condition_facts_append_range_refinement(
+        rhs, rhs_facts, rhs_preimage, facts, out_derivation, out_complete));
+  }
+  return iree_ok_status();
+}
+
+// Derives numeric consequences while the condition owner visits a comparison.
+// Consumers retain and index the resulting operand relations; they do not
+// search arithmetic users when querying an address's bounds.
+static iree_status_t loom_condition_facts_derive_result_preimage(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t result_value, loom_value_facts_t result_facts,
+    loom_condition_fact_set_t* facts,
+    loom_condition_derivation_t* out_derivation, bool* out_complete) {
+  const loom_value_facts_t ambient_result =
+      loom_condition_lookup_facts(fact_table, result_value);
+  if (result_facts.range_lo == ambient_result.range_lo &&
+      result_facts.range_hi == ambient_result.range_hi) {
+    return iree_ok_status();
+  }
+  result_value = loom_value_fact_table_query_identity(fact_table, result_value);
+  const loom_value_t* value = loom_module_value(module, result_value);
   if (loom_value_is_block_arg(value)) {
     return iree_ok_status();
   }
@@ -728,6 +883,18 @@ static iree_status_t loom_condition_facts_derive_quotient_preimage(
   if (!op) {
     return iree_ok_status();
   }
+  switch (op->kind) {
+    case LOOM_OP_INDEX_ADD:
+    case LOOM_OP_INDEX_SUB:
+    case LOOM_OP_SCALAR_ADDI:
+    case LOOM_OP_SCALAR_SUBI:
+      return loom_condition_facts_derive_affine_preimage(
+          module, fact_table, op, result_facts, facts, out_derivation,
+          out_complete);
+    default:
+      break;
+  }
+
   loom_value_facts_quotient_kind_t kind;
   switch (op->kind) {
     case LOOM_OP_INDEX_DIV:
@@ -763,7 +930,7 @@ static iree_status_t loom_condition_facts_derive_quotient_preimage(
   const loom_value_facts_t scale_facts =
       loom_condition_lookup_facts(fact_table, loom_op_const_operands(op)[1]);
   const loom_scalar_type_t scalar_type =
-      loom_type_element_type(loom_module_value_type(module, quotient_value));
+      loom_type_element_type(loom_module_value_type(module, result_value));
   int32_t bit_count = loom_scalar_type_bitwidth(scalar_type);
   if (op->kind == LOOM_OP_INDEX_DIV) {
     if (!loom_value_facts_is_non_negative(dividend_facts) ||
@@ -784,36 +951,15 @@ static iree_status_t loom_condition_facts_derive_quotient_preimage(
     if (bit_count <= 0 ||
         !loom_value_facts_fit_signed_bit_count(dividend_facts,
                                                (uint8_t)bit_count) ||
-        !loom_value_facts_fit_signed_bit_count(quotient_facts,
+        !loom_value_facts_fit_signed_bit_count(result_facts,
                                                (uint8_t)bit_count)) {
       return iree_ok_status();
     }
   }
   const loom_value_facts_t preimage = loom_value_facts_quotient_preimage(
-      kind, bit_count, quotient_facts, scale_facts);
-  if (preimage.range_lo > dividend_facts.range_lo) {
-    const loom_condition_integer_relation_t lower = {
-        .relation = LOOM_SYMBOLIC_INTEGER_RELATION_GE,
-        .left = loom_condition_value_operand(dividend),
-        .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-                  .value_id = LOOM_VALUE_ID_INVALID,
-                  .constant = preimage.range_lo},
-    };
-    IREE_RETURN_IF_ERROR(loom_condition_fact_set_append_integer_relation(
-        facts, out_derivation, lower, out_complete));
-  }
-  if (preimage.range_hi < dividend_facts.range_hi) {
-    const loom_condition_integer_relation_t upper = {
-        .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LE,
-        .left = loom_condition_value_operand(dividend),
-        .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-                  .value_id = LOOM_VALUE_ID_INVALID,
-                  .constant = preimage.range_hi},
-    };
-    IREE_RETURN_IF_ERROR(loom_condition_fact_set_append_integer_relation(
-        facts, out_derivation, upper, out_complete));
-  }
-  return iree_ok_status();
+      kind, bit_count, result_facts, scale_facts);
+  return loom_condition_facts_append_range_refinement(
+      dividend, dividend_facts, preimage, facts, out_derivation, out_complete);
 }
 
 static iree_status_t loom_condition_facts_query_integer_compare(
@@ -863,10 +1009,10 @@ static iree_status_t loom_condition_facts_query_integer_compare(
       loom_symbolic_integer_relation_to_predicate_kind(relation);
   if (loom_value_facts_refine_relation(predicate_kind, left_facts, right_facts,
                                        &left_facts, &right_facts)) {
-    IREE_RETURN_IF_ERROR(loom_condition_facts_derive_quotient_preimage(
+    IREE_RETURN_IF_ERROR(loom_condition_facts_derive_result_preimage(
         module, fact_table, left_value, left_facts, facts, out_derivation,
         out_complete));
-    IREE_RETURN_IF_ERROR(loom_condition_facts_derive_quotient_preimage(
+    IREE_RETURN_IF_ERROR(loom_condition_facts_derive_result_preimage(
         module, fact_table, right_value, right_facts, facts, out_derivation,
         out_complete));
   }
@@ -1231,14 +1377,10 @@ static bool loom_condition_fact_resolver_proves_integer_comparison(
       loom_condition_edge_value_facts(fact_table, resolver, comparison.lhs);
   const loom_value_facts_t rhs_facts =
       loom_condition_edge_value_facts(fact_table, resolver, comparison.rhs);
-  loom_value_facts_t normalized_lhs = lhs_facts;
-  loom_value_facts_t normalized_rhs = rhs_facts;
-  if (loom_condition_integer_comparison_normalize_relation(
-          &comparison, fact_table ? &fact_table->context : NULL, true,
-          &normalized_lhs, &normalized_rhs, &relation.relation) &&
-      normalized_lhs.range_lo == lhs_facts.range_lo &&
-      normalized_rhs.range_lo == rhs_facts.range_lo && resolver != NULL &&
-      resolver->proves_integer_relation != NULL &&
+  if (loom_condition_integer_comparison_equivalent_relation(
+          &comparison, fact_table ? &fact_table->context : NULL,
+          /*assumed_truth=*/true, &lhs_facts, &rhs_facts, &relation.relation) &&
+      resolver != NULL && resolver->proves_integer_relation != NULL &&
       resolver->proves_integer_relation(resolver->user_data, fact_table,
                                         &relation, out_condition)) {
     return true;

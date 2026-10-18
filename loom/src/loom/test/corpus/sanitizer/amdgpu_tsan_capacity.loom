@@ -1,0 +1,110 @@
+kernel.def @tsan_shadow_capacity_8(%workgroups_x: index, %workgroups_y: index, %workgroups_z: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups_x, %workgroups_y, %workgroups_z) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %value = scalar.constant 1 : i64
+  %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<1xi64>
+  view.store %value, %view[0] : i64, view<1xi64>
+  kernel.return
+}
+
+kernel.def @tsan_shadow_capacity_16(%workgroups_x: index, %workgroups_y: index, %workgroups_z: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups_x, %workgroups_y, %workgroups_z) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 16 : offset
+  %value = scalar.constant 1 : i64
+  %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<2xi64>
+  view.store %value, %view[0] : i64, view<2xi64>
+  kernel.return
+}
+
+kernel.def @tsan_shadow_capacity_multiwave() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %scratch_bytes = index.constant 512 : offset
+  %output_value = scalar.constant 1 : i32
+  %scratch_value = scalar.constant 1 : i64
+  %lane = kernel.workitem.id<x> : index
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %global[%base] : buffer -> view<64xi32>
+  view.store %output_value, %output_view[%lane] : i32, view<64xi32>
+  %scratch = buffer.alloca<workgroup> align(8) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xi64>
+  view.store %scratch_value, %scratch_view[%lane] : i64, view<64xi64>
+  kernel.return
+}
+
+func.def @tsan_shadow_capacity_no_output() {
+  func.return
+}
+
+func.def @tsan_shadow_capacity_output_unchanged(%output: buffer) {
+  func.return
+}
+
+check.scenario @tsan_shadow_capacity_boundaries {
+  // Sixteen 136-byte records exactly consume the 2176-byte test arena.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %x = check.literal value(4) : index
+    %y = check.literal value(2) : index
+    %z = check.literal value(2) : index
+    check.compare<@tsan_shadow_capacity_8, @tsan_shadow_capacity_no_output>[%x, %y, %z]() : [index, index, index]() -> () {
+    }
+  }
+
+  // A second trial reuses the prepared queue and proves that one dispatch does
+  // not permanently consume its shadow records.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %x = check.literal value(4) : index
+    %y = check.literal value(2) : index
+    %z = check.literal value(2) : index
+    check.compare<@tsan_shadow_capacity_8, @tsan_shadow_capacity_no_output>[%x, %y, %z]() : [index, index, index]() -> () {
+    }
+  }
+
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %x = check.literal value(17) : index
+    %unit = check.literal value(1) : index
+    check.compare<@tsan_shadow_capacity_8, @tsan_shadow_capacity_no_output>[%x, %unit, %unit]() : [index, index, index]() -> () {
+      check.expect.event<device> {count = 1, severity = "error", tsan = {check = "shadow_capacity"}, type = "tsan_report"}
+    }
+  }
+
+  // Eight 264-byte records fit; the ninth does not. The excess case uses a 3D
+  // launch so ordinal calculation, not only the X dimension, owns the result.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %x = check.literal value(8) : index
+    %unit = check.literal value(1) : index
+    check.compare<@tsan_shadow_capacity_16, @tsan_shadow_capacity_no_output>[%x, %unit, %unit]() : [index, index, index]() -> () {
+    }
+  }
+
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %x = check.literal value(3) : index
+    %y = check.literal value(3) : index
+    %unit = check.literal value(1) : index
+    check.compare<@tsan_shadow_capacity_16, @tsan_shadow_capacity_no_output>[%x, %y, %unit]() : [index, index, index]() -> () {
+      check.expect.event<device> {count = 1, severity = "error", tsan = {check = "shadow_capacity"}, type = "tsan_report"}
+    }
+  }
+
+  // Capacity failure occurs before any wave executes and emits one report for
+  // the workgroup, even when the rejected kernel contains multiple waves.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<64xi32>
+    check.compare<@tsan_shadow_capacity_multiwave, @tsan_shadow_capacity_output_unchanged>(%output) : (tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64xi32>
+      check.expect.event<device> {count = 1, severity = "error", tsan = {check = "shadow_capacity"}, type = "tsan_report"}
+    }
+  }
+  check.return
+}

@@ -112,6 +112,8 @@ loom_cc_library(
     ],
 )
 
+# Serving retains whole-program optimization and standalone deployment in
+# shared compiler tool bundles.
 loom_cc_binary(
     name = "loom-serve",
     srcs = ["loom-serve.c"],

@@ -22,6 +22,8 @@ struct loom_serve_host_t {
   iree_atomic_ref_count_t ref_count;
   // Allocation policy for the host and its shared services.
   iree_allocator_t host_allocator;
+  // Reusable CPU scratch blocks shared by independent invocation arenas.
+  iree_arena_block_pool_t block_pool;
   // Worker executor shared by compiler and application processes.
   iree_task_executor_t* executor;
   // Task driver retaining the same executor and configured native loaders.
@@ -126,6 +128,8 @@ iree_status_t loom_serve_host_create(
       iree_allocator_malloc(host_allocator, sizeof(*host), (void**)&host));
   host->host_allocator = host_allocator;
   iree_atomic_ref_count_init(&host->ref_count);
+  iree_arena_block_pool_initialize(64 * 1024, host_allocator,
+                                   &host->block_pool);
   iree_status_t status = iree_ok_status();
   if (compiler_options) {
     host->target_provider_count = compiler_options->target_provider_count;
@@ -201,6 +205,7 @@ void loom_serve_host_release(loom_serve_host_t* host) {
     iree_task_executor_release(host->executor);
     loomc_target_environment_release(host->target_environment);
     iree_allocator_free(host->host_allocator, host->target_providers);
+    iree_arena_block_pool_deinitialize(&host->block_pool);
     iree_allocator_free(host->host_allocator, host);
   }
 }
@@ -211,6 +216,10 @@ iree_task_executor_t* loom_serve_host_executor(const loom_serve_host_t* host) {
 
 loomc_task_pool_t* loom_serve_host_task_pool(const loom_serve_host_t* host) {
   return host->task_pool;
+}
+
+iree_arena_block_pool_t* loom_serve_host_block_pool(loom_serve_host_t* host) {
+  return &host->block_pool;
 }
 
 iree_hal_driver_t* loom_serve_host_task_driver(const loom_serve_host_t* host) {

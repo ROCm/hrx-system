@@ -902,7 +902,7 @@ static iree_status_t loom_cmd_launch_count_build_kernel(
   loom_builder_set_block(builder, loom_module_block(module));
   loom_op_t* kernel_op = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_def_build(
-      builder, build_flags, /*retain=*/0, cluster->target,
+      builder, build_flags, /*linkage=*/0, /*retain=*/0, cluster->target,
       LOOM_STRING_ID_INVALID,
       /*export_linkage=*/0, kernel_ref, /*config_arg_types=*/NULL,
       /*config_arg_types_count=*/0, argument_types, argument_count,

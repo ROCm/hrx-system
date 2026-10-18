@@ -116,13 +116,13 @@ func.def @rotate_amounts_wrap_modulo_width(%x: i32) -> (i32, i32, i32, i32, i32,
 
 // ----
 func.def @rotate_amounts_wrap_modulo_width(%x: i32) -> (i32, i32, i32, i32, i32, i32) {
-  %23 = scalar.constant 1 : i32
-  %rotl_wrapped = scalar.rotli %x, %23 : i32
-  %21 = scalar.constant 31 : i32
-  %rotl_negative = scalar.rotli %x, %21 : i32
+  %20 = scalar.constant 1 : i32
+  %rotl_wrapped = scalar.rotli %x, %20 : i32
   %19 = scalar.constant 31 : i32
-  %rotr_wrapped = scalar.rotli %x, %19 : i32
-  %17 = scalar.constant 1 : i32
-  %rotr_negative = scalar.rotli %x, %17 : i32
+  %rotl_negative = scalar.rotli %x, %19 : i32
+  %18 = scalar.constant 1 : i32
+  %rotr_wrapped = scalar.rotri %x, %18 : i32
+  %17 = scalar.constant 31 : i32
+  %rotr_negative = scalar.rotri %x, %17 : i32
   func.return %x, %x, %rotl_wrapped, %rotl_negative, %rotr_wrapped, %rotr_negative : i32, i32, i32, i32, i32, i32
 }

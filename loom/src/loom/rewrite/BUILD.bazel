@@ -38,6 +38,21 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "cfg_facts_test",
+    srcs = ["cfg_facts_test.cc"],
+    deps = [
+        ":rewriter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "erasure_test",
     srcs = ["erasure_test.cc"],
     deps = [

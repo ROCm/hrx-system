@@ -800,25 +800,23 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@loop_entry_wave64) abi_layout(
 ^_bb3:
   low.br ^_bb8(%lane: reg<amdgpu.vgpr>)
 ^_bb8(%21: reg<amdgpu.vgpr>):
-  %34 = s_mov_b64_exec_read
+  %37 = s_mov_b64_exec_read
   low.br ^_bb4(%21: reg<amdgpu.vgpr>)
 ^_bb4(%slot: reg<amdgpu.vgpr>):
-  %33 = v_cmp_lt_i32 %slot, %loop_bound
-  %35, %36 = s_and_saveexec_b64 %33
-  low.cond_br %36, ^_bb5, ^_bb9 : reg<amdgpu.scc>
+  low.br ^_bb5
 ^_bb5:
-  %37 = v_mov_b32 1
-  %38 = v_lshlrev_b32_src0_inline %slot, 2
-  global_store_b32_saddr %38, %37, %output_view
-  %39 = v_sub_nc_u32 %loop_bound, %slot
-  %40 = v_cmp_lt_u32_src0_inline %39 {lhs = 64}
-  %41, %42 = s_and_saveexec_b64 %40
-  low.cond_br %42, ^_bb6, ^_bb9 : reg<amdgpu.scc>
+  %33 = v_mov_b32 1
+  %34 = v_lshlrev_b32_src0_inline %slot, 2
+  global_store_b32_saddr %34, %33, %output_view
+  %35 = v_sub_nc_u32 %loop_bound, %slot
+  %36 = v_cmp_lt_u32_src0_inline %35 {lhs = 64}
+  %38, %39 = s_and_saveexec_b64 %36
+  low.cond_br %39, ^_bb6, ^_bb9 : reg<amdgpu.scc>
 ^_bb6:
-  %43 = v_add_u32 %loop_step, %slot
-  low.br ^_bb4(%43: reg<amdgpu.vgpr>)
+  %40 = v_add_u32 %loop_step, %slot
+  low.br ^_bb4(%40: reg<amdgpu.vgpr>)
 ^_bb9:
-  s_mov_b64_exec %34
+  s_mov_b64_exec %37
   low.br ^_bb7
 ^_bb7:
   return

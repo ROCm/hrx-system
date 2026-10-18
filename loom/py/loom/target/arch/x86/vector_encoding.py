@@ -42,6 +42,7 @@ class VectorRegisterSelector(IntEnum):
     FIXED_3 = 6
     FIXED_4 = 7
     FIXED_6 = 8
+    FIXED_1 = 9
 
 
 class VectorEncodingBehavior(IntEnum):

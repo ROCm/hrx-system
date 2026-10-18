@@ -839,13 +839,14 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query_storage(
   iree_hal_amd_fabric_import_route_t* imports =
       routes ? (iree_hal_amd_fabric_import_route_t*)(routes + imports_offset)
              : NULL;
+  uint32_t profile_count = 0;
   bool supported = true;
   iree_status_t status = iree_ok_status();
   for (uint32_t profile_ordinal = 0;
        profile_ordinal < scope_info.memory_profile_count &&
        iree_status_is_ok(status);
        ++profile_ordinal) {
-    amdf_memory_profile_t* profile = &profiles[profile_ordinal];
+    amdf_memory_profile_t* profile = &profiles[profile_count];
     *profile = (amdf_memory_profile_t){
         .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
         .structure_size = sizeof(*profile),
@@ -865,6 +866,11 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query_storage(
     }
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(native_status,
                                            "memory_scope_query_device_profile");
+    // Optional routes retain their description even when a native prerequisite
+    // is absent. Only available routes can supply allocations or imports.
+    if (iree_status_is_ok(status) && amdf_status_is_ok(profile->availability)) {
+      ++profile_count;
+    }
   }
   for (iree_host_size_t i = 0; i < query->options->imports.class_count &&
                                supported && iree_status_is_ok(status);
@@ -874,7 +880,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query_storage(
     const iree_hal_external_storage_class_t storage_class =
         policy->storage_class;
     supported = false;
-    for (uint32_t p = 0; p < scope_info.memory_profile_count; ++p) {
+    for (uint32_t p = 0; p < profile_count; ++p) {
       const amdf_memory_profile_t* profile = &profiles[p];
       if (iree_all_bits_set(profile->supported_flags, query->required_flags) &&
           iree_hal_amd_fabric_memory_supports_import(profile, storage_class) &&
@@ -901,8 +907,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query_storage(
       status = iree_hal_amd_fabric_slab_pool_emit_plan(
           owner, storage, placement, query, NULL, imports);
     } else {
-      for (uint32_t p = 0;
-           p < scope_info.memory_profile_count && iree_status_is_ok(status);
+      for (uint32_t p = 0; p < profile_count && iree_status_is_ok(status);
            ++p) {
         status = iree_hal_amd_fabric_slab_pool_emit_plan(
             owner, storage, placement, query, &profiles[p], imports);

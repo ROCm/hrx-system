@@ -16,6 +16,8 @@ loom_cc_library(
     name = "options",
     srcs = ["options.c"],
     hdrs = ["options.h"],
+    # Option parsing and formatting carry no shared mutable state.
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
     deps = [
         "//runtime/src/iree/base",
     ],

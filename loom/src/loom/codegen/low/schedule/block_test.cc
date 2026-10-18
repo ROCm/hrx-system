@@ -163,9 +163,11 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
   EXPECT_EQ(effects[0].node_index, 2u);
   EXPECT_EQ(effects[0].scheduled_ordinal, 1u);
   EXPECT_EQ(hazards[0].node_index, 2u);
+  EXPECT_EQ(hazards[0].hazard_index, nodes[2].schedule_class->hazard_start);
 
   // Results retain target-owned descriptors and newly owned rows, never old
   // nodes or diagnostics. Retiring those tables cannot change the result.
+  previous_nodes[1] = {};
   previous_nodes[2] = {};
   previous_steps[1] = {};
   previous_decisions[1] = {};
@@ -174,6 +176,12 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
   EXPECT_EQ(steps[2].node_index, 3u);
   EXPECT_EQ(decisions[1].ready_candidate_count, 2u);
   EXPECT_EQ(ordered_ops[2], &operations[1]);
+  const auto& hazard_node = nodes[hazards[0].node_index];
+  EXPECT_EQ(hazard_node.op, &operations[0]);
+  EXPECT_EQ(hazard_node.block_index, 1u);
+  EXPECT_EQ(hazard_node.scheduled_ordinal, 1u);
+  EXPECT_EQ(descriptors->hazards[hazards[0].hazard_index].kind,
+            LOOM_LOW_HAZARD_KIND_MIN_DISTANCE);
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&pool);
 }

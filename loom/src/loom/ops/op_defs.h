@@ -561,7 +561,7 @@ static_assert(sizeof(loom_result_descriptor_t) ==
                   (IREE_PTR_SIZE == 8 ? 16 : 12),
               "loom_result_descriptor_t must remain compact");
 
-typedef uint16_t loom_symbol_definition_flags_t;
+typedef uint8_t loom_symbol_definition_flags_t;
 
 enum loom_symbol_definition_flag_bits_e {
   // Symbol op declares a contract that a provider definition may satisfy.
@@ -582,6 +582,8 @@ typedef struct loom_symbol_definition_descriptor_t {
   uint8_t name_attr_index;
   // Attribute index plus one for optional public visibility, or 0 if absent.
   uint8_t visibility_attr_index_plus_one;
+  // Attribute index plus one for optional definition linkage, or 0 if absent.
+  uint8_t linkage_attr_index_plus_one;
   // Attribute index plus one for the optional retain marker, or 0 if absent.
   uint8_t retain_attr_index_plus_one;
   // Attribute index plus one for an enum product carrier, or 0 if this symbol
@@ -646,6 +648,13 @@ static inline uint8_t loom_symbol_definition_visibility_attr_index(
     const loom_symbol_definition_descriptor_t* descriptor) {
   return descriptor && descriptor->visibility_attr_index_plus_one
              ? descriptor->visibility_attr_index_plus_one - 1
+             : LOOM_ATTR_INDEX_NONE;
+}
+
+static inline uint8_t loom_symbol_definition_linkage_attr_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->linkage_attr_index_plus_one
+             ? descriptor->linkage_attr_index_plus_one - 1
              : LOOM_ATTR_INDEX_NONE;
 }
 

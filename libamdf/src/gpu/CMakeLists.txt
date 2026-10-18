@@ -126,6 +126,25 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_library(
   NAME
+    event
+  HDRS
+    "event.h"
+  SRCS
+    "event.c"
+  DEPS
+    ::device
+    amdf::headers
+    libamdf::src::allocator
+    libamdf::src::device
+    libamdf::src::gpu::umd::event
+    libamdf::src::structure
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
     extension
   HDRS
     "extension.h"
@@ -135,6 +154,7 @@ iree_cc_library(
     ::clock
     ::device
     ::endpoint_profile
+    ::event
     ::kernel_queue
     ::user_queue
     amdf::headers

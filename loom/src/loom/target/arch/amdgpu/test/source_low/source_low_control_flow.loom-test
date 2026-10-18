@@ -1257,62 +1257,43 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform
   %initial_sum = v_mov_b32 0
   low.br ^_bb1(%loop_begin: reg<amdgpu.sgpr>, %initial_sum: reg<amdgpu.vgpr>)
 ^_bb1(%position: reg<amdgpu.sgpr>, %acc: reg<amdgpu.vgpr>):
-  %83 = s_cmp_lt_i32 %position, %loop_end
-  low.cond_br %83, ^_bb2, ^_bb6 : reg<amdgpu.scc>
+  %90 = s_cmp_lt_i32 %position, %loop_end
+  low.cond_br %90, ^_bb2, ^_bb6 : reg<amdgpu.scc>
 ^_bb2:
   %group = s_add_u32 %position, %group_offset
   %group_lt4 = s_cmp_lt_i32 %group, %group_width
   low.cond_br %group_lt4, ^_bb3, ^_bb4 : reg<amdgpu.scc>
 ^_bb3:
-  %87 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %88 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %90, %91 = s_add_co_u32 %87, %position
-  %92, %93 = s_addc_u32 %88, %loop_begin, %91
-  %94 = concat(%90, %92) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %scale_i8 = global_load_i8_saddr %initial_sum, %94 {offset = 3}
-  %100, %101 = s_add_co_u32 %87, %position
-  %102, %103 = s_addc_u32 %88, %loop_begin, %101
-  %104 = concat(%100, %102) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %min_i8 = global_load_i8_saddr %initial_sum, %104 {offset = 7}
+  %scale_i8 = global_load_i8_saddr %initial_sum, %input_view {offset = 3}
+  %min_i8 = global_load_i8_saddr %initial_sum, %input_view {offset = 7}
   %scale_u = v_and_b32_lit %scale_i8, 255
   %min_u = v_and_b32_lit %min_i8, 255
-  %scale$108 = v_and_b32_src0_inline %scale_u, 63
-  %min$109 = v_and_b32_src0_inline %min_u, 63
-  low.br ^_bb5(%scale$108: reg<amdgpu.vgpr>, %min$109: reg<amdgpu.vgpr>)
+  %scale$99 = v_and_b32_src0_inline %scale_u, 63
+  %min$100 = v_and_b32_src0_inline %min_u, 63
+  low.br ^_bb5(%scale$99: reg<amdgpu.vgpr>, %min$100: reg<amdgpu.vgpr>)
 ^_bb4:
-  %111 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %112 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %114, %115 = s_add_co_u32 %111, %position
-  %116, %117 = s_addc_u32 %112, %loop_begin, %115
-  %118 = concat(%114, %116) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %low_i8 = global_load_i8_saddr %initial_sum, %118
-  %124, %125 = s_add_co_u32 %111, %position
-  %126, %127 = s_addc_u32 %112, %loop_begin, %125
-  %128 = concat(%124, %126) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %mid_i8 = global_load_i8_saddr %initial_sum, %128 {offset = 4}
-  %134, %135 = s_add_co_u32 %111, %position
-  %136, %137 = s_addc_u32 %112, %loop_begin, %135
-  %138 = concat(%134, %136) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %high_i8 = global_load_i8_saddr %initial_sum, %138 {offset = 8}
+  %low_i8 = global_load_i8_saddr %initial_sum, %input_view {offset = 1}
+  %mid_i8 = global_load_i8_saddr %initial_sum, %input_view {offset = 5}
+  %high_i8 = global_load_i8_saddr %initial_sum, %input_view {offset = 9}
   %low = v_and_b32_lit %low_i8, 255
   %mid = v_and_b32_lit %mid_i8, 255
   %high = v_and_b32_lit %high_i8, 255
   %scale_low = v_and_b32_src0_inline %high, 15
   %scale_hi0 = v_and_b32_lit %low, 192
   %scale_hi = v_lshrrev_b32_src0_inline %scale_hi0, 2
-  %scale$146 = v_or_b32 %scale_low, %scale_hi
+  %scale$113 = v_or_b32 %scale_low, %scale_hi
   %min_low = v_lshrrev_b32_src0_inline %high, 4
   %min_hi0 = v_and_b32_lit %mid, 192
   %min_hi = v_lshrrev_b32_src0_inline %min_hi0, 2
-  %min$150 = v_or_b32 %min_low, %min_hi
-  low.br ^_bb5(%scale$146: reg<amdgpu.vgpr>, %min$150: reg<amdgpu.vgpr>)
+  %min$117 = v_or_b32 %min_low, %min_hi
+  low.br ^_bb5(%scale$113: reg<amdgpu.vgpr>, %min$117: reg<amdgpu.vgpr>)
 ^_bb5(%scale_i32: reg<amdgpu.vgpr>, %min_i32: reg<amdgpu.vgpr>):
   %scale_f32 = v_cvt_f32_u32 %scale_i32
   %min_f32 = v_cvt_f32_u32 %min_i32
   %term = v_add_f32 %scale_f32, %min_f32
   %next = v_add_f32 %acc, %term
-  %155 = s_add_u32 %position, %loop_step
-  low.br ^_bb1(%155: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr>)
+  %122 = s_add_u32 %position, %loop_step
+  low.br ^_bb1(%122: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr>)
 ^_bb6:
   return %acc
 }

@@ -120,6 +120,37 @@ that executes it. Target platforms and toolchains own portable ISA selection;
 local benchmark runs may add an explicit architecture flag only when the build
 and execution machine are intentionally the same.
 
+### Shared Loom tool bundles
+
+Loom tools link statically by default. Release bundles can share the compiler
+and runtime used by `loom-compile`, `loom-opt`, and `loom-import-cxx`:
+
+```bash
+iree-bazel-build --config=opt --//loom/config:shared_tools \
+  //loom/src/loom/tools/loom-compile \
+  //loom/src/loom/tools/loom-opt \
+  //loom/src/loom/tools/loom-serve
+iree-cmake-configure -DLOOM_LINK_SHARED_TOOLS=ON
+```
+
+The shared mode packages one `libloomc` and one `libiree` alongside the compiler
+tools. `loom-serve` keeps its compiler and runtime statically linked in either
+mode, retaining whole-program optimization and standalone deployment.
+The IREE companion includes the configured HAL drivers and owns runtime state
+used by both tools and compiler discovery. All files in this bundle come from
+the same build; the companion is not an independently versioned IREE ABI.
+Shared compiler tools trade some cross-library optimization for a smaller
+bundle. Local development and benchmarks retain the default static mode.
+
+CMake shared tools require CMake 3.27 or newer and static component libraries
+(`BUILD_SHARED_LIBS=OFF`). This option controls final tool composition separately
+from the component sharing used for in-tree development. Each selected tool's
+install component includes both libraries, with relative loader paths for
+`bin/` and `lib/` installs or a single-directory bundle. The installed LoomC SDK
+exports the same configured bindings in either mode.
+Windows CMake builds place the shared tools and both DLLs together under the
+build tree's `bin/` directory so the tools also run directly from the build tree.
+
 ### Default allocator
 
 IREE uses libc for `iree_allocator_system()` by default. Native builds can
@@ -206,6 +237,10 @@ The selected C/C++ toolchain also supplies the MASM assembler and sanitizer
 runtimes. Native Windows uses the tools discovered in its Visual Studio/LLVM
 environment. Linux cross builds use clang-cl, lld-link, and llvm-ml from the
 selected Linux LLVM installation.
+
+Clang's compiler runtime supplies helpers for operations such as 128-bit
+arithmetic. Bazel and CMake resolve it from the selected compiler and link it
+into executables and shared libraries that need those helpers.
 
 #### Cross-compilation from Linux
 
@@ -464,13 +499,18 @@ root independently through build configuration.
 
 | Workflow surface | Host compiler | AMDGPU device compiler | Coverage intent |
 | --- | --- | --- | --- |
-| Presubmit | Fetched ROCm Clang 23 | None | Runs repository policy checks and clang-tidy with the newest supported LLVM APIs. |
-| IREE Bazel/CMake CPU and importers | Ubuntu Clang 18 | None | Primary source build, test, sanitizer, and importer coverage. |
-| IREE Bazel/CMake Vulkan | Fetched ROCm Clang 23 | None | Vulkan source build and execution coverage on self-hosted runners that do not currently provision a generic Clang toolchain. |
-| IREE Bazel/CMake AMDGPU | Fetched ROCm Clang 23 | Fetched ROCm Clang 23 | Compiles and runs AMDGPU host and device code in the ROCm toolchain environment. |
-| IREE Bazel repository build | GCC 13 system toolchain | Fetched ROCm Clang 23 | Builds every supported Linux HAL driver, Loom target/importer, and build-compatible target under `//...`; it does not duplicate test execution. |
-| libHRX Bazel | Fetched ROCm Clang 23 | Fetched ROCm Clang 23 | Validates the source HRX product against its shipping ROCm compiler environment. |
-| Installed CMake/package CI | Fetched ROCm Clang 23 | Fetched ROCm Clang 23 | Builds, installs, packages, and tests the composed HRX distribution. |
+| Presubmit | Fetched ROCm Clang | None | Runs repository policy checks and clang-tidy with the newest supported LLVM APIs. |
+| IREE Bazel CPU Fastbuild/TSAN/UBSAN and CMake Sanitizer Smoke | Ubuntu Clang 18 | None | Preserves source build, test, and sanitizer coverage with the system compiler. |
+| IREE Bazel CPU ASAN and CMake CPU RelWithDebInfo | Fetched ROCm Clang | None | Exercises static and shared compiler tools, including the C++23 importer. |
+| IREE Bazel/CMake Vulkan | System GCC | None | Vulkan source build and execution coverage on self-hosted runners. |
+| IREE Bazel/CMake AMDGPU | Fetched ROCm Clang | Fetched ROCm Clang | Compiles and runs AMDGPU host and device code in the ROCm toolchain environment. |
+| IREE Bazel/CMake repository build | GCC 13 system toolchain | Fetched ROCm Clang | Builds every supported Linux HAL driver, Loom target/importer, and build-compatible target. |
+| libHRX Bazel | Fetched ROCm Clang | Fetched ROCm Clang | Validates the source HRX product against its shipping ROCm compiler environment. |
+| Installed CMake/package CI | Fetched ROCm Clang | Fetched ROCm Clang | Builds, installs, packages, and tests the composed HRX distribution. |
+
+The importer requires C++23 library facilities, including `std::expected`.
+Ubuntu Clang 18 with the runner's libstdc++ does not expose that facility, so
+the importer qualification jobs select the fetched ROCm host compiler explicitly.
 
 The `platform_coverage` rows in `.github/workflows/ci_iree.yml` are the shared
 representative set for portable optional dependencies: Linux Bazel Clang ASAN,

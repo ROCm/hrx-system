@@ -361,6 +361,16 @@ static iree_status_t loom_low_lower_visit_contract_cases(
         !loom_low_lower_contract_case_queries_target(index, contract_case)) {
       continue;
     }
+    const loom_target_contract_binding_t* binding =
+        &index->bindings[contract_case->binding_index];
+    if (used_candidate_index &&
+        domain == LOOM_LOW_LOWER_CONTRACT_CASE_DOMAIN_LOWERING &&
+        binding->required_primary_feature_class != 0 &&
+        !loom_low_lower_rule_primary_feature_class_available(
+            match_context, options->rule_sets.values[binding->rule_set_index],
+            binding->required_primary_feature_class)) {
+      continue;
+    }
     if (case_scope != LOOM_LOW_LOWER_CONTRACT_CASE_SCOPE_ALL) {
       uint16_t rule_index = UINT16_MAX;
       const bool has_lower_rule = loom_low_lower_contract_case_lower_rule_index(
@@ -368,8 +378,6 @@ static iree_status_t loom_low_lower_visit_contract_cases(
       bool is_source_graph = false;
       const loom_low_lower_rule_set_t* rule_set = NULL;
       if (has_lower_rule) {
-        const loom_target_contract_binding_t* binding =
-            &index->bindings[contract_case->binding_index];
         rule_set = options->rule_sets.values[binding->rule_set_index];
         is_source_graph = loom_low_lower_rule_source_node_count(
                               &rule_set->rules[rule_index]) != 0;

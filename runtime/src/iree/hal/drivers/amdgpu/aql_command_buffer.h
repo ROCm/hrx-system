@@ -42,7 +42,6 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
     iree_host_size_t binding_capacity, iree_host_size_t device_ordinal,
     iree_host_size_t queue_count_per_physical_device,
     iree_hal_amdgpu_grid_sync_strategy_t grid_sync_strategy,
-    uint32_t tsan_shadow_slot_count,
     iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
         prepublished_kernarg_storage,
     void* hostcall_buffer,

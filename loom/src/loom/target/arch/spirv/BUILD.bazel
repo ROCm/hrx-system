@@ -287,6 +287,19 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "math_policy_test",
+    srcs = ["math_policy_test.cc"],
+    deps = [
+        ":math_policy",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "module_contract",
     srcs = ["module_contract.c"],
@@ -495,6 +508,7 @@ loom_check_test_suite(
         "test/source_low/numeric_rounding.loom-test",
         "test/source_low/numeric_scalar_f32.loom-test",
         "test/source_low/numeric_scalar_f32_values.loom-test",
+        "test/source_low/numeric_trigonometry.loom-test",
         "test/source_low/numeric_unsigned_remainder.loom-test",
         "test/source_low/ordinary_vector_alu.loom-test",
         "test/source_low/ordinary_vector_concat.loom-test",

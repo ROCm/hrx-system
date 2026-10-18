@@ -58,6 +58,8 @@ exports_files([
     "deps.MODULE.bazel",
     "elf_dynamic_library_closure.bzl",
     "msvc_masm_wrapper.bat",
+    "package_policy.bzl",
+    "requirements.bzl",
 ])
 
 py_library(

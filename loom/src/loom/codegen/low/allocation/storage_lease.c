@@ -859,14 +859,15 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
     const loom_liveness_analysis_t* liveness,
     const loom_low_allocation_storage_identity_t* storage_identity,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
-    iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* result_arena,
+    iree_arena_allocator_t* decision_arena,
     loom_low_allocation_storage_lease_state_t* out_state) {
   IREE_ASSERT_ARGUMENT(lease_table);
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(function_op);
   IREE_ASSERT_ARGUMENT(liveness);
   IREE_ASSERT_ARGUMENT(storage_identity);
-  IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(result_arena);
   IREE_ASSERT_ARGUMENT(out_state);
   *out_state = (loom_low_allocation_storage_lease_state_t){0};
   out_state->minimum_pressure_release_start_point = UINT32_MAX;
@@ -885,7 +886,7 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
               schedule->value_producer_nodes != NULL);
 
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, lease_table->record_count, sizeof(*out_state->instances),
+      result_arena, lease_table->record_count, sizeof(*out_state->instances),
       (void**)&out_state->instances));
   memset(out_state->instances, 0,
          lease_table->record_count * sizeof(*out_state->instances));
@@ -893,24 +894,27 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
     out_state->instances[i].release_action_index =
         LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
   }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, lease_table->record_count, sizeof(*out_state->release_actions),
-      (void**)&out_state->release_actions));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(result_arena, lease_table->record_count,
+                                sizeof(*out_state->release_actions),
+                                (void**)&out_state->release_actions));
   memset(out_state->release_actions, 0,
          lease_table->record_count * sizeof(*out_state->release_actions));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, lease_table->record_count, sizeof(*out_state->instance_written),
-      (void**)&out_state->instance_written));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(decision_arena, lease_table->record_count,
+                                sizeof(*out_state->instance_written),
+                                (void**)&out_state->instance_written));
   memset(out_state->instance_written, 0,
          lease_table->record_count * sizeof(*out_state->instance_written));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, lease_table->record_count, sizeof(*out_state->next_record_indices),
-      (void**)&out_state->next_record_indices));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(decision_arena, lease_table->record_count,
+                                sizeof(*out_state->next_record_indices),
+                                (void**)&out_state->next_record_indices));
   for (iree_host_size_t i = 0; i < lease_table->record_count; ++i) {
     out_state->next_record_indices[i] = UINT32_MAX;
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, liveness->value_count,
+      decision_arena, liveness->value_count,
       sizeof(*out_state->record_heads_by_value_ordinal),
       (void**)&out_state->record_heads_by_value_ordinal));
   for (iree_host_size_t i = 0; i < liveness->value_count; ++i) {
@@ -945,24 +949,25 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
   if (lease_unit_capacity == 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(
-      arena, sizeof(*out_state->unit_index), (void**)&out_state->unit_index));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(result_arena,
+                                           sizeof(*out_state->unit_index),
+                                           (void**)&out_state->unit_index));
   IREE_RETURN_IF_ERROR(loom_low_allocation_storage_lease_unit_index_initialize(
       out_state->unit_index, out_state->instances, lease_table->record_count,
       lease_unit_capacity,
       loom_low_allocation_storage_lease_distinct_unit_capacity(
           schedule->target.descriptor_set, lease_unit_capacity),
-      arena));
+      result_arena));
   if (lease_unit_capacity <
       LOOM_LOW_ALLOCATION_STORAGE_LEASE_AVAILABILITY_MIN_UNITS) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, lease_table->record_count,
+      decision_arena, lease_table->record_count,
       sizeof(*out_state->availability_expiration_heap),
       (void**)&out_state->availability_expiration_heap));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, lease_table->record_count,
+      decision_arena, lease_table->record_count,
       sizeof(*out_state->availability_expiration_positions),
       (void**)&out_state->availability_expiration_positions));
   for (iree_host_size_t i = 0; i < lease_table->record_count; ++i) {

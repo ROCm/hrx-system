@@ -19,6 +19,9 @@ if(IREE_TARGET_HAS_THREADS AND IREE_BUILD_BENCHMARKS)
     DEPS
       iree::third_party::google_benchmark
       iree::base
+      iree::base::internal
+      iree::base::threading::latency
+      iree::base::tooling::flags
     PUBLIC
   )
 else()
@@ -31,6 +34,7 @@ else()
       "benchmark_nop.c"
     DEPS
       iree::base
+      iree::base::tooling::flags
     PUBLIC
   )
 endif()
@@ -42,7 +46,6 @@ iree_cc_library(
     "benchmark_main.c"
   DEPS
     ::benchmark
-    iree::base::tooling::flags
   TESTONLY
   PUBLIC
 )

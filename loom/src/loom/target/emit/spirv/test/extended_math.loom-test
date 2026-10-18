@@ -7,6 +7,8 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
   %one = OpConstant.f32 1065353216
   %two = OpConstant.f32 1073741824
   %pair = OpCompositeConstruct.v2f32 %one, %two
+  %sine = OpExtInst.GLSL.std.450.Sin.f32 %one
+  %cosine = OpExtInst.GLSL.std.450.Cos.v2f32 %pair
   %exp = OpExtInst.GLSL.std.450.Exp.f32 %one
   %log = OpExtInst.GLSL.std.450.Log.f32 %exp
   %exp2 = OpExtInst.GLSL.std.450.Exp2.v2f32 %pair
@@ -29,6 +31,8 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
                OpName %one "one"
                OpName %two "two"
                OpName %pair "pair"
+               OpName %sine "sine"
+               OpName %cosine "cosine"
                OpName %exp "exp"
                OpName %log "log"
                OpName %exp2 "exp2"
@@ -42,6 +46,8 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
 %spirv_extended_math = OpFunction %void None %3
           %4 = OpLabel
        %pair = OpCompositeConstruct %v2float %one %two
+       %sine = OpExtInst %float %11 Sin %one
+     %cosine = OpExtInst %v2float %11 Cos %pair
         %exp = OpExtInst %float %11 Exp %one
         %log = OpExtInst %float %11 Log %exp
        %exp2 = OpExtInst %v2float %11 Exp2 %pair

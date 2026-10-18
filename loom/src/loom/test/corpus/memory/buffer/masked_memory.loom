@@ -162,3 +162,55 @@ check.scenario @counted_packet_masks {
   }
   check.return
 }
+
+// Every element shares a runtime predicate. Inactive packets point beyond both
+// views, take distinct passthrough values, and leave the written buffer intact.
+func.def @uniform_masked_packets(%ordinal: index, %input: buffer, %previous: buffer, %output: buffer, %written: buffer) {
+  %c0 = index.constant 0 : index
+  %past_end = index.constant 4 : index
+  %active = index.cmp eq, %ordinal, %c0 : index
+  %position = scf.select %active, %c0, %past_end : index
+  %mask = vector.splat %active : vector<4xi1>
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<4xi32>
+  %old = buffer.view %previous[%base] : buffer -> view<4xi32>
+  %results = buffer.view %output[%base] : buffer -> view<4xi32>
+  %destination = buffer.view %written[%base] : buffer -> view<4xi32>
+  %passthrough = vector.load %old[0] : view<4xi32> -> vector<4xi32>
+  %value = vector.load.mask %source[%position], %mask, %passthrough : view<4xi32>, vector<4xi1>, vector<4xi32>
+  vector.store %value, %results[0] : vector<4xi32>, view<4xi32>
+  vector.store.mask %value, %destination[%position], %mask : vector<4xi32>, view<4xi32>, vector<4xi1>
+  func.return
+}
+
+// Whole-buffer copies establish the expected bytes independently of vector
+// mask lowering and the deliberately inaccessible inactive packet positions.
+func.def @uniform_masked_packets_oracle(%ordinal: index, %input: buffer, %previous: buffer, %output: buffer, %written: buffer) {
+  %c0 = index.constant 0 : index
+  %active = index.cmp eq, %ordinal, %c0 : index
+  %base = index.constant 0 : offset
+  %length = index.constant 16 : offset
+  scf.if %active {
+    buffer.copy %input[%base], %output[%base], %length
+    buffer.copy %input[%base], %written[%base], %length
+  } else {
+    buffer.copy %previous[%base], %output[%base], %length
+  }
+  func.return
+}
+
+check.scenario @uniform_packet_masks {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(13) step(17) : tensor<4xi32>
+    %previous = check.generate.iota offset(-37) step(3) : tensor<4xi32>
+    %output = check.generate.fill value(91) : tensor<4xi32>
+    %written = check.generate.fill value(19) : tensor<4xi32>
+    check.compare<@uniform_masked_packets, @uniform_masked_packets_oracle>(%trial, %input, %previous, %output, %written) : (index, tensor<4xi32>, tensor<4xi32>, tensor<4xi32>, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<4xi32>
+      check.expect.bitwise actual(%previous) expected(%previous) : tensor<4xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4xi32>
+      check.expect.bitwise actual(%written) expected(%written) : tensor<4xi32>
+    }
+  }
+  check.return
+}

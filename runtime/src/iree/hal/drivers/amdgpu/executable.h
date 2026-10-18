@@ -204,6 +204,9 @@ iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue_ordinal(
 bool iree_hal_amdgpu_executable_requires_queue_scope(
     iree_hal_executable_t* executable);
 
+// Returns true when the executable contains Loom TSAN instrumentation.
+bool iree_hal_amdgpu_executable_uses_tsan(iree_hal_executable_t* executable);
+
 // Returns PM4 compute launch state for an exported kernel function on a
 // physical device.
 //

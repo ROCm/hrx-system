@@ -172,6 +172,34 @@ void* amdf_host_memory_pointer(const amdf_memory_t* memory) {
              : native;
 }
 
+amdf_status_t amdf_host_memory_export(
+    amdf_memory_t* memory, const amdf_platform_host_export_t* service,
+    bool first_export, amdf_external_memory_t* out_memory) {
+  const amdf_platform_host_backing_t* backing =
+      memory->accesses[memory->backing_access_ordinal].native;
+  amdf_external_memory_t exported = {0};
+  amdf_status_t status = amdf_platform_host_export_memory(
+      service, backing, memory->info.byte_length, &exported);
+  if (amdf_status_is_ok(status) && first_export) {
+    // Export has pinned/populated every page. Retire CPU initialization once
+    // before any attachment can install a device-writable alias.
+    amdf_memory_host_description_t description;
+    status = amdf_host_memory_query_description(&description);
+    if (amdf_status_is_ok(status)) {
+      status = amdf_platform_host_memory_cache_control(
+          backing->pointer, memory->info.byte_length,
+          description.cache_line_size);
+    }
+  }
+  if (amdf_status_is_ok(status)) {
+    *out_memory = exported;
+  } else if (exported.release != NULL) {
+    exported.release(exported.release_user_data, exported.type,
+                     exported.payload);
+  }
+  return status;
+}
+
 amdf_status_t amdf_host_memory_prepare(
     amdf_memory_t* memory, const amdf_memory_native_profile_t* profile,
     const amdf_memory_create_info_t* create_info,
@@ -184,7 +212,8 @@ amdf_status_t amdf_host_memory_prepare(
   const uint64_t native_length =
       (create_info->byte_length + granularity - 1) & ~(granularity - 1);
   const bool mapping_source =
-      (create_info->required_flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE) != 0;
+      ((create_info->required_flags | profile->guaranteed_flags) &
+       AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE) != 0;
   memory->accesses[memory->backing_access_ordinal].vtable =
       registration ? &amdf_registered_host_memory_vtable
                    : &amdf_host_memory_vtable;
@@ -222,6 +251,7 @@ amdf_status_t amdf_host_memory_prepare(
         .memory_class = AMDF_MEMORY_CLASS_SYSTEM,
         .access_count = memory->info.access_count,
         .flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
+                 (registration ? 0 : AMDF_MEMORY_FLAG_HOST_FILE_IO) |
                  (mapping_source ? AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE : 0),
         .byte_length = create_info->byte_length,
         .alignment = registration ? address & (~address + 1) : granularity,

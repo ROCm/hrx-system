@@ -308,12 +308,10 @@ TEST_F(HostQueueCommandBufferTest, DispatchSummariesRetainPacketOrdinals) {
   EXPECT_EQ(summary->next, nullptr);
 }
 
-TEST_F(HostQueueCommandBufferTest,
-       TsanAssignmentPlanForcesBarrierWhenShadowSlotsWouldOverlap) {
+TEST_F(HostQueueCommandBufferTest, TsanDispatchesUseSerializedShadowArena) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.preallocate_pools = 0;
-  options.tsan.shadow_slot_count = 1;
 
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.InitializeWithRuntimeFeatures(
@@ -324,6 +322,7 @@ TEST_F(HostQueueCommandBufferTest,
   IREE_ASSERT_OK(LoadCtsExecutable(
       iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("tsan_executable_test.bin"), &executable));
+  ASSERT_TRUE(iree_hal_amdgpu_executable_uses_tsan(executable));
 
   Ref<iree_hal_buffer_t> input_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
@@ -391,7 +390,7 @@ TEST_F(HostQueueCommandBufferTest,
   const iree_hal_amdgpu_command_buffer_command_header_t* command =
       iree_hal_amdgpu_command_buffer_block_commands_const(block);
   ASSERT_EQ(command->opcode, IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_DISPATCH);
-  EXPECT_FALSE(iree_any_bit_set(
+  EXPECT_TRUE(iree_any_bit_set(
       command->flags, IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER));
   command = iree_hal_amdgpu_command_buffer_command_next_const(command);
   ASSERT_EQ(command->opcode, IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_DISPATCH);

@@ -37,6 +37,9 @@ from loom.target.arch.x86.contracts.integer_division import (
     runtime_integer_division_rules,
     unsigned_constant_division_rules,
 )
+from loom.target.arch.x86.contracts.integer_rotation import (
+    scalar_integer_rotation_rules,
+)
 from loom.target.arch.x86.contracts.memory import (
     x86_scalar_memory_rules,
     x86_view_carrier_rules,
@@ -1552,6 +1555,7 @@ def _cases() -> Sequence[ContractCase]:
         ),
         *unsigned_constant_division_rules(descriptor_lookup),
         *runtime_integer_division_rules(descriptor_lookup),
+        *scalar_integer_rotation_rules(descriptor_lookup),
         *scalar_integer_bit_count_rules(descriptor_lookup),
     )
 

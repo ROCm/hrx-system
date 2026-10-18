@@ -18,12 +18,15 @@ typedef struct loom_liveness_dataflow_block_state_t {
   iree_host_size_t live_in_count;
   // Number of live-in values published for this block.
   iree_host_size_t live_in_fill_count;
-  // Mutable exact live-out value list.
+  // Mutable exact live-out value list, or NULL when borrowing a successor.
   loom_value_id_t* live_out_values;
   // Number of live-out relations counted for this block.
   iree_host_size_t live_out_count;
   // Number of live-out values published for this block.
   iree_host_size_t live_out_fill_count;
+  // Successor whose live-in list equals this block's live-out union, or
+  // UINT16_MAX when the live-out list has independent storage.
+  uint16_t live_out_successor;
 } loom_liveness_dataflow_block_state_t;
 
 typedef enum loom_liveness_dataflow_pass_e {
@@ -208,6 +211,9 @@ static void loom_liveness_dataflow_record_live_out(
     ++block_state->live_out_count;
     return;
   }
+  if (block_state->live_out_values == NULL) {
+    return;
+  }
   IREE_ASSERT_LT(block_state->live_out_fill_count, block_state->live_out_count);
   block_state->live_out_values[block_state->live_out_fill_count++] =
       solver->value_ids[value_ordinal];
@@ -270,16 +276,32 @@ static iree_status_t loom_liveness_dataflow_allocate_results(
   iree_host_size_t total_live_out_count = 0;
   for (uint16_t block_index = 0; block_index < solver->block_count;
        ++block_index) {
-    const loom_liveness_dataflow_block_state_t* block_state =
+    loom_liveness_dataflow_block_state_t* block_state =
         &solver->block_states[block_index];
+    block_state->live_out_successor = UINT16_MAX;
+    const loom_cfg_block_index_span_t successors =
+        loom_cfg_graph_successors(solver->cfg_graph, block_index);
+    for (iree_host_size_t i = 0; i < successors.count; ++i) {
+      const uint16_t successor = successors.values[i];
+      // Live-out is the union of successor live-ins. A constituent with the
+      // union's cardinality is the complete set; no value comparison is needed.
+      if (solver->block_states[successor].live_in_count ==
+          block_state->live_out_count) {
+        block_state->live_out_successor = successor;
+        break;
+      }
+    }
+    const iree_host_size_t owned_live_out_count =
+        block_state->live_out_successor == UINT16_MAX
+            ? block_state->live_out_count
+            : 0;
     if (block_state->live_in_count > IREE_HOST_SIZE_MAX - total_live_in_count ||
-        block_state->live_out_count >
-            IREE_HOST_SIZE_MAX - total_live_out_count) {
+        owned_live_out_count > IREE_HOST_SIZE_MAX - total_live_out_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "liveness block relations exceed host size");
     }
     total_live_in_count += block_state->live_in_count;
-    total_live_out_count += block_state->live_out_count;
+    total_live_out_count += owned_live_out_count;
   }
 
   loom_value_id_t* live_in_values = NULL;
@@ -308,12 +330,16 @@ static iree_status_t loom_liveness_dataflow_allocate_results(
     relation->live_in_values = block_state->live_in_values;
     relation->live_in_count = block_state->live_in_count;
     live_in_offset += block_state->live_in_count;
-    block_state->live_out_values = block_state->live_out_count > 0
-                                       ? live_out_values + live_out_offset
-                                       : NULL;
+    const bool owns_live_out = block_state->live_out_successor == UINT16_MAX;
+    block_state->live_out_values =
+        owns_live_out && block_state->live_out_count > 0
+            ? live_out_values + live_out_offset
+            : NULL;
     relation->live_out_values = block_state->live_out_values;
     relation->live_out_count = block_state->live_out_count;
-    live_out_offset += block_state->live_out_count;
+    if (owns_live_out) {
+      live_out_offset += block_state->live_out_count;
+    }
   }
   IREE_ASSERT_EQ(live_in_offset, total_live_in_count);
   IREE_ASSERT_EQ(live_out_offset, total_live_out_count);
@@ -340,8 +366,13 @@ iree_status_t loom_liveness_dataflow_solve(
     const loom_liveness_dataflow_block_state_t* block_state =
         &solver.block_states[block_index];
     IREE_ASSERT_EQ(block_state->live_in_fill_count, block_state->live_in_count);
-    IREE_ASSERT_EQ(block_state->live_out_fill_count,
-                   block_state->live_out_count);
+    if (block_state->live_out_successor == UINT16_MAX) {
+      IREE_ASSERT_EQ(block_state->live_out_fill_count,
+                     block_state->live_out_count);
+    } else {
+      out_block_relations[block_index].live_out_values =
+          out_block_relations[block_state->live_out_successor].live_in_values;
+    }
   }
   return iree_ok_status();
 }

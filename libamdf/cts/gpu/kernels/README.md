@@ -39,6 +39,29 @@ allocation addresses directly. The caller checks the required wave32,
 kernarg-pointer, group-X and local-X initial-register contract, with no
 private or group storage. [PM4 dispatch contract](../../../../docs/reference/amd/gpu/pm4/dispatch.md)
 
+[shader_event/kernel.loom](shader_event/kernel.loom) runs one finite workitem
+that writes a payload, release-publishes its generation, writes the native
+event mailbox, and issues a shader interrupt after draining stores. Its native
+mailbox trigger and interrupt context are separate arguments. Target-selected
+instruction fragments cover the physical compiler catalog without requiring
+other architectures in a restricted compiler. The [PM4](../pm4/shader_event_test.cc)
+and [AQL](../aql/shader_event_test.cc) cases observe eight shader-only wakes and
+exact guarded records before checking execution retirement. PM4 publishes its
+completion tail only after the observation; AQL uses a completion signal with
+no event mailbox and no packet release fence. Neither case signals the event
+from the host or substitutes a command-processor interrupt.
+
+[program_atomic.loom](program_atomic.loom) runs 256 producers in four workgroups
+against shared coherent SYSTEM cells. Each producer performs one deliberately
+failing compare/exchange, one contended attempt, a non-returning ADD, and a
+release-published result record. The [PM4](../pm4/program_atomic_test.cc) and
+[AQL](../aql/program_atomic_test.cc) cases check both 32- and 64-bit operations,
+every returned value, exactly one winner, counter wrap/carry, host-tail acquire,
+and untouched guards. The host acquires every record before checking execution
+retirement. PM4 submits its completion tail afterward; AQL uses release NONE.
+The kernel has no retry loop or inter-wave wait. Host-tail publication occurs
+between retired epochs, and the CPU performs no RMW on the shader-owned cells.
+
 [file_exchange.loom](file_exchange.loom) owns an initially empty Linux io_uring
 SQ/CQ for one finite invocation. It reads a response-selected file block,
 transforms its words, writes another block, and reloads that block into a

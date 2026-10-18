@@ -1233,6 +1233,11 @@ class BuildFileFunctions(object):
             "iree_generated_files requires an explicit CMake projection"
         )
 
+    def objc_library(self, tags=None, **kwargs):
+        if self._should_skip_target(tags=tags):
+            return
+        raise NotImplementedError("objc_library requires an explicit CMake projection")
+
     def iree_msvc_masm_library(self, **kwargs):
         # CMakeLists.txt owns its equivalent custom ml.exe/ml64.exe invocation.
         pass
@@ -1773,6 +1778,10 @@ class BuildFileFunctions(object):
         testonly_block = self._convert_option_block("TESTONLY", testonly)
         alwayslink_block = self._convert_option_block("ALWAYSLINK", alwayslink)
         shared_block = self._convert_option_block("SHARED", shared)
+        duplicate_safe_block = self._convert_option_block(
+            "LINKABLE_MORE_THAN_ONCE",
+            "LINKABLE_MORE_THAN_ONCE" in (kwargs.get("tags") or []),
+        )
         linkopts_block, platform_linkopts_block = self._convert_platform_select_strings(
             name, "LINKOPTS", linkopts, expand_locations=True
         )
@@ -1811,6 +1820,7 @@ class BuildFileFunctions(object):
             f"{testonly_block}"
             f"{alwayslink_block}"
             f"{shared_block}"
+            f"{duplicate_safe_block}"
             f"{sanitizer_suppressions_block}"
             f"{linkopts_block}"
             f"{includes_block}"

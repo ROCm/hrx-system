@@ -123,6 +123,8 @@ iree_cc_binary_benchmark(
     iree::hal::drivers::amd::xdna::image::testdata::add_i32_npu4
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32_npu4
+    iree::hal::memory::fixed_block_pool
+    iree::hal::memory::slab_cache
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
   ARGS

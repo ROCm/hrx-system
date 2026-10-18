@@ -33,12 +33,13 @@ typedef struct loom_cfg_value_identity_table_t {
   // represent values for which no CFG identity has been established.
   loom_value_id_t* representatives;
 
-  // Number of entries in representatives.
+  // Value-domain prefix covered by this snapshot and representatives.
   loom_value_ordinal_t representative_count;
 } loom_cfg_value_identity_table_t;
 
 // Initializes an empty identity table covering the current value domain.
-// |value_domain| must remain acquired and unchanged for the table lifetime.
+// |value_domain| must remain acquired for the table lifetime. Later value
+// registrations preserve this snapshot's ordinals and have no identity here.
 iree_status_t loom_cfg_value_identity_table_initialize(
     const loom_local_value_domain_t* value_domain,
     iree_arena_allocator_t* arena, loom_cfg_value_identity_table_t* out_table);
@@ -49,7 +50,8 @@ iree_status_t loom_cfg_value_identity_table_initialize(
 // occurrence, partition, and obligation storage is released before returning;
 // only direct representatives remain in |table|. A valid CFG whose branch
 // payloads cannot be represented by the generic CFG interface contributes no
-// identities.
+// identities. The snapshot's block arguments and incoming values must belong
+// to the value-domain prefix captured when |table| was initialized.
 iree_status_t loom_cfg_value_identity_table_update(
     loom_cfg_value_identity_table_t* table,
     const loom_value_fact_cfg_region_t* region,

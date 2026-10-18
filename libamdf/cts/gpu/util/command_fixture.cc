@@ -59,14 +59,13 @@ amdf_status_t GpuCommandTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
 }
 
 void GpuCommandTest::CreateMemory(amdf_memory_access_t access,
-                                  uint64_t byte_length,
-                                  GpuMemory** out_memory) {
+                                  uint64_t byte_length, GpuMemory** out_memory,
+                                  amdf_memory_flags_t flags) {
   const amdf_memory_device_access_t attachment = {
       device_,
       {
           .access = access,
-          .flags =
-              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+          .flags = flags | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
       }};
   amdf_memory_create_info_t creation = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,

@@ -349,9 +349,10 @@ amdf_status_t GpuXdnaDeviceFixture::HostTransition(
 void GpuXdnaDeviceFixture::CreateShaderMemory(
     amdf_memory_access_t device_access, uint64_t byte_length,
     CtsMappedMemory& memory, uint64_t& address,
-    amdf_cache_transition_t& host_release) {
+    amdf_cache_transition_t& host_release, amdf_memory_flags_t flags) {
   auto access = accesses_[1];
   access.requirements.access = device_access;
+  access.requirements.flags |= flags;
   const std::span<const amdf_memory_device_access_t> accesses(&access, 1);
   amdf_memory_profile_t profile = {};
   ASSERT_NO_FATAL_FAILURE(

@@ -233,6 +233,18 @@ def _symbol_retain_attr_index(op: Op) -> int | None:
     return retain_attr_index
 
 
+def _symbol_linkage_attr_index(op: Op) -> int | None:
+    """Returns the optional definition-linkage attribute index."""
+
+    if op.symbol_def is None or op.symbol_def.linkage is None:
+        return None
+    linkage_attr_index = c_queries.resolve_attr_index(op, op.symbol_def.linkage, "symbol_def.linkage")
+    linkage_attr = c_queries.non_flags_attrs(op)[linkage_attr_index]
+    if linkage_attr.attr_type != ATTR_TYPE_ENUM:
+        raise ValueError(f"Op {op.name!r}: symbol_def.linkage {op.symbol_def.linkage!r} must name an enum attr")
+    return linkage_attr_index
+
+
 def _symbol_product_carrier_attr_index(op: Op) -> int | None:
     """Returns the product-carrier attribute index for a symbol op."""
 
@@ -1152,6 +1164,7 @@ def generate_tables_c(
         if op.symbol_def is not None:
             attr_index = c_queries.resolve_attr_index(op, op.symbol_def.field, "symbol_def")
             visibility_attr_index = _symbol_visibility_attr_index(op)
+            linkage_attr_index = _symbol_linkage_attr_index(op)
             retain_attr_index = _symbol_retain_attr_index(op)
             product_carrier_attr_index = _symbol_product_carrier_attr_index(op)
             value_contract_indices = _symbol_value_contract_indices(op)
@@ -1164,6 +1177,8 @@ def generate_tables_c(
                 lines.append(f"    .name_attr_index = {attr_index},")
             if visibility_attr_index is not None:
                 lines.append(f"    .visibility_attr_index_plus_one = {visibility_attr_index + 1},")
+            if linkage_attr_index is not None:
+                lines.append(f"    .linkage_attr_index_plus_one = {linkage_attr_index + 1},")
             if retain_attr_index is not None:
                 lines.append(f"    .retain_attr_index_plus_one = {retain_attr_index + 1},")
             if product_carrier_attr_index is not None:

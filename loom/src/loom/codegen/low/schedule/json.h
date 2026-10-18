@@ -25,6 +25,7 @@ iree_status_t loom_low_schedule_hazard_gap_write_json_fields(
 
 // Appends a compact JSON object describing |table| to |builder|. The format
 // is diagnostic/test output, not bytecode-stable artifact identity.
+// The table must have been built with RETAIN_DEPENDENCIES.
 iree_status_t loom_low_schedule_format_json(
     const loom_low_schedule_table_t* table, iree_string_builder_t* builder);
 

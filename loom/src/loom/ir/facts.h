@@ -337,7 +337,8 @@ bool loom_value_facts_mark_topology_domain(
 // Returns the float types that can represent every finite value described by
 // |facts| without changing its numerical value. Returns an empty set for
 // integer facts. Float class predicates remain independent; consumers that
-// require finite values must also query FINITE.
+// require finite values must also query FINITE. Known nonfinite values satisfy
+// every destination format because they introduce no finite value.
 loom_scalar_type_set_t loom_value_facts_exact_float_types(
     loom_value_facts_t facts);
 

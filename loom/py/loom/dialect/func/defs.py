@@ -41,6 +41,7 @@ from loom.assembly import (
     TypesOf,
     kw,
 )
+from loom.dialect.symbol import Linkage
 from loom.dialect.target.defs import ExportAbiKind
 from loom.dsl import (
     ANY,
@@ -165,6 +166,7 @@ _RETAIN_ATTR = AttrDef("retain", "enum", enum_def=Retain, optional=True)
 #   func.def public pure @name(...)
 _MODIFIER_FORMAT: list[FormatElement] = [
     OptionalGroup([Attr("visibility")], anchor="visibility"),
+    OptionalGroup([Attr("linkage")], anchor="linkage"),
     OptionalGroup([Attr("retain")], anchor="retain"),
     OptionalGroup([Attr("cc")], anchor="cc"),
     OptionalGroup([Attr("effect_contract")], anchor="effect_contract"),
@@ -250,6 +252,7 @@ _SIGNATURE_FORMAT: list[FormatElement] = [
 _MODIFIER_ATTRS = [
     AttrDef("callee", "symbol"),
     AttrDef("visibility", "enum", enum_def=Visibility, optional=True),
+    AttrDef("linkage", "enum", enum_def=Linkage, optional=True),
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("effect_contract", "enum", enum_def=EffectContract, optional=True),
     AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
@@ -343,6 +346,7 @@ func_def = Op(
         interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
+        linkage="linkage",
         retain="retain",
     ),
     results=[Result("results", ANY, variadic=True)],

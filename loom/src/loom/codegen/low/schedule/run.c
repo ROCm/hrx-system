@@ -1804,6 +1804,11 @@ static iree_status_t loom_low_schedule_build(
               : NULL,
       .arena = arena,
       .scratch_arena = scratch_arena,
+      .dependency_arena =
+          iree_any_bit_set(options->flags,
+                           LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES)
+              ? arena
+              : scratch_arena,
       .function_op = model->context.function_op,
       .body = model->context.body,
       .target = model->context.target,
@@ -1939,7 +1944,7 @@ static iree_status_t loom_low_schedule_build(
         .scopes = state.scopes,
         .call_node_indices = state.call_node_indices,
         .call_node_count = state.call_node_count,
-        .effect_dependencies = state.effect_dependencies,
+        .dependency_count = state.dependencies.count,
         .dependency_group_count = state.dependency_index.group_count,
         .dependency_index = dependency_index,
         .unlock_summary_publication_count =
@@ -1986,8 +1991,21 @@ static iree_status_t loom_low_schedule_build(
           &out_table->source_suffix_issue_cycle_lower_bounds);
     }
     if (iree_status_is_ok(status)) {
-      loom_low_schedule_dependency_graph_move(&state.dependencies,
-                                              &out_table->dependencies);
+      status = loom_low_schedule_dependency_graph_retain_range(
+          &state.dependencies, state.effect_dependencies, arena,
+          &out_table->effect_dependencies);
+    }
+    if (iree_status_is_ok(status) &&
+        iree_any_bit_set(options->flags,
+                         LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES)) {
+      loom_low_schedule_dependency_graph_t* graph = NULL;
+      status = iree_arena_allocate(arena, sizeof(*graph), (void**)&graph);
+      if (iree_status_is_ok(status)) {
+        loom_low_schedule_dependency_graph_move(&state.dependencies, graph);
+        out_table->dependency_graph = graph;
+      }
+    }
+    if (iree_status_is_ok(status)) {
       status = loom_low_schedule_diagnostics_emit(
           out_table, options->diagnostic_flags, options->emitter);
     }

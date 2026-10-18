@@ -113,6 +113,12 @@ void SdmaCommandWriter::Fence32(uint64_t address, uint32_t value) {
   words_[word_count_++] = value;
 }
 
+void SdmaCommandWriter::NotifyKfdEvent(const amdf_gpu_event_info_t& event) {
+  Fence32(event.mailbox_address, event.trigger_data);
+  words_[word_count_++] = 6;  // TRAP, with zero suboperation and reserved bits.
+  words_[word_count_++] = event.interrupt_context;
+}
+
 void SdmaCommandWriter::WriteGlobalTimestamp(uint64_t address) {
   const bool scoped =
       (features_ & AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE) != 0;

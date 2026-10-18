@@ -1,0 +1,69 @@
+// RUN: pass vector-memory-footprint
+
+// The guarded sum constrains the assumed lane identity used by an equivalent
+// address expression. Each i64 element models one eight-byte packed pair; the
+// maximum executing origin is the final element.
+func.def @scalar_add_guard_bounds_equivalent_address(%storage: buffer, %base: offset, %raw: i32, %value: vector<1xi64>) {
+  %source_lane = scalar.assume %raw [range(%raw, 0, 24)] : i32
+  %guard_lane = scalar.assume %source_lane [range(%source_lane, 0, 24)] : i32
+  %guard_bias = scalar.constant 25 : i32
+  %guard_bound = scalar.constant 40 : i32
+  %address_bias = scalar.constant 185 : i32
+  %position = scalar.addi %guard_lane, %guard_bias : i32
+  %inside = scalar.cmpi ult, %position, %guard_bound : i32
+  %view = buffer.view %storage[%base] : buffer -> view<200xi64>
+  cfg.cond_br %inside, ^body, ^exit
+^body:
+  %address = scalar.addi %source_lane, %address_bias : i32
+  %origin = index.cast %address : i32 to index
+  vector.store %value, %view[%origin] : vector<1xi64>, view<200xi64>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// Reversing the comparison and selecting its false edge preserves the same
+// additive preimage.
+func.def @reversed_false_edge_bounds_equivalent_address(%storage: buffer, %base: offset, %raw: index, %value: vector<1xi64>) {
+  %source_lane = index.assume %raw [range(%raw, 0, 24)] : index
+  %guard_lane = index.assume %source_lane [range(%source_lane, 0, 24)] : index
+  %guard_bias = index.constant 25 : index
+  %guard_bound = index.constant 40 : index
+  %address_bias = index.constant 185 : index
+  %position = index.add %guard_bias, %guard_lane : index
+  %outside = index.cmp ule, %guard_bound, %position : index
+  %view = buffer.view %storage[%base] : buffer -> view<200xi64>
+  cfg.cond_br %outside, ^exit, ^body
+^body:
+  %address = index.add %address_bias, %source_lane : index
+  vector.store %value, %view[%address] : vector<1xi64>, view<200xi64>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// The guard still admits origin 200, so changing only the address bias must
+// remain a compile-time bounds error.
+func.def @affine_guard_rejects_real_overrun(%storage: buffer, %base: offset, %raw: i32, %value: vector<1xi64>) {
+  %source_lane = scalar.assume %raw [range(%raw, 0, 24)] : i32
+  %guard_lane = scalar.assume %source_lane [range(%source_lane, 0, 24)] : i32
+  %guard_bias = scalar.constant 25 : i32
+  %guard_bound = scalar.constant 40 : i32
+  %address_bias = scalar.constant 186 : i32
+  %position = scalar.addi %guard_lane, %guard_bias : i32
+  %inside = scalar.cmpi ult, %position, %guard_bound : i32
+  %view = buffer.view %storage[%base] : buffer -> view<200xi64>
+  cfg.cond_br %inside, ^body, ^exit
+^body:
+  %address = scalar.addi %source_lane, %address_bias : i32
+  %origin = index.cast %address : i32 to index
+  // ERROR@+1: SUBRANGE/011 {op_name="vector.store", vector_extent="1", view_bound="200", required_origin_upper_bound="199"}
+  vector.store %value, %view[%origin] : vector<1xi64>, view<200xi64>
+  cfg.br ^exit
+^exit:
+  func.return
+}

@@ -1,0 +1,82 @@
+// RUN: roundtrip
+#include <loomcxx/index.h>
+
+loom::type::index index_sum(loom::type::index begin, loom::type::index end) {
+  loom::type::index total{0};
+  [[loom::unroll(2)]]
+  for (auto position = begin; position < end;
+       position = position + loom::type::index{1}) {
+    total = total + position;
+  }
+  return total;
+}
+
+loom::type::offset offset_sum(loom::type::offset begin, loom::type::offset end) {
+  loom::type::offset total{0};
+  [[loom::pipeline(2)]]
+  for (auto position = begin; position < end;
+       position = loom::type::offset{1} + position) {
+    total = total + position;
+  }
+  return total;
+}
+// ----
+func.def public @index_sum(%begin: index, %end: index) -> (index) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %total$5 = index.cast %4 : i64 to index
+  %6 = index.constant 1 : index
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %position = [%begin to %end step %6](%total$10 = %total$5 : index) -> (index) unroll(%8) {
+    %total$12 = index.add %total$10, %position : index
+    scf.yield %total$12 : index
+  }
+  func.return %total$11 : index
+}
+
+func.def public @offset_sum(%begin: offset, %end: offset) -> (offset) {
+  %16 = scalar.constant 0 : i32
+  %17 = scalar.extsi %16 : i32 to i64
+  %total$18 = index.cast %17 : i64 to offset
+  %19 = index.constant 1 : offset
+  %20 = scalar.constant 2 : i32
+  %21 = index.cast %20 : i32 to index
+  %total$24 = scf.for %position = [%begin to %end step %19](%total$23 = %total$18 : offset) -> (offset) pipeline(%21) {
+    %total$25 = index.add %total$23, %position : offset
+    scf.yield %total$25 : offset
+  }
+  func.return %total$24 : offset
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+#include <loomcxx/index.h>
+
+loom::type::index empty_index_loop(loom::type::index bound) {
+  loom::type::index result{7};
+  for (auto position = bound; position < bound;
+       position = position + loom::type::index{1}) {
+    result = result + position;
+  }
+  return result;
+}
+
+loom::type::offset empty_offset_loop(loom::type::offset bound) {
+  loom::type::offset result{9};
+  for (auto position = bound; position < bound;
+       position = position + loom::type::offset{1}) {
+    result = result + position;
+  }
+  return result;
+}
+// ----
+func.def public @empty_index_loop(%bound: index) -> (index) {
+  %result = index.constant 7 : index
+  func.return %result : index
+}
+
+func.def public @empty_offset_loop(%bound: offset) -> (offset) {
+  %result = index.constant 9 : offset
+  func.return %result : offset
+}

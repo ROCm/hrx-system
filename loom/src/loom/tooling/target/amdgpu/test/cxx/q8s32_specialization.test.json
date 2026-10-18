@@ -63,7 +63,7 @@
               "path": "{tmp}/gfx1151-values32.loom",
               "contains": [
                 "config.def @model.q8s32.input_capacity = 512",
-                "func.def inline @q8s32_lane_dot_combined",
+                "func.def linkonce inline @q8s32_lane_dot_combined",
                 "@q8s32_wave32_values32",
                 "{cluster_size = 32}",
                 "amdgpu.target<gfx1151>"
@@ -97,7 +97,7 @@
               "path": "{tmp}/gfx1151-values16.loom",
               "contains": [
                 "config.def @model.q8s32.input_capacity = 768",
-                "func.def inline @q8s32_lane_dot_combined",
+                "func.def linkonce inline @q8s32_lane_dot_combined",
                 "@q8s32_wave32_values16",
                 "{cluster_size = 16}",
                 "amdgpu.target<gfx1151>"
@@ -131,7 +131,7 @@
               "path": "{tmp}/gfx942-values32.loom",
               "contains": [
                 "config.def @model.q8s32.input_capacity = 512",
-                "func.def inline @q8s32_lane_dot_split",
+                "func.def linkonce inline @q8s32_lane_dot_split",
                 "@q8s32_wave64_values32",
                 "{cluster_size = 32}",
                 "amdgpu.target<gfx942>"
@@ -165,7 +165,7 @@
               "path": "{tmp}/gfx942-values16.loom",
               "contains": [
                 "config.def @model.q8s32.input_capacity = 768",
-                "func.def inline @q8s32_lane_dot_split",
+                "func.def linkonce inline @q8s32_lane_dot_split",
                 "@q8s32_wave64_values16",
                 "{cluster_size = 16}",
                 "amdgpu.target<gfx942>"
@@ -233,7 +233,7 @@
               "path": "{tmp}/gfx1151-values8.loom",
               "contains": [
                 "config.def @model.q8s32.input_capacity = 1280",
-                "func.def inline @q8s32_lane_dot_split",
+                "func.def linkonce inline @q8s32_lane_dot_split",
                 "@q8s32_generic_lanes8",
                 "{cluster_size = 8}",
                 "amdgpu.target<gfx1151>"

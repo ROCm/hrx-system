@@ -118,6 +118,16 @@ typedef struct loom_serve_text_session_t {
   } request;
 } loom_serve_text_session_t;
 
+// Selects the named row (including an active row so the caller can report a
+// conflict), or the oldest idle row. For an untagged rendered chat, prefers the
+// longest reusable canonical completion in an idle untagged row. A null chat
+// performs identity/LRU selection only. Completion storage stays immutable
+// through selection and the caller's preparation/admission borrow. Returns
+// null when there is neither a named match nor an idle row.
+loom_serve_text_session_t* loom_serve_text_session_select(
+    iree_host_size_t count, loom_serve_text_session_t* sessions,
+    iree_string_view_t name, const loom_serve_text_chat_t* chat);
+
 // Copies only owner-published work and immutable admission metadata. Safe on
 // the serialized owner while a CPU task borrows the row's response storage;
 // request phase/output buffers are deliberately excluded. ID zero means idle.
@@ -152,13 +162,17 @@ void loom_serve_text_session_release_request(
 
 // Decodes selected tokens and stages semantic output through the consumer.
 // Source VM calls use the request policy; scratch/tool_calls are exclusive
-// shared CPU storage, not per-row caches. Translation failures invalidate the
-// continuation and stage a terminal consumer error. Encoding allocation failure
-// propagates. No transport send or receipt release occurs on this CPU loan.
+// shared CPU storage, not per-row caches. scratch_allocator owns call-local
+// VM wrappers and may be reset after return. Translation failures invalidate
+// the continuation and stage a terminal consumer error. Encoding allocation
+// failure propagates. No transport send or receipt release occurs on this CPU
+// loan.
 iree_status_t loom_serve_text_session_append_tokens(
     loom_serve_text_session_t* session, iree_string_view_t model_name,
     iree_host_size_t count, const int32_t* tokens,
-    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls);
+    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls,
+    loom_serve_text_chat_scratch_t* completion_scratch,
+    iree_allocator_t scratch_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

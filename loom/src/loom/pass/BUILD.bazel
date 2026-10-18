@@ -16,6 +16,8 @@ loom_cc_library(
     name = "environment",
     srcs = ["environment.c"],
     hdrs = ["environment.h"],
+    # Environment lookup borrows descriptors; it defines no descriptor identity.
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
     deps = [
         "//runtime/src/iree/base",
     ],
@@ -137,6 +139,8 @@ loom_cc_library(
     name = "registry",
     srcs = ["registry.c"],
     hdrs = ["registry.h"],
+    # Registry queries borrow descriptors owned by their caller.
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
     deps = [
         ":types",
         "//runtime/src/iree/base",
@@ -206,6 +210,8 @@ loom_cc_library(
     name = "report",
     srcs = ["report.c"],
     hdrs = ["report.h"],
+    # Reports own caller-allocated storage and borrow compiler descriptors.
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
     deps = [
         ":environment",
         ":registry",

@@ -4,7 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-[[loom::symbol("library.adjust")]]
-unsigned adjust(unsigned value) {
-  return value * 3u + 1u;
+#include "function_link_helpers.h"
+
+static unsigned local_adjust(unsigned value) { return value + 5u; }
+
+[[loom::symbol("library.adjust")]] unsigned adjust(unsigned value) {
+  return shared_inline(value) + shared_template<7u>(value) +
+         local_adjust(value);
 }

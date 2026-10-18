@@ -12,6 +12,14 @@ func.def @call_identity(%x: f32) -> (f32) {
 
 // ====
 
+// Link-once definitions retain public source visibility while permitting
+// repeated definitions to coalesce during module linking.
+func.def public linkonce @header_identity(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+// ====
+
 // Inline policy and temperature modifiers on function definitions and calls.
 func.def hot inline @hot_inline_identity(%x: f32) -> (f32) {
   func.return %x : f32

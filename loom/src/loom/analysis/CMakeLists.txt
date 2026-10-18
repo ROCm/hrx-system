@@ -398,6 +398,7 @@ loom_cc_library(
   DEPS
     ::integer_relation
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
@@ -425,6 +426,23 @@ loom_cc_test(
     loom::ops::index
     loom::ops::scalar
     loom::ops::scf
+    loom::target::facts
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    condition_affine_preimage_test
+  SRCS
+    "condition_affine_preimage_test.cc"
+  DEPS
+    ::condition_facts
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
     loom::target::facts
     loom::util::fact_table
 )

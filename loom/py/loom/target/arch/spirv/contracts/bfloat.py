@@ -60,6 +60,7 @@ class _BfloatNarrowResult(Enum):
 @unique
 class _BfloatNarrowSemantics(Enum):
     EXACTLY_REPRESENTABLE = "exactly_representable"
+    EXACTLY_REPRESENTABLE_PRESERVE_NAN = "exactly_representable_preserve_nan"
     RNE_NOT_NAN = "rne_not_nan"
     RNE_PRESERVE_NAN = "rne_preserve_nan"
 
@@ -160,8 +161,14 @@ def _bfloat_narrow_rule(
     semantics: _BfloatNarrowSemantics,
 ) -> DescriptorRule:
     """Rounds one binary source format to BF16 with exact RNE semantics."""
-    exactly_representable = semantics is _BfloatNarrowSemantics.EXACTLY_REPRESENTABLE
-    preserve_nan = semantics is _BfloatNarrowSemantics.RNE_PRESERVE_NAN
+    exactly_representable = semantics in (
+        _BfloatNarrowSemantics.EXACTLY_REPRESENTABLE,
+        _BfloatNarrowSemantics.EXACTLY_REPRESENTABLE_PRESERVE_NAN,
+    )
+    preserve_nan = semantics in (
+        _BfloatNarrowSemantics.RNE_PRESERVE_NAN,
+        _BfloatNarrowSemantics.EXACTLY_REPRESENTABLE_PRESERVE_NAN,
+    )
     if exactly_representable and source_format != F32_FORMAT:
         raise ValueError("representable BF16 shortcut requires a binary32 source")
     direct_carrier_result = (
@@ -181,6 +188,7 @@ def _bfloat_narrow_rule(
                 descriptors,
                 ValueRef.operand("input"),
                 carrier_ref,
+                preserve_nan=preserve_nan,
             )
         )
     elif source_format == F32_FORMAT:
@@ -250,14 +258,10 @@ def _bfloat_narrow_rule(
         guards=(
             Guard.value_type("input", Scalar(source_type)),
             Guard.value_type("result", Scalar("bf16")),
+            *((Guard.value_not_nan("input"),) if not preserve_nan else ()),
             *(
                 (Guard.value_float_exactly_representable_as("input", "result"),)
                 if exactly_representable
-                else ()
-            ),
-            *(
-                (Guard.value_not_nan("input"),)
-                if semantics is _BfloatNarrowSemantics.RNE_NOT_NAN
                 else ()
             ),
             *descriptor_feature_guards(*(step.descriptor for step in emits)),
@@ -265,6 +269,7 @@ def _bfloat_narrow_rule(
         emit=tuple(emits),
         report_key=(
             f"exactly_representable_{source_name}_to_bfloat16"
+            + ("_preserve_nan" if preserve_nan else "")
             if exactly_representable
             else f"exact_{source_name}_to_bfloat16"
         ),
@@ -300,7 +305,11 @@ def bfloat_narrow_rules() -> tuple[DescriptorRule, ...]:
                     integer_suffix=integer_suffix,
                     descriptors=descriptors,
                     result_kind=result_kind,
-                    semantics=_BfloatNarrowSemantics.EXACTLY_REPRESENTABLE,
+                    semantics=semantics,
+                )
+                for semantics in (
+                    _BfloatNarrowSemantics.EXACTLY_REPRESENTABLE,
+                    _BfloatNarrowSemantics.EXACTLY_REPRESENTABLE_PRESERVE_NAN,
                 )
                 for result_kind in (
                     _BfloatNarrowResult.NATIVE,

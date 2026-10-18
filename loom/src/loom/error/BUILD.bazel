@@ -101,6 +101,8 @@ loom_generated_cc_library(
     ],
     generator = "//loom/py/loom/gen/error:c_errors",
     source = "error_catalog.c",
+    # Diagnostic catalogs are immutable and identified by domain and code.
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
     deps = [
         "//runtime/src/iree/base",
     ],

@@ -905,8 +905,9 @@ typedef enum loom_low_lower_guard_kind_e {
   // Optional i64 size/stride attributes name an explicit contiguous
   // power-of-two cluster no larger than the target subgroup.
   LOOM_LOW_LOWER_GUARD_TARGET_CONTIGUOUS_SUBGROUP_CLUSTER = 47,
-  // Source value facts must prove finite values exactly representable in the
-  // other source value's floating-point element type.
+  // Every finite source value is exactly representable in the other source
+  // value's floating-point element type. NaN and infinity remain possible;
+  // recipes requiring a narrower value class use a separate class guard.
   LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS = 48,
   // Source value facts must prove an exact integer equal to the selected
   // target subgroup size.

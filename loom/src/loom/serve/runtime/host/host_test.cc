@@ -5,6 +5,9 @@
 
 #include "loom/serve/runtime/host/host.h"
 
+#include <cstring>
+
+#include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loomc/iree/task_pool.h"
@@ -52,6 +55,32 @@ TEST(HostTest, InvalidCapacityAndAllocationFailureReturnNoHost) {
       IREE_STATUS_INVALID_ARGUMENT,
       loom_serve_host_create(1, nullptr, iree_allocator_null(), &host));
   EXPECT_EQ(host, nullptr);
+}
+
+TEST(HostTest, BatchArenasShareAndReturnScratchBlocks) {
+  loom_serve_host_t* host = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_host_create(1, nullptr, iree_allocator_system(), &host));
+  auto* pool = loom_serve_host_block_pool(host);
+  iree_arena_allocator_t first, second;
+  iree_arena_initialize(pool, &first);
+  iree_arena_initialize(pool, &second);
+  void* first_bytes = nullptr;
+  void* second_bytes = nullptr;
+  IREE_ASSERT_OK(iree_arena_allocate(&first, 256, &first_bytes));
+  IREE_ASSERT_OK(iree_arena_allocate(&second, 256, &second_bytes));
+  EXPECT_NE(first_bytes, second_bytes);
+  iree_arena_deinitialize(&first);
+  iree_arena_initialize(pool, &first);
+  void* reused_bytes = nullptr;
+  IREE_ASSERT_OK(iree_arena_allocate(&first, 256, &reused_bytes));
+  EXPECT_EQ(first_bytes, reused_bytes);
+  iree_arena_deinitialize(&first);
+  // Trimming free blocks leaves an independently live batch untouched.
+  iree_arena_block_pool_trim(pool);
+  std::memset(second_bytes, 0x5a, 256);
+  iree_arena_deinitialize(&second);
+  loom_serve_host_release(host);
 }
 
 }  // namespace

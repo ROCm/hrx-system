@@ -7,6 +7,7 @@
 #define LOOM_SERVE_RUNTIME_HOST_HOST_H_
 
 #include "iree/async/util/proactor_pool.h"
+#include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
 #include "iree/task/executor.h"
 #include "loomc/target.h"
@@ -67,6 +68,14 @@ void loom_serve_host_retain(loom_serve_host_t* host);
 // uses exactly this executor; it does not create another worker population.
 iree_task_executor_t* loom_serve_host_executor(const loom_serve_host_t* host);
 loomc_task_pool_t* loom_serve_host_task_pool(const loom_serve_host_t* host);
+
+// Shared backing for short-lived CPU work arenas. Each invocation owns its
+// arena and returns its blocks after all borrowers retire. The thread-safe pool
+// is shared across models and workers, and may be trimmed independently of live
+// arenas. Borrowed through host release; arena-backed values must not outlive
+// their invocation.
+iree_arena_block_pool_t* loom_serve_host_block_pool(loom_serve_host_t* host);
+
 // Task driver sharing the host executor, borrowed through host release.
 iree_hal_driver_t* loom_serve_host_task_driver(const loom_serve_host_t* host);
 

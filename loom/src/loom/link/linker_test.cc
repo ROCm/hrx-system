@@ -1523,6 +1523,117 @@ func.def public @identity(%x: i32) -> (i32) {
   EXPECT_EQ(linked, nullptr);
 }
 
+TEST_F(LinkerTest, CoalescesLinkOncePublicDefinitions) {
+  loom_module_t* first = Parse(IREE_SV(R"(
+func.def public linkonce @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  loom_module_t* second = Parse(IREE_SV(R"(
+func.def public linkonce @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  loom_module_t* linked = Link({first, second});
+  Verify(linked);
+
+  const std::string text = Print(linked);
+  const size_t definition =
+      text.find("func.def public linkonce @identity(%x: i32)");
+  EXPECT_NE(definition, std::string::npos);
+  EXPECT_EQ(text.find("func.def public linkonce @identity", definition + 1),
+            std::string::npos);
+}
+
+TEST_F(LinkerTest, RejectsIncompatibleLinkOnceDefinitions) {
+  loom_module_t* first = Parse(IREE_SV(R"(
+func.def public linkonce @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  loom_module_t* second = Parse(IREE_SV(R"(
+func.def public linkonce @identity(%x: i64) -> (i64) {
+  func.return %x : i64
+}
+)"));
+
+  loom_module_t* linked = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        LinkStatus({first, second}, &linked));
+  EXPECT_EQ(linked, nullptr);
+}
+
+TEST_F(LinkerTest, RejectsMixedStrongAndLinkOnceDefinitions) {
+  loom_module_t* first = Parse(IREE_SV(R"(
+func.def public @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  loom_module_t* second = Parse(IREE_SV(R"(
+func.def public linkonce @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  loom_module_t* linked = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                        LinkStatus({first, second}, &linked));
+  EXPECT_EQ(linked, nullptr);
+}
+
+TEST_F(LinkerTest, CoalescesLinkOnceKernelDefinitions) {
+  loom_module_t* first = Parse(IREE_SV(R"(
+kernel.def linkonce @copy() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  kernel.return
+}
+)"));
+  loom_module_t* second = Parse(IREE_SV(R"(
+kernel.def linkonce @copy() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  kernel.return
+}
+)"));
+
+  loom_module_t* linked = Link({first, second});
+  Verify(linked);
+
+  const std::string text = Print(linked);
+  const size_t definition = text.find("kernel.def linkonce @copy()");
+  EXPECT_NE(definition, std::string::npos);
+  EXPECT_EQ(text.find("kernel.def linkonce @copy()", definition + 1),
+            std::string::npos);
+}
+
+TEST_F(LinkerTest, RejectsIncompatibleLinkOnceKernelDefinitions) {
+  loom_module_t* first = Parse(IREE_SV(R"(
+kernel.def linkonce @copy() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  kernel.return
+}
+)"));
+  loom_module_t* second = Parse(IREE_SV(R"(
+kernel.def linkonce @copy() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer, %value: i32) {
+  kernel.return
+}
+)"));
+
+  loom_module_t* linked = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        LinkStatus({first, second}, &linked));
+  EXPECT_EQ(linked, nullptr);
+}
+
 TEST_F(LinkerTest, TemplateFamilyDeclarationAndDefinitionLinkTogether) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 template.decl @demo.effect(%x: i32) -> (i32)

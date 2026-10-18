@@ -13,8 +13,17 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @dupl
 
 amdgpu.target<gfx1100> @target
 
-// ERROR@+1: AMDGPU/025 {argument_index="0", expected_reg_class_id="0", expected_unit_count="2"}
+// ERROR@+1: AMDGPU/025 {argument_index="0", expected_reg_class_id="0", expected_unit_count="32"}
 low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @bad_direct_arg(%value: reg<amdgpu.vgpr>) asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: AMDGPU/025 {argument_index="0", expected_reg_class_id="0", expected_unit_count="32"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @too_wide_direct_arg(%value: reg<amdgpu.sgpr x33>) asm {
   return
 }
 

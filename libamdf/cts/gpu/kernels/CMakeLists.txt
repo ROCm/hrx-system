@@ -284,6 +284,124 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 iree_cc_library(
   NAME
+    shader_event
+  HDRS
+    "shader_event.h"
+  DEPS
+    amdf::headers
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+iree_cc_library(
+  NAME
+    program_atomic
+  HDRS
+    "program_atomic.h"
+  DEPS
+    amdf::headers
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND (LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA4_CORE))
+amdf_cts_gpu_kernel_set(
+  NAME
+    "program_atomic_kernels"
+  SRCS
+    "program_atomic.loom"
+  TARGETS
+    "gfx1100"
+    "gfx1101"
+    "gfx1102"
+    "gfx1103"
+    "gfx1150"
+    "gfx1151"
+    "gfx1152"
+    "gfx1153"
+    "gfx1170"
+    "gfx1171"
+    "gfx1172"
+    "gfx1200"
+    "gfx1201"
+    "gfx1250"
+    "gfx1250-a0"
+    "gfx1251"
+    "gfx90a"
+    "gfx940"
+    "gfx941"
+    "gfx942"
+    "gfx950"
+  ENTRY_POINT
+    "program_atomic"
+  NAMESPACE
+    "kernels::program_atomic"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND (LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA4_CORE))
+amdf_cts_gpu_kernel_set(
+  NAME
+    "shader_event_kernels"
+  SRCS
+    "shader_event/kernel.loom"
+  TARGETS
+    "gfx1100"
+    "gfx1101"
+    "gfx1102"
+    "gfx1103"
+    "gfx1150"
+    "gfx1151"
+    "gfx1152"
+    "gfx1153"
+    "gfx1170"
+    "gfx1171"
+    "gfx1172"
+    "gfx1200"
+    "gfx1201"
+    "gfx1250"
+    "gfx1250-a0"
+    "gfx1251"
+    "gfx90a"
+    "gfx940"
+    "gfx941"
+    "gfx942"
+    "gfx950"
+  TARGET_SRCS
+    "shader_event/rdna3.loom"
+    "shader_event/rdna3.loom"
+    "shader_event/rdna3.loom"
+    "shader_event/rdna3.loom"
+    "shader_event/rdna35.loom"
+    "shader_event/rdna35.loom"
+    "shader_event/rdna35.loom"
+    "shader_event/rdna35.loom"
+    "shader_event/rdna4m.loom"
+    "shader_event/rdna4m.loom"
+    "shader_event/rdna4m.loom"
+    "shader_event/rdna4.loom"
+    "shader_event/rdna4.loom"
+    "shader_event/gfx1250.loom"
+    "shader_event/gfx1250_a0.loom"
+    "shader_event/gfx1251.loom"
+    "shader_event/cdna2.loom"
+    "shader_event/cdna3.loom"
+    "shader_event/cdna3.loom"
+    "shader_event/cdna3.loom"
+    "shader_event/cdna4.loom"
+  ENTRY_POINT
+    "shader_event"
+  NAMESPACE
+    "kernels::shader_event"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+iree_cc_library(
+  NAME
     transform
   HDRS
     "transform.h"
@@ -1586,6 +1704,10 @@ iree_cc_test(
     ::private_roundtrip
     ::private_roundtrip_kernels
     ::product_test
+    ::program_atomic
+    ::program_atomic_kernels
+    ::shader_event
+    ::shader_event_kernels
     ::transform
     ::transform_alternate_kernels
     ::transform_kernels

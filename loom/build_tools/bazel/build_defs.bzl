@@ -280,7 +280,7 @@ def loom_target_table_cc_library(
         paths.
       inputs: Source/vendor data labels consumed by the generator.
       deps: Runtime C library dependencies.
-      tags: Additional Bazel tags for the internal generator action.
+      tags: Additional Bazel tags for the generator action and runtime library.
       testonly: Passed through to the runtime C library.
       visibility: Passed through to the generator action and runtime library.
       **kwargs: Additional arguments passed through to loom_cc_library.
@@ -589,7 +589,7 @@ def loom_generated_cc_library(
       extra_output_flags: Generator flags paired with extra_outputs.
       extra_outputs: Additional generated files produced by the action.
       deps: Runtime C library dependencies.
-      tags: Additional Bazel tags for the internal generator action.
+      tags: Additional Bazel tags for the generator action and runtime library.
       testonly: Passed through to the runtime C library.
       visibility: Passed through to the generator action and runtime library.
       **kwargs: Additional arguments passed through to loom_cc_library.
@@ -649,6 +649,7 @@ def loom_generated_cc_library(
         hdrs = hdrs + generated_headers,
         textual_hdrs = textual_hdrs,
         deps = deps,
+        tags = tags,
         testonly = testonly,
         visibility = visibility,
         **kwargs

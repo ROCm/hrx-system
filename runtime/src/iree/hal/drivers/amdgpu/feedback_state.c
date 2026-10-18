@@ -77,6 +77,8 @@ static const char* iree_hal_amdgpu_feedback_state_tsan_check_kind_string(
   switch (check_kind) {
     case IREE_HAL_AMDGPU_TSAN_CHECK_KIND_DATA_RACE:
       return "data_race";
+    case IREE_HAL_AMDGPU_TSAN_CHECK_KIND_SHADOW_CAPACITY:
+      return "shadow_capacity";
     case IREE_HAL_AMDGPU_TSAN_CHECK_KIND_UNKNOWN:
     default:
       return "unknown";
@@ -121,6 +123,8 @@ iree_hal_amdgpu_feedback_state_map_tsan_check_kind(
   switch (check_kind) {
     case IREE_HAL_AMDGPU_TSAN_CHECK_KIND_DATA_RACE:
       return IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE;
+    case IREE_HAL_AMDGPU_TSAN_CHECK_KIND_SHADOW_CAPACITY:
+      return IREE_HAL_DEVICE_TSAN_CHECK_KIND_SHADOW_CAPACITY;
     case IREE_HAL_AMDGPU_TSAN_CHECK_KIND_UNKNOWN:
     default:
       return IREE_HAL_DEVICE_TSAN_CHECK_KIND_UNKNOWN;
@@ -398,33 +402,59 @@ static void iree_hal_amdgpu_feedback_state_publish_tsan_event(
   tsan_event.check_kind =
       iree_hal_amdgpu_feedback_state_map_tsan_check_kind(report->check_kind);
   tsan_event.flags = report->flags;
-  tsan_event.memory_space =
-      iree_hal_amdgpu_feedback_state_map_tsan_memory_space(
-          report->memory_space);
-  tsan_event.current_access_kind =
-      iree_hal_amdgpu_feedback_state_map_tsan_access_kind(
-          report->current_access_kind);
-  tsan_event.prior_access_kind =
-      iree_hal_amdgpu_feedback_state_map_tsan_access_kind(
-          report->prior_access_kind);
-  tsan_event.access_length = report->access_size;
-  tsan_event.current_site_id = report->current_site_id;
-  tsan_event.prior_site_id = report->prior_site_id;
-  tsan_event.memory_address = report->memory_address;
-  tsan_event.shadow_address = report->shadow_address;
-  tsan_event.shadow_value = report->shadow_value;
-  tsan_event.current_workgroup_id[0] = report->current_workgroup_id[0];
-  tsan_event.current_workgroup_id[1] = report->current_workgroup_id[1];
-  tsan_event.current_workgroup_id[2] = report->current_workgroup_id[2];
-  tsan_event.current_workitem_id[0] = report->current_workitem_id[0];
-  tsan_event.current_workitem_id[1] = report->current_workitem_id[1];
-  tsan_event.current_workitem_id[2] = report->current_workitem_id[2];
-  tsan_event.prior_workgroup_id[0] = report->prior_workgroup_id[0];
-  tsan_event.prior_workgroup_id[1] = report->prior_workgroup_id[1];
-  tsan_event.prior_workgroup_id[2] = report->prior_workgroup_id[2];
-  tsan_event.prior_workitem_id[0] = report->prior_workitem_id[0];
-  tsan_event.prior_workitem_id[1] = report->prior_workitem_id[1];
-  tsan_event.prior_workitem_id[2] = report->prior_workitem_id[2];
+  switch (report->check_kind) {
+    case IREE_HAL_AMDGPU_TSAN_CHECK_KIND_DATA_RACE: {
+      const iree_hal_amdgpu_tsan_data_race_report_t* source =
+          &report->detail.data_race;
+      iree_hal_device_tsan_data_race_report_t* target =
+          &tsan_event.detail.data_race;
+      target->memory_space =
+          iree_hal_amdgpu_feedback_state_map_tsan_memory_space(
+              source->memory_space);
+      target->current_access_kind =
+          iree_hal_amdgpu_feedback_state_map_tsan_access_kind(
+              source->current_access_kind);
+      target->prior_access_kind =
+          iree_hal_amdgpu_feedback_state_map_tsan_access_kind(
+              source->prior_access_kind);
+      target->access_length = source->access_size;
+      target->current_site_id = source->current_site_id;
+      target->prior_site_id = source->prior_site_id;
+      target->memory_address = source->memory_address;
+      target->shadow_address = source->shadow_address;
+      target->shadow_value = source->shadow_value;
+      memcpy(target->current_workgroup_id, source->current_workgroup_id,
+             sizeof(target->current_workgroup_id));
+      memcpy(target->current_workitem_id, source->current_workitem_id,
+             sizeof(target->current_workitem_id));
+      memcpy(target->prior_workgroup_id, source->prior_workgroup_id,
+             sizeof(target->prior_workgroup_id));
+      memcpy(target->prior_workitem_id, source->prior_workitem_id,
+             sizeof(target->prior_workitem_id));
+      break;
+    }
+    case IREE_HAL_AMDGPU_TSAN_CHECK_KIND_SHADOW_CAPACITY: {
+      const iree_hal_amdgpu_tsan_shadow_capacity_report_t* source =
+          &report->detail.shadow_capacity;
+      iree_hal_device_tsan_shadow_capacity_report_t* target =
+          &tsan_event.detail.shadow_capacity;
+      target->shadow_size = source->shadow_size;
+      target->required_shadow_end = source->required_shadow_end;
+      target->workgroup_shadow_stride = source->workgroup_shadow_stride;
+      target->workgroup_ordinal = source->workgroup_ordinal;
+      target->workgroup_local_memory_size = source->workgroup_local_memory_size;
+      target->shadow_cell_size = source->shadow_cell_size;
+      target->shadow_history_count = source->shadow_history_count;
+      memcpy(target->current_workgroup_id, source->current_workgroup_id,
+             sizeof(target->current_workgroup_id));
+      memcpy(target->current_workitem_id, source->current_workitem_id,
+             sizeof(target->current_workitem_id));
+      break;
+    }
+    case IREE_HAL_AMDGPU_TSAN_CHECK_KIND_UNKNOWN:
+    default:
+      break;
+  }
   tsan_event.source_dispatch_ptr = packet->source_dispatch_ptr;
 
   iree_hal_device_event_t event = iree_hal_device_event_default();
@@ -440,8 +470,9 @@ static void iree_hal_amdgpu_feedback_state_publish_tsan_event(
       iree_hal_amdgpu_feedback_state_physical_device_ordinal(
           physical_device_ordinal);
   iree_hal_device_event_site_t site;
-  if (iree_hal_amdgpu_source_context_try_resolve_sanitizer_site(
-          source_context, report->current_site_id, &site)) {
+  if (report->check_kind == IREE_HAL_AMDGPU_TSAN_CHECK_KIND_DATA_RACE &&
+      iree_hal_amdgpu_source_context_try_resolve_sanitizer_site(
+          source_context, report->detail.data_race.current_site_id, &site)) {
     event.site = &site;
   }
   event.payload = iree_make_const_byte_span(&tsan_event, sizeof(tsan_event));
@@ -497,20 +528,37 @@ static iree_status_t iree_hal_amdgpu_feedback_state_handle_tsan_packet(
     return iree_ok_status();
   }
 
+  if (report->check_kind == IREE_HAL_AMDGPU_TSAN_CHECK_KIND_SHADOW_CAPACITY) {
+    const iree_hal_amdgpu_tsan_shadow_capacity_report_t* capacity =
+        &report->detail.shadow_capacity;
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "AMDGPU TSAN shadow capacity exhausted on physical device %" PRIhsz
+        ": workgroup ordinal=%" PRIu64 " requires byte end=%" PRIu64
+        " with stride=%" PRIu64 ", queue shadow size=%" PRIu64
+        ", workgroup local memory=%u",
+        physical_device_ordinal, capacity->workgroup_ordinal,
+        capacity->required_shadow_end, capacity->workgroup_shadow_stride,
+        capacity->shadow_size, capacity->workgroup_local_memory_size);
+  }
+
+  const iree_hal_amdgpu_tsan_data_race_report_t* data_race =
+      &report->detail.data_race;
   return iree_make_status(
       IREE_STATUS_DATA_LOSS,
       "AMDGPU TSAN %s violation on physical device %" PRIhsz
       " site_id=0x%016" PRIx64 " prior_site_id=0x%016" PRIx64
       " memory=%s address=0x%016" PRIx64 " current_access=%s prior_access=%s",
       iree_hal_amdgpu_feedback_state_tsan_check_kind_string(report->check_kind),
-      physical_device_ordinal, report->current_site_id, report->prior_site_id,
+      physical_device_ordinal, data_race->current_site_id,
+      data_race->prior_site_id,
       iree_hal_amdgpu_feedback_state_tsan_memory_space_string(
-          report->memory_space),
-      report->memory_address,
+          data_race->memory_space),
+      data_race->memory_address,
       iree_hal_amdgpu_feedback_state_tsan_access_kind_string(
-          report->current_access_kind),
+          data_race->current_access_kind),
       iree_hal_amdgpu_feedback_state_tsan_access_kind_string(
-          report->prior_access_kind));
+          data_race->prior_access_kind));
 }
 
 static iree_status_t iree_hal_amdgpu_feedback_state_handle_packet(
@@ -690,21 +738,12 @@ static iree_status_t iree_hal_amdgpu_feedback_state_initialize_device(
         "AMDGPU feedback requires initialized physical devices");
   }
 
-  hsa_amd_memory_pool_t control_memory_pool =
+  hsa_amd_memory_pool_t host_memory_pool =
       physical_device->host_memory_pools.fine_pool;
-  if (IREE_UNLIKELY(!control_memory_pool.handle)) {
+  if (IREE_UNLIKELY(!host_memory_pool.handle)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU feedback requires a host fine-grained control memory pool");
-  }
-
-  hsa_amd_memory_pool_t ring_memory_pool =
-      physical_device->coarse_block_pools.large.memory_pool;
-  if (IREE_UNLIKELY(!ring_memory_pool.handle)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU feedback requires a coarse-grained device-local ring memory "
-        "pool");
+        "AMDGPU feedback requires a host fine-grained memory pool");
   }
 
   out_device_state->parent = state;
@@ -714,8 +753,7 @@ static iree_status_t iree_hal_amdgpu_feedback_state_initialize_device(
   const iree_hal_amdgpu_feedback_channel_params_t channel_params = {
       .libhsa = state->libhsa,
       .device_agent = physical_device->device_agent,
-      .control_memory_pool = control_memory_pool,
-      .ring_memory_pool = ring_memory_pool,
+      .host_memory_pool = host_memory_pool,
       .topology = &system->topology,
       .minimum_capacity = 0,
   };

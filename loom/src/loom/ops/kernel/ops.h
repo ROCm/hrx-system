@@ -14,6 +14,7 @@
 
 #include "loom/ops/op_defs.h"
 #include "loom/ir/facts.h"
+#include "loom/ir/ir.h"
 #include "loom/ops/atomic.h"
 #include "loom/ops/cache.h"
 #include "loom/ops/combining.h"
@@ -153,24 +154,27 @@ typedef enum loom_kernel_workgroup_scan_direction_e {
 // }
 LOOM_DEFINE_ISA(loom_kernel_def_isa, LOOM_OP_KERNEL_DEF)
 LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_def_callee, 0)
-LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_def_target, 1)
-LOOM_DEFINE_ATTR_STRING(loom_kernel_def_export_symbol, 2)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_def_export_linkage, 3, loom_target_linkage_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_kernel_def_predicates, 4)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_def_retain, 5, loom_kernel_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_def_linkage, 1, loom_symbol_linkage_t)
+LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_def_target, 2)
+LOOM_DEFINE_ATTR_STRING(loom_kernel_def_export_symbol, 3)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_def_export_linkage, 4, loom_target_linkage_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_kernel_def_predicates, 5)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_def_retain, 6, loom_kernel_retain_t)
 LOOM_DEFINE_REGION(loom_kernel_def_config, 0)
 LOOM_DEFINE_REGION(loom_kernel_def_body, 1)
 enum loom_kernel_def_build_flag_bits_e {
-  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_RETAIN = 1u << 0,
-  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_TARGET = 1u << 1,
-  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 2,
-  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_LINKAGE = 1u << 3,
-  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 4,
+  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_LINKAGE = 1u << 0,
+  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_RETAIN = 1u << 1,
+  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_TARGET = 1u << 2,
+  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 3,
+  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_LINKAGE = 1u << 4,
+  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 5,
 };
 typedef uint32_t loom_kernel_def_build_flags_t;
 iree_status_t loom_kernel_def_build(
     loom_builder_t* builder,
     loom_kernel_def_build_flags_t build_flags,
+    loom_optional uint8_t linkage,
     loom_optional uint8_t retain,
     loom_optional loom_symbol_ref_t target,
     loom_optional loom_string_id_t export_symbol,

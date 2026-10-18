@@ -387,7 +387,7 @@ class ReaderTest : public ::testing::Test {
     };
     loom_op_t* kernel_op = nullptr;
     IREE_CHECK_OK(loom_kernel_def_build(
-        &module_builder, /*build_flags=*/0, /*retain=*/0,
+        &module_builder, /*build_flags=*/0, /*linkage=*/0, /*retain=*/0,
         loom_symbol_ref_null(), LOOM_STRING_ID_INVALID, /*export_linkage=*/0,
         callee, &index_type, 1, /*arg_types=*/nullptr,
         /*arg_types_count=*/0, /*predicates=*/nullptr,
@@ -444,7 +444,7 @@ class ReaderTest : public ::testing::Test {
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_func_def_build(
         &builder, LOOM_FUNC_DEF_BUILD_FLAG_HAS_RETAIN, /*visibility=*/0,
-        LOOM_FUNC_RETAIN_RETAIN, /*cc=*/0, /*effect_contract=*/0,
+        /*linkage=*/0, LOOM_FUNC_RETAIN_RETAIN, /*cc=*/0, /*effect_contract=*/0,
         /*temperature=*/0,
         /*inline_policy=*/0, loom_symbol_ref_null(), /*abi=*/0,
         loom_named_attr_slice_empty(), /*export_symbol=*/LOOM_STRING_ID_INVALID,

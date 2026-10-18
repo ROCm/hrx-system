@@ -50,7 +50,7 @@ LOOM_FORCE_INLINE void empty_stage() {
 }
 
 // ----
-func.def public inline @copy_pair(%source_layout: encoding<layout>, %source: view<4xi8, %source_layout>, %destination_layout: encoding<layout>, %destination: view<4xi8, %destination_layout>, %enabled: i1) {
+func.def public linkonce inline @copy_pair(%source_layout: encoding<layout>, %source: view<4xi8, %source_layout>, %destination_layout: encoding<layout>, %destination: view<4xi8, %destination_layout>, %enabled: i1) {
   %load = kernel.async.copy %source to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi8, %source_layout> to view<4xi8, %destination_layout> -> kernel.async.token
   %store = kernel.async.copy.mask %source to %destination, %enabled {cache_scope = device, cache_temporal = non_temporal_writeback, direction = workgroup_to_global} : view<4xi8, %source_layout> to view<4xi8, %destination_layout>, i1 -> kernel.async.token
   %transfers = kernel.async.group %load, %store : kernel.async.token, kernel.async.token -> kernel.async.group
@@ -58,7 +58,7 @@ func.def public inline @copy_pair(%source_layout: encoding<layout>, %source: vie
   func.return
 }
 
-func.def public inline @gather_pair(%source_layout: encoding<layout>, %source: view<4xi8, %source_layout>, %destination_layout: encoding<layout>, %destination: view<64x4xi8, %destination_layout>, %enabled: i1) {
+func.def public linkonce inline @gather_pair(%source_layout: encoding<layout>, %source: view<4xi8, %source_layout>, %destination_layout: encoding<layout>, %destination: view<64x4xi8, %destination_layout>, %enabled: i1) {
   %first = kernel.async.gather %source to %destination {cache_scope = workgroup, cache_temporal = regular} : view<4xi8, %source_layout> to view<64x4xi8, %destination_layout> -> kernel.async.token
   %tail = kernel.async.gather.mask %source to %destination, %enabled {cache_scope = cluster, cache_temporal = last_use} : view<4xi8, %source_layout> to view<64x4xi8, %destination_layout>, i1 -> kernel.async.token
   %transfers = kernel.async.group %first, %tail : kernel.async.token, kernel.async.token -> kernel.async.group
@@ -66,7 +66,7 @@ func.def public inline @gather_pair(%source_layout: encoding<layout>, %source: v
   func.return
 }
 
-func.def public inline @cluster_pair(%source_layout: encoding<layout>, %source: view<4xi8, %source_layout>, %destination_layout: encoding<layout>, %destination: view<4xi8, %destination_layout>, %participants: i32, %enabled: i1) {
+func.def public linkonce inline @cluster_pair(%source_layout: encoding<layout>, %source: view<4xi8, %source_layout>, %destination_layout: encoding<layout>, %destination: view<4xi8, %destination_layout>, %participants: i32, %enabled: i1) {
   %first = kernel.async.cluster.gather %source to %destination using %participants {cache_scope = cluster, cache_temporal = high_temporal} : view<4xi8, %source_layout> to view<4xi8, %destination_layout>, i32 -> kernel.async.token
   %tail = kernel.async.cluster.gather.mask %source to %destination using %participants, %enabled {cache_scope = system, cache_temporal = bypass} : view<4xi8, %source_layout> to view<4xi8, %destination_layout>, i32, i1 -> kernel.async.token
   %transfers = kernel.async.group %first, %tail : kernel.async.token, kernel.async.token -> kernel.async.group
@@ -74,7 +74,7 @@ func.def public inline @cluster_pair(%source_layout: encoding<layout>, %source: 
   func.return
 }
 
-func.def public inline @empty_stage() {
+func.def public linkonce inline @empty_stage() {
   %stage = kernel.async.group -> kernel.async.group
   kernel.async.wait %stage {newer_groups = 0} : kernel.async.group
   func.return

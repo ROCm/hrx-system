@@ -51,8 +51,12 @@ class GpuCommandTest : public GpuDeviceFixture {
   amdf_status_t MatchGpuEndpoint(amdf_endpoint_t* endpoint,
                                  bool* out_matches) override;
   void TearDown() override;
+  // Defaults to queue/control backing. Payload cases supply their own flags;
+  // host coherence alone does not establish a live control-memory policy.
   void CreateMemory(amdf_memory_access_t access, uint64_t byte_length,
-                    GpuMemory** out_memory);
+                    GpuMemory** out_memory,
+                    amdf_memory_flags_t flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                                AMDF_MEMORY_FLAG_QUEUE_STORAGE);
   // Uses the exact profile and access inputs already queried by the caller.
   void CreateMemory(amdf_memory_scope_t* scope,
                     const amdf_memory_create_info_t& create_info,

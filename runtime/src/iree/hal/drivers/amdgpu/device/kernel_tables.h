@@ -93,8 +93,8 @@ IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_grid_sync_gws_initialize,
 // TSAN helpers (tsan.h)
 //===----------------------------------------------------------------------===//
 
-IREE_HAL_AMDGPU_DEVICE_KERNEL(
-    iree_hal_amdgpu_device_tsan_initialize_queue_state, 32, 1, 1)
+IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_tsan_initialize_shadow, 32,
+                              1, 1)
 
 //===----------------------------------------------------------------------===//
 // Timestamp helpers (timestamp.h)

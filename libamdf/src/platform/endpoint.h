@@ -21,6 +21,10 @@ amdf_status_t amdf_platform_endpoint_open(
     amdf_platform_instance_t* instance, const amdf_endpoint_id_t* id,
     amdf_platform_endpoint_t** out_endpoint, amdf_endpoint_info_t* out_info);
 
+// Returns cached OS CPU locality, or UINT32_MAX when no CPU node is known.
+uint32_t amdf_platform_endpoint_host_numa_node(
+    const amdf_platform_endpoint_t* endpoint);
+
 // Queries publication paths implemented for one native command type.
 amdf_queue_publication_modes_t
 amdf_platform_endpoint_query_queue_publication_modes(
