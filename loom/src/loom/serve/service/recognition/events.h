@@ -29,6 +29,8 @@ enum loom_serve_recognition_output_flag_bits_e {
 typedef uint32_t loom_serve_recognition_output_flags_t;
 
 // Source-established activity over actual input, independent of turn policy.
+// Requested observations partition each collection's acknowledged input prefix
+// in order. Lookahead remains unconsumed until its observation is established.
 // Coverage is not a claim of exact speech onset, offset, or word alignment.
 typedef struct loom_serve_recognition_activity_t {
   // Inclusive input sample-frame position covered by the observation.
@@ -71,12 +73,14 @@ void loom_serve_recognition_events_free(
 // positive U32 count followed by count records: kind (U32), payload bytes
 // (U32), and payload, without padding. All fields are little-endian. Transcript
 // payloads use transcript_parse's representation; activity is begin/end (U64)
-// and speech probability (F32). No trailing bytes are permitted. input_end is
-// the retired input frontier. allowed_outputs is the admitted request
-// selection.
+// and speech probability (F32). No trailing bytes are permitted. input_begin
+// and input_end bound the newly acknowledged input prefix. Requested activity
+// must cover that exact interval without gaps or overlap, including empty cuts.
+// allowed_outputs is the admitted request selection.
 iree_status_t loom_serve_recognition_events_parse(
     loom_serve_recognition_events_t* events, iree_const_byte_span_t packet,
-    uint64_t input_end, loom_serve_recognition_output_flags_t allowed_outputs);
+    uint64_t input_begin, uint64_t input_end,
+    loom_serve_recognition_output_flags_t allowed_outputs);
 
 // Direct queries of successfully checked output; no decoding or allocation.
 iree_host_size_t loom_serve_recognition_events_count(

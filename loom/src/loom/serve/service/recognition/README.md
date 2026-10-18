@@ -36,6 +36,8 @@ the accepted frame count. `stream_credit` reports the available frame budget;
 one input's pressure does not consume another's credit. The caller supplies
 explicit EOF with `stream_finish` after its final accepted frame. Packet
 boundaries never imply padding, endpoint detection, or EOF.
+`stream_input_capacity` supplies the immutable source window size, including
+lookahead, independently of current credit and model lifetime.
 
 `stream_peek` borrows the next typed event from one source-ordered packet. A
 completion can produce several observations, including multiple replacements of
@@ -47,6 +49,11 @@ Sample intervals, optional speaker labels, and optional word alignment retain
 the source's evidence. The service does not invent diarization or alignment.
 An activity event carries a finite speech probability in `[0,1]` and the input
 interval it covers. It does not select a turn threshold or claim exact onset.
+When activity is requested, each completion's observations partition its
+acknowledged input prefix without gaps or overlap. Future context remains
+unconsumed in the source window until its observation is established. A caller
+retaining audio for another consumer accounts for pre-roll, the accepted input
+window, and at most one pending activity packet of one window's extent.
 `stream_consume` advances to the next event; the request becomes eligible for
 more model work after the entire packet is consumed. A stalled reader makes
 only that request ineligible.
