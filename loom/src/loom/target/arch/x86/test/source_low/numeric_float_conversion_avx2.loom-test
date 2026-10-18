@@ -186,3 +186,78 @@ low.func.def target<x86.avx2.core> abi(object_function) @narrow_f64_f32_8_memory
   vmovdqu32.store.xmm %18, %output {disp32 = 16}
   return
 }
+
+// ====
+
+func.def @narrow_f64_f16_packet_1(%input: vector<1xf64>) -> (vector<1xf16>) {
+  %result = vector.fptrunc %input : vector<1xf64> to vector<1xf16>
+  func.return %result : vector<1xf16>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<1xf64>) -> (vector<1xf16>)}) @narrow_f64_f16_packet_1(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %9 = vpermilpd.xmm %input, 0
+  %10 = vmovq.gpr64.xmm %9
+  %11 = mov.imm64 -9223372036854775808
+  %12 = copy %10 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %13 = and.gpr64 %12, %11
+  %14 = shr.imm.gpr64 %13 {shift = 48}
+  %15 = mov.imm64 9223372036854775807
+  %16 = and.gpr64 %10, %15
+  %17 = mov.imm64 4503599627370495
+  %18 = copy %16 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %19 = and.gpr64 %18, %17
+  %20 = mov.imm64 4503599627370496
+  %21 = or.gpr64 %19, %20
+  %22 = copy %16 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %23 = shr.imm.gpr64 %22 {shift = 52}
+  %24 = mov.imm64 1008
+  %25 = cmp.sgt.imm.gpr64 %23, 1008
+  %26 = select.gpr64 %25, %24, %23
+  %27 = mov.imm64 1051
+  %28 = sub.gpr64 %27, %26
+  %29 = mov.imm64 63
+  %30 = cmp.sgt.imm.gpr64 %28, 63
+  %31 = select.gpr64 %30, %29, %28
+  %32 = copy %21 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %33 = copy %31 : reg<x86.gpr64> -> reg<x86.rcx>
+  %34 = shr.cl.gpr64 %32, %33
+  %35 = mov.imm64 1
+  %36 = copy %31 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %37 = sub.imm.gpr64 %36 {imm32 = 1}
+  %38 = copy %37 : reg<x86.gpr64> -> reg<x86.rcx>
+  %39 = shl.cl.gpr64 %35, %38
+  %40 = sub.imm.gpr64 %39 {imm32 = 1}
+  %41 = and.imm.gpr64 %34 {imm32 = 1}
+  %42 = add.gpr64 %21, %40
+  %43 = add.gpr64 %42, %41
+  %44 = copy %31 : reg<x86.gpr64> -> reg<x86.rcx>
+  %45 = shr.cl.gpr64 %43, %44
+  %46 = copy %16 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %47 = shr.imm.gpr64 %46 {shift = 42}
+  %48 = and.imm.gpr64 %47 {imm32 = 1}
+  %49 = mov.imm64 -4539626225366204417
+  %50 = copy %16 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %51 = add.gpr64 %50, %49
+  %52 = add.gpr64 %51, %48
+  %53 = shr.imm.gpr64 %52 {shift = 42}
+  %54 = mov.imm64 4544132024016830464
+  %55 = cmp.slt.gpr64 %16, %54
+  %56 = select.gpr64 %55, %45, %53
+  %57 = mov.imm64 31744
+  %58 = cmp.sge.imm.gpr64 %56, 31744
+  %59 = select.gpr64 %58, %57, %56
+  %61 = copy %16 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %62 = and.gpr64 %61, %17
+  %63 = shr.imm.gpr64 %62 {shift = 42}
+  %64 = or.imm.gpr64 %63 {imm32 = 31744}
+  %65 = or.imm.gpr64 %64 {imm32 = 512}
+  %66 = mov.imm64 9218868437227405312
+  %67 = cmp.sgt.gpr64 %16, %66
+  %68 = select.gpr64 %67, %65, %59
+  %69 = or.gpr64 %14, %68
+  %70 = mov.trunc.gpr32.gpr64 %69
+  %71 = vmovd.xmm.gpr32 %70
+  %result = vpbroadcastw.xmm %71
+  return %result
+}

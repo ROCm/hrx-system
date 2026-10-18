@@ -916,21 +916,21 @@ def _gpr_compare_select_descriptor(
     )
 
 
-def _gpr32_compare_descriptor(
+def _gpr_register_compare_descriptor(
     *,
+    bit_count: int,
     predicate: str,
     setcc: str,
     opcode: int,
-    semantic_tag: str,
 ) -> Descriptor:
     return _gpr_compare_descriptor(
         predicate=predicate,
         setcc=setcc,
-        encoding_id=encoding(opcode),
-        semantic_tag=semantic_tag,
-        lhs=_gpr32_operand("lhs"),
-        rhs=_gpr32_operand("rhs"),
-        asm_suffix="gpr32",
+        encoding_id=encoding(opcode, flags=_gpr_width_flags(bit_count)),
+        semantic_tag=f"integer.cmp.{predicate}.i{bit_count}",
+        lhs=_gpr_width_operand(bit_count, "lhs"),
+        rhs=_gpr_width_operand(bit_count, "rhs"),
+        asm_suffix=f"gpr{bit_count}",
     )
 
 
@@ -1311,15 +1311,18 @@ _X86_SCALAR_SUFFIX_DESCRIPTORS = (
             (32, "sgt"),
             (32, "uge"),
             (64, "eq"),
+            (64, "sge"),
+            (64, "sgt"),
         }
     ),
     *(
-        _gpr32_compare_descriptor(
+        _gpr_register_compare_descriptor(
+            bit_count=bit_count,
             predicate=predicate,
             setcc=setcc,
             opcode=opcode,
-            semantic_tag=f"integer.cmp.{predicate}.i32",
         )
+        for bit_count in (32, 64)
         for predicate, setcc, opcode in _CMP_PREDICATE_SETCC
         if predicate in {"slt", "sge", "sgt"}
     ),

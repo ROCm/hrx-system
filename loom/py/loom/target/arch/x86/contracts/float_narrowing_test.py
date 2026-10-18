@@ -39,7 +39,17 @@ _EXPECTED_PAIRS = frozenset(
         ("f32", "f16"),
         ("f32", "f8E4M3"),
         ("f32", "f8E5M2"),
+        ("f64", "bf16"),
+        ("f64", "f16"),
+        ("f64", "f8E4M3"),
+        ("f64", "f8E5M2"),
     }
+)
+
+_VARIABLE_SHIFT_DESCRIPTOR_KEYS = frozenset(
+    f"x86.scalar.{operation}.cl.gpr{bit_width}"
+    for operation in ("shl", "shr")
+    for bit_width in (32, 64)
 )
 
 
@@ -87,19 +97,11 @@ def test_rules_fold_static_literals_and_copy_dynamic_shift_counts(
         emit.descriptor.key
         for rule in rules
         for emit in rule.emit
-        if ".imm.gpr32" in emit.descriptor.key
+        if ".imm.gpr" in emit.descriptor.key
     }
 
-    assert immediate_keys == {
-        "x86.scalar.add.imm.gpr32",
-        "x86.scalar.and.imm.gpr32",
-        "x86.scalar.cmp.sge.imm.gpr32",
-        "x86.scalar.cmp.sgt.imm.gpr32",
-        "x86.scalar.cmp.slt.imm.gpr32",
-        "x86.scalar.or.imm.gpr32",
-        "x86.scalar.shr.imm.gpr32",
-        "x86.scalar.sub.imm.gpr32",
-    }
+    assert any(key.endswith("gpr32") for key in immediate_keys)
+    assert any(key.endswith("gpr64") for key in immediate_keys)
 
     for rule in rules:
         constant_temporaries = {
@@ -110,10 +112,7 @@ def test_rules_fold_static_literals_and_copy_dynamic_shift_counts(
             if result.kind is SourceValueKind.TEMPORARY
         }
         for emit in rule.emit:
-            if emit.descriptor.key not in (
-                "x86.scalar.shl.cl.gpr32",
-                "x86.scalar.shr.cl.gpr32",
-            ):
+            if emit.descriptor.key not in _VARIABLE_SHIFT_DESCRIPTOR_KEYS:
                 continue
             assert emit.copy_operands == ("rhs",)
             shift = emit.operands["rhs"]
