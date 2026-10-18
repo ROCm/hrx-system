@@ -519,6 +519,86 @@ TEST_P(GpuNativeRecordingSizeTest,
 INSTANTIATE_TEST_SUITE_P(ProgramSize, GpuNativeRecordingSizeTest,
                          ::testing::Values(1u, 1000u, 8000u, 65536u));
 
+TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
+  for (bool copy_at_exit : {false, true}) {
+    SCOPED_TRACE(copy_at_exit);
+    iree_hal_buffer_t* output = nullptr;
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool_, iree_hal_make_pool_reservation_request(64, 4),
+        iree_infinite_timeout(), &output));
+    iree_hal_command_buffer_t* recording = nullptr;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, &recording));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+    const iree_hal_barrier_t barrier = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &barrier));
+    uint32_t pattern = 0x12345678;
+    const auto reference = iree_hal_make_buffer_ref(output, 0, 64);
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+        recording, reference, &pattern, sizeof(pattern), 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &barrier));
+    if (copy_at_exit) {
+      pattern = 0x9abcdef0;
+      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+          recording, reference, &pattern, sizeof(pattern), 0));
+    }
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+
+    iree_hal_amd_gpu_pm4_command_invocation_t invocation;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_command_invocation_initialize(
+        recording, {}, nullptr, 0, &invocation));
+    EXPECT_EQ(invocation.program->pending_dma, copy_at_exit);
+    const auto& program = *invocation.program;
+    const auto* words = reinterpret_cast<const uint32_t*>(
+        program.resident.contents.data + program.entry.offset);
+    std::vector<uint32_t> dma_lengths;
+    for (uint32_t offset = 0; offset < program.entry.word_count;) {
+      const uint32_t header = words[offset];
+      if (((header >> 8) & 0xff) == 0x50) {
+        dma_lengths.push_back(words[offset + 6]);
+      }
+      offset += ((header >> 16) & 0x3fff) + 2;
+    }
+    // The leading transfer barrier has no producer. Only the barrier after
+    // the first fill emits a zero-length DMA drain; exit retains any new debt.
+    EXPECT_EQ(dma_lengths, copy_at_exit ? (std::vector<uint32_t>{64, 0, 64})
+                                        : (std::vector<uint32_t>{64, 0}));
+    iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
+
+    iree_hal_semaphore_t* done = nullptr;
+    CreateSemaphore(&done);
+    uint64_t one = 1, two = 2;
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queues_[0], iree_hal_semaphore_list_empty(), {1, &done, &one},
+        recording, iree_hal_buffer_binding_table_empty(),
+        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
+    iree_hal_command_buffer_release(recording);
+    std::array<uint32_t, 16> actual = {};
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = output,
+                .target = actual.data(),
+                .length = sizeof(actual),
+            },
+    };
+    IREE_ASSERT_OK(iree_hal_queue_transfer(
+        queues_[1], {1, &done, &one}, {1, &done, &two}, 1, &download, nullptr));
+    iree_hal_buffer_release(output);
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(done, two, iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+    for (uint32_t value : actual) {
+      EXPECT_EQ(value, pattern);
+    }
+    iree_hal_semaphore_release(done);
+  }
+}
+
 TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
   for (bool indirect : {false, true}) {
     SCOPED_TRACE(indirect);

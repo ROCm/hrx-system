@@ -389,6 +389,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_equal_lengths(
 
 static iree_status_t iree_hal_amd_gpu_pm4_command_flush_barrier(
     iree_hal_amd_gpu_pm4_command_buffer_t* buffer) {
+  // Primary publications join their own CP DMA before entering this program.
+  // Only copies recorded since the last join can leave a DMA dependency here.
+  if (!buffer->program.pending_dma) {
+    buffer->pending_barrier.execution &=
+        ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+  }
   const uint32_t count =
       iree_hal_amd_gpu_pm4_barrier_word_count(buffer->pending_barrier);
   if (!count) {

@@ -536,6 +536,8 @@ iree_hal_amd_gpu_pm4_publish_transfer(
   const bool terminal = chunk.next.index == transfer->count;
   iree_hal_amd_gpu_pm4_barrier_t before =
       first ? submission->before : (iree_hal_amd_gpu_pm4_barrier_t){0};
+  // Every preceding publication drains its own CP DMA before retirement.
+  before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   if (chunk.staging_length > chunk.download.length) {
     // Host-written transport bytes need visibility even with empty payload
     // barriers. This is the same mandatory publication as native kernargs.
@@ -849,6 +851,12 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
     argument_address = arguments->address + argument_offset;
   }
   iree_hal_amd_gpu_pm4_barrier_t before = submission->before;
+  // Transfer chunks and resident-program exits join their own CP DMA. Direct
+  // dispatch setup also joins its copies before launching, so neither boundary
+  // of this publication has outstanding CP DMA to drain.
+  before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+  iree_hal_amd_gpu_pm4_barrier_t after = submission->after;
+  after.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   if (dispatch) {
     // Instruction upload and host argument publication remain mandatory even
     // when the caller supplies an empty optional payload boundary.
@@ -876,10 +884,6 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
                                 indirect_copy_count)
                           : 5)
                : 0;
-  const uint32_t tail_words =
-      (submission->after.execution & IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA)
-          ? 7
-          : 0;
   bool native_signal = false;
   for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
     native_signal |=
@@ -887,7 +891,7 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
   }
   const uint32_t body_words = submission->native_wait_count * 7 + launch_words +
                               iree_hal_amd_gpu_pm4_barrier_word_count(before) +
-                              tail_words + (native_signal ? 8 : 0) + 14 +
+                              (native_signal ? 8 : 0) + 14 +
                               (queue->kernel ? 0 : 8);
   iree_hal_amd_gpu_pm4_ring_t candidate = queue->producer.ring;
   iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
@@ -1007,9 +1011,8 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
     }
   }
   return iree_hal_amd_gpu_pm4_publish_commit(
-      queue, submission, position, &reservation, body_words, 0, words,
-      submission->after, argument_end, (iree_hal_amd_gpu_pm4_download_t){0},
-      true);
+      queue, submission, position, &reservation, body_words, 0, words, after,
+      argument_end, (iree_hal_amd_gpu_pm4_download_t){0}, true);
 }
 
 // An unresolved edge leaves no native reader pinned. In particular, a consumer
