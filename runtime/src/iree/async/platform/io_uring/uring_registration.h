@@ -51,8 +51,30 @@ typedef enum iree_io_uring_registration_state_e {
   IREE_IO_URING_REGISTRATION_STATE_CLOSED = 3,
 } iree_io_uring_registration_state_t;
 
-typedef struct iree_io_uring_registration_request_t
-    iree_io_uring_registration_request_t;
+// Receives the raw syscall result or a negated errno after a request ends.
+// The request and argument storage may be freed or reused by the callback.
+typedef struct iree_io_uring_registration_callback_t {
+  // Required terminal callback, invoked without the registration mutex held.
+  void (*fn)(void* user_data, int result);
+  // Borrowed callback state, valid through terminal delivery.
+  void* user_data;
+} iree_io_uring_registration_callback_t;
+
+// Caller-owned native request, stable until its terminal callback. Submission
+// may complete inline. The registration owner outlives submission, completion,
+// and any concurrent drain or shutdown call.
+typedef struct iree_io_uring_registration_request_t {
+  // Intrusive FIFO linkage owned by registration dispatch while pending.
+  struct iree_io_uring_registration_request_t* next;
+  // io_uring_register opcode to execute.
+  uint32_t opcode;
+  // Caller-owned opcode argument memory, borrowed through completion.
+  void* arg;
+  // Opcode-specific argument count or size.
+  uint32_t argument_count;
+  // Exactly one terminal delivery, including owner-shutdown rejection.
+  iree_io_uring_registration_callback_t completion;
+} iree_io_uring_registration_request_t;
 
 // Serializes io_uring_register operations and dispatches them to the kernel's
 // SINGLE_ISSUER owner task when required.
@@ -78,6 +100,10 @@ typedef struct iree_io_uring_registration_t {
 
   // Non-zero when the pending queue may contain requests.
   iree_atomic_int32_t has_pending;
+
+  // The bound owner is delivering requests. Guarded by |mutex|; callbacks
+  // append asynchronous successors for that drain instead of recursing.
+  bool draining;
 
   // Callback used to wake the owner after a request is queued.
   // Guarded by |mutex|.
@@ -106,6 +132,18 @@ void iree_io_uring_registration_set_wake_callback(
 // owner. Returns the raw syscall result or a negated errno value.
 int iree_io_uring_registration_enable(
     iree_io_uring_registration_t* registration);
+
+// Submits a native registration request without waiting for polling progress.
+// Direct and unbound rings execute on the caller. Bound SINGLE_ISSUER rings
+// execute on their owner, preserving FIFO order with already pending requests.
+// Native execution can block when the caller is the execution owner. The
+// callback may run inline or on the owner and may reenter registration. Bound
+// owner drains defer asynchronous successors until their submitting callback
+// returns, keeping callback chains at constant stack depth.
+// No request storage is accessed after its callback begins.
+void iree_io_uring_registration_submit(
+    iree_io_uring_registration_t* registration,
+    iree_io_uring_registration_request_t* request);
 
 // Executes an io_uring_register operation synchronously.
 //
