@@ -269,12 +269,14 @@ iree_status_t loom_serve_registry_try_open_text(
     loom_serve_registry_t* registry, iree_string_view_t name,
     loom_serve_text_request_t* request, loom_serve_text_stream_t** out_stream);
 
-// Resolves the current text registration under the same admission policy and
-// enqueues PIN, SUSPEND, or RELEASE against that incarnation's retained
-// history. Success with a handle copies identifiers; NULL means
-// preparation/queue pressure. Completion/status survive removal and same-name
-// replacement. Named pins belong to their original registration, independently
-// of control handles.
+// Resolves the current text registration and enqueues PIN, SUSPEND, or RELEASE
+// against that incarnation's retained history. PIN/SUSPEND obey inference
+// admission. RELEASE bypasses drain and held inference but uses the same
+// bounded control slot; an unprepared model has no retained state and returns
+// NOT_FOUND without preparing it. Success with a handle copies identifiers;
+// NULL means preparation/queue pressure. Completion/status survive removal and
+// same-name replacement. Named pins belong to their original registration,
+// independently of control handles.
 iree_status_t loom_serve_registry_try_open_text_checkpoint(
     loom_serve_registry_t* registry, iree_string_view_t name,
     const loom_serve_text_checkpoint_request_t* request,
