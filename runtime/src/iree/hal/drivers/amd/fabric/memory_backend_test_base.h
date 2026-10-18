@@ -210,6 +210,7 @@ struct FakeNative {
     out_profile->host_mapping.maximum_byte_length = UINT64_C(1) << 30;
     out_profile->host_mapping.byte_offset_granularity = 1;
     out_profile->host_mapping.byte_length_granularity = 1;
+    out_profile->host_mapping.features = self->host_mapping_features;
     out_profile->host_mapping.supported_access =
         !self->host_mappable ? 0
         : self->supports_private_mapping
@@ -499,6 +500,7 @@ struct FakeNative {
     info->pointer = memory->data;
     info->byte_length = memory->byte_length;
     info->cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
+    info->features = memory->owner->host_mapping_features;
     return AMDF_STATUS_OK;
   }
 
@@ -637,6 +639,8 @@ struct FakeNative {
   bool host_source_enabled = false;
   // Whether the native profile admits ordinary host buffers for file I/O.
   bool file_io_enabled = false;
+  // Exact capabilities reported by prepared host views.
+  amdf_host_mapping_features_t host_mapping_features = 0;
   // Native address geometry per live consumer, before addresses are reserved.
   std::array<uint64_t, 2> reservation_granularities = {4096, 4096};
   // Whole-backing preparation required by each native address domain.

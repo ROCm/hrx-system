@@ -133,8 +133,9 @@ void iree_hal_amd_fabric_file_transfer_deinitialize(
 // qualified against each physical source and performed only when required.
 // Unsupported backing returns OK with available=false and no acquired views.
 // Holes, native errors, and metadata allocation failures propagate.
-// Registered sources support direct files and retain fixed-buffer identity.
-// Sources without registration may use ordinary buffered I/O. A registration
+// Native file-capable host views support direct files. Registered sources also
+// retain fixed-buffer identity; registration is not required for an otherwise
+// capable view. Other host views support ordinary buffered I/O. A registration
 // for a different file proactor is an admission error. Success with
 // available=true borrows prepared host views until deinitialization,
 // without adding source ownership or public host-mapping permissions to the

@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cerrno>
+#include <utility>
 
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend_test_base.h"
@@ -868,8 +869,13 @@ TEST_F(MemoryBackendTest, PrivateTransferViewsFollowEachStorageRoute) {
       IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER, {0, 0}};
   const iree_hal_pool_import_class_t import_class = {storage_class, {}};
   pool_options_.imports = {1, &import_class};
-  for (bool host_visible : {false, true}) {
+  for (auto [host_visible, file_capable] :
+       {std::pair{false, false}, std::pair{false, true}, std::pair{true, false},
+        std::pair{true, true}}) {
     native_.host_visibility_guaranteed = host_visible;
+    native_.file_io_enabled = file_capable;
+    native_.host_mapping_features =
+        file_capable ? AMDF_HOST_MAPPING_FEATURE_FILE_IO : 0;
     const int map_count = native_.map_count;
     iree_hal_pool_t* pool = nullptr;
     IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool,
@@ -902,6 +908,9 @@ TEST_F(MemoryBackendTest, PrivateTransferViewsFollowEachStorageRoute) {
           facts->memory->host_access,
           mapped ? AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE : 0u);
       EXPECT_EQ(facts->memory->mapping != nullptr, mapped);
+      EXPECT_EQ(
+          facts->memory->host_features,
+          mapped && file_capable ? AMDF_HOST_MAPPING_FEATURE_FILE_IO : 0u);
       for (uint32_t i = 0; i < families_.size(); ++i) {
         EXPECT_EQ(
             facts->scope_access_ordinals[families_[i]->memory.queue_scope_id],

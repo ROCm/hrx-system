@@ -29,6 +29,8 @@ typedef struct iree_hal_amd_fabric_memory_t {
   iree_byte_span_t contents;
   // Actual permissions of the prepared host view, or zero when absent.
   amdf_memory_map_flags_t host_access;
+  // Native capabilities of the prepared host view, independent of I/O pins.
+  amdf_host_mapping_features_t host_features;
   // Cache class of the native or registered host view, when established.
   iree_hal_host_cacheability_t host_cacheability;
   // Achieved attachment geometry and physical identity, captured once.

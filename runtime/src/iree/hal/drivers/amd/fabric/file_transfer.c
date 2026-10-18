@@ -107,7 +107,8 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
         ((queue_access & IREE_HAL_MEMORY_ACCESS_WRITE)
              ? AMDF_MEMORY_MAP_FLAG_READ
              : 0);
-    if ((transfer->async.file->flags & IREE_ASYNC_FILE_FLAG_DIRECT) ||
+    if (((transfer->async.file->flags & IREE_ASYNC_FILE_FLAG_DIRECT) &&
+         !(storage->host_features & AMDF_HOST_MAPPING_FEATURE_FILE_IO)) ||
         !iree_all_bits_set(storage->host_access, required_access)) {
       *available = false;
       return iree_ok_status();
@@ -129,8 +130,9 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
   const amdf_memory_site_t host = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
       .structure_size = sizeof(host),
-      .kind = range->region ? AMDF_MEMORY_SITE_KIND_FILE_IO
-                            : AMDF_MEMORY_SITE_KIND_HOST,
+      .kind = (storage->host_features & AMDF_HOST_MAPPING_FEATURE_FILE_IO)
+                  ? AMDF_MEMORY_SITE_KIND_FILE_IO
+                  : AMDF_MEMORY_SITE_KIND_HOST,
       .value.host = {.mapping = range->mapping},
   };
   iree_hal_memory_pair_info_t pair;
@@ -205,8 +207,7 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare_ranges(
       physical_bindings = binding.registered_io.table;
       source_offset = binding.registered_io.offset;
     } else {
-      if ((transfer->async.file->flags & IREE_ASYNC_FILE_FLAG_DIRECT) ||
-          !physical_storage->mapping ||
+      if (!physical_storage->mapping ||
           layout->host_binding_index ==
               IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {
         return iree_ok_status();
