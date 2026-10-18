@@ -73,25 +73,43 @@ void loom_serve_realtime_wire_deinitialize(loom_serve_realtime_wire_t* wire) {
   iree_string_builder_deinitialize(&wire->scratch);
 }
 
+iree_status_t loom_serve_realtime_wire_prefix(uint64_t session_id,
+                                              uint64_t sequence,
+                                              const char* type,
+                                              loom_output_stream_t* output) {
+  return loom_output_stream_write_format(
+      output, "{\"event_id\":\"event_%" PRIu64 "_%" PRIu64 "\",\"type\":\"%s\"",
+      session_id, sequence, type);
+}
+
+iree_status_t loom_serve_realtime_wire_check_size(iree_host_size_t size) {
+  return size <= 512 * 1024
+             ? iree_ok_status()
+             : iree_make_status(
+                   IREE_STATUS_OUT_OF_RANGE,
+                   "realtime event exceeds the 512 KiB message limit");
+}
+
 iree_status_t loom_serve_realtime_wire_begin(loom_serve_realtime_wire_t* wire,
                                              const char* type) {
   iree_string_builder_reset(&wire->scratch);
-  return iree_string_builder_append_format(
-      &wire->scratch,
-      "{\"event_id\":\"event_%" PRIu64 "_%" PRIu64 "\",\"type\":\"%s\"",
-      wire->session_id, ++wire->sequence, type);
+  loom_output_stream_t output;
+  loom_output_stream_for_builder(&wire->scratch, &output);
+  return loom_serve_realtime_wire_prefix(wire->session_id, ++wire->sequence,
+                                         type, &output);
 }
 
 iree_status_t loom_serve_realtime_wire_commit(loom_serve_realtime_wire_t* wire,
                                               uint64_t response,
                                               bool publication) {
-  if (wire->scratch.size > 512 * 1024) {
+  iree_status_t status =
+      loom_serve_realtime_wire_check_size(wire->scratch.size);
+  if (!iree_status_is_ok(status)) {
     // A rejected large event must not retain construction capacity that would
     // prevent the following small diagnostic from entering the bounded queue.
     iree_string_builder_deinitialize(&wire->scratch);
     iree_string_builder_initialize(wire->host_allocator, &wire->scratch);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "realtime event exceeds the 512 KiB message limit");
+    return status;
   }
   if (wire->count == 64 || wire->scratch.capacity > 1024 * 1024 - wire->bytes) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,

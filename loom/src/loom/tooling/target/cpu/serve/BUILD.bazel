@@ -154,6 +154,51 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "realtime_response_test",
+    args = [
+        "--text_model=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
+        "--speech_model=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
+    ],
+    data = TEXT_SOURCES + SPEECH_SOURCES,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/server/realtime:response_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "realtime_response_parallel_test",
+    args = [
+        "--text_model=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
+        "--speech_model=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
+        "--test_workers=8",
+    ],
+    data = TEXT_SOURCES + SPEECH_SOURCES,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/server/realtime:response_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "realtime_input_test",
     args = ["--model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)"],
     data = RECOGNITION_SOURCES,

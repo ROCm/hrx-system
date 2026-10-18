@@ -1140,6 +1140,458 @@ def oversized_item_admission(address, trace):
         client.close()
 
 
+FUNCTION_TOOLS = [
+    {
+        "type": "function",
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+        },
+    }
+    for name, description in (
+        ("z_lookup", "First function 🌲"),
+        ("a_lookup", "Second function"),
+    )
+]
+
+
+def function_oracle(messages, tools, maximum):
+    # Independent dense recurrence, with the source's documented reversible
+    # rendering: catalogue markers, content, call letters, assistant separator.
+    prompt = "#" * len(tools)
+    for message in messages:
+        prompt += message.get("content") or ""
+        prompt += "".join(
+            json.loads(call["function"]["arguments"])["value"]
+            for call in message.get("tool_calls", [])
+        )
+        if message["role"] == "assistant":
+            prompt += "#"
+    raw, finish = complete([{"role": "user", "content": prompt}], maximum)
+    boundary = raw.find("x") if tools else -1
+    if boundary < 0:
+        return raw, [], finish
+    calls = [
+        {
+            "name": tools[0]["name"],
+            "arguments": json.dumps({"value": letter}, separators=(",", ":")),
+        }
+        for letter in raw[boundary:]
+    ]
+    return raw[:boundary], calls, "tool_calls"
+
+
+def function_response(
+    client, messages, tools, *, maximum=12, overrides=None, results=False
+):
+    expected, calls, finish = function_oracle(messages, tools, maximum)
+    client.send(
+        "response.create", response={"max_output_tokens": maximum, **(overrides or {})}
+    )
+    events = []
+    outputs = []
+    returned = []
+    acknowledgements = set()
+    response = None
+    while response is None or (results and len(acknowledgements) != len(calls)):
+        event = client.receive()
+        events.append(event)
+        if (
+            event["type"] == "response.output_item.done"
+            and event["item"]["type"] == "function_call"
+        ):
+            call = event["item"]
+            assert call["status"] == "completed", call
+            ordinal = len(outputs)
+            assert {key: call[key] for key in ("name", "arguments")} == calls[
+                ordinal
+            ], (call, calls)
+            outputs.append(call)
+            if results:
+                # Send before response.done, just as Open WebUI executes each
+                # completed call. Even empty result strings are canonical input.
+                output = "a" if ordinal % 2 == 0 else ""
+                identity = f"result_{ordinal}"
+                client.send(
+                    "conversation.item.create",
+                    item={
+                        "id": identity,
+                        "type": "function_call_output",
+                        "call_id": call["call_id"],
+                        "output": output,
+                        "object": "realtime.item",
+                        "status": "in_progress",
+                    },
+                )
+                returned.append(
+                    {"role": "tool", "tool_call_id": call["call_id"], "content": output}
+                )
+        elif (
+            event["type"] == "conversation.item.done"
+            and event["item"]["type"] == "function_call_output"
+        ):
+            acknowledgements.add(event["item"]["id"])
+            assert event["item"]["status"] == "completed", event
+        elif event["type"] == "response.done":
+            response = event["response"]
+    assert len(outputs) == len(calls), (outputs, calls)
+    text = "".join(
+        event["delta"]
+        for event in events
+        if event["type"]
+        in ("response.output_text.delta", "response.output_audio_transcript.delta")
+    )
+    assert text == expected, (text, expected, events)
+    audio = b"".join(
+        base64.b64decode(event["delta"], validate=True)
+        for event in events
+        if event["type"] == "response.output_audio.delta"
+    )
+    audio_output = (overrides or {}).get("output_modalities", ["audio"]) == ["audio"]
+    if audio_output and expected:
+        check_pcm(audio, expected, 42, "positive")
+    else:
+        assert not audio
+    if not expected:
+        assert not any(
+            "output_audio" in event["type"] or "content_part" in event["type"]
+            for event in events
+        ), events
+    status = "incomplete" if finish == "length" else "completed"
+    assert response["status"] == status, response
+    assert (
+        response["output"]
+        == (
+            [
+                next(
+                    event["item"]
+                    for event in events
+                    if event["type"] == "response.output_item.done"
+                    and event["item"]["type"] == "message"
+                )
+            ]
+            if expected
+            else []
+        )
+        + outputs
+    ), response
+    for index, call in enumerate(outputs, bool(expected)):
+        selected = [
+            event
+            for event in events
+            if event.get("item_id", event.get("item", {}).get("id")) == call["id"]
+        ]
+        kinds = [event["type"] for event in selected]
+        assert kinds == [
+            "conversation.item.added",
+            "response.output_item.added",
+            "response.function_call_arguments.delta",
+            "response.function_call_arguments.done",
+            "response.output_item.done",
+            "conversation.item.done",
+        ], selected
+        for event in selected:
+            if event["type"].startswith("response."):
+                assert event["output_index"] == index, event
+        assert (
+            selected[0]["item"]["arguments"] == selected[1]["item"]["arguments"] == ""
+        )
+        assert selected[2]["delta"] == selected[3]["arguments"] == call["arguments"]
+    message = {"role": "assistant", "content": expected}
+    if outputs:
+        message["tool_calls"] = [
+            {
+                "id": call["call_id"],
+                "type": "function",
+                "function": {key: call[key] for key in ("name", "arguments")},
+            }
+            for call in outputs
+        ]
+    return response, message, returned
+
+
+def function_transactions(address, trace, *, content):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        client.send(
+            "session.update", session={"tools": FUNCTION_TOOLS, "tool_choice": "auto"}
+        )
+        settings = client.until("session.updated")[-1]["session"]
+        assert (
+            settings["tools"] == FUNCTION_TOOLS and settings["tool_choice"] == "auto"
+        ), settings
+        client.message("prompt", content)
+        messages = [{"role": "user", "content": content}]
+        expected, calls, _ = function_oracle(messages, FUNCTION_TOOLS, 12)
+        model = next(
+            item["loom"]
+            for item in HttpClient(address).request("/v1/status")["data"]
+            if item["id"] == "fixture-text"
+        )
+        assert "error" not in model, model
+        try:
+            native = HttpClient(address).request(
+                "/v1/chat/completions",
+                {
+                    "model": "fixture-text",
+                    "messages": messages,
+                    "max_tokens": 12,
+                    "seed": 42,
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                key: value
+                                for key, value in tool.items()
+                                if key != "type"
+                            },
+                        }
+                        for tool in FUNCTION_TOOLS
+                    ],
+                },
+            )
+        except AssertionError as error:
+            error.add_note(json.dumps(HttpClient(address).request("/v1/status")))
+            raise
+        choice = native["choices"][0]
+        assert choice["finish_reason"] == "tool_calls", native
+        assert (choice["message"].get("content") or "") == expected, native
+        assert [
+            call["function"] for call in choice["message"]["tool_calls"]
+        ] == calls, native
+        metadata = {"input_item_id": "prompt", "operation": "lookup 🌲"}
+        overrides = {"metadata": metadata}
+        if not expected:
+            # A deliberately nonexistent voice proves tool-only output does not
+            # acquire a speech request, independently of emitted audio events.
+            overrides["audio"] = {"output": {"voice": "missing-tool-only-voice"}}
+        response, message, returned = function_response(
+            client, messages, FUNCTION_TOOLS, overrides=overrides, results=True
+        )
+        assert response["metadata"] == metadata
+        messages += [message, *returned]
+        spoken, _, _ = function_response(
+            client, messages, [], maximum=3, overrides={"tool_choice": "none"}
+        )
+        assert spoken["usage"]["input_token_details"]["cached_tokens"] == 0, spoken
+        # The override did not mutate the default catalogue or the preceding
+        # compatible checkpoint. Subsequent canonical history includes results.
+        messages.append(
+            {
+                "role": "assistant",
+                "content": spoken["output"][0]["content"][0]["transcript"],
+            }
+        )
+        resumed, _, _ = function_response(client, messages, FUNCTION_TOOLS, maximum=2)
+        assert resumed["usage"]["input_token_details"]["cached_tokens"] > 0, resumed
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def function_item_edits(address, trace):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        # Unknown calls reject without publishing or reserving the item ID.
+        result = {
+            "id": "result",
+            "type": "function_call_output",
+            "call_id": "unknown",
+            "output": "",
+        }
+        client.send("conversation.item.create", item=result, event_id="unknown")
+        error = client.receive(allow_error=True)
+        assert error["type"] == "error" and error["error"]["event_id"] == "unknown", (
+            error
+        )
+        client.send(
+            "conversation.item.create",
+            item={
+                "id": "call",
+                "type": "function_call",
+                "name": "z_lookup",
+                "arguments": '{"value":"x"}',
+                "status": "incomplete",
+                "object": "realtime.item",
+            },
+        )
+        call = client.until("conversation.item.done")[-1]["item"]
+        assert call["status"] == "completed" and call["call_id"], call
+        result["call_id"] = call["call_id"]
+        client.send(
+            "conversation.item.create",
+            item=result,
+            previous_item_id="root",
+            event_id="before-call",
+        )
+        error = client.receive(allow_error=True)
+        assert (
+            error["type"] == "error" and error["error"]["event_id"] == "before-call"
+        ), error
+        client.send("conversation.item.create", item=result)
+        assert client.until("conversation.item.done")[-1]["item"]["output"] == ""
+        duplicate = {**call, "id": "duplicate"}
+        client.send("conversation.item.create", item=duplicate, event_id="duplicate")
+        error = client.receive(allow_error=True)
+        assert error["type"] == "error" and error["error"]["event_id"] == "duplicate", (
+            error
+        )
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "id": call["call_id"],
+                        "function": {"name": "z_lookup", "arguments": '{"value":"x"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": call["call_id"], "content": ""},
+        ]
+        function_response(client, messages, [], maximum=2)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def function_policy_admission(address, trace):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        client.send("session.update", session={"tools": FUNCTION_TOOLS})
+        settings = client.until("session.updated")[-1]["session"]
+        rejected = [
+            {"tool_choice": "required"},
+            {"tool_choice": {"type": "function", "name": "z_lookup"}},
+            {"tools": [{**FUNCTION_TOOLS[0], "strict": True}]},
+            {"tools": [FUNCTION_TOOLS[0], FUNCTION_TOOLS[0]]},
+            {"tools": [{**FUNCTION_TOOLS[0], "parameters": {"type": "string"}}]},
+        ]
+        for index, policy in enumerate(rejected):
+            identity = f"rejected-policy-{index}"
+            client.send("session.update", session=policy, event_id=identity)
+            error = client.receive(allow_error=True)
+            assert (
+                error["type"] == "error" and error["error"]["event_id"] == identity
+            ), error
+            client.send("session.update", session={})
+            assert client.until("session.updated")[-1]["session"] == settings
+
+        # The inbound command fits, but its full effective-settings echo does
+        # not. Rejecting the echo must also discard the candidate catalogue.
+        tool = {**FUNCTION_TOOLS[0], "description": ""}
+        request = {
+            "type": "session.update",
+            "event_id": "large-policy",
+            "session": {"tools": [tool]},
+        }
+
+        def encode():
+            return json.dumps(
+                request, ensure_ascii=False, separators=(",", ":")
+            ).encode()
+
+        tool["description"] = "a" * (512 * 1024 - len(encode()))
+        payload = encode()
+        assert len(payload) == 512 * 1024
+        client.send_frame(1, payload)
+        error = client.receive(allow_error=True)
+        assert error["type"] == "error" and error["error"]["code"] == "OUT_OF_RANGE", (
+            error
+        )
+        assert error["error"]["event_id"] == "large-policy", error
+        client.send("session.update", session={})
+        assert client.until("session.updated")[-1]["session"] == settings
+        client.message("prompt", "a")
+        function_response(client, [{"role": "user", "content": "a"}], FUNCTION_TOOLS)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def function_capacity(address, trace):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        client.send("session.update", session={"tools": FUNCTION_TOOLS})
+        client.until("session.updated")
+        # Leave room for the first two of eight generated calls. The complete
+        # set must be admitted before any call becomes externally executable.
+        for index in range(125):
+            client.message(f"empty-{index}", "")
+        client.message("prompt", "a")
+        client.send("response.create", response={"max_output_tokens": 12})
+        events = client.until("response.done")
+        assert [event["type"] for event in events] == [
+            "response.created",
+            "response.done",
+        ], events
+        response = events[-1]["response"]
+        assert response["status"] == "failed" and response["output"] == [], response
+        assert response["status_details"]["error"]["code"] == "RESOURCE_EXHAUSTED", (
+            response
+        )
+        for index in range(125):
+            client.send("conversation.item.delete", item_id=f"empty-{index}")
+            client.until("conversation.item.deleted")
+        # No partial calls, assistant separators, or leaked capacity from the
+        # failed response may enter the next native prompt.
+        function_response(client, [{"role": "user", "content": "a"}], FUNCTION_TOOLS)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def function_group_edits(address, trace):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        client.send("session.update", session={"tools": FUNCTION_TOOLS})
+        client.until("session.updated")
+        client.message("prompt", "a")
+        messages = [{"role": "user", "content": "a"}]
+        response, message, _ = function_response(client, messages, FUNCTION_TOOLS)
+        first, removed = response["output"][:2]
+        client.send(
+            "conversation.item.create",
+            previous_item_id=first["id"],
+            item={
+                "type": "function_call_output",
+                "call_id": first["call_id"],
+                "output": "a",
+            },
+        )
+        client.until("conversation.item.done")
+        client.send("conversation.item.delete", item_id=removed["id"])
+        client.until("conversation.item.deleted")
+        # A result inserted between generated members splits the native
+        # assistant message. Deletion removes only its selected call.
+        messages += [
+            {**message, "tool_calls": message["tool_calls"][:1]},
+            {"role": "tool", "tool_call_id": first["call_id"], "content": "a"},
+            {**message, "tool_calls": message["tool_calls"][2:]},
+        ]
+        response, _, _ = function_response(
+            client, messages, [], maximum=2, overrides={"tool_choice": "none"}
+        )
+        assert response["usage"]["input_token_details"]["cached_tokens"] == 0, response
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
 def main():
     executable = str(Path(sys.argv[1]).resolve())
     fixtures = [Path(value).resolve() for value in sys.argv[2:5]]
@@ -1193,6 +1645,12 @@ def main():
         with running_server(command, artifacts / "server.log") as (process, address):
             assert address is not None, process.poll()
             with (artifacts / "wire.jsonl").open("w") as trace:
+                function_transactions(address, trace, content="a")
+                function_transactions(address, trace, content="b")
+                function_item_edits(address, trace)
+                function_policy_admission(address, trace)
+                function_capacity(address, trace)
+                function_group_edits(address, trace)
                 anonymous_item(address, trace)
                 reserved_item_identity(address, trace)
                 deferred_response_frontier(address, trace)
