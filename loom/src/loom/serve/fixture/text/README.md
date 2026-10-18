@@ -11,7 +11,10 @@ download. Other modalities have their own [source fixtures](../README.md).
 
 ## Definition and independent oracle
 
-Token IDs are `a=0`, `b=1`, `x=2`, `#=3`. `#` is the terminal token and the
+Token IDs are `a=0`, `b=1`, `x=2`, `#=3`. The tokenizer lowercases input, so
+`A`, `B`, and `X` have the same numerical meaning while canonical conversation
+text retains its original spelling. This allows transcription labels to feed
+the text fixture directly. `#` is the terminal token and the
 assistant-message delimiter. Starting with `h=k=position=0`, each consumed
 token performs unsigned 32-bit arithmetic:
 

@@ -63,6 +63,35 @@ loom_cc_library(
     alwayslink = True,
 )
 
+loom_py_test(
+    name = "realtime_session_test",
+    size = "medium",
+    srcs = ["//loom/src/loom/serve/server/realtime:session_test.py"],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
+        "$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",
+        "$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
+        "8",
+        "--device=vulkan",
+        "--pool_backing=fixed",
+    ],
+    data = TEXT_SOURCES + RECOGNITION_SOURCES + SPEECH_SOURCES + [":loom-serve-test-tool"],
+    main = "session_test.py",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = ["iree-run-requirement=vulkan.resource.device"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:spirv_vulkan_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/server:catalog_test_util",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
 loom_cc_test(
     name = "execution_queues_test",
     args = ["--vulkan_dedicated_compute_queue=false"],
