@@ -180,6 +180,7 @@ loom_cc_library(
     hdrs = ["settings.h"],
     deps = [
         ":event",
+        ":turn",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
     ],
@@ -222,6 +223,7 @@ loom_cc_library(
         ":history",
         ":input",
         ":settings",
+        ":turn",
         ":wire",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/server:registry",
@@ -233,6 +235,23 @@ loom_cc_library(
         "//loom/src/loom/serve/transport/websocket:connection",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "turn",
+    srcs = ["turn.c"],
+    hdrs = ["turn.h"],
+    deps = [
+        ":binding",
+        ":capture",
+        ":input",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service/recognition:events",
+        "//loom/src/loom/serve/service/recognition:request",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/task",
     ],
 )

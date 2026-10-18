@@ -227,6 +227,7 @@ loom_cc_library(
     "settings.c"
   DEPS
     ::event
+    ::turn
     iree::base
     iree::base::internal::json
   PUBLIC
@@ -284,6 +285,7 @@ loom_cc_library(
     ::history
     ::input
     ::settings
+    ::turn
     ::wire
     iree::base
     iree::base::internal::json
@@ -296,6 +298,28 @@ loom_cc_library(
     loom::serve::service::text::stream
     loom::serve::transport::http::server
     loom::serve::transport::websocket::connection
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    turn
+  HDRS
+    "turn.h"
+  SRCS
+    "turn.c"
+  DEPS
+    ::binding
+    ::capture
+    ::input
+    iree::base
+    iree::task
+    loom::serve::runtime::host::wake
+    loom::serve::server::registry
+    loom::serve::service::recognition::events
+    loom::serve::service::recognition::request
   PUBLIC
 )
 endif()

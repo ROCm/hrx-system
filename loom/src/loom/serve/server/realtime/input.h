@@ -19,6 +19,16 @@ typedef struct loom_serve_realtime_input_t loom_serve_realtime_input_t;
 typedef struct loom_serve_realtime_input_item_t
     loom_serve_realtime_input_item_t;
 
+// Immutable converter/source geometry, published after finite CPU priming.
+typedef struct loom_serve_realtime_input_geometry_t {
+  // Native observation clock in frames per second.
+  uint32_t sample_rate;
+  // Conservative original-rate frames beyond consumed activity coverage in
+  // native input/output, normalized staging, and converter history. Excludes
+  // unconsumed caller PCM loans and caller-selected pre-roll.
+  uint64_t retention_frames;
+} loom_serve_realtime_input_geometry_t;
+
 // Owns independent microphone items and one finite conversion worker. The
 // registry owner serializes every call; worker publication owes observer a
 // wake. PCM owners remain alive through their final release callback.
@@ -57,6 +67,21 @@ void loom_serve_realtime_input_close(loom_serve_realtime_input_item_t* item);
 // failure never terminates another session.
 void loom_serve_realtime_input_advance(loom_serve_realtime_input_t* input,
                                        bool stopping, bool* out_progress);
+
+// NULL until native admission and CPU priming release. No PCM is required to
+// prime; the returned immutable facts survive native completion.
+const loom_serve_realtime_input_geometry_t* loom_serve_realtime_input_geometry(
+    const loom_serve_realtime_input_item_t* item);
+// Borrows the next activity observation until consume/close. Transcript
+// revisions are collected into their independent source document. Holding an
+// activity observation applies only this item's native output backpressure.
+const loom_serve_recognition_activity_t* loom_serve_realtime_input_activity(
+    const loom_serve_realtime_input_item_t* item);
+void loom_serve_realtime_input_consume_activity(
+    loom_serve_realtime_input_item_t* item);
+// All requested output and accepted CPU work have retired successfully.
+bool loom_serve_realtime_input_complete(
+    const loom_serve_realtime_input_item_t* item);
 
 // Final transcript in source-established segment order, or NULL until all
 // accepted conversion and native result ownership has retired successfully.
