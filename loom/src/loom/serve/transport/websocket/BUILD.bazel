@@ -58,6 +58,7 @@ loom_cc_test(
     deps = [
         ":connection",
         ":handshake",
+        "//loom/src/loom/serve/testing:worker_gate",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:request",
         "//loom/src/loom/serve/transport/http:server",
@@ -65,6 +66,7 @@ loom_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
