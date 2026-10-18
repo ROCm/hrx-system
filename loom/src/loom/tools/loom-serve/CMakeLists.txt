@@ -68,6 +68,35 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    activity_tests
+  HDRS
+    "activity_test.h"
+  SRCS
+    "activity_test.cc"
+  DEPS
+    ::options
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::hal
+    iree::task
+    iree::testing::gtest
+    loom::serve::runtime::device
+    loom::serve::runtime::host
+    loom::serve::server::configuration
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::service::recognition::stream
+    loom::serve::service::recognition::transcription
+    loom::serve::testing::worker_gate
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     main
   HDRS
     "main.h"

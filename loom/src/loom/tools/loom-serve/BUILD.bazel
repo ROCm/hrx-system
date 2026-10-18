@@ -64,6 +64,30 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "activity_tests",
+    testonly = True,
+    srcs = ["activity_test.cc"],
+    hdrs = ["activity_test.h"],
+    deps = [
+        ":options",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/server:configuration",
+        "//loom/src/loom/serve/server:model_registration",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service/recognition:stream",
+        "//loom/src/loom/serve/service/recognition:transcription",
+        "//loom/src/loom/serve/testing:worker_gate",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_library(
     name = "main",
     srcs = ["main.c"],
     hdrs = ["main.h"],
