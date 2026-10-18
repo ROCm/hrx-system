@@ -1,0 +1,226 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("runner") @execute_5(%stage: i32, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) -> (i64)
+
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+global.rodata.def @empty = bytes("")
+
+global.rodata.def @options_error = bytes("53696c65726f2061637469766974792061636365707473206e6f206c616e67756167652c2070726f6d70742c206f722073616d706c696e672074656d7065726174757265")
+
+// A request owns its reusable descriptor and one padded PCM hop. Word 1 is
+// initialized only after a positive hop retires; slot reuse never borrows history.
+func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %language_length = buffer.length %language
+  %prompt_length = buffer.length %prompt
+  %no_language = index.cmp eq, %language_length, %origin : offset
+  %no_prompt = index.cmp eq, %prompt_length, %origin : offset
+  %zero_float = scalar.constant 0.0 : f32
+  %no_sampling = scalar.cmpf oeq, %temperature, %zero_float : f32
+  %no_text = scalar.andi %no_language, %no_prompt : i1
+  %valid = scalar.andi %no_text, %no_sampling : i1
+  %condition = scalar.extui %valid : i1 to i32
+  %diagnostic = global.load @options_error : buffer
+  func.call @require(%condition, %diagnostic) : (i32, buffer)
+  %metadata_offset = index.constant 32 : offset
+  %metadata = buffer.view %model[%metadata_offset] : buffer -> view<2xi64>
+  %hop_value = view.load %metadata[1] : view<2xi64> -> i64
+  %hop = scalar.assume %hop_value [range(%hop_value, 256, 512)] : i64
+  %four = scalar.constant 4 : i64
+  %header_bytes = scalar.constant 32 : i64
+  %pcm_bytes = scalar.muli %hop, %four : i64
+  %bytes = scalar.addi %pcm_bytes, %header_bytes : i64
+  %length = index.cast %bytes : i64 to offset
+  %state = buffer.alloca<private> align(8) %length : buffer
+  %initialized_offset = index.constant 4 : offset
+  %initialized = buffer.view %state[%initialized_offset] : buffer -> view<1xi32>
+  %zero32 = scalar.constant 0 : i32
+  view.store %zero32, %initialized[0] : i32, view<1xi32>
+  %empty = global.load @empty : buffer
+  func.return %state, %empty : buffer, buffer
+}
+
+func.def public @prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %position: i64, %eof: i32) -> (buffer, i64, i64) {
+  %origin = index.constant 0 : offset
+  %metadata_offset = index.constant 32 : offset
+  %metadata = buffer.view %model[%metadata_offset] : buffer -> view<2xi64>
+  %hop_value = view.load %metadata[1] : view<2xi64> -> i64
+  %hop = scalar.assume %hop_value [range(%hop_value, 256, 512)] : i64
+  %length = buffer.length %pcm
+  %bytes = index.cast %length : offset to i64
+  %four = scalar.constant 4 : i64
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %zero32 = scalar.constant 0 : i32
+  %frames = scalar.divui %bytes, %four : i64
+  %short = scalar.cmpi ult, %frames, %hop : i64
+  %count = scf.select %short, %frames, %hop : i64
+  %final = scalar.cmpi ne, %eof, %zero32 : i32
+  %full = scalar.cmpi uge, %frames, %hop : i64
+  %ready = scalar.ori %full, %final : i1
+  %units = scf.select %ready, %one, %zero : i64
+  %all = scalar.cmpi eq, %count, %frames : i64
+  %done = scalar.andi %all, %final : i1
+  %done32 = scalar.extui %done : i1 to i32
+  %header = buffer.view %state[%origin] : buffer -> view<8xi32>
+  %position_offset = index.constant 8 : offset
+  %position_field = buffer.view %state[%position_offset] : buffer -> view<1xi64>
+  %count32 = scalar.trunci %count : i64 to i32
+  view.store %zero32, %header[0] : i32, view<8xi32>
+  view.store %position, %position_field[0] : i64, view<1xi64>
+  view.store %count32, %header[4] : i32, view<8xi32>
+  view.store %done32, %header[5] : i32, view<8xi32>
+  view.store %zero32, %header[6] : i32, view<8xi32>
+  view.store %zero32, %header[7] : i32, view<8xi32>
+  %samples_offset = index.constant 32 : offset
+  %count_index = index.cast %count : i64 to index
+  %hop_index = index.cast %hop : i64 to index
+  %source = buffer.view %pcm[%origin] : buffer -> view<[%count_index]xf32>
+  %target = buffer.view %state[%samples_offset] : buffer -> view<[%hop_index]xf32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %zero_float = scalar.constant 0.0 : f32
+  scf.for %i = [%begin to %hop_index step %step] {
+    %present = index.cmp ult, %i, %count_index : index
+    %sample = scf.if %present -> (f32) {
+      %value = view.load %source[%i] : view<[%count_index]xf32> -> f32
+      scf.yield %value : f32
+    } else {
+      scf.yield %zero_float : f32
+    }
+    view.store %sample, %target[%i] : f32, view<[%hop_index]xf32>
+  }
+  func.return %state, %units, %zero : buffer, i64, i64
+}
+
+func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %metadata_offset = index.constant 32 : offset
+  %metadata = buffer.view %model[%metadata_offset] : buffer -> view<2xi64>
+  %hop_value = view.load %metadata[1] : view<2xi64> -> i64
+  %hop = scalar.assume %hop_value [range(%hop_value, 256, 512)] : i64
+  %four = scalar.constant 4 : i64
+  %descriptor_bytes = scalar.constant 32 : i64
+  %pcm_bytes = scalar.muli %hop, %four : i64
+  %stride64 = scalar.addi %pcm_bytes, %descriptor_bytes : i64
+  %stride = index.cast %stride64 : i64 to offset
+  %length = buffer.length %ranges
+  %range_bytes = index.cast %length : offset to i64
+  %range_stride = scalar.constant 24 : i64
+  %range_count = scalar.divui %range_bytes, %range_stride : i64
+  %count64 = scalar.assume %range_count [range(%range_count, 1, 8)] : i64
+  %count = index.cast %count64 : i64 to index
+  %records = buffer.view %ranges[%origin] : buffer -> view<[%count]x3xi64>
+  %capacity = index.constant 8 : index
+  %header_length = index.constant 16 : offset
+  %body_bytes = index.scale %capacity, %stride : index, offset -> offset
+  %payload_bytes = index.add %body_bytes, %header_length : offset
+  %payload = buffer.alloca<private> align(8) %payload_bytes : buffer
+  %header = buffer.view %payload[%origin] : buffer -> view<4xi32>
+  %count32 = scalar.trunci %count64 : i64 to i32
+  %zero32 = scalar.constant 0 : i32
+  view.store %count32, %header[0] : i32, view<4xi32>
+  view.store %zero32, %header[2] : i32, view<4xi32>
+  view.store %zero32, %header[3] : i32, view<4xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %positive_count = scf.for %i = [%begin to %count step %step](%positive_sum = %zero32 : i32) -> (i32) {
+    %source_value = view.load %records[%i, 1] : view<[%count]x3xi64> -> i64
+    %source64 = scalar.assume %source_value [range(%source_value, 0, 14560)] : i64
+    %source_offset = index.cast %source64 : i64 to offset
+    %scaled = index.scale %i, %stride : index, offset -> offset
+    %target_offset = index.add %scaled, %header_length : offset
+    buffer.copy %packed[%source_offset], %payload[%target_offset], %stride
+    %target = buffer.view %payload[%target_offset] : buffer -> view<8xi32>
+    %row = view.load %records[%i, 0] : view<[%count]x3xi64> -> i64
+    %row32 = scalar.trunci %row : i64 to i32
+    view.store %row32, %target[0] : i32, view<8xi32>
+    %frames = view.load %target[4] : view<8xi32> -> i32
+    %positive = scalar.cmpi ne, %frames, %zero32 : i32
+    %positive32 = scalar.extui %positive : i1 to i32
+    %next = scalar.addi %positive_sum, %positive32 : i32
+    scf.yield %next : i32
+  }
+  view.store %positive_count, %header[1] : i32, view<4xi32>
+  func.return %payload, %payload : buffer, buffer
+}
+
+func.def public @generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %plan[%origin] : buffer -> view<2xi32>
+  %positive = view.load %header[1] : view<2xi32> -> i32
+  %zero32 = scalar.constant 0 : i32
+  %has_work = scalar.cmpi ne, %positive, %zero32 : i32
+  scf.if %has_work {
+    %execution = func.call @execute_5(%zero32, %work, %requests, %conditioning, %streams, %output) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %count = view.load %header[0] : view<2xi32> -> i32
+    %count64 = scalar.extui %count : i32 to i64
+    %stride = scalar.constant 4 : i64
+    %length = scalar.muli %count64, %stride : i64
+    %zero64 = scalar.constant 0 : i64
+    %feedback = func.call @feedback(%zero32, %output, %zero64, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+  }
+  func.return
+}
+
+func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32) {
+  %origin = index.constant 0 : offset
+  %metadata_offset = index.constant 32 : offset
+  %metadata = buffer.view %model[%metadata_offset] : buffer -> view<2xi64>
+  %hop_value = view.load %metadata[1] : view<2xi64> -> i64
+  %hop = scalar.assume %hop_value [range(%hop_value, 256, 512)] : i64
+  %four = scalar.constant 4 : i64
+  %descriptor_bytes = scalar.constant 32 : i64
+  %pcm_bytes = scalar.muli %hop, %four : i64
+  %stride64 = scalar.addi %pcm_bytes, %descriptor_bytes : i64
+  %stride = index.cast %stride64 : i64 to offset
+  %bounded_ordinal = scalar.assume %ordinal [range(%ordinal, 0, 7)] : i64
+  %ordinal_index = index.cast %bounded_ordinal : i64 to index
+  %header_length = index.constant 16 : offset
+  %scaled = index.scale %ordinal_index, %stride : index, offset -> offset
+  %record_offset = index.add %scaled, %header_length : offset
+  %record = buffer.view %plan[%record_offset] : buffer -> view<8xi32>
+  %frames = view.load %record[4] : view<8xi32> -> i32
+  %done = view.load %record[5] : view<8xi32> -> i32
+  %count = scalar.extui %frames : i32 to i64
+  %zero32 = scalar.constant 0 : i32
+  %zero64 = scalar.constant 0 : i64
+  %positive = scalar.cmpi ne, %frames, %zero32 : i32
+  %event_bytes = scf.if %positive -> (i64) {
+    %one32 = scalar.constant 1 : i32
+    %initialized_offset = index.constant 4 : offset
+    %initialized = buffer.view %state[%initialized_offset] : buffer -> view<1xi32>
+    view.store %one32, %initialized[0] : i32, view<1xi32>
+    %position_delta = index.constant 8 : offset
+    %position_offset = index.add %record_offset, %position_delta : offset
+    %position_field = buffer.view %plan[%position_offset] : buffer -> view<1xi64>
+    %begin = view.load %position_field[0] : view<1xi64> -> i64
+    %end = scalar.addi %begin, %count : i64
+    %scores = buffer.view %feedback[%origin] : buffer -> view<8xf32>
+    %probability = view.load %scores[%ordinal_index] : view<8xf32> -> f32
+    %header = buffer.view %model[%origin] : buffer -> view<3xi32>
+    %payload_bytes = scalar.constant 20 : i32
+    view.store %one32, %header[0] : i32, view<3xi32>
+    view.store %one32, %header[1] : i32, view<3xi32>
+    view.store %payload_bytes, %header[2] : i32, view<3xi32>
+    %interval_offset = index.constant 12 : offset
+    %interval = buffer.view %model[%interval_offset] : buffer -> view<2xi64>
+    view.store %begin, %interval[0] : i64, view<2xi64>
+    view.store %end, %interval[1] : i64, view<2xi64>
+    %probability_offset = index.constant 28 : offset
+    %result = buffer.view %model[%probability_offset] : buffer -> view<1xf32>
+    view.store %probability, %result[0] : f32, view<1xf32>
+    %bytes = scalar.constant 32 : i64
+    scf.yield %bytes : i64
+  } else {
+    scf.yield %zero64 : i64
+  }
+  func.return %count, %model, %event_bytes, %done : i64, buffer, i64, i32
+}

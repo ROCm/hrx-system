@@ -1,0 +1,148 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// These are independent scalar state equations for the zero-weight network:
+// c' = c/2, h' = tanh(c/2)/2, probability = 1/2. Nonzero learned matrix
+// arithmetic has separate coverage; here every history and padding value is
+// visible, including empty rows, fresh rows, and packed/resident permutations.
+// Rounded F64 oracle values for tanh((1 + resident/4)/2)/2.
+global.rodata.def @hidden_values = align(4) bytes("9f9a6c3e3ffa8d3e1f99a23e2833b43ed6f7c23e5b2ecf3e1e29d93e533ce13e")
+
+config.decl @state.hop : index
+
+config.decl @state.context : index
+
+func.def @state_fixture(%trial_value: index, %work: buffer, %bank: buffer, %expected_bank: buffer, %expected_windows: buffer, %expected_previous: buffer) {
+  %trial = index.assume %trial_value [range(%trial_value, 0, 7)] : index
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %eight = index.constant 8 : index
+  %channels = index.constant 128 : index
+  %recurrent = index.constant 256 : index
+  %hop = config.get @state.hop : index
+  %context = config.get @state.context : index
+  %window = index.add %hop, %context : index
+  %state_columns = index.add %context, %recurrent : index
+  %cell_begin = index.add %context, %channels : index
+  %four_bytes = index.constant 4 : offset
+  %pcm_bytes = index.scale %hop, %four_bytes : index, offset -> offset
+  %header_bytes = index.constant 32 : offset
+  %stride = index.add %pcm_bytes, %header_bytes : offset
+  %batch_header_bytes = index.constant 16 : offset
+  %zero_float = scalar.constant 0.0 : f32
+  %half = scalar.constant 0.5 : f32
+  %count = index.add %trial, %one : index
+  %count32 = index.cast %count : index to i32
+  %header = buffer.view %work[%origin] : buffer -> view<4xi32>
+  view.store %count32, %header[0] : i32, view<4xi32>
+  %initial = buffer.view %bank[%origin] : buffer -> view<8x[%state_columns]xf32>
+  %expected = buffer.view %expected_bank[%origin] : buffer -> view<8x[%state_columns]xf32>
+  %windows = buffer.view %expected_windows[%origin] : buffer -> view<8x[%window]xf32>
+  %previous = buffer.view %expected_previous[%origin] : buffer -> view<2x128x16xf32>
+  %hidden_storage = global.load @hidden_values : buffer
+  %hidden_values = buffer.view %hidden_storage[%origin] : buffer -> view<8xf32>
+  %quarter = scalar.constant 0.25 : f32
+  %unit = scalar.constant 1.0 : f32
+  scf.for %resident = [%zero to %eight step %one] {
+    %word = index.cast %resident : index to i32
+    %number = scalar.sitofp %word : i32 to f32
+    %cell = scalar.fmaf %number, %quarter, %unit : f32
+    scf.for %channel = [%zero to %channels step %one] {
+      %column = index.add %cell_begin, %channel : index
+      view.store %cell, %initial[%resident, %column] : f32, view<8x[%state_columns]xf32>
+      view.store %cell, %expected[%resident, %column] : f32, view<8x[%state_columns]xf32>
+    }
+  }
+  scf.for %packed = [%zero to %count step %one] {
+    %permuted = index.mul %packed, %three : index
+    %shifted = index.add %permuted, %trial : index
+    %resident = index.rem %shifted, %eight : index
+    %fresh_pattern = index.add %packed, %trial : index
+    %initialized = index.rem %fresh_pattern, %two : index
+    %history = index.cmp ne, %initialized, %zero : index
+    %empty = index.cmp eq, %packed, %one : index
+    %partial = index.cmp eq, %packed, %two : index
+    %seventeen = index.constant 17 : index
+    %nonempty_frames = scf.select %partial, %seventeen, %hop : index
+    %frames = scf.select %empty, %zero, %nonempty_frames : index
+    %positive = index.cmp ne, %frames, %zero : index
+    %retained = scalar.andi %history, %positive : i1
+    %record_delta = index.scale %packed, %stride : index, offset -> offset
+    %record_offset = index.add %record_delta, %batch_header_bytes : offset
+    %record = buffer.view %work[%record_offset] : buffer -> view<8xi32>
+    %resident32 = index.cast %resident : index to i32
+    %initialized32 = index.cast %initialized : index to i32
+    %frames32 = index.cast %frames : index to i32
+    view.store %resident32, %record[0] : i32, view<8xi32>
+    view.store %initialized32, %record[1] : i32, view<8xi32>
+    view.store %frames32, %record[4] : i32, view<8xi32>
+    %sample_offset = index.add %record_offset, %header_bytes : offset
+    %samples = buffer.view %work[%sample_offset] : buffer -> view<[%hop]xf32>
+    %row32 = index.cast %resident : index to i32
+    %row_float = scalar.sitofp %row32 : i32 to f32
+    scf.for %frame = [%zero to %frames step %one] {
+      %frame32 = index.cast %frame : index to i32
+      %frame_float = scalar.sitofp %frame32 : i32 to f32
+      %step = scalar.constant 0.001953125 : f32
+      %sample = scalar.fmaf %frame_float, %step, %row_float : f32
+      view.store %sample, %samples[%frame] : f32, view<[%hop]xf32>
+      %column = index.add %context, %frame : index
+      view.store %sample, %windows[%packed, %column] : f32, view<8x[%window]xf32>
+    }
+    scf.if %retained {
+      scf.for %column = [%zero to %context step %one] {
+        %sample = view.load %initial[%resident, %column] : view<8x[%state_columns]xf32> -> f32
+        view.store %sample, %windows[%packed, %column] : f32, view<8x[%window]xf32>
+      }
+      scf.for %channel = [%zero to %channels step %one] {
+        %hidden_column = index.add %context, %channel : index
+        %cell_column = index.add %cell_begin, %channel : index
+        %hidden = view.load %initial[%resident, %hidden_column] : view<8x[%state_columns]xf32> -> f32
+        %cell = view.load %initial[%resident, %cell_column] : view<8x[%state_columns]xf32> -> f32
+        view.store %hidden, %previous[0, %channel, %packed] : f32, view<2x128x16xf32>
+        view.store %cell, %previous[1, %channel, %packed] : f32, view<2x128x16xf32>
+      }
+    }
+    scf.if %positive {
+      scf.for %column = [%zero to %context step %one] {
+        %tail_begin = index.sub %hop, %context : index
+        %source = index.add %tail_begin, %column : index
+        %sample = view.load %samples[%source] : view<[%hop]xf32> -> f32
+        view.store %sample, %expected[%resident, %column] : f32, view<8x[%state_columns]xf32>
+      }
+      scf.for %channel = [%zero to %channels step %one] {
+        %hidden_column = index.add %context, %channel : index
+        %cell_column = index.add %cell_begin, %channel : index
+        %old_cell = scf.if %history -> (f32) {
+          %value = view.load %initial[%resident, %cell_column] : view<8x[%state_columns]xf32> -> f32
+          scf.yield %value : f32
+        } else {
+          scf.yield %zero_float : f32
+        }
+        %cell32 = scalar.mulf %old_cell, %half : f32
+        %hidden32 = scf.if %history -> (f32) {
+          %value = view.load %hidden_values[%resident] : view<8xf32> -> f32
+          scf.yield %value : f32
+        } else {
+          scf.yield %zero_float : f32
+        }
+        view.store %hidden32, %expected[%resident, %hidden_column] : f32, view<8x[%state_columns]xf32>
+        view.store %cell32, %expected[%resident, %cell_column] : f32, view<8x[%state_columns]xf32>
+      }
+    }
+  }
+  func.return
+}
+
+func.def @copy_fixture(%source: buffer, %target: buffer) {
+  %origin = index.constant 0 : offset
+  %length = buffer.length %source
+  buffer.copy %source[%origin], %target[%origin], %length
+  func.return
+}

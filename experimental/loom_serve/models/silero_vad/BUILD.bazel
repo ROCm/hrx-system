@@ -1,0 +1,106 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile", "loom_test")
+load("//loom/requirements:defs.bzl", "EXECUTE_IREE_HAL", "TARGET_ARCH_X86")
+load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
+
+package(default_visibility = ["//visibility:private"])
+
+filegroup(
+    name = "sources",
+    srcs = glob(["*.loom"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "models",
+    srcs = [
+        "model_16000.json",
+        "model_8000.json",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+_CPU_PROFILE = loom_execution_profile(
+    name = "cpu",
+    build_requirements = [
+        EXECUTE_IREE_HAL,
+        TARGET_ARCH_X86,
+    ],
+    executor = "hardware",
+    runner_args = ["--device=task"],
+    target_class = "cpu",
+    target_family = "x86",
+)
+
+loom_test(
+    name = "matrix_test",
+    srcs = [
+        "numerical.loom",
+        "tests/matrix.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [_CPU_PROFILE],
+    variants = {
+        "%dx%dx%d" % (rows, columns, reduction): {
+            "configs": {
+                "matrix.columns": str(columns),
+                "matrix.reduction": str(reduction),
+                "matrix.rows": str(rows),
+            },
+        }
+        for rows, columns, reduction in [
+            (132, 32, 128),
+            (264, 32, 256),
+            (132, 32, 195),
+            (132, 32, 387),
+            (72, 16, 384),
+            (72, 16, 192),
+            (132, 16, 192),
+            (516, 16, 128),
+        ]
+    },
+)
+
+[
+    loom_test(
+        name = "state_%d_test" % rate,
+        srcs = [
+            "generate_%d.loom" % rate,
+            "numerical.loom",
+            "tests/state.loom",
+            "tests/state_%d.loom" % rate,
+        ],
+        benchmark_smoke = False,
+        configs = {
+            "state.context": str(rate // 250),
+            "state.hop": str(rate * 32 // 1000),
+        },
+        execution_profiles = [_CPU_PROFILE],
+    )
+    for rate in [
+        8000,
+        16000,
+    ]
+]
+
+loom_test(
+    name = "control_test",
+    srcs = [
+        "control.loom",
+        "tests/control.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
+    variants = {
+        str(rate): {"configs": {"control.hop": str(rate * 32 // 1000)}}
+        for rate in [
+            8000,
+            16000,
+        ]
+    },
+)

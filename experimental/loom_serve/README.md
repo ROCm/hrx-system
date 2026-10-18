@@ -17,12 +17,15 @@ are no per-model C implementations or compiler-internal dependencies here.
   reference voices, retained conditioning, and independent request batching.
 - [Moonshine Streaming Tiny](models/moonshine/README.md): incremental speech
   recognition, revisable transcripts, independent histories, and batched dictation.
+- [Silero VAD](models/silero_vad/README.md): CPU voice activity at 8 and 16 kHz,
+  independent recurrent histories, and native activity events for turn detection.
 - [Shared motifs](motifs/README.md): reusable arithmetic receiving SSA operands
   and template arguments, independent of a model's configuration namespace.
 
 Each package targets its stated device architecture. Qwen3 embeddings use the
-Strix Halo NPU; the text, image, and speech packages use GFX11 AMD GPUs. Model
-documents select the corresponding device in a multi-device server.
+Strix Halo NPU; Silero uses the CPU; the text, image, and speech generation and
+recognition packages use GFX11 AMD GPUs. Model documents select the corresponding
+device in a multi-device server.
 The server and model packages have independent lifetimes: changing a compatible
 package needs no server rebuild. The packages remain experimental and separate
 from the supported serving implementation.

@@ -1,0 +1,864 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Twelve independent accumulator rows reuse each sixteen-column input load.
+target.decl @vad
+
+template.decl @vad.matrix(%rows: index, %columns: index, %reduction: index, %input: buffer, %weights: view<[%rows]x[%reduction]xf32>, %output: buffer, %input_origin: offset, %output_origin: offset)
+
+template.def<@vad.matrix> device @vad_matrix(%rows: index, %columns: index, %reduction: index, %input: buffer, %weights: view<[%rows]x[%reduction]xf32>, %output: buffer, %input_origin: offset, %output_origin: offset) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %twelve = index.constant 12 : index
+  %sixteen = index.constant 16 : index
+  %zero_float = scalar.constant 0.0 : f32
+  %initial = vector.splat %zero_float : vector<16xf32>
+  %values = buffer.view %input[%input_origin] : buffer -> view<[%reduction]x[%columns]xf32>
+  %results = buffer.view %output[%output_origin] : buffer -> view<[%rows]x[%columns]xf32>
+  scf.for %row = [%zero to %rows step %twelve] {
+    scf.for %column = [%zero to %columns step %sixteen] {
+      %delta0 = index.constant 0 : index
+      %row0 = index.add %row, %delta0 : index
+      %delta1 = index.constant 1 : index
+      %row1 = index.add %row, %delta1 : index
+      %delta2 = index.constant 2 : index
+      %row2 = index.add %row, %delta2 : index
+      %delta3 = index.constant 3 : index
+      %row3 = index.add %row, %delta3 : index
+      %delta4 = index.constant 4 : index
+      %row4 = index.add %row, %delta4 : index
+      %delta5 = index.constant 5 : index
+      %row5 = index.add %row, %delta5 : index
+      %delta6 = index.constant 6 : index
+      %row6 = index.add %row, %delta6 : index
+      %delta7 = index.constant 7 : index
+      %row7 = index.add %row, %delta7 : index
+      %delta8 = index.constant 8 : index
+      %row8 = index.add %row, %delta8 : index
+      %delta9 = index.constant 9 : index
+      %row9 = index.add %row, %delta9 : index
+      %delta10 = index.constant 10 : index
+      %row10 = index.add %row, %delta10 : index
+      %delta11 = index.constant 11 : index
+      %row11 = index.add %row, %delta11 : index
+      %result0, %result1, %result2, %result3, %result4, %result5, %result6, %result7, %result8, %result9, %result10, %result11 = scf.for %k = [%zero to %reduction step %one](%sum0 = %initial : vector<16xf32>, %sum1 = %initial : vector<16xf32>, %sum2 = %initial : vector<16xf32>, %sum3 = %initial : vector<16xf32>, %sum4 = %initial : vector<16xf32>, %sum5 = %initial : vector<16xf32>, %sum6 = %initial : vector<16xf32>, %sum7 = %initial : vector<16xf32>, %sum8 = %initial : vector<16xf32>, %sum9 = %initial : vector<16xf32>, %sum10 = %initial : vector<16xf32>, %sum11 = %initial : vector<16xf32>) -> (vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>) {
+        %value = vector.load %values[%k, %column] : view<[%reduction]x[%columns]xf32> -> vector<16xf32>
+        %weight0 = view.load %weights[%row0, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast0 = vector.splat %weight0 : vector<16xf32>
+        %next0 = vector.fmaf %value, %broadcast0, %sum0 : vector<16xf32>
+        %weight1 = view.load %weights[%row1, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast1 = vector.splat %weight1 : vector<16xf32>
+        %next1 = vector.fmaf %value, %broadcast1, %sum1 : vector<16xf32>
+        %weight2 = view.load %weights[%row2, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast2 = vector.splat %weight2 : vector<16xf32>
+        %next2 = vector.fmaf %value, %broadcast2, %sum2 : vector<16xf32>
+        %weight3 = view.load %weights[%row3, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast3 = vector.splat %weight3 : vector<16xf32>
+        %next3 = vector.fmaf %value, %broadcast3, %sum3 : vector<16xf32>
+        %weight4 = view.load %weights[%row4, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast4 = vector.splat %weight4 : vector<16xf32>
+        %next4 = vector.fmaf %value, %broadcast4, %sum4 : vector<16xf32>
+        %weight5 = view.load %weights[%row5, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast5 = vector.splat %weight5 : vector<16xf32>
+        %next5 = vector.fmaf %value, %broadcast5, %sum5 : vector<16xf32>
+        %weight6 = view.load %weights[%row6, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast6 = vector.splat %weight6 : vector<16xf32>
+        %next6 = vector.fmaf %value, %broadcast6, %sum6 : vector<16xf32>
+        %weight7 = view.load %weights[%row7, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast7 = vector.splat %weight7 : vector<16xf32>
+        %next7 = vector.fmaf %value, %broadcast7, %sum7 : vector<16xf32>
+        %weight8 = view.load %weights[%row8, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast8 = vector.splat %weight8 : vector<16xf32>
+        %next8 = vector.fmaf %value, %broadcast8, %sum8 : vector<16xf32>
+        %weight9 = view.load %weights[%row9, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast9 = vector.splat %weight9 : vector<16xf32>
+        %next9 = vector.fmaf %value, %broadcast9, %sum9 : vector<16xf32>
+        %weight10 = view.load %weights[%row10, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast10 = vector.splat %weight10 : vector<16xf32>
+        %next10 = vector.fmaf %value, %broadcast10, %sum10 : vector<16xf32>
+        %weight11 = view.load %weights[%row11, %k] : view<[%rows]x[%reduction]xf32> -> f32
+        %broadcast11 = vector.splat %weight11 : vector<16xf32>
+        %next11 = vector.fmaf %value, %broadcast11, %sum11 : vector<16xf32>
+        scf.yield %next0, %next1, %next2, %next3, %next4, %next5, %next6, %next7, %next8, %next9, %next10, %next11 : vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>, vector<16xf32>
+      }
+      vector.store %result0, %results[%row0, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result1, %results[%row1, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result2, %results[%row2, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result3, %results[%row3, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result4, %results[%row4, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result5, %results[%row5, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result6, %results[%row6, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result7, %results[%row7, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result8, %results[%row8, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result9, %results[%row9, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result10, %results[%row10, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+      vector.store %result11, %results[%row11, %column] : vector<16xf32>, view<[%rows]x[%columns]xf32>
+    }
+  }
+  template.return
+}
+
+template.decl @vad.hop_8000(%window_buffer: buffer, %stft_weights: view<132x128xf32>, %encoder0_weights: view<132x195xf32>, %encoder1_weights: view<72x384xf32>, %encoder2_weights: view<72x192xf32>, %encoder3_weights: view<132x192xf32>, %input_gates_weights: view<516x128xf32>, %recurrent_gates_weights: view<516x128xf32>, %encoder0_bias: view<128xf32>, %encoder1_bias: view<64xf32>, %encoder2_bias: view<64xf32>, %encoder3_bias: view<128xf32>, %gate_bias: view<512xf32>, %head_weight: view<128xf32>, %head_bias: view<1xf32>, %previous_state: buffer, %scratch: buffer, %next_state: buffer, %probability: buffer)
+
+template.def<@vad.hop_8000> device @vad_hop_8000(%window_buffer: buffer, %stft_weights: view<132x128xf32>, %encoder0_weights: view<132x195xf32>, %encoder1_weights: view<72x384xf32>, %encoder2_weights: view<72x192xf32>, %encoder3_weights: view<132x192xf32>, %input_gates_weights: view<516x128xf32>, %recurrent_gates_weights: view<516x128xf32>, %encoder0_bias: view<128xf32>, %encoder1_bias: view<64xf32>, %encoder2_bias: view<64xf32>, %encoder3_bias: view<128xf32>, %gate_bias: view<512xf32>, %head_weight: view<128xf32>, %head_bias: view<1xf32>, %previous_state: buffer, %scratch: buffer, %next_state: buffer, %probability: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %four = index.constant 4 : index
+  %three = index.constant 3 : index
+  %zero_float = scalar.constant 0.0 : f32
+  %zeros = vector.splat %zero_float : vector<16xf32>
+  %constant1 = index.constant 0 : offset
+  %window = buffer.view %window_buffer[%constant1] : buffer -> view<8x288xf32>
+  %constant2 = index.constant 0 : offset
+  %spectral_input = buffer.view %scratch[%constant2] : buffer -> view<128x32xf32>
+  %constant3 = index.constant 128 : index
+  %constant4 = index.constant 64 : index
+  %constant5 = index.constant 288 : index
+  %constant6 = index.constant 574 : index
+  scf.for %k = [%zero to %constant3 step %one] {
+    scf.for %column = [%zero to %thirty_two step %one] {
+      %stream = index.div %column, %four : index
+      %time = index.rem %column, %four : index
+      %begin = index.mul %time, %constant4 : index
+      %position = index.add %begin, %k : index
+      %outside = index.cmp uge, %position, %constant5 : index
+      %backward = index.sub %constant6, %position : index
+      %source = scf.select %outside, %backward, %position : index
+      %value = view.load %window[%stream, %source] : view<8x288xf32> -> f32
+      view.store %value, %spectral_input[%k, %column] : f32, view<128x32xf32>
+    }
+  }
+  %constant7 = index.constant 132 : index
+  %constant8 = index.constant 32 : index
+  %constant9 = index.constant 128 : index
+  %constant10 = index.constant 0 : offset
+  %constant11 = index.constant 0 : offset
+  %constant12 = index.constant 51200 : offset
+  %stft_weights_matrix = view.refine %stft_weights : view<132x128xf32> -> view<[%constant7]x[%constant9]xf32>
+  template.apply<@vad.matrix>(%constant7, %constant8, %constant9, %scratch, %stft_weights_matrix, %scratch, %constant10, %constant12) : (index, index, index, buffer, view<[%constant7]x[%constant9]xf32>, buffer, offset, offset)
+  %constant13 = index.constant 51200 : offset
+  %spectrum = buffer.view %scratch[%constant13] : buffer -> view<132x32xf32>
+  %constant14 = index.constant 118784 : offset
+  %magnitude = buffer.view %scratch[%constant14] : buffer -> view<65x32xf32>
+  %constant15 = index.constant 65 : index
+  scf.for %bin = [%zero to %constant15 step %one] {
+    %imaginary_bin = index.add %bin, %constant15 : index
+    scf.for %column = [%zero to %thirty_two step %sixteen] {
+      %real = vector.load %spectrum[%bin, %column] : view<132x32xf32> -> vector<16xf32>
+      %imaginary = vector.load %spectrum[%imaginary_bin, %column] : view<132x32xf32> -> vector<16xf32>
+      %squared_real = vector.mulf %real, %real : vector<16xf32>
+      %squared_imaginary = vector.mulf %imaginary, %imaginary : vector<16xf32>
+      %squared = vector.addf %squared_real, %squared_imaginary : vector<16xf32>
+      %magnitude_value = vector.sqrtf %squared : vector<16xf32>
+      vector.store %magnitude_value, %magnitude[%bin, %column] : vector<16xf32>, view<65x32xf32>
+    }
+  }
+  %constant16 = index.constant 0 : offset
+  %encoder0_input = buffer.view %scratch[%constant16] : buffer -> view<195x32xf32>
+  %constant17 = index.constant 118784 : offset
+  %encoder0_source = buffer.view %scratch[%constant17] : buffer -> view<65x32xf32>
+  %constant18 = index.constant 195 : index
+  %constant19 = index.constant 32 : index
+  %constant20 = index.constant 4 : index
+  %constant21 = index.constant 4 : index
+  %constant22 = index.constant 1 : index
+  scf.for %k = [%zero to %constant18 step %one] {
+    %channel = index.div %k, %three : index
+    %tap = index.rem %k, %three : index
+    scf.for %column = [%zero to %constant19 step %one] {
+      %stream = index.div %column, %constant20 : index
+      %time = index.rem %column, %constant20 : index
+      %center = index.mul %time, %constant22 : index
+      %padded = index.add %center, %tap : index
+      %position = index.sub %padded, %one : index
+      %valid_stream = index.cmp ult, %stream, %eight : index
+      %valid_time = index.cmp ult, %position, %constant21 : index
+      %live = scalar.andi %valid_stream, %valid_time : i1
+      %value = scf.if %live -> (f32) {
+        %stream_begin = index.mul %stream, %constant21 : index
+        %source_column = index.add %stream_begin, %position : index
+        %loaded = view.load %encoder0_source[%channel, %source_column] : view<65x32xf32> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero_float : f32
+      }
+      view.store %value, %encoder0_input[%k, %column] : f32, view<195x32xf32>
+    }
+  }
+  %constant23 = index.constant 132 : index
+  %constant24 = index.constant 32 : index
+  %constant25 = index.constant 195 : index
+  %constant26 = index.constant 0 : offset
+  %constant27 = index.constant 68160 : offset
+  %constant28 = index.constant 51200 : offset
+  %encoder0_weights_matrix = view.refine %encoder0_weights : view<132x195xf32> -> view<[%constant23]x[%constant25]xf32>
+  template.apply<@vad.matrix>(%constant23, %constant24, %constant25, %scratch, %encoder0_weights_matrix, %scratch, %constant26, %constant28) : (index, index, index, buffer, view<[%constant23]x[%constant25]xf32>, buffer, offset, offset)
+  %constant29 = index.constant 51200 : offset
+  %encoder0_result = buffer.view %scratch[%constant29] : buffer -> view<132x32xf32>
+  %constant30 = index.constant 171120 : offset
+  %constant31 = index.constant 118784 : offset
+  %encoder0_activation = buffer.view %scratch[%constant31] : buffer -> view<128x32xf32>
+  %constant32 = index.constant 128 : index
+  scf.for %channel = [%zero to %constant32 step %one] {
+    %bias = view.load %encoder0_bias[%channel] : view<128xf32> -> f32
+    %biases = vector.splat %bias : vector<16xf32>
+    scf.for %column = [%zero to %constant19 step %sixteen] {
+      %value = vector.load %encoder0_result[%channel, %column] : view<132x32xf32> -> vector<16xf32>
+      %biased = vector.addf %value, %biases : vector<16xf32>
+      %activated = vector.maxnumf %biased, %zeros : vector<16xf32>
+      vector.store %activated, %encoder0_activation[%channel, %column] : vector<16xf32>, view<128x32xf32>
+    }
+  }
+  %constant33 = index.constant 0 : offset
+  %encoder1_input = buffer.view %scratch[%constant33] : buffer -> view<384x16xf32>
+  %constant34 = index.constant 118784 : offset
+  %encoder1_source = buffer.view %scratch[%constant34] : buffer -> view<128x32xf32>
+  %constant35 = index.constant 384 : index
+  %constant36 = index.constant 16 : index
+  %constant37 = index.constant 2 : index
+  %constant38 = index.constant 4 : index
+  %constant39 = index.constant 2 : index
+  scf.for %k = [%zero to %constant35 step %one] {
+    %channel = index.div %k, %three : index
+    %tap = index.rem %k, %three : index
+    scf.for %column = [%zero to %constant36 step %one] {
+      %stream = index.div %column, %constant37 : index
+      %time = index.rem %column, %constant37 : index
+      %center = index.mul %time, %constant39 : index
+      %padded = index.add %center, %tap : index
+      %position = index.sub %padded, %one : index
+      %valid_stream = index.cmp ult, %stream, %eight : index
+      %valid_time = index.cmp ult, %position, %constant38 : index
+      %live = scalar.andi %valid_stream, %valid_time : i1
+      %value = scf.if %live -> (f32) {
+        %stream_begin = index.mul %stream, %constant38 : index
+        %source_column = index.add %stream_begin, %position : index
+        %loaded = view.load %encoder1_source[%channel, %source_column] : view<128x32xf32> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero_float : f32
+      }
+      view.store %value, %encoder1_input[%k, %column] : f32, view<384x16xf32>
+    }
+  }
+  %constant40 = index.constant 72 : index
+  %constant41 = index.constant 16 : index
+  %constant42 = index.constant 384 : index
+  %constant43 = index.constant 0 : offset
+  %constant44 = index.constant 171648 : offset
+  %constant45 = index.constant 51200 : offset
+  %encoder1_weights_matrix = view.refine %encoder1_weights : view<72x384xf32> -> view<[%constant40]x[%constant42]xf32>
+  template.apply<@vad.matrix>(%constant40, %constant41, %constant42, %scratch, %encoder1_weights_matrix, %scratch, %constant43, %constant45) : (index, index, index, buffer, view<[%constant40]x[%constant42]xf32>, buffer, offset, offset)
+  %constant46 = index.constant 51200 : offset
+  %encoder1_result = buffer.view %scratch[%constant46] : buffer -> view<72x16xf32>
+  %constant47 = index.constant 282240 : offset
+  %constant48 = index.constant 118784 : offset
+  %encoder1_activation = buffer.view %scratch[%constant48] : buffer -> view<64x16xf32>
+  %constant49 = index.constant 64 : index
+  scf.for %channel = [%zero to %constant49 step %one] {
+    %bias = view.load %encoder1_bias[%channel] : view<64xf32> -> f32
+    %biases = vector.splat %bias : vector<16xf32>
+    scf.for %column = [%zero to %constant36 step %sixteen] {
+      %value = vector.load %encoder1_result[%channel, %column] : view<72x16xf32> -> vector<16xf32>
+      %biased = vector.addf %value, %biases : vector<16xf32>
+      %activated = vector.maxnumf %biased, %zeros : vector<16xf32>
+      vector.store %activated, %encoder1_activation[%channel, %column] : vector<16xf32>, view<64x16xf32>
+    }
+  }
+  %constant50 = index.constant 0 : offset
+  %encoder2_input = buffer.view %scratch[%constant50] : buffer -> view<192x16xf32>
+  %constant51 = index.constant 118784 : offset
+  %encoder2_source = buffer.view %scratch[%constant51] : buffer -> view<64x16xf32>
+  %constant52 = index.constant 192 : index
+  %constant53 = index.constant 16 : index
+  %constant54 = index.constant 1 : index
+  %constant55 = index.constant 2 : index
+  %constant56 = index.constant 2 : index
+  scf.for %k = [%zero to %constant52 step %one] {
+    %channel = index.div %k, %three : index
+    %tap = index.rem %k, %three : index
+    scf.for %column = [%zero to %constant53 step %one] {
+      %stream = index.div %column, %constant54 : index
+      %time = index.rem %column, %constant54 : index
+      %center = index.mul %time, %constant56 : index
+      %padded = index.add %center, %tap : index
+      %position = index.sub %padded, %one : index
+      %valid_stream = index.cmp ult, %stream, %eight : index
+      %valid_time = index.cmp ult, %position, %constant55 : index
+      %live = scalar.andi %valid_stream, %valid_time : i1
+      %value = scf.if %live -> (f32) {
+        %stream_begin = index.mul %stream, %constant55 : index
+        %source_column = index.add %stream_begin, %position : index
+        %loaded = view.load %encoder2_source[%channel, %source_column] : view<64x16xf32> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero_float : f32
+      }
+      view.store %value, %encoder2_input[%k, %column] : f32, view<192x16xf32>
+    }
+  }
+  %constant57 = index.constant 72 : index
+  %constant58 = index.constant 16 : index
+  %constant59 = index.constant 192 : index
+  %constant60 = index.constant 0 : offset
+  %constant61 = index.constant 282496 : offset
+  %constant62 = index.constant 51200 : offset
+  %encoder2_weights_matrix = view.refine %encoder2_weights : view<72x192xf32> -> view<[%constant57]x[%constant59]xf32>
+  template.apply<@vad.matrix>(%constant57, %constant58, %constant59, %scratch, %encoder2_weights_matrix, %scratch, %constant60, %constant62) : (index, index, index, buffer, view<[%constant57]x[%constant59]xf32>, buffer, offset, offset)
+  %constant63 = index.constant 51200 : offset
+  %encoder2_result = buffer.view %scratch[%constant63] : buffer -> view<72x16xf32>
+  %constant64 = index.constant 337792 : offset
+  %constant65 = index.constant 118784 : offset
+  %encoder2_activation = buffer.view %scratch[%constant65] : buffer -> view<64x16xf32>
+  %constant66 = index.constant 64 : index
+  scf.for %channel = [%zero to %constant66 step %one] {
+    %bias = view.load %encoder2_bias[%channel] : view<64xf32> -> f32
+    %biases = vector.splat %bias : vector<16xf32>
+    scf.for %column = [%zero to %constant53 step %sixteen] {
+      %value = vector.load %encoder2_result[%channel, %column] : view<72x16xf32> -> vector<16xf32>
+      %biased = vector.addf %value, %biases : vector<16xf32>
+      %activated = vector.maxnumf %biased, %zeros : vector<16xf32>
+      vector.store %activated, %encoder2_activation[%channel, %column] : vector<16xf32>, view<64x16xf32>
+    }
+  }
+  %constant67 = index.constant 0 : offset
+  %encoder3_input = buffer.view %scratch[%constant67] : buffer -> view<192x16xf32>
+  %constant68 = index.constant 118784 : offset
+  %encoder3_source = buffer.view %scratch[%constant68] : buffer -> view<64x16xf32>
+  %constant69 = index.constant 192 : index
+  %constant70 = index.constant 16 : index
+  %constant71 = index.constant 1 : index
+  %constant72 = index.constant 1 : index
+  %constant73 = index.constant 1 : index
+  scf.for %k = [%zero to %constant69 step %one] {
+    %channel = index.div %k, %three : index
+    %tap = index.rem %k, %three : index
+    scf.for %column = [%zero to %constant70 step %one] {
+      %stream = index.div %column, %constant71 : index
+      %time = index.rem %column, %constant71 : index
+      %center = index.mul %time, %constant73 : index
+      %padded = index.add %center, %tap : index
+      %position = index.sub %padded, %one : index
+      %valid_stream = index.cmp ult, %stream, %eight : index
+      %valid_time = index.cmp ult, %position, %constant72 : index
+      %live = scalar.andi %valid_stream, %valid_time : i1
+      %value = scf.if %live -> (f32) {
+        %stream_begin = index.mul %stream, %constant72 : index
+        %source_column = index.add %stream_begin, %position : index
+        %loaded = view.load %encoder3_source[%channel, %source_column] : view<64x16xf32> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero_float : f32
+      }
+      view.store %value, %encoder3_input[%k, %column] : f32, view<192x16xf32>
+    }
+  }
+  %constant74 = index.constant 132 : index
+  %constant75 = index.constant 16 : index
+  %constant76 = index.constant 192 : index
+  %constant77 = index.constant 0 : offset
+  %constant78 = index.constant 338048 : offset
+  %constant79 = index.constant 51200 : offset
+  %encoder3_weights_matrix = view.refine %encoder3_weights : view<132x192xf32> -> view<[%constant74]x[%constant76]xf32>
+  template.apply<@vad.matrix>(%constant74, %constant75, %constant76, %scratch, %encoder3_weights_matrix, %scratch, %constant77, %constant79) : (index, index, index, buffer, view<[%constant74]x[%constant76]xf32>, buffer, offset, offset)
+  %constant80 = index.constant 51200 : offset
+  %encoder3_result = buffer.view %scratch[%constant80] : buffer -> view<132x16xf32>
+  %constant81 = index.constant 439424 : offset
+  %constant82 = index.constant 118784 : offset
+  %encoder3_activation = buffer.view %scratch[%constant82] : buffer -> view<128x16xf32>
+  %constant83 = index.constant 128 : index
+  scf.for %channel = [%zero to %constant83 step %one] {
+    %bias = view.load %encoder3_bias[%channel] : view<128xf32> -> f32
+    %biases = vector.splat %bias : vector<16xf32>
+    scf.for %column = [%zero to %constant70 step %sixteen] {
+      %value = vector.load %encoder3_result[%channel, %column] : view<132x16xf32> -> vector<16xf32>
+      %biased = vector.addf %value, %biases : vector<16xf32>
+      %activated = vector.maxnumf %biased, %zeros : vector<16xf32>
+      vector.store %activated, %encoder3_activation[%channel, %column] : vector<16xf32>, view<128x16xf32>
+    }
+  }
+  %constant84 = index.constant 0 : offset
+  %gate_input = buffer.view %scratch[%constant84] : buffer -> view<256x16xf32>
+  %constant85 = index.constant 0 : offset
+  %previous = buffer.view %previous_state[%constant85] : buffer -> view<2x128x16xf32>
+  %constant86 = index.constant 128 : index
+  scf.for %channel = [%zero to %constant86 step %one] {
+    %x = vector.load %encoder3_activation[%channel, 0] : view<128x16xf32> -> vector<16xf32>
+    %h = vector.load %previous[0, %channel, 0] : view<2x128x16xf32> -> vector<16xf32>
+    %hidden_row = index.add %channel, %constant86 : index
+    vector.store %x, %gate_input[%channel, 0] : vector<16xf32>, view<256x16xf32>
+    vector.store %h, %gate_input[%hidden_row, 0] : vector<16xf32>, view<256x16xf32>
+  }
+  %constant87 = index.constant 516 : index
+  %constant88 = index.constant 16 : index
+  %constant89 = index.constant 128 : index
+  %constant90 = index.constant 0 : offset
+  %constant91 = index.constant 439936 : offset
+  %constant92 = index.constant 51200 : offset
+  %input_gates_weights_matrix = view.refine %input_gates_weights : view<516x128xf32> -> view<[%constant87]x[%constant89]xf32>
+  template.apply<@vad.matrix>(%constant87, %constant88, %constant89, %scratch, %input_gates_weights_matrix, %scratch, %constant90, %constant92) : (index, index, index, buffer, view<[%constant87]x[%constant89]xf32>, buffer, offset, offset)
+  %constant93 = index.constant 516 : index
+  %constant94 = index.constant 16 : index
+  %constant95 = index.constant 128 : index
+  %constant96 = index.constant 8192 : offset
+  %constant97 = index.constant 706176 : offset
+  %constant98 = index.constant 84224 : offset
+  %recurrent_gates_weights_matrix = view.refine %recurrent_gates_weights : view<516x128xf32> -> view<[%constant93]x[%constant95]xf32>
+  template.apply<@vad.matrix>(%constant93, %constant94, %constant95, %scratch, %recurrent_gates_weights_matrix, %scratch, %constant96, %constant98) : (index, index, index, buffer, view<[%constant93]x[%constant95]xf32>, buffer, offset, offset)
+  %constant99 = index.constant 51200 : offset
+  %gate_results = buffer.view %scratch[%constant99] : buffer -> view<516x16xf32>
+  %constant100 = index.constant 84224 : offset
+  %recurrent_results = buffer.view %scratch[%constant100] : buffer -> view<516x16xf32>
+  %constant101 = index.constant 704128 : offset
+  %constant102 = index.constant 0 : offset
+  %next = buffer.view %next_state[%constant102] : buffer -> view<2x128x8xf32>
+  %constant103 = index.constant 972416 : offset
+  %constant104 = index.constant 972928 : offset
+  %constant105 = index.constant 0 : offset
+  %probabilities = buffer.view %probability[%constant105] : buffer -> view<8xf32>
+  %zeros_live = vector.splat %zero_float : vector<8xf32>
+  %logits = scf.for %channel = [%zero to %constant86 step %one](%sum = %zeros_live : vector<8xf32>) -> (vector<8xf32>) {
+    %constant106 = index.constant 0 : index
+    %input_row = index.add %channel, %constant106 : index
+    %input_bias = view.load %gate_bias[%input_row] : view<512xf32> -> f32
+    %input_biases = vector.splat %input_bias : vector<8xf32>
+    %input_input = vector.load %gate_results[%input_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %input_recurrent = vector.load %recurrent_results[%input_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %input_value = vector.addf %input_input, %input_recurrent : vector<8xf32>
+    %input_biased = vector.addf %input_value, %input_biases : vector<8xf32>
+    %input = vector.logisticf<afn> %input_biased : vector<8xf32>
+    %constant107 = index.constant 128 : index
+    %forget_row = index.add %channel, %constant107 : index
+    %forget_bias = view.load %gate_bias[%forget_row] : view<512xf32> -> f32
+    %forget_biases = vector.splat %forget_bias : vector<8xf32>
+    %forget_input = vector.load %gate_results[%forget_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %forget_recurrent = vector.load %recurrent_results[%forget_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %forget_value = vector.addf %forget_input, %forget_recurrent : vector<8xf32>
+    %forget_biased = vector.addf %forget_value, %forget_biases : vector<8xf32>
+    %forget = vector.logisticf<afn> %forget_biased : vector<8xf32>
+    %constant108 = index.constant 256 : index
+    %candidate_row = index.add %channel, %constant108 : index
+    %candidate_bias = view.load %gate_bias[%candidate_row] : view<512xf32> -> f32
+    %candidate_biases = vector.splat %candidate_bias : vector<8xf32>
+    %candidate_input = vector.load %gate_results[%candidate_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %candidate_recurrent = vector.load %recurrent_results[%candidate_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %candidate_value = vector.addf %candidate_input, %candidate_recurrent : vector<8xf32>
+    %candidate_biased = vector.addf %candidate_value, %candidate_biases : vector<8xf32>
+    %candidate = vector.tanhf<afn> %candidate_biased : vector<8xf32>
+    %constant109 = index.constant 384 : index
+    %output_row = index.add %channel, %constant109 : index
+    %output_bias = view.load %gate_bias[%output_row] : view<512xf32> -> f32
+    %output_biases = vector.splat %output_bias : vector<8xf32>
+    %output_input = vector.load %gate_results[%output_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %output_recurrent = vector.load %recurrent_results[%output_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %output_value = vector.addf %output_input, %output_recurrent : vector<8xf32>
+    %output_biased = vector.addf %output_value, %output_biases : vector<8xf32>
+    %output = vector.logisticf<afn> %output_biased : vector<8xf32>
+    %previous_cell = vector.load %previous[1, %channel, 0] : view<2x128x16xf32> -> vector<8xf32>
+    %retained = vector.mulf %forget, %previous_cell : vector<8xf32>
+    %incoming = vector.mulf %input, %candidate : vector<8xf32>
+    %cell = vector.addf %retained, %incoming : vector<8xf32>
+    %cell_activation = vector.tanhf<afn> %cell : vector<8xf32>
+    %hidden = vector.mulf %output, %cell_activation : vector<8xf32>
+    vector.store %hidden, %next[0, %channel, 0] : vector<8xf32>, view<2x128x8xf32>
+    vector.store %cell, %next[1, %channel, 0] : vector<8xf32>, view<2x128x8xf32>
+    %head_value = vector.maxnumf %hidden, %zeros_live : vector<8xf32>
+    %weight = view.load %head_weight[%channel] : view<128xf32> -> f32
+    %weights = vector.splat %weight : vector<8xf32>
+    %next_sum = vector.fmaf %head_value, %weights, %sum : vector<8xf32>
+    scf.yield %next_sum : vector<8xf32>
+  }
+  %bias = view.load %head_bias[0] : view<1xf32> -> f32
+  %biases = vector.splat %bias : vector<8xf32>
+  %biased = vector.addf %logits, %biases : vector<8xf32>
+  %scores = vector.logisticf<afn> %biased : vector<8xf32>
+  vector.store %scores, %probabilities[0] : vector<8xf32>, view<8xf32>
+  template.return
+}
+
+template.decl @vad.hop_16000(%window_buffer: buffer, %stft_weights: view<264x256xf32>, %encoder0_weights: view<132x387xf32>, %encoder1_weights: view<72x384xf32>, %encoder2_weights: view<72x192xf32>, %encoder3_weights: view<132x192xf32>, %input_gates_weights: view<516x128xf32>, %recurrent_gates_weights: view<516x128xf32>, %encoder0_bias: view<128xf32>, %encoder1_bias: view<64xf32>, %encoder2_bias: view<64xf32>, %encoder3_bias: view<128xf32>, %gate_bias: view<512xf32>, %head_weight: view<128xf32>, %head_bias: view<1xf32>, %previous_state: buffer, %scratch: buffer, %next_state: buffer, %probability: buffer)
+
+template.def<@vad.hop_16000> device @vad_hop_16000(%window_buffer: buffer, %stft_weights: view<264x256xf32>, %encoder0_weights: view<132x387xf32>, %encoder1_weights: view<72x384xf32>, %encoder2_weights: view<72x192xf32>, %encoder3_weights: view<132x192xf32>, %input_gates_weights: view<516x128xf32>, %recurrent_gates_weights: view<516x128xf32>, %encoder0_bias: view<128xf32>, %encoder1_bias: view<64xf32>, %encoder2_bias: view<64xf32>, %encoder3_bias: view<128xf32>, %gate_bias: view<512xf32>, %head_weight: view<128xf32>, %head_bias: view<1xf32>, %previous_state: buffer, %scratch: buffer, %next_state: buffer, %probability: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %four = index.constant 4 : index
+  %three = index.constant 3 : index
+  %zero_float = scalar.constant 0.0 : f32
+  %zeros = vector.splat %zero_float : vector<16xf32>
+  %constant1 = index.constant 0 : offset
+  %window = buffer.view %window_buffer[%constant1] : buffer -> view<8x576xf32>
+  %constant2 = index.constant 0 : offset
+  %spectral_input = buffer.view %scratch[%constant2] : buffer -> view<256x32xf32>
+  %constant3 = index.constant 256 : index
+  %constant4 = index.constant 128 : index
+  %constant5 = index.constant 576 : index
+  %constant6 = index.constant 1150 : index
+  scf.for %k = [%zero to %constant3 step %one] {
+    scf.for %column = [%zero to %thirty_two step %one] {
+      %stream = index.div %column, %four : index
+      %time = index.rem %column, %four : index
+      %begin = index.mul %time, %constant4 : index
+      %position = index.add %begin, %k : index
+      %outside = index.cmp uge, %position, %constant5 : index
+      %backward = index.sub %constant6, %position : index
+      %source = scf.select %outside, %backward, %position : index
+      %value = view.load %window[%stream, %source] : view<8x576xf32> -> f32
+      view.store %value, %spectral_input[%k, %column] : f32, view<256x32xf32>
+    }
+  }
+  %constant7 = index.constant 264 : index
+  %constant8 = index.constant 32 : index
+  %constant9 = index.constant 256 : index
+  %constant10 = index.constant 0 : offset
+  %constant11 = index.constant 0 : offset
+  %constant12 = index.constant 51200 : offset
+  %stft_weights_matrix = view.refine %stft_weights : view<264x256xf32> -> view<[%constant7]x[%constant9]xf32>
+  template.apply<@vad.matrix>(%constant7, %constant8, %constant9, %scratch, %stft_weights_matrix, %scratch, %constant10, %constant12) : (index, index, index, buffer, view<[%constant7]x[%constant9]xf32>, buffer, offset, offset)
+  %constant13 = index.constant 51200 : offset
+  %spectrum = buffer.view %scratch[%constant13] : buffer -> view<264x32xf32>
+  %constant14 = index.constant 118784 : offset
+  %magnitude = buffer.view %scratch[%constant14] : buffer -> view<129x32xf32>
+  %constant15 = index.constant 129 : index
+  scf.for %bin = [%zero to %constant15 step %one] {
+    %imaginary_bin = index.add %bin, %constant15 : index
+    scf.for %column = [%zero to %thirty_two step %sixteen] {
+      %real = vector.load %spectrum[%bin, %column] : view<264x32xf32> -> vector<16xf32>
+      %imaginary = vector.load %spectrum[%imaginary_bin, %column] : view<264x32xf32> -> vector<16xf32>
+      %squared_real = vector.mulf %real, %real : vector<16xf32>
+      %squared_imaginary = vector.mulf %imaginary, %imaginary : vector<16xf32>
+      %squared = vector.addf %squared_real, %squared_imaginary : vector<16xf32>
+      %magnitude_value = vector.sqrtf %squared : vector<16xf32>
+      vector.store %magnitude_value, %magnitude[%bin, %column] : vector<16xf32>, view<129x32xf32>
+    }
+  }
+  %constant16 = index.constant 0 : offset
+  %encoder0_input = buffer.view %scratch[%constant16] : buffer -> view<387x32xf32>
+  %constant17 = index.constant 118784 : offset
+  %encoder0_source = buffer.view %scratch[%constant17] : buffer -> view<129x32xf32>
+  %constant18 = index.constant 387 : index
+  %constant19 = index.constant 32 : index
+  %constant20 = index.constant 4 : index
+  %constant21 = index.constant 4 : index
+  %constant22 = index.constant 1 : index
+  scf.for %k = [%zero to %constant18 step %one] {
+    %channel = index.div %k, %three : index
+    %tap = index.rem %k, %three : index
+    scf.for %column = [%zero to %constant19 step %one] {
+      %stream = index.div %column, %constant20 : index
+      %time = index.rem %column, %constant20 : index
+      %center = index.mul %time, %constant22 : index
+      %padded = index.add %center, %tap : index
+      %position = index.sub %padded, %one : index
+      %valid_stream = index.cmp ult, %stream, %eight : index
+      %valid_time = index.cmp ult, %position, %constant21 : index
+      %live = scalar.andi %valid_stream, %valid_time : i1
+      %value = scf.if %live -> (f32) {
+        %stream_begin = index.mul %stream, %constant21 : index
+        %source_column = index.add %stream_begin, %position : index
+        %loaded = view.load %encoder0_source[%channel, %source_column] : view<129x32xf32> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero_float : f32
+      }
+      view.store %value, %encoder0_input[%k, %column] : f32, view<387x32xf32>
+    }
+  }
+  %constant23 = index.constant 132 : index
+  %constant24 = index.constant 32 : index
+  %constant25 = index.constant 387 : index
+  %constant26 = index.constant 0 : offset
+  %constant27 = index.constant 271424 : offset
+  %constant28 = index.constant 51200 : offset
+  %encoder0_weights_matrix = view.refine %encoder0_weights : view<132x387xf32> -> view<[%constant23]x[%constant25]xf32>
+  template.apply<@vad.matrix>(%constant23, %constant24, %constant25, %scratch, %encoder0_weights_matrix, %scratch, %constant26, %constant28) : (index, index, index, buffer, view<[%constant23]x[%constant25]xf32>, buffer, offset, offset)
+  %constant29 = index.constant 51200 : offset
+  %encoder0_result = buffer.view %scratch[%constant29] : buffer -> view<132x32xf32>
+  %constant30 = index.constant 475760 : offset
+  %constant31 = index.constant 118784 : offset
+  %encoder0_activation = buffer.view %scratch[%constant31] : buffer -> view<128x32xf32>
+  %constant32 = index.constant 128 : index
+  scf.for %channel = [%zero to %constant32 step %one] {
+    %bias = view.load %encoder0_bias[%channel] : view<128xf32> -> f32
+    %biases = vector.splat %bias : vector<16xf32>
+    scf.for %column = [%zero to %constant19 step %sixteen] {
+      %value = vector.load %encoder0_result[%channel, %column] : view<132x32xf32> -> vector<16xf32>
+      %biased = vector.addf %value, %biases : vector<16xf32>
+      %activated = vector.maxnumf %biased, %zeros : vector<16xf32>
+      vector.store %activated, %encoder0_activation[%channel, %column] : vector<16xf32>, view<128x32xf32>
+    }
+  }
+  %constant33 = index.constant 0 : offset
+  %encoder1_input = buffer.view %scratch[%constant33] : buffer -> view<384x16xf32>
+  %constant34 = index.constant 118784 : offset
+  %encoder1_source = buffer.view %scratch[%constant34] : buffer -> view<128x32xf32>
+  %constant35 = index.constant 384 : index
+  %constant36 = index.constant 16 : index
+  %constant37 = index.constant 2 : index
+  %constant38 = index.constant 4 : index
+  %constant39 = index.constant 2 : index
+  scf.for %k = [%zero to %constant35 step %one] {
+    %channel = index.div %k, %three : index
+    %tap = index.rem %k, %three : index
+    scf.for %column = [%zero to %constant36 step %one] {
+      %stream = index.div %column, %constant37 : index
+      %time = index.rem %column, %constant37 : index
+      %center = index.mul %time, %constant39 : index
+      %padded = index.add %center, %tap : index
+      %position = index.sub %padded, %one : index
+      %valid_stream = index.cmp ult, %stream, %eight : index
+      %valid_time = index.cmp ult, %position, %constant38 : index
+      %live = scalar.andi %valid_stream, %valid_time : i1
+      %value = scf.if %live -> (f32) {
+        %stream_begin = index.mul %stream, %constant38 : index
+        %source_column = index.add %stream_begin, %position : index
+        %loaded = view.load %encoder1_source[%channel, %source_column] : view<128x32xf32> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero_float : f32
+      }
+      view.store %value, %encoder1_input[%k, %column] : f32, view<384x16xf32>
+    }
+  }
+  %constant40 = index.constant 72 : index
+  %constant41 = index.constant 16 : index
+  %constant42 = index.constant 384 : index
+  %constant43 = index.constant 0 : offset
+  %constant44 = index.constant 476288 : offset
+  %constant45 = index.constant 51200 : offset
+  %encoder1_weights_matrix = view.refine %encoder1_weights : view<72x384xf32> -> view<[%constant40]x[%constant42]xf32>
+  template.apply<@vad.matrix>(%constant40, %constant41, %constant42, %scratch, %encoder1_weights_matrix, %scratch, %constant43, %constant45) : (index, index, index, buffer, view<[%constant40]x[%constant42]xf32>, buffer, offset, offset)
+  %constant46 = index.constant 51200 : offset
+  %encoder1_result = buffer.view %scratch[%constant46] : buffer -> view<72x16xf32>
+  %constant47 = index.constant 586880 : offset
+  %constant48 = index.constant 118784 : offset
+  %encoder1_activation = buffer.view %scratch[%constant48] : buffer -> view<64x16xf32>
+  %constant49 = index.constant 64 : index
+  scf.for %channel = [%zero to %constant49 step %one] {
+    %bias = view.load %encoder1_bias[%channel] : view<64xf32> -> f32
+    %biases = vector.splat %bias : vector<16xf32>
+    scf.for %column = [%zero to %constant36 step %sixteen] {
+      %value = vector.load %encoder1_result[%channel, %column] : view<72x16xf32> -> vector<16xf32>
+      %biased = vector.addf %value, %biases : vector<16xf32>
+      %activated = vector.maxnumf %biased, %zeros : vector<16xf32>
+      vector.store %activated, %encoder1_activation[%channel, %column] : vector<16xf32>, view<64x16xf32>
+    }
+  }
+  %constant50 = index.constant 0 : offset
+  %encoder2_input = buffer.view %scratch[%constant50] : buffer -> view<192x16xf32>
+  %constant51 = index.constant 118784 : offset
+  %encoder2_source = buffer.view %scratch[%constant51] : buffer -> view<64x16xf32>
+  %constant52 = index.constant 192 : index
+  %constant53 = index.constant 16 : index
+  %constant54 = index.constant 1 : index
+  %constant55 = index.constant 2 : index
+  %constant56 = index.constant 2 : index
+  scf.for %k = [%zero to %constant52 step %one] {
+    %channel = index.div %k, %three : index
+    %tap = index.rem %k, %three : index
+    scf.for %column = [%zero to %constant53 step %one] {
+      %stream = index.div %column, %constant54 : index
+      %time = index.rem %column, %constant54 : index
+      %center = index.mul %time, %constant56 : index
+      %padded = index.add %center, %tap : index
+      %position = index.sub %padded, %one : index
+      %valid_stream = index.cmp ult, %stream, %eight : index
+      %valid_time = index.cmp ult, %position, %constant55 : index
+      %live = scalar.andi %valid_stream, %valid_time : i1
+      %value = scf.if %live -> (f32) {
+        %stream_begin = index.mul %stream, %constant55 : index
+        %source_column = index.add %stream_begin, %position : index
+        %loaded = view.load %encoder2_source[%channel, %source_column] : view<64x16xf32> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero_float : f32
+      }
+      view.store %value, %encoder2_input[%k, %column] : f32, view<192x16xf32>
+    }
+  }
+  %constant57 = index.constant 72 : index
+  %constant58 = index.constant 16 : index
+  %constant59 = index.constant 192 : index
+  %constant60 = index.constant 0 : offset
+  %constant61 = index.constant 587136 : offset
+  %constant62 = index.constant 51200 : offset
+  %encoder2_weights_matrix = view.refine %encoder2_weights : view<72x192xf32> -> view<[%constant57]x[%constant59]xf32>
+  template.apply<@vad.matrix>(%constant57, %constant58, %constant59, %scratch, %encoder2_weights_matrix, %scratch, %constant60, %constant62) : (index, index, index, buffer, view<[%constant57]x[%constant59]xf32>, buffer, offset, offset)
+  %constant63 = index.constant 51200 : offset
+  %encoder2_result = buffer.view %scratch[%constant63] : buffer -> view<72x16xf32>
+  %constant64 = index.constant 642432 : offset
+  %constant65 = index.constant 118784 : offset
+  %encoder2_activation = buffer.view %scratch[%constant65] : buffer -> view<64x16xf32>
+  %constant66 = index.constant 64 : index
+  scf.for %channel = [%zero to %constant66 step %one] {
+    %bias = view.load %encoder2_bias[%channel] : view<64xf32> -> f32
+    %biases = vector.splat %bias : vector<16xf32>
+    scf.for %column = [%zero to %constant53 step %sixteen] {
+      %value = vector.load %encoder2_result[%channel, %column] : view<72x16xf32> -> vector<16xf32>
+      %biased = vector.addf %value, %biases : vector<16xf32>
+      %activated = vector.maxnumf %biased, %zeros : vector<16xf32>
+      vector.store %activated, %encoder2_activation[%channel, %column] : vector<16xf32>, view<64x16xf32>
+    }
+  }
+  %constant67 = index.constant 0 : offset
+  %encoder3_input = buffer.view %scratch[%constant67] : buffer -> view<192x16xf32>
+  %constant68 = index.constant 118784 : offset
+  %encoder3_source = buffer.view %scratch[%constant68] : buffer -> view<64x16xf32>
+  %constant69 = index.constant 192 : index
+  %constant70 = index.constant 16 : index
+  %constant71 = index.constant 1 : index
+  %constant72 = index.constant 1 : index
+  %constant73 = index.constant 1 : index
+  scf.for %k = [%zero to %constant69 step %one] {
+    %channel = index.div %k, %three : index
+    %tap = index.rem %k, %three : index
+    scf.for %column = [%zero to %constant70 step %one] {
+      %stream = index.div %column, %constant71 : index
+      %time = index.rem %column, %constant71 : index
+      %center = index.mul %time, %constant73 : index
+      %padded = index.add %center, %tap : index
+      %position = index.sub %padded, %one : index
+      %valid_stream = index.cmp ult, %stream, %eight : index
+      %valid_time = index.cmp ult, %position, %constant72 : index
+      %live = scalar.andi %valid_stream, %valid_time : i1
+      %value = scf.if %live -> (f32) {
+        %stream_begin = index.mul %stream, %constant72 : index
+        %source_column = index.add %stream_begin, %position : index
+        %loaded = view.load %encoder3_source[%channel, %source_column] : view<64x16xf32> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero_float : f32
+      }
+      view.store %value, %encoder3_input[%k, %column] : f32, view<192x16xf32>
+    }
+  }
+  %constant74 = index.constant 132 : index
+  %constant75 = index.constant 16 : index
+  %constant76 = index.constant 192 : index
+  %constant77 = index.constant 0 : offset
+  %constant78 = index.constant 642688 : offset
+  %constant79 = index.constant 51200 : offset
+  %encoder3_weights_matrix = view.refine %encoder3_weights : view<132x192xf32> -> view<[%constant74]x[%constant76]xf32>
+  template.apply<@vad.matrix>(%constant74, %constant75, %constant76, %scratch, %encoder3_weights_matrix, %scratch, %constant77, %constant79) : (index, index, index, buffer, view<[%constant74]x[%constant76]xf32>, buffer, offset, offset)
+  %constant80 = index.constant 51200 : offset
+  %encoder3_result = buffer.view %scratch[%constant80] : buffer -> view<132x16xf32>
+  %constant81 = index.constant 744064 : offset
+  %constant82 = index.constant 118784 : offset
+  %encoder3_activation = buffer.view %scratch[%constant82] : buffer -> view<128x16xf32>
+  %constant83 = index.constant 128 : index
+  scf.for %channel = [%zero to %constant83 step %one] {
+    %bias = view.load %encoder3_bias[%channel] : view<128xf32> -> f32
+    %biases = vector.splat %bias : vector<16xf32>
+    scf.for %column = [%zero to %constant70 step %sixteen] {
+      %value = vector.load %encoder3_result[%channel, %column] : view<132x16xf32> -> vector<16xf32>
+      %biased = vector.addf %value, %biases : vector<16xf32>
+      %activated = vector.maxnumf %biased, %zeros : vector<16xf32>
+      vector.store %activated, %encoder3_activation[%channel, %column] : vector<16xf32>, view<128x16xf32>
+    }
+  }
+  %constant84 = index.constant 0 : offset
+  %gate_input = buffer.view %scratch[%constant84] : buffer -> view<256x16xf32>
+  %constant85 = index.constant 0 : offset
+  %previous = buffer.view %previous_state[%constant85] : buffer -> view<2x128x16xf32>
+  %constant86 = index.constant 128 : index
+  scf.for %channel = [%zero to %constant86 step %one] {
+    %x = vector.load %encoder3_activation[%channel, 0] : view<128x16xf32> -> vector<16xf32>
+    %h = vector.load %previous[0, %channel, 0] : view<2x128x16xf32> -> vector<16xf32>
+    %hidden_row = index.add %channel, %constant86 : index
+    vector.store %x, %gate_input[%channel, 0] : vector<16xf32>, view<256x16xf32>
+    vector.store %h, %gate_input[%hidden_row, 0] : vector<16xf32>, view<256x16xf32>
+  }
+  %constant87 = index.constant 516 : index
+  %constant88 = index.constant 16 : index
+  %constant89 = index.constant 128 : index
+  %constant90 = index.constant 0 : offset
+  %constant91 = index.constant 744576 : offset
+  %constant92 = index.constant 51200 : offset
+  %input_gates_weights_matrix = view.refine %input_gates_weights : view<516x128xf32> -> view<[%constant87]x[%constant89]xf32>
+  template.apply<@vad.matrix>(%constant87, %constant88, %constant89, %scratch, %input_gates_weights_matrix, %scratch, %constant90, %constant92) : (index, index, index, buffer, view<[%constant87]x[%constant89]xf32>, buffer, offset, offset)
+  %constant93 = index.constant 516 : index
+  %constant94 = index.constant 16 : index
+  %constant95 = index.constant 128 : index
+  %constant96 = index.constant 8192 : offset
+  %constant97 = index.constant 1010816 : offset
+  %constant98 = index.constant 84224 : offset
+  %recurrent_gates_weights_matrix = view.refine %recurrent_gates_weights : view<516x128xf32> -> view<[%constant93]x[%constant95]xf32>
+  template.apply<@vad.matrix>(%constant93, %constant94, %constant95, %scratch, %recurrent_gates_weights_matrix, %scratch, %constant96, %constant98) : (index, index, index, buffer, view<[%constant93]x[%constant95]xf32>, buffer, offset, offset)
+  %constant99 = index.constant 51200 : offset
+  %gate_results = buffer.view %scratch[%constant99] : buffer -> view<516x16xf32>
+  %constant100 = index.constant 84224 : offset
+  %recurrent_results = buffer.view %scratch[%constant100] : buffer -> view<516x16xf32>
+  %constant101 = index.constant 1008768 : offset
+  %constant102 = index.constant 0 : offset
+  %next = buffer.view %next_state[%constant102] : buffer -> view<2x128x8xf32>
+  %constant103 = index.constant 1277056 : offset
+  %constant104 = index.constant 1277568 : offset
+  %constant105 = index.constant 0 : offset
+  %probabilities = buffer.view %probability[%constant105] : buffer -> view<8xf32>
+  %zeros_live = vector.splat %zero_float : vector<8xf32>
+  %logits = scf.for %channel = [%zero to %constant86 step %one](%sum = %zeros_live : vector<8xf32>) -> (vector<8xf32>) {
+    %constant106 = index.constant 0 : index
+    %input_row = index.add %channel, %constant106 : index
+    %input_bias = view.load %gate_bias[%input_row] : view<512xf32> -> f32
+    %input_biases = vector.splat %input_bias : vector<8xf32>
+    %input_input = vector.load %gate_results[%input_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %input_recurrent = vector.load %recurrent_results[%input_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %input_value = vector.addf %input_input, %input_recurrent : vector<8xf32>
+    %input_biased = vector.addf %input_value, %input_biases : vector<8xf32>
+    %input = vector.logisticf<afn> %input_biased : vector<8xf32>
+    %constant107 = index.constant 128 : index
+    %forget_row = index.add %channel, %constant107 : index
+    %forget_bias = view.load %gate_bias[%forget_row] : view<512xf32> -> f32
+    %forget_biases = vector.splat %forget_bias : vector<8xf32>
+    %forget_input = vector.load %gate_results[%forget_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %forget_recurrent = vector.load %recurrent_results[%forget_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %forget_value = vector.addf %forget_input, %forget_recurrent : vector<8xf32>
+    %forget_biased = vector.addf %forget_value, %forget_biases : vector<8xf32>
+    %forget = vector.logisticf<afn> %forget_biased : vector<8xf32>
+    %constant108 = index.constant 256 : index
+    %candidate_row = index.add %channel, %constant108 : index
+    %candidate_bias = view.load %gate_bias[%candidate_row] : view<512xf32> -> f32
+    %candidate_biases = vector.splat %candidate_bias : vector<8xf32>
+    %candidate_input = vector.load %gate_results[%candidate_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %candidate_recurrent = vector.load %recurrent_results[%candidate_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %candidate_value = vector.addf %candidate_input, %candidate_recurrent : vector<8xf32>
+    %candidate_biased = vector.addf %candidate_value, %candidate_biases : vector<8xf32>
+    %candidate = vector.tanhf<afn> %candidate_biased : vector<8xf32>
+    %constant109 = index.constant 384 : index
+    %output_row = index.add %channel, %constant109 : index
+    %output_bias = view.load %gate_bias[%output_row] : view<512xf32> -> f32
+    %output_biases = vector.splat %output_bias : vector<8xf32>
+    %output_input = vector.load %gate_results[%output_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %output_recurrent = vector.load %recurrent_results[%output_row, 0] : view<516x16xf32> -> vector<8xf32>
+    %output_value = vector.addf %output_input, %output_recurrent : vector<8xf32>
+    %output_biased = vector.addf %output_value, %output_biases : vector<8xf32>
+    %output = vector.logisticf<afn> %output_biased : vector<8xf32>
+    %previous_cell = vector.load %previous[1, %channel, 0] : view<2x128x16xf32> -> vector<8xf32>
+    %retained = vector.mulf %forget, %previous_cell : vector<8xf32>
+    %incoming = vector.mulf %input, %candidate : vector<8xf32>
+    %cell = vector.addf %retained, %incoming : vector<8xf32>
+    %cell_activation = vector.tanhf<afn> %cell : vector<8xf32>
+    %hidden = vector.mulf %output, %cell_activation : vector<8xf32>
+    vector.store %hidden, %next[0, %channel, 0] : vector<8xf32>, view<2x128x8xf32>
+    vector.store %cell, %next[1, %channel, 0] : vector<8xf32>, view<2x128x8xf32>
+    %head_value = vector.maxnumf %hidden, %zeros_live : vector<8xf32>
+    %weight = view.load %head_weight[%channel] : view<128xf32> -> f32
+    %weights = vector.splat %weight : vector<8xf32>
+    %next_sum = vector.fmaf %head_value, %weights, %sum : vector<8xf32>
+    scf.yield %next_sum : vector<8xf32>
+  }
+  %bias = view.load %head_bias[0] : view<1xf32> -> f32
+  %biases = vector.splat %bias : vector<8xf32>
+  %biased = vector.addf %logits, %biases : vector<8xf32>
+  %scores = vector.logisticf<afn> %biased : vector<8xf32>
+  vector.store %scores, %probabilities[0] : vector<8xf32>, view<8xf32>
+  template.return
+}

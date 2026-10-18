@@ -1,0 +1,172 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl @prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %position: i64, %eof: i32) -> (buffer, i64, i64)
+
+func.decl @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer)
+
+func.decl @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32)
+
+config.decl @control.hop : index
+
+// Input lengths are 0, 17, hop-1, hop, and hop+17, with and without EOF.
+global.rodata.def @frame_deltas = align(4) bytes("0000000011000000ffffffff0000000011000000")
+
+global.rodata.def @feedback_values = align(4) bytes("0000203f0000203f0000203f0000203f0000203f0000203f0000203f0000203f")
+
+global.rodata.def @event_header = align(4) bytes("010000000100000014000000")
+
+func.def @input_geometry(%trial: index) -> (i64, i64, i32) {
+  %zero = index.constant 0 : offset
+  %five = index.constant 5 : index
+  %two = index.constant 2 : index
+  %kind = index.rem %trial, %five : index
+  %storage = global.load @frame_deltas : buffer
+  %table = buffer.view %storage[%zero] : buffer -> view<5xi32>
+  %row = index.assume %kind [range(%kind, 0, 4)] : index
+  %delta32 = view.load %table[%row] : view<5xi32> -> i32
+  %delta = scalar.extsi %delta32 : i32 to i64
+  %hop_index = config.get @control.hop : index
+  %hop = index.cast %hop_index : index to i64
+  %from_hop = index.cmp uge, %kind, %two : index
+  %relative = scalar.addi %hop, %delta : i64
+  %frames = scf.select %from_hop, %relative, %delta : i64
+  %final = index.cmp uge, %trial, %five : index
+  %eof = scalar.extui %final : i1 to i32
+  func.return %hop, %frames, %eof : i64, i64, i32
+}
+
+// Observe the actual prepare/pack/complete flow. The result contains readiness,
+// consumed frames, produced bytes, completion, the complete wire packet,
+// history initialization, and the number of incorrect padded PCM samples.
+func.def @observe(%hop_value: i64, %frames_value: i64, %eof: i32, %output: buffer) {
+  %hop = scalar.assume %hop_value [range(%hop_value, 256, 512)] : i64
+  %frames = scalar.assume %frames_value [range(%frames_value, 0, 529)] : i64
+  %origin = index.constant 0 : offset
+  %zero = scalar.constant 0 : i64
+  %zero32 = scalar.constant 0 : i32
+  %four = scalar.constant 4 : i64
+  %header = scalar.constant 32 : i64
+  %state_pcm_bytes = scalar.muli %hop, %four : i64
+  %state_bytes64 = scalar.addi %state_pcm_bytes, %header : i64
+  %state_bytes = index.cast %state_bytes64 : i64 to offset
+  %pcm_bytes64 = scalar.muli %frames, %four : i64
+  %pcm_bytes = index.cast %pcm_bytes64 : i64 to offset
+  %pcm = buffer.alloca<private> align(4) %pcm_bytes : buffer
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %model_bytes = index.constant 48 : offset
+  %model = buffer.alloca<private> align(8) %model_bytes : buffer
+  %metadata_offset = index.constant 32 : offset
+  %metadata = buffer.view %model[%metadata_offset] : buffer -> view<2xi64>
+  view.store %hop, %metadata[1] : i64, view<2xi64>
+  %state_header = buffer.view %state[%origin] : buffer -> view<8xi32>
+  view.store %zero32, %state_header[1] : i32, view<8xi32>
+  %frame_count = index.cast %frames : i64 to index
+  %samples = buffer.view %pcm[%origin] : buffer -> view<[%frame_count]xf32>
+  %begin = index.constant 0 : index
+  %one = index.constant 1 : index
+  %sample = scalar.constant 1.0 : f32
+  scf.for %i = [%begin to %frame_count step %one] {
+    view.store %sample, %samples[%i] : f32, view<[%frame_count]xf32>
+  }
+  %position = scalar.constant 1099511627783 : i64
+  %work, %units, %tag = func.call @prepare_work(%model, %state, %pcm, %position, %eof) : (buffer, buffer, buffer, i64, i32) -> (buffer, i64, i64)
+  %result = buffer.view %output[%origin] : buffer -> view<10xi64>
+  view.store %units, %result[0] : i64, view<10xi64>
+  %ready = scalar.cmpi ne, %units, %zero : i64
+  scf.if %ready {
+    %range_bytes = index.constant 24 : offset
+    %ranges = buffer.alloca<private> align(8) %range_bytes : buffer
+    %range = buffer.view %ranges[%origin] : buffer -> view<3xi64>
+    %resident = scalar.constant 5 : i64
+    view.store %resident, %range[0] : i64, view<3xi64>
+    view.store %zero, %range[1] : i64, view<3xi64>
+    view.store %state_bytes64, %range[2] : i64, view<3xi64>
+    %plan, %packed = func.call @prepare_batch(%model, %state, %ranges, %work) : (buffer, buffer, buffer, buffer) -> (buffer, buffer)
+    %feedback = global.load @feedback_values : buffer
+    %consumed, %events, %produced, %complete = func.call @complete(%model, %state, %plan, %zero, %feedback) : (buffer, buffer, buffer, i64, buffer) -> (i64, buffer, i64, i32)
+    %done = scalar.extui %complete : i32 to i64
+    view.store %consumed, %result[1] : i64, view<10xi64>
+    view.store %produced, %result[2] : i64, view<10xi64>
+    view.store %done, %result[3] : i64, view<10xi64>
+    %fits = scalar.cmpi ule, %produced, %header : i64
+    scf.if %fits {
+      %length = index.cast %produced : i64 to offset
+      buffer.copy %events[%origin], %output[%metadata_offset], %length
+    }
+  }
+  %initialized32 = view.load %state_header[1] : view<8xi32> -> i32
+  %initialized = scalar.extui %initialized32 : i32 to i64
+  view.store %initialized, %result[8] : i64, view<10xi64>
+  %hop_index = index.cast %hop : i64 to index
+  %padded = buffer.view %state[%metadata_offset] : buffer -> view<[%hop_index]xf32>
+  %silence = scalar.constant 0.0 : f32
+  %errors = scf.for %i = [%begin to %hop_index step %one](%errors = %zero : i64) -> (i64) {
+    %present = index.cmp ult, %i, %frame_count : index
+    %expected = scf.select %present, %sample, %silence : f32
+    %actual = view.load %padded[%i] : view<[%hop_index]xf32> -> f32
+    %wrong = scalar.cmpf une, %actual, %expected : f32
+    %wrong64 = scalar.extui %wrong : i1 to i64
+    %next = scalar.addi %errors, %wrong64 : i64
+    scf.yield %next : i64
+  }
+  view.store %errors, %result[9] : i64, view<10xi64>
+  func.return
+}
+
+// This reference encodes the public record directly, independently of the
+// request descriptor, packed ordinal, metadata storage, and source helpers.
+func.def @expected(%hop: i64, %frames: i64, %eof: i32, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero32 = scalar.constant 0 : i32
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %full = scalar.cmpi uge, %frames, %hop : i64
+  %final = scalar.cmpi ne, %eof, %zero32 : i32
+  %ready = scalar.ori %full, %final : i1
+  %count = scf.select %full, %hop, %frames : i64
+  %positive = scalar.cmpi ne, %count, %zero : i64
+  %result = buffer.view %output[%origin] : buffer -> view<10xi64>
+  scf.if %ready {
+    view.store %one, %result[0] : i64, view<10xi64>
+    view.store %count, %result[1] : i64, view<10xi64>
+    %all = scalar.cmpi ule, %frames, %hop : i64
+    %done = scalar.andi %all, %final : i1
+    %done64 = scalar.extui %done : i1 to i64
+    view.store %done64, %result[3] : i64, view<10xi64>
+    scf.if %positive {
+      %bytes = scalar.constant 32 : i64
+      view.store %bytes, %result[2] : i64, view<10xi64>
+      view.store %one, %result[8] : i64, view<10xi64>
+      %header = global.load @event_header : buffer
+      %packet_offset = index.constant 32 : offset
+      %header_length = index.constant 12 : offset
+      buffer.copy %header[%origin], %output[%packet_offset], %header_length
+      %interval_offset = index.constant 44 : offset
+      %interval = buffer.view %output[%interval_offset] : buffer -> view<2xi64>
+      %begin = scalar.constant 1099511627783 : i64
+      %end = scalar.addi %begin, %count : i64
+      view.store %begin, %interval[0] : i64, view<2xi64>
+      view.store %end, %interval[1] : i64, view<2xi64>
+      %score_offset = index.constant 60 : offset
+      %score = buffer.view %output[%score_offset] : buffer -> view<1xf32>
+      %probability = scalar.constant 0.625 : f32
+      view.store %probability, %score[0] : f32, view<1xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @input_credit_and_activity_records {
+  check.trial[10](%trial: index, %entropy: check.entropy) {
+    %hop, %frames, %eof = check.generate<@input_geometry>(%trial) : (index) -> (i64, i64, i32)
+    %output = check.generate.fill value(0) : tensor<10xi64>
+    check.compare<@observe, @expected>(%hop, %frames, %eof, %output) : (i64, i64, i32, tensor<10xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10xi64>
+    }
+  }
+  check.return
+}

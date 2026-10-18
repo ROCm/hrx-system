@@ -1,0 +1,153 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @vad.hop_8000(%window_buffer: buffer, %stft_weights: view<132x128xf32>, %encoder0_weights: view<132x195xf32>, %encoder1_weights: view<72x384xf32>, %encoder2_weights: view<72x192xf32>, %encoder3_weights: view<132x192xf32>, %input_gates_weights: view<516x128xf32>, %recurrent_gates_weights: view<516x128xf32>, %encoder0_bias: view<128xf32>, %encoder1_bias: view<64xf32>, %encoder2_bias: view<64xf32>, %encoder3_bias: view<128xf32>, %gate_bias: view<512xf32>, %head_weight: view<128xf32>, %head_bias: view<1xf32>, %previous_state: buffer, %scratch: buffer, %next_state: buffer, %probability: buffer)
+
+// Resident history is indexed by request row, independently of packed ordinal.
+kernel.def @silero_hop_8000() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%work: buffer, %bank_buffer: buffer, %output: buffer, %window_buffer: buffer, %previous_buffer: buffer, %next_buffer: buffer, %scratch: buffer, %stft_weights: view<132x128xf32>, %encoder0_weights: view<132x195xf32>, %encoder1_weights: view<72x384xf32>, %encoder2_weights: view<72x192xf32>, %encoder3_weights: view<132x192xf32>, %input_gates_weights: view<516x128xf32>, %recurrent_gates_weights: view<516x128xf32>, %encoder0_bias: view<128xf32>, %encoder1_bias: view<64xf32>, %encoder2_bias: view<64xf32>, %encoder3_bias: view<128xf32>, %gate_bias: view<512xf32>, %head_weight: view<128xf32>, %head_bias: view<1xf32>) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  %context = index.constant 32 : index
+  %hop = index.constant 256 : index
+  %window = index.constant 288 : index
+  %channels = index.constant 128 : index
+  %cell_begin = index.constant 160 : index
+  %stride = index.constant 1056 : offset
+  %header_length = index.constant 16 : offset
+  %sample_delta = index.constant 32 : offset
+  %zero32 = scalar.constant 0 : i32
+  %zero_float = scalar.constant 0.0 : f32
+  %zeros = vector.splat %zero_float : vector<8xf32>
+  %header = buffer.view %work[%origin] : buffer -> view<1xi32>
+  %count32 = view.load %header[0] : view<1xi32> -> i32
+  %count_index = index.cast %count32 : i32 to index
+  %count = index.assume %count_index [range(%count_index, 1, 8)] : index
+  %bank = buffer.view %bank_buffer[%origin] : buffer -> view<8x288xf32>
+  %windows = buffer.view %window_buffer[%origin] : buffer -> view<8x288xf32>
+  %previous = buffer.view %previous_buffer[%origin] : buffer -> view<2x128x16xf32>
+  %next = buffer.view %next_buffer[%origin] : buffer -> view<2x128x8xf32>
+  scf.for %row = [%zero to %eight step %one] {
+    %live = index.cmp ult, %row, %count : index
+    %scaled = index.scale %row, %stride : index, offset -> offset
+    %record_offset = index.add %scaled, %header_length : offset
+    %slot, %has_input, %has_history = scf.if %live -> (index, i1, i1) {
+      %record = buffer.view %work[%record_offset] : buffer -> view<8xi32>
+      %slot32 = view.load %record[0] : view<8xi32> -> i32
+      %initialized = view.load %record[1] : view<8xi32> -> i32
+      %frames = view.load %record[4] : view<8xi32> -> i32
+      %slot_index = index.cast %slot32 : i32 to index
+      %slot = index.assume %slot_index [range(%slot_index, 0, 7)] : index
+      %positive = scalar.cmpi ne, %frames, %zero32 : i32
+      %retained = scalar.cmpi ne, %initialized, %zero32 : i32
+      %history = scalar.andi %positive, %retained : i1
+      scf.yield %slot, %positive, %history : index, i1, i1
+    } else {
+      %false = scalar.constant 0 : i1
+      scf.yield %zero, %false, %false : index, i1, i1
+    }
+    %sample_offset = index.add %record_offset, %sample_delta : offset
+    %samples = buffer.view %work[%sample_offset] : buffer -> view<256xf32>
+    scf.for %position = [%zero to %window step %one] {
+      %sample = scf.if %has_input -> (f32) {
+        %in_context = index.cmp ult, %position, %context : index
+        %value = scf.if %in_context -> (f32) {
+          %prior = scf.if %has_history -> (f32) {
+            %value = view.load %bank[%slot, %position] : view<8x288xf32> -> f32
+            scf.yield %value : f32
+          } else {
+            scf.yield %zero_float : f32
+          }
+          scf.yield %prior : f32
+        } else {
+          %frame = index.sub %position, %context : index
+          %value = view.load %samples[%frame] : view<256xf32> -> f32
+          scf.yield %value : f32
+        }
+        scf.yield %value : f32
+      } else {
+        scf.yield %zero_float : f32
+      }
+      view.store %sample, %windows[%row, %position] : f32, view<8x288xf32>
+    }
+    scf.for %channel = [%zero to %channels step %one] {
+      %hidden, %cell = scf.if %has_history -> (f32, f32) {
+        %hidden_column = index.add %context, %channel : index
+        %cell_column = index.add %cell_begin, %channel : index
+        %hidden = view.load %bank[%slot, %hidden_column] : view<8x288xf32> -> f32
+        %cell = view.load %bank[%slot, %cell_column] : view<8x288xf32> -> f32
+        scf.yield %hidden, %cell : f32, f32
+      } else {
+        scf.yield %zero_float, %zero_float : f32, f32
+      }
+      view.store %hidden, %previous[0, %channel, %row] : f32, view<2x128x16xf32>
+      view.store %cell, %previous[1, %channel, %row] : f32, view<2x128x16xf32>
+    }
+  }
+  // The numerical contraction's padding columns are initialized workspace.
+  scf.for %channel = [%zero to %channels step %one] {
+    vector.store %zeros, %previous[0, %channel, 8] : vector<8xf32>, view<2x128x16xf32>
+    vector.store %zeros, %previous[1, %channel, 8] : vector<8xf32>, view<2x128x16xf32>
+  }
+  template.apply<@vad.hop_8000>(%window_buffer, %stft_weights, %encoder0_weights, %encoder1_weights, %encoder2_weights, %encoder3_weights, %input_gates_weights, %recurrent_gates_weights, %encoder0_bias, %encoder1_bias, %encoder2_bias, %encoder3_bias, %gate_bias, %head_weight, %head_bias, %previous_buffer, %scratch, %next_buffer, %output) : (buffer, view<132x128xf32>, view<132x195xf32>, view<72x384xf32>, view<72x192xf32>, view<132x192xf32>, view<516x128xf32>, view<516x128xf32>, view<128xf32>, view<64xf32>, view<64xf32>, view<128xf32>, view<512xf32>, view<128xf32>, view<1xf32>, buffer, buffer, buffer, buffer)
+  scf.for %row = [%zero to %count step %one] {
+    %scaled = index.scale %row, %stride : index, offset -> offset
+    %record_offset = index.add %scaled, %header_length : offset
+    %record = buffer.view %work[%record_offset] : buffer -> view<8xi32>
+    %frames = view.load %record[4] : view<8xi32> -> i32
+    %positive = scalar.cmpi ne, %frames, %zero32 : i32
+    scf.if %positive {
+      %slot32 = view.load %record[0] : view<8xi32> -> i32
+      %slot_index = index.cast %slot32 : i32 to index
+      %slot = index.assume %slot_index [range(%slot_index, 0, 7)] : index
+      scf.for %position = [%zero to %context step %one] {
+        %source_position = index.add %hop, %position : index
+        %sample = view.load %windows[%row, %source_position] : view<8x288xf32> -> f32
+        view.store %sample, %bank[%slot, %position] : f32, view<8x288xf32>
+      }
+      scf.for %channel = [%zero to %channels step %one] {
+        %hidden_column = index.add %context, %channel : index
+        %cell_column = index.add %cell_begin, %channel : index
+        %hidden = view.load %next[0, %channel, %row] : view<2x128x8xf32> -> f32
+        %cell = view.load %next[1, %channel, %row] : view<2x128x8xf32> -> f32
+        view.store %hidden, %bank[%slot, %hidden_column] : f32, view<8x288xf32>
+        view.store %cell, %bank[%slot, %cell_column] : f32, view<8x288xf32>
+      }
+    }
+  }
+  kernel.return
+}
+
+command.program.def public @detect_8000() launch(%weights: buffer, %work: buffer, %requests: buffer, %conditioning: buffer, %streams: buffer, %output: buffer) {
+  %stft_weights = command.parameter %weights, "stft_weights" : view<132x128xf32>
+  %encoder0_weights = command.parameter %weights, "encoder0_weights" : view<132x195xf32>
+  %encoder1_weights = command.parameter %weights, "encoder1_weights" : view<72x384xf32>
+  %encoder2_weights = command.parameter %weights, "encoder2_weights" : view<72x192xf32>
+  %encoder3_weights = command.parameter %weights, "encoder3_weights" : view<132x192xf32>
+  %input_gates_weights = command.parameter %weights, "input_gates_weights" : view<516x128xf32>
+  %recurrent_gates_weights = command.parameter %weights, "recurrent_gates_weights" : view<516x128xf32>
+  %encoder0_bias = command.parameter %weights, "encoder0_bias" : view<128xf32>
+  %encoder1_bias = command.parameter %weights, "encoder1_bias" : view<64xf32>
+  %encoder2_bias = command.parameter %weights, "encoder2_bias" : view<64xf32>
+  %encoder3_bias = command.parameter %weights, "encoder3_bias" : view<128xf32>
+  %gate_bias = command.parameter %weights, "gate_bias" : view<512xf32>
+  %head_weight = command.parameter %weights, "head_weight" : view<128xf32>
+  %head_bias = command.parameter %weights, "head_bias" : view<1xf32>
+  %window_bytes = index.constant 9216 : offset
+  %window = buffer.alloca<global> align(16) %window_bytes : buffer
+  %previous_bytes = index.constant 16384 : offset
+  %previous = buffer.alloca<global> align(16) %previous_bytes : buffer
+  %next_bytes = index.constant 8192 : offset
+  %next = buffer.alloca<global> align(16) %next_bytes : buffer
+  %scratch_bytes = index.constant 136192 : offset
+  %scratch = buffer.alloca<global> align(16) %scratch_bytes : buffer
+  kernel.launch @silero_hop_8000(%work, %streams, %output, %window, %previous, %next, %scratch, %stft_weights, %encoder0_weights, %encoder1_weights, %encoder2_weights, %encoder3_weights, %input_gates_weights, %recurrent_gates_weights, %encoder0_bias, %encoder1_bias, %encoder2_bias, %encoder3_bias, %gate_bias, %head_weight, %head_bias) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, view<132x128xf32>, view<132x195xf32>, view<72x384xf32>, view<72x192xf32>, view<132x192xf32>, view<516x128xf32>, view<516x128xf32>, view<128xf32>, view<64xf32>, view<64xf32>, view<128xf32>, view<512xf32>, view<128xf32>, view<1xf32>)
+  command.return
+}

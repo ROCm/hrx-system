@@ -1,0 +1,15 @@
+{
+  "name": "silero-vad-8000",
+  "definition": {
+    "kind": "activity",
+    "prepare": "prepare_8000.loom",
+    "control": "control.loom",
+    "sources": [
+      "numerical.loom",
+      "generate_8000.loom"
+    ],
+    "assets": ".",
+    "pending_requests": 8,
+    "options": {}
+  }
+}

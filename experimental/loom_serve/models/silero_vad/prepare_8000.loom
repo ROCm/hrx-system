@@ -1,0 +1,63 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+
+func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+global.rodata.def @root = bytes("6465746563745f38303030")
+
+global.rodata.def @name = bytes("73696c65726f2d7661642d38303030")
+
+global.rodata.def @checkpoint = bytes("73696c65726f2d383030302e7361666574656e736f7273")
+
+global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
+
+global.rodata.def @empty = bytes("")
+
+global.rodata.def @options_error = bytes("53696c65726f206861732066697865642067656f6d6574727920616e642061636365707473206e6f206d6f64656c206f7074696f6e73")
+
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer) {
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %zero32 = scalar.constant 0 : i32
+  %object_type = scalar.constant 2 : i32
+  %members, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  %none = scalar.cmpi eq, %count, %c0 : i64
+  %valid = scalar.andi %object, %none : i1
+  %condition = scalar.extui %valid : i1 to i32
+  %error = global.load @options_error : buffer
+  func.call @require(%condition, %error) : (i32, buffer)
+  %root = global.load @root : buffer
+  %stage = func.call @stage(%root, %c0) : (buffer, i64) -> (i32)
+  %checkpoint = global.load @checkpoint : buffer
+  %policy = global.load @policy : buffer
+  func.call @parameter(%stage, %zero32, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  %rows = scalar.constant 8 : i64
+  %small = scalar.constant 16 : i64
+  %stream_stride = scalar.constant 1152 : i64
+  %batch_bytes = scalar.constant 8464 : i64
+  %output_bytes = scalar.constant 32 : i64
+  %input_frames = scalar.constant 256 : i64
+  %frame_limit = scalar.constant 9223372036854775807 : i64
+  %event_bytes = scalar.constant 32 : i64
+  %rate = scalar.constant 8000 : i64
+  %outputs = scalar.constant 2 : i32
+  %model_bytes = index.constant 48 : offset
+  %model = buffer.alloca<private> align(8) %model_bytes : buffer
+  %metadata_offset = index.constant 32 : offset
+  %metadata = buffer.view %model[%metadata_offset] : buffer -> view<2xi64>
+  view.store %rate, %metadata[0] : i64, view<2xi64>
+  view.store %input_frames, %metadata[1] : i64, view<2xi64>
+  %empty = global.load @empty : buffer
+  %name = global.load @name : buffer
+  func.return %rows, %rows, %small, %small, %stream_stride, %batch_bytes, %output_bytes, %output_bytes, %input_frames, %frame_limit, %event_bytes, %rate, %c1, %c1, %outputs, %empty, %name, %model, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer
+}
