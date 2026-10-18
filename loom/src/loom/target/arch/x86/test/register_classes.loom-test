@@ -1,13 +1,13 @@
-// RUN: emit low-allocation-json @simd128_register_15 output=none fixed=%input:physical_register:15:1
-low.func.def target<x86.simd128.core> @simd128_register_15(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+// RUN: emit low-allocation-json @avx2_xmm_register_15 output=none fixed=%input:physical_register:15:1
+low.func.def target<x86.avx2.core> @avx2_xmm_register_15(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   return %input
 }
 
 // ====
 
-// RUN: emit low-allocation-json @simd128_register_16 output=none fixed=%input:physical_register:16:1
-// ERROR@+1: BACKEND/022 {function_name="simd128_register_16", request_kind="fixed_value", register_class="x86.xmm", location_base="16", location_count="1", location_end="17", allocation_capacity="16"}
-low.func.def target<x86.simd128.core> @simd128_register_16(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+// RUN: emit low-allocation-json @avx2_xmm_register_16 output=none fixed=%input:physical_register:16:1
+// ERROR@+1: BACKEND/022 {function_name="avx2_xmm_register_16", request_kind="fixed_value", register_class="x86.xmm", location_base="16", location_count="1", location_end="17", allocation_capacity="16"}
+low.func.def target<x86.avx2.core> @avx2_xmm_register_16(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   return %input
 }
 
@@ -46,12 +46,6 @@ low.func.def target<x86.avx_vnni.core> @avx_vnni_register_16(%input: reg<x86.ymm
 // RUN: verify
 // ERROR@+1: PARSE/003 {actual_token="x86.xmm", expected="register class defined by the selected descriptor set"}
 low.func.decl target<x86.scalar.core> @scalar_absent_xmm(%input: reg<x86.xmm>)
-
-// ====
-
-// RUN: verify
-// ERROR@+1: PARSE/003 {actual_token="x86.ymm", expected="register class defined by the selected descriptor set"}
-low.func.decl target<x86.simd128.core> @simd128_absent_ymm(%input: reg<x86.ymm>)
 
 // ====
 

@@ -14,7 +14,6 @@
 #include "loom/target/arch/x86/descriptors/avx512_descriptors.h"
 #include "loom/target/arch/x86/descriptors/avx512_features_descriptors.h"
 #include "loom/target/arch/x86/descriptors/scalar_descriptors.h"
-#include "loom/target/arch/x86/descriptors/simd128_descriptors.h"
 
 namespace loom {
 namespace {
@@ -47,7 +46,6 @@ TEST(EntryDescriptorsTest, OrdinalsResolveInEachRepresentationView) {
        IREE_SV("x86.scalar.lea.symbol.gpr64")},
   };
   for (const auto* set : {loom_x86_scalar_core_descriptor_set(),
-                          loom_x86_simd128_core_descriptor_set(),
                           loom_x86_avx2_core_descriptor_set(),
                           loom_x86_avx2_features_core_descriptor_set(),
                           loom_x86_avx512_core_descriptor_set(),

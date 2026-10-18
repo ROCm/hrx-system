@@ -65,12 +65,6 @@ DESCRIPTOR_SET_REGISTRATIONS = (
         aliases=("x86_scalar_core",),
     ),
     DescriptorSetRegistration(
-        key="x86.simd128.core",
-        module_name="loom.target.arch.x86.descriptors",
-        symbol_name="X86_SIMD128_DESCRIPTOR_SET",
-        aliases=("x86_simd128_core",),
-    ),
-    DescriptorSetRegistration(
         key="x86.avx2.core",
         module_name="loom.target.arch.x86.descriptors",
         symbol_name="X86_AVX2_DESCRIPTOR_SET",

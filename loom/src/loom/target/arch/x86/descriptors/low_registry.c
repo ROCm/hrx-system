@@ -19,11 +19,9 @@
 #include "loom/target/arch/x86/descriptors/avx_vnni_int8_descriptors.h"
 #include "loom/target/arch/x86/descriptors/packed_dot_descriptors.h"
 #include "loom/target/arch/x86/descriptors/scalar_descriptors.h"
-#include "loom/target/arch/x86/descriptors/simd128_descriptors.h"
 
 static const loom_low_descriptor_set_provider_t kLowDescriptorSetProviders[] = {
     loom_x86_scalar_core_descriptor_set,
-    loom_x86_simd128_core_descriptor_set,
     loom_x86_avx2_core_descriptor_set,
     loom_x86_avx2_features_core_descriptor_set,
     loom_x86_avx512_core_descriptor_set,

@@ -117,7 +117,6 @@ iree_py_library(
     "descriptors/memory.py"
     "descriptors/packed_dot.py"
     "descriptors/scalar.py"
-    "descriptors/simd128.py"
   DEPS
     loom::py::loom::target::arch::x86::native_vector
     loom::py::loom::target::arch::x86::scalar_families

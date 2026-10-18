@@ -67,16 +67,6 @@ low.kernel.def target<x86.scalar.core>(@target) abi_layout({offsets = [0], signa
 
 // ====
 
-x86.target<simd128> @target
-
-// SIMD128 has XMM carriers but no task-entry SIMD instruction vocabulary.
-// ERROR@+1: BACKEND/053 {parameter_index="0", actual_type="reg<x86.xmm>"}
-low.kernel.def target<x86.simd128.core>(@target) abi_layout({offsets = [0], signature = (f32) -> ()}) @simd128_entry(%value: reg<x86.xmm>) asm {
-  return
-}
-
-// ====
-
 x86.target<avx512> @target
 
 // Task parameters use the stable callable SIMD predicate representation.

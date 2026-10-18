@@ -168,7 +168,6 @@ loom_cc_test(
     loom::target::arch::x86::descriptors::avx_vnni_int8_descriptors
     loom::target::arch::x86::descriptors::packed_dot_descriptors
     loom::target::arch::x86::descriptors::scalar_descriptors
-    loom::target::arch::x86::descriptors::simd128_descriptors
     loom::target::arch::x86::register_classes
     loom::testing::module_ptr
   LABELS

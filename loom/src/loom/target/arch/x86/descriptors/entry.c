@@ -11,7 +11,6 @@
 #include "loom/target/arch/x86/descriptors/avx512_descriptors.h"
 #include "loom/target/arch/x86/descriptors/avx512_features_descriptors.h"
 #include "loom/target/arch/x86/descriptors/scalar_descriptors.h"
-#include "loom/target/arch/x86/descriptors/simd128_descriptors.h"
 
 #define LOOM_X86_ENTRY_BASE_FIELDS(prefix)                             \
   .load_u8 = prefix##_DESCRIPTOR_REF_SCALAR_MOVZX_LOAD_U8_GPR32,       \
@@ -63,7 +62,6 @@
 
 static const loom_x86_entry_descriptors_t* const kEntryDescriptors[] = {
     LOOM_X86_ENTRY_SCALAR(X86_SCALAR_CORE),
-    LOOM_X86_ENTRY_SCALAR(X86_SIMD128_CORE),
     LOOM_X86_ENTRY_AVX2(X86_AVX2_CORE),
     LOOM_X86_ENTRY_AVX2(X86_AVX2_FEATURES_CORE),
     LOOM_X86_ENTRY_AVX512(X86_AVX512_CORE),

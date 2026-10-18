@@ -458,8 +458,8 @@ TEST_F(X86ProviderTest, RejectsNonExecutableAndForeignProfiles) {
       .architecture = IREE_CPU_ARCHITECTURE_X86_64,
       .fields = {UINT64_MAX},
   };
-  for (iree_string_view_t selector : {IREE_SV("simd128"), IREE_SV("packed_dot"),
-                                      IREE_SV("avx512_packed_dot")}) {
+  for (iree_string_view_t selector :
+       {IREE_SV("packed_dot"), IREE_SV("avx512_packed_dot")}) {
     ExpectStaticSelection(&cpu_data, Profile(selector), nullptr);
   }
 

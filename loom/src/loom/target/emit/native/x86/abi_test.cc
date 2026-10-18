@@ -30,7 +30,6 @@
 #include "loom/target/arch/x86/descriptors/avx_vnni_int8_descriptors.h"
 #include "loom/target/arch/x86/descriptors/packed_dot_descriptors.h"
 #include "loom/target/arch/x86/descriptors/scalar_descriptors.h"
-#include "loom/target/arch/x86/descriptors/simd128_descriptors.h"
 #include "loom/target/arch/x86/register_classes.h"
 #include "loom/testing/module_ptr.h"
 
@@ -58,15 +57,6 @@ static const ProfileExpectation kProfiles[] = {
         .provider = loom_x86_scalar_core_descriptor_set,
         .vector_register_class = LOOM_LOW_REG_CLASS_NONE,
         .vector_register_count = 0,
-        .mask_register_count = 0,
-    },
-    {
-        .name = "simd128",
-        .descriptor_key = "x86.simd128.core",
-        .carrier = "xmm",
-        .provider = loom_x86_simd128_core_descriptor_set,
-        .vector_register_class = LOOM_X86_REGISTER_CLASS_XMM,
-        .vector_register_count = 16,
         .mask_register_count = 0,
     },
     {
@@ -172,7 +162,6 @@ static const ProfileExpectation kProfiles[] = {
 
 static const loom_low_descriptor_set_provider_t kDescriptorSetProviders[] = {
     loom_x86_scalar_core_descriptor_set,
-    loom_x86_simd128_core_descriptor_set,
     loom_x86_avx2_core_descriptor_set,
     loom_x86_avx2_features_core_descriptor_set,
     loom_x86_avx512_core_descriptor_set,
@@ -608,8 +597,8 @@ TEST_F(X86FunctionAbiTest, StackRowsRetainExactScalarAndVectorWidths) {
        8, 16},
       {"xmm64", "x86.avx512.core", "vector<4xf16>", "xmm",
        loom_x86_avx512_core_descriptor_set, 8, 16},
-      {"xmm", "x86.simd128.core", "vector<4xi32>", "xmm",
-       loom_x86_simd128_core_descriptor_set, 16, 16},
+      {"xmm", "x86.avx2.core", "vector<4xi32>", "xmm",
+       loom_x86_avx2_core_descriptor_set, 16, 16},
       {"ymm", "x86.avx2.core", "vector<8xi32>", "ymm",
        loom_x86_avx2_core_descriptor_set, 32, 32},
       {"zmm", "x86.avx512.core", "vector<16xi32>", "zmm",
