@@ -1,0 +1,51 @@
+// RUN: emit source-low target=x86:avx512 output=low
+
+func.def @native_float_integer(%single: f32, %double: f64, %single_packet: vector<16xf32>, %double_packet: vector<8xf64>) -> (i32, i64, vector<16xi32>, vector<16xi32>, vector<8xi64>, vector<8xi64>, vector<16xi8>) {
+  %unsigned_word = scalar.fptoui %single : f32 to i32
+  %unsigned_wide = scalar.fptoui %double : f64 to i64
+  %signed_words = vector.fptosi %single_packet : vector<16xf32> to vector<16xi32>
+  %unsigned_words = vector.fptoui %single_packet : vector<16xf32> to vector<16xi32>
+  %signed_wide = vector.fptosi %double_packet : vector<8xf64> to vector<8xi64>
+  %unsigned_wide_packet = vector.fptoui %double_packet : vector<8xf64> to vector<8xi64>
+  %unsigned_bytes = vector.fptoui %single_packet : vector<16xf32> to vector<16xi8>
+  func.return %unsigned_word, %unsigned_wide, %signed_words, %unsigned_words, %signed_wide, %unsigned_wide_packet, %unsigned_bytes : i32, i64, vector<16xi32>, vector<16xi32>, vector<8xi64>, vector<8xi64>, vector<16xi8>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (f32, f64, vector<16xf32>, vector<8xf64>) -> (i32, i64, vector<16xi32>, vector<16xi32>, vector<8xi64>, vector<8xi64>, vector<16xi8>)}) @native_float_integer(%single: reg<x86.xmm>, %double: reg<x86.xmm>, %single_packet: reg<x86.zmm>, %double_packet: reg<x86.zmm>) -> (reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.xmm>) asm {
+  %unsigned_word = avx512.vcvttss2usi.gpr32.xmm %single
+  %unsigned_wide = avx512.vcvttsd2usi.gpr64.xmm %double
+  %signed_words = avx512.vcvttps2dq.zmm.zmm %single_packet
+  %unsigned_words = avx512.vcvttps2udq.zmm.zmm %single_packet
+  %signed_wide = avx512.vcvttpd2qq.zmm.zmm %double_packet
+  %unsigned_wide_packet = avx512.vcvttpd2uqq.zmm.zmm %double_packet
+  %unsigned_bytes = avx512.vpmovdb.xmm.zmm %signed_words
+  return %unsigned_word, %unsigned_wide, %signed_words, %unsigned_words, %signed_wide, %unsigned_wide_packet, %unsigned_bytes
+}
+
+// ====
+
+// AVX-512VL is optional. Smaller packets and wide F64-to-narrow conversions
+// retain their AVX2 conversion and packing path when it is unavailable.
+// RUN: emit source-low output=low
+x86.target<avx512> @target {features = [-avx512vl]}
+
+func.def target(@target) @without_avx512vl(%single: vector<4xf32>, %double: vector<8xf64>) -> (vector<4xi8>, vector<8xi16>) {
+  %single_bytes = vector.fptosi %single : vector<4xf32> to vector<4xi8>
+  %double_halves = vector.fptoui %double : vector<8xf64> to vector<8xi16>
+  func.return %single_bytes, %double_halves : vector<4xi8>, vector<8xi16>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<4xf32>, vector<8xf64>) -> (vector<4xi8>, vector<8xi16>)}) @without_avx512vl(%single: reg<x86.xmm>, %double: reg<x86.zmm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+  %10 = vcvttps2dq.xmm.xmm %single
+  %11 = avx2.vmovdqu.rodata.xmm @__low_rodata_9663ac4f
+  %single_bytes = vpshufb.xmm %10, %11
+  %13 = avx512.vcvttpd2dq.ymm.zmm %double
+  %14 = avx2.vmovdqu.rodata.ymm @__low_rodata_6e7103bf
+  %15 = vpshufb.ymm %13, %14
+  %16 = vextractf128.xmm %15, 0
+  %17 = vextractf128.xmm %15, 1
+  %double_halves = vpunpcklqdq.xmm %16, %17
+  return %single_bytes, %double_halves
+}

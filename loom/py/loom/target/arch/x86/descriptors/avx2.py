@@ -17,6 +17,7 @@ from loom.target.arch.x86.vector_families import (
     AVX2_FLOAT_BINARY_FAMILIES,
     AVX2_FLOAT_COMPARE_MNEMONICS,
     AVX2_FLOAT_FMA_MNEMONICS,
+    AVX2_FLOAT_INTEGER_I32_FORMS,
     AVX2_FLOAT_ROOT_FAMILIES,
     AVX2_INTEGER_BINARY_FAMILIES,
     AVX2_INTEGER_COMPARE_MNEMONICS,
@@ -97,6 +98,10 @@ from .common import (
     _xmm_result,
 )
 from .float_conversion import float_conversion_descriptors
+from .float_integer import (
+    scalar_float_integer_descriptors,
+    vector_float_integer_descriptors,
+)
 from .integer_float import integer_float_descriptors
 from .memory import memory_descriptors
 from .scalar import (
@@ -1311,6 +1316,10 @@ X86_AVX2_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
     *X86_AVX2_VECTOR_DESCRIPTORS,
     *integer_float_descriptors(unsigned=False),
+    *scalar_float_integer_descriptors(unsigned=False),
+    *vector_float_integer_descriptors(
+        AVX2_FLOAT_INTEGER_I32_FORMS, unsigned=False, evex=False
+    ),
     *float_conversion_descriptors(evex=False),
     *X86_SCALAR_SUFFIX_DESCRIPTORS,
 )

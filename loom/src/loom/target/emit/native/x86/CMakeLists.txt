@@ -227,6 +227,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/float_integer_native_bytes.loom-test"
     "test/function.loom-test"
     "test/operand_ties.loom-test"
     "test/root_native_bytes.loom-test"

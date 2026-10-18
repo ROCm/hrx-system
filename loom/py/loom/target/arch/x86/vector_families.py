@@ -84,6 +84,23 @@ class FloatRootFamily:
 
 
 @dataclass(frozen=True, slots=True)
+class FloatIntegerVectorForm:
+    """One native floating-to-integer packet shape."""
+
+    source: VectorElement
+    result_bit_width: int
+    lane_count: int
+
+    @property
+    def source_vector_bit_width(self) -> int:
+        return self.source.bit_width * self.lane_count
+
+    @property
+    def result_vector_bit_width(self) -> int:
+        return self.result_bit_width * self.lane_count
+
+
+@dataclass(frozen=True, slots=True)
 class VectorLaneFamily:
     """Bit-compatible scalar lane movement shared by source element types."""
 
@@ -166,6 +183,24 @@ X86_VECTOR_INTEGER_NARROWING_FAMILIES = (
 FLOAT_ELEMENTS = (
     VectorElement("f32", 32),
     VectorElement("f64", 64),
+)
+
+AVX2_FLOAT_INTEGER_I32_FORMS = tuple(
+    FloatIntegerVectorForm(source, 32, lane_count)
+    for source, lane_counts in zip(FLOAT_ELEMENTS, ((4, 8), (2, 4)), strict=True)
+    for lane_count in lane_counts
+)
+
+AVX512_FLOAT_INTEGER_I32_FORMS = (
+    *AVX2_FLOAT_INTEGER_I32_FORMS,
+    FloatIntegerVectorForm(FLOAT_ELEMENTS[0], 32, 16),
+    FloatIntegerVectorForm(FLOAT_ELEMENTS[1], 32, 8),
+)
+
+AVX512_FLOAT_INTEGER_I64_FORMS = tuple(
+    FloatIntegerVectorForm(source, 64, lane_count)
+    for source in FLOAT_ELEMENTS
+    for lane_count in (2, 4, 8)
 )
 
 FP16_ELEMENT = VectorElement("f16", 16)

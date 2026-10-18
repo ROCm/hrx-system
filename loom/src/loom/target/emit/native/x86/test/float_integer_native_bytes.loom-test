@@ -1,0 +1,101 @@
+// RUN: emit x86-native-bytes @signed_scalar_float_integer
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @signed_scalar_float_integer(%single: reg<x86.xmm>, %double: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+  %single_word = vcvttss2si.gpr32.xmm %single
+  %single_wide = vcvttss2si.gpr64.xmm %single
+  %double_word = vcvttsd2si.gpr32.xmm %double
+  %double_wide = vcvttsd2si.gpr64.xmm %double
+  return %double_wide
+}
+
+// ----
+code: c5 fa 2c c0 c4 e1 fa 2c c0 c5 fb 2c c1 c4 e1 fb 2c c1 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @unsigned_scalar_float_integer
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @unsigned_scalar_float_integer(%single: reg<x86.xmm>, %double: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+  %single_word = avx512.vcvttss2usi.gpr32.xmm %single
+  %single_wide = avx512.vcvttss2usi.gpr64.xmm %single
+  %double_word = avx512.vcvttsd2usi.gpr32.xmm %double
+  %double_wide = avx512.vcvttsd2usi.gpr64.xmm %double
+  return %double_wide
+}
+
+// ----
+code: 62 f1 7e 08 78 c0 62 f1 fe 08 78 c0 62 f1 7f 08 78 c1 62 f1 ff 08 78 c1 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @signed_packed_word_float_integer
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @signed_packed_word_float_integer(%xmm: reg<x86.xmm>, %ymm: reg<x86.ymm>) -> (reg<x86.xmm>) asm {
+  %single_xmm = vcvttps2dq.xmm.xmm %xmm
+  %single_ymm = vcvttps2dq.ymm.ymm %ymm
+  %double_xmm = vcvttpd2dq.xmm.xmm %xmm
+  %double_ymm = vcvttpd2dq.xmm.ymm %ymm
+  return %double_ymm
+}
+
+// ----
+code: c5 fa 5b d0 c5 fe 5b d1 c5 f9 e6 c0 c5 fd e6 c1 c5 f8 77 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @avx512_packed_word_float_integer
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @avx512_packed_word_float_integer(%xmm: reg<x86.xmm>, %ymm: reg<x86.ymm>, %zmm: reg<x86.zmm>) -> (reg<x86.ymm>) asm {
+  %signed_single_zmm = avx512.vcvttps2dq.zmm.zmm %zmm
+  %signed_double_zmm = avx512.vcvttpd2dq.ymm.zmm %zmm
+  %unsigned_single_xmm = avx512.vcvttps2udq.xmm.xmm %xmm
+  %unsigned_single_ymm = avx512.vcvttps2udq.ymm.ymm %ymm
+  %unsigned_single_zmm = avx512.vcvttps2udq.zmm.zmm %zmm
+  %unsigned_double_xmm = avx512.vcvttpd2udq.xmm.xmm %xmm
+  %unsigned_double_ymm = avx512.vcvttpd2udq.xmm.ymm %ymm
+  %unsigned_double_zmm = avx512.vcvttpd2udq.ymm.zmm %zmm
+  return %unsigned_double_zmm
+}
+
+// ----
+code: 62 f1 7e 48 5b da 62 f1 fd 48 e6 da 62 f1 7c 08 78 d8 62 f1 7c 28 78 d9 62 f1 7c 48 78 da 62 f1 fc 08 78 c0 62 f1 fc 28 78 c1 62 f1 fc 48 78 c2 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @signed_packed_wide_float_integer
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @signed_packed_wide_float_integer(%xmm: reg<x86.xmm>, %ymm: reg<x86.ymm>, %zmm: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %single_xmm = avx512.vcvttps2qq.xmm.xmm %xmm
+  %single_ymm = avx512.vcvttps2qq.ymm.xmm %xmm
+  %single_zmm = avx512.vcvttps2qq.zmm.ymm %ymm
+  %double_xmm = avx512.vcvttpd2qq.xmm.xmm %xmm
+  %double_ymm = avx512.vcvttpd2qq.ymm.ymm %ymm
+  %double_zmm = avx512.vcvttpd2qq.zmm.zmm %zmm
+  return %double_zmm
+}
+
+// ----
+code: 62 f1 7d 08 7a d8 62 f1 7d 28 7a d8 62 f1 7d 48 7a d9 62 f1 fd 08 7a c0 62 f1 fd 28 7a c1 62 f1 fd 48 7a c2 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @unsigned_packed_wide_float_integer
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @unsigned_packed_wide_float_integer(%xmm: reg<x86.xmm>, %ymm: reg<x86.ymm>, %zmm: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %single_xmm = avx512.vcvttps2uqq.xmm.xmm %xmm
+  %single_ymm = avx512.vcvttps2uqq.ymm.xmm %xmm
+  %single_zmm = avx512.vcvttps2uqq.zmm.ymm %ymm
+  %double_xmm = avx512.vcvttpd2uqq.xmm.xmm %xmm
+  %double_ymm = avx512.vcvttpd2uqq.ymm.ymm %ymm
+  %double_zmm = avx512.vcvttpd2uqq.zmm.zmm %zmm
+  return %double_zmm
+}
+
+// ----
+code: 62 f1 7d 08 78 d8 62 f1 7d 28 78 d8 62 f1 7d 48 78 d9 62 f1 fd 08 78 c0 62 f1 fd 28 78 c1 62 f1 fd 48 78 c2 c3

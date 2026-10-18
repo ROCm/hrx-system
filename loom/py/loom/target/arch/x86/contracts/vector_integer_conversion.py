@@ -411,6 +411,37 @@ def avx2_vector_integer_narrowing_rules(
     )
 
 
+def avx512_integer_narrowing_emits(
+    family: VectorIntegerNarrowingFamily,
+    lane_count: int,
+    descriptor_lookup: _DescriptorLookup,
+    *,
+    source: ValueRef,
+    result: ValueRef,
+    result_type: ResultTypeBinding | None,
+) -> tuple[tuple[ContractEmit, ...], tuple[Descriptor, ...]]:
+    """Natively narrows one AVX-512 register of integer lanes."""
+
+    source_vector_bit_width = lane_count * family.source.bit_width
+    result_vector_bit_width = lane_count * family.result.bit_width
+    descriptor = descriptor_lookup(
+        f"x86.avx512.{family.mnemonic}."
+        f"{_physical_register_suffix(result_vector_bit_width)}."
+        f"{_physical_register_suffix(source_vector_bit_width)}"
+    )
+    return (
+        (
+            _op_emit(
+                descriptor=descriptor,
+                operands={"source": source},
+                results={"dst": result},
+                result_types=(None if result_type is None else {"dst": result_type}),
+            ),
+        ),
+        (descriptor,),
+    )
+
+
 def avx512_vector_integer_narrowing_rules(
     descriptor_lookup: _DescriptorLookup,
 ) -> tuple[DescriptorRule, ...]:
@@ -425,18 +456,15 @@ def avx512_vector_integer_narrowing_rules(
             result_vector_bit_width = lane_count * family.result.bit_width
             if result_vector_bit_width not in AVX512_CARRIER_VECTOR_BIT_WIDTHS:
                 continue
-            physical_source_bit_width = max(128, source_vector_bit_width)
-            physical_result_bit_width = max(
-                128,
-                physical_source_bit_width
-                * family.result.bit_width
-                // family.source.bit_width,
+            emits, descriptors = avx512_integer_narrowing_emits(
+                family,
+                lane_count,
+                descriptor_lookup,
+                source=ValueRef.operand("input"),
+                result=ValueRef.result("result"),
+                result_type=None,
             )
-            descriptor = descriptor_lookup(
-                f"x86.avx512.{family.mnemonic}."
-                f"{_physical_register_suffix(physical_result_bit_width)}."
-                f"{_physical_register_suffix(physical_source_bit_width)}"
-            )
+            descriptor = descriptors[0]
             rules.append(
                 DescriptorRule(
                     source_op=vector.vector_trunci,
@@ -450,13 +478,7 @@ def avx512_vector_integer_narrowing_rules(
                         ),
                         Guard.value_static_element_count_eq("input", "result"),
                     ),
-                    emit=(
-                        _op_emit(
-                            descriptor=descriptor,
-                            operands={"source": ValueRef.operand("input")},
-                            results={"dst": ValueRef.result("result")},
-                        ),
-                    ),
+                    emit=emits,
                     priority=1,
                     report_key="x86.vector_integer_narrow.native",
                 )

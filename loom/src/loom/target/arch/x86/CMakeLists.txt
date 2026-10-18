@@ -318,6 +318,8 @@ loom_check_test_suite(
     "test/source_low/numeric_f64_constants.loom-test"
     "test/source_low/numeric_float_conversion_avx2.loom-test"
     "test/source_low/numeric_float_conversion_avx512.loom-test"
+    "test/source_low/numeric_float_integer_avx2.loom-test"
+    "test/source_low/numeric_float_integer_avx512.loom-test"
     "test/source_low/numeric_half_conversion_avx512.loom-test"
     "test/source_low/numeric_index_operands.loom-test"
     "test/source_low/numeric_integer_bit_counts.loom-test"

@@ -98,6 +98,7 @@ iree_py_library(
         "descriptors/encoding.py",
         "descriptors/f16c.py",
         "descriptors/float_conversion.py",
+        "descriptors/float_integer.py",
         "descriptors/half_conversion.py",
         "descriptors/integer_bits.py",
         "descriptors/integer_float.py",

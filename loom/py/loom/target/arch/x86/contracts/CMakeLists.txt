@@ -24,6 +24,7 @@ iree_py_library(
     "constants.py"
     "f16c.py"
     "float_conversion.py"
+    "float_integer.py"
     "float_narrowing.py"
     "float_roots.py"
     "floating_extrema.py"
@@ -100,6 +101,30 @@ iree_py_test(
     loom::py::loom::target::arch::x86::contracts::contracts
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::x86::descriptors
+    loom::py::loom::target::contracts::contracts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    float_integer_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
+  SRCS
+    "float_integer_test.py"
+    "../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.x86.contracts.float_integer_test"
+  DEPS
+    loom::py::loom::target::arch::x86::contracts::contracts
+    loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::dialect::vector::vector
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::x86::descriptors
+    loom::py::loom::target::arch::x86::vector_families
     loom::py::loom::target::contracts::contracts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
