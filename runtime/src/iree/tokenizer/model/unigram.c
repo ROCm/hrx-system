@@ -609,6 +609,13 @@ static void iree_tokenizer_unigram_state_deinitialize(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static void iree_tokenizer_unigram_state_reset(
+    iree_tokenizer_model_state_t* base_state) {
+  const iree_tokenizer_model_t* model = base_state->model;
+  memset(base_state, 0, sizeof(iree_tokenizer_unigram_state_t));
+  base_state->model = model;
+}
+
 // Emits pending tokens to the output buffer. Returns the number of tokens
 // emitted. Updates pending_emit_index.
 static iree_host_size_t iree_tokenizer_unigram_emit_pending(
@@ -920,6 +927,7 @@ static const iree_tokenizer_model_vtable_t iree_tokenizer_unigram_model_vtable =
         .destroy = iree_tokenizer_unigram_model_destroy,
         .state_initialize = iree_tokenizer_unigram_state_initialize,
         .state_deinitialize = iree_tokenizer_unigram_state_deinitialize,
+        .state_reset = iree_tokenizer_unigram_state_reset,
         .state_encode = iree_tokenizer_unigram_state_encode,
         .state_finalize = iree_tokenizer_unigram_state_finalize,
         .state_has_pending = iree_tokenizer_unigram_state_has_pending,

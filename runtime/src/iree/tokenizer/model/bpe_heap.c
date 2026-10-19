@@ -9,11 +9,9 @@
 void iree_tokenizer_bpe_heap_initialize(
     iree_tokenizer_bpe_heap_t* heap, iree_tokenizer_bpe_heap_entry_t* storage,
     iree_host_size_t capacity) {
-  IREE_TRACE_ZONE_BEGIN(z0);
   heap->entries = storage;
   heap->capacity = capacity;
   heap->size = 0;
-  IREE_TRACE_ZONE_END(z0);
 }
 
 void iree_tokenizer_bpe_heap_reset(iree_tokenizer_bpe_heap_t* heap) {
@@ -22,7 +20,7 @@ void iree_tokenizer_bpe_heap_reset(iree_tokenizer_bpe_heap_t* heap) {
 
 void iree_tokenizer_bpe_heap_push(iree_tokenizer_bpe_heap_t* heap,
                                   iree_tokenizer_bpe_heap_entry_t entry) {
-  // Hard check: capacity is a proven bound (3 * max_token_length).
+  // The candidate producer establishes this bound from its initial symbols.
   // Exceeding it indicates a bug in the BPE algorithm, not user input.
   if (IREE_UNLIKELY(heap->size >= heap->capacity)) {
     IREE_ASSERT_UNREACHABLE("BPE heap overflow: size=%" PRIhsz
@@ -36,7 +34,7 @@ void iree_tokenizer_bpe_heap_push(iree_tokenizer_bpe_heap_t* heap,
   heap->entries[index] = entry;
 
   // Sift up: swap with parent while new entry has higher priority.
-  // Uses composite comparison: rank first, then start_byte for tie-breaking.
+  // Uses composite comparison: rank first, then symbol position for ties.
   while (index > 0) {
     iree_host_size_t parent = (index - 1) / 2;
     if (!iree_tokenizer_bpe_heap_entry_less(heap->entries[index],
@@ -66,7 +64,7 @@ iree_tokenizer_bpe_heap_entry_t iree_tokenizer_bpe_heap_pop(
   heap->entries[0] = heap->entries[heap->size];
 
   // Sift down: swap with highest-priority child while lower priority.
-  // Uses composite comparison: rank first, then start_byte for tie-breaking.
+  // Uses composite comparison: rank first, then symbol position for ties.
   iree_host_size_t index = 0;
   for (;;) {
     iree_host_size_t left = 2 * index + 1;

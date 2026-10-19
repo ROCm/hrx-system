@@ -30,7 +30,7 @@ TEST(BpeHeapTest, PushPop) {
 
   auto entry = iree_tokenizer_bpe_heap_pop(&heap);
   EXPECT_EQ(entry.rank, 10u);
-  EXPECT_EQ(entry.left_start_byte, 0u);
+  EXPECT_EQ(entry.position, 0u);
   EXPECT_TRUE(iree_tokenizer_bpe_heap_is_empty(&heap));
 }
 
@@ -112,8 +112,7 @@ TEST(BpeHeapTest, BytePositionPreserved) {
   EXPECT_EQ(e3.rank, 1u);
 
   // Verify all byte positions were preserved (in some order).
-  std::set<uint32_t> byte_positions = {e1.left_start_byte, e2.left_start_byte,
-                                       e3.left_start_byte};
+  std::set<uint32_t> byte_positions = {e1.position, e2.position, e3.position};
   EXPECT_TRUE(byte_positions.count(50));
   EXPECT_TRUE(byte_positions.count(100));
   EXPECT_TRUE(byte_positions.count(200));

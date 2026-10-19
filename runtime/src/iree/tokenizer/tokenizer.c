@@ -61,8 +61,11 @@ typedef enum iree_tokenizer_encode_phase_e {
 struct iree_tokenizer_encode_state_t {
   const iree_tokenizer_t* tokenizer;
 
-  // User-provided buffers.
+  // Active transform ring, borrowing caller storage until overflow growth.
   iree_byte_span_t transform_buffer;
+  // Owned replacement for an exhausted caller ring, retained across resets.
+  uint8_t* transform_overflow;
+  // Caller-provided offset mapping storage.
   iree_tokenizer_offset_run_list_t offset_runs;
 
   // Flags from initialization.
@@ -107,10 +110,6 @@ struct iree_tokenizer_encode_state_t {
   // Postprocessor state. When phase is IDLE, all postprocessor operations are
   // no-ops (either ADD_SPECIAL_TOKENS not set or template has no tokens).
   iree_tokenizer_postprocessor_encode_state_t postprocessor;
-
-  // The model owns an unfinished span fed directly from the ring. Reclaiming
-  // its bytes does not retire the span; a producer boundary must complete it.
-  bool has_partial_segment;
 
   // Deferred pre-normalization special token emission.
   //
@@ -166,6 +165,40 @@ static inline iree_host_size_t iree_tokenizer_ring_available(
 static inline iree_host_size_t iree_tokenizer_ring_writable_space(
     const iree_tokenizer_encode_state_t* state) {
   return iree_tokenizer_ring_available(state);
+}
+
+// Cold overflow path. Logical positions and segmenter-relative offsets do not
+// change; only the mapping into physical ring storage changes. No producer
+// retains a pointer into the old ring across calls.
+static iree_status_t iree_tokenizer_ring_grow(
+    iree_tokenizer_encode_state_t* state) {
+  iree_host_size_t old_capacity = state->capacity_mask + 1;
+  if (old_capacity > IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE / 4) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "unfinished tokenizer segment exceeds transform "
+                            "ring capacity (%" PRIhsz " bytes)",
+                            old_capacity);
+  }
+  iree_host_size_t new_capacity = old_capacity * 2;
+  uint8_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      state->tokenizer->allocator, new_capacity * 2, (void**)&storage));
+  iree_host_size_t position = state->read_position;
+  while (position < state->write_position) {
+    iree_host_size_t old_offset = position & state->capacity_mask;
+    iree_host_size_t new_offset = position & (new_capacity - 1);
+    iree_host_size_t length = iree_min(
+        state->write_position - position,
+        iree_min(old_capacity - old_offset, new_capacity - new_offset));
+    memcpy(storage + new_offset, state->transform_buffer.data + old_offset,
+           length);
+    position += length;
+  }
+  iree_allocator_free(state->tokenizer->allocator, state->transform_overflow);
+  state->transform_overflow = storage;
+  state->transform_buffer = iree_make_byte_span(storage, new_capacity * 2);
+  state->capacity_mask = new_capacity - 1;
+  return iree_ok_status();
 }
 
 // After writing |bytes_written| bytes starting at |physical_write_start|,
@@ -668,7 +701,6 @@ static iree_status_t iree_tokenizer_encode_state_reset_internal(
   const iree_tokenizer_t* tokenizer = state->tokenizer;
 
   // Deinitialize and re-initialize pipeline stage states.
-  iree_tokenizer_model_state_deinitialize(state->model_state);
   iree_tokenizer_segmenter_state_deinitialize(state->segmenter_state);
   iree_tokenizer_normalizer_state_deinitialize(state->normalizer_state);
 
@@ -692,8 +724,7 @@ static iree_status_t iree_tokenizer_encode_state_reset_internal(
         &state->segmenter_state));
   }
   if (state->model_state) {
-    IREE_RETURN_IF_ERROR(iree_tokenizer_model_state_initialize(
-        tokenizer->model, (void*)state->model_state, &state->model_state));
+    iree_tokenizer_model_state_reset(state->model_state);
   }
 
   // Reset special token match states.
@@ -718,7 +749,6 @@ static iree_status_t iree_tokenizer_encode_state_reset_internal(
   state->pending_special_token = -1;
   state->first_consumed_by_special_token = false;
   state->phase = IREE_TOKENIZER_ENCODE_PHASE_PROCESS;
-  state->has_partial_segment = false;
   return iree_ok_status();
 }
 
@@ -1012,23 +1042,6 @@ iree_status_t iree_tokenizer_encode_state_initialize(
   }
   iree_host_size_t capacity = allocation / 2;
 
-  // Validate buffer is large enough for the frozen token theorem to apply.
-  // BPE's streaming mode freezes tokens when: current_byte > token_end +
-  // max_token_length - 1. With capacity <= max_token_length, tokens at the
-  // start of the buffer can never freeze, causing deadlock when the ring fills.
-  // Require capacity > max_token_length (strictly greater) to guarantee
-  // progress.
-  iree_host_size_t max_token_length =
-      iree_tokenizer_vocab_max_token_length(tokenizer->vocab);
-  if (iree_status_is_ok(status) && capacity <= max_token_length) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "transform buffer too small for this tokenizer: logical capacity "
-        "%" PRIhsz " must be > max_token_length %" PRIhsz
-        " (need physical allocation > %" PRIhsz ")",
-        capacity, max_token_length, max_token_length * 2);
-  }
-
   // Initialize state struct at base of storage.
   iree_tokenizer_encode_state_t* state = NULL;
   if (iree_status_is_ok(status)) {
@@ -1118,6 +1131,7 @@ void iree_tokenizer_encode_state_deinitialize(
   iree_tokenizer_segmenter_state_deinitialize(state->segmenter_state);
   iree_tokenizer_normalizer_state_deinitialize(state->normalizer_state);
 
+  iree_allocator_free(state->tokenizer->allocator, state->transform_overflow);
   memset(state, 0, sizeof(*state));
   IREE_TRACE_ZONE_END(z0);
 }
@@ -1137,9 +1151,6 @@ static inline bool iree_tokenizer_encode_state_pipeline_has_content(
     return true;
   }
   if (state->segment_count > 0) {
-    return true;
-  }
-  if (state->has_partial_segment) {
     return true;
   }
   if (state->normalizer_state &&
@@ -1200,52 +1211,6 @@ bool iree_tokenizer_encode_state_has_pending(
   }
 
   return false;
-}
-
-// Feeds ring buffer data [read_position, end_position) directly to the
-// model as a single segment, bypassing the segmenter. Handles physical
-// wrap-around via mirror copy. When |is_partial| is true, the model preserves
-// state for continuation (more bytes will follow); when false, the model
-// processes through to completion (FLUSH transition).
-static iree_status_t iree_tokenizer_encode_ring_as_segment(
-    iree_tokenizer_encode_state_t* state, iree_host_size_t end_position,
-    bool is_partial, iree_tokenizer_token_output_t sub_output,
-    iree_host_size_t* out_tokens_written, bool* out_segment_complete) {
-  *out_tokens_written = 0;
-  *out_segment_complete = false;
-
-  // An empty final span still retires model state after all accepted bytes
-  // have been reclaimed. Storage ownership and span lifetime are independent.
-  iree_host_size_t data_length = end_position - state->read_position;
-  iree_host_size_t capacity = state->capacity_mask + 1;
-  iree_host_size_t physical_read = state->read_position & state->capacity_mask;
-  iree_host_size_t physical_write = end_position & state->capacity_mask;
-
-  // Mirror copy if data wraps around the physical buffer end.
-  if (data_length > 0 && physical_write <= physical_read &&
-      physical_write > 0) {
-    memcpy(state->transform_buffer.data + capacity,
-           state->transform_buffer.data, physical_write);
-  }
-
-  iree_tokenizer_segment_t segment = {
-      .start = physical_read,
-      .end = physical_read + data_length,
-  };
-  iree_tokenizer_segment_list_t segment_list = {
-      .count = 1,
-      .values = &segment,
-      .last_is_partial = is_partial,
-  };
-
-  iree_host_size_t segments_consumed = 0;
-  IREE_RETURN_IF_ERROR(iree_tokenizer_model_state_encode(
-      state->model_state,
-      iree_make_const_byte_span(state->transform_buffer.data,
-                                state->transform_buffer.data_length),
-      segment_list, sub_output, &segments_consumed, out_tokens_written));
-  *out_segment_complete = (segments_consumed > 0);
-  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1459,8 +1424,7 @@ iree_tokenizer_encode_state_match_post_norm_special_tokens(
           &tokenizer->special_tokens_post_norm, normalized_text, safe,
           check_result, check_id, &check_state);
       bool confirmed = check_result == IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED;
-      if (safe == 0 && original_safe > 0 && confirmed &&
-          !state->has_partial_segment) {
+      if (safe == 0 && original_safe > 0 && confirmed) {
         // All prefix was whitespace. Skip those bytes and let the match
         // proceed on the next call. Update prev_byte context so LSTRIP check
         // succeeds when using the real state.
@@ -1493,11 +1457,6 @@ iree_tokenizer_encode_state_match_post_norm_special_tokens(
                                           normalized_text, &match_length,
                                           &match_id, &match_state);
 
-  if (result == IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED &&
-      state->has_partial_segment) {
-    *out_segment_limit = 0;
-    return IREE_TOKENIZER_POST_NORM_BOUNDARY;
-  }
   state->special_token_match_post = match_state;
 
   if (result == IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED) {
@@ -1809,10 +1768,6 @@ static iree_status_t iree_tokenizer_encode_state_pump(
   // ring may contain partial codepoints when input chunks split mid-sequence
   // (passthrough path) - the segmenter must only see complete codepoints.
   //
-  // When partial mode is active, the segmenter is bypassed: those bytes are
-  // being fed directly to the model. Continuing to feed the segmenter would
-  // cause it to produce segments for bytes already processed, with positions
-  // referencing reclaimed ring buffer space.
   iree_string_view_t normalized_text =
       iree_tokenizer_ring_get_segment_view(state);
   if (normalized_text.size > 0) {
@@ -1825,11 +1780,8 @@ static iree_status_t iree_tokenizer_encode_state_pump(
   if (post_norm_segment_limit < normalized_text.size) {
     normalized_text.size = post_norm_segment_limit;
   }
-  iree_host_size_t normalized_end =
-      state->segmenter_view_start + normalized_text.size;
   bool span_complete = post_norm_boundary || normalized_span_complete;
-  if (!state->has_partial_segment &&
-      state->segment_count < tokenizer->segment_batch_size &&
+  if (state->segment_count < tokenizer->segment_batch_size &&
       normalized_text.size > 0) {
     iree_tokenizer_segment_output_t segment_output = {
         .capacity = tokenizer->segment_batch_size - state->segment_count,
@@ -2183,68 +2135,17 @@ static iree_status_t iree_tokenizer_encode_state_pump(
     }
   }
 
-  // Handle ring full with no segment boundaries. When no progress was made,
-  // has data but no segment boundaries (split=false), enter partial segment
-  // mode. The model processes ring data directly, emitting frozen tokens and
-  // reclaiming bytes to free ring space for more normalization.
-  if (!*out_made_progress &&
+  // Input segmentation, not storage capacity, establishes model boundaries.
+  // If more input is blocked by retained bytes, grow the ring and retry the
+  // same producer state. Output backpressure never triggers growth.
+  if (!*out_made_progress && output->capacity > *total_tokens &&
       (chunk->size > 0 ||
        state->phase == IREE_TOKENIZER_ENCODE_PHASE_NORMALIZE) &&
-      normalized_end > state->read_position &&
+      iree_tokenizer_ring_used(state) > 0 &&
       state->segment_count <= state->segments_consumed) {
-    state->has_partial_segment = true;
+    IREE_RETURN_IF_ERROR(iree_tokenizer_ring_grow(state));
+    *out_made_progress = true;
   }
-  if (state->has_partial_segment &&
-      (normalized_end > state->read_position || span_complete) &&
-      output->capacity > *total_tokens) {
-    iree_tokenizer_token_output_t sub_output = {
-        .capacity = output->capacity - *total_tokens,
-        .token_ids = &output->token_ids[*total_tokens],
-        .token_offsets = output->token_offsets
-                             ? &output->token_offsets[*total_tokens]
-                             : NULL,
-        .type_ids = output->type_ids ? &output->type_ids[*total_tokens] : NULL,
-    };
-    iree_host_size_t tokens_written = 0;
-    bool segment_complete = false;
-    IREE_RETURN_IF_ERROR(iree_tokenizer_encode_ring_as_segment(
-        state, normalized_end, /*is_partial=*/!span_complete, sub_output,
-        &tokens_written, &segment_complete));
-    iree_tokenizer_postprocessor_assign_type_ids(&state->postprocessor,
-                                                 sub_output, 0, tokens_written);
-    iree_tokenizer_postprocessor_trim_token_offsets(
-        &state->postprocessor, state->tokenizer->vocab, sub_output, 0,
-        tokens_written);
-    *total_tokens += tokens_written;
-
-    iree_host_size_t reclaimed =
-        iree_tokenizer_model_state_reclaim(state->model_state);
-    if (reclaimed > 0) {
-      state->read_position += reclaimed;
-      // Keep segmenter_view_start in sync: those bytes were processed by the
-      // model directly, not through the segmenter. Without this, the segmenter
-      // view (segmenter_view_start to write_position) would include reclaimed
-      // bytes, producing segments with out-of-bounds positions.
-      if (state->segmenter_view_start < state->read_position) {
-        state->segmenter_view_start = state->read_position;
-      }
-    }
-    // When a forced-complete segment finishes, retire the entire ring region
-    // that was just fed directly to the model. Unlike the partial reclaim path
-    // above, a non-partial completion resets the model to SEGMENT_START, so
-    // state_reclaim() returns 0 even though all bytes were fully processed.
-    // If we leave the ring positions unchanged, the same bytes are re-encoded
-    // on the next pump iteration and a pending special token can never flush.
-    if (span_complete && segment_complete) {
-      state->read_position = normalized_end;
-      state->segmenter_view_start = normalized_end;
-      state->has_partial_segment = false;
-    }
-    if (reclaimed > 0 || tokens_written > 0 || segment_complete) {
-      *out_made_progress = true;
-    }
-  }
-
   return iree_ok_status();
 }
 
@@ -2314,9 +2215,9 @@ static iree_status_t iree_tokenizer_encode_state_feed_internal(
         "encode pump invariant violated: no progress with output room "
         "and no pending pipeline data "
         "(logical_capacity=%" PRIhsz " bytes, used=%" PRIhsz
-        " bytes, pending_input=%" PRIhsz " bytes, has_partial=%" PRIu32 ")",
+        " bytes, pending_input=%" PRIhsz " bytes)",
         state->capacity_mask + 1, state->write_position - state->read_position,
-        chunk.size, (uint32_t)state->has_partial_segment);
+        chunk.size);
   }
 
   return status;
@@ -2379,14 +2280,11 @@ static iree_status_t iree_tokenizer_encode_state_finalize_internal(
           state->write_position > state->segmenter_view_start) {
         break;
       }
-      if (state->has_partial_segment) {
-        break;
-      }
       state->phase = IREE_TOKENIZER_ENCODE_PHASE_SEGMENT;
       made_progress = true;
     }
     if (state->phase == IREE_TOKENIZER_ENCODE_PHASE_SEGMENT) {
-      if (state->segmenter_state && !state->has_partial_segment) {
+      if (state->segmenter_state) {
         iree_tokenizer_segment_output_t segment_output = {
             .capacity = state->tokenizer->segment_batch_size,
             .values = state->segments,
@@ -2405,7 +2303,7 @@ static iree_status_t iree_tokenizer_encode_state_finalize_internal(
         }
       }
       if (iree_status_is_ok(status) &&
-          (state->has_partial_segment || !state->segmenter_state ||
+          (!state->segmenter_state ||
            !iree_tokenizer_segmenter_state_has_pending(
                state->segmenter_state))) {
         state->segmenter_view_start = state->write_position;

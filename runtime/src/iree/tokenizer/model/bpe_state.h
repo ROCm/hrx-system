@@ -4,15 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Internal header for BPE model types and inline functions.
-// Used by bpe.c and its split-out implementation files.
+// BPE model tables, reusable encoding state, and their representation
+// contracts.
 
-#ifndef IREE_TOKENIZER_MODEL_BPE_INTERNAL_H_
-#define IREE_TOKENIZER_MODEL_BPE_INTERNAL_H_
+#ifndef IREE_TOKENIZER_MODEL_BPE_STATE_H_
+#define IREE_TOKENIZER_MODEL_BPE_STATE_H_
 
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/internal/unicode.h"
 #include "iree/tokenizer/byte_level_tables.h"
 #include "iree/tokenizer/model/bpe.h"
 #include "iree/tokenizer/model/bpe_heap.h"
@@ -23,72 +24,57 @@
 extern "C" {
 #endif
 
-//===----------------------------------------------------------------------===//
-// Sliding Window Token Entry
-//===----------------------------------------------------------------------===//
-
-// Entry in the sliding window representing a token being built.
-// Stores the token ID and the byte range it covers in the input segment.
-typedef struct iree_tokenizer_bpe_window_token_t {
-  // The token ID (-1 for invalid/removed slots).
+// Stable-index list entry for complete initial-symbol merging. Removed entries
+// are tombstones, so queued merge candidates never depend on shifted indices.
+typedef struct iree_tokenizer_bpe_symbol_t {
+  // Vocabulary ID, or -1 after this node is merged into its predecessor.
   int32_t token_id;
-  // Starting byte position in segment (inclusive).
+  // Inclusive input byte position within the segment.
   uint32_t start_byte;
-  // Ending byte position (exclusive).
+  // Exclusive input byte position within the segment.
   uint32_t end_byte;
-} iree_tokenizer_bpe_window_token_t;
+  // Previous live node, or UINT32_MAX at the head.
+  uint32_t previous;
+  // Next live node, or UINT32_MAX at the tail.
+  uint32_t next;
+} iree_tokenizer_bpe_symbol_t;
 
 // Inverse merge entry: for a token formed by a merge, stores its constituents.
-// Base tokens (single-byte, added, not from any merge) store (self, self).
+// Character atoms and unreachable dictionary entries store (self, self).
 typedef struct iree_tokenizer_bpe_split_entry_t {
+  // Left operand of the canonical token's final merge, or self for an atom.
   uint32_t left_id;
+  // Right operand of the canonical token's final merge, or self for an atom.
   uint32_t right_id;
+  // One-based priority barrier before the left boundary reaches this token.
+  uint32_t left_boundary_rank;
+  // One-based priority barrier before the right boundary reaches this token.
+  uint32_t right_boundary_rank;
 } iree_tokenizer_bpe_split_entry_t;
 
-// Backtracking stack entry: token ID and the byte position where it starts.
-// Bit-packed backtrack entry to maintain 8-byte size while supporting large
-// vocabs. start_byte is bounded by max_backtrack_segment_bytes (<=4095), so
-// we use 12 bits for it and 20 bits for deferred_merge_rank (supports 1M
-// tokens, covering all realistic vocabularies).
-#define IREE_TOKENIZER_BPE_BACKTRACK_START_BYTE_BITS 12
-#define IREE_TOKENIZER_BPE_BACKTRACK_START_BYTE_MASK \
-  ((1u << IREE_TOKENIZER_BPE_BACKTRACK_START_BYTE_BITS) - 1)
-#define IREE_TOKENIZER_BPE_BACKTRACK_DEFERRED_RANK_BITS 20
-#define IREE_TOKENIZER_BPE_BACKTRACK_DEFERRED_RANK_MAX \
-  ((1u << IREE_TOKENIZER_BPE_BACKTRACK_DEFERRED_RANK_BITS) - 1)
-
+// Complete-segment token workspace shared by boundary validation and explicit
+// atom merging. Both offsets fit in 16 bits because complete segments routed
+// here are bounded by max_backtrack_segment_bytes (at most 4095).
 typedef struct iree_tokenizer_bpe_backtrack_entry_t {
+  // Vocabulary token ID.
   int32_t token_id;
-  // Packed field: lower 12 bits = start_byte, upper 20 bits = deferred_rank.
-  // The deferred_merge_rank is the effective_rank that was active when this
-  // token was pushed. It tells pair validation at the next position which
-  // merges were intentionally deferred due to suffix blocking.
-  uint32_t start_byte_and_deferred_rank;
+  // Inclusive offset in the original segment.
+  uint16_t start_byte;
+  // Exclusive offset; explicit because unknown omission can leave gaps.
+  uint16_t end_byte;
 } iree_tokenizer_bpe_backtrack_entry_t;
 
 static inline uint32_t iree_tokenizer_bpe_backtrack_entry_start_byte(
     const iree_tokenizer_bpe_backtrack_entry_t* entry) {
-  return entry->start_byte_and_deferred_rank &
-         IREE_TOKENIZER_BPE_BACKTRACK_START_BYTE_MASK;
-}
-
-static inline uint32_t iree_tokenizer_bpe_backtrack_entry_deferred_rank(
-    const iree_tokenizer_bpe_backtrack_entry_t* entry) {
-  return entry->start_byte_and_deferred_rank >>
-         IREE_TOKENIZER_BPE_BACKTRACK_START_BYTE_BITS;
+  return entry->start_byte;
 }
 
 static inline void iree_tokenizer_bpe_backtrack_entry_set(
     iree_tokenizer_bpe_backtrack_entry_t* entry, int32_t token_id,
-    uint32_t start_byte, uint32_t deferred_rank) {
+    uint32_t start_byte, uint32_t end_byte) {
   entry->token_id = token_id;
-  // Cap deferred_rank at 20-bit max (supports vocabs up to 1M tokens).
-  if (deferred_rank > IREE_TOKENIZER_BPE_BACKTRACK_DEFERRED_RANK_MAX) {
-    deferred_rank = IREE_TOKENIZER_BPE_BACKTRACK_DEFERRED_RANK_MAX;
-  }
-  entry->start_byte_and_deferred_rank =
-      (start_byte & IREE_TOKENIZER_BPE_BACKTRACK_START_BYTE_MASK) |
-      (deferred_rank << IREE_TOKENIZER_BPE_BACKTRACK_START_BYTE_BITS);
+  entry->start_byte = (uint16_t)start_byte;
+  entry->end_byte = (uint16_t)end_byte;
 }
 
 //===----------------------------------------------------------------------===//
@@ -101,11 +87,14 @@ static inline void iree_tokenizer_bpe_backtrack_entry_set(
 typedef struct iree_tokenizer_bpe_backtrack_tables_t {
   // Single allocation for all tables below.
   void* slab;
-  iree_tokenizer_bpe_split_entry_t* split_table;  // Inverse merge table.
+  // Canonical final merge and priority barriers per token.
+  iree_tokenizer_bpe_split_entry_t* split_table;
   // Longest proper prefix token, or UINT32_MAX.
   uint32_t* next_prefix_match;
-  uint32_t* effective_rank;   // 0 = non-participant, >0 = BPE-reachable.
-  uint64_t* token_reachable;  // Precomputed reachability bits.
+  // Maximum one-based merge priority in the canonical history; zero for atoms.
+  uint32_t* effective_rank;
+  // Bit per token reachable from the model's initial symbols.
+  uint64_t* token_reachable;
 } iree_tokenizer_bpe_backtrack_tables_t;
 
 //===----------------------------------------------------------------------===//
@@ -113,9 +102,10 @@ typedef struct iree_tokenizer_bpe_backtrack_tables_t {
 //===----------------------------------------------------------------------===//
 
 // Runtime state for the O(n) backtracking algorithm.
-// Modified during BACKTRACK/BACKTRACK_EMIT phases.
+// Retained while computed output waits for credit.
 typedef struct iree_tokenizer_bpe_backtrack_state_t {
-  iree_host_size_t stack_count;  // Tokens in the stack.
+  // Number of computed compact tokens.
+  iree_host_size_t stack_count;
   // Next token to emit from stack.
   iree_host_size_t emit_index;
   // Dirty mask for lazy bitfield reset. Each bit corresponds to a uint64_t
@@ -126,24 +116,16 @@ typedef struct iree_tokenizer_bpe_backtrack_state_t {
 } iree_tokenizer_bpe_backtrack_state_t;
 
 //===----------------------------------------------------------------------===//
-// Window State (State-Side)
-//===----------------------------------------------------------------------===//
-
-// Runtime state for the sliding window used in the O(n log L) algorithm.
-// Modified during BYTE_LOOP/FLUSH phases.
-typedef struct iree_tokenizer_bpe_window_state_t {
-  iree_host_size_t count;  // Tokens currently in window.
-  iree_host_size_t start;  // Circular buffer head index.
-} iree_tokenizer_bpe_window_state_t;
-
-//===----------------------------------------------------------------------===//
 // BPE Model Structure
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_tokenizer_bpe_model_t {
+  // Shared model interface, at offset zero.
   iree_tokenizer_model_t base;
+  // Owns immutable tables and per-state overflow allocations.
   iree_allocator_t allocator;
-  const iree_tokenizer_vocab_t* vocab;  // NOT owned.
+  // Borrowed vocabulary, which outlives the model and its states.
+  const iree_tokenizer_vocab_t* vocab;
 
   // Prefix trie for token lookup (owned).
   iree_tokenizer_vocab_trie_t* trie;
@@ -157,13 +139,8 @@ typedef struct iree_tokenizer_bpe_model_t {
   // End-of-word suffix (e.g., "</w>" for CLIP).
   // Empty if not used. Appended to each segment before tokenization.
   char end_of_word_suffix[16];
+  // Number of valid suffix bytes.
   iree_host_size_t end_of_word_suffix_length;
-
-  // Byte-to-token lookup table.
-  // Maps each byte (0-255) to its single-byte token ID, or -1 if none.
-  // For ByteLevel mode, this maps the UTF-8 encoding of the ByteLevel
-  // codepoint.
-  int32_t byte_to_token[256];
 
   // Precomputed byte fallback token IDs for each byte value.
   // Maps byte N to the token ID for "<0xNN>" (the byte-level fallback token).
@@ -171,42 +148,40 @@ typedef struct iree_tokenizer_bpe_model_t {
   // snprintf + vocab hash lookup per unknown byte during encoding.
   int32_t byte_fallback_token[256];
 
-  // Precomputed buffer capacities (based on max_token_length).
-  // window_capacity is rounded up to power of 2 for fast modulo via bitmask.
-  iree_host_size_t window_capacity;
-  iree_host_size_t window_capacity_mask;  // = window_capacity - 1
-  iree_host_size_t heap_capacity;
+  // Maximum encoded vocabulary spelling length in bytes.
   iree_host_size_t max_token_length;
-
-  // Offsets into state slab for buffer access (window+heap path).
-  iree_host_size_t window_offset;
-  iree_host_size_t heap_offset;
 
   // Backtracking algorithm tables (owned).
   // Each table is indexed by token ID and sized to vocab_capacity.
   iree_tokenizer_bpe_backtrack_tables_t backtrack_tables;
+  // Number of addressable token IDs in the table arrays.
   iree_host_size_t vocab_capacity;
 
   // Backtracking encode configuration and state buffer offsets.
   // Segments <= max_backtrack_segment_bytes use the backtracking path;
-  // longer segments fall back to the window+heap path.
+  // longer segments use the indexed explicit-symbol heap.
   iree_host_size_t max_backtrack_segment_bytes;
+  // Number of compact token slots in fixed state storage.
   iree_host_size_t backtrack_stack_capacity;
-  iree_host_size_t backtrack_bitfield_capacity;  // In uint64_t units.
+  // Number of uint64_t words in the boundary-search bitfield.
+  iree_host_size_t backtrack_bitfield_capacity;
+  // Byte offset of compact tokens from the state base.
   iree_host_size_t backtrack_stack_offset;
+  // Byte offset of boundary-search bits from the state base.
   iree_host_size_t backtrack_bitfield_offset;
 
   // Word cache capacity (power of 2, or 0 if disabled).
   // Caching exploits Zipf's law: frequent words dominate token positions.
   // Only useful with sufficient vocabulary diversity (>= 256 tokens).
   iree_host_size_t cache_capacity;
-  iree_host_size_t cache_capacity_mask;  // = cache_capacity - 1, or 0.
+  // Hash mask, cache_capacity - 1, or zero when disabled.
+  iree_host_size_t cache_capacity_mask;
+  // Byte offset of word cache entries from the state base.
   iree_host_size_t cache_offset;
 
-  // Pair validation cache capacity and offset.
-  // Memoizes valid (true) pair validation results to avoid repeated
-  // recursive decomposition in the backtracking algorithm.
+  // Number of cached canonical boundary validity results.
   iree_host_size_t pair_cache_capacity;
+  // Byte offset of pair cache entries from the state base.
   iree_host_size_t pair_cache_offset;
 } iree_tokenizer_bpe_model_t;
 
@@ -214,78 +189,48 @@ typedef struct iree_tokenizer_bpe_model_t {
 // Segment Context (State-Side)
 //===----------------------------------------------------------------------===//
 
-// Context for the segment currently being encoded.
-// All three fields are set at segment start and used together for offset
-// calculations. Grouping them makes the relationship explicit and reduces
-// the chance of updating one without the others.
+// Input origin retained while computed tokens wait for output credit.
 typedef struct iree_tokenizer_bpe_segment_context_t {
-  // Offset of segment in transform buffer.
+  // Offset of the segment in the caller's transform buffer.
   iree_host_size_t base_offset;
-  // Size before suffix appending (for clamping).
-  iree_host_size_t original_size;
-  // Current byte within segment (resumption).
-  iree_host_size_t byte_position;
 } iree_tokenizer_bpe_segment_context_t;
 
 //===----------------------------------------------------------------------===//
 // BPE State Structure
 //===----------------------------------------------------------------------===//
 
-// Encoding phase state machine.
-// Transitions: SEGMENT_START -> BYTE_LOOP -> FLUSH -> SEGMENT_START (next
-// segment)
-//              SEGMENT_START -> FAST_PATH_PENDING (if output full on fast path)
-//              FAST_PATH_PENDING -> SEGMENT_START (after emitting)
+// Input is borrowed until its segment completes; only computed token results
+// remain pending under output backpressure.
 typedef enum iree_tokenizer_bpe_phase_e {
-  // Ready to start a new segment. Check for fast-path match first.
   IREE_TOKENIZER_BPE_PHASE_SEGMENT_START = 0,
-  // Fast-path token matched but couldn't emit (output was full).
-  // Next call should emit fast_path_pending_token_id and complete segment.
-  IREE_TOKENIZER_BPE_PHASE_FAST_PATH_PENDING,
-  // Processing bytes: adding tokens to window, applying merges, emitting
-  // frozen. segment.byte_position tracks progress.
-  IREE_TOKENIZER_BPE_PHASE_BYTE_LOOP,
-  // All bytes processed. Applying final merges and emitting remaining tokens.
-  IREE_TOKENIZER_BPE_PHASE_FLUSH,
-  // Backtracking path: running the O(n) algorithm on a segment.
-  IREE_TOKENIZER_BPE_PHASE_BACKTRACK,
-  // Backtracking path: emitting tokens from the completed stack.
   IREE_TOKENIZER_BPE_PHASE_BACKTRACK_EMIT,
+  IREE_TOKENIZER_BPE_PHASE_SYMBOL_EMIT,
 } iree_tokenizer_bpe_phase_t;
 
-// BPE encoding state with trailing window and heap buffers.
-// The total allocation size is model->base.state_size bytes.
-// Memory layout:
-//   [iree_tokenizer_bpe_state_t struct]
-//   [window_tokens array]
-//   [heap_entries array]
+// Caller-provided fixed state with optional owned overflow workspace.
 typedef struct iree_tokenizer_bpe_state_t {
+  // Shared state interface and borrowed model, at offset zero.
   iree_tokenizer_model_state_t base;
 
   // Current encoding phase (see iree_tokenizer_bpe_phase_t).
   iree_tokenizer_bpe_phase_t phase;
 
-  // Sliding window: circular buffer of tokens being built.
-  iree_tokenizer_bpe_window_state_t window;
-
-  // Min-heap of merge candidates ordered by rank.
-  iree_tokenizer_bpe_heap_t heap;
-
-  // Current segment context (offset, size, position).
+  // Origin used when finalizing computed output.
   iree_tokenizer_bpe_segment_context_t segment;
-
-  // Token ID waiting to emit (used in FAST_PATH_PENDING phase).
-  int32_t fast_path_pending_token_id;
-
-  // Last emitted token ID, used for UNK fusing across calls.
-  int32_t last_emitted_token_id;
 
   // Backtracking state (used in BACKTRACK/BACKTRACK_EMIT phases).
   iree_tokenizer_bpe_backtrack_state_t backtrack;
 
+  // Reusable overflow storage owned by the model allocator; NULL before growth.
+  void* symbol_storage;
+  // Allocated overflow bytes, bounded by IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE.
+  iree_host_size_t symbol_storage_size;
+  // Active symbols, borrowing the backtrack slab or symbol_storage.
+  iree_tokenizer_bpe_symbol_t* symbols;
+  // Next live symbol to emit, or UINT32_MAX when complete.
+  uint32_t symbol_emit_index;
+
   // Trailing buffers (accessed via model offsets):
-  // - iree_tokenizer_bpe_window_token_t window_tokens[window_capacity]
-  // - iree_tokenizer_bpe_heap_entry_t heap_entries[heap_capacity]
   // - iree_tokenizer_bpe_backtrack_entry_t backtrack_stack[stack_capacity]
   // - uint64_t backtrack_bitfield[bitfield_capacity]
   // - iree_tokenizer_bpe_cache_entry_t cache_entries[cache_capacity]
@@ -296,12 +241,7 @@ typedef struct iree_tokenizer_bpe_state_t {
 // Pair Validation Cache
 //===----------------------------------------------------------------------===//
 
-// Direct-mapped cache for pair validation results.
-// Only "true" (valid) results are cached. When a pair is known valid, it
-// remains valid regardless of deferred_merge_rank (relaxation only makes
-// more pairs valid). "False" results depend on deferred_merge_rank and
-// cannot be safely cached.
-//
+// Direct-mapped cache of exact canonical boundary validity.
 // Default capacity for the pair validation cache. Must be a power of 2.
 // 4096 entries × 8 bytes = 32 KB, which fits in L1 cache on most CPUs.
 // Larger caches (16K+) spill into L2 and regress ASCII/Code throughput;
@@ -311,15 +251,10 @@ typedef struct iree_tokenizer_bpe_state_t {
 #define IREE_TOKENIZER_BPE_PAIR_CACHE_CAPACITY_DEFAULT 4096
 
 typedef struct iree_tokenizer_bpe_pair_cache_entry_t {
-  uint32_t token1;  // Left token (UINT32_MAX = empty).
-  uint32_t token2;  // Right token with validity flag in bit 31.
-  // Bit 31 of token2: 1 = pair is valid (TRUE), 0 = pair is invalid (FALSE).
-  // Token IDs are bounded by vocab_capacity (always < 2^31), so bit 31 is
-  // available for use as a flag without aliasing real token IDs.
-  // Cache stores both TRUE and FALSE results (when deferred_merge_rank == 0).
-  // Cached TRUE is valid for any deferred_merge_rank (monotonic relaxation).
-  // Cached FALSE is only valid when deferred_merge_rank == 0; when nonzero,
-  // a cached FALSE must be re-validated because deferral may change the result.
+  // Left token ID, or UINT32_MAX for an empty entry.
+  uint32_t token1;
+  // Right token ID with validity in bit 31 (IDs are below 2^31).
+  uint32_t token2;
 } iree_tokenizer_bpe_pair_cache_entry_t;
 
 // Bit flag stored in token2 to indicate a valid (TRUE) pair cache result.
@@ -370,13 +305,15 @@ static inline uint32_t iree_tokenizer_bpe_pair_cache_index(
 #define IREE_TOKENIZER_BPE_CACHE_MAX_TOKENS 10
 
 typedef struct iree_tokenizer_bpe_cache_entry_t {
-  // FNV-1a hash of segment bytes (0 = empty slot).
+  // Hash of segment bytes (0 = empty slot).
   uint32_t key_hash;
   // Byte length of the cached segment.
   uint16_t key_length;
   // Number of tokens produced for this segment.
   uint16_t token_count;
+  // Exact input bytes used to disambiguate hash collisions.
   uint8_t key[IREE_TOKENIZER_BPE_CACHE_MAX_KEY_BYTES];
+  // Cached output IDs, valid through token_count.
   iree_tokenizer_token_id_t tokens[IREE_TOKENIZER_BPE_CACHE_MAX_TOKENS];
 } iree_tokenizer_bpe_cache_entry_t;
 // Size: 4 + 2 + 2 + 32 + 40 = 80 bytes per entry (1.25 cache lines).
@@ -416,51 +353,8 @@ static inline uint32_t iree_tokenizer_bpe_cache_hash(const uint8_t* data,
 }
 
 //===----------------------------------------------------------------------===//
-// State Buffer Layout
-//===----------------------------------------------------------------------===//
-//
-// The state struct has a trailing allocation with this layout:
-//
-// ┌───────────────────────────────────────┐
-// │ iree_tokenizer_bpe_state_t struct    │  (sizeof(bpe_state_t))
-// ├───────────────────────────────────────┤
-// │ window_tokens[window_capacity]        │  (model->window_offset)
-// ├───────────────────────────────────────┤
-// │ heap_entries[heap_capacity]           │  (model->heap_offset)
-// ├───────────────────────────────────────┤
-// │ backtrack_stack[stack_capacity]       │  (model->backtrack_stack_offset)
-// ├───────────────────────────────────────┤
-// │ backtrack_bitfield[bitfield_capacity] │ (model->backtrack_bitfield_offset)
-// ├───────────────────────────────────────┤
-// │ cache_entries[cache_capacity]         │  (model->cache_offset, if enabled)
-// ├───────────────────────────────────────┤
-// │ pair_cache[pair_cache_capacity]       │  (model->pair_cache_offset)
-// └───────────────────────────────────────┘
-//
-// Total size = model->base.state_size
-//
-// INVARIANT: All offsets must satisfy:
-//   offset + element_count * element_size <= model->base.state_size
-//
-// Layout is computed in bpe.c:iree_tokenizer_bpe_model_allocate().
-//
-//===----------------------------------------------------------------------===//
 // State Buffer Accessors
 //===----------------------------------------------------------------------===//
-
-static inline iree_tokenizer_bpe_window_token_t*
-iree_tokenizer_bpe_state_window(iree_tokenizer_bpe_state_t* state,
-                                const iree_tokenizer_bpe_model_t* model) {
-  return (iree_tokenizer_bpe_window_token_t*)((uint8_t*)state +
-                                              model->window_offset);
-}
-
-static inline iree_tokenizer_bpe_heap_entry_t* iree_tokenizer_bpe_state_heap(
-    iree_tokenizer_bpe_state_t* state,
-    const iree_tokenizer_bpe_model_t* model) {
-  return (iree_tokenizer_bpe_heap_entry_t*)((uint8_t*)state +
-                                            model->heap_offset);
-}
 
 static inline iree_tokenizer_bpe_backtrack_entry_t*
 iree_tokenizer_bpe_state_backtrack_stack(
@@ -488,24 +382,6 @@ iree_tokenizer_bpe_state_pair_cache(iree_tokenizer_bpe_state_t* state,
                                     const iree_tokenizer_bpe_model_t* model) {
   return (iree_tokenizer_bpe_pair_cache_entry_t*)((uint8_t*)state +
                                                   model->pair_cache_offset);
-}
-
-//===----------------------------------------------------------------------===//
-// Window Helpers
-//===----------------------------------------------------------------------===//
-
-static inline iree_host_size_t iree_tokenizer_bpe_window_index(
-    iree_tokenizer_bpe_state_t* state, const iree_tokenizer_bpe_model_t* model,
-    iree_host_size_t logical_index) {
-  return (state->window.start + logical_index) & model->window_capacity_mask;
-}
-
-static inline iree_tokenizer_bpe_window_token_t* iree_tokenizer_bpe_window_at(
-    iree_tokenizer_bpe_state_t* state, const iree_tokenizer_bpe_model_t* model,
-    iree_host_size_t logical_index) {
-  iree_tokenizer_bpe_window_token_t* window =
-      iree_tokenizer_bpe_state_window(state, model);
-  return &window[iree_tokenizer_bpe_window_index(state, model, logical_index)];
 }
 
 //===----------------------------------------------------------------------===//
@@ -563,20 +439,6 @@ static inline bool iree_tokenizer_bpe_emit(
   return true;
 }
 
-// Emits a token with byte range and updates last_emitted_token_id.
-// Returns false if full.
-static inline bool iree_tokenizer_bpe_emit_and_track(
-    iree_tokenizer_bpe_state_t* state,
-    iree_tokenizer_bpe_output_cursor_t* cursor,
-    iree_tokenizer_token_id_t token_id, uint32_t start_byte,
-    uint32_t end_byte) {
-  if (!iree_tokenizer_bpe_emit(cursor, token_id, start_byte, end_byte)) {
-    return false;
-  }
-  state->last_emitted_token_id = token_id;
-  return true;
-}
-
 //===----------------------------------------------------------------------===//
 // Bitfield Helpers
 //===----------------------------------------------------------------------===//
@@ -601,24 +463,14 @@ static inline void iree_tokenizer_bpe_bitfield_clear(
 // Shared Trie Helpers
 //===----------------------------------------------------------------------===//
 
-// Advances a trie cursor by a single raw byte, handling ByteLevel conversion.
-// Returns true if the advance succeeded (cursor is at a valid trie node).
-static inline bool iree_tokenizer_bpe_trie_advance_byte(
-    iree_tokenizer_trie_cursor_t* cursor, uint8_t raw_byte, bool byte_level) {
-  if (!byte_level || (raw_byte >= 0x21 && raw_byte <= 0x7E)) {
-    return iree_tokenizer_trie_cursor_advance(cursor, raw_byte);
-  }
-  // ByteLevel non-ASCII: convert to 2-byte UTF-8.
-  const iree_tokenizer_byte_level_utf8_t* utf8 =
-      &iree_tokenizer_byte_level_utf8[raw_byte];
-  if (!iree_tokenizer_trie_cursor_advance(cursor, utf8->bytes[0])) {
-    return false;
-  }
-  if (utf8->length > 1 &&
-      !iree_tokenizer_trie_cursor_advance(cursor, utf8->bytes[1])) {
-    return false;
-  }
-  return true;
+// Character models start with complete UTF-8 codepoints. Invalid bytes remain
+// individual atoms; raw byte vocabulary entries cannot split a valid codepoint.
+static inline iree_host_size_t iree_tokenizer_bpe_character_length(
+    const uint8_t* data, iree_host_size_t size) {
+  iree_host_size_t length = iree_unicode_utf8_sequence_length(data[0]);
+  return length <= size && iree_unicode_utf8_is_valid_sequence(data, length)
+             ? length
+             : 1;
 }
 
 // Finds the longest token matching raw input bytes starting at data[0..size].
@@ -639,15 +491,24 @@ iree_tokenizer_bpe_backtrack_longest_match(
   const bool byte_level =
       iree_all_bits_set(model->flags, IREE_TOKENIZER_BPE_FLAG_BYTE_LEVEL_INPUT);
 
-  for (iree_host_size_t raw_consumed = 0; raw_consumed < size; ++raw_consumed) {
+  for (iree_host_size_t raw_consumed = 0; raw_consumed < size;) {
     uint8_t byte = data[raw_consumed];
-    if (!byte_level || (byte >= 0x21 && byte <= 0x7E)) {
-      // Non-ByteLevel or printable ASCII (0x21-0x7E): the ByteLevel mapping is
-      // identity for this range (codepoint == byte, single-byte UTF-8), so we
-      // advance the trie cursor directly with the raw byte.
+    if (!byte_level) {
+      iree_host_size_t length = iree_tokenizer_bpe_character_length(
+          data + raw_consumed, size - raw_consumed);
+      for (iree_host_size_t i = 0; i < length; ++i) {
+        if (!iree_tokenizer_trie_cursor_advance(&cursor,
+                                                data[raw_consumed + i])) {
+          return;
+        }
+      }
+      raw_consumed += length;
+    } else if (byte >= 0x21 && byte <= 0x7E) {
+      // The ByteLevel mapping is identity for printable ASCII.
       if (!iree_tokenizer_trie_cursor_advance(&cursor, byte)) {
         break;
       }
+      ++raw_consumed;
     } else {
       // Non-printable or high byte: use pre-computed UTF-8 from lookup table.
       // All non-identity ByteLevel mappings produce 2-byte UTF-8.
@@ -660,23 +521,18 @@ iree_tokenizer_bpe_backtrack_longest_match(
           !iree_tokenizer_trie_cursor_advance(&cursor, utf8->bytes[1])) {
         break;
       }
+      ++raw_consumed;
     }
 
-    // Check if current position is a token boundary (greedy longest match).
-    // Only accept tokens reachable via BPE merge rules:
-    //   - Single raw byte tokens are base vocabulary (always valid).
-    //   - Multi-byte tokens must participate in the BPE merge system
-    //     (effective_rank > 0): either produced by a merge, or a base token
-    //     that serves as a left/right component in at least one merge.
-    // This prevents added tokens (e.g., "<|endoftext|>") that exist in the
-    // vocabulary but don't participate in BPE from being incorrectly matched.
+    // Only initial-symbol boundaries can end a canonical token. Reachability
+    // excludes dictionary spellings that BPE cannot actually construct.
     int32_t token_id = iree_tokenizer_trie_cursor_token_id(&cursor);
     if (token_id >= 0) {
-      iree_host_size_t candidate_raw_length = raw_consumed + 1;
-      if (candidate_raw_length == 1 ||
-          model->backtrack_tables.effective_rank[(uint32_t)token_id] > 0) {
+      if (iree_any_bit_set(
+              model->backtrack_tables.token_reachable[(uint32_t)token_id / 64],
+              1ull << ((uint32_t)token_id % 64))) {
         *out_token_id = token_id;
-        *out_raw_length = candidate_raw_length;
+        *out_raw_length = raw_consumed;
       }
     }
   }
@@ -696,65 +552,22 @@ iree_status_t iree_tokenizer_bpe_build_backtrack_tables(
 bool iree_tokenizer_bpe_is_first_token_reachable(
     const iree_tokenizer_bpe_model_t* model, uint32_t token);
 
-// Checks if a specific decomposition (left + right) of a token is reachable.
-// Used by pair validation during backtracking.
-bool iree_tokenizer_bpe_is_decomposition_reachable(
-    const iree_tokenizer_bpe_model_t* model, uint32_t left, uint32_t right,
-    uint32_t token);
-
-// Returns the rightmost leaf (base) token of the split tree rooted at token.
-// For a base token (split_table[token] = {token, token}), returns itself.
-uint32_t iree_tokenizer_bpe_rightmost_base_token(
-    const iree_tokenizer_bpe_model_t* model, uint32_t token);
-
-// Returns the effective_rank when the rightmost boundary base token is first
-// consumed by a merge within the subtree rooted at |token|.
-// For base tokens, returns UINT32_MAX (never consumed internally).
-uint32_t iree_tokenizer_bpe_right_boundary_consumed_rank(
-    const iree_tokenizer_bpe_model_t* model, uint32_t token);
-
 //===----------------------------------------------------------------------===//
 // Backtracking Algorithm (bpe_backtrack.c)
 //===----------------------------------------------------------------------===//
 
 // Runs the O(n) backtracking BPE encode algorithm on a segment.
 // Populates the backtrack_stack with the resulting token sequence.
-void iree_tokenizer_bpe_backtrack_encode(
+bool iree_tokenizer_bpe_backtrack_encode(
     const iree_tokenizer_bpe_model_t* model, iree_tokenizer_bpe_state_t* state,
-    const uint8_t* segment_data, iree_host_size_t segment_size,
-    const char* suffix_data, iree_host_size_t suffix_length);
+    const uint8_t* segment_data, iree_host_size_t segment_size);
+
+iree_status_t iree_tokenizer_bpe_encode_symbols(
+    const iree_tokenizer_bpe_model_t* model, iree_tokenizer_bpe_state_t* state,
+    iree_string_view_t segment);
 
 //===----------------------------------------------------------------------===//
-// Window/Heap Operations (bpe_window.c)
-//===----------------------------------------------------------------------===//
-
-// Pushes a token onto the window.
-void iree_tokenizer_bpe_window_push(iree_tokenizer_bpe_state_t* state,
-                                    const iree_tokenizer_bpe_model_t* model,
-                                    iree_tokenizer_bpe_window_token_t token);
-
-// Pops and returns the front token from the window.
-iree_tokenizer_bpe_window_token_t iree_tokenizer_bpe_window_pop_front(
-    iree_tokenizer_bpe_state_t* state, const iree_tokenizer_bpe_model_t* model);
-
-// Adds a merge candidate to the heap if a merge exists for the pair.
-void iree_tokenizer_bpe_maybe_add_merge(iree_tokenizer_bpe_state_t* state,
-                                        const iree_tokenizer_bpe_model_t* model,
-                                        iree_host_size_t position);
-
-// Applies all valid merges from the heap until no valid merges remain.
-void iree_tokenizer_bpe_apply_pending_merges(
-    iree_tokenizer_bpe_state_t* state, const iree_tokenizer_bpe_model_t* model);
-
-// Emits all frozen tokens from the window front.
-// Returns false if output fills before all frozen tokens are emitted.
-bool iree_tokenizer_bpe_emit_frozen_tokens(
-    iree_tokenizer_bpe_state_t* state, const iree_tokenizer_bpe_model_t* model,
-    iree_host_size_t current_byte_position,
-    iree_tokenizer_bpe_output_cursor_t* cursor);
-
-//===----------------------------------------------------------------------===//
-// Cache and Suffix Operations (bpe_cache.c)
+// Word Cache and Trie Lookup (bpe_cache.c)
 //===----------------------------------------------------------------------===//
 
 // Attempts to serve a segment from the word cache.
@@ -770,27 +583,10 @@ void iree_tokenizer_bpe_cache_populate(
     const iree_tokenizer_bpe_backtrack_entry_t* stack,
     iree_host_size_t token_count);
 
-// Finds the longest token matching segment + suffix bytes via trie lookup.
-// Used by both backtracking and encode state machine for end-of-word handling.
-void iree_tokenizer_bpe_trie_longest_match_with_suffix(
-    const iree_tokenizer_bpe_model_t* model, iree_string_view_t segment,
-    iree_string_view_t suffix, int32_t* out_token_id,
-    iree_host_size_t* out_length);
-
 // Finds the longest token with ByteLevel transformation applied.
 void iree_tokenizer_bpe_trie_longest_match_byte_level(
     const iree_tokenizer_bpe_model_t* model, iree_string_view_t segment,
     int32_t* out_token_id, iree_host_size_t* out_length);
-
-// Applies end-of-word suffix to the last token in the backtrack stack.
-void iree_tokenizer_bpe_apply_suffix_to_backtrack(
-    const iree_tokenizer_bpe_model_t* model, iree_tokenizer_bpe_state_t* state,
-    iree_string_view_t segment);
-
-// Applies end-of-word suffix to the last token in the sliding window.
-void iree_tokenizer_bpe_apply_suffix_to_last_window_token(
-    const iree_tokenizer_bpe_model_t* model, iree_tokenizer_bpe_state_t* state,
-    iree_string_view_t segment);
 
 //===----------------------------------------------------------------------===//
 // Encoding State Machine (bpe_encode.c)
@@ -815,18 +611,8 @@ bool iree_tokenizer_bpe_state_has_pending(
 iree_host_size_t iree_tokenizer_bpe_state_reclaim(
     iree_tokenizer_model_state_t* state);
 
-//===----------------------------------------------------------------------===//
-// Shared Utilities (bpe.c)
-//===----------------------------------------------------------------------===//
-
-// Handles a byte that could not be encoded via the trie.
-// Returns the token ID for the byte (fallback, UNK, or -1 for FUSE_UNK).
-int32_t iree_tokenizer_bpe_handle_unknown_byte(
-    const iree_tokenizer_bpe_model_t* model, uint8_t byte,
-    int32_t last_emitted_token_id);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // IREE_TOKENIZER_MODEL_BPE_INTERNAL_H_
+#endif  // IREE_TOKENIZER_MODEL_BPE_STATE_H_

@@ -364,6 +364,14 @@ static void iree_tokenizer_wordpiece_state_deinitialize(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static void iree_tokenizer_wordpiece_state_reset(
+    iree_tokenizer_model_state_t* base_state) {
+  iree_tokenizer_wordpiece_state_t* state =
+      (iree_tokenizer_wordpiece_state_t*)base_state;
+  state->pending_count = 0;
+  state->pending_emit_index = 0;
+}
+
 static iree_status_t iree_tokenizer_wordpiece_state_encode(
     iree_tokenizer_model_state_t* base_state,
     iree_const_byte_span_t transform_buffer,
@@ -574,6 +582,7 @@ static const iree_tokenizer_model_vtable_t
         .destroy = iree_tokenizer_wordpiece_model_destroy,
         .state_initialize = iree_tokenizer_wordpiece_state_initialize,
         .state_deinitialize = iree_tokenizer_wordpiece_state_deinitialize,
+        .state_reset = iree_tokenizer_wordpiece_state_reset,
         .state_encode = iree_tokenizer_wordpiece_state_encode,
         .state_finalize = iree_tokenizer_wordpiece_state_finalize,
         .state_has_pending = iree_tokenizer_wordpiece_state_has_pending,

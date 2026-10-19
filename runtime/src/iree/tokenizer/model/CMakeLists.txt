@@ -32,18 +32,19 @@ iree_cc_library(
     bpe
   HDRS
     "bpe.h"
-    "bpe_internal.h"
+    "bpe_state.h"
   SRCS
     "bpe.c"
     "bpe_backtrack.c"
     "bpe_cache.c"
     "bpe_encode.c"
+    "bpe_symbols.c"
     "bpe_tables.c"
-    "bpe_window.c"
   DEPS
     ::bpe_heap
     iree::base
     iree::base::internal
+    iree::base::internal::unicode
     iree::tokenizer::byte_level_tables
     iree::tokenizer::model
     iree::tokenizer::types
@@ -69,6 +70,20 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    bpe_suffix_test
+  SRCS
+    "bpe_suffix_test.cc"
+  DEPS
+    ::bpe
+    ::model_test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tokenizer::vocab::vocab_builder
+)
+
+iree_cc_test(
+  NAME
     bpe_encode_test
   SRCS
     "bpe_encode_test.cc"
@@ -79,6 +94,19 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::tokenizer::model
+)
+
+iree_cc_test(
+  NAME
+    bpe_reference_test
+  SRCS
+    "bpe_reference_test.cc"
+  DEPS
+    ::bpe
+    ::model_test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

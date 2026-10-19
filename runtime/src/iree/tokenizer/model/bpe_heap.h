@@ -17,49 +17,44 @@ extern "C" {
 // iree_tokenizer_bpe_heap_t
 //===----------------------------------------------------------------------===//
 
-// Entry in the BPE merge candidate heap storing merge rank and byte position.
+// Entry in the BPE merge candidate heap storing merge rank and symbol position.
 // The heap orders entries by rank (lower rank = higher priority = applied
-// first). For equal ranks, the entry with smaller start_byte has higher
+// first). For equal ranks, the entry with smaller position has higher
 // priority - this ensures leftmost merges are applied first, which is critical
 // for correctness when overlapping merges have the same rank.
 //
-// The left_start_byte field identifies the left token's starting byte
-// position in the segment, which is stable even as window indices shift during
-// merges.
+// Position identifies the left symbol's stable slot in the input-ordered list.
+// Removed slots remain tombstones; surviving slots never move.
 //
 // Entries may become stale if the tokens at their position have been merged
 // or removed. The BPE algorithm uses lazy invalidation: stale entries are
 // detected and discarded when popped rather than eagerly removed when merges
 // occur. This avoids the O(n) cost of finding and removing entries.
 //
-// Using byte position instead of window index is critical for correctness:
-// when a merge removes a token from the window, all subsequent window indices
-// shift down, invalidating any heap entries that stored those indices. Byte
-// positions are stable because they refer to the input segment, not the window.
 typedef struct iree_tokenizer_bpe_heap_entry_t {
-  uint32_t rank;  // Merge priority (0 = highest).
-  // Starting byte of left token in segment.
-  uint32_t left_start_byte;
+  // Merge priority, with zero ordered first.
+  uint32_t rank;
+  // Stable index of the left symbol in input order.
+  uint32_t position;
 } iree_tokenizer_bpe_heap_entry_t;
 
-// Creates a heap entry from a merge rank and the starting byte of the left
-// token in the segment.
+// Creates a heap entry from a merge rank and the left symbol's stable index.
 static inline iree_tokenizer_bpe_heap_entry_t
-iree_tokenizer_make_bpe_heap_entry(uint32_t rank, uint32_t left_start_byte) {
+iree_tokenizer_make_bpe_heap_entry(uint32_t rank, uint32_t position) {
   iree_tokenizer_bpe_heap_entry_t entry = {/*rank=*/rank,
-                                           /*left_start_byte=*/left_start_byte};
+                                           /*position=*/position};
   return entry;
 }
 
 // Returns true if entry |a| has higher priority (should be closer to root)
-// than entry |b|. Priority is determined by rank first, then by start_byte
-// for equal ranks (smaller start_byte = higher priority = leftmost first).
+// than entry |b|. Priority is determined by rank first, then position for equal
+// ranks (smaller position = higher priority = leftmost first).
 static inline bool iree_tokenizer_bpe_heap_entry_less(
     iree_tokenizer_bpe_heap_entry_t a, iree_tokenizer_bpe_heap_entry_t b) {
   if (a.rank != b.rank) {
     return a.rank < b.rank;
   }
-  return a.left_start_byte < b.left_start_byte;
+  return a.position < b.position;
 }
 
 // Min-heap for BPE merge candidates ordered by rank.
@@ -72,14 +67,13 @@ static inline bool iree_tokenizer_bpe_heap_entry_less(
 // allows the BPE state to allocate the heap buffer as part of a single slab
 // allocation, avoiding per-operation allocations during encoding.
 //
-// Capacity is 3*max_token_length, derived from rigorous analysis:
-// - Peak heap = H + (W - 1) where H = entries at call, W = window tokens
-// - H ≤ L - 1 (bytes added between heap drains), W ≤ 2L - 1 (window bound)
-// - Peak ≤ (L - 1) + (2L - 2) = 3L - 3 < 3L
-// Exceeding capacity indicates a bug in the algorithm.
+// The caller establishes a capacity bound for its candidate producer.
 typedef struct iree_tokenizer_bpe_heap_t {
+  // Borrowed storage valid for the heap's lifetime.
   iree_tokenizer_bpe_heap_entry_t* entries;
+  // Number of entries available in storage.
   iree_host_size_t capacity;
+  // Number of queued entries, including lazily invalidated candidates.
   iree_host_size_t size;
 } iree_tokenizer_bpe_heap_t;
 

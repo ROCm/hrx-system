@@ -232,6 +232,21 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    tokenizer_buffer_test
+  SRCS
+    "tokenizer_buffer_test.cc"
+  DEPS
+    ::tokenizer
+    ::tokenizer_test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tokenizer::model::bpe
+    iree::tokenizer::segmenter::whitespace
+)
+
+iree_cc_test(
+  NAME
     tokenizer_input_tokens_test
   SRCS
     "tokenizer_input_tokens_test.cc"

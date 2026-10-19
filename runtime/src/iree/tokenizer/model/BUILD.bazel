@@ -47,17 +47,18 @@ iree_runtime_cc_library(
         "bpe_backtrack.c",
         "bpe_cache.c",
         "bpe_encode.c",
+        "bpe_symbols.c",
         "bpe_tables.c",
-        "bpe_window.c",
     ],
     hdrs = [
         "bpe.h",
-        "bpe_internal.h",
+        "bpe_state.h",
     ],
     deps = [
         ":bpe_heap",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/tokenizer:byte_level_tables",
         "//runtime/src/iree/tokenizer:model",
         "//runtime/src/iree/tokenizer:types",
@@ -81,6 +82,19 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "bpe_suffix_test",
+    srcs = ["bpe_suffix_test.cc"],
+    deps = [
+        ":bpe",
+        ":model_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer/vocab:vocab_builder",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "bpe_encode_test",
     srcs = ["bpe_encode_test.cc"],
     deps = [
@@ -90,6 +104,18 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/tokenizer:model",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "bpe_reference_test",
+    srcs = ["bpe_reference_test.cc"],
+    deps = [
+        ":bpe",
+        ":model_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -7,28 +7,32 @@ written in C. Loads HuggingFace `tokenizer.json` and OpenAI tiktoken
 ## What This Is
 
 The IREE tokenizer is a format-agnostic tokenization engine with a pull-based
-streaming architecture. It processes arbitrarily long input with fixed memory,
-produces tokens incrementally, and tracks byte-exact offsets through the full
-normalization pipeline for training use cases.
+streaming architecture. Completed pre-tokenizer segments produce tokens as
+output space permits. Unfinished segments remain buffered: buffer capacity is
+not a segmentation boundary, and BPE merge-priority dependencies can extend
+beyond any fixed multiple of the longest vocabulary token.
 
-The tokenizer is thread-safe and allocation-free in the hot path: all buffers
-are caller-provided, all state is in fixed-size structs, and the tokenizer
-object itself is immutable after construction. This makes it suitable for
-high-throughput inference servers (pool state objects, share the tokenizer
-across threads) as well as embedded systems (statically allocate everything).
+The immutable tokenizer can be shared across threads, each with its own encoding
+state. Ordinary complete words use caller-provided state and transform storage
+without allocations. Oversized segments grow bounded overflow storage through
+the caller-supplied construction allocator. Reset retains that storage for reuse;
+deinitialize releases it. Concurrent states require a concurrency-safe allocator.
 
 ### Key Properties
 
 - **Streaming-first**: `encode(text)` is just `initialize() -> feed(text) ->
   finalize()`. Chunked input produces identical output regardless of chunk
   boundaries.
-- **Bounded memory**: State size depends on the tokenizer configuration, with
-  caller-provided storage and transform buffers. Feed calls allocate no memory,
-  and state size is independent of input length.
-- **Offset tracking**: Every token maps back to its exact byte range in the
-  original input, propagated forward through normalization (NFC, lowercase,
-  etc.) using run-length encoded offset maps. Essential for training data
-  provenance and RAG chunking.
+- **Bounded memory**: Initial state and transform buffers are caller-provided.
+  Owned transform overflow is capped by
+  `IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE` (1 MiB by default, half
+  usable ring capacity); BPE explicit-symbol overflow is capped separately by
+  `IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE` (8 MiB). Exhaustion returns
+  `RESOURCE_EXHAUSTED`, never a changed token sequence. A ring growth temporarily
+  retains both old and new storage while copying live bytes.
+- **Token spans**: Model encoders can report byte ranges in their input segments.
+  The full pipeline does not yet compose normalization and ring-position maps;
+  those offsets cannot establish original-input provenance.
 - **HuggingFace formats**: Loads vocabulary, normalization, segmentation,
   model, decoder, and post-processing configuration from `tokenizer.json`.
 - **Tiktoken compatible**: Loads OpenAI tiktoken `.tiktoken` files
@@ -40,55 +44,16 @@ across threads) as well as embedded systems (statically allocate everything).
   No undefined behavior on malformed UTF-8, pathological regex patterns, or
   adversarial input.
 
-## Performance
-
-Throughput in MiB/s (one-shot encode and decode, pool rotation with 64
-copies defeating cache warming, Clang `-O3 -march=native` with ThinLTO,
-AMD EPYC 5.4 GHz). Corpus: 593KB ASCII (Sherlock Holmes), 1.8MB CJK
-(Chinese classic), 1.4MB Code (concatenated C source):
-
-| Model | Algo | Vocab | ASCII Enc | CJK Enc | Code Enc | ASCII Dec | CJK Dec | Code Dec |
-|-------|------|------:|----------:|--------:|---------:|----------:|--------:|---------:|
-| GPT-2             | BPE       |  50K |  28 |  15 |  44 |   587 | 1,588 |   630 |
-| Llama 3           | BPE       | 128K |  42 |   9 |  54 |   709 | 1,236 |   781 |
-| Gemma 2B          | BPE       | 256K |  40 |  67 |  15 |   213 |   366 |   215 |
-| Qwen 2.5          | BPE       | 151K |  24 |   8 |  44 |   736 | 1,270 |   835 |
-| BLOOM             | BPE       | 250K |  24 |   7 |   2 |   621 |   984 |   762 |
-| Mistral NeMo      | BPE       | 131K |  39 |  10 |  39 |   601 | 1,221 |   780 |
-| DeepSeek V3       | BPE       | 129K |  13 |  10 |  16 |   658 | 1,667 | 2,125 |
-| Whisper           | BPE       |  51K |  26 |  11 |  43 |   588 | 1,439 |   596 |
-| BERT              | WordPiece |  30K |  44 |  36 |  40 |   814 | 3,061 |   792 |
-| T5                | Unigram   |  32K |  18 |  34 |   3 |   646 | 1,808 |   556 |
-
-Streaming encode produces bit-exact output regardless of buffer size and
-tracks one-shot throughput closely. DeepSeek V3 streaming encode on ASCII
-(same settings as above, pool rotation, Sherlock Holmes corpus):
-
-| Buffer Size | Throughput | Tokens | vs One-Shot |
-|------------:|-----------:|-------:|------------:|
-|        1 KB |  10.7 MiB/s | 143,053 | 0.82x |
-|        4 KB |  10.7 MiB/s | 143,053 | 0.82x |
-|       16 KB |  11.6 MiB/s | 143,053 | 0.89x |
-|       64 KB |  11.6 MiB/s | 143,053 | 0.89x |
-|    One-Shot |  13.1 MiB/s | 143,053 | 1.00x |
-
-Throughput is flat across all buffer sizes. The 0.82-0.89x streaming ratio is
-the cost of the pass-through probe: when a segmenter child finds no matches
-(e.g., Numbers split on English text), the pipeline probes the final child's
-DFA to determine the natural segment boundary before expanding through the
-full child chain. This avoids forcing word splits at arbitrary buffer
-boundaries.
-
-### Running Benchmarks
+## Running Benchmarks
 
 ```bash
 # Single model (HuggingFace JSON):
-iree-bazel-run --copt=-O3 --copt=-march=native --features=thin_lto \
+iree-bazel-run --config=opt \
   //runtime/src/iree/tokenizer/tools:comprehensive_benchmark -- \
   --tokenizer_json=path/to/tokenizer.json --benchmark_min_time=1s
 
 # Single model (tiktoken — encoding inferred from filename):
-iree-bazel-run --copt=-O3 --copt=-march=native --features=thin_lto \
+iree-bazel-run --config=opt \
   //runtime/src/iree/tokenizer/tools:comprehensive_benchmark -- \
   --tokenizer_json=path/to/cl100k_base.tiktoken --benchmark_min_time=1s
 
@@ -233,10 +198,12 @@ The pipeline is organized to keep working data in L1/L2 cache:
 
 ### Algorithmic Efficiency
 
-- **BPE**: Priority-queue based merge with a fixed-size heap. Processes one
-  segment at a time with O(n log n) merges where n is the segment length
-  (typically 5-20 bytes, not the full input length). The heap is embedded in
-  the encode state, not heap-allocated.
+- **BPE**: Canonical merge histories compiled once at model construction
+  validate adjacent token boundaries during complete-word backtracking.
+  Repeated words use a bounded cache. Explicit initial-symbol merging uses a
+  rank-ordered heap with stable symbol indices and O(n log n) work per segment.
+  Its workspace borrows fixed state storage for small segments and grows within
+  a per-state ceiling for larger ones.
 - **Trie-based vocabulary**: Token lookup during encoding uses a trie for
   longest-prefix matching, giving O(k) lookup where k is the max token length
   (bounded, typically < 50 bytes).
@@ -246,19 +213,21 @@ The pipeline is organized to keep working data in L1/L2 cache:
 
 ### Memory Consumption
 
-The tokenizer uses a fixed, small amount of memory for streaming state:
+Fixed state and optional reusable overflow have separate lifetimes:
 
 | Component | Size | Notes |
 |-----------|------|-------|
-| Encode state | ~1-2 KB | Pipeline stage batch buffers + state |
-| Transform buffer | 4-64 KB | Caller-provided, tunable |
+| Encode state | Configuration-dependent | Pipeline batches, model scratch, and bounded caches |
+| Initial transform buffer | Caller-selected | Recommended size is capped at 16 KiB by default |
+| Transform overflow | Up to 1 MiB by default | Grows only for retained input; reset preserves it |
+| BPE symbol overflow | Up to 8 MiB by default | Reused across large complete segments |
 | Decode state | Configuration-dependent | Token decoder state, optional text transform, and a retained edge sized from the vocabulary |
 | Tokenizer (shared) | Varies | Vocabulary + merge table + regex DFA |
 
-The encode and decode state sizes are independent of input length. A 1-byte
-input and a 1-GB input use the same state allocation. This makes the tokenizer
-suitable for processing accepted tokens incrementally without re-decoding the
-previous output.
+Fixed state sizes depend on configuration, not total stream length. Encoding
+overflow depends on the largest unresolved segment, not total input consumed;
+inputs exceeding its ceiling fail explicitly. Decoding processes accepted
+tokens incrementally without re-decoding previous output.
 
 ### Composability with Streaming Workflows
 
@@ -330,9 +299,11 @@ lists with 100% token-for-token accuracy.
 
 ### Offset Tracking
 
-Forward-propagated byte offsets through the full normalization pipeline.
-Offsets are stored as run-length encoded maps (O(discontinuities) memory, not
-O(input_length)), making them practical for arbitrarily long inputs.
+Model-level spans refer to the supplied transform buffer. The public pipeline
+accepts run-length offset-map storage, but does not populate and compose it
+through normalization and ring relocation. Original-input provenance requires
+that mapping before model spans reach the caller; token-ID correctness alone
+does not verify those offsets.
 
 ### Regex Engine
 

@@ -205,6 +205,20 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "tokenizer_buffer_test",
+    srcs = ["tokenizer_buffer_test.cc"],
+    deps = [
+        ":tokenizer",
+        ":tokenizer_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer/model:bpe",
+        "//runtime/src/iree/tokenizer/segmenter:whitespace",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "tokenizer_input_tokens_test",
     srcs = ["tokenizer_input_tokens_test.cc"],
     deps = [

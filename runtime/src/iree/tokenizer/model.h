@@ -14,13 +14,13 @@
 //
 // Design principles:
 // - Pull-based: output buffer capacity drives processing
-// - Streaming: can process segments incrementally (greedy left-to-right)
-// - Zero allocation: state lives in caller-provided storage
+// - Streaming: completed segments and output credit drive progress
+// - Caller-provided fixed state with model-specific bounded overflow storage
 //
 // Streaming model:
-// - Model tracks position within current segment
-// - Greedy longest-match emits tokens as they're determined
-// - No need to see entire segment before emitting tokens
+// - Model tracks pending output within the current segment
+// - Only tokens independent of future input may be published
+// - Incomplete input may remain caller-owned until a segment boundary arrives
 
 #ifndef IREE_TOKENIZER_MODEL_H_
 #define IREE_TOKENIZER_MODEL_H_
@@ -47,15 +47,9 @@ typedef struct iree_tokenizer_segment_list_t {
   iree_host_size_t count;
   const iree_tokenizer_segment_t* values;
   // When true, the last segment in the list is incomplete — more bytes will be
-  // appended in subsequent calls. The model must use an incremental processing
-  // path (e.g., BYTE_LOOP for BPE) and must not flush/finalize the last
-  // segment. It reports segment_complete=false and preserves internal state
-  // (window, heap, byte position) for continuation.
-  //
-  // This enables streaming encode for inputs that exceed the ring buffer's
-  // capacity, such as split=false models where the entire input is one segment.
-  // The frozen token theorem guarantees correctness: tokens sufficiently far
-  // from the processing frontier are emitted incrementally.
+  // appended in subsequent calls. The caller retains all unreclaimed bytes and
+  // resubmits the completed segment. A model may defer the entire incomplete
+  // segment; partial input is not a promise of immediate token output.
   bool last_is_partial;
 } iree_tokenizer_segment_list_t;
 
@@ -92,9 +86,8 @@ struct iree_tokenizer_model_t {
 // Base streaming state structure. All concrete state types embed this at
 // offset 0. The model back-pointer enables vtable dispatch from state.
 //
-// Model state tracks position within the current segment for streaming
-// tokenization. Greedy BPE processes left-to-right, emitting tokens as they
-// become determined, so state is O(1) - just position tracking.
+// Models may retain computed tokens across output backpressure. Optional
+// overflow storage belongs to the concrete state and is freed at deinitialize.
 struct iree_tokenizer_model_state_t {
   const iree_tokenizer_model_t* model;
 };
@@ -106,17 +99,17 @@ struct iree_tokenizer_model_state_t {
 // VTable for model implementations.
 //
 // Streaming model:
-// - state_encode() processes segments incrementally
-// - Model tracks current segment index and position within segment
-// - Greedy longest-match determines tokens left-to-right
-// - Tokens emitted immediately as they're determined (no buffering)
-// - state_finalize() handles any trailing bytes that need special handling
+// - state_encode() processes complete segments and retains pending output
+// - state_finalize() drains already accepted work
+// - state_reset() discards pending work without freeing reusable storage
 struct iree_tokenizer_model_vtable_t {
   void (*destroy)(iree_tokenizer_model_t* model);
   iree_status_t (*state_initialize)(const iree_tokenizer_model_t* model,
                                     void* storage,
                                     iree_tokenizer_model_state_t** out_state);
   void (*state_deinitialize)(iree_tokenizer_model_state_t* state);
+  // Discards pending input/output while retaining reusable model workspace.
+  void (*state_reset)(iree_tokenizer_model_state_t* state);
   iree_status_t (*state_encode)(iree_tokenizer_model_state_t* state,
                                 iree_const_byte_span_t transform_buffer,
                                 iree_tokenizer_segment_list_t segments,
@@ -169,13 +162,18 @@ static inline void iree_tokenizer_model_state_deinitialize(
   }
 }
 
+// Starts a new independent input without releasing reusable scratch storage.
+static inline void iree_tokenizer_model_state_reset(
+    iree_tokenizer_model_state_t* state) {
+  state->model->vtable->state_reset(state);
+}
+
 // Encodes segments to token IDs, streaming within each segment.
 //
 // |transform_buffer| is the normalized text backing the |segments| indices.
 // All segment start/end offsets must be valid indices into this buffer.
-// Processes segments using greedy longest-match, tracking current segment
-// index and byte position in state. Tokens are emitted as they're determined
-// without future lookahead.
+// Token selection follows the concrete model's algorithm. Incomplete segments
+// may require more input before any token can be emitted.
 //
 // Returns the number of fully-processed segments in |out_segments_consumed|
 // and the number of tokens written in |out_token_count|. May consume fewer
@@ -196,9 +194,8 @@ static inline iree_status_t iree_tokenizer_model_state_encode(
 }
 
 // Finalizes encoding, handling any trailing state. Call after all segments
-// have been provided via state_encode(). Most models produce no output here
-// since greedy emits as it goes; some may emit a final token for incomplete
-// sequences. May need multiple calls if the output buffer is too small.
+// have been provided via state_encode(). A deferred incomplete segment must
+// first be resubmitted as complete. May need multiple calls if output is small.
 static inline iree_status_t iree_tokenizer_model_state_finalize(
     iree_tokenizer_model_state_t* state, iree_tokenizer_token_output_t output,
     iree_host_size_t* out_token_count) {
@@ -214,14 +211,12 @@ static inline bool iree_tokenizer_model_state_has_pending(
 
 // Reclaims committed bytes from the current partial segment.
 //
-// When processing a partial segment (last_is_partial=true), the model
-// accumulates frozen tokens in its window. This computes how many leading
-// segment bytes are fully committed (all tokens covering those bytes have
-// been emitted), adjusts all internal byte position tracking by subtracting
-// the committed count, and returns the number of bytes reclaimed. The caller
-// advances the ring buffer's read position by the returned count. Returns 0
-// if no bytes can be reclaimed or the model is not processing a partial
-// segment.
+// This computes how many leading segment bytes are fully committed (all tokens
+// covering those bytes have been emitted), subtracts the committed count from
+// internal byte positions, and returns the number of bytes reclaimed. The
+// caller advances the ring buffer's read position by the returned count.
+// Returns 0 if no bytes can be reclaimed or the model is not processing a
+// partial segment.
 static inline iree_host_size_t iree_tokenizer_model_state_reclaim(
     iree_tokenizer_model_state_t* state) {
   return state->model->vtable->state_reclaim(state);

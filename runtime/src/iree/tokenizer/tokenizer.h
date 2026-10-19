@@ -20,11 +20,9 @@ extern "C" {
 // Transform Buffer Configuration
 //===----------------------------------------------------------------------===//
 
-// Maximum transform buffer size for one-shot and streaming encode operations.
-// This limits stack/heap allocation for the internal ring buffer used during
-// normalization and segmentation. Larger buffers reduce the chance of needing
-// emergency flush for pathological inputs (thousands of characters without
-// punctuation), but use more memory.
+// Recommended initial transform buffer size for streaming encode. Larger
+// buffers reduce overflow growth for long pre-tokenizer segments. Capacity
+// never establishes a segmentation boundary or changes the resulting tokens.
 //
 // The transform buffer uses double-buffer mode, so the logical capacity is half
 // the allocation. A 64KB allocation provides 32KB logical capacity.
@@ -58,17 +56,21 @@ extern "C" {
 #define IREE_TOKENIZER_TRANSFORM_BUFFER_EXPANSION_FACTOR 3
 #endif
 
-// Minimum transform buffer allocation returned by recommended_size().
-// Below this threshold, the ring buffer's logical capacity (allocation / 2)
-// is too small for the segmenter to reliably identify complete segment
-// boundaries, causing artificial segment splits and sub-optimal BPE merges
-// (allocation=256 → +8.5% tokens, allocation=1024 → +1.4% tokens,
-// allocation=2048+ → optimal). The value 4096 (2048 bytes logical capacity)
-// ensures optimal BPE quality for all practical inputs.
+// Minimum initial transform buffer allocation returned by recommended_size().
+// Smaller caller buffers are valid but may require overflow growth more often.
 //
 // The encode_state_initialize function accepts any power-of-two allocation
 // >= 8. This constant only affects recommended_size(), not the hard minimum.
 #define IREE_TOKENIZER_TRANSFORM_BUFFER_MIN_SIZE 4096
+
+// Ceiling for owned overflow storage when an unfinished pre-tokenizer segment
+// outgrows the caller's transform ring. Storage grows geometrically, survives
+// reset, and is released by deinitialize. The initial caller buffer is not
+// subject to this ceiling. Exhaustion returns RESOURCE_EXHAUSTED without
+// inventing a segment boundary. Logical capacity is half the allocation.
+#ifndef IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE
+#define IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE (1024 * 1024)
+#endif
 
 // Tokenizer with builder pattern for construction.
 // See README.md for architecture, streaming patterns, and design details.
@@ -522,8 +524,8 @@ static inline iree_host_size_t iree_tokenizer_transform_buffer_recommended_size(
 }
 
 // Calculates the transform buffer size for one-shot (batch) encoding.
-// Unlike the streaming recommended_size (which caps at 64KB for bounded
-// memory), one-shot encoding uses a buffer proportional to the full input since
+// Unlike the streaming recommended_size (which caps the initial allocation),
+// one-shot encoding uses a buffer proportional to the full input since
 // it already allocates O(text_size) for output tokens. This avoids deadlocks
 // when pre-tokenizer segments span more than the streaming buffer cap.
 static inline iree_host_size_t iree_tokenizer_transform_buffer_oneshot_size(
@@ -547,9 +549,11 @@ static inline iree_host_size_t iree_tokenizer_transform_buffer_oneshot_size(
 // IREE_TOKENIZER_ENCODE_FLAG_TRACK_OFFSETS in |flags|; otherwise pass an empty
 // list.
 //
-// The initialized state is returned in |out_state|. The state does not own the
-// storage buffers; the caller is responsible for keeping them valid until
-// deinitialize is called.
+// The initialized state is returned in |out_state|. Caller-provided buffers
+// must remain valid until deinitialize. If an unfinished segment exceeds the
+// initial ring, the state may allocate bounded reusable overflow storage
+// through the tokenizer's allocator. Models may also own bounded workspace.
+// Neither can force a token or segment boundary to reclaim storage.
 iree_status_t iree_tokenizer_encode_state_initialize(
     const iree_tokenizer_t* tokenizer, iree_byte_span_t state_storage,
     iree_byte_span_t transform_buffer,

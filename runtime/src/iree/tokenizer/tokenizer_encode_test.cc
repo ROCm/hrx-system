@@ -895,7 +895,8 @@ TEST_F(TokenizerBatchEncodeTest, MatchesSingleEncode) {
 TEST_F(TokenizerStreamingTest, CJKTextWithSmallBuffer) {
   ScopedVocabBuilder vocab_builder(256);
   for (int i = 0; i < 256; ++i) {
-    char byte_token[2] = {static_cast<char>(i), '\0'};
+    char byte_token[8];
+    iree_snprintf(byte_token, sizeof(byte_token), "<0x%02X>", i);
     vocab_builder.AddToken(i, byte_token);
   }
   ScopedVocab vocab = vocab_builder.Build();
@@ -973,7 +974,10 @@ TEST_F(TokenizerStreamingTest, CJKTextWithSmallBuffer) {
       &final_tokens));
   total_tokens += final_tokens;
 
-  EXPECT_GT(total_tokens, 0u) << "Expected tokens from CJK text";
+  ASSERT_EQ(total_tokens, strlen(cjk_text));
+  for (size_t i = 0; i < total_tokens; ++i) {
+    EXPECT_EQ(tokens[i], static_cast<uint8_t>(cjk_text[i]));
+  }
 
   iree_tokenizer_encode_state_deinitialize(state);
   iree_tokenizer_free(tokenizer);
@@ -982,7 +986,8 @@ TEST_F(TokenizerStreamingTest, CJKTextWithSmallBuffer) {
 TEST_F(TokenizerStreamingTest, LongLetterRunWithoutPunctuation) {
   ScopedVocabBuilder vocab_builder(256);
   for (int i = 0; i < 256; ++i) {
-    char byte_token[2] = {static_cast<char>(i), '\0'};
+    char byte_token[8];
+    iree_snprintf(byte_token, sizeof(byte_token), "<0x%02X>", i);
     vocab_builder.AddToken(i, byte_token);
   }
   ScopedVocab vocab = vocab_builder.Build();
@@ -1064,8 +1069,11 @@ TEST_F(TokenizerStreamingTest, LongLetterRunWithoutPunctuation) {
   total_tokens += final_tokens;
 
   // With byte-level fallback, each CJK character (3 bytes) produces 3 tokens.
-  EXPECT_EQ(total_tokens, 1500u)
+  ASSERT_EQ(total_tokens, 1500u)
       << "Expected 1500 byte-level tokens from 500 CJK characters";
+  for (size_t i = 0; i < total_tokens; ++i) {
+    EXPECT_EQ(tokens[i], static_cast<uint8_t>(cjk_text[i]));
+  }
 
   iree_tokenizer_encode_state_deinitialize(state);
   iree_tokenizer_free(tokenizer);
@@ -1074,7 +1082,8 @@ TEST_F(TokenizerStreamingTest, LongLetterRunWithoutPunctuation) {
 TEST_F(TokenizerStreamingTest, LargeCJKTextWithCappedBuffer) {
   ScopedVocabBuilder vocab_builder(256);
   for (int i = 0; i < 256; ++i) {
-    char byte_token[2] = {static_cast<char>(i), '\0'};
+    char byte_token[8];
+    iree_snprintf(byte_token, sizeof(byte_token), "<0x%02X>", i);
     vocab_builder.AddToken(i, byte_token);
   }
   ScopedVocab vocab = vocab_builder.Build();
@@ -1169,7 +1178,10 @@ TEST_F(TokenizerStreamingTest, LargeCJKTextWithCappedBuffer) {
       &final_tokens));
   total_tokens += final_tokens;
 
-  EXPECT_GT(total_tokens, 0u);
+  ASSERT_EQ(total_tokens, cjk_text.size());
+  for (size_t i = 0; i < total_tokens; ++i) {
+    EXPECT_EQ(tokens[i], static_cast<uint8_t>(cjk_text[i]));
+  }
 
   iree_tokenizer_encode_state_deinitialize(state);
   iree_tokenizer_free(tokenizer);
@@ -1178,7 +1190,8 @@ TEST_F(TokenizerStreamingTest, LargeCJKTextWithCappedBuffer) {
 TEST_F(TokenizerStreamingTest, ChunkedEncodeWithUTF8BoundarySplits) {
   ScopedVocabBuilder vocab_builder(256);
   for (int i = 0; i < 256; ++i) {
-    char byte_token[2] = {static_cast<char>(i), '\0'};
+    char byte_token[8];
+    iree_snprintf(byte_token, sizeof(byte_token), "<0x%02X>", i);
     vocab_builder.AddToken(i, byte_token);
   }
   ScopedVocab vocab = vocab_builder.Build();
@@ -1234,7 +1247,10 @@ TEST_F(TokenizerStreamingTest, ChunkedEncodeWithUTF8BoundarySplits) {
     total_tokens += token_count;
   }
 
-  EXPECT_GT(total_tokens, 0u);
+  ASSERT_EQ(total_tokens, cjk_text.size());
+  for (size_t i = 0; i < total_tokens; ++i) {
+    EXPECT_EQ(tokens[i], static_cast<uint8_t>(cjk_text[i]));
+  }
   iree_tokenizer_free(tokenizer);
 }
 

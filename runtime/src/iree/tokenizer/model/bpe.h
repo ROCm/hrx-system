@@ -19,12 +19,11 @@
 //   merge('he','ll') -> ['hell','o']
 //   merge('hell','o') -> ['hello']
 //
-// Streaming Behavior:
-// BPE uses greedy left-to-right tokenization, which is streaming-compatible.
-// Each segment is tokenized independently - tokens can be emitted as they're
-// determined without needing to see future segments. State is O(1): just
-// tracking current segment index and position within segment for partial
-// processing when output buffer fills.
+// Streaming processes complete pre-tokenizer segments independently. An
+// unfinished segment remains caller-owned: merge-priority dependencies can
+// propagate arbitrarily farther than the longest vocabulary token. Computed
+// tokens are retained when output fills. Common words use fixed state storage;
+// large segments use bounded reusable overflow workspace.
 
 #ifndef IREE_TOKENIZER_MODEL_BPE_H_
 #define IREE_TOKENIZER_MODEL_BPE_H_
@@ -33,6 +32,13 @@
 #include "iree/tokenizer/model.h"
 #include "iree/tokenizer/types.h"
 #include "iree/tokenizer/vocab/vocab.h"
+
+// Per-state ceiling for reusable explicit-symbol overflow storage. Ordinary
+// words use caller-provided state storage. Oversized unresolved segments return
+// RESOURCE_EXHAUSTED instead of changing tokenization to fit the workspace.
+#ifndef IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE
+#define IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE (8 * 1024 * 1024)
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,8 +79,7 @@ typedef enum iree_tokenizer_bpe_flag_bits_e {
   // complete segments, avoiding redundant BPE merge computation for words that
   // appear multiple times. Only effective when the pre-tokenizer produces
   // word-level segments (Split, ByteLevel+regex, Metaspace+split=true).
-  // Without word-level segmentation, input flows through the streaming partial
-  // path and the cache is never consulted.
+  // Long unsplit segments generally exceed the cache's key size.
   IREE_TOKENIZER_BPE_FLAG_ENABLE_WORD_CACHE = 1 << 4,
 } iree_tokenizer_bpe_flag_bits_t;
 typedef uint32_t iree_tokenizer_bpe_flags_t;
@@ -93,7 +98,8 @@ typedef uint32_t iree_tokenizer_bpe_flags_t;
 //   The model stores a reference but does not take ownership — the caller
 //   must ensure vocab outlives the model.
 // |flags| controls tokenization behavior (see iree_tokenizer_bpe_flag_bits_t).
-// |allocator| is used for model allocation.
+// |allocator| owns the model and any per-state overflow workspace; it must
+// support concurrent independent states if encoding concurrently.
 // |out_model| receives the allocated model on success.
 iree_status_t iree_tokenizer_bpe_model_allocate(
     const iree_tokenizer_vocab_t* vocab, iree_tokenizer_bpe_flags_t flags,
