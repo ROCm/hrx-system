@@ -1118,6 +1118,7 @@ loom_cc_test(
     iree::base
     iree::base::tooling::flags
     iree::hal
+    iree::hal::testing::deferred_pool
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main
@@ -1164,6 +1165,7 @@ loom_cc_test(
     iree::base
     iree::base::tooling::flags
     iree::hal
+    iree::hal::testing::deferred_pool
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main

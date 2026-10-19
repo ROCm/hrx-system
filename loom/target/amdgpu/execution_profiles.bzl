@@ -94,7 +94,7 @@ RDNA_TSAN_PROFILE = rdna_execution_profile(
 
 RDNA_TSAN_CAPACITY_PROFILE = rdna_execution_profile(
     name = "rdna_tsan_capacity",
-    device = "rdna://?tsan_report_policy=report-only&tsan_shadow_size=2176",
+    device = "rdna://?tsan_report_policy=report-only&tsan_shadow_size=1440",
     runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )
 

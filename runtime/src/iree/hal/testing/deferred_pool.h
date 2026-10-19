@@ -64,6 +64,8 @@ struct DeferredBackingPool : iree_hal_pool_t {
   };
   // Serializes returned tokens with explicit test-controlled retirement.
   std::mutex return_mutex;
+  // Publishes the handoff of real reservations to the deferred-return owner.
+  std::condition_variable return_condition;
   // Holds subsequent returns without blocking the queue performing them.
   bool defer_returns = false;
   // Real parent ownership awaiting explicit forwarding by the test.
@@ -239,6 +241,11 @@ struct DeferredBackingPool : iree_hal_pool_t {
     return count;
   }
 
+  void WaitForReturn() {
+    std::unique_lock<std::mutex> lock(return_mutex);
+    return_condition.wait(lock, [&] { return !pending_returns.empty(); });
+  }
+
   void Return(iree_host_size_t count,
               const iree_hal_pool_reservation_t* reservations,
               const iree_async_frontier_t* frontier) {
@@ -253,6 +260,7 @@ struct DeferredBackingPool : iree_hal_pool_t {
                  sizeof(*frontier) +
                      frontier->entry_count * sizeof(frontier->entries[0]));
         }
+        return_condition.notify_all();
         return;
       }
     }

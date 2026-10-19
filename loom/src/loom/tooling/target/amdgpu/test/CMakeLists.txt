@@ -1348,7 +1348,7 @@ loom_execution_test(
   MODULE
     "::tsan_capacity_test_module"
   RUNNER_ARGS
-    "--device=rdna://?tsan_report_policy=report-only&tsan_shadow_size=2176"
+    "--device=rdna://?tsan_report_policy=report-only&tsan_shadow_size=1440"
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
   LABELS

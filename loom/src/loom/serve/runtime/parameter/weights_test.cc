@@ -15,6 +15,7 @@
 
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/hal/testing/deferred_pool.h"
 #include "iree/task/executor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -426,6 +427,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   }
 
   void TearDown() override {
+    if (deferred_backing_) {
+      deferred_backing_->CompleteReturns();
+    }
     iree_hal_buffer_release(workspace_);
     if (consumer_gate_) {
       IREE_EXPECT_OK(iree_hal_semaphore_signal(consumer_gate_, 2, nullptr));
@@ -460,6 +464,16 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
       IREE_EXPECT_OK(loom_serve_weights_free(plan));
     }
     IREE_EXPECT_OK(loom_serve_virtual_buffer_free(state_));
+    if (owned_pool_) {
+      IREE_EXPECT_OK(loom_serve_memory_pool_await(owned_pool_));
+      EXPECT_EQ(loom_serve_memory_pool_statistics(owned_pool_).reserved_bytes,
+                0u);
+      EXPECT_EQ(loom_serve_memory_pool_statistics(owned_pool_).committed_bytes,
+                0u);
+      loom_serve_residency_cache_free(owned_cache_);
+      loom_serve_memory_pool_free(owned_pool_);
+    }
+    iree_hal_pool_release(deferred_backing_);
     iree_hal_buffer_release(output_buffer_);
     loom_serve_jit_release(jit_);
     loom_serve_execution_release(shared_execution_);
@@ -477,6 +491,55 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     if (adapter_path_.Exists()) {
       EXPECT_TRUE(adapter_path_.Remove());
     }
+  }
+
+  void UseDeferredBacking() {
+    if (!pool_) {
+      return;
+    }
+    const auto* dispatch = iree_hal_queue_family(dispatch_);
+    const auto* transfer = iree_hal_queue_family(transfer_);
+    iree_hal_pool_family_access_t families[] = {
+        {.family = dispatch,
+         .usage =
+             IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+         .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE},
+        {.family = transfer,
+         .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+         .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE},
+    };
+    const iree_hal_pool_scope_t scope = {
+        .family_count = dispatch == transfer ? 1u : 2u, .families = families};
+    auto* group = loom_serve_device_group(device_owner_);
+    iree_hal_slab_pool_options_t options;
+    iree_hal_slab_pool_options_initialize(&options);
+    iree_hal_pool_t* backing = nullptr;
+    IREE_ASSERT_OK(iree_hal_slab_pool_create(group, scope, &options,
+                                             host_allocator_, &backing));
+    auto status = iree::hal::testing::DeferredBackingPool::Create(
+        backing, &deferred_backing_);
+    iree_hal_pool_release(backing);
+    IREE_ASSERT_OK(status);
+    for (auto& family : families) {
+      family.interfaces = 0;
+    }
+    iree_hal_virtual_buffer_capabilities_t capabilities;
+    IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+        group, scope, host_allocator_, &capabilities));
+    iree_hal_pool_reservation_request_t request;
+    IREE_ASSERT_OK(loom_serve_memory_pool_query_slab_request(
+        &capabilities, deferred_backing_, kSlabBytes, &request));
+    IREE_ASSERT_OK(loom_serve_memory_pool_allocate(
+        group, scope, deferred_backing_, transfer_, request, 2 * kSlabBytes,
+        host_allocator_, &owned_pool_));
+    pool_ = owned_pool_;
+    IREE_ASSERT_OK(loom_serve_residency_cache_allocate(pool_, host_allocator_,
+                                                       &owned_cache_));
+  }
+
+  loom_serve_residency_cache_t* ResidencyCache() {
+    return owned_cache_ ? owned_cache_
+                        : loom_serve_device_residency_cache(device_owner_);
   }
 
   iree_status_t Compile(iree_host_size_t index, const char* root) {
@@ -544,7 +607,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
 
   iree_status_t Register(iree_host_size_t index, iree_host_size_t first_plan,
                          iree_host_size_t plan_count) {
-    auto* cache = loom_serve_device_residency_cache(device_owner_);
+    auto* cache = ResidencyCache();
     IREE_RETURN_IF_ERROR(loom_serve_residency_group_allocate(
         cache, plan_count, plans_.data() + first_plan, host_allocator_,
         &parameter_groups_[index]));
@@ -572,18 +635,14 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
 
   void AdmitAfterRelease(iree_host_size_t index) {
     loom_serve_residency_admission_t admission;
-    {
-      loom_serve::testing::ScopedNativeHold gate(device_owner_,
-                                                 IREE_ALLOCATOR_COMMAND_FREE);
-      IREE_ASSERT_OK(
-          loom_serve_residency_try_admit(residencies_[index], &admission));
-      ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
-      EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(
-          loom_serve_device_residency_cache(device_owner_)));
-    }
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
     IREE_ASSERT_OK(
         loom_serve_residency_try_admit(residencies_[index], &admission));
+    if (admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
+      ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+      IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+      IREE_ASSERT_OK(
+          loom_serve_residency_try_admit(residencies_[index], &admission));
+    }
     ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   }
 
@@ -658,6 +717,12 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   iree_hal_semaphore_t* consumer_gate_ = nullptr;
   // Explicitly elastic backing or NULL for the fixed comparison arm.
   loom_serve_memory_pool_t* pool_ = nullptr;
+  // Optional real pool whose parent reservations can outlive logical return.
+  loom_serve_memory_pool_t* owned_pool_ = nullptr;
+  // Admission policy attached to the same optional pool as its weight plans.
+  loom_serve_residency_cache_t* owned_cache_ = nullptr;
+  // Retains real native backing without blocking unmapping or queue work.
+  iree::hal::testing::DeferredBackingPool* deferred_backing_ = nullptr;
   // Physical slab size; the shared budget holds two unique roots.
   static constexpr uint64_t kSlabBytes = 2 * 1024 * 1024;
   // Suite-owned fixed and elastic devices, each constructed exactly once.
@@ -838,13 +903,11 @@ TEST_P(WeightsTest, OneWorkerActivatesAndConsumesThroughAsyncTimelineWait) {
   }
   // Readiness publication retains the pin. Pressure cannot evict the result's
   // parameters before the owning scheduler consumes completion.
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_device_residency_cache(device_owner_), 0));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
             GetParam() ? kSlabBytes : 0);
   loom_serve_residency_release(residencies_[0]);
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_device_residency_cache(device_owner_), 0));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   DrainNativeReturns();
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
   // The same compiled consumer survives a complete asynchronous reload.
@@ -1077,8 +1140,7 @@ TEST_P(WeightsTest, RejectedActivationRetainsProtectionUntilActualRetirement) {
   EXPECT_FALSE(admitted);
   // The rejection can precede earlier accepted file reads' final accesses.
   // It preserves a terminal pin even though no invocation was admitted.
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_device_residency_cache(device_owner_), 0));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   ExpectBacking(0, GetParam() ? kSlabBytes : 0);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
                         loom_serve_weights_await(plans_[0]));
@@ -1336,8 +1398,7 @@ TEST_P(WeightsTest, AdmissionUsesRecencyOnlyAmongUnpinnedGroups) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
       loom_serve_residency_deactivate(residencies_[0], &complete));
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_device_residency_cache(device_owner_), 0));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
             kSlabBytes);
@@ -1379,7 +1440,7 @@ TEST_P(WeightsTest, PersistentPinningOnlyChangesParameterEvictionEligibility) {
   IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
   IREE_ASSERT_OK(Register(0, 0, 1));
   auto* residency = residencies_[0];
-  auto* cache = loom_serve_device_residency_cache(device_owner_);
+  auto* cache = ResidencyCache();
   loom_serve_residency_set_pinned(residency, true);
   loom_serve_residency_set_pinned(residency, true);
   EXPECT_FALSE(loom_serve_residency_snapshot(residency).active);
@@ -1429,8 +1490,7 @@ TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
   IREE_ASSERT_OK(loom_serve_activation_advance(
       activation, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase));
   EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_LOADING);
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_device_residency_cache(device_owner_), 0));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   ExpectBacking(0, GetParam() ? kSlabBytes : 0u);
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, gate_value, nullptr));
   wake.Await();
@@ -1442,13 +1502,13 @@ TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
   ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
   EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 1u);
   // Warmup owns no persistent pin after completion.
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_device_residency_cache(device_owner_), 0));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   DrainNativeReturns();
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
 }
 
 TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
   if (!GetParam()) {
     // Fixed allocations have no serving-imposed physical ceiling.
     return;
@@ -1494,10 +1554,10 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
       loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
       &activation));
   {
-    loom_serve::testing::ScopedNativeHold gate(device_owner_,
-                                               IREE_ALLOCATOR_COMMAND_FREE);
+    deferred_backing_->DeferReturns();
     IREE_ASSERT_OK(loom_serve_activation_advance(activation, 0, &phase));
     EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_WAITING);
+    deferred_backing_->CompleteReturns();
   }
   while (phase != LOOM_SERVE_ACTIVATION_COMPLETE) {
     wake.Await();
@@ -1527,8 +1587,7 @@ TEST_P(WeightsTest, RejectedWarmupKeepsAcceptedLoadsProtectedUntilRetirement) {
                         loom_serve_activation_advance(activation, 0, &phase));
   EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
   loom_serve_activation_free(activation);
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_device_residency_cache(device_owner_), 0));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   ExpectBacking(0, GetParam() ? kSlabBytes : 0u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
                         loom_serve_weights_await(plans_[0]));
@@ -1584,8 +1643,7 @@ TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
   ASSERT_NO_FATAL_FAILURE(Run(1, 290));
   loom_serve_residency_release(residencies_[1]);
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_device_residency_cache(device_owner_), 0));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   DrainNativeReturns();
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
   check_activity(2, 2);
@@ -1702,6 +1760,7 @@ TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
 }
 
 TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
   if (!GetParam()) {
     return;
   }
@@ -1730,14 +1789,13 @@ TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
   const loom_serve_memory_range_t next = {state_, kSlabBytes, kSlabBytes};
   bool admitted = false;
   {
-    loom_serve::testing::ScopedNativeHold gate(device_owner_,
-                                               IREE_ALLOCATOR_COMMAND_FREE);
+    deferred_backing_->DeferReturns();
     loom_serve_virtual_buffer_begin_trim(state_);
     loom_serve_memory_operation_t* operation = nullptr;
     IREE_ASSERT_OK(loom_serve_memory_pool_trim_async(pool_, 1, &state_, nullptr,
                                                      0, &operation));
-    gate.WaitEntered();
     loom_serve_memory_operation_await(operation);
+    EXPECT_EQ(deferred_backing_->PendingReturnCount(), 1u);
     IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
     loom_serve_memory_operation_free(operation);
     EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
@@ -1754,6 +1812,7 @@ TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
     EXPECT_TRUE(loom_serve_residency_snapshot(residencies_[1]).active);
     EXPECT_EQ(loom_serve_weights_activity(plans_[1]).deactivations, 0u);
+    deferred_backing_->CompleteReturns();
   }
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
@@ -1802,6 +1861,7 @@ TEST_P(WeightsTest, NewAdmissionsCoexistWithoutPhysicalPressure) {
 }
 
 TEST_P(WeightsTest, WarmAdmissionCollectsCompletedPeerRelease) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
   if (!GetParam()) {
     return;
   }
@@ -1815,21 +1875,22 @@ TEST_P(WeightsTest, WarmAdmissionCollectsCompletedPeerRelease) {
   IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool_, 2 * kSlabBytes, 256, &state_statistics_, &state_));
-  auto* cache = loom_serve_device_residency_cache(device_owner_);
+  auto* cache = ResidencyCache();
   bool admitted = false;
   const loom_serve_memory_range_t first = {state_, 0, kSlabBytes};
   {
-    loom_serve::testing::ScopedNativeHold gate(device_owner_,
-                                               IREE_ALLOCATOR_COMMAND_FREE);
+    deferred_backing_->DeferReturns();
     IREE_ASSERT_OK(
         loom_serve_memory_pool_try_commit(pool_, 1, &first, &admitted));
     EXPECT_FALSE(admitted);
-    gate.WaitEntered();
+    deferred_backing_->WaitForReturn();
+    EXPECT_EQ(deferred_backing_->PendingReturnCount(), 1u);
     EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(cache));
     // Native backing can outlive the weights' logical return. The pool owns
     // those bytes while the cache retains the uncollected release interest.
     EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
               kSlabBytes);
+    deferred_backing_->CompleteReturns();
   }
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
   IREE_ASSERT_OK(
@@ -1854,6 +1915,7 @@ TEST_P(WeightsTest, WarmAdmissionCollectsCompletedPeerRelease) {
 }
 
 TEST_P(WeightsTest, IdleExpiryPreservesPinsAndReloadsWithoutRecompiling) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
   for (iree_host_size_t i = 0; i < 2; ++i) {
     IREE_ASSERT_OK(Compile(i, "target"));
     const auto root = Root(i, 0);
@@ -1861,7 +1923,7 @@ TEST_P(WeightsTest, IdleExpiryPreservesPinsAndReloadsWithoutRecompiling) {
     IREE_ASSERT_OK(Register(i, i, 1));
     ASSERT_NO_FATAL_FAILURE(RunPinned(i, 70));
   }
-  auto* cache = loom_serve_device_residency_cache(device_owner_);
+  auto* cache = ResidencyCache();
   const auto timeout = iree_make_duration_ms(3600000);
   loom_serve_residency_set_pinned(residencies_[0], true);
   IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[1]));
@@ -1880,8 +1942,9 @@ TEST_P(WeightsTest, IdleExpiryPreservesPinsAndReloadsWithoutRecompiling) {
       cache, unpinned + timeout / 2, timeout, &pending));
   EXPECT_EQ(pending, GetParam());
   {
-    loom_serve::testing::ScopedNativeHold gate(device_owner_,
-                                               IREE_ALLOCATOR_COMMAND_FREE);
+    if (deferred_backing_) {
+      deferred_backing_->DeferReturns();
+    }
     IREE_ASSERT_OK(loom_serve_residency_cache_trim_idle(
         cache, unpinned + timeout, timeout, &pending));
     EXPECT_FALSE(pending);
@@ -1889,12 +1952,16 @@ TEST_P(WeightsTest, IdleExpiryPreservesPinsAndReloadsWithoutRecompiling) {
               !GetParam());
     EXPECT_TRUE(loom_serve_residency_snapshot(residencies_[1]).active);
     if (GetParam()) {
-      gate.WaitEntered();
+      deferred_backing_->WaitForReturn();
+      EXPECT_EQ(deferred_backing_->PendingReturnCount(), 1u);
       EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
                 kSlabBytes);
     }
     // The independent consumer has no dependency on the held native release.
     ASSERT_NO_FATAL_FAILURE(Run(1, 70));
+    if (deferred_backing_) {
+      deferred_backing_->CompleteReturns();
+    }
   }
   if (pool_) {
     IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
@@ -1950,7 +2017,7 @@ TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
          return static_cast<loom_serve_test_weight_cache_owner_t*>(self)
              ->pending;
        }});
-  auto* cache = loom_serve_device_residency_cache(device_owner_);
+  auto* cache = ResidencyCache();
   loom_serve_residency_admission_t admission;
   IREE_ASSERT_OK(Compile(1, "raw"));
   const auto peer_root = Root(1, 0);
@@ -2001,6 +2068,7 @@ TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
 }
 
 TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
   IREE_ASSERT_OK(Compile(0, "target"));
   const auto root = Root(0, 0);
   IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
@@ -2018,17 +2086,18 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   EXPECT_EQ(state_statistics_.committed_bytes, 0u);
   loom_serve_residency_release(residencies_[0]);
   {
-    loom_serve::testing::ScopedNativeHold gate(device_owner_,
-                                               IREE_ALLOCATOR_COMMAND_FREE);
+    deferred_backing_->DeferReturns();
     const loom_serve_memory_range_t range = {state_, 0, 2 * kSlabBytes};
     bool admitted = true;
     IREE_ASSERT_OK(
         loom_serve_memory_pool_try_commit(pool_, 1, &range, &admitted));
     EXPECT_FALSE(admitted);
-    gate.WaitEntered();
+    deferred_backing_->WaitForReturn();
+    EXPECT_EQ(deferred_backing_->PendingReturnCount(), 1u);
     EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
               kSlabBytes);
     EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+    deferred_backing_->CompleteReturns();
   }
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, 2 * kSlabBytes));
@@ -2052,8 +2121,7 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   bool admitted = true;
   IREE_ASSERT_OK(loom_serve_residency_try_acquire(residencies_[0], &admitted));
   EXPECT_FALSE(admitted);
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_device_residency_cache(device_owner_), 0));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   EXPECT_EQ(state_statistics_.committed_bytes, 2 * kSlabBytes);
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
