@@ -165,6 +165,7 @@ loom_cc_library(
         ":stream",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:scheduler",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/server:model_registration",

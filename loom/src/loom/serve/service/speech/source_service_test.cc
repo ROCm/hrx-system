@@ -22,6 +22,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/speech/input.h"
@@ -77,6 +78,7 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
 
   void SetUp() override {
     IREE_ASSERT_OK(AcquireApplication(allocator_, &host_, &group_));
+    loom_serve_execution_scheduler_initialize(0, &scheduler_);
     directory_ =
         std::filesystem::path(FLAG_model_source).parent_path().string();
     const bool weighted = GetParam();
@@ -119,6 +121,7 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
           loom_serve_device_group_at(group_, 0), &options, allocator_,
           &model_));
       generator_ = loom_serve_speech_model_generator(model_);
+      generator_.scheduler = &scheduler_;
       EXPECT_EQ(generator_.tokenizer != nullptr, weighted);
       EXPECT_EQ(generator_.format.sample_rate, 24000u);
       EXPECT_EQ(generator_.format.channels, 1u);
@@ -251,6 +254,11 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       auto status = interface_.advance(interface_.self, flags, &progress);
+      if (iree_status_is_ok(status) && grant_work_ &&
+          !iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+        progress |= loom_serve_execution_scheduler_advance(&scheduler_,
+                                                           iree_time_now());
+      }
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
       } else {
@@ -448,6 +456,10 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   loom_serve_speech_model_t* model_ = nullptr;
   // Borrowed callbacks into model_.
   loom_serve_speech_generator_t generator_ = {};
+  // Serialized numerical permission shared with the manually driven service.
+  loom_serve_execution_scheduler_t scheduler_ = {};
+  // Owner-controlled grant boundary, independent of service progress.
+  bool grant_work_ = true;
   // Direct generator callers retain input through their synchronous CPU turns.
   std::unordered_map<void*, SpeechInput> inputs_;
   // Source asset base retained through asynchronous registration.
@@ -1129,6 +1141,59 @@ TEST_P(SourceSpeechServiceTest,
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       [&] { return interface_.telemetry.counters->completed == 1; }));
   CheckAudio(Read(clients[1].release()), 65, -1);
+}
+
+TEST_P(SourceSpeechServiceTest,
+       CancellationBeforeGrantPreservesPeersAndRequestReuse) {
+  loom_serve_execution_scheduler_initialize(1, &scheduler_);
+  ASSERT_NO_FATAL_FAILURE(StartManual());
+  std::array<loom_serve::testing::HttpClient, 2> clients;
+  std::array<loom_serve_http_connection_t*, 2> connections = {};
+  for (size_t i = 0; i < clients.size(); ++i) {
+    *clients[i].put() = Send("POST", "/v1/audio/speech",
+                             Request(i ? "negative" : "positive", "abcdefgh"));
+    ASSERT_NO_FATAL_FAILURE(Accept(clients[i].get(), &connections[i]));
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    const std::string phase = interface_.snapshot(interface_.self).phase;
+    return largest_batch_ == 2 && (phase == "ready" || phase == "delivering");
+  }));
+  grant_work_ = false;
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return scheduler_.head &&
+           scheduler_.head->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING;
+  }));
+  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "ready_batch");
+  const auto submitted = interface_.telemetry.counters->batches;
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(clients[0].get(), SOL_SOCKET, SO_LINGER, &reset,
+                       sizeof(reset)),
+            0);
+  ASSERT_EQ(close(clients[0].release()), 0);
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* self) {
+        return loom_serve_http_connection_failed(
+            static_cast<loom_serve_http_connection_t*>(self));
+      },
+      connections[0], iree_infinite_timeout());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->cancelled == 1; }));
+  EXPECT_EQ(interface_.telemetry.counters->batches, submitted);
+  EXPECT_EQ(scheduler_.outstanding_count, 0u);
+
+  grant_work_ = true;
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 1; }));
+  CheckAudio(Read(clients[1].release()), 65, -1);
+  *clients[0].put() =
+      Send("POST", "/v1/audio/speech", Request("positive", "abcdefgh", 11));
+  ASSERT_NO_FATAL_FAILURE(Accept(clients[0].get(), &connections[0]));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 2; }));
+  CheckAudio(Read(clients[0].release()), 65, 1, 11);
+  EXPECT_EQ(scheduler_.outstanding_count, 0u);
+  EXPECT_EQ(scheduler_.head, nullptr);
 }
 
 TEST_P(SourceSpeechServiceTest,

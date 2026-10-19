@@ -208,6 +208,7 @@ loom_cc_library(
     iree::testing::temp_file
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::server::model_registration
