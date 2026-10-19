@@ -282,6 +282,56 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
+    input_check
+  SRCS
+    "input_check.c"
+  DEPS
+    iree::base
+    iree::base::tooling::flags
+    iree::io::file_handle
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::vm
+    loom::binding::c::loomc
+    loom::binding::c::target::vm
+    loom::serve::runtime::program
+    loom::serve::runtime::program::compilation
+    loom::serve::runtime::program::input
+    loom::util::stream
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+iree_py_test(
+  NAME
+    input_check_test
+  MAIN
+    "input_check_test.py"
+  SRCS
+    "input_check_test.py"
+  ARGS
+    "{{$<TARGET_FILE:loom::serve::testing::input_check>}}"
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/testing/testdata/input_check.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/testing/testdata/input_check_provider.loom}}"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/testing/testdata/input_check.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/testing/testdata/input_check_provider.loom"
+    "loom::serve::testing::input_check"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_binary(
+  NAME
     text_request_check
   SRCS
     "text_request.c"

@@ -31,7 +31,8 @@ class ToolPolicyTest(unittest.TestCase):
                             "merges": [],
                         }
                     }
-                )
+                ),
+                encoding="utf-8",
             )
             request = directory / "request.json"
             request.write_text(
@@ -41,10 +42,11 @@ class ToolPolicyTest(unittest.TestCase):
                         "messages": messages or [{"role": "user", "content": "hello"}],
                         "stream": stream,
                     }
-                )
+                ),
+                encoding="utf-8",
             )
             response = directory / "response.txt"
-            response.write_text(calls)
+            response.write_text(calls, encoding="utf-8")
             return subprocess.run(
                 [
                     str(CHECKER),
@@ -55,6 +57,7 @@ class ToolPolicyTest(unittest.TestCase):
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
             )
 

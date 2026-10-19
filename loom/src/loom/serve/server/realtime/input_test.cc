@@ -221,8 +221,9 @@ TEST_F(RealtimeInputTest, IndependentPcmItemsFlushAndRetainFinalResults) {
 }
 
 TEST_F(RealtimeInputTest, PrimedActivityPreservesCoverageAndIndependentOutput) {
-  for (auto outputs : {LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY,
-                       LOOM_SERVE_RECOGNITION_OUTPUT_ALL}) {
+  for (loom_serve_recognition_output_flags_t outputs :
+       {LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY,
+        LOOM_SERVE_RECOGNITION_OUTPUT_ALL}) {
     SCOPED_TRACE(outputs);
     const loom_serve_recognition_request_t activity_request = {
         .outputs = outputs,
