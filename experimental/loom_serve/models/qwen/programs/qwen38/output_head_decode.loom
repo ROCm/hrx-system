@@ -22,11 +22,13 @@ kernel.decl @qwen38_rmsnorm_f32_prefill(%token_count: index) launch(%token_count
 
 kernel.decl @qwen38_rmsnorm_f32_prefill_last() launch(%control: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @qwen38_greedy_argmax_partial_rows_f32(%token_count: index, %output_size: index) launch(%token_count_argument: index, %output_size_argument: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
+kernel.decl @qwen38_greedy_argmax_partial_rows_f32(%token_count: index, %logit_stride: index, %output_size: index) launch(%token_count_argument: index, %logit_stride_argument: index, %output_size_argument: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
 
 kernel.decl @qwen38_greedy_argmax_reduce_rows_f32(%token_count: index, %output_size: index) launch(%token_count_argument: index, %output_size_argument: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer)
 
 kernel.decl @qwen38_sample_rows(%rows: index) launch(%rows_argument: index, %epoch: buffer, %logits: buffer, %partial_logits: buffer, %partial_ids: buffer, %outputs: buffer)
+
+kernel.decl @qwen38_sampling_partial_rows(%rows: index) launch(%rows_argument: index, %epoch: buffer, %logits: buffer, %partial_logits: buffer, %partial_ids: buffer)
 
 // Projects normalized hidden rows into caller-owned device-local logits.
 // Greedy and chained selection share packing and vocabulary contractions.
@@ -130,7 +132,8 @@ command.program.def public @qwen38_output_projection_logits_prefix(%token_count:
 // Only selected token IDs escape greedy projection; its logits and partial
 // winners remain transient and can be reclaimed after the final reduction.
 command.program.def public @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 512)] {
-  %vocabulary_size = index.constant 248320 : index
+  %logit_stride = index.constant 248320 : index
+  %vocabulary_size = index.constant 248077 : index
   %logits_row_bytes = index.constant 993280 : offset
   %partial_row_bytes = index.constant 244 : offset
   %logits_bytes = index.scale %token_count, %logits_row_bytes : index, offset -> offset
@@ -141,7 +144,7 @@ command.program.def public @qwen38_output_projection_greedy(%token_count: index,
   %output_rows = buffer.view %token_id[%output_origin] : buffer -> view<[%token_count]xi32>
   %origin = index.constant 0 : offset
   command.program.launch @qwen38_output_projection_logits[%token_count, %normalized_origin, %origin](%parameters, %normalized, %logits) : [index, offset, offset](buffer, buffer, buffer)
-  kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %logits, %partial_logits, %partial_token_ids) : [index, index](index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %logit_stride, %vocabulary_size](%token_count, %logit_stride, %vocabulary_size, %logits, %partial_logits, %partial_token_ids) : [index, index, index](index, index, index, buffer, buffer, buffer)
   kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %partial_logits, %partial_token_ids, %output_rows) : [index, index](index, index, buffer, buffer, view<[%token_count]xi32>)
   command.return
 }
@@ -150,7 +153,6 @@ command.program.def public @qwen38_output_projection_greedy(%token_count: index,
 // Draft proposals retain their own selection policy and never consume target
 // random draws. Only selected IDs escape this transient workspace.
 command.program.def public @qwen38_output_projection_sampled(%token_count: index) launch(%parameters: buffer, %epoch: buffer, %normalized: buffer, %token_ids: buffer) where [range(%token_count, 1, 128)] {
-  %vocabulary_size = index.constant 248320 : index
   %logits_row_bytes = index.constant 993280 : offset
   %partial_row_bytes = index.constant 244 : offset
   %logits_bytes = index.scale %token_count, %logits_row_bytes : index, offset -> offset
@@ -160,7 +162,7 @@ command.program.def public @qwen38_output_projection_sampled(%token_count: index
   %partial_ids = buffer.alloca<global> align(256) %partial_bytes : buffer
   %origin = index.constant 0 : offset
   command.program.launch @qwen38_output_projection_logits[%token_count, %origin, %origin](%parameters, %normalized, %logits) : [index, offset, offset](buffer, buffer, buffer)
-  kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %logits, %partial_logits, %partial_ids) : [index, index](index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_sampling_partial_rows[%token_count](%token_count, %epoch, %logits, %partial_logits, %partial_ids) : [index](index, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_sample_rows[%token_count](%token_count, %epoch, %logits, %partial_logits, %partial_ids, %token_ids) : [index](index, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
