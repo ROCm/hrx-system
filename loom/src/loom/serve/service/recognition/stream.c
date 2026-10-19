@@ -73,7 +73,7 @@ struct loom_serve_recognition_stream_t {
     iree_host_size_t consumed_frames;
     // Source has no further numerical work or events for this request.
     bool complete;
-    // Owned document update error, transferred to the request on publication.
+    // Owned collection/document error, transferred after CPU retirement.
     iree_status_t status;
   } result;
 };
@@ -202,16 +202,16 @@ static iree_status_t loom_serve_recognition_cpu_run(
                                                 service->batch.invocations);
     }
   } else {
-    for (iree_host_size_t i = 0;
-         i < service->batch.count && iree_status_is_ok(status); ++i) {
+    for (iree_host_size_t i = 0; i < service->batch.count; ++i) {
       loom_serve_recognition_stream_t* row = service->batch.rows[i];
+      row->result.consumed_frames = 0;
+      row->result.complete = false;
       loom_serve_recognition_result_t collected;
-      status = service->generator.collect(service->generator.self, i,
-                                          row->output, &collected);
-      if (iree_status_is_ok(status)) {
+      row->result.status = service->generator.collect(
+          service->generator.self, i, row->output, &collected);
+      if (iree_status_is_ok(row->result.status)) {
         row->result.consumed_frames = collected.consumed_frames;
         row->result.complete = collected.complete;
-        row->result.status = iree_ok_status();
         for (iree_host_size_t j = 0;
              j < loom_serve_recognition_events_count(row->output) &&
              iree_status_is_ok(row->result.status);

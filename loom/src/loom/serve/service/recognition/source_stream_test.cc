@@ -127,10 +127,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
                           loom_serve_recognition_events_t* events,
                           loom_serve_recognition_result_t* out) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
-      IREE_RETURN_IF_ERROR(
-          test->actual_.collect(test->actual_.self, ordinal, events, out));
       ++test->collected_[test->members_[ordinal]];
-      return iree_ok_status();
+      return test->actual_.collect(test->actual_.self, ordinal, events, out);
     };
     observed.release_batch = [](void* self) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
@@ -433,6 +431,44 @@ TEST_F(SourceRecognitionStreamTest,
   loom_serve_recognition_stream_consume(streams[0]);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(streams[0]); }));
   ASSERT_NO_FATAL_FAILURE(CheckFinal(streams[0], "D"));
+}
+
+TEST_F(SourceRecognitionStreamTest,
+       SourceCompletionFailureRetiresOnlyItsOriginalMember) {
+  std::array<loom_serve_recognition_stream_t*, 3> streams = {};
+  for (auto& stream : streams) {
+    ASSERT_NO_FATAL_FAILURE(Open(&stream));
+  }
+  ASSERT_NO_FATAL_FAILURE(Settle());
+  ASSERT_NO_FATAL_FAILURE(Write(streams[0], {-1}, 1));
+  ASSERT_NO_FATAL_FAILURE(Write(streams[1], {2, 3}, 2));
+  ASSERT_NO_FATAL_FAILURE(Write(streams[2], {4}, 1));
+  for (auto* stream : streams) {
+    loom_serve_recognition_stream_finish(stream);
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return submitted_ == 1; }));
+  EXPECT_EQ(largest_batch_, 3u);
+  ASSERT_NO_FATAL_FAILURE(Close(streams[1]));
+  EXPECT_EQ(released_[1], 0u);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return Consume(streams[2]) && released_[0] == 1 && released_[1] == 1;
+  }));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_recognition_stream_status(streams[0]));
+  EXPECT_EQ(loom_serve_recognition_stream_peek(streams[0]), nullptr);
+  EXPECT_EQ(loom_serve_recognition_stream_document(streams[0]), nullptr);
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(streams[2], "E"));
+  for (size_t i = 0; i < streams.size(); ++i) {
+    EXPECT_EQ(collected_[i].load(), 1u);
+    EXPECT_EQ(released_[i], 1u);
+  }
+  loom_serve_recognition_stream_t* replacement = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&replacement));
+  ASSERT_NO_FATAL_FAILURE(Write(replacement, {5}, 1));
+  loom_serve_recognition_stream_finish(replacement);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(replacement); }));
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(replacement, "F"));
+  EXPECT_EQ(released_[0], 2u);
 }
 
 TEST_F(SourceRecognitionStreamTest, InputStarvationWaitsForNewFramesOrEof) {

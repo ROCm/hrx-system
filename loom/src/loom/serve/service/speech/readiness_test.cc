@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -182,6 +183,19 @@ class SpeechReadinessTest : public ::testing::Test {
                loom_serve_speech_block_t* out) {
               auto* test = static_cast<SpeechReadinessTest*>(self);
               auto& invocation = *test->batch_[ordinal];
+              ++test->row_collected_[invocation.row];
+              if (invocation.row == 0 &&
+                  invocation.block == test->output_failure_block_) {
+                if (test->fail_collection_) {
+                  return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                          "speech source completion failed");
+                }
+                if (test->nonfinite_output_) {
+                  iree_unaligned_store_le_f32(
+                      invocation.output.data(),
+                      std::numeric_limits<float>::quiet_NaN());
+                }
+              }
               const size_t frames = test->empty_output_ ? 0 : test->frames_;
               *out = {
                   .position = invocation.block * frames,
@@ -505,6 +519,12 @@ class SpeechReadinessTest : public ::testing::Test {
   loom_serve_speech_format_t format_ = {};
   // Source completion produces no waveform despite its retired device work.
   bool empty_output_ = false;
+  // Inject a source error after successful retirement of one selected row.
+  bool fail_collection_ = false;
+  // Deliver a nonfinite source sample to the production output encoder.
+  bool nonfinite_output_ = false;
+  // Output block at which the first resident row encounters either error.
+  uint64_t output_failure_block_ = 1;
   // Terminal block count for each request.
   uint64_t blocks_ = 0;
   // Per-request block index that imports gate_ before accepting transfers.
@@ -518,6 +538,8 @@ class SpeechReadinessTest : public ::testing::Test {
   std::vector<loom_serve_test_speech_invocation_t*> batch_;
   // Accepted work per resident row, published without exposing source cursors.
   std::array<std::atomic<uint64_t>, 4> row_submitted_ = {};
+  // Collection attempts include failed and cancelled original batch members.
+  std::array<std::atomic<uint64_t>, 4> row_collected_ = {};
   // Largest accepted cohort, independent of request completion order.
   std::atomic<size_t> largest_batch_{0};
   // A complete numerical cohort has accepted the held dependency.
@@ -541,6 +563,96 @@ class SpeechReadinessTest : public ::testing::Test {
   // Client readiness and the outer router thread.
   loom_serve::testing::HttpHarness http_;
 };
+
+class SpeechOutputFailureTest : public SpeechReadinessTest,
+                                public ::testing::WithParamInterface<bool> {};
+
+TEST_P(SpeechOutputFailureTest, RetiredFailurePreservesPeersAndRetirement) {
+  ASSERT_NO_FATAL_FAILURE(Initialize(3, 4, 1, 4, 4, false));
+  std::array<loom_serve::testing::HttpClient, 4> clients;
+  std::array<loom_serve_http_connection_t*, 4> connections = {};
+  for (size_t i = 0; i < clients.size(); ++i) {
+    IREE_ASSERT_OK(Send(&clients[i], 4 + i));
+    const loom_serve_http_request_t* request = nullptr;
+    IREE_ASSERT_OK(
+        http_.TakeRequest(clients[i].get(), &connections[i], &request));
+    IREE_ASSERT_OK(actual_.accept(actual_.self, connections[i], request, 0));
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return held_.load(std::memory_order_acquire); }));
+  EXPECT_EQ(largest_batch_.load(), 4u);
+  // Admission permits earlier rows to advance before the full cohort forms.
+  // Arm the fault only at this accepted device cut, before collection can run.
+  ASSERT_NE(invocations_[0], nullptr);
+  output_failure_block_ = invocations_[0]->block;
+  const size_t prefix_frames = output_failure_block_ * frames_;
+  fail_collection_ = GetParam();
+  nonfinite_output_ = !GetParam();
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(clients[1].get(), SOL_SOCKET, SO_LINGER, &reset,
+                       sizeof(reset)),
+            0);
+  ASSERT_EQ(close(clients[1].release()), 0);
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* self) {
+        return loom_serve_http_connection_failed(
+            static_cast<loom_serve_http_connection_t*>(self));
+      },
+      connections[1], iree_infinite_timeout());
+  bool progress = false;
+  IREE_ASSERT_OK(actual_.advance(actual_.self, 0, &progress));
+  EXPECT_EQ(released_.load(), 0u);
+  ReleaseDependency();
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return !actual_.is_pending(actual_.self); }));
+  EXPECT_EQ(actual_.telemetry.counters->failed, 1u);
+  EXPECT_EQ(actual_.telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(actual_.telemetry.counters->completed, 2u);
+  EXPECT_EQ(released_.load(), 4u);
+  for (size_t i = 0; i < clients.size(); ++i) {
+    EXPECT_EQ(row_collected_[i].load(), row_submitted_[i].load());
+  }
+  std::string response;
+  IREE_ASSERT_OK(http_.Read(clients[0].release(), true, &response));
+  CheckPcm(response, prefix_frames);
+  for (size_t i : {2u, 3u}) {
+    IREE_ASSERT_OK(http_.Read(clients[i].release(), false, &response));
+    CheckPcm(response, 3 * (4 + i));
+  }
+
+  // Reuse the failed row through the actual router, after the whole cohort
+  // has retired. Neither failure publishes a partial block or poisons serving.
+  fail_collection_ = false;
+  nonfinite_output_ = false;
+  StartRouter();
+  ASSERT_NO_FATAL_FAILURE(CheckHealth());
+  loom_serve::testing::HttpClient replacement;
+  IREE_ASSERT_OK(Send(&replacement, 2));
+  IREE_ASSERT_OK(http_.Read(replacement.release(), false, &response));
+  CheckPcm(response, 6);
+}
+
+TEST_P(SpeechOutputFailureTest, FailureBeforeFirstAudioReturnsJson) {
+  fail_collection_ = GetParam();
+  nonfinite_output_ = !GetParam();
+  output_failure_block_ = 0;
+  ASSERT_NO_FATAL_FAILURE(Initialize(3, 2, UINT64_MAX, 2));
+  loom_serve::testing::HttpClient failed;
+  IREE_ASSERT_OK(Send(&failed));
+  std::string response;
+  IREE_ASSERT_OK(http_.Read(failed.release(), false, &response));
+  EXPECT_EQ(response.find("HTTP/1.1 500 Internal Server Error\r\n"), 0u);
+  EXPECT_NE(response.find("Content-Type: application/json\r\n"),
+            std::string::npos);
+  EXPECT_NE(response.find(GetParam() ? "speech source completion failed"
+                                     : "nonfinite waveform sample"),
+            std::string::npos);
+  ASSERT_NO_FATAL_FAILURE(CheckHealth());
+}
+
+INSTANTIATE_TEST_SUITE_P(SourceAndEncoding, SpeechOutputFailureTest,
+                         ::testing::Bool());
 
 TEST_F(SpeechReadinessTest, NativePressureMovesOnlyAcceptedInput) {
   ASSERT_NO_FATAL_FAILURE(Initialize(3, 1, 0, 1, 1, false));

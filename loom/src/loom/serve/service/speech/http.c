@@ -124,17 +124,21 @@ static iree_status_t loom_serve_speech_http_end(
   if (consumer->connection) {
     if (outcome == LOOM_SERVE_TELEMETRY_COMPLETED) {
       loom_serve_http_connection_finish(consumer->connection);
-    } else if (outcome == LOOM_SERVE_TELEMETRY_REJECTED &&
+    } else if ((outcome == LOOM_SERVE_TELEMETRY_REJECTED ||
+                outcome == LOOM_SERVE_TELEMETRY_FAILED) &&
                !consumer->header_sent) {
       iree_string_view_t message = iree_status_message(request_status);
       if (!message.size) {
-        message = IREE_SV("source rejected speech input");
+        message = iree_make_cstring_view(
+            iree_status_code_string(iree_status_code(request_status)));
       }
       status = loom_serve_speech_http_reject(
           consumer->connection,
           iree_status_is_resource_exhausted(request_status)
               ? "503 Service Unavailable"
-              : "400 Bad Request",
+          : outcome == LOOM_SERVE_TELEMETRY_REJECTED
+              ? "400 Bad Request"
+              : "500 Internal Server Error",
           message, consumer->host_allocator);
     } else {
       loom_serve_http_connection_abort(consumer->connection);
