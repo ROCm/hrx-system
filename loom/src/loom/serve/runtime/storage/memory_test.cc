@@ -587,7 +587,9 @@ TEST_F(MemoryTest, PendingCommitChargesBudgetAndLeavesPublishedStorageUsable) {
     // commitment is held. No source-file readiness or queue ordering is mocked.
     CheckRetained(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
   }
-  loom_serve_memory_operation_await(operation);
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(ready, 1, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_TRUE(loom_serve_memory_operation_is_complete(operation));
   IREE_EXPECT_OK(loom_serve_memory_pool_query_status(pool));
   const auto completed = loom_serve_memory_pool_statistics(pool);
   EXPECT_EQ(completed.committed_bytes, 3 * kSlabSize);

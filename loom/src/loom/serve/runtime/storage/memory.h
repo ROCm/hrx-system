@@ -176,7 +176,9 @@ iree_status_t loom_serve_memory_pool_try_commit(
 // The caller keeps every reservation and its accounting alive until the
 // returned operation retires, independently of readiness success/failure. No
 // other commitment or trim may touch its pending slabs. Ranges are copied; the
-// readiness semaphore is retained. Completion may precede return.
+// readiness semaphore is retained. Completion may precede return. Inline
+// readiness callbacks may schedule the owner but cannot collect or await this
+// operation; the owner joins publication through is_complete before freeing it.
 iree_status_t loom_serve_memory_pool_commit_async(
     loom_serve_memory_pool_t* pool, iree_host_size_t range_count,
     const loom_serve_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
@@ -188,7 +190,8 @@ iree_status_t loom_serve_memory_pool_commit_async(
 // keeps reservations/accounting alive through operation completion. Kept slabs
 // remain usable. No other operation may edit selected slabs before completion.
 // The private mapping and deallocation completions join before optional
-// readiness is signaled. Physical capacity stays charged by the source pool
+// readiness is signaled. Inline readiness callbacks obey the same non-reentry
+// contract as commit_async. Physical capacity stays charged by the source pool
 // until native release completes; its capacity notification wakes admission.
 // An empty set returns NULL and signals immediately.
 // Native failures fail readiness, preserve unreleased ownership, and poison
@@ -208,9 +211,10 @@ void loom_serve_memory_operation_set_observer(
     void* user_data);
 
 // Publishes completed native results and accounting on the serialized owner.
-// True joins captured queue ownership, independently of caller readiness. NULL
-// is complete. A failed operation is reported by operation_query_status and
-// readiness.
+// True joins captured queue ownership and the publisher's final callback
+// access. After successful readiness this returns true; failed readiness alone
+// does not imply completion. NULL is complete. A failed operation is reported
+// by operation_query_status and readiness.
 bool loom_serve_memory_operation_is_complete(
     loom_serve_memory_operation_t* operation);
 

@@ -619,6 +619,9 @@ static void loom_serve_memory_operation_complete(
   operation->stages[0].status = operation->stages[1].status = iree_ok_status();
   operation->invalidates_backing =
       !iree_status_is_ok(status) && (operation->releasing || first_ok);
+  // Readiness can wake the owner on another thread. Its completion query must
+  // join publication and our last callback access before it can free us.
+  iree_slim_mutex_lock(&operation->mutex);
   if (operation->readiness && iree_status_is_ok(status)) {
     status =
         iree_hal_semaphore_signal(operation->readiness, operation->value, NULL);
@@ -626,7 +629,6 @@ static void loom_serve_memory_operation_complete(
   if (operation->readiness && !iree_status_is_ok(status)) {
     iree_hal_semaphore_fail(operation->readiness, iree_status_clone(status));
   }
-  iree_slim_mutex_lock(&operation->mutex);
   operation->status = status;
   operation->complete = true;
   iree_notification_post(&operation->notification, IREE_ALL_WAITERS);
