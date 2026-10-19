@@ -480,13 +480,6 @@ static iree_status_t loom_serve_transcription_accept(
 static iree_status_t loom_serve_transcription_deliver(
     loom_serve_recognition_service_t* service,
     loom_serve_recognition_job_t* row) {
-  const iree_status_t failure =
-      loom_serve_recognition_stream_status(row->stream);
-  if (!iree_status_is_ok(failure)) {
-    iree_status_t status = loom_serve_transcription_fail(service, row, failure);
-    iree_status_free(failure);
-    return status;
-  }
   // Typed sources may terminate an input session themselves. A finite upload
   // cannot report success while its input tail has never reached the model.
   if (!row->finished) {
@@ -571,6 +564,16 @@ static iree_status_t loom_serve_recognition_advance(
       continue;
     }
     if (!row->stream || row == service->cpu.row) {
+      continue;
+    }
+    // A source failure stops input before asynchronous release completes.
+    // Preserve that result instead of replacing it with a late-write error.
+    iree_status_t stream_status =
+        loom_serve_recognition_stream_status(row->stream);
+    if (!iree_status_is_ok(stream_status)) {
+      status = loom_serve_transcription_fail(service, row, stream_status);
+      iree_status_free(stream_status);
+      *out_progress = true;
       continue;
     }
     if (loom_serve_recognition_stream_peek(row->stream)) {

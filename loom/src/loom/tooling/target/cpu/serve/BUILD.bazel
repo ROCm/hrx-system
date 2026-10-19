@@ -430,6 +430,29 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "source_recognition_http_elastic_parallel_test",
+    args = [
+        "--test_elastic=true",
+        "--test_workers=8",
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/recognition:prepare.loom)",
+    ],
+    data = RECOGNITION_SOURCES,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/recognition:source_http_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "source_image_service_test",
     data = IMAGE_SOURCES,
     env = {
