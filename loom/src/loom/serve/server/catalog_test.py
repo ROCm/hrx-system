@@ -617,6 +617,15 @@ def check_startup_failures(server_command, directory, catalog):
                 for failed, missing in failures.values():
                     assert missing.name in failed["error"]["message"], failed
                     assert failed["error"]["code"] == 5, failed
+                try:
+                    client.idle()
+                except RuntimeError as error:
+                    assert any(
+                        model in str(error) and failed["error"]["message"] in str(error)
+                        for model, (failed, _) in failures.items()
+                    ), error
+                else:
+                    raise AssertionError("failed models cannot become idle")
                 assert client.request("/readyz") == {"status": "ready"}
                 # The provider failure occurs after three peer models have
                 # registered. It cannot terminate their serving path.
