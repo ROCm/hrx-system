@@ -1,5 +1,7 @@
 kernel.decl @qwen38_sample_rows(%rows: index) launch(%rows_argument: index, %epoch: buffer, %logits: buffer, %partial_logits: buffer, %partial_ids: buffer, %outputs: buffer)
 
+kernel.decl @qwen38_sampling_partial_rows(%rows: index) launch(%rows_argument: index, %epoch: buffer, %logits: buffer, %partial_logits: buffer, %partial_ids: buffer)
+
 func.decl @sampling_race(%logit: f32, %maximum: f32, %temperature: f32, %seed: i64, %position: i64, %id: i32) -> (f32)
 
 // Nonadjacent owners share a random stream; a third owner is greedy. The
@@ -14,6 +16,7 @@ func.def @sampling_packet(%seed: i64, %epoch: buffer) {
   %floats = buffer.view %epoch[%policy_origin] : buffer -> view<16x6xf32>
   %seeds = buffer.view %epoch[%policy_origin] : buffer -> view<16x3xi64>
   %three = scalar.constant 3 : i32
+  %zero32 = scalar.constant 0 : i32
   %two = scalar.constant 2 : i32
   %seven = scalar.constant 7 : i32
   %fifteen = scalar.constant 15 : i32
@@ -36,6 +39,9 @@ func.def @sampling_packet(%seed: i64, %epoch: buffer) {
   view.store %one, %floats[7, 1] : f32, view<16x6xf32>
   view.store %twenty, %policies[2, 2] : i32, view<16x6xi32>
   view.store %twenty, %policies[7, 2] : i32, view<16x6xi32>
+  view.store %zero32, %policies[2, 3] : i32, view<16x6xi32>
+  view.store %zero32, %policies[7, 3] : i32, view<16x6xi32>
+  view.store %zero32, %policies[15, 3] : i32, view<16x6xi32>
   view.store %seed, %seeds[2, 2] : i64, view<16x3xi64>
   view.store %seed, %seeds[7, 2] : i64, view<16x3xi64>
   func.return
@@ -85,5 +91,88 @@ check.scenario public @sampling_rows {
       check.expect.equal actual(%outputs) expected(%outputs) : tensor<4xi32>
     }
   }
+  check.return
+}
+
+// Repeated and nonadjacent owners model speculative rows. Their highest logit
+// is the tool opener; a disabled row must retain the next winner in the SAME
+// partial tile as well as outranking the best value from another tile.
+kernel.def @tool_permission_packet() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer, %logits: buffer, %expected: buffer) {
+  %origin = index.constant 0 : offset
+  %policy_origin = index.constant 4704 : offset
+  %identity_origin = index.constant 5088 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %policies = buffer.view %epoch[%policy_origin] : buffer -> view<16x6xi32>
+  %floats = buffer.view %epoch[%policy_origin] : buffer -> view<16x6xf32>
+  %identities = buffer.view %epoch[%identity_origin] : buffer -> view<128x2xi32>
+  %values = buffer.view %logits[%origin] : buffer -> view<8x248320xf32>
+  %outputs = buffer.view %expected[%origin] : buffer -> view<8xi32>
+  %six = scalar.constant 6 : i32
+  view.store %six, %header[2] : i32, view<3xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c6 = index.constant 6 : index
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %disabled = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %five = scalar.constant 5 : i32
+  %fifteen = scalar.constant 15 : i32
+  %zero_f32 = scalar.constant 0.0 : f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %half = scalar.constant 0.5 : f32
+  %temperature = scalar.constant 0.7 : f32
+  %high = scalar.constant 100.0 : f32
+  %padding = scalar.constant 1000.0 : f32
+  %next = scalar.constant 10.0 : f32
+  %other = scalar.constant -100.0 : f32
+  %opener = scalar.constant 248058 : i32
+  %allowed = scalar.constant 248059 : i32
+  scf.for %row = [%c0 to %c6 step %c1] {
+    %row_word = index.cast %row : index to i32
+    %repeated = scalar.cmpi eq, %row_word, %five : i32
+    %ordinary_owner = scalar.subi %fifteen, %row_word : i32
+    %owner_word = scf.select %repeated, %fifteen, %ordinary_owner : i32
+    %owner_value = index.cast %owner_word : i32 to index
+    %owner = index.assume %owner_value [range(%owner_value, 0, 15)] : index
+    %forbidden = scalar.cmpi ne, %owner_word, %fifteen : i32
+    %flags = scf.select %forbidden, %disabled, %zero : i32
+    %sampled = scalar.cmpi uge, %row_word, %disabled : i32
+    %row_temperature = scf.select %sampled, %temperature, %zero_f32 : f32
+    %single = scalar.cmpi eq, %row_word, %disabled : i32
+    %nucleus = scalar.cmpi eq, %row_word, %three : i32
+    %top_k = scf.select %single, %one, %zero : i32
+    %top_p = scf.select %nucleus, %half, %one_f32 : f32
+    view.store %owner_word, %identities[%row, 0] : i32, view<128x2xi32>
+    view.store %row_word, %identities[%row, 1] : i32, view<128x2xi32>
+    view.store %row_temperature, %floats[%owner, 0] : f32, view<16x6xf32>
+    view.store %top_p, %floats[%owner, 1] : f32, view<16x6xf32>
+    view.store %top_k, %policies[%owner, 2] : i32, view<16x6xi32>
+    view.store %flags, %policies[%owner, 3] : i32, view<16x6xi32>
+    view.store %high, %values[%row, 248058] : f32, view<8x248320xf32>
+    view.store %padding, %values[%row, 248077] : f32, view<8x248320xf32>
+    view.store %next, %values[%row, 248059] : f32, view<8x248320xf32>
+    view.store %other, %values[%row, 42] : f32, view<8x248320xf32>
+    %winner = scf.select %forbidden, %allowed, %opener : i32
+    view.store %winner, %outputs[%row] : i32, view<8xi32>
+  }
+  kernel.return
+}
+
+check.case public @sampling_tool_permissions {
+  %rows = check.literal value(8) : index
+  %epoch = check.generate.fill value(-1) : tensor<1528xi32>
+  %logits = check.generate.fill value(-1000.0) : tensor<8x248320xf32>
+  %expected = check.generate.fill value(-99) : tensor<8xi32>
+  kernel.launch @tool_permission_packet(%epoch, %logits, %expected) : (tensor<1528xi32>, tensor<8x248320xf32>, tensor<8xi32>)
+  %partials = check.generate.fill value(-99.0) : tensor<8x61xf32>
+  %partial_ids = check.generate.fill value(-99) : tensor<8x61xi32>
+  %outputs = check.generate.fill value(-99) : tensor<8xi32>
+  kernel.launch @qwen38_sampling_partial_rows[%rows](%rows, %epoch, %logits, %partials, %partial_ids) : [index](index, tensor<1528xi32>, tensor<8x248320xf32>, tensor<8x61xf32>, tensor<8x61xi32>)
+  kernel.launch @qwen38_sample_rows[%rows](%rows, %epoch, %logits, %partials, %partial_ids, %outputs) : [index](index, tensor<1528xi32>, tensor<8x248320xf32>, tensor<8x61xf32>, tensor<8x61xi32>, tensor<8xi32>)
+  check.expect.equal actual(%outputs) expected(%expected) : tensor<8xi32>
   check.return
 }

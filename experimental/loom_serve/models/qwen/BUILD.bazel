@@ -117,11 +117,13 @@ loom_test(
 loom_test(
     name = "sampling_test",
     srcs = [
+        "kernels/qwen38/greedy_argmax.loom",
         "kernels/qwen38/sampling.loom",
         "tests/sampling.loom",
         "//experimental/loom_serve/motifs/tensor:library",
     ],
     benchmark_smoke = False,
+    configs = {"qwen38.greedy_argmax.output_capacity": "248320"},
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,

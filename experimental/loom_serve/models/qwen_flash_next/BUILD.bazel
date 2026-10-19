@@ -6,7 +6,7 @@
 
 load("@rules_python//python:defs.bzl", "py_binary")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
-load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "AMDGPU_TSAN_BYTE_GRANULE_PROFILE", "AMDGPU_TSAN_PROFILE")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "AMDGPU_TSAN_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -63,7 +63,7 @@ loom_library(
         execution_profiles = [
             AMDGPU_HARDWARE_PROFILE,
             AMDGPU_ACCESS_PROFILE,
-        ] + ([AMDGPU_TSAN_BYTE_GRANULE_PROFILE] if name == "attention" else []),
+        ] + ([AMDGPU_TSAN_PROFILE] if name == "attention" else []),
         deps = [":residual_programs"],
     )
     for name in [
@@ -88,7 +88,7 @@ loom_test(
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
-        AMDGPU_TSAN_BYTE_GRANULE_PROFILE,
+        AMDGPU_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -252,7 +252,7 @@ loom_test(
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
-        AMDGPU_TSAN_BYTE_GRANULE_PROFILE,
+        AMDGPU_TSAN_PROFILE,
     ],
     deps = [
         ":quantized_reference",
@@ -275,7 +275,7 @@ loom_test(
         execution_profiles = [
             AMDGPU_HARDWARE_PROFILE,
             AMDGPU_ACCESS_PROFILE,
-            AMDGPU_TSAN_BYTE_GRANULE_PROFILE,
+            AMDGPU_TSAN_PROFILE,
         ],
         deps = [
             ":quantized_reference",
