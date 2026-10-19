@@ -64,6 +64,7 @@ loom_cc_library(
     deps = [
         ":request",
         "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:scheduler",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/service:execution_reconfiguration",
         "//runtime/src/iree/base",
@@ -93,6 +94,7 @@ loom_cc_library(
         ":request",
         ":telemetry",
         "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:scheduler",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/host:clock",
         "//loom/src/loom/serve/runtime/host:timer",

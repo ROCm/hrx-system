@@ -155,6 +155,7 @@ iree_status_t loom_serve_realtime_generation_allocate(
   iree_string_builder_initialize(host_allocator, &generation->packet);
   iree_string_builder_initialize(host_allocator, &generation->pending_text);
   generation->text_request = *text_request;
+  generation->speech_request.execution_weight = text_request->execution_weight;
   *text_request = (loom_serve_text_request_t){0};
   *out_generation = generation;
   return iree_ok_status();

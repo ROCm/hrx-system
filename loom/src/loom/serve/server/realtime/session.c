@@ -240,7 +240,8 @@ static iree_status_t loom_serve_realtime_transcription_begin(
   const loom_serve_recognition_request_t request = {
       .language = iree_string_builder_view(&session->settings.language),
       .prompt = iree_string_builder_view(&session->settings.prompt),
-      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT};
+      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+      .execution_weight = session->profile->execution_weight};
   IREE_RETURN_IF_ERROR(loom_serve_realtime_input_begin(session->input, &request,
                                                        &transcription->input));
   transcription->item->input = transcription->input;
@@ -965,8 +966,8 @@ iree_status_t loom_serve_realtime_session_allocate(
   }
   if (iree_status_is_ok(status) && profile->activity.size) {
     status = loom_serve_realtime_turn_allocate(
-        executor, registry, activity, session->capture, capacity, observer,
-        host_allocator, &session->turn);
+        executor, registry, activity, session->capture, capacity,
+        profile->execution_weight, observer, host_allocator, &session->turn);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_realtime_session_event(session, "session.created",

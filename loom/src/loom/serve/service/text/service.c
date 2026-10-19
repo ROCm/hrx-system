@@ -13,6 +13,7 @@
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/media/image_codec.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/execution_reconfiguration.h"
@@ -106,6 +107,10 @@ struct loom_serve_text_service_t {
   loom_serve_text_cpu_work_t cpu_work;
   // Retained cohort inputs and feedback through response CPU release.
   loom_serve_text_epoch_t epoch;
+  // Stable optional second-traversal inputs retained while a grant is pending.
+  loom_serve_text_epoch_continuation_t continuation;
+  // Numerical permission, separate from accepted CPU/device readiness.
+  loom_serve_execution_permit_t permit;
   // One delivery receipt retaining validated names through device readiness.
   loom_serve_text_checkpoint_operation_t control;
   // Stateless CPU input queries, independent of generation rows and capacity.
@@ -144,9 +149,16 @@ struct loom_serve_text_service_t {
   loom_serve_text_session_t sessions[LOOM_SERVE_TEXT_ROW_CAPACITY];
 };
 
+static bool loom_serve_text_epoch_is_prepared(
+    const loom_serve_text_service_t* service) {
+  return service->permit.phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING ||
+         service->permit.phase == LOOM_SERVE_EXECUTION_PERMIT_GRANTED;
+}
+
 static bool loom_serve_text_has_work(const loom_serve_text_service_t* service) {
   return service->completion.work != TEXT_WORK_NONE ||
-         service->cpu_work != TEXT_CPU_WORK_NONE;
+         service->cpu_work != TEXT_CPU_WORK_NONE ||
+         loom_serve_text_epoch_is_prepared(service);
 }
 
 static iree_status_t loom_serve_text_await_work(
@@ -602,7 +614,8 @@ static iree_status_t loom_serve_text_prepare_media(
                               "model has no image component");
     }
     IREE_RETURN_IF_ERROR(loom_serve_text_media_request_allocate(
-        &pending->chat, service->host_allocator, &pending->media));
+        &pending->chat, pending->consumer.execution_weight,
+        service->host_allocator, &pending->media));
   }
   IREE_RETURN_IF_ERROR(
       loom_serve_text_media_request_take_status(pending->media));
@@ -1261,14 +1274,23 @@ static void loom_serve_text_separate_ready(
   }
 }
 
-static iree_status_t loom_serve_text_submit_epoch(
+static void loom_serve_text_request_epoch(loom_serve_text_service_t* service) {
+  const bool packed =
+      service->scheduling.schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED;
+  const iree_host_size_t begin = packed ? 0 : service->epoch.cursor;
+  const iree_host_size_t end = packed ? service->epoch.count : begin + 1;
+  uint32_t weight = 1;
+  for (iree_host_size_t i = begin; i < end; ++i) {
+    const iree_host_size_t row = service->epoch.spans[i].row_index;
+    weight = iree_max(weight,
+                      service->sessions[row].request.consumer.execution_weight);
+  }
+  loom_serve_execution_permit_request(&service->permit, weight);
+}
+
+static void loom_serve_text_prepare_epoch(
     loom_serve_text_service_t* service, iree_host_size_t shape_index,
     iree_host_size_t count, const loom_serve_packed_span_t* scheduled) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_TEXT(z0, service->name.data, service->name.size);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(
-      z0,
-      loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
   loom_serve_text_epoch_row_t rows[LOOM_SERVE_TEXT_ROW_CAPACITY];
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_host_size_t row = scheduled[i].row_index;
@@ -1294,28 +1316,11 @@ static iree_status_t loom_serve_text_submit_epoch(
         .token = prefill ? 0 : loom_serve_text_row_token(session->row),
     };
   }
-  loom_serve_text_epoch_continuation_t continuation;
   loom_serve_text_epoch_prepare(&service->scheduling, rows, shape_index, count,
-                                scheduled, &service->epoch, &continuation);
-  loom_serve_text_observe(service, "execute");
-  const iree_time_t start = iree_time_now();
-  iree_slim_mutex_lock(&service->heartbeat.mutex);
-  loom_serve_text_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
-  service->epoch.start.serial = state->issued_epochs + 1;
-  service->epoch.start.time = start;
-  state->issued_epochs += service->epoch.device_epochs;
-  state->phase_start = start;
-  state->epoch_spans = count;
-  state->epoch_tokens = service->epoch.input_count;
-  iree_slim_mutex_unlock(&service->heartbeat.mutex);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, service->epoch.start.serial);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loom_serve_text_epoch_submit(
-              service->model, service->scheduling.schedule_mode,
-              &service->epoch, &continuation, &service->completion.frontier));
-  const iree_status_t status =
-      loom_serve_text_await_work(service, TEXT_WORK_EPOCH);
-  IREE_RETURN_AND_END_ZONE(z0, status);
+                                scheduled, &service->epoch,
+                                &service->continuation);
+  loom_serve_text_request_epoch(service);
+  loom_serve_text_observe(service, "ready");
 }
 
 static void loom_serve_text_publish_epoch(loom_serve_text_service_t* service) {
@@ -1453,6 +1458,71 @@ static iree_status_t loom_serve_text_capture_prefix(
   return status;
 }
 
+static iree_status_t loom_serve_text_finish_epoch(
+    loom_serve_text_service_t* service, loom_serve_service_flags_t flags) {
+  loom_serve_text_publish_epoch(service);
+  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+    service->epoch.count = 0;
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_capture_prefix(service));
+  if (service->completion.work == TEXT_WORK_NONE) {
+    loom_serve_text_begin_output(service);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_text_submit_ready_epoch(
+    loom_serve_text_service_t* service, loom_serve_service_flags_t flags,
+    bool* progress) {
+  bool cancelled = iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING);
+  for (iree_host_size_t i = service->epoch.cursor; i < service->epoch.count;
+       ++i) {
+    const loom_serve_text_consumer_t consumer =
+        service->sessions[service->epoch.spans[i].row_index].request.consumer;
+    cancelled |= !consumer.vtable->is_open(consumer.self);
+  }
+  if (cancelled) {
+    loom_serve_execution_permit_cancel(&service->permit);
+    // Packed work has not started; isolated work retains only completed spans.
+    service->epoch.count = service->epoch.cursor;
+    *progress = true;
+    return service->epoch.count ? loom_serve_text_finish_epoch(service, flags)
+                                : iree_ok_status();
+  }
+  const iree_time_t start = iree_time_now();
+  if (!loom_serve_execution_permit_try_acquire(&service->permit, start)) {
+    return iree_ok_status();
+  }
+  *progress = true;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_TEXT(z0, service->name.data, service->name.size);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(
+      z0,
+      loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
+  loom_serve_text_observe(service, "execute");
+  if (!service->epoch.cursor) {
+    iree_slim_mutex_lock(&service->heartbeat.mutex);
+    loom_serve_text_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
+    service->epoch.start.serial = state->issued_epochs + 1;
+    service->epoch.start.time = start;
+    state->issued_epochs += service->epoch.device_epochs;
+    state->phase_start = start;
+    state->epoch_spans = service->epoch.count;
+    state->epoch_tokens = service->epoch.input_count;
+    iree_slim_mutex_unlock(&service->heartbeat.mutex);
+  }
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, service->epoch.start.serial);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, loom_serve_text_epoch_submit(service->model,
+                                       service->scheduling.schedule_mode,
+                                       &service->epoch, &service->continuation,
+                                       &service->completion.frontier));
+  const iree_status_t status =
+      loom_serve_text_await_work(service, TEXT_WORK_EPOCH);
+  IREE_RETURN_AND_END_ZONE(z0, status);
+}
+
 static iree_status_t loom_serve_text_complete_epoch(
     loom_serve_text_service_t* service, loom_serve_service_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -1461,6 +1531,7 @@ static iree_status_t loom_serve_text_complete_epoch(
       z0,
       loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, service->epoch.start.serial);
+  loom_serve_execution_permit_complete(&service->permit, iree_time_now());
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       loom_serve_text_epoch_complete(
@@ -1470,28 +1541,14 @@ static iree_status_t loom_serve_text_complete_epoch(
       // Only these isolated spans were submitted; the remainder never ran.
       service->epoch.count = service->epoch.cursor;
     }
-    loom_serve_text_publish_epoch(service);
-    service->epoch.count = 0;
-    IREE_RETURN_AND_END_ZONE(z0, iree_ok_status());
+    IREE_RETURN_AND_END_ZONE(z0, loom_serve_text_finish_epoch(service, flags));
   }
   if (service->scheduling.schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED &&
       service->epoch.cursor < service->epoch.count) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, loom_serve_text_epoch_submit(
-                service->model, service->scheduling.schedule_mode,
-                &service->epoch, NULL, &service->completion.frontier));
-    const iree_status_t status =
-        loom_serve_text_await_work(service, TEXT_WORK_EPOCH);
-    IREE_RETURN_AND_END_ZONE(z0, status);
+    loom_serve_text_request_epoch(service);
+    IREE_RETURN_AND_END_ZONE(z0, iree_ok_status());
   }
-  loom_serve_text_publish_epoch(service);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    loom_serve_text_capture_prefix(service));
-  if (service->completion.work == TEXT_WORK_NONE) {
-    loom_serve_text_begin_output(service);
-  }
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  IREE_RETURN_AND_END_ZONE(z0, loom_serve_text_finish_epoch(service, flags));
 }
 
 static iree_status_t loom_serve_text_service_initialize(
@@ -1577,6 +1634,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
   if (!service) {
     return;
   }
+  loom_serve_execution_permit_deinitialize(&service->permit);
   loom_serve_residency_set_reclaimer(
       loom_serve_text_model_residency(service->model),
       (loom_serve_residency_reclaimer_t){0});
@@ -1667,6 +1725,9 @@ iree_status_t loom_serve_text_service_allocate(
           .draft_depth = draft_depth,
           .shapes = loom_serve_text_model_shapes(model),
           .shape_count = loom_serve_text_model_shape_count(model)}};
+  loom_serve_execution_permit_initialize(
+      loom_serve_device_scheduler(loom_serve_text_model_device(model)),
+      &service->permit);
   if (!service->scheduling.shape_count) {
     service->scheduling.shapes = &service->isolated_shape;
     service->scheduling.shape_count = 1;
@@ -1776,6 +1837,9 @@ static iree_status_t loom_serve_text_advance_work(
     if (work == TEXT_CPU_WORK_OUTPUT) {
       loom_serve_text_complete_output(service);
     }
+  }
+  if (loom_serve_text_epoch_is_prepared(service)) {
+    return loom_serve_text_submit_ready_epoch(service, flags, out_progress);
   }
   if (service->completion.work != TEXT_WORK_NONE) {
     iree_status_t status = iree_ok_status();
@@ -1903,7 +1967,8 @@ static iree_status_t loom_serve_text_advance_work(
         &service->cursor, spans, scratch, &shape_index);
     if (count) {
       *out_progress = true;
-      status = loom_serve_text_submit_epoch(service, shape_index, count, spans);
+      loom_serve_text_prepare_epoch(service, shape_index, count, spans);
+      status = loom_serve_text_submit_ready_epoch(service, flags, out_progress);
     } else if (yield_preparation) {
       // With no ready device work, rejection never stalls the remaining FIFO.
       *out_progress |= loom_serve_text_begin_preparation(service);

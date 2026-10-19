@@ -48,6 +48,16 @@ expose several compositions sharing any of the same deployments. Repeat
 `--realtime_origin` for each browser application's exact Origin. Native clients
 that send no Origin header do not require an allowlist entry.
 
+When voice shares a device with background work, the optional assistant field
+`"execution_weight":8` assigns a larger relative numerical service share to its
+recognition, activity, text, and speech requests. The value is an integer from
+1 through 4294967295 and defaults to 1. Enable weighted submission with a positive
+`--execution_concurrency` at server startup. These are operator controls;
+session and response updates cannot change the weight. The
+[operation workflow](operate-model-server.md#share-execution-between-voice-and-background-work)
+explains bounded overlap, compatible batching, and the effect of model execution
+granularity on latency.
+
 Size the text deployment's
 [`context_capacity`](../model-documents.md#text-definitions) for instructions,
 tool definitions, conversation history, and generated output. A client may send

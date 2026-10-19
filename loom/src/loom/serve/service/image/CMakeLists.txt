@@ -83,6 +83,7 @@ loom_cc_library(
     iree::base
     iree::tokenizer
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::parameter::residency
     loom::serve::service::execution_reconfiguration
   PUBLIC
@@ -126,6 +127,7 @@ loom_cc_library(
     iree::base::threading
     iree::task
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::host::clock
     loom::serve::runtime::host::timer

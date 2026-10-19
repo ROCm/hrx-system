@@ -69,6 +69,8 @@ typedef struct loom_serve_text_consumer_t {
   void* self;
   // Process-lifetime operations; nonnull exactly when self is nonnull.
   const loom_serve_text_consumer_vtable_t* vtable;
+  // Immutable request share, moved with its receipt; zero selects weight one.
+  uint32_t execution_weight;
 } loom_serve_text_consumer_t;
 
 #ifdef __cplusplus

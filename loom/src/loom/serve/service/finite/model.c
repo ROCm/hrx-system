@@ -890,6 +890,11 @@ loom_serve_residency_t* loom_serve_finite_model_residency(
   return model->residency;
 }
 
+loom_serve_device_t* loom_serve_finite_model_device(
+    const loom_serve_finite_model_t* model) {
+  return model->owner;
+}
+
 iree_status_t loom_serve_finite_model_prepare_request(
     loom_serve_finite_model_t* model, iree_vm_buffer_t* input,
     loom_serve_finite_prepared_t* out_prepared) {

@@ -328,6 +328,7 @@ iree_py_test(
     "8"
     "--device=task"
     "--pool_backing=fixed"
+    "--execution_concurrency=2"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"

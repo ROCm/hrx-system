@@ -83,6 +83,7 @@ typedef enum loom_serve_recognition_phase_e {
   RECOGNITION_PHASE_PREPARING,
   RECOGNITION_PHASE_RESERVING,
   RECOGNITION_PHASE_OFFERING,
+  RECOGNITION_PHASE_READY_BATCH,
   RECOGNITION_PHASE_EXECUTING,
   RECOGNITION_PHASE_COLLECTING,
   RECOGNITION_PHASE_RELEASING,
@@ -103,6 +104,8 @@ struct loom_serve_recognition_stream_service_t {
   iree_async_proactor_t* proactor;
   // One active CPU/device borrow, independent of individual stream phases.
   loom_serve_recognition_phase_t phase;
+  // Permission for the retained source plan, independent of per-stream state.
+  loom_serve_execution_permit_t permit;
   // Stops new source work while accepted callbacks drain.
   bool stopping;
   // Owned terminal service failure, copied into affected stream results.
@@ -518,24 +521,17 @@ static iree_status_t loom_serve_recognition_collect(
           row->work.units ? RECOGNITION_ROW_READY : RECOGNITION_ROW_AWAIT_INPUT;
     }
     service->batch.candidate_count = 0;
-    bool cancelled = service->stopping;
-    for (iree_host_size_t i = 0; i < service->batch.count; ++i) {
-      cancelled |= !service->batch.rows[i]->caller_open;
-    }
-    if (service->batch.count && cancelled) {
-      service->generator.release_batch(service->generator.self);
-      service->batch.count = 0;
-    } else if (service->batch.count) {
+    if (service->batch.count) {
+      uint32_t weight = 1;
       for (iree_host_size_t i = 0; i < service->batch.count; ++i) {
-        service->batch.rows[i]->phase = RECOGNITION_ROW_EXECUTING;
+        weight =
+            iree_max(weight, service->batch.rows[i]->request.execution_weight);
       }
-      service->cursor = (service->batch.rows[0]->index + 1) %
-                        service->generator.request_capacity;
-      IREE_RETURN_IF_ERROR(service->generator.submit(
-          service->generator.self, &service->device.frontier));
-      return loom_serve_recognition_wait(service, RECOGNITION_PHASE_EXECUTING);
+      loom_serve_execution_permit_request(&service->permit, weight);
+      service->phase = RECOGNITION_PHASE_READY_BATCH;
     }
   } else if (phase == RECOGNITION_PHASE_EXECUTING) {
+    loom_serve_execution_permit_complete(&service->permit, iree_time_now());
     // Collection is part of accepted work, including during cancellation and
     // shutdown. It releases source feedback and acknowledges each original row.
     loom_serve_recognition_schedule_cpu(service, RECOGNITION_PHASE_COLLECTING);
@@ -562,6 +558,34 @@ static iree_status_t loom_serve_recognition_collect(
     service->generator.release_batch(service->generator.self);
     service->batch.count = 0;
     service->admit_next = true;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_recognition_submit_ready(
+    loom_serve_recognition_stream_service_t* service, bool* progress) {
+  bool cancelled = service->stopping;
+  for (iree_host_size_t i = 0; i < service->batch.count; ++i) {
+    cancelled |= !service->batch.rows[i]->caller_open;
+  }
+  if (cancelled) {
+    loom_serve_execution_permit_cancel(&service->permit);
+    service->generator.release_batch(service->generator.self);
+    service->batch.count = 0;
+    service->phase = RECOGNITION_PHASE_IDLE;
+    *progress = true;
+  } else if (loom_serve_execution_permit_try_acquire(&service->permit,
+                                                     iree_time_now())) {
+    service->phase = RECOGNITION_PHASE_IDLE;
+    for (iree_host_size_t i = 0; i < service->batch.count; ++i) {
+      service->batch.rows[i]->phase = RECOGNITION_ROW_EXECUTING;
+    }
+    service->cursor = (service->batch.rows[0]->index + 1) %
+                      service->generator.request_capacity;
+    *progress = true;
+    IREE_RETURN_IF_ERROR(service->generator.submit(service->generator.self,
+                                                   &service->device.frontier));
+    return loom_serve_recognition_wait(service, RECOGNITION_PHASE_EXECUTING);
   }
   return iree_ok_status();
 }
@@ -633,6 +657,10 @@ iree_status_t loom_serve_recognition_stream_service_advance(
     }
   }
   iree_status_t status = loom_serve_recognition_collect(service, out_progress);
+  if (iree_status_is_ok(status) &&
+      service->phase == RECOGNITION_PHASE_READY_BATCH) {
+    status = loom_serve_recognition_submit_ready(service, out_progress);
+  }
   if (iree_status_is_ok(status) && service->phase == RECOGNITION_PHASE_IDLE) {
     status = loom_serve_recognition_release_finished(service, out_progress);
     // Publication ends this bounded turn before the next source CPU operation.
@@ -864,6 +892,7 @@ void loom_serve_recognition_stream_service_free(
     IREE_ASSERT(!service->rows[i]);
   }
   const iree_allocator_t host_allocator = service->host_allocator;
+  loom_serve_execution_permit_deinitialize(&service->permit);
   iree_status_free(service->failure);
   iree_slim_mutex_deinitialize(&service->events.mutex);
   iree_allocator_free(host_allocator, service->batch.candidates);
@@ -907,6 +936,7 @@ iree_status_t loom_serve_recognition_stream_service_allocate(
       (void**)&service));
   service->host_allocator = host_allocator;
   service->generator = generator;
+  loom_serve_execution_permit_initialize(generator.scheduler, &service->permit);
   service->options = *options;
   service->executor = loom_serve_host_executor(host);
   service->admit_next = true;

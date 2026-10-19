@@ -20,6 +20,8 @@ typedef struct loom_serve_recognition_request_t {
   float temperature;
   // Nonempty subset of the admitted source's supported output types.
   loom_serve_recognition_output_flags_t outputs;
+  // Relative numerical service share; zero selects the ordinary weight of one.
+  uint32_t execution_weight;
 } loom_serve_recognition_request_t;
 
 #endif  // LOOM_SERVE_SERVICE_RECOGNITION_REQUEST_H_

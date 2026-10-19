@@ -101,6 +101,7 @@ loom_cc_library(
     iree::base::internal::json
     iree::hal
     loom::serve::runtime::device
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::storage::memory

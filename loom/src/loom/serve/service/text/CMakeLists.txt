@@ -1037,7 +1037,9 @@ loom_cc_library(
     iree::vm
     loom::serve::media::image
     loom::serve::media::image_request
+    loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::parameter::residency
     loom::serve::service
     loom::serve::service::finite::model
@@ -1161,6 +1163,7 @@ loom_cc_library(
     loom::serve::media::image_codecs
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake

@@ -28,6 +28,8 @@ typedef struct loom_serve_speech_request_t {
   float speed;
   // True for a finite text request; false for an initially empty native stream.
   bool input_complete;
+  // Relative numerical service share; zero selects the ordinary weight of one.
+  uint32_t execution_weight;
 } loom_serve_speech_request_t;
 
 // Copies a native request without JSON encoding. Text, voice, and instructions

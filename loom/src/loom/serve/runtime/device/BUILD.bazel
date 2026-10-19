@@ -26,6 +26,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/execution:queues",
+        "//loom/src/loom/serve/runtime/execution:scheduler",
         "//loom/src/loom/serve/runtime/execution:workspace",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/parameter:residency",

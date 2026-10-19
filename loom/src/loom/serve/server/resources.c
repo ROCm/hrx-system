@@ -9,6 +9,7 @@
 #include <inttypes.h>
 
 #include "iree/base/internal/json.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/util/json.h"
 
@@ -64,6 +65,22 @@ bool loom_serve_resources_is_pending(const loom_serve_resources_t* resources) {
     }
   }
   return pending;
+}
+
+bool loom_serve_resources_schedule(const loom_serve_resources_t* resources) {
+  if (!resources->device_group) {
+    return false;
+  }
+  bool progress = false;
+  const iree_time_t now = iree_time_now();
+  for (iree_host_size_t i = 0;
+       i < loom_serve_device_group_count(resources->device_group); ++i) {
+    progress |= loom_serve_execution_scheduler_advance(
+        loom_serve_device_scheduler(
+            loom_serve_device_group_at(resources->device_group, i)),
+        now);
+  }
+  return progress;
 }
 
 static iree_status_t loom_serve_resources_write_physical_devices(

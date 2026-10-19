@@ -28,7 +28,8 @@ typedef struct loom_serve_text_media_projector_t
 // Borrows chat through projection, not through later text execution. Allocation
 // is proportional to the checked image count; no pixels or device work occur.
 iree_status_t loom_serve_text_media_request_allocate(
-    const loom_serve_text_chat_t* chat, iree_allocator_t host_allocator,
+    const loom_serve_text_chat_t* chat, uint32_t execution_weight,
+    iree_allocator_t host_allocator,
     loom_serve_text_media_request_t** out_request);
 
 // Rebinds checked input coordinates after history eviction/prefix lookup.

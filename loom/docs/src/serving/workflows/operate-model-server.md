@@ -260,6 +260,50 @@ defines inspection, selection and removal responses.
 The [live development workflow](live-model-development.md) combines these controls
 with remote source uploads, checked kernel changes and pinned continuation trials.
 
+## Share execution between voice and background work
+
+Realtime conversations can share a device with background chat, image,
+embedding, and decision requests. A positive `--execution_concurrency` bounds
+outstanding numerical work across these services. For example, with compatible
+AMDGPU packages already configured in `serve.flags`:
+
+```sh
+loom-serve --flagfile=serve.flags --execution_concurrency=2
+```
+
+This permits at most two granted or accepted source numerical units on each
+configured device. A unit is a source-defined text epoch, speech or recognition
+batch, finite cohort, or image command part; it may contain several requests
+and device dispatches. CPU preparation, input handling, output delivery,
+cancellation, and retirement continue while numerical work waits. The default
+`0` leaves submissions unrestricted.
+
+Set `"execution_weight":8` in a [named assistant document](realtime-conversation.md#configure-an-assistant)
+to give its native recognition, activity, text, and speech work a larger relative
+share than ordinary requests with weight one. The weight is positive and defaults
+to one. It belongs to operator configuration and stays fixed for the session;
+clients cannot change it through `session.update` or `response.create`.
+
+Ready work is selected by accumulated host-observed service time divided by
+weight, including elapsed time for still-active work. Spare capacity can remain
+unused when another submission would overtake a less-served active peer.
+Independent units retire separately, and compatible request batches use their
+highest member weight. This preserves model batching while favoring interactive
+work across competing services. Weights express relative service, not a reserved
+fraction of GPU occupancy or a response deadline.
+
+Accepted work runs to its source-defined completion boundary. A long text epoch
+or image part can therefore delay voice work even with a larger voice weight.
+Model execution granularity, first-audio latency, audio delivery gaps, and
+background completion time belong in the same workload measurement. Queue count
+determines the available overlap; pinning weights keeps them resident, and
+memory admission independently determines whether a request fits. None of these
+controls reserves compute or memory bandwidth.
+
+The budget is applied independently to each explicit device entry. Two entries
+that share physical memory bandwidth still have independent submission budgets;
+the server does not infer a combined contention domain from their hardware.
+
 ## Bound memory and admission
 
 Process limits and model capacities constrain different resources:

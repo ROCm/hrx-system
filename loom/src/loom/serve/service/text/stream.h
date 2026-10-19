@@ -25,6 +25,8 @@ typedef struct loom_serve_text_request_t {
   iree_string_view_t session;
   // Optional pinned-checkpoint identifier, borrowed until admission returns.
   iree_string_view_t checkpoint;
+  // Relative numerical service share; zero selects the ordinary weight of one.
+  uint32_t execution_weight;
 } loom_serve_text_request_t;
 
 typedef struct loom_serve_text_stream_t loom_serve_text_stream_t;

@@ -7,6 +7,7 @@
 #define LOOM_SERVE_RUNTIME_DEVICE_DEVICE_H_
 
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/storage/memory.h"
@@ -45,6 +46,9 @@ typedef struct loom_serve_device_options_t {
   iree_device_size_t slab_size;
   // Maximum committed virtual-pool bytes; zero imposes no serving limit.
   uint64_t memory_limit;
+  // Maximum granted/accepted source numerical units across model services on
+  // this device; zero leaves submissions unrestricted. Independent of queues.
+  uint32_t execution_concurrency;
 } loom_serve_device_options_t;
 
 // Creates every requested HAL device from its application-selected driver,
@@ -149,6 +153,10 @@ iree_hal_queue_t* loom_serve_device_dispatch_queue(
     const loom_serve_device_t* device);
 iree_hal_queue_t* loom_serve_device_transfer_queue(
     const loom_serve_device_t* device);
+// Borrowed numerical-permission owner, independent of queue placement and
+// residency. The serialized host advances it after offering ready model work.
+loom_serve_execution_scheduler_t* loom_serve_device_scheduler(
+    loom_serve_device_t* device);
 // Creates an owned model timeline over this device's shared workspace. The
 // serialized device owner assigns the least borrowed provisioned queues;
 // final execution release returns that binding, including retained result and

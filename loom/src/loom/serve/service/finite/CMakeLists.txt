@@ -90,7 +90,9 @@ loom_cc_library(
     iree::hal
     iree::task
     iree::vm
+    loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake

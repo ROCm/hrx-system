@@ -18,6 +18,7 @@
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/stream.h"
 #include "loom/serve/telemetry/record.h"
@@ -38,6 +39,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_notification_initialize(&notification_);
+    loom_serve_execution_scheduler_initialize(0, &scheduler_);
     auto options = loom_serve_test_application_options_default();
     options.worker_count = FLAG_test_workers;
     options.backing = FLAG_test_elastic ? LOOM_SERVE_DEVICE_BACKING_ELASTIC
@@ -66,6 +68,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     actual_ = loom_serve_recognition_model_generator(model_);
     auto observed = actual_;
     observed.self = this;
+    observed.scheduler = &scheduler_;
     observed.prepare = [](void* self, iree_host_size_t row,
                           const loom_serve_recognition_request_t* request,
                           void** out) {
@@ -203,8 +206,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = loom_serve_recognition_stream_service_advance(
-          service_, stopping, false, &progress);
+      auto status = Advance(stopping, &progress);
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -220,8 +222,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     while (true) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = loom_serve_recognition_stream_service_advance(
-          service_, stopping, false, &progress);
+      auto status = Advance(stopping, &progress);
       const bool idle =
           !progress &&
           !loom_serve_recognition_stream_service_is_pending(service_);
@@ -244,8 +245,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     while (iree_status_is_ok(status)) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      status = loom_serve_recognition_stream_service_advance(service_, false,
-                                                             false, &progress);
+      status = Advance(false, &progress);
       if (progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -257,10 +257,24 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     return status;
   }
 
+  iree_status_t Advance(bool stopping, bool* progress) {
+    iree_status_t status = loom_serve_recognition_stream_service_advance(
+        service_, stopping, false, progress);
+    if (iree_status_is_ok(status) && !stopping && grant_work_) {
+      *progress |=
+          loom_serve_execution_scheduler_advance(&scheduler_, iree_time_now());
+    }
+    return status;
+  }
+
   void Open(loom_serve_recognition_stream_t** out,
             loom_serve_recognition_output_flags_t outputs =
-                LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT) {
-    const loom_serve_recognition_request_t request = {.outputs = outputs};
+                LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+            uint32_t execution_weight = 0) {
+    const loom_serve_recognition_request_t request = {
+        .outputs = outputs,
+        .execution_weight = execution_weight,
+    };
     const loom_serve_recognition_completion_t completion = {
         this, [](void* self, loom_serve_telemetry_outcome_t outcome,
                  const iree_status_t status) {
@@ -333,6 +347,10 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   loom_serve_recognition_generator_t actual_ = {};
   // Actual typed service under test.
   loom_serve_recognition_stream_service_t* service_ = nullptr;
+  // Same numerical permission controller used by the production router.
+  loom_serve_execution_scheduler_t scheduler_ = {};
+  // The outer owner may hold offers before granting numerical acceptance.
+  bool grant_work_ = true;
   // Caller-owned results, closed independently of service/model teardown.
   std::vector<loom_serve_recognition_stream_t*> streams_;
   // Owner completion notifications, independent of retained caller handles.
@@ -365,6 +383,38 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   // Selects backing-release readiness instead of numerical batch readiness.
   bool fail_release_readiness_ = false;
 };
+
+TEST_F(SourceRecognitionStreamTest,
+       PreparedCancellationReturnsPermissionWithoutSubmittingOrConsumingPcm) {
+  loom_serve_execution_scheduler_initialize(1, &scheduler_);
+  grant_work_ = false;
+  loom_serve_recognition_stream_t* cancelled = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      Open(&cancelled, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT, 8));
+  ASSERT_NO_FATAL_FAILURE(Write(cancelled, {5}, 1));
+  loom_serve_recognition_stream_finish(cancelled);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return scheduler_.head; }));
+  EXPECT_EQ(scheduler_.head->weight, 8u);
+  EXPECT_EQ(submitted_, 0u);
+  EXPECT_EQ(collected_[0].load(), 0u);
+  EXPECT_EQ(loom_serve_recognition_stream_peek(cancelled), nullptr);
+  ASSERT_NO_FATAL_FAILURE(Close(cancelled));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return released_[0] == 1; }));
+  EXPECT_EQ(scheduler_.head, nullptr);
+  EXPECT_EQ(scheduler_.outstanding_count, 0u);
+  EXPECT_EQ(submitted_, 0u);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_CANCELLED);
+
+  grant_work_ = true;
+  loom_serve_recognition_stream_t* replacement = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&replacement));
+  ASSERT_NO_FATAL_FAILURE(Write(replacement, {5}, 1));
+  loom_serve_recognition_stream_finish(replacement);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(replacement); }));
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(replacement, "F"));
+  EXPECT_EQ(submitted_, 1u);
+  EXPECT_EQ(scheduler_.outstanding_count, 0u);
+}
 
 TEST_F(SourceRecognitionStreamTest,
        StaggeredCohortsStalledReaderAcceptedCancellationAndReuse) {

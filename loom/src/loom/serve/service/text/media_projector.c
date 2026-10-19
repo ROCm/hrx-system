@@ -9,6 +9,8 @@
 #include <string.h>
 
 #include "loom/serve/media/image_request.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 
 typedef struct loom_serve_text_media_image_t {
   // Owned cohort reference, independent of producer parameter residency.
@@ -24,6 +26,8 @@ struct loom_serve_text_media_request_t {
   iree_allocator_t host_allocator;
   // Borrowed immutable pending chat, accessed only before language admission.
   const loom_serve_text_chat_t* chat;
+  // Inherited text-request share for the prerequisite finite computation.
+  uint32_t execution_weight;
   // One owned result reference per original image occurrence.
   loom_serve_text_media_image_t* images;
   // Sorted source input spans rebuilt when retained input coordinates change.
@@ -40,7 +44,8 @@ struct loom_serve_text_media_request_t {
 };
 
 iree_status_t loom_serve_text_media_request_allocate(
-    const loom_serve_text_chat_t* chat, iree_allocator_t host_allocator,
+    const loom_serve_text_chat_t* chat, uint32_t execution_weight,
+    iree_allocator_t host_allocator,
     loom_serve_text_media_request_t** out_request) {
   *out_request = NULL;
   iree_host_size_t length = 0, images_offset = 0, spans_offset = 0;
@@ -57,6 +62,7 @@ iree_status_t loom_serve_text_media_request_allocate(
   *request = (loom_serve_text_media_request_t){
       .host_allocator = host_allocator,
       .chat = chat,
+      .execution_weight = execution_weight,
       .images = (void*)(storage + images_offset),
       .spans = (void*)(storage + spans_offset),
       .count = chat->images.count,
@@ -180,7 +186,9 @@ typedef enum loom_serve_text_media_phase_e {
   MEDIA_BATCHING,
   MEDIA_SPECIALIZING,
   MEDIA_WAITING,
+  MEDIA_READY,
   MEDIA_RUNNING,
+  MEDIA_RELEASING,
   MEDIA_FAILED,
 } loom_serve_text_media_phase_t;
 
@@ -189,6 +197,8 @@ struct loom_serve_text_media_projector_t {
   iree_allocator_t host_allocator;
   // Borrowed component model; its owner excludes trim during these loans.
   loom_serve_finite_model_t* model;
+  // Permission on the component's device, independently of parent text work.
+  loom_serve_execution_permit_t permit;
   // Independent publication channels, never serialized behind text readiness.
   loom_serve_text_readiness_t readiness;
   // Exclusive producer/VM phase.
@@ -259,6 +269,9 @@ iree_status_t loom_serve_text_media_projector_allocate(
   };
   loom_serve_text_readiness_initialize(executor, proactor,
                                        &projector->readiness);
+  loom_serve_execution_permit_initialize(
+      loom_serve_device_scheduler(loom_serve_finite_model_device(model)),
+      &projector->permit);
   loom_serve_text_readiness_set_observer(&projector->readiness, observer);
   loom_serve_finite_model_set_observer(model, observer);
   *out_projector = projector;
@@ -497,7 +510,9 @@ bool loom_serve_text_media_projector_is_pending(
   return projector && (projector->phase == MEDIA_PREPARING ||
                        projector->phase == MEDIA_BATCHING ||
                        projector->phase == MEDIA_SPECIALIZING ||
-                       projector->phase == MEDIA_RUNNING);
+                       projector->phase == MEDIA_READY ||
+                       projector->phase == MEDIA_RUNNING ||
+                       projector->phase == MEDIA_RELEASING);
 }
 
 void loom_serve_text_media_projector_set_observer(
@@ -516,7 +531,8 @@ const char* loom_serve_text_media_projector_phase(
   }
   static const char* const phases[] = {
       "image_gather",     "image_prepare", "image_prepared", "image_batch",
-      "image_specialize", "image_wait",    "image_execute",  "image_failed",
+      "image_specialize", "image_wait",    "image_ready",    "image_execute",
+      "image_release",    "image_failed",
   };
   return phases[projector->phase];
 }
@@ -584,13 +600,18 @@ iree_status_t loom_serve_text_media_projector_advance(
     } else {
       projector->phase = MEDIA_SPECIALIZING;
     }
-  } else if (projector->phase == MEDIA_RUNNING) {
+  } else if (projector->phase == MEDIA_RUNNING ||
+             projector->phase == MEDIA_RELEASING) {
     if (!loom_serve_text_readiness_take_device(&projector->readiness,
                                                &status)) {
       return status;
     }
     *out_progress = true;
     if (iree_status_is_ok(status)) {
+      if (projector->phase == MEDIA_RUNNING) {
+        loom_serve_execution_permit_complete(&projector->permit,
+                                             iree_time_now());
+      }
       loom_serve_finite_model_complete(projector->model);
       loom_serve_text_media_projector_complete(projector);
     }
@@ -640,7 +661,18 @@ iree_status_t loom_serve_text_media_projector_advance(
           loom_serve_finite_model_residency(projector->model), &admission);
       if (iree_status_is_ok(status) &&
           admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
-        status = loom_serve_text_media_projector_submit(projector);
+        loom_serve_residency_cancel_admission(
+            loom_serve_finite_model_residency(projector->model));
+        uint32_t weight = 1;
+        for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
+          const loom_serve_text_media_request_t* request =
+              projector->cohort[i]->request;
+          if (request) {
+            weight = iree_max(weight, request->execution_weight);
+          }
+        }
+        loom_serve_execution_permit_request(&projector->permit, weight);
+        projector->phase = MEDIA_READY;
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
                  admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
@@ -660,6 +692,29 @@ iree_status_t loom_serve_text_media_projector_advance(
         loom_serve_text_media_projector_complete(projector);
         *out_progress = true;
       }
+    }
+  }
+  if (iree_status_is_ok(status) && projector->phase == MEDIA_READY) {
+    bool live = false;
+    for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
+      live |= projector->cohort[i]->request != NULL;
+    }
+    if (stopping || !live) {
+      loom_serve_execution_permit_cancel(&projector->permit);
+      loom_serve_residency_t* residency =
+          loom_serve_finite_model_residency(projector->model);
+      const loom_serve_execution_frontier_t frontier =
+          loom_serve_residency_frontier(residency);
+      status =
+          loom_serve_text_readiness_await(&projector->readiness, &frontier);
+      if (iree_status_is_ok(status)) {
+        projector->phase = MEDIA_RELEASING;
+      }
+      *out_progress = true;
+    } else if (loom_serve_execution_permit_try_acquire(&projector->permit,
+                                                       iree_time_now())) {
+      status = loom_serve_text_media_projector_submit(projector);
+      *out_progress = true;
     }
   }
   if (!iree_status_is_ok(status)) {
@@ -683,6 +738,7 @@ void loom_serve_text_media_projector_free(
   if (!projector) {
     return;
   }
+  loom_serve_execution_permit_deinitialize(&projector->permit);
   loom_serve_finite_model_set_observer(projector->model,
                                        (loom_serve_wake_callback_t){0});
   for (iree_host_size_t i = 0; i < projector->count; ++i) {

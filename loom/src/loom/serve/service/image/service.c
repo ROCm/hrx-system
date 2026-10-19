@@ -65,6 +65,8 @@ struct loom_serve_image_service_t {
   iree_allocator_t host_allocator;
   // Borrowed, serialized native model invocation.
   loom_serve_image_generator_t generator;
+  // Numerical permission for the next source-controlled invocation part.
+  loom_serve_execution_permit_t permit;
   // Candidate ownership and pending selection, retired before the generator.
   loom_serve_execution_reconfiguration_t* reconfiguration;
   // Copied model geometry and policy; the route name is borrowed.
@@ -411,12 +413,10 @@ static iree_status_t loom_serve_image_service_submit(
       loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, service->job.id);
   const iree_time_t begin = iree_time_now();
-  if (service->phase == IMAGE_PHASE_WAITING) {
-    service->job.work.admission_ns = begin - service->phase_start;
-    service->telemetry.totals.work.admission_ns +=
-        service->job.work.admission_ns;
-  }
   service->device.cancelled = service->stopping || !service->connection;
+  if (service->device.cancelled) {
+    loom_serve_execution_permit_cancel(&service->permit);
+  }
   const loom_serve_image_submit_flags_t flags =
       service->device.cancelled ? LOOM_SERVE_IMAGE_SUBMIT_FLAG_CANCEL : 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -512,7 +512,11 @@ static void loom_serve_image_prepared(loom_serve_image_service_t* service,
     *progress = true;
     return;
   } else if (iree_status_is_ok(service->status)) {
-    service->status = loom_serve_image_service_submit(service);
+    service->job.work.admission_ns = iree_time_now() - service->phase_start;
+    service->telemetry.totals.work.admission_ns +=
+        service->job.work.admission_ns;
+    loom_serve_execution_permit_request(&service->permit, 1);
+    service->phase = IMAGE_PHASE_READY;
   }
   *progress = true;
   if (!iree_status_is_ok(service->status)) {
@@ -578,10 +582,12 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
     service->job.work.execution_ns += execution_ns;
     service->telemetry.totals.work.execution_ns += execution_ns;
     if (!service->device.cancelled) {
+      loom_serve_execution_permit_complete(&service->permit, iree_time_now());
       ++service->telemetry.counters.batches;
       ++service->job.completed_parts;
     }
     if (!service->device.complete) {
+      loom_serve_execution_permit_request(&service->permit, 1);
       service->phase = IMAGE_PHASE_READY;
       return;
     }
@@ -883,7 +889,11 @@ static iree_status_t loom_serve_image_advance(void* self,
   }
   if (service->phase == IMAGE_PHASE_WAITING) {
     loom_serve_image_prepared(service, flags, out_progress);
-  } else if (service->phase == IMAGE_PHASE_READY) {
+  }
+  if (service->phase == IMAGE_PHASE_READY &&
+      (service->stopping || !service->connection ||
+       loom_serve_execution_permit_try_acquire(&service->permit,
+                                               iree_time_now()))) {
     service->status = loom_serve_image_service_submit(service);
     *out_progress = true;
     if (!iree_status_is_ok(service->status)) {
@@ -959,6 +969,7 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
   }
   IREE_ASSERT(!loom_serve_image_is_pending(service));
   const iree_allocator_t host_allocator = service->host_allocator;
+  loom_serve_execution_permit_deinitialize(&service->permit);
   if (!service->stopping) {
     loom_serve_image_stop(service);
   }
@@ -1009,6 +1020,7 @@ iree_status_t loom_serve_image_service_allocate(
       iree_alignof(loom_serve_image_service_t), 0, (void**)&service));
   service->host_allocator = host_allocator;
   service->generator = generator;
+  loom_serve_execution_permit_initialize(generator.scheduler, &service->permit);
   service->options = *options;
   service->telemetry.stream = stream;
   service->executor = loom_serve_host_executor(host);

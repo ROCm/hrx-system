@@ -21,6 +21,8 @@ struct loom_serve_device_t {
   iree_hal_queue_t* transfer;
   // Fixed inventory shared by independently retained model executions.
   loom_serve_execution_queues_t* execution_queues;
+  // Fixed numerical permission state, advanced only by the serialized owner.
+  loom_serve_execution_scheduler_t scheduler;
   // Native retained storage qualified for both execution and transfer.
   iree_hal_pool_t* storage_pool;
   // Shared private command backing, independent of model timelines.
@@ -97,6 +99,8 @@ static iree_status_t loom_serve_device_group_initialize(
 static iree_status_t loom_serve_device_initialize(
     loom_serve_device_t* device, const loom_serve_device_options_t* options) {
   loom_serve_device_group_t* group = device->owner;
+  loom_serve_execution_scheduler_initialize(options->execution_concurrency,
+                                            &device->scheduler);
   device->dispatch = loom_serve_device_select_queue(
       device->handle, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
   device->transfer = loom_serve_device_select_queue(
@@ -185,18 +189,20 @@ iree_status_t loom_serve_device_group_allocate(
                             "serving group needs between 1 and %d devices",
                             IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT);
   }
-  for (iree_host_size_t i = 0; i < device_count; ++i) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
+       ++i) {
     if (options[i].backing != LOOM_SERVE_DEVICE_BACKING_FIXED &&
         options[i].backing != LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported physical backing strategy");
-    }
-    if (options[i].backing == LOOM_SERVE_DEVICE_BACKING_FIXED &&
-        options[i].memory_limit) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "a physical budget requires elastic backing");
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "unsupported physical backing strategy");
+    } else if (options[i].backing == LOOM_SERVE_DEVICE_BACKING_FIXED &&
+               options[i].memory_limit) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "a physical budget requires elastic backing");
     }
   }
+  IREE_RETURN_IF_ERROR(status);
   loom_serve_device_group_t* group = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, sizeof(*group) + device_count * sizeof(group->devices[0]),
@@ -208,7 +214,7 @@ iree_status_t loom_serve_device_group_allocate(
   for (iree_host_size_t i = 0; i < device_count; ++i) {
     group->devices[i].owner = group;
   }
-  iree_status_t status = loom_serve_device_group_initialize(group, options);
+  status = loom_serve_device_group_initialize(group, options);
   for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
        ++i) {
     status = loom_serve_device_initialize(&group->devices[i], &options[i]);
@@ -337,6 +343,11 @@ iree_hal_queue_t* loom_serve_device_dispatch_queue(
 iree_hal_queue_t* loom_serve_device_transfer_queue(
     const loom_serve_device_t* device) {
   return device->transfer;
+}
+
+loom_serve_execution_scheduler_t* loom_serve_device_scheduler(
+    loom_serve_device_t* device) {
+  return &device->scheduler;
 }
 
 iree_status_t loom_serve_device_create_execution(

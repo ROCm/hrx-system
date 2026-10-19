@@ -1479,6 +1479,7 @@ def main():
                     "voice": "positive",
                     "max_output_tokens": 2,
                     "seed": 42,
+                    "execution_weight": 8,
                 }
             )
         )

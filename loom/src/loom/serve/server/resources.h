@@ -39,6 +39,11 @@ void loom_serve_resources_set_observer(const loom_serve_resources_t* resources,
 iree_status_t loom_serve_resources_query_status(
     const loom_serve_resources_t* resources);
 
+// Grants ready numerical work after the owner has progressed all services.
+// True requires another owner turn to consume the new permissions. Retirement,
+// input/output, and memory admission proceed independently of these grants.
+bool loom_serve_resources_schedule(const loom_serve_resources_t* resources);
+
 // Whether native capacity work still borrows application resources. Router
 // shutdown joins this independently of model readiness or semaphore failure.
 bool loom_serve_resources_is_pending(const loom_serve_resources_t* resources);

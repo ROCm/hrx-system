@@ -26,6 +26,9 @@ struct loom_serve_realtime_turn_t {
   loom_serve_realtime_capture_t* capture;
   // Immutable raw ring capacity, in 24 kHz mono frames.
   iree_host_size_t capacity;
+  // Copied assistant request share for each independently admitted activity
+  // row.
+  uint32_t execution_weight;
   // One finite conversion slot with independent numerical epoch histories.
   loom_serve_realtime_input_t* input;
   // Stable loan records for a current epoch and cancelled CPU borrowers.
@@ -52,8 +55,8 @@ iree_status_t loom_serve_realtime_turn_allocate(
     iree_task_executor_t* executor, loom_serve_registry_t* registry,
     loom_serve_realtime_binding_t binding,
     loom_serve_realtime_capture_t* capture, iree_host_size_t capture_capacity,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
-    loom_serve_realtime_turn_t** out_turn) {
+    uint32_t execution_weight, loom_serve_wake_callback_t observer,
+    iree_allocator_t host_allocator, loom_serve_realtime_turn_t** out_turn) {
   *out_turn = NULL;
   loom_serve_realtime_turn_t* turn = NULL;
   IREE_RETURN_IF_ERROR(
@@ -61,6 +64,7 @@ iree_status_t loom_serve_realtime_turn_allocate(
   turn->host_allocator = host_allocator;
   turn->capture = capture;
   turn->capacity = capture_capacity;
+  turn->execution_weight = execution_weight;
   iree_status_t status = loom_serve_realtime_input_allocate(
       executor, registry, binding, observer, host_allocator, &turn->input);
   if (!iree_status_is_ok(status)) {
@@ -87,7 +91,8 @@ iree_status_t loom_serve_realtime_turn_begin(
   }
   *epoch = (loom_serve_realtime_turn_epoch_t){0};
   const loom_serve_recognition_request_t request = {
-      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY};
+      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY,
+      .execution_weight = turn->execution_weight};
   IREE_RETURN_IF_ERROR(
       loom_serve_realtime_input_begin(turn->input, &request, &epoch->input));
   loom_serve_realtime_capture_mark(turn->capture, &epoch->begin);

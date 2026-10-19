@@ -1682,5 +1682,6 @@ loom_serve_recognition_generator_t loom_serve_recognition_model_generator(
       .release = loom_serve_recognition_generator_release,
       .tokenizer = model->tokenizer,
       .capacity_domain = loom_serve_residency_cache(model->residency),
+      .scheduler = loom_serve_device_scheduler(model->owner),
       .weight_activity = loom_serve_recognition_generator_weight_activity};
 }

@@ -1295,5 +1295,6 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .weight_activity = loom_serve_image_generator_weight_activity,
       .execution_update = loom_serve_executables_update(model->executables),
       .tokenizer = model->tokenizer,
-      .capacity_domain = loom_serve_residency_cache(model->residency)};
+      .capacity_domain = loom_serve_residency_cache(model->residency),
+      .scheduler = loom_serve_device_scheduler(model->owner)};
 }

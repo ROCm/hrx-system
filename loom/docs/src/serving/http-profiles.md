@@ -467,6 +467,11 @@ The model query selects a named composition supplied by `--realtime_assistant`.
 The [conversation workflow](workflows/realtime-conversation.md) covers its model
 requirements, startup document, and playback ownership.
 
+The assistant's optional `execution_weight` is server configuration, not an HTTP
+or WebSocket request setting. It defaults to one and supplies the relative share
+for native model work when `--execution_concurrency` is positive. Neither
+`session.update` nor `response.create` accepts a client-selected weight.
+
 The profile uses GA event names and nested `audio.input` /
 `audio.output` settings. Both formats are `{"type":"audio/pcm","rate":24000}`:
 mono PCM16LE carried in base64 JSON strings. Supported commands are:

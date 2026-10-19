@@ -22,8 +22,8 @@ typedef struct loom_serve_realtime_configuration_t {
 
 // Parses one complete assistant document with required name/text/recognition/
 // speech/voice and optional activity/instructions/max_output_tokens/seed/
-// input_capacity. Every selector names an independent registration; this
-// document owns no weights.
+// input_capacity/execution_weight. Every selector names an independent
+// registration; this document owns no model weights.
 // Failure leaves a deinitializable value and performs no model or file I/O.
 iree_status_t loom_serve_realtime_configuration_initialize(
     iree_string_view_t document, iree_allocator_t host_allocator,

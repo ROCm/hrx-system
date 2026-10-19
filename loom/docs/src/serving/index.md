@@ -37,6 +37,7 @@ controls, pressure, counters and telemetry cursors.
 | `--realtime_origin=origin` | None, repeatable | Exact allowed browser Origin for WebSocket upgrades. |
 | `--listen=address` | `127.0.0.1:8080`, repeatable | Numeric IPv4 `host:port`, IPv6 `[host]:port`, or `unix:path`. |
 | `--workers=N` | `8` | Shared CPU workers for JIT, model scheduling and media work. |
+| `--execution_concurrency=N` | `0` | Maximum granted or accepted source numerical units per configured device; `0` leaves submissions unrestricted. Positive budgets select ready work by weighted observed service. |
 | `--model_capacity=N` | `32` | Registered names, including drained, failed and removing entries. |
 | `--connections=N` | `64` | Simultaneous admitted HTTP connections across all listeners. |
 | `--held_requests=N` | `-1` | Closed-gate holding credit; `-1` selects half the connection limit, `0` rejects rather than holds. |
@@ -49,9 +50,10 @@ controls, pressure, counters and telemetry cursors.
 | `--memory_bytes=N` | `0` | Serving-managed physical parameter/state limit; `0` imposes no serving limit. |
 
 Model, connection and body capacities must be positive. Holding credit must
-remain below connection capacity. Heartbeat/idle intervals, slab sizes and memory
-limits are nonnegative. A nonzero memory limit requires elastic backing and
-exactly one device: independent device pools cannot enforce a shared byte limit.
+remain below connection capacity. Heartbeat/idle intervals, slab sizes, memory
+limits, and execution concurrency are nonnegative. A nonzero memory limit
+requires elastic backing and exactly one device: independent device pools cannot
+enforce a shared byte limit.
 It excludes invocation workspace, host allocations and driver overhead; it is
 not a whole-process or whole-device memory cap.
 
@@ -97,6 +99,12 @@ do not reserve compute or memory bandwidth and provide no latency guarantee.
 Assignment counts live executions; request batching and residency pinning remain
 separate controls. Vulkan uses its provisioned inventory, and task devices use
 the application's shared CPU workers.
+
+`--execution_concurrency` controls submission across models sharing each
+configured device. It bounds source numerical units, which may contain multiple
+batched requests or dispatches. The [operation workflow](workflows/operate-model-server.md#share-execution-between-voice-and-background-work)
+explains how to combine this budget with assistant weights. Queue inventory,
+request capacity, and weight residency remain independent controls.
 
 The model's native source must compile for that device. `task` uses native x86
 CPU execution. AMDGPU and Vulkan require the corresponding compiler target,

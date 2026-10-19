@@ -256,8 +256,10 @@ iree_status_t loom_serve_text_stream_allocate(
       .publish = loom_serve_text_stream_publish,
       .reject = loom_serve_text_stream_reject,
       .end = loom_serve_text_stream_end};
-  *out_consumer =
-      (loom_serve_text_consumer_t){.self = stream, .vtable = &vtable};
+  *out_consumer = (loom_serve_text_consumer_t){
+      .self = stream,
+      .vtable = &vtable,
+      .execution_weight = stream->request.execution_weight};
   return iree_ok_status();
 }
 

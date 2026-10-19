@@ -280,6 +280,7 @@ loom_py_test(
         "8",
         "--device=task",
         "--pool_backing=fixed",
+        "--execution_concurrency=2",
     ],
     data = TEXT_SOURCES + RECOGNITION_SOURCES + SPEECH_SOURCES + [":loom-serve-test-tool"],
     main = "session_test.py",

@@ -489,7 +489,8 @@ static bool loom_serve_realtime_response_ready(
 static iree_status_t loom_serve_realtime_response_start(
     loom_serve_realtime_responses_t* owner,
     loom_serve_realtime_response_t* response) {
-  loom_serve_text_request_t request = {0};
+  loom_serve_text_request_t request = {.execution_weight =
+                                           owner->profile->execution_weight};
   iree_status_t status =
       loom_serve_realtime_context_take(&response->context, &request.body);
   if (iree_status_is_ok(status) && response->uses_history &&

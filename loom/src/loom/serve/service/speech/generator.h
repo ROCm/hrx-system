@@ -9,6 +9,7 @@
 
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/service/speech/input.h"
 #include "loom/serve/service/speech/request.h"
@@ -154,6 +155,9 @@ typedef struct loom_serve_speech_generator_t {
   // Shared admission identity; equal non-NULL domains can release each other's
   // capacity. Borrowed through service retirement and never dereferenced here.
   const void* capacity_domain;
+  // Borrowed numerical controller for the actual execution device, or NULL
+  // when the embedding caller manages independent submission itself.
+  loom_serve_execution_scheduler_t* scheduler;
   // Optional copied parameter activity, queried only on serialized owner turns.
   loom_serve_weight_activity_t (*weight_activity)(void* self);
 } loom_serve_speech_generator_t;

@@ -40,7 +40,8 @@ iree_status_t loom_serve_realtime_configuration_initialize(
       {"max_output_tokens", 1u << IREE_JSON_VALUE_TYPE_NUMBER},
       {"seed", 1u << IREE_JSON_VALUE_TYPE_NUMBER},
       {"activity", 1u << IREE_JSON_VALUE_TYPE_STRING},
-      {"input_capacity", 1u << IREE_JSON_VALUE_TYPE_NUMBER}};
+      {"input_capacity", 1u << IREE_JSON_VALUE_TYPE_NUMBER},
+      {"execution_weight", 1u << IREE_JSON_VALUE_TYPE_NUMBER}};
   loom_serve_realtime_event_value_t values[IREE_ARRAYSIZE(rules)];
   uint32_t present = 0;
   IREE_RETURN_IF_ERROR(loom_serve_realtime_object_parse(
@@ -96,6 +97,15 @@ iree_status_t loom_serve_realtime_configuration_initialize(
     }
   }
   configuration->profile.input_capacity = (iree_host_size_t)capacity;
+  uint64_t weight = 1;
+  if (iree_status_is_ok(status) && (present & (1u << 10))) {
+    status = iree_json_parse_uint64(values[10].text, &weight);
+    if (iree_status_is_ok(status) && (!weight || weight > UINT32_MAX)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "execution_weight requires a positive uint32");
+    }
+  }
+  configuration->profile.execution_weight = (uint32_t)weight;
   return status;
 }
 

@@ -14,6 +14,12 @@
 
 IREE_FLAG(int32_t, workers, 8,
           "Shared CPU workers for compilation, scheduling and media jobs.");
+IREE_FLAG(
+    int32_t, execution_concurrency, 0,
+    "Maximum granted/accepted source numerical units across model "
+    "services per configured device; zero leaves submissions unrestricted. "
+    "A positive budget selects ready units by weighted observed service. "
+    "Independent of queue count; does not preempt work or reserve memory.");
 IREE_FLAG(string, pool_backing, "elastic",
           "elastic demand-commits parameter/state slabs; fixed backs storage "
           "eagerly and supports device address sanitization.");
@@ -40,6 +46,10 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
     loom_serve_host_t* host, iree_hal_driver_registry_t* driver_registry,
     iree_allocator_t host_allocator, loom_serve_device_group_t** out_group) {
   *out_group = NULL;
+  if (FLAG_execution_concurrency < 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "execution_concurrency must be nonnegative");
+  }
   const iree_string_view_list_t devices = iree_hal_device_flag_list();
   if (!devices.count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -114,6 +124,7 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
                        : LOOM_SERVE_DEVICE_BACKING_FIXED,
         .slab_size = (iree_device_size_t)FLAG_slab_bytes,
         .memory_limit = (uint64_t)FLAG_memory_bytes,
+        .execution_concurrency = (uint32_t)FLAG_execution_concurrency,
     };
   }
   if (iree_status_is_ok(status)) {

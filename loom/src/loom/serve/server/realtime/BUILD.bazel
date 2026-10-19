@@ -125,6 +125,17 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "configuration_test",
+    srcs = ["configuration_test.cc"],
+    deps = [
+        ":configuration",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "event",
     srcs = ["event.c"],

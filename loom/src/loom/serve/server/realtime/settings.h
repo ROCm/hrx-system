@@ -40,6 +40,9 @@ typedef struct loom_serve_realtime_profile_t {
   uint64_t seed;
   // Immutable original 24 kHz microphone ring capacity; zero uses the default.
   iree_host_size_t input_capacity;
+  // Relative numerical share for this assistant's native model requests;
+  // zero selects the ordinary weight of one. This never reserves memory.
+  uint32_t execution_weight;
 } loom_serve_realtime_profile_t;
 
 // Generation policy shared by session defaults and independent response copies.

@@ -45,8 +45,8 @@ iree_status_t loom_serve_realtime_turn_allocate(
     iree_task_executor_t* executor, loom_serve_registry_t* registry,
     loom_serve_realtime_binding_t binding,
     loom_serve_realtime_capture_t* capture, iree_host_size_t capture_capacity,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
-    loom_serve_realtime_turn_t** out_turn);
+    uint32_t execution_weight, loom_serve_wake_callback_t observer,
+    iree_allocator_t host_allocator, loom_serve_realtime_turn_t** out_turn);
 
 // Begins an epoch at the current ordered append frontier. The caller invokes
 // this before its first append and only when no epoch is open. Source geometry

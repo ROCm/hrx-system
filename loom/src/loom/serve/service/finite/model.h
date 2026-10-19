@@ -161,6 +161,9 @@ const iree_tokenizer_t* loom_serve_finite_model_tokenizer(
     const loom_serve_finite_model_t* model);
 loom_serve_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model);
+// Borrowed logical device owning this model's queues and numerical policy.
+loom_serve_device_t* loom_serve_finite_model_device(
+    const loom_serve_finite_model_t* model);
 
 typedef struct loom_serve_finite_prepared_t {
   // Owned source bytes. The input buffer remains retained by the request owner
@@ -220,6 +223,8 @@ iree_status_t loom_serve_finite_model_submit(
 // Scheduler consumes successful producer readiness, releasing the residency pin
 // and uploaded payload. Independent results may remain live across subsequent
 // cohorts, parameter eviction, reconfiguration, and model destruction.
+// A cancelled admitted cohort can complete without numerical submission after
+// its residency frontier succeeds; this releases the same pin and source plan.
 void loom_serve_finite_model_complete(loom_serve_finite_model_t* model);
 
 // Releases an unsubmitted cohort. Never used after
