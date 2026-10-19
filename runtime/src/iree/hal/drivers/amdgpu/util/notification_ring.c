@@ -59,28 +59,27 @@ iree_status_t iree_hal_amdgpu_reclaim_entry_prepare(
   entry->queue_upload_write_position = 0;
   entry->count = 0;
   entry->signal_semaphore_count = 0;
+  entry->resource_capacity = count;
+  entry->resources = NULL;
   if (count <= IREE_HAL_AMDGPU_RECLAIM_INLINE_CAPACITY) {
     entry->resources = entry->inline_resources;
   } else {
-    iree_host_size_t required_size = 0;
-    IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-        0, &required_size,
-        IREE_STRUCT_FIELD(count, iree_hal_resource_t*, NULL)));
+    const iree_host_size_t required_size = count * sizeof(*entry->resources);
     if (required_size > block_pool->usable_block_size) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "reclaim overflow (%" PRIhsz
-                              " bytes) exceeds block pool block size (%" PRIhsz
-                              " bytes)",
-                              required_size, block_pool->usable_block_size);
+      void* resources = NULL;
+      IREE_RETURN_IF_ERROR(iree_allocator_malloc(block_pool->block_allocator,
+                                                 required_size, &resources));
+      entry->resources = (iree_hal_resource_t**)resources;
+    } else {
+      iree_arena_block_t* block = NULL;
+      void* block_ptr = NULL;
+      IREE_TRACE_ZONE_BEGIN(z0);
+      IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, count);
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_arena_block_pool_acquire(block_pool, &block, &block_ptr));
+      entry->resources = (iree_hal_resource_t**)block_ptr;
+      IREE_TRACE_ZONE_END(z0);
     }
-    iree_arena_block_t* block = NULL;
-    void* block_ptr = NULL;
-    IREE_TRACE_ZONE_BEGIN(z0);
-    IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, count);
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_arena_block_pool_acquire(block_pool, &block, &block_ptr));
-    entry->resources = (iree_hal_resource_t**)block_ptr;
-    IREE_TRACE_ZONE_END(z0);
   }
   *out_resources = entry->resources;
   return iree_ok_status();
@@ -110,9 +109,14 @@ void iree_hal_amdgpu_reclaim_entry_release(
   iree_hal_resource_set_free(entry->resource_set);
   if (entry->resources != entry->inline_resources && entry->resources != NULL) {
     IREE_TRACE_ZONE_BEGIN(z0);
-    iree_arena_block_t* block =
-        iree_arena_block_trailer(block_pool, entry->resources);
-    iree_arena_block_pool_release(block_pool, block, block);
+    if (entry->resource_capacity * sizeof(*entry->resources) >
+        block_pool->usable_block_size) {
+      iree_allocator_free(block_pool->block_allocator, entry->resources);
+    } else {
+      iree_arena_block_t* block =
+          iree_arena_block_trailer(block_pool, entry->resources);
+      iree_arena_block_pool_release(block_pool, block, block);
+    }
     IREE_TRACE_ZONE_END(z0);
   }
   entry->resources = NULL;
@@ -127,6 +131,7 @@ void iree_hal_amdgpu_reclaim_entry_release(
   entry->queue_upload_write_position = 0;
   entry->count = 0;
   entry->signal_semaphore_count = 0;
+  entry->resource_capacity = 0;
 }
 
 static inline void iree_hal_amdgpu_reclaim_entry_execute_pre_signal_action(

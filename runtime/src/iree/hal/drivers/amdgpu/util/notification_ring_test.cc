@@ -8,6 +8,7 @@
 
 #include <array>
 #include <memory>
+#include <vector>
 
 #include "iree/async/proactor_platform.h"
 #include "iree/async/semaphore.h"
@@ -811,8 +812,27 @@ TEST_F(NotificationRingTest, PreSignalActionRunsBeforeSemaphorePublication) {
   iree_async_semaphore_release(semaphore);
 }
 
-TEST_F(NotificationRingTest,
-       OperationResourcesReleaseBeforeSemaphorePublication) {
+class ReclaimEntryTest : public NotificationRingTest,
+                         public ::testing::WithParamInterface<uint16_t> {};
+
+TEST_P(ReclaimEntryTest, UnpublishedEntryReleasesReservedStorage) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
+  auto* entry = ReclaimEntryForNextEpoch(ring.get());
+  iree_hal_resource_t** resources = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_reclaim_entry_prepare(entry, &block_pool,
+                                                       GetParam(), &resources));
+  // Submission can fail after reserving storage but before retaining resources.
+  iree_hal_amdgpu_reclaim_entry_release(entry, &block_pool);
+  EXPECT_EQ(entry->resources, nullptr);
+  EXPECT_EQ(entry->count, 0u);
+  EXPECT_EQ(entry->resource_capacity, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(StorageExtents, ReclaimEntryTest,
+                         ::testing::Values(2, 8, 9, 511, 512, 1660,
+                                           UINT16_MAX));
+
+TEST_P(ReclaimEntryTest, OperationResourcesReleaseBeforeSemaphorePublication) {
   IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
   iree_async_semaphore_t* semaphore = CreateSemaphore();
 
@@ -820,16 +840,19 @@ TEST_F(NotificationRingTest,
       ReclaimEntryForNextEpoch(ring.get());
   iree_hal_resource_t** resources = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_reclaim_entry_prepare(
-      reclaim_entry, &block_pool, /*count=*/2, &resources));
+      reclaim_entry, &block_pool, GetParam(), &resources));
   iree_async_semaphore_retain(semaphore);
   resources[0] = reinterpret_cast<iree_hal_resource_t*>(semaphore);
-  ReleaseOrderResource operation_resource = {};
-  iree_hal_resource_initialize(&kReleaseOrderResourceVTable,
-                               &operation_resource.resource);
-  operation_resource.semaphore = semaphore;
-  resources[1] = &operation_resource.resource;
+  std::vector<ReleaseOrderResource> operation_resources(GetParam() - 1);
+  for (size_t i = 0; i < operation_resources.size(); ++i) {
+    auto& resource = operation_resources[i];
+    iree_hal_resource_initialize(&kReleaseOrderResourceVTable,
+                                 &resource.resource);
+    resource.semaphore = semaphore;
+    resources[1 + i] = &resource.resource;
+  }
   reclaim_entry->signal_semaphore_count = 1;
-  reclaim_entry->count = 2;
+  reclaim_entry->count = GetParam();
 
   uint64_t epoch = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
   PushNotification(ring.get(), epoch, semaphore, 1);
@@ -840,7 +863,9 @@ TEST_F(NotificationRingTest,
       iree_hal_amdgpu_notification_ring_drain(
           ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
-  EXPECT_EQ(operation_resource.destroy_count, 1);
+  for (const auto& resource : operation_resources) {
+    EXPECT_EQ(resource.destroy_count, 1);
+  }
   EXPECT_EQ(iree_async_semaphore_query(semaphore), 1u);
 
   iree_async_semaphore_release(semaphore);
@@ -880,7 +905,7 @@ TEST_F(NotificationRingTest, RetireCallbackRunsBeforeSemaphorePublication) {
   iree_async_semaphore_release(semaphore);
 }
 
-TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
+TEST_P(ReclaimEntryTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
   iree_async_semaphore_t* semaphore = CreateSemaphore();
   PreSignalActionState action_state = {
@@ -899,18 +924,21 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
       ReclaimEntryForNextEpoch(ring.get());
   iree_hal_resource_t** resources = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_reclaim_entry_prepare(
-      reclaim_entry, &block_pool, /*count=*/2, &resources));
+      reclaim_entry, &block_pool, GetParam(), &resources));
   reclaim_entry->kernarg_write_position = 64;
   reclaim_entry->queue_upload_write_position = 256;
   iree_async_semaphore_retain(semaphore);
   resources[0] = reinterpret_cast<iree_hal_resource_t*>(semaphore);
-  ReleaseOrderResource operation_resource = {};
-  iree_hal_resource_initialize(&kReleaseOrderResourceVTable,
-                               &operation_resource.resource);
-  operation_resource.semaphore = semaphore;
-  resources[1] = &operation_resource.resource;
+  std::vector<ReleaseOrderResource> operation_resources(GetParam() - 1);
+  for (size_t i = 0; i < operation_resources.size(); ++i) {
+    auto& resource = operation_resources[i];
+    iree_hal_resource_initialize(&kReleaseOrderResourceVTable,
+                                 &resource.resource);
+    resource.semaphore = semaphore;
+    resources[1 + i] = &resource.resource;
+  }
   reclaim_entry->signal_semaphore_count = 1;
-  reclaim_entry->count = 2;
+  reclaim_entry->count = GetParam();
   reclaim_entry->pre_signal_action = {
       .fn = VerifySemaphoreNotVisibleBeforeFailedPreSignalAction,
       .user_data = &action_state,
@@ -936,7 +964,9 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   EXPECT_EQ(callback_state.flags, IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_FAILED);
   EXPECT_EQ(reclaim_positions.kernarg_write_position, 64u);
   EXPECT_EQ(reclaim_positions.queue_upload_write_position, 256u);
-  EXPECT_EQ(operation_resource.destroy_count, 1);
+  for (const auto& resource : operation_resources) {
+    EXPECT_EQ(resource.destroy_count, 1);
+  }
 
   iree_async_semaphore_release(semaphore);
 }

@@ -205,8 +205,8 @@ typedef void(IREE_API_PTR* iree_hal_amdgpu_reclaim_retire_fn_t)(
 // unretained semaphore pointers — the reclaim entry keeps them alive)
 // and operation-specific resources (buffers, executables, command buffers).
 struct iree_hal_amdgpu_reclaim_entry_t {
-  // Pointer to the retained-resource pointer array. Points to inline_resources
-  // when count <= INLINE_CAPACITY, otherwise to a block-pool-allocated array.
+  // Retained-resource array, inline or acquired from the block pool's
+  // allocator.
   iree_hal_resource_t** resources;
   // Optional operation resource set released before user signals publish.
   iree_hal_resource_set_t* resource_set;
@@ -240,23 +240,27 @@ struct iree_hal_amdgpu_reclaim_entry_t {
   // Number of leading |resources| entries retaining signal semaphores until
   // their notifications have been published.
   uint16_t signal_semaphore_count;
+  // Original pointer-array extent, preserved when retirement reduces count.
+  // Extents exceeding one pooled block belong directly to its allocator.
+  uint16_t resource_capacity;
   // Inline retained-resource storage for common small submissions.
   iree_hal_resource_t*
       inline_resources[IREE_HAL_AMDGPU_RECLAIM_INLINE_CAPACITY];
 };
 
 // Prepares a reclaim entry for |count| resources. If count fits inline,
-// sets |*out_resources| to the entry's inline storage. Otherwise acquires
-// a block from |block_pool| and sets |*out_resources| to point into it.
-// The caller fills the array with retained resource pointers, sets any
-// queue-owned ring write positions, and sets entry->count before advancing the
-// submission epoch.
+// sets |*out_resources| to the entry's inline storage. Larger arrays use a
+// pooled block or, when exceeding one block, an exact allocation from its
+// allocator. The caller fills the array with retained resource pointers, sets
+// any queue-owned ring write positions, and sets entry->count before advancing
+// the submission epoch.
 iree_status_t iree_hal_amdgpu_reclaim_entry_prepare(
     iree_hal_amdgpu_reclaim_entry_t* entry, iree_arena_block_pool_t* block_pool,
     uint16_t count, iree_hal_resource_t*** out_resources);
 
-// Releases all remaining resources in the entry and returns any overflow block
-// to the pool. Zeros entry->count and entry->signal_semaphore_count.
+// Releases all remaining resources and returns array storage to its owner.
+// Zeros entry->count, entry->signal_semaphore_count, and
+// entry->resource_capacity.
 void iree_hal_amdgpu_reclaim_entry_release(
     iree_hal_amdgpu_reclaim_entry_t* entry,
     iree_arena_block_pool_t* block_pool);
