@@ -1,0 +1,252 @@
+// Independent scalar GGUF/Q8 decoders executed by the VM oracle.
+func.def inline @qwen_cohort_reference_byte(%buffer: buffer, %origin: offset, %index: index) -> (i32) {
+  %element_bytes = index.constant 1 : offset
+  %add = index.scale %index, %element_bytes : index, offset -> offset
+  %address = index.add %origin, %add : offset
+  %view = buffer.view %buffer[%address] : buffer -> view<1xi8>
+  %byte = view.load %view[0] : view<1xi8> -> i8
+  %value = scalar.extui %byte : i8 to i32
+  func.return %value : i32
+}
+
+func.def inline @qwen_cohort_reference_half(%buffer: buffer, %origin: offset, %index: index) -> (f64) {
+  %element_bytes = index.constant 2 : offset
+  %add = index.scale %index, %element_bytes : index, offset -> offset
+  %address = index.add %origin, %add : offset
+  %view = buffer.view %buffer[%address] : buffer -> view<1xf16>
+  %half = view.load %view[0] : view<1xf16> -> f16
+  %value = scalar.extf %half : f16 to f64
+  func.return %value : f64
+}
+
+func.def inline @qwen_cohort_reference_q8(%input: buffer, %row_origin: offset, %element: index) -> (f64, f64, f64) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %thirty_two = index.constant 32 : index
+  %group_values = index.constant 128 : index
+  %group_bytes = index.constant 144 : offset
+  %header_bytes = index.constant 16 : offset
+  %group = index.div %element, %group_values : index
+  %within = index.rem %element, %group_values : index
+  %block = index.div %within, %thirty_two : index
+  %group_add = index.scale %group, %group_bytes : index, offset -> offset
+  %origin = index.add %row_origin, %group_add : offset
+  %payload = index.add %origin, %header_bytes : offset
+  %view = buffer.view %input[%payload] : buffer -> view<128xi8>
+  %word = view.load %view[%within] : view<128xi8> -> i8
+  %value = scalar.sitofp %word : i8 to f64
+  %d_index = index.mul %block, %two : index
+  %s_index = index.add %d_index, %one : index
+  %d = func.call @qwen_cohort_reference_half(%input, %origin, %d_index) : (buffer, offset, index) -> (f64)
+  %s = func.call @qwen_cohort_reference_half(%input, %origin, %s_index) : (buffer, offset, index) -> (f64)
+  func.return %value, %d, %s : f64, f64, f64
+}
+
+func.def inline @qwen_cohort_reference_q6(%weight: buffer, %row_origin: offset, %element: index) -> (f64) {
+  %zero = index.constant 0 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %sixty_four = index.constant 64 : index
+  %half_values = index.constant 128 : index
+  %block_values = index.constant 256 : index
+  %block_bytes = index.constant 210 : offset
+  %high_add = index.constant 128 : offset
+  %scale_add = index.constant 192 : offset
+  %d_add = index.constant 208 : offset
+  %mask15 = scalar.constant 15 : i32
+  %mask3 = scalar.constant 3 : i32
+  %shift4 = scalar.constant 4 : i32
+  %center = scalar.constant 32 : i32
+  %block = index.div %element, %block_values : index
+  %block_element = index.rem %element, %block_values : index
+  %half = index.div %block_element, %half_values : index
+  %within = index.rem %block_element, %half_values : index
+  %group = index.div %within, %thirty_two : index
+  %lane = index.rem %within, %thirty_two : index
+  %block_add = index.scale %block, %block_bytes : index, offset -> offset
+  %origin = index.add %row_origin, %block_add : offset
+  %high_origin = index.add %origin, %high_add : offset
+  %scale_origin = index.add %origin, %scale_add : offset
+  %d_origin = index.add %origin, %d_add : offset
+  %ql_half = index.mul %half, %sixty_four : index
+  %ql_side = index.rem %group, %two : index
+  %ql_side_add = index.mul %ql_side, %thirty_two : index
+  %ql_base = index.add %ql_half, %ql_side_add : index
+  %ql_index = index.add %ql_base, %lane : index
+  %qh_base = index.mul %half, %thirty_two : index
+  %qh_index = index.add %qh_base, %lane : index
+  %ql = func.call @qwen_cohort_reference_byte(%weight, %origin, %ql_index) : (buffer, offset, index) -> (i32)
+  %qh = func.call @qwen_cohort_reference_byte(%weight, %high_origin, %qh_index) : (buffer, offset, index) -> (i32)
+  %nibble = index.div %group, %two : index
+  %nibble_shift_index = index.mul %nibble, %four : index
+  %high_shift_index = index.mul %group, %two : index
+  %nibble_shift = index.cast %nibble_shift_index : index to i32
+  %high_shift = index.cast %high_shift_index : index to i32
+  %low_bits = scalar.shrui %ql, %nibble_shift : i32
+  %low = scalar.andi %low_bits, %mask15 : i32
+  %high_bits = scalar.shrui %qh, %high_shift : i32
+  %high_pair = scalar.andi %high_bits, %mask3 : i32
+  %high = scalar.shli %high_pair, %shift4 : i32
+  %unsigned = scalar.ori %low, %high : i32
+  %code = scalar.subi %unsigned, %center : i32
+  %code_float = scalar.sitofp %code : i32 to f64
+  %scale_half = index.mul %half, %eight : index
+  %scale_group = index.mul %group, %two : index
+  %scale_base = index.add %scale_half, %scale_group : index
+  %scale_lane = index.div %lane, %sixteen : index
+  %scale_index = index.add %scale_base, %scale_lane : index
+  %scales = buffer.view %weight[%scale_origin] : buffer -> view<16xi8>
+  %scale_byte = view.load %scales[%scale_index] : view<16xi8> -> i8
+  %scale = scalar.sitofp %scale_byte : i8 to f64
+  %d = func.call @qwen_cohort_reference_half(%weight, %d_origin, %zero) : (buffer, offset, index) -> (f64)
+  %scaled = scalar.mulf %code_float, %scale : f64
+  %value = scalar.mulf %scaled, %d : f64
+  func.return %value : f64
+}
+
+func.def inline @qwen_cohort_reference_q5(%weight: buffer, %block_origin: offset, %element: index) -> (f64, f64) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %thirty_two = index.constant 32 : index
+  %high_add = index.constant 16 : offset
+  %code_add = index.constant 48 : offset
+  %scale_add = index.constant 4 : offset
+  %mask15 = scalar.constant 15 : i32
+  %mask63 = scalar.constant 63 : i32
+  %mask1 = scalar.constant 1 : i32
+  %shift4 = scalar.constant 4 : i32
+  %shift6 = scalar.constant 6 : i32
+  %group = index.div %element, %thirty_two : index
+  %lane = index.rem %element, %thirty_two : index
+  %pair = index.div %group, %two : index
+  %pair_base = index.mul %pair, %thirty_two : index
+  %code_index = index.add %pair_base, %lane : index
+  %nibble = index.rem %group, %two : index
+  %nibble_shift_index = index.mul %nibble, %four : index
+  %nibble_shift = index.cast %nibble_shift_index : index to i32
+  %high_shift = index.cast %group : index to i32
+  %high_origin = index.add %block_origin, %high_add : offset
+  %code_origin = index.add %block_origin, %code_add : offset
+  %scale_origin = index.add %block_origin, %scale_add : offset
+  %packed = func.call @qwen_cohort_reference_byte(%weight, %code_origin, %code_index) : (buffer, offset, index) -> (i32)
+  %high_byte = func.call @qwen_cohort_reference_byte(%weight, %high_origin, %lane) : (buffer, offset, index) -> (i32)
+  %low_bits = scalar.shrui %packed, %nibble_shift : i32
+  %low = scalar.andi %low_bits, %mask15 : i32
+  %high_bits = scalar.shrui %high_byte, %high_shift : i32
+  %high_bit = scalar.andi %high_bits, %mask1 : i32
+  %high = scalar.shli %high_bit, %shift4 : i32
+  %code = scalar.ori %low, %high : i32
+  %code_float = scalar.uitofp %code : i32 to f64
+  %early = index.cmp ult, %group, %four : index
+  %scale, %minimum = scf.if %early -> (i32, i32) {
+    %minimum_index = index.add %group, %four : index
+    %s = func.call @qwen_cohort_reference_byte(%weight, %scale_origin, %group) : (buffer, offset, index) -> (i32)
+    %m = func.call @qwen_cohort_reference_byte(%weight, %scale_origin, %minimum_index) : (buffer, offset, index) -> (i32)
+    %scale_bits = scalar.andi %s, %mask63 : i32
+    %minimum_bits = scalar.andi %m, %mask63 : i32
+    scf.yield %scale_bits, %minimum_bits : i32, i32
+  } else {
+    %packed_index = index.add %group, %four : index
+    %scale_index = index.sub %group, %four : index
+    %p = func.call @qwen_cohort_reference_byte(%weight, %scale_origin, %packed_index) : (buffer, offset, index) -> (i32)
+    %s = func.call @qwen_cohort_reference_byte(%weight, %scale_origin, %scale_index) : (buffer, offset, index) -> (i32)
+    %m = func.call @qwen_cohort_reference_byte(%weight, %scale_origin, %group) : (buffer, offset, index) -> (i32)
+    %scale_low = scalar.andi %p, %mask15 : i32
+    %minimum_low = scalar.shrui %p, %shift4 : i32
+    %scale_high_bits = scalar.shrui %s, %shift6 : i32
+    %minimum_high_bits = scalar.shrui %m, %shift6 : i32
+    %scale_high = scalar.shli %scale_high_bits, %shift4 : i32
+    %minimum_high = scalar.shli %minimum_high_bits, %shift4 : i32
+    %scale_bits = scalar.ori %scale_low, %scale_high : i32
+    %minimum_bits = scalar.ori %minimum_low, %minimum_high : i32
+    scf.yield %scale_bits, %minimum_bits : i32, i32
+  }
+  %d = func.call @qwen_cohort_reference_half(%weight, %block_origin, %zero) : (buffer, offset, index) -> (f64)
+  %dmin = func.call @qwen_cohort_reference_half(%weight, %block_origin, %one) : (buffer, offset, index) -> (f64)
+  %scale_float = scalar.uitofp %scale : i32 to f64
+  %minimum_float = scalar.uitofp %minimum : i32 to f64
+  %scaled = scalar.mulf %d, %scale_float : f64
+  %value = scalar.mulf %scaled, %code_float : f64
+  %correction = scalar.mulf %dmin, %minimum_float : f64
+  func.return %value, %correction : f64, f64
+}
+
+func.def inline @qwen_cohort_reference(%rows: index, %kind: index, %weight_channels: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %thirty_two = index.constant 32 : index
+  %q8_values = index.constant 128 : index
+  %block_values = index.constant 256 : index
+  %q5_bytes = index.constant 176 : offset
+  %q6_bytes = index.constant 210 : offset
+  %q8_bytes = index.constant 144 : offset
+  %f32_bytes = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %zero_float = scalar.constant 0.0 : f64
+  %is_q5 = index.cmp eq, %kind, %zero : index
+  %is_f32 = index.cmp eq, %kind, %two : index
+  %block_bytes = scf.select %is_q5, %q5_bytes, %q6_bytes : offset
+  %blocks = index.div %inputs, %block_values : index
+  %weight_row_stride = index.scale %blocks, %block_bytes : index, offset -> offset
+  %weight_group_stride = index.scale %weight_channels, %weight_row_stride : index, offset -> offset
+  %weight_block_stride = index.scale %weight_channels, %block_bytes : index, offset -> offset
+  %q8_groups = index.div %inputs, %q8_values : index
+  %q8_row_stride = index.scale %q8_groups, %q8_bytes : index, offset -> offset
+  %f32_row_stride = index.scale %inputs, %f32_bytes : index, offset -> offset
+  %input_stride = scf.select %is_f32, %f32_row_stride, %q8_row_stride : offset
+  %output_stride = index.scale %outputs, %f32_bytes : index, offset -> offset
+  scf.for %row = [%zero to %rows step %one] {
+    %input_origin = index.scale %row, %input_stride : index, offset -> offset
+    %output_origin = index.scale %row, %output_stride : index, offset -> offset
+    %result = buffer.view %output[%output_origin] : buffer -> view<[%outputs]xf32>
+    scf.for %column = [%zero to %outputs step %one] {
+      %weight_group = index.div %column, %weight_channels : index
+      %weight_channel = index.rem %column, %weight_channels : index
+      %weight_group_origin = index.scale %weight_group, %weight_group_stride : index, offset -> offset
+      %weight_channel_add = index.scale %weight_channel, %block_bytes : index, offset -> offset
+      %weight_origin = index.add %weight_group_origin, %weight_channel_add : offset
+      %sum = scf.for %element = [%zero to %inputs step %one](%accumulator = %zero_float : f64) -> (f64) {
+        %activation, %input_scale, %input_sum = scf.if %is_f32 -> (f64, f64, f64) {
+          %view = buffer.view %input[%input_origin] : buffer -> view<[%inputs]xf32>
+          %f32_value = view.load %view[%element] : view<[%inputs]xf32> -> f32
+          %value = scalar.extf %f32_value : f32 to f64
+          %one_float = scalar.constant 1.0 : f64
+          scf.yield %value, %one_float, %zero_float : f64, f64, f64
+        } else {
+          %value, %d, %s = func.call @qwen_cohort_reference_q8(%input, %input_origin, %element) : (buffer, offset, index) -> (f64, f64, f64)
+          scf.yield %value, %d, %s : f64, f64, f64
+        }
+        %weighted, %minimum = scf.if %is_q5 -> (f64, f64) {
+          %block = index.div %element, %block_values : index
+          %within = index.rem %element, %block_values : index
+          %block_add = index.scale %block, %weight_block_stride : index, offset -> offset
+          %block_origin = index.add %weight_origin, %block_add : offset
+          %value, %correction = func.call @qwen_cohort_reference_q5(%weight, %block_origin, %within) : (buffer, offset, index) -> (f64, f64)
+          %within_group = index.rem %element, %thirty_two : index
+          %first = index.cmp eq, %within_group, %zero : index
+          %applied = scf.select %first, %correction, %zero_float : f64
+          scf.yield %value, %applied : f64, f64
+        } else {
+          %value = func.call @qwen_cohort_reference_q6(%weight, %weight_origin, %element) : (buffer, offset, index) -> (f64)
+          scf.yield %value, %zero_float : f64, f64
+        }
+        %scaled = scalar.mulf %weighted, %input_scale : f64
+        %product = scalar.mulf %scaled, %activation : f64
+        %correction = scalar.mulf %minimum, %input_sum : f64
+        %contribution = scalar.subf %product, %correction : f64
+        %next = scalar.addf %accumulator, %contribution : f64
+        scf.yield %next : f64
+      }
+      %value = scalar.fptrunc %sum : f64 to f32
+      view.store %value, %result[%column] : f32, view<[%outputs]xf32>
+    }
+  }
+  func.return
+}

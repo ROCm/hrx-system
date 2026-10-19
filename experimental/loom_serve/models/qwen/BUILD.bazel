@@ -145,6 +145,33 @@ loom_library(
 )
 
 loom_library(
+    name = "cohort_kernels",
+    srcs = ["kernels/qwen38/linear_cohort.loom"],
+    deps = ["//experimental/loom_serve/motifs/ggml:library"],
+)
+
+loom_test(
+    name = "cohort_projection_test",
+    srcs = [
+        "tests/linear_cohort.loom",
+        "tests/linear_cohort_oracle.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    variants = {
+        "rows1": {"configs": {"runner.qwen38.prefill_token_count": "1"}},
+        "rows16": {"configs": {"runner.qwen38.prefill_token_count": "16"}},
+        "rows2": {"configs": {"runner.qwen38.prefill_token_count": "2"}},
+        "rows4": {"configs": {"runner.qwen38.prefill_token_count": "4"}},
+        "rows8": {"configs": {"runner.qwen38.prefill_token_count": "8"}},
+    },
+    deps = [":cohort_kernels"],
+)
+
+loom_library(
     name = "vision_kernels",
     srcs = [
         "kernels/qwen38/vision_attention.loom",

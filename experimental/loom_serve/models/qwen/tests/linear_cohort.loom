@@ -1,0 +1,115 @@
+// The shipped leaves are compared with independent scalar GGUF decoders.
+// Three K blocks and odd channel counts exercise both tails; inactive output
+// rows must retain their sentinels. Config variants cover each row-bank
+// size within the same physical capacity, as they do in the serving pool.
+config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%value, 1, 512)]
+
+func.decl @qwen_cohort_reference(%rows: index, %kind: index, %weight_channels: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_q8_1_cohort(%inputs: index, %outputs: index) launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def @q5k_q8_1_cohort_oracle(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @runner.qwen38.prefill_token_count : index
+  %kind = index.constant 0 : index
+  %channels = index.constant 1 : index
+  func.call @qwen_cohort_reference(%rows, %kind, %channels, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @q5k_q8_1_cohort_check {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %inputs = check.literal value(768) : index
+    %outputs = check.literal value(9) : index
+    %input = check.generate.random.uniform seed(%seed0) range(-128 to -65) : tensor<16x864xi8>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to -65) : tensor<9x3x176xi8>
+    %output = check.generate.fill value(-99.0) : tensor<17x9xf32>
+    check.compare<@qwen38_linear_q5k_q8_1_cohort, @q5k_q8_1_cohort_oracle>[%inputs, %outputs](%inputs, %outputs, %input, %weight, %output) : [index, index](index, index, tensor<16x864xi8>, tensor<9x3x176xi8>, tensor<17x9xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0001) rtol(0.00002) nan(same) : tensor<17x9xf32>
+    }
+  }
+  check.return
+}
+
+kernel.decl @qwen38_linear_q5k_q8_1_channel8_cohort(%inputs: index, %outputs: index) launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def @q5k_q8_1_channel8_cohort_oracle(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @runner.qwen38.prefill_token_count : index
+  %kind = index.constant 0 : index
+  %channels = index.constant 8 : index
+  func.call @qwen_cohort_reference(%rows, %kind, %channels, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @q5k_q8_1_channel8_cohort_check {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %inputs = check.literal value(768) : index
+    %outputs = check.literal value(16) : index
+    %input = check.generate.random.uniform seed(%seed0) range(-128 to -65) : tensor<16x864xi8>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to -65) : tensor<16x3x176xi8>
+    %output = check.generate.fill value(-99.0) : tensor<17x16xf32>
+    check.compare<@qwen38_linear_q5k_q8_1_channel8_cohort, @q5k_q8_1_channel8_cohort_oracle>[%inputs, %outputs](%inputs, %outputs, %input, %weight, %output) : [index, index](index, index, tensor<16x864xi8>, tensor<16x3x176xi8>, tensor<17x16xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0001) rtol(0.00002) nan(same) : tensor<17x16xf32>
+    }
+  }
+  check.return
+}
+
+kernel.decl @qwen38_linear_q6k_q8_1_cohort(%inputs: index, %outputs: index) launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def @q6k_q8_1_cohort_oracle(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @runner.qwen38.prefill_token_count : index
+  %kind = index.constant 1 : index
+  %channels = index.constant 1 : index
+  func.call @qwen_cohort_reference(%rows, %kind, %channels, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @q6k_q8_1_cohort_check {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %inputs = check.literal value(768) : index
+    %outputs = check.literal value(9) : index
+    %input = check.generate.random.uniform seed(%seed0) range(-128 to -65) : tensor<16x864xi8>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to -65) : tensor<9x3x210xi8>
+    %output = check.generate.fill value(-99.0) : tensor<17x9xf32>
+    check.compare<@qwen38_linear_q6k_q8_1_cohort, @q6k_q8_1_cohort_oracle>[%inputs, %outputs](%inputs, %outputs, %input, %weight, %output) : [index, index](index, index, tensor<16x864xi8>, tensor<9x3x210xi8>, tensor<17x9xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0001) rtol(0.00002) nan(same) : tensor<17x9xf32>
+    }
+  }
+  check.return
+}
+
+kernel.decl @qwen38_linear_q6k_f32_cohort(%inputs: index, %outputs: index) launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def @q6k_f32_cohort_oracle(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @runner.qwen38.prefill_token_count : index
+  %kind = index.constant 2 : index
+  %channels = index.constant 1 : index
+  func.call @qwen_cohort_reference(%rows, %kind, %channels, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @q6k_f32_cohort_check {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %inputs = check.literal value(768) : index
+    %outputs = check.literal value(9) : index
+    %input = check.generate.random.uniform seed(%seed0) range(-0.25 to 0.25) : tensor<16x768xf32>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to -65) : tensor<9x3x210xi8>
+    %output = check.generate.fill value(-99.0) : tensor<17x9xf32>
+    check.compare<@qwen38_linear_q6k_f32_cohort, @q6k_f32_cohort_oracle>[%inputs, %outputs](%inputs, %outputs, %input, %weight, %output) : [index, index](index, index, tensor<16x768xf32>, tensor<9x3x210xi8>, tensor<17x9xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.002) rtol(0.00002) nan(same) : tensor<17x9xf32>
+    }
+  }
+  check.return
+}

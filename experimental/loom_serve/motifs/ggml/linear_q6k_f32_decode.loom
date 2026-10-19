@@ -114,7 +114,7 @@ func.def inline @ggml_q6k_f32_block_row_lane(%weight: buffer, %weight_row_byte_b
 }
 
 // Computes two output rows while loading each F32 activation packet once.
-func.def inline @ggml_q6k_f32_block_lane_row2(%input: buffer, %input_row_byte_base: offset, %weight: buffer, %weight_row0_byte_base: offset, %weight_row1_byte_base: offset, %q6_block: index, %lane_in_block: index) -> (f32, f32) {
+func.def public inline @ggml_q6k_f32_block_lane_row2(%input: buffer, %input_row_byte_base: offset, %weight: buffer, %weight_row0_byte_base: offset, %weight_row1_byte_base: offset, %q6_block: index, %lane_in_block: index) -> (f32, f32) {
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
   %c32 = index.constant 32 : index
