@@ -1,0 +1,17 @@
+func.decl @check_tokens()
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+global.rodata.def @rejection = bytes("736f757263652072656a656374656420696e707574")
+
+func.def public @check() {
+  func.call @check_tokens() : ()
+  func.return
+}
+
+func.def public @reject() {
+  %false = scalar.constant 0 : i32
+  %diagnostic = global.load @rejection : buffer
+  func.call @require(%false, %diagnostic) : (i32, buffer)
+  func.return
+}

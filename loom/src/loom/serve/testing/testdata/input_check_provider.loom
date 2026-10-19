@@ -1,0 +1,27 @@
+func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+global.rodata.def @text = bytes("616261")
+
+global.rodata.def @expected = align(4) bytes("000000000100000000000000")
+
+global.rodata.def @mismatch = bytes("746f6b656e206d69736d61746368")
+
+func.def public @check_tokens() {
+  %text = global.load @text : buffer
+  %c0 = scalar.constant 0 : i32
+  %capacity = scalar.constant 3 : i64
+  %ids, %count = func.call @encode(%text, %c0, %capacity) : (buffer, i32, i64) -> (buffer, i64)
+  %expected = global.load @expected : buffer
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 12 : offset
+  %comparison = buffer.compare %ids[%origin], %expected[%origin], %bytes
+  %equal = scalar.cmpi eq, %comparison, %c0 : i32
+  %complete = scalar.cmpi eq, %count, %capacity : i64
+  %valid = scalar.andi %equal, %complete : i1
+  %condition = scalar.extui %valid : i1 to i32
+  %diagnostic = global.load @mismatch : buffer
+  func.call @require(%condition, %diagnostic) : (i32, buffer)
+  func.return
+}
