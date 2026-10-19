@@ -541,6 +541,26 @@ loom_test(
     deps = [":input_records"],
 )
 
+loom_test(
+    name = "attention_split_test",
+    srcs = [
+        "kernels/qwen38/attention_common.loom",
+        "kernels/qwen38/attention_spans_split.loom",
+        "kernels/qwen38/spans.loom",
+        "tests/attention_spans_split.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {"qwen38.attention.cache_capacity": "640"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    variants = {
+        "dense": {"configs": {"qwen38.attention.pool_capacity": "0"}},
+        "paged": {"configs": {"qwen38.attention.pool_capacity": "768"}},
+    },
+)
+
 py_binary(
     name = "benchmark_service",
     testonly = True,
