@@ -25,6 +25,8 @@ extern "C" {
 // Private construction may run on a shared worker; the model retains this
 // representation and its descriptor tables through all warm program consumers.
 typedef struct loom_serve_text_source_t {
+  // Coherent source contract selected before compilation and tokenizer work.
+  loom_serve_text_mode_t mode;
   // Allocation policy for source-owned metadata and bytecode.
   iree_allocator_t host_allocator;
   // Copied diagnostics, extended by subsequent native stage compilation.

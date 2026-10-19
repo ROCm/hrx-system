@@ -270,8 +270,10 @@ loom_cc_library(
   NAME
     source_execution_tests
   SRCS
+    "capture_execution_test.cc"
     "source_execution_test.cc"
   DEPS
+    ::capture
     ::source_service_fixture
   TESTONLY
   ALWAYSLINK
@@ -501,6 +503,40 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    capture
+  HDRS
+    "capture.h"
+  SRCS
+    "capture.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::vm
+    loom::serve::runtime::execution
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    capture_test
+  SRCS
+    "capture_test.cc"
+  DEPS
+    ::capture
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     model
   HDRS
     "control.h"
@@ -522,6 +558,7 @@ loom_cc_library(
     "state.c"
     "variant.c"
   DEPS
+    ::capture
     ::chat
     ::packing
     ::storage

@@ -141,7 +141,8 @@ static iree_status_t loom_serve_text_prepare(
     status = iree_vm_buffer_ptr_from_variant_move(
         &source->vm_types, &results[3], &source->terminal_marker);
   }
-  if (iree_status_is_ok(status) && !source->terminal_marker) {
+  if (iree_status_is_ok(status) && !source->terminal_marker &&
+      source->mode == LOOM_SERVE_TEXT_MODE_GENERATE) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "source terminal marker must not be null");
   }
@@ -180,6 +181,8 @@ iree_status_t loom_serve_text_source_initialize(
     loom_serve_text_source_t* out_source,
     loom_serve_text_storage_t* out_storage) {
   memset(out_source, 0, sizeof(*out_source));
+  out_source->mode = options->mode;
+  out_source->eos_token = -1;
   out_source->host_allocator = host_allocator;
   IREE_RETURN_IF_ERROR(loom_serve_text_prepare(target_environment, out_source,
                                                options, out_storage));
@@ -188,28 +191,40 @@ iree_status_t loom_serve_text_source_initialize(
       iree_hal_module_register_types(out_source->environment, &table));
   IREE_RETURN_IF_ERROR(
       iree_hal_module_types_resolve(table, &out_source->types));
-  const iree_string_view_t roots[] = {IREE_SVL("step"),
-                                      IREE_SVL("epoch"),
-                                      IREE_SVL("encode_epoch"),
-                                      IREE_SVL("publish_epoch"),
-                                      IREE_SVL("encode_state"),
-                                      IREE_SVL("render_tool"),
-                                      IREE_SVL("prepare_input"),
-                                      IREE_SVL("output_next"),
-                                      IREE_SVL("complete_text"),
-                                      IREE_SVL("model_name"),
-                                      IREE_SVL("chat_image_limits"),
-                                      IREE_SVL("chat_begin"),
-                                      IREE_SVL("chat_message"),
-                                      IREE_SVL("chat_end"),
-                                      IREE_SVL("parse_tools"),
-                                      IREE_SVL("request_defaults"),
-                                      IREE_SVL("request_options"),
-                                      IREE_SVL("bind_request")};
-  return loom_serve_program_compile(
-      target_environment, out_source->environment, &options->sources,
-      options->sources.control, IREE_ARRAYSIZE(roots), roots,
-      &out_source->compilation, host_allocator, &out_source->module);
+  const iree_string_view_t generation_roots[] = {IREE_SVL("step"),
+                                                 IREE_SVL("epoch"),
+                                                 IREE_SVL("encode_epoch"),
+                                                 IREE_SVL("publish_epoch"),
+                                                 IREE_SVL("encode_state"),
+                                                 IREE_SVL("render_tool"),
+                                                 IREE_SVL("prepare_input"),
+                                                 IREE_SVL("output_next"),
+                                                 IREE_SVL("complete_text"),
+                                                 IREE_SVL("model_name"),
+                                                 IREE_SVL("chat_image_limits"),
+                                                 IREE_SVL("chat_begin"),
+                                                 IREE_SVL("chat_message"),
+                                                 IREE_SVL("chat_end"),
+                                                 IREE_SVL("parse_tools"),
+                                                 IREE_SVL("request_defaults"),
+                                                 IREE_SVL("request_options"),
+                                                 IREE_SVL("bind_request")};
+  const iree_string_view_t encoding_roots[] = {IREE_SVL("epoch"),
+                                               IREE_SVL("encode_epoch"),
+                                               IREE_SVL("publish_epoch"),
+                                               IREE_SVL("encode_state"),
+                                               IREE_SVL("bind_request"),
+                                               IREE_SVL("capture_epoch"),
+                                               IREE_SVL("request_defaults"),
+                                               IREE_SVL("request_options")};
+  const bool encodes = options->mode == LOOM_SERVE_TEXT_MODE_ENCODE;
+  return loom_serve_program_compile(target_environment, out_source->environment,
+                                    &options->sources, options->sources.control,
+                                    encodes ? IREE_ARRAYSIZE(encoding_roots)
+                                            : IREE_ARRAYSIZE(generation_roots),
+                                    encodes ? encoding_roots : generation_roots,
+                                    &out_source->compilation, host_allocator,
+                                    &out_source->module);
 }
 
 void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {

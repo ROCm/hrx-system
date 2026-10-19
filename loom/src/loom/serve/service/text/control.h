@@ -51,6 +51,12 @@ typedef struct loom_serve_text_control_t {
   iree_vm_function_t encode_state;
   // Request options to retained row policy.
   iree_vm_function_t bind_request;
+  // Source-owned ranges for independent known-input activation capture.
+  iree_vm_function_t capture_epoch;
+  // Source-owned per-request options for a known-input model.
+  iree_vm_function_t request_options;
+  // Owned known-input defaults; generative defaults belong to chat_policy.
+  iree_vm_buffer_t* defaults;
   // Chat policy borrowing this program and owning its source-returned defaults.
   loom_serve_text_chat_policy_t chat_policy;
   // Queue-visible host payloads retained until actual device retirement.
@@ -79,6 +85,14 @@ void loom_serve_text_control_unlink(loom_serve_text_control_t* control);
 // Releases host payloads after actual queue retirement. Unlink must precede
 // this call. Both cleanup operations accept partial initialization.
 void loom_serve_text_control_deinitialize(loom_serve_text_control_t* control);
+
+// Evaluates the checked model source against a validated native cohort, then
+// copies and validates its output ranges before any retained row is mutated.
+iree_status_t loom_serve_text_control_capture(
+    loom_serve_text_control_t* control, const loom_serve_text_source_t* source,
+    iree_host_size_t shape_index, iree_host_size_t span_count,
+    iree_device_size_t residual_length, iree_allocator_t host_allocator,
+    loom_serve_text_capture_t** out_capture);
 
 #ifdef __cplusplus
 }  // extern "C"

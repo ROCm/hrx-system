@@ -16,6 +16,7 @@
 #include "loom/serve/runtime/program/sources.h"
 #include "loom/serve/runtime/program/variant_pool.h"
 #include "loom/serve/runtime/storage/memory.h"
+#include "loom/serve/service/text/capture.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/media_input.h"
 #include "loom/serve/service/text/packing.h"
@@ -83,7 +84,17 @@ const loom_serve_compilation_report_t* loom_serve_text_variant_report(
 // Retained arenas are sized to row_count, not this control-payload bound.
 enum { LOOM_SERVE_TEXT_ROW_CAPACITY = 16 };
 
+typedef enum loom_serve_text_mode_e {
+  // Tokenizer/chat policy and optional local token prediction.
+  LOOM_SERVE_TEXT_MODE_GENERATE = 0,
+  // Known IDs advance retained state and produce opaque activation bytes.
+  // No tokenizer, chat policy, vocabulary head, or proposal stage is required.
+  LOOM_SERVE_TEXT_MODE_ENCODE = 1,
+} loom_serve_text_mode_t;
+
 typedef struct loom_serve_text_options_t {
+  // Source root contract and request semantics, fixed for this residency.
+  loom_serve_text_mode_t mode;
   // Explicit program inputs and local base, borrowed through load completion.
   loom_serve_sources_t sources;
   // Maximum input count specialized into isolated prefill.
@@ -480,6 +491,11 @@ const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
 // chunks or promotes a selected first result to speculation, stopping
 // speculative work at EOS, output credit or context bound.
 //
+// Known-input models require out_capture and reject selection, proposal, media,
+// and continuation. Their source capture plan is checked before row mutation;
+// successful submission transfers independent output ownership to the caller.
+// Generative models require out_capture=NULL and preserve the token contract.
+//
 // Accepted token IDs and publication metadata are copied before return. Their
 // caller storage may be reused immediately, even on submission failure. Media
 // metadata is also copied, and queue submission retains every device view it
@@ -498,6 +514,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
     iree_host_size_t span_count, const loom_serve_text_span_t* spans,
     const uint32_t* output_limits,
     const loom_serve_text_continuation_t* continuation,
+    loom_serve_text_capture_t** out_capture,
     loom_serve_execution_frontier_t* out_frontier);
 
 // Consumes one successfully completed epoch after both submitted frontiers

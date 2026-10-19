@@ -226,10 +226,16 @@ loom_cc_library(
 loom_cc_library(
     name = "source_execution_tests",
     testonly = True,
-    srcs = ["source_execution_test.cc"],
+    srcs = [
+        "capture_execution_test.cc",
+        "source_execution_test.cc",
+    ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//loom/src/loom/serve:implementation"],
-    deps = [":source_service_fixture"],
+    deps = [
+        ":capture",
+        ":source_service_fixture",
+    ],
     alwayslink = True,
 )
 
@@ -427,6 +433,30 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "capture",
+    srcs = ["capture.c"],
+    hdrs = ["capture.h"],
+    deps = [
+        "//loom/src/loom/serve/runtime/execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "capture_test",
+    srcs = ["capture_test.cc"],
+    deps = [
+        ":capture",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "model",
     srcs = [
         "control.c",
@@ -450,6 +480,7 @@ loom_cc_library(
         "variant.h",
     ],
     deps = [
+        ":capture",
         ":chat",
         ":packing",
         ":storage",

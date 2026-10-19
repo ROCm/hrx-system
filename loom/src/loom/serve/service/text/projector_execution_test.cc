@@ -180,8 +180,8 @@ TEST_F(PixelProjectorExecutionTest, RgbAndRgbaCohortConditionsRetainedText) {
       },
   };
   // No producer host wait or feature snapshot precedes text submission.
-  IREE_ASSERT_OK(loom_serve_text_model_submit_epoch(model_, 1, 2, spans,
-                                                    nullptr, nullptr, &ready));
+  IREE_ASSERT_OK(loom_serve_text_model_submit_epoch(
+      model_, 1, 2, spans, nullptr, nullptr, nullptr, &ready));
   ASSERT_NO_FATAL_FAILURE(Wait(ready));
   loom_serve_text_result_t results[2];
   IREE_ASSERT_OK(loom_serve_text_model_complete_epoch(model_, results));

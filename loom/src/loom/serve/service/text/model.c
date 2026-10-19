@@ -228,11 +228,13 @@ static iree_status_t loom_serve_text_load_prepare(
     loom_serve_text_load_t* load) {
   loom_serve_text_model_t* model = load->model;
   const loom_serve_text_options_t* options = &load->options;
-  IREE_RETURN_IF_ERROR(loom_serve_tokenizer_load_start(
-      loom_serve_host_compiler_sink(
-          loom_serve_device_host(model->device_owner)),
-      &options->sources, options->tokenizer_path, load->event.wake,
-      load->event.user_data, model->host_allocator, &load->tokenizer_load));
+  if (options->mode == LOOM_SERVE_TEXT_MODE_GENERATE) {
+    IREE_RETURN_IF_ERROR(loom_serve_tokenizer_load_start(
+        loom_serve_host_compiler_sink(
+            loom_serve_device_host(model->device_owner)),
+        &options->sources, options->tokenizer_path, load->event.wake,
+        load->event.user_data, model->host_allocator, &load->tokenizer_load));
+  }
   model->shape_count = options->epoch_count;
   model->context_capacity = options->context_capacity;
   if (model->shape_count) {
@@ -378,6 +380,15 @@ iree_status_t loom_serve_text_load_allocate(
     loom_serve_text_load_wake_fn_t wake, void* user_data,
     iree_allocator_t host_allocator, loom_serve_text_load_t** out_load) {
   *out_load = NULL;
+  if ((options->mode != LOOM_SERVE_TEXT_MODE_GENERATE &&
+       options->mode != LOOM_SERVE_TEXT_MODE_ENCODE) ||
+      (options->mode == LOOM_SERVE_TEXT_MODE_ENCODE &&
+       (!options->epoch_count || options->draft_depth ||
+        !iree_string_view_is_empty(options->tokenizer_path)))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "encoding requires packed epochs without a "
+                            "tokenizer or draft stages");
+  }
   if (options->row_count < 1 || options->row_count > TEXT_ROW_CAPACITY) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "text row count must be in [1, 16]");
@@ -513,7 +524,8 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
                                             &model->source.tokenizer)) {
           return iree_ok_status();
         }
-        if (iree_status_is_ok(status)) {
+        if (iree_status_is_ok(status) &&
+            model->source.mode == LOOM_SERVE_TEXT_MODE_GENERATE) {
           status = loom_serve_text_source_resolve_tokenizer(&model->source);
         }
         if (iree_status_is_ok(status)) {
@@ -1295,8 +1307,19 @@ iree_status_t loom_serve_text_model_submit_epoch(
     iree_host_size_t span_count, const loom_serve_text_span_t* spans,
     const uint32_t* output_limits,
     const loom_serve_text_continuation_t* continuation,
+    loom_serve_text_capture_t** out_capture,
     loom_serve_execution_frontier_t* out_frontier) {
   *out_frontier = (loom_serve_execution_frontier_t){0};
+  if (out_capture) {
+    *out_capture = NULL;
+  }
+  const bool encodes = model->source.mode == LOOM_SERVE_TEXT_MODE_ENCODE;
+  if (encodes != (out_capture != NULL) ||
+      (encodes && (output_limits || continuation))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "known-input encoding requires capture ownership "
+                            "without speculative continuation");
+  }
   if (continuation && !output_limits) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "continuation requires speculative output limits");
@@ -1329,7 +1352,8 @@ iree_status_t loom_serve_text_model_submit_epoch(
   bool has_media_input = false;
   for (iree_host_size_t i = 0; i < span_count; ++i) {
     const loom_serve_text_span_t* span = &spans[i];
-    if (span->row_index >= model->row_count || !span->token_count ||
+    if ((encodes && (span->flags || span->media)) ||
+        span->row_index >= model->row_count || !span->token_count ||
         !span->token_ids ||
         span->token_count > shape.token_capacity - token_count ||
         (span->flags & ~(LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
@@ -1485,7 +1509,25 @@ iree_status_t loom_serve_text_model_submit_epoch(
         model->host_allocator, &media));
   }
   iree_status_t status = iree_ok_status();
-  if (media.plan) {
+  iree_host_size_t input_count = loom_serve_text_epoch_plan_write(
+      model->state.rows, model->control.host.bytes[TEXT_HOST_PLAN],
+      model->control.host.bytes[TEXT_HOST_INPUT], span_count, spans,
+      output_limits, NULL, 0, 0);
+  if (continuation) {
+    input_count = loom_serve_text_epoch_plan_write(
+        model->state.rows, model->control.host.bytes[TEXT_HOST_PLAN],
+        model->control.host.bytes[TEXT_HOST_INPUT], continuation->span_count,
+        continuation->spans, continuation->output_limits, next_indices,
+        TEXT_ROW_CAPACITY, input_count);
+  }
+  loom_serve_text_capture_t* capture = NULL;
+  if (encodes) {
+    status = loom_serve_text_control_capture(
+        &model->control, &model->source, shape_index, span_count,
+        iree_hal_buffer_byte_length(model->state.residual),
+        model->host_allocator, &capture);
+  }
+  if (iree_status_is_ok(status) && media.plan) {
     status = loom_serve_execution_reserve_workspace(
         model->execution, media.device_length,
         LOOM_SERVE_TEXT_MEDIA_PACKET_FEATURE_ALIGNMENT);
@@ -1495,6 +1537,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_text_media_epoch_deinitialize(&media);
+    loom_serve_text_capture_release(capture);
     return status;
   }
   model->invocation.media = media;
@@ -1511,17 +1554,6 @@ iree_status_t loom_serve_text_model_submit_epoch(
     status = loom_serve_text_publish_state_bindings(model);
   }
 
-  iree_host_size_t input_count = loom_serve_text_epoch_plan_write(
-      model->state.rows, model->control.host.bytes[TEXT_HOST_PLAN],
-      model->control.host.bytes[TEXT_HOST_INPUT], span_count, spans,
-      output_limits, NULL, 0, 0);
-  if (continuation) {
-    input_count = loom_serve_text_epoch_plan_write(
-        model->state.rows, model->control.host.bytes[TEXT_HOST_PLAN],
-        model->control.host.bytes[TEXT_HOST_INPUT], continuation->span_count,
-        continuation->spans, continuation->output_limits, next_indices,
-        TEXT_ROW_CAPACITY, input_count);
-  }
   loom_serve_text_media_epoch_t* invocation_media = &model->invocation.media;
   const bool has_media_packet = invocation_media->plan != NULL;
   iree_vm_buffer_t* media_plan =
@@ -1644,14 +1676,23 @@ iree_status_t loom_serve_text_model_submit_epoch(
                                     iree_vm_variant_span_from_array(results));
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  if (iree_status_is_ok(status) && capture) {
+    status = loom_serve_text_capture_submit(capture, model->execution,
+                                            model->state.residual);
+  }
   if (iree_status_is_ok(status) && dynamic_input) {
     status = loom_serve_execution_dealloca(model->execution, dynamic_input,
                                            &completion);
   }
   iree_hal_buffer_release(dynamic_input);
   if (iree_status_is_ok(status)) {
+    if (out_capture) {
+      *out_capture = capture;
+      capture = NULL;
+    }
     *out_frontier = loom_serve_execution_frontier(model->execution);
   }
+  loom_serve_text_capture_release(capture);
   return status;
 }
 
@@ -1726,7 +1767,7 @@ static iree_status_t loom_serve_text_epoch(
     loom_serve_text_result_t* out_results) {
   loom_serve_execution_frontier_t frontier;
   IREE_RETURN_IF_ERROR(loom_serve_text_model_submit_epoch(
-      model, shape_index, span_count, spans, output_limits, continuation,
+      model, shape_index, span_count, spans, output_limits, continuation, NULL,
       &frontier));
   IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
   return loom_serve_text_model_complete_epoch(model, out_results);
@@ -1783,7 +1824,7 @@ iree_status_t loom_serve_text_row_submit_prefill(
         LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
     };
     return loom_serve_text_model_submit_epoch(model, shape_index, 1, &span,
-                                              NULL, NULL, out_frontier);
+                                              NULL, NULL, NULL, out_frontier);
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_state_row_activate(row->state));
   uint8_t* input = model->control.host.bytes[TEXT_HOST_INPUT].data;
@@ -1843,7 +1884,7 @@ iree_status_t loom_serve_text_row_submit_decode(
         LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
     };
     return loom_serve_text_model_submit_epoch(row->model, 0, 1, &span, NULL,
-                                              NULL, out_frontier);
+                                              NULL, NULL, out_frontier);
   }
   // The host row owns the input position and prediction regardless of which
   // schedule produced it. The isolated decode command consumes that snapshot.

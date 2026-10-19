@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/vm/sync.h"
 #include "loom/serve/runtime/program/input.h"
 #include "loom/serve/runtime/program/json.h"
 #include "loom/serve/service/text/epoch_plan.h"
@@ -105,22 +106,26 @@ iree_status_t loom_serve_text_control_initialize(
     status = loom_serve_json_module_create(source->environment, host_allocator,
                                            &libraries[2]);
   }
-  if (iree_status_is_ok(status)) {
+  const bool generates = source->mode == LOOM_SERVE_TEXT_MODE_GENERATE;
+  if (iree_status_is_ok(status) && generates) {
     status = loom_serve_text_chat_tools_module_create(
         source->environment, host_allocator, &libraries[3]);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_program_link(source->module,
-                                     iree_vm_module_span_from_array(libraries),
-                                     host_allocator, &control->program);
+    status = loom_serve_program_link(
+        source->module,
+        iree_vm_module_span_from_ptr(libraries, generates ? 4 : 3),
+        host_allocator, &control->program);
   }
   iree_vm_module_release(libraries[3]);
   iree_vm_module_release(libraries[2]);
   iree_vm_module_release(libraries[1]);
   IREE_RETURN_IF_ERROR(status);
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_policy_initialize(
-      source->environment, control->program, source->options,
-      &control->chat_policy));
+  if (generates) {
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_policy_initialize(
+        source->environment, control->program, source->options,
+        &control->chat_policy));
+  }
   const iree_vm_signature_type_t buffer = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
       .value.ref = source->vm_types.buffer};
@@ -152,10 +157,6 @@ iree_status_t loom_serve_text_control_initialize(
       device_buffer, device_buffer, device_buffer, device_buffer, device_buffer,
       device_buffer, device_buffer, device_buffer};
   const loom_serve_program_binding_t bindings[] = {
-      {IREE_SVL("step"),
-       {step_arguments, IREE_ARRAYSIZE(step_arguments)},
-       {step_results, IREE_ARRAYSIZE(step_results)},
-       &control->step},
       {IREE_SVL("encode_epoch"),
        {encode_arguments, IREE_ARRAYSIZE(encode_arguments)},
        {&i32, 1},
@@ -177,11 +178,55 @@ iree_status_t loom_serve_text_control_initialize(
        {&i64, 1},
        &control->epoch_step},
   };
-  return loom_serve_program_bind(control->program, IREE_ARRAYSIZE(bindings),
-                                 bindings);
+  IREE_RETURN_IF_ERROR(loom_serve_program_bind(
+      control->program, IREE_ARRAYSIZE(bindings), bindings));
+  if (generates) {
+    const loom_serve_program_binding_t step = {
+        IREE_SVL("step"),
+        {step_arguments, IREE_ARRAYSIZE(step_arguments)},
+        {step_results, IREE_ARRAYSIZE(step_results)},
+        &control->step};
+    return loom_serve_program_bind(control->program, 1, &step);
+  }
+  iree_vm_function_t defaults = {0};
+  const iree_vm_signature_type_t capture_arguments[] = {buffer, i32, i32,
+                                                        buffer};
+  const iree_vm_signature_type_t options_arguments[] = {buffer, buffer, i64};
+  const loom_serve_program_binding_t encoding_bindings[] = {
+      {IREE_SVL("capture_epoch"),
+       {capture_arguments, IREE_ARRAYSIZE(capture_arguments)},
+       {&buffer, 1},
+       &control->capture_epoch},
+      {IREE_SVL("request_defaults"), {&buffer, 1}, {&buffer, 1}, &defaults},
+      {IREE_SVL("request_options"),
+       {options_arguments, IREE_ARRAYSIZE(options_arguments)},
+       {&buffer, 1},
+       &control->request_options},
+  };
+  IREE_RETURN_IF_ERROR(loom_serve_program_bind(
+      control->program, IREE_ARRAYSIZE(encoding_bindings), encoding_bindings));
+  iree_vm_variant_t argument = iree_vm_buffer_variant_from_ptr_borrowed(
+      &source->vm_types, source->options);
+  iree_vm_variant_t result = {0};
+  status = iree_vm_invoke(loom_serve_program_invocation(control->program),
+                          defaults, iree_vm_variant_span_from_ptr(&argument, 1),
+                          iree_vm_variant_span_from_ptr(&result, 1));
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_ptr_from_variant_move(&source->vm_types, &result,
+                                                  &control->defaults);
+  }
+  if (iree_status_is_ok(status) && !control->defaults) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source request defaults must not be null");
+  }
+  iree_vm_variant_reset(&argument);
+  iree_vm_variant_reset(&result);
+  return status;
 }
 
 void loom_serve_text_control_unlink(loom_serve_text_control_t* control) {
+  iree_vm_buffer_release(control->defaults);
+  control->defaults = NULL;
   loom_serve_text_chat_policy_deinitialize(&control->chat_policy);
   loom_serve_program_free(control->program);
   control->program = NULL;
@@ -194,4 +239,42 @@ void loom_serve_text_control_deinitialize(loom_serve_text_control_t* control) {
     iree_vm_buffer_release(control->host.buffers[i]);
   }
   memset(control, 0, sizeof(*control));
+}
+
+iree_status_t loom_serve_text_control_capture(
+    loom_serve_text_control_t* control, const loom_serve_text_source_t* source,
+    iree_host_size_t shape_index, iree_host_size_t span_count,
+    iree_device_size_t residual_length, iree_allocator_t host_allocator,
+    loom_serve_text_capture_t** out_capture) {
+  *out_capture = NULL;
+  iree_vm_variant_t arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&source->vm_types,
+                                               source->control_state),
+      iree_vm_variant_from_i32((int32_t)shape_index),
+      iree_vm_variant_from_i32((int32_t)span_count),
+      iree_vm_buffer_variant_from_ptr_borrowed(
+          &source->vm_types, control->host.buffers[TEXT_HOST_PLAN]),
+  };
+  iree_vm_variant_t result = {0};
+  iree_status_t status = iree_vm_invoke(
+      loom_serve_program_invocation(control->program), control->capture_epoch,
+      iree_vm_variant_span_from_array(arguments),
+      iree_vm_variant_span_from_ptr(&result, 1));
+  iree_vm_buffer_t* plan = NULL;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_vm_buffer_ptr_from_variant_move(&source->vm_types, &result, &plan);
+  }
+  if (iree_status_is_ok(status) && !plan) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source capture plan must not be null");
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_capture_create(plan, span_count, residual_length,
+                                            host_allocator, out_capture);
+  }
+  iree_vm_buffer_release(plan);
+  iree_vm_variant_reset(&result);
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  return status;
 }

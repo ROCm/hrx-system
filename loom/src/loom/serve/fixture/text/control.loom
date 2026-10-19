@@ -650,6 +650,37 @@ func.def public @encode_state(%bindings: buffer, %count: i32, %origins: buffer) 
   func.return
 }
 
+// Opaque output deliberately gathers the two halves of each retained hidden
+// word in reverse order. Native serving preserves bytes, not tensor types.
+func.def public @capture_epoch(%state: buffer, %shape: i32, %count: i32, %plan: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %bounded = scalar.assume %count [range(%count, 1, 16)] : i32
+  %spans = index.cast %bounded : i32 to index
+  %count64 = scalar.extui %bounded : i32 to i64
+  %record_bytes = scalar.constant 48 : i64
+  %bytes64 = scalar.muli %count64, %record_bytes : i64
+  %bounded_bytes = scalar.assume %bytes64 [range(%bytes64, 48, 768)] : i64
+  %length = index.cast %bounded_bytes : i64 to offset
+  %storage = buffer.alloca<private> align(8) %length : buffer
+  %records = buffer.view %storage[%origin] : buffer -> view<[%spans]x2x3xi64>
+  %half = scalar.constant 2 : i64
+  %word = scalar.constant 4 : i64
+  scf.for %i = [%c0 to %spans step %c1] {
+    %span = index.cast %i : index to i64
+    %low = scalar.muli %span, %word : i64
+    %high = scalar.addi %low, %half : i64
+    view.store %span, %records[%i, 0, 0] : i64, view<[%spans]x2x3xi64>
+    view.store %high, %records[%i, 0, 1] : i64, view<[%spans]x2x3xi64>
+    view.store %half, %records[%i, 0, 2] : i64, view<[%spans]x2x3xi64>
+    view.store %span, %records[%i, 1, 0] : i64, view<[%spans]x2x3xi64>
+    view.store %low, %records[%i, 1, 1] : i64, view<[%spans]x2x3xi64>
+    view.store %half, %records[%i, 1, 2] : i64, view<[%spans]x2x3xi64>
+  }
+  func.return %storage : buffer
+}
+
 func.def @encode_mixed_plan(%plan: buffer, %inputs: buffer, %record_begin: index, %span_count: i32, %input_count: i32, %packet_capacity: i32, %packet: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index

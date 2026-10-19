@@ -180,12 +180,12 @@ iree_status_t loom_serve_text_epoch_submit(
         verifies ? epoch->output_limits : NULL,
         continuation->continuation.span_count ? &continuation->continuation
                                               : NULL,
-        out_frontier);
+        NULL, out_frontier);
   }
   const loom_serve_text_span_t* span = &epoch->spans[epoch->cursor];
   if (span->media) {
-    return loom_serve_text_model_submit_epoch(model, epoch->shape_index, 1,
-                                              span, NULL, NULL, out_frontier);
+    return loom_serve_text_model_submit_epoch(
+        model, epoch->shape_index, 1, span, NULL, NULL, NULL, out_frontier);
   }
   loom_serve_text_row_t* row =
       loom_serve_text_model_row(model, span->row_index);
