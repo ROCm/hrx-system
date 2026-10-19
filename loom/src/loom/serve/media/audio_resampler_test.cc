@@ -135,11 +135,11 @@ TEST(AudioResamplerTest, ClockAndWaveformIgnorePacketAndOutputBoundaries) {
 }
 
 TEST(AudioResamplerTest, ExplicitEofPreservesEveryShortFinalFrame) {
-  for (const auto rates : {std::pair<uint32_t, uint32_t>{24000, 16000},
-                           {44100, 16000},
-                           {16000, 24000},
-                           {16001, 16000},
-                           {16000, 16000}}) {
+  for (const auto& rates : {std::pair<uint32_t, uint32_t>{24000, 16000},
+                            {44100, 16000},
+                            {16000, 24000},
+                            {16001, 16000},
+                            {16000, 16000}}) {
     Filter filter;
     IREE_ASSERT_OK(loom_serve_audio_resampler_filter_initialize(
         rates.first, rates.second, kStorageLimit, iree_allocator_system(),
@@ -196,16 +196,16 @@ TEST(AudioResamplerTest, IndependentStreamsShareOnlyImmutableCoefficients) {
 }
 
 TEST(AudioResamplerTest, PreservesAnalyticPassbandAndRejectsAliases) {
-  for (const auto rates : {std::pair<uint32_t, uint32_t>{24000, 16000},
-                           {44100, 16000},
-                           {48000, 16000},
-                           {16000, 24000},
-                           {8000, 48000},
-                           {192000, 8000},
-                           {22050, 24000},
-                           {16001, 16000},
-                           {16000, 16001},
-                           {16000, 16000}}) {
+  for (const auto& rates : {std::pair<uint32_t, uint32_t>{24000, 16000},
+                            {44100, 16000},
+                            {48000, 16000},
+                            {16000, 24000},
+                            {8000, 48000},
+                            {192000, 8000},
+                            {22050, 24000},
+                            {16001, 16000},
+                            {16000, 16001},
+                            {16000, 16000}}) {
     SCOPED_TRACE(::testing::Message() << rates.first << " -> " << rates.second);
     Filter filter;
     IREE_ASSERT_OK(loom_serve_audio_resampler_filter_initialize(
@@ -263,7 +263,7 @@ TEST(AudioResamplerTest, PreservesAnalyticPassbandAndRejectsAliases) {
 }
 
 TEST(AudioResamplerTest, GeometryAndStorageFailAtConstruction) {
-  for (const auto rates :
+  for (const auto& rates :
        {std::pair<uint32_t, uint32_t>{0, 16000}, {16000, 0}, {0, 0}}) {
     Filter filter;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -281,7 +281,7 @@ TEST(AudioResamplerTest, GeometryAndStorageFailAtConstruction) {
   Filter filter;
   IREE_ASSERT_OK(loom_serve_audio_resampler_filter_initialize(
       24000, 16000, kStorageLimit, iree_allocator_system(), &filter.value));
-  for (const auto geometry : {std::pair<uint32_t, size_t>{0, 1}, {1, 0}}) {
+  for (const auto& geometry : {std::pair<uint32_t, size_t>{0, 1}, {1, 0}}) {
     Stream stream;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -289,9 +289,9 @@ TEST(AudioResamplerTest, GeometryAndStorageFailAtConstruction) {
             &filter.value, geometry.first, geometry.second, kStorageLimit,
             iree_allocator_system(), &stream.value));
   }
-  for (const auto geometry : {std::pair<uint32_t, size_t>{1, SIZE_MAX},
-                              {UINT32_MAX, SIZE_MAX / 2},
-                              {1, 1024}}) {
+  for (const auto& geometry : {std::pair<uint32_t, size_t>{1, SIZE_MAX},
+                               {UINT32_MAX, SIZE_MAX / 2},
+                               {1, 1024}}) {
     Stream stream;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                           loom_serve_audio_resampler_initialize(
