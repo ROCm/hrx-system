@@ -41,6 +41,10 @@ The shared foundation consists of:
   connection claims and response credit over shared proactors. Independent
   TCP/Unix listeners feed the same connection owner. Stopping a listener does
   not stop the requests it admitted; this layer has no model dependencies.
+- [`transport/websocket`](transport/websocket/README.md): in-place HTTP
+  upgrades, bounded message assembly, and caller-owned message receipts. An
+  accepted CPU borrower can retain a payload while later controls advance;
+  connection ownership joins both the application and network retirement.
 - [`service`](service/service.h): the named native and HTTP model service contract,
   including bounded task turns, asynchronous retirement, client capabilities
   and copied inspection state. It consumes transport claims without owning

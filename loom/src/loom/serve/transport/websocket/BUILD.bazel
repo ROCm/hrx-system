@@ -1,0 +1,73 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//loom/src/loom/serve:implementation"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "handshake",
+    srcs = ["handshake.c"],
+    hdrs = ["handshake.h"],
+    deps = [
+        "//loom/src/loom/serve/transport/http:request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+    ],
+)
+
+loom_cc_test(
+    name = "handshake_test",
+    srcs = ["handshake_test.cc"],
+    deps = [
+        ":handshake",
+        "//loom/src/loom/serve/transport/http:request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "connection",
+    srcs = ["connection.c"],
+    hdrs = ["connection.h"],
+    deps = [
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/net:carrier",
+    ],
+)
+
+loom_cc_test(
+    name = "connection_test",
+    srcs = ["connection_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":connection",
+        ":handshake",
+        "//loom/src/loom/serve/testing:worker_gate",
+        "//loom/src/loom/serve/transport/http:listener",
+        "//loom/src/loom/serve/transport/http:request",
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
