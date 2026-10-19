@@ -260,10 +260,49 @@ bypassing preprocessing leaves a headerless file that browsers cannot play.
 The adapter buffers each complete provider response before playback, so
 incremental server output does not start playback within that request.
 
-Its [realtime voice path](https://github.com/open-webui/open-webui/blob/f8ae8a6c328946dc62cd0712961a0632574581bf/backend/open_webui/routers/audio/realtime.py#L403)
-additionally needs session events, microphone input, transcription, turn
-detection and interruption. Configuring a speech model on the ordinary OpenAI
-chat connection does not supply those capabilities.
+## Realtime conversations in Open WebUI
+
+For streaming microphone input, automatic turns, speech output, and
+interruption, configure a [named assistant](realtime-conversation.md#configure-an-assistant)
+with recognition, retained text, speech, and activity deployments. Open WebUI's
+[realtime adapter](https://github.com/open-webui/open-webui/blob/f8ae8a6c328946dc62cd0712961a0632574581bf/backend/open_webui/routers/audio/realtime.py#L403)
+uses server activity detection, so the assistant must include an `activity`
+deployment. Its text model must support function calling.
+
+For an assistant named `assistant`, a recognition deployment named `listener`,
+and a speech package providing `alba`, set these values under
+**Admin Settings → Audio → Voice calls**:
+
+| Setting | Value |
+| --- | --- |
+| Call mode | Realtime |
+| OpenAI API Base URL | Your server URL followed by `/v1`, reachable from the Open WebUI backend |
+| API Key | `local`, or the key required by your deployment proxy |
+| Voice Model | `assistant` |
+| Voice | `alba` |
+| Input Transcription Model | `listener` |
+
+The Voice Model selects the assistant composition. The transcription selector
+must match its recognition deployment, and the voice must belong to its speech
+package. The backend opens `/v1/realtime?model=assistant` and exchanges 24 kHz
+PCM directly. This path does not use the ordinary read-aloud adapter's cached
+file or MP3 conversion. The backend's upstream connection sends no browser
+Origin; `--realtime_origin` applies when a browser connects directly to Loom.
+
+Keep the ordinary chat connection configured too. Open WebUI supplies a
+`generate_chat_completion` function that delegates substantive questions to
+the chat's selected model and tools. It returns that result to the voice
+assistant for speech. Both models can be served by the same Loom process;
+Open WebUI owns this additional tool round trip. A direct Realtime client can
+use the assistant's native text generation.
+
+Budget text context for the complete chat snapshot and tool catalogue in both
+assistant and chat requests. A short spoken question can still carry substantial
+model input.
+The [conversation workflow](realtime-conversation.md) explains input ordering,
+automatic turn settings, playback truncation, and retained history; the
+[Realtime profile](../http-profiles.md#realtime-conversations) defines the
+supported wire events.
 
 ## Transcription and dictation
 
