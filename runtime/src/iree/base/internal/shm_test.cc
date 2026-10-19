@@ -142,14 +142,18 @@ TEST_F(ShmReservationTest, PopulatesUntouchedSubrangesInAnyOrder) {
 
 TEST_F(ShmReservationTest, IndependentReservationsShareOriginalStorage) {
   iree_shm_reservation_t other = {};
-  IREE_ASSERT_OK(iree_shm_reservation_initialize(2 * granularity_, 0,
-                                                 2 * granularity_, &other));
-  auto update = Mapping(0, granularity_, 2 * granularity_);
+  IREE_ASSERT_OK(iree_shm_reservation_initialize(3 * granularity_, 0,
+                                                 3 * granularity_, &other));
+  auto update = Mapping(0, granularity_, 3 * granularity_);
   IREE_ASSERT_OK(iree_shm_reservation_update(&reservation_, 1, &update));
   IREE_ASSERT_OK(iree_shm_reservation_update(&other, 1, &update));
   reservation_.base[5] = 39;
   EXPECT_EQ(other.base[5], 39);
   EXPECT_EQ(static_cast<uint8_t*>(source_.base)[granularity_ + 5], 39);
+  auto partial = Mapping(granularity_, 0, granularity_);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_shm_reservation_update(&other, 1, &partial));
+  EXPECT_EQ(other.base[5], 39);
   IREE_ASSERT_OK(iree_shm_reservation_deinitialize(&reservation_));
   other.base[7] = 42;
   EXPECT_EQ(static_cast<uint8_t*>(source_.base)[granularity_ + 7], 42);

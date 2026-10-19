@@ -124,7 +124,6 @@ static amdf_status_t amdf_host_reservation_prepare(
       create_info->accesses[owner_ordinal].access;
   uint64_t alignment = create_info->minimum_alignment;
   uint64_t native_alignment = 0;
-  uint64_t mapping_granularity = 0;
   amdf_memory_access_t required_access = 0;
   for (uint32_t i = 0; i < group->access_count; ++i) {
     const uint32_t ordinal = group->access_ordinals[i];
@@ -140,12 +139,6 @@ static amdf_status_t amdf_host_reservation_prepare(
     }
     if (native_alignment < profile->capabilities.reservation_granularity) {
       native_alignment = profile->capabilities.reservation_granularity;
-    }
-    const uint64_t unit = request->mapping_granularity != 0
-                              ? request->mapping_granularity
-                              : profile->capabilities.mapping_granularity;
-    if (mapping_granularity < unit) {
-      mapping_granularity = unit;
     }
     required_access |= profile->capabilities.required_access;
     if (profile->host.prepare_translations != NULL) {
@@ -192,7 +185,10 @@ static amdf_status_t amdf_host_reservation_prepare(
           .address_kind = profile->host.address_kind,
           .address = base + bias,
           .byte_length = create_info->byte_length,
-          .mapping_granularity = mapping_granularity,
+          .mapping_granularity =
+              create_info->accesses[ordinal].mapping_granularity != 0
+                  ? create_info->accesses[ordinal].mapping_granularity
+                  : capabilities->mapping_granularity,
           .reset_epoch = profile->reset_epoch,
       };
     }

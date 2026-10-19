@@ -73,7 +73,10 @@ typedef struct iree_hal_virtual_buffer_options_t {
   iree_device_size_t byte_length;
   // Minimum power-of-two alignment of the virtual buffer's first byte.
   iree_device_size_t min_alignment;
-  // Minimum power-of-two independently replaceable mapping unit, in bytes.
+  // Independently replaceable offset/length unit, in bytes. Zero selects the
+  // native minimum. Nonzero units must divide the reservation and be divisible
+  // by the native unit, or divide it when requesting a smaller unit. This is
+  // replacement geometry, not a base-address alignment requirement.
   iree_device_size_t mapping_granularity;
 } iree_hal_virtual_buffer_options_t;
 

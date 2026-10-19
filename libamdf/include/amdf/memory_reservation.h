@@ -62,11 +62,13 @@ typedef struct amdf_memory_reservation_access_t {
   /// Maximum permissions that updates may establish for this consumer.
   /// Consumers sharing host/SVA translations require identical envelopes.
   amdf_memory_access_t access;
-  /// Minimum mapping offset/length unit, or zero for provider policy.
-  /// Must be a power-of-two multiple of the native mapping granularity and
+  /// Independently replaceable destination offset/length unit, or zero for
+  /// provider policy. Must be a multiple of the native mapping granularity and
   /// divide the reservation length. The returned geometry also satisfies any
   /// consumers sharing this native mapping group. Independently owned native
-  /// views use these units on platforms requiring whole-view removal.
+  /// views use these units on platforms requiring whole-view removal. Native
+  /// source offsets satisfy the strongest native alignment of the consumers
+  /// sharing the mapping group, independent of this unit.
   uint64_t mapping_granularity;
 } amdf_memory_reservation_access_t;
 

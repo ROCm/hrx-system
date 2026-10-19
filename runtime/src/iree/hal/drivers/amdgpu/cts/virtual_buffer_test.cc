@@ -88,6 +88,8 @@ class AmdgpuVirtualBufferTest : public CtsTestBase<> {
 };
 
 TEST_P(AmdgpuVirtualBufferTest, QueuedBackingMapsAndProducesBytesAcrossHoles) {
+  // A replacement unit describes independent ownership, not base alignment.
+  granularity_ *= 3;
   Ref<iree_hal_buffer_t> target;
   IREE_ASSERT_OK(Reserve(3, target.out()));
   const std::array<iree_hal_pool_reservation_request_t, 2> requests = {

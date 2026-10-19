@@ -79,8 +79,7 @@ static amdf_status_t amdf_memory_reservation_query_profile(
       &create_info->accesses[ordinal];
   if ((access->device != NULL &&
        access->device->provider_instance != instance) ||
-      access->access == 0 ||
-      (access->mapping_granularity & (access->mapping_granularity - 1)) != 0) {
+      access->access == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   for (uint32_t j = 0; j < ordinal; ++j) {
@@ -121,6 +120,38 @@ static amdf_status_t amdf_memory_reservation_query_profile(
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   return AMDF_STATUS_OK;
+}
+
+// Every prepared unit divides the validated reservation length. Their common
+// multiple therefore fits that same extent; no speculative geometry or mapping
+// history is needed after native preparation supplies alias identities.
+static void amdf_memory_reservation_compose_geometry(
+    amdf_memory_reservation_t* reservation) {
+  for (uint32_t i = 0; i < reservation->access_count; ++i) {
+    const amdf_memory_reservation_access_state_t* access =
+        &reservation->accesses[i];
+    amdf_memory_reservation_access_state_t* owner =
+        &reservation->accesses[access->info.mapping_access_ordinal];
+    uint64_t x = access->info.mapping_granularity;
+    uint64_t y = owner->info.mapping_granularity;
+    while (y != 0) {
+      const uint64_t remainder = x % y;
+      x = y;
+      y = remainder;
+    }
+    owner->info.mapping_granularity =
+        owner->info.mapping_granularity / x * access->info.mapping_granularity;
+    if (owner->source_granularity < access->source_granularity) {
+      owner->source_granularity = access->source_granularity;
+    }
+  }
+  for (uint32_t i = 0; i < reservation->access_count; ++i) {
+    amdf_memory_reservation_access_state_t* access = &reservation->accesses[i];
+    const amdf_memory_reservation_access_state_t* owner =
+        &reservation->accesses[access->info.mapping_access_ordinal];
+    access->info.mapping_granularity = owner->info.mapping_granularity;
+    access->source_granularity = owner->source_granularity;
+  }
 }
 
 amdf_status_t AMDF_CALL amdf_memory_reservation_create(
@@ -187,6 +218,8 @@ amdf_status_t AMDF_CALL amdf_memory_reservation_create(
           access->vtable = profiles[j].vtable;
           access->native_owner_ordinal = i;
           access->native_access_ordinal = group_count;
+          access->source_granularity =
+              profiles[j].capabilities.mapping_granularity;
           ordinals[group_count++] = j;
         }
       }
@@ -200,6 +233,7 @@ amdf_status_t AMDF_CALL amdf_memory_reservation_create(
   }
   amdf_free(allocator, profiles);
   if (amdf_status_is_ok(status)) {
+    amdf_memory_reservation_compose_geometry(reservation);
     *out_reservation = reservation;
   } else if (reservation != NULL) {
     const amdf_status_t release_status =
@@ -315,7 +349,7 @@ static amdf_status_t amdf_memory_reservation_validate_update(
   if (update->access == 0 || (update->access & ~target->info.access) != 0 ||
       (update->access & target->required_access) != target->required_access ||
       (memory->info.source_byte_offset + update->source_byte_offset) %
-              granularity !=
+              target->source_granularity !=
           0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }

@@ -87,6 +87,9 @@ typedef struct amdf_memory_reservation_access_state_t {
   amdf_device_t* device;
   // Immutable address and alias-domain facts.
   amdf_memory_reservation_access_info_t info;
+  // Native source-offset unit shared by the canonical page-table projection;
+  // independent of the caller's larger destination replacement unit.
+  uint64_t source_granularity;
   // Native permissions that every nonempty mapping must include.
   amdf_memory_access_t required_access;
   // First native mutation failure for the canonical mapping access.

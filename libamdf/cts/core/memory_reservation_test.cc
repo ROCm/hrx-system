@@ -107,7 +107,7 @@ class HostReservationTest : public ::testing::TestWithParam<uint64_t> {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
         .structure_size = sizeof(create),
         .byte_length = length,
-        .minimum_alignment = unit_,
+        .minimum_alignment = capabilities_.reservation_granularity,
         .access_count = 1,
         .accesses = &access,
     };
@@ -121,7 +121,7 @@ class HostReservationTest : public ::testing::TestWithParam<uint64_t> {
         AMDF_STATUS_OK);
     ASSERT_EQ(address_.address_kind, AMDF_MEMORY_ADDRESS_HOST);
     ASSERT_EQ(address_.mapping_granularity, unit_);
-    ASSERT_EQ(address_.address % unit_, 0u);
+    ASSERT_EQ(address_.address % capabilities_.reservation_granularity, 0u);
   }
 
   void Allocate(uint64_t length, amdf_memory_flags_t flags,
@@ -283,14 +283,19 @@ TEST_P(HostReservationTest, ReplacesBackingThroughAnUnchangedHostView) {
     }
   }
   ASSERT_EQ(api_->memory_reservation_detach(reservation_, 0), AMDF_STATUS_OK);
-  const auto refill = Bind(0, 3 * unit_, memories[0], unit_);
+  const auto refill =
+      Bind(0, 3 * unit_, memories[0], capabilities_.mapping_granularity);
   ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &refill),
             AMDF_STATUS_OK);
-  EXPECT_EQ(std::memcmp(pointer, expected[0].data() + words, 3 * unit_), 0);
+  EXPECT_EQ(std::memcmp(pointer,
+                        expected[0].data() + capabilities_.mapping_granularity /
+                                                 sizeof(uint32_t),
+                        3 * unit_),
+            0);
 }
 
 TEST_P(HostReservationTest, UpdatesDistantRangesWithoutPopulatingTheHoles) {
-  const uint64_t length = UINT64_C(16) << 30;
+  const uint64_t length = (UINT64_C(16) << 30) / unit_ * unit_;
   ASSERT_LE(length, capabilities_.maximum_byte_length);
   ASSERT_NO_FATAL_FAILURE(Reserve(length));
   amdf_memory_t* memory = nullptr;
@@ -502,9 +507,13 @@ TEST_P(HostReservationTest, ReadOnlyMappingAndViewDoNotGrantWriteOperations) {
 }
 
 INSTANTIATE_TEST_SUITE_P(MappingUnit, HostReservationTest,
-                         ::testing::Values(uint64_t{0}, UINT64_C(2) << 20),
+                         ::testing::Values(uint64_t{0}, UINT64_C(2) << 20,
+                                           UINT64_C(3) << 20),
                          [](const auto& info) {
-                           return info.param == 0 ? "Native" : "TwoMiB";
+                           return info.param == 0 ? "Native"
+                                  : info.param == (UINT64_C(2) << 20)
+                                      ? "TwoMiB"
+                                      : "ThreeMiB";
                          });
 
 }  // namespace

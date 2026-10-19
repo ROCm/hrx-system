@@ -6,10 +6,12 @@
 
 #include "libamdf/src/memory_reservation.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <vector>
 
+#include "libamdf/src/host_reservation.h"
 #include "libamdf/src/memory_test_fixture.h"
 
 namespace amdf::testing {
@@ -100,6 +102,7 @@ class MemoryReservationTest : public MemoryTest {
       access.info.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
       access.info.byte_length = 65536;
       access.info.mapping_granularity = 4096;
+      access.source_granularity = 4096;
       access.required_access = AMDF_MEMORY_ACCESS_READ;
     }
     native_.accesses[0].native = &native_;
@@ -448,6 +451,65 @@ TEST_F(MemoryReservationTest,
   // The GPU provider, not each common handoff, adds the native prefix.
   EXPECT_EQ(native_.updates[0].source_byte_offset, 4096u - 13u);
   EXPECT_EQ(amdf_memory_destroy(imported), AMDF_STATUS_OK);
+}
+
+TEST_F(MemoryReservationTest, SharedPageTablesComposeReplacementBoundaries) {
+  amdf_memory_reservation_capabilities_t capabilities = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES,
+      .structure_size = sizeof(capabilities),
+  };
+  ASSERT_EQ(amdf_instance_query_host_memory_reservation_capabilities(
+                &instance_, &capabilities),
+            AMDF_STATUS_OK);
+  const uint64_t unit = std::max(capabilities.reservation_granularity,
+                                 capabilities.mapping_granularity);
+  const auto* original_vtable = devices_[0].base.vtable;
+  auto vtable = *original_vtable;
+  vtable.query_memory_reservation_profile =
+      [](amdf_device_t* device, uint32_t,
+         amdf_memory_reservation_profile_t* out) {
+        out->vtable = &amdf_host_reservation_vtable;
+        out->host.address_kind = AMDF_MEMORY_ADDRESS_HOST;
+        out->capabilities.type =
+            AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES;
+        out->capabilities.structure_size = sizeof(out->capabilities);
+        return amdf_instance_query_host_memory_reservation_capabilities(
+            device->provider_instance, &out->capabilities);
+      };
+  for (auto& device : devices_) {
+    device.base.vtable = &vtable;
+  }
+  // Both logical consumers use the real host reservation implementation.
+  // Their replacement units differ even though their page tables are shared.
+  const amdf_memory_reservation_access_t accesses[] = {
+      {&devices_[0].base, 0, AMDF_MEMORY_ACCESS_READ, 3 * unit},
+      {&devices_[1].base, 0, AMDF_MEMORY_ACCESS_READ, 4 * unit},
+  };
+  const amdf_memory_reservation_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .byte_length = 12 * unit,
+      .access_count = 2,
+      .accesses = accesses,
+  };
+  amdf_memory_reservation_t* reservation = nullptr;
+  const auto status =
+      amdf_memory_reservation_create(&instance_, &create, &reservation);
+  for (auto& device : devices_) {
+    device.base.vtable = original_vtable;
+  }
+  ASSERT_EQ(status, AMDF_STATUS_OK);
+  for (uint32_t i = 0; i < 2; ++i) {
+    amdf_memory_reservation_access_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_ACCESS_INFO,
+        .structure_size = sizeof(info),
+    };
+    EXPECT_EQ(amdf_memory_reservation_query_access_info(reservation, i, &info),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(info.mapping_access_ordinal, 0u);
+    EXPECT_EQ(info.mapping_granularity, 12 * unit);
+  }
+  EXPECT_EQ(amdf_memory_reservation_destroy(reservation), AMDF_STATUS_OK);
 }
 
 TEST_F(MemoryReservationTest,

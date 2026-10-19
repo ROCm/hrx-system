@@ -267,7 +267,8 @@ bool iree_shm_reservation_is_supported(void);
 
 // Reserves an inaccessible interval. Length must be a nonzero multiple of the
 // replacement granularity. Zero alignment/granularity selects the normal page
-// size; nonzero values must be powers of two at least as large as that size.
+// size. Alignment must be a power of two at least as large as that size;
+// replacement granularity must be a multiple of it, independent of alignment.
 // Larger granules reduce native mapping work on platforms requiring individual
 // views for independently replaceable ranges. Failure leaves output unchanged.
 iree_status_t iree_shm_reservation_initialize(

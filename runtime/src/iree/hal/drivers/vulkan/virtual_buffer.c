@@ -209,6 +209,9 @@ iree_status_t iree_hal_vulkan_virtual_buffer_create(
   // alignments use an interior view without committing any physical storage.
   iree_device_size_t native_length = 0;
   if (options->byte_length % granularity ||
+      granularity % plan.capabilities.mapping_granularity ||
+      (options->mapping_granularity &&
+       granularity % options->mapping_granularity) ||
       alignment > plan.capabilities.max_alignment ||
       !iree_device_size_checked_add(
           options->byte_length,

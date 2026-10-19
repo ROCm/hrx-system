@@ -14,8 +14,8 @@
 #include "libamdf/src/xdna/umd/mcdm/memory_profile.h"
 
 // A standard allocation's size is bounded by UINT32_MAX. Larger public mapping
-// units use several power-of-two native views, without changing public
-// geometry.
+// units use several native views, with a short final view when needed. Native
+// views never cross an independently replaceable public unit.
 #define AMDF_WINDOWS_XDNA_MAXIMUM_VIEW_SIZE (UINT64_C(1) << 31)
 
 typedef struct amdf_windows_xdna_reservation_t {
@@ -27,8 +27,12 @@ typedef struct amdf_windows_xdna_reservation_t {
   uint64_t reservation_byte_length;
   // Aligned native base before the target's shim-DMA address displacement.
   uint64_t address;
-  // Size of each independent native registration, in bytes.
+  // Maximum size of one native registration within a replacement unit.
   uint64_t view_byte_length;
+  // Independently replaceable public unit, in bytes.
+  uint64_t mapping_byte_length;
+  // Number of native registrations per complete replacement unit.
+  uint32_t views_per_unit;
   // Fixed number of native view slots allocated during reservation creation.
   uint32_t view_count;
   // Permanent removal error: failed batches have no per-handle progress result
@@ -121,9 +125,14 @@ static amdf_status_t amdf_windows_xdna_reservation_prepare(
     const uint64_t view_size = unit < AMDF_WINDOWS_XDNA_MAXIMUM_VIEW_SIZE
                                    ? unit
                                    : AMDF_WINDOWS_XDNA_MAXIMUM_VIEW_SIZE;
-    const uint64_t count = create->byte_length / view_size;
-    if (count > UINT32_MAX ||
-        count > (SIZE_MAX - sizeof(amdf_windows_xdna_reservation_t)) /
+    const uint64_t views_per_unit = unit / view_size + (unit % view_size != 0);
+    const uint64_t unit_count = create->byte_length / unit;
+    if (unit_count > UINT32_MAX / views_per_unit) {
+      status = amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+      break;
+    }
+    const uint64_t count = unit_count * views_per_unit;
+    if (count > (SIZE_MAX - sizeof(amdf_windows_xdna_reservation_t)) /
                     (2 * sizeof(D3DKMT_HANDLE))) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
       break;
@@ -139,6 +148,8 @@ static amdf_status_t amdf_windows_xdna_reservation_prepare(
     reservation->device = profile->native_device;
     reservation->view_count = (uint32_t)count;
     reservation->view_byte_length = view_size;
+    reservation->mapping_byte_length = unit;
+    reservation->views_per_unit = (uint32_t)views_per_unit;
     reservation->views = (D3DKMT_HANDLE*)(reservation + 1);
     reservation->batch = reservation->views + count;
     amdf_memory_reservation_access_state_t* access = &base->accesses[ordinal];
@@ -188,15 +199,35 @@ static amdf_status_t amdf_windows_xdna_reservation_prepare(
   return status;
 }
 
+static uint64_t amdf_windows_xdna_reservation_view_offset(
+    const amdf_windows_xdna_reservation_t* reservation, uint32_t slot) {
+  return (slot / reservation->views_per_unit) *
+             reservation->mapping_byte_length +
+         (slot % reservation->views_per_unit) * reservation->view_byte_length;
+}
+
+static uint64_t amdf_windows_xdna_reservation_view_length(
+    const amdf_windows_xdna_reservation_t* reservation, uint32_t slot) {
+  const uint64_t remaining =
+      reservation->mapping_byte_length -
+      (slot % reservation->views_per_unit) * reservation->view_byte_length;
+  return remaining < reservation->view_byte_length
+             ? remaining
+             : reservation->view_byte_length;
+}
+
 static amdf_status_t amdf_windows_xdna_reservation_map(
     amdf_windows_xdna_reservation_t* reservation, uint32_t slot,
     uint64_t* paging_fence) {
   D3DDDI_MAPGPUVIRTUALADDRESS map = {0};
   map.hPagingQueue = reservation->device->paging_queue;
-  map.BaseAddress = reservation->address + slot * reservation->view_byte_length;
+  map.BaseAddress =
+      reservation->address +
+      amdf_windows_xdna_reservation_view_offset(reservation, slot);
   map.hAllocation = reservation->views[slot];
   map.SizeInPages =
-      reservation->view_byte_length / AMDF_WINDOWS_XDNA_ADDRESS_ALIGNMENT;
+      amdf_windows_xdna_reservation_view_length(reservation, slot) /
+      AMDF_WINDOWS_XDNA_ADDRESS_ALIGNMENT;
   map.Protection.Write = 1;
   const NTSTATUS native_status =
       reservation->device->kmt->map_gpu_virtual_address(&map);
@@ -216,11 +247,13 @@ static amdf_status_t amdf_windows_xdna_reservation_update(
     amdf_memory_reservation_t* base, uint32_t ordinal, uint32_t update_count,
     const amdf_memory_mapping_update_t* updates, bool* mutation_started) {
   amdf_windows_xdna_reservation_t* reservation = base->accesses[ordinal].native;
-  const uint64_t unit = reservation->view_byte_length;
+  const uint64_t unit = reservation->mapping_byte_length;
+  const uint32_t views_per_unit = reservation->views_per_unit;
   uint32_t old_count = 0;
   for (uint32_t i = 0; i < update_count; ++i) {
-    const uint64_t first = updates[i].target_byte_offset / unit;
-    const uint64_t end = first + updates[i].byte_length / unit;
+    const uint64_t first =
+        updates[i].target_byte_offset / unit * views_per_unit;
+    const uint64_t end = first + updates[i].byte_length / unit * views_per_unit;
     for (uint64_t slot = first; slot < end; ++slot) {
       if (reservation->views[slot] != 0) {
         reservation->batch[old_count++] = reservation->views[slot];
@@ -236,8 +269,11 @@ static amdf_status_t amdf_windows_xdna_reservation_update(
   // Successful destruction consumes every old handle before new registration
   // begins. A later failure leaves only actually acquired new views to detach.
   for (uint32_t i = 0; i < update_count; ++i) {
-    memset(reservation->views + updates[i].target_byte_offset / unit, 0,
-           updates[i].byte_length / unit * sizeof(*reservation->views));
+    memset(reservation->views +
+               updates[i].target_byte_offset / unit * views_per_unit,
+           0,
+           updates[i].byte_length / unit * views_per_unit *
+               sizeof(*reservation->views));
   }
   uint32_t new_count = 0;
   uint64_t paging_fence = 0;
@@ -252,18 +288,22 @@ static amdf_status_t amdf_windows_xdna_reservation_update(
     uint8_t* pointer = amdf_windows_xdna_memory_mapping_source(
         memory->accesses[owner].native,
         memory->info.source_byte_offset + update->source_byte_offset);
-    for (uint64_t offset = 0;
-         offset < update->byte_length && amdf_status_is_ok(status);
-         offset += unit) {
-      const uint32_t slot =
-          (uint32_t)((update->target_byte_offset + offset) / unit);
+    const uint64_t first = update->target_byte_offset / unit * views_per_unit;
+    const uint64_t end = first + update->byte_length / unit * views_per_unit;
+    for (uint64_t slot = first; slot < end && amdf_status_is_ok(status);
+         ++slot) {
+      const uint64_t offset = amdf_windows_xdna_reservation_view_offset(
+                                  reservation, (uint32_t)slot) -
+                              update->target_byte_offset;
       status = amdf_windows_xdna_memory_register_pages(
-          reservation->device, pointer + offset, unit,
+          reservation->device, pointer + offset,
+          amdf_windows_xdna_reservation_view_length(reservation,
+                                                    (uint32_t)slot),
           &reservation->views[slot]);
       if (amdf_status_is_ok(status)) {
         reservation->batch[new_count++] = reservation->views[slot];
-        status =
-            amdf_windows_xdna_reservation_map(reservation, slot, &paging_fence);
+        status = amdf_windows_xdna_reservation_map(reservation, (uint32_t)slot,
+                                                   &paging_fence);
       }
     }
   }

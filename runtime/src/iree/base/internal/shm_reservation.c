@@ -120,17 +120,15 @@ iree_status_t iree_shm_reservation_initialize(
     granularity = info.normal_page_size;
   }
   if (!alignment) {
-    alignment = granularity;
+    alignment = info.normal_page_size;
   }
-  if (!byte_length || !granularity ||
-      !iree_host_size_is_valid_alignment(granularity) ||
-      granularity < info.normal_page_size || byte_length % granularity ||
+  if (!byte_length || !granularity || granularity % info.normal_page_size ||
+      byte_length % granularity ||
       !iree_host_size_is_valid_alignment(alignment) ||
       alignment < info.normal_page_size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid shared address reservation geometry");
   }
-  alignment = iree_max(alignment, granularity);
   iree_shm_reservation_t reservation = {
       .byte_length = byte_length,
       .granularity = granularity,

@@ -153,24 +153,6 @@ static amdf_status_t amdf_gpu_memory_reservation_prepare(
             create_info->accesses[ordinal].mapping_granularity;
       }
     }
-    // All units are powers of two. The strongest requested unit satisfies
-    // every logical consumer sharing the same native page tables.
-    for (uint32_t i = 0; i < count; ++i) {
-      const amdf_memory_reservation_access_info_t* info =
-          &reservation->accesses[ordinals[i]].info;
-      amdf_memory_reservation_access_info_t* group =
-          &reservation->accesses[info->mapping_access_ordinal].info;
-      if (info->mapping_granularity > group->mapping_granularity) {
-        group->mapping_granularity = info->mapping_granularity;
-      }
-    }
-    for (uint32_t i = 0; i < count; ++i) {
-      amdf_memory_reservation_access_info_t* info =
-          &reservation->accesses[ordinals[i]].info;
-      info->mapping_granularity =
-          reservation->accesses[info->mapping_access_ordinal]
-              .info.mapping_granularity;
-    }
   }
   return status;
 }

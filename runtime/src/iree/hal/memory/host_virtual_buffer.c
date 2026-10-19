@@ -129,17 +129,23 @@ iree_status_t iree_hal_host_virtual_buffer_create(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "reservation exceeds host address space");
   }
+  const iree_host_size_t page_size = iree_memory_query_info().normal_page_size;
+  const iree_host_size_t granularity =
+      iree_max((iree_host_size_t)options->mapping_granularity, page_size);
+  if (options->mapping_granularity &&
+      granularity % options->mapping_granularity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "replacement unit is incompatible with host pages");
+  }
   iree_hal_host_virtual_buffer_t* reservation = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator,
       sizeof(*reservation) + contract->scope_count * sizeof(uint32_t),
       (void**)&reservation));
-  const iree_host_size_t page_size = iree_memory_query_info().normal_page_size;
   iree_status_t status = iree_shm_reservation_initialize(
       (iree_host_size_t)options->byte_length,
       iree_max((iree_host_size_t)options->min_alignment, page_size),
-      iree_max((iree_host_size_t)options->mapping_granularity, page_size),
-      &reservation->native);
+      granularity, &reservation->native);
   if (iree_status_is_ok(status)) {
     reservation->event_sink = backend->event_sink;
     reservation->binding.host_pointer = reservation->native.base;
@@ -147,8 +153,7 @@ iree_status_t iree_hal_host_virtual_buffer_create(
         .notification = backend->notification,
         .tracker = frontier_tracker,
         .maintenance_range = {.byte_length = options->byte_length},
-        .allocation_alignment =
-            iree_max(options->min_alignment, reservation->native.granularity),
+        .allocation_alignment = iree_max(options->min_alignment, page_size),
         .maintenance_alignment = 1,
     };
     iree_hal_virtual_buffer_initialize(

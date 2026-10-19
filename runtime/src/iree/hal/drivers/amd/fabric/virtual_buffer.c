@@ -523,6 +523,9 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
   if (options->byte_length > plan.capabilities.max_byte_length ||
       options->byte_length % plan.capabilities.reservation_granularity ||
       options->byte_length % granularity ||
+      granularity % plan.capabilities.mapping_granularity ||
+      (options->mapping_granularity &&
+       granularity % options->mapping_granularity) ||
       alignment > plan.capabilities.max_alignment) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "reservation exceeds native address geometry");

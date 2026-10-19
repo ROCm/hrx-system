@@ -43,6 +43,8 @@ struct NativeState {
   uint64_t point = 0;
   // Calls to release the explicitly reserved address range.
   uint32_t free_count = 0;
+  // Complete VA extent owned by the modeled reservation.
+  uint64_t reservation_byte_length = 0;
   // One-based registration call to reject, or zero for none.
   size_t reject_create = 0;
   // One-based registration whose mapping is rejected, or zero for none.
@@ -114,7 +116,9 @@ NTSTATUS APIENTRY MakeResident(D3DDDI_MAKERESIDENT* resident) {
 
 class WindowsXdnaReservationTest : public ::testing::Test {
  protected:
-  void SetUp() override {
+  void SetUp() override { Initialize(65536, MEM_RESERVE | MEM_COMMIT); }
+
+  void Initialize(uint64_t source_byte_length, DWORD allocation_type) {
     native = &state_;
     kmt_.create_allocation = CreateAllocation;
     kmt_.destroy_allocation = DestroyAllocation;
@@ -124,13 +128,14 @@ class WindowsXdnaReservationTest : public ::testing::Test {
         [](D3DDDI_RESERVEGPUVIRTUALADDRESS* reserve) -> NTSTATUS {
       EXPECT_LE(reserve->MinimumAddress, kAddress);
       EXPECT_GE(reserve->MaximumAddress, kAddress + reserve->Size);
+      native->reservation_byte_length = reserve->Size;
       reserve->VirtualAddress = kAddress;
       return 0;
     };
     kmt_.free_gpu_virtual_address =
         [](const D3DKMT_FREEGPUVIRTUALADDRESS* release) -> NTSTATUS {
       EXPECT_EQ(release->BaseAddress, kAddress);
-      EXPECT_EQ(release->Size, 65536u);
+      EXPECT_EQ(release->Size, native->reservation_byte_length);
       ++native->free_count;
       return 0;
     };
@@ -161,9 +166,10 @@ class WindowsXdnaReservationTest : public ::testing::Test {
               AMDF_STATUS_OK);
     access_.vtable = profile_.vtable;
 
-    // Use the real ordinary registration owner with valid borrowed pages.
-    pages_ =
-        VirtualAlloc(nullptr, 65536, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    // Use the real ordinary registration owner. The native dependency records
+    // page ranges without accessing their contents.
+    pages_ = VirtualAlloc(nullptr, static_cast<SIZE_T>(source_byte_length),
+                          allocation_type, PAGE_READWRITE);
     ASSERT_NE(pages_, nullptr);
     amdf_memory_native_profile_t memory_profile = {};
     ASSERT_EQ(
@@ -171,7 +177,7 @@ class WindowsXdnaReservationTest : public ::testing::Test {
         AMDF_STATUS_OK);
     const amdf_memory_native_create_info_t create = {
         .device_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-        .byte_length = 65536,
+        .byte_length = source_byte_length,
         .registered_host_pointer = pages_,
     };
     amdf_xdna_umd_memory_result_t result = {};
@@ -199,13 +205,14 @@ class WindowsXdnaReservationTest : public ::testing::Test {
     native = nullptr;
   }
 
-  void Reserve() {
+  void Reserve(uint64_t byte_length = 65536,
+               uint64_t mapping_granularity = kUnit) {
     const amdf_memory_reservation_access_t consumer = {
         .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-        .mapping_granularity = kUnit,
+        .mapping_granularity = mapping_granularity,
     };
     const amdf_memory_reservation_create_info_t create = {
-        .byte_length = 65536,
+        .byte_length = byte_length,
         .access_count = 1,
         .accesses = &consumer,
     };
@@ -263,9 +270,63 @@ class WindowsXdnaReservationTest : public ::testing::Test {
   amdf_memory_access_state_t source_access_ = {};
   // Ordinary source registration retained through all view changes.
   amdf_xdna_umd_memory_t* source_ = nullptr;
-  // Real host pages borrowed by the modeled registrations.
+  // Real host address range borrowed by the modeled registrations.
   void* pages_ = nullptr;
 };
+
+class WindowsXdnaLargeReservationTest : public WindowsXdnaReservationTest {
+ protected:
+  void SetUp() override {
+    // The mocked KMT registration does not pin or read pages. Reserve the full
+    // source address range so pointer arithmetic is valid without charging the
+    // machine for three GiB of physical storage in a native-call contract test.
+    Initialize(kMappingUnit, MEM_RESERVE);
+  }
+
+  static constexpr uint64_t kGiB = UINT64_C(1) << 30;
+  static constexpr uint64_t kMappingUnit = 3 * kGiB;
+};
+
+TEST_F(WindowsXdnaLargeReservationTest,
+       ShortViewsStayWithinIndependentReplacementUnits) {
+  ASSERT_NO_FATAL_FAILURE(Reserve(2 * kMappingUnit, kMappingUnit));
+  const uint64_t pages_per_unit = kMappingUnit / kUnit;
+  ASSERT_EQ(Apply({Update(0, 0, pages_per_unit),
+                   Update(pages_per_unit, 0, pages_per_unit)}),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(state_.allocations.size(), 5u);
+  const uint64_t offsets[] = {0, 2 * kGiB, 3 * kGiB, 5 * kGiB};
+  for (size_t i = 0; i < 4; ++i) {
+    const auto& allocation = state_.allocations[i + 1];
+    EXPECT_EQ(allocation.address, kAddress + offsets[i]);
+    EXPECT_EQ(allocation.byte_length, (i % 2 == 0 ? 2 : 1) * kGiB);
+    EXPECT_EQ(allocation.pointer,
+              static_cast<uint8_t*>(pages_) + (i % 2) * 2 * kGiB);
+  }
+  EXPECT_EQ(state_.residents.back(), (std::vector<D3DKMT_HANDLE>{2, 3, 4, 5}));
+
+  amdf_memory_mapping_update_t unmap = {.byte_length = kMappingUnit};
+  ASSERT_EQ(Apply({unmap}), AMDF_STATUS_OK);
+  ASSERT_EQ(state_.destroys.size(), 1u);
+  EXPECT_EQ(state_.destroys.back(), (std::vector<D3DKMT_HANDLE>{2, 3}));
+  EXPECT_FALSE(state_.allocations[3].destroyed);
+  EXPECT_FALSE(state_.allocations[4].destroyed);
+  ASSERT_EQ(profile_.vtable->detach(&base_, 0), AMDF_STATUS_OK);
+  EXPECT_EQ(state_.destroys.back(), (std::vector<D3DKMT_HANDLE>{4, 5}));
+}
+
+TEST_F(WindowsXdnaLargeReservationTest, FailedTailMappingRetainsEveryView) {
+  ASSERT_NO_FATAL_FAILURE(Reserve(2 * kMappingUnit, kMappingUnit));
+  state_.reject_map = 5;
+  const uint64_t pages_per_unit = kMappingUnit / kUnit;
+  EXPECT_EQ(Apply({Update(0, 0, pages_per_unit),
+                   Update(pages_per_unit, 0, pages_per_unit)}),
+            amdf_kmt_make_status(kNoMemory));
+  ASSERT_EQ(state_.allocations.size(), 5u);
+  EXPECT_EQ(state_.allocations.back().byte_length, kGiB);
+  EXPECT_EQ(profile_.vtable->detach(&base_, 0), AMDF_STATUS_OK);
+  EXPECT_EQ(state_.destroys.back(), (std::vector<D3DKMT_HANDLE>{2, 3, 4, 5}));
+}
 
 TEST_F(WindowsXdnaReservationTest,
        ReplacesOnlyAffectedViewsAndBatchesReadiness) {

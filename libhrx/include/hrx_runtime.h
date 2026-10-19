@@ -913,7 +913,8 @@ typedef struct hrx_virtual_buffer_options_t {
   size_t byte_length;
   // Minimum power-of-two base alignment; zero selects the native minimum.
   size_t min_alignment;
-  // Minimum power-of-two mapping unit; zero selects the native minimum.
+  // Independently replaceable offset/length unit; zero selects the native
+  // minimum. Must divide the reservation and satisfy native page geometry.
   size_t mapping_granularity;
 } hrx_virtual_buffer_options_t;
 

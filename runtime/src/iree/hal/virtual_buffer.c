@@ -70,8 +70,7 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_create(
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
   *out_buffer = NULL;
   if (!group || !options || !options->byte_length ||
-      !iree_device_size_is_valid_alignment(options->min_alignment) ||
-      !iree_device_size_is_valid_alignment(options->mapping_granularity)) {
+      !iree_device_size_is_valid_alignment(options->min_alignment)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid reservation group or geometry");
   }
@@ -418,10 +417,8 @@ static iree_status_t iree_hal_memory_mapping_resolve(
   iree_hal_virtual_buffer_t* target = view.root;
   const iree_device_size_t target_offset =
       view.byte_offset + mapping->target_range.byte_offset;
-  if (!iree_device_size_has_alignment(target_offset,
-                                      target->mapping_granularity) ||
-      !iree_device_size_has_alignment(mapping->target_range.byte_length,
-                                      target->mapping_granularity)) {
+  if (target_offset % target->mapping_granularity ||
+      mapping->target_range.byte_length % target->mapping_granularity) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "mapping range is misaligned in native coordinates");
