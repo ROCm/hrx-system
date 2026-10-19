@@ -1,4 +1,51 @@
-template.decl @sampling.categorical_f32(%columns: index, %logits: buffer, %logits_origin: offset, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
+template.decl @sampling.categorical_excluding_f32(%columns: index, %logits: buffer, %logits_origin: offset, %excluded_id: i32, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
+
+template.decl @qwen38.greedy_argmax_f32.partial(%token_count: index, %logit_stride: index, %output_size: index, %excluded_id: i32, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
+
+func.def @qwen38_sampling_excluded_token(%flags: i32) -> (i32) {
+  %tool_bit = scalar.constant 2 : i32
+  %zero = scalar.constant 0 : i32
+  %none = scalar.constant -1 : i32
+  %tool_open = scalar.constant 248058 : i32
+  %permission = scalar.andi %flags, %tool_bit : i32
+  %disabled = scalar.cmpi ne, %permission, %zero : i32
+  %excluded = scf.select %disabled, %tool_open, %none : i32
+  func.return %excluded : i32
+}
+
+// Apply current-turn permissions at the first winner reduction, including
+// every speculative target row. Padded identities are never dereferenced.
+kernel.def @qwen38_sampling_partial_rows(%rows_value: index) {
+  %rows = index.assume %rows_value [range(%rows_value, 1, 128)] : index
+  %partials = index.constant 61 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%partials, %rows, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%rows_value: index, %epoch: buffer, %logits: buffer, %partial_logits: buffer, %partial_ids: buffer) {
+  %rows = index.assume %rows_value [range(%rows_value, 1, 128)] : index
+  %row = kernel.workgroup.id<y> : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count = view.load %header[2] : view<3xi32> -> i32
+  %row_word = index.cast %row : index to i32
+  %live = scalar.cmpi ult, %row_word, %count : i32
+  scf.if %live {
+    %bounded_row = index.assume %row [range(%row, 0, 127)] : index
+    %identity_origin = index.constant 5088 : offset
+    %identities = buffer.view %epoch[%identity_origin] : buffer -> view<128x2xi32>
+    %owner_word = view.load %identities[%bounded_row, 0] : view<128x2xi32> -> i32
+    %owner_value = index.cast %owner_word : i32 to index
+    %owner = index.assume %owner_value [range(%owner_value, 0, 15)] : index
+    %policy_origin = index.constant 4704 : offset
+    %policies = buffer.view %epoch[%policy_origin] : buffer -> view<16x6xi32>
+    %flags = view.load %policies[%owner, 3] : view<16x6xi32> -> i32
+    %excluded = func.call @qwen38_sampling_excluded_token(%flags) : (i32) -> (i32)
+    %stride = index.constant 248320 : index
+    %columns = index.constant 248077 : index
+    template.apply<@qwen38.greedy_argmax_f32.partial>(%rows, %stride, %columns, %excluded, %logits, %partial_logits, %partial_ids) : (index, index, index, i32, buffer, buffer, buffer)
+  }
+  kernel.return
+}
 
 // Target draws are indexed by logical request and absolute token position.
 // Padded head rows never read a policy. Greedy rows retain the tiled reduction;
@@ -39,6 +86,8 @@ kernel.def @qwen38_sample_rows(%rows_value: index) {
     %temperature = view.load %floats[0] : view<6xf32> -> f32
     %top_p = view.load %floats[1] : view<6xf32> -> f32
     %top_k = view.load %policy[2] : view<6xi32> -> i32
+    %flags = view.load %policy[3] : view<6xi32> -> i32
+    %excluded = func.call @qwen38_sampling_excluded_token(%flags) : (i32) -> (i32)
     %seed = view.load %seeds[0] : view<1xi64> -> i64
     %zero_f32 = scalar.constant 0.0 : f32
     %one_i32 = scalar.constant 1 : i32
@@ -65,10 +114,10 @@ kernel.def @qwen38_sample_rows(%rows_value: index) {
       %winner = kernel.workgroup.reduce<minsi> %candidate : i32
       scf.yield %winner : i32
     } else {
-      %columns = index.constant 248320 : index
+      %columns = index.constant 248077 : index
       %row_bytes = index.constant 993280 : offset
       %row_offset = index.scale %row, %row_bytes : index, offset -> offset
-      %winner = template.apply<@sampling.categorical_f32>(%columns, %logits, %row_offset, %temperature, %top_p, %top_k, %seed, %position) : (index, buffer, offset, f32, f32, i32, i64, i64) -> (i32)
+      %winner = template.apply<@sampling.categorical_excluding_f32>(%columns, %logits, %row_offset, %excluded, %temperature, %top_p, %top_k, %seed, %position) : (index, buffer, offset, i32, f32, f32, i32, i64, i64) -> (i32)
       scf.yield %winner : i32
     }
     %publishes = index.cmp eq, %thread, %zero : index

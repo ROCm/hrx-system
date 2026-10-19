@@ -756,6 +756,10 @@ global.rodata.def @top_k_key = bytes("746f705f6b")
 
 global.rodata.def @seed_key = bytes("73656564")
 
+global.rodata.def @tool_choice_key = bytes("746f6f6c5f63686f696365")
+
+global.rodata.def @tool_choice_none = bytes("6e6f6e65")
+
 global.rodata.def @draft_weights_key = bytes("64726166745f77656967687473")
 
 global.rodata.def @sampling_error = bytes("73616d706c696e672072657175697265732074656d70657261747572653d30206f7220706f736974697665206e6f726d616c204633322c206e6f726d616c2046333220746f705f7020696e2028302c315d2c206e6f6e6e656761746976652049333220746f705f6b2c20616e64207369676e65642049363420736565643b206475706c696361746520616e6420756e6b6e6f776e2073616d706c696e672064656661756c7473206172652072656a6563746564")
@@ -801,6 +805,9 @@ func.def @sampling_overlay(%source: buffer, %strict: i1, %configuration: buffer)
   %p_key = global.load @top_p_key : buffer
   %k_key = global.load @top_k_key : buffer
   %seed_key = global.load @seed_key : buffer
+  %choice_key = global.load @tool_choice_key : buffer
+  %false = scalar.constant false : i1
+  %request = scalar.cmpi eq, %strict, %false : i1
   %seen = scf.for %i = [%c0 to %extent step %c1](%seen = %zero32 : i32) -> (i32) {
     %key_begin = view.load %records[%i, 0] : view<[%extent]x5xi64> -> i64
     %key_length = view.load %records[%i, 1] : view<[%extent]x5xi64> -> i64
@@ -809,59 +816,76 @@ func.def @sampling_overlay(%source: buffer, %strict: i1, %configuration: buffer)
     %is_p = func.call @chat_equal(%key, %p_key) : (buffer, buffer) -> (i1)
     %is_k = func.call @chat_equal(%key, %k_key) : (buffer, buffer) -> (i1)
     %is_seed = func.call @chat_equal(%key, %seed_key) : (buffer, buffer) -> (i1)
+    %matches_choice = func.call @chat_equal(%key, %choice_key) : (buffer, buffer) -> (i1)
+    %is_choice = scalar.andi %matches_choice, %request : i1
     %tbit = scalar.extui %is_temperature : i1 to i32
     %pbit = scf.select %is_p, %two, %zero32 : i32
     %four = scalar.constant 4 : i32
     %eight = scalar.constant 8 : i32
     %kbit = scf.select %is_k, %four, %zero32 : i32
     %sbit = scf.select %is_seed, %eight, %zero32 : i32
+    %sixteen = scalar.constant 16 : i32
+    %choice_bit = scf.select %is_choice, %sixteen, %zero32 : i32
     %a = scalar.ori %tbit, %pbit : i32
     %b = scalar.ori %kbit, %sbit : i32
-    %bit = scalar.ori %a, %b : i32
+    %sampling_bits = scalar.ori %a, %b : i32
+    %bit = scalar.ori %sampling_bits, %choice_bit : i32
     %known = scalar.cmpi ne, %bit, %zero32 : i32
     %duplicate = scalar.andi %seen, %bit : i32
     %unique = scalar.cmpi eq, %duplicate, %zero32 : i32
-    %not_strict = scalar.constant false : i1
-    %loose = scalar.cmpi eq, %strict, %not_strict : i1
-    %allowed = scalar.ori %known, %loose : i1
+    %allowed = scalar.ori %known, %request : i1
     %valid = scalar.andi %allowed, %unique : i1
     func.call @sampling_require(%valid) : (i1)
     scf.if %known {
       %value_begin = view.load %records[%i, 2] : view<[%extent]x5xi64> -> i64
       %value_length = view.load %records[%i, 3] : view<[%extent]x5xi64> -> i64
       %value_type = view.load %records[%i, 4] : view<[%extent]x5xi64> -> i64
-      %number = scalar.cmpi eq, %value_type, %one64 : i64
-      func.call @sampling_require(%number) : (i1)
-      %floating = scalar.ori %is_temperature, %is_p : i1
-      scf.if %floating {
-        %value = func.call @parse_f64(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (f64)
-        %zero = scalar.constant 0.0 : f64
-        %one = scalar.constant 1.0 : f64
-        %largest = scalar.constant 3.4028234663852886e+38 : f64
-        %smallest = scalar.constant 1.1754943508222875e-38 : f64
-        %zero_value = scalar.cmpf oeq, %value, %zero : f64
-        %normal = scalar.cmpf oge, %value, %smallest : f64
-        %finite = scalar.cmpf ole, %value, %largest : f64
-        %nonnegative = scalar.ori %zero_value, %normal : i1
-        %valid_temperature = scalar.andi %nonnegative, %finite : i1
-        %probability = scalar.cmpf ole, %value, %one : f64
-        %valid_p = scalar.andi %normal, %probability : i1
-        %valid = scf.select %is_temperature, %valid_temperature, %valid_p : i1
-        func.call @sampling_require(%valid) : (i1)
-        %value32 = scalar.fptrunc %value : f64 to f32
-        %slot = scf.select %is_temperature, %c0, %c1 : index
-        view.store %value32, %floats[%slot] : f32, view<6xf32>
+      scf.if %is_choice {
+        // Native chat validation owns the accepted choice vocabulary. Keep
+        // turn permission in the device packet, not in the rendered history.
+        %value = func.call @option_key(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (buffer)
+        %none = global.load @tool_choice_none : buffer
+        %disabled = func.call @chat_equal(%value, %none) : (buffer, buffer) -> (i1)
+        %flags = view.load %words[3] : view<6xi32> -> i32
+        %choice_flag = scf.select %disabled, %two, %zero32 : i32
+        %updated = scalar.ori %flags, %choice_flag : i32
+        view.store %updated, %words[3] : i32, view<6xi32>
       } else {
-        %value = func.call @parse_i64(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (i64)
-        scf.if %is_seed {
-          view.store %value, %seed_view[0] : i64, view<1xi64>
-          view.store %one32, %words[3] : i32, view<6xi32>
-        } else {
-          %limit = scalar.constant 2147483647 : i64
-          %valid = scalar.cmpi ule, %value, %limit : i64
+        %number = scalar.cmpi eq, %value_type, %one64 : i64
+        func.call @sampling_require(%number) : (i1)
+        %floating = scalar.ori %is_temperature, %is_p : i1
+        scf.if %floating {
+          %value = func.call @parse_f64(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (f64)
+          %zero = scalar.constant 0.0 : f64
+          %one = scalar.constant 1.0 : f64
+          %largest = scalar.constant 3.4028234663852886e+38 : f64
+          %smallest = scalar.constant 1.1754943508222875e-38 : f64
+          %zero_value = scalar.cmpf oeq, %value, %zero : f64
+          %normal = scalar.cmpf oge, %value, %smallest : f64
+          %finite = scalar.cmpf ole, %value, %largest : f64
+          %nonnegative = scalar.ori %zero_value, %normal : i1
+          %valid_temperature = scalar.andi %nonnegative, %finite : i1
+          %probability = scalar.cmpf ole, %value, %one : f64
+          %valid_p = scalar.andi %normal, %probability : i1
+          %valid = scf.select %is_temperature, %valid_temperature, %valid_p : i1
           func.call @sampling_require(%valid) : (i1)
-          %value32 = scalar.trunci %value : i64 to i32
-          view.store %value32, %words[2] : i32, view<6xi32>
+          %value32 = scalar.fptrunc %value : f64 to f32
+          %slot = scf.select %is_temperature, %c0, %c1 : index
+          view.store %value32, %floats[%slot] : f32, view<6xf32>
+        } else {
+          %value = func.call @parse_i64(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (i64)
+          scf.if %is_seed {
+            view.store %value, %seed_view[0] : i64, view<1xi64>
+            %flags = view.load %words[3] : view<6xi32> -> i32
+            %explicit_seed = scalar.ori %flags, %one32 : i32
+            view.store %explicit_seed, %words[3] : i32, view<6xi32>
+          } else {
+            %limit = scalar.constant 2147483647 : i64
+            %valid = scalar.cmpi ule, %value, %limit : i64
+            func.call @sampling_require(%valid) : (i1)
+            %value32 = scalar.trunci %value : i64 to i32
+            view.store %value32, %words[2] : i32, view<6xi32>
+          }
         }
       }
     }
@@ -871,8 +895,9 @@ func.def @sampling_overlay(%source: buffer, %strict: i1, %configuration: buffer)
   func.return
 }
 
-// Source-private request packet: F32 temperature/top-p, I32 top-k/seed-presence,
-// and I64 seed. Native serving code only retains and transports the bytes.
+// Source-private request packet: F32 temperature/top-p, I32 top-k/flags, and
+// I64 seed. Flag bit 0 records an explicit seed; bit 1 forbids tool calls.
+// Native serving code only retains and transports the bytes.
 func.def public @request_defaults(%options: buffer) -> (buffer) {
   %origin = index.constant 0 : offset
   %bytes = index.constant 24 : offset
@@ -926,8 +951,10 @@ func.def public @request_options(%defaults: buffer, %request: buffer, %nonce: i6
   func.call @sampling_overlay(%request, %false, %configuration) : (buffer, i1, buffer)
   %words = buffer.view %configuration[%origin] : buffer -> view<6xi32>
   %flag = view.load %words[3] : view<6xi32> -> i32
+  %one = scalar.constant 1 : i32
+  %explicit_seed = scalar.andi %flag, %one : i32
   %zero = scalar.constant 0 : i32
-  %implicit_seed = scalar.cmpi eq, %flag, %zero : i32
+  %implicit_seed = scalar.cmpi eq, %explicit_seed, %zero : i32
   scf.if %implicit_seed {
     %seed_origin = index.constant 16 : offset
     %seed = buffer.view %configuration[%seed_origin] : buffer -> view<1xi64>

@@ -2,6 +2,8 @@ amdgpu.target<gfx11-generic> @sampling_wave32 {subgroup_size = 32}
 
 template.decl @sampling.categorical_f32(%columns: index, %logits: buffer, %logits_origin: offset, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
 
+template.decl @sampling.categorical_excluding_f32(%columns: index, %logits: buffer, %logits_origin: offset, %excluded_id: i32, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
+
 func.decl @sampling_race(%logit: f32, %maximum: f32, %temperature: f32, %seed: i64, %position: i64, %id: i32) -> (f32)
 
 kernel.def target(@sampling_wave32) @sample(%columns: index) {
@@ -25,6 +27,12 @@ kernel.def target(@sampling_wave32) @sample(%columns: index) {
 // Independent ordinal-rank oracle. Each candidate counts its predecessors
 // directly instead of using the device's key interval or partition algorithm.
 func.def @reference(%columns: index, %logits: buffer, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64, %output: buffer) {
+  %none = scalar.constant -1 : i32
+  func.call @reference_excluding(%columns, %logits, %none, %temperature, %top_p, %top_k, %seed, %position, %output) : (index, buffer, i32, f32, f32, i32, i64, i64, buffer)
+  func.return
+}
+
+func.def @reference_excluding(%columns: index, %logits: buffer, %excluded_id: i32, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64, %output: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -43,7 +51,10 @@ func.def @reference(%columns: index, %logits: buffer, %temperature: f32, %top_p:
   %weights = buffer.view %weight_storage[%origin] : buffer -> view<[%columns]xf32>
   %maximum = scf.for %column = [%c0 to %columns step %c1](%best = %negative : f32) -> (f32) {
     %value = view.load %input[%column] : view<[%columns]xf32> -> f32
-    %next = scalar.maxnumf %best, %value : f32
+    %id = index.cast %column : index to i32
+    %permitted = scalar.cmpi ne, %id, %excluded_id : i32
+    %eligible = scf.select %permitted, %value, %negative : f32
+    %next = scalar.maxnumf %best, %eligible : f32
     scf.yield %next : f32
   }
   %vocabulary = index.cast %columns : index to i32
@@ -61,12 +72,18 @@ func.def @reference(%columns: index, %logits: buffer, %temperature: f32, %top_p:
       %earlier = index.cmp ult, %other, %column : index
       %tie = scalar.andi %equal, %earlier : i1
       %before = scalar.ori %greater, %tie : i1
-      %increment = scalar.extui %before : i1 to i32
+      %id = index.cast %other : index to i32
+      %permitted = scalar.cmpi ne, %id, %excluded_id : i32
+      %predecessor = scalar.andi %before, %permitted : i1
+      %increment = scalar.extui %predecessor : i1 to i32
       %next = scalar.addi %rank, %increment : i32
       scf.yield %next : i32
     }
     view.store %rank, %ranks[%column] : i32, view<[%columns]xi32>
-    %eligible = scalar.cmpi slt, %rank, %limit : i32
+    %within_k = scalar.cmpi slt, %rank, %limit : i32
+    %id = index.cast %column : index to i32
+    %permitted = scalar.cmpi ne, %id, %excluded_id : i32
+    %eligible = scalar.andi %within_k, %permitted : i1
     %difference = scalar.subf %value, %maximum : f32
     %scaled = scalar.divf %difference, %safe_temperature : f32
     %exponential = scalar.expf<afn> %scaled : f32
@@ -90,7 +107,10 @@ func.def @reference(%columns: index, %logits: buffer, %temperature: f32, %top_p:
     %within_p = scalar.cmpf olt, %prefix, %target : f32
     %first = scalar.cmpi eq, %rank, %zero32 : i32
     %selected = scalar.andi %within_k, %within_p : i1
-    %eligible = scf.select %greedy, %first, %selected : i1
+    %in_support = scf.select %greedy, %first, %selected : i1
+    %column_id = index.cast %column : index to i32
+    %permitted = scalar.cmpi ne, %column_id, %excluded_id : i32
+    %eligible = scalar.andi %in_support, %permitted : i1
     %next_best, %next_id = scf.if %eligible -> (f32, i32) {
       %value = view.load %input[%column] : view<[%columns]xf32> -> f32
       %candidate_id = index.cast %column : index to i32
@@ -111,6 +131,81 @@ func.def @reference(%columns: index, %logits: buffer, %temperature: f32, %top_p:
   }
   view.store %token, %result[0] : i32, view<1xi32>
   func.return
+}
+
+kernel.def target(@sampling_wave32) @sample_excluding(%columns: index) {
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%columns: index, %logits: buffer, %excluded_id: i32, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %token = template.apply<@sampling.categorical_excluding_f32>(%columns, %logits, %origin, %excluded_id, %temperature, %top_p, %top_k, %seed, %position) : (index, buffer, offset, i32, f32, f32, i32, i64, i64) -> (i32)
+  %thread = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : index
+  %leader = index.cmp eq, %thread, %zero : index
+  scf.if %leader {
+    %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+    view.store %token, %result[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+func.def @exclusion_policy(%trial: index) -> (i32, f32, f32, i32) {
+  %ordinal = index.cast %trial : index to i32
+  %none = scalar.constant -1 : i32
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %four = scalar.constant 4 : i32
+  %eight = scalar.constant 8 : i32
+  %sixteen = scalar.constant 16 : i32
+  %twenty = scalar.constant 20 : i32
+  %tail = scalar.constant 66 : i32
+  %hundred = scalar.constant 100 : i32
+  %excluded_index = scalar.andi %ordinal, %three : i32
+  %first = scalar.cmpi eq, %excluded_index, %zero : i32
+  %second = scalar.cmpi eq, %excluded_index, %one : i32
+  %third = scalar.cmpi eq, %excluded_index, %two : i32
+  %last_pair = scf.select %third, %sixteen, %tail : i32
+  %present = scf.select %second, %zero, %last_pair : i32
+  %excluded = scf.select %first, %none, %present : i32
+  %temperature_bit = scalar.andi %ordinal, %four : i32
+  %sampled = scalar.cmpi ne, %temperature_bit, %zero : i32
+  %zero_f32 = scalar.constant 0.0 : f32
+  %sample_temperature = scalar.constant 0.7 : f32
+  %temperature = scf.select %sampled, %sample_temperature, %zero_f32 : f32
+  %nucleus_bit = scalar.andi %ordinal, %eight : i32
+  %nucleus = scalar.cmpi ne, %nucleus_bit, %zero : i32
+  %all_mass = scalar.constant 1.0 : f32
+  %partial_mass = scalar.constant 0.73 : f32
+  %top_p = scf.select %nucleus, %partial_mass, %all_mass : f32
+  %k_index = scalar.shrui %ordinal, %four : i32
+  %unbounded = scalar.cmpi eq, %k_index, %zero : i32
+  %single = scalar.cmpi eq, %k_index, %one : i32
+  %bounded = scalar.cmpi eq, %k_index, %two : i32
+  %wide_k = scf.select %bounded, %twenty, %hundred : i32
+  %nonzero_k = scf.select %single, %one, %wide_k : i32
+  %top_k = scf.select %unbounded, %zero, %nonzero_k : i32
+  func.return %excluded, %temperature, %top_p, %top_k : i32, f32, f32, i32
+}
+
+// Exclude the leading tied maximum, a low logit, the final tail element, or
+// nothing. Cross greedy, top-k=1, bounded and unbounded support, and nucleus.
+check.scenario public @sampling_exclusion {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %columns = check.literal value(67) : index
+    %excluded, %temperature, %top_p, %top_k = check.generate<@exclusion_policy>(%trial) : (index) -> (i32, f32, f32, i32)
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %position = check.literal value(117) : i64
+    %input = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<67xf32>
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@sample_excluding, @reference_excluding>[%columns](%columns, %input, %excluded, %temperature, %top_p, %top_k, %seed, %position, %output) : [index](index, tensor<67xf32>, i32, f32, f32, i32, i64, i64, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
 }
 
 check.scenario public @sampling_greedy {

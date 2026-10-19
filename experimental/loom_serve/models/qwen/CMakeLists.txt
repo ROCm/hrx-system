@@ -269,6 +269,7 @@ loom_test_module(
   NAME
     sampling_test_module
   SRCS
+    "kernels/qwen38/greedy_argmax.loom"
     "kernels/qwen38/sampling.loom"
     "tests/sampling.loom"
     "iree::experimental::loom_serve::motifs::tensor::library"
@@ -283,6 +284,7 @@ loom_execution_test(
     "::sampling_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
+    "--config=qwen38.greedy_argmax.output_capacity=248320"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -309,6 +311,7 @@ loom_execution_test(
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
+    "--config=qwen38.greedy_argmax.output_capacity=248320"
   LABELS
     "notsan"
     "iree-build-requirement=loom.target.arch.amdgpu"
