@@ -714,9 +714,9 @@ TEST_P(RegisteredSourceSpeechServiceTest,
       R"({"name":"speech","base_directory":")" +
       std::filesystem::absolute(directory_).string() + R"(","definition":)" +
       definition + "}";
-  EXPECT_EQ(Read(Send("POST", "/v1/models/register", declaration))
-                .find("HTTP/1.1 202"),
-            0u);
+  const auto registered =
+      Read(Send("POST", "/v1/models/register", declaration));
+  ASSERT_EQ(registered.find("HTTP/1.1 202"), 0u) << registered;
   CheckAudio(Read(Send("POST", "/v1/audio/speech", Request())), 17);
   if (GetParam()) {
     const auto tokens = Read(
@@ -733,13 +733,15 @@ TEST_P(RegisteredSourceSpeechServiceTest,
   const auto models = Read(Send("GET", "/v1/models"));
   EXPECT_NE(models.find(R"("output_modalities":["audio"])"), std::string::npos);
   EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
-  EXPECT_EQ(Read(Send("POST", "/v1/models/unregister",
-                      R"({"model":"speech","mode":"drain"})"))
-                .find("HTTP/1.1 202"),
-            0u);
-  while (!http_.failed() && !HasFatalFailure()) {
-    if (Read(Send("GET", "/v1/models")).find(R"("data":[])") !=
-        std::string::npos) {
+  const auto removing = Read(Send("POST", "/v1/models/unregister",
+                                  R"({"model":"speech","mode":"drain"})"));
+  ASSERT_EQ(removing.find("HTTP/1.1 202"), 0u) << removing;
+  // Discovery hides removing models while their names remain reserved.
+  // Status retains each incarnation until all of its resources retire.
+  for (;;) {
+    const auto status = Read(Send("GET", "/v1/status"));
+    ASSERT_EQ(status.find("HTTP/1.1 200"), 0u) << status;
+    if (status.find(R"("data":[])") != std::string::npos) {
       break;
     }
   }
@@ -752,9 +754,9 @@ TEST_P(RegisteredSourceSpeechServiceTest,
             std::string::npos);
   EXPECT_NE(retired.find("loom_serve_server_first_output_seconds_count{} 2\n"),
             std::string::npos);
-  EXPECT_EQ(Read(Send("POST", "/v1/models/register", declaration))
-                .find("HTTP/1.1 202"),
-            0u);
+  const auto replacement =
+      Read(Send("POST", "/v1/models/register", declaration));
+  ASSERT_EQ(replacement.find("HTTP/1.1 202"), 0u) << replacement;
   CheckAudio(Read(Send("POST", "/v1/audio/speech", Request())), 17);
 }
 
