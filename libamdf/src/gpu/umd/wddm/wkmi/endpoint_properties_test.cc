@@ -126,9 +126,14 @@ TEST(WkmiEndpointPropertiesTest, RdnaExposesPm4AndSdmaPacketFeatures) {
         (target >= 120000
              ? AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE
              : AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_EXTENDED_Z);
-    EXPECT_EQ(sdma.format_features, fence | scope | rectangle);
-    EXPECT_EQ(sdma.roles, AMDF_QUEUE_ROLE_TRANSFER);
-    EXPECT_EQ(sdma.cache_operations, 0u);
+    EXPECT_EQ(sdma.format_features,
+              fence | scope | rectangle |
+                  AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR);
+    EXPECT_EQ(sdma.roles,
+              AMDF_QUEUE_ROLE_TRANSFER | AMDF_QUEUE_ROLE_CACHE_CONTROL);
+    EXPECT_EQ(sdma.cache_operations,
+              AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
+                  AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM);
   }
 }
 
@@ -161,10 +166,15 @@ TEST(WkmiEndpointPropertiesTest, SdmaFieldsFollowNativeEncoding) {
     ASSERT_EQ(properties.queue_family_count, 2u);
     const auto& family = properties.queue_families[1];
     EXPECT_EQ(family.command_type, AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
-    EXPECT_EQ(family.format_features, kFeatures[i]);
-    EXPECT_EQ(family.roles, AMDF_QUEUE_ROLE_TRANSFER);
-    EXPECT_EQ(family.cache_operations, 0u);
-    EXPECT_EQ(family.cache_transition_kinds, 0u);
+    EXPECT_EQ(family.format_features,
+              kFeatures[i] | AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR);
+    EXPECT_EQ(family.roles,
+              AMDF_QUEUE_ROLE_TRANSFER | AMDF_QUEUE_ROLE_CACHE_CONTROL);
+    EXPECT_EQ(family.cache_operations,
+              AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
+                  AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM);
+    EXPECT_EQ(family.cache_transition_kinds,
+              AMDF_CACHE_TRANSITION_KINDS_GLOBAL);
   }
 }
 

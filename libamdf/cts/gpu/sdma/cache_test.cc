@@ -143,4 +143,118 @@ TEST_F(SdmaCacheTest, UserGcrBracketsCopiesAcrossEpochs) {
   }
 }
 
+class SdmaSubmissionCacheTest
+    : public GpuCommandTest,
+      public ::testing::WithParamInterface<amdf_memory_flags_t> {
+ protected:
+  SdmaSubmissionCacheTest()
+      : GpuCommandTest({
+            .command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
+            .roles = AMDF_QUEUE_ROLE_TRANSFER | AMDF_QUEUE_ROLE_CACHE_CONTROL,
+            .format_features = AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR,
+            .cache_operations = AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM |
+                                AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM,
+            .cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL,
+            .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+        }) {}
+};
+
+TEST_P(SdmaSubmissionCacheTest, NativeBoundariesPublishReusedPrivatePayloads) {
+  constexpr uint32_t kByteLength = 256 * 1024;
+  constexpr auto kReadWrite =
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
+  GpuMemory* source = nullptr;
+  GpuMemory* target = nullptr;
+  GpuMemory* local = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      CreateMemory(kReadWrite, kByteLength, &source, GetParam()));
+  ASSERT_NO_FATAL_FAILURE(
+      CreateMemory(kReadWrite, kByteLength, &target, GetParam()));
+  ASSERT_NE(local_scope_, nullptr);
+  const amdf_memory_device_access_t access = {
+      device_,
+      {.access = kReadWrite, .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
+  const uint32_t ordinal = FindGpuMemoryProfileOrdinal(
+      api_, local_scope_, device_, AMDF_MEMORY_PROFILE_ROLE_CREATE,
+      AMDF_MEMORY_FLAG_DEVICE_LOCAL, access.requirements);
+  ASSERT_NE(ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
+  const amdf_memory_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .memory_profile_ordinal = ordinal,
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_DEVICE_LOCAL,
+      .byte_length = kByteLength,
+      .minimum_alignment = 4096,
+      .accesses = &access,
+  };
+  ASSERT_NO_FATAL_FAILURE(CreateMemory(local_scope_, create, &local));
+  GpuCommandQueue* upload = nullptr;
+  GpuCommandQueue* download = nullptr;
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(&upload));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(&download));
+  const auto local_site = local->DeviceSite(family_.ordinal);
+  amdf_memory_pair_info_t handoff = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(handoff),
+  };
+  ASSERT_EQ(api_->memory_query_pair_info(&local_site, &local_site, &handoff),
+            AMDF_STATUS_OK);
+  const bool scoped = (family_.format_features &
+                       AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE) != 0;
+  for (const auto* transition : {&handoff.release, &handoff.acquire}) {
+    ASSERT_EQ(transition->kind, scoped ? AMDF_CACHE_TRANSITION_KIND_NONE
+                                       : AMDF_CACHE_TRANSITION_KIND_GLOBAL);
+    ASSERT_EQ(transition->executor, scoped
+                                        ? AMDF_CACHE_TRANSITION_EXECUTOR_NONE
+                                        : AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE);
+  }
+
+  auto* input = static_cast<uint32_t*>(source->host.pointer);
+  auto* output = static_cast<uint32_t*>(target->host.pointer);
+  constexpr size_t kWordsPerSubmission = 8;
+  for (uint32_t epoch = 1; epoch <= 3; ++epoch) {
+    for (uint32_t i = 0; i < kByteLength / sizeof(uint32_t); ++i) {
+      input[i] = epoch * 0x127390abu + i * 0x13579bdu;
+      output[i] = ~input[i];
+    }
+    ASSERT_NO_FATAL_FAILURE(source->TransferHostCache(
+        api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_FLUSH));
+    ASSERT_NO_FATAL_FAILURE(target->TransferHostCache(
+        api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_FLUSH));
+    SdmaCommandWriter produce(
+        upload->words().data() + (epoch - 1) * kWordsPerSubmission,
+        family_.format_features);
+    produce.CopyLinear(source->device_address, local->device_address,
+                       kByteLength);
+    produce.Noop();
+    ASSERT_EQ(produce.word_count(), kWordsPerSubmission);
+    ASSERT_NO_FATAL_FAILURE(
+        upload->Publish(api_, gpu_api_, epoch * kWordsPerSubmission));
+    // The native epilogue, not a fence packet inside the stream, owns release.
+    // The second queue's submission starts only after that producer boundary.
+    ASSERT_NO_FATAL_FAILURE(upload->WaitRetired(api_));
+    SdmaCommandWriter consume(
+        download->words().data() + (epoch - 1) * kWordsPerSubmission,
+        family_.format_features);
+    consume.CopyLinear(local->device_address, target->device_address,
+                       kByteLength);
+    consume.Noop();
+    ASSERT_EQ(consume.word_count(), kWordsPerSubmission);
+    ASSERT_NO_FATAL_FAILURE(
+        download->Publish(api_, gpu_api_, epoch * kWordsPerSubmission));
+    ASSERT_NO_FATAL_FAILURE(download->WaitRetired(api_));
+    ASSERT_NO_FATAL_FAILURE(target->TransferHostCache(
+        api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
+    for (uint32_t i = 0; i < kByteLength / sizeof(uint32_t); ++i) {
+      ASSERT_EQ(output[i], input[i]) << "epoch=" << epoch << " word=" << i;
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    HostPolicies, SdmaSubmissionCacheTest,
+    ::testing::Values(amdf_memory_flags_t{0},
+                      amdf_memory_flags_t{AMDF_MEMORY_FLAG_HOST_COHERENT}));
+
 }  // namespace

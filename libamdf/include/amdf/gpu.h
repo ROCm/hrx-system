@@ -367,6 +367,17 @@ enum amdf_gpu_sdma_format_feature_bits_e {
   /// unchanged. Requires COPY_LINEAR_RECT and is mutually exclusive with
   /// COPY_LINEAR_RECT_EXTENDED_Z. MEMORY_SCOPE independently admits scopes.
   AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE = UINT64_C(1) << 6,
+  /// KERNEL publication brackets each submitted stream with native global
+  /// ACQUIRE_FROM_SYSTEM and RELEASE_TO_SYSTEM operations. Incoming producer
+  /// dependencies must precede the submission; native submission retirement
+  /// proves the outgoing release. An in-stream wait or fence cannot substitute
+  /// for those boundaries. Callers split streams at such handoffs. A required
+  /// GLOBAL QUEUE recipe is realized by the submission boundary instead of an
+  /// encoded USER_GCR packet; this feature does not make it a no-op. This
+  /// feature
+  /// grants neither USER_GCR encoding nor cache transitions for USER
+  /// publication.
+  AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR = UINT64_C(1) << 7,
 };
 
 /// First directly published AQL queue format.

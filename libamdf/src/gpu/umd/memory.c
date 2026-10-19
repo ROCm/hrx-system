@@ -27,8 +27,12 @@ amdf_status_t amdf_gpu_umd_memory_describe_site(
        family->format_version == AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1) ||
       (family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
        family->format_version == AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1) ||
-      (sdma_format &&
-       (family->format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0);
+      (sdma_format && ((family->format_features &
+                        AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0 ||
+                       ((family->format_features &
+                         AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR) != 0 &&
+                        (family->publication_modes &
+                         AMDF_QUEUE_PUBLICATION_MODE_KERNEL) != 0)));
   const bool system_cache_operations =
       (family->roles & AMDF_QUEUE_ROLE_CACHE_CONTROL) != 0 &&
       (family->cache_operations &
