@@ -1,3 +1,7 @@
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+global.rodata.def @invalid_accumulator = bytes("7265636f676e6974696f6e206669787475726520616363756d756c61746f72206973206f7574736964652069747320756e7369676e656420696e6465782072616e6765")
+
 func.decl import("runner") @execute_5(%stage: i32, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) -> (i64)
 
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
@@ -171,6 +175,16 @@ func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordina
   %done = view.load %output[2] : view<4xi32> -> i32
   %values = buffer.view %feedback[%offset] : buffer -> view<4xf32>
   %sum = view.load %values[3] : view<4xf32> -> f32
+  // Truncation maps (-1, 0) to unsigned zero, including resampler ringing.
+  // Reject an unrepresentable alphabet index before converting device output.
+  %lower_bound = scalar.constant -1.0 : f32
+  %upper_bound = scalar.constant 4294967296.0 : f32
+  %above = scalar.cmpf ogt, %sum, %lower_bound : f32
+  %below = scalar.cmpf olt, %sum, %upper_bound : f32
+  %representable = scalar.andi %above, %below : i1
+  %valid = scalar.extui %representable : i1 to i32
+  %diagnostic = global.load @invalid_accumulator : buffer
+  func.call @require(%valid, %diagnostic) : (i32, buffer)
   %sum_offset = index.constant 24 : offset
   %previous = buffer.view %state[%sum_offset] : buffer -> view<1xf32>
   %previous_sum = view.load %previous[0] : view<1xf32> -> f32

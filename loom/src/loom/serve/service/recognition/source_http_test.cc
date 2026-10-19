@@ -29,7 +29,8 @@ IREE_FLAG(int32_t, test_workers, 1, "Shared application worker count.");
 namespace {
 
 // Zero rate selects encoded WAV; positive rates select declared PCM16LE.
-std::string Request(uint32_t sample_rate, size_t frame_count = 0) {
+std::string Request(uint32_t sample_rate, size_t frame_count = 0,
+                    int16_t sample = 8192) {
   const bool encoded = sample_rate == 0;
   if (encoded) {
     sample_rate = 16000;
@@ -40,7 +41,8 @@ std::string Request(uint32_t sample_rate, size_t frame_count = 0) {
   }
   std::string pcm(frame_count * sizeof(int16_t), '\0');
   for (size_t i = 0; i < frame_count; ++i) {
-    iree_unaligned_store_le_u16(pcm.data() + i * sizeof(int16_t), 8192);
+    iree_unaligned_store_le_u16(pcm.data() + i * sizeof(int16_t),
+                                static_cast<uint16_t>(sample));
   }
   std::string content_type =
       "audio/pcm;rate=" + std::to_string(sample_rate) + ";channels=1";
@@ -331,6 +333,40 @@ INSTANTIATE_TEST_SUITE_P(DisconnectAndShutdown,
                          SourceRecognitionHttpRetirementTest,
                          ::testing::Combine(::testing::Bool(),
                                             ::testing::ValuesIn(InputRates())));
+
+TEST_F(SourceRecognitionHttpTest, SourceCompletionFailurePreservesServing) {
+  loom_serve::testing::HttpClient rejected;
+  loom_serve::testing::HttpClient peer;
+  IREE_ASSERT_OK(http_.Send(Request(16000, 5, -8192), rejected.put()));
+  IREE_ASSERT_OK(http_.Send(Request(16000), peer.put()));
+  for (int client : {rejected.get(), peer.get()}) {
+    loom_serve_http_connection_t* connection = nullptr;
+    const loom_serve_http_request_t* request = nullptr;
+    ASSERT_NO_FATAL_FAILURE(Accept(client, &connection, &request));
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return !interface_.is_pending(interface_.self); }));
+  std::string response;
+  IREE_ASSERT_OK(http_.Read(rejected.release(), false, &response));
+  EXPECT_EQ(response.find("HTTP/1.1 400 Bad Request\r\n"), 0u);
+  EXPECT_NE(response.find("recognition fixture accumulator is outside its "
+                          "unsigned index range"),
+            std::string::npos);
+  IREE_ASSERT_OK(http_.Read(peer.release(), false, &response));
+  EXPECT_EQ(response.find("HTTP/1.1 200 OK\r\n"), 0u);
+  EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
+
+  loom_serve::testing::HttpClient replacement;
+  IREE_ASSERT_OK(http_.Send(Request(16000), replacement.put()));
+  loom_serve_http_connection_t* connection = nullptr;
+  const loom_serve_http_request_t* request = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(replacement.get(), &connection, &request));
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return !interface_.is_pending(interface_.self); }));
+  IREE_ASSERT_OK(http_.Read(replacement.release(), false, &response));
+  EXPECT_EQ(response.find("HTTP/1.1 200 OK\r\n"), 0u);
+  EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
+}
 
 TEST_F(SourceRecognitionHttpTest, RawPcmLimitsRejectOnlyTheAffectedRequest) {
   // The first upload exceeds normalized duration before admission. The second

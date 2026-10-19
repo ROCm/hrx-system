@@ -160,6 +160,13 @@ Pins, row storage and request handles release only after their accepted work and
 CPU borrowers retire. Failed readiness leaves ownership with the model's actual
 buffer-retirement path.
 
+Source completion and waveform encoding failures terminate only their request;
+collection continues for every other original batch member. A partially encoded
+block is never published. HTTP returns a JSON error before the first audio
+headers, or closes an already streaming response without inserting error text
+into its PCM. Native consumers retain the request error after retirement. Both
+paths return the row's capacity without poisoning peer or subsequent requests.
+
 Dynamic registration and removal use the same constructors and teardown as
 startup model documents. Protocol rejection preserves the prepared service;
 terminal execution failures retain accepted consumers until registration
