@@ -730,12 +730,15 @@ class RequestCheckTest(unittest.TestCase):
         for thinking in (False, True):
             request = self.request(enable_thinking=thinking, tools=TOOLS)
             ordinary = self.success(self.execute(source, request))
+            catalog = (
+                ordinary["prompt"].split("<tools>\n", 1)[1].split("\n</tools>", 1)[0]
+            )
+            self.assertEqual([json.loads(line) for line in catalog.splitlines()], TOOLS)
             for choice, expected_flag in (("auto", 0), ("none", 2)):
                 request["tool_choice"] = choice
                 value = self.success(self.execute(source, request))
                 self.assertEqual(value["prompt"], ordinary["prompt"])
                 self.assertEqual(value["tokens"], ordinary["tokens"])
-                self.assertEqual(value["declared_tool_count"], len(TOOLS))
                 self.assertEqual(
                     struct.unpack("<ffiiq", bytes(value["request_options"])),
                     (0, 1, 0, expected_flag, 1),

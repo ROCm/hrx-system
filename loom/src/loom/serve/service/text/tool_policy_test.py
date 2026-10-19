@@ -41,6 +41,16 @@ class ToolPolicyTest(unittest.TestCase):
                         "model": "portable-chat",
                         "messages": messages or [{"role": "user", "content": "hello"}],
                         "stream": stream,
+                        "tools": [
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "parameters": {"type": "object", "properties": {}},
+                                },
+                            }
+                            for name in ("read", "list")
+                        ],
                     }
                 ),
                 encoding="utf-8",

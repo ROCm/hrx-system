@@ -159,6 +159,29 @@ class ClientTest(unittest.TestCase):
                     ):
                         result = self.request(address, self.body(**options))
                         self.check_completion(result, "bx", "length", 4, 2)
+                    tools = [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "inspect",
+                                "description": "Inspect the input",
+                                "parameters": {"type": "object", "properties": {}},
+                            },
+                        }
+                    ]
+                    for streaming in (False, True):
+                        result = self.request(
+                            address,
+                            self.body(
+                                tools=tools, tool_choice="none", stream=streaming
+                            ),
+                        )
+                        if streaming:
+                            self.assertEqual(
+                                self.check_stream(result, include_usage=False), "bb"
+                            )
+                        else:
+                            self.check_completion(result, "bb", "length", 5, 2)
                     # A completed inference proves model readiness; the bound
                     # listener alone does not publish a usable model.
                     models = control(address, "GET", "/v1/models", 200)["data"]
@@ -310,6 +333,61 @@ class ClientTest(unittest.TestCase):
                         address, self.body(model="broken", stream=True)
                     )
                     self.assertIn("message", failed[-1]["error"])
+
+                    # A source parser cannot publish structured calls when the
+                    # request disables calls, even with a declared catalog.
+                    calls = (
+                        json.dumps(
+                            [
+                                {
+                                    "type": "function",
+                                    "function": {"name": "inspect", "arguments": "{}"},
+                                }
+                            ]
+                        )
+                        .encode()
+                        .hex()
+                    )
+                    marker = 'global.rodata.def @no_tools = bytes("5b5d")'
+                    self.assertEqual(source.count(marker), 1)
+                    path.write_text(
+                        source.replace(
+                            marker, f'global.rodata.def @no_tools = bytes("{calls}")'
+                        )
+                    )
+                    control(
+                        address,
+                        "POST",
+                        "/v1/models/register",
+                        202,
+                        body=json.dumps(
+                            {
+                                **declaration,
+                                "name": "unexpected-tools",
+                                "base_directory": str(broken),
+                            }
+                        ),
+                    )
+                    for permission in (
+                        {"tools": tools, "tool_choice": "none"},
+                        {"tools": [], "tool_choice": "auto"},
+                        {},
+                    ):
+                        for streaming in (False, True):
+                            failed = self.request(
+                                address,
+                                self.body(
+                                    model="unexpected-tools",
+                                    stream=streaming,
+                                    **permission,
+                                ),
+                                expected=200 if streaming else 500,
+                            )
+                            error = (
+                                failed[-1]["error"] if streaming else failed["error"]
+                            )
+                            self.assertIn("without enabled tools", error["message"])
+                            self.assertNotIn("tool_calls", json.dumps(failed))
                     result = self.request(address, self.body())
                     self.check_completion(result, "bx", "length", 4, 2)
                 self.assertEqual(process.returncode, 0, log.read_text())
