@@ -60,14 +60,14 @@ typedef struct loom_serve_weight_activity_t {
 // tensor name in distinct checkpoint domains does not imply shared storage.
 //
 // With pool, roots have stable virtual addresses and start without physical
-// backing. NULL selects explicitly fixed storage (including device ASAN use);
-// deactivation is unavailable in that mode. Fixed roots use one queued
-// allocation batch. Source preparation joins its readiness before consumer
-// commands can be recorded, and activation imports it before file reads.
-// Successful source preparation is required before activation, and activation
-// before any consumer executes.
-// storage_pool supplies fixed roots, is qualified for dispatch and transfer,
-// and outlives the plan and every resolved root.
+// backing with the selected geometry. NULL selects explicitly fixed storage
+// (including device ASAN use); deactivation is unavailable in that mode. Fixed
+// roots use one queued allocation batch. Source preparation joins its readiness
+// before consumer commands can be recorded, and activation imports it before
+// file reads. Successful source preparation is required before activation, and
+// activation before any consumer executes. storage_pool supplies fixed roots,
+// is qualified for dispatch and transfer, and outlives the plan and every
+// resolved root.
 //
 // On failure both populated root slots and a non-NULL *out_weights remain
 // caller-owned for teardown. Release consumer commands and root slots before
@@ -75,9 +75,10 @@ typedef struct loom_serve_weight_activity_t {
 iree_status_t loom_serve_weights_allocate(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
     iree_hal_queue_t* dispatch, iree_hal_pool_t* storage_pool,
-    loom_serve_memory_pool_t* pool, iree_host_size_t shared_root_count,
-    iree_host_size_t root_count, const loom_serve_weight_root_t* roots,
-    iree_allocator_t host_allocator, loom_serve_weights_t** out_weights);
+    loom_serve_memory_pool_t* pool, loom_serve_memory_geometry_t geometry,
+    iree_host_size_t shared_root_count, iree_host_size_t root_count,
+    const loom_serve_weight_root_t* roots, iree_allocator_t host_allocator,
+    loom_serve_weights_t** out_weights);
 
 // Receives terminal source preparation and fixed-root allocation status.
 // All preparation tasks/compiler accesses have retired before this callback,

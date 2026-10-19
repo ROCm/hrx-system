@@ -93,7 +93,8 @@ def oracle(text):
     return result
 
 
-def check(server, source, directory, workers, memory_bytes, retention):
+def check(server, source, directory, workers, capacity, retention, model_bytes=0):
+    memory_bytes = capacity * model_bytes
     configuration = directory / "models.flags"
     weights = directory / "weights.safetensors"
     header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
@@ -126,7 +127,8 @@ def check(server, source, directory, workers, memory_bytes, retention):
         str(server),
         "--device=amdgpu",
         "--pool_backing=elastic",
-        "--slab_bytes=2097152",
+        "--weight_slab_bytes=2097152",
+        "--state_slab_bytes=2097152",
         f"--memory_bytes={memory_bytes}",
         f"--workers={workers}",
         f"--flagfile={configuration}",
@@ -143,6 +145,15 @@ def check(server, source, directory, workers, memory_bytes, retention):
                 model["loom"]["status"]["phase"] == "idle" for model in models
             ):
                 break
+        if not capacity:
+            # The tiny source model fits each root in its native tail extent.
+            # Size pressure from its actual reserved roots instead of assuming
+            # that every small allocation consumes a full configured slab.
+            state = control(address, "GET", "/v1/status", 200)
+            retained = state["server"]["resources"]["devices"][0]["memory"]["retained"]
+            assert retained["reserved_bytes"] > 0, state
+            assert retained["reserved_bytes"] % 2 == 0, state
+            return retained["reserved_bytes"] // 2
         messages = [{"role": "user", "content": "abxa"}]
         first = ""
         for index in range(4):
@@ -191,7 +202,7 @@ def check(server, source, directory, workers, memory_bytes, retention):
         }
         print(json.dumps(result), flush=True)
         assert memory_after["peak_bytes"] <= memory_bytes, result
-        expected = 503 if retention != "none" and memory_bytes == 4194304 else 200
+        expected = 503 if retention != "none" and capacity == 1 else 200
         assert second_status == expected, second
         beta = next(item["loom"] for item in after["data"] if item["id"] == "beta")
         admission = beta["parameters"]["primary"]["admission"]
@@ -254,7 +265,7 @@ def check(server, source, directory, workers, memory_bytes, retention):
             )
             # Weight pinning is not a session pin: capacity pressure can discard
             # all idle histories while the parameters remain resident.
-            assert bool(sessions["data"]) == (memory_bytes == 8388608), sessions
+            assert bool(sessions["data"]) == (capacity == 2), sessions
             for _ in range(2):
                 unpinned = control(
                     address,
@@ -298,9 +309,7 @@ def check(server, source, directory, workers, memory_bytes, retention):
             )
             assert resumed_status == 200, resumed
             assert output(resumed) == oracle("abxa" + output(first) + "#b"), resumed
-            assert cached_tokens(resumed) == (0 if memory_bytes == 4194304 else 5), (
-                resumed
-            )
+            assert cached_tokens(resumed) == (0 if capacity == 1 else 5), resumed
         # Removal owns pinned state as well as the service. A peer submitted
         # immediately after accepted unregister must complete without waiting
         # for a client-side polling loop to observe final model destruction.
@@ -366,13 +375,18 @@ def run_from_command_line(cases):
     failures = []
     with tempfile.TemporaryDirectory(prefix="loom pressure ") as temporary:
         root = Path(temporary)
-        for workers, memory_bytes, retention in cases:
-            directory = root / f"{workers}-{memory_bytes}-{retention}"
+        measurement = root / "geometry"
+        measurement.mkdir()
+        model_bytes = check(server, source, measurement, 1, 0, "none")
+        for workers, capacity, retention in cases:
+            directory = root / f"{workers}-{capacity}-{retention}"
             directory.mkdir()
             try:
-                check(server, source, directory, workers, memory_bytes, retention)
+                check(
+                    server, source, directory, workers, capacity, retention, model_bytes
+                )
             except AssertionError as error:
-                failures.append((workers, memory_bytes, retention, str(error)))
+                failures.append((workers, capacity, retention, str(error)))
     assert not failures, failures
 
 
@@ -380,12 +394,12 @@ def run_from_command_line(cases):
 # state policy. The manual pressure_stress_test target retains the complete
 # Cartesian product for explicit stress qualification.
 _CASES = (
-    (1, 8 * 1024 * 1024, "none"),
-    (1, 4 * 1024 * 1024, "checkpoint"),
-    (1, 8 * 1024 * 1024, "parameters"),
-    (4, 4 * 1024 * 1024, "none"),
-    (4, 8 * 1024 * 1024, "checkpoint"),
-    (4, 4 * 1024 * 1024, "parameters"),
+    (1, 2, "none"),
+    (1, 1, "checkpoint"),
+    (1, 2, "parameters"),
+    (4, 1, "none"),
+    (4, 2, "checkpoint"),
+    (4, 1, "parameters"),
 )
 
 

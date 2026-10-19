@@ -314,7 +314,12 @@ TEST_F(ElasticTextServiceTest,
   IREE_ASSERT_OK(loom_serve_text_row_try_pin(row, &checkpoint));
   ASSERT_NE(checkpoint, nullptr);
   const auto before = loom_serve_text_model_memory_statistics(sparse);
-  ASSERT_EQ(before.committed_bytes, 3 * slab_size);
+  // The two KV slabs end in a short tail containing the displaced private
+  // prefix (four 768-byte rows and ten 256-byte recurrent slots).
+  const auto geometry = loom_serve_device_state_geometry(device_);
+  const uint64_t tail_bytes =
+      iree_device_align(4 * 768 + 10 * 256, geometry.granularity);
+  ASSERT_EQ(before.committed_bytes, 2 * slab_size + tail_bytes);
 
   auto* warm = loom_serve_text_model_row(model_, 0);
   IREE_ASSERT_OK(
@@ -344,9 +349,9 @@ TEST_F(ElasticTextServiceTest,
     const auto physical = loom_serve_memory_pool_statistics(
         loom_serve_device_memory_pool(device_));
     const auto returned = loom_serve_text_model_memory_statistics(sparse);
-    EXPECT_EQ(returned.committed_bytes, before.committed_bytes - slab_size);
+    EXPECT_EQ(returned.committed_bytes, before.committed_bytes - tail_bytes);
     EXPECT_EQ(returned.releasing_bytes, 0u);
-    EXPECT_GE(physical.releasing_bytes, slab_size);
+    EXPECT_GE(physical.releasing_bytes, tail_bytes);
     ASSERT_NO_FATAL_FAILURE(advance_warm());
   }
   ASSERT_NO_FATAL_FAILURE(wait_frontier());
@@ -377,7 +382,7 @@ TEST_F(ElasticTextServiceTest,
   IREE_ASSERT_OK(loom_serve_text_model_complete_trim(sparse, &result, &complete,
                                                      &frontier));
   ASSERT_TRUE(complete);
-  EXPECT_EQ(result.released_bytes, 2 * slab_size);
+  EXPECT_EQ(result.released_bytes, slab_size + tail_bytes);
   EXPECT_EQ(loom_serve_text_model_memory_statistics(sparse).committed_bytes,
             slab_size);
 

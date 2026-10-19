@@ -49,9 +49,9 @@ iree_status_t loom_serve_rows_allocate(
       const iree_device_size_t length =
           state->strides[i] *
           (i == LOOM_SERVE_ROWS_CONDITIONING ? 1 : row_count);
-      status = loom_serve_virtual_buffer_allocate(state->pool, length,
-                                                  alignment, &state->statistics,
-                                                  &state->reservations[i]);
+      status = loom_serve_virtual_buffer_allocate(
+          state->pool, loom_serve_device_state_geometry(device), length,
+          alignment, &state->statistics, &state->reservations[i]);
       if (iree_status_is_ok(status)) {
         state->buffers[i] =
             loom_serve_virtual_buffer_handle(state->reservations[i]);

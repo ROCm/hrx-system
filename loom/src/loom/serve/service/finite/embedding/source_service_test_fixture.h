@@ -138,8 +138,9 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
 
   std::string SelectVariant(uint64_t variant, uint64_t expected);
 
-  // Writes a package with a scalar checkpoint initialized to 1.0. Its device
-  // preparation doubles the factor in place before serving scales the output.
+  // Writes a package with a 2 MiB parameter block and leading scale of 1.0.
+  // Preparation doubles that scale in place before serving uses it. The full
+  // block provides actual storage demand for the one-root pressure budget.
   void WriteCheckpointPackage(const std::string& target);
 
   void UseDirectPackage();

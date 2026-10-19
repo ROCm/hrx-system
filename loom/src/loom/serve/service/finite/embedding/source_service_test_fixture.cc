@@ -621,17 +621,17 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
   manifest.close();
   ASSERT_TRUE(manifest.good());
   std::string header =
-      R"({"factor":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}})";
+      R"({"factor":{"dtype":"F32","shape":[524288],"data_offsets":[0,2097152]}})";
   header.append((8 - header.size() % 8) % 8, ' ');
   std::ofstream weights(target + "/weights.safetensors", std::ios::binary);
   uint8_t length[8];
   iree_unaligned_store_le_u64(length, header.size());
   weights.write(reinterpret_cast<const char*>(length), sizeof(length));
   weights.write(header.data(), header.size());
-  uint8_t factor[4];
+  std::string factor(2 * 1024 * 1024, '\0');
   // F32 1.0; the source-selected preparation command doubles it on device.
-  iree_unaligned_store_le_u32(factor, 0x3f800000);
-  weights.write(reinterpret_cast<const char*>(factor), sizeof(factor));
+  iree_unaligned_store_le_u32(factor.data(), 0x3f800000);
+  weights.write(factor.data(), factor.size());
   weights.close();
   ASSERT_TRUE(weights.good());
 }

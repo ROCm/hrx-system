@@ -506,7 +506,8 @@ static iree_status_t loom_serve_finite_model_bind(
     status = loom_serve_weights_allocate(
         device, loom_serve_device_transfer_queue(model->owner), dispatch,
         loom_serve_device_storage_pool(model->owner),
-        loom_serve_device_memory_pool(model->owner), 0, 1, &root,
+        loom_serve_device_memory_pool(model->owner),
+        loom_serve_device_weight_geometry(model->owner), 0, 1, &root,
         host_allocator, &model->weights.plans[i]);
   }
   return status;

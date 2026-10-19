@@ -41,7 +41,8 @@ controls, pressure, counters and telemetry cursors.
 | `--workspace_idle_ms=N` | `0` | Trim reusable command-workspace backing after the device's last workspace allocation retires and stays idle for this interval; `0` disables expiry. |
 | `--parameter_idle_ms=N` | `0` | Deactivate unpinned elastic model weights after this idle interval; `0` disables expiry. Sessions and KV/prefix history survive. |
 | `--pool_backing=elastic\|fixed` | `elastic` | Demand-committed retained slabs or eagerly backed retained storage. |
-| `--slab_bytes=N` | `67108864` | Elastic physical slab size in bytes (64 MiB); `0` uses the allocator recommendation. Ignored for fixed backing. |
+| `--weight_slab_bytes=N` | `1073741824` | Maximum elastic weight slab size in bytes (1 GiB). Small roots and final slabs use only their native-aligned extent. `0` uses the allocator recommendation. Ignored for fixed backing. |
+| `--state_slab_bytes=N` | `67108864` | Elastic mutable-state commitment/reclamation granularity (64 MiB), independent of weight slabs and logical KV blocks. Final slabs use their native-aligned extent. `0` uses the allocator recommendation. Ignored for fixed backing. |
 | `--memory_bytes=N` | `0` | Serving-managed physical parameter/state limit; `0` imposes no serving limit. |
 
 Model, connection and body capacities must be positive. Holding credit must

@@ -13,7 +13,7 @@ from loom.src.loom.serve.server.pressure_test import run_from_command_line
 _CASES = tuple(
     itertools.product(
         (1, 4),
-        (8 * 1024 * 1024, 4 * 1024 * 1024),
+        (2, 1),
         ("none", "checkpoint", "parameters"),
     )
 )

@@ -13,21 +13,22 @@
           "--listen",
           "--workers",
           "--pool_backing",
-          "--slab_bytes=67108864"
+          "--weight_slab_bytes=1073741824",
+          "--state_slab_bytes=67108864"
         ]
       },
       "stderr": {"not_contains": ["\"event\":\"ready\""]}
     },
     {
-      "name": "explicit physical slab size overrides the serving default",
-      "run": {"tool": "loom-serve", "args": ["--slab_bytes=2097152", "--help"]},
-      "stdout": {"contains": ["--slab_bytes=2097152"]},
+      "name": "weight and state slab sizes are independently configurable",
+      "run": {"tool": "loom-serve", "args": ["--weight_slab_bytes=2097152", "--state_slab_bytes=4194304", "--help"]},
+      "stdout": {"contains": ["--weight_slab_bytes=2097152", "--state_slab_bytes=4194304"]},
       "stderr": {"not_contains": ["\"event\":\"ready\""]}
     },
     {
       "name": "allocator-recommended physical slabs remain selectable",
-      "run": {"tool": "loom-serve", "args": ["--slab_bytes=0", "--help"]},
-      "stdout": {"contains": ["--slab_bytes=0"]},
+      "run": {"tool": "loom-serve", "args": ["--weight_slab_bytes=0", "--state_slab_bytes=0", "--help"]},
+      "stdout": {"contains": ["--weight_slab_bytes=0", "--state_slab_bytes=0"]},
       "stderr": {"not_contains": ["\"event\":\"ready\""]}
     },
     {

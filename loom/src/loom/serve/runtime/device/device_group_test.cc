@@ -85,13 +85,15 @@ TEST_F(DeviceGroupTest, LaterPoolFailureReleasesSealedGroupAndEarlierPool) {
           .driver = driver_,
           .uri = loom_serve_test_device()->device_uri,
           .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
-          .slab_size = kSlabBytes,
+          .weight_slab_size = kSlabBytes,
+          .state_slab_size = kSlabBytes,
       },
       {
           .driver = driver_,
           .uri = loom_serve_test_device()->device_uri,
           .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
-          .slab_size = UINT64_MAX,
+          .weight_slab_size = UINT64_MAX,
+          .state_slab_size = UINT64_MAX,
       }};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -100,21 +102,35 @@ TEST_F(DeviceGroupTest, LaterPoolFailureReleasesSealedGroupAndEarlierPool) {
   EXPECT_EQ(group_, nullptr);
 }
 
-TEST_F(DeviceGroupTest, ElasticPoolPreservesExplicitSlabSize) {
+TEST_F(DeviceGroupTest, IndependentSlabSizesPreserveShortTails) {
   constexpr uint64_t slab_size = 128 * 1024 * 1024;
   const loom_serve_device_options_t options = {
       .driver = driver_,
       .uri = loom_serve_test_device()->device_uri,
       .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
-      .slab_size = slab_size,
+      .weight_slab_size = slab_size,
+      .state_slab_size = kSlabBytes,
   };
   IREE_ASSERT_OK(loom_serve_device_group_allocate(
       host_, 1, &options, iree_allocator_system(), &group_));
   auto* device = loom_serve_device_group_at(group_, 0);
+  const auto weights = loom_serve_device_weight_geometry(device);
+  const auto state = loom_serve_device_state_geometry(device);
+  EXPECT_EQ(weights.slab_size, slab_size);
+  EXPECT_EQ(state.slab_size, kSlabBytes);
+  EXPECT_EQ(weights.granularity, state.granularity);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      loom_serve_device_memory_pool(device), 1, 256, &statistics_[0],
-      &reservations_[0]));
-  EXPECT_EQ(statistics_[0].reserved_bytes, slab_size);
+      loom_serve_device_memory_pool(device), weights, slab_size + 1, 256,
+      &statistics_[0], &reservations_[0]));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      loom_serve_device_memory_pool(device), state, 1, 256, &statistics_[1],
+      &reservations_[1]));
+  EXPECT_EQ(loom_serve_virtual_buffer_slab_count(reservations_[0]), 2u);
+  const auto tail = loom_serve_virtual_buffer_slab_range(reservations_[0], 1);
+  EXPECT_EQ(tail.byte_offset, slab_size);
+  EXPECT_EQ(tail.byte_length, weights.minimum_size);
+  EXPECT_EQ(statistics_[0].reserved_bytes, slab_size + weights.minimum_size);
+  EXPECT_EQ(statistics_[1].reserved_bytes, state.minimum_size);
   EXPECT_EQ(statistics_[0].committed_bytes, 0u);
 }
 
@@ -124,14 +140,16 @@ TEST_F(DeviceGroupTest, SeparateBudgetsAndWholeGroupLifetime) {
           .driver = driver_,
           .uri = loom_serve_test_device()->device_uri,
           .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
-          .slab_size = kSlabBytes,
+          .weight_slab_size = kSlabBytes,
+          .state_slab_size = kSlabBytes,
           .memory_limit = kSlabBytes,
       },
       {
           .driver = driver_,
           .uri = loom_serve_test_device()->device_uri,
           .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
-          .slab_size = kSlabBytes,
+          .weight_slab_size = kSlabBytes,
+          .state_slab_size = kSlabBytes,
           .memory_limit = 2 * kSlabBytes,
       }};
   IREE_ASSERT_OK(
@@ -145,14 +163,16 @@ TEST_F(DeviceGroupTest, SeparateBudgetsAndWholeGroupLifetime) {
   EXPECT_NE(loom_serve_device_residency_cache(first),
             loom_serve_device_residency_cache(second));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      loom_serve_device_memory_pool(second), 2 * kSlabBytes, 256,
+      loom_serve_device_memory_pool(second),
+      loom_serve_device_state_geometry(second), 2 * kSlabBytes, 256,
       &statistics_[1], &reservations_[1]));
   // Only the last record has a reservation. Rejection must preserve the first
   // record's resources too; it can still admit work after the failed teardown.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_serve_device_group_free(group_));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      loom_serve_device_memory_pool(first), 2 * kSlabBytes, 256,
+      loom_serve_device_memory_pool(first),
+      loom_serve_device_state_geometry(first), 2 * kSlabBytes, 256,
       &statistics_[0], &reservations_[0]));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(reservations_[0], 0, 4));
   IREE_ASSERT_OK(

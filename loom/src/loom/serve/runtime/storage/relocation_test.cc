@@ -32,7 +32,8 @@ class RelocationTest : public ::testing::Test {
         .driver = driver,
         .uri = loom_serve_test_device()->device_uri,
         .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
-        .slab_size = 2 * 1024 * 1024,
+        .weight_slab_size = 2 * 1024 * 1024,
+        .state_slab_size = 2 * 1024 * 1024,
     };
     auto status = loom_serve_device_group_allocate(host, 1, &options,
                                                    native.allocator(), &group);
@@ -83,7 +84,7 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   constexpr uint32_t kLiveBlocks = 35;
   constexpr uint32_t kBlockCount = kLiveBlocks * 2;
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      pool,
+      pool, loom_serve_device_state_geometry(device),
       region.origin + 2 * region.stride + kBlockCount * region.block_bytes, 256,
       &statistics, &buffer));
   auto* const handle = loom_serve_virtual_buffer_handle(buffer);

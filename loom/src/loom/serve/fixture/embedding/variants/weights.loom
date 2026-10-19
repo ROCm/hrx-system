@@ -31,7 +31,7 @@ kernel.def target(@parameter_target) @scale() {
   %units = config.get @fixture.units : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%units, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%input: buffer, %output: buffer, %scale: view<1xf32>) {
+} launch(%input: buffer, %output: buffer, %scale: view<524288xf32>) {
   %origin = index.constant 0 : offset
   %row = kernel.workgroup.id<x> : index
   %units = config.get @fixture.units : index
@@ -51,7 +51,7 @@ kernel.def target(@parameter_target) @scale() {
     %c4 = index.constant 4 : index
     %capacity = index.mul %units, %c4 : index
     %result = buffer.view %output[%origin] : buffer -> view<[%capacity]xf32>
-    %factor = view.load %scale[0] : view<1xf32> -> f32
+    %factor = view.load %scale[0] : view<524288xf32> -> f32
     %c0 = index.constant 0 : index
     %c1 = index.constant 1 : index
     scf.for %i = [%c0 to %width step %c1] {
@@ -67,13 +67,15 @@ kernel.def target(@parameter_target) @scale() {
 }
 
 command.program.def public @embed_with_parameters() launch(%parameters: buffer, %input: buffer, %output: buffer) {
-  %factor = command.parameter %parameters, "factor" : view<1xf32>
+  // A real 2 MiB parameter root exercises the one-root pressure budget without
+  // depending on allocation padding. Only the leading scale is consumed.
+  %factor = command.parameter %parameters, "factor" : view<524288xf32>
   %units = config.get @fixture.units : index
   %c16 = index.constant 16 : offset
   %length = index.scale %units, %c16 : index, offset -> offset
   %hidden = buffer.alloca<global> align(16) %length : buffer
   kernel.launch @pool(%input, %hidden) : (buffer, buffer)
   kernel.launch @project(%input, %hidden, %output) : (buffer, buffer, buffer)
-  kernel.launch @scale(%input, %output, %factor) : (buffer, buffer, view<1xf32>)
+  kernel.launch @scale(%input, %output, %factor) : (buffer, buffer, view<524288xf32>)
   command.return
 }

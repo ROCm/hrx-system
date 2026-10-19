@@ -41,8 +41,10 @@ typedef struct loom_serve_device_options_t {
   iree_string_view_t uri;
   // Physical backing strategy for all models sharing this owner.
   loom_serve_device_backing_t backing;
-  // Physical slab bytes; zero selects the backing source's recommendation.
-  iree_device_size_t slab_size;
+  // Bulk weight slab bytes; zero selects the source recommendation.
+  iree_device_size_t weight_slab_size;
+  // Mutable-state slab bytes; zero selects the source recommendation.
+  iree_device_size_t state_slab_size;
   // Maximum committed virtual-pool bytes; zero imposes no serving limit.
   uint64_t memory_limit;
 } loom_serve_device_options_t;
@@ -155,6 +157,12 @@ iree_status_t loom_serve_device_create_execution(
     loom_serve_device_t* device, loom_serve_execution_t** out_execution);
 // Borrowed shared physical owner, or NULL for explicitly fixed backing.
 loom_serve_memory_pool_t* loom_serve_device_memory_pool(
+    const loom_serve_device_t* device);
+// Validated elastic allocation geometry; zeroed for fixed backing. Both
+// classes share the physical pool and budget. Final slabs use native extents.
+loom_serve_memory_geometry_t loom_serve_device_weight_geometry(
+    const loom_serve_device_t* device);
+loom_serve_memory_geometry_t loom_serve_device_state_geometry(
     const loom_serve_device_t* device);
 // Borrowed parameter admission, pinning and LRU policy shared by all models.
 loom_serve_residency_cache_t* loom_serve_device_residency_cache(

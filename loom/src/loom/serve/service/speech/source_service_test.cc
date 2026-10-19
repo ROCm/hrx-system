@@ -68,8 +68,6 @@ iree_status_t AcquireApplication(iree_allocator_t allocator,
 
 class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
  protected:
-  static constexpr uint64_t kSlabSize = 2 * 1024 * 1024;
-
   virtual bool NeedsStandaloneModel() const { return true; }
 
   static void WriteCheckpoint(const std::string& path,
@@ -486,7 +484,7 @@ TEST_P(SourceSpeechServiceTest,
     if (FLAG_test_elastic) {
       EXPECT_EQ(
           loom_serve_device_memory_statistics(device).retained.pending_bytes,
-          3 * kSlabSize);
+          3 * loom_serve_device_state_geometry(device).minimum_size);
     }
     IREE_ASSERT_OK(Generate(warm, 6, &warm_samples, &warm_blocks));
     ASSERT_EQ(warm_samples.size(), 6u);
@@ -522,7 +520,7 @@ TEST_P(SourceSpeechServiceTest,
     if (FLAG_test_elastic) {
       EXPECT_EQ(
           loom_serve_device_memory_statistics(device).retained.releasing_bytes,
-          2 * kSlabSize);
+          2 * loom_serve_device_state_geometry(device).minimum_size);
     }
     IREE_ASSERT_OK(Generate(warm, SIZE_MAX, &warm_samples, &warm_blocks));
   }
@@ -682,7 +680,8 @@ TEST_P(SourceSpeechServiceTest, CohortsPreserveIndependentResidentProgress) {
     // Releasing an individual row cannot trim slabs shared by live neighbors.
     // The last release reclaims input/history; reusable conditioning survives.
     EXPECT_EQ(idle.reserved_bytes, initial.reserved_bytes);
-    EXPECT_EQ(full_commitment - idle.committed_bytes, 2 * kSlabSize);
+    EXPECT_EQ(full_commitment - idle.committed_bytes,
+              2 * loom_serve_device_state_geometry(device).minimum_size);
   }
   for (size_t index = 0; index < 5; ++index) {
     const auto& request = requests[index];

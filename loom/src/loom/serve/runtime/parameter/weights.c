@@ -636,15 +636,12 @@ static iree_status_t loom_serve_weight_stream_plan(
   iree_status_t status =
       iree_allocator_malloc_array(allocator, weights->span_count,
                                   sizeof(*plan->spans), (void**)&plan->spans);
-  const iree_device_size_t slab_size =
-      weights->pool ? loom_serve_memory_pool_slab_size(weights->pool) : 0;
   if (iree_status_is_ok(status)) {
     if (weights->pool) {
       for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
         storage_groups[i] = plan->group_count;
-        plan->group_count +=
-            iree_hal_buffer_byte_length(weights->storages[i].buffer) /
-            slab_size;
+        plan->group_count += loom_serve_virtual_buffer_slab_count(
+            weights->storages[i].reservation);
       }
     }
     for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
@@ -652,6 +649,10 @@ static iree_status_t loom_serve_weight_stream_plan(
       plan->read_bytes += span->parameter.byte_length;
       plan->has_preparation |= span->prepare != NULL;
       if (weights->pool) {
+        const loom_serve_virtual_buffer_t* reservation =
+            weights->storages[span->storage_index].reservation;
+        const iree_device_size_t slab_size =
+            loom_serve_virtual_buffer_slab_size(reservation);
         const iree_host_size_t base = storage_groups[span->storage_index];
         plan->spans[i] = (loom_serve_weight_group_range_t){
             base + span->parameter.byte_offset / slab_size,
@@ -664,10 +665,7 @@ static iree_status_t loom_serve_weight_stream_plan(
           plan->spans[i].begin =
               base +
               iree_min(span->parameter.byte_offset / slab_size,
-                       iree_hal_buffer_byte_length(
-                           weights->storages[span->storage_index].buffer) /
-                               slab_size -
-                           1);
+                       loom_serve_virtual_buffer_slab_count(reservation) - 1);
           plan->spans[i].end = plan->spans[i].begin + 1;
         }
       } else {
@@ -687,15 +685,18 @@ static iree_status_t loom_serve_weight_stream_plan(
   if (iree_status_is_ok(status)) {
     if (weights->pool) {
       for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
-        const iree_device_size_t length =
-            iree_hal_buffer_byte_length(weights->storages[i].buffer);
-        for (iree_device_size_t offset = 0; offset < length;
-             offset += slab_size) {
+        loom_serve_virtual_buffer_t* reservation =
+            weights->storages[i].reservation;
+        const iree_host_size_t count =
+            loom_serve_virtual_buffer_slab_count(reservation);
+        for (iree_host_size_t j = 0; j < count; ++j) {
+          const iree_hal_buffer_range_t range =
+              loom_serve_virtual_buffer_slab_range(reservation, j);
           loom_serve_weight_group_t* group =
-              &plan->groups[storage_groups[i] + offset / slab_size];
+              &plan->groups[storage_groups[i] + j];
           group->storage_index = i;
           group->backing = (loom_serve_memory_range_t){
-              weights->storages[i].reservation, offset, slab_size};
+              reservation, range.byte_offset, range.byte_length};
         }
       }
     }
@@ -949,9 +950,10 @@ static void loom_serve_weights_backing_completed(
 iree_status_t loom_serve_weights_allocate(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
     iree_hal_queue_t* dispatch, iree_hal_pool_t* storage_pool,
-    loom_serve_memory_pool_t* pool, iree_host_size_t shared_root_count,
-    iree_host_size_t root_count, const loom_serve_weight_root_t* roots,
-    iree_allocator_t host_allocator, loom_serve_weights_t** out_weights) {
+    loom_serve_memory_pool_t* pool, loom_serve_memory_geometry_t geometry,
+    iree_host_size_t shared_root_count, iree_host_size_t root_count,
+    const loom_serve_weight_root_t* roots, iree_allocator_t host_allocator,
+    loom_serve_weights_t** out_weights) {
   *out_weights = NULL;
   loom_serve_weights_t* weights = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*weights),
@@ -1045,8 +1047,9 @@ iree_status_t loom_serve_weights_allocate(
     loom_serve_weight_storage_t* storage = &weights->storages[i];
     if (pool) {
       status = loom_serve_virtual_buffer_allocate(
-          pool, requests[i].allocation_size, requests[i].min_alignment,
-          &weights->statistics, &storage->reservation);
+          pool, geometry, requests[i].allocation_size,
+          requests[i].min_alignment, &weights->statistics,
+          &storage->reservation);
       if (iree_status_is_ok(status)) {
         buffers[i] = loom_serve_virtual_buffer_handle(storage->reservation);
         iree_hal_buffer_retain(buffers[i]);

@@ -115,7 +115,8 @@ iree_status_t loom_serve_test_application_acquire(
           .driver = driver,
           .uri = device_uri,
           .backing = options->backing,
-          .slab_size = options->slab_size,
+          .weight_slab_size = options->slab_size,
+          .state_slab_size = options->slab_size,
           .memory_limit = options->memory_limit,
       };
     }

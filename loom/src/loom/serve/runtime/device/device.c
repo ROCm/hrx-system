@@ -24,6 +24,10 @@ struct loom_serve_device_t {
   loom_serve_workspace_t* workspace;
   // Owned physical domain shared by all model reservations; NULL when fixed.
   loom_serve_memory_pool_t* memory_pool;
+  // Validated bulk weight allocation geometry for the shared physical source.
+  loom_serve_memory_geometry_t weight_geometry;
+  // Validated mutable-state geometry for the same source and budget.
+  loom_serve_memory_geometry_t state_geometry;
   // Parameter admission and eviction policy borrowing shared memory.
   loom_serve_residency_cache_t* residency_cache;
 };
@@ -162,12 +166,17 @@ static iree_status_t loom_serve_device_initialize(
     IREE_RETURN_IF_ERROR(
         iree_hal_slab_pool_create(group->handle, source_scope, &source_options,
                                   group->host_allocator, &source_pool));
-    iree_hal_pool_reservation_request_t slab_request;
-    iree_status_t status = loom_serve_memory_pool_query_slab_request(
-        &virtual_capabilities, source_pool, options->slab_size, &slab_request);
+    iree_status_t status = loom_serve_memory_pool_query_geometry(
+        &virtual_capabilities, source_pool, options->weight_slab_size,
+        &device->weight_geometry);
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_memory_pool_query_geometry(
+          &virtual_capabilities, source_pool, options->state_slab_size,
+          &device->state_geometry);
+    }
     if (iree_status_is_ok(status)) {
       status = loom_serve_memory_pool_allocate(
-          group->handle, scope, source_pool, device->transfer, slab_request,
+          group->handle, scope, source_pool, device->transfer,
           options->memory_limit, group->host_allocator, &device->memory_pool);
     }
     iree_hal_pool_release(source_pool);
@@ -355,4 +364,14 @@ loom_serve_memory_pool_t* loom_serve_device_memory_pool(
 loom_serve_residency_cache_t* loom_serve_device_residency_cache(
     const loom_serve_device_t* device) {
   return device->residency_cache;
+}
+
+loom_serve_memory_geometry_t loom_serve_device_weight_geometry(
+    const loom_serve_device_t* device) {
+  return device->weight_geometry;
+}
+
+loom_serve_memory_geometry_t loom_serve_device_state_geometry(
+    const loom_serve_device_t* device) {
+  return device->state_geometry;
 }

@@ -39,28 +39,40 @@ typedef struct loom_serve_memory_statistics_t {
   uint64_t released_bytes;
 } loom_serve_memory_statistics_t;
 
+// Validated physical allocation geometry for one source and virtual-target
+// scope. Independent reservations can select different slab sizes while sharing
+// one physical budget. Small reservations and final slabs use only the native
+// minimum extent and granularity, not a full slab.
+typedef struct loom_serve_memory_geometry_t {
+  // Maximum physical allocation extent in bytes.
+  iree_device_size_t slab_size;
+  // Required source/target byte granularity and guaranteed base alignment.
+  iree_device_size_t granularity;
+  // Smallest source extent, rounded to granularity; at most slab_size.
+  iree_device_size_t minimum_size;
+} loom_serve_memory_geometry_t;
+
 // Resolves physical slab geometry against captured virtual-target capabilities
 // and one mapping source. Zero slab_size selects the source recommendation;
 // explicit sizes must satisfy source and target geometry and the native limit.
 // Returns UNAVAILABLE for missing mapping support, INVALID_ARGUMENT for invalid
 // geometry, or OUT_OF_RANGE when the requested extent exceeds the source limit.
 // This is a cold admission query and acquires no physical backing.
-iree_status_t loom_serve_memory_pool_query_slab_request(
+iree_status_t loom_serve_memory_pool_query_geometry(
     const iree_hal_virtual_buffer_capabilities_t* capabilities,
     iree_hal_pool_t* storage_pool, iree_device_size_t slab_size,
-    iree_hal_pool_reservation_request_t* out_request);
+    loom_serve_memory_geometry_t* out_geometry);
 
 // Retains the mapping-source pool and copies the exact virtual-target scope.
-// The sealed group and selected transfer queue outlive this pool. slab_request
-// is the query result for this exact source and target scope; it is consumed
-// without repeating native queries. limit_bytes bounds physical commitment,
+// The sealed group and selected transfer queue outlive this pool.
+// limit_bytes bounds physical commitment,
 // including native releases not yet completed. Zero imposes no serving budget.
 // Each reservation borrows this pool and is destroyed before the pool.
 iree_status_t loom_serve_memory_pool_allocate(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
-    iree_hal_pool_reservation_request_t slab_request, uint64_t limit_bytes,
-    iree_allocator_t host_allocator, loom_serve_memory_pool_t** out_pool);
+    uint64_t limit_bytes, iree_allocator_t host_allocator,
+    loom_serve_memory_pool_t** out_pool);
 
 void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool);
 
@@ -70,11 +82,6 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 // Immutable physical commitment ceiling in bytes; UINT64_MAX is unbounded.
 // This is the configured budget, not currently available backing.
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool);
-
-// Immutable physical commitment granularity in bytes. Reservations and queued
-// mappings use this same geometry.
-iree_device_size_t loom_serve_memory_pool_slab_size(
-    const loom_serve_memory_pool_t* pool);
 
 // Clones a shared capacity-observation or reclamation failure, or returns OK.
 // Those failures apply to the shared domain; the serialized owner stops new
@@ -139,16 +146,28 @@ iree_status_t loom_serve_memory_pool_prepare(
     loom_serve_memory_admission_t* out_admission);
 
 // Reserves stable device addresses without committing physical storage.
+// geometry is the validated query result for this pool's source and target
+// scope. The final slab and reservation round only to its native requirements.
 // The borrowed HAL buffer remains identical across commit/trim operations.
 // statistics is a caller-owned, initially zeroed accounting group shared by
 // related reservations. It outlives every reservation using it. The pool also
 // accounts all reservations independently, enforcing their common budget.
 iree_status_t loom_serve_virtual_buffer_allocate(
-    loom_serve_memory_pool_t* pool, iree_device_size_t length,
-    iree_device_size_t alignment, loom_serve_memory_statistics_t* statistics,
+    loom_serve_memory_pool_t* pool, loom_serve_memory_geometry_t geometry,
+    iree_device_size_t length, iree_device_size_t alignment,
+    loom_serve_memory_statistics_t* statistics,
     loom_serve_virtual_buffer_t** out_buffer);
 iree_hal_buffer_t* loom_serve_virtual_buffer_handle(
     const loom_serve_virtual_buffer_t* buffer);
+
+// Immutable slab count and exact extent for streaming/commit planning. The
+// final extent may be shorter than slab_size. index is less than slab_count.
+iree_device_size_t loom_serve_virtual_buffer_slab_size(
+    const loom_serve_virtual_buffer_t* buffer);
+iree_host_size_t loom_serve_virtual_buffer_slab_count(
+    const loom_serve_virtual_buffer_t* buffer);
+iree_hal_buffer_range_t loom_serve_virtual_buffer_slab_range(
+    const loom_serve_virtual_buffer_t* buffer, iree_host_size_t index);
 
 // Backs the slabs intersecting a caller-validated nonempty byte range. Existing
 // contents survive. New contents are unspecified. No consumer may access new

@@ -176,8 +176,8 @@ command.program.def public @prepare_factor() launch(%storage: buffer) {
 }
 
 command.program.def public @embed_with_parameters() launch(%parameters: buffer, %input: buffer, %output: buffer) {
-  %factor = command.parameter %parameters, "factor" : view<1xf32>
+  %factor = command.parameter %parameters, "factor" : view<524288xf32>
   %width = index.constant 1 : index
-  kernel.launch @resident_with_parameters[%width](%factor, %input, %output) : [index](view<1xf32>, buffer, buffer)
+  kernel.launch @resident_with_parameters[%width](%factor, %input, %output) : [index](view<524288xf32>, buffer, buffer)
   command.return
 }

@@ -17,13 +17,17 @@ IREE_FLAG(int32_t, workers, 8,
 IREE_FLAG(string, pool_backing, "elastic",
           "elastic demand-commits parameter/state slabs; fixed backs storage "
           "eagerly and supports device address sanitization.");
-IREE_FLAG(
-    int64_t, slab_bytes, 67108864,
-    "Physical commitment/reclamation granularity for elastic parameter "
-    "and state storage (default 64 MiB). Larger slabs reduce allocation "
-    "and mapping operations but retain more backing for partially live "
-    "slabs; logical tensor and KV block sizes are unchanged. Zero selects "
-    "the allocator recommendation. Ignored for fixed backing.");
+IREE_FLAG(int64_t, weight_slab_bytes, 1073741824,
+          "Maximum physical slab size for elastic weights (default 1 GiB). "
+          "Larger slabs reduce allocation and mapping operations. Small roots "
+          "and final slabs use only their native-aligned extent. Zero selects "
+          "the allocator recommendation. Ignored for fixed backing.");
+IREE_FLAG(int64_t, state_slab_bytes, 67108864,
+          "Physical commitment/reclamation granularity for elastic mutable "
+          "state (default 64 MiB). Smaller slabs allow finer reclamation of "
+          "partially live state; logical KV block sizes are unchanged. Final "
+          "slabs use their native-aligned extent. Zero selects the allocator "
+          "recommendation. Ignored for fixed backing.");
 IREE_FLAG(int64_t, memory_bytes, 0,
           "Shared physical parameter/state budget; a nonzero limit requires "
           "one device. Zero imposes no serving limit. Invocation workspace "
@@ -59,12 +63,14 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
   }
   if ((strcmp(FLAG_pool_backing, "elastic") &&
        strcmp(FLAG_pool_backing, "fixed")) ||
-      FLAG_slab_bytes < 0 || FLAG_memory_bytes < 0 ||
+      FLAG_weight_slab_bytes < 0 || FLAG_state_slab_bytes < 0 ||
+      FLAG_memory_bytes < 0 ||
       (FLAG_memory_bytes && !strcmp(FLAG_pool_backing, "fixed"))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "pool_backing must be elastic or fixed; slab_bytes "
-                            "and memory_bytes must be nonnegative; a physical "
-                            "budget requires elastic backing");
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "pool_backing must be elastic or fixed; weight_slab_bytes, "
+        "state_slab_bytes, and memory_bytes must be nonnegative; a physical "
+        "budget requires elastic backing");
   }
   if (devices.count > 1 && FLAG_memory_bytes) {
     return iree_make_status(
@@ -112,7 +118,8 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
         .backing = !strcmp(FLAG_pool_backing, "elastic")
                        ? LOOM_SERVE_DEVICE_BACKING_ELASTIC
                        : LOOM_SERVE_DEVICE_BACKING_FIXED,
-        .slab_size = (iree_device_size_t)FLAG_slab_bytes,
+        .weight_slab_size = (iree_device_size_t)FLAG_weight_slab_bytes,
+        .state_slab_size = (iree_device_size_t)FLAG_state_slab_bytes,
         .memory_limit = (uint64_t)FLAG_memory_bytes,
     };
   }
