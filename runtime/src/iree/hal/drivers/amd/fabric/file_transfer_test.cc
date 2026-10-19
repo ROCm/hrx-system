@@ -375,18 +375,18 @@ class FileTransferTest : public ::testing::TestWithParam<
   std::array<uint8_t, 128> expected_file_;
 };
 
-TEST_P(FileTransferTest, DirectAdmissionUsesAchievedBackingCapabilities) {
-  enum class Route { kHost, kCopy, kUnavailable };
+TEST_P(FileTransferTest, NativeAdmissionUsesAchievedBackingCapabilities) {
+  enum class Route { kHost, kCopy };
   struct Case {
     // Achieved physical storage class, independent of requested placement.
     amdf_memory_class_t memory_class;
     // Native qualification of the prepared host mapping.
     amdf_host_mapping_features_t features;
-    // Expected route for DIRECT; buffered files always use this host view.
-    Route direct_route;
+    // Expected native route for both buffered and DIRECT files.
+    Route route;
   };
   const Case cases[] = {
-      {AMDF_MEMORY_CLASS_SYSTEM, 0, Route::kUnavailable},
+      {AMDF_MEMORY_CLASS_SYSTEM, 0, Route::kCopy},
       {AMDF_MEMORY_CLASS_SYSTEM, AMDF_HOST_MAPPING_FEATURE_FILE_IO,
        Route::kHost},
       {AMDF_MEMORY_CLASS_LOCAL, 0, Route::kCopy},
@@ -432,23 +432,18 @@ TEST_P(FileTransferTest, DirectAdmissionUsesAchievedBackingCapabilities) {
     iree_hal_memory_effects_t before, after;
     iree::Status status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
         &transfer_, &storage_.api, &family, 0, &before, &after);
-    const Route route = is_direct() ? item.direct_route : Route::kHost;
-    if (route == Route::kUnavailable) {
-      EXPECT_EQ(status.code(), iree::StatusCode::kUnavailable);
-      EXPECT_EQ(transfer_.sources.count, 0u);
-      EXPECT_EQ(transfer_.sources.ranges, nullptr);
-    } else {
-      IREE_ASSERT_OK(status);
-      ASSERT_EQ(transfer_.sources.count, 1u);
-      EXPECT_EQ(transfer_.sources.host_count, route == Route::kHost ? 1u : 0u);
-      const auto& range = transfer_.sources.ranges[0];
-      EXPECT_EQ(range.storage, &storage_.memory);
-      EXPECT_EQ(range.source_offset, kNativeOffset);
-      EXPECT_EQ(range.contents.data_length, kLength);
-      EXPECT_EQ(range.contents.data,
-                route == Route::kHost ? storage_.contents.data() + kNativeOffset
-                                      : nullptr);
-    }
+    IREE_ASSERT_OK(status);
+    ASSERT_EQ(transfer_.sources.count, 1u);
+    EXPECT_EQ(transfer_.sources.host_count,
+              item.route == Route::kHost ? 1u : 0u);
+    const auto& range = transfer_.sources.ranges[0];
+    EXPECT_EQ(range.storage, &storage_.memory);
+    EXPECT_EQ(range.source_offset, kNativeOffset);
+    EXPECT_EQ(range.contents.data_length, kLength);
+    EXPECT_EQ(range.contents.data,
+              item.route == Route::kHost
+                  ? storage_.contents.data() + kNativeOffset
+                  : nullptr);
     EXPECT_EQ(before.bits, 0u);
     EXPECT_EQ(after.bits, 0u);
     EXPECT_TRUE(provider_.requests.empty());

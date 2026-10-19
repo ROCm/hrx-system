@@ -697,7 +697,12 @@ iree_status_t iree_hal_amd_gpu_device_create(
       break;
     }
   }
-  const bool has_file_queue = file_family != UINT32_MAX;
+  bool has_file_queue = false;
+  amdf_memory_profile_t file_profile;
+  if (file_family != UINT32_MAX) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_file_staging_query_profile(
+        context, &file_profile, &has_file_queue));
+  }
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_device_t);
   const uint32_t source_count =
       options->queue_count + 1 + feedback_enabled + has_file_queue;
@@ -784,7 +789,8 @@ iree_status_t iree_hal_amd_gpu_device_create(
   }
   if (iree_status_is_ok(status) && has_file_queue) {
     status = iree_hal_amd_gpu_file_staging_allocate(
-        (iree_hal_device_t*)device, context, file_family, device->files.queue,
+        (iree_hal_device_t*)device, context, file_family, &file_profile,
+        device->files.queue,
         iree_async_proactor_pool_entry_proactor(device->proactor_entry), 8,
         2 * 1024 * 1024,
         iree_async_proactor_pool_entry_node_id(device->proactor_entry),

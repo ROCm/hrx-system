@@ -56,8 +56,17 @@ typedef struct iree_hal_amd_gpu_file_staging_request_t {
   uint32_t chunk_capacity;
 } iree_hal_amd_gpu_file_staging_request_t;
 
-// Selects coherent system backing and allocates only metadata. File-capable
-// backing prepares I/O registrations; ordinary backing admits buffered files.
+// Resolves file-capable system backing before acquiring a native copy queue.
+// Absence is reported through out_available; native query failures propagate.
+// The profile is consumed directly by allocate on the same context. Staging
+// bytes are accessed by native file I/O and SDMA, without a CPU access site or
+// virtual aliases. Their visibility follows FILE_IO/DEVICE pair recipes.
+iree_status_t iree_hal_amd_gpu_file_staging_query_profile(
+    iree_hal_amd_gpu_context_t* context, amdf_memory_profile_t* out_profile,
+    bool* out_available);
+
+// Consumes a resolved file-capable profile and allocates only metadata.
+// Physical blocks prepare I/O registrations for both buffered and DIRECT files.
 // Payload storage is acquired lazily and shared across file proactors. All
 // constructing, live, and retiring blocks share the native-aligned byte budget
 // for lane_count * lane_capacity. Per-proactor views add no physical payload.
@@ -67,9 +76,10 @@ typedef struct iree_hal_amd_gpu_file_staging_request_t {
 // joins asynchronous detach and native release before releasing metadata.
 iree_status_t iree_hal_amd_gpu_file_staging_allocate(
     iree_hal_device_t* device, iree_hal_amd_gpu_context_t* context,
-    uint32_t family_ordinal, iree_hal_amd_gpu_sdma_queue_t* queue,
-    iree_async_proactor_t* proactor, uint32_t lane_count,
-    uint32_t lane_capacity, uint32_t numa_node, iree_allocator_t host_allocator,
+    uint32_t family_ordinal, const amdf_memory_profile_t* profile,
+    iree_hal_amd_gpu_sdma_queue_t* queue, iree_async_proactor_t* proactor,
+    uint32_t lane_count, uint32_t lane_capacity, uint32_t numa_node,
+    iree_allocator_t host_allocator,
     iree_hal_amd_gpu_file_staging_t** out_staging);
 
 // Qualifies each captured physical copy range once, before touching a prefix.

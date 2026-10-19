@@ -69,6 +69,13 @@ class GpuNativeFileTest : public GpuNativeTest,
   }
 
   void SetUp() override {
+    // The registered driver shares process-scoped native connections. File
+    // staging uses the same ownership when registering ordinary host pages.
+    if (!fabric_) {
+      IREE_ASSERT_OK(
+          iree::hal::amd::gpu::cts::NativeMemoryGate::AcquireProcessFabric(
+              &fabric_));
+    }
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
       return;
@@ -185,21 +192,16 @@ class GpuNativeFileTest : public GpuNativeTest,
       const auto* facts =
           reinterpret_cast<const iree_hal_amd_fabric_memory_binding_facts_t*>(
               memory.bindings + memory.contract->binding_layout.binding_count);
-      host_transfer_ = facts->memory->mapping != nullptr;
+      host_visible_ = facts->memory->mapping != nullptr;
       file_io_capable_ = iree_any_bit_set(facts->memory->host_features,
                                           AMDF_HOST_MAPPING_FEATURE_FILE_IO);
-      direct_io_available_ =
-          facts->memory->info.memory_class != AMDF_MEMORY_CLASS_SYSTEM ||
-          file_io_capable_;
-      RecordProperty("physical_sources_host_visible", host_transfer_);
+      RecordProperty("physical_sources_host_visible", host_visible_);
       RecordProperty("physical_sources_file_io_capable", file_io_capable_);
-      RecordProperty("physical_sources_direct_io_available",
-                     direct_io_available_);
       if (GetParam() == FileBacking::kPhysicalPrivate ||
           GetParam() == FileBacking::kNestedPrivate) {
         EXPECT_EQ(memory.contract->host.access, 0u);
       }
-      if (host_transfer_) {
+      if (host_visible_) {
         const auto binding = iree_hal_buffer_memory_native_binding(
             &memory, {memory.contract->binding_layout.host_binding_index,
                       IREE_HAL_BUFFER_INTERFACE_HOST});
@@ -261,13 +263,8 @@ class GpuNativeFileTest : public GpuNativeTest,
       const auto* native_source =
           static_cast<const iree_hal_amd_fabric_mapping_source_t*>(
               binding.mapping_source.descriptor);
-      host_transfer_ &= native_source->storage->mapping != nullptr;
+      host_visible_ &= native_source->storage->mapping != nullptr;
       file_io_capable_ &=
-          iree_any_bit_set(native_source->storage->host_features,
-                           AMDF_HOST_MAPPING_FEATURE_FILE_IO);
-      direct_io_available_ &=
-          native_source->storage->info.memory_class !=
-              AMDF_MEMORY_CLASS_SYSTEM ||
           iree_any_bit_set(native_source->storage->host_features,
                            AMDF_HOST_MAPPING_FEATURE_FILE_IO);
       mappings_.push_back({
@@ -288,10 +285,8 @@ class GpuNativeFileTest : public GpuNativeTest,
                                       mappings_.size(), mappings_.data(), 0));
     IREE_ASSERT_OK(
         iree_hal_semaphore_wait(mapped, value, iree_infinite_timeout(), 0));
-    RecordProperty("physical_sources_host_visible", host_transfer_);
+    RecordProperty("physical_sources_host_visible", host_visible_);
     RecordProperty("physical_sources_file_io_capable", file_io_capable_);
-    RecordProperty("physical_sources_direct_io_available",
-                   direct_io_available_);
   }
 
   void ReleaseSources() {
@@ -385,7 +380,7 @@ class GpuNativeFileTest : public GpuNativeTest,
   static constexpr size_t kBufferOffset = 128;
   // Native identity borrowed from the context transferred into the HAL device.
   amdf_device_t* native_device_ = nullptr;
-  // Several old staging chunks with a non-power-of-two final tail.
+  // Multiple staging chunks with a non-power-of-two final tail.
   static constexpr size_t kLength = 8 * 1024 * 1024 + 12;
   // Native file owns its path through independent output verification.
   iree::testing::TempFilePath path_{"iree_gpu_file_transfer"};
@@ -399,13 +394,11 @@ class GpuNativeFileTest : public GpuNativeTest,
   std::vector<Ref<iree_hal_buffer_t>> sources_;
   // Installed source coordinates, reused for explicit replacement and removal.
   std::vector<iree_hal_memory_mapping_t> mappings_;
-  // Prepared native sources admit file transfers without staged GPU copies.
-  bool host_transfer_ = true;
+  // Every physical source exposes a CPU mapping, independent of file access.
+  bool host_visible_ = true;
   // Every physical source exposes a native file-capable view, independent of
   // retained registration and public host-mapping permission.
   bool file_io_capable_ = true;
-  // No system source requires a redundant staging copy for DIRECT files.
-  bool direct_io_available_ = true;
   // Public operation timeline, independent of private native handoff points.
   Ref<iree_hal_semaphore_t> timeline_;
   // Real shader that leaves dirty lines before file access.
@@ -446,7 +439,7 @@ void GpuNativeFileTest::BufferedRoundTrip() {
                                      kBufferOffset, kLength, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(three));
   RecordProperty("read_queue_publications", Publications() - before_read);
-  if (host_transfer_) {
+  if (file_io_capable_) {
     EXPECT_EQ(Publications() - before_read, 2u);
   }
   ASSERT_NO_FATAL_FAILURE(
@@ -459,7 +452,7 @@ void GpuNativeFileTest::BufferedRoundTrip() {
       kBufferOffset, file, 64, kLength, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(five));
   RecordProperty("write_queue_publications", Publications() - before_write);
-  if (host_transfer_) {
+  if (file_io_capable_) {
     EXPECT_EQ(Publications() - before_write, 2u);
   }
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
@@ -584,7 +577,7 @@ TEST_P(GpuNativeFileTest, TruncatedReadEndsCapturedUsesBeforeFailure) {
   ReleaseSources();
 }
 
-class GpuNativeDirectFileTest : public GpuNativeFileTest {
+class GpuNativeFileAccessTest : public GpuNativeFileTest {
  protected:
   void SetUp() override {
     GpuNativeFileTest::SetUp();
@@ -596,8 +589,7 @@ class GpuNativeDirectFileTest : public GpuNativeFileTest {
         .requirements =
             {
                 .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
-                         AMDF_MEMORY_FLAG_HOST_COHERENT,
+                .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
                 .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
             },
     };
@@ -635,36 +627,26 @@ class GpuNativeDirectFileTest : public GpuNativeFileTest {
     RecordProperty("direct_staging_available", direct_staging_available_);
   }
 
-  void RoundTrip();
+  void RoundTrip(bool direct);
 
   // Exact native capability, including the selected lifetime and host services.
   bool direct_staging_available_ = false;
 };
 
-// The registered driver uses process lifetime. Keep its fabric across device
-// recreation, matching the driver's ownership of the primary native VM binding.
-class GpuProcessDirectFileTest : public GpuNativeDirectFileTest {
- public:
-  static void SetUpTestSuite() {
-    IREE_ASSERT_OK(
-        iree::hal::amd::gpu::cts::NativeMemoryGate::AcquireProcessFabric(
-            &shared_fabric_));
-  }
-  static void TearDownTestSuite() {
-    iree_hal_amd_fabric_release(shared_fabric_);
-    shared_fabric_ = nullptr;
-  }
-
+// Instance-scoped native connections can lack file-capable staging even when
+// compute works. Exercise both successful transfers and explicit rejection
+// according to the exact native capability, followed by independent GPU work.
+class GpuInstanceFileAccessTest : public GpuNativeFileAccessTest {
  protected:
   void SetUp() override {
-    fabric_ = shared_fabric_;
-    iree_hal_amd_fabric_retain(fabric_);
-    GpuNativeDirectFileTest::SetUp();
+    const amdf_api_t* api = nullptr;
+    ASSERT_EQ(
+        amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
+        AMDF_STATUS_OK);
+    IREE_ASSERT_OK(iree_hal_amd_fabric_create(
+        api, AMDF_NATIVE_LIFETIME_INSTANCE, iree_allocator_system(), &fabric_));
+    GpuNativeFileAccessTest::SetUp();
   }
-
- private:
-  // Suite root retains the primary native connection through all child devices.
-  inline static iree_hal_amd_fabric_t* shared_fabric_ = nullptr;
 };
 
 class GpuNativeGlobalFileTest : public GpuNativeFileTest {};
@@ -731,21 +713,21 @@ TEST_P(GpuNativeGlobalFileTest, NestedExecutableGlobalRoundTrip) {
   EXPECT_EQ(observed_global, expected_global);
 }
 
-void GpuNativeDirectFileTest::RoundTrip() {
+void GpuNativeFileAccessTest::RoundTrip(bool direct) {
   constexpr size_t kAlignment = 4096;
   constexpr size_t kBytes = 8 * 1024 * 1024 + kAlignment;
   const size_t buffer_offset = kAlignment - (is_nested() ? 256 : 0);
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(Allocate(kBytes + 2 * kAlignment, buffer.out()));
-  if (!file_io_capable_) {
-    direct_io_available_ &= direct_staging_available_;
-  }
+  const bool direct_io_available =
+      file_io_capable_ || direct_staging_available_;
+  RecordProperty("direct_io_available", direct_io_available);
   std::vector<uint32_t> expected(kBytes / 4 + 2 * kAlignment / 4);
   for (size_t i = 0; i < expected.size(); ++i) {
     expected[i] = uint32_t(i * 37 + 3);
   }
   Ref<iree_hal_file_t> file;
-  iree::Status file_status = Open(expected, file.out(), /*direct=*/true);
+  iree::Status file_status = Open(expected, file.out(), direct);
   if (file_status.code() == iree::StatusCode::kUnavailable) {
     GTEST_SKIP() << file_status.ToString();
   }
@@ -761,7 +743,7 @@ void GpuNativeDirectFileTest::RoundTrip() {
   IREE_ASSERT_OK(iree_hal_queue_read(
       queues_[0], {1, &semaphore, &one}, {1, &semaphore, &two}, file,
       kAlignment, buffer, buffer_offset, kBytes, &barriers_, 0));
-  if (!direct_io_available_) {
+  if (!direct_io_available) {
     EXPECT_EQ(iree::Status(iree_hal_semaphore_wait(timeline_, two,
                                                    iree_infinite_timeout(), 0))
                   .code(),
@@ -821,18 +803,27 @@ void GpuNativeDirectFileTest::RoundTrip() {
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 }
 
-TEST_P(GpuNativeDirectFileTest, DirectFileRoundTripThroughGpuBacking) {
-  ASSERT_NO_FATAL_FAILURE(RoundTrip());
+TEST_P(GpuNativeFileAccessTest, DirectFileRoundTripThroughGpuBacking) {
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(/*direct=*/true));
 }
 
-TEST_P(GpuProcessDirectFileTest, DirectFileRoundTripThroughGpuBacking) {
-  ASSERT_NO_FATAL_FAILURE(RoundTrip());
+TEST_P(GpuNativeFileAccessTest, BufferedFileRoundTripThroughGpuBacking) {
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(/*direct=*/false));
+}
+
+TEST_P(GpuInstanceFileAccessTest, DirectFileRoundTripThroughGpuBacking) {
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(/*direct=*/true));
+}
+
+TEST_P(GpuInstanceFileAccessTest, BufferedFileRoundTripThroughGpuBacking) {
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(/*direct=*/false));
 }
 
 class GpuNativeFileProgressTest : public GpuNativeFileTest {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
+    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_, UINT64_MAX,
+                                             AMDF_NATIVE_LIFETIME_PROCESS));
     GpuNativeFileTest::SetUp();
   }
 
@@ -847,7 +838,7 @@ TEST_P(GpuNativeFileProgressTest,
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(
       Allocate(kBufferOffset + kSmall + kLarge, buffer.out()));
-  if (host_transfer_) {
+  if (file_io_capable_) {
     GTEST_SKIP() << "This backing uses direct file I/O and needs no staging";
   }
   std::vector<uint32_t> expected((kLarge + kSmall) / 4);
@@ -901,7 +892,8 @@ TEST_P(GpuNativeFileProgressTest,
 class GpuNativeFileLimitTest : public GpuNativeFileTest {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_, 8 * 1024 * 1024));
+    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_, 8 * 1024 * 1024,
+                                             AMDF_NATIVE_LIFETIME_PROCESS));
     GpuNativeFileTest::SetUp();
   }
 
@@ -1215,7 +1207,7 @@ TEST_P(GpuSharedFileStagingTest,
   constexpr uint64_t kTotal = 2 * kSmall + kLarge;
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(Allocate(kBufferOffset + kTotal, buffer.out()));
-  if (host_transfer_) {
+  if (file_io_capable_) {
     GTEST_SKIP() << "Direct host ranges do not require physical staging";
   }
   std::vector<uint32_t> expected(kTotal / 4);
@@ -1365,7 +1357,7 @@ TEST_P(GpuSharedVirtualFileStagingTest,
   constexpr uint64_t kSmall = 1024 * 1024;
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(Allocate(kLength + 256, buffer.out()));
-  if (host_transfer_) {
+  if (file_io_capable_) {
     GTEST_SKIP() << "Direct host ranges do not require physical staging";
   }
   ASSERT_GE(mappings_.size(), 2u);
@@ -1598,7 +1590,7 @@ INSTANTIATE_TEST_SUITE_P(
         FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
 
 INSTANTIATE_TEST_SUITE_P(
-    PhysicalAndVirtual, GpuNativeDirectFileTest,
+    PhysicalAndVirtual, GpuNativeFileAccessTest,
     ::testing::Values(
         FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
         FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
@@ -1607,7 +1599,7 @@ INSTANTIATE_TEST_SUITE_P(
         FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
 
 INSTANTIATE_TEST_SUITE_P(
-    ProcessPhysicalAndVirtual, GpuProcessDirectFileTest,
+    InstancePhysicalAndVirtual, GpuInstanceFileAccessTest,
     ::testing::Values(
         FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
         FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,

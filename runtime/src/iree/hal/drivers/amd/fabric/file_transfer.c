@@ -95,15 +95,10 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
           "registered buffer and file use different I/O proactors");
     }
   } else {
-    const bool unavailable_file_view =
-        (transfer->async.file->flags & IREE_ASYNC_FILE_FLAG_DIRECT) &&
-        !(storage->host_features & AMDF_HOST_MAPPING_FEATURE_FILE_IO);
-    if (unavailable_file_view &&
-        storage->info.memory_class == AMDF_MEMORY_CLASS_SYSTEM) {
-      return iree_make_status(
-          IREE_STATUS_UNAVAILABLE,
-          "system-memory backing does not support direct file I/O; select "
-          "file-capable backing or a buffered file");
+    if (!(storage->host_features & AMDF_HOST_MAPPING_FEATURE_FILE_IO)) {
+      // CPU access alone does not establish native file access or page pins.
+      // Preserve the backing for an engine copy through file-capable staging.
+      return iree_ok_status();
     }
     const amdf_memory_map_flags_t required_access =
         (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
@@ -112,8 +107,7 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
         ((queue_access & IREE_HAL_MEMORY_ACCESS_WRITE)
              ? AMDF_MEMORY_MAP_FLAG_READ
              : 0);
-    if (unavailable_file_view ||
-        !iree_all_bits_set(storage->host_access, required_access)) {
+    if (!iree_all_bits_set(storage->host_access, required_access)) {
       return iree_ok_status();
     }
   }
@@ -128,9 +122,7 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
   const amdf_memory_site_t host = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
       .structure_size = sizeof(host),
-      .kind = (storage->host_features & AMDF_HOST_MAPPING_FEATURE_FILE_IO)
-                  ? AMDF_MEMORY_SITE_KIND_FILE_IO
-                  : AMDF_MEMORY_SITE_KIND_HOST,
+      .kind = AMDF_MEMORY_SITE_KIND_FILE_IO,
       .value.host = {.mapping = storage->mapping},
   };
   bool available = true;

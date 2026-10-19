@@ -37,7 +37,11 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
   constexpr uint64_t kBufferOffset = 128;
   constexpr uint64_t kFileOffset = 64;
   constexpr uint64_t kLength = 3 * kUnit - 256;
-  const auto [host_mask, write] = GetParam();
+  const auto [routes, write] = GetParam();
+  // Each physical source is private, CPU-accessible, or file-capable. CPU
+  // accessibility alone does not permit native file I/O through that view.
+  const std::array<uint32_t, 3> source_routes = {routes % 3, (routes / 3) % 3,
+                                                 routes / 9};
   native_.required_flags = 0;
   native_.mapping_enabled = true;
   native_.api.memory_query_pair_info =
@@ -47,6 +51,7 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     const auto* device =
         producer->kind == AMDF_MEMORY_SITE_KIND_DEVICE ? producer : consumer;
     const auto* host = device == producer ? consumer : producer;
+    EXPECT_EQ(host->kind, AMDF_MEMORY_SITE_KIND_FILE_IO);
     const auto* memory =
         reinterpret_cast<FakeNative::Memory*>(device->value.device.memory);
     EXPECT_EQ(reinterpret_cast<const void*>(host->value.host.mapping), memory);
@@ -64,10 +69,12 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     native_.address_kinds[i] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
     native_families_[i].host_usage = 0;
   }
-  std::array<Ref<iree_hal_pool_t>, 2> pools;
+  std::array<Ref<iree_hal_pool_t>, 3> pools;
   for (uint32_t i = 0; i < pools.size(); ++i) {
     native_.host_mappable = i != 0;
     native_.host_visibility_guaranteed = i != 0;
+    native_.host_mapping_features =
+        i == 2 ? AMDF_HOST_MAPPING_FEATURE_FILE_IO : 0;
     IREE_ASSERT_OK(CreatePool(
         IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
         pools[i].out(), UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
@@ -80,8 +87,10 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
   IREE_ASSERT_OK(CreateReservation(target.out()));
   const auto scope = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
   for (uint32_t i = 0; i < sources.size(); ++i) {
+    native_.host_mapping_features =
+        source_routes[i] == 2 ? AMDF_HOST_MAPPING_FEATURE_FILE_IO : 0;
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-        pools[(host_mask >> i) & 1],
+        pools[source_routes[i]],
         iree_hal_make_pool_reservation_request(2 * kUnit, kUnit),
         iree_infinite_timeout(), sources[i].out()));
     const auto memory = iree_hal_buffer_memory_view(sources[i]);
@@ -91,7 +100,7 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     auto* native = reinterpret_cast<FakeNative::Memory*>(facts->memory->handle);
     source_contents[i] = static_cast<uint8_t*>(native->data);
     std::memset(source_contents[i], 0xCD, 2 * kUnit);
-    EXPECT_EQ(facts->memory->mapping != nullptr, ((host_mask >> i) & 1) != 0);
+    EXPECT_EQ(facts->memory->mapping != nullptr, source_routes[i] != 0);
     mappings[i] = {
         .target = target,
         .scope = scope,
@@ -158,7 +167,7 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
   for (uint32_t i = 0; i < sources.size(); ++i) {
     const uint64_t start = std::max(i * kUnit, kBufferOffset);
     const uint64_t end = std::min((i + 1) * kUnit, kBufferOffset + kLength);
-    const bool host = host_mask & (1u << i);
+    const bool host = source_routes[i] == 2;
     host_count += host;
     const auto& range = transfer.sources.ranges[i];
     const auto* memory =
@@ -206,7 +215,7 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Routes, FileTransferRangesTest,
-                         ::testing::Combine(::testing::Range(0u, 8u),
+                         ::testing::Combine(::testing::Range(0u, 27u),
                                             ::testing::Bool()));
 
 }  // namespace

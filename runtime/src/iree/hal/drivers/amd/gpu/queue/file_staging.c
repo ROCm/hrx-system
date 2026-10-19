@@ -506,9 +506,7 @@ static iree_status_t iree_hal_amd_gpu_file_staging_query_effects(
   const amdf_memory_site_t file = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
       .structure_size = sizeof(file),
-      .kind = (block->memory.host_features & AMDF_HOST_MAPPING_FEATURE_FILE_IO)
-                  ? AMDF_MEMORY_SITE_KIND_FILE_IO
-                  : AMDF_MEMORY_SITE_KIND_HOST,
+      .kind = AMDF_MEMORY_SITE_KIND_FILE_IO,
       .value.host = {.mapping = block->memory.mapping}};
   const amdf_memory_site_t device = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
@@ -571,13 +569,9 @@ iree_status_t iree_hal_amd_gpu_file_staging_prepare(
     iree_hal_amd_fabric_file_transfer_t* transfer,
     iree_hal_memory_effects_t* before, iree_hal_memory_effects_t* after) {
   if (!staging || !transfer->sources.count) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "file copy requires native SDMA backing access");
-  }
-  if ((transfer->async.file->flags & IREE_ASYNC_FILE_FLAG_DIRECT) &&
-      !(staging->memory.required_flags & AMDF_MEMORY_FLAG_HOST_FILE_IO)) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "DIRECT file copies require file-capable staging");
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "file copy requires native SDMA and file-capable staging");
   }
   const iree_async_file_requirements_t* requirements =
       iree_hal_file_requirements(transfer->file);
@@ -1537,11 +1531,70 @@ bool iree_hal_amd_gpu_file_staging_free(
   return true;
 }
 
+static amdf_memory_device_access_t iree_hal_amd_gpu_file_staging_access(
+    iree_hal_amd_gpu_context_t* context) {
+  return (amdf_memory_device_access_t){
+      .device = context->device,
+      .requirements = {
+          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+          .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU}};
+}
+
+iree_status_t iree_hal_amd_gpu_file_staging_query_profile(
+    iree_hal_amd_gpu_context_t* context, amdf_memory_profile_t* out_profile,
+    bool* out_available) {
+  memset(out_profile, 0, sizeof(*out_profile));
+  *out_available = false;
+  const amdf_memory_device_access_t device_access =
+      iree_hal_amd_gpu_file_staging_access(context);
+  amdf_memory_scope_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(info)};
+  IREE_RETURN_IF_ERROR(
+      IREE_HAL_AMD_STATUS_FROM_AMDF(context->api->memory_scope_query_info(
+                                        context->fabric->system_scope, &info),
+                                    "memory_scope_query_info(file staging)"));
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; i < info.memory_profile_count && !*out_available &&
+                       iree_status_is_ok(status);
+       ++i) {
+    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                     .structure_size = sizeof(profile)};
+    amdf_memory_access_capabilities_t access = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+        .structure_size = sizeof(access)};
+    const amdf_status_t native =
+        context->api->memory_scope_query_device_profile(
+            context->fabric->system_scope, i, 1, &device_access, &profile,
+            &access);
+    if (amdf_status_code(native) == AMDF_STATUS_CODE_UNSUPPORTED) {
+      continue;
+    }
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(native, "file staging profile");
+    if (iree_status_is_ok(status) && amdf_status_is_ok(profile.availability) &&
+        iree_all_bits_set(profile.roles,
+                          AMDF_MEMORY_PROFILE_ROLE_CREATE |
+                              AMDF_MEMORY_PROFILE_ROLE_HOST_MAP) &&
+        iree_all_bits_set(
+            profile.supported_flags,
+            AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO) &&
+        profile.allocation.maximum_byte_length >= 4096 &&
+        profile.allocation.maximum_byte_length >=
+            profile.allocation.byte_length_granularity) {
+      *out_profile = profile;
+      *out_available = true;
+    }
+  }
+  return status;
+}
+
 iree_status_t iree_hal_amd_gpu_file_staging_allocate(
     iree_hal_device_t* device, iree_hal_amd_gpu_context_t* context,
-    uint32_t family_ordinal, iree_hal_amd_gpu_sdma_queue_t* queue,
-    iree_async_proactor_t* proactor, uint32_t lane_count,
-    uint32_t lane_capacity, uint32_t numa_node, iree_allocator_t host_allocator,
+    uint32_t family_ordinal, const amdf_memory_profile_t* profile,
+    iree_hal_amd_gpu_sdma_queue_t* queue, iree_async_proactor_t* proactor,
+    uint32_t lane_count, uint32_t lane_capacity, uint32_t numa_node,
+    iree_allocator_t host_allocator,
     iree_hal_amd_gpu_file_staging_t** out_staging) {
   *out_staging = NULL;
   iree_hal_amd_gpu_file_staging_t* staging = NULL;
@@ -1561,97 +1614,35 @@ iree_status_t iree_hal_amd_gpu_file_staging_allocate(
   staging->lane_capacity = lane_capacity;
   iree_slim_mutex_initialize(&staging->mutex);
   iree_notification_initialize(&staging->notification);
-  staging->access = (amdf_memory_device_access_t){
-      .device = context->device,
-      .requirements = {
-          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-          .flags =
-              AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_HOST_COHERENT,
-          .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU}};
-  amdf_memory_scope_info_t info = {
-      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
-      .structure_size = sizeof(info)};
-  iree_status_t status =
-      IREE_HAL_AMD_STATUS_FROM_AMDF(context->api->memory_scope_query_info(
-                                        context->fabric->system_scope, &info),
-                                    "memory_scope_query_info(file staging)");
-  bool found = false, registered = false;
-  for (uint32_t i = 0; i < info.memory_profile_count && !registered &&
-                       iree_status_is_ok(status);
-       ++i) {
-    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                     .structure_size = sizeof(profile)};
-    amdf_memory_access_capabilities_t access = {
-        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-        .structure_size = sizeof(access)};
-    const amdf_status_t native =
-        context->api->memory_scope_query_device_profile(
-            context->fabric->system_scope, i, 1, &staging->access, &profile,
-            &access);
-    if (amdf_status_code(native) == AMDF_STATUS_CODE_UNSUPPORTED) {
-      continue;
-    }
-    status = IREE_HAL_AMD_STATUS_FROM_AMDF(native, "file staging profile");
-    const bool file_capable =
-        profile.supported_flags & AMDF_MEMORY_FLAG_HOST_FILE_IO;
-    const amdf_memory_flags_t flags =
-        AMDF_MEMORY_FLAG_HOST_VISIBLE |
-        (file_capable ? AMDF_MEMORY_FLAG_HOST_FILE_IO : 0);
-    if (iree_status_is_ok(status) && amdf_status_is_ok(profile.availability) &&
-        (!found || file_capable) &&
-        iree_all_bits_set(profile.roles,
-                          AMDF_MEMORY_PROFILE_ROLE_CREATE |
-                              AMDF_MEMORY_PROFILE_ROLE_HOST_MAP) &&
-        iree_all_bits_set(profile.supported_flags, flags)) {
-      staging->memory = (iree_hal_amd_fabric_memory_options_t){
-          .scope = context->fabric->system_scope,
-          .profile = profile,
-          .access_count = 1,
-          .accesses = &staging->access,
-          .required_flags = flags,
-          .host_access =
-              AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE};
-      if (numa_node != UINT32_MAX &&
-          (profile.allocation.placement_kinds &
-           (UINT32_C(1) << AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA))) {
-        staging->memory.placement = (amdf_memory_placement_t){
-            .kind = AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA, .node = numa_node};
-      }
-      found = true;
-      registered = file_capable;
-    }
+  staging->access = iree_hal_amd_gpu_file_staging_access(context);
+  staging->memory = (iree_hal_amd_fabric_memory_options_t){
+      .scope = context->fabric->system_scope,
+      .profile = *profile,
+      .access_count = 1,
+      .accesses = &staging->access,
+      .required_flags =
+          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO,
+      .host_access = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE};
+  if (numa_node != UINT32_MAX &&
+      (profile->allocation.placement_kinds &
+       (UINT32_C(1) << AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA))) {
+    staging->memory.placement = (amdf_memory_placement_t){
+        .kind = AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA, .node = numa_node};
   }
-  if (iree_status_is_ok(status) && !found) {
-    status =
-        iree_make_status(IREE_STATUS_UNAVAILABLE,
-                         "GPU has no coherent host-visible staging profile");
+  const amdf_memory_construction_capabilities_t* allocation =
+      &profile->allocation;
+  const uint64_t maximum_byte_length = allocation->maximum_byte_length /
+                                       allocation->byte_length_granularity *
+                                       allocation->byte_length_granularity;
+  while (staging->lane_capacity > maximum_byte_length) {
+    staging->lane_capacity >>= 1;
   }
-  if (iree_status_is_ok(status)) {
-    const amdf_memory_construction_capabilities_t* allocation =
-        &staging->memory.profile.allocation;
-    const uint64_t maximum_byte_length = allocation->maximum_byte_length /
-                                         allocation->byte_length_granularity *
-                                         allocation->byte_length_granularity;
-    while (staging->lane_capacity > maximum_byte_length) {
-      staging->lane_capacity >>= 1;
-    }
-    if (staging->lane_capacity < 4096) {
-      status = iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                "native staging cannot provide 4 KiB lanes");
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    staging->byte_budget = iree_hal_amd_gpu_file_staging_native_length(
-        staging, (uint64_t)staging->lane_capacity * staging->lane_count);
-    if (staging->memory.required_flags & AMDF_MEMORY_FLAG_HOST_FILE_IO) {
-      staging->memory.io.proactor_count = 1;
-      staging->memory.io.proactors = &staging->proactor;
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_memory_trace_initialize_domain("libamdf-numa", numa_node,
-                                                     &staging->trace);
-  }
+  staging->byte_budget = iree_hal_amd_gpu_file_staging_native_length(
+      staging, (uint64_t)staging->lane_capacity * staging->lane_count);
+  staging->memory.io.proactor_count = 1;
+  staging->memory.io.proactors = &staging->proactor;
+  iree_status_t status = iree_hal_memory_trace_initialize_domain(
+      "libamdf-numa", numa_node, &staging->trace);
   if (iree_status_is_ok(status)) {
     *out_staging = staging;
   } else {

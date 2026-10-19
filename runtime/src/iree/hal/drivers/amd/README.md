@@ -229,6 +229,31 @@ execution binding needs an engine-specific copy/staging route and is rejected by
 the direct host path. File and buffer references remain retained through the
 operation; callers still own backing retirement and the device lifetime.
 
+### GPU file backing
+
+GPU file transfers use a native host view directly when that exact view
+supports file I/O. CPU visibility alone does not establish file eligibility,
+for either buffered or direct files. Other ranges use the device's shared SDMA
+staging pool, including host-visible UMA allocations and device-local VRAM.
+Virtual buffers retain the routing and visibility requirements of each physical
+source range.
+
+Staging shares a 16 MiB backing budget per device across file proactors,
+growth, and trim, rounded to native allocation granularity. The staging
+allocation needs GPU addressing and file access, without virtual aliases; the
+destination independently retains its own mapping-source contract. This permits
+ordinary model backing with a bounded transfer allocation instead of
+registering the full model. Each staged ingress adds one payload read and
+write. Explicit file-capable pools avoid that copy when their placement and
+native admission costs suit the application.
+
+The device qualifies file-capable backing before creating its SDMA queue.
+Without that capability, compute remains available and file operations requiring
+staging report `UNAVAILABLE`. Linux process-lifetime registration can attach
+ordinary host pages; instance-lifetime native connections require the optional
+host exporter for this backing. Native file visibility uses its own pair
+queries and does not require CPU-coherent GPU accesses.
+
 ### Registered physical backing
 
 A pool can request `IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO` from the family
