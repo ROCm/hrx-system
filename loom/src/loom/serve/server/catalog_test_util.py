@@ -300,6 +300,14 @@ class Client:
         # arbitrary deadline substitutes for completed request ownership.
         while True:
             status = self.request("/v1/status")
+            for item in status["data"]:
+                details = item["loom"]
+                if "error" in details:
+                    error = details["error"]
+                    raise RuntimeError(
+                        f"model {item['id']!r} failed ({error['code']}): "
+                        f"{error['message']}"
+                    )
             if all(
                 item["loom"]["status"]["phase"] == "idle"
                 and item["loom"]["status"]["queued_requests"] == 0
