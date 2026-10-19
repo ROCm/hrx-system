@@ -24,7 +24,7 @@ typedef struct loom_serve_virtual_buffer_t loom_serve_virtual_buffer_t;
 typedef struct loom_serve_memory_operation_t loom_serve_memory_operation_t;
 
 typedef struct loom_serve_memory_statistics_t {
-  // Reserved virtual bytes, including final slab alignment.
+  // Reserved virtual bytes, including physical-unit alignment.
   uint64_t reserved_bytes;
   // Unique backing bytes; pool-wide queries include pending native retirement.
   uint64_t committed_bytes;
@@ -41,8 +41,9 @@ typedef struct loom_serve_memory_statistics_t {
 
 // Retains the mapping-source pool and copies the exact virtual-target scope.
 // The sealed group and selected transfer queue outlive this pool. Zero
-// slab_size selects the common recommended granularity; explicit sizes satisfy
-// both source and target geometry. limit_bytes bounds physical commitment,
+// slab_size selects the recommended unit for independently reclaimed ranges;
+// explicit sizes satisfy both source and target geometry. Whole reservations
+// use their own extent instead. limit_bytes bounds physical commitment,
 // including native releases not yet completed. Zero imposes no serving budget.
 // Each reservation borrows this pool and is destroyed before the pool.
 iree_status_t loom_serve_memory_pool_allocate(
@@ -122,14 +123,27 @@ iree_status_t loom_serve_memory_pool_prepare(
     loom_serve_memory_pool_t* pool, uint64_t additional_bytes,
     loom_serve_memory_admission_t* out_admission);
 
+// The caller's smallest independently reclaimable portion of a reservation.
+// This describes content lifetime, not native mapping alignment.
+typedef enum loom_serve_memory_reclamation_e {
+  // Any live byte retains the complete reservation, as with a parameter bank.
+  LOOM_SERVE_MEMORY_RECLAMATION_WHOLE = 0,
+  // Disjoint ranges can retire independently, as with retained KV blocks.
+  LOOM_SERVE_MEMORY_RECLAMATION_RANGES,
+} loom_serve_memory_reclamation_t;
+
 // Reserves stable device addresses without committing physical storage.
 // The borrowed HAL buffer remains identical across commit/trim operations.
+// Whole reclamation uses one source rounded to the native minimum; ranged
+// reclamation uses the pool's independent allocation units. Commit and keep
+// expand a requested range to every reclamation unit it intersects.
 // statistics is a caller-owned, initially zeroed accounting group shared by
 // related reservations. It outlives every reservation using it. The pool also
 // accounts all reservations independently, enforcing their common budget.
 iree_status_t loom_serve_virtual_buffer_allocate(
-    loom_serve_memory_pool_t* pool, iree_device_size_t length,
-    iree_device_size_t alignment, loom_serve_memory_statistics_t* statistics,
+    loom_serve_memory_pool_t* pool, loom_serve_memory_reclamation_t reclamation,
+    iree_device_size_t length, iree_device_size_t alignment,
+    loom_serve_memory_statistics_t* statistics,
     loom_serve_virtual_buffer_t** out_buffer);
 iree_hal_buffer_t* loom_serve_virtual_buffer_handle(
     const loom_serve_virtual_buffer_t* buffer);

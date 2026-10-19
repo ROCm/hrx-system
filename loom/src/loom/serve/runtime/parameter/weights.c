@@ -841,7 +841,8 @@ iree_status_t loom_serve_weights_allocate(
     loom_serve_weight_storage_t* storage = &weights->storages[i];
     if (pool) {
       status = loom_serve_virtual_buffer_allocate(
-          pool, requests[i].allocation_size, requests[i].min_alignment,
+          pool, LOOM_SERVE_MEMORY_RECLAMATION_WHOLE,
+          requests[i].allocation_size, requests[i].min_alignment,
           &weights->statistics, &storage->reservation);
       if (iree_status_is_ok(status)) {
         buffers[i] = loom_serve_virtual_buffer_handle(storage->reservation);

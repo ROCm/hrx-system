@@ -5,6 +5,7 @@
 
 #include "loom/serve/runtime/parameter/weights.h"
 
+#include <algorithm>
 #include <array>
 #include <condition_variable>
 #include <filesystem>
@@ -289,13 +290,34 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
           .uri = IREE_SV("amdgpu:?feedback"),
           .backing = elastic ? LOOM_SERVE_DEVICE_BACKING_ELASTIC
                              : LOOM_SERVE_DEVICE_BACKING_FIXED,
-          .slab_size = kSlabBytes,
-          .memory_limit = elastic ? 2 * kSlabBytes : 0,
+          .slab_size = backing_bytes_,
+          .memory_limit = elastic ? 2 * backing_bytes_ : 0,
       };
       IREE_ASSERT_OK(loom_serve_device_group_allocate(
           host, 1, &options, native_allocators_[i].allocator(), &groups_[i]));
       IREE_ASSERT_OK(native_allocators_[i].Observe(
           loom_serve_device_group_at(groups_[i], 0)));
+      if (!elastic) {
+        // The capacity cases admit exactly two of these small parameter banks.
+        // Use native reservation geometry rather than relying on padding from
+        // the unrelated sparse-state reclamation policy.
+        auto* device = loom_serve_device_group_at(groups_[i], 0);
+        const iree_hal_pool_family_access_t family = {
+            .family =
+                iree_hal_queue_family(loom_serve_device_dispatch_queue(device)),
+            .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+        };
+        const iree_hal_pool_scope_t scope = {
+            .family_count = 1,
+            .families = &family,
+        };
+        iree_hal_virtual_buffer_capabilities_t capabilities;
+        IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+            loom_serve_device_group(device), scope, host_allocator,
+            &capabilities));
+        backing_bytes_ = std::max(capabilities.reservation_granularity,
+                                  capabilities.mapping_granularity);
+      }
     }
     iree_hal_driver_release(driver);
     loom_serve_host_release(host);
@@ -600,8 +622,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   iree_hal_semaphore_t* consumer_gate_ = nullptr;
   // Explicitly elastic backing or NULL for the fixed comparison arm.
   loom_serve_memory_pool_t* pool_ = nullptr;
-  // Physical slab size; the shared budget holds two unique roots.
-  static constexpr uint64_t kSlabBytes = 2 * 1024 * 1024;
+  // Native charge of each small parameter bank; the shared budget holds two.
+  inline static uint64_t backing_bytes_ = 0;
   // Suite-owned fixed and elastic devices, each constructed exactly once.
   inline static loom_serve_device_group_t* groups_[2] = {};
   // Native allocator dependencies outliving their device groups.
@@ -718,7 +740,7 @@ TEST_P(WeightsTest, OneWorkerActivatesAndConsumesThroughAsyncTimelineWait) {
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
-            GetParam() ? kSlabBytes : 0);
+            GetParam() ? backing_bytes_ : 0);
   loom_serve_residency_release(residencies_[0]);
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
@@ -956,7 +978,7 @@ TEST_P(WeightsTest, RejectedActivationRetainsProtectionUntilActualRetirement) {
   // It preserves a terminal pin even though no invocation was admitted.
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
-  ExpectBacking(0, GetParam() ? kSlabBytes : 0);
+  ExpectBacking(0, GetParam() ? backing_bytes_ : 0);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
                         loom_serve_weights_await(plans_[0]));
   iree_hal_buffer_release(buffers_[0][0]);
@@ -1077,7 +1099,7 @@ TEST_P(WeightsTest, SharedWorkingSetsAdmitAtomicallyAndEvictOnlyIdleGroups) {
   loom_serve_residency_release(residencies_[2]);
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(cache, 0));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
-            2 * kSlabBytes);
+            2 * backing_bytes_);
   bool complete = false;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
@@ -1091,9 +1113,9 @@ TEST_P(WeightsTest, SharedWorkingSetsAdmitAtomicallyAndEvictOnlyIdleGroups) {
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(cache, 0));
   DrainNativeReturns();
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
-            kSlabBytes);
+            backing_bytes_);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
-            kSlabBytes);
+            backing_bytes_);
   loom_serve_residency_set_pinned(residencies_[2], false);
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(cache, 0));
   DrainNativeReturns();
@@ -1110,7 +1132,7 @@ TEST_P(WeightsTest, SharedWorkingSetsAdmitAtomicallyAndEvictOnlyIdleGroups) {
   EXPECT_EQ(commands_[0], command);
   EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 2u);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).peak_bytes,
-            2 * kSlabBytes);
+            2 * backing_bytes_);
   loom_serve_residency_release(residencies_[0]);
 }
 
@@ -1144,19 +1166,21 @@ TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
   loom_serve_virtual_buffer_t* other = nullptr;
   loom_serve_memory_statistics_t other_statistics = {};
-  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(pool_, 2 * kSlabBytes, 256,
-                                                    &other_statistics, &other));
-  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(other, 0, 2 * kSlabBytes));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool_, LOOM_SERVE_MEMORY_RECLAMATION_RANGES, 2 * backing_bytes_, 256,
+      &other_statistics, &other));
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(other, 0, 2 * backing_bytes_));
   // Another allocation consumes every physical byte the model gave up.
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
-            2 * kSlabBytes);
+            2 * backing_bytes_);
   const uint32_t poison = 0xDEADBEEF;
   const iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
       .fill =
           {
               .target_buffer = loom_serve_virtual_buffer_handle(other),
-              .length = 2 * kSlabBytes,
+              .length = 2 * backing_bytes_,
               .pattern = &poison,
               .pattern_length = sizeof(poison),
           },
@@ -1178,7 +1202,7 @@ TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
   EXPECT_EQ(replay_activity.groups, first_activity.groups * 2);
   EXPECT_EQ(buffers_[0][0], root);
   EXPECT_EQ(commands_[0], command);
-  ExpectBacking(0, 2 * kSlabBytes);
+  ExpectBacking(0, 2 * backing_bytes_);
   Run(0, 70);
   Run(1, 70);
   Run(2, 93);
@@ -1205,10 +1229,10 @@ TEST_P(WeightsTest, AdmissionUsesRecencyOnlyAmongUnpinnedGroups) {
     return;
   }
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
-            kSlabBytes);
+            backing_bytes_);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[1]).committed_bytes, 0u);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[2]).committed_bytes,
-            kSlabBytes);
+            backing_bytes_);
   IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
@@ -1217,13 +1241,13 @@ TEST_P(WeightsTest, AdmissionUsesRecencyOnlyAmongUnpinnedGroups) {
       loom_serve_device_residency_cache(device_owner_), 0));
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
-            kSlabBytes);
+            backing_bytes_);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[2]).committed_bytes, 0u);
   ASSERT_NO_FATAL_FAILURE(Run(0, 70));
   loom_serve_residency_release(residencies_[0]);
   ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).peak_bytes,
-            2 * kSlabBytes);
+            2 * backing_bytes_);
 }
 
 TEST_P(WeightsTest, ImpossibleParameterGroupCannotJoinPressureAdmission) {
@@ -1236,7 +1260,7 @@ TEST_P(WeightsTest, ImpossibleParameterGroupCannotJoinPressureAdmission) {
     IREE_ASSERT_OK(Register(0, 0, 3));
     return;
   }
-  EXPECT_EQ(loom_serve_memory_pool_limit(pool_), 2 * kSlabBytes);
+  EXPECT_EQ(loom_serve_memory_pool_limit(pool_), 2 * backing_bytes_);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Register(0, 0, 3));
   EXPECT_EQ(residencies_[0], nullptr);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
@@ -1265,7 +1289,7 @@ TEST_P(WeightsTest, PersistentPinningOnlyChangesParameterEvictionEligibility) {
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(cache, 0));
   EXPECT_TRUE(loom_serve_residency_snapshot(residency).active);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
-            GetParam() ? kSlabBytes : 0u);
+            GetParam() ? backing_bytes_ : 0u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_serve_residency_deactivate(residency, &complete));
   loom_serve_residency_set_pinned(residency, false);
@@ -1308,7 +1332,7 @@ TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
   EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_LOADING);
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
-  ExpectBacking(0, GetParam() ? kSlabBytes : 0u);
+  ExpectBacking(0, GetParam() ? backing_bytes_ : 0u);
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, gate_value, nullptr));
   wake.Await();
   IREE_ASSERT_OK(loom_serve_activation_advance(
@@ -1406,7 +1430,7 @@ TEST_P(WeightsTest, RejectedWarmupKeepsAcceptedLoadsProtectedUntilRetirement) {
   loom_serve_activation_free(activation);
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
-  ExpectBacking(0, GetParam() ? kSlabBytes : 0u);
+  ExpectBacking(0, GetParam() ? backing_bytes_ : 0u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
                         loom_serve_weights_await(plans_[0]));
 }
@@ -1454,7 +1478,7 @@ TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {
   EXPECT_EQ(loom_serve_weights_statistics(plans_[2]).peak_bytes, 0u);
   // Failed admission neither consumes its own pin nor releases retention.
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
-            kSlabBytes);
+            backing_bytes_);
   loom_serve_residency_release(residencies_[0]);
   IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[1]));
   check_activity(2, 0);
@@ -1591,8 +1615,9 @@ TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
   IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
   ASSERT_NO_FATAL_FAILURE(Run(0, 70));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      pool_, 2 * kSlabBytes, 256, &state_statistics_, &state_));
-  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
+      pool_, LOOM_SERVE_MEMORY_RECLAMATION_RANGES, 2 * backing_bytes_, 256,
+      &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, backing_bytes_));
   loom_serve_residency_admission_t admission;
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
@@ -1604,7 +1629,8 @@ TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
 
   // Parameters fit, but a retired mutable-state slab still consumes physical
   // capacity until its native return. The new row needs a different slab.
-  const loom_serve_memory_range_t next = {state_, kSlabBytes, kSlabBytes};
+  const loom_serve_memory_range_t next = {state_, backing_bytes_,
+                                          backing_bytes_};
   bool admitted = false;
   {
     loom_serve::testing::ScopedNativeHold gate(device_owner_,
@@ -1618,7 +1644,7 @@ TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
     IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
     loom_serve_memory_operation_free(operation);
     EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
-              kSlabBytes);
+              backing_bytes_);
     IREE_ASSERT_OK(
         loom_serve_memory_pool_try_commit(pool_, 1, &next, &admitted));
     EXPECT_FALSE(admitted);
@@ -1650,7 +1676,7 @@ TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
   ASSERT_NO_FATAL_FAILURE(Run(0, 70));
   loom_serve_residency_release(residencies_[0]);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).peak_bytes,
-            2 * kSlabBytes);
+            2 * backing_bytes_);
 }
 
 TEST_P(WeightsTest, NewAdmissionsCoexistWithoutPhysicalPressure) {
@@ -1691,10 +1717,11 @@ TEST_P(WeightsTest, WarmAdmissionCollectsCompletedPeerRelease) {
   }
   IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      pool_, 2 * kSlabBytes, 256, &state_statistics_, &state_));
+      pool_, LOOM_SERVE_MEMORY_RECLAMATION_RANGES, 2 * backing_bytes_, 256,
+      &state_statistics_, &state_));
   auto* cache = loom_serve_device_residency_cache(device_owner_);
   bool admitted = false;
-  const loom_serve_memory_range_t first = {state_, 0, kSlabBytes};
+  const loom_serve_memory_range_t first = {state_, 0, backing_bytes_};
   {
     loom_serve::testing::ScopedNativeHold gate(device_owner_,
                                                IREE_ALLOCATOR_COMMAND_FREE);
@@ -1706,7 +1733,7 @@ TEST_P(WeightsTest, WarmAdmissionCollectsCompletedPeerRelease) {
     // Native backing can outlive the weights' logical return. The pool owns
     // those bytes while the cache retains the uncollected release interest.
     EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
-              kSlabBytes);
+              backing_bytes_);
   }
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
   IREE_ASSERT_OK(
@@ -1717,7 +1744,7 @@ TEST_P(WeightsTest, WarmAdmissionCollectsCompletedPeerRelease) {
   loom_serve_residency_admission_t admission;
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
-  const loom_serve_memory_range_t both = {state_, 0, 2 * kSlabBytes};
+  const loom_serve_memory_range_t both = {state_, 0, 2 * backing_bytes_};
   IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool_, 1, &both, &admitted));
   EXPECT_FALSE(admitted);
   EXPECT_FALSE(loom_serve_memory_pool_is_pending(pool_));
@@ -1768,7 +1795,7 @@ TEST_P(WeightsTest, IdleExpiryPreservesPinsAndReloadsWithoutRecompiling) {
     if (GetParam()) {
       gate.WaitEntered();
       EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
-                kSlabBytes);
+                backing_bytes_);
     }
     // The independent consumer has no dependency on the held native release.
     ASSERT_NO_FATAL_FAILURE(Run(1, 70));
@@ -1800,8 +1827,9 @@ TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
   IREE_ASSERT_OK(Register(0, 0, 2));
   IREE_ASSERT_OK(Register(1, 0, 0));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      pool_, kSlabBytes, 256, &state_statistics_, &state_));
-  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
+      pool_, LOOM_SERVE_MEMORY_RECLAMATION_RANGES, backing_bytes_, 256,
+      &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, backing_bytes_));
   struct loom_serve_test_weight_cache_owner_t {
     // Logical ownership can be released once, independently of physical trim.
     bool retained = true;
@@ -1842,7 +1870,7 @@ TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
   EXPECT_EQ(owner.requests, 0u);
   EXPECT_TRUE(owner.retained);
   EXPECT_FALSE(loom_serve_residency_cache_is_reclaiming(cache));
-  EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
+  EXPECT_EQ(state_statistics_.committed_bytes, backing_bytes_);
   loom_serve_residency_set_pinned(residencies_[2], true);
   loom_serve_residency_release(residencies_[2]);
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
@@ -1856,7 +1884,7 @@ TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(cache));
-  EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
+  EXPECT_EQ(state_statistics_.committed_bytes, backing_bytes_);
   EXPECT_EQ(loom_serve_residency_statistics(residencies_[0]).committed_bytes,
             0u);
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
@@ -1865,7 +1893,7 @@ TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
   // Cancelling admission does not pretend accepted maintenance has retired.
   loom_serve_residency_cancel_admission(residencies_[0]);
   EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(cache));
-  EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
+  EXPECT_EQ(state_statistics_.committed_bytes, backing_bytes_);
   loom_serve_virtual_buffer_begin_trim(state_);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(state_));
   owner.pending = false;
@@ -1887,28 +1915,30 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
     return;
   }
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      pool_, 2 * kSlabBytes, 256, &state_statistics_, &state_));
+      pool_, LOOM_SERVE_MEMORY_RECLAMATION_RANGES, 2 * backing_bytes_, 256,
+      &state_statistics_, &state_));
   IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
-      loom_serve_virtual_buffer_commit(state_, 0, 2 * kSlabBytes));
+      loom_serve_virtual_buffer_commit(state_, 0, 2 * backing_bytes_));
   EXPECT_EQ(state_statistics_.committed_bytes, 0u);
   loom_serve_residency_release(residencies_[0]);
   {
     loom_serve::testing::ScopedNativeHold gate(device_owner_,
                                                IREE_ALLOCATOR_COMMAND_FREE);
-    const loom_serve_memory_range_t range = {state_, 0, 2 * kSlabBytes};
+    const loom_serve_memory_range_t range = {state_, 0, 2 * backing_bytes_};
     bool admitted = true;
     IREE_ASSERT_OK(
         loom_serve_memory_pool_try_commit(pool_, 1, &range, &admitted));
     EXPECT_FALSE(admitted);
     gate.WaitEntered();
     EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
-              kSlabBytes);
+              backing_bytes_);
     EXPECT_EQ(state_statistics_.committed_bytes, 0u);
   }
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
-  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, 2 * kSlabBytes));
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(state_, 0, 2 * backing_bytes_));
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
   const uint32_t value = 0xA1B2C3D4;
   uint32_t observed = 0;
@@ -1931,7 +1961,7 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   EXPECT_FALSE(admitted);
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
-  EXPECT_EQ(state_statistics_.committed_bytes, 2 * kSlabBytes);
+  EXPECT_EQ(state_statistics_.committed_bytes, 2 * backing_bytes_);
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -1950,7 +1980,7 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(state_));
   ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
-            2 * kSlabBytes);
+            2 * backing_bytes_);
 }
 
 TEST_P(WeightsTest,
@@ -1964,9 +1994,9 @@ TEST_P(WeightsTest,
   }
   IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
   IREE_ASSERT_OK(
-      loom_serve_execution_reserve_workspace(execution_, kSlabBytes, 256));
+      loom_serve_execution_reserve_workspace(execution_, backing_bytes_, 256));
   const iree_hal_pool_reservation_request_t request = {
-      .allocation_size = kSlabBytes,
+      .allocation_size = backing_bytes_,
       .min_alignment = 256,
   };
   IREE_ASSERT_OK(
@@ -1978,8 +2008,9 @@ TEST_P(WeightsTest,
   workspace_ = nullptr;
   IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
   const auto before = loom_serve_device_memory_statistics(device_owner_);
-  EXPECT_EQ(before.retained.committed_bytes, GetParam() ? 2 * kSlabBytes : 0);
-  EXPECT_EQ(before.workspace.bytes_committed, kSlabBytes);
+  EXPECT_EQ(before.retained.committed_bytes,
+            GetParam() ? 2 * backing_bytes_ : 0);
+  EXPECT_EQ(before.workspace.bytes_committed, backing_bytes_);
   IREE_ASSERT_OK(
       loom_serve_device_trim(device_owner_, before.retained.committed_bytes));
   const auto idle = loom_serve_device_memory_statistics(device_owner_);
@@ -1995,12 +2026,12 @@ TEST_P(WeightsTest,
       loom_serve_execution_alloca(execution_, &request, &workspace_));
   // The model's real command completion follows allocation on the work chain.
   ASSERT_NO_FATAL_FAILURE(Run(0, 70));
-  IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, kSlabBytes - 1));
+  IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, backing_bytes_ - 1));
   DrainNativeReturns();
   const auto pinned = loom_serve_device_memory_statistics(device_owner_);
-  EXPECT_EQ(pinned.workspace.bytes_committed, kSlabBytes);
+  EXPECT_EQ(pinned.workspace.bytes_committed, backing_bytes_);
   EXPECT_EQ(pinned.workspace.reservation_count, 1u);
-  EXPECT_EQ(pinned.retained.committed_bytes, GetParam() ? kSlabBytes : 0);
+  EXPECT_EQ(pinned.retained.committed_bytes, GetParam() ? backing_bytes_ : 0);
   if (GetParam()) {
     EXPECT_EQ(loom_serve_weights_statistics(plans_[1]).committed_bytes, 0u);
   }
@@ -2019,7 +2050,7 @@ TEST_P(WeightsTest,
   ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
   EXPECT_EQ(loom_serve_device_memory_statistics(device_owner_)
                 .retained.committed_bytes,
-            GetParam() ? kSlabBytes : 0);
+            GetParam() ? backing_bytes_ : 0);
 }
 
 INSTANTIATE_TEST_SUITE_P(Backing, WeightsTest, ::testing::Values(false, true));

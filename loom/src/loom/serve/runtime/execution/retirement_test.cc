@@ -48,7 +48,8 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
     IREE_ASSERT_OK(status);
     device = loom_serve_device_group_at(group, 0);
     IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-        loom_serve_device_memory_pool(device), kSlabBytes, 256, &statistics,
+        loom_serve_device_memory_pool(device),
+        LOOM_SERVE_MEMORY_RECLAMATION_RANGES, kSlabBytes, 256, &statistics,
         &reservation));
     IREE_ASSERT_OK(
         loom_serve_virtual_buffer_commit(reservation, 0, kSlabBytes));

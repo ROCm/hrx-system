@@ -84,7 +84,7 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   constexpr uint32_t kLiveBlocks = 35;
   constexpr uint32_t kBlockCount = kLiveBlocks * 2;
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      pool,
+      pool, LOOM_SERVE_MEMORY_RECLAMATION_RANGES,
       region.origin + 2 * region.stride + kBlockCount * region.block_bytes, 256,
       &statistics, &buffer));
   auto* const handle = loom_serve_virtual_buffer_handle(buffer);

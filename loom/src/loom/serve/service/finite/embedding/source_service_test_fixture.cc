@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iterator>
 #include <utility>
+#include <vector>
 
 #include "iree/base/internal/json.h"
 #include "iree/testing/status_matchers.h"
@@ -621,17 +622,18 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
   manifest.close();
   ASSERT_TRUE(manifest.good());
   std::string header =
-      R"({"factor":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}})";
+      R"({"factor":{"dtype":"F32","shape":[524288],"data_offsets":[0,2097152]}})";
   header.append((8 - header.size() % 8) % 8, ' ');
   std::ofstream weights(target + "/weights.safetensors", std::ios::binary);
   uint8_t length[8];
   iree_unaligned_store_le_u64(length, header.size());
   weights.write(reinterpret_cast<const char*>(length), sizeof(length));
   weights.write(header.data(), header.size());
-  uint8_t factor[4];
-  // F32 1.0; the source-selected preparation command doubles it on device.
-  iree_unaligned_store_le_u32(factor, 0x3f800000);
-  weights.write(reinterpret_cast<const char*>(factor), sizeof(factor));
+  // The declared bank fills one fixture budget. Its first F32 factor is 1.0;
+  // source-selected preparation doubles it on device before inference.
+  std::vector<uint8_t> factors(2 * 1024 * 1024);
+  iree_unaligned_store_le_u32(factors.data(), 0x3f800000);
+  weights.write(reinterpret_cast<const char*>(factors.data()), factors.size());
   weights.close();
   ASSERT_TRUE(weights.good());
 }

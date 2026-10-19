@@ -123,14 +123,16 @@ TEST_F(DeviceGroupTest, SeparateBudgetsAndWholeGroupLifetime) {
   EXPECT_NE(loom_serve_device_residency_cache(first),
             loom_serve_device_residency_cache(second));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      loom_serve_device_memory_pool(second), 2 * kSlabBytes, 256,
+      loom_serve_device_memory_pool(second),
+      LOOM_SERVE_MEMORY_RECLAMATION_RANGES, 2 * kSlabBytes, 256,
       &statistics_[1], &reservations_[1]));
   // Only the last record has a reservation. Rejection must preserve the first
   // record's resources too; it can still admit work after the failed teardown.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_serve_device_group_free(group_));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      loom_serve_device_memory_pool(first), 2 * kSlabBytes, 256,
+      loom_serve_device_memory_pool(first),
+      LOOM_SERVE_MEMORY_RECLAMATION_RANGES, 2 * kSlabBytes, 256,
       &statistics_[0], &reservations_[0]));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(reservations_[0], 0, 4));
   IREE_ASSERT_OK(

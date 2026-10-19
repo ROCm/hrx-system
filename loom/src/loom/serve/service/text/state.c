@@ -108,8 +108,8 @@ iree_status_t loom_serve_text_state_allocate(
       }
       if (state->memory.pool && state->cache.capacity && elastic) {
         status = loom_serve_virtual_buffer_allocate(
-            state->memory.pool, length, alignment, &state->memory.statistics,
-            &state->memory.buffers[i]);
+            state->memory.pool, LOOM_SERVE_MEMORY_RECLAMATION_RANGES, length,
+            alignment, &state->memory.statistics, &state->memory.buffers[i]);
         if (iree_status_is_ok(status)) {
           *allocation =
               loom_serve_virtual_buffer_handle(state->memory.buffers[i]);

@@ -2,7 +2,7 @@ config.decl @fixture.units : %value: index where [range(%value, 1, 256)]
 
 aie2p.target<array> @parameter_target
 
-// The checkpoint contains one F32 scale factor, prepared from 1.0 to 2.0 on
+// The checkpoint bank starts with an F32 factor, prepared from 1.0 to 2.0 on
 // first activation. Scaling the output detects missing or repeated preparation.
 // The parameter buffer is a runtime binding; its extent is a staged input.
 // The resident consumer transports the factor and packets through device-local
@@ -176,8 +176,8 @@ command.program.def public @prepare_factor() launch(%storage: buffer) {
 }
 
 command.program.def public @embed_with_parameters() launch(%parameters: buffer, %input: buffer, %output: buffer) {
-  %factor = command.parameter %parameters, "factor" : view<1xf32>
+  %factor = command.parameter %parameters, "factor" : view<524288xf32>
   %width = index.constant 1 : index
-  kernel.launch @resident_with_parameters[%width](%factor, %input, %output) : [index](view<1xf32>, buffer, buffer)
+  kernel.launch @resident_with_parameters[%width](%factor, %input, %output) : [index](view<524288xf32>, buffer, buffer)
   command.return
 }

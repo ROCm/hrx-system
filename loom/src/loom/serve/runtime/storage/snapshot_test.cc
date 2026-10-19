@@ -102,7 +102,8 @@ class SnapshotTest : public ::testing::Test {
 TEST_F(SnapshotTest, LogicalRangesSurviveSourceDestructionAndFreshPlacement) {
   for (size_t i = 0; i < roots.size(); ++i) {
     IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-        pool, kHighOffset + kSlabSize, 256, &statistics, &reservations[i]));
+        pool, LOOM_SERVE_MEMORY_RECLAMATION_RANGES, kHighOffset + kSlabSize,
+        256, &statistics, &reservations[i]));
     roots[i] = loom_serve_virtual_buffer_handle(reservations[i]);
     iree_hal_buffer_retain(roots[i]);
     IREE_ASSERT_OK(loom_serve_retirement_track(&retirement, &roots[i],
@@ -141,7 +142,8 @@ TEST_F(SnapshotTest, LogicalRangesSurviveSourceDestructionAndFreshPlacement) {
   EXPECT_EQ(statistics.reserved_bytes, 0u);
   for (size_t i = 0; i < roots.size(); ++i) {
     IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-        pool, kSlabSize, 256, &statistics, &reservations[i]));
+        pool, LOOM_SERVE_MEMORY_RECLAMATION_RANGES, kSlabSize, 256, &statistics,
+        &reservations[i]));
     roots[i] = loom_serve_virtual_buffer_handle(reservations[i]);
     iree_hal_buffer_retain(roots[i]);
     IREE_ASSERT_OK(loom_serve_retirement_track(&retirement, &roots[i],
@@ -184,8 +186,8 @@ TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
       kStateBytes + kPageBytes * kPageCount + 12 + 2048 + 32 + 20480;
   for (size_t i = 0; i < roots.size(); ++i) {
     IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-        pool, kCacheOrigin + kPlaneStride * 32, 256, &statistics,
-        &reservations[i]));
+        pool, LOOM_SERVE_MEMORY_RECLAMATION_RANGES,
+        kCacheOrigin + kPlaneStride * 32, 256, &statistics, &reservations[i]));
     roots[i] = loom_serve_virtual_buffer_handle(reservations[i]);
     iree_hal_buffer_retain(roots[i]);
     IREE_ASSERT_OK(loom_serve_retirement_track(&retirement, &roots[i],
@@ -482,7 +484,8 @@ TEST_P(AsyncSnapshotTest, OneWorkerSubmitsAndReleasesBeforeNativeRetirement) {
       loom_serve_host_proactor_pool(host), 0, &transfer.proactor));
   for (size_t i = 0; i < transfer.roots.size(); ++i) {
     IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-        pool, kHighOffset + kSlabSize, 256, &statistics, &reservations[i]));
+        pool, LOOM_SERVE_MEMORY_RECLAMATION_RANGES, kHighOffset + kSlabSize,
+        256, &statistics, &reservations[i]));
     IREE_ASSERT_OK(
         loom_serve_virtual_buffer_commit(reservations[i], kHighOffset, 32768));
     transfer.roots[i] = loom_serve_virtual_buffer_handle(reservations[i]);
