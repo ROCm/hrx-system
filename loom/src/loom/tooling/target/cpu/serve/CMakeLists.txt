@@ -308,7 +308,7 @@ iree_py_test(
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
   TIMEOUT
-    300
+    60
 )
 endif()
 
@@ -355,7 +355,7 @@ iree_py_test(
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
   TIMEOUT
-    300
+    60
 )
 endif()
 

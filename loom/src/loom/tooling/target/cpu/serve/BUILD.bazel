@@ -17,10 +17,6 @@ load("//loom/src/loom/serve/service/finite:testdata/component/sources.bzl", COMP
 
 package(default_visibility = ["//visibility:private"])
 
-# Each case compiles independent model instances; shards keep sanitizer suites
-# within the ordinary test budget while retaining one application per process.
-_COMPILED_SERVICE_TEST_SHARDS = 4
-
 loom_cc_test(
     name = "activity_test",
     srcs = ["activity_test_main.c"],
@@ -164,7 +160,6 @@ loom_cc_test(
         "--speech_model=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
     ],
     data = TEXT_SOURCES + SPEECH_SOURCES,
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -188,7 +183,6 @@ loom_cc_test(
         "--test_workers=8",
     ],
     data = TEXT_SOURCES + SPEECH_SOURCES,
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -247,7 +241,7 @@ loom_cc_test(
 
 loom_py_test(
     name = "realtime_session_test",
-    size = "medium",
+    size = "small",
     srcs = ["//loom/src/loom/serve/server/realtime:session_test.py"],
     args = [
         "$(rootpath :loom-serve-test-tool)",
@@ -276,7 +270,7 @@ loom_py_test(
 
 loom_py_test(
     name = "realtime_session_parallel_test",
-    size = "medium",
+    size = "small",
     srcs = ["//loom/src/loom/serve/server/realtime:session_test.py"],
     args = [
         "$(rootpath :loom-serve-test-tool)",
@@ -614,7 +608,6 @@ loom_cc_test(
         "--model_source=$(rootpath //loom/src/loom/serve/fixture/speech:prepare.loom)",
     ],
     data = SPEECH_SOURCES + SPEECH_VARIANT_SOURCES,
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -637,7 +630,6 @@ loom_cc_test(
         "--model_source=$(rootpath //loom/src/loom/serve/fixture/speech:prepare.loom)",
     ],
     data = SPEECH_SOURCES + SPEECH_VARIANT_SOURCES,
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -681,7 +673,6 @@ loom_cc_test(
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/embedding:prepare.loom)",
     },
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -747,7 +738,6 @@ loom_cc_test(
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
     },
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -771,7 +761,6 @@ loom_cc_test(
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
         "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
     },
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -793,7 +782,6 @@ loom_cc_test(
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
     },
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -815,7 +803,6 @@ loom_cc_test(
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
     },
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -858,7 +845,6 @@ loom_cc_test(
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
     },
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -880,7 +866,6 @@ loom_cc_test(
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
     },
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
@@ -902,7 +887,6 @@ loom_cc_test(
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
     },
-    shard_count = _COMPILED_SERVICE_TEST_SHARDS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",
