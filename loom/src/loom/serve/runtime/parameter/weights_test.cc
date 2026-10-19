@@ -278,7 +278,9 @@ struct loom_serve_test_weight_activation_wake_t {
 
 class WeightsTest : public ::testing::TestWithParam<bool> {
  protected:
-  static void SetUpTestSuite() {
+  static void SetUpTestSuite() { AllocateDeviceGroups(kSlabBytes); }
+
+  static void AllocateDeviceGroups(uint64_t weight_slab_size) {
     const iree_allocator_t host_allocator = iree_allocator_system();
     loom_serve_host_t* host = nullptr;
     IREE_ASSERT_OK(loom_serve_test_host_create(1, host_allocator, &host));
@@ -293,9 +295,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
                      : loom_serve_test_device()->device_uri,
           .backing = elastic ? LOOM_SERVE_DEVICE_BACKING_ELASTIC
                              : LOOM_SERVE_DEVICE_BACKING_FIXED,
-          .weight_slab_size = kSlabBytes,
+          .weight_slab_size = weight_slab_size,
           .state_slab_size = kSlabBytes,
-          .memory_limit = elastic ? 2 * kSlabBytes : 0,
+          .memory_limit = elastic ? 2 * weight_slab_size : 0,
       };
       IREE_ASSERT_OK(loom_serve_device_group_allocate(
           host, 1, &options, native_allocators_[i].allocator(), &groups_[i]));
@@ -805,6 +807,71 @@ TEST_P(WeightsTest, SmallRootCommitsOnlyItsNativeExtent) {
 }
 
 class WindowedWeightsTest : public WeightsTest {};
+
+class CoarseWeightsTest : public WeightsTest {
+ protected:
+  static void SetUpTestSuite() { AllocateDeviceGroups(128 * 1024 * 1024); }
+};
+
+TEST_P(CoarseWeightsTest, ReadWindowsShareOnePendingSlabAndReload) {
+  ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint());
+  IREE_ASSERT_OK(Compile(0, "windowed"));
+  // Fixed storage after the parameters extends into a second read window.
+  // Both windows belong to one exact-sized physical allocation.
+  const auto root = Root(0, 0, 64 * 1024 * 1024 + 4096);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  const auto reserved = loom_serve_weights_statistics(plans_[0]).reserved_bytes;
+  {
+    loom_serve::testing::ScopedNativeHold hold(device_owner_);
+    IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
+    hold.WaitEntered();
+    EXPECT_FALSE(loom_serve_weights_is_retired(plans_[0]));
+    EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).pending_bytes, reserved);
+  }
+  IREE_ASSERT_OK(loom_serve_weights_await(plans_[0]));
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).groups, 2u);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, reserved);
+  ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage());
+  Run(0, 525333);
+  bool complete = false;
+  IREE_ASSERT_OK(loom_serve_weights_deactivate(plans_[0], &complete));
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_serve_weights_deactivate(plans_[0], &complete));
+  EXPECT_TRUE(complete);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
+  IREE_ASSERT_OK(loom_serve_weights_await(plans_[0]));
+  ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage());
+  Run(0, 525333);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).groups, 4u);
+}
+
+TEST_P(CoarseWeightsTest, ReadWindowsRetireAfterSharedAllocationFailure) {
+  ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint());
+  IREE_ASSERT_OK(Compile(0, "windowed"));
+  const auto root = Root(0, 0, 64 * 1024 * 1024 + 4096);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  loom_serve::testing::NativeAllocator::ForDevice(device_owner_)
+      .FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC, true);
+  {
+    loom_serve::testing::ScopedNativeHold hold(device_owner_);
+    IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
+    hold.WaitEntered();
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_weights_await(plans_[0]));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_execution_drain(execution_));
+  loom_serve_execution_release(execution_);
+  execution_ = nullptr;
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  loom_serve_weights_await_retirement(plans_[0]);
+  IREE_ASSERT_OK(loom_serve_weights_free(plans_[0]));
+  plans_[0] = nullptr;
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
+}
 
 TEST_P(WindowedWeightsTest,
        CrossSlabTensorPreparesOnceAndReloadsInSharedStorage) {
@@ -2250,6 +2317,7 @@ TEST_P(WeightsTest,
 }
 
 INSTANTIATE_TEST_SUITE_P(Backing, WeightsTest, ::testing::Values(false, true));
+INSTANTIATE_TEST_SUITE_P(Streaming, CoarseWeightsTest, ::testing::Values(true));
 INSTANTIATE_TEST_SUITE_P(Streaming, WindowedWeightsTest,
                          ::testing::Values(false, true));
 

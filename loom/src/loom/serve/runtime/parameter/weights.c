@@ -41,8 +41,10 @@ typedef struct loom_serve_weight_group_t {
   iree_host_size_t storage_index;
   // Number of fragments exposed to the parameter provider.
   iree_host_size_t count;
-  // One physical slab for elastic backing; empty for fixed backing.
+  // Read window within one physical slab; empty for fixed backing.
   loom_serve_memory_range_t backing;
+  // First read group sharing this physical slab's mapping readiness.
+  iree_host_size_t mapping_group;
   // Owned mapping readiness, released after accepted reads capture it.
   iree_hal_semaphore_t* mapped;
   // Previous read on this lane and optional mapping readiness.
@@ -63,8 +65,10 @@ typedef struct loom_serve_weight_group_range_t {
 typedef struct loom_serve_weight_stream_plan_t {
   // Owned read groups, in physical mapping order for elastic backing.
   loom_serve_weight_group_t* groups;
-  // Number of initialized groups, including padding-only slabs.
+  // Number of initialized groups, including padding-only read windows.
   iree_host_size_t group_count;
+  // Number of distinct physical slabs backing all read groups.
+  iree_host_size_t backing_count;
   // Owned contiguous gather fragments borrowed by groups.
   loom_serve_weight_fragment_t* fragments;
   // Owned tensor-to-group intervals consumed by preparation submission.
@@ -622,8 +626,15 @@ iree_status_t loom_serve_weights_prepare(
   return status;
 }
 
-// Builds only cold activation metadata. Elastic groups are physical slab
-// windows; fixed groups preserve consecutive canonical tensors and individual
+static iree_device_size_t loom_serve_weight_read_window_size(
+    const loom_serve_virtual_buffer_t* reservation) {
+  const iree_device_size_t slab_size =
+      loom_serve_virtual_buffer_slab_size(reservation);
+  return iree_min(slab_size & (0 - slab_size), 64 * 1024 * 1024);
+}
+
+// Builds only cold activation metadata. Elastic groups are read windows
+// within physical slabs; fixed groups preserve canonical tensors and individual
 // preparers. Tensor-to-group intervals are recorded here and consumed without
 // rescanning.
 static iree_status_t loom_serve_weight_stream_plan(
@@ -640,8 +651,14 @@ static iree_status_t loom_serve_weight_stream_plan(
     if (weights->pool) {
       for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
         storage_groups[i] = plan->group_count;
-        plan->group_count += loom_serve_virtual_buffer_slab_count(
-            weights->storages[i].reservation);
+        const loom_serve_virtual_buffer_t* reservation =
+            weights->storages[i].reservation;
+        const iree_device_size_t length = iree_hal_buffer_byte_length(
+            loom_serve_virtual_buffer_handle(reservation));
+        plan->group_count +=
+            (length - 1) / loom_serve_weight_read_window_size(reservation) + 1;
+        plan->backing_count +=
+            loom_serve_virtual_buffer_slab_count(reservation);
       }
     }
     for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
@@ -651,21 +668,24 @@ static iree_status_t loom_serve_weight_stream_plan(
       if (weights->pool) {
         const loom_serve_virtual_buffer_t* reservation =
             weights->storages[span->storage_index].reservation;
-        const iree_device_size_t slab_size =
-            loom_serve_virtual_buffer_slab_size(reservation);
+        const iree_device_size_t window_size =
+            loom_serve_weight_read_window_size(reservation);
         const iree_host_size_t base = storage_groups[span->storage_index];
         plan->spans[i] = (loom_serve_weight_group_range_t){
-            base + span->parameter.byte_offset / slab_size,
+            base + span->parameter.byte_offset / window_size,
             base + (span->parameter.byte_offset + span->parameter.byte_length +
-                    slab_size - 1) /
-                       slab_size};
+                    window_size - 1) /
+                       window_size};
         if (!span->parameter.byte_length) {
           // Empty tensors still resolve their checkpoint key. At the end of a
           // root, the zero-byte read belongs to its final mapped window.
           plan->spans[i].begin =
               base +
-              iree_min(span->parameter.byte_offset / slab_size,
-                       loom_serve_virtual_buffer_slab_count(reservation) - 1);
+              iree_min(span->parameter.byte_offset / window_size,
+                       (iree_hal_buffer_byte_length(
+                            loom_serve_virtual_buffer_handle(reservation)) -
+                        1) /
+                           window_size);
           plan->spans[i].end = plan->spans[i].begin + 1;
         }
       } else {
@@ -687,16 +707,22 @@ static iree_status_t loom_serve_weight_stream_plan(
       for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
         loom_serve_virtual_buffer_t* reservation =
             weights->storages[i].reservation;
-        const iree_host_size_t count =
-            loom_serve_virtual_buffer_slab_count(reservation);
+        const iree_device_size_t window_size =
+            loom_serve_weight_read_window_size(reservation);
+        const iree_device_size_t length = iree_hal_buffer_byte_length(
+            loom_serve_virtual_buffer_handle(reservation));
+        const iree_host_size_t count = (length - 1) / window_size + 1;
+        const iree_host_size_t windows_per_slab =
+            loom_serve_virtual_buffer_slab_size(reservation) / window_size;
         for (iree_host_size_t j = 0; j < count; ++j) {
-          const iree_hal_buffer_range_t range =
-              loom_serve_virtual_buffer_slab_range(reservation, j);
           loom_serve_weight_group_t* group =
               &plan->groups[storage_groups[i] + j];
           group->storage_index = i;
           group->backing = (loom_serve_memory_range_t){
-              reservation, range.byte_offset, range.byte_length};
+              reservation, j * window_size,
+              iree_min(window_size, length - j * window_size)};
+          group->mapping_group =
+              storage_groups[i] + j / windows_per_slab * windows_per_slab;
         }
       }
     }
@@ -793,12 +819,17 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
     }
   }
   if (iree_status_is_ok(status) && weights->pool) {
-    status = iree_allocator_malloc_array(host_allocator, plan.group_count,
+    status = iree_allocator_malloc_array(host_allocator, plan.backing_count,
                                          sizeof(*weights->activation.backing),
                                          (void**)&weights->activation.backing);
     for (iree_host_size_t i = 0;
          i < plan.group_count && iree_status_is_ok(status); ++i) {
       loom_serve_weight_group_t* group = &plan.groups[i];
+      if (group->mapping_group != i) {
+        group->mapped = plan.groups[group->mapping_group].mapped;
+        iree_hal_semaphore_retain(group->mapped);
+        continue;
+      }
       status = iree_hal_semaphore_create(
           weights->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
           IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &group->mapped);
@@ -806,7 +837,7 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
         bool admitted = false;
         status = loom_serve_memory_pool_commit_async(
             weights->pool, 1, &group->backing, group->mapped, 1, &admitted,
-            &weights->activation.backing[i]);
+            &weights->activation.backing[weights->activation.backing_count]);
         ++weights->activation.backing_count;
         if (iree_status_is_ok(status) && !admitted) {
           status =
