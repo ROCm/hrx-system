@@ -5,6 +5,7 @@
 
 #include "loom/serve/runtime/parameter/weights.h"
 
+#include <algorithm>
 #include <array>
 #include <condition_variable>
 #include <filesystem>
