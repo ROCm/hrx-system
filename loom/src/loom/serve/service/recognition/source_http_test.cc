@@ -25,6 +25,7 @@
 
 IREE_FLAG(string, model_source, "", "Recognition fixture bootstrap source.");
 IREE_FLAG(int32_t, test_workers, 1, "Shared application worker count.");
+IREE_FLAG(bool, test_elastic, false, "Use elastic backing for recognition.");
 
 namespace {
 
@@ -80,6 +81,9 @@ class SourceRecognitionHttpTest : public ::testing::Test {
   void SetUp() override {
     auto options = loom_serve_test_application_options_default();
     options.worker_count = FLAG_test_workers;
+    options.backing = FLAG_test_elastic ? LOOM_SERVE_DEVICE_BACKING_ELASTIC
+                                        : LOOM_SERVE_DEVICE_BACKING_FIXED;
+    options.slab_size = FLAG_test_elastic ? 2 * 1024 * 1024 : 0;
     loom_serve_test_application_t* application = nullptr;
     IREE_ASSERT_OK(loom_serve_test_application_acquire(
         &options, iree_allocator_system(), &application));
@@ -334,15 +338,22 @@ INSTANTIATE_TEST_SUITE_P(DisconnectAndShutdown,
                          ::testing::Combine(::testing::Bool(),
                                             ::testing::ValuesIn(InputRates())));
 
-TEST_F(SourceRecognitionHttpTest, SourceCompletionFailurePreservesServing) {
+class SourceRecognitionHttpFailureTest
+    : public SourceRecognitionHttpTest,
+      public ::testing::WithParamInterface<std::tuple<size_t, bool>> {};
+
+TEST_P(SourceRecognitionHttpFailureTest, SourceCompletionPreservesServing) {
   loom_serve::testing::HttpClient rejected;
   loom_serve::testing::HttpClient peer;
-  IREE_ASSERT_OK(http_.Send(Request(16000, 5, -8192), rejected.put()));
-  IREE_ASSERT_OK(http_.Send(Request(16000), peer.put()));
-  for (int client : {rejected.get(), peer.get()}) {
-    loom_serve_http_connection_t* connection = nullptr;
-    const loom_serve_http_request_t* request = nullptr;
-    ASSERT_NO_FATAL_FAILURE(Accept(client, &connection, &request));
+  const auto [frame_count, concurrent_peer] = GetParam();
+  IREE_ASSERT_OK(
+      http_.Send(Request(16000, frame_count, -8192), rejected.put()));
+  loom_serve_http_connection_t* connection = nullptr;
+  const loom_serve_http_request_t* request = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(rejected.get(), &connection, &request));
+  if (concurrent_peer) {
+    IREE_ASSERT_OK(http_.Send(Request(16000), peer.put()));
+    ASSERT_NO_FATAL_FAILURE(Accept(peer.get(), &connection, &request));
   }
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return !interface_.is_pending(interface_.self); }));
@@ -352,14 +363,13 @@ TEST_F(SourceRecognitionHttpTest, SourceCompletionFailurePreservesServing) {
   EXPECT_NE(response.find("recognition fixture accumulator is outside its "
                           "unsigned index range"),
             std::string::npos);
-  IREE_ASSERT_OK(http_.Read(peer.release(), false, &response));
-  EXPECT_EQ(response.find("HTTP/1.1 200 OK\r\n"), 0u);
-  EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
-
+  if (concurrent_peer) {
+    IREE_ASSERT_OK(http_.Read(peer.release(), false, &response));
+    EXPECT_EQ(response.find("HTTP/1.1 200 OK\r\n"), 0u);
+    EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
+  }
   loom_serve::testing::HttpClient replacement;
   IREE_ASSERT_OK(http_.Send(Request(16000), replacement.put()));
-  loom_serve_http_connection_t* connection = nullptr;
-  const loom_serve_http_request_t* request = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(replacement.get(), &connection, &request));
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return !interface_.is_pending(interface_.self); }));
@@ -367,6 +377,13 @@ TEST_F(SourceRecognitionHttpTest, SourceCompletionFailurePreservesServing) {
   EXPECT_EQ(response.find("HTTP/1.1 200 OK\r\n"), 0u);
   EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
 }
+
+// The five-frame upload is fully staged before the source rejects it. The
+// longer upload still has input queued when that same source failure arrives.
+// A lone row releases the model's backing; a concurrent peer keeps it resident.
+INSTANTIATE_TEST_SUITE_P(QueuedInput, SourceRecognitionHttpFailureTest,
+                         ::testing::Combine(::testing::Values(5u, 19u),
+                                            ::testing::Bool()));
 
 TEST_F(SourceRecognitionHttpTest, RawPcmLimitsRejectOnlyTheAffectedRequest) {
   // The first upload exceeds normalized duration before admission. The second

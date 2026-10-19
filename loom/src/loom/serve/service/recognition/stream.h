@@ -114,6 +114,8 @@ bool loom_serve_recognition_stream_is_complete(
 
 // Returns an owned copy of the request failure, including service-wide failure.
 // The caller consumes the returned status; querying does not clear the failure.
+// Failure can precede is_complete while accepted execution ownership retires.
+// Input producers check this result before offering more audio.
 iree_status_t loom_serve_recognition_stream_status(
     const loom_serve_recognition_stream_t* stream);
 
