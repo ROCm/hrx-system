@@ -14,22 +14,20 @@ import sys
 import tempfile
 from pathlib import Path
 
-from loom_serve_testing.http_harness import running_server
-
-from loom.src.loom.serve.server.catalog_test_util import (
+from catalog_test_util import (
     Client as HttpClient,
 )
-from loom.src.loom.serve.server.catalog_test_util import (
+from catalog_test_util import (
     check_pcm,
     complete,
     prepare_catalog,
     write_startup,
 )
-from loom.src.loom.serve.server.realtime.client_test_util import (
+from client_test_util import (
     Client,
     check_response_metadata,
 )
-from loom.src.loom.serve.server.realtime.independent_test import (
+from independent_test import (
     independent_admission,
     independent_automatic_intent,
     independent_cancel_scope,
@@ -37,7 +35,8 @@ from loom.src.loom.serve.server.realtime.independent_test import (
     independent_function_input,
     independent_pending_input,
 )
-from loom.src.loom.serve.server.realtime.registration_test import (
+from loom_serve_testing.http_harness import running_server
+from registration_test import (
     registration_replacement,
 )
 
