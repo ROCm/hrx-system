@@ -823,7 +823,8 @@ TEST_P(CoarseWeightsTest, ReadWindowsShareOnePendingSlabAndReload) {
   const auto reserved = loom_serve_weights_statistics(plans_[0]).reserved_bytes;
   {
     loom_serve::testing::ScopedNativeHold hold(device_owner_);
-    IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
+    IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+    IREE_ASSERT_OK(loom_serve_weights_import_readiness(plans_[0], execution_));
     hold.WaitEntered();
     EXPECT_FALSE(loom_serve_weights_is_retired(plans_[0]));
     EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).pending_bytes, reserved);
@@ -839,7 +840,8 @@ TEST_P(CoarseWeightsTest, ReadWindowsShareOnePendingSlabAndReload) {
   IREE_ASSERT_OK(loom_serve_weights_deactivate(plans_[0], &complete));
   EXPECT_TRUE(complete);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
-  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
+  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+  IREE_ASSERT_OK(loom_serve_weights_import_readiness(plans_[0], execution_));
   IREE_ASSERT_OK(loom_serve_weights_await(plans_[0]));
   ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage());
   Run(0, 525333);
@@ -855,7 +857,8 @@ TEST_P(CoarseWeightsTest, ReadWindowsRetireAfterSharedAllocationFailure) {
       .FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC, true);
   {
     loom_serve::testing::ScopedNativeHold hold(device_owner_);
-    IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
+    IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+    IREE_ASSERT_OK(loom_serve_weights_import_readiness(plans_[0], execution_));
     hold.WaitEntered();
   }
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
