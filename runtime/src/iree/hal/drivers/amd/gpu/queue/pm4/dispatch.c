@@ -112,6 +112,7 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
     iree_hal_amd_gpu_pm4_dispatch_t* out_dispatch) {
   const bool indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(flags);
+  const iree_hal_amd_gpu_metadata_kernel_t* metadata = function->metadata;
   const uint16_t launch_requirements =
       function->launch.requirements &
       ~(IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_DISPATCH_POINTER |
@@ -119,11 +120,13 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
   if (launch_requirements || function->kernarg->requirements) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "dispatch requires native launch services 0x%x and argument services "
-        "0x%x that this queue has not provisioned",
-        launch_requirements, function->kernarg->requirements);
+        "kernel '%.*s' requires native launch services 0x%x and argument "
+        "services 0x%x that this queue has not provisioned "
+        "(fixed private segment: %u bytes per workitem)",
+        (int)metadata->reflection_name.size, metadata->reflection_name.data,
+        launch_requirements, function->kernarg->requirements,
+        metadata->private_segment_fixed_size);
   }
-  const iree_hal_amd_gpu_metadata_kernel_t* metadata = function->metadata;
   if (metadata->has_workgroup_cluster_size) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "PM4 workgroup clusters require native queue "
