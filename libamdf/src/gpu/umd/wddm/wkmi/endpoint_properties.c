@@ -71,6 +71,8 @@ bool amdf_gpu_wddm_wkmi_endpoint_properties_translate(
                                 AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,
             .cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL,
             .atomic_capabilities = amdf_gpu_pm4_atomic_capabilities(),
+            .kernel_queue_capabilities =
+                AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY,
         };
   }
   if (provider_properties->supports_sdma_kernel_queue != 0) {
@@ -115,6 +117,10 @@ bool amdf_gpu_wddm_wkmi_endpoint_properties_translate(
             .format_features = format_features,
             .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
             .roles = AMDF_QUEUE_ROLE_TRANSFER,
+            .kernel_queue_capabilities =
+                provider_properties->supports_sdma_hardware_queue
+                    ? AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY
+                    : 0,
         };
   }
   *out_properties = properties;

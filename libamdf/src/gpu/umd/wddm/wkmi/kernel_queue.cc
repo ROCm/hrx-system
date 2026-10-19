@@ -31,10 +31,12 @@
 struct amdf_wkmi_bridge_gpu_kernel_queue_t {
   // Parsed adapter state borrowed for the lifetime of the queue.
   amdf_wkmi_bridge_gpu_adapter_t* adapter = nullptr;
-  // Native execution context owning the hardware queue.
+  // Native execution context owning all accepted commands.
   D3DKMT_HANDLE context = 0;
-  // Native kernel-mediated hardware queue.
+  // Hardware queue, or zero for a software-scheduled context.
   D3DKMT_HANDLE handle = 0;
+  // Separately owned monitored fence for SWS; HWS owns its fence implicitly.
+  D3DKMT_HANDLE progress_fence = 0;
   // Fixed WKMI record reused by externally serialized submissions.
   amdf::wkmi_bridge::HostBuffer submission_private_data;
 };
@@ -71,12 +73,21 @@ NTSTATUS DestroyNativeQueue(amdf_wkmi_bridge_gpu_kernel_queue_t* queue) {
     }
     queue->context = 0;
   }
+  if (queue->progress_fence != 0) {
+    D3DKMT_DESTROYSYNCHRONIZATIONOBJECT destroy_fence = {};
+    destroy_fence.hSyncObject = queue->progress_fence;
+    const NTSTATUS status = D3DKMTDestroySynchronizationObject(&destroy_fence);
+    if (status != STATUS_SUCCESS) {
+      return status;
+    }
+    queue->progress_fence = 0;
+  }
   return STATUS_SUCCESS;
 }
 
 }  // namespace
 
-bool SelectGpuHardwareQueueScheduler(
+bool SelectGpuKernelQueueScheduler(
     Wkmi::DeviceInfo& device_info,
     amdf_wkmi_bridge_gpu_queue_command_type_t command_type,
     uint32_t* out_scheduler) {
@@ -97,6 +108,15 @@ bool SelectGpuHardwareQueueScheduler(
         return true;
       }
     }
+    if (device_info.user_queue_size == 0) {
+      for (int scheduler : device_info.sdma_schedid) {
+        if (scheduler >= 0 &&
+            Wkmi::EngineOrdinal(scheduler, &device_info) >= 0) {
+          *out_scheduler = static_cast<uint32_t>(scheduler);
+          return true;
+        }
+      }
+    }
   }
   return false;
 }
@@ -111,15 +131,17 @@ amdf_wkmi_bridge_result_t CreateNativeQueue(
     uint32_t* out_native_status) {
   Wkmi::DeviceInfo& device_info = adapter->device_info;
   uint32_t scheduler = 0;
-  if (!SelectGpuHardwareQueueScheduler(device_info, command_type, &scheduler)) {
+  if (!SelectGpuKernelQueueScheduler(device_info, command_type, &scheduler)) {
     return AMDF_WKMI_BRIDGE_RESULT_UNSUPPORTED;
   }
   const int engine_ordinal = Wkmi::EngineOrdinal(scheduler, &device_info);
+  const bool hardware_scheduling = Wkmi::GetHwsEnabled(scheduler, &device_info);
 
   const int context_private_size = Wkmi::GetContextPrivDataSize();
   const int queue_private_size = Wkmi::GetHwQueuePrivDataSize();
   const int submission_private_size = Wkmi::GetSubmitPrivDataSize();
-  if (context_private_size <= 0 || queue_private_size <= 0 ||
+  if (context_private_size <= 0 ||
+      (hardware_scheduling && queue_private_size <= 0) ||
       submission_private_size <= 0) {
     return AMDF_WKMI_BRIDGE_RESULT_VERSION_MISMATCH;
   }
@@ -133,8 +155,9 @@ amdf_wkmi_bridge_result_t CreateNativeQueue(
   HostBuffer queue_private;
   if (!context_private.Allocate(adapter->host_allocator,
                                 static_cast<size_t>(context_private_size)) ||
-      !queue_private.Allocate(adapter->host_allocator,
-                              static_cast<size_t>(queue_private_size)) ||
+      (hardware_scheduling &&
+       !queue_private.Allocate(adapter->host_allocator,
+                               static_cast<size_t>(queue_private_size))) ||
       !queue->submission_private_data.Allocate(
           adapter->host_allocator,
           static_cast<size_t>(submission_private_size))) {
@@ -149,7 +172,7 @@ amdf_wkmi_bridge_result_t CreateNativeQueue(
   create_context.hDevice = static_cast<D3DKMT_HANDLE>(device_handle);
   create_context.EngineAffinity = 1;
   create_context.NodeOrdinal = static_cast<uint32_t>(engine_ordinal);
-  create_context.Flags.HwQueueSupported = 1;
+  create_context.Flags.HwQueueSupported = hardware_scheduling;
   create_context.pPrivateDriverData = context_private.data();
   create_context.PrivateDriverDataSize =
       static_cast<uint32_t>(context_private.byte_length());
@@ -164,7 +187,8 @@ amdf_wkmi_bridge_result_t CreateNativeQueue(
   }
 
   D3DKMT_CREATEHWQUEUE create_queue = {};
-  if (native_status == STATUS_SUCCESS) {
+  D3DKMT_CREATESYNCHRONIZATIONOBJECT2 create_fence = {};
+  if (native_status == STATUS_SUCCESS && hardware_scheduling) {
     Wkmi::FillinHwQueuePrivData(queue_private.data(),
                                 device_info.state_shadowing_by_cpfw,
                                 Wkmi::kNormal, Wkmi::kHwQueuePm4);
@@ -177,12 +201,27 @@ amdf_wkmi_bridge_result_t CreateNativeQueue(
         static_cast<uint32_t>(queue_private.byte_length());
     native_status = D3DKMTCreateHwQueue(&create_queue);
   }
-  if (native_status == STATUS_SUCCESS) {
+  if (native_status == STATUS_SUCCESS && hardware_scheduling) {
     queue->handle = create_queue.hHwQueue;
     if (queue->handle == 0 || create_queue.hHwQueueProgressFence == 0 ||
         create_queue.HwQueueProgressFenceCPUVirtualAddress == nullptr ||
         create_queue.HwQueueProgressFenceGPUVirtualAddress == 0) {
       native_status = STATUS_INVALID_HANDLE;
+    }
+  }
+  if (native_status == STATUS_SUCCESS && !hardware_scheduling) {
+    create_fence.hDevice = static_cast<D3DKMT_HANDLE>(device_handle);
+    create_fence.Info.Type = D3DDDI_MONITORED_FENCE;
+    create_fence.Info.MonitoredFence.EngineAffinity = 1;
+    native_status = D3DKMTCreateSynchronizationObject2(&create_fence);
+    if (native_status == STATUS_SUCCESS) {
+      queue->progress_fence = create_fence.hSyncObject;
+      if (queue->progress_fence == 0 ||
+          create_fence.Info.MonitoredFence.FenceValueCPUVirtualAddress ==
+              nullptr ||
+          create_fence.Info.MonitoredFence.FenceValueGPUVirtualAddress == 0) {
+        native_status = STATUS_INVALID_HANDLE;
+      }
     }
   }
   if (native_status != STATUS_SUCCESS) {
@@ -199,13 +238,19 @@ amdf_wkmi_bridge_result_t CreateNativeQueue(
   info.structure_size = sizeof(info);
   info.command_buffer_alignment = kCommandBufferAlignment;
   info.maximum_command_buffer_byte_length = kMaximumCommandBufferByteLength;
-  info.progress_fence_handle = create_queue.hHwQueueProgressFence;
+  info.progress_fence_handle = hardware_scheduling
+                                   ? create_queue.hHwQueueProgressFence
+                                   : create_fence.hSyncObject;
   info.context_handle = queue->context;
   info.queue_handle = queue->handle;
   info.progress_fence_pointer = static_cast<const volatile uint64_t*>(
-      create_queue.HwQueueProgressFenceCPUVirtualAddress);
+      hardware_scheduling
+          ? create_queue.HwQueueProgressFenceCPUVirtualAddress
+          : create_fence.Info.MonitoredFence.FenceValueCPUVirtualAddress);
   info.progress_fence_device_address =
-      create_queue.HwQueueProgressFenceGPUVirtualAddress;
+      hardware_scheduling
+          ? create_queue.HwQueueProgressFenceGPUVirtualAddress
+          : create_fence.Info.MonitoredFence.FenceValueGPUVirtualAddress;
 
   AcquireSRWLockExclusive(&adapter->state_lock);
   ++adapter->live_queue_count;
@@ -249,9 +294,9 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL GpuKernelQueueCreate(
 amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL GpuKernelQueueSubmit(
     amdf_wkmi_bridge_gpu_kernel_queue_t* queue, uint64_t command_buffer_address,
     uint64_t command_buffer_byte_length, uint64_t progress_value,
-    uint32_t* out_native_status) noexcept {
-  if (queue == nullptr || queue->handle == 0 || out_native_status == nullptr ||
-      command_buffer_address == 0 ||
+    uint32_t* out_accepted, uint32_t* out_native_status) noexcept {
+  if (queue == nullptr || queue->context == 0 || out_accepted == nullptr ||
+      out_native_status == nullptr || command_buffer_address == 0 ||
       (command_buffer_address & (kCommandBufferAlignment - 1)) != 0 ||
       command_buffer_byte_length == 0 ||
       (command_buffer_byte_length & (kCommandBufferAlignment - 1)) != 0 ||
@@ -259,12 +304,38 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL GpuKernelQueueSubmit(
       progress_value == 0) {
     return AMDF_WKMI_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
+  *out_accepted = 0;
   *out_native_status = 0;
   std::memset(queue->submission_private_data.data(), 0,
               queue->submission_private_data.byte_length());
   Wkmi::FillinSubmitPrivData(queue->submission_private_data.data(),
                              queue->handle, command_buffer_address,
-                             command_buffer_byte_length, true);
+                             command_buffer_byte_length, queue->handle != 0);
+
+  if (queue->handle == 0) {
+    D3DKMT_SUBMITCOMMAND submit = {};
+    submit.Commands = command_buffer_address;
+    submit.CommandLength = static_cast<uint32_t>(command_buffer_byte_length);
+    submit.BroadcastContextCount = 1;
+    submit.BroadcastContext[0] = queue->context;
+    submit.pPrivateDriverData = queue->submission_private_data.data();
+    submit.PrivateDriverDataSize =
+        static_cast<uint32_t>(queue->submission_private_data.byte_length());
+    NTSTATUS native_status = D3DKMTSubmitCommand(&submit);
+    if (native_status != STATUS_SUCCESS) {
+      return MakeNativeFailure(native_status, out_native_status);
+    }
+    *out_accepted = 1;
+    D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU signal = {};
+    signal.hContext = queue->context;
+    signal.ObjectCount = 1;
+    signal.ObjectHandleArray = &queue->progress_fence;
+    signal.MonitoredFenceValueArray = &progress_value;
+    native_status = D3DKMTSignalSynchronizationObjectFromGpu(&signal);
+    return native_status == STATUS_SUCCESS
+               ? AMDF_WKMI_BRIDGE_RESULT_SUCCESS
+               : MakeNativeFailure(native_status, out_native_status);
+  }
 
   D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
   submit.hHwQueue = queue->handle;
@@ -275,6 +346,7 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL GpuKernelQueueSubmit(
   submit.PrivateDriverDataSize =
       static_cast<uint32_t>(queue->submission_private_data.byte_length());
   const NTSTATUS native_status = D3DKMTSubmitCommandToHwQueue(&submit);
+  *out_accepted = native_status == STATUS_SUCCESS;
   return native_status == STATUS_SUCCESS
              ? AMDF_WKMI_BRIDGE_RESULT_SUCCESS
              : MakeNativeFailure(native_status, out_native_status);

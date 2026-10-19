@@ -145,12 +145,15 @@ amdf_status_t amdf_gpu_wddm_wkmi_adapter_create_kernel_queue(
 amdf_status_t amdf_gpu_wddm_wkmi_adapter_submit_kernel_queue(
     const amdf_gpu_wddm_wkmi_adapter_t* adapter,
     amdf_wkmi_bridge_gpu_kernel_queue_t* queue, uint64_t command_buffer_address,
-    uint64_t command_buffer_byte_length, uint64_t progress_value) {
+    uint64_t command_buffer_byte_length, uint64_t progress_value,
+    bool* out_accepted) {
   uint32_t native_status = 0;
+  uint32_t accepted = 0;
   const amdf_wkmi_bridge_result_t result =
-      adapter->api->gpu_kernel_queue_submit(queue, command_buffer_address,
-                                            command_buffer_byte_length,
-                                            progress_value, &native_status);
+      adapter->api->gpu_kernel_queue_submit(
+          queue, command_buffer_address, command_buffer_byte_length,
+          progress_value, &accepted, &native_status);
+  *out_accepted = accepted != 0;
   return amdf_gpu_wddm_wkmi_make_status(result, native_status);
 }
 

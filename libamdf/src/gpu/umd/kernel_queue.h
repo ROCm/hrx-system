@@ -51,6 +51,8 @@ amdf_status_t amdf_gpu_umd_kernel_queue_create(
 // point. A fresh native queue starts at progress zero. This hot path takes no
 // provider lock and performs no allocation, initialization, command parsing,
 // address lookup or native-submit retry. Native driver entry is permitted.
+// Failure after acceptance returns OK and latches terminal queue failure;
+// the assigned point remains live until independently checked retirement.
 amdf_status_t amdf_gpu_umd_kernel_queue_submit(
     amdf_gpu_umd_kernel_queue_t* queue, uint64_t command_buffer_address,
     uint64_t command_buffer_byte_length, uint64_t submission);

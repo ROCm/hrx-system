@@ -100,7 +100,7 @@ GpuKernelQueueCreate(amdf_wkmi_bridge_gpu_adapter_t*,
 
 amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL
 GpuKernelQueueSubmit(amdf_wkmi_bridge_gpu_kernel_queue_t*, uint64_t, uint64_t,
-                     uint64_t, uint32_t*) {
+                     uint64_t, uint32_t*, uint32_t*) {
   return AMDF_WKMI_BRIDGE_RESULT_UNSUPPORTED;
 }
 
@@ -125,7 +125,7 @@ GpuClockSample(amdf_wkmi_bridge_gpu_adapter_t*, uint32_t, uint32_t,
 
 amdf_wkmi_bridge_api_t api = {
     sizeof(amdf_wkmi_bridge_api_t),
-    AMDF_WKMI_BRIDGE_ABI_VERSION_8,
+    AMDF_WKMI_BRIDGE_ABI_VERSION_9,
     GpuAdapterOpen,
     GpuAdapterClose,
     GpuAllocationQueryLayout,

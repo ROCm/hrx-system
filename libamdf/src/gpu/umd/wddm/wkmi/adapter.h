@@ -7,6 +7,7 @@
 #ifndef AMDF_SRC_GPU_UMD_WDDM_WKMI_ADAPTER_H_
 #define AMDF_SRC_GPU_UMD_WDDM_WKMI_ADAPTER_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "amdf/amdf.h"
@@ -78,7 +79,8 @@ amdf_status_t amdf_gpu_wddm_wkmi_adapter_create_kernel_queue(
 amdf_status_t amdf_gpu_wddm_wkmi_adapter_submit_kernel_queue(
     const amdf_gpu_wddm_wkmi_adapter_t* adapter,
     amdf_wkmi_bridge_gpu_kernel_queue_t* queue, uint64_t command_buffer_address,
-    uint64_t command_buffer_byte_length, uint64_t progress_value);
+    uint64_t command_buffer_byte_length, uint64_t progress_value,
+    bool* out_accepted);
 
 // Releases one native GPU kernel queue.
 amdf_status_t amdf_gpu_wddm_wkmi_adapter_destroy_kernel_queue(

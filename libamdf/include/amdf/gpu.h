@@ -707,6 +707,10 @@ typedef struct amdf_gpu_api_t {
   /// object live until the submission retires.
   /// Successful calls return increasing queue-local completion points. Callers
   /// use returned points without assuming a starting value or dense numbering.
+  /// Success means acceptance, not successful execution. A native failure after
+  /// command acceptance returns OK and the accepted point, latches terminal
+  /// queue failure, and prevents subsequent publication. Observe both queue
+  /// status and checked retirement; failure never authorizes storage reuse.
   /// A successful wait for one point covers all earlier accepted submissions
   /// on this queue, not independently scheduled work on other queues.
   ///

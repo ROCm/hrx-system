@@ -51,19 +51,23 @@ void PopulateGpuProperties(Wkmi::DeviceInfo& device_info,
   properties.shader_engine_count = device_info.num_shader_engine;
   properties.is_discrete = device_info.is_dgpu;
   properties.supports_platform_atomics = device_info.platform_atomic_support;
-  const bool has_kernel_queue_api = Wkmi::GetContextPrivDataSize() > 0 &&
-                                    Wkmi::GetHwQueuePrivDataSize() > 0 &&
-                                    Wkmi::GetSubmitPrivDataSize() > 0;
+  const bool has_kernel_queue_api =
+      Wkmi::GetContextPrivDataSize() > 0 && Wkmi::GetSubmitPrivDataSize() > 0;
+  const bool has_hardware_queue_api = Wkmi::GetHwQueuePrivDataSize() > 0;
   uint32_t scheduler = 0;
   properties.supports_pm4_kernel_queue =
-      has_kernel_queue_api &&
-      amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+      has_kernel_queue_api && has_hardware_queue_api &&
+      amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
           device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler);
   properties.supports_sdma_kernel_queue =
       has_kernel_queue_api &&
-      amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+      amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
           device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA,
-          &scheduler);
+          &scheduler) &&
+      (!Wkmi::GetHwsEnabled(scheduler, &device_info) || has_hardware_queue_api);
+  properties.supports_sdma_hardware_queue =
+      properties.supports_sdma_kernel_queue &&
+      Wkmi::GetHwsEnabled(scheduler, &device_info);
   *out_properties = properties;
 }
 
@@ -144,7 +148,7 @@ GpuClockSample(amdf_wkmi_bridge_gpu_adapter_t* adapter, uint32_t adapter_handle,
   }
   *out_native_status = 0;
   uint32_t scheduler = 0;
-  if (!amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+  if (!amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
           adapter->device_info, command_type, &scheduler)) {
     return AMDF_WKMI_BRIDGE_RESULT_UNSUPPORTED;
   }
@@ -172,9 +176,9 @@ GpuClockSample(amdf_wkmi_bridge_gpu_adapter_t* adapter, uint32_t adapter_handle,
   return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
 }
 
-const amdf_wkmi_bridge_api_t kBridgeApiV8 = {
+const amdf_wkmi_bridge_api_t kBridgeApiV9 = {
     sizeof(amdf_wkmi_bridge_api_t),
-    AMDF_WKMI_BRIDGE_ABI_VERSION_8,
+    AMDF_WKMI_BRIDGE_ABI_VERSION_9,
     GpuAdapterOpen,
     GpuAdapterClose,
     amdf::wkmi_bridge::GpuAllocationQueryLayout,
@@ -194,10 +198,10 @@ amdf_wkmi_bridge_query_api(uint32_t minimum_version, uint32_t maximum_version,
   if (out_api == nullptr) {
     return AMDF_WKMI_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
-  if (minimum_version > AMDF_WKMI_BRIDGE_ABI_VERSION_8 ||
-      maximum_version < AMDF_WKMI_BRIDGE_ABI_VERSION_8) {
+  if (minimum_version > AMDF_WKMI_BRIDGE_ABI_VERSION_9 ||
+      maximum_version < AMDF_WKMI_BRIDGE_ABI_VERSION_9) {
     return AMDF_WKMI_BRIDGE_RESULT_VERSION_MISMATCH;
   }
-  *out_api = &kBridgeApiV8;
+  *out_api = &kBridgeApiV9;
   return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
 }

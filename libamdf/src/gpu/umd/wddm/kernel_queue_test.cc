@@ -22,6 +22,8 @@ struct FakeQueueState {
   volatile uint64_t progress = 0;
   // Native submission rejection selected by the test.
   NTSTATUS submit_status = STATUS_SUCCESS;
+  // Native completion-signal result after command acceptance.
+  NTSTATUS signal_status = STATUS_SUCCESS;
   // Native CPU wait registration result selected by the test.
   NTSTATUS wait_status = STATUS_SUCCESS;
   // Native teardown result returned by the bridge dependency.
@@ -104,18 +106,20 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeCreateQueue(
   return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
 }
 
-amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL
-FakeSubmitQueue(amdf_wkmi_bridge_gpu_kernel_queue_t* queue,
-                uint64_t command_address, uint64_t command_byte_length,
-                uint64_t progress_value, uint32_t* out_native_status) {
+amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeSubmitQueue(
+    amdf_wkmi_bridge_gpu_kernel_queue_t* queue, uint64_t command_address,
+    uint64_t command_byte_length, uint64_t progress_value,
+    uint32_t* out_accepted, uint32_t* out_native_status) {
   auto* state = reinterpret_cast<FakeQueueState*>(queue);
   EXPECT_EQ(command_address, 0x20000u);
   EXPECT_EQ(command_byte_length, 64u);
   state->submitted_values.push_back(progress_value);
-  *out_native_status = static_cast<uint32_t>(state->submit_status);
-  return state->submit_status == STATUS_SUCCESS
-             ? AMDF_WKMI_BRIDGE_RESULT_SUCCESS
-             : AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE;
+  *out_accepted = state->submit_status == STATUS_SUCCESS;
+  const NTSTATUS status =
+      *out_accepted ? state->signal_status : state->submit_status;
+  *out_native_status = static_cast<uint32_t>(status);
+  return status == STATUS_SUCCESS ? AMDF_WKMI_BRIDGE_RESULT_SUCCESS
+                                  : AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE;
 }
 
 amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeDestroyQueue(
@@ -470,6 +474,50 @@ TEST_P(WindowsGpuKernelQueueTest, FatalRejectionStopsAllQueuesOnDevice) {
   EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(sibling), lost);
   EXPECT_EQ(state_.diagnostic_count, 0u);
   EXPECT_EQ(amdf_gpu_umd_kernel_queue_destroy(sibling), AMDF_STATUS_OK);
+}
+
+TEST_P(WindowsGpuKernelQueueTest,
+       FailedSignalPreservesAcceptanceAndStopsPublication) {
+  state_.signal_status = STATUS_NO_MEMORY;
+  const auto failure = amdf_kmt_make_status(STATUS_NO_MEMORY);
+  EXPECT_EQ(Submit(1), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), failure);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
+  EXPECT_EQ(Submit(1), failure);
+  EXPECT_EQ(Submit(2), failure);
+  EXPECT_EQ(state_.submitted_values, (std::vector<uint64_t>{1}));
+  CreateNotificationEvent();
+  EXPECT_EQ(Notify(1), failure);
+  EXPECT_EQ(state_.wait_count, 0u);
+  EXPECT_EQ(state_.allocation_count, 1u);
+  // Only independently supplied native progress proves final access. Cached
+  // failure remains visible after that point; it is never treated as success.
+  state_.progress = 1;
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 1u);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), failure);
+}
+
+TEST_P(WindowsGpuKernelQueueTest, SoftwareContextOmitsHardwareMappingOrdering) {
+  EXPECT_GT(amdf_gpu_umd_kernel_queue_mapping_capacity(queue_), 0u);
+  auto create = bridge_.gpu_kernel_queue_create;
+  bridge_.gpu_kernel_queue_create =
+      [](amdf_wkmi_bridge_gpu_adapter_t* adapter,
+         const amdf_wkmi_bridge_gpu_kernel_queue_create_info_t* create_info,
+         amdf_wkmi_bridge_gpu_kernel_queue_t** out_queue,
+         amdf_wkmi_bridge_gpu_kernel_queue_info_t* out_info,
+         uint32_t* out_native_status) {
+        const auto result = FakeCreateQueue(adapter, create_info, out_queue,
+                                            out_info, out_native_status);
+        out_info->queue_handle = 0;
+        return result;
+      };
+  amdf_gpu_umd_kernel_queue_t* software_queue = nullptr;
+  ASSERT_EQ(
+      amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &software_queue),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_mapping_capacity(software_queue), 0u);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_destroy(software_queue), AMDF_STATUS_OK);
+  bridge_.gpu_kernel_queue_create = create;
 }
 
 TEST_P(WindowsGpuKernelQueueTest, RecoverableWaitErrorDoesNotReplayCommand) {

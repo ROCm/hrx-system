@@ -39,10 +39,18 @@ struct FakeNativeState {
   NTSTATUS create_context_status = STATUS_SUCCESS;
   // Native result selected for queue construction.
   NTSTATUS create_queue_status = STATUS_SUCCESS;
+  // Native result selected for software-queue fence construction.
+  NTSTATUS create_fence_status = STATUS_SUCCESS;
+  // Native command submission result, before completion-signal publication.
+  NTSTATUS submit_status = STATUS_SUCCESS;
+  // Native completion-signal result after SWS command acceptance.
+  NTSTATUS signal_status = STATUS_SUCCESS;
   // Native result selected for queue destruction.
   NTSTATUS destroy_queue_status = STATUS_SUCCESS;
   // Native result selected for context destruction.
   NTSTATUS destroy_context_status = STATUS_SUCCESS;
+  // Native result selected for separately owned fence destruction.
+  NTSTATUS destroy_fence_status = STATUS_SUCCESS;
   // Fence handle returned on successful queue construction.
   D3DKMT_HANDLE fence = kFence;
   // Native-owned progress mapping, independent of bridge host allocations.
@@ -53,8 +61,12 @@ struct FakeNativeState {
   uint32_t queue_destroy_count = 0;
   // Number of native context destruction calls.
   uint32_t context_destroy_count = 0;
+  // Number of separately owned native fence destruction calls.
+  uint32_t fence_destroy_count = 0;
   // Number of submitted commands.
   uint32_t submit_count = 0;
+  // Number of separate SWS completion-signal publication calls.
+  uint32_t signal_count = 0;
   // Host allocation ordinal rejected, or SIZE_MAX for no injected failure.
   size_t failure_ordinal = SIZE_MAX;
   // Number of attempted host allocations.
@@ -126,7 +138,9 @@ D3DKMTCreateContextVirtual(D3DKMT_CREATECONTEXTVIRTUAL* create) {
       static_cast<uint32_t>(
           current_state->schedulers[current_state->expected_scheduler]
               .engine_ordinal));
-  ExpectDependency(create->Flags.HwQueueSupported == 1);
+  ExpectDependency(create->Flags.HwQueueSupported ==
+                   current_state->schedulers[current_state->expected_scheduler]
+                       .hardware_scheduling);
   ExpectDependency(create->pPrivateDriverData != nullptr);
   ExpectDependency(create->PrivateDriverDataSize == 16);
   if (current_state->create_context_status == STATUS_SUCCESS) {
@@ -163,6 +177,52 @@ D3DKMTDestroyContext(const D3DKMT_DESTROYCONTEXT* destroy) {
   return current_state->destroy_context_status;
 }
 
+extern "C" NTSTATUS APIENTRY D3DKMTCreateSynchronizationObject2(
+    D3DKMT_CREATESYNCHRONIZATIONOBJECT2* create) {
+  ExpectDependency(create->hDevice == kDevice);
+  ExpectDependency(create->Info.Type == D3DDDI_MONITORED_FENCE);
+  ExpectDependency(create->Info.MonitoredFence.InitialFenceValue == 0);
+  ExpectDependency(create->Info.MonitoredFence.EngineAffinity == 1);
+  if (current_state->create_fence_status == STATUS_SUCCESS) {
+    create->hSyncObject = current_state->fence;
+    create->Info.MonitoredFence.FenceValueCPUVirtualAddress =
+        &current_state->progress;
+    create->Info.MonitoredFence.FenceValueGPUVirtualAddress = 0x1000;
+  }
+  return current_state->create_fence_status;
+}
+
+extern "C" NTSTATUS APIENTRY D3DKMTDestroySynchronizationObject(
+    const D3DKMT_DESTROYSYNCHRONIZATIONOBJECT* destroy) {
+  ++current_state->fence_destroy_count;
+  ExpectDependency(destroy->hSyncObject == kFence);
+  return current_state->destroy_fence_status;
+}
+
+extern "C" NTSTATUS APIENTRY
+D3DKMTSubmitCommand(const D3DKMT_SUBMITCOMMAND* submit) {
+  ++current_state->submit_count;
+  ExpectDependency(submit->Commands == 0x2000 && submit->CommandLength == 64);
+  ExpectDependency(submit->BroadcastContextCount == 1);
+  ExpectDependency(submit->BroadcastContext[0] == kContext);
+  ExpectDependency(submit->pPrivateDriverData != nullptr);
+  ExpectDependency(submit->PrivateDriverDataSize == 48);
+  return current_state->submit_status;
+}
+
+extern "C" NTSTATUS APIENTRY D3DKMTSignalSynchronizationObjectFromGpu(
+    const D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU* signal) {
+  ++current_state->signal_count;
+  ExpectDependency(signal->hContext == kContext);
+  ExpectDependency(signal->ObjectCount == 1);
+  ExpectDependency(signal->ObjectHandleArray[0] == kFence);
+  ExpectDependency(signal->MonitoredFenceValueArray[0] == 7);
+  if (current_state->signal_status == STATUS_SUCCESS) {
+    current_state->progress = signal->MonitoredFenceValueArray[0];
+  }
+  return current_state->signal_status;
+}
+
 extern "C" NTSTATUS APIENTRY
 D3DKMTSubmitCommandToHwQueue(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
   ++current_state->submit_count;
@@ -172,8 +232,10 @@ D3DKMTSubmitCommandToHwQueue(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
   ExpectDependency(submit->CommandLength == 64);
   ExpectDependency(submit->pPrivateDriverData != nullptr);
   ExpectDependency(submit->PrivateDriverDataSize == 48);
-  current_state->progress = submit->HwQueueProgressFenceId;
-  return STATUS_SUCCESS;
+  if (current_state->submit_status == STATUS_SUCCESS) {
+    current_state->progress = submit->HwQueueProgressFenceId;
+  }
+  return current_state->submit_status;
 }
 
 namespace Wkmi {
@@ -215,8 +277,13 @@ void FillinHwQueuePrivData(void* private_data, bool, SchedLevel,
 void FillinSubmitPrivData(void* private_data, D3DKMT_HANDLE queue,
                           uint64_t address, uint64_t byte_length,
                           bool hardware_queue) {
-  ExpectDependency(private_data != nullptr && queue == kQueue &&
-                   address == 0x2000 && byte_length == 64 && hardware_queue);
+  const bool expected_hardware =
+      current_state->schedulers[current_state->expected_scheduler]
+          .hardware_scheduling;
+  ExpectDependency(private_data != nullptr &&
+                   queue == (expected_hardware ? kQueue : 0u) &&
+                   address == 0x2000 && byte_length == 64 &&
+                   hardware_queue == expected_hardware);
 }
 
 }  // namespace Wkmi
@@ -233,10 +300,10 @@ bool NativeSchedulerSelectionPreservesCommandRepresentation() {
   device_info.sdma_schedid = {-1, 2, 3};
   state.schedulers = {FakeScheduler{4, true}, {5, true}, {6, false}, {7, true}};
   uint32_t scheduler = UINT32_MAX;
-  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
       device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
   AMDF_EXPECT(scheduler == 0);
-  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
       device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
   AMDF_EXPECT(scheduler == 3);
 
@@ -244,17 +311,22 @@ bool NativeSchedulerSelectionPreservesCommandRepresentation() {
   for (const auto unavailable : {FakeScheduler{-1, true}, {4, false}}) {
     state.schedulers[0] = unavailable;
     scheduler = UINT32_MAX;
-    AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+    AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
         device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
     AMDF_EXPECT(scheduler == UINT32_MAX);
   }
-  // Native-ring support alone cannot supply an eligible HWS engine.
+  // SWS accepts immutable streams only when the driver owns queue storage.
   device_info.hwsInfo.hwsMask.sdma_queue = 1;
   state.schedulers[3].engine_ordinal = -1;
+  device_info.user_queue_size = 4096;
   scheduler = UINT32_MAX;
-  AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuHardwareQueueScheduler(
+  AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
       device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
   AMDF_EXPECT(scheduler == UINT32_MAX);
+  device_info.user_queue_size = 0;
+  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
+      device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
+  AMDF_EXPECT(scheduler == 2);
   current_state = nullptr;
   return passed;
 }
@@ -277,9 +349,11 @@ bool ContextUsesPm4SchedulerWhenAqlSchedulerDiffers() {
                                                       &info, &native_status) ==
               AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
   if (queue != nullptr) {
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(queue, 0x2000, 64, 7,
-                                                        &native_status) ==
+    uint32_t accepted = 0;
+    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(
+                    queue, 0x2000, 64, 7, &accepted, &native_status) ==
                 AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+    AMDF_EXPECT(accepted == 1);
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueDestroy(
                     queue, &native_status) == AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
   }
@@ -409,9 +483,11 @@ bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
     AMDF_EXPECT(adapter.live_queue_count == 1);
     AMDF_EXPECT(amdf::wkmi_bridge::PrepareGpuAdapterClose(
                     &adapter, &native_status) == AMDF_WKMI_BRIDGE_RESULT_BUSY);
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(queue, 0x2000, 64, 7,
-                                                        &native_status) ==
+    uint32_t accepted = 0;
+    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(
+                    queue, 0x2000, 64, 7, &accepted, &native_status) ==
                 AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+    AMDF_EXPECT(accepted == 1);
     AMDF_EXPECT(*info.progress_fence_pointer == 7);
     if (failure_stage == 1) {
       state.destroy_queue_status = STATUS_DEVICE_BUSY;
@@ -440,6 +516,125 @@ bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
   return passed;
 }
 
+bool SoftwareSubmissionSeparatesAcceptanceFromSignal() {
+  bool passed = true;
+  for (uint32_t failure_stage = 0; failure_stage < 3; ++failure_stage) {
+    FakeNativeState state;
+    state.expected_scheduler = 2;
+    state.schedulers[2] = {1, false};
+    state.submit_status =
+        failure_stage == 1 ? STATUS_NO_MEMORY : STATUS_SUCCESS;
+    state.signal_status =
+        failure_stage == 2 ? STATUS_NO_MEMORY : STATUS_SUCCESS;
+    current_state = &state;
+    amdf_wkmi_bridge_gpu_adapter_t adapter;
+    adapter.host_allocator = {&state, Allocate, nullptr, Free};
+    adapter.device_info.sdma_schedid = {2};
+    auto create = MakeCreateInfo();
+    create.command_type = AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
+    amdf_wkmi_bridge_gpu_kernel_queue_t* queue = nullptr;
+    amdf_wkmi_bridge_gpu_kernel_queue_info_t info = {};
+    uint32_t native_status = 0;
+    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(
+                    &adapter, &create, &queue, &info, &native_status) ==
+                AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+    if (queue == nullptr) {
+      return false;
+    }
+    AMDF_EXPECT(info.queue_handle == 0 && info.context_handle == kContext);
+    AMDF_EXPECT(info.progress_fence_handle == kFence);
+    AMDF_EXPECT(info.progress_fence_pointer == &state.progress);
+    const auto allocations = state.allocation_count;
+    uint32_t accepted = UINT32_MAX;
+    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(
+                    queue, 0x2000, 64, 7, &accepted, &native_status) ==
+                (failure_stage ? AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE
+                               : AMDF_WKMI_BRIDGE_RESULT_SUCCESS));
+    AMDF_EXPECT(accepted == (failure_stage == 1 ? 0u : 1u));
+    AMDF_EXPECT(native_status == static_cast<uint32_t>(failure_stage
+                                                           ? STATUS_NO_MEMORY
+                                                           : STATUS_SUCCESS));
+    AMDF_EXPECT(state.submit_count == 1);
+    AMDF_EXPECT(state.signal_count == (failure_stage == 1 ? 0u : 1u));
+    AMDF_EXPECT(state.progress == (failure_stage == 0 ? 7u : 0u));
+    AMDF_EXPECT(state.allocation_count == allocations);
+    // The dependency supplies final access independently of signal failure.
+    // Production callers must establish this before native queue destruction.
+    state.progress = 7;
+    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueDestroy(
+                    queue, &native_status) == AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+    AMDF_EXPECT(state.queue_destroy_count == 0);
+    AMDF_EXPECT(state.context_destroy_count == 1);
+    AMDF_EXPECT(state.fence_destroy_count == 1);
+    AMDF_EXPECT(state.live_allocation_count == 0);
+    AMDF_EXPECT(adapter.live_queue_count == 0);
+    AMDF_EXPECT(state.dependency_failure_count == 0);
+  }
+  current_state = nullptr;
+  return passed;
+}
+
+bool SoftwareConstructionAndReleasePreserveOwnership() {
+  bool passed = true;
+  for (uint32_t failure_stage = 0; failure_stage < 7; ++failure_stage) {
+    FakeNativeState state;
+    state.expected_scheduler = 2;
+    state.schedulers[2] = {1, false};
+    if (failure_stage < 3) {
+      state.failure_ordinal = failure_stage;
+    } else if (failure_stage == 3) {
+      state.create_fence_status = STATUS_NO_MEMORY;
+    } else if (failure_stage == 4) {
+      state.fence = 0;
+    }
+    current_state = &state;
+    amdf_wkmi_bridge_gpu_adapter_t adapter;
+    adapter.host_allocator = {&state, Allocate, nullptr, Free};
+    adapter.device_info.sdma_schedid = {2};
+    auto create = MakeCreateInfo();
+    create.command_type = AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
+    auto* queue = reinterpret_cast<amdf_wkmi_bridge_gpu_kernel_queue_t*>(1);
+    amdf_wkmi_bridge_gpu_kernel_queue_info_t info;
+    std::memset(&info, 0xA5, sizeof(info));
+    const auto original = info;
+    uint32_t native_status = 0;
+    const auto result = amdf::wkmi_bridge::GpuKernelQueueCreate(
+        &adapter, &create, &queue, &info, &native_status);
+    if (failure_stage < 5) {
+      AMDF_EXPECT(result == (failure_stage < 3
+                                 ? AMDF_WKMI_BRIDGE_RESULT_RESOURCE_EXHAUSTED
+                                 : AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE));
+      AMDF_EXPECT(reinterpret_cast<uintptr_t>(queue) == 1);
+      AMDF_EXPECT(std::memcmp(&info, &original, sizeof(info)) == 0);
+      AMDF_EXPECT(state.context_create_count == (failure_stage < 3 ? 0u : 1u));
+      AMDF_EXPECT(state.context_destroy_count == (failure_stage < 3 ? 0u : 1u));
+      AMDF_EXPECT(state.fence_destroy_count == 0);
+    } else {
+      AMDF_EXPECT(result == AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+      if (result != AMDF_WKMI_BRIDGE_RESULT_SUCCESS) {
+        return false;
+      }
+      if (failure_stage == 5) {
+        state.destroy_context_status = STATUS_DEVICE_BUSY;
+      } else {
+        state.destroy_fence_status = STATUS_DEVICE_BUSY;
+      }
+      AMDF_EXPECT(
+          amdf::wkmi_bridge::GpuKernelQueueDestroy(queue, &native_status) ==
+          AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE);
+      AMDF_EXPECT(native_status == static_cast<uint32_t>(STATUS_DEVICE_BUSY));
+      AMDF_EXPECT(state.context_destroy_count == 1);
+      AMDF_EXPECT(state.fence_destroy_count == (failure_stage == 6 ? 1u : 0u));
+    }
+    AMDF_EXPECT(state.queue_destroy_count == 0);
+    AMDF_EXPECT(state.live_allocation_count == 0);
+    AMDF_EXPECT(adapter.live_queue_count == 0);
+    AMDF_EXPECT(state.dependency_failure_count == 0);
+  }
+  current_state = nullptr;
+  return passed;
+}
+
 #undef AMDF_EXPECT
 
 }  // namespace
@@ -462,6 +657,10 @@ int main() {
        NativeFailureLeavesNoAdapterCleanupObligation},
       {"FinalReleaseConsumesPublishedQueueOnEveryNativeResult",
        FinalReleaseConsumesPublishedQueueOnEveryNativeResult},
+      {"SoftwareSubmissionSeparatesAcceptanceFromSignal",
+       SoftwareSubmissionSeparatesAcceptanceFromSignal},
+      {"SoftwareConstructionAndReleasePreserveOwnership",
+       SoftwareConstructionAndReleasePreserveOwnership},
   };
   bool passed = true;
   for (const auto& test : cases) {

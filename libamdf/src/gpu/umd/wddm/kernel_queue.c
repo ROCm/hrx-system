@@ -36,7 +36,7 @@ struct amdf_gpu_umd_kernel_queue_t {
   D3DKMT_HANDLE context;
   // Native hardware queue borrowed for ordering mapping completion.
   D3DKMT_HANDLE hardware_queue;
-  // First failure after native mapping acceptance, independent of retirement.
+  // First failure after native acceptance, independent of retirement.
   amdf_atomic_uint64_t failure;
   // Serializes use of the reusable asynchronous wait event.
   SRWLOCK wait_lock;
@@ -126,13 +126,20 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
   }
 
   MemoryBarrier();
-  const amdf_status_t status = amdf_gpu_wddm_wkmi_adapter_submit_kernel_queue(
+  bool accepted = false;
+  amdf_status_t status = amdf_gpu_wddm_wkmi_adapter_submit_kernel_queue(
       &queue->device->wkmi_adapter, queue->native, command_buffer_address,
-      command_buffer_byte_length, submission);
+      command_buffer_byte_length, submission, &accepted);
   if (!amdf_status_is_ok(status)) {
-    return amdf_kmt_device_status_observe_error(&queue->device->status,
-                                                queue->device->kmt,
-                                                queue->device->device, status);
+    status = amdf_kmt_device_status_observe_error(
+        &queue->device->status, queue->device->kmt, queue->device->device,
+        status);
+    if (accepted) {
+      // The command is already live. Publish its point and surface the failed
+      // completion signal through queue status, never as retryable rejection.
+      amdf_atomic_uint64_store_release(&queue->failure, status);
+      return AMDF_STATUS_OK;
+    }
   }
   return status;
 }
@@ -150,7 +157,8 @@ uint32_t amdf_gpu_umd_kernel_queue_mapping_capacity(
     const amdf_gpu_umd_kernel_queue_t* queue) {
   // WDDM can block the caller beyond 128 queued updates. Counting the entire
   // unretired prefix is conservative and needs no second operation ledger.
-  return queue->device->kmt->update_gpu_virtual_address != NULL &&
+  return queue->hardware_queue != 0 &&
+                 queue->device->kmt->update_gpu_virtual_address != NULL &&
                  queue->device->kmt->wait_on_hardware_queue != NULL
              ? 128
              : 0;

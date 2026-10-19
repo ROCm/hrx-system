@@ -45,8 +45,12 @@ extern "C" {
 // First version preserving native GPU and host calibration timestamps.
 #define AMDF_WKMI_BRIDGE_ABI_VERSION_8 8u
 
+// First version distinguishing accepted commands from signal publication and
+// identifying whether the SDMA scheduler exposes a hardware-queue handle.
+#define AMDF_WKMI_BRIDGE_ABI_VERSION_9 9u
+
 // Most recent private bridge ABI version described by this header.
-#define AMDF_WKMI_BRIDGE_ABI_VERSION_LATEST AMDF_WKMI_BRIDGE_ABI_VERSION_8
+#define AMDF_WKMI_BRIDGE_ABI_VERSION_LATEST AMDF_WKMI_BRIDGE_ABI_VERSION_9
 
 // Result of one bridge operation.
 typedef uint32_t amdf_wkmi_bridge_result_t;
@@ -116,19 +120,21 @@ typedef struct amdf_wkmi_bridge_gpu_properties_t {
   uint32_t shader_engine_count;
   // Nonzero when a native PM4 hardware queue can be constructed.
   uint32_t supports_pm4_kernel_queue;
-  // Nonzero when a native SDMA hardware queue can be constructed.
+  // Nonzero when a native SDMA command queue can be constructed.
   uint32_t supports_sdma_kernel_queue;
   // Nonzero for a discrete adapter, zero for an integrated processor.
   uint32_t is_discrete;
   // Nonzero when the discrete adapter's platform route supports CPU atomics.
   uint32_t supports_platform_atomics;
+  // Nonzero when the selected SDMA scheduler exposes a hardware-queue handle.
+  uint32_t supports_sdma_hardware_queue;
 } amdf_wkmi_bridge_gpu_properties_t;
 
 #ifdef __cplusplus
-static_assert(sizeof(amdf_wkmi_bridge_gpu_properties_t) == 64,
+static_assert(sizeof(amdf_wkmi_bridge_gpu_properties_t) == 72,
               "WKMI GPU property ABI must remain stable");
 #else
-_Static_assert(sizeof(amdf_wkmi_bridge_gpu_properties_t) == 64,
+_Static_assert(sizeof(amdf_wkmi_bridge_gpu_properties_t) == 72,
                "WKMI GPU property ABI must remain stable");
 #endif
 
@@ -178,7 +184,7 @@ _Static_assert(sizeof(amdf_wkmi_bridge_gpu_allocation_create_info_t) == 40,
                "WKMI allocation create ABI must remain stable");
 #endif
 
-// Native GPU command representation accepted by one WKMI hardware queue.
+// Native GPU command representation accepted by one WKMI kernel queue.
 typedef uint32_t amdf_wkmi_bridge_gpu_queue_command_type_t;
 enum amdf_wkmi_bridge_gpu_queue_command_type_e {
   // Native PM4 command streams submitted to a compute scheduler.
@@ -215,7 +221,7 @@ typedef struct amdf_wkmi_bridge_gpu_kernel_queue_info_t {
   uint32_t command_buffer_alignment;
   // Maximum command-buffer byte length accepted by one submission.
   uint64_t maximum_command_buffer_byte_length;
-  // Monitored progress-fence object owned by the hardware queue.
+  // Monitored progress-fence object owned by the native queue state.
   uint32_t progress_fence_handle;
   // Reserved for compatible growth and always zero.
   uint32_t reserved;
@@ -225,7 +231,7 @@ typedef struct amdf_wkmi_bridge_gpu_kernel_queue_info_t {
   uint64_t progress_fence_device_address;
   // Execution context borrowed through queue destruction.
   uint32_t context_handle;
-  // Hardware queue borrowed for native dependency publication.
+  // Hardware queue for native dependencies, or zero for a SWS context.
   uint32_t queue_handle;
 } amdf_wkmi_bridge_gpu_kernel_queue_info_t;
 
@@ -314,11 +320,14 @@ typedef struct amdf_wkmi_bridge_api_t {
       amdf_wkmi_bridge_gpu_kernel_queue_info_t* out_info,
       uint32_t* out_native_status);
 
-  // Publishes one native GPU command without reading its bytes.
+  // Publishes one native GPU command without reading its bytes. Sets accepted
+  // after native submission even if a later completion-signal call fails.
+  // Rejection sets accepted to zero; invalid arguments leave outputs unchanged.
   amdf_wkmi_bridge_result_t(AMDF_WKMI_BRIDGE_CALL* gpu_kernel_queue_submit)(
       amdf_wkmi_bridge_gpu_kernel_queue_t* queue,
       uint64_t command_buffer_address, uint64_t command_buffer_byte_length,
-      uint64_t progress_value, uint32_t* out_native_status);
+      uint64_t progress_value, uint32_t* out_accepted,
+      uint32_t* out_native_status);
 
   // Consumes an idle queue even when native queue/context cleanup fails.
   // Returns the first native error and leaks unreleased native handles, without

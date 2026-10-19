@@ -80,6 +80,23 @@ TEST(WkmiEndpointPropertiesTest, NormalizesMissingScratchSlots) {
             32u);
 }
 
+TEST(WkmiEndpointPropertiesTest, MappingOrderingRequiresHardwareQueueHandle) {
+  for (uint32_t hardware : {0u, 1u}) {
+    auto provider = MakeProperties();
+    provider.supports_sdma_hardware_queue = hardware;
+    amdf_gpu_endpoint_properties_t properties = {};
+    ASSERT_TRUE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(&provider,
+                                                                 &properties));
+    ASSERT_EQ(properties.queue_family_count, 2u);
+    EXPECT_NE(properties.queue_families[0].kernel_queue_capabilities &
+                  AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY,
+              0u);
+    EXPECT_EQ((properties.queue_families[1].kernel_queue_capabilities &
+               AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY) != 0,
+              hardware != 0);
+  }
+}
+
 TEST(WkmiEndpointPropertiesTest, RdnaExposesPm4AndSdmaPacketFeatures) {
   for (uint32_t target :
        {110000u, 110001u, 110002u, 110003u, 110500u, 110501u, 110502u, 110503u,
