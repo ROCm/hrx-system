@@ -273,9 +273,11 @@ class NativeActivityTest : public ::testing::Test {
 
   iree_status_t Open(loom_serve_activity_test_stream_t* result,
                      size_t role = 0) {
+    const loom_serve_recognition_output_flags_t outputs =
+        role ? LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT
+             : LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY;
     const loom_serve_recognition_request_t request = {
-        .outputs = role ? LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT
-                        : LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY,
+        .outputs = outputs,
     };
     loom_serve_recognition_stream_t* stream = nullptr;
     auto status = loom_serve_registry_try_open_recognition(
