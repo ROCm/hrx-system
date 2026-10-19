@@ -532,8 +532,7 @@ static iree_status_t iree_hal_amd_gpu_file_staging_query_effects(
       (queue->kind != IREE_HAL_MEMORY_TRANSITION_KIND_NONE &&
        (queue->kind != IREE_HAL_MEMORY_TRANSITION_KIND_GLOBAL ||
         queue->executor != IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE ||
-        !(staging->context->families[staging->family_ordinal].format_features &
-          AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR)))) {
+        !iree_hal_amd_gpu_sdma_queue_supports_cache_control(staging->queue)))) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "native file/SDMA staging visibility is unsupported");
@@ -629,8 +628,7 @@ iree_status_t iree_hal_amd_gpu_file_staging_prepare(
       }
     }
     if (iree_status_is_ok(status) && range->effects.bits &&
-        !(staging->context->families[staging->family_ordinal].format_features &
-          AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR)) {
+        !iree_hal_amd_gpu_sdma_queue_supports_cache_control(staging->queue)) {
       status = iree_make_status(IREE_STATUS_UNAVAILABLE,
                                 "SDMA family lacks required cache operations");
     }

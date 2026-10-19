@@ -375,4 +375,32 @@ TEST_F(QueueTest, BoundedCopiesSplitPacketsAndReuseRetiredCommandSlots) {
   }
 }
 
+TEST_F(QueueTest, SubmissionCacheTransitionsRetireAtNativePoint) {
+  family_.format_features = AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR;
+  ASSERT_NO_FATAL_FAILURE(Allocate());
+  EXPECT_TRUE(iree_hal_amd_gpu_sdma_queue_supports_cache_control(queue_));
+  Copy copy;
+  copy.operation.effects.bits =
+      IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
+      IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM;
+  iree_hal_amd_gpu_sdma_queue_submit(queue_, &copy.operation);
+  ASSERT_EQ(last_commands_.size(), 11u);
+  EXPECT_EQ(last_commands_,
+            (std::vector<uint32_t>{1, 4095, 0, 0x100000, 0, 0x200000, 0, 5,
+                                   last_commands_[8], last_commands_[9], 1}));
+  const uint64_t completion_address =
+      last_commands_[8] | (uint64_t{last_commands_[9]} << 32);
+  // The in-stream marker may precede the native cache-release epilogue.
+  // Publishing that marker alone must not return the operands to the caller.
+  iree_atomic_store(reinterpret_cast<iree_atomic_int32_t*>(completion_address),
+                    1, iree_memory_order_release);
+  Poll();
+  EXPECT_EQ(copy.notifications, 0u);
+  retired_ = submitted_;
+  Poll();
+  EXPECT_EQ(copy.notifications, 1u);
+  EXPECT_EQ(copy.status, AMDF_STATUS_OK);
+  EXPECT_EQ(copy.retirement, IREE_HAL_AMD_GPU_SDMA_RETIRED);
+}
+
 }  // namespace

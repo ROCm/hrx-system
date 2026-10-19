@@ -117,6 +117,13 @@ struct iree_hal_amd_gpu_sdma_queue_t {
   amdf_status_t removal_status;
 };
 
+bool iree_hal_amd_gpu_sdma_queue_supports_cache_control(
+    const iree_hal_amd_gpu_sdma_queue_t* queue) {
+  return (queue->features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0 ||
+         (queue->kernel.queue &&
+          (queue->features & AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR) != 0);
+}
+
 static void iree_hal_amd_gpu_sdma_queue_fail(
     iree_hal_amd_gpu_sdma_queue_t* queue, amdf_status_t status) {
   int64_t expected = 0;
@@ -190,7 +197,13 @@ static uint32_t iree_hal_amd_gpu_sdma_encode(
     iree_hal_amd_gpu_sdma_queue_t* queue,
     const iree_hal_amd_gpu_sdma_copy_t* copy, uint32_t value, uint32_t* words) {
   uint32_t* cursor = words;
-  if (copy->effects.bits & IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM) {
+  // KERNEL submission GCR brackets the complete copy through native retirement.
+  // Only USER_GCR admits cache packets inside the command stream itself.
+  const uint32_t cache_effects =
+      queue->features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
+          ? copy->effects.bits
+          : 0;
+  if (cache_effects & IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM) {
     cursor = iree_hal_amd_gpu_sdma_cache(cursor, 0xc3c0u);
   }
   const uint32_t scopes =
@@ -211,7 +224,7 @@ static uint32_t iree_hal_amd_gpu_sdma_encode(
     *cursor++ = (uint32_t)(target >> 32);
     offset += length;
   }
-  if (copy->effects.bits & IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM) {
+  if (cache_effects & IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM) {
     cursor = iree_hal_amd_gpu_sdma_cache(cursor, 0x8040u);
   }
   cursor = iree_hal_amd_gpu_sdma_fence(cursor, queue->features,

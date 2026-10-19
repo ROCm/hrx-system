@@ -65,6 +65,12 @@ iree_status_t iree_hal_amd_gpu_sdma_queue_allocate(
     iree_hal_amd_gpu_publication_t* publication, uint32_t publication_ordinal,
     iree_allocator_t host_allocator, iree_hal_amd_gpu_sdma_queue_t** out_queue);
 
+// Whether this queue can realize global acquire/release around each copy.
+// The selected publication protocol supplies either explicit stream packets
+// or native submission boundaries; callers establish dependencies first.
+bool iree_hal_amd_gpu_sdma_queue_supports_cache_control(
+    const iree_hal_amd_gpu_sdma_queue_t* queue);
+
 // Transfers one ready, validated copy without allocation. An idle caller
 // publishes one entry immediately. The completion callback may precede return;
 // the caller joins its submitting borrow before reusing the record.
