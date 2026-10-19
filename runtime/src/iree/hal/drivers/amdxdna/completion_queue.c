@@ -367,8 +367,11 @@ static int iree_hal_amdxdna_completion_queue_worker_main(void* arg) {
     if (batch) {
       iree_hal_amdxdna_completion_batch_finish(batch);
       iree_hal_amdxdna_completion_batch_mark_done(batch);
-      iree_hal_amdxdna_completion_queue_complete_inflight(queue);
+      // Action cleanups run when the last batch reference drops. Release this
+      // reference before waking queue destroy, which waits on the inflight
+      // count. Posting first lets that waiter run before the cleanup.
       iree_hal_amdxdna_completion_batch_destroy(batch);
+      iree_hal_amdxdna_completion_queue_complete_inflight(queue);
       continue;
     }
     if (shutdown) return 0;
