@@ -176,9 +176,14 @@ the prepared weights and the compilation cache.
 Depth 3 selects MTP. Depth 7 selects the DFlash2 source path and requires
 `definition.options.draft_weights` to name its matching GGUF draft checkpoint.
 Draft weights are additional model storage. Two-epoch continuation lets selected
-device output feed the next prepared epoch without a host token round trip.
-These choices change the executed workload; throughput comparisons need matching
-drafting and retention settings.
+device output feed the next prepared epoch before publishing results to the
+host. `continuation_epochs: 1` publishes after each completed epoch while
+preserving the selected drafting mode. Streaming speech consumers can therefore
+receive the next text span sooner; their own tokenizer and sentence policy
+determine when that span contains enough committed input to synthesize audio.
+Two-epoch continuation reduces host feedback exchanges and delivers results in
+larger groups. These choices change the executed workload; throughput comparisons
+need matching drafting and retention settings.
 
 ## Source map
 
