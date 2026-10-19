@@ -76,7 +76,7 @@ template.def<@ggml.q5k.chunk> device @ggml_q5k_chunk(%weight: buffer, %row_byte_
 // Loads the Q8_1 values and scales paired with one Q5_K half-group. Keeping
 // the activation access separate from weight decoding lets the four-row
 // schedule reuse one decoded weight packet across all four activation rows.
-func.def inline @ggml_q5k_q8_1_x4_activation_chunk(%q8_input: buffer, %q8_row_byte_base: offset, %q8_group: index, %q8_inner_block: index, %q5_half: index) -> (vector<16xi8>, f32, f32) {
+func.def public inline @ggml_q5k_q8_1_x4_activation_chunk(%q8_input: buffer, %q8_row_byte_base: offset, %q8_group: index, %q8_inner_block: index, %q5_half: index) -> (vector<16xi8>, f32, f32) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %c4 = index.constant 4 : index
