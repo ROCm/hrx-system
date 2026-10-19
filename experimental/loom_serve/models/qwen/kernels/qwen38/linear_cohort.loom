@@ -5,17 +5,19 @@ config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%val
 amdgpu.target<gfx11-generic> @qwen38_cohort_wave32 {subgroup_size = 32}
 
 func.decl @ggml_linear_q5k_q8_1_cohort(%rows: index, %weight_channels: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
 func.decl @ggml_linear_q6k_q8_1_cohort(%rows: index, %block_lanes: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
 func.decl @ggml_linear_q6k_f32_cohort(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q5k_q8_1_cohort(%inputs: index, %outputs: index) {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %channels = index.constant 8 : index
   %padding = index.constant 7 : index
   %threads = index.constant 256 : index
   %padded = index.add %outputs, %padding : index
   %groups = index.div %padded, %channels : index
-  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @runner.qwen38.prefill_token_count : index
   %layout = index.constant 1 : index
@@ -25,13 +27,13 @@ kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q5k_q8_1_cohort(%inputs:
 }
 
 kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q5k_q8_1_channel8_cohort(%inputs: index, %outputs: index) {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %channels = index.constant 8 : index
   %padding = index.constant 7 : index
   %threads = index.constant 256 : index
   %padded = index.add %outputs, %padding : index
   %groups = index.div %padded, %channels : index
-  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @runner.qwen38.prefill_token_count : index
   %layout = index.constant 8 : index
@@ -41,13 +43,13 @@ kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q5k_q8_1_channel8_cohort
 }
 
 kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q6k_q8_1_cohort(%inputs: index, %outputs: index) {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %channels = index.constant 8 : index
   %padding = index.constant 7 : index
   %threads = index.constant 256 : index
   %padded = index.add %outputs, %padding : index
   %groups = index.div %padded, %channels : index
-  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @runner.qwen38.prefill_token_count : index
   %block_lanes = index.constant 32 : index
@@ -57,13 +59,13 @@ kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q6k_q8_1_cohort(%inputs:
 }
 
 kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q6k_f32_cohort(%inputs: index, %outputs: index) {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %channels = index.constant 2 : index
   %padding = index.constant 1 : index
   %threads = index.constant 32 : index
   %padded = index.add %outputs, %padding : index
   %groups = index.div %padded, %channels : index
-  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @runner.qwen38.prefill_token_count : index
   %bounded_outputs = index.assume %outputs [range(%outputs, 1, 5120)] : index
