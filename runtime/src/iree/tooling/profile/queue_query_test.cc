@@ -225,4 +225,42 @@ TEST(ProfileQueueQueryTest, RejectsMatchedEventWithoutQueueMetadata) {
   iree_profile_model_deinitialize(&model);
 }
 
+TEST(ProfileQueueQueryTest, SelectsMemoryMapAndTransferBatchesByName) {
+  std::vector<uint8_t> metadata;
+  auto queue = iree_hal_profile_queue_record_default();
+  queue.stream_id = 1;
+  AppendPlainRecord(&metadata, queue);
+  auto metadata_chunk = MakeQueuesChunk(metadata);
+  iree_profile_model_t model;
+  iree_profile_model_initialize(iree_allocator_system(), &model);
+  IREE_ASSERT_OK(
+      iree_profile_model_process_metadata_record(&model, &metadata_chunk));
+
+  std::vector<uint8_t> payload;
+  auto event = iree_hal_profile_queue_event_default();
+  event.stream_id = queue.stream_id;
+  event.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_MAP;
+  event.event_id = 1;
+  AppendPlainRecord(&payload, event);
+  event.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER;
+  event.event_id = 2;
+  AppendPlainRecord(&payload, event);
+  auto chunk = MakeQueueEventsChunk(payload);
+
+  const char* names[] = {"map", "transfer"};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
+    iree_profile_queue_event_query_t query;
+    iree_profile_queue_event_query_initialize(iree_allocator_system(), &query);
+    IREE_ASSERT_OK(iree_profile_queue_event_query_process_record(
+        &query, &model, &chunk, iree_make_cstring_view(names[i]), -1));
+    EXPECT_EQ(query.total_queue_event_count, 2u);
+    EXPECT_EQ(query.queue_event_count, 1u);
+    if (query.queue_event_count == 1) {
+      EXPECT_EQ(query.queue_events[0].record.event_id, i + 1);
+    }
+    iree_profile_queue_event_query_deinitialize(&query);
+  }
+  iree_profile_model_deinitialize(&model);
+}
+
 }  // namespace

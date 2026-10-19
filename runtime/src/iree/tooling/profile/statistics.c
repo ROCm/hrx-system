@@ -111,6 +111,10 @@ static const char* iree_profile_statistics_queue_event_type_name(
       return "atomic_store";
     case IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW:
       return "atomic_rmw";
+    case IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_MAP:
+      return "map";
+    case IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER:
+      return "transfer";
     default:
       return "unknown";
   }
