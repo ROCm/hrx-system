@@ -129,11 +129,15 @@ amdf_status_t amdf_platform_host_reservation_replace(
     uintptr_t source, uint64_t source_byte_offset,
     amdf_memory_access_t access) {
   amdf_status_t status = AMDF_STATUS_OK;
-  for (uint64_t offset = 0; offset < byte_length && amdf_status_is_ok(status);
-       offset += mapping_granularity) {
+  for (uint64_t offset = 0;
+       offset < byte_length && amdf_status_is_ok(status);) {
+    const uint64_t remaining = byte_length - offset;
+    const uint64_t unit_length =
+        remaining < mapping_granularity ? remaining : mapping_granularity;
     status = amdf_windows_host_reservation_replace_unit(
-        (uint8_t*)pointer + offset, mapping_granularity, source,
+        (uint8_t*)pointer + offset, unit_length, source,
         source_byte_offset + offset, access);
+    offset += unit_length;
   }
   return status;
 }

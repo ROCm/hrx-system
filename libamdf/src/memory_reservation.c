@@ -114,10 +114,10 @@ static amdf_status_t amdf_memory_reservation_query_profile(
           capabilities->required_access ||
       create_info->byte_length > capabilities->maximum_byte_length ||
       create_info->byte_length % capabilities->reservation_granularity != 0 ||
+      create_info->byte_length % capabilities->mapping_granularity != 0 ||
       create_info->minimum_alignment > capabilities->maximum_alignment ||
       (access->mapping_granularity != 0 &&
-       (access->mapping_granularity % capabilities->mapping_granularity != 0 ||
-        create_info->byte_length % access->mapping_granularity != 0))) {
+       access->mapping_granularity % capabilities->mapping_granularity != 0)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   return AMDF_STATUS_OK;
@@ -297,7 +297,9 @@ static amdf_status_t amdf_memory_reservation_validate_update(
       update->byte_length >
           target->info.byte_length - update->target_byte_offset ||
       update->target_byte_offset % granularity != 0 ||
-      update->byte_length % granularity != 0) {
+      (update->byte_length % granularity != 0 &&
+       update->byte_length !=
+           target->info.byte_length - update->target_byte_offset)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
   if (update->memory == NULL) {

@@ -26,7 +26,8 @@ class Pm4MappingTest : public Pm4MappingFixture {
     ASSERT_LT(kPayloadByteOffset, page);
     ASSERT_LE(page, kSlabByteLength);
     ASSERT_NO_FATAL_FAILURE(ReleaseReservation(&reservation_));
-    const amdf_memory_reservation_access_t access = {device_, 0, access_, page};
+    const amdf_memory_reservation_access_t access = {device_, 0, access_,
+                                                     kSlabByteLength};
     const amdf_memory_reservation_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
         .structure_size = sizeof(create),
@@ -42,7 +43,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
                                                          &reservation_info_),
               AMDF_STATUS_OK);
     ASSERT_EQ(reservation_info_.byte_length, create.byte_length);
-    ASSERT_EQ(reservation_info_.mapping_granularity, page);
+    ASSERT_EQ(reservation_info_.mapping_granularity, kSlabByteLength);
     RecordProperty("mapping_reserved_byte_length",
                    std::to_string(reservation_info_.byte_length));
     RecordProperty("mapping_base", std::to_string(reservation_info_.address));

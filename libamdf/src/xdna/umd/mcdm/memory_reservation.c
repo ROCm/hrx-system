@@ -27,7 +27,7 @@ typedef struct amdf_windows_xdna_reservation_t {
   uint64_t reservation_byte_length;
   // Aligned native base before the target's shim-DMA address displacement.
   uint64_t address;
-  // Size of each independent native registration, in bytes.
+  // Maximum size of each independent native registration, in bytes.
   uint64_t view_byte_length;
   // Fixed number of native view slots allocated during reservation creation.
   uint32_t view_count;
@@ -121,7 +121,7 @@ static amdf_status_t amdf_windows_xdna_reservation_prepare(
     const uint64_t view_size = unit < AMDF_WINDOWS_XDNA_MAXIMUM_VIEW_SIZE
                                    ? unit
                                    : AMDF_WINDOWS_XDNA_MAXIMUM_VIEW_SIZE;
-    const uint64_t count = create->byte_length / view_size;
+    const uint64_t count = (create->byte_length - 1) / view_size + 1;
     if (count > UINT32_MAX ||
         count > (SIZE_MAX - sizeof(amdf_windows_xdna_reservation_t)) /
                     (2 * sizeof(D3DKMT_HANDLE))) {
@@ -190,13 +190,12 @@ static amdf_status_t amdf_windows_xdna_reservation_prepare(
 
 static amdf_status_t amdf_windows_xdna_reservation_map(
     amdf_windows_xdna_reservation_t* reservation, uint32_t slot,
-    uint64_t* paging_fence) {
+    uint64_t byte_length, uint64_t* paging_fence) {
   D3DDDI_MAPGPUVIRTUALADDRESS map = {0};
   map.hPagingQueue = reservation->device->paging_queue;
   map.BaseAddress = reservation->address + slot * reservation->view_byte_length;
   map.hAllocation = reservation->views[slot];
-  map.SizeInPages =
-      reservation->view_byte_length / AMDF_WINDOWS_XDNA_ADDRESS_ALIGNMENT;
+  map.SizeInPages = byte_length / AMDF_WINDOWS_XDNA_ADDRESS_ALIGNMENT;
   map.Protection.Write = 1;
   const NTSTATUS native_status =
       reservation->device->kmt->map_gpu_virtual_address(&map);
@@ -220,7 +219,7 @@ static amdf_status_t amdf_windows_xdna_reservation_update(
   uint32_t old_count = 0;
   for (uint32_t i = 0; i < update_count; ++i) {
     const uint64_t first = updates[i].target_byte_offset / unit;
-    const uint64_t end = first + updates[i].byte_length / unit;
+    const uint64_t end = first + (updates[i].byte_length - 1) / unit + 1;
     for (uint64_t slot = first; slot < end; ++slot) {
       if (reservation->views[slot] != 0) {
         reservation->batch[old_count++] = reservation->views[slot];
@@ -237,7 +236,8 @@ static amdf_status_t amdf_windows_xdna_reservation_update(
   // begins. A later failure leaves only actually acquired new views to detach.
   for (uint32_t i = 0; i < update_count; ++i) {
     memset(reservation->views + updates[i].target_byte_offset / unit, 0,
-           updates[i].byte_length / unit * sizeof(*reservation->views));
+           ((updates[i].byte_length - 1) / unit + 1) *
+               sizeof(*reservation->views));
   }
   uint32_t new_count = 0;
   uint64_t paging_fence = 0;
@@ -253,18 +253,20 @@ static amdf_status_t amdf_windows_xdna_reservation_update(
         memory->accesses[owner].native,
         memory->info.source_byte_offset + update->source_byte_offset);
     for (uint64_t offset = 0;
-         offset < update->byte_length && amdf_status_is_ok(status);
-         offset += unit) {
+         offset < update->byte_length && amdf_status_is_ok(status);) {
+      const uint64_t remaining = update->byte_length - offset;
+      const uint64_t unit_length = remaining < unit ? remaining : unit;
       const uint32_t slot =
           (uint32_t)((update->target_byte_offset + offset) / unit);
       status = amdf_windows_xdna_memory_register_pages(
-          reservation->device, pointer + offset, unit,
+          reservation->device, pointer + offset, unit_length,
           &reservation->views[slot]);
       if (amdf_status_is_ok(status)) {
         reservation->batch[new_count++] = reservation->views[slot];
-        status =
-            amdf_windows_xdna_reservation_map(reservation, slot, &paging_fence);
+        status = amdf_windows_xdna_reservation_map(reservation, slot,
+                                                   unit_length, &paging_fence);
       }
+      offset += unit_length;
     }
   }
   amdf_xdna_umd_device_t* device = reservation->device;
