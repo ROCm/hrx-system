@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "libamdf/cts/gpu/pm4/mapping_fixture.h"
@@ -16,6 +17,83 @@ namespace {
 
 class Pm4MappingTest : public Pm4MappingFixture {
  protected:
+  void RunShortExtent(amdf_memory_scope_t* scope) {
+    ASSERT_NO_FATAL_FAILURE(Prepare(scope));
+    if (IsSkipped()) {
+      return;
+    }
+    const uint64_t page = reservation_info_.mapping_granularity;
+    ASSERT_LT(kPayloadByteOffset, page);
+    ASSERT_LE(page, kSlabByteLength);
+    ASSERT_NO_FATAL_FAILURE(ReleaseReservation(&reservation_));
+    const amdf_memory_reservation_access_t access = {device_, 0, access_, page};
+    const amdf_memory_reservation_create_info_t create = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
+        .structure_size = sizeof(create),
+        .byte_length = 2 * kSlabByteLength + page,
+        .minimum_alignment = page,
+        .access_count = 1,
+        .accesses = &access,
+    };
+    ASSERT_EQ(
+        api_->memory_reservation_create(instance_, &create, &reservation_),
+        AMDF_STATUS_OK);
+    ASSERT_EQ(api_->memory_reservation_query_access_info(reservation_, 0,
+                                                         &reservation_info_),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(reservation_info_.byte_length, create.byte_length);
+    ASSERT_EQ(reservation_info_.mapping_granularity, page);
+    RecordProperty("mapping_reserved_byte_length",
+                   std::to_string(reservation_info_.byte_length));
+    RecordProperty("mapping_base", std::to_string(reservation_info_.address));
+
+    GpuMemory* neighbor = nullptr;
+    ASSERT_NO_FATAL_FAILURE(CreateBacking(kSlabByteLength, &neighbor));
+    const amdf_memory_mapping_update_t first = {
+        .byte_length = kSlabByteLength,
+        .memory = neighbor->memory,
+        .access = access_,
+    };
+    ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &first),
+              AMDF_STATUS_OK);
+    ASSERT_NO_FATAL_FAILURE(WriteAndVerify(0, 4096, 37, *neighbor));
+    std::array<GpuMemory*, 2> tails = {};
+    for (auto& tail : tails) {
+      ASSERT_NO_FATAL_FAILURE(CreateBacking(page, &tail));
+    }
+    amdf_memory_mapping_update_t last = {
+        .target_byte_offset = 2 * kSlabByteLength,
+        .byte_length = page,
+        .access = access_,
+    };
+    for (uint32_t generation = 0; generation < tails.size(); ++generation) {
+      last.memory = tails[generation]->memory;
+      ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &last),
+                AMDF_STATUS_OK);
+      ASSERT_NO_FATAL_FAILURE(
+          WriteAndVerify(last.target_byte_offset, page - kPayloadByteOffset,
+                         generation + 1, *tails[generation]));
+      for (uint32_t previous = 0; previous < generation; ++previous) {
+        ASSERT_NO_FATAL_FAILURE(
+            Verify(tails[previous]->device_address + kPayloadByteOffset,
+                   page - kPayloadByteOffset, previous + 1));
+      }
+    }
+    // Clearing the exact terminal page must preserve the distant mapping and
+    // cannot consume physical padding beyond the requested reservation extent.
+    last.memory = nullptr;
+    last.access = 0;
+    ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &last),
+              AMDF_STATUS_OK);
+    ASSERT_NO_FATAL_FAILURE(
+        Verify(reservation_info_.address + kPayloadByteOffset, 4096, 37));
+    ASSERT_NO_FATAL_FAILURE(ReleaseReservation(&reservation_));
+    for (auto* tail : tails) {
+      ASSERT_NO_FATAL_FAILURE(ReleaseBacking(tail));
+    }
+    ASSERT_NO_FATAL_FAILURE(ReleaseBacking(neighbor));
+  }
+
   void RunSplit(amdf_memory_scope_t* scope) {
     ASSERT_NO_FATAL_FAILURE(Prepare(scope));
     if (IsSkipped()) {
@@ -442,6 +520,17 @@ class Pm4MappingTest : public Pm4MappingFixture {
     }
   }
 };
+
+TEST_F(Pm4MappingTest, SystemBackingReplacesExactShortTerminalExtent) {
+  RunShortExtent(system_scope_);
+}
+
+TEST_F(Pm4MappingTest, LocalBackingReplacesExactShortTerminalExtent) {
+  if (local_scope_ == nullptr) {
+    GTEST_SKIP() << "endpoint has no local storage scope";
+  }
+  RunShortExtent(local_scope_);
+}
 
 TEST_F(Pm4MappingTest, SystemBackingSplitReuseIsImmediatelyVisibleToCompute) {
   RunSplit(system_scope_);

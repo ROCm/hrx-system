@@ -118,7 +118,8 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
     const amdf_memory_reservation_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
         .structure_size = sizeof(create),
-        .byte_length = UINT64_C(8) << 30,
+        // The final mapping ends exactly at this short terminal extent.
+        .byte_length = kTargetOffset + kPageLength,
         .access_count = 2,
         .accesses = consumers,
     };

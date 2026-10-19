@@ -83,6 +83,8 @@ typedef struct amdf_gpu_kfd_topology_t {
     uint64_t end;
     // Required GPU mapping alignment in bytes.
     uint32_t alignment;
+    // Native page-table fragment size in bytes; a nonzero power of two.
+    uint32_t fragment_size;
   } virtual_address;
 } amdf_gpu_kfd_topology_t;
 

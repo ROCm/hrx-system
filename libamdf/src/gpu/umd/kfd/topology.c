@@ -494,12 +494,15 @@ amdf_status_t amdf_gpu_kfd_topology_query_memory(
       device.virtual_address_offset >= device.virtual_address_max ||
       device.virtual_address_alignment == 0 ||
       (device.virtual_address_alignment &
-       (device.virtual_address_alignment - 1)) != 0) {
+       (device.virtual_address_alignment - 1)) != 0 ||
+      device.pte_fragment_size == 0 ||
+      (device.pte_fragment_size & (device.pte_fragment_size - 1)) != 0) {
     return amdf_linux_error(EPROTO);
   }
   topology->virtual_address.begin = device.virtual_address_offset;
   topology->virtual_address.end = device.virtual_address_max;
   topology->virtual_address.alignment = device.virtual_address_alignment;
+  topology->virtual_address.fragment_size = device.pte_fragment_size;
   topology->memory_features = amdf_gpu_kfd_topology_memory_features(
       topology, (device.ids_flags & AMDGPU_IDS_FLAGS_FUSION) != 0);
   return AMDF_STATUS_OK;

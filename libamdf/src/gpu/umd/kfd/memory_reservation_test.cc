@@ -271,6 +271,7 @@ class KfdMemoryReservationTest : public ::testing::Test {
     device_.page_size = 4096;
     device_.topology.gpu_id = 19;
     device_.topology.virtual_address.end = UINT64_C(1) << 48;
+    device_.topology.virtual_address.fragment_size = 2 * 1024 * 1024;
   }
 
   void TearDown() override {
@@ -293,12 +294,12 @@ class KfdMemoryReservationTest : public ::testing::Test {
     native_state = nullptr;
   }
 
-  void Create() {
+  void Create(uint64_t byte_length = 32768, uint64_t minimum_alignment = 4096) {
     amdf_gpu_umd_device_t* devices[] = {&device_};
-    ASSERT_EQ(
-        amdf_gpu_umd_memory_reservation_create(
-            amdf_allocator_system(), 1, devices, 32768, 4096, &reservation_),
-        AMDF_STATUS_OK);
+    ASSERT_EQ(amdf_gpu_umd_memory_reservation_create(
+                  amdf_allocator_system(), 1, devices, byte_length,
+                  minimum_alignment, &reservation_),
+              AMDF_STATUS_OK);
     uint32_t owner = 0;
     uint64_t granularity = 0;
     amdf_memory_access_t required_access = 0;
@@ -336,6 +337,69 @@ class KfdMemoryReservationTest : public ::testing::Test {
   // Host intervals retained by consuming native failure, not production owners.
   std::vector<std::pair<uintptr_t, size_t>> abandoned_intervals_;
 };
+
+struct ReservationGeometry {
+  // Exact usable virtual extent, without physical padding.
+  uint64_t byte_length;
+  // Caller-requested base alignment in bytes.
+  uint64_t minimum_alignment;
+  // Native page-table fragment size reported by the device.
+  uint32_t fragment_size;
+  // Base alignment selected without changing page-level replacement.
+  uint64_t expected_alignment;
+};
+
+class KfdReservationGeometryTest
+    : public KfdMemoryReservationTest,
+      public ::testing::WithParamInterface<ReservationGeometry> {};
+
+TEST_P(KfdReservationGeometryTest, PreservesShortExtentAndPageReplacements) {
+  const auto geometry = GetParam();
+  device_.topology.virtual_address.fragment_size = geometry.fragment_size;
+  ASSERT_NO_FATAL_FAILURE(
+      Create(geometry.byte_length, geometry.minimum_alignment));
+  EXPECT_EQ(address_ % geometry.expected_alignment, 0u);
+  uint64_t address = 0;
+  uint32_t owner = 0;
+  uint64_t granularity = 0;
+  amdf_memory_access_t required_access = 0;
+  amdf_gpu_umd_memory_reservation_query_access(
+      reservation_, 0, &address, &owner, &granularity, &required_access);
+  EXPECT_EQ(granularity, device_.page_size);
+
+  const amdf_gpu_umd_mapping_update_t update = {
+      .target_byte_offset = geometry.byte_length - device_.page_size,
+      .byte_length = device_.page_size,
+  };
+  bool mutation_started = false;
+  ASSERT_EQ(amdf_gpu_umd_memory_reservation_update(reservation_, 0, 1, &update,
+                                                   &mutation_started),
+            AMDF_STATUS_OK);
+  ASSERT_TRUE(mutation_started);
+  ASSERT_EQ(native_.mutations.size(), 1u);
+  EXPECT_EQ(native_.mutations[0].va_address,
+            address_ + geometry.byte_length - device_.page_size);
+  EXPECT_EQ(native_.mutations[0].map_size, device_.page_size);
+  const auto status = amdf_gpu_umd_memory_reservation_destroy(reservation_);
+  reservation_ = nullptr;
+  ASSERT_EQ(status, AMDF_STATUS_OK);
+  ASSERT_EQ(native_.mutations.size(), 2u);
+  EXPECT_EQ(native_.mutations[1].va_address, address_);
+  EXPECT_EQ(native_.mutations[1].map_size, geometry.byte_length);
+  EXPECT_EQ(native_.allocation_count, 0u);
+  EXPECT_EQ(native_.context_count, 0u);
+  EXPECT_EQ(native_.gem_count, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    NativePageGeometry, KfdReservationGeometryTest,
+    ::testing::Values(ReservationGeometry{3 * 4096, 4096, 65536, 4096},
+                      ReservationGeometry{65536 + 4096, 4096, 65536, 65536},
+                      ReservationGeometry{2 * 1024 * 1024 + 4096, 4096,
+                                          2 * 1024 * 1024, 2 * 1024 * 1024},
+                      ReservationGeometry{2 * 1024 * 1024 + 4096,
+                                          4 * 1024 * 1024, 2 * 1024 * 1024,
+                                          4 * 1024 * 1024}));
 
 TEST_F(KfdMemoryReservationTest, ResumesBothNativeWaitProtocols) {
   ASSERT_NO_FATAL_FAILURE(Create());

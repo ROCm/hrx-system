@@ -63,6 +63,7 @@ struct NativeState {
       .virtual_address_offset = UINT64_C(0x10000),
       .virtual_address_max = UINT64_C(1) << 46,
       .virtual_address_alignment = 4096,
+      .pte_fragment_size = 2 * 1024 * 1024,
   };
   // Render descriptor used for the most recent successful memory query.
   int queried_descriptor = -1;
@@ -261,6 +262,7 @@ TEST_F(KfdInstanceTest, NativeMemoryQueryPrecedesBootstrapAndPublication) {
   EXPECT_EQ(topology.virtual_address.end,
             native_.device_info.virtual_address_max);
   EXPECT_EQ(topology.virtual_address.alignment, 4096u);
+  EXPECT_EQ(topology.virtual_address.fragment_size, 2 * 1024 * 1024u);
   EXPECT_EQ(topology.memory_features, AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY);
   EXPECT_EQ(topology.vram.total_byte_length, UINT64_C(8) << 30);
 
@@ -268,9 +270,11 @@ TEST_F(KfdInstanceTest, NativeMemoryQueryPrecedesBootstrapAndPublication) {
   // VM again. Neither an older interval nor placement bits survive a new native
   // query.
   native_.device_info.virtual_address_max = UINT64_C(1) << 45;
+  native_.device_info.pte_fragment_size = 65536;
   topology.vram.visible_byte_length = topology.vram.total_byte_length;
   ASSERT_EQ(PrepareVm(11, &descriptor, &topology), AMDF_STATUS_OK);
   EXPECT_EQ(topology.virtual_address.end, UINT64_C(1) << 45);
+  EXPECT_EQ(topology.virtual_address.fragment_size, 65536u);
   EXPECT_EQ(topology.memory_features,
             AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY |
                 AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY);
@@ -301,7 +305,7 @@ TEST_F(KfdInstanceTest, FailedMemoryQueryDoesNotAcquireOrPublishFacts) {
 TEST_F(KfdInstanceTest, InvalidNativeMemoryFactsNeverReachBootstrap) {
   ASSERT_EQ(Prepare(), AMDF_STATUS_OK);
   const drm_amdgpu_info_device valid = native_.device_info;
-  for (uint32_t variant = 0; variant < 5; ++variant) {
+  for (uint32_t variant = 0; variant < 7; ++variant) {
     SCOPED_TRACE(variant);
     native_.device_info = valid;
     switch (variant) {
@@ -320,6 +324,12 @@ TEST_F(KfdInstanceTest, InvalidNativeMemoryFactsNeverReachBootstrap) {
         break;
       case 4:
         native_.device_info.virtual_address_alignment = 65536;
+        break;
+      case 5:
+        native_.device_info.pte_fragment_size = 0;
+        break;
+      case 6:
+        native_.device_info.pte_fragment_size = 6144;
         break;
     }
     amdf_gpu_kfd_topology_t topology = {.gpu_id = 11};
@@ -888,6 +898,8 @@ amdf_status_t __wrap_amdf_gpu_kfd_vm_acquire(
             native_state->device_info.virtual_address_max);
   EXPECT_EQ(topology->virtual_address.alignment,
             native_state->device_info.virtual_address_alignment);
+  EXPECT_EQ(topology->virtual_address.fragment_size,
+            native_state->device_info.pte_fragment_size);
   EXPECT_EQ(bootstrap->buffer_handle, 0u);
   EXPECT_NE(topology->gpu_id, 0u);
   EXPECT_EQ(page_size, 4096u);
