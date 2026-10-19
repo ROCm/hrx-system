@@ -1,0 +1,152 @@
+{
+  "state": "small connected valid-image ownership gate passed; no serving/performance selection",
+  "commit": "f60115c770812cc3844fd8938b163f54c812f6dd",
+  "host": "hrx-gorgon-3",
+  "target": "gfx1151",
+  "source_sha256": "dca43ca976ad38f281fa57b0532f17c24cdecc95920fd288c4220c0c17498701",
+  "caller_build_receipt": "persistent-command-build.json",
+  "resources_receipt": "persistent-connected-gfx1151-resources.json",
+  "root_bytes": {
+    "input": 499744,
+    "output": 200864
+  },
+  "component_ring_bytes": 40832,
+  "scope": "Compressed bytes and header facts through nine device entropy stages and persistent row initialization/consumer; no captured body metadata is an input. One command submission/completion before verification. Three-row wrap exercised by two four-row images. Valid restart-free small inputs, provisional full RGB, no resize or final invalid-output publication. Host ASAN and GPU access checks, no performance measurement.",
+  "runs": [
+    {
+      "workers": 1,
+      "fixture_sha256": "177dfcffab4c0e5cd88114906f46eee858a17a7db33ddd4f8784f02a835a4f40",
+      "module_sha256": "4686529a77053161ee3c961b5cd814aee933894ea0230a31abf7ecf83f656519",
+      "captures": {
+        "input.bin": "bb324fdbeb03a4e66a68c46c7dfd9180201615c97753ceff949ac6fb4c623368",
+        "output.bin": "49a1f8250948a90793869fe7683864cc00879a1e5763fade3d169402e47cf28e"
+      },
+      "passed": true,
+      "images": 16,
+      "rows": 42,
+      "completed_intervals": 48,
+      "comparison_count": 21,
+      "guard_bytes": 796,
+      "queued_tasks": 0,
+      "window_seconds": 28.722077161000925,
+      "broker_status_after": "benchmark-lock: idle; policy idle; queued 0\n",
+      "command": {
+        "phase": "command",
+        "root": "jpeg_decode",
+        "scratch_bytes": 12,
+        "commands": 13,
+        "entries": 13,
+        "kinds": [
+          3,
+          259,
+          259,
+          259,
+          259,
+          261,
+          259,
+          261,
+          259,
+          259,
+          259,
+          259,
+          259
+        ]
+      },
+      "receipts": [
+        "persistent-hrx-gorgon-3-connected-rows3-workers1-command-result.json",
+        "persistent-hrx-gorgon-3-connected-rows3-workers1-command-window.json",
+        "persistent-connected-rows3-workers1-audit.json"
+      ]
+    },
+    {
+      "workers": 128,
+      "fixture_sha256": "b772534d9f36d93bebcdb9aa63acdbad285d6b27c70f8b33ab991933a2075a3a",
+      "module_sha256": "444b48fca807d15ac5edee6ec3607d4f212b42de1e2dc8d2486697c0c6f9543d",
+      "captures": {
+        "input.bin": "bb324fdbeb03a4e66a68c46c7dfd9180201615c97753ceff949ac6fb4c623368",
+        "output.bin": "4396da4ac4138126360f0de20926f5431f9d06cd643d8e7f4e9cead4b6f35e56"
+      },
+      "passed": true,
+      "images": 16,
+      "rows": 42,
+      "completed_intervals": 48,
+      "comparison_count": 21,
+      "guard_bytes": 796,
+      "queued_tasks": 0,
+      "window_seconds": 23.004991963000066,
+      "broker_status_after": "benchmark-lock: idle; policy idle; queued 0\n",
+      "command": {
+        "phase": "command",
+        "root": "jpeg_decode",
+        "scratch_bytes": 12,
+        "commands": 13,
+        "entries": 13,
+        "kinds": [
+          3,
+          259,
+          259,
+          259,
+          259,
+          261,
+          259,
+          261,
+          259,
+          259,
+          259,
+          259,
+          259
+        ]
+      },
+      "receipts": [
+        "persistent-hrx-gorgon-3-connected-rows3-workers128-command-result.json",
+        "persistent-hrx-gorgon-3-connected-rows3-workers128-command-window.json",
+        "persistent-connected-rows3-workers128-audit.json"
+      ]
+    },
+    {
+      "workers": 1024,
+      "fixture_sha256": "6564c28d9dd296ef35051c337fec0623942f8a6701683a3bb6217bb366a35c3e",
+      "module_sha256": "1d7ad1b7308def1e267054ed8cd25de43d6453b33498bd70df47e99abca0fcfe",
+      "captures": {
+        "input.bin": "bb324fdbeb03a4e66a68c46c7dfd9180201615c97753ceff949ac6fb4c623368",
+        "output.bin": "4396da4ac4138126360f0de20926f5431f9d06cd643d8e7f4e9cead4b6f35e56"
+      },
+      "passed": true,
+      "images": 16,
+      "rows": 42,
+      "completed_intervals": 48,
+      "comparison_count": 21,
+      "guard_bytes": 796,
+      "queued_tasks": 0,
+      "window_seconds": 22.933826891001445,
+      "broker_status_after": "benchmark-lock: idle; policy idle; queued 0\n",
+      "command": {
+        "phase": "command",
+        "root": "jpeg_decode",
+        "scratch_bytes": 12,
+        "commands": 13,
+        "entries": 13,
+        "kinds": [
+          3,
+          259,
+          259,
+          259,
+          259,
+          261,
+          259,
+          261,
+          259,
+          259,
+          259,
+          259,
+          259
+        ]
+      },
+      "receipts": [
+        "persistent-hrx-gorgon-3-connected-rows3-workers1024-command-result.json",
+        "persistent-hrx-gorgon-3-connected-rows3-workers1024-command-window.json",
+        "persistent-connected-rows3-workers1024-audit.json"
+      ]
+    }
+  ]
+}

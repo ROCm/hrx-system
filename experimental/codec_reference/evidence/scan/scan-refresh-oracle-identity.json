@@ -1,0 +1,76 @@
+{
+  "binary_sha256": "36e701dbbecb3a4176234b7cc0fb5001f1a65bf281f5bc8428301504395cf008",
+  "source_sha256": "83f7590b021728d4a5b16299c410fef6ae2c60649ca40cb76663163217c6e09d",
+  "headers": {
+    "rocprim/device/device_scan.hpp": "7abf67e7f63e42ce18049630bd2057e65679415dcd25771763861449df8a6b05",
+    "rocprim/device/detail/device_scan.hpp": "9e4467c1823fba80f833fc1fdff6139671f7c5316c16a09dc7e5d1c90d0f8af8",
+    "rocprim/device/device_scan_config.hpp": "7964af954db048991e7f0395142e75e5d647638951508234f16f6b270ea5cb3e",
+    "rocprim/rocprim_version.hpp": "1cb6963c3d7e1d31596aefe25293111441806520f0e0706052679c0eaaba6386"
+  },
+  "rows": [
+    {
+      "count": 32,
+      "index": 0,
+      "name": "void rocprim::ROCPRIM_400600_NS::detail::trampoline_kernel<rocprim::ROCPRIM_400600_NS::default_config, rocprim::ROCPRIM_400600_NS::detail::scan_config_selector<unsigned int>, rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#2}, rocprim::ROCPRIM_400600_NS::detail::comp_target<(rocprim::ROCPRIM_400600_NS::detail::gen)9, (rocprim::ROCPRIM_400600_NS::detail::target_arch)1100, (rocprim::ROCPRIM_400600_NS::detail::gpu)3, (rocprim::ROCPRIM_400600_NS::detail::rep)0>, rocprim::ROCPRIM_400600_NS::detail::default_config_static_selector, (rocprim::ROCPRIM_400600_NS::arch::wavefront::target)0>(rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#2})",
+      "instructions": 227,
+      "assembly_sha256": "60c7cbe2dc7b30ab13da5c52c8b3378f20d16f0f58476e42d4d01cd92161ff1f",
+      "same_instruction_words": true
+    },
+    {
+      "count": 512,
+      "index": 0,
+      "name": "void rocprim::ROCPRIM_400600_NS::detail::trampoline_kernel<rocprim::ROCPRIM_400600_NS::default_config, rocprim::ROCPRIM_400600_NS::detail::scan_config_selector<unsigned int>, rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#2}, rocprim::ROCPRIM_400600_NS::detail::comp_target<(rocprim::ROCPRIM_400600_NS::detail::gen)9, (rocprim::ROCPRIM_400600_NS::detail::target_arch)1100, (rocprim::ROCPRIM_400600_NS::detail::gpu)3, (rocprim::ROCPRIM_400600_NS::detail::rep)0>, rocprim::ROCPRIM_400600_NS::detail::default_config_static_selector, (rocprim::ROCPRIM_400600_NS::arch::wavefront::target)0>(rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#2})",
+      "instructions": 227,
+      "assembly_sha256": "60c7cbe2dc7b30ab13da5c52c8b3378f20d16f0f58476e42d4d01cd92161ff1f",
+      "same_instruction_words": true
+    },
+    {
+      "count": 65537,
+      "index": 0,
+      "name": "void rocprim::ROCPRIM_400600_NS::detail::init_lookback_scan_state_kernel<rocprim::ROCPRIM_400600_NS::detail::lookback_scan_state<unsigned int, false, true>, rocprim::ROCPRIM_400600_NS::detail::block_id_wrapper<unsigned int, false> >(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_state<unsigned int, false, true>, unsigned int, rocprim::ROCPRIM_400600_NS::detail::block_id_wrapper<unsigned int, false>, unsigned int, rocprim::ROCPRIM_400600_NS::detail::lookback_scan_state<unsigned int, false, true>::value_type*)",
+      "instructions": 65,
+      "assembly_sha256": "fdd69bccde3fddf58f6c486734e46db07f5604d811a8b1284594de2f81e03da2",
+      "same_instruction_words": true
+    },
+    {
+      "count": 65537,
+      "index": 1,
+      "name": "void rocprim::ROCPRIM_400600_NS::detail::trampoline_kernel<rocprim::ROCPRIM_400600_NS::default_config, rocprim::ROCPRIM_400600_NS::detail::scan_config_selector<unsigned int>, rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#1}, rocprim::ROCPRIM_400600_NS::detail::comp_target<(rocprim::ROCPRIM_400600_NS::detail::gen)9, (rocprim::ROCPRIM_400600_NS::detail::target_arch)1100, (rocprim::ROCPRIM_400600_NS::detail::gpu)3, (rocprim::ROCPRIM_400600_NS::detail::rep)0>, rocprim::ROCPRIM_400600_NS::detail::default_config_static_selector, (rocprim::ROCPRIM_400600_NS::arch::wavefront::target)0>(rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#1})",
+      "instructions": 733,
+      "assembly_sha256": "f6c8eb14cc06134234267ddad82143d847744d383af4775b039a467ae28f9c57",
+      "same_instruction_words": true
+    },
+    {
+      "count": 2097152,
+      "index": 0,
+      "name": "void rocprim::ROCPRIM_400600_NS::detail::init_lookback_scan_state_kernel<rocprim::ROCPRIM_400600_NS::detail::lookback_scan_state<unsigned int, false, true>, rocprim::ROCPRIM_400600_NS::detail::block_id_wrapper<unsigned int, false> >(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_state<unsigned int, false, true>, unsigned int, rocprim::ROCPRIM_400600_NS::detail::block_id_wrapper<unsigned int, false>, unsigned int, rocprim::ROCPRIM_400600_NS::detail::lookback_scan_state<unsigned int, false, true>::value_type*)",
+      "instructions": 65,
+      "assembly_sha256": "fdd69bccde3fddf58f6c486734e46db07f5604d811a8b1284594de2f81e03da2",
+      "same_instruction_words": true
+    },
+    {
+      "count": 2097152,
+      "index": 1,
+      "name": "void rocprim::ROCPRIM_400600_NS::detail::trampoline_kernel<rocprim::ROCPRIM_400600_NS::default_config, rocprim::ROCPRIM_400600_NS::detail::scan_config_selector<unsigned int>, rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#1}, rocprim::ROCPRIM_400600_NS::detail::comp_target<(rocprim::ROCPRIM_400600_NS::detail::gen)9, (rocprim::ROCPRIM_400600_NS::detail::target_arch)1100, (rocprim::ROCPRIM_400600_NS::detail::gpu)3, (rocprim::ROCPRIM_400600_NS::detail::rep)0>, rocprim::ROCPRIM_400600_NS::detail::default_config_static_selector, (rocprim::ROCPRIM_400600_NS::arch::wavefront::target)0>(rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#1})",
+      "instructions": 733,
+      "assembly_sha256": "f6c8eb14cc06134234267ddad82143d847744d383af4775b039a467ae28f9c57",
+      "same_instruction_words": true
+    },
+    {
+      "count": 16777216,
+      "index": 0,
+      "name": "void rocprim::ROCPRIM_400600_NS::detail::init_lookback_scan_state_kernel<rocprim::ROCPRIM_400600_NS::detail::lookback_scan_state<unsigned int, false, true>, rocprim::ROCPRIM_400600_NS::detail::block_id_wrapper<unsigned int, false> >(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_state<unsigned int, false, true>, unsigned int, rocprim::ROCPRIM_400600_NS::detail::block_id_wrapper<unsigned int, false>, unsigned int, rocprim::ROCPRIM_400600_NS::detail::lookback_scan_state<unsigned int, false, true>::value_type*)",
+      "instructions": 65,
+      "assembly_sha256": "fdd69bccde3fddf58f6c486734e46db07f5604d811a8b1284594de2f81e03da2",
+      "same_instruction_words": true
+    },
+    {
+      "count": 16777216,
+      "index": 1,
+      "name": "void rocprim::ROCPRIM_400600_NS::detail::trampoline_kernel<rocprim::ROCPRIM_400600_NS::default_config, rocprim::ROCPRIM_400600_NS::detail::scan_config_selector<unsigned int>, rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#1}, rocprim::ROCPRIM_400600_NS::detail::comp_target<(rocprim::ROCPRIM_400600_NS::detail::gen)9, (rocprim::ROCPRIM_400600_NS::detail::target_arch)1100, (rocprim::ROCPRIM_400600_NS::detail::gpu)3, (rocprim::ROCPRIM_400600_NS::detail::rep)0>, rocprim::ROCPRIM_400600_NS::detail::default_config_static_selector, (rocprim::ROCPRIM_400600_NS::arch::wavefront::target)0>(rocprim::ROCPRIM_400600_NS::detail::scan_impl<(rocprim::ROCPRIM_400600_NS::detail::lookback_scan_determinism)0, true, true, rocprim::ROCPRIM_400600_NS::default_config, unsigned int*, unsigned int*, unsigned int, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, unsigned int>(void*, unsigned long&, unsigned int*, unsigned int*, unsigned int, unsigned long, rocprim::ROCPRIM_400600_NS::plus<unsigned int>, ihipStream_t*, bool)::{lambda(auto:1, auto:2)#1}::operator()<std::integral_constant<bool, false>, std::integral_constant<bool, false> >(std::integral_constant<bool, false>, std::integral_constant<bool, false>) const::{lambda(auto:1)#1})",
+      "instructions": 733,
+      "assembly_sha256": "f6c8eb14cc06134234267ddad82143d847744d383af4775b039a467ae28f9c57",
+      "same_instruction_words": true
+    }
+  ]
+}

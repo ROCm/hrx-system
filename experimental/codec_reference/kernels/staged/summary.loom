@@ -1,0 +1,45 @@
+kernel.decl @jpeg_classify_bytes() launch(%compressed: buffer, %headers: buffer, %records: buffer)
+kernel.decl @jpeg_prefix_bytes() launch(%compressed: buffer, %headers: buffer, %records: buffer, %prefixes: buffer, %segments: buffer, %errors: buffer)
+kernel.decl @jpeg_plan_jobs() launch(%segments: buffer, %schedule: buffer)
+kernel.decl @jpeg_compact_bytes() launch(%compressed: buffer, %headers: buffer, %records: buffer, %prefixes: buffer, %segments: buffer, %errors: buffer, %entropy: buffer, %jobs: buffer)
+kernel.decl @jpeg_speculate(%launch_schedule: buffer, %launch_offset: offset) launch(%entropy: buffer, %jobs: buffer, %tables: buffer, %blocks: buffer, %expected: buffer, %points: buffer, %schedule: buffer, %headers: buffer)
+kernel.decl @jpeg_bridge(%launch_schedule: buffer, %launch_offset: offset) launch(%entropy: buffer, %jobs: buffer, %tables: buffer, %blocks: buffer, %expected: buffer, %bridges: buffer, %schedule: buffer, %headers: buffer)
+kernel.decl @jpeg_index() launch(%segments: buffer, %expected: buffer, %suffixes: buffer, %ranges: buffer, %intervals: buffer)
+kernel.decl @jpeg_certify() launch(%segments: buffer, %expected: buffer, %bridges: buffer, %suffixes: buffer, %ranges: buffer, %intervals: buffer)
+kernel.decl @jpeg_intervals() launch(%segments: buffer, %expected: buffer, %suffixes: buffer, %ranges: buffer, %points: buffer, %intervals: buffer)
+kernel.decl @jpeg_reconstruct(%launch_schedule: buffer, %launch_offset: offset) launch(%entropy: buffer, %segments: buffer, %tables: buffer, %blocks: buffer, %intervals: buffer, %geometry: buffer, %quantization: buffer, %zigzag: buffer, %pixels: buffer, %status: buffer, %headers: buffer)
+kernel.decl @jpeg_validate() launch(%segments: buffer, %errors: buffer, %status: buffer, %validity: buffer)
+kernel.decl @jpeg_color(%launch_schedule: buffer, %launch_offset: offset) launch(%pixels: buffer, %rgb: buffer, %headers: buffer, %color_tiles: buffer, %validity: buffer)
+
+func.def @fixture_values(%entropy: buffer, %tables: buffer, %blocks: buffer, %expected: buffer, %jobs: buffer, %segments: buffer, %bridges: buffer, %suffixes: buffer, %ranges: buffer, %intervals: buffer, %geometry: buffer, %quantization: buffer, %zigzag: buffer, %pixels: buffer, %status: buffer, %points: buffer, %rgb: buffer, %compressed: buffer, %records: buffer, %prefixes: buffer, %errors: buffer, %headers: buffer, %schedule: buffer, %color_tiles: buffer, %color_schedule: buffer, %validity: buffer) {
+  func.return
+}
+
+command.program.def public @jpeg_decode() launch(%entropy: buffer, %tables: buffer, %blocks: buffer, %expected: buffer, %jobs: buffer, %segments: buffer, %bridges: buffer, %suffixes: buffer, %ranges: buffer, %intervals: buffer, %geometry: buffer, %quantization: buffer, %zigzag: buffer, %pixels: buffer, %status: buffer, %points: buffer, %rgb: buffer, %compressed: buffer, %records: buffer, %prefixes: buffer, %errors: buffer, %headers: buffer, %schedule: buffer, %color_tiles: buffer, %color_schedule: buffer, %validity: buffer) {
+  %schedule_offset = index.constant 0 : offset
+  command.serial {
+    kernel.launch @jpeg_classify_bytes(%compressed, %headers, %records) : (buffer, buffer, buffer)
+    kernel.launch @jpeg_prefix_bytes(%compressed, %headers, %records, %prefixes, %segments, %errors) : (buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @jpeg_plan_jobs(%segments, %schedule) : (buffer, buffer)
+    kernel.launch @jpeg_compact_bytes(%compressed, %headers, %records, %prefixes, %segments, %errors, %entropy, %jobs) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @jpeg_speculate[%schedule, %schedule_offset](%entropy, %jobs, %tables, %blocks, %expected, %points, %schedule, %headers) : [buffer, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @jpeg_bridge[%schedule, %schedule_offset](%entropy, %jobs, %tables, %blocks, %expected, %bridges, %schedule, %headers) : [buffer, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @jpeg_index(%segments, %expected, %suffixes, %ranges, %intervals) : (buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @jpeg_certify(%segments, %expected, %bridges, %suffixes, %ranges, %intervals) : (buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @jpeg_intervals(%segments, %expected, %suffixes, %ranges, %points, %intervals) : (buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @jpeg_reconstruct[%schedule, %schedule_offset](%entropy, %segments, %tables, %blocks, %intervals, %geometry, %quantization, %zigzag, %pixels, %status, %headers) : [buffer, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @jpeg_validate(%segments, %errors, %status, %validity) : (buffer, buffer, buffer, buffer)
+    kernel.launch @jpeg_color[%color_schedule, %schedule_offset](%pixels, %rgb, %headers, %color_tiles, %validity) : [buffer, offset](buffer, buffer, buffer, buffer, buffer)
+  }
+  command.return
+}
+
+command.program.def public @jpeg_batch() launch(%entropy: buffer, %tables: buffer, %blocks: buffer, %expected: buffer, %jobs: buffer, %segments: buffer, %bridges: buffer, %suffixes: buffer, %ranges: buffer, %intervals: buffer, %geometry: buffer, %quantization: buffer, %zigzag: buffer, %pixels: buffer, %status: buffer, %points: buffer, %rgb: buffer, %compressed: buffer, %records: buffer, %prefixes: buffer, %errors: buffer, %headers: buffer, %schedule: buffer, %color_tiles: buffer, %color_schedule: buffer, %validity: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  scf.for %repeat = [%zero to %eight step %one] unroll {
+    command.program.launch @jpeg_decode(%entropy, %tables, %blocks, %expected, %jobs, %segments, %bridges, %suffixes, %ranges, %intervals, %geometry, %quantization, %zigzag, %pixels, %status, %points, %rgb, %compressed, %records, %prefixes, %errors, %headers, %schedule, %color_tiles, %color_schedule, %validity) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  }
+  command.return
+}

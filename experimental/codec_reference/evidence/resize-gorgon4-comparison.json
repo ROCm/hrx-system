@@ -1,0 +1,904 @@
+{
+  "before": {
+    "gpus": {
+      "/sys/devices/pci0000:00/0000:00:08.1/0000:c2:00.0": {
+        "vendor": "0x1002",
+        "device": "0x1586",
+        "gpu_busy_percent": "0",
+        "mem_info_vram_used": "386494464"
+      }
+    },
+    "live_kfd": [],
+    "native_workers": [
+      12525
+    ],
+    "worker_exclusion": [
+      {
+        "pid": 12525,
+        "status": {
+          "Owner": "codec-jpeg-resize-20261019",
+          "State": "held",
+          "Active": 0,
+          "Failure": "",
+          "Pending": 0
+        }
+      }
+    ],
+    "governor": "performance",
+    "loadavg": "1.00 0.48 0.19 2/1441 23745",
+    "gpu_power": {
+      "/sys/class/drm/card0/device/power_dpm_force_performance_level": "high"
+    },
+    "cpu_topology": "# The following is the parsable format, which can be fed to other\n# programs. Each different item in every column has an unique ID\n# starting usually from zero.\n# CPU,Core,Socket\n0,0,0\n1,1,0\n2,2,0\n3,3,0\n4,4,0\n5,5,0\n6,6,0\n7,7,0\n8,8,0\n9,9,0\n10,10,0\n11,11,0\n12,12,0\n13,13,0\n14,14,0\n15,15,0\n16,0,0\n17,1,0\n18,2,0\n19,3,0\n20,4,0\n21,5,0\n22,6,0\n23,7,0\n24,8,0\n25,9,0\n26,10,0\n27,11,0\n28,12,0\n29,13,0\n30,14,0\n31,15,0\n"
+  },
+  "manifest": {
+    "case": "primary-r3-w128-polling",
+    "mode": "bench",
+    "host": "hrx-gorgon-4",
+    "tag": "codec-jpeg-resize-opt",
+    "files": {
+      "codec_command_probe": {
+        "bytes": 14420664,
+        "sha256": "92f80e8f5bddcf405a3a876e5288bcae9735f592d27600771e564ab6e79b6a5d"
+      },
+      "persistent_window.py": {
+        "bytes": 9462,
+        "sha256": "ce33c31fc3cdd77ec900fb1aeaf69b93235ae744a99ec306aed37e168ad4835e"
+      },
+      "sharkbox_window.py": {
+        "bytes": 15751,
+        "sha256": "c02acaaed5c1969da0116f4b8f143d6f6042a819d8b364481ca63bd45c0b0b2c"
+      },
+      "lib/libhsa-runtime64.so.1": {
+        "bytes": 4895880,
+        "sha256": "69cfd3277b627dec1641166600764d2ee4c34bdfc8519e6ffe58a7e0d51bfbc0"
+      },
+      "lib/librocm_sysdeps_elf.so.1": {
+        "bytes": 1198616,
+        "sha256": "a51543f71efce0c552ae606fe103b6e4fa4f6b283ba48a762f6d57b880401832"
+      },
+      "lib/librocprofiler-register.so.0": {
+        "bytes": 967760,
+        "sha256": "7166282aacab9f6c8fdcc28ad884e57b6b09cd4e08aead98b8e862a61010e85c"
+      },
+      "lib/librocm_sysdeps_drm.so.2": {
+        "bytes": 360336,
+        "sha256": "f1b274ac80ac1bcd241d70e1f13f9586e3fc83545a357b312890c1722ca68dcf"
+      },
+      "lib/librocm_sysdeps_drm_amdgpu.so.1": {
+        "bytes": 251416,
+        "sha256": "78c1af14962d9ee0e43602d422eb8619b6c825a9b7c8f532308ea1f4108a466f"
+      },
+      "lib/librocm_sysdeps_numa.so.1": {
+        "bytes": 219056,
+        "sha256": "333b980e3f706f7196c73a33967c7979e9fd47b6d5f5f51ed3990142ef4142cb"
+      },
+      "lib/librocm_sysdeps_z.so.1": {
+        "bytes": 129576,
+        "sha256": "27361c0c552d2afd5ecf9079f356309ed827e9a27d35f2fc68c7b5e6b5c83199"
+      },
+      "lib/librocm_sysdeps_zstd.so.1": {
+        "bytes": 879168,
+        "sha256": "5fc4ab0e6899318ece9bea43d3d397d20053418a5e40cb6bc86efe19a801c75e"
+      },
+      "lib/librocm_sysdeps_liblzma.so.5": {
+        "bytes": 218464,
+        "sha256": "15402b36e2fdb0762e0b6590c3470fccec5e80cc8010c84ac4835573d592c02d"
+      },
+      "lib/librocm_sysdeps_bz2.so": {
+        "bytes": 104016,
+        "sha256": "628d4871ea18e82dcc73b28f45a587f00a7abd4b208b371a713eb2e9d5b95dec"
+      },
+      "primary-r3-w128-polling/input.npy": {
+        "bytes": 20205008,
+        "sha256": "1181fc504ec2ecc8d0b0d60454e0d99f88b6163584057bc34a0a55e75391ae38"
+      },
+      "primary-r3-w128-polling/output.npy": {
+        "bytes": 74166384,
+        "sha256": "82528d5fd8101d738dc88a1ceb4c397062a3210b27ecdf210278b110d4747e7b"
+      },
+      "primary-r3-w128-polling/output-expected.npy": {
+        "bytes": 74166384,
+        "sha256": "68f7a34f23ec375b714297e841397964f10fad53b0a0d513899ba4c61b8cba1b"
+      },
+      "primary-r3-w128-polling/bindings.txt": {
+        "bytes": 69,
+        "sha256": "a3259990e4225450b4ff37e11fa6bd01488ea6202e97dbe3a7d8b907e06028e6"
+      },
+      "primary-r3-w128-polling/regions.txt": {
+        "bytes": 1529,
+        "sha256": "63f07e7dc2835807a6dcf34f6801f8fc89b06cb5705c06ce6c9f1b32c0606cd4"
+      },
+      "primary-r3-w128-polling/config.json": {
+        "bytes": 213,
+        "sha256": "052d20de03adc2affb43d096f57f10a2a6a0afde88c2b781a4bd319b36f89cfc"
+      },
+      "primary-r3-w128-polling/summary.loombc": {
+        "bytes": 427177,
+        "sha256": "fc6798b59bfa51a563d09ba59cf77e4bf1b643cf78301861e76a0bcbfc2ac566"
+      },
+      "primary-r3-w128-polling/fixture.json": {
+        "bytes": 16298,
+        "sha256": "70030054072b60a2b877a38c843bcc4217427ed3fdd50af5c6b0fd83e911061f"
+      }
+    },
+    "repetitions": 8,
+    "capture": false
+  },
+  "cpu": {
+    "configuration": "--config=opt --copt=-march=znver5; -ffp-contract=off implements separate float32 multiply/add",
+    "source_sha256": "495ebae661f32dfcad9fc7c7c9d3733c57bd8676d5fd603c37720206575bf271",
+    "native_sha256": {
+      "islow": "c40f8e1cb137b3426a9e0a9f10206084bcd132aad909e789cbddb9216359e7f1",
+      "ifast": "4514cb27bc5c7f342132b31c7d5418982ff5a4ebab4f798b324ff3cde5b04942"
+    },
+    "files": {
+      "jpeg_resize_islow": {
+        "bytes": 1186112,
+        "sha256": "f83d484ce491bc06c99132534782ddbd85e2cb75c21935942762f06a7b820aea"
+      },
+      "jpeg_resize_ifast": {
+        "bytes": 1186112,
+        "sha256": "5fb2ff56603c50858f6ffcab33b2f3a98796c90e192b3bb91620b3ffae6a847a"
+      },
+      "cpu/synthetic-256.jpg.r0.jpg.plan": {
+        "bytes": 9936,
+        "sha256": "be0fcb822320f74655d25f3eeef8cb82b5a2bf9a776e81da952241e77af1e330"
+      },
+      "cpu/synthetic-256.jpg.r0.jpg": {
+        "bytes": 35839,
+        "sha256": "9558df136ad97302d428d88a1611e86dcb8ecb47f06c89938144ee47bf3e796b"
+      },
+      "cpu/synthetic-1024.jpg.r0.jpg.plan": {
+        "bytes": 34896,
+        "sha256": "d36897860d1f7cce44d9be42e48a584bd8c909382aa3f26c0216081d046e92b1"
+      },
+      "cpu/synthetic-1024.jpg.r0.jpg": {
+        "bytes": 418457,
+        "sha256": "72b2683bdd28f97c8ffd863d22355ce76ef04248d420931752a4fa228f74a346"
+      },
+      "cpu/006mp-cathedral.jpg.r0.jpg.plan": {
+        "bytes": 91552,
+        "sha256": "02d211a5cea2761d596e9bf3c8b85999abe5bea7f232bce788b3bbb7175551ea"
+      },
+      "cpu/006mp-cathedral.jpg.r0.jpg": {
+        "bytes": 823353,
+        "sha256": "ee148ec6f6475538466004fe5fbb02d0b9146557715d85c6860ea8ff6aaeab74"
+      },
+      "cpu/012mp-bus.jpg.r0.jpg.plan": {
+        "bytes": 128928,
+        "sha256": "2653eab67015a81ac9c9c70ec0446cb5a5133603267b9c8a9500bbb45f15bd6a"
+      },
+      "cpu/012mp-bus.jpg.r0.jpg": {
+        "bytes": 3361185,
+        "sha256": "18a96a46ffbc049bb3d90ed336ba86791cc1fa55c04e8021331f3603c431e558"
+      }
+    }
+  },
+  "rows": [
+    {
+      "policy": "baseline",
+      "result": {
+        "command": [
+          "/tmp/codec-jpeg-resize/codec_command_probe",
+          "--jpeg_fixture=/tmp/codec-jpeg-resize/primary-r3-w128",
+          "--jpeg_initial=.",
+          "--jpeg_regions=regions.txt",
+          "--gtest_filter=JpegCommandTest.CompressedToRgb",
+          "--jpeg_repetitions=8",
+          "--jpeg_benchmark=true"
+        ],
+        "returncode": 0,
+        "output": "Note: Google Test filter = JpegCommandTest.CompressedToRgb\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from JpegCommandTest\n[ RUN      ] JpegCommandTest.CompressedToRgb\n{\"phase\":\"command\",\"root\":\"jpeg_decode\",\"scratch_bytes\":12,\"commands\":14,\"entries\":14,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n{\"phase\":\"command\",\"root\":\"jpeg_batch\",\"scratch_bytes\":12,\"commands\":112,\"entries\":28,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"measurement\",\"operations_per_submission\":8,\"batch_ns\":[2419368053,2415008976,2415868523,2416346916,2416715356,2414783823,2413846343,2413477158,2419230042],\"median_operation_ns\":301983565}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n[       OK ] JpegCommandTest.CompressedToRgb (28365 ms)\n[----------] 1 test from JpegCommandTest (28365 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (28365 ms total)\n[  PASSED  ] 1 test.\n"
+      },
+      "wall_seconds": 28.38927503999912,
+      "median_ms": 2415.868523,
+      "measurement": {
+        "phase": "measurement",
+        "operations_per_submission": 8,
+        "batch_ns": [
+          2419368053,
+          2415008976,
+          2415868523,
+          2416346916,
+          2416715356,
+          2414783823,
+          2413846343,
+          2413477158,
+          2419230042
+        ],
+        "median_operation_ns": 301983565
+      },
+      "memory": [
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        },
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        }
+      ]
+    },
+    {
+      "policy": "polling",
+      "result": {
+        "command": [
+          "/tmp/codec-jpeg-resize/codec_command_probe",
+          "--jpeg_fixture=/tmp/codec-jpeg-resize/primary-r3-w128-polling",
+          "--jpeg_initial=.",
+          "--jpeg_regions=regions.txt",
+          "--gtest_filter=JpegCommandTest.CompressedToRgb",
+          "--jpeg_repetitions=8",
+          "--jpeg_benchmark=true"
+        ],
+        "returncode": 0,
+        "output": "Note: Google Test filter = JpegCommandTest.CompressedToRgb\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from JpegCommandTest\n[ RUN      ] JpegCommandTest.CompressedToRgb\n{\"phase\":\"command\",\"root\":\"jpeg_decode\",\"scratch_bytes\":12,\"commands\":14,\"entries\":14,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n{\"phase\":\"command\",\"root\":\"jpeg_batch\",\"scratch_bytes\":12,\"commands\":112,\"entries\":28,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"measurement\",\"operations_per_submission\":8,\"batch_ns\":[2180705112,2181916787,2181274633,2181892188,2180517447,2183273308,2182962723,2183327302,2181514251],\"median_operation_ns\":272736523}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n[       OK ] JpegCommandTest.CompressedToRgb (25790 ms)\n[----------] 1 test from JpegCommandTest (25790 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (25790 ms total)\n[  PASSED  ] 1 test.\n"
+      },
+      "wall_seconds": 25.81899569199959,
+      "median_ms": 2181.892188,
+      "measurement": {
+        "phase": "measurement",
+        "operations_per_submission": 8,
+        "batch_ns": [
+          2180705112,
+          2181916787,
+          2181274633,
+          2181892188,
+          2180517447,
+          2183273308,
+          2182962723,
+          2183327302,
+          2181514251
+        ],
+        "median_operation_ns": 272736523
+      },
+      "memory": [
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        },
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        }
+      ]
+    },
+    {
+      "policy": "islow",
+      "result": {
+        "command": [
+          "taskset",
+          "-c",
+          "0-15",
+          "/tmp/codec-jpeg-resize/jpeg_resize_islow",
+          "bench",
+          "16",
+          "16",
+          "9",
+          "/tmp/codec-jpeg-resize/cpu/012mp-bus.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/006mp-cathedral.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/synthetic-1024.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/synthetic-256.jpg.r0.jpg"
+        ],
+        "returncode": 0,
+        "output": "{\"kind\":\"timing\",\"workers\":16,\"batch\":16,\"compressed_bytes\":18555336,\"rgb_bytes\":19872768,\"images\":[\"012mp-bus.jpg.r0.jpg\",\"006mp-cathedral.jpg.r0.jpg\",\"synthetic-1024.jpg.r0.jpg\",\"synthetic-256.jpg.r0.jpg\"],\"batch_ns\":[525461684,518147452,514885325,517127070,515994743,520500941,520462020,516217887,516259206],\"full_rgb_and_guards\":true,\"repeats_per_job\":8,\"maximum_row_workspace_bytes\":270144,\"process_peak_rss_kib\":53356}\n"
+      },
+      "wall_seconds": 5.832266761999563,
+      "median_ms": 517.12707,
+      "measurement": {
+        "kind": "timing",
+        "workers": 16,
+        "batch": 16,
+        "compressed_bytes": 18555336,
+        "rgb_bytes": 19872768,
+        "images": [
+          "012mp-bus.jpg.r0.jpg",
+          "006mp-cathedral.jpg.r0.jpg",
+          "synthetic-1024.jpg.r0.jpg",
+          "synthetic-256.jpg.r0.jpg"
+        ],
+        "batch_ns": [
+          525461684,
+          518147452,
+          514885325,
+          517127070,
+          515994743,
+          520500941,
+          520462020,
+          516217887,
+          516259206
+        ],
+        "full_rgb_and_guards": true,
+        "repeats_per_job": 8,
+        "maximum_row_workspace_bytes": 270144,
+        "process_peak_rss_kib": 53356
+      }
+    },
+    {
+      "policy": "ifast",
+      "result": {
+        "command": [
+          "taskset",
+          "-c",
+          "0-15",
+          "/tmp/codec-jpeg-resize/jpeg_resize_ifast",
+          "bench",
+          "16",
+          "16",
+          "9",
+          "/tmp/codec-jpeg-resize/cpu/012mp-bus.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/006mp-cathedral.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/synthetic-1024.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/synthetic-256.jpg.r0.jpg"
+        ],
+        "returncode": 0,
+        "output": "{\"kind\":\"timing\",\"workers\":16,\"batch\":16,\"compressed_bytes\":18555336,\"rgb_bytes\":19872768,\"images\":[\"012mp-bus.jpg.r0.jpg\",\"006mp-cathedral.jpg.r0.jpg\",\"synthetic-1024.jpg.r0.jpg\",\"synthetic-256.jpg.r0.jpg\"],\"batch_ns\":[511641190,513024447,513616257,512646354,511018273,523978246,522072664,513281802,522496180],\"full_rgb_and_guards\":true,\"repeats_per_job\":8,\"maximum_row_workspace_bytes\":270144,\"process_peak_rss_kib\":53356}\n"
+      },
+      "wall_seconds": 5.803289189001589,
+      "median_ms": 513.281802,
+      "measurement": {
+        "kind": "timing",
+        "workers": 16,
+        "batch": 16,
+        "compressed_bytes": 18555336,
+        "rgb_bytes": 19872768,
+        "images": [
+          "012mp-bus.jpg.r0.jpg",
+          "006mp-cathedral.jpg.r0.jpg",
+          "synthetic-1024.jpg.r0.jpg",
+          "synthetic-256.jpg.r0.jpg"
+        ],
+        "batch_ns": [
+          511641190,
+          513024447,
+          513616257,
+          512646354,
+          511018273,
+          523978246,
+          522072664,
+          513281802,
+          522496180
+        ],
+        "full_rgb_and_guards": true,
+        "repeats_per_job": 8,
+        "maximum_row_workspace_bytes": 270144,
+        "process_peak_rss_kib": 53356
+      }
+    },
+    {
+      "policy": "polling",
+      "result": {
+        "command": [
+          "/tmp/codec-jpeg-resize/codec_command_probe",
+          "--jpeg_fixture=/tmp/codec-jpeg-resize/primary-r3-w128-polling",
+          "--jpeg_initial=.",
+          "--jpeg_regions=regions.txt",
+          "--gtest_filter=JpegCommandTest.CompressedToRgb",
+          "--jpeg_repetitions=8",
+          "--jpeg_benchmark=true"
+        ],
+        "returncode": 0,
+        "output": "Note: Google Test filter = JpegCommandTest.CompressedToRgb\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from JpegCommandTest\n[ RUN      ] JpegCommandTest.CompressedToRgb\n{\"phase\":\"command\",\"root\":\"jpeg_decode\",\"scratch_bytes\":12,\"commands\":14,\"entries\":14,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n{\"phase\":\"command\",\"root\":\"jpeg_batch\",\"scratch_bytes\":12,\"commands\":112,\"entries\":28,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"measurement\",\"operations_per_submission\":8,\"batch_ns\":[2139696178,2140690102,2140382100,2140808412,2136263548,2139690690,2139985054,2139112487,2140166622],\"median_operation_ns\":267498131}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n[       OK ] JpegCommandTest.CompressedToRgb (25316 ms)\n[----------] 1 test from JpegCommandTest (25316 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (25316 ms total)\n[  PASSED  ] 1 test.\n"
+      },
+      "wall_seconds": 25.338230459999977,
+      "median_ms": 2139.985054,
+      "measurement": {
+        "phase": "measurement",
+        "operations_per_submission": 8,
+        "batch_ns": [
+          2139696178,
+          2140690102,
+          2140382100,
+          2140808412,
+          2136263548,
+          2139690690,
+          2139985054,
+          2139112487,
+          2140166622
+        ],
+        "median_operation_ns": 267498131
+      },
+      "memory": [
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        },
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        }
+      ]
+    },
+    {
+      "policy": "baseline",
+      "result": {
+        "command": [
+          "/tmp/codec-jpeg-resize/codec_command_probe",
+          "--jpeg_fixture=/tmp/codec-jpeg-resize/primary-r3-w128",
+          "--jpeg_initial=.",
+          "--jpeg_regions=regions.txt",
+          "--gtest_filter=JpegCommandTest.CompressedToRgb",
+          "--jpeg_repetitions=8",
+          "--jpeg_benchmark=true"
+        ],
+        "returncode": 0,
+        "output": "Note: Google Test filter = JpegCommandTest.CompressedToRgb\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from JpegCommandTest\n[ RUN      ] JpegCommandTest.CompressedToRgb\n{\"phase\":\"command\",\"root\":\"jpeg_decode\",\"scratch_bytes\":12,\"commands\":14,\"entries\":14,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n{\"phase\":\"command\",\"root\":\"jpeg_batch\",\"scratch_bytes\":12,\"commands\":112,\"entries\":28,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"measurement\",\"operations_per_submission\":8,\"batch_ns\":[2480283329,2482313148,2476964220,2479500257,2477464924,2478203758,2478879676,2478815279,2478964342],\"median_operation_ns\":309859959}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n[       OK ] JpegCommandTest.CompressedToRgb (29081 ms)\n[----------] 1 test from JpegCommandTest (29081 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (29081 ms total)\n[  PASSED  ] 1 test.\n"
+      },
+      "wall_seconds": 29.102826137999728,
+      "median_ms": 2478.879676,
+      "measurement": {
+        "phase": "measurement",
+        "operations_per_submission": 8,
+        "batch_ns": [
+          2480283329,
+          2482313148,
+          2476964220,
+          2479500257,
+          2477464924,
+          2478203758,
+          2478879676,
+          2478815279,
+          2478964342
+        ],
+        "median_operation_ns": 309859959
+      },
+      "memory": [
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        },
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        }
+      ]
+    },
+    {
+      "policy": "islow",
+      "result": {
+        "command": [
+          "taskset",
+          "-c",
+          "0-15",
+          "/tmp/codec-jpeg-resize/jpeg_resize_islow",
+          "bench",
+          "16",
+          "16",
+          "9",
+          "/tmp/codec-jpeg-resize/cpu/012mp-bus.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/006mp-cathedral.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/synthetic-1024.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/synthetic-256.jpg.r0.jpg"
+        ],
+        "returncode": 0,
+        "output": "{\"kind\":\"timing\",\"workers\":16,\"batch\":16,\"compressed_bytes\":18555336,\"rgb_bytes\":19872768,\"images\":[\"012mp-bus.jpg.r0.jpg\",\"006mp-cathedral.jpg.r0.jpg\",\"synthetic-1024.jpg.r0.jpg\",\"synthetic-256.jpg.r0.jpg\"],\"batch_ns\":[529345604,528001123,520735816,528157599,518036932,528037118,519935527,522641110,521481372],\"full_rgb_and_guards\":true,\"repeats_per_job\":8,\"maximum_row_workspace_bytes\":270144,\"process_peak_rss_kib\":52844}\n"
+      },
+      "wall_seconds": 5.891688421999788,
+      "median_ms": 522.64111,
+      "measurement": {
+        "kind": "timing",
+        "workers": 16,
+        "batch": 16,
+        "compressed_bytes": 18555336,
+        "rgb_bytes": 19872768,
+        "images": [
+          "012mp-bus.jpg.r0.jpg",
+          "006mp-cathedral.jpg.r0.jpg",
+          "synthetic-1024.jpg.r0.jpg",
+          "synthetic-256.jpg.r0.jpg"
+        ],
+        "batch_ns": [
+          529345604,
+          528001123,
+          520735816,
+          528157599,
+          518036932,
+          528037118,
+          519935527,
+          522641110,
+          521481372
+        ],
+        "full_rgb_and_guards": true,
+        "repeats_per_job": 8,
+        "maximum_row_workspace_bytes": 270144,
+        "process_peak_rss_kib": 52844
+      }
+    },
+    {
+      "policy": "ifast",
+      "result": {
+        "command": [
+          "taskset",
+          "-c",
+          "0-15",
+          "/tmp/codec-jpeg-resize/jpeg_resize_ifast",
+          "bench",
+          "16",
+          "16",
+          "9",
+          "/tmp/codec-jpeg-resize/cpu/012mp-bus.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/006mp-cathedral.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/synthetic-1024.jpg.r0.jpg",
+          "/tmp/codec-jpeg-resize/cpu/synthetic-256.jpg.r0.jpg"
+        ],
+        "returncode": 0,
+        "output": "{\"kind\":\"timing\",\"workers\":16,\"batch\":16,\"compressed_bytes\":18555336,\"rgb_bytes\":19872768,\"images\":[\"012mp-bus.jpg.r0.jpg\",\"006mp-cathedral.jpg.r0.jpg\",\"synthetic-1024.jpg.r0.jpg\",\"synthetic-256.jpg.r0.jpg\"],\"batch_ns\":[527240379,525965095,525732402,524786365,516385516,514130090,516731657,518016252,515722962],\"full_rgb_and_guards\":true,\"repeats_per_job\":8,\"maximum_row_workspace_bytes\":270144,\"process_peak_rss_kib\":53396}\n"
+      },
+      "wall_seconds": 5.852445136000824,
+      "median_ms": 518.016252,
+      "measurement": {
+        "kind": "timing",
+        "workers": 16,
+        "batch": 16,
+        "compressed_bytes": 18555336,
+        "rgb_bytes": 19872768,
+        "images": [
+          "012mp-bus.jpg.r0.jpg",
+          "006mp-cathedral.jpg.r0.jpg",
+          "synthetic-1024.jpg.r0.jpg",
+          "synthetic-256.jpg.r0.jpg"
+        ],
+        "batch_ns": [
+          527240379,
+          525965095,
+          525732402,
+          524786365,
+          516385516,
+          514130090,
+          516731657,
+          518016252,
+          515722962
+        ],
+        "full_rgb_and_guards": true,
+        "repeats_per_job": 8,
+        "maximum_row_workspace_bytes": 270144,
+        "process_peak_rss_kib": 53396
+      }
+    },
+    {
+      "policy": "polling",
+      "result": {
+        "command": [
+          "/tmp/codec-jpeg-resize/codec_command_probe",
+          "--jpeg_fixture=/tmp/codec-jpeg-resize/primary-r3-w128-polling",
+          "--jpeg_initial=.",
+          "--jpeg_regions=regions.txt",
+          "--gtest_filter=JpegCommandTest.CompressedToRgb",
+          "--jpeg_repetitions=8",
+          "--jpeg_benchmark=true"
+        ],
+        "returncode": 0,
+        "output": "Note: Google Test filter = JpegCommandTest.CompressedToRgb\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from JpegCommandTest\n[ RUN      ] JpegCommandTest.CompressedToRgb\n{\"phase\":\"command\",\"root\":\"jpeg_decode\",\"scratch_bytes\":12,\"commands\":14,\"entries\":14,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n{\"phase\":\"command\",\"root\":\"jpeg_batch\",\"scratch_bytes\":12,\"commands\":112,\"entries\":28,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"measurement\",\"operations_per_submission\":8,\"batch_ns\":[2139417778,2139544205,2138199091,2138410385,2139321280,2138135410,2139348480,2138356134,2137242680],\"median_operation_ns\":267301298}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n[       OK ] JpegCommandTest.CompressedToRgb (25351 ms)\n[----------] 1 test from JpegCommandTest (25351 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (25351 ms total)\n[  PASSED  ] 1 test.\n"
+      },
+      "wall_seconds": 25.380000961000405,
+      "median_ms": 2138.410385,
+      "measurement": {
+        "phase": "measurement",
+        "operations_per_submission": 8,
+        "batch_ns": [
+          2139417778,
+          2139544205,
+          2138199091,
+          2138410385,
+          2139321280,
+          2138135410,
+          2139348480,
+          2138356134,
+          2137242680
+        ],
+        "median_operation_ns": 267301298
+      },
+      "memory": [
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        },
+        {
+          "phase": "memory",
+          "logical_buffer_bytes": 94371148,
+          "unique_backing_bytes": 94371148,
+          "backings": 3,
+          "device_peak": 0,
+          "device_live": 0,
+          "host_peak": 0,
+          "host_live": 0
+        }
+      ]
+    },
+    {
+      "policy": "profile",
+      "result": {
+        "command": [
+          "/tmp/codec-jpeg-resize/codec_command_probe",
+          "--jpeg_fixture=/tmp/codec-jpeg-resize/primary-r3-w128-polling",
+          "--jpeg_initial=.",
+          "--jpeg_regions=regions.txt",
+          "--gtest_filter=JpegCommandTest.CompressedToRgb",
+          "--jpeg_repetitions=8",
+          "--jpeg_profile=true"
+        ],
+        "returncode": 0,
+        "output": "Note: Google Test filter = JpegCommandTest.CompressedToRgb\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from JpegCommandTest\n[ RUN      ] JpegCommandTest.CompressedToRgb\n{\"phase\":\"command\",\"root\":\"jpeg_decode\",\"scratch_bytes\":12,\"commands\":14,\"entries\":14,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n{\"phase\":\"command\",\"root\":\"jpeg_batch\",\"scratch_bytes\":12,\"commands\":112,\"entries\":28,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"command\",\"root\":\"jpeg_batch\",\"scratch_bytes\":12,\"commands\":112,\"entries\":28,\"kinds\":[3,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259,259,259,259,259,259,261,259,261,259,259,259,259,259,259]}\n{\"phase\":\"profile\",\"function\":\"jpeg_classify_bytes\",\"samples\":8,\"total_ns\":1354574}\n{\"phase\":\"profile\",\"function\":\"jpeg_prefix_bytes\",\"samples\":8,\"total_ns\":55065}\n{\"phase\":\"profile\",\"function\":\"jpeg_plan_jobs\",\"samples\":8,\"total_ns\":19237}\n{\"phase\":\"profile\",\"function\":\"jpeg_compact_bytes\",\"samples\":8,\"total_ns\":1903176}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_0\",\"samples\":1,\"total_ns\":2084}\n{\"phase\":\"profile\",\"function\":\"jpeg_speculate\",\"samples\":8,\"total_ns\":26873981}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_1\",\"samples\":1,\"total_ns\":1603}\n{\"phase\":\"profile\",\"function\":\"jpeg_bridge\",\"samples\":8,\"total_ns\":6830979}\n{\"phase\":\"profile\",\"function\":\"jpeg_index\",\"samples\":8,\"total_ns\":812544}\n{\"phase\":\"profile\",\"function\":\"jpeg_certify\",\"samples\":8,\"total_ns\":358120}\n{\"phase\":\"profile\",\"function\":\"jpeg_intervals\",\"samples\":8,\"total_ns\":711993}\n{\"phase\":\"profile\",\"function\":\"jpeg_resize_init\",\"samples\":8,\"total_ns\":5525939}\n{\"phase\":\"profile\",\"function\":\"jpeg_resize_stream\",\"samples\":8,\"total_ns\":2108447851}\n{\"phase\":\"profile\",\"function\":\"jpeg_resize_publish\",\"samples\":8,\"total_ns\":34852099}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_2\",\"samples\":1,\"total_ns\":1803}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_3\",\"samples\":1,\"total_ns\":1723}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_4\",\"samples\":1,\"total_ns\":1803}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_5\",\"samples\":1,\"total_ns\":1763}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_6\",\"samples\":1,\"total_ns\":1844}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_7\",\"samples\":1,\"total_ns\":1563}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_8\",\"samples\":1,\"total_ns\":1803}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_9\",\"samples\":1,\"total_ns\":2204}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_10\",\"samples\":1,\"total_ns\":1803}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_11\",\"samples\":1,\"total_ns\":1763}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_12\",\"samples\":1,\"total_ns\":1763}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_13\",\"samples\":1,\"total_ns\":1844}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_14\",\"samples\":1,\"total_ns\":1844}\n{\"phase\":\"profile\",\"function\":\"__command_launch_counts_15\",\"samples\":1,\"total_ns\":1844}\n{\"phase\":\"memory\",\"logical_buffer_bytes\":94371148,\"unique_backing_bytes\":94371148,\"backings\":3,\"device_peak\":0,\"device_live\":0,\"host_peak\":0,\"host_live\":0}\n{\"phase\":\"regions\",\"binding\":\"input\",\"bytes\":20204880,\"checked_bytes\":20204880}\n{\"phase\":\"regions\",\"binding\":\"output\",\"bytes\":74166256,\"checked_bytes\":70896844}\n[       OK ] JpegCommandTest.CompressedToRgb (8383 ms)\n[----------] 1 test from JpegCommandTest (8383 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (8383 ms total)\n[  PASSED  ] 1 test.\n"
+      },
+      "wall_seconds": 8.406213186000969,
+      "profile": [
+        {
+          "phase": "profile",
+          "function": "jpeg_classify_bytes",
+          "samples": 8,
+          "total_ns": 1354574
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_prefix_bytes",
+          "samples": 8,
+          "total_ns": 55065
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_plan_jobs",
+          "samples": 8,
+          "total_ns": 19237
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_compact_bytes",
+          "samples": 8,
+          "total_ns": 1903176
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_0",
+          "samples": 1,
+          "total_ns": 2084
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_speculate",
+          "samples": 8,
+          "total_ns": 26873981
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_1",
+          "samples": 1,
+          "total_ns": 1603
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_bridge",
+          "samples": 8,
+          "total_ns": 6830979
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_index",
+          "samples": 8,
+          "total_ns": 812544
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_certify",
+          "samples": 8,
+          "total_ns": 358120
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_intervals",
+          "samples": 8,
+          "total_ns": 711993
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_resize_init",
+          "samples": 8,
+          "total_ns": 5525939
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_resize_stream",
+          "samples": 8,
+          "total_ns": 2108447851
+        },
+        {
+          "phase": "profile",
+          "function": "jpeg_resize_publish",
+          "samples": 8,
+          "total_ns": 34852099
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_2",
+          "samples": 1,
+          "total_ns": 1803
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_3",
+          "samples": 1,
+          "total_ns": 1723
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_4",
+          "samples": 1,
+          "total_ns": 1803
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_5",
+          "samples": 1,
+          "total_ns": 1763
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_6",
+          "samples": 1,
+          "total_ns": 1844
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_7",
+          "samples": 1,
+          "total_ns": 1563
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_8",
+          "samples": 1,
+          "total_ns": 1803
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_9",
+          "samples": 1,
+          "total_ns": 2204
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_10",
+          "samples": 1,
+          "total_ns": 1803
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_11",
+          "samples": 1,
+          "total_ns": 1763
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_12",
+          "samples": 1,
+          "total_ns": 1763
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_13",
+          "samples": 1,
+          "total_ns": 1844
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_14",
+          "samples": 1,
+          "total_ns": 1844
+        },
+        {
+          "phase": "profile",
+          "function": "__command_launch_counts_15",
+          "samples": 1,
+          "total_ns": 1844
+        }
+      ],
+      "device_total_ms": 2187.774612
+    }
+  ],
+  "scope": "Both sides complete 128 decode/resize operations before one completion, retain 16 final outputs, and use identical filter weight bytes. GPU has compressed input resident, CPU includes codec and temporary-workspace allocation. Final output/guards checked before and after timing. Distinct IDCT policies retain independent native model-filter hashes.",
+  "baseline": {
+    "case": "primary-r3-w128",
+    "files": {
+      "primary-r3-w128/input.npy": {
+        "bytes": 20205008,
+        "sha256": "1181fc504ec2ecc8d0b0d60454e0d99f88b6163584057bc34a0a55e75391ae38"
+      },
+      "primary-r3-w128/output.npy": {
+        "bytes": 74166384,
+        "sha256": "82528d5fd8101d738dc88a1ceb4c397062a3210b27ecdf210278b110d4747e7b"
+      },
+      "primary-r3-w128/output-expected.npy": {
+        "bytes": 74166384,
+        "sha256": "68f7a34f23ec375b714297e841397964f10fad53b0a0d513899ba4c61b8cba1b"
+      },
+      "primary-r3-w128/bindings.txt": {
+        "bytes": 69,
+        "sha256": "a3259990e4225450b4ff37e11fa6bd01488ea6202e97dbe3a7d8b907e06028e6"
+      },
+      "primary-r3-w128/regions.txt": {
+        "bytes": 1529,
+        "sha256": "63f07e7dc2835807a6dcf34f6801f8fc89b06cb5705c06ce6c9f1b32c0606cd4"
+      },
+      "primary-r3-w128/config.json": {
+        "bytes": 213,
+        "sha256": "052d20de03adc2affb43d096f57f10a2a6a0afde88c2b781a4bd319b36f89cfc"
+      },
+      "primary-r3-w128/summary.loombc": {
+        "bytes": 426811,
+        "sha256": "c6513889f2a7bb6cf431bd69c5170a6b049ffe7376584ea10b3acb571649339d"
+      },
+      "primary-r3-w128/fixture.json": {
+        "bytes": 16154,
+        "sha256": "a390fb4cfe17a650b2794576dacd8e065df69f97e8241ac431ff4761f1fac1b5"
+      }
+    }
+  },
+  "after": {
+    "gpus": {
+      "/sys/devices/pci0000:00/0000:00:08.1/0000:c2:00.0": {
+        "vendor": "0x1002",
+        "device": "0x1586",
+        "gpu_busy_percent": "94",
+        "mem_info_vram_used": "386609152"
+      }
+    },
+    "live_kfd": [],
+    "native_workers": [
+      12525
+    ]
+  }
+}

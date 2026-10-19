@@ -1,0 +1,10 @@
+# Copyright 2026 The IREE Authors
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# The command experiment stays with the serving test owner so the archive
+# needs no new access to private serving implementation libraries.
+exports_files(
+    ["resize_command_probe.cc"],
+    visibility = ["//loom/src/loom/tooling/target/amdgpu/serve:__pkg__"],
+)

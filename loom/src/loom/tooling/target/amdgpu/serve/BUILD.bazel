@@ -826,3 +826,32 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+# Branch-only codec research caller; no serving runtime behavior is changed.
+loom_cc_binary(
+    name = "codec_reference",
+    testonly = True,
+    srcs = ["//experimental/codec_reference:resize_command_probe.cc"],
+    tags = ["manual"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target:amdgpu_artifacts",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/program:jit",
+        "//loom/src/loom/serve/testing:compiler",
+        "//loom/src/loom/serve/testing:device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:statistics_sink",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

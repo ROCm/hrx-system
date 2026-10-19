@@ -1,0 +1,45 @@
+{
+  "passed": true,
+  "compiler_commit": "d7addd2777d2435722dd67ed0b1141e1f98ab140",
+  "phases": {
+    "case": 28,
+    "native_upload": 28,
+    "command": 1,
+    "exact": 26,
+    "regions": 702,
+    "body_error": 27,
+    "complete": 1
+  },
+  "negative_comparison_regions": 1944,
+  "fixture_bytes": 19948368,
+  "source_sha256": {
+    "native_upload.c": "3fa851ff9f73e630a931963a92e12b0c0232690c0f9f1b481553ca70194817f6",
+    "native_upload.h": "5790dd2329a1073eff454720264f3ddb7e5e588f40b1f7f46379a0c7794a4d44",
+    "device_upload.h": "d0a05d4d5904e92fea65a57c2a208cd2c7499d22986fa1e98dae92073e88b492",
+    "native_header.c": "07e3b2829defe433de4ce6c5b816a52c39889c48fc7c68675b65b0e8648ad222",
+    "native_header.h": "ec7826a575b46d42c6d9b21f24d4d64da36fd50b3a8c8fe72ac59299c9a8abb4",
+    "native_metadata.c": "4e306c90ef19059e5ae099b88905958f1319c40fcd9fae3ef041c61314b6fc35",
+    "native_metadata.h": "21c0bb648c1adf258c5b3a9447c7282656cea37385d4032fe43e9019df9d1e9f",
+    "native_color.c": "1a9e2fa50729ecf515dec6e2e2ab56cfec1ac7b4cc91beff826d342b1c075d84",
+    "native_color.h": "e7c5a93ebe690cc868a47fcc8083c748d3562bd20b3d0236e0430da5c7388860",
+    "upload_probe.cc": "f4bb89a8f8a7ed149c68e1c5ca845f7e814140a15fc2c47caee1c620ca055af4"
+  },
+  "run_receipt_sha256": "1d57142bd607a2c4ca89a8255d1cdc9488eb381d56966a40298ee44f69253872",
+  "cases_receipt_sha256": "32bb7d8ffad1366e9a0787605dab3673aec4c41ba3529442dcfb47f7b02cb791",
+  "native_code_totals": {
+    "separate_bindings": {
+      "instruction_count": 21241,
+      "code_byte_count": 110480
+    },
+    "direct_offsets": {
+      "instruction_count": 22474,
+      "code_byte_count": 118356
+    },
+    "shared_offsets": {
+      "instruction_count": 23040,
+      "code_byte_count": 119316
+    }
+  },
+  "broker_status_after": "benchmark-lock: idle; policy idle; queued 0\n",
+  "scope": "Scratch-only native original-byte ownership through serving JIT and execution to final pixels. Positive all-binding equality and all 27 qualified entropy failures with exact valid peers and preserved guards. One command reused across all cases. HTTP/model publication, restart integration, memory reduction, and performance qualification remain separate gates."
+}

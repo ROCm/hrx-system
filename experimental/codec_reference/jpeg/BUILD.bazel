@@ -1,0 +1,45 @@
+# Copyright 2026 The IREE Authors
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cc_test.bzl", "iree_cc_test")
+
+package(default_visibility = ["//visibility:private"])
+
+_HEADER_SOURCES = [
+    "native_header.c",
+    "native_header.h",
+    "native_metadata.c",
+    "native_metadata.h",
+    "native_color.c",
+    "native_color.h",
+]
+
+_TEST_DEPS = [
+    "//runtime/src/iree/base",
+    "//runtime/src/iree/base/internal",
+    "//runtime/src/iree/testing:gtest",
+    "//runtime/src/iree/testing:gtest_main",
+]
+
+iree_cc_test(
+    name = "native_header_test",
+    srcs = _HEADER_SOURCES + [
+        "native_header_cases.inc",
+        "native_header_test.cc",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    deps = _TEST_DEPS + ["@libjpeg_turbo//:jpeg"],
+)
+
+iree_cc_test(
+    name = "native_upload_test",
+    srcs = _HEADER_SOURCES + [
+        "device_upload.h",
+        "native_upload.c",
+        "native_upload.h",
+        "native_upload_cases.inc",
+        "native_upload_test.cc",
+    ],
+    deps = _TEST_DEPS,
+)

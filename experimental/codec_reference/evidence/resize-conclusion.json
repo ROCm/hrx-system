@@ -1,0 +1,723 @@
+{
+  "state": "Complete bounded experiment; reject this per-tile role-selecting schedule for serving.",
+  "machine": "hrx-gorgon-4; gfx1151; 16 physical Zen5 CPU cores; native-worker hold and benchmark broker lease",
+  "scope": "Both sides complete 128 decode/resize operations before one completion, retain 16 final outputs, and use identical filter weight bytes. GPU has compressed input resident, CPU includes codec and temporary-workspace allocation. Final output/guards checked before and after timing. Distinct IDCT policies retain independent native model-filter hashes.",
+  "cohort_images": 128,
+  "retained_outputs": 16,
+  "fixture_unique_images": 4,
+  "policies": {
+    "baseline": {
+      "pooled_median_ms": 2448.1661365,
+      "samples_ms": [
+        2419.368053,
+        2415.008976,
+        2415.868523,
+        2416.346916,
+        2416.715356,
+        2414.783823,
+        2413.846343,
+        2413.477158,
+        2419.230042,
+        2480.283329,
+        2482.313148,
+        2476.96422,
+        2479.500257,
+        2477.464924,
+        2478.203758,
+        2478.879676,
+        2478.815279,
+        2478.964342
+      ],
+      "round_medians_ms": [
+        2415.868523,
+        2478.879676
+      ]
+    },
+    "polling": {
+      "pooled_median_ms": 2139.985054,
+      "samples_ms": [
+        2180.705112,
+        2181.916787,
+        2181.274633,
+        2181.892188,
+        2180.517447,
+        2183.273308,
+        2182.962723,
+        2183.327302,
+        2181.514251,
+        2139.696178,
+        2140.690102,
+        2140.3821,
+        2140.808412,
+        2136.263548,
+        2139.69069,
+        2139.985054,
+        2139.112487,
+        2140.166622,
+        2139.417778,
+        2139.544205,
+        2138.199091,
+        2138.410385,
+        2139.32128,
+        2138.13541,
+        2139.34848,
+        2138.356134,
+        2137.24268
+      ],
+      "round_medians_ms": [
+        2181.892188,
+        2139.985054,
+        2138.410385
+      ]
+    },
+    "islow": {
+      "pooled_median_ms": 520.4814805000001,
+      "samples_ms": [
+        525.461684,
+        518.147452,
+        514.885325,
+        517.12707,
+        515.994743,
+        520.500941,
+        520.46202,
+        516.217887,
+        516.259206,
+        529.345604,
+        528.001123,
+        520.735816,
+        528.157599,
+        518.036932,
+        528.037118,
+        519.935527,
+        522.64111,
+        521.481372
+      ],
+      "round_medians_ms": [
+        517.12707,
+        522.64111
+      ]
+    },
+    "ifast": {
+      "pooled_median_ms": 516.5585865,
+      "samples_ms": [
+        511.64119,
+        513.024447,
+        513.616257,
+        512.646354,
+        511.018273,
+        523.978246,
+        522.072664,
+        513.281802,
+        522.49618,
+        527.240379,
+        525.965095,
+        525.732402,
+        524.786365,
+        516.385516,
+        514.13009,
+        516.731657,
+        518.016252,
+        515.722962
+      ],
+      "round_medians_ms": [
+        513.281802,
+        518.016252
+      ]
+    }
+  },
+  "profile_ms": {
+    "jpeg_classify_bytes": 1.354574,
+    "jpeg_prefix_bytes": 0.055065,
+    "jpeg_plan_jobs": 0.019237,
+    "jpeg_compact_bytes": 1.903176,
+    "__command_launch_counts_0": 0.002084,
+    "jpeg_speculate": 26.873981,
+    "__command_launch_counts_1": 0.001603,
+    "jpeg_bridge": 6.830979,
+    "jpeg_index": 0.812544,
+    "jpeg_certify": 0.35812,
+    "jpeg_intervals": 0.711993,
+    "jpeg_resize_init": 5.525939,
+    "jpeg_resize_stream": 2108.447851,
+    "jpeg_resize_publish": 34.852099,
+    "__command_launch_counts_2": 0.001803,
+    "__command_launch_counts_3": 0.001723,
+    "__command_launch_counts_4": 0.001803,
+    "__command_launch_counts_5": 0.001763,
+    "__command_launch_counts_6": 0.001844,
+    "__command_launch_counts_7": 0.001563,
+    "__command_launch_counts_8": 0.001803,
+    "__command_launch_counts_9": 0.002204,
+    "__command_launch_counts_10": 0.001803,
+    "__command_launch_counts_11": 0.001763,
+    "__command_launch_counts_12": 0.001763,
+    "__command_launch_counts_13": 0.001844,
+    "__command_launch_counts_14": 0.001844,
+    "__command_launch_counts_15": 0.001844
+  },
+  "profile_total_ms": 2187.774612,
+  "synchronization_time_reduction_fraction": 0.1258824219097272,
+  "gpu_over_best_cpu_ratio": 4.142773172157889,
+  "consumer_share_fraction": 0.963740889685395,
+  "memory": {
+    "scope": "Measured live image buffer backing plus exact named logical capacities; excludes compiler/driver/code and host fixture mirrors. Allocator peak counters return zero and are not evidence of zero memory.",
+    "live_image_backing_bytes_opt": 94371148,
+    "logical_root_bytes": {
+      "input": 20204880,
+      "output": 74166256
+    },
+    "groups": {
+      "compressed input": 18596128,
+      "unstuffed entropy": 18598400,
+      "private and published final RGB": 39746560,
+      "component and horizontal rings": 5072896,
+      "tables, plans, queue state and certificates": 12357152
+    },
+    "old_full_resolution_decode_buffers_bytes": 425547140,
+    "reduction_fraction": 0.7782357367035765,
+    "12mp_component_ring_bytes": 290304,
+    "12mp_horizontal_ring_bytes": 414720,
+    "12mp_old_component_and_rgb_bytes": 54867456,
+    "cpu_maximum_row_workspace_per_job_bytes": 270144,
+    "cpu_retained_final_rgb_bytes": 19872768,
+    "cpu_process_peak_rss_not_device_memory_kib": 53364,
+    "memory_parity_proven": false
+  },
+  "logical_work": {
+    "horizontal_jobs": 5593088,
+    "vertical_jobs": 1657856,
+    "horizontal_payload_write_bytes": 2146172928,
+    "vertical_logical_horizontal_read_bytes": 8573681664,
+    "horizontal_taps": 2436809728,
+    "vertical_taps": 714473472
+  },
+  "native_resources": {
+    "baseline": {
+      "index": 0,
+      "function": "jpeg_resize_stream",
+      "source_function": "jpeg_resize_stream",
+      "target_bundle": "__loom_target_context_0_0",
+      "target_snapshot": "__loom_target_context_0_0",
+      "target_export": "jpeg_resize_stream",
+      "target_export_symbol": null,
+      "target_config": "__loom_target_context_0_0",
+      "detail_flags": 257925950,
+      "planning": {
+        "frame_build_count": 5,
+        "allocation_run_count": 2,
+        "retained_location_replay_count": 1,
+        "repair": {
+          "iteration_count": 4,
+          "spill_traffic_lowering_count": 1,
+          "rematerialized_operand_count": 4,
+          "retained_placement_count": 0,
+          "live_range_split_operand_count": 0,
+          "pair_replication_attempt_count": 1,
+          "pair_replication_edit_count": 0,
+          "pair_replication_rejection_count": 0,
+          "spill_materialization_batch_count": 0
+        },
+        "memory": {
+          "frame_arena": {
+            "used_bytes_high_water": 5526268,
+            "owned_bytes_high_water": 6100188
+          },
+          "repair_arena": {
+            "used_bytes_high_water": 34848,
+            "owned_bytes_high_water": 131072
+          },
+          "scratch_arena": {
+            "used_bytes_high_water": 5129428,
+            "owned_bytes_high_water": 5706996
+          },
+          "system_allocations": {
+            "block_count": 18,
+            "block_bytes": 2359296,
+            "oversized_count": 39,
+            "oversized_bytes": 15310860
+          }
+        }
+      },
+      "schedule_node_count": 10493,
+      "scheduled_node_count": 10493,
+      "schedule_dependency_count": 19372,
+      "schedule_resource_use_count": 16996,
+      "schedule_hazard_gap_count": 0,
+      "schedule_model_summary_count": 14,
+      "register_pressure_summary_count": 3,
+      "register_pressure_peak_live_units": 160,
+      "allocation_assignment_count": 10788,
+      "allocation_spill_count": 0,
+      "allocation_spill_plan_count": 0,
+      "allocation_coalesced_copy_count": 0,
+      "allocation_materialized_copy_count": 0,
+      "allocation_materialized_spill_storage_count": 0,
+      "allocation_materialized_spill_storage_bytes": 0,
+      "allocation_materialized_spill_store_count": 0,
+      "allocation_materialized_spill_store_bytes": 0,
+      "allocation_materialized_reload_count": 0,
+      "allocation_materialized_reload_bytes": 0,
+      "allocation_storage_lease_count": 369,
+      "allocation_storage_lease_instance_count": 369,
+      "allocation_storage_release_action_count": 175,
+      "move_causes": {
+        "kind_count": 5,
+        "packet_count": 1470,
+        "unit_count": 2197,
+        "causes": [
+          {
+            "cause": "constant_materialization",
+            "packet_count": 602,
+            "unit_count": 602
+          },
+          {
+            "cause": "low_slice",
+            "packet_count": 276,
+            "unit_count": 276
+          },
+          {
+            "cause": "low_concat",
+            "packet_count": 81,
+            "unit_count": 157
+          },
+          {
+            "cause": "branch_edge",
+            "packet_count": 247,
+            "unit_count": 898
+          },
+          {
+            "cause": "operand_bank_materialization",
+            "packet_count": 264,
+            "unit_count": 264
+          }
+        ]
+      },
+      "wait_plan": {
+        "action_count": 478,
+        "explicit_action_count": 140,
+        "planned_action_count": 338,
+        "full_drain_count": 361,
+        "partial_wait_count": 117,
+        "drained_count": 374,
+        "max_drained_count": 10,
+        "max_outstanding_before": 16,
+        "max_full_drain_outstanding_before": 10
+      },
+      "workload": {
+        "workgroup_size": {
+          "x": 32,
+          "y": 1,
+          "z": 1,
+          "flat": 32
+        },
+        "workgroup_count": {
+          "x": 128,
+          "y": 1,
+          "z": 1,
+          "flat": 128
+        },
+        "dispatch_workitem_count": 4096
+      },
+      "target_insertions": {
+        "static_packet_count": 1871,
+        "exact_dynamic_packet_count": 0,
+        "unknown_dynamic_packet_count": 1871,
+        "dynamic_packet_count": null,
+        "row_count": 1871
+      },
+      "instruction_count": 12297,
+      "body_instruction_count": 12297,
+      "entry_instruction_count": 0,
+      "coissued_instruction_count": 164,
+      "coissued_component_count": 328,
+      "code_byte_count": 64664,
+      "code_storage_byte_count": 64664,
+      "private_memory_bytes": 0,
+      "local_memory_bytes": 4096,
+      "pressure_row_count": 3,
+      "pressure_origin_row_count": 34,
+      "schedule_band_row_count": 7901,
+      "schedule_band_summary_row_count": 4711,
+      "spill_row_count": 0,
+      "allocation_high_water_row_count": 3,
+      "wait_counter_row_count": 5,
+      "wait_reason_summary_row_count": 15,
+      "wait_action_row_count": 478,
+      "target_capability_row_count": 21,
+      "target_insertion_row_count": 1871,
+      "target_resources": {
+        "scalar": {
+          "register_class": "amdgpu.sgpr",
+          "final": {
+            "register_count": 104,
+            "overhead_units": 0
+          },
+          "scheduled_pressure": {
+            "peak_live_units": 107
+          }
+        },
+        "vector": {
+          "register_class": "amdgpu.vgpr",
+          "final": {
+            "register_count": 161,
+            "overhead_units": 1
+          },
+          "scheduled_pressure": {
+            "peak_live_units": 160
+          }
+        },
+        "subgroup_size": 32,
+        "max_subgroups_per_simd": 16,
+        "resident_subgroups_per_simd": 8,
+        "occupancy_percent": 50,
+        "limiting_resource": "amdgpu.lds",
+        "residency": {
+          "required_tier": 1,
+          "best_tier": 16,
+          "current_tier": 8,
+          "launchable": true,
+          "limiting_resource_count": 1,
+          "next_better_tier": 9,
+          "unique_limiting_resource": {
+            "name": "amdgpu.lds",
+            "units": 4096,
+            "reduction_units_to_next_better_tier": 512,
+            "next_worse": {
+              "tier": 7,
+              "cliff_units": 4097,
+              "additional_units": 1
+            }
+          }
+        }
+      },
+      "static_instruction_mix": {
+        "descriptor_count": 8379,
+        "unknown_count": 0,
+        "scalar_alu_count": 1256,
+        "vector_alu_count": 6452,
+        "matrix_count": 0,
+        "mfma_count": 0,
+        "smfmac_count": 0,
+        "wmma_count": 0,
+        "swmmac_count": 0,
+        "dot_count": 0,
+        "global_memory_count": 286,
+        "global_load_count": 240,
+        "global_store_count": 35,
+        "buffer_load_count": 0,
+        "buffer_store_count": 0,
+        "flat_memory_count": 0,
+        "local_memory_count": 227,
+        "scalar_memory_count": 1,
+        "private_memory_count": 0,
+        "generic_memory_count": 276,
+        "memory_read_unknown_width_count": 0,
+        "memory_write_unknown_width_count": 0,
+        "memory_read_byte_count": 1332,
+        "memory_write_byte_count": 485,
+        "global_load_byte_count": 930,
+        "global_store_byte_count": 135,
+        "buffer_load_byte_count": 0,
+        "buffer_store_byte_count": 0,
+        "flat_read_byte_count": 0,
+        "flat_write_byte_count": 0,
+        "local_read_byte_count": 342,
+        "local_write_byte_count": 306,
+        "scalar_read_byte_count": 16,
+        "scalar_write_byte_count": 0,
+        "private_read_byte_count": 0,
+        "private_write_byte_count": 0,
+        "unclassified_read_byte_count": 44,
+        "unclassified_write_byte_count": 44,
+        "atomic_count": 11,
+        "branch_count": 887,
+        "execution_barrier_count": 0,
+        "control_count": 1818,
+        "conversion_count": 87,
+        "cache_count": 60,
+        "register_move_count": 1595
+      }
+    },
+    "polling": {
+      "index": 0,
+      "function": "jpeg_resize_stream",
+      "source_function": "jpeg_resize_stream",
+      "target_bundle": "__loom_target_context_0_0",
+      "target_snapshot": "__loom_target_context_0_0",
+      "target_export": "jpeg_resize_stream",
+      "target_export_symbol": null,
+      "target_config": "__loom_target_context_0_0",
+      "detail_flags": 257925950,
+      "planning": {
+        "frame_build_count": 5,
+        "allocation_run_count": 2,
+        "retained_location_replay_count": 1,
+        "repair": {
+          "iteration_count": 4,
+          "spill_traffic_lowering_count": 1,
+          "rematerialized_operand_count": 4,
+          "retained_placement_count": 0,
+          "live_range_split_operand_count": 0,
+          "pair_replication_attempt_count": 1,
+          "pair_replication_edit_count": 0,
+          "pair_replication_rejection_count": 0,
+          "spill_materialization_batch_count": 0
+        },
+        "memory": {
+          "frame_arena": {
+            "used_bytes_high_water": 5533696,
+            "owned_bytes_high_water": 6103840
+          },
+          "repair_arena": {
+            "used_bytes_high_water": 34992,
+            "owned_bytes_high_water": 131072
+          },
+          "scratch_arena": {
+            "used_bytes_high_water": 5135336,
+            "owned_bytes_high_water": 5710648
+          },
+          "system_allocations": {
+            "block_count": 18,
+            "block_bytes": 2359296,
+            "oversized_count": 39,
+            "oversized_bytes": 15331728
+          }
+        }
+      },
+      "schedule_node_count": 10479,
+      "scheduled_node_count": 10479,
+      "schedule_dependency_count": 19380,
+      "schedule_resource_use_count": 16954,
+      "schedule_hazard_gap_count": 0,
+      "schedule_model_summary_count": 14,
+      "register_pressure_summary_count": 3,
+      "register_pressure_peak_live_units": 160,
+      "allocation_assignment_count": 10808,
+      "allocation_spill_count": 0,
+      "allocation_spill_plan_count": 0,
+      "allocation_coalesced_copy_count": 0,
+      "allocation_materialized_copy_count": 0,
+      "allocation_materialized_spill_storage_count": 0,
+      "allocation_materialized_spill_storage_bytes": 0,
+      "allocation_materialized_spill_store_count": 0,
+      "allocation_materialized_spill_store_bytes": 0,
+      "allocation_materialized_reload_count": 0,
+      "allocation_materialized_reload_bytes": 0,
+      "allocation_storage_lease_count": 369,
+      "allocation_storage_lease_instance_count": 369,
+      "allocation_storage_release_action_count": 175,
+      "move_causes": {
+        "kind_count": 5,
+        "packet_count": 1476,
+        "unit_count": 2214,
+        "causes": [
+          {
+            "cause": "constant_materialization",
+            "packet_count": 604,
+            "unit_count": 604
+          },
+          {
+            "cause": "low_slice",
+            "packet_count": 276,
+            "unit_count": 276
+          },
+          {
+            "cause": "low_concat",
+            "packet_count": 81,
+            "unit_count": 157
+          },
+          {
+            "cause": "branch_edge",
+            "packet_count": 251,
+            "unit_count": 913
+          },
+          {
+            "cause": "operand_bank_materialization",
+            "packet_count": 264,
+            "unit_count": 264
+          }
+        ]
+      },
+      "wait_plan": {
+        "action_count": 494,
+        "explicit_action_count": 134,
+        "planned_action_count": 360,
+        "full_drain_count": 377,
+        "partial_wait_count": 117,
+        "drained_count": 373,
+        "max_drained_count": 10,
+        "max_outstanding_before": 16,
+        "max_full_drain_outstanding_before": 10
+      },
+      "workload": {
+        "workgroup_size": {
+          "x": 32,
+          "y": 1,
+          "z": 1,
+          "flat": 32
+        },
+        "workgroup_count": {
+          "x": 128,
+          "y": 1,
+          "z": 1,
+          "flat": 128
+        },
+        "dispatch_workitem_count": 4096
+      },
+      "target_insertions": {
+        "static_packet_count": 1897,
+        "exact_dynamic_packet_count": 0,
+        "unknown_dynamic_packet_count": 1897,
+        "dynamic_packet_count": null,
+        "row_count": 1897
+      },
+      "instruction_count": 12325,
+      "body_instruction_count": 12325,
+      "entry_instruction_count": 0,
+      "coissued_instruction_count": 164,
+      "coissued_component_count": 328,
+      "code_byte_count": 64704,
+      "code_storage_byte_count": 64704,
+      "private_memory_bytes": 0,
+      "local_memory_bytes": 4096,
+      "pressure_row_count": 3,
+      "pressure_origin_row_count": 34,
+      "schedule_band_row_count": 7884,
+      "schedule_band_summary_row_count": 4699,
+      "spill_row_count": 0,
+      "allocation_high_water_row_count": 3,
+      "wait_counter_row_count": 5,
+      "wait_reason_summary_row_count": 14,
+      "wait_action_row_count": 494,
+      "target_capability_row_count": 21,
+      "target_insertion_row_count": 1897,
+      "target_resources": {
+        "scalar": {
+          "register_class": "amdgpu.sgpr",
+          "final": {
+            "register_count": 104,
+            "overhead_units": 0
+          },
+          "scheduled_pressure": {
+            "peak_live_units": 107
+          }
+        },
+        "vector": {
+          "register_class": "amdgpu.vgpr",
+          "final": {
+            "register_count": 161,
+            "overhead_units": 1
+          },
+          "scheduled_pressure": {
+            "peak_live_units": 160
+          }
+        },
+        "subgroup_size": 32,
+        "max_subgroups_per_simd": 16,
+        "resident_subgroups_per_simd": 8,
+        "occupancy_percent": 50,
+        "limiting_resource": "amdgpu.lds",
+        "residency": {
+          "required_tier": 1,
+          "best_tier": 16,
+          "current_tier": 8,
+          "launchable": true,
+          "limiting_resource_count": 1,
+          "next_better_tier": 9,
+          "unique_limiting_resource": {
+            "name": "amdgpu.lds",
+            "units": 4096,
+            "reduction_units_to_next_better_tier": 512,
+            "next_worse": {
+              "tier": 7,
+              "cliff_units": 4097,
+              "additional_units": 1
+            }
+          }
+        }
+      },
+      "static_instruction_mix": {
+        "descriptor_count": 8358,
+        "unknown_count": 0,
+        "scalar_alu_count": 1260,
+        "vector_alu_count": 6459,
+        "matrix_count": 0,
+        "mfma_count": 0,
+        "smfmac_count": 0,
+        "wmma_count": 0,
+        "swmmac_count": 0,
+        "dot_count": 0,
+        "global_memory_count": 286,
+        "global_load_count": 240,
+        "global_store_count": 35,
+        "buffer_load_count": 0,
+        "buffer_store_count": 0,
+        "flat_memory_count": 0,
+        "local_memory_count": 227,
+        "scalar_memory_count": 1,
+        "private_memory_count": 0,
+        "generic_memory_count": 276,
+        "memory_read_unknown_width_count": 0,
+        "memory_write_unknown_width_count": 0,
+        "memory_read_byte_count": 1332,
+        "memory_write_byte_count": 485,
+        "global_load_byte_count": 930,
+        "global_store_byte_count": 135,
+        "buffer_load_byte_count": 0,
+        "buffer_store_byte_count": 0,
+        "flat_read_byte_count": 0,
+        "flat_write_byte_count": 0,
+        "local_read_byte_count": 342,
+        "local_write_byte_count": 306,
+        "scalar_read_byte_count": 16,
+        "scalar_write_byte_count": 0,
+        "private_read_byte_count": 0,
+        "private_write_byte_count": 0,
+        "unclassified_read_byte_count": 44,
+        "unclassified_write_byte_count": 44,
+        "atomic_count": 11,
+        "branch_count": 895,
+        "execution_barrier_count": 0,
+        "control_count": 1799,
+        "conversion_count": 87,
+        "cache_count": 36,
+        "register_move_count": 1610
+      }
+    }
+  },
+  "source_pins": {
+    "baseline_source_sha256": "c4cddfed2a1fcd031f271a15ed6b6fc1c63ac722c2745216d4e91a268efb4e21",
+    "source_sha256": "abc7525fb489e8c9a7947541495452922063561a2696bf7730d328f5ce086b6d",
+    "source": "/tmp/codec-jpeg-device-y6frb_3u/persistent-resize/source-polling",
+    "changes": "Empty queue returns; acquire head before relaxed links; acquire readiness once after selection; all producer ordering preserved."
+  },
+  "numerical_contract": "Unchanged float32 GPU IDCT and exact model bicubic operation order. CPU ISLOW/IFAST preserve their separately checked outputs; no new cross-policy bit-equality or accuracy claim.",
+  "limits": [
+    "Four unique images repeated into sixteen distinct outputs, then eight queued repetitions; not a training-dataset generalization.",
+    "Resident GPU compressed input; header preparation, GPU upload/allocation and JIT outside timing. CPU codec lifecycle and row workspace allocation included.",
+    "CPU uses actual SIMD libjpeg plus the identical bounded row filter, not a claim to the fastest available CPU resizing library.",
+    "Device allocation peak counters are unavailable; live image-buffer backing excludes runtime/code and host mirrors.",
+    "The synchronization variant jointly changes empty-queue work and acquire placement; their individual contributions are not separated.",
+    "Static task/byte counts and native ISA do not dynamically apportion remaining scheduler, reconstruction, filter, or memory-stall time."
+  ],
+  "receipts": {
+    "resize-gorgon4-comparison.json": "ad07e32ea4b4fa6fdb213e9e33f3393e7a10a13b2194fa76fe4ad9899809e5e9",
+    "resize-gorgon4-comparison-window.json": "85431663ab25d63d7abc60544f276507237c9a0bc0430a33b9f59e1e5c363258",
+    "resize-output-audit.json": "c9f20a328a59ef61ab432a14ab6b1efc4de4d6f551ea35af4edcdef374c3efa9",
+    "resize-gorgon4-cpu-checks.json": "df879f5f08e948d1befd84e66590a32b4a569c1131d4fe9e9a6cd12903b439d1",
+    "resize-gorgon4-cpu-routes.json": "0818f657d31ade454c5cbf037f729d2466da2b6ee1cc47e8915daa87a73d6790",
+    "resize-gorgon4-primary-window.json": "401a863877de07bcae49b146a54de1fb5a8bde9dd055cf4e709db28f74ea401b",
+    "resize-gorgon4-padding-window.json": "b2d6dd81d8e7970d53ae0e532ad7973013c15b4b359be39e832decee70e1bfdc",
+    "resize-baseline-worker.native.s": "58dc3d3ef2edf7bfa5c638b7637ab1395d8b4b8e1dc4eb7c24d4e009fe59e0aa",
+    "resize-polling-worker.native.s": "0940ee4b86af6e92580a1846a9a1093e61bbfcb71e2eb28e1f78093f5e8bb154",
+    "resize-cpu-islow.native.s": "c40f8e1cb137b3426a9e0a9f10206084bcd132aad909e789cbddb9216359e7f1",
+    "resize-cpu-ifast.native.s": "4514cb27bc5c7f342132b31c7d5418982ff5a4ebab4f798b324ff3cde5b04942",
+    "resize-cpu-stage.json": "1736249e9ebbce9714b2af81a596098ab78799c697bd0178df642aeaa221ee63",
+    "resize-hrx-gorgon-3-small-r3-w1-check.json": "7e37b077d37210e731ef19a4f2fca85b1d97e97dddf64d851a88c57d29c26089",
+    "resize-hrx-gorgon-3-primary-r3-w128-check.json": "0b7bf06ab94d86e9a49dfb845db378aaad030281e2664b6f9546b92e9ffe4885",
+    "resize-hrx-gorgon-3-small-r3-w128-invalid-check.json": "508f05636999e7c8181bb268a197c9824dcf789855909a70aa0adac23528ff4a",
+    "resize-hrx-gorgon-3-small-r3-w128-invalid-padding-check.json": "9055a4501bc4539ee87d5d177c3e993d2d3e75e81c36a43a22cb427f1995ee6e",
+    "resize-hrx-gorgon-4-primary-r3-w128-polling-check.json": "f2ff5429159b74534908f443373f09b301c2e2803f412527a0f4e465936bf1ea",
+    "resize-hrx-gorgon-4-small-r3-w128-invalid-padding-polling-check.json": "f13005bf494e5dd233b16d48c1d7753b8e2f999eeda2651aedaa063880538cfb"
+  }
+}

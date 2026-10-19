@@ -1,0 +1,121 @@
+[
+  {
+    "count": 32,
+    "allocation_set": 0,
+    "rocprim_ns": 2159.002,
+    "loom_ns": 1914.272,
+    "rocprim_window_range_ns": [
+      2158.51,
+      2161.68
+    ],
+    "loom_window_range_ns": [
+      1913.961,
+      1914.277
+    ],
+    "speedup": 1.1278449457548352,
+    "time_reduction_percent": 11.335329934849526,
+    "useful_GB_per_second": 0.13373230136574113
+  },
+  {
+    "count": 512,
+    "allocation_set": 0,
+    "rocprim_ns": 2191.988,
+    "loom_ns": 2041.844,
+    "rocprim_window_range_ns": [
+      2191.252,
+      2194.434
+    ],
+    "loom_window_range_ns": [
+      2040.428,
+      2042.744
+    ],
+    "speedup": 1.0735335314549004,
+    "time_reduction_percent": 6.849672534703643,
+    "useful_GB_per_second": 2.006029843611951
+  },
+  {
+    "count": 65537,
+    "allocation_set": 0,
+    "rocprim_ns": 4914.214,
+    "loom_ns": 4839.89,
+    "rocprim_window_range_ns": [
+      4911.308,
+      4914.742
+    ],
+    "loom_window_range_ns": [
+      4839.638,
+      4840.167
+    ],
+    "speedup": 1.0153565473595474,
+    "time_reduction_percent": 1.5124290476564384,
+    "useful_GB_per_second": 108.32808183657066
+  },
+  {
+    "count": 2097152,
+    "allocation_set": 0,
+    "rocprim_ns": 38691.718,
+    "loom_ns": 37567.693,
+    "rocprim_window_range_ns": [
+      38691.083,
+      38697.483
+    ],
+    "loom_window_range_ns": [
+      37561.016,
+      37569.852
+    ],
+    "speedup": 1.0299199900297311,
+    "time_reduction_percent": 2.9050790662745962,
+    "useful_GB_per_second": 446.58627294468147
+  },
+  {
+    "count": 2097152,
+    "allocation_set": 1,
+    "rocprim_ns": 35994.916,
+    "loom_ns": 33562.516,
+    "rocprim_window_range_ns": [
+      35981.307,
+      35994.952
+    ],
+    "loom_window_range_ns": [
+      33440.471,
+      33639.969
+    ],
+    "speedup": 1.0724737084669098,
+    "time_reduction_percent": 6.75762099292021,
+    "useful_GB_per_second": 499.87956802761744
+  },
+  {
+    "count": 2097152,
+    "allocation_set": 2,
+    "rocprim_ns": 38696.256,
+    "loom_ns": 37480.864,
+    "rocprim_window_range_ns": [
+      38687.787,
+      38733.9
+    ],
+    "loom_window_range_ns": [
+      37471.695,
+      37499.869
+    ],
+    "speedup": 1.0324270006155674,
+    "time_reduction_percent": 3.140851662755173,
+    "useful_GB_per_second": 447.62084459952683
+  },
+  {
+    "count": 16777216,
+    "allocation_set": 0,
+    "rocprim_ns": 612239.963,
+    "loom_ns": 567167.0449999999,
+    "rocprim_window_range_ns": [
+      612047.223,
+      612297.027
+    ],
+    "loom_window_range_ns": [
+      567114.092,
+      567186.572
+    ],
+    "speedup": 1.0794702696451626,
+    "time_reduction_percent": 7.361969280662595,
+    "useful_GB_per_second": 236.64585095912972
+  }
+]

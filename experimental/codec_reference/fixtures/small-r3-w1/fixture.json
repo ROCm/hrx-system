@@ -1,0 +1,662 @@
+{
+  "case": "small-r3-w1",
+  "scope": "Poisoned compressed-input to bounded native RGB resize; original entropy, IDCT and exact model filter order.",
+  "source_fixture": "/tmp/codec-jpeg-device-y6frb_3u/mixed-negative-base",
+  "input_hashes": {
+    "tables.npy": "500e771313273251a303cee4902e043586f35e1d9e6a35832d34aea623c317d5",
+    "blocks.npy": "31ccfa527a6002c425d5a6ac7ca936bed33f4601b2acdabb142d0c683ff8ca35",
+    "geometry.npy": "d705a200e0ea2ce7b759c17d46cbd711d306079299534fc367bc2a78b09fb368",
+    "quantization.npy": "d92c65d87b09862eaaca7457f7db27d751dcaabce4edfba7ede7d285848e1ae4",
+    "zigzag.npy": "f0770bf88488cce5ee4dce7f87339bb84790d5b4a24af5a10833994ea9bda8f2",
+    "compressed.npy": "5c43387f7e8b676b2ac9e610cca41e1afe1822c3d4d1a40f0c1b59e9cd97e689",
+    "headers.npy": "b821db31e42fdd43e6e9cf7ad562be3d444c969425a558e5640a103a4e717312",
+    "entropy.npy": "113cd9225d4f1a60f28d3e853831e23b02c5c802d058994f34a847b38238fd6d",
+    "segments.npy": "d613a74d69dd5bbf980b4136e241a8c7a8331ee0b0a6bcc8f57053f93db160e6",
+    "intervals.npy": "588837e028617bbf0ae26e4afc96e36cdb3538b3168f68f641a6c97d5d632122",
+    "records.npy": "92f4805da8b8e67928ce498575904f7c5d1d2ac75afba61a4dcfe1db3e641a49",
+    "prefixes.npy": "a06a4b1e117c18d4c907ed9ddb8cc9b593ed01764361e9ee80dd3060a6ea6a42",
+    "errors.npy": "f4d116b169b5be061b3f6a8aead7ac1ff73ba835dd9963f6ec4bd64aa7f469b1",
+    "schedule.npy": "8a4830682c16549eb8f06a8d04ea93da3d6143dc3d7fb55e623af9484f9e755a",
+    "jobs.npy": "e87db5e5776df80035da4f63cc3182c2157d292fffd697249bf91282510b9f7c",
+    "expected.npy": "f820537c02a6a0f591c2b97cca3b2fa84b5b883d6854d4b96a8d44fdbb14692d",
+    "points.npy": "e8462c17b78905c2c952ff2134636c99fb6c8d1d9faadedf19406e151a6721e0",
+    "bridges.npy": "893e7e76f47e54d0e006a9252ab9679c096c08a6c636ce2e52dd1b67840471c8",
+    "suffixes.npy": "f35022a8880002035ed5b707a7aacb905ff84d85522d4524c9b6e415a9c3a74c",
+    "ranges.npy": "44242591609126ef96defe78a8a828f7a4a6386ab1d68894e748bcb1d7ccb4e4",
+    "pixels.npy": "9ab21661d16c08eed86e796142a00a17556cd52c3af7c56cdd0568b6d30c22e9",
+    "rgb.npy": "0a2d07cff0b0a84b525deaca7be3427d48a82291dd89542bea22772276200e3d"
+  },
+  "images": [
+    {
+      "name": "existing_exif_fixture",
+      "rows": 1,
+      "row_offset": 0,
+      "pixel_word_count": 152,
+      "interval_count": 1,
+      "source": [
+        2,
+        3
+      ],
+      "target": [
+        2,
+        2
+      ],
+      "output_offset": 0,
+      "output_bytes": 12,
+      "horizontal_rows": 11,
+      "horizontal_bytes": 264,
+      "output_sha256": "d35fd2b24b65e7dbc91f7b78f78a4aae84f2266106507874796324e8be0548e1"
+    },
+    {
+      "name": "ycbcr_444",
+      "rows": 3,
+      "row_offset": 1,
+      "pixel_word_count": 728,
+      "interval_count": 5,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 44,
+      "output_bytes": 936,
+      "horizontal_rows": 14,
+      "horizontal_bytes": 4032,
+      "output_sha256": "3e9bf52b2730de9e60cd76ac3eab21cf6460d4f4f49f49e4a531749c24d1e222"
+    },
+    {
+      "name": "ycbcr_422",
+      "rows": 3,
+      "row_offset": 4,
+      "pixel_word_count": 536,
+      "interval_count": 5,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 1012,
+      "output_bytes": 936,
+      "horizontal_rows": 14,
+      "horizontal_bytes": 4032,
+      "output_sha256": "5ccf3d4508a318533d6031e6ace305de599f6f0d6c0639cedcebb99038adc974"
+    },
+    {
+      "name": "ycbcr_420",
+      "rows": 2,
+      "row_offset": 7,
+      "pixel_word_count": 776,
+      "interval_count": 1,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 1980,
+      "output_bytes": 936,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 6336,
+      "output_sha256": "cc6c4e0d0e3ab280cdfc15d5900f8554b9afa6c88adde902ff9bdb20c389f605"
+    },
+    {
+      "name": "ycbcr_440",
+      "rows": 2,
+      "row_offset": 9,
+      "pixel_word_count": 968,
+      "interval_count": 5,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 2948,
+      "output_bytes": 936,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 6336,
+      "output_sha256": "ace667f7a4bb4d8673972a5622992642a48656e2fae3c53d421756ada9ecd4fb"
+    },
+    {
+      "name": "ycbcr_411",
+      "rows": 3,
+      "row_offset": 11,
+      "pixel_word_count": 440,
+      "interval_count": 1,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 3916,
+      "output_bytes": 936,
+      "horizontal_rows": 14,
+      "horizontal_bytes": 4032,
+      "output_sha256": "ee7f962df276098fa639feda0e4f440b17b9b5228b7c73e71995971fb04e67d4"
+    },
+    {
+      "name": "ycbcr_410",
+      "rows": 2,
+      "row_offset": 14,
+      "pixel_word_count": 680,
+      "interval_count": 1,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 4884,
+      "output_bytes": 936,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 6336,
+      "output_sha256": "02f20711c17bfc528d3cdc883a3d8de3439c8a28afa27880d27bafc44b7eac1e"
+    },
+    {
+      "name": "ycbcr_444_extended_quantization",
+      "rows": 3,
+      "row_offset": 16,
+      "pixel_word_count": 728,
+      "interval_count": 1,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 5852,
+      "output_bytes": 936,
+      "horizontal_rows": 14,
+      "horizontal_bytes": 4032,
+      "output_sha256": "fb9b30312fb83dc832bde192cb4bb7e56f0964c325ed157bfc84c888857c5a7f"
+    },
+    {
+      "name": "rgb_sequential",
+      "rows": 3,
+      "row_offset": 19,
+      "pixel_word_count": 728,
+      "interval_count": 9,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 6820,
+      "output_bytes": 936,
+      "horizontal_rows": 14,
+      "horizontal_bytes": 4032,
+      "output_sha256": "732cb9d22a05530fb434634570f444dc0ccaaa3bc86a68d36b8d756185d2f8c0"
+    },
+    {
+      "name": "grayscale",
+      "rows": 3,
+      "row_offset": 22,
+      "pixel_word_count": 248,
+      "interval_count": 1,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 7788,
+      "output_bytes": 936,
+      "horizontal_rows": 14,
+      "horizontal_bytes": 4032,
+      "output_sha256": "efb4746e4e59aa040eac21cf4430f4c3ceb45457c29398118bf2d98fe4ba22be"
+    },
+    {
+      "name": "dense-periodic",
+      "rows": 4,
+      "row_offset": 25,
+      "pixel_word_count": 1160,
+      "interval_count": 5,
+      "source": [
+        64,
+        64
+      ],
+      "target": [
+        43,
+        43
+      ],
+      "output_offset": 8756,
+      "output_bytes": 5547,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 11352,
+      "output_sha256": "fb42d38892664d1ede7e7f67abe6fbe7b11ffcba95a56b1fe7e4669e5c79abff"
+    },
+    {
+      "name": "mcu-phase",
+      "rows": 4,
+      "row_offset": 29,
+      "pixel_word_count": 1160,
+      "interval_count": 1,
+      "source": [
+        64,
+        64
+      ],
+      "target": [
+        43,
+        43
+      ],
+      "output_offset": 14335,
+      "output_bytes": 5547,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 11352,
+      "output_sha256": "8940273fff79021b09601b5e8f16652a1ecb3fa16638fb25a4aa0c2174271ed2"
+    },
+    {
+      "name": "grayscale",
+      "rows": 3,
+      "row_offset": 33,
+      "pixel_word_count": 248,
+      "interval_count": 1,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 19914,
+      "output_bytes": 936,
+      "horizontal_rows": 14,
+      "horizontal_bytes": 4032,
+      "output_sha256": "efb4746e4e59aa040eac21cf4430f4c3ceb45457c29398118bf2d98fe4ba22be"
+    },
+    {
+      "name": "rgb_sequential",
+      "rows": 3,
+      "row_offset": 36,
+      "pixel_word_count": 728,
+      "interval_count": 9,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 20882,
+      "output_bytes": 936,
+      "horizontal_rows": 14,
+      "horizontal_bytes": 4032,
+      "output_sha256": "732cb9d22a05530fb434634570f444dc0ccaaa3bc86a68d36b8d756185d2f8c0"
+    },
+    {
+      "name": "ycbcr_420",
+      "rows": 2,
+      "row_offset": 39,
+      "pixel_word_count": 776,
+      "interval_count": 1,
+      "source": [
+        35,
+        19
+      ],
+      "target": [
+        24,
+        13
+      ],
+      "output_offset": 21850,
+      "output_bytes": 936,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 6336,
+      "output_sha256": "cc6c4e0d0e3ab280cdfc15d5900f8554b9afa6c88adde902ff9bdb20c389f605"
+    },
+    {
+      "name": "existing_exif_fixture",
+      "rows": 1,
+      "row_offset": 41,
+      "pixel_word_count": 152,
+      "interval_count": 1,
+      "source": [
+        2,
+        3
+      ],
+      "target": [
+        2,
+        2
+      ],
+      "output_offset": 22818,
+      "output_bytes": 12,
+      "horizontal_rows": 11,
+      "horizontal_bytes": 264,
+      "output_sha256": "d35fd2b24b65e7dbc91f7b78f78a4aae84f2266106507874796324e8be0548e1"
+    }
+  ],
+  "ranges": {
+    "tables": {
+      "root": "input",
+      "offset": 176,
+      "bytes": 417824,
+      "elements": 104456,
+      "type": "i32"
+    },
+    "blocks": {
+      "root": "input",
+      "offset": 418032,
+      "bytes": 288,
+      "elements": 72,
+      "type": "i32"
+    },
+    "geometry": {
+      "root": "input",
+      "offset": 418352,
+      "bytes": 2208,
+      "elements": 552,
+      "type": "i32"
+    },
+    "quantization": {
+      "root": "input",
+      "offset": 420592,
+      "bytes": 11296,
+      "elements": 2824,
+      "type": "i32"
+    },
+    "zigzag": {
+      "root": "input",
+      "offset": 431920,
+      "bytes": 288,
+      "elements": 72,
+      "type": "i32"
+    },
+    "images": {
+      "root": "input",
+      "offset": 432240,
+      "bytes": 1184,
+      "elements": 296,
+      "type": "i32"
+    },
+    "plans": {
+      "root": "input",
+      "offset": 433456,
+      "bytes": 448,
+      "elements": 112,
+      "type": "i32"
+    },
+    "compressed": {
+      "root": "input",
+      "offset": 433936,
+      "bytes": 65824,
+      "elements": 16456,
+      "type": "i32"
+    },
+    "resize_plans": {
+      "root": "input",
+      "offset": 499792,
+      "bytes": 896,
+      "elements": 224,
+      "type": "i32"
+    },
+    "filter_indices": {
+      "root": "input",
+      "offset": 500720,
+      "bytes": 5120,
+      "elements": 1280,
+      "type": "i32"
+    },
+    "filter_weights": {
+      "root": "input",
+      "offset": 505872,
+      "bytes": 13872,
+      "elements": 3468,
+      "type": "i32"
+    },
+    "filter_tiles": {
+      "root": "input",
+      "offset": 519776,
+      "bytes": 288,
+      "elements": 72,
+      "type": "i32"
+    },
+    "entropy": {
+      "root": "output",
+      "offset": 0,
+      "bytes": 68096,
+      "elements": 17024,
+      "type": "i32"
+    },
+    "segments": {
+      "root": "output",
+      "offset": 68128,
+      "bytes": 544,
+      "elements": 136,
+      "type": "i32"
+    },
+    "intervals": {
+      "root": "output",
+      "offset": 68704,
+      "bytes": 10784,
+      "elements": 2696,
+      "type": "i32"
+    },
+    "pixels": {
+      "root": "output",
+      "offset": 79520,
+      "bytes": 40832,
+      "elements": 10208,
+      "type": "i32"
+    },
+    "streams": {
+      "root": "output",
+      "offset": 120384,
+      "bytes": 448,
+      "elements": 112,
+      "type": "i32"
+    },
+    "heads": {
+      "root": "output",
+      "offset": 120864,
+      "bytes": 168,
+      "elements": 42,
+      "type": "i32"
+    },
+    "pending": {
+      "root": "output",
+      "offset": 121072,
+      "bytes": 168,
+      "elements": 42,
+      "type": "i32"
+    },
+    "decoded": {
+      "root": "output",
+      "offset": 121280,
+      "bytes": 168,
+      "elements": 42,
+      "type": "i32"
+    },
+    "color_claimed": {
+      "root": "output",
+      "offset": 121488,
+      "bytes": 168,
+      "elements": 42,
+      "type": "i32"
+    },
+    "color_done": {
+      "root": "output",
+      "offset": 121696,
+      "bytes": 168,
+      "elements": 42,
+      "type": "i32"
+    },
+    "links": {
+      "root": "output",
+      "offset": 121904,
+      "bytes": 1348,
+      "elements": 337,
+      "type": "i32"
+    },
+    "cursors": {
+      "root": "output",
+      "offset": 123296,
+      "bytes": 10784,
+      "elements": 2696,
+      "type": "i32"
+    },
+    "records": {
+      "root": "output",
+      "offset": 134112,
+      "bytes": 288,
+      "elements": 72,
+      "type": "i32"
+    },
+    "prefixes": {
+      "root": "output",
+      "offset": 134432,
+      "bytes": 96,
+      "elements": 24,
+      "type": "i32"
+    },
+    "errors": {
+      "root": "output",
+      "offset": 134560,
+      "bytes": 288,
+      "elements": 72,
+      "type": "i32"
+    },
+    "schedule": {
+      "root": "output",
+      "offset": 134880,
+      "bytes": 64,
+      "elements": 16,
+      "type": "i32"
+    },
+    "jobs": {
+      "root": "output",
+      "offset": 134976,
+      "bytes": 1056,
+      "elements": 264,
+      "type": "i32"
+    },
+    "expected": {
+      "root": "output",
+      "offset": 136064,
+      "bytes": 2080,
+      "elements": 520,
+      "type": "i32"
+    },
+    "points": {
+      "root": "output",
+      "offset": 138176,
+      "bytes": 6176,
+      "elements": 1544,
+      "type": "i32"
+    },
+    "bridges": {
+      "root": "output",
+      "offset": 144384,
+      "bytes": 2080,
+      "elements": 520,
+      "type": "i32"
+    },
+    "suffixes": {
+      "root": "output",
+      "offset": 146496,
+      "bytes": 2592,
+      "elements": 648,
+      "type": "i32"
+    },
+    "ranges": {
+      "root": "output",
+      "offset": 149120,
+      "bytes": 2592,
+      "elements": 648,
+      "type": "i32"
+    },
+    "horizontal": {
+      "root": "output",
+      "offset": 151744,
+      "bytes": 81344,
+      "elements": 20336,
+      "type": "i32"
+    },
+    "provisional": {
+      "root": "output",
+      "offset": 233120,
+      "bytes": 22862,
+      "elements": 22862,
+      "type": "i8"
+    },
+    "resize_rows": {
+      "root": "output",
+      "offset": 256016,
+      "bytes": 64,
+      "elements": 16,
+      "type": "i32"
+    },
+    "resize_claimed": {
+      "root": "output",
+      "offset": 256112,
+      "bytes": 984,
+      "elements": 246,
+      "type": "i32"
+    },
+    "resize_done": {
+      "root": "output",
+      "offset": 257136,
+      "bytes": 984,
+      "elements": 246,
+      "type": "i32"
+    },
+    "resized": {
+      "root": "output",
+      "offset": 258160,
+      "bytes": 22862,
+      "elements": 22862,
+      "type": "i8"
+    },
+    "validity": {
+      "root": "output",
+      "offset": 281056,
+      "bytes": 64,
+      "elements": 16,
+      "type": "i32"
+    }
+  },
+  "root_bytes": {
+    "input": 520096,
+    "output": 281152
+  },
+  "configuration": {
+    "jpeg": {
+      "chunk_bytes": 1024,
+      "output_partitions": 4,
+      "segments": 16
+    },
+    "input": {
+      "tiles": 1,
+      "entropy_padding_words": 32
+    },
+    "stream": {
+      "rows": 3,
+      "workers": 1
+    }
+  },
+  "repetitions": 8,
+  "guard_bytes": 1000,
+  "source_sha256": "973e8ae45a8a2a206f18fbe9db57d8eba1789c9d2e8942cb48af20814a28e08e"
+}

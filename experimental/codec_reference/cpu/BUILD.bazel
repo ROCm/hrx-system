@@ -1,0 +1,80 @@
+load("//build_tools/bazel:cc.bzl", "iree_cc_binary")
+
+iree_cc_binary(
+    name = "jpeg_baseline",
+    srcs = ["jpeg_baseline.cc"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "@libjpeg_turbo//:jpeg",
+    ],
+)
+
+iree_cc_binary(
+    name = "jpeg_pipeline_islow",
+    srcs = ["jpeg_pipeline_baseline.cc"],
+    defines = ["CODEC_REFERENCE_IDCT=JDCT_ISLOW"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "@libjpeg_turbo//:jpeg",
+    ],
+)
+
+iree_cc_binary(
+    name = "jpeg_pipeline_float",
+    srcs = ["jpeg_pipeline_baseline.cc"],
+    defines = ["CODEC_REFERENCE_IDCT=JDCT_FLOAT"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "@libjpeg_turbo//:jpeg",
+    ],
+)
+
+iree_cc_binary(
+    name = "jpeg_pipeline_ifast",
+    srcs = ["jpeg_pipeline_baseline.cc"],
+    defines = ["CODEC_REFERENCE_IDCT=JDCT_IFAST"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "@libjpeg_turbo//:jpeg",
+    ],
+)
+
+iree_cc_binary(
+    name = "jpeg_resize_islow",
+    srcs = ["jpeg_resize_baseline.cc"],
+    copts = ["-ffp-contract=off"],
+    defines = ["CODEC_REFERENCE_IDCT=JDCT_ISLOW"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "@libjpeg_turbo//:jpeg",
+    ],
+)
+
+iree_cc_binary(
+    name = "jpeg_resize_ifast",
+    srcs = ["jpeg_resize_baseline.cc"],
+    copts = ["-ffp-contract=off"],
+    defines = ["CODEC_REFERENCE_IDCT=JDCT_IFAST"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "@libjpeg_turbo//:jpeg",
+    ],
+)

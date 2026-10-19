@@ -1,0 +1,285 @@
+{
+  "scope": "Logical useful work, not dynamic measured traffic; 16 images repeated eight times. Scheduler polls/retries and metadata traffic not counted.",
+  "images": [
+    {
+      "image": "012mp-bus.jpg.r0.jpg",
+      "source": [
+        4032,
+        3024
+      ],
+      "target": [
+        1152,
+        864
+      ],
+      "horizontal_jobs": 108864,
+      "vertical_jobs": 31104,
+      "horizontal_payload_write_bytes": 41803776,
+      "vertical_logical_horizontal_read_bytes": 167021568,
+      "horizontal_taps": 48728736,
+      "vertical_taps": 13918464
+    },
+    {
+      "image": "006mp-cathedral.jpg.r0.jpg",
+      "source": [
+        2000,
+        3008
+      ],
+      "target": [
+        576,
+        864
+      ],
+      "horizontal_jobs": 54144,
+      "vertical_jobs": 15552,
+      "horizontal_payload_write_bytes": 20791296,
+      "vertical_logical_horizontal_read_bytes": 83068416,
+      "horizontal_taps": 24021888,
+      "vertical_taps": 6922368
+    },
+    {
+      "image": "synthetic-1024.jpg.r0.jpg",
+      "source": [
+        1024,
+        768
+      ],
+      "target": [
+        448,
+        336
+      ],
+      "horizontal_jobs": 10752,
+      "vertical_jobs": 4704,
+      "horizontal_payload_write_bytes": 4128768,
+      "vertical_logical_horizontal_read_bytes": 16472064,
+      "horizontal_taps": 3139584,
+      "vertical_taps": 1372672
+    },
+    {
+      "image": "synthetic-256.jpg.r0.jpg",
+      "source": [
+        256,
+        256
+      ],
+      "target": [
+        112,
+        112
+      ],
+      "horizontal_jobs": 1024,
+      "vertical_jobs": 448,
+      "horizontal_payload_write_bytes": 344064,
+      "vertical_logical_horizontal_read_bytes": 1365504,
+      "horizontal_taps": 260096,
+      "vertical_taps": 113792
+    },
+    {
+      "image": "012mp-bus.jpg.r0.jpg",
+      "source": [
+        4032,
+        3024
+      ],
+      "target": [
+        1152,
+        864
+      ],
+      "horizontal_jobs": 108864,
+      "vertical_jobs": 31104,
+      "horizontal_payload_write_bytes": 41803776,
+      "vertical_logical_horizontal_read_bytes": 167021568,
+      "horizontal_taps": 48728736,
+      "vertical_taps": 13918464
+    },
+    {
+      "image": "006mp-cathedral.jpg.r0.jpg",
+      "source": [
+        2000,
+        3008
+      ],
+      "target": [
+        576,
+        864
+      ],
+      "horizontal_jobs": 54144,
+      "vertical_jobs": 15552,
+      "horizontal_payload_write_bytes": 20791296,
+      "vertical_logical_horizontal_read_bytes": 83068416,
+      "horizontal_taps": 24021888,
+      "vertical_taps": 6922368
+    },
+    {
+      "image": "synthetic-1024.jpg.r0.jpg",
+      "source": [
+        1024,
+        768
+      ],
+      "target": [
+        448,
+        336
+      ],
+      "horizontal_jobs": 10752,
+      "vertical_jobs": 4704,
+      "horizontal_payload_write_bytes": 4128768,
+      "vertical_logical_horizontal_read_bytes": 16472064,
+      "horizontal_taps": 3139584,
+      "vertical_taps": 1372672
+    },
+    {
+      "image": "synthetic-256.jpg.r0.jpg",
+      "source": [
+        256,
+        256
+      ],
+      "target": [
+        112,
+        112
+      ],
+      "horizontal_jobs": 1024,
+      "vertical_jobs": 448,
+      "horizontal_payload_write_bytes": 344064,
+      "vertical_logical_horizontal_read_bytes": 1365504,
+      "horizontal_taps": 260096,
+      "vertical_taps": 113792
+    },
+    {
+      "image": "012mp-bus.jpg.r0.jpg",
+      "source": [
+        4032,
+        3024
+      ],
+      "target": [
+        1152,
+        864
+      ],
+      "horizontal_jobs": 108864,
+      "vertical_jobs": 31104,
+      "horizontal_payload_write_bytes": 41803776,
+      "vertical_logical_horizontal_read_bytes": 167021568,
+      "horizontal_taps": 48728736,
+      "vertical_taps": 13918464
+    },
+    {
+      "image": "006mp-cathedral.jpg.r0.jpg",
+      "source": [
+        2000,
+        3008
+      ],
+      "target": [
+        576,
+        864
+      ],
+      "horizontal_jobs": 54144,
+      "vertical_jobs": 15552,
+      "horizontal_payload_write_bytes": 20791296,
+      "vertical_logical_horizontal_read_bytes": 83068416,
+      "horizontal_taps": 24021888,
+      "vertical_taps": 6922368
+    },
+    {
+      "image": "synthetic-1024.jpg.r0.jpg",
+      "source": [
+        1024,
+        768
+      ],
+      "target": [
+        448,
+        336
+      ],
+      "horizontal_jobs": 10752,
+      "vertical_jobs": 4704,
+      "horizontal_payload_write_bytes": 4128768,
+      "vertical_logical_horizontal_read_bytes": 16472064,
+      "horizontal_taps": 3139584,
+      "vertical_taps": 1372672
+    },
+    {
+      "image": "synthetic-256.jpg.r0.jpg",
+      "source": [
+        256,
+        256
+      ],
+      "target": [
+        112,
+        112
+      ],
+      "horizontal_jobs": 1024,
+      "vertical_jobs": 448,
+      "horizontal_payload_write_bytes": 344064,
+      "vertical_logical_horizontal_read_bytes": 1365504,
+      "horizontal_taps": 260096,
+      "vertical_taps": 113792
+    },
+    {
+      "image": "012mp-bus.jpg.r0.jpg",
+      "source": [
+        4032,
+        3024
+      ],
+      "target": [
+        1152,
+        864
+      ],
+      "horizontal_jobs": 108864,
+      "vertical_jobs": 31104,
+      "horizontal_payload_write_bytes": 41803776,
+      "vertical_logical_horizontal_read_bytes": 167021568,
+      "horizontal_taps": 48728736,
+      "vertical_taps": 13918464
+    },
+    {
+      "image": "006mp-cathedral.jpg.r0.jpg",
+      "source": [
+        2000,
+        3008
+      ],
+      "target": [
+        576,
+        864
+      ],
+      "horizontal_jobs": 54144,
+      "vertical_jobs": 15552,
+      "horizontal_payload_write_bytes": 20791296,
+      "vertical_logical_horizontal_read_bytes": 83068416,
+      "horizontal_taps": 24021888,
+      "vertical_taps": 6922368
+    },
+    {
+      "image": "synthetic-1024.jpg.r0.jpg",
+      "source": [
+        1024,
+        768
+      ],
+      "target": [
+        448,
+        336
+      ],
+      "horizontal_jobs": 10752,
+      "vertical_jobs": 4704,
+      "horizontal_payload_write_bytes": 4128768,
+      "vertical_logical_horizontal_read_bytes": 16472064,
+      "horizontal_taps": 3139584,
+      "vertical_taps": 1372672
+    },
+    {
+      "image": "synthetic-256.jpg.r0.jpg",
+      "source": [
+        256,
+        256
+      ],
+      "target": [
+        112,
+        112
+      ],
+      "horizontal_jobs": 1024,
+      "vertical_jobs": 448,
+      "horizontal_payload_write_bytes": 344064,
+      "vertical_logical_horizontal_read_bytes": 1365504,
+      "horizontal_taps": 260096,
+      "vertical_taps": 113792
+    }
+  ],
+  "cohort": {
+    "horizontal_jobs": 5593088,
+    "vertical_jobs": 1657856,
+    "horizontal_payload_write_bytes": 2146172928,
+    "vertical_logical_horizontal_read_bytes": 8573681664,
+    "horizontal_taps": 2436809728,
+    "vertical_taps": 714473472
+  }
+}

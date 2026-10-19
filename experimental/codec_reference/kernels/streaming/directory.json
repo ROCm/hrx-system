@@ -1,0 +1,37 @@
+{
+  "inputs": [
+    "tables",
+    "blocks",
+    "geometry",
+    "quantization",
+    "zigzag",
+    "images",
+    "plans",
+    "compressed"
+  ],
+  "outputs": [
+    "entropy",
+    "segments",
+    "intervals",
+    "pixels",
+    "rgb",
+    "streams",
+    "heads",
+    "pending",
+    "decoded",
+    "color_claimed",
+    "color_done",
+    "links",
+    "cursors",
+    "records",
+    "prefixes",
+    "errors",
+    "schedule",
+    "jobs",
+    "expected",
+    "points",
+    "bridges",
+    "suffixes",
+    "ranges"
+  ]
+}

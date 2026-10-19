@@ -1,0 +1,77 @@
+{
+  "compiler_commit": "d7addd2777d2435722dd67ed0b1141e1f98ab140",
+  "command": [
+    "iree-bazel-test",
+    "--config=asan",
+    "//experimental/codec_reference/research/jpeg-entropy:native_upload_test",
+    "//experimental/codec_reference/research/jpeg-entropy:native_header_test"
+  ],
+  "configuration": "asan",
+  "passed": true,
+  "tests": 7,
+  "cases": {
+    "positive_cases": 684,
+    "negative_cases": 442,
+    "header_bytes": 388483,
+    "source_bytes": 6498802,
+    "generator_sha256": "1e7657699ae0f6401fc201a1dcb26daef77c6c992bc9d85d6d53e3cd885a3ffd",
+    "oracle_sha256": "e29ea4a45e5526c9cdfcd0d4b0d945f226d9e71fdd0186c73bce21e25ca7b633",
+    "cases_sha256": "41933c853b3cbe0d0f5378a473cfd507ad27776102d36bdddc4379612a73ad31",
+    "corpus": [
+      "existing_exif_fixture",
+      "ycbcr_444",
+      "ycbcr_422",
+      "ycbcr_420",
+      "ycbcr_440",
+      "ycbcr_411",
+      "ycbcr_410",
+      "ycbcr_444_extended_quantization",
+      "rgb_sequential",
+      "grayscale",
+      "dense-periodic",
+      "mcu-phase",
+      "012mp-bus.jpg.r0.jpg",
+      "012mp-bus.jpg.r64.jpg",
+      "006mp-cathedral.jpg.r0.jpg",
+      "006mp-cathedral.jpg.r64.jpg",
+      "synthetic-1024.jpg.r0.jpg",
+      "synthetic-1024.jpg.r64.jpg",
+      "synthetic-256.jpg.r0.jpg",
+      "synthetic-256.jpg.r64.jpg"
+    ],
+    "sampling_combinations": 515,
+    "extended_destination_combinations": 64,
+    "alias_image_sha256": "b849c265beed0f5f5016b70aca4af82eec322b7225cc3d425a1635f231ed1084",
+    "device_color_stage_sha256": {
+      "mixed-current": "2705a81d53b8f811b7210d53a947b79708ba5615298b83d53ac9f33a9e61e274",
+      "mixed-negative-base": "7274a161459d2d514189a0fac217dc655f077c5590efdd6de852330e314f829c"
+    },
+    "device_color_cases": 16,
+    "unique_device_codebooks": 41,
+    "device_prefixes_checked": 2686976,
+    "device_oracle_sha256": "9dc61235f010cedd58675b73960298932b7dffc7d304845132242c48485f9913",
+    "scope": "Header facts only; sampling mutations are not claimed to have a valid compressed body."
+  },
+  "sources": {
+    "native_header.c": "07e3b2829defe433de4ce6c5b816a52c39889c48fc7c68675b65b0e8648ad222",
+    "native_header.h": "ec7826a575b46d42c6d9b21f24d4d64da36fd50b3a8c8fe72ac59299c9a8abb4",
+    "native_metadata.c": "4e306c90ef19059e5ae099b88905958f1319c40fcd9fae3ef041c61314b6fc35",
+    "native_metadata.h": "21c0bb648c1adf258c5b3a9447c7282656cea37385d4032fe43e9019df9d1e9f",
+    "native_header_test.cc": "02084c7d7416f36cea344f653de37f7e30329ea57cde7f3be48ff52ab88de490",
+    "native_header_cases.py": "1e7657699ae0f6401fc201a1dcb26daef77c6c992bc9d85d6d53e3cd885a3ffd",
+    "native_header_cases.inc": "41933c853b3cbe0d0f5378a473cfd507ad27776102d36bdddc4379612a73ad31",
+    "native_color.c": "1a9e2fa50729ecf515dec6e2e2ab56cfec1ac7b4cc91beff826d342b1c075d84",
+    "native_color.h": "e7c5a93ebe690cc868a47fcc8083c748d3562bd20b3d0236e0430da5c7388860",
+    "native_metadata_fixture_check.py": "88292c5becdda5c63645dce2887350f817520317dc03f52fd5e8f674743b63c8",
+    "sequential.py": "e29ea4a45e5526c9cdfcd0d4b0d945f226d9e71fdd0186c73bce21e25ca7b633",
+    "BUILD.bazel": "7e66fe69171f17654118840386840b09b978b1ede96d501ebd33660f9dda1cf1"
+  },
+  "test_log_sha256": "9526154ff53e337bbe4797dc4d3a4e21a80af26fa7fa757a60a015c6a65893db",
+  "build_log_sha256": "d6e73ec47005197a0a54a96e78463628a795baf23eaef78d9dc21c828a6c8fc7",
+  "fixture_comparison_sha256": "3735ff83ec5d6dc3932b0ee90398fc1877ec502eead9f8018fa3e6c6f54ade4c",
+  "oracle_requalification": {
+    "sequential-small.json": "8280eaa72ca6cb480a40f449994e0ec4f65d506dba342e5f20b34fb6631d5562",
+    "sequential-rejections.json": "610b890a0967c6de1ed0897352eadec2cff727a5e94175ad3cf444610323fd65"
+  },
+  "scope": "Native header/color facts and exact device metadata/codebooks, independent input matrices and malformed families, complete public-libjpeg alias control, public header color interpretation, unread poisoned entropy, and preserved GPU-fixture equality including all sixteen prior color cases. Three u16-extent fixtures exceed libjpeg's 65500 limit and retain independently checked native JFIF/444 semantics. No new GPU execution, serving qualification, performance claim, or selected public ABI."
+}

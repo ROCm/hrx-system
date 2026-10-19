@@ -1102,4 +1102,30 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_cc_binary(
+  NAME
+    codec_reference
+  SRCS
+    "${PROJECT_SOURCE_DIR}/experimental/codec_reference/resize_command_probe.cc"
+  DEPS
+    ::test_compiler
+    ::test_device
+    iree::base
+    iree::base::tooling::flags
+    iree::hal
+    iree::hal::utils::statistics_sink
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::host
+    loom::serve::runtime::program::jit
+    loom::serve::testing::compiler
+    loom::serve::testing::device
+  TESTONLY
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

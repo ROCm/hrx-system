@@ -1,0 +1,662 @@
+{
+  "case": "primary-r3-w128",
+  "scope": "Poisoned compressed-input to bounded native RGB resize; original entropy, IDCT and exact model filter order.",
+  "source_fixture": "/tmp/codec-jpeg-device-y6frb_3u/mixed-current",
+  "input_hashes": {
+    "tables.npy": "233c031f82134752035812d5936a1b402b143cc91d07c812492438d2be971661",
+    "blocks.npy": "82a6d0abc256c03f006b650f6007f0abe57a59ec44a4b4e338c965286f3250ed",
+    "geometry.npy": "4490d5dd90c71c3cdc02655390f1b6ab5818bee0af871f6bc9126494a2847f1c",
+    "quantization.npy": "331b3f31044313a00672a38554488f36e5ae9c46a73952e7d5a799f28da107eb",
+    "zigzag.npy": "f0770bf88488cce5ee4dce7f87339bb84790d5b4a24af5a10833994ea9bda8f2",
+    "compressed.npy": "cbd76331d5548f1617b483b41bfb58be29184aa72b541bc5df8d96beb35ed300",
+    "headers.npy": "98499ff7d9dd49798b15bf5280e7d10a7cc265e836731b3d171d9434815a2db7",
+    "entropy.npy": "b57e184ad1e81d12d4746a21cdc2b70cf9880ad91a4bd27ecacbac216e7e91d6",
+    "segments.npy": "964b555b8d4b6e4db9637fa7acd2cb4f211a87694902bcb54c8c580ec5812b4d",
+    "intervals.npy": "b5296bff49f9da9ccaf934159ed24a884afd8c93ded5390be698fff41e4c5f61",
+    "records.npy": "d2446721fe8911ec698969bda7c8416c7b958719cda20a52212526a9fffcae07",
+    "prefixes.npy": "d88bb87b6ee35f0eeb69a5bb5184b67f321e5ec6caba403889e9dd9d46a7138c",
+    "errors.npy": "7116b86a77b5ac95fd6b3244429ee73b9b0a33c2c07ec1db962bc470545e33d3",
+    "schedule.npy": "36d05ff28a041651492349f49737b87aa47246eca97ed4c5dd38a194bf91f5d7",
+    "jobs.npy": "6c964621f8f38454e65d39d13fc313fbc04d69c2d8b2399a17c301d1329f10f2",
+    "expected.npy": "4fc4b16d3a56e34a3c90cde561546bb766368e63e82e3e1e2600c5eb6a5083c5",
+    "points.npy": "e7a5ab91ebe3df3327ef192b8be211f3c331bd4c50ee987928240974ecad56f5",
+    "bridges.npy": "3d23be6b7ec2a85d5d32536246905ffaaa3aab8fe2a7f84802c8e9fd53f15725",
+    "suffixes.npy": "032688fa4d885207c6d6cf3aca8e9d33e6e8ec9929db150cc30056e262d1a2a5",
+    "ranges.npy": "631d4802332cc8c3d22cfcde32ac22e0613af251ed44f62e4d39ae67ba9b2184",
+    "pixels.npy": "fae8768fdd6de73c8646f111b5101408f9ae3eb9e427cb9fe9a8116e9fa97eae",
+    "rgb.npy": "4be1e7843a9de2b11c53c396ffc5b3d05b3000ede88a640adc08dbf998518c14"
+  },
+  "images": [
+    {
+      "name": "012mp-bus.jpg.r0.jpg",
+      "rows": 189,
+      "row_offset": 0,
+      "pixel_word_count": 72584,
+      "interval_count": 12988,
+      "source": [
+        4032,
+        3024
+      ],
+      "target": [
+        1152,
+        864
+      ],
+      "output_offset": 0,
+      "output_bytes": 2985984,
+      "horizontal_rows": 30,
+      "horizontal_bytes": 414720,
+      "output_sha256": "1814e73c296f30373fd37e3f5bb0a711697486372e0617110ae774ae0791a642"
+    },
+    {
+      "name": "006mp-cathedral.jpg.r0.jpg",
+      "rows": 376,
+      "row_offset": 189,
+      "pixel_word_count": 36008,
+      "interval_count": 3205,
+      "source": [
+        2000,
+        3008
+      ],
+      "target": [
+        576,
+        864
+      ],
+      "output_offset": 2986016,
+      "output_bytes": 1492992,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 152064,
+      "output_sha256": "9f5699c6a07b627e374da81e3e48596c839dc4e7d5d8d187c4dd5e6e52041469"
+    },
+    {
+      "name": "synthetic-1024.jpg.r0.jpg",
+      "rows": 48,
+      "row_offset": 565,
+      "pixel_word_count": 18440,
+      "interval_count": 1586,
+      "source": [
+        1024,
+        768
+      ],
+      "target": [
+        448,
+        336
+      ],
+      "output_offset": 4479040,
+      "output_bytes": 451584,
+      "horizontal_rows": 26,
+      "horizontal_bytes": 139776,
+      "output_sha256": "3e2579ba31a16b43297a51ba3ae5e8ea4e3db912f37e56eda687b8c994500080"
+    },
+    {
+      "name": "synthetic-256.jpg.r0.jpg",
+      "rows": 16,
+      "row_offset": 613,
+      "pixel_word_count": 4616,
+      "interval_count": 128,
+      "source": [
+        256,
+        256
+      ],
+      "target": [
+        112,
+        112
+      ],
+      "output_offset": 4930656,
+      "output_bytes": 37632,
+      "horizontal_rows": 26,
+      "horizontal_bytes": 34944,
+      "output_sha256": "f117d6cc403ecfed6aa1d935d1f07a18f23fc8027eba75561c10de1352bb1830"
+    },
+    {
+      "name": "012mp-bus.jpg.r0.jpg",
+      "rows": 189,
+      "row_offset": 629,
+      "pixel_word_count": 72584,
+      "interval_count": 12988,
+      "source": [
+        4032,
+        3024
+      ],
+      "target": [
+        1152,
+        864
+      ],
+      "output_offset": 4968320,
+      "output_bytes": 2985984,
+      "horizontal_rows": 30,
+      "horizontal_bytes": 414720,
+      "output_sha256": "1814e73c296f30373fd37e3f5bb0a711697486372e0617110ae774ae0791a642"
+    },
+    {
+      "name": "006mp-cathedral.jpg.r0.jpg",
+      "rows": 376,
+      "row_offset": 818,
+      "pixel_word_count": 36008,
+      "interval_count": 3205,
+      "source": [
+        2000,
+        3008
+      ],
+      "target": [
+        576,
+        864
+      ],
+      "output_offset": 7954336,
+      "output_bytes": 1492992,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 152064,
+      "output_sha256": "9f5699c6a07b627e374da81e3e48596c839dc4e7d5d8d187c4dd5e6e52041469"
+    },
+    {
+      "name": "synthetic-1024.jpg.r0.jpg",
+      "rows": 48,
+      "row_offset": 1194,
+      "pixel_word_count": 18440,
+      "interval_count": 1586,
+      "source": [
+        1024,
+        768
+      ],
+      "target": [
+        448,
+        336
+      ],
+      "output_offset": 9447360,
+      "output_bytes": 451584,
+      "horizontal_rows": 26,
+      "horizontal_bytes": 139776,
+      "output_sha256": "3e2579ba31a16b43297a51ba3ae5e8ea4e3db912f37e56eda687b8c994500080"
+    },
+    {
+      "name": "synthetic-256.jpg.r0.jpg",
+      "rows": 16,
+      "row_offset": 1242,
+      "pixel_word_count": 4616,
+      "interval_count": 128,
+      "source": [
+        256,
+        256
+      ],
+      "target": [
+        112,
+        112
+      ],
+      "output_offset": 9898976,
+      "output_bytes": 37632,
+      "horizontal_rows": 26,
+      "horizontal_bytes": 34944,
+      "output_sha256": "f117d6cc403ecfed6aa1d935d1f07a18f23fc8027eba75561c10de1352bb1830"
+    },
+    {
+      "name": "012mp-bus.jpg.r0.jpg",
+      "rows": 189,
+      "row_offset": 1258,
+      "pixel_word_count": 72584,
+      "interval_count": 12988,
+      "source": [
+        4032,
+        3024
+      ],
+      "target": [
+        1152,
+        864
+      ],
+      "output_offset": 9936640,
+      "output_bytes": 2985984,
+      "horizontal_rows": 30,
+      "horizontal_bytes": 414720,
+      "output_sha256": "1814e73c296f30373fd37e3f5bb0a711697486372e0617110ae774ae0791a642"
+    },
+    {
+      "name": "006mp-cathedral.jpg.r0.jpg",
+      "rows": 376,
+      "row_offset": 1447,
+      "pixel_word_count": 36008,
+      "interval_count": 3205,
+      "source": [
+        2000,
+        3008
+      ],
+      "target": [
+        576,
+        864
+      ],
+      "output_offset": 12922656,
+      "output_bytes": 1492992,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 152064,
+      "output_sha256": "9f5699c6a07b627e374da81e3e48596c839dc4e7d5d8d187c4dd5e6e52041469"
+    },
+    {
+      "name": "synthetic-1024.jpg.r0.jpg",
+      "rows": 48,
+      "row_offset": 1823,
+      "pixel_word_count": 18440,
+      "interval_count": 1586,
+      "source": [
+        1024,
+        768
+      ],
+      "target": [
+        448,
+        336
+      ],
+      "output_offset": 14415680,
+      "output_bytes": 451584,
+      "horizontal_rows": 26,
+      "horizontal_bytes": 139776,
+      "output_sha256": "3e2579ba31a16b43297a51ba3ae5e8ea4e3db912f37e56eda687b8c994500080"
+    },
+    {
+      "name": "synthetic-256.jpg.r0.jpg",
+      "rows": 16,
+      "row_offset": 1871,
+      "pixel_word_count": 4616,
+      "interval_count": 128,
+      "source": [
+        256,
+        256
+      ],
+      "target": [
+        112,
+        112
+      ],
+      "output_offset": 14867296,
+      "output_bytes": 37632,
+      "horizontal_rows": 26,
+      "horizontal_bytes": 34944,
+      "output_sha256": "f117d6cc403ecfed6aa1d935d1f07a18f23fc8027eba75561c10de1352bb1830"
+    },
+    {
+      "name": "012mp-bus.jpg.r0.jpg",
+      "rows": 189,
+      "row_offset": 1887,
+      "pixel_word_count": 72584,
+      "interval_count": 12988,
+      "source": [
+        4032,
+        3024
+      ],
+      "target": [
+        1152,
+        864
+      ],
+      "output_offset": 14904960,
+      "output_bytes": 2985984,
+      "horizontal_rows": 30,
+      "horizontal_bytes": 414720,
+      "output_sha256": "1814e73c296f30373fd37e3f5bb0a711697486372e0617110ae774ae0791a642"
+    },
+    {
+      "name": "006mp-cathedral.jpg.r0.jpg",
+      "rows": 376,
+      "row_offset": 2076,
+      "pixel_word_count": 36008,
+      "interval_count": 3205,
+      "source": [
+        2000,
+        3008
+      ],
+      "target": [
+        576,
+        864
+      ],
+      "output_offset": 17890976,
+      "output_bytes": 1492992,
+      "horizontal_rows": 22,
+      "horizontal_bytes": 152064,
+      "output_sha256": "9f5699c6a07b627e374da81e3e48596c839dc4e7d5d8d187c4dd5e6e52041469"
+    },
+    {
+      "name": "synthetic-1024.jpg.r0.jpg",
+      "rows": 48,
+      "row_offset": 2452,
+      "pixel_word_count": 18440,
+      "interval_count": 1586,
+      "source": [
+        1024,
+        768
+      ],
+      "target": [
+        448,
+        336
+      ],
+      "output_offset": 19384000,
+      "output_bytes": 451584,
+      "horizontal_rows": 26,
+      "horizontal_bytes": 139776,
+      "output_sha256": "3e2579ba31a16b43297a51ba3ae5e8ea4e3db912f37e56eda687b8c994500080"
+    },
+    {
+      "name": "synthetic-256.jpg.r0.jpg",
+      "rows": 16,
+      "row_offset": 2500,
+      "pixel_word_count": 4616,
+      "interval_count": 128,
+      "source": [
+        256,
+        256
+      ],
+      "target": [
+        112,
+        112
+      ],
+      "output_offset": 19835616,
+      "output_bytes": 37632,
+      "horizontal_rows": 26,
+      "horizontal_bytes": 34944,
+      "output_sha256": "f117d6cc403ecfed6aa1d935d1f07a18f23fc8027eba75561c10de1352bb1830"
+    }
+  ],
+  "ranges": {
+    "tables": {
+      "root": "input",
+      "offset": 176,
+      "bytes": 524320,
+      "elements": 131080,
+      "type": "i32"
+    },
+    "blocks": {
+      "root": "input",
+      "offset": 524528,
+      "bytes": 288,
+      "elements": 72,
+      "type": "i32"
+    },
+    "geometry": {
+      "root": "input",
+      "offset": 524848,
+      "bytes": 2720,
+      "elements": 680,
+      "type": "i32"
+    },
+    "quantization": {
+      "root": "input",
+      "offset": 527600,
+      "bytes": 12320,
+      "elements": 3080,
+      "type": "i32"
+    },
+    "zigzag": {
+      "root": "input",
+      "offset": 539952,
+      "bytes": 288,
+      "elements": 72,
+      "type": "i32"
+    },
+    "images": {
+      "root": "input",
+      "offset": 540272,
+      "bytes": 1184,
+      "elements": 296,
+      "type": "i32"
+    },
+    "plans": {
+      "root": "input",
+      "offset": 541488,
+      "bytes": 448,
+      "elements": 112,
+      "type": "i32"
+    },
+    "compressed": {
+      "root": "input",
+      "offset": 541968,
+      "bytes": 18596128,
+      "elements": 4649032,
+      "type": "i32"
+    },
+    "resize_plans": {
+      "root": "input",
+      "offset": 19138128,
+      "bytes": 896,
+      "elements": 224,
+      "type": "i32"
+    },
+    "filter_indices": {
+      "root": "input",
+      "offset": 19139056,
+      "bytes": 142976,
+      "elements": 35744,
+      "type": "i32"
+    },
+    "filter_weights": {
+      "root": "input",
+      "offset": 19282064,
+      "bytes": 918144,
+      "elements": 229536,
+      "type": "i32"
+    },
+    "filter_tiles": {
+      "root": "input",
+      "offset": 20200240,
+      "bytes": 4608,
+      "elements": 1152,
+      "type": "i32"
+    },
+    "entropy": {
+      "root": "output",
+      "offset": 0,
+      "bytes": 18598400,
+      "elements": 4649600,
+      "type": "i32"
+    },
+    "segments": {
+      "root": "output",
+      "offset": 18598432,
+      "bytes": 544,
+      "elements": 136,
+      "type": "i32"
+    },
+    "intervals": {
+      "root": "output",
+      "offset": 18599008,
+      "bytes": 2906144,
+      "elements": 726536,
+      "type": "i32"
+    },
+    "pixels": {
+      "root": "output",
+      "offset": 21505184,
+      "bytes": 2106368,
+      "elements": 526592,
+      "type": "i32"
+    },
+    "streams": {
+      "root": "output",
+      "offset": 23611584,
+      "bytes": 448,
+      "elements": 112,
+      "type": "i32"
+    },
+    "heads": {
+      "root": "output",
+      "offset": 23612064,
+      "bytes": 10064,
+      "elements": 2516,
+      "type": "i32"
+    },
+    "pending": {
+      "root": "output",
+      "offset": 23622160,
+      "bytes": 10064,
+      "elements": 2516,
+      "type": "i32"
+    },
+    "decoded": {
+      "root": "output",
+      "offset": 23632256,
+      "bytes": 10064,
+      "elements": 2516,
+      "type": "i32"
+    },
+    "color_claimed": {
+      "root": "output",
+      "offset": 23642352,
+      "bytes": 10064,
+      "elements": 2516,
+      "type": "i32"
+    },
+    "color_done": {
+      "root": "output",
+      "offset": 23652448,
+      "bytes": 10064,
+      "elements": 2516,
+      "type": "i32"
+    },
+    "links": {
+      "root": "output",
+      "offset": 23662544,
+      "bytes": 363268,
+      "elements": 90817,
+      "type": "i32"
+    },
+    "cursors": {
+      "root": "output",
+      "offset": 24025856,
+      "bytes": 2906144,
+      "elements": 726536,
+      "type": "i32"
+    },
+    "records": {
+      "root": "output",
+      "offset": 26932032,
+      "bytes": 72672,
+      "elements": 18168,
+      "type": "i32"
+    },
+    "prefixes": {
+      "root": "output",
+      "offset": 27004736,
+      "bytes": 18192,
+      "elements": 4548,
+      "type": "i32"
+    },
+    "errors": {
+      "root": "output",
+      "offset": 27022960,
+      "bytes": 288,
+      "elements": 72,
+      "type": "i32"
+    },
+    "schedule": {
+      "root": "output",
+      "offset": 27023280,
+      "bytes": 64,
+      "elements": 16,
+      "type": "i32"
+    },
+    "jobs": {
+      "root": "output",
+      "offset": 27023376,
+      "bytes": 290592,
+      "elements": 72648,
+      "type": "i32"
+    },
+    "expected": {
+      "root": "output",
+      "offset": 27314000,
+      "bytes": 581152,
+      "elements": 145288,
+      "type": "i32"
+    },
+    "points": {
+      "root": "output",
+      "offset": 27895184,
+      "bytes": 1743392,
+      "elements": 435848,
+      "type": "i32"
+    },
+    "bridges": {
+      "root": "output",
+      "offset": 29638608,
+      "bytes": 581152,
+      "elements": 145288,
+      "type": "i32"
+    },
+    "suffixes": {
+      "root": "output",
+      "offset": 30219792,
+      "bytes": 581664,
+      "elements": 145416,
+      "type": "i32"
+    },
+    "ranges": {
+      "root": "output",
+      "offset": 30801488,
+      "bytes": 581664,
+      "elements": 145416,
+      "type": "i32"
+    },
+    "horizontal": {
+      "root": "output",
+      "offset": 31383184,
+      "bytes": 2966528,
+      "elements": 741632,
+      "type": "i32"
+    },
+    "provisional": {
+      "root": "output",
+      "offset": 34349744,
+      "bytes": 19873280,
+      "elements": 19873280,
+      "type": "i8"
+    },
+    "resize_rows": {
+      "root": "output",
+      "offset": 54223056,
+      "bytes": 64,
+      "elements": 16,
+      "type": "i32"
+    },
+    "resize_claimed": {
+      "root": "output",
+      "offset": 54223152,
+      "bytes": 34816,
+      "elements": 8704,
+      "type": "i32"
+    },
+    "resize_done": {
+      "root": "output",
+      "offset": 54258000,
+      "bytes": 34816,
+      "elements": 8704,
+      "type": "i32"
+    },
+    "resized": {
+      "root": "output",
+      "offset": 54292848,
+      "bytes": 19873280,
+      "elements": 19873280,
+      "type": "i8"
+    },
+    "validity": {
+      "root": "output",
+      "offset": 74166160,
+      "bytes": 64,
+      "elements": 16,
+      "type": "i32"
+    }
+  },
+  "root_bytes": {
+    "input": 20204880,
+    "output": 74166256
+  },
+  "configuration": {
+    "jpeg": {
+      "chunk_bytes": 1024,
+      "output_partitions": 4,
+      "segments": 16
+    },
+    "input": {
+      "tiles": 821,
+      "entropy_padding_words": 32
+    },
+    "stream": {
+      "rows": 3,
+      "workers": 128
+    }
+  },
+  "repetitions": 8,
+  "guard_bytes": 940,
+  "source_sha256": "c4cddfed2a1fcd031f271a15ed6b6fc1c63ac722c2745216d4e91a268efb4e21"
+}

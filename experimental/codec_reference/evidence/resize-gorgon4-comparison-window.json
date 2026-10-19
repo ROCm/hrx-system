@@ -1,0 +1,66 @@
+{
+  "phase": "compare",
+  "worker": {
+    "kind": "gorgon4-native",
+    "pid": 12525,
+    "binary": "/proc/12525/root/run/bureau/package/teleport-capture-runtime/bin/bureau-build-cell",
+    "storage": "/proc/12525/root/run/bureau/volume/teleport-corporate-worker/storage"
+  },
+  "before": {
+    "gpus": {
+      "/sys/devices/pci0000:00/0000:00:08.1/0000:c2:00.0": {
+        "vendor": "0x1002",
+        "device": "0x1586",
+        "gpu_busy_percent": "0",
+        "mem_info_vram_used": "386494464"
+      }
+    },
+    "live_kfd": [],
+    "native_workers": [
+      12525
+    ]
+  },
+  "controls": [
+    {
+      "hold": {
+        "Owner": "codec-jpeg-resize-20261019",
+        "State": "held",
+        "Active": 0,
+        "Failure": "",
+        "Pending": 0
+      }
+    },
+    {
+      "resume": {
+        "Owner": "",
+        "State": "accepting",
+        "Active": 0,
+        "Failure": "",
+        "Pending": 0
+      }
+    }
+  ],
+  "returncode": 0,
+  "after_worker": {
+    "Owner": "",
+    "State": "accepting",
+    "Active": 0,
+    "Failure": "",
+    "Pending": 0
+  },
+  "wall_seconds": 166.0770392530012,
+  "after": {
+    "gpus": {
+      "/sys/devices/pci0000:00/0000:00:08.1/0000:c2:00.0": {
+        "vendor": "0x1002",
+        "device": "0x1586",
+        "gpu_busy_percent": "89",
+        "mem_info_vram_used": "386494464"
+      }
+    },
+    "live_kfd": [],
+    "native_workers": [
+      12525
+    ]
+  }
+}

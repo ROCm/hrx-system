@@ -1,0 +1,24 @@
+{
+  "scope": "Measured live image buffer backing plus exact named logical capacities; excludes compiler/driver/code and host fixture mirrors. Allocator peak counters return zero and are not evidence of zero memory.",
+  "live_image_backing_bytes_opt": 94371148,
+  "logical_root_bytes": {
+    "input": 20204880,
+    "output": 74166256
+  },
+  "groups": {
+    "compressed input": 18596128,
+    "unstuffed entropy": 18598400,
+    "private and published final RGB": 39746560,
+    "component and horizontal rings": 5072896,
+    "tables, plans, queue state and certificates": 12357152
+  },
+  "old_full_resolution_decode_buffers_bytes": 425547140,
+  "reduction_fraction": 0.7782357367035765,
+  "12mp_component_ring_bytes": 290304,
+  "12mp_horizontal_ring_bytes": 414720,
+  "12mp_old_component_and_rgb_bytes": 54867456,
+  "cpu_maximum_row_workspace_per_job_bytes": 270144,
+  "cpu_retained_final_rgb_bytes": 19872768,
+  "cpu_process_peak_rss_not_device_memory_kib": 53364,
+  "memory_parity_proven": false
+}

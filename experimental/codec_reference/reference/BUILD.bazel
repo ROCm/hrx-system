@@ -1,0 +1,35 @@
+# Copyright 2026 The IREE Authors
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cc.bzl", "iree_cc_binary")
+load("//build_tools/bazel:python.bzl", "iree_py_test")
+
+package(default_visibility = ["//visibility:private"])
+
+iree_py_test(
+    name = "check_test",
+    srcs = [
+        "check_test.py",
+        "sequential.py",
+    ],
+    data = ["probe.jsonl"],
+    imports = ["."],
+)
+
+iree_cc_binary(
+    name = "color_oracle",
+    srcs = ["color_oracle.cc"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = ["@libjpeg_turbo//:jpeg"],
+)
+
+iree_cc_binary(
+    name = "float_reference",
+    srcs = [
+        "float_factor.h",
+        "float_reference.cc",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    deps = ["@libjpeg_turbo//:jpeg"],
+)

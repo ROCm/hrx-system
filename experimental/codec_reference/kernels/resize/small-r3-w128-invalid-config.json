@@ -1,0 +1,15 @@
+{
+  "jpeg": {
+    "chunk_bytes": 1024,
+    "output_partitions": 4,
+    "segments": 16
+  },
+  "input": {
+    "tiles": 1,
+    "entropy_padding_words": 32
+  },
+  "stream": {
+    "rows": 3,
+    "workers": 128
+  }
+}
