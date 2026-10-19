@@ -17,6 +17,8 @@ iree_py_library(
     "client_test_util.py"
     "independent_test.py"
     "registration_test.py"
+  IMPORTS
+    "."
   DEPS
     loom::serve::server::catalog_test_util
 )

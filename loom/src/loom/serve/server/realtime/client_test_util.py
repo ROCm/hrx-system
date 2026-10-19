@@ -12,7 +12,7 @@ import socket
 import struct
 from urllib.parse import quote
 
-from loom.src.loom.serve.server.catalog_test_util import check_pcm, complete
+from catalog_test_util import check_pcm, complete
 
 
 class Client:

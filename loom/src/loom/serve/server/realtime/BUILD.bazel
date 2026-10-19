@@ -23,6 +23,7 @@ loom_py_library(
         "independent_test.py",
         "registration_test.py",
     ],
+    imports = ["."],
     deps = ["//loom/src/loom/serve/server:catalog_test_util"],
 )
 
