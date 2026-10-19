@@ -154,6 +154,8 @@ enum loom_serve_text_chat_flag_bits_e {
   LOOM_SERVE_TEXT_CHAT_FLAG_STREAM = 1u << 0,
   // Append a final usage chunk and include usage:null on preceding chunks.
   LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE = 1u << 1,
+  // This turn forbids tool calls without removing declared tools from history.
+  LOOM_SERVE_TEXT_CHAT_FLAG_TOOL_CALLS_DISABLED = 1u << 2,
 };
 typedef uint32_t loom_serve_text_chat_flags_t;
 
@@ -181,13 +183,13 @@ typedef struct loom_serve_text_chat_t {
   } output;
   // Maximum selected output tokens, including a terminal EOS prediction.
   iree_host_size_t max_tokens;
-  // Validated transport and usage options; inference is independent of these.
+  // Validated transport, usage, and output-permission options.
   loom_serve_text_chat_flags_t flags;
-  // Effective tool declarations borrowing the HTTP body, or [] when disabled.
+  // Declared tools borrowing the HTTP body, independent of this turn's choice.
   iree_string_view_t tool_schemas;
   // Host allocator owning the tool descriptor array.
   iree_allocator_t host_allocator;
-  // Number of enabled tool descriptors; zero when tool_choice is none.
+  // Number of declared tool descriptors, including on tool-free turns.
   iree_host_size_t tool_count;
   // Allocated descriptor capacity.
   iree_host_size_t tool_capacity;

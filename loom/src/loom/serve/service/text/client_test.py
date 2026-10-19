@@ -178,10 +178,10 @@ class ClientTest(unittest.TestCase):
                         )
                         if streaming:
                             self.assertEqual(
-                                self.check_stream(result, include_usage=False), "bx"
+                                self.check_stream(result, include_usage=False), "bb"
                             )
                         else:
-                            self.check_completion(result, "bx", "length", 4, 2)
+                            self.check_completion(result, "bb", "length", 5, 2)
                     # A completed inference proves model readiness; the bound
                     # listener alone does not publish a usable model.
                     models = control(address, "GET", "/v1/models", 200)["data"]
@@ -335,7 +335,7 @@ class ClientTest(unittest.TestCase):
                     self.assertIn("message", failed[-1]["error"])
 
                     # A source parser cannot publish structured calls when the
-                    # request's effective catalog disables every tool.
+                    # request disables calls, even with a declared catalog.
                     calls = (
                         json.dumps(
                             [

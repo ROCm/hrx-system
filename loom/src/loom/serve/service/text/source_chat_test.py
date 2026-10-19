@@ -124,7 +124,7 @@ class RequestTest(unittest.TestCase):
         self.assertIn("base64 PNG, JPEG, GIF, WebP, or PAM data URL", result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def test_tool_choice_controls_the_effective_catalog(self):
+    def test_tool_choice_preserves_declared_catalog_and_prompt(self):
         tool = {
             "type": "function",
             "function": {
@@ -133,20 +133,20 @@ class RequestTest(unittest.TestCase):
                 "parameters": {"type": "object", "properties": {}},
             },
         }
-        for choice, count in ((None, 1), ("auto", 1), ("none", 0)):
+        for choice in (None, "auto", "none"):
             with self.subTest(choice=choice):
                 options = {} if choice is None else {"tool_choice": choice}
                 result = self.execute(self.request(tools=[tool], **options))
                 self.assertEqual(result.returncode, 0, result.stderr)
                 value = json.loads(result.stdout)
-                self.assertEqual(value["declared_tool_count"], count)
-                self.assertEqual(value["prompt"], "#" * count + "abxa")
-                self.assertEqual(value["tokens"], [3] * count + [0, 1, 2, 0])
+                self.assertEqual(value["declared_tool_count"], 1)
+                self.assertEqual(value["prompt"], "#abxa")
+                self.assertEqual(value["tokens"], [3, 0, 1, 2, 0])
 
         request = self.request(tools=[tool], tool_choice="none")
         result = self.execute(request.replace('"none"', '"n\\u006fne"'))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["prompt"], "abxa")
+        self.assertEqual(json.loads(result.stdout)["prompt"], "#abxa")
 
         result = self.execute(self.request(tools=[tool, tool], tool_choice="none"))
         self.assertNotEqual(result.returncode, 0)
