@@ -115,6 +115,7 @@ loom_cc_library(
     loom::ops::index
     loom::ops::kernel
     loom::ops::sanitizer
+    loom::ops::scf
     loom::ops::vector
     loom::ops::view
     loom::pass::options

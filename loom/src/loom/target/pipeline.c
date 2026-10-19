@@ -147,6 +147,17 @@ loom_target_pipeline_build_sanitizer_assertion_materialization(
       builder, IREE_SV("sanitizer-materialize-assertions"));
 }
 
+static iree_status_t loom_target_pipeline_build_sanitizer_race_finalization(
+    loom_builder_t* builder, void* user_data) {
+  const loom_target_pipeline_build_context_t* context = user_data;
+  loom_target_control_flow_lowering_t lowering;
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_resolve_control_flow_lowering(
+      context->options, &lowering));
+  return lowering == LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG
+             ? loom_target_pipeline_build_run(builder, IREE_SV("scf-to-cfg"))
+             : iree_ok_status();
+}
+
 static iree_status_t loom_target_pipeline_build_sanitizer_race_observations(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
@@ -154,9 +165,14 @@ static iree_status_t loom_target_pipeline_build_sanitizer_race_observations(
   iree_string_view_t checks_value = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_sanitizer_checks_format(
       context->sanitizer_options.checks, &checks_value));
-  return loom_target_pipeline_build_run_with_string_option(
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(
       builder, IREE_SV("sanitizer-insert-race-observations"), IREE_SV("checks"),
-      checks_value);
+      checks_value));
+  // Vector observations retain loops after ordinary source CFG finalization.
+  loom_op_t* changed = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_sanitizer_race_finalization,
+      user_data, &changed);
 }
 
 static iree_status_t loom_target_pipeline_build_vector_memory_footprint(

@@ -15,6 +15,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/sanitizer/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/pass/options.h"
@@ -383,118 +384,92 @@ static iree_status_t loom_sanitizer_try_instrument_fragment_race_access_op(
   return iree_ok_status();
 }
 
-static iree_status_t loom_sanitizer_vector_static_lane_count(
-    loom_type_t vector_type, bool* out_has_static_lane_count,
-    uint16_t* out_lane_count) {
-  *out_has_static_lane_count = false;
-  *out_lane_count = 0;
-  uint64_t lane_count = 0;
-  if (!loom_type_static_element_count(vector_type, &lane_count)) {
-    return iree_ok_status();
-  }
-  if (lane_count > UINT16_MAX) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "sanitizer race observation vector lane count %llu exceeds max %u",
-        (unsigned long long)lane_count, UINT16_MAX);
-  }
-  *out_has_static_lane_count = true;
-  *out_lane_count = (uint16_t)lane_count;
-  return iree_ok_status();
-}
-
-static void loom_sanitizer_vector_static_lane_indices(loom_type_t vector_type,
-                                                      uint16_t lane_ordinal,
-                                                      int64_t* out_indices) {
-  uint64_t remaining_ordinal = lane_ordinal;
-  const uint8_t rank = loom_type_rank(vector_type);
-  for (uint8_t i = 0; i < rank; ++i) {
-    const uint8_t axis = (uint8_t)(rank - i - 1);
-    const uint64_t dimension_size =
-        (uint64_t)loom_type_dim_static_size_at(vector_type, axis);
-    out_indices[axis] = (int64_t)(remaining_ordinal % dimension_size);
-    remaining_ordinal /= dimension_size;
-  }
-}
-
-static iree_status_t loom_sanitizer_materialize_dynamic_lane_index(
-    loom_module_t* module, loom_rewriter_t* rewriter,
-    loom_value_id_t base_index, int64_t lane_offset,
-    loom_location_id_t location, loom_value_id_t* out_index) {
-  *out_index = base_index;
-  if (lane_offset == 0) {
-    return iree_ok_status();
-  }
-
-  const loom_type_t index_type = loom_module_value_type(module, base_index);
-  loom_op_t* offset_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_index_constant_build(&rewriter->builder, loom_attr_i64(lane_offset),
-                                index_type, location, &offset_op));
-  loom_op_t* add_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_add_build(
-      &rewriter->builder, base_index, loom_index_constant_result(offset_op),
-      index_type, location, &add_op));
-  *out_index = loom_index_add_result(add_op);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_sanitizer_build_vector_lane_race_access(
+// Traverse logical vector axes without cloning the race detector per element.
+// Typed view indexing retains the original layout, including strided rows.
+static iree_status_t loom_sanitizer_build_vector_race_access(
     loom_module_t* module, loom_rewriter_t* rewriter,
     loom_sanitizer_race_access_kind_t kind, loom_value_id_t view,
     loom_value_slice_t indices, loom_attribute_t static_indices,
-    loom_type_t vector_type, const int64_t* lane_indices, bool atomic,
-    loom_atomic_ordering_t ordering, loom_atomic_scope_t scope,
-    loom_location_id_t source_location, loom_op_t** out_op) {
-  *out_op = NULL;
+    loom_type_t vector_type, loom_location_id_t location) {
   const uint8_t view_rank = (uint8_t)static_indices.count;
   const uint8_t vector_rank = loom_type_rank(vector_type);
   const uint8_t first_vector_axis = (uint8_t)(view_rank - vector_rank);
-  int64_t lane_static_indices[LOOM_TYPE_MAX_RANK] = {0};
-  loom_value_id_t lane_dynamic_indices[LOOM_TYPE_MAX_RANK] = {0};
+  int64_t observed_static_indices[LOOM_TYPE_MAX_RANK] = {0};
+  loom_value_id_t observed_dynamic_indices[LOOM_TYPE_MAX_RANK] = {0};
   uint16_t source_dynamic_ordinal = 0;
-  uint16_t lane_dynamic_count = 0;
+  uint16_t observed_dynamic_count = 0;
+  uint8_t loop_count = 0;
+  loom_builder_ip_t saved_ips[LOOM_TYPE_MAX_RANK];
+  const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   for (uint8_t axis = 0; axis < view_rank; ++axis) {
-    int64_t lane_offset = 0;
-    if (axis >= first_vector_axis) {
-      lane_offset = lane_indices[axis - first_vector_axis];
-    }
     const int64_t origin = static_indices.i64_array[axis];
+    loom_value_id_t origin_value = LOOM_VALUE_ID_INVALID;
     if (origin == INT64_MIN) {
-      if (source_dynamic_ordinal >= indices.count) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "sanitizer race observation dynamic index count is too small");
+      origin_value = indices.values[source_dynamic_ordinal++];
+    }
+    const int64_t extent = axis < first_vector_axis
+                               ? 1
+                               : loom_type_dim_static_size_at(
+                                     vector_type, axis - first_vector_axis);
+    if (extent == 1) {
+      observed_static_indices[axis] = origin;
+      if (origin == INT64_MIN) {
+        observed_dynamic_indices[observed_dynamic_count++] = origin_value;
       }
-      loom_value_id_t dynamic_index = indices.values[source_dynamic_ordinal++];
-      IREE_RETURN_IF_ERROR(loom_sanitizer_materialize_dynamic_lane_index(
-          module, rewriter, dynamic_index, lane_offset, source_location,
-          &dynamic_index));
-      lane_static_indices[axis] = INT64_MIN;
-      lane_dynamic_indices[lane_dynamic_count++] = dynamic_index;
       continue;
     }
-    if (!iree_checked_add_i64(origin, lane_offset,
-                              &lane_static_indices[axis])) {
-      return iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "sanitizer race observation lane index is not representable");
+    loom_op_t* lower = NULL;
+    loom_op_t* upper = NULL;
+    loom_op_t* step = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_constant_build(
+        &rewriter->builder, loom_attr_i64(0), index_type, location, &lower));
+    IREE_RETURN_IF_ERROR(
+        loom_index_constant_build(&rewriter->builder, loom_attr_i64(extent),
+                                  index_type, location, &upper));
+    IREE_RETURN_IF_ERROR(loom_index_constant_build(
+        &rewriter->builder, loom_attr_i64(1), index_type, location, &step));
+    if (origin_value == LOOM_VALUE_ID_INVALID && origin != 0) {
+      loom_op_t* origin_op = NULL;
+      IREE_RETURN_IF_ERROR(
+          loom_index_constant_build(&rewriter->builder, loom_attr_i64(origin),
+                                    index_type, location, &origin_op));
+      origin_value = loom_index_constant_result(origin_op);
     }
+    loom_op_t* loop = NULL;
+    IREE_RETURN_IF_ERROR(loom_scf_for_build(
+        &rewriter->builder, /*build_flags=*/0,
+        loom_index_constant_result(lower), loom_index_constant_result(upper),
+        loom_index_constant_result(step), /*init=*/NULL, 0,
+        /*result_types=*/NULL, NULL, 0,
+        /*pipeline_depth=*/LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID,
+        /*unroll_policy=*/0, /*unroll_schedule=*/0, location, &loop));
+    saved_ips[loop_count++] = loom_builder_enter_region(
+        &rewriter->builder, loop, loom_scf_for_body(loop));
+    loom_value_id_t index =
+        loom_region_entry_arg_id(loom_scf_for_body(loop), 0);
+    if (origin_value != LOOM_VALUE_ID_INVALID) {
+      loom_op_t* add = NULL;
+      IREE_RETURN_IF_ERROR(loom_index_add_build(
+          &rewriter->builder, origin_value, index, index_type, location, &add));
+      index = loom_index_add_result(add);
+    }
+    observed_static_indices[axis] = INT64_MIN;
+    observed_dynamic_indices[observed_dynamic_count++] = index;
   }
-  if (source_dynamic_ordinal != indices.count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "sanitizer race observation dynamic index count is too large");
+  loom_op_t* observation = NULL;
+  IREE_RETURN_IF_ERROR(loom_sanitizer_build_race_access(
+      module, rewriter, kind, view,
+      (loom_value_slice_t){observed_dynamic_indices, observed_dynamic_count},
+      loom_attr_i64_array(observed_static_indices, view_rank),
+      /*atomic=*/false, /*ordering=*/0, /*scope=*/0, location, &observation));
+  while (loop_count) {
+    loom_op_t* yield_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_scf_yield_build(&rewriter->builder, NULL, 0, location, &yield_op));
+    --loop_count;
+    loom_builder_restore(&rewriter->builder, saved_ips[loop_count]);
   }
-  const loom_value_slice_t lane_dynamic_slice = {
-      .values = lane_dynamic_indices,
-      .count = lane_dynamic_count,
-  };
-  loom_attribute_t lane_static_attr =
-      loom_attr_i64_array(lane_static_indices, static_indices.count);
-  return loom_sanitizer_build_race_access(
-      module, rewriter, kind, view, lane_dynamic_slice, lane_static_attr,
-      atomic, ordering, scope, source_location, out_op);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_sanitizer_try_instrument_vector_race_access_op(
@@ -529,38 +504,20 @@ static iree_status_t loom_sanitizer_try_instrument_vector_race_access_op(
       memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     return iree_ok_status();
   }
-  if (static_indices.kind != LOOM_ATTR_I64_ARRAY ||
-      static_indices.count > LOOM_TYPE_MAX_RANK ||
-      loom_type_rank(vector_type) > static_indices.count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "sanitizer race observation requires a valid vector memory access");
-  }
-
-  bool has_static_lane_count = false;
-  uint16_t lane_count = 0;
-  IREE_RETURN_IF_ERROR(loom_sanitizer_vector_static_lane_count(
-      vector_type, &has_static_lane_count, &lane_count));
-  if (!has_static_lane_count) {
+  if (!loom_type_is_all_static(vector_type)) {
     return loom_sanitizer_emit_unsupported_race_memory_observation(
         pass, module, op,
         IREE_SV("local-memory vector operation has dynamic lane count"));
   }
-  loom_sanitizer_insert_race_observations_statistics_t* statistics =
-      loom_sanitizer_insert_race_observations_statistics(pass);
-  loom_builder_set_before(&rewriter->builder, op);
-  for (uint16_t lane_ordinal = 0; lane_ordinal < lane_count; ++lane_ordinal) {
-    int64_t lane_indices[LOOM_TYPE_MAX_RANK] = {0};
-    loom_sanitizer_vector_static_lane_indices(vector_type, lane_ordinal,
-                                              lane_indices);
-    loom_op_t* observe_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_sanitizer_build_vector_lane_race_access(
-        module, rewriter, kind, view, indices, static_indices, vector_type,
-        lane_indices, /*atomic=*/false, /*ordering=*/0, /*scope=*/0,
-        op->location, &observe_op));
-    (void)observe_op;
-    ++statistics->access_observations_inserted;
+  if (loom_type_has_static_zero_extent(vector_type)) {
+    return iree_ok_status();
   }
+  loom_builder_set_before(&rewriter->builder, op);
+  IREE_RETURN_IF_ERROR(loom_sanitizer_build_vector_race_access(
+      module, rewriter, kind, view, indices, static_indices, vector_type,
+      op->location));
+  ++loom_sanitizer_insert_race_observations_statistics(pass)
+        ->access_observations_inserted;
   return iree_ok_status();
 }
 

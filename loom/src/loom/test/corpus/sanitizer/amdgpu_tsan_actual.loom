@@ -51,6 +51,36 @@ kernel.def @tsan_workgroup_cross_chunk_upper_write_race() {
   kernel.return
 }
 
+// A 2x2 vector in a 2x4 view touches bytes 0, 1, 4, and 5. The
+// distant workitem probes either the final vector element or row padding.
+// This distinguishes the logical footprint from its contiguous bounding range.
+kernel.def @tsan_workgroup_vector_rows() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 192 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%probe_column: index) {
+  %column = index.assume %probe_column [range(%probe_column, 0, 3)] : index
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c191 = index.constant 191 : index
+  %bytes = index.constant 8 : offset
+  %element = scalar.constant 7 : i8
+  %vector = vector.splat %element : vector<2x2xi8>
+  %lane = kernel.workitem.id<x> : index
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<2x4xi8>
+  %first = index.cmp eq, %lane, %c0 : index
+  scf.if %first {
+    vector.store %vector, %view[0, 0] : vector<2x2xi8>, view<2x4xi8>
+  }
+  %last = index.cmp eq, %lane, %c191 : index
+  scf.if %last {
+    view.store %element, %view[%c1, %column] : i8, view<2x4xi8>
+  }
+  kernel.return
+}
+
 kernel.def @tsan_workgroup_wide_current_write_race() {
   %unit = index.constant 1 : index
   %threads = index.constant 2 : index
@@ -372,6 +402,10 @@ func.def @tsan_expected_no_output() {
   func.return
 }
 
+func.def @tsan_expected_no_output_with_column(%probe_column: index) {
+  func.return
+}
+
 check.scenario @tsan_workgroup_write_race_scenario {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %output = check.generate.fill value(0) : tensor<1xi32>
@@ -389,6 +423,25 @@ check.scenario @tsan_workgroup_cross_chunk_upper_write_race_scenario {
     check.compare<@tsan_workgroup_cross_chunk_upper_write_race, @tsan_expected_i32_pair_one>(%output) : (tensor<2xi32>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
       check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", memory_address = 16, prior_access = "write"}, type = "tsan_report"}
+    }
+  }
+  check.return
+}
+
+check.scenario @tsan_workgroup_vector_rows_overlap {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %column = check.literal value(1) : index
+    check.compare<@tsan_workgroup_vector_rows, @tsan_expected_no_output_with_column>(%column) : (index) -> () {
+      check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 1, check = "data_race", current_access = "write", memory = "workgroup", memory_address = 5, prior_access = "write"}, type = "tsan_report"}
+    }
+  }
+  check.return
+}
+
+check.scenario @tsan_workgroup_vector_rows_padding {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %column = check.literal value(2) : index
+    check.compare<@tsan_workgroup_vector_rows, @tsan_expected_no_output_with_column>(%column) : (index) -> () {
     }
   }
   check.return
