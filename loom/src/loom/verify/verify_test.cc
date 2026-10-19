@@ -29,6 +29,7 @@
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
+#include "loom/verify/verify_state.h"
 
 namespace loom {
 namespace {
@@ -2834,10 +2835,10 @@ TEST_F(VerifyTest, LargeModuleManyValues) {
 }
 
 TEST_F(VerifyTest, DeepNestingAtLimit) {
-  // Build IR nested to exactly LOOM_VERIFY_MAX_SCOPE_DEPTH (32) levels.
+  // Build IR nested to exactly LOOM_VERIFY_MAX_SCOPE_DEPTH levels.
   // The module body is scope 0, the test.func body is scope 1, so we
-  // can nest 30 additional isolated_region ops (scopes 2..31).
-  constexpr int kNestingDepth = 30;
+  // can nest LOOM_VERIFY_MAX_SCOPE_DEPTH - 2 additional isolated regions.
+  constexpr int kNestingDepth = LOOM_VERIFY_MAX_SCOPE_DEPTH - 2;
 
   loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   EnterTestFunc(nullptr, 0, nullptr);
@@ -2877,8 +2878,8 @@ TEST_F(VerifyTest, DeepNestingExceedsLimit) {
   // Build IR nested to LOOM_VERIFY_MAX_SCOPE_DEPTH + 1 levels.
   // The verifier should return RESOURCE_EXHAUSTED (not crash, not
   // silently succeed). Module body is scope 0, func body is scope 1,
-  // then 31 isolated_region regions push scopes 2..32 (exceeding 32).
-  constexpr int kNestingDepth = 31;
+  // then one more isolated region attempts to exceed the hard limit.
+  constexpr int kNestingDepth = LOOM_VERIFY_MAX_SCOPE_DEPTH - 1;
 
   loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   EnterTestFunc(nullptr, 0, nullptr);

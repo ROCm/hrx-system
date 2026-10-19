@@ -23,6 +23,9 @@ class VerifyStateTest : public ::testing::Test {
     state_.module = &module_;
     state_.visibility.definition_depths = definition_depths_;
     state_.visibility.minimum_depth = 1;
+    state_.visibility.scope_minimum_depth_storage =
+        state_.visibility.scope_minimum_depths;
+    state_.scope_watermark_storage = state_.scope_watermarks;
   }
   void TearDown() override {
     iree_arena_deinitialize(&state_.arena);
@@ -40,14 +43,16 @@ class VerifyStateTest : public ::testing::Test {
 };
 
 TEST_F(VerifyStateTest, ReusableSortedValuesSupportMembershipAndDuplicates) {
-  const loom_value_id_t first[] = {5, 2, 5, LOOM_VALUE_ID_INVALID, 40};
+  const loom_value_id_t first[] = {5, 2, 5, LOOM_VALUE_ID_INVALID,
+                                   LOOM_VERIFY_MAX_SCOPE_DEPTH + 1};
   IREE_ASSERT_OK(
       loom_verify_sorted_values_assign(&state_, first, IREE_ARRAYSIZE(first)));
   EXPECT_EQ(state_.sorted_values.count, 3u);
   EXPECT_TRUE(loom_verify_sorted_values_contains(&state_, 2));
   EXPECT_TRUE(loom_verify_sorted_values_contains(&state_, 5));
   EXPECT_FALSE(loom_verify_sorted_values_contains(&state_, 3));
-  EXPECT_FALSE(loom_verify_sorted_values_contains(&state_, 40));
+  EXPECT_FALSE(loom_verify_sorted_values_contains(
+      &state_, LOOM_VERIFY_MAX_SCOPE_DEPTH + 1));
   EXPECT_TRUE(loom_verify_sorted_values_contain_duplicate(&state_, 5));
   EXPECT_FALSE(loom_verify_sorted_values_contain_duplicate(&state_, 2));
 
@@ -105,6 +110,15 @@ TEST_F(VerifyStateTest, EveryIsolationDepthAndLimit) {
   IREE_ASSERT_OK(loom_verify_define_value(&state_, 0));
   for (uint32_t depth = 1; depth <= LOOM_VERIFY_MAX_SCOPE_DEPTH; ++depth) {
     IREE_ASSERT_OK(loom_verify_push_scope(&state_, /*isolated=*/true));
+    if (depth <= LOOM_VERIFY_INLINE_SCOPE_DEPTH) {
+      EXPECT_EQ(state_.scope_watermark_storage, state_.scope_watermarks);
+      EXPECT_EQ(state_.visibility.scope_minimum_depth_storage,
+                state_.visibility.scope_minimum_depths);
+    } else {
+      EXPECT_NE(state_.scope_watermark_storage, state_.scope_watermarks);
+      EXPECT_NE(state_.visibility.scope_minimum_depth_storage,
+                state_.visibility.scope_minimum_depths);
+    }
     EXPECT_FALSE(loom_verify_value_is_visible(&state_, depth - 1));
     IREE_ASSERT_OK(loom_verify_define_value(&state_, depth));
     EXPECT_TRUE(loom_verify_value_is_visible(&state_, depth));

@@ -2332,6 +2332,133 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
+  static cxx::ConditionalExpressionAST* parenthesized_conditional(
+      cxx::ExpressionAST* expression) {
+    // Parentheses do not transform a value. Implicit casts do, so leave those
+    // for expression() instead of using the broader unwrap_expression().
+    while (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+      expression = nested->expression;
+    }
+    return cxx::ast_cast<cxx::ConditionalExpressionAST>(expression);
+  }
+
+  struct ConditionalValueFrame {
+    // Source conditional whose unfinished arms this frame owns.
+    cxx::ConditionalExpressionAST* expression;
+    // Source bindings that either arm may replace.
+    std::vector<cxx::Symbol*> written;
+    // Binding components restored before entering the else arm.
+    std::vector<loom_value_id_t> initial;
+    // Structured conditional receiving the two source arm values.
+    loom_op_t* operation;
+    // Insertion point enclosing |operation|.
+    loom_builder_ip_t enclosing;
+    // Leading operation results occupied by the conditional value.
+    iree_host_size_t value_count;
+    // Whether the active operation region is the then arm.
+    bool building_then;
+  };
+
+  ConditionalValueFrame begin_conditional_value(
+      cxx::ConditionalExpressionAST* expression) {
+    if (types_.native_vector(expression->condition->type)) {
+      fail(expression, "vector conditions require lane-wise selection");
+    }
+    auto condition = this->expression(expression->condition).ssa();
+    auto written = live_mutations(expression);
+    auto value_count =
+        types_.partition(expression->type, expression).component_count;
+    std::vector<const cxx::Type*> sources = {expression->type};
+    sources.reserve(1 + written.size());
+    for (auto* symbol : written) {
+      sources.push_back(types_.unqualified_value(symbol->type()));
+    }
+    auto initial = current(written);
+    auto outputs = bind_signature(types_, sources, expression, &builder_);
+    loom_op_t* operation;
+    check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
+                            condition, outputs.types.data(),
+                            outputs.types.size(), nullptr, 0,
+                            locations_.get(expression), &operation));
+    auto enclosing = loom_builder_enter_region(
+        &builder_, operation, loom_scf_if_then_region(operation));
+    return {expression, std::move(written), std::move(initial),
+            operation,  enclosing,          value_count,
+            true};
+  }
+
+  void yield_conditional_value(const ConditionalValueFrame& frame,
+                               Value value) {
+    std::vector<loom_value_id_t> yielded;
+    value.append_to(yielded);
+    auto mutations = current(frame.written);
+    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    loom_op_t* yield;
+    check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
+                               locations_.get(frame.expression), &yield));
+  }
+
+  Value finish_conditional_value(const ConditionalValueFrame& frame) {
+    loom_builder_restore(&builder_, frame.enclosing);
+    bind_values(frame.written,
+                loom_op_results(frame.operation) + frame.value_count);
+    return value_arena_.capture(
+        types_.partition(frame.expression->type, frame.expression),
+        {loom_op_results(frame.operation), frame.value_count});
+  }
+
+  Value conditional_value(cxx::ConditionalExpressionAST* expression) {
+    if (!parenthesized_conditional(expression->iftrueExpression) &&
+        !parenthesized_conditional(expression->iffalseExpression)) {
+      if (types_.native_vector(expression->condition->type)) {
+        fail(expression, "vector conditions require lane-wise selection");
+      }
+      auto condition = this->expression(expression->condition).ssa();
+      return conditional(
+          expression, condition,
+          [&] { return this->expression(expression->iftrueExpression); },
+          [&] { return this->expression(expression->iffalseExpression); });
+    }
+
+    // Generated decision tables commonly form long trees of parenthesized
+    // conditional expressions. Keep the source evaluation and nested scf.if
+    // shape while storing unfinished arms on the heap instead of retaining
+    // one C++ call frame per source level.
+    std::vector<ConditionalValueFrame> frames;
+    frames.push_back(begin_conditional_value(expression));
+    std::optional<Value> value;
+    for (;;) {
+      auto& frame = frames.back();
+      if (!value) {
+        auto* arm = frame.building_then ? frame.expression->iftrueExpression
+                                        : frame.expression->iffalseExpression;
+        if (auto* nested = parenthesized_conditional(arm)) {
+          frames.push_back(begin_conditional_value(nested));
+        } else {
+          value = this->expression(arm);
+        }
+        continue;
+      }
+
+      yield_conditional_value(frame, *value);
+      value.reset();
+      if (frame.building_then) {
+        loom_builder_restore(&builder_, frame.enclosing);
+        bind_values(frame.written, frame.initial.data());
+        loom_builder_enter_region(&builder_, frame.operation,
+                                  loom_scf_if_else_region(frame.operation));
+        frame.building_then = false;
+        continue;
+      }
+
+      value = finish_conditional_value(frame);
+      frames.pop_back();
+      if (frames.empty()) {
+        return *value;
+      }
+    }
+  }
+
   void conditional_object(StorageProjection destination, const cxx::Type* type,
                           cxx::ConditionalExpressionAST* select,
                           bool retained) override {
@@ -2544,13 +2671,7 @@ class Translator final : private Initialization::Evaluation {
       return initialization_.value(ast->type, ast, nullptr, ast);
     }
     if (auto* select = cxx::ast_cast<cxx::ConditionalExpressionAST>(ast)) {
-      if (types_.native_vector(select->condition->type)) {
-        fail(ast, "vector conditions require lane-wise selection");
-      }
-      auto condition = expression(select->condition).ssa();
-      return conditional(
-          ast, condition, [&] { return expression(select->iftrueExpression); },
-          [&] { return expression(select->iffalseExpression); });
+      return conditional_value(select);
     }
 
     if (auto* decision = cxx::ast_cast<cxx::ConditionExpressionAST>(ast)) {

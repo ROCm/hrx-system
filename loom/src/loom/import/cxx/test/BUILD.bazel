@@ -98,6 +98,7 @@ loom_check_test_suite(
         "constexpr_storage.cxx-test",
         "control_invalid.cxx-test",
         "data_models.cxx-test",
+        "deep_conditionals.cxx-test",
         "encoding_schemas.cxx-test",
         "encoding_schemas_invalid.cxx-test",
         "enum_semantics.cxx-test",

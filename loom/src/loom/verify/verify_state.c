@@ -6,6 +6,8 @@
 
 #include "loom/verify/verify_state.h"
 
+#include <string.h>
+
 #include "loom/ops/op_defs.h"
 #include "loom/util/adaptive_sort.h"
 
@@ -125,15 +127,36 @@ bool loom_verify_has_func_signature_scope(const loom_op_vtable_t* vtable) {
 
 iree_status_t loom_verify_push_scope(loom_verify_state_t* state,
                                      bool isolated) {
-  if (state->scope_depth >= LOOM_VERIFY_MAX_SCOPE_DEPTH) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "region nesting depth exceeds verifier limit (%d); the input IR "
-        "has more nesting than the verifier can track",
-        LOOM_VERIFY_MAX_SCOPE_DEPTH);
+  if (state->scope_depth >= LOOM_VERIFY_INLINE_SCOPE_DEPTH) {
+    if (state->scope_depth >= LOOM_VERIFY_MAX_SCOPE_DEPTH) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "region nesting depth exceeds verifier limit (%d); the input IR "
+          "has more nesting than the verifier can track",
+          LOOM_VERIFY_MAX_SCOPE_DEPTH);
+    }
+    if (state->scope_watermark_storage == state->scope_watermarks) {
+      const iree_host_size_t spill_storage_size =
+          LOOM_VERIFY_MAX_SCOPE_DEPTH *
+          (sizeof(iree_host_size_t) + sizeof(uint8_t));
+      uint8_t* spill_storage = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          &state->arena, spill_storage_size, (void**)&spill_storage));
+      iree_host_size_t* spill_watermarks = (iree_host_size_t*)spill_storage;
+      uint8_t* spill_minimum_depths =
+          spill_storage +
+          LOOM_VERIFY_MAX_SCOPE_DEPTH * sizeof(iree_host_size_t);
+      memcpy(spill_watermarks, state->scope_watermarks,
+             sizeof(state->scope_watermarks));
+      memcpy(spill_minimum_depths, state->visibility.scope_minimum_depths,
+             sizeof(state->visibility.scope_minimum_depths));
+      state->scope_watermark_storage = spill_watermarks;
+      state->visibility.scope_minimum_depth_storage = spill_minimum_depths;
+    }
   }
-  state->scope_watermarks[state->scope_depth] = state->defined_stack_count;
-  state->visibility.scope_minimum_depths[state->scope_depth] =
+  state->scope_watermark_storage[state->scope_depth] =
+      state->defined_stack_count;
+  state->visibility.scope_minimum_depth_storage[state->scope_depth] =
       state->visibility.minimum_depth;
   ++state->scope_depth;
   if (isolated) {
@@ -156,10 +179,10 @@ void loom_verify_pop_scope(loom_verify_state_t* state) {
     return;
   }
   --state->scope_depth;
-  loom_verify_restore_definitions(state,
-                                  state->scope_watermarks[state->scope_depth]);
+  loom_verify_restore_definitions(
+      state, state->scope_watermark_storage[state->scope_depth]);
   state->visibility.minimum_depth =
-      state->visibility.scope_minimum_depths[state->scope_depth];
+      state->visibility.scope_minimum_depth_storage[state->scope_depth];
 }
 
 iree_status_t loom_verify_define_value(loom_verify_state_t* state,

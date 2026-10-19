@@ -19,10 +19,15 @@
 extern "C" {
 #endif
 
-// Maximum region/signature nesting depth tracked by the verifier's scope stack.
-#define LOOM_VERIFY_MAX_SCOPE_DEPTH 32
-static_assert(LOOM_VERIFY_MAX_SCOPE_DEPTH < UINT8_MAX,
-              "definition depth plus one must fit in a byte");
+// Region/signature scopes retained inline for ordinary shallow programs.
+#define LOOM_VERIFY_INLINE_SCOPE_DEPTH 32
+
+// Maximum region/signature nesting depth accepted by the verifier. Definition
+// depth tags store the active depth plus one in a byte, leaving 254 as the
+// deepest representable active scope.
+#define LOOM_VERIFY_MAX_SCOPE_DEPTH (UINT8_MAX - 1)
+static_assert(LOOM_VERIFY_MAX_SCOPE_DEPTH + 1 == UINT8_MAX,
+              "maximum definition depth tag must fit in a byte");
 
 // Reusable scratch tables for validating one op's tied-result metadata.
 typedef struct loom_verify_tied_table_t {
@@ -140,8 +145,10 @@ typedef struct loom_verify_state_t {
     uint8_t* definition_depths;
     // Lowest visible definition depth plus one; always positive.
     uint8_t minimum_depth;
-    // Inherited minimum to restore when each region/signature scope exits.
-    uint8_t scope_minimum_depths[LOOM_VERIFY_MAX_SCOPE_DEPTH];
+    // Inherited minimums for ordinary inline region/signature scopes.
+    uint8_t scope_minimum_depths[LOOM_VERIFY_INLINE_SCOPE_DEPTH];
+    // Active minimum-depth storage, initially the inline array above.
+    uint8_t* scope_minimum_depth_storage;
   } visibility;
 
   // Reusable per-op scratch for tied-result uniqueness checks.
@@ -174,8 +181,11 @@ typedef struct loom_verify_state_t {
   // Number of allocated defined_stack entries.
   iree_host_size_t defined_stack_capacity;
 
-  // Defined-stack watermarks at each region/signature scope entry.
-  iree_host_size_t scope_watermarks[LOOM_VERIFY_MAX_SCOPE_DEPTH];
+  // Defined-stack watermarks for ordinary inline region/signature scopes.
+  iree_host_size_t scope_watermarks[LOOM_VERIFY_INLINE_SCOPE_DEPTH];
+
+  // Active watermark storage, initially the inline array above.
+  iree_host_size_t* scope_watermark_storage;
 
   // Number of active region/signature scopes.
   uint32_t scope_depth;

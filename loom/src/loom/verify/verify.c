@@ -671,6 +671,9 @@ static iree_status_t loom_verify_state_initialize(
   iree_host_size_t value_count = module->values.count;
   iree_host_size_t value_capacity = value_count > 0 ? value_count : 1;
   state->visibility.minimum_depth = 1;
+  state->visibility.scope_minimum_depth_storage =
+      state->visibility.scope_minimum_depths;
+  state->scope_watermark_storage = state->scope_watermarks;
 
   // Initialize scratch arena from the module's block pool. All
   // verification-time allocations go here; bulk O(1) free on exit.
