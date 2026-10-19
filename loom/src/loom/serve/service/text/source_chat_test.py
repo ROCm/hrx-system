@@ -123,6 +123,45 @@ class RequestTest(unittest.TestCase):
         self.assertIn("base64 PNG, JPEG, GIF, WebP, or PAM data URL", result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_tool_choice_preserves_declared_catalog_and_prompt(self):
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "inspect",
+                "description": "Inspect the input",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        for choice in (None, "auto", "none"):
+            with self.subTest(choice=choice):
+                options = {} if choice is None else {"tool_choice": choice}
+                result = self.execute(self.request(tools=[tool], **options))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                value = json.loads(result.stdout)
+                self.assertEqual(value["prompt"], "#abxa")
+                self.assertEqual(value["tokens"], [3, 0, 1, 2, 0])
+
+        request = self.request(tools=[tool], tool_choice="none")
+        result = self.execute(request.replace('"none"', '"n\\u006fne"'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["prompt"], "#abxa")
+
+        result = self.execute(self.request(tools=[tool, tool], tool_choice="none"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("duplicate tool name", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+        for choice in (
+            "required",
+            "unknown",
+            {"type": "function", "function": {"name": "inspect"}},
+        ):
+            with self.subTest(choice=choice):
+                result = self.execute(self.request(tools=[tool], tool_choice=choice))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("INVALID_ARGUMENT", result.stderr)
+                self.assertEqual(result.stdout, "")
+
     def test_policy_errors_publish_no_partial_success(self):
         requests = [
             self.request(enable_thinking=True),

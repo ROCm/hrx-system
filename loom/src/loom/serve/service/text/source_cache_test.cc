@@ -85,6 +85,41 @@ TEST_F(UntaggedTextServiceTest, NamedAndUntaggedHistoriesStayIndependent) {
   EXPECT_NE(continued.find(R"("cached_tokens":5})"), std::string::npos);
 }
 
+TEST_F(UntaggedTextServiceTest, ToolPermissionChangesPreserveRetainedHistory) {
+  Start();
+  const auto request = [](const std::string& messages, const char* choice) {
+    std::string body = Request(messages, 2);
+    body.pop_back();
+    body +=
+        R"(,"tools":[{"type":"function","function":{"name":"inspect","parameters":{"type":"object","properties":{}}}}],"tool_choice":")";
+    body += choice;
+    body += R"("})";
+    return body;
+  };
+  std::string history = Message("user", "abxa");
+  // The fixture renders one prefix marker per declared tool. Removing the
+  // catalog changes both the arithmetic result and the reusable token prefix.
+  std::string prompt = "#abxa";
+  auto response = Read(Send(request(history, "auto")));
+  std::string reply = Content(response);
+  EXPECT_EQ(reply, Oracle::Complete(prompt, 2));
+  EXPECT_NE(response.find(R"("cached_tokens":0})"), std::string::npos);
+
+  for (const char* choice : {"none", "auto"}) {
+    SCOPED_TRACE(choice);
+    const auto retained_count = prompt.size() + reply.size() - 1;
+    history += "," + Message("assistant", reply) + "," + Message("user", "b");
+    prompt += reply + "#b";
+    response = Read(Send(request(history, choice)));
+    reply = Content(response);
+    EXPECT_EQ(reply, Oracle::Complete(prompt, 2));
+    EXPECT_NE(response.find(
+                  "\"cached_tokens\":" + std::to_string(retained_count) + "}"),
+              std::string::npos)
+        << response;
+  }
+}
+
 TEST_F(UntaggedTextServiceTest,
        RejectedContinuationPreservesHistoryAndEditedHistoryReplays) {
   Start();
