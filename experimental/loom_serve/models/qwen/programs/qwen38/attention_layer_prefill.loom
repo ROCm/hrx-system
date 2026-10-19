@@ -17,13 +17,21 @@ kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) 
 
 kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_capacity: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @ggml_linear_q5k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q5k_q8_1_x4_m4(%rows: index, %inputs: index, %outputs: index) launch(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @ggml_linear_q5k_q8_1_x4_m4_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_q8_1_cohort(%inputs: index, %outputs: index) launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @ggml_linear_q6k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q5k_q8_1_x4_m4_channel8(%rows: index, %inputs: index, %outputs: index) launch(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @ggml_linear_q6k_f32_decode_m4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_q8_1_channel8_cohort(%inputs: index, %outputs: index) launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @ggml_linear_q6k_q8_1_x4_m4(%rows: index, %inputs: index, %outputs: index) launch(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_q8_1_cohort(%inputs: index, %outputs: index) launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @ggml_linear_q6k_f32_decode_m4(%rows: index, %inputs: index, %outputs: index) launch(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f32_cohort(%inputs: index, %outputs: index) launch(%inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qwen38_linear_q5k_f16_wmma(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
@@ -100,6 +108,7 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
   %c3 = index.constant 3 : index
   %c32 = index.constant 32 : index
   %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
   %c65 = index.constant 65 : index
   %c481 = index.constant 481 : index
   %c256 = index.constant 256 : index
@@ -110,11 +119,15 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
   %isolated_verification = scalar.andi %verifying, %isolated : i1
   %uses_spans = index.cmp ne, %span_capacity, %c0 : index
   %four_tokens = index.cmp eq, %token_count, %c4 : index
-  %narrow_spans = scalar.andi %four_tokens, %uses_spans : i1
-  %uses_m4 = scalar.ori %isolated_verification, %narrow_spans : i1
+  %eight_tokens = index.cmp eq, %token_count, %c8 : index
+  %narrow_tokens = scalar.ori %four_tokens, %eight_tokens : i1
+  %narrow_spans = scalar.andi %narrow_tokens, %uses_spans : i1
+  %uses_cohort = scalar.ori %isolated_verification, %narrow_spans : i1
+  %cohort_rows = scf.select %isolated_verification, %c4, %token_count : index
+  %four_row_cohort = index.cmp eq, %cohort_rows, %c4 : index
 
   %uses_x64 = index.cmp ult, %schedule_token_count, %c65 : index
-  %uses_f32_ffn_input = scalar.ori %uses_m4, %uses_x64 : i1
+  %uses_f32_ffn_input = scalar.ori %uses_cohort, %uses_x64 : i1
   %x64_token_count = scf.if %uses_x64 -> (index) {
     scf.yield %token_count : index
   } else {
@@ -156,6 +169,7 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
   } else {
     scf.yield %c0 : index
   }
+
   %attention_norm_weight = command.parameter %parameters, "blk.{}.attn_norm.weight"[%layer] : view<5120xf32>
   %query_weight = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<51609600xi8>
   %query_norm_weight = command.parameter %parameters, "blk.{}.attn_q_norm.weight"[%layer] : view<256xf32>
@@ -185,10 +199,10 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
 
   %hidden_bytes = index.constant 10485760 : offset
   %hidden_q8_bytes = index.constant 2949120 : offset
-  // The four-row dot kernels and complete 32-row WMMA tile have fixed
-  // footprints. Other projections mask active rows within the dispatch bound.
+  // Dot kernels cover the selected useful cohort. WMMA projections retain
+  // their complete physical tile; stateful consumers independently mask rows.
   %matrix_rows = scf.select %uses_c64t32, %c32, %token_count : index
-  %projection_rows = scf.select %uses_m4, %c4, %matrix_rows : index
+  %projection_rows = scf.select %uses_cohort, %cohort_rows, %matrix_rows : index
   %query_gate_row_bytes = index.constant 49152 : offset
   %key_value_row_bytes = index.constant 4096 : offset
   %attention_row_bytes = index.constant 24576 : offset
@@ -208,12 +222,20 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
   %query_gate_projection = buffer.alloca<global> align(256) %query_gate_bytes : buffer
   %key_projection = buffer.alloca<global> align(256) %key_value_bytes : buffer
   %value_projection = buffer.alloca<global> align(256) %key_value_bytes : buffer
-  scf.if %uses_m4 {
+  scf.if %uses_cohort {
     %normalized_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
     kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_capacity, %hidden_size, %normalized, %normalized_q8) : [index, index](index, index, buffer, buffer)
     command.concurrent {
-      kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%c4, %hidden_size, %query_gate_size](%c4, %hidden_size, %query_gate_size, %normalized_q8, %query_weight, %query_gate_projection) : [index, index, index](index, index, index, buffer, view<51609600xi8>, buffer)
-      kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%c4, %hidden_size, %key_value_size](%c4, %hidden_size, %key_value_size, %normalized_q8, %key_weight, %key_projection) : [index, index, index](index, index, index, buffer, view<4300800xi8>, buffer)
+      scf.if %four_row_cohort {
+        kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%cohort_rows, %hidden_size, %query_gate_size](%cohort_rows, %hidden_size, %query_gate_size, %normalized_q8, %query_weight, %query_gate_projection) : [index, index, index](index, index, index, buffer, view<51609600xi8>, buffer)
+      } else {
+        kernel.launch @qwen38_linear_q6k_q8_1_cohort[%hidden_size, %query_gate_size](%hidden_size, %query_gate_size, %normalized_q8, %query_weight, %query_gate_projection) : [index, index](index, index, buffer, view<51609600xi8>, buffer)
+      }
+      scf.if %four_row_cohort {
+        kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%cohort_rows, %hidden_size, %key_value_size](%cohort_rows, %hidden_size, %key_value_size, %normalized_q8, %key_weight, %key_projection) : [index, index, index](index, index, index, buffer, view<4300800xi8>, buffer)
+      } else {
+        kernel.launch @qwen38_linear_q6k_q8_1_cohort[%hidden_size, %key_value_size](%hidden_size, %key_value_size, %normalized_q8, %key_weight, %key_projection) : [index, index](index, index, buffer, view<4300800xi8>, buffer)
+      }
       kernel.launch @ggml_linear_q8_0_q8_1_x4[%token_count, %hidden_size, %key_value_size](%token_capacity, %hidden_size, %key_value_size, %normalized_q8, %value_weight, %value_projection) : [index, index, index](index, index, index, buffer, view<5570560xi8>, buffer)
     }
   } else {
@@ -278,11 +300,16 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
   }
 
   %projected_attention = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  scf.if %uses_m4 {
-    %attention_q8_bytes = index.constant 27648 : offset
+  scf.if %uses_cohort {
+    %attention_q8_row_bytes = index.constant 6912 : offset
+    %attention_q8_bytes = index.scale %cohort_rows, %attention_q8_row_bytes : index, offset -> offset
     %attention_q8 = buffer.alloca<global> align(256) %attention_q8_bytes : buffer
-    kernel.launch @ggml_quantize_q8_1_x4_f32[%c4, %attention_size](%c4, %attention_size, %attention_output, %attention_q8) : [index, index](index, index, buffer, buffer)
-    kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%c4, %attention_size, %hidden_size](%c4, %attention_size, %hidden_size, %attention_q8, %output_weight, %projected_attention) : [index, index, index](index, index, index, buffer, view<25804800xi8>, buffer)
+    kernel.launch @ggml_quantize_q8_1_x4_f32[%cohort_rows, %attention_size](%cohort_rows, %attention_size, %attention_output, %attention_q8) : [index, index](index, index, buffer, buffer)
+    scf.if %four_row_cohort {
+      kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%cohort_rows, %attention_size, %hidden_size](%cohort_rows, %attention_size, %hidden_size, %attention_q8, %output_weight, %projected_attention) : [index, index, index](index, index, index, buffer, view<25804800xi8>, buffer)
+    } else {
+      kernel.launch @qwen38_linear_q6k_q8_1_cohort[%attention_size, %hidden_size](%attention_size, %hidden_size, %attention_q8, %output_weight, %projected_attention) : [index, index](index, index, buffer, view<25804800xi8>, buffer)
+    }
     kernel.launch @qwen38_residual_add_f32_prefill[%token_count](%token_capacity, %residual, %projected_attention, %residual) : [index](index, buffer, buffer, buffer)
   } else {
     scf.if %uses_x64 {
@@ -306,13 +333,22 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
   %ffn_gate = buffer.alloca<global> align(256) %ffn_bytes : buffer
   %ffn_up = buffer.alloca<global> align(256) %ffn_bytes : buffer
   %swiglu = buffer.alloca<global> align(256) %swiglu_bytes : buffer
-  scf.if %uses_m4 {
-    %post_normalized_q8_bytes = index.constant 23040 : offset
+  scf.if %uses_cohort {
+    %post_normalized_q8_row_bytes = index.constant 5760 : offset
+    %post_normalized_q8_bytes = index.scale %cohort_rows, %post_normalized_q8_row_bytes : index, offset -> offset
     %post_normalized_q8 = buffer.alloca<global> align(256) %post_normalized_q8_bytes : buffer
-    kernel.launch @ggml_quantize_q8_1_x4_f32[%c4, %hidden_size](%c4, %hidden_size, %post_normalized, %post_normalized_q8) : [index, index](index, index, buffer, buffer)
+    kernel.launch @ggml_quantize_q8_1_x4_f32[%cohort_rows, %hidden_size](%cohort_rows, %hidden_size, %post_normalized, %post_normalized_q8) : [index, index](index, index, buffer, buffer)
     command.concurrent {
-      kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%c4, %hidden_size, %ffn_size](%c4, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
-      kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%c4, %hidden_size, %ffn_size](%c4, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
+      scf.if %four_row_cohort {
+        kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%cohort_rows, %hidden_size, %ffn_size](%cohort_rows, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
+      } else {
+        kernel.launch @qwen38_linear_q5k_q8_1_channel8_cohort[%hidden_size, %ffn_size](%hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index](index, index, buffer, view<61276160xi8>, buffer)
+      }
+      scf.if %four_row_cohort {
+        kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%cohort_rows, %hidden_size, %ffn_size](%cohort_rows, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
+      } else {
+        kernel.launch @qwen38_linear_q5k_q8_1_channel8_cohort[%hidden_size, %ffn_size](%hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index](index, index, buffer, view<61276160xi8>, buffer)
+      }
     }
   } else {
     scf.if %uses_x64 {
@@ -336,8 +372,12 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
   scf.if %uses_x64 {
     kernel.launch @qwen38_swiglu_f32_prefill[%token_count](%projection_rows, %ffn_gate, %ffn_up, %swiglu) : [index](index, buffer, buffer, buffer)
   }
-  scf.if %uses_m4 {
-    kernel.launch @ggml_linear_q6k_f32_decode_m4[%c4, %ffn_size, %hidden_size](%c4, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %ffn_output) : [index, index, index](index, index, index, buffer, view<73113600xi8>, buffer)
+  scf.if %uses_cohort {
+    scf.if %four_row_cohort {
+      kernel.launch @ggml_linear_q6k_f32_decode_m4[%cohort_rows, %ffn_size, %hidden_size](%cohort_rows, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %ffn_output) : [index, index, index](index, index, index, buffer, view<73113600xi8>, buffer)
+    } else {
+      kernel.launch @qwen38_linear_q6k_f32_cohort[%ffn_size, %hidden_size](%ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %ffn_output) : [index, index](index, index, buffer, view<73113600xi8>, buffer)
+    }
     kernel.launch @qwen38_residual_add_f32_prefill[%token_count](%token_capacity, %residual, %ffn_output, %residual) : [index](index, buffer, buffer, buffer)
   } else {
     scf.if %uses_x64 {
