@@ -25,6 +25,29 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
     "${CMAKE_CURRENT_BINARY_DIR}/sources.stamp"
 )
 
+iree_package_target_name(_FILEGROUP_TARGET "::input_test_sources")
+add_custom_command(OUTPUT input_test_sources.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch input_test_sources.stamp
+  DEPENDS
+    "${IREE_BINARY_DIR}/experimental/loom_serve/motifs/text/sources.stamp"
+    "request_layout.loom"
+    "text_chunking.loom"
+    "text_encoding.loom"
+    "text_input.loom"
+    "text_normalization.loom"
+    "text_packets.loom"
+    "text_sentences.loom"
+    "text_stream.loom"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS input_test_sources.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/input_test_sources.stamp"
+)
+
 file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 loom_test_module(
   NAME

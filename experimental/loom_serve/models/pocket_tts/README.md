@@ -153,13 +153,20 @@ tables cover both FlowLM and the codecs' sixteen positions per block. Batch
 capacity cannot exceed request capacity. Unknown or duplicate options, invalid
 voice metadata, and insufficient geometry fail during preparation.
 
-Text preparation follows the pinned English model's token-boundary sentence
-grouping, decimal handling, punctuation fallback, and final prompt normalization.
-The same source pipeline serves complete and continuing input. It retains only
-unresolved normalization, encoding, and sentence state, then admits packets as
-soon as later text can no longer change them. Voice conditioning can run before
-the first packet is ready. An available packet can begin numerical execution
-while the producer is still writing later text.
+Text preparation publishes each complete sentence as soon as its boundary is
+stable. It retains the pinned English model's decimal handling, punctuation
+fallback within oversized sentences, and final prompt normalization. Complete
+and continuing input use this same policy, so transport write boundaries do not
+change the model's packets. The pipeline retains unresolved normalization,
+encoding, and sentence state. Voice conditioning can run before the first
+packet is ready, and numerical execution can begin while the producer is still
+writing later sentences.
+
+Publishing sentences independently reduces the wait for first audio compared
+with grouping neighboring sentences up to the token limit. Each packet repeats
+text conditioning and codec startup, so more packets can cost additional work
+and alter phrasing. The selected voice prefix and absolute sampling sequence
+remain owned by the request across every packet.
 
 Text packets retain token IDs, the final post-EOS tail, and the generation bound;
 output is never silently truncated to fit a request allocation. Cumulative byte
@@ -193,7 +200,7 @@ The source owns a persistent encoder and two independent decoders: one advances
 through the token prefix once; the other decodes a fresh suffix to resolve the
 model's decimal-boundary rule. `prepare_input` takes one ready CPU operation per
 turn on the existing task executor. It preserves ambiguous tokenizer history
-and unfinished sentence groups across input windows. Completed text is not
+and unfinished sentences across input windows. Completed text is not
 reprocessed on every arrival. Final packet normalization and encoding remain
 the checkpoint's policy and happen once for each admitted packet.
 
@@ -205,10 +212,11 @@ only after explicit input EOF, final text preparation, and the last packet's
 numerical retirement. A slow waveform consumer makes only that request
 ineligible; another voice can continue accepting text and producing audio.
 
-A short input may need EOF before its first packet is stable. A sentence ending
-is not necessarily a commitment boundary because the checkpoint groups nearby
-sentences into one packet. Continuing input preserves the complete-input packet
-policy rather than selecting speech chunks from transport write boundaries.
+A short input may need EOF before its first packet is stable. Receiving a period
+alone does not establish that boundary: later text can continue a punctuation
+run or a decimal, and the tokenizer must commit the relevant tokens. Once the
+complete sentence is stable, it is published without waiting to fill a larger
+group. Explicit EOF resolves the remaining sentence.
 
 ## Phase and storage contract
 
@@ -431,9 +439,18 @@ entry at a retired boundary. No shared pending owner can strand a voice when a
 reader disconnects. Restore never reads unused cache padding, and overwrites the
 entire request row before a new chunk or request uses it.
 
-The checkpoint-free tests use closed-form projection, strided-convolution,
-normalization, and attention oracles. Attention checks retain positions beyond
-256, mask future slots, and reach the last configured absolute rotary row.
+The native input check runs the full source pipeline with a tiny Unigram
+vocabulary and its Prepend/Metaspace boundary rules. It checks
+exact packet tokens, EOS tails, generation bounds, and zero padding across
+input-window sizes, decimal boundaries, and punctuation fallback. It also
+requires publication before EOF once sufficient lookahead has committed,
+retires packets before storage reuse, and checks empty/oversized rejection.
+This test needs neither weights nor a physical device.
+
+The checkpoint-free numerical tests use closed-form projection,
+strided-convolution, normalization, and attention oracles. Attention checks
+retain positions beyond 256, mask future slots, and reach the last configured
+absolute rotary row.
 Streaming checks observe consecutive outputs and retained history, including
 startup replication, overlap bias, latent recurrence, and
 fade behavior. Projection scenarios compare the shipping entries with serial

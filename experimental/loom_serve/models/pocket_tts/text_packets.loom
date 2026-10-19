@@ -1,14 +1,8 @@
-// Copyright 2026 The IREE Authors
-//
-// Licensed under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
 func.decl @pocket.refine_sentence(%sentence: buffer, %tokens: index, %fallback: buffer, %fallback_count: index, %group: buffer, %state: buffer, %packets: buffer, %limit: index) -> (buffer)
 
 func.decl @pocket.emit_text_packet(%group: buffer, %group_length: offset, %packets: buffer, %chunk: index, %limit: index) -> (buffer)
 
-// The first three cursor words are the finite policy's accumulator:
+// The first three cursor words are the sentence refinement accumulator:
 // 0: unresolved group's byte length.
 // 1: original token count of that group, before final normalization.
 // 2: number of completed packets in the current storage epoch.
@@ -22,8 +16,8 @@ func.def public @pocket.packets_create(%input_limit: index) -> (buffer, buffer, 
   %origin = index.constant 0 : offset
   %state_bytes = index.constant 48 : offset
   %state = buffer.alloca<private> align(8) %state_bytes : buffer
-  %zero = scalar.constant 0 : i32
-  buffer.fill %zero, %state[%origin], %state_bytes : i32
+  %c0 = scalar.constant 0 : i32
+  buffer.fill %c0, %state[%origin], %state_bytes : i32
   %bytes_per_token = index.constant 18 : offset
   %group_bytes = index.scale %input_limit, %bytes_per_token : index, offset -> offset
   %group = buffer.alloca<private> align(4) %group_bytes : buffer
@@ -31,18 +25,33 @@ func.def public @pocket.packets_create(%input_limit: index) -> (buffer, buffer, 
   func.return %state, %group, %packets : buffer, buffer, buffer
 }
 
-// Refine one complete sentence with the unchanged fallback and regrouping
-// policy. The owner drains this epoch before supplying the next sentence.
+// Refine and commit one complete sentence. The owner drains its packet
+// epoch before supplying the next sentence; fallback refinement is unchanged.
 func.def public @pocket.packets_feed(%state: buffer, %group: buffer, %packets: buffer, %sentence: buffer, %tokens: index, %fallback: buffer, %fallback_count: index, %limit: index) -> (buffer) {
-  %output = func.call @pocket.refine_sentence(%sentence, %tokens, %fallback, %fallback_count, %group, %state, %packets, %limit) : (buffer, index, buffer, index, buffer, buffer, buffer, index) -> (buffer)
+  %refined = func.call @pocket.refine_sentence(%sentence, %tokens, %fallback, %fallback_count, %group, %state, %packets, %limit) : (buffer, index, buffer, index, buffer, buffer, buffer, index) -> (buffer)
   %origin = index.constant 0 : offset
   %header = buffer.view %state[%origin] : buffer -> view<6xi64>
-  %count = view.load %header[2] : view<6xi64> -> i64
+  %length64 = view.load %header[0] : view<6xi64> -> i64
+  %count64 = view.load %header[2] : view<6xi64> -> i64
   %previous = view.load %header[4] : view<6xi64> -> i64
-  %zero = scalar.constant 0 : i64
-  %one = scalar.constant 1 : i64
-  %nonempty = scalar.cmpi ne, %count, %zero : i64
-  %seen = scf.select %nonempty, %one, %previous : i64
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %has_group = scalar.cmpi ne, %length64, %c0 : i64
+  %output, %count = scf.if %has_group -> (buffer, i64) {
+    %length_value = scalar.assume %length64 [range(%length64, 0, 9223372036854775807)] : i64
+    %length = index.cast %length_value : i64 to offset
+    %position = index.cast %count64 : i64 to index
+    %emitted = func.call @pocket.emit_text_packet(%group, %length, %refined, %position, %limit) : (buffer, offset, buffer, index, index) -> (buffer)
+    %next = scalar.addi %count64, %c1 : i64
+    view.store %c0, %header[0] : i64, view<6xi64>
+    view.store %c0, %header[1] : i64, view<6xi64>
+    view.store %next, %header[2] : i64, view<6xi64>
+    scf.yield %emitted, %next : buffer, i64
+  } else {
+    scf.yield %refined, %count64 : buffer, i64
+  }
+  %nonempty = scalar.cmpi ne, %count, %c0 : i64
+  %seen = scf.select %nonempty, %c1, %previous : i64
   view.store %seen, %header[4] : i64, view<6xi64>
   func.return %output : buffer
 }
@@ -54,9 +63,9 @@ func.def public @pocket.packets_peek(%state: buffer) -> (i64, i64, i32) {
   %position = view.load %header[3] : view<6xi64> -> i64
   %final = view.load %header[5] : view<6xi64> -> i64
   %remaining = scalar.subi %count, %position : i64
-  %zero = scalar.constant 0 : i64
-  %drained = scalar.cmpi eq, %remaining, %zero : i64
-  %finished = scalar.cmpi ne, %final, %zero : i64
+  %c0 = scalar.constant 0 : i64
+  %drained = scalar.cmpi eq, %remaining, %c0 : i64
+  %finished = scalar.cmpi ne, %final, %c0 : i64
   %complete = scalar.andi %drained, %finished : i1
   %complete32 = scalar.extui %complete : i1 to i32
   func.return %position, %remaining, %complete32 : i64, i64, i32
@@ -69,12 +78,12 @@ func.def public @pocket.packets_consume(%state: buffer) {
   %header = buffer.view %state[%origin] : buffer -> view<6xi64>
   %count = view.load %header[2] : view<6xi64> -> i64
   %position = view.load %header[3] : view<6xi64> -> i64
-  %zero = scalar.constant 0 : i64
-  %one = scalar.constant 1 : i64
-  %next = scalar.addi %position, %one : i64
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %next = scalar.addi %position, %c1 : i64
   %drained = scalar.cmpi eq, %next, %count : i64
-  %next_count = scf.select %drained, %zero, %count : i64
-  %next_position = scf.select %drained, %zero, %next : i64
+  %next_count = scf.select %drained, %c0, %count : i64
+  %next_position = scf.select %drained, %c0, %next : i64
   view.store %next_count, %header[2] : i64, view<6xi64>
   view.store %next_position, %header[3] : i64, view<6xi64>
   func.return
@@ -89,25 +98,25 @@ func.def public @pocket.packets_finish(%state: buffer, %group: buffer, %packets:
   %length64 = view.load %header[0] : view<6xi64> -> i64
   %count64 = view.load %header[2] : view<6xi64> -> i64
   %seen = view.load %header[4] : view<6xi64> -> i64
-  %zero = scalar.constant 0 : i64
-  %one = scalar.constant 1 : i64
-  %has_group = scalar.cmpi ne, %length64, %zero : i64
-  %no_packets = scalar.cmpi eq, %seen, %zero : i64
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %has_group = scalar.cmpi ne, %length64, %c0 : i64
+  %no_packets = scalar.cmpi eq, %seen, %c0 : i64
   %emit = scalar.ori %has_group, %no_packets : i1
   %output = scf.if %emit -> (buffer) {
     %length_value = scalar.assume %length64 [range(%length64, 0, 9223372036854775807)] : i64
     %length = index.cast %length_value : i64 to offset
     %count = index.cast %count64 : i64 to index
     %output = func.call @pocket.emit_text_packet(%group, %length, %packets, %count, %limit) : (buffer, offset, buffer, index, index) -> (buffer)
-    %next_count = scalar.addi %count64, %one : i64
+    %next_count = scalar.addi %count64, %c1 : i64
     view.store %next_count, %header[2] : i64, view<6xi64>
-    view.store %one, %header[4] : i64, view<6xi64>
+    view.store %c1, %header[4] : i64, view<6xi64>
     scf.yield %output : buffer
   } else {
     scf.yield %packets : buffer
   }
-  view.store %zero, %header[0] : i64, view<6xi64>
-  view.store %zero, %header[1] : i64, view<6xi64>
-  view.store %one, %header[5] : i64, view<6xi64>
+  view.store %c0, %header[0] : i64, view<6xi64>
+  view.store %c0, %header[1] : i64, view<6xi64>
+  view.store %c1, %header[5] : i64, view<6xi64>
   func.return %output : buffer
 }

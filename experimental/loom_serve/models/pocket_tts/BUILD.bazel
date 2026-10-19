@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
@@ -14,6 +15,39 @@ filegroup(
     name = "sources",
     srcs = glob(["*.loom"]),
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "input_test_sources",
+    testonly = True,
+    srcs = [
+        "request_layout.loom",
+        "text_chunking.loom",
+        "text_encoding.loom",
+        "text_input.loom",
+        "text_normalization.loom",
+        "text_packets.loom",
+        "text_sentences.loom",
+        "text_stream.loom",
+        "//experimental/loom_serve/motifs/text:sources",
+    ],
+)
+
+loom_py_test(
+    name = "text_packets_test",
+    size = "small",
+    srcs = ["tests/text_packets_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/serve/testing:input_check)",
+        "$(rootpath tests/text_packets.loom)",
+        "$(rootpaths :input_test_sources)",
+    ],
+    data = [
+        "tests/text_packets.loom",
+        ":input_test_sources",
+        "//loom/src/loom/serve/testing:input_check",
+    ],
+    main = "tests/text_packets_test.py",
 )
 
 loom_test(

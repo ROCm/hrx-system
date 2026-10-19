@@ -1,0 +1,179 @@
+func.decl @pocket.input_create(%raw_limit: offset, %input_limit: index) -> (buffer, buffer, buffer, input.encoder, buffer, buffer, buffer, input.decoder, input.decoder, buffer, buffer, buffer, buffer, buffer, buffer)
+
+func.decl @pocket.input_work(%state: buffer, %groups: buffer) -> (i32)
+
+func.decl @pocket.input_prepare(%state: buffer, %normalizer: buffer, %normalized: buffer, %encoder: input.encoder, %sentences: buffer, %sentence_ids: buffer, %decoded: buffer, %prefix: input.decoder, %suffix: input.decoder, %groups: buffer, %group_text: buffer, %packets: buffer, %tokens: buffer, %sentence_set: buffer, %fallback_set: buffer, %text: buffer, %byte_offset: i64, %final: i32, %chunk_limit: index, %input_limit: index) -> (buffer, i64)
+
+func.decl @pocket.packets_peek(%state: buffer) -> (i64, i64, i32)
+
+func.decl @pocket.packets_consume(%state: buffer)
+
+func.decl import("input", "require") @check_require(%condition: i32, %diagnostic: buffer)
+
+template.decl pure @pocket.packet_stride(%tokens: index) -> (offset)
+
+// One. Two. One.
+global.rodata.def @sentences = bytes("4f6e652e2054776f2e204f6e652e")
+
+// One, Two. One. requires two packets for its first sentence at smaller capacity.
+global.rodata.def @fallback = bytes("4f6e652c2054776f2e204f6e652e")
+
+// 1.2. Two. One. keeps the decimal inside the first sentence.
+global.rodata.def @decimal = bytes("312e322e2054776f2e204f6e652e")
+
+global.rodata.def @empty = bytes("")
+
+// Each record is [token count, EOS tail, frame bound, reserved, five IDs].
+// The tiny Unigram vocabulary is declared in text_packets_test.py.
+// Expected normalized packets: One. / Two. / One.
+global.rodata.def @expected_words = align(4) bytes("05000000050000002e000000000000000100000008000000090000000a0000000200000005000000050000002e00000000000000010000000b0000000c0000000d0000000200000005000000050000002e000000000000000100000008000000090000000a00000002000000")
+
+// Expected normalized packets: 1.2. / Two. / One.
+global.rodata.def @expected_decimal = align(4) bytes("05000000050000002e00000000000000010000000e000000020000000f0000000200000005000000050000002e00000000000000010000000b0000000c0000000d0000000200000005000000050000002e000000000000000100000008000000090000000a00000002000000")
+
+// Unexpected extra packet
+global.rodata.def @extra_packet = bytes("556e6578706563746564206578747261207061636b6574")
+
+// Packet record differs from expected tokens and metadata
+global.rodata.def @packet_mismatch = bytes("5061636b6574207265636f726420646966666572732066726f6d20657870656374656420746f6b656e7320616e64206d65746164617461")
+
+// Input or packets remain at completion
+global.rodata.def @incomplete = bytes("496e707574206f72207061636b6574732072656d61696e20617420636f6d706c6574696f6e")
+
+// Complete sentence was withheld until EOF
+global.rodata.def @late_publication = bytes("436f6d706c6574652073656e74656e636520776173207769746868656c6420756e74696c20454f46")
+
+func.def @require_true(%condition: i1, %diagnostic: buffer) {
+  %value = scalar.extui %condition : i1 to i32
+  func.call @check_require(%value, %diagnostic) : (i32, buffer)
+  func.return
+}
+
+func.def @check_packet(%packets: buffer, %position: index, %expected: buffer, %ordinal: index, %limit: index) {
+  %packet_count = index.constant 3 : index
+  %inside = index.cmp ult, %ordinal, %packet_count : index
+  %diagnostic = global.load @extra_packet : buffer
+  func.call @require_true(%inside, %diagnostic) : (i1, buffer)
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 36 : offset
+  %expected_position = index.scale %ordinal, %record_bytes : index, offset -> offset
+  %stride = template.apply<@pocket.packet_stride>(%limit) pure : (index) -> (offset)
+  %reference = buffer.alloca<private> align(4) %stride : buffer
+  %c0 = scalar.constant 0 : i32
+  buffer.fill %c0, %reference[%origin], %stride : i32
+  buffer.copy %expected[%expected_position], %reference[%origin], %record_bytes
+  %actual_position = index.scale %position, %stride : index, offset -> offset
+  %comparison = buffer.compare %packets[%actual_position], %reference[%origin], %stride
+  %equal = scalar.cmpi eq, %comparison, %c0 : i32
+  %record_error = global.load @packet_mismatch : buffer
+  func.call @require_true(%equal, %record_error) : (i1, buffer)
+  func.return
+}
+
+// Windows contain complete ASCII scalars, as required by the native input
+// owner. The native stream tests separately cover writes splitting UTF-8.
+// A packet stays borrowed until checked; consume then permits storage reuse.
+func.def @check_stream(%text: buffer, %window_bytes: offset, %limit: index, %expected: buffer, %early_required: i1) {
+  %raw_limit = index.constant 256 : offset
+  %input_limit = index.constant 128 : index
+  %state, %normalizer, %normalized, %encoder, %sentences, %sentence_ids, %decoded, %prefix, %suffix, %groups, %group_text, %packets, %tokens, %sentence_set, %fallback_set = func.call @pocket.input_create(%raw_limit, %input_limit) : (offset, index) -> (buffer, buffer, buffer, input.encoder, buffer, buffer, buffer, input.decoder, input.decoder, buffer, buffer, buffer, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  %first = index.constant 0 : index
+  %step = index.constant 1 : index
+  %length = buffer.length %text
+  %length64 = index.cast %length : offset to i64
+  %start_offset = scalar.constant 0 : i64
+  %packet_work = scalar.constant 0 : i32
+  %input_work = scalar.constant 2 : i32
+  %terminal_work = scalar.constant 3 : i32
+  %false = scalar.constant false : i1
+  %diagnostic = global.load @incomplete : buffer
+  %unused_available, %consumed, %unused_packets, %count, %early_seen, %unused_work = scf.while(%available = %origin : offset, %consumed = %start_offset : i64, %packets = %packets : buffer, %ordinal = %first : index, %early_seen = %false : i1, %work = %input_work : i32) -> (offset, i64, buffer, index, i1, i32) {
+    %more = scalar.cmpi ne, %work, %terminal_work : i32
+    scf.condition %more, %available, %consumed, %packets, %ordinal, %early_seen, %work : i1, offset, i64, buffer, index, i1, i32
+  } do(%available: offset, %consumed: i64, %packets: buffer, %ordinal: index, %early_seen: i1, %work: i32) {
+    %ready = scalar.cmpi eq, %work, %packet_work : i32
+    %next_available, %next_consumed, %next_packets, %next_ordinal, %next_early = scf.if %ready -> (offset, i64, buffer, index, i1) {
+      %position64, %unused_remaining, %unused_complete = func.call @pocket.packets_peek(%groups) : (buffer) -> (i64, i64, i32)
+      %position = index.cast %position64 : i64 to index
+      func.call @check_packet(%packets, %position, %expected, %ordinal, %limit) : (buffer, index, buffer, index, index)
+      %before_eof = index.cmp ult, %available, %length : offset
+      %published_early = scalar.ori %early_seen, %before_eof : i1
+      func.call @pocket.packets_consume(%groups) : (buffer)
+      %next = index.add %ordinal, %step : index
+      scf.yield %available, %consumed, %packets, %next, %published_early : offset, i64, buffer, index, i1
+    } else {
+      %starved = scalar.cmpi eq, %work, %input_work : i32
+      %end = scf.if %starved -> (offset) {
+        %proposed = index.add %available, %window_bytes : offset
+        %inside = index.cmp ult, %proposed, %length : offset
+        %end = scf.select %inside, %proposed, %length : offset
+        scf.yield %end : offset
+      } else {
+        scf.yield %available : offset
+      }
+      %window = buffer.alloca<private> align(1) %end : buffer
+      buffer.copy %text[%origin], %window[%origin], %end
+      %final = index.cmp eq, %end, %length : offset
+      %final32 = scalar.extui %final : i1 to i32
+      %output, %taken = func.call @pocket.input_prepare(%state, %normalizer, %normalized, %encoder, %sentences, %sentence_ids, %decoded, %prefix, %suffix, %groups, %group_text, %packets, %tokens, %sentence_set, %fallback_set, %window, %consumed, %final32, %limit, %input_limit) : (buffer, buffer, buffer, input.encoder, buffer, buffer, buffer, input.decoder, input.decoder, buffer, buffer, buffer, buffer, buffer, buffer, buffer, i64, i32, index, index) -> (buffer, i64)
+      %next = scalar.addi %consumed, %taken : i64
+      scf.yield %end, %next, %output, %ordinal, %early_seen : offset, i64, buffer, index, i1
+    }
+    %next_work = func.call @pocket.input_work(%state, %groups) : (buffer, buffer) -> (i32)
+    scf.yield %next_available, %next_consumed, %next_packets, %next_ordinal, %next_early, %next_work : offset, i64, buffer, index, i1, i32
+  }
+  %expected_count = index.constant 3 : index
+  %all_packets = index.cmp eq, %count, %expected_count : index
+  %all_input = scalar.cmpi eq, %consumed, %length64 : i64
+  %complete = scalar.andi %all_packets, %all_input : i1
+  func.call @require_true(%complete, %diagnostic) : (i1, buffer)
+  scf.if %early_required {
+    %publication_error = global.load @late_publication : buffer
+    func.call @require_true(%early_seen, %publication_error) : (i1, buffer)
+  }
+  func.return
+}
+
+func.def public @check() {
+  %sentences = global.load @sentences : buffer
+  %fallback = global.load @fallback : buffer
+  %decimal = global.load @decimal : buffer
+  %words = global.load @expected_words : buffer
+  %numbers = global.load @expected_decimal : buffer
+  %first_window = index.constant 1 : index
+  %window_end = index.constant 15 : index
+  %step = index.constant 1 : index
+  %open_prefix = index.constant 13 : index
+  %ordinary_limit = index.constant 16 : index
+  %fallback_limit = index.constant 6 : index
+  %false = scalar.constant false : i1
+  scf.for %window = [%first_window to %window_end step %step] {
+    %bytes = index.cast %window : index to offset
+    %early = index.cmp eq, %window, %open_prefix : index
+    func.call @check_stream(%sentences, %bytes, %ordinary_limit, %words, %early) : (buffer, offset, index, buffer, i1)
+    func.call @check_stream(%decimal, %bytes, %ordinary_limit, %numbers, %early) : (buffer, offset, index, buffer, i1)
+    func.call @check_stream(%fallback, %bytes, %fallback_limit, %words, %false) : (buffer, offset, index, buffer, i1)
+  }
+  func.return
+}
+
+func.def public @reject_empty() {
+  %text = global.load @empty : buffer
+  %expected = global.load @expected_words : buffer
+  %window = index.constant 1 : offset
+  %limit = index.constant 16 : index
+  %false = scalar.constant false : i1
+  func.call @check_stream(%text, %window, %limit, %expected, %false) : (buffer, offset, index, buffer, i1)
+  func.return
+}
+
+func.def public @reject_capacity() {
+  %text = global.load @sentences : buffer
+  %expected = global.load @expected_words : buffer
+  %window = index.constant 9 : offset
+  %limit = index.constant 4 : index
+  %false = scalar.constant false : i1
+  func.call @check_stream(%text, %window, %limit, %expected, %false) : (buffer, offset, index, buffer, i1)
+  func.return
+}
