@@ -13,6 +13,7 @@
 #define _GNU_SOURCE
 
 #include "iree/base/internal/math.h"
+#include "iree/base/internal/prng.h"
 #include "iree/base/internal/sysfs.h"
 #include "iree/task/topology.h"
 
@@ -836,10 +837,15 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
 
   // Find unique cores by enumerating processors and grouping by core_id.
   // We build a simple map of core_id -> first processor in that core.
-  // Start after the caller's current CPU so independent applications do not
-  // all bind small worker pools to the lowest-numbered available processors.
+  // Randomize the base so independent pools, including those created by the
+  // same thread, do not all bind to the lowest-numbered available processors.
+  // Time varies repeated calls and the address varies concurrent callers.
+  iree_prng_splitmix64_state_t placement_prng;
+  iree_prng_splitmix64_initialize(
+      (uint64_t)iree_time_now() ^ (uint64_t)(uintptr_t)out_topology,
+      &placement_prng);
   const uint32_t first_cpu =
-      (iree_sysfs_query_current_cpu() + 1) % processor_count;
+      iree_prng_splitmix64_next(&placement_prng) % processor_count;
   uint32_t core_map[IREE_TASK_TOPOLOGY_MAX_GROUP_COUNT];
   iree_host_size_t core_count = 0;
   for (uint32_t ordinal = 0;
