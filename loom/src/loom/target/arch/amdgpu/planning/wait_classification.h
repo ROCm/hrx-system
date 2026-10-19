@@ -38,8 +38,6 @@ typedef enum loom_amdgpu_wait_node_state_flag_bits_e {
   LOOM_AMDGPU_WAIT_NODE_STATE_DEFAULT_DEPENDENCY_WRITE = 1u << 5,
   // Node issues on the vector ALU.
   LOOM_AMDGPU_WAIT_NODE_STATE_USES_VECTOR_ALU = 1u << 6,
-  // Node issues on the scalar ALU.
-  LOOM_AMDGPU_WAIT_NODE_STATE_USES_SCALAR_ALU = 1u << 7,
   // Node is a transcendental VALU packet.
   LOOM_AMDGPU_WAIT_NODE_STATE_TRANSCENDENTAL = 1u << 8,
   // Node materializes its scheduled SSA results into physical locations.

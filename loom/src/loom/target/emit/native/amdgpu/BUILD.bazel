@@ -194,6 +194,7 @@ loom_check_test_suite(
         "test/register_banks.loom-test",
         "test/register_numbering.loom-test",
         "test/replay_clauses.loom-test",
+        "test/sgpr_read_waits.loom-test",
         "test/shift_allocation.loom-test",
         "test/short_wait_windows.loom-test",
         "test/spill_fact_lifetime.loom-test",
@@ -442,6 +443,7 @@ loom_cc_library(
     deps = [
         ":kernel_plan",
         ":kernel_record_build",
+        ":kernel_report",
         ":preflight",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
@@ -451,7 +453,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:error_defs",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
-        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/reporting:low",
         "//loom/src/loom/target/reporting:report",
@@ -569,10 +570,24 @@ loom_cc_library(
         ":kernel_plan",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/reporting:low",
         "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_report_test",
+    srcs = ["kernel_report_test.cc"],
+    deps = [
+        ":kernel_report",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -26,9 +26,6 @@ static void loom_amdgpu_structural_packet_analyze_move_range(
     if (move->destination.descriptor_reg_class_id ==
         LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
       out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_USES_VECTOR_ALU;
-    } else if (move->destination.descriptor_reg_class_id ==
-               LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
-      out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_USES_SCALAR_ALU;
     }
   }
 }

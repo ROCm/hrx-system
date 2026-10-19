@@ -93,14 +93,14 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) @reload_wide_address(%un
   scratch_load_b32 v0, off, off offset:4
   s_wait_loadcnt loadcnt(0)
   v_readfirstlane_b32 s3, v0
-  s_wait_alu depctr(0)
+  s_wait_alu depctr(65534)
   s_mov_b64 exec, s[0:1]
   scratch_load_b64 v[0:1], off, off offset:8
   s_wait_loadcnt loadcnt(0)
   v_add_co_u32 v0, s[0:1], s2, v0
   v_mov_b32 v2, s3
-  s_wait_alu depctr(0)
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  s_wait_alu depctr(61951)
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v0, v[0:1], off offset:0
   s_wait_loadcnt loadcnt(0)
@@ -305,14 +305,14 @@ low.func.def target<amdgpu.rdna4.core>(@target) @reload_wide_address(%uniform: r
   scratch_load_b32 v0, off, off offset:4
   s_wait_loadcnt loadcnt(0)
   v_readfirstlane_b32 s3, v0
-  s_wait_alu depctr(0)
+  s_wait_alu depctr(65534)
   s_mov_b64 exec, s[0:1]
   scratch_load_b64 v[0:1], off, off offset:8
   s_wait_loadcnt loadcnt(0)
   v_add_co_u32 v0, s[0:1], s2, v0
   v_mov_b32 v2, s3
-  s_wait_alu depctr(0)
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  s_wait_alu depctr(61951)
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v0, v[0:1], off offset:0
   s_wait_loadcnt loadcnt(0)

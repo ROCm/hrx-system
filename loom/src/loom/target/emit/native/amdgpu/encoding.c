@@ -1134,16 +1134,20 @@ static iree_status_t loom_amdgpu_encode_wait_state_action(
     }
     case LOOM_AMDGPU_WAIT_STATE_ACTION_V_NOP:
       return loom_amdgpu_encode_v_nop_slots(state, wait_state->cycle_count);
-    case LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR: {
+    case LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR:
+    case LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU: {
+      const loom_amdgpu_descriptor_ref_t descriptor_ref =
+          wait_state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU
+              ? LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_ALU
+              : LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT_DEPCTR;
       const loom_low_descriptor_t* descriptor =
           loom_amdgpu_descriptor_ref_descriptor(
-              state->inputs.schedule->target.descriptor_set,
-              LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT_DEPCTR);
+              state->inputs.schedule->target.descriptor_set, descriptor_ref);
       IREE_RETURN_IF_ERROR(loom_amdgpu_encode_sopp_simm16(
           state, descriptor->encoding_id, wait_state->immediate));
       loom_amdgpu_record_native_insertion(
-          state, LOOM_AMDGPU_NATIVE_INSERTION_WAIT,
-          LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT_DEPCTR, wait_state->immediate);
+          state, LOOM_AMDGPU_NATIVE_INSERTION_WAIT, descriptor_ref,
+          wait_state->immediate);
       return iree_ok_status();
     }
     case LOOM_AMDGPU_WAIT_STATE_ACTION_UNKNOWN:

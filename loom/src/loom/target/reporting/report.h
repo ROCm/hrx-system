@@ -1124,7 +1124,8 @@ typedef struct loom_target_compile_report_wait_action_row_t {
   iree_string_view_t consumer_descriptor_key;
   // Descriptor semantic tag for |consumer_node|, or empty.
   iree_string_view_t consumer_semantic_tag;
-  // Wait target value. Zero drains all outstanding packets for the counter.
+  // Target-owned wait bound, including packed dependency fields for ALU waits.
+  // Zero drains all outstanding packets for an ordinary counting counter.
   uint32_t target_count;
   // Outstanding packet count for this counter before the wait action.
   uint32_t outstanding_before;

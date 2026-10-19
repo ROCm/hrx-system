@@ -190,6 +190,7 @@ loom_check_test_suite(
     "test/register_banks.loom-test"
     "test/register_numbering.loom-test"
     "test/replay_clauses.loom-test"
+    "test/sgpr_read_waits.loom-test"
     "test/shift_allocation.loom-test"
     "test/short_wait_windows.loom-test"
     "test/spill_fact_lifetime.loom-test"
@@ -510,6 +511,7 @@ loom_cc_library(
   DEPS
     ::kernel_plan
     ::kernel_record_build
+    ::kernel_report
     ::preflight
     iree::base
     iree::base::internal::arena
@@ -521,7 +523,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::planning::occupancy
-    loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::reporting::low
     loom::target::reporting::report
@@ -675,10 +676,30 @@ loom_cc_library(
     iree::base
     loom::codegen::low::frame
     loom::ir
+    loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::reporting::low
     loom::target::reporting::report
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    kernel_report_test
+  SRCS
+    "kernel_report_test.cc"
+  DEPS
+    ::kernel_report
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::amdgpu::planning::wait_counters
+    loom::target::reporting::report
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
 )
 endif()
 

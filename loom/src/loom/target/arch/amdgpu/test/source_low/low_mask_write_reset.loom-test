@@ -400,6 +400,6 @@ low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @reuse(%value: 
   v_cndmask_b32 v0, 0, v0, s[0:1]
   v_mov_b32 v0, s4
   s_or_b64 s[0:1], s[4:5], s[4:5]
-  s_wait_alu depctr(0)
+  s_wait_alu depctr(65534)
   s_and_b64 s[0:1], s[0:1], s[4:5]
   s_endpgm

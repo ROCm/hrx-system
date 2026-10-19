@@ -20,6 +20,12 @@
 extern "C" {
 #endif
 
+// Records counter and native destination waits in one ordered report view.
+// The immutable plans keep their own ownership and are not copied or mutated.
+iree_status_t loom_amdgpu_kernel_report_record_plan(
+    loom_target_compile_report_t* report,
+    const loom_amdgpu_packet_plan_t* packet_plan);
+
 // Records target-native emission facts against their originating Low frame.
 //
 // This adapter owns the cross-layer reporting join. Native emission produces

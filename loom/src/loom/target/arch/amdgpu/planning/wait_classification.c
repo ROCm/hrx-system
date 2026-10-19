@@ -441,10 +441,6 @@ static void loom_amdgpu_wait_classification_finish_nodes(
       node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_USES_VECTOR_ALU;
     }
     if (iree_any_bit_set(descriptor_traits,
-                         LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU)) {
-      node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_USES_SCALAR_ALU;
-    }
-    if (iree_any_bit_set(descriptor_traits,
                          LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL)) {
       node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_TRANSCENDENTAL;
     }
@@ -560,10 +556,6 @@ static void loom_amdgpu_wait_classification_finish_nodes(
     if (iree_any_bit_set(structural.flags,
                          LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_USES_VECTOR_ALU)) {
       node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_USES_VECTOR_ALU;
-    }
-    if (iree_any_bit_set(structural.flags,
-                         LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_USES_SCALAR_ALU)) {
-      node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_USES_SCALAR_ALU;
     }
     if (has_valu_trans_use_depctr &&
         iree_any_bit_set(flags, LOOM_AMDGPU_WAIT_NODE_STATE_TRANSCENDENTAL)) {

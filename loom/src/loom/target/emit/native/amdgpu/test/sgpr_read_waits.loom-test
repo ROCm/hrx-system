@@ -1,0 +1,496 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// RUN: emit amdgpu-assembly @local_pair strategy=source fixed=%original:physical_register:1:1 fixed=%replacement:physical_register:0:1
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @local_pair(%original: reg<amdgpu.sgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  %replacement = s_mov_b32 66
+  %consumed = s_add_u32 %replacement, %replacement
+  return
+}
+
+// ----
+  v_mov_b32 v0, s1
+  s_mov_b32 s0, 66
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @read_before_fallthrough strategy=source fixed=%original:physical_register:1:1 fixed=%replacement:physical_register:0:1
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @read_before_fallthrough(%original: reg<amdgpu.sgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  low.br ^overwrite
+^overwrite:
+  %replacement = s_mov_b32 66
+  %consumed = s_add_u32 %replacement, %replacement
+  return
+}
+
+// ----
+  v_mov_b32 v0, s1
+.Lbb1:
+  s_mov_b32 s0, 66
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @write_before_fallthrough strategy=source fixed=%original:physical_register:1:1 fixed=%replacement:physical_register:0:1
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @write_before_fallthrough(%original: reg<amdgpu.sgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  %replacement = s_mov_b32 66
+  low.br ^consume
+^consume:
+  %consumed = s_add_u32 %replacement, %replacement
+  return
+}
+
+// ----
+  v_mov_b32 v0, s1
+  s_mov_b32 s0, 66
+.Lbb1:
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @read_from_later_predecessor strategy=source fixed=%original:physical_register:1:1 fixed=%replacement:physical_register:0:1
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @read_from_later_predecessor(%original: reg<amdgpu.sgpr>, %condition: reg<amdgpu.scc>) asm {
+  low.cond_br %condition, ^read, ^skip : reg<amdgpu.scc>
+^skip:
+  low.br ^join
+^join:
+  %replacement = s_mov_b32 66
+  %consumed = s_add_u32 %replacement, %replacement
+  return
+^read:
+  %saved = v_mov_b32_copy %original
+  low.br ^join
+}
+
+// ----
+  s_cbranch_scc1 .Lbb3
+.Lbb1:
+.Lbb2:
+  s_mov_b32 s0, 66
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+  s_endpgm
+.Lbb3:
+  v_mov_b32 v0, s1
+  s_branch .Lbb2
+
+// ====
+
+// RUN: emit amdgpu-assembly @scalar_vcc_write strategy=source
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @scalar_vcc_write(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.vcc>) asm {
+  %selected = v_cndmask_b32_src0_inline_vcc %value, %mask {false_value = 0}
+  %replacement = s_mov_b32_vcc_imm 1
+  %consumed = v_cndmask_b32_src0_inline_vcc %selected, %replacement {false_value = 0}
+  return
+}
+
+// ----
+  v_cndmask_b32 v0, 0, v0, vcc
+  s_mov_b32 vcc_lo, 1
+  s_delay_alu instid0(VALU_DEP_1)
+  s_wait_alu depctr(65534)
+  v_cndmask_b32 v0, 0, v0, vcc
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @vector_vcc_write strategy=source
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @vector_vcc_write(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.vcc>) asm {
+  %selected = v_cndmask_b32_src0_inline_vcc %value, %mask {false_value = 0}
+  %replacement = v_cmp_eq_i32_src0_inline_vcc %value {lhs = 0}
+  %consumed = v_cndmask_b32_src0_inline_vcc %selected, %replacement {false_value = 0}
+  return
+}
+
+// ----
+  v_cndmask_b32 v1, 0, v0, vcc
+  v_cmp_eq_i32 vcc, 0, v0
+  s_delay_alu instid0(VALU_DEP_2)
+  s_wait_alu depctr(65533)
+  v_cndmask_b32 v0, 0, v1, vcc
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @backedge_read strategy=source fixed=%replacement:physical_register:0:1
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @backedge_read() asm {
+  low.br ^header
+^header:
+  %replacement = s_mov_b32 66
+  low.br ^body
+^body:
+  %consumed = v_mov_b32_copy %replacement
+  low.br ^header
+}
+
+// ----
+.Lbb1:
+  s_mov_b32 s0, 66
+.Lbb2:
+  s_wait_alu depctr(65534)
+  v_mov_b32 v0, s0
+  s_branch .Lbb1
+
+// ====
+
+// RUN: emit amdgpu-assembly @edge_copy_write strategy=source fixed=%original:physical_register:0:1 fixed=%source:physical_register:4:1 fixed=%joined:physical_register:0:1
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @edge_copy_write(%original: reg<amdgpu.sgpr>, %source: reg<amdgpu.sgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  low.br ^join(%source: reg<amdgpu.sgpr>)
+^join(%joined: reg<amdgpu.sgpr>):
+  %consumed = s_add_u32 %joined, %joined
+  return
+}
+
+// ----
+  v_mov_b32 v0, s0
+  s_mov_b32 s0, s4
+.Lbb1:
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @cycle_temporary strategy=source fixed=%left:physical_register:0:1 fixed=%right:physical_register:1:1 fixed=%spare:physical_register:2:1 fixed=%joined:physical_register:0:2
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @cycle_temporary(%left: reg<amdgpu.sgpr>, %right: reg<amdgpu.sgpr>, %spare: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %saved = v_mov_b32_copy %spare
+  %reversed = concat(%right, %left) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^join(%reversed: reg<amdgpu.sgpr x2>)
+^join(%joined: reg<amdgpu.sgpr x2>):
+  return %joined
+}
+
+// ----
+  v_mov_b32 v0, s2
+  s_mov_b32 s2, s1
+  s_mov_b32 s1, s0
+  s_wait_alu depctr(65534)
+  s_mov_b32 s0, s2
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @memory_progress strategy=source fixed=%original:physical_register:1:1 fixed=%replacement:physical_register:0:1 fixed=%base:physical_register:4:2
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @memory_progress(%original: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr x2>, %address: reg<amdgpu.vgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  %replacement = s_mov_b32 66
+  %loaded = global_load_b32_saddr %address, %base
+  %consumed = s_add_u32 %replacement, %replacement
+  return
+}
+
+// ----
+  v_mov_b32 v1, s1
+  s_mov_b32 s0, 66
+  global_load_b32 v0, v0, s[4:5] offset:0
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @cycle_temporary strategy=source fixed=%left:physical_register:0:1 fixed=%right:physical_register:1:1 fixed=%spare:physical_register:2:1 fixed=%joined:physical_register:0:2
+
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @cycle_temporary(%left: reg<amdgpu.sgpr>, %right: reg<amdgpu.sgpr>, %spare: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %saved = v_mov_b32_copy %spare
+  %reversed = concat(%right, %left) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^join(%reversed: reg<amdgpu.sgpr x2>)
+^join(%joined: reg<amdgpu.sgpr x2>):
+  return %joined
+}
+
+// ----
+0x7E000202
+0xBE820001
+0xBE810000
+0xBF88FFFE
+0xBE800002
+0xBFB00000
+
+// ====
+
+// VALU scalar destinations use va_sdst, independently of scalar writes.
+// RUN: emit amdgpu-assembly @vector_scalar_write strategy=source fixed=%original:physical_register:1:1 fixed=%replacement:physical_register:0:1
+amdgpu.target<gfx1201> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @vector_scalar_write(%original: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  %replacement = v_readfirstlane_b32 %value
+  %consumed = v_mov_b32_copy %replacement
+  return
+}
+
+// ----
+  v_mov_b32 v1, s1
+  v_readfirstlane_b32 s0, v0
+  s_delay_alu instid0(VALU_DEP_1)
+  s_wait_alu depctr(61951)
+  v_mov_b32 v0, s0
+  s_endpgm
+
+// ====
+
+// SALU consumption interlocks the same VALU-written destination.
+// RUN: emit amdgpu-assembly @scalar_consumption strategy=source fixed=%original:physical_register:1:1 fixed=%replacement:physical_register:0:1 fixed=%sum:physical_register:4:1
+amdgpu.target<gfx1201> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @scalar_consumption(%original: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  %replacement = v_readfirstlane_b32 %value
+  %sum = s_add_u32 %replacement, %replacement
+  %consumed = v_mov_b32_copy %replacement
+  return
+}
+
+// ----
+  v_mov_b32 v1, s1
+  v_readfirstlane_b32 s0, v0
+  s_delay_alu instid0(VALU_DEP_1)
+  s_add_u32 s4, s0, s0
+  v_mov_b32 v0, s0
+  s_endpgm
+
+// ====
+
+// A wait on another destination field cannot retire a scalar write. A matching
+// wait completes that write but does not erase pair history for later writes.
+// RUN: emit amdgpu-assembly @partial_wait_fields strategy=source fixed=%original:physical_register:1:1 fixed=%first:physical_register:0:1 fixed=%second:physical_register:0:1 fixed=%third:physical_register:0:1
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @partial_wait_fields(%original: reg<amdgpu.sgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  %first = s_mov_b32 65
+  s_wait_alu {depctr = 65533}
+  %first_use = s_add_u32 %first, %first
+  %second = s_mov_b32 66
+  s_wait_alu {depctr = 65534}
+  %second_use = s_add_u32 %second, %second
+  low.br ^next
+^next:
+  %third = s_mov_b32 67
+  %third_use = s_add_u32 %third, %third
+  return
+}
+
+// ----
+  v_mov_b32 v0, s1
+  s_mov_b32 s0, 65
+  s_wait_alu depctr(65533)
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+  s_mov_b32 s0, 66
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+.Lbb1:
+  s_mov_b32 s0, 67
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+  s_endpgm
+
+// ====
+
+// SMEM completes pending scalar destinations, not persistent pair history.
+// RUN: emit amdgpu-assembly @scalar_memory_progress strategy=source fixed=%original:physical_register:1:1 fixed=%first:physical_register:0:1 fixed=%second:physical_register:0:1 fixed=%base:physical_register:4:2 fixed=%offset:physical_register:6:1 fixed=%loaded:physical_register:8:1
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @scalar_memory_progress(%original: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  %first = s_mov_b32 66
+  %loaded = s_load_dword %base, %offset
+  %first_use = s_add_u32 %first, %first
+  %second = s_mov_b32 67
+  %second_use = s_add_u32 %second, %second
+  return
+}
+
+// ----
+  v_mov_b32 v0, s1
+  s_mov_b32 s0, 66
+  s_load_dword s8, s[4:5], s6 offset:0
+  s_add_u32 s0, s0, s0
+  s_mov_b32 s0, 67
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, s0, s0
+  s_endpgm
+
+// ====
+
+// Buffer memory has the scalar destination interlock that GLOBAL lacks.
+// RUN: emit amdgpu-assembly @buffer_memory_progress strategy=source fixed=%original:physical_register:1:1 fixed=%replacement:physical_register:0:1 fixed=%resource:physical_register:4:4 fixed=%offset:physical_register:8:1
+amdgpu.target<gfx1200> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @buffer_memory_progress(%original: reg<amdgpu.sgpr>, %resource: reg<amdgpu.sgpr x4>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  %replacement = s_mov_b32 66
+  %loaded = buffer_load_dword %resource, %address, %offset
+  %consumed = s_add_u32 %replacement, %replacement
+  return
+}
+
+// ----
+  v_mov_b32 v1, s1
+  s_mov_b32 s0, 66
+  buffer_load_dword v0, v0, s[4:7], s8 offen offset:0
+  s_add_u32 s0, s0, s0
+  s_endpgm
+
+// ====
+
+// TTMP lives beyond ordinary SGPR allocation, with the same physical pairs.
+// RUN: emit amdgpu-assembly @fixed_temporary_pair strategy=source fixed=%original:physical_register:123:1 fixed=%replacement:physical_register:122:1
+amdgpu.target<gfx1201> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @fixed_temporary_pair(%original: reg<amdgpu.sgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  low.br ^overwrite
+^overwrite:
+  %replacement = s_mov_b32 66
+  %consumed = s_add_u32 %replacement, %replacement
+  return
+}
+
+// ----
+  v_mov_b32 v0, ttmp15
+.Lbb1:
+  s_mov_b32 ttmp14, 66
+  s_wait_alu depctr(65534)
+  s_add_u32 s0, ttmp14, ttmp14
+  s_endpgm
+
+// ====
+
+// Both hardware mask DWORDs belong to the VCC destination field in wave64.
+// RUN: emit amdgpu-assembly @vector_vcc_wave64 strategy=source
+amdgpu.target<gfx1201> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @vector_vcc_wave64(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.vcc>) asm {
+  %selected = v_cndmask_b32_src0_inline_vcc %value, %mask {false_value = 0}
+  %replacement = v_cmp_eq_i32_src0_inline_vcc %value {lhs = 0}
+  %consumed = v_cndmask_b32_src0_inline_vcc %selected, %replacement {false_value = 0}
+  return
+}
+
+// ----
+  v_cndmask_b32 v1, 0, v0, vcc
+  v_cmp_eq_i32 vcc, 0, v0
+  s_delay_alu instid0(VALU_DEP_2)
+  s_wait_alu depctr(65533)
+  v_cndmask_b32 v0, 0, v1, vcc
+  s_endpgm
+
+// ====
+
+// Older processors do not acquire GFX12's persistent scalar-read hazard.
+// RUN: emit amdgpu-assembly @older_target strategy=source fixed=%original:physical_register:1:1 fixed=%replacement:physical_register:0:1
+amdgpu.target<gfx1100> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @older_target(%original: reg<amdgpu.sgpr>) asm {
+  %saved = v_mov_b32_copy %original
+  low.br ^overwrite
+^overwrite:
+  %replacement = s_mov_b32 66
+  %consumed = s_add_u32 %replacement, %replacement
+  return
+}
+
+// ----
+  v_mov_b32 v0, s1
+.Lbb1:
+  s_mov_b32 s0, 66
+  s_add_u32 s0, s0, s0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-wait-state-plan @gfx12_sgpr_read_hazard strategy=source
+amdgpu.target<gfx1200> @gfx12_target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_sgpr_read_hazard(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
+  %replacement = s_or_b64 %source, %source
+  %result = s_and_b64 %replacement, %source
+  return
+}
+
+// ----
+amdgpu.wait_state_plan states=1 progress=4 hazards=1
+state[0] reason=sgpr_read_dependency action=amdgpu.s_wait_alu at=b0:n2/o2 producer=n1 consumer=n2 required=1 observed=0 residual=1 depctr=0xfffe
+
+// ====
+
+// RUN: emit amdgpu-wait-state-plan @gfx12_structural_sgpr_read_hazard strategy=source fixed=%mask:physical_register:0:2 fixed=%source:physical_register:2:2 fixed=%copy:physical_register:0:2 fixed=%result:physical_register:0:2
+amdgpu.target<gfx1200> @gfx12_target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_structural_sgpr_read_hazard(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
+  %copy = copy %source {detached = true} : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr x2>
+  %result = s_and_b64 %copy, %source
+  return
+}
+
+// ----
+amdgpu.wait_state_plan states=1 progress=4 hazards=1
+state[0] reason=sgpr_read_dependency action=amdgpu.s_wait_alu at=b0:n2/o2 producer=n1 consumer=n2 required=1 observed=0 residual=1 depctr=0xfffe
+
+// ====
+
+// RUN: emit amdgpu-wait-state-plan @gfx12_fixed_sgpr_read_hazard strategy=source fixed=%mask:physical_register:108:2 fixed=%source:physical_register:110:2 fixed=%replacement:physical_register:108:2 fixed=%result:physical_register:108:2
+amdgpu.target<gfx1200> @gfx12_target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_fixed_sgpr_read_hazard(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
+  %replacement = s_or_b64 %source, %source
+  %result = s_and_b64 %replacement, %source
+  return
+}
+
+// ----
+amdgpu.wait_state_plan states=1 progress=4 hazards=1
+state[0] reason=sgpr_read_dependency action=amdgpu.s_wait_alu at=b0:n2/o2 producer=n1 consumer=n2 required=1 observed=0 residual=1 depctr=0xfffe

@@ -1892,6 +1892,10 @@ static iree_status_t loom_amdgpu_append_wait_state_action(
             iree_string_builder_append_cstring(context->builder, "  v_nop\n"));
       }
       return iree_ok_status();
+    case LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU:
+      return iree_string_builder_append_format(
+          context->builder, "  s_wait_alu depctr(%" PRIu16 ")\n",
+          wait_state->immediate);
     case LOOM_AMDGPU_WAIT_STATE_ACTION_UNKNOWN:
     default: {
       IREE_ASSERT_UNREACHABLE(
@@ -1942,11 +1946,17 @@ static iree_status_t loom_amdgpu_append_wait_states_after_instruction(
         wait_state->instruction_offset != instruction_offset) {
       break;
     }
-    IREE_ASSERT_EQ(wait_state->action,
-                   LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR);
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        context->builder, "\n  s_waitcnt_depctr 0x%04" PRIx16,
-        wait_state->immediate));
+    if (wait_state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          context->builder, "\n  s_wait_alu depctr(%" PRIu16 ")",
+          wait_state->immediate));
+    } else {
+      IREE_ASSERT_EQ(wait_state->action,
+                     LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          context->builder, "\n  s_waitcnt_depctr 0x%04" PRIx16,
+          wait_state->immediate));
+    }
     ++state->packet_plan.next_wait_state_index;
   }
   return iree_ok_status();

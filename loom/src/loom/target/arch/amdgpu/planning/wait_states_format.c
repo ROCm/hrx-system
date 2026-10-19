@@ -59,7 +59,8 @@ static iree_status_t loom_amdgpu_wait_state_write_states_json(
           &state_object, IREE_SV("instruction_offset"),
           state->instruction_offset));
     }
-    if (state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR) {
+    if (state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR ||
+        state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU) {
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
           &state_object, IREE_SV("depctr_immediate"), state->immediate));
     }
@@ -118,7 +119,8 @@ iree_status_t loom_amdgpu_wait_state_plan_format_text(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder, " after=%" PRIu32, state->instruction_offset));
     }
-    if (state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR) {
+    if (state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR ||
+        state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder, " depctr=0x%04" PRIx16, state->immediate));
     }

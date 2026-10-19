@@ -3534,8 +3534,8 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_valu_sgpr_read_depc
 // ----
   v_add_u32 v0, s0, v0
   s_add_u32 s0, s0, s0
-  s_wait_alu depctr(0)
   s_delay_alu instid0(VALU_DEP_1)
+  s_wait_alu depctr(65534)
   v_add_u32 v0, s0, v0
   buffer_store_dword v0, v1, s[4:7], s0 offen offset:0
   s_wait_storecnt storecnt(0)

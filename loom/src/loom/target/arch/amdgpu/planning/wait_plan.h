@@ -62,8 +62,9 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE = 5,
   // An RDNA VALU consumes a nearby TRANS result before va_vdst is drained.
   LOOM_AMDGPU_WAIT_PLAN_REASON_TRANS_RESULT_USE = 6,
-  // A GFX12 ALU packet reads SGPR state with outstanding ALU dependencies.
-  LOOM_AMDGPU_WAIT_PLAN_REASON_VALU_SGPR_READ = 7,
+  // An ALU consumes a rewritten scalar pair previously read by VALU. The
+  // native wait-state plan supplies these actions to compile reporting.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_SGPR_READ_DEPENDENCY = 7,
   // A memory-effect dependency observes an outstanding memory packet.
   LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT = 8,
   // Program exit observes outstanding memory stores.
@@ -113,6 +114,7 @@ typedef struct loom_amdgpu_wait_plan_action_t {
   // Wait target value. Zero drains all outstanding packets for the counter;
   // nonzero bounds the remaining work. Authored bounds need an ordering proof
   // before they can establish completion of an individual producer.
+  // ALU waits instead pack the ISA's independent dependency-field bounds.
   uint16_t target_count;
   // Region block containing the insertion point or explicit wait.
   uint32_t block_index;

@@ -252,11 +252,13 @@ loom_cc_library(
   HDRS
     "mask_write_wait.h"
     "replay_clause.h"
+    "sgpr_read_wait.h"
     "short_wait.h"
     "wait_states.h"
   SRCS
     "mask_write_wait.c"
     "replay_clause.c"
+    "sgpr_read_wait.c"
     "short_wait.c"
     "wait_states.c"
   DEPS
@@ -309,6 +311,24 @@ loom_cc_library(
     loom::util::json
     loom::util::stream
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    sgpr_read_wait_test
+  SRCS
+    "sgpr_read_wait_test.cc"
+  DEPS
+    ::wait_states
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::schedule
+    loom::util::cfg_graph_test_util
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
 )
 endif()
 
@@ -418,40 +438,6 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
-    sgpr_read_hazard
-  HDRS
-    "sgpr_read_hazard.h"
-  SRCS
-    "sgpr_read_hazard.c"
-  DEPS
-    iree::base
-    iree::base::internal::arena
-    loom::codegen::low::allocation
-    loom::target::arch::amdgpu::refs::target_refs
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_cc_test(
-  NAME
-    sgpr_read_hazard_test
-  SRCS
-    "sgpr_read_hazard_test.cc"
-  DEPS
-    ::sgpr_read_hazard
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::target::arch::amdgpu::refs::target_refs
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_cc_library(
-  NAME
     trans_result_window
   HDRS
     "trans_result_window.h"
@@ -531,7 +517,6 @@ loom_cc_library(
     ::address_state
     ::matrix_result_wait
     ::matrix_wait_states
-    ::sgpr_read_hazard
     ::trans_result_window
     ::wait_classification
     ::wait_completion

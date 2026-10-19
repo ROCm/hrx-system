@@ -27,50 +27,6 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_multi_counter_consu
 
 // ====
 
-// RUN: emit amdgpu-wait-counter-plan-json @gfx12_sgpr_read_hazard strategy=source
-amdgpu.target<gfx1200> @gfx12_target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_sgpr_read_hazard(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
-}
-
-// ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"gfx12_sgpr_read_hazard","target":"gfx12_target","descriptor_set":"amdgpu.rdna4.core","progress_count":0,"hazard_count":1,"progress":[],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":7,"reason_name":"amdgpu.valu_sgpr_read","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":5,"progress_class_name":"amdgpu.alu","required":1,"observed":0,"residual":1}]}
-
-// ====
-
-// RUN: emit amdgpu-wait-counter-plan-json @gfx12_structural_sgpr_read_hazard strategy=source fixed=%mask:physical_register:0:2 fixed=%source:physical_register:2:2 fixed=%copy:physical_register:0:2 fixed=%result:physical_register:0:2
-amdgpu.target<gfx1200> @gfx12_target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_structural_sgpr_read_hazard(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %copy = copy %source {detached = true} : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr x2>
-  %result = s_and_b64 %copy, %source
-  return
-}
-
-// ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"gfx12_structural_sgpr_read_hazard","target":"gfx12_target","descriptor_set":"amdgpu.rdna4.core","progress_count":0,"hazard_count":1,"progress":[],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":7,"reason_name":"amdgpu.valu_sgpr_read","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":5,"progress_class_name":"amdgpu.alu","required":1,"observed":0,"residual":1}]}
-
-// ====
-
-// RUN: emit amdgpu-wait-counter-plan-json @gfx12_fixed_sgpr_read_hazard strategy=source fixed=%mask:physical_register:108:2 fixed=%source:physical_register:110:2 fixed=%replacement:physical_register:108:2 fixed=%result:physical_register:108:2
-amdgpu.target<gfx1200> @gfx12_target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_fixed_sgpr_read_hazard(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
-}
-
-// ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"gfx12_fixed_sgpr_read_hazard","target":"gfx12_target","descriptor_set":"amdgpu.rdna4.core","progress_count":0,"hazard_count":1,"progress":[],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":7,"reason_name":"amdgpu.valu_sgpr_read","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":5,"progress_class_name":"amdgpu.alu","required":1,"observed":0,"residual":1}]}
-
-// ====
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_explicit_smem_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target

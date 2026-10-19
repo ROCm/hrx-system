@@ -10,9 +10,283 @@
 
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/reporting/low_mix.h"
 #include "loom/target/reporting/low_names.h"
+
+// Counter planning and native destination planning own different dependencies.
+// Merge their retained actions only for reporting; no combined plan is retained
+// and neither producer has to reconstruct the other's physical facts.
+static bool loom_amdgpu_kernel_report_next_wait_action(
+    const loom_amdgpu_packet_plan_t* packet_plan,
+    iree_host_size_t* counter_cursor, iree_host_size_t* state_cursor,
+    loom_amdgpu_wait_plan_action_t* out_action) {
+  const loom_amdgpu_wait_plan_t* counters = &packet_plan->wait_plan;
+  const loom_amdgpu_wait_state_plan_t* states = &packet_plan->wait_states;
+  while (*state_cursor < states->state_count &&
+         states->states[*state_cursor].action !=
+             LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU) {
+    ++*state_cursor;
+  }
+  const loom_amdgpu_wait_plan_action_t* counter =
+      *counter_cursor < counters->action_count
+          ? &counters->actions[*counter_cursor]
+          : NULL;
+  const loom_amdgpu_wait_state_t* state = *state_cursor < states->state_count
+                                              ? &states->states[*state_cursor]
+                                              : NULL;
+  if (counter != NULL &&
+      (state == NULL || counter->block_index < state->block_index ||
+       (counter->block_index == state->block_index &&
+        counter->scheduled_ordinal <= state->scheduled_ordinal))) {
+    *out_action = *counter;
+    ++*counter_cursor;
+    return true;
+  }
+  if (state == NULL) {
+    return false;
+  }
+  *out_action = (loom_amdgpu_wait_plan_action_t){
+      .kind = LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED,
+      .reason = LOOM_AMDGPU_WAIT_PLAN_REASON_SGPR_READ_DEPENDENCY,
+      .counter_id = LOOM_AMDGPU_WAIT_COUNTER_ALU,
+      .target_count = state->immediate,
+      .block_index = state->block_index,
+      .node_index = state->node_index,
+      .scheduled_ordinal = state->scheduled_ordinal,
+      .producer_node = state->producer_node,
+      .consumer_node = state->consumer_node,
+  };
+  ++*state_cursor;
+  return true;
+}
+
+static void loom_amdgpu_kernel_report_accumulate_wait_action(
+    loom_target_compile_report_wait_plan_t* summary,
+    const loom_amdgpu_wait_plan_action_t* action) {
+  ++summary->action_count;
+  switch (action->kind) {
+    case LOOM_AMDGPU_WAIT_PLAN_ACTION_EXPLICIT:
+      ++summary->explicit_action_count;
+      break;
+    case LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED:
+      ++summary->planned_action_count;
+      break;
+    case LOOM_AMDGPU_WAIT_PLAN_ACTION_UNKNOWN:
+    default:
+      IREE_ASSERT(false, "wait plan action kind must be known");
+      break;
+  }
+  if (action->target_count == 0) {
+    ++summary->full_drain_count;
+    summary->max_full_drain_outstanding_before =
+        iree_max(summary->max_full_drain_outstanding_before,
+                 (uint64_t)action->outstanding_before);
+  } else {
+    ++summary->partial_wait_count;
+  }
+  const uint64_t drained_count =
+      action->outstanding_before > action->target_count
+          ? (uint64_t)action->outstanding_before - action->target_count
+          : 0;
+  summary->drained_count += drained_count;
+  summary->max_drained_count =
+      iree_max(summary->max_drained_count, drained_count);
+  summary->max_outstanding_before = iree_max(
+      summary->max_outstanding_before, (uint64_t)action->outstanding_before);
+}
+
+static iree_string_view_t loom_amdgpu_kernel_report_wait_action_name(
+    loom_amdgpu_wait_plan_action_kind_t kind) {
+  switch (kind) {
+    case LOOM_AMDGPU_WAIT_PLAN_ACTION_EXPLICIT:
+      return IREE_SV("explicit");
+    case LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED:
+      return IREE_SV("planned");
+    case LOOM_AMDGPU_WAIT_PLAN_ACTION_UNKNOWN:
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
+typedef struct loom_amdgpu_kernel_report_wait_endpoint_t {
+  // Node index in the schedule table, or UINT32_MAX.
+  uint32_t node_index;
+  // Scheduled ordinal for |node_index|, or UINT32_MAX.
+  uint32_t scheduled_ordinal;
+  // Operation mnemonic for |node_index|, or empty.
+  iree_string_view_t operation_name;
+  // Descriptor key for |node_index|, or empty.
+  iree_string_view_t descriptor_key;
+  // Descriptor semantic tag for |node_index|, or empty.
+  iree_string_view_t semantic_tag;
+} loom_amdgpu_kernel_report_wait_endpoint_t;
+
+static loom_amdgpu_kernel_report_wait_endpoint_t
+loom_amdgpu_kernel_report_wait_endpoint(
+    const loom_amdgpu_wait_plan_t* wait_plan, uint32_t node_index) {
+  loom_amdgpu_kernel_report_wait_endpoint_t endpoint = {
+      .node_index = UINT32_MAX,
+      .scheduled_ordinal = UINT32_MAX,
+      .operation_name = iree_string_view_empty(),
+      .descriptor_key = iree_string_view_empty(),
+      .semantic_tag = iree_string_view_empty(),
+  };
+  const loom_low_schedule_table_t* schedule = wait_plan->schedule;
+  if (node_index == LOOM_LOW_SCHEDULE_NODE_NONE ||
+      node_index >= schedule->node_count) {
+    return endpoint;
+  }
+
+  const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+  endpoint.node_index = node_index;
+  endpoint.scheduled_ordinal = node->scheduled_ordinal;
+  if (node->op != NULL) {
+    endpoint.operation_name = loom_op_name(schedule->module, node->op);
+  }
+  if (node->descriptor != NULL) {
+    endpoint.descriptor_key = loom_low_descriptor_set_string(
+        schedule->target.descriptor_set, node->descriptor->key_string_ref);
+    if (node->descriptor->semantic_tag_string_ref != LOOM_STRING_REF_NONE) {
+      endpoint.semantic_tag = loom_low_descriptor_set_string(
+          schedule->target.descriptor_set,
+          node->descriptor->semantic_tag_string_ref);
+    }
+  }
+  return endpoint;
+}
+
+iree_status_t loom_amdgpu_kernel_report_record_plan(
+    loom_target_compile_report_t* report,
+    const loom_amdgpu_packet_plan_t* packet_plan) {
+  if (report == NULL) {
+    return iree_ok_status();
+  }
+  iree_host_size_t counter_cursor = 0;
+  iree_host_size_t state_cursor = 0;
+  loom_amdgpu_wait_plan_action_t report_action;
+  if (!loom_amdgpu_kernel_report_next_wait_action(
+          packet_plan, &counter_cursor, &state_cursor, &report_action)) {
+    return iree_ok_status();
+  }
+  const loom_amdgpu_wait_plan_t* wait_plan = &packet_plan->wait_plan;
+  loom_target_compile_report_wait_plan_t summary = {0};
+  loom_target_compile_report_wait_plan_t
+      counter_summaries[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
+  loom_target_compile_report_wait_plan_t
+      reason_summaries[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT]
+                      [LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT] = {0};
+  do {
+    const loom_amdgpu_wait_plan_action_t* action = &report_action;
+    loom_amdgpu_kernel_report_accumulate_wait_action(&summary, action);
+    const uint32_t counter_index =
+        loom_amdgpu_wait_counter_slot_from_id(action->counter_id);
+    loom_amdgpu_kernel_report_accumulate_wait_action(
+        &counter_summaries[counter_index], action);
+    loom_amdgpu_kernel_report_accumulate_wait_action(
+        &reason_summaries[counter_index][action->reason], action);
+  } while (loom_amdgpu_kernel_report_next_wait_action(
+      packet_plan, &counter_cursor, &state_cursor, &report_action));
+  loom_target_compile_report_record_wait_plan(report, &summary);
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0;
+       i < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT && iree_status_is_ok(status);
+       ++i) {
+    if (counter_summaries[i].action_count == 0) {
+      continue;
+    }
+    const uint32_t counter_id = i + 1;
+    const loom_target_compile_report_wait_counter_row_t row = {
+        .function_name = report->function_name,
+        .counter_name = loom_amdgpu_wait_counter_name(counter_id),
+        .counter_id = counter_id,
+        .summary = counter_summaries[i],
+    };
+    status = loom_target_compile_report_record_wait_counter_row(report, &row);
+  }
+  for (uint32_t i = 0;
+       i < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT && iree_status_is_ok(status);
+       ++i) {
+    const uint32_t counter_id = i + 1;
+    const iree_string_view_t counter_name =
+        loom_amdgpu_wait_counter_name(counter_id);
+    for (uint32_t reason_id = 0;
+         reason_id < LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT &&
+         iree_status_is_ok(status);
+         ++reason_id) {
+      if (reason_summaries[i][reason_id].action_count == 0) {
+        continue;
+      }
+      const loom_target_compile_report_wait_reason_summary_row_t row = {
+          .function_name = report->function_name,
+          .counter_name = counter_name,
+          .reason_name = loom_amdgpu_wait_plan_reason_name(
+              (loom_amdgpu_wait_plan_reason_t)reason_id),
+          .counter_id = counter_id,
+          .reason_id = reason_id,
+          .summary = reason_summaries[i][reason_id],
+      };
+      status = loom_target_compile_report_record_wait_reason_summary_row(report,
+                                                                         &row);
+    }
+  }
+  if (!iree_status_is_ok(status) ||
+      !loom_target_compile_report_wants_details(
+          report, LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN)) {
+    return status;
+  }
+  counter_cursor = 0;
+  state_cursor = 0;
+  while (iree_status_is_ok(status) &&
+         loom_amdgpu_kernel_report_next_wait_action(
+             packet_plan, &counter_cursor, &state_cursor, &report_action)) {
+    const loom_amdgpu_wait_plan_action_t* action = &report_action;
+    // The ALU target packs dependency fields, not an outstanding packet count.
+    const uint32_t outstanding_after =
+        action->counter_id == LOOM_AMDGPU_WAIT_COUNTER_ALU
+            ? 0
+            : action->target_count;
+    const uint32_t drained_count =
+        action->outstanding_before > outstanding_after
+            ? action->outstanding_before - outstanding_after
+            : 0;
+    const loom_amdgpu_kernel_report_wait_endpoint_t producer =
+        loom_amdgpu_kernel_report_wait_endpoint(wait_plan,
+                                                action->producer_node);
+    const loom_amdgpu_kernel_report_wait_endpoint_t consumer =
+        loom_amdgpu_kernel_report_wait_endpoint(wait_plan,
+                                                action->consumer_node);
+    const loom_target_compile_report_wait_action_row_t row = {
+        .function_name = report->function_name,
+        .counter_name = loom_amdgpu_wait_counter_name(action->counter_id),
+        .action_name = loom_amdgpu_kernel_report_wait_action_name(action->kind),
+        .reason_name = loom_amdgpu_wait_plan_reason_name(action->reason),
+        .counter_id = action->counter_id,
+        .action_id = (uint32_t)action->kind,
+        .reason_id = (uint32_t)action->reason,
+        .block_index = action->block_index,
+        .node_index = action->node_index,
+        .scheduled_ordinal = action->scheduled_ordinal,
+        .producer_node = producer.node_index,
+        .producer_scheduled_ordinal = producer.scheduled_ordinal,
+        .producer_operation_name = producer.operation_name,
+        .producer_descriptor_key = producer.descriptor_key,
+        .producer_semantic_tag = producer.semantic_tag,
+        .consumer_node = consumer.node_index,
+        .consumer_scheduled_ordinal = consumer.scheduled_ordinal,
+        .consumer_operation_name = consumer.operation_name,
+        .consumer_descriptor_key = consumer.descriptor_key,
+        .consumer_semantic_tag = consumer.semantic_tag,
+        .target_count = action->target_count,
+        .outstanding_before = action->outstanding_before,
+        .outstanding_after = outstanding_after,
+        .drained_count = drained_count,
+    };
+    status = loom_target_compile_report_record_wait_action_row(report, &row);
+  }
+  return status;
+}
 
 static iree_status_t loom_amdgpu_kernel_report_record_native_insertions(
     loom_target_compile_report_t* report,

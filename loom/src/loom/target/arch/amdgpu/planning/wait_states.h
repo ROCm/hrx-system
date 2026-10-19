@@ -89,8 +89,10 @@ typedef enum loom_amdgpu_wait_state_reason_e {
   LOOM_AMDGPU_WAIT_STATE_REASON_DGEMM_MEMORY = 17,
   // A replayable memory clause would overwrite an address or mix load/store.
   LOOM_AMDGPU_WAIT_STATE_REASON_XNACK_REPLAY_CLAUSE = 18,
+  // An ALU reads a rewritten scalar pair previously consumed by VALU.
+  LOOM_AMDGPU_WAIT_STATE_REASON_SGPR_READ_DEPENDENCY = 19,
   // Number of wait-state reasons, including UNKNOWN.
-  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 19,
+  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 20,
 } loom_amdgpu_wait_state_reason_t;
 
 typedef enum loom_amdgpu_wait_state_action_e {
@@ -104,6 +106,8 @@ typedef enum loom_amdgpu_wait_state_action_e {
   LOOM_AMDGPU_WAIT_STATE_ACTION_V_NOP = 3,
   // Dependency-counter wait for selected ALU destination fields.
   LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR = 4,
+  // GFX12 dependency-counter wait for selected scalar destinations.
+  LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU = 5,
 } loom_amdgpu_wait_state_action_t;
 
 // One hardware wait action in scheduled packet and instruction order.
