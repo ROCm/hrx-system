@@ -67,6 +67,70 @@ TEST_F(SourceTextServiceTest, ChunkingRowsAndForksMatchDenseOracle) {
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
 }
 
+TEST_F(SourceTextServiceTest, KnownInputCheckpointsPreserveNoPrediction) {
+  const std::string prompt = "abxabbaaxba";
+  std::vector<int32_t> tokens;
+  for (char character : prompt) {
+    tokens.push_back(Oracle::Id(character));
+  }
+  auto* row = loom_serve_text_model_row(model_, 0);
+  const loom_serve_text_span_t prefix = {0, tokens.size(), tokens.data(), 0};
+  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, 1, &prefix));
+  EXPECT_EQ(loom_serve_text_row_position(row), 11u);
+  loom_serve_execution_frontier_t frontier;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_text_row_submit_decode(row, &frontier));
+
+  loom_serve_text_checkpoint_t* checkpoint = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_row_try_pin(row, &checkpoint));
+  ASSERT_NE(checkpoint, nullptr);
+
+  // The next ID belongs to the caller, not a local prediction. Consuming it
+  // advances retained state without making the row eligible for decoding.
+  const int32_t b = Oracle::Id('b');
+  const loom_serve_text_span_t append = {0, 1, &b, 0};
+  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 0, 1, &append));
+  EXPECT_EQ(loom_serve_text_row_position(row), 12u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_text_row_submit_decode(row, &frontier));
+
+  auto* fork = loom_serve_text_model_row(model_, 1);
+  bool restored = false;
+  IREE_ASSERT_OK(loom_serve_text_row_try_restore(fork, checkpoint, &restored));
+  ASSERT_TRUE(restored);
+  EXPECT_EQ(loom_serve_text_row_position(fork), 11u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_text_row_submit_decode(fork, &frontier));
+
+  // An explicit later selection observes the independently evolved states.
+  const int32_t x = Oracle::Id('x');
+  const loom_serve_text_span_t branches[] = {
+      {0, 1, &x, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+      {1, 1, &b, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+  };
+  IREE_ASSERT_OK(loom_serve_text_model_epoch(
+      model_, 1, IREE_ARRAYSIZE(branches), branches));
+  Oracle reference;
+  reference.Consume(prompt + "bx");
+  Oracle branch;
+  branch.Consume(prompt + "b");
+  EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+  EXPECT_EQ(loom_serve_text_row_token(fork), branch.Predict());
+  EXPECT_EQ(loom_serve_text_row_position(row), 13u);
+  EXPECT_EQ(loom_serve_text_row_position(fork), 12u);
+
+  // Restoring over a selected row must clear its old prediction as well.
+  IREE_ASSERT_OK(loom_serve_text_row_try_restore(row, checkpoint, &restored));
+  ASSERT_TRUE(restored);
+  EXPECT_EQ(loom_serve_text_row_position(row), 11u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_text_row_submit_decode(row, &frontier));
+  loom_serve_text_checkpoint_release(checkpoint);
+  IREE_ASSERT_OK(loom_serve_text_row_reset(row));
+  IREE_ASSERT_OK(loom_serve_text_row_reset(fork));
+  EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
+}
+
 TEST_F(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
   for (size_t capacity : {513u, 1024u, 4097u}) {
     SCOPED_TRACE(capacity);
