@@ -17,6 +17,7 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/service.h"
 #include "loom/serve/testing/http_harness.h"
@@ -88,6 +89,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_test_application_acquire(
         &options, iree_allocator_system(), &application));
     host_ = loom_serve_test_application_host(application);
+    group_ = loom_serve_test_application_device_group(application);
     const auto directory =
         std::filesystem::path(FLAG_model_source).parent_path().string();
     const iree_string_view_t sources[] = {IREE_SVL("generate.loom")};
@@ -151,6 +153,10 @@ class SourceRecognitionHttpTest : public ::testing::Test {
     IREE_ASSERT_OK(interface_.advance(
         interface_.self, stopping ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0,
         &progress));
+    if (!stopping) {
+      const loom_serve_resources_t resources = {.device_group = group_};
+      loom_serve_resources_schedule(&resources);
+    }
   }
   template <typename Predicate>
   void AdvanceUntil(Predicate ready, bool stopping = false) {
@@ -161,6 +167,10 @@ class SourceRecognitionHttpTest : public ::testing::Test {
       auto status = interface_.advance(
           interface_.self, stopping ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0,
           &progress);
+      if (iree_status_is_ok(status) && !stopping) {
+        const loom_serve_resources_t resources = {.device_group = group_};
+        progress |= loom_serve_resources_schedule(&resources);
+      }
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
       } else {
@@ -179,6 +189,8 @@ class SourceRecognitionHttpTest : public ::testing::Test {
 
   // Shared application host; worker gates establish the pre-execution cut.
   loom_serve_host_t* host_ = nullptr;
+  // Application group whose numerical permissions share the service owner.
+  loom_serve_device_group_t* group_ = nullptr;
   // Real source-owned request state and numerical execution.
   loom_serve_recognition_model_t* model_ = nullptr;
   // Independent HTTP connection owner.

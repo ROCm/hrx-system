@@ -19,6 +19,7 @@
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/registry.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/output.h"
 #include "loom/serve/service/speech/request.h"
@@ -184,6 +185,12 @@ class RegistryTextSpeechTest : public ::testing::Test {
         status = iree_status_join(status, iree_status_clone(model->status));
       }
       cursor_ ^= 1;
+      if (iree_status_is_ok(status)) {
+        const loom_serve_resources_t resources = {
+            .device_group = registration_.device_group,
+        };
+        progress |= loom_serve_resources_schedule(&resources);
+      }
       if (!iree_status_is_ok(status) || progress || done()) {
         iree_notification_cancel_wait(&notification_);
       } else {

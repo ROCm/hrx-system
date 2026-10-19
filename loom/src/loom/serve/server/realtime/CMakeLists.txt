@@ -96,6 +96,7 @@ loom_cc_library(
     loom::serve::server::configuration
     loom::serve::server::model_registration
     loom::serve::server::registry
+    loom::serve::server::resources
     loom::serve::service::text::stream
     loom::serve::testing::service_application
     loom::serve::testing::worker_gate
@@ -122,6 +123,7 @@ loom_cc_library(
     loom::serve::server::configuration
     loom::serve::server::model_registration
     loom::serve::server::registry
+    loom::serve::server::resources
     loom::serve::service::recognition::request
     loom::serve::testing::service_application
     loom::serve::testing::worker_gate
@@ -614,6 +616,7 @@ loom_cc_library(
     loom::serve::server::configuration
     loom::serve::server::model_registration
     loom::serve::server::registry
+    loom::serve::server::resources
     loom::serve::testing::service_application
     loom::serve::testing::worker_gate
     loom::serve::transport::http::listener

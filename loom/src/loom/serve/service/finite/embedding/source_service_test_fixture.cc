@@ -19,6 +19,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/serve/server/model_registration.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/testing/model.h"
@@ -82,9 +83,13 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
   if (self->service) {
     const auto flags =
         self->complete ? 0 : LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
-    self->status = iree_status_join(
-        self->status,
-        self->service->advance(self->service->self, flags, &result->did_work));
+    auto service_status =
+        self->service->advance(self->service->self, flags, &result->did_work);
+    if (iree_status_is_ok(service_status)) {
+      result->did_work |= loom_serve_execution_scheduler_advance(
+          self->scheduler, iree_time_now());
+    }
+    self->status = iree_status_join(self->status, service_status);
     pending = self->service->is_pending(self->service->self);
   }
   if (self->pool) {
@@ -124,6 +129,7 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Retire(
 iree_status_t loom_serve_test_embedding_model_lifecycle_t::RunOwner(
     loom_serve_device_t* device) {
   executor = loom_serve_host_executor(loom_serve_device_host(device));
+  scheduler = loom_serve_device_scheduler(device);
   iree_task_process_initialize(Drain, 0, 1, &process);
   process.user_data = this;
   process.release_fn = Release;
@@ -293,7 +299,18 @@ void SourceEmbeddingServiceTest::Accept(
 bool SourceEmbeddingServiceTest::Step(loom_serve_service_flags_t flags) {
   const uint64_t previous = wakes_.load();
   bool progress = false;
-  IREE_EXPECT_OK(interface_.advance(interface_.self, flags, &progress));
+  auto status = interface_.advance(interface_.self, flags, &progress);
+  if (!iree_status_is_ok(status)) {
+    IREE_EXPECT_OK(status);
+    return false;
+  }
+  if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+    const loom_serve_resources_t resources = {.device_group = group_};
+    progress |= loom_serve_resources_schedule(&resources);
+  }
+  if (progress) {
+    return true;
+  }
   auto* pool = loom_serve_device_memory_pool(device_);
   if (interface_.is_active(interface_.self) ||
       (pool && loom_serve_memory_pool_is_pending(pool))) {
@@ -315,7 +332,14 @@ bool SourceEmbeddingServiceTest::Step(loom_serve_service_flags_t flags) {
   }
   // A native completion can arrive during advance after capacity was denied.
   // Consume that wake with another owner turn instead of ending the drain.
-  return progress || wakes_.load() > previous;
+  return wakes_.load() > previous;
+}
+
+void SourceEmbeddingServiceTest::AdvanceUntil(
+    const char* phase, loom_serve_service_flags_t flags) {
+  while (std::string(interface_.snapshot(interface_.self).phase) != phase) {
+    ASSERT_TRUE(Step(flags));
+  }
 }
 
 void SourceEmbeddingServiceTest::Drain() {
@@ -333,10 +357,8 @@ void SourceEmbeddingServiceTest::CheckAbandonedCohort(
     clients[i] = Send(bodies[i]);
     ASSERT_NO_FATAL_FAILURE(Accept(clients[i], &connections[i]));
   }
-  ASSERT_TRUE(Step());  // CPU request preparation.
-  ASSERT_TRUE(Step());  // Source batch preparation.
-  ASSERT_TRUE(Step());  // Accepted device work; readiness may still be pending.
-  ASSERT_STREQ(interface_.snapshot(interface_.self).phase, "running");
+  // Device work is accepted; its completion has not been consumed by the owner.
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil("running"));
 
   if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(clients); ++i) {

@@ -80,6 +80,7 @@ loom_cc_library(
         ":model",
         ":service",
         "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/server:resources",
         "//loom/src/loom/serve/testing:http_harness",
         "//loom/src/loom/serve/testing:service_application",
         "//loom/src/loom/serve/testing:worker_gate",

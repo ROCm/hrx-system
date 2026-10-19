@@ -269,9 +269,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   // The outer owner holds another model's pin and will release it. Queue the
   // cohort behind that activity instead of treating capacity as unreachable.
   constexpr auto kShared = LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
-  EXPECT_TRUE(Step(kShared));  // Prepare requests.
-  EXPECT_TRUE(Step(kShared));  // Prepare cohort.
-  EXPECT_TRUE(Step(kShared));  // Consume preparation; admission denied.
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil("waiting", kShared));
   const auto waiting = interface_.snapshot(interface_.self);
   EXPECT_STREQ(waiting.phase, "waiting");
   EXPECT_EQ(waiting.queued_requests, 0u);
@@ -337,9 +335,7 @@ TEST_F(ElasticEmbeddingServiceTest,
             withdrawn.admission.duration_ns);
   const int request = Send(R"({"model":"fixture","input":["a","bbb"]})");
   ASSERT_NO_FATAL_FAILURE(Accept(request));
-  EXPECT_TRUE(Step(kShared));
-  EXPECT_TRUE(Step(kShared));
-  EXPECT_TRUE(Step(kShared));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil("waiting", kShared));
   const auto second_wait = loom_serve_residency_snapshot(residency);
   EXPECT_TRUE(second_wait.admission.waiting);
   EXPECT_EQ(second_wait.admission.count, 2u);

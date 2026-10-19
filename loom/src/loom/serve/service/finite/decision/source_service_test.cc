@@ -18,6 +18,7 @@
 #include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
@@ -146,7 +147,16 @@ class SourceDecisionServiceTest : public ::testing::Test {
   bool Step() {
     const uint64_t previous = wakes_.load();
     bool progress = false;
-    IREE_EXPECT_OK(interfaces_[0].advance(interfaces_[0].self, 0, &progress));
+    auto status = interfaces_[0].advance(interfaces_[0].self, 0, &progress);
+    if (!iree_status_is_ok(status)) {
+      IREE_EXPECT_OK(status);
+      return false;
+    }
+    const loom_serve_resources_t resources = {.device_group = group_};
+    progress |= loom_serve_resources_schedule(&resources);
+    if (progress) {
+      return true;
+    }
     if (interfaces_[0].is_active(interfaces_[0].self)) {
       struct loom_serve_test_decision_wait_t {
         // Shared release generation.
@@ -162,8 +172,9 @@ class SourceDecisionServiceTest : public ::testing::Test {
             return wait->wakes->load() > wait->previous;
           },
           &wait, iree_infinite_timeout());
+      return true;
     }
-    return progress;
+    return wakes_.load() > previous;
   }
   void Drain() {
     while (Step()) {
@@ -257,9 +268,10 @@ TEST_F(SourceDecisionServiceTest, PacksQuestionsAndRetainsResultsAcrossReset) {
   const int bad = Send(
       R"({"model":"decisions","state":"a","questions":{"bad":{"type":"score","instructions":"?","criteria":["one"]}}})");
   ASSERT_NO_FATAL_FAILURE(Accept(bad));
-  EXPECT_TRUE(Step());
-  EXPECT_TRUE(Step());
-  EXPECT_TRUE(Step());
+  while (std::string(interfaces_[0].snapshot(interfaces_[0].self).phase) !=
+         "running") {
+    ASSERT_TRUE(Step());
+  }
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(c, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
   ASSERT_EQ(close(c), 0);

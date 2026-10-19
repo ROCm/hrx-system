@@ -25,6 +25,7 @@
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/realtime/item.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/testing/service_application.h"
 #include "loom/serve/testing/worker_gate.h"
 #include "loom/serve/transport/http/listener.h"
@@ -319,6 +320,12 @@ class RealtimeResponseTest
           progress |= advanced;
           status = iree_status_join(status, iree_status_clone(model->status));
         }
+      }
+      if (iree_status_is_ok(status)) {
+        const loom_serve_resources_t resources = {
+            .device_group = registration_.device_group,
+        };
+        progress |= loom_serve_resources_schedule(&resources);
       }
       if (!iree_status_is_ok(status) || progress || done()) {
         iree_notification_cancel_wait(&notification_);

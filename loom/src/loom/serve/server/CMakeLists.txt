@@ -300,6 +300,7 @@ loom_cc_library(
     ::configuration
     ::model_registration
     ::registry
+    ::resources
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -333,6 +334,7 @@ loom_cc_library(
     ::configuration
     ::model_registration
     ::registry
+    ::resources
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -360,6 +362,7 @@ loom_cc_library(
     ::configuration
     ::model_registration
     ::registry
+    ::resources
     iree::base
     iree::base::threading
     iree::base::tooling::flags

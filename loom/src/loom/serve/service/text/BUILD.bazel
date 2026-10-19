@@ -88,6 +88,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/program:variant_pool",
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/server:resources",
         "//loom/src/loom/serve/server:router",
         "//loom/src/loom/serve/service/finite:component",
         "//loom/src/loom/serve/service/finite:model",

@@ -118,6 +118,8 @@ iree_status_t loom_serve_test_application_acquire(
           .backing = options->backing,
           .slab_size = options->slab_size,
           .memory_limit = options->memory_limit,
+          // Exercise deferred numerical permission through the real owner loop.
+          .execution_concurrency = 2,
       };
     }
     status = loom_serve_device_group_allocate(

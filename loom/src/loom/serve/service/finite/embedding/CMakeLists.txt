@@ -49,11 +49,13 @@ loom_cc_library(
     iree::testing::temp_file
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::compilation
     loom::serve::server::model_registration
     loom::serve::server::registry
+    loom::serve::server::resources
     loom::serve::server::router
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model

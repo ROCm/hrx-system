@@ -29,6 +29,7 @@
 #include "loom/serve/runtime/program/package.h"
 #include "loom/serve/runtime/program/variant_pool.h"
 #include "loom/serve/server/model_registration.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/image/model.h"
 #include "loom/serve/service/image/output.h"
@@ -323,6 +324,10 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         const auto ticket = iree_notification_prepare_wait(notification);
         bool progress = false;
         IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
+        if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+          const loom_serve_resources_t resources = {.device_group = group_};
+          progress |= loom_serve_resources_schedule(&resources);
+        }
         if (ready() || progress) {
           iree_notification_cancel_wait(notification);
         } else {
@@ -684,6 +689,8 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+      const loom_serve_resources_t resources = {.device_group = group_};
+      progress |= loom_serve_resources_schedule(&resources);
       if (ready() || progress) {
         iree_notification_cancel_wait(notification);
       } else {

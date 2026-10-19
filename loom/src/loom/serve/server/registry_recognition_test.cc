@@ -19,6 +19,7 @@
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/registry.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/service/recognition/stream.h"
 #include "loom/serve/service/recognition/transcription.h"
 #include "loom/serve/telemetry/record.h"
@@ -187,6 +188,12 @@ class RegistryRecognitionTest : public ::testing::Test {
                                              &registry_progress);
       }
       status = iree_status_join(status, iree_status_clone(Model()->status));
+      if (iree_status_is_ok(status)) {
+        const loom_serve_resources_t resources = {
+            .device_group = registration_options_.device_group,
+        };
+        progress |= loom_serve_resources_schedule(&resources);
+      }
       if (ready() || progress || registry_progress ||
           !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);

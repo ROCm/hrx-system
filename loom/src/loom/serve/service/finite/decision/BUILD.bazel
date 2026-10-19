@@ -43,6 +43,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/server:resources",
         "//loom/src/loom/serve/server:router",
         "//loom/src/loom/serve/service/finite:model",
         "//loom/src/loom/serve/service/finite:service",

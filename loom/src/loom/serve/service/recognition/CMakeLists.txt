@@ -86,6 +86,7 @@ loom_cc_library(
     iree::task
     iree::testing::gtest
     loom::serve::runtime::host
+    loom::serve::server::resources
     loom::serve::testing::http_harness
     loom::serve::testing::service_application
     loom::serve::testing::worker_gate

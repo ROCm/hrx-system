@@ -475,8 +475,8 @@ TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
   while (!complete) {
     const auto ticket = iree_notification_prepare_wait(notification);
     bool progress = false;
-    IREE_ASSERT_OK(interface.advance(
-        interface.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+    IREE_ASSERT_OK(
+        Advance(interface, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
     const auto state = interface.snapshot(interface.self);
     complete = !interface.is_pending(interface.self) &&
                !state.queued_requests && !state.active_requests;
@@ -906,7 +906,7 @@ TEST_F(SourceTextServiceTest,
         }
         EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 3u);
         bool progress = false;
-        IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+        IREE_ASSERT_OK(Advance(interface, 0, &progress));
         // The first heartbeat precedes borrower collection. It must include
         // arrivals after preparation began, not just the initial FIFO head.
         read_snapshots();

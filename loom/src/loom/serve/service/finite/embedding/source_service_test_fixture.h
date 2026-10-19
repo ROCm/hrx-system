@@ -17,6 +17,7 @@
 #include "iree/task/process.h"
 #include "iree/testing/gtest.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/service/finite/model.h"
 #include "loom/serve/service/finite/service.h"
@@ -52,7 +53,10 @@ struct loom_serve_test_embedding_model_lifecycle_t {
   // Borrowed capacity domain whose wakes keep this owner runnable under
   // pressure.
   loom_serve_memory_pool_t* pool = nullptr;
-  // Optional live service advanced by this same serialized pool owner.
+  // Borrowed numerical controller for this serialized device owner.
+  loom_serve_execution_scheduler_t* scheduler = nullptr;
+  // Optional live service on this device, advanced by the same serialized
+  // owner.
   loom_serve_service_t* service = nullptr;
   // Owned in-progress load, consumed at its terminal owner turn.
   loom_serve_finite_load_t* load = nullptr;
@@ -107,6 +111,8 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
               loom_serve_http_connection_t** out_connection = nullptr);
 
   bool Step(loom_serve_service_flags_t flags = 0);
+
+  void AdvanceUntil(const char* phase, loom_serve_service_flags_t flags = 0);
 
   void Drain();
 

@@ -211,6 +211,7 @@ loom_cc_library(
     loom::serve::runtime::program::variant_pool
     loom::serve::server::model_registration
     loom::serve::server::registry
+    loom::serve::server::resources
     loom::serve::server::router
     loom::serve::service::image::model
     loom::serve::service::image::output

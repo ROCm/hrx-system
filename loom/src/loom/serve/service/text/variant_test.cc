@@ -444,7 +444,7 @@ TEST_F(ReconfigurationTextServiceTest,
         EXPECT_FALSE(selection_.called);
         EXPECT_EQ(configuration_.selected(configuration_.self), original_);
         bool progress = false;
-        IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+        IREE_ASSERT_OK(Advance(interface_, 0, &progress));
         // The accepted CPU task cannot retire while its sole worker runs this
         // turn, even if the outstanding device epoch is already ready.
         EXPECT_FALSE(selection_.called);
@@ -569,7 +569,7 @@ TEST_F(ReconfigurationTextServiceTest,
             interface_.accept(interface_.self, connection, request, 0));
         ASSERT_NO_FATAL_FAILURE(Select(id));
         bool progress = false;
-        IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+        IREE_ASSERT_OK(Advance(interface_, 0, &progress));
         EXPECT_FALSE(selection_.called);
         EXPECT_EQ(configuration_.selected(configuration_.self), original_);
       });
@@ -590,8 +590,8 @@ TEST_F(ReconfigurationTextServiceTest,
             Stage(directory_ + "/advance.loom", original_, &id));
         ASSERT_NO_FATAL_FAILURE(Select(original_));
         bool progress = false;
-        IREE_ASSERT_OK(interface_.advance(
-            interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+        IREE_ASSERT_OK(
+            Advance(interface_, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
         EXPECT_TRUE(selection_.called);
         EXPECT_EQ(selection_.id, original_);
         IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, TakeSelectionStatus());
