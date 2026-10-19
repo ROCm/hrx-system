@@ -788,6 +788,7 @@ TEST_F(TokenizerJsonTest, BackToBackSpecialTokens) {
   iree_string_view_t json = IREE_SV(R"({
     "model": {
       "type": "BPE",
+      "ignore_merges": true,
       "vocab": {"hello": 1, "world": 2},
       "merges": []
     },
@@ -823,6 +824,8 @@ TEST_F(TokenizerJsonTest, BackToBackSpecialTokens) {
   IREE_ASSERT_OK(
       iree_tokenizer_from_huggingface_json(json, allocator_, &tokenizer));
   ASSERT_NE(tokenizer, nullptr);
+  std::unique_ptr<iree_tokenizer_t, decltype(&iree_tokenizer_free)> owner(
+      tokenizer, iree_tokenizer_free);
 
   auto encode = [&](const char* text) -> std::vector<int32_t> {
     std::vector<int32_t> tokens(64);
@@ -865,8 +868,6 @@ TEST_F(TokenizerJsonTest, BackToBackSpecialTokens) {
     EXPECT_EQ(tokens[1], 100);  // <|user|>
     EXPECT_EQ(tokens[2], 102);  // <|assistant|>
   }
-
-  iree_tokenizer_free(tokenizer);
 }
 
 TEST_F(TokenizerJsonTest, MaxSpecialTokenCountNoPostProcessor) {
@@ -918,6 +919,7 @@ TEST_F(TokenizerJsonTest, RstripTokenMatchAndWhitespaceConsumption) {
   iree_string_view_t json = IREE_SV(R"({
     "model": {
       "type": "BPE",
+      "ignore_merges": true,
       "vocab": {"hello": 1, "world": 2},
       "merges": []
     },
@@ -937,6 +939,8 @@ TEST_F(TokenizerJsonTest, RstripTokenMatchAndWhitespaceConsumption) {
   IREE_ASSERT_OK(
       iree_tokenizer_from_huggingface_json(json, allocator_, &tokenizer));
   ASSERT_NE(tokenizer, nullptr);
+  std::unique_ptr<iree_tokenizer_t, decltype(&iree_tokenizer_free)> owner(
+      tokenizer, iree_tokenizer_free);
 
   auto encode = [&](const char* text) -> std::vector<int32_t> {
     std::vector<int32_t> tokens(64);
@@ -997,8 +1001,6 @@ TEST_F(TokenizerJsonTest, RstripTokenMatchAndWhitespaceConsumption) {
     ASSERT_EQ(tokens.size(), 1u);
     EXPECT_EQ(tokens[0], 100);  // <|user|> (whitespace consumed, nothing left)
   }
-
-  iree_tokenizer_free(tokenizer);
 }
 
 TEST_F(TokenizerJsonTest, AddedTokenSingleWordFlag) {

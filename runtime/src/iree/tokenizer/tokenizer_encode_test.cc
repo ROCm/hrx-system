@@ -4658,6 +4658,17 @@ TEST_F(ByteLevelBPEEncodeTest, ASCIIPrintable) {
   // Printable ASCII (0x21-0x7E) maps to identity in byte-level encoding.
   ScopedVocabBuilder vocab_builder;
   vocab_builder.AddToken(0, "hello");
+  vocab_builder.AddToken(1, "h");
+  vocab_builder.AddToken(2, "e");
+  vocab_builder.AddToken(3, "l");
+  vocab_builder.AddToken(4, "o");
+  vocab_builder.AddToken(5, "he");
+  vocab_builder.AddToken(6, "hel");
+  vocab_builder.AddToken(7, "hell");
+  vocab_builder.AddMerge(1, 2);
+  vocab_builder.AddMerge(5, 3);
+  vocab_builder.AddMerge(6, 3);
+  vocab_builder.AddMerge(7, 4);
   ScopedVocab vocab = vocab_builder.Build();
 
   ScopedBuilder builder;
