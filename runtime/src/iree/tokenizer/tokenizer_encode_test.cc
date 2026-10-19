@@ -5321,10 +5321,10 @@ TEST_F(BPEFlagsEncodeTest, EndOfWordSuffix) {
   // of a segment.
   ScopedVocabBuilder vocab_builder;
   vocab_builder.AddToken(0, "h");
-  vocab_builder.AddToken(1, "i");
+  vocab_builder.AddToken(1, "i</w>");
   vocab_builder.AddToken(2, "hi</w>");
-  // Add merges: h+i with suffix should produce "hi</w>".
-  vocab_builder.AddMerge(0, 1);  // h + i -> hi</w> (with suffix)
+  // The final character carries the suffix before merging begins.
+  vocab_builder.AddMerge(0, 1);  // h + i</w> -> hi</w>
   ScopedVocab vocab = vocab_builder.Build();
 
   ScopedBuilder builder;
@@ -5354,12 +5354,12 @@ TEST_F(BPEFlagsEncodeTest, EndOfWordSuffixWithMerges) {
   vocab_builder.AddToken(0, "h");
   vocab_builder.AddToken(1, "e");
   vocab_builder.AddToken(2, "l");
-  vocab_builder.AddToken(3, "o");
+  vocab_builder.AddToken(3, "o</w>");
   vocab_builder.AddToken(4, "he");
   vocab_builder.AddToken(5, "lo</w>");
   vocab_builder.AddToken(6, "helo</w>");
   vocab_builder.AddMerge(0, 1);  // h + e -> he (rank 0)
-  vocab_builder.AddMerge(2, 3);  // l + o -> lo</w> with suffix (rank 1)
+  vocab_builder.AddMerge(2, 3);  // l + o</w> -> lo</w> (rank 1)
   vocab_builder.AddMerge(4, 5);  // he + lo</w> -> helo</w> (rank 2)
   ScopedVocab vocab = vocab_builder.Build();
 

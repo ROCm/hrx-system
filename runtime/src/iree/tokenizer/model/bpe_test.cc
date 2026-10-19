@@ -2357,7 +2357,8 @@ TEST(BPEByteLevelSuffixTest, NonAsciiBytesWithSuffix) {
   builder.AddToken(4, "©");
   builder.AddToken(5, "cafÃ©");      // Without suffix
   builder.AddToken(6, "cafÃ©</w>");  // With suffix (target)
-  builder.AddMerge(0, 1);            // c + a -> ca (implicit)
+  builder.AddToken(7, "ca");
+  builder.AddMerge(0, 1);  // c + a -> ca
 
   auto vocab = ScopedVocab(builder.Build());
   iree_tokenizer_model_t* raw_model = nullptr;
@@ -3140,9 +3141,9 @@ TEST_F(BPEModelTest, MultipleDecompositionsAlternatePathReachable) {
 // This tests that suffix collection walks the full rightmost path.
 //
 // Vocabulary:
-//   - OUTER = L1 + LEVEL2 (rank 5)
-//   - LEVEL2 = L2 + LEVEL3 (rank 4)
-//   - LEVEL3 = L3 + SUFFIX (rank 3)
+//   - OUTER = L1 + LEVEL2 (rank 4)
+//   - LEVEL2 = L2 + LEVEL3 (rank 3)
+//   - LEVEL3 = L3 + SUFFIX (rank 2)
 //   - SUFFIX + REM -> MERGED (rank 0)
 TEST_F(BPEModelTest, NestedSuffixBlockingThreeLevel) {
   ScopedVocabBuilder builder;
@@ -3172,10 +3173,9 @@ TEST_F(BPEModelTest, NestedSuffixBlockingThreeLevel) {
   // Merges in rank order.
   builder.AddMerge(4, 5);   // Rank 0: e + f -> ef (LOWEST - blocks de!)
   builder.AddMerge(3, 4);   // Rank 1: d + e -> de
-  builder.AddMerge(10, 5);  // Rank 2: ef + f -> skip (not needed)
-  builder.AddMerge(2, 11);  // Rank 3: c + de -> cde
-  builder.AddMerge(1, 12);  // Rank 4: b + cde -> bcde
-  builder.AddMerge(0, 14);  // Rank 5: a + bcde -> abcde (highest)
+  builder.AddMerge(2, 11);  // Rank 2: c + de -> cde
+  builder.AddMerge(1, 12);  // Rank 3: b + cde -> bcde
+  builder.AddMerge(0, 14);  // Rank 4: a + bcde -> abcde (highest)
 
   CreateModel(builder);
 

@@ -50,7 +50,9 @@ static inline bool iree_tokenizer_merge_hash_result_is_valid(
 typedef struct iree_tokenizer_merge_hash_entry_t {
   // (left_id << 32) | right_id, EMPTY_KEY for empty slots.
   uint64_t key;
+  // Priority of this rule; lower ranks merge first.
   uint32_t rank;
+  // Valid vocabulary token produced by the rule.
   int32_t result_id;
 } iree_tokenizer_merge_hash_entry_t;
 
@@ -72,15 +74,21 @@ typedef struct iree_tokenizer_merge_hash_entry_t {
 // Uses a flexible array member (FAM) for entries to enable direct indexing
 // without pointer indirection in the lookup hot path.
 typedef struct iree_tokenizer_vocab_merge_hash_t {
+  // Allocator owning this table and its inline entries.
   iree_allocator_t allocator;
-  iree_host_size_t capacity;  // Power of 2.
+  // Number of slots; zero or a power of two.
+  iree_host_size_t capacity;
+  // Number of rules stored in the table.
   iree_host_size_t count;
+  // Open-addressed lookup slots, owned by this allocation.
   iree_tokenizer_merge_hash_entry_t entries[];
 } iree_tokenizer_vocab_merge_hash_t;
 
 // Builds a merge hash table from a vocabulary's merge rules.
 // The vocab's merges are stored in rank order where index 0 is the highest
 // priority merge. The result token for each merge is looked up from the vocab.
+// Rejects rules whose operands are empty/missing or whose concatenation is not
+// a vocabulary token. On failure, |out_hash| is NULL.
 iree_status_t iree_tokenizer_vocab_merge_hash_build(
     const struct iree_tokenizer_vocab_t* vocab, iree_allocator_t allocator,
     iree_tokenizer_vocab_merge_hash_t** out_hash);

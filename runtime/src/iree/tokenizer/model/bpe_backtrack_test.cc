@@ -555,26 +555,25 @@ TEST_F(BpeBacktrackTest, DeepMergeChain) {
   // The validation stack has capacity 64, so this tests within bounds.
   ScopedVocabBuilder builder;
 
-  // Build a linear merge chain: a -> ab -> abc -> abcd -> ...
-  std::string accumulated;
-  for (int i = 0; i < 20; ++i) {
-    char c = 'a' + i;
-    accumulated += c;
-    builder.AddToken(i, accumulated.c_str());
-    if (i > 0) {
-      builder.AddMerge(i - 1, i);  // previous + single char
-    }
-  }
   // Add single-char tokens for each letter.
   for (int i = 0; i < 20; ++i) {
     std::string single(1, 'a' + i);
-    builder.AddToken(20 + i, single.c_str());
+    builder.AddToken(i, single.c_str());
+  }
+  // Build a linear merge chain: a -> ab -> abc -> abcd -> ...
+  std::string accumulated = "a";
+  int previous = 0;
+  for (int i = 1; i < 20; ++i) {
+    accumulated += 'a' + i;
+    builder.AddToken(19 + i, accumulated.c_str());
+    builder.AddMerge(previous, i);
+    previous = 19 + i;
   }
 
   CreateModel(builder);
 
   // Encode the full accumulated string.
-  TestEncode(model(), accumulated, {19}, false);  // Single merged token
+  TestEncode(model(), accumulated, {38}, false);  // Single merged token
 }
 
 TEST_F(BpeBacktrackTest, RepeatingPattern) {
@@ -703,21 +702,20 @@ TEST_F(BpeBacktrackTest, ByteLevelSpaceWord) {
   builder.AddToken(5, "Ġh");      // space + h
   builder.AddToken(6, "Ġhe");     // space + he
   builder.AddToken(7, "Ġhel");    // space + hel
-  builder.AddToken(8, "Ġhello");  // space + hello
+  builder.AddToken(8, "Ġhell");   // space + hell
+  builder.AddToken(9, "Ġhello");  // space + hello
 
   // Merges for building Ġhello
   builder.AddMerge(0, 1);  // Ġ + h -> Ġh (rank 0)
-  builder.AddMerge(1, 2);  // h + e -> he (rank 1)
-  builder.AddMerge(5, 2);  // Ġh + e -> Ġhe (rank 2)
-  builder.AddMerge(2, 3);  // e + l -> el (rank 3)
-  builder.AddMerge(6, 3);  // Ġhe + l -> Ġhel (rank 4)
-  builder.AddMerge(3, 4);  // l + o -> lo (rank 5)
-  builder.AddMerge(7, 4);  // Ġhel + o -> Ġhello (rank 6)
+  builder.AddMerge(5, 2);  // Ġh + e -> Ġhe (rank 1)
+  builder.AddMerge(6, 3);  // Ġhe + l -> Ġhel (rank 2)
+  builder.AddMerge(7, 3);  // Ġhel + l -> Ġhell (rank 3)
+  builder.AddMerge(8, 4);  // Ġhell + o -> Ġhello (rank 4)
 
   CreateModel(builder, IREE_TOKENIZER_BPE_FLAG_BYTE_LEVEL_INPUT);
 
   // Raw input " hello" should merge to [Ġhello]
-  TestEncode(model(), " hello", {8}, false);
+  TestEncode(model(), " hello", {9}, false);
 }
 
 TEST_F(BpeBacktrackTest, ByteLevelConsecutiveSpaces) {
@@ -865,19 +863,19 @@ TEST_F(BpeBacktrackTest, LongCompoundWord_OptimalMerges) {
   builder.AddToken(9, "anti");
   builder.AddToken(10, "dis");
   builder.AddToken(11, "antidis");
+  builder.AddToken(12, "is");
 
   // Build the merge chain properly:
   // Level 1 merges (base -> 2-char)
   builder.AddMerge(0, 1);  // a + n -> an (rank 0)
   builder.AddMerge(2, 3);  // t + i -> ti (rank 1)
   builder.AddMerge(4, 3);  // d + i -> di (rank 2)
-  builder.AddMerge(3, 5);  // i + s -> is (rank 3) - but we want dis, not is
-  // Let's use different approach - dis = d+i+s, so di+s->dis
-  builder.AddMerge(8, 5);  // di + s -> dis (rank 3)
+  builder.AddMerge(3, 5);  // i + s -> is (rank 3; i is already consumed)
+  builder.AddMerge(8, 5);  // di + s -> dis (rank 4)
   // Level 2 merges
-  builder.AddMerge(6, 7);  // an + ti -> anti (rank 4)
+  builder.AddMerge(6, 7);  // an + ti -> anti (rank 5)
   // Level 3 merge
-  builder.AddMerge(9, 10);  // anti + dis -> antidis (rank 5)
+  builder.AddMerge(9, 10);  // anti + dis -> antidis (rank 6)
 
   CreateModel(builder);
 

@@ -6,6 +6,8 @@
 
 #include "iree/tokenizer/vocab/vocab_merge_hash.h"
 
+#include <string>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/vocab/vocab.h"
@@ -157,5 +159,93 @@ TEST_F(VocabMergeHashTest, MultipleMerges) {
   EXPECT_EQ(r2.rank, 2u);
   EXPECT_EQ(r2.result_id, 6);
 }
+
+TEST_F(VocabMergeHashTest, LongMergeResult) {
+  const std::string left(300, 'a');
+  const std::string right(300, 'b');
+  const std::string result_text = left + right;
+  for (const std::string& text : {left, right, result_text}) {
+    IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token(
+        builder_, iree_make_string_view(text.data(), text.size()), 0.0f,
+        IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  }
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_merge(builder_, 0, 1));
+  BuildVocabAndHash();
+
+  auto result = iree_tokenizer_vocab_merge_hash_lookup(hash_, 0, 1);
+  ASSERT_TRUE(iree_tokenizer_merge_hash_result_is_valid(result));
+  EXPECT_EQ(result.rank, 0u);
+  EXPECT_EQ(result.result_id, 2);
+}
+
+TEST_F(VocabMergeHashTest, RepeatedOperandAndRule) {
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token(
+      builder_, IREE_SV("a"), 0.0f, IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token(
+      builder_, IREE_SV("aa"), 0.0f, IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_merge(builder_, 0, 0));
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_merge(builder_, 0, 0));
+  BuildVocabAndHash();
+
+  auto result = iree_tokenizer_vocab_merge_hash_lookup(hash_, 0, 0);
+  ASSERT_TRUE(iree_tokenizer_merge_hash_result_is_valid(result));
+  EXPECT_EQ(result.rank, 0u);
+  EXPECT_EQ(result.result_id, 1);
+}
+
+TEST_F(VocabMergeHashTest, MissingMergeResult) {
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token(
+      builder_, IREE_SV("a"), 0.0f, IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token(
+      builder_, IREE_SV("b"), 0.0f, IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  // Ensure the absent result fits in the vocabulary's maximum token length.
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token(
+      builder_, IREE_SV("other"), 0.0f, IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_merge(builder_, 0, 1));
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_build(builder_, &vocab_));
+  builder_ = nullptr;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_tokenizer_vocab_merge_hash_build(
+                            vocab_, iree_allocator_system(), &hash_));
+  EXPECT_EQ(hash_, nullptr);
+}
+
+TEST_F(VocabMergeHashTest, MergeResultLongerThanVocabulary) {
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token(
+      builder_, IREE_SV("a"), 0.0f, IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_merge(builder_, 0, 0));
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_build(builder_, &vocab_));
+  builder_ = nullptr;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_tokenizer_vocab_merge_hash_build(
+                            vocab_, iree_allocator_system(), &hash_));
+  EXPECT_EQ(hash_, nullptr);
+}
+
+class InvalidMergeOperandTest : public VocabMergeHashTest,
+                                public ::testing::WithParamInterface<uint32_t> {
+};
+
+TEST_P(InvalidMergeOperandTest, RejectsInvalidOperand) {
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token_with_id(
+      builder_, 0, IREE_SV("a"), 0.0f, IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  // ID 1 is an unused sparse slot; ID 2 is a real but empty token.
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token_with_id(
+      builder_, 2, IREE_SV(""), 0.0f, IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  IREE_ASSERT_OK(
+      iree_tokenizer_vocab_builder_add_merge(builder_, 0, GetParam()));
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_build(builder_, &vocab_));
+  builder_ = nullptr;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_tokenizer_vocab_merge_hash_build(
+                            vocab_, iree_allocator_system(), &hash_));
+  EXPECT_EQ(hash_, nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(VocabMergeHash, InvalidMergeOperandTest,
+                         ::testing::Values(1u, 2u, 3u, UINT32_MAX));
 
 }  // namespace
