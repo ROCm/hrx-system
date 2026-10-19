@@ -9,9 +9,9 @@
 import base64
 import struct
 
-from loom.src.loom.serve.server.catalog_test_util import Client as HttpClient
-from loom.src.loom.serve.server.catalog_test_util import check_pcm, complete
-from loom.src.loom.serve.server.realtime.client_test_util import Client
+from catalog_test_util import Client as HttpClient
+from catalog_test_util import check_pcm, complete
+from client_test_util import Client
 
 
 def message(text, role="user"):
