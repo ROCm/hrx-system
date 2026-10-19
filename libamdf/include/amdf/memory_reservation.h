@@ -119,7 +119,8 @@ typedef struct amdf_memory_reservation_access_info_t {
   uint64_t address;
   /// Complete reserved length in bytes.
   uint64_t byte_length;
-  /// Required native mapping offset and length alignment in bytes.
+  /// Achieved independently replaceable destination offset and length unit in
+  /// bytes; native source offsets retain their own alignment requirements.
   uint64_t mapping_granularity;
   /// Device reset epoch, or zero for a host projection.
   uint64_t reset_epoch;
