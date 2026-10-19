@@ -100,7 +100,7 @@ TEST_F(DeviceGroupTest, LaterPoolFailureReleasesSealedGroupAndEarlierPool) {
   EXPECT_EQ(group_, nullptr);
 }
 
-TEST_F(DeviceGroupTest, OptionalIoBackingPreservesExplicitSlabSize) {
+TEST_F(DeviceGroupTest, ElasticPoolPreservesExplicitSlabSize) {
   constexpr uint64_t slab_size = 128 * 1024 * 1024;
   const loom_serve_device_options_t options = {
       .driver = driver_,
