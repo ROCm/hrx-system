@@ -844,8 +844,21 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   iree_prng_splitmix64_initialize(
       (uint64_t)iree_time_now() ^ (uint64_t)(uintptr_t)out_topology,
       &placement_prng);
-  const uint32_t first_cpu =
-      iree_prng_splitmix64_next(&placement_prng) % processor_count;
+  const uint64_t placement = iree_prng_splitmix64_next(&placement_prng);
+  uint32_t first_cpu = placement % processor_count;
+  if (current_affinity_ptr) {
+    // Choose an allowed processor directly: starting inside an excluded gap
+    // would bias every such draw toward the first processor after that gap.
+    uint32_t remaining = placement % CPU_COUNT(current_affinity_ptr);
+    for (first_cpu = 0; first_cpu < processor_count; ++first_cpu) {
+      if (iree_sysfs_is_processor_available(first_cpu, current_affinity_ptr)) {
+        if (remaining == 0) {
+          break;
+        }
+        --remaining;
+      }
+    }
+  }
   uint32_t core_map[IREE_TASK_TOPOLOGY_MAX_GROUP_COUNT];
   iree_host_size_t core_count = 0;
   for (uint32_t ordinal = 0;
