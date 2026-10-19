@@ -274,3 +274,404 @@ kernel.def @packet_reference_arithmetic() {
   view.store %observed, %destination[%item, 1] : f32, view<32x2xf32>
   kernel.return
 }
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// Narrow payloads share one addressing calculation while keeping four bytes
+// per exchanged word. The final byte is padded from the captured value.
+kernel.def @packed_byte_shuffle_validity() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%values: vector<17xi8>, %source_lane: i32, %width: i32) {
+  %result, %valid = kernel.subgroup.shuffle<index> %values, %source_lane, %width : vector<17xi8>, i32, i32
+  test.use %result, %valid : vector<17xi8>, i1
+  kernel.return
+}
+
+// ----
+kernel.def @packed_byte_shuffle_validity() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%values: vector<17xi8>, %source_lane: i32, %width: i32) {
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.constant 1 : i32
+  %9 = scalar.constant 32 : i32
+  %10 = scalar.cmpi ne, %width, %7 : i32
+  %11 = scalar.cmpi ule, %width, %9 : i32
+  %12 = scalar.andi %10, %11 : i1
+  %13 = scf.select %12, %width, %8 : i32
+  %14 = scalar.cmpi ult, %source_lane, %13 : i32
+  %15 = scalar.andi %12, %14 : i1
+  %16 = scf.select %15, %source_lane, %7 : i32
+  %17 = kernel.subgroup.lane.id : index
+  %18 = index.cast %17 : index to i32
+  %19 = scalar.divui %18, %13 : i32
+  %20 = scalar.muli %19, %13 : i32
+  %21 = scalar.addi %20, %16 : i32
+  %22 = scalar.divui %21, %13 : i32
+  %23 = scalar.cmpi eq, %22, %19 : i32
+  %24 = scalar.cmpi ult, %21, %9 : i32
+  %25 = scalar.andi %15, %23 : i1
+  %26 = scalar.andi %25, %24 : i1
+  %27 = scf.select %26, %21, %18 : i32
+  %214 = scalar.constant 31 : i32
+  %215 = scalar.andi %27, %214 : i32
+  %144 = vector.extract %values[0] : vector<17xi8> -> i8
+  %145 = scalar.extui %144 : i8 to i32
+  %146 = vector.extract %values[1] : vector<17xi8> -> i8
+  %147 = scalar.extui %146 : i8 to i32
+  %148 = scalar.constant 8 : i32
+  %149 = scalar.shli %147, %148 : i32
+  %150 = scalar.ori %145, %149 : i32
+  %151 = vector.extract %values[2] : vector<17xi8> -> i8
+  %152 = scalar.extui %151 : i8 to i32
+  %153 = scalar.constant 16 : i32
+  %154 = scalar.shli %152, %153 : i32
+  %155 = scalar.ori %150, %154 : i32
+  %156 = vector.extract %values[3] : vector<17xi8> -> i8
+  %157 = scalar.extui %156 : i8 to i32
+  %158 = scalar.constant 24 : i32
+  %159 = scalar.shli %157, %158 : i32
+  %160 = scalar.ori %155, %159 : i32
+  %161 = vector.extract %values[4] : vector<17xi8> -> i8
+  %162 = scalar.extui %161 : i8 to i32
+  %163 = vector.extract %values[5] : vector<17xi8> -> i8
+  %164 = scalar.extui %163 : i8 to i32
+  %165 = scalar.constant 8 : i32
+  %166 = scalar.shli %164, %165 : i32
+  %167 = scalar.ori %162, %166 : i32
+  %168 = vector.extract %values[6] : vector<17xi8> -> i8
+  %169 = scalar.extui %168 : i8 to i32
+  %170 = scalar.constant 16 : i32
+  %171 = scalar.shli %169, %170 : i32
+  %172 = scalar.ori %167, %171 : i32
+  %173 = vector.extract %values[7] : vector<17xi8> -> i8
+  %174 = scalar.extui %173 : i8 to i32
+  %175 = scalar.constant 24 : i32
+  %176 = scalar.shli %174, %175 : i32
+  %177 = scalar.ori %172, %176 : i32
+  %178 = vector.extract %values[8] : vector<17xi8> -> i8
+  %179 = scalar.extui %178 : i8 to i32
+  %180 = vector.extract %values[9] : vector<17xi8> -> i8
+  %181 = scalar.extui %180 : i8 to i32
+  %182 = scalar.constant 8 : i32
+  %183 = scalar.shli %181, %182 : i32
+  %184 = scalar.ori %179, %183 : i32
+  %185 = vector.extract %values[10] : vector<17xi8> -> i8
+  %186 = scalar.extui %185 : i8 to i32
+  %187 = scalar.constant 16 : i32
+  %188 = scalar.shli %186, %187 : i32
+  %189 = scalar.ori %184, %188 : i32
+  %190 = vector.extract %values[11] : vector<17xi8> -> i8
+  %191 = scalar.extui %190 : i8 to i32
+  %192 = scalar.constant 24 : i32
+  %193 = scalar.shli %191, %192 : i32
+  %194 = scalar.ori %189, %193 : i32
+  %195 = vector.extract %values[12] : vector<17xi8> -> i8
+  %196 = scalar.extui %195 : i8 to i32
+  %197 = vector.extract %values[13] : vector<17xi8> -> i8
+  %198 = scalar.extui %197 : i8 to i32
+  %199 = scalar.constant 8 : i32
+  %200 = scalar.shli %198, %199 : i32
+  %201 = scalar.ori %196, %200 : i32
+  %202 = vector.extract %values[14] : vector<17xi8> -> i8
+  %203 = scalar.extui %202 : i8 to i32
+  %204 = scalar.constant 16 : i32
+  %205 = scalar.shli %203, %204 : i32
+  %206 = scalar.ori %201, %205 : i32
+  %207 = vector.extract %values[15] : vector<17xi8> -> i8
+  %208 = scalar.extui %207 : i8 to i32
+  %209 = scalar.constant 24 : i32
+  %210 = scalar.shli %208, %209 : i32
+  %211 = scalar.ori %206, %210 : i32
+  %212 = vector.from_elements %160, %177, %194, %211 : vector<4xi32>
+  %34, %35 = kernel.subgroup.shuffle<index> %212, %215, %9 : vector<4xi32>, i32, i32
+  %47 = vector.extract %34[0] : vector<4xi32> -> i32
+  %142 = scalar.constant 255 : i32
+  %143 = scalar.andi %47, %142 : i32
+  %49 = scalar.trunci %143 : i32 to i8
+  %50 = vector.extract %34[0] : vector<4xi32> -> i32
+  %138 = scalar.constant 8 : i32
+  %139 = scalar.shrui %50, %138 : i32
+  %140 = scalar.constant 255 : i32
+  %141 = scalar.andi %139, %140 : i32
+  %52 = scalar.trunci %141 : i32 to i8
+  %53 = vector.extract %34[0] : vector<4xi32> -> i32
+  %134 = scalar.constant 16 : i32
+  %135 = scalar.shrui %53, %134 : i32
+  %136 = scalar.constant 255 : i32
+  %137 = scalar.andi %135, %136 : i32
+  %55 = scalar.trunci %137 : i32 to i8
+  %56 = vector.extract %34[0] : vector<4xi32> -> i32
+  %132 = scalar.constant 24 : i32
+  %133 = scalar.shrui %56, %132 : i32
+  %58 = scalar.trunci %133 : i32 to i8
+  %59 = vector.extract %34[1] : vector<4xi32> -> i32
+  %130 = scalar.constant 255 : i32
+  %131 = scalar.andi %59, %130 : i32
+  %61 = scalar.trunci %131 : i32 to i8
+  %62 = vector.extract %34[1] : vector<4xi32> -> i32
+  %126 = scalar.constant 8 : i32
+  %127 = scalar.shrui %62, %126 : i32
+  %128 = scalar.constant 255 : i32
+  %129 = scalar.andi %127, %128 : i32
+  %64 = scalar.trunci %129 : i32 to i8
+  %65 = vector.extract %34[1] : vector<4xi32> -> i32
+  %122 = scalar.constant 16 : i32
+  %123 = scalar.shrui %65, %122 : i32
+  %124 = scalar.constant 255 : i32
+  %125 = scalar.andi %123, %124 : i32
+  %67 = scalar.trunci %125 : i32 to i8
+  %68 = vector.extract %34[1] : vector<4xi32> -> i32
+  %120 = scalar.constant 24 : i32
+  %121 = scalar.shrui %68, %120 : i32
+  %70 = scalar.trunci %121 : i32 to i8
+  %71 = vector.extract %34[2] : vector<4xi32> -> i32
+  %118 = scalar.constant 255 : i32
+  %119 = scalar.andi %71, %118 : i32
+  %73 = scalar.trunci %119 : i32 to i8
+  %74 = vector.extract %34[2] : vector<4xi32> -> i32
+  %114 = scalar.constant 8 : i32
+  %115 = scalar.shrui %74, %114 : i32
+  %116 = scalar.constant 255 : i32
+  %117 = scalar.andi %115, %116 : i32
+  %76 = scalar.trunci %117 : i32 to i8
+  %77 = vector.extract %34[2] : vector<4xi32> -> i32
+  %110 = scalar.constant 16 : i32
+  %111 = scalar.shrui %77, %110 : i32
+  %112 = scalar.constant 255 : i32
+  %113 = scalar.andi %111, %112 : i32
+  %79 = scalar.trunci %113 : i32 to i8
+  %80 = vector.extract %34[2] : vector<4xi32> -> i32
+  %108 = scalar.constant 24 : i32
+  %109 = scalar.shrui %80, %108 : i32
+  %82 = scalar.trunci %109 : i32 to i8
+  %83 = vector.extract %34[3] : vector<4xi32> -> i32
+  %106 = scalar.constant 255 : i32
+  %107 = scalar.andi %83, %106 : i32
+  %85 = scalar.trunci %107 : i32 to i8
+  %86 = vector.extract %34[3] : vector<4xi32> -> i32
+  %102 = scalar.constant 8 : i32
+  %103 = scalar.shrui %86, %102 : i32
+  %104 = scalar.constant 255 : i32
+  %105 = scalar.andi %103, %104 : i32
+  %88 = scalar.trunci %105 : i32 to i8
+  %89 = vector.extract %34[3] : vector<4xi32> -> i32
+  %98 = scalar.constant 16 : i32
+  %99 = scalar.shrui %89, %98 : i32
+  %100 = scalar.constant 255 : i32
+  %101 = scalar.andi %99, %100 : i32
+  %91 = scalar.trunci %101 : i32 to i8
+  %92 = vector.extract %34[3] : vector<4xi32> -> i32
+  %96 = scalar.constant 24 : i32
+  %97 = scalar.shrui %92, %96 : i32
+  %94 = scalar.trunci %97 : i32 to i8
+  %95 = vector.from_elements %49, %52, %55, %58, %61, %64, %67, %70, %73, %76, %79, %82, %85, %88, %91, %94 : vector<16xi8>
+  %37 = vector.slice %values[16] : vector<17xi8> -> vector<1xi8>
+  %213 = vector.extract %values[16] : vector<17xi8> -> i8
+  %39 = vector.splat %213 : vector<3xi8>
+  %40 = vector.concat<0> %37, %39 : vector<1xi8>, vector<3xi8> -> vector<4xi8>
+  %41 = vector.bitcast %40 : vector<4xi8> to vector<1xi32>
+  %42, %43 = kernel.subgroup.shuffle<index> %41, %215, %9 : vector<1xi32>, i32, i32
+  %44 = vector.bitcast %42 : vector<1xi32> to vector<4xi8>
+  %45 = vector.slice %44[0] : vector<4xi8> -> vector<1xi8>
+  %result = vector.concat<0> %95, %45 : vector<16xi8>, vector<1xi8> -> vector<17xi8>
+  %valid = scalar.andi %26, %35 : i1
+  test.use %result, %valid : vector<17xi8>, i1
+  kernel.return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// Software bfloat transport likewise packs object bits after normalizing the
+// logical source lane; numerical conversion would destroy NaN payloads.
+kernel.def @packed_bfloat_shuffle_validity() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%values: vector<13xbf16>, %source_lane: i32, %width: i32) {
+  %result, %valid = kernel.subgroup.shuffle<index> %values, %source_lane, %width : vector<13xbf16>, i32, i32
+  test.use %result, %valid : vector<13xbf16>, i1
+  kernel.return
+}
+
+// ----
+kernel.def @packed_bfloat_shuffle_validity() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%values: vector<13xbf16>, %source_lane: i32, %width: i32) {
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.constant 1 : i32
+  %9 = scalar.constant 32 : i32
+  %10 = scalar.cmpi ne, %width, %7 : i32
+  %11 = scalar.cmpi ule, %width, %9 : i32
+  %12 = scalar.andi %10, %11 : i1
+  %13 = scf.select %12, %width, %8 : i32
+  %14 = scalar.cmpi ult, %source_lane, %13 : i32
+  %15 = scalar.andi %12, %14 : i1
+  %16 = scf.select %15, %source_lane, %7 : i32
+  %17 = kernel.subgroup.lane.id : index
+  %18 = index.cast %17 : index to i32
+  %19 = scalar.divui %18, %13 : i32
+  %20 = scalar.muli %19, %13 : i32
+  %21 = scalar.addi %20, %16 : i32
+  %22 = scalar.divui %21, %13 : i32
+  %23 = scalar.cmpi eq, %22, %19 : i32
+  %24 = scalar.cmpi ult, %21, %9 : i32
+  %25 = scalar.andi %15, %23 : i1
+  %26 = scalar.andi %25, %24 : i1
+  %27 = scf.select %26, %21, %18 : i32
+  %198 = scalar.constant 31 : i32
+  %199 = scalar.andi %27, %198 : i32
+  %160 = vector.extract %values[0] : vector<13xbf16> -> bf16
+  %161 = scalar.bitcast %160 : bf16 to i16
+  %162 = scalar.extui %161 : i16 to i32
+  %163 = vector.extract %values[1] : vector<13xbf16> -> bf16
+  %164 = scalar.bitcast %163 : bf16 to i16
+  %165 = scalar.extui %164 : i16 to i32
+  %166 = scalar.constant 16 : i32
+  %167 = scalar.shli %165, %166 : i32
+  %168 = scalar.ori %162, %167 : i32
+  %169 = vector.extract %values[2] : vector<13xbf16> -> bf16
+  %170 = scalar.bitcast %169 : bf16 to i16
+  %171 = scalar.extui %170 : i16 to i32
+  %172 = vector.extract %values[3] : vector<13xbf16> -> bf16
+  %173 = scalar.bitcast %172 : bf16 to i16
+  %174 = scalar.extui %173 : i16 to i32
+  %175 = scalar.constant 16 : i32
+  %176 = scalar.shli %174, %175 : i32
+  %177 = scalar.ori %171, %176 : i32
+  %178 = vector.extract %values[4] : vector<13xbf16> -> bf16
+  %179 = scalar.bitcast %178 : bf16 to i16
+  %180 = scalar.extui %179 : i16 to i32
+  %181 = vector.extract %values[5] : vector<13xbf16> -> bf16
+  %182 = scalar.bitcast %181 : bf16 to i16
+  %183 = scalar.extui %182 : i16 to i32
+  %184 = scalar.constant 16 : i32
+  %185 = scalar.shli %183, %184 : i32
+  %186 = scalar.ori %180, %185 : i32
+  %187 = vector.extract %values[6] : vector<13xbf16> -> bf16
+  %188 = scalar.bitcast %187 : bf16 to i16
+  %189 = scalar.extui %188 : i16 to i32
+  %190 = vector.extract %values[7] : vector<13xbf16> -> bf16
+  %191 = scalar.bitcast %190 : bf16 to i16
+  %192 = scalar.extui %191 : i16 to i32
+  %193 = scalar.constant 16 : i32
+  %194 = scalar.shli %192, %193 : i32
+  %195 = scalar.ori %189, %194 : i32
+  %196 = vector.from_elements %168, %177, %186, %195 : vector<4xi32>
+  %34, %35 = kernel.subgroup.shuffle<index> %196, %199, %9 : vector<4xi32>, i32, i32
+  %111 = vector.extract %34[0] : vector<4xi32> -> i32
+  %158 = scalar.constant 65535 : i32
+  %159 = scalar.andi %111, %158 : i32
+  %113 = scalar.trunci %159 : i32 to i16
+  %114 = scalar.bitcast %113 : i16 to bf16
+  %115 = vector.extract %34[0] : vector<4xi32> -> i32
+  %156 = scalar.constant 16 : i32
+  %157 = scalar.shrui %115, %156 : i32
+  %117 = scalar.trunci %157 : i32 to i16
+  %118 = scalar.bitcast %117 : i16 to bf16
+  %119 = vector.extract %34[1] : vector<4xi32> -> i32
+  %154 = scalar.constant 65535 : i32
+  %155 = scalar.andi %119, %154 : i32
+  %121 = scalar.trunci %155 : i32 to i16
+  %122 = scalar.bitcast %121 : i16 to bf16
+  %123 = vector.extract %34[1] : vector<4xi32> -> i32
+  %152 = scalar.constant 16 : i32
+  %153 = scalar.shrui %123, %152 : i32
+  %125 = scalar.trunci %153 : i32 to i16
+  %126 = scalar.bitcast %125 : i16 to bf16
+  %127 = vector.extract %34[2] : vector<4xi32> -> i32
+  %150 = scalar.constant 65535 : i32
+  %151 = scalar.andi %127, %150 : i32
+  %129 = scalar.trunci %151 : i32 to i16
+  %130 = scalar.bitcast %129 : i16 to bf16
+  %131 = vector.extract %34[2] : vector<4xi32> -> i32
+  %148 = scalar.constant 16 : i32
+  %149 = scalar.shrui %131, %148 : i32
+  %133 = scalar.trunci %149 : i32 to i16
+  %134 = scalar.bitcast %133 : i16 to bf16
+  %135 = vector.extract %34[3] : vector<4xi32> -> i32
+  %146 = scalar.constant 65535 : i32
+  %147 = scalar.andi %135, %146 : i32
+  %137 = scalar.trunci %147 : i32 to i16
+  %138 = scalar.bitcast %137 : i16 to bf16
+  %139 = vector.extract %34[3] : vector<4xi32> -> i32
+  %144 = scalar.constant 16 : i32
+  %145 = scalar.shrui %139, %144 : i32
+  %141 = scalar.trunci %145 : i32 to i16
+  %142 = scalar.bitcast %141 : i16 to bf16
+  %143 = vector.from_elements %114, %118, %122, %126, %130, %134, %138, %142 : vector<8xbf16>
+  %197 = vector.extract %values[8] : vector<13xbf16> -> bf16
+  %84 = vector.extract %values[8] : vector<13xbf16> -> bf16
+  %85 = scalar.bitcast %84 : bf16 to i16
+  %86 = scalar.extui %85 : i16 to i32
+  %87 = vector.extract %values[9] : vector<13xbf16> -> bf16
+  %88 = scalar.bitcast %87 : bf16 to i16
+  %89 = scalar.extui %88 : i16 to i32
+  %90 = scalar.constant 16 : i32
+  %91 = scalar.shli %89, %90 : i32
+  %92 = scalar.ori %86, %91 : i32
+  %93 = vector.extract %values[10] : vector<13xbf16> -> bf16
+  %94 = scalar.bitcast %93 : bf16 to i16
+  %95 = scalar.extui %94 : i16 to i32
+  %96 = vector.extract %values[11] : vector<13xbf16> -> bf16
+  %97 = scalar.bitcast %96 : bf16 to i16
+  %98 = scalar.extui %97 : i16 to i32
+  %99 = scalar.constant 16 : i32
+  %100 = scalar.shli %98, %99 : i32
+  %101 = scalar.ori %95, %100 : i32
+  %102 = vector.extract %values[12] : vector<13xbf16> -> bf16
+  %103 = scalar.bitcast %102 : bf16 to i16
+  %104 = scalar.extui %103 : i16 to i32
+  %105 = scalar.bitcast %197 : bf16 to i16
+  %106 = scalar.extui %105 : i16 to i32
+  %107 = scalar.constant 16 : i32
+  %108 = scalar.shli %106, %107 : i32
+  %109 = scalar.ori %104, %108 : i32
+  %110 = vector.from_elements %92, %101, %109 : vector<3xi32>
+  %42, %43 = kernel.subgroup.shuffle<index> %110, %199, %9 : vector<3xi32>, i32, i32
+  %47 = vector.extract %42[0] : vector<3xi32> -> i32
+  %82 = scalar.constant 65535 : i32
+  %83 = scalar.andi %47, %82 : i32
+  %49 = scalar.trunci %83 : i32 to i16
+  %50 = scalar.bitcast %49 : i16 to bf16
+  %51 = vector.extract %42[0] : vector<3xi32> -> i32
+  %80 = scalar.constant 16 : i32
+  %81 = scalar.shrui %51, %80 : i32
+  %53 = scalar.trunci %81 : i32 to i16
+  %54 = scalar.bitcast %53 : i16 to bf16
+  %55 = vector.extract %42[1] : vector<3xi32> -> i32
+  %78 = scalar.constant 65535 : i32
+  %79 = scalar.andi %55, %78 : i32
+  %57 = scalar.trunci %79 : i32 to i16
+  %58 = scalar.bitcast %57 : i16 to bf16
+  %59 = vector.extract %42[1] : vector<3xi32> -> i32
+  %76 = scalar.constant 16 : i32
+  %77 = scalar.shrui %59, %76 : i32
+  %61 = scalar.trunci %77 : i32 to i16
+  %62 = scalar.bitcast %61 : i16 to bf16
+  %63 = vector.extract %42[2] : vector<3xi32> -> i32
+  %74 = scalar.constant 65535 : i32
+  %75 = scalar.andi %63, %74 : i32
+  %65 = scalar.trunci %75 : i32 to i16
+  %66 = scalar.bitcast %65 : i16 to bf16
+  %67 = vector.extract %42[2] : vector<3xi32> -> i32
+  %72 = scalar.constant 16 : i32
+  %73 = scalar.shrui %67, %72 : i32
+  %69 = scalar.trunci %73 : i32 to i16
+  %70 = scalar.bitcast %69 : i16 to bf16
+  %71 = vector.from_elements %50, %54, %58, %62, %66, %70 : vector<6xbf16>
+  %45 = vector.slice %71[0] : vector<6xbf16> -> vector<5xbf16>
+  %result = vector.concat<0> %143, %45 : vector<8xbf16>, vector<5xbf16> -> vector<13xbf16>
+  %valid = scalar.andi %26, %35 : i1
+  test.use %result, %valid : vector<13xbf16>, i1
+  kernel.return
+}

@@ -11,12 +11,38 @@
 #include <stdfloat>
 
 using Words4 = unsigned __attribute__((ext_vector_type(4)));
+using Bytes32 = unsigned char __attribute__((ext_vector_type(32)));
+using BFloats16 = __bf16 __attribute__((ext_vector_type(16)));
+
+// Logical component counts for payloads spanning multiple native packets.
+template <class T>
+struct WidePayload;
+template <>
+struct WidePayload<Bytes32> {
+  using Element = unsigned char;
+  // Number of logical components carrying independent source fingerprints.
+  static constexpr unsigned count = 32;
+};
+template <>
+struct WidePayload<BFloats16> {
+  using Element = __bf16;
+  // Number of logical components carrying independent source fingerprints.
+  static constexpr unsigned count = 16;
+};
 
 // Use object bits, including floating NaNs, without numerical
 // conversions. Each wide component carries a distinct source-lane fingerprint.
 template <class T>
 LOOM_FORCE_INLINE T payload(unsigned long long bits) {
-  if constexpr (__is_same(T, bool)) {
+  if constexpr (sizeof(T) > 16) {
+    T values{};
+    for (unsigned component = 0; component < WidePayload<T>::count;
+         ++component) {
+      values[component] = payload<typename WidePayload<T>::Element>(
+          bits ^ (0x9325ull * component));
+    }
+    return values;
+  } else if constexpr (__is_same(T, bool)) {
     return (bits & 1) != 0;
   } else if constexpr (sizeof(T) == 1) {
     return __builtin_bit_cast(T, static_cast<unsigned char>(bits));
@@ -37,7 +63,15 @@ LOOM_FORCE_INLINE T payload(unsigned long long bits) {
 
 template <class T>
 LOOM_FORCE_INLINE bool same_bits(T left, T right) {
-  if constexpr (__is_same(T, bool)) {
+  if constexpr (sizeof(T) > 16) {
+    bool equal = true;
+    for (unsigned component = 0; component < WidePayload<T>::count;
+         ++component) {
+      equal &= same_bits<typename WidePayload<T>::Element>(left[component],
+                                                           right[component]);
+    }
+    return equal;
+  } else if constexpr (__is_same(T, bool)) {
     return left == right;
   } else if constexpr (sizeof(T) == 1) {
     return __builtin_bit_cast(unsigned char, left) ==
@@ -190,5 +224,7 @@ SHUFFLE_VALUES(doubles2, Doubles2)
 SHUFFLE_VALUES(float8x4, Float8x4)
 SHUFFLE_VALUES(halfs4, Halfs4)
 SHUFFLE_VALUES(bfloats4, BFloats4)
+SHUFFLE_VALUES(bytes32, Bytes32)
+SHUFFLE_VALUES(bfloats16, BFloats16)
 
 #undef SHUFFLE_VALUES

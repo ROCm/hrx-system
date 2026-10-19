@@ -576,125 +576,125 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %lane = OpLoadBuiltin.subgroup_local_invocation_id
-  %220 = OpSConvert.i32.offset64 %lane
-  %221 = OpConstant.offset64 20
-  %222 = OpIMul.offset64 %220, %221
-  %223 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %222
-  %224 = OpLoad.storage_buffer.i32 %223
-  %228 = OpConstant.offset64 4
-  %229 = OpIAdd.offset64 %222, %228
-  %230 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %229
-  %231 = OpLoad.storage_buffer.i32 %230
-  %235 = OpConstant.offset64 8
-  %236 = OpIAdd.offset64 %222, %235
-  %237 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %236
-  %238 = OpLoad.storage_buffer.i32 %237
-  %242 = OpConstant.offset64 12
-  %243 = OpIAdd.offset64 %222, %242
-  %244 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %243
-  %245 = OpLoad.storage_buffer.i32 %244
-  %249 = OpConstant.offset64 16
-  %250 = OpIAdd.offset64 %222, %249
-  %251 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %250
-  %252 = OpLoad.storage_buffer.i32 %251
-  %253 = OpCopyObject.i32 %224 : reg<spirv.id : index>
-  %254 = OpCopyObject.i32 %231 : reg<spirv.id : index>
-  %255 = OpCopyObject.i32 %238 : reg<spirv.id : index>
-  %256 = OpCopyObject.i32 %245 : reg<spirv.id : index>
-  %257 = OpCopyObject.i32 %252 : reg<spirv.id : index>
-  %258 = OpBitcast.i32.u32 %224
-  %259 = OpUConvert.u32.offset64 %258
-  %260 = OpBitcast.i32.u32 %231
-  %261 = OpUConvert.u32.offset64 %260
-  %262 = OpBitcast.i32.u32 %238
-  %263 = OpUConvert.u32.offset64 %262
-  %264 = OpBitcast.i32.u32 %245
-  %265 = OpUConvert.u32.offset64 %264
-  %266 = OpBitcast.i32.u32 %252
-  %267 = OpUConvert.u32.offset64 %266
+  %188 = OpSConvert.i32.offset64 %lane
+  %189 = OpConstant.offset64 20
+  %190 = OpIMul.offset64 %188, %189
+  %191 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %190
+  %192 = OpLoad.storage_buffer.i32 %191
+  %196 = OpConstant.offset64 4
+  %197 = OpIAdd.offset64 %190, %196
+  %198 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %197
+  %199 = OpLoad.storage_buffer.i32 %198
+  %203 = OpConstant.offset64 8
+  %204 = OpIAdd.offset64 %190, %203
+  %205 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %204
+  %206 = OpLoad.storage_buffer.i32 %205
+  %210 = OpConstant.offset64 12
+  %211 = OpIAdd.offset64 %190, %210
+  %212 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %211
+  %213 = OpLoad.storage_buffer.i32 %212
+  %217 = OpConstant.offset64 16
+  %218 = OpIAdd.offset64 %190, %217
+  %219 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %218
+  %220 = OpLoad.storage_buffer.i32 %219
+  %221 = OpCopyObject.i32 %192 : reg<spirv.id : index>
+  %222 = OpCopyObject.i32 %199 : reg<spirv.id : index>
+  %223 = OpCopyObject.i32 %206 : reg<spirv.id : index>
+  %224 = OpCopyObject.i32 %213 : reg<spirv.id : index>
+  %225 = OpCopyObject.i32 %220 : reg<spirv.id : index>
+  %226 = OpBitcast.i32.u32 %192
+  %227 = OpUConvert.u32.offset64 %226
+  %228 = OpBitcast.i32.u32 %199
+  %229 = OpUConvert.u32.offset64 %228
+  %230 = OpBitcast.i32.u32 %206
+  %231 = OpUConvert.u32.offset64 %230
+  %232 = OpBitcast.i32.u32 %213
+  %233 = OpUConvert.u32.offset64 %232
+  %234 = OpBitcast.i32.u32 %220
+  %235 = OpUConvert.u32.offset64 %234
   %selector = OpConstant.i32 1
-  %269 = OpCompositeConstruct.v4i32 %253, %254, %255, %256 : reg<spirv.id : vector<4xindex>>
-  %270 = OpBitcast.i32.u32 %selector
-  %271 = OpGroupNonUniformShuffle.v4i32 %269, %270 : reg<spirv.id : vector<4xindex>>
-  %272 = OpBitcast.i32.u32 %selector
-  %273 = OpGroupNonUniformShuffle.i32 %257, %272 : reg<spirv.id : index>
-  %274 = OpCompositeConstruct.v4offset64 %259, %261, %263, %265
-  %275 = OpCopyObject.i32 %lane
-  %276 = OpConstant.i32 4
-  %277 = OpShiftRightLogical %275, %276
-  %278 = OpShiftLeftLogical %277, %276
-  %279 = OpIAdd %278, %selector
-  %280 = OpShiftRightLogical %279, %276
-  %281 = OpIEqual %280, %277
-  %282 = OpSelect %281, %279, %275
-  %283 = OpBitcast.i32.u32 %282
-  %284 = OpGroupNonUniformShuffle.v4offset64 %274, %283
-  %285 = OpBitcast.i32.u32 %282
-  %286 = OpGroupNonUniformShuffle.offset64 %267, %285
-  %287 = OpCompositeExtract.v4i32.i32 %271, 0 : reg<spirv.id : index>
-  %288 = OpCopyObject.i32 %287
-  %289 = OpCompositeExtract.v4i32.i32 %271, 1 : reg<spirv.id : index>
-  %290 = OpCopyObject.i32 %289
-  %291 = OpCompositeExtract.v4i32.i32 %271, 2 : reg<spirv.id : index>
-  %292 = OpCopyObject.i32 %291
-  %293 = OpCompositeExtract.v4i32.i32 %271, 3 : reg<spirv.id : index>
-  %294 = OpCopyObject.i32 %293
-  %295 = OpCopyObject.i32 %273
-  %296 = OpCompositeExtract.v4offset64.offset64 %284, 0
-  %297 = OpUConvert.offset64.u32 %296
-  %298 = OpBitcast.u32.i32 %297
-  %299 = OpCompositeExtract.v4offset64.offset64 %284, 1
-  %300 = OpUConvert.offset64.u32 %299
-  %301 = OpBitcast.u32.i32 %300
-  %302 = OpCompositeExtract.v4offset64.offset64 %284, 2
-  %303 = OpUConvert.offset64.u32 %302
-  %304 = OpBitcast.u32.i32 %303
-  %305 = OpCompositeExtract.v4offset64.offset64 %284, 3
-  %306 = OpUConvert.offset64.u32 %305
-  %307 = OpBitcast.u32.i32 %306
-  %308 = OpUConvert.offset64.u32 %286
-  %309 = OpBitcast.u32.i32 %308
-  %310 = OpSConvert.i32.offset64 %lane
-  %311 = OpConstant.offset64 40
-  %312 = OpIMul.offset64 %310, %311
-  %313 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %312
-  OpStore.storage_buffer.i32 %313, %288
-  %317 = OpConstant.offset64 4
-  %318 = OpIAdd.offset64 %312, %317
-  %319 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %318
-  OpStore.storage_buffer.i32 %319, %290
-  %323 = OpConstant.offset64 8
-  %324 = OpIAdd.offset64 %312, %323
-  %325 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %324
-  OpStore.storage_buffer.i32 %325, %292
-  %329 = OpConstant.offset64 12
-  %330 = OpIAdd.offset64 %312, %329
-  %331 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %330
-  OpStore.storage_buffer.i32 %331, %294
-  %335 = OpConstant.offset64 16
-  %336 = OpIAdd.offset64 %312, %335
-  %337 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %336
-  OpStore.storage_buffer.i32 %337, %295
-  %341 = OpConstant.offset64 20
-  %342 = OpIAdd.offset64 %312, %341
-  %343 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %342
-  OpStore.storage_buffer.i32 %343, %298
-  %347 = OpConstant.offset64 24
-  %348 = OpIAdd.offset64 %312, %347
-  %349 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %348
-  OpStore.storage_buffer.i32 %349, %301
-  %353 = OpConstant.offset64 28
-  %354 = OpIAdd.offset64 %312, %353
-  %355 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %354
-  OpStore.storage_buffer.i32 %355, %304
-  %359 = OpConstant.offset64 32
-  %360 = OpIAdd.offset64 %312, %359
-  %361 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %360
-  OpStore.storage_buffer.i32 %361, %307
-  %365 = OpConstant.offset64 36
-  %366 = OpIAdd.offset64 %312, %365
-  %367 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %366
-  OpStore.storage_buffer.i32 %367, %309
+  %237 = OpCompositeConstruct.v4i32 %221, %222, %223, %224 : reg<spirv.id : vector<4xindex>>
+  %238 = OpBitcast.i32.u32 %selector
+  %239 = OpGroupNonUniformShuffle.v4i32 %237, %238 : reg<spirv.id : vector<4xindex>>
+  %240 = OpBitcast.i32.u32 %selector
+  %241 = OpGroupNonUniformShuffle.i32 %225, %240 : reg<spirv.id : index>
+  %242 = OpCopyObject.i32 %lane
+  %243 = OpConstant.i32 4
+  %244 = OpShiftRightLogical %242, %243
+  %245 = OpShiftLeftLogical %244, %243
+  %246 = OpIAdd %245, %selector
+  %247 = OpShiftRightLogical %246, %243
+  %248 = OpIEqual %247, %244
+  %249 = OpSelect %248, %246, %242
+  %250 = OpCompositeConstruct.v4offset64 %227, %229, %231, %233
+  %251 = OpBitcast.i32.u32 %249
+  %252 = OpGroupNonUniformShuffle.v4offset64 %250, %251
+  %253 = OpBitcast.i32.u32 %249
+  %254 = OpGroupNonUniformShuffle.offset64 %235, %253
+  %255 = OpCompositeExtract.v4i32.i32 %239, 0 : reg<spirv.id : index>
+  %256 = OpCopyObject.i32 %255
+  %257 = OpCompositeExtract.v4i32.i32 %239, 1 : reg<spirv.id : index>
+  %258 = OpCopyObject.i32 %257
+  %259 = OpCompositeExtract.v4i32.i32 %239, 2 : reg<spirv.id : index>
+  %260 = OpCopyObject.i32 %259
+  %261 = OpCompositeExtract.v4i32.i32 %239, 3 : reg<spirv.id : index>
+  %262 = OpCopyObject.i32 %261
+  %263 = OpCopyObject.i32 %241
+  %264 = OpCompositeExtract.v4offset64.offset64 %252, 0
+  %265 = OpUConvert.offset64.u32 %264
+  %266 = OpBitcast.u32.i32 %265
+  %267 = OpCompositeExtract.v4offset64.offset64 %252, 1
+  %268 = OpUConvert.offset64.u32 %267
+  %269 = OpBitcast.u32.i32 %268
+  %270 = OpCompositeExtract.v4offset64.offset64 %252, 2
+  %271 = OpUConvert.offset64.u32 %270
+  %272 = OpBitcast.u32.i32 %271
+  %273 = OpCompositeExtract.v4offset64.offset64 %252, 3
+  %274 = OpUConvert.offset64.u32 %273
+  %275 = OpBitcast.u32.i32 %274
+  %276 = OpUConvert.offset64.u32 %254
+  %277 = OpBitcast.u32.i32 %276
+  %278 = OpSConvert.i32.offset64 %lane
+  %279 = OpConstant.offset64 40
+  %280 = OpIMul.offset64 %278, %279
+  %281 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %280
+  OpStore.storage_buffer.i32 %281, %256
+  %285 = OpConstant.offset64 4
+  %286 = OpIAdd.offset64 %280, %285
+  %287 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %286
+  OpStore.storage_buffer.i32 %287, %258
+  %291 = OpConstant.offset64 8
+  %292 = OpIAdd.offset64 %280, %291
+  %293 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %292
+  OpStore.storage_buffer.i32 %293, %260
+  %297 = OpConstant.offset64 12
+  %298 = OpIAdd.offset64 %280, %297
+  %299 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %298
+  OpStore.storage_buffer.i32 %299, %262
+  %303 = OpConstant.offset64 16
+  %304 = OpIAdd.offset64 %280, %303
+  %305 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %304
+  OpStore.storage_buffer.i32 %305, %263
+  %309 = OpConstant.offset64 20
+  %310 = OpIAdd.offset64 %280, %309
+  %311 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %310
+  OpStore.storage_buffer.i32 %311, %266
+  %315 = OpConstant.offset64 24
+  %316 = OpIAdd.offset64 %280, %315
+  %317 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %316
+  OpStore.storage_buffer.i32 %317, %269
+  %321 = OpConstant.offset64 28
+  %322 = OpIAdd.offset64 %280, %321
+  %323 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %322
+  OpStore.storage_buffer.i32 %323, %272
+  %327 = OpConstant.offset64 32
+  %328 = OpIAdd.offset64 %280, %327
+  %329 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %328
+  OpStore.storage_buffer.i32 %329, %275
+  %333 = OpConstant.offset64 36
+  %334 = OpIAdd.offset64 %280, %333
+  %335 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %334
+  OpStore.storage_buffer.i32 %335, %277
   return
 }
 

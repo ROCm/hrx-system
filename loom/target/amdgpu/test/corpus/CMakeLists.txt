@@ -22,6 +22,10 @@ loom_corpus_build(
     loom::target::amdgpu::all
   XFAILS
     "loom::target::amdgpu::all"
+    "kernel/subgroup/transport.loom"
+    "@subgroup_transport_address_5"
+    "TARGET/002,AMDGPU/023"
+    "loom::target::amdgpu::all"
     "memory/storage/load_snapshot.loom"
     "@capture_partial_byte_vectors"
     "AMDGPU/023"
@@ -398,6 +402,9 @@ loom_corpus_test(
     "function/template/library.loom"
     "@template_dead_library_values"
     "LOWERING/045"
+    "kernel/subgroup/transport.loom"
+    "@subgroup_transport_address_5_values"
+    "TARGET/002,AMDGPU/023"
     "memory/buffer/allocation_freshness.loom"
     "@allocation_freshness_values"
     "LOWERING/044"

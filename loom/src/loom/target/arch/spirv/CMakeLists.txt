@@ -399,6 +399,7 @@ loom_cc_library(
     loom::rewrite::rewriter
     loom::target::arch::spirv::descriptors
     loom::target::legalization
+    loom::transforms::kernel::target_legalization
     loom::transforms::scalar::target_legalization
     loom::transforms::vector::packet_legalization
     loom::transforms::vector::shape_legalization

@@ -29,7 +29,7 @@
 // Addressing, clustering, and participation do not depend on vector components.
 // Keep every packet at the authored convergence point and consume its captured
 // SSA value rather than replaying the producer across the collective.
-static iree_status_t loom_kernel_legalize_subgroup_packets(
+iree_status_t loom_kernel_target_legalize_subgroup_packets(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
@@ -272,7 +272,7 @@ static bool loom_kernel_value_as_exact_i64(
   return true;
 }
 
-static bool loom_kernel_match_subgroup_shuffle(
+bool loom_kernel_match_subgroup_shuffle(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
   (void)entry;
@@ -1472,17 +1472,17 @@ static const loom_target_legalizer_rule_t kKernelLegalizerRules[] = {
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_REDUCE,
-        .legalize = loom_kernel_legalize_subgroup_packets,
+        .legalize = loom_kernel_target_legalize_subgroup_packets,
     },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_SCAN,
-        .legalize = loom_kernel_legalize_subgroup_packets,
+        .legalize = loom_kernel_target_legalize_subgroup_packets,
     },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_SHUFFLE,
-        .legalize = loom_kernel_legalize_subgroup_packets,
+        .legalize = loom_kernel_target_legalize_subgroup_packets,
     },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,

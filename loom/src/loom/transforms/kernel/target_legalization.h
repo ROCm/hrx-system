@@ -21,6 +21,21 @@ extern "C" {
 const loom_target_legalizer_provider_t* loom_kernel_target_legalizer_provider(
     void);
 
+// Splits a wide subgroup payload only when each target-native packet preserves
+// the authored addressing and participation contract. Target payload adapters
+// use this before changing the value representation; rejected packet contracts
+// leave the operation unchanged for shared normalization or payload conversion.
+iree_status_t loom_kernel_target_legalize_subgroup_packets(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result);
+
+// Matches logical shuffle addressing that differs from the physical indexed
+// normal form. Payload adapters normalize it once before splitting the value.
+bool loom_kernel_match_subgroup_shuffle(
+    const loom_target_legalizer_entry_t* entry,
+    const loom_target_legalization_context_t* context, const loom_op_t* op);
+
 // Exchanges scalar or rank-1 i1 payloads through shape-preserving i32 values.
 // Targets whose predicates occupy lane masks use this for shuffle, broadcast,
 // and broadcast.first. Shuffle source validity remains independent of payload

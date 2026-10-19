@@ -14,6 +14,7 @@
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/features.h"
 #include "loom/target/arch/spirv/value_types.h"
+#include "loom/transforms/kernel/target_legalization.h"
 #include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/packet_insert_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
@@ -88,12 +89,28 @@ static iree_status_t loom_spirv_legalize_subgroup_payload(
   // Address packets preserve their target-selected width. Native BF16 packets
   // use the descriptor's pair packing, which needs no Int16 capability.
   const bool preserve_element_type = is_address || native_bfloat;
+  const uint32_t element_bits = loom_scalar_type_bitwidth(element_type);
+  if (loom_kernel_subgroup_shuffle_isa(op)) {
+    // Word-sized and wider native payloads need no integer repacking. Narrow
+    // software payloads retain their packed-word transport to amortize lane
+    // exchanges. Both paths normalize addressing once before splitting.
+    if (preserve_element_type || element_bits >= 32) {
+      IREE_RETURN_IF_ERROR(loom_kernel_target_legalize_subgroup_packets(
+          entry, context, op, out_result));
+      if (out_result->action == LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN) {
+        return iree_ok_status();
+      }
+    }
+    if (loom_kernel_match_subgroup_shuffle(entry, context, op)) {
+      return loom_kernel_target_legalize_subgroup_shuffle(entry, context, op,
+                                                          out_result);
+    }
+  }
   // Rejected native packets have no further payload representation.
   if ((element_type == LOOM_SCALAR_TYPE_I32 || preserve_element_type) &&
       source_lane_count <= 4) {
     return iree_ok_status();
   }
-  const uint32_t element_bits = loom_scalar_type_bitwidth(element_type);
   if (source_lane_count <= 0) {
     return iree_ok_status();
   }
