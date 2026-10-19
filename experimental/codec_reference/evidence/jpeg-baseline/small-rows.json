@@ -1,0 +1,752 @@
+[
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 573424,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      2811055,
+      2814421,
+      2833858,
+      2813199,
+      2811776,
+      2829719,
+      2815122,
+      2811726,
+      2813920
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 2813920
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 573424,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      748187,
+      721456,
+      727547,
+      718200,
+      721727,
+      714313,
+      712529,
+      712941,
+      712910
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 718200
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 16,
+    "compressed_bytes": 573424,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      2810213,
+      2823849,
+      2812086,
+      2806316,
+      2811405,
+      2810484,
+      2808250,
+      2805664,
+      2812096
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 2810484
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 573424,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      728419,
+      756492,
+      844598,
+      896555,
+      898930,
+      892738,
+      826975,
+      843225,
+      837675
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 843225
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 573424,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      2809782,
+      2812868,
+      2814381,
+      2813700,
+      2815693,
+      2820993,
+      2817497,
+      2813308,
+      2814952
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 2814381
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 573648,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      3199936,
+      3198724,
+      3196169,
+      3201348,
+      3207229,
+      3202661,
+      3202340,
+      3198863,
+      3202640
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 3201348
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 573648,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      1014427,
+      913607,
+      877730,
+      1005810,
+      1159089,
+      1017443,
+      1196559,
+      914700,
+      888500
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 1005810
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 16,
+    "compressed_bytes": 573648,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      3186430,
+      3184487,
+      3205035,
+      3189106,
+      3180238,
+      3183785,
+      3182022,
+      3192221,
+      3184696
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 3184696
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 573648,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      1147447,
+      974762,
+      895914,
+      878061,
+      913267,
+      887668,
+      814972,
+      808560,
+      804713
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 887668
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 573648,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      3187032,
+      3188303,
+      3186820,
+      3187152,
+      3185078,
+      3185930,
+      3183264,
+      3183705,
+      3199474
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 3186820
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 542304,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      9921661,
+      9932472,
+      9947841,
+      9930829,
+      9919899,
+      9917323,
+      9886625,
+      9892137,
+      9887527
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 9919899
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 542304,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      2631296,
+      3134714,
+      2628391,
+      2638660,
+      2664850,
+      2643640,
+      2642067,
+      2631196,
+      3027972
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 2642067
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 16,
+    "compressed_bytes": 542304,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      9920378,
+      9908457,
+      9895422,
+      9939154,
+      9954715,
+      9996802,
+      10009647,
+      9996834,
+      10001140
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 9954715
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 542304,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      2621258,
+      2639142,
+      2642477,
+      2638840,
+      3109035,
+      3021800,
+      3057368,
+      3033202,
+      3047509
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 3021800
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 542304,
+    "rgb_bytes": 3145728,
+    "images": [
+      "synthetic-256.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      9939956,
+      9897407,
+      9911522,
+      9907145,
+      9888058,
+      9892607,
+      9927893,
+      9917955,
+      9903728
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 9907145
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 6695312,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      40906109,
+      40891320,
+      40834234,
+      40812673,
+      40820899,
+      40859190,
+      40814496,
+      40815098,
+      40813023
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 40820899
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 6695312,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      10698312,
+      10328245,
+      10327043,
+      10342213,
+      10335369,
+      10315331,
+      10308369,
+      10253234,
+      10266791
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 10327043
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 16,
+    "compressed_bytes": 6695312,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      40923571,
+      40882104,
+      40882444,
+      40853279,
+      40840516,
+      40854331,
+      40869069,
+      40855414,
+      40830807
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 40855414
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 6695312,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      10753806,
+      10302908,
+      10262082,
+      10267312,
+      10265738,
+      10261030,
+      10314350,
+      10294792,
+      10252174
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 10267312
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 6695312,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      40906759,
+      40903115,
+      40894196,
+      40865462,
+      40791364,
+      40803565,
+      40793547,
+      40779953,
+      40781263
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 40803565
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 6697008,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      42915355,
+      42882163,
+      42919925,
+      42850864,
+      42804308,
+      42802373,
+      42863659,
+      42844212,
+      42796743
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 42850864
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 6697008,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      10821473,
+      10809089,
+      10794734,
+      10858422,
+      10869183,
+      11195737,
+      10781257,
+      10798971,
+      10780546
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 10809089
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 16,
+    "compressed_bytes": 6697008,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      42867627,
+      42855823,
+      42837519,
+      42813125,
+      42854481,
+      42835296,
+      42832429,
+      42843321,
+      42789229
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 42837519
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 6697008,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      10868622,
+      10828406,
+      10812025,
+      10768304,
+      10792629,
+      10783842,
+      10771269,
+      10793911,
+      10757542
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 10792629
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 6697008,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      42835696,
+      42799628,
+      42763380,
+      42733704,
+      42728365,
+      42750685,
+      42762778,
+      42747561,
+      42736499
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 42750685
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 6274240,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      119728145,
+      119761027,
+      119685665,
+      119259334,
+      120533088,
+      119587290,
+      119502139,
+      119429204,
+      119721202
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 119685665
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 6274240,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      30038479,
+      30015786,
+      29920027,
+      30046234,
+      29964730,
+      30044850,
+      29981261,
+      30010947,
+      30019824
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 30015786
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 16,
+    "compressed_bytes": 6274240,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      118684012,
+      118701143,
+      118713017,
+      118753002,
+      118690513,
+      118650459,
+      118812103,
+      118905107,
+      119231902
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 118713017
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 6274240,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      30349373,
+      30591077,
+      30461374,
+      30519763,
+      30559147,
+      30484558,
+      30550050,
+      30349304,
+      30154487
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 30484558
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 16,
+    "compressed_bytes": 6274240,
+    "rgb_bytes": 37748736,
+    "images": [
+      "synthetic-1024.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      119215991,
+      119212786,
+      119113829,
+      119178312,
+      119008461,
+      119153174,
+      119463285,
+      119361375,
+      119310319
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 119212786
+  }
+]

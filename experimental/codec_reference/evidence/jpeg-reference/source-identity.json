@@ -1,0 +1,59 @@
+{
+  "recorded_utc": "2026-10-17T13:29:32.415873+00:00",
+  "sources": [
+    {
+      "name": "bcr-source.json",
+      "url": "https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/modules/libjpeg_turbo/3.1.3.bcr.6/source.json",
+      "bytes": 410,
+      "sha256": "4b4e6a77dfcd9b7abfece7e977817acf9db30f6e1313a10ea4a80f2e9f58ad7f"
+    },
+    {
+      "name": "bcr-build-overlay.bazel",
+      "url": "https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/modules/libjpeg_turbo/3.1.3.bcr.6/overlay/BUILD.bazel",
+      "bytes": 29509,
+      "sha256": "e5898af7ecb5bcc5f36f9ca4ca58ed44cfab0761cc0fb5026e01cd6fd81e00d8"
+    },
+    {
+      "name": "jpeglib.h",
+      "url": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.3/src/jpeglib.h",
+      "bytes": 55794,
+      "sha256": "dc3e8220f34b7e9f9e48620f5cb8dc070834feb3214bb12bbad78478ebb29e60"
+    },
+    {
+      "name": "jdapimin.c",
+      "url": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.3/src/jdapimin.c",
+      "bytes": 13680,
+      "sha256": "03c7c476f4cfc19fc0b7f53c6bef9f3122e682cbfd37410743fed4a1ecaecbc1"
+    },
+    {
+      "name": "jdmaster.c",
+      "url": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.3/src/jdmaster.c",
+      "bytes": 34517,
+      "sha256": "150a57d80a67b139c233ebaff1d7ded3677f07e3b6d6bd5859fc88e32f80c62d"
+    },
+    {
+      "name": "jdcolor.c",
+      "url": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.3/src/jdcolor.c",
+      "bytes": 30387,
+      "sha256": "b51cdf7f6dc93f8874fdfa82aaea7030cc70bf3408e7fcb60cf76017b07000cf"
+    },
+    {
+      "name": "jdatasrc.c",
+      "url": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.3/src/jdatasrc.c",
+      "bytes": 10087,
+      "sha256": "25b8689e08ec083106e13a9c5a599b7d79dcf1f182d4565b1600eac014b874d1"
+    },
+    {
+      "name": "jdapistd.c",
+      "url": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.3/src/jdapistd.c",
+      "bytes": 28540,
+      "sha256": "6cac8b1dd8051e4c8372e026e98479ed3a6dd0004c72f3aa83d32ef890b26e3f"
+    },
+    {
+      "name": "jmorecfg.h",
+      "url": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.3/src/jmorecfg.h",
+      "bytes": 14386,
+      "sha256": "80a97f45ecb28d83310247eecec2a3865b5fd39ba0ecc490b48a36fac6318e26"
+    }
+  ]
+}

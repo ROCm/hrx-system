@@ -765,12 +765,108 @@
       "sha256": "569fcecd2043b85a988736077af698bc3ed6a8d7462547d9be7ab3536ced61ff",
       "bytes": 31029,
       "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-baseline/corpus-source.json",
+      "source": "jpeg-baseline/corpus-source.json",
+      "source_sha256": "6db5ee93017d56bad801e3a01698e4fc007f3cda38c52541939cc788c379a12d",
+      "sha256": "6db5ee93017d56bad801e3a01698e4fc007f3cda38c52541939cc788c379a12d",
+      "bytes": 793,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-baseline/input-structure.json",
+      "source": "jpeg-baseline/input-structure.json",
+      "source_sha256": "984c540c7ce635fb788a63d13f1f2c0f026767c9c09b5b6bcdb67558e039ae80",
+      "sha256": "984c540c7ce635fb788a63d13f1f2c0f026767c9c09b5b6bcdb67558e039ae80",
+      "bytes": 8501,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-baseline/qualified.json",
+      "source": "jpeg-baseline/qualified.json",
+      "source_sha256": "cc0af607960dde72767c9a975e7f1a0c3fcece1a68d365558301a59cba6d6f81",
+      "sha256": "993060704361f07e496c7cd7703187ec88f9d732c5d6f6c3a88aa3ca403c5a03",
+      "bytes": 10872,
+      "paths_relocated": true
+    },
+    {
+      "path": "evidence/jpeg-baseline/qualified-native.json",
+      "source": "jpeg-baseline/qualified-native.json",
+      "source_sha256": "056ac7f65ec985ca379858a6d4a12539ba39511ce5ec513789ab1b190bd751ba",
+      "sha256": "056ac7f65ec985ca379858a6d4a12539ba39511ce5ec513789ab1b190bd751ba",
+      "bytes": 681,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-baseline/summary.json",
+      "source": "jpeg-baseline/summary.json",
+      "source_sha256": "2c3b39da134e819e1290175b0889f0dec784c0565c2534b0e1f29f191ed6a8ae",
+      "sha256": "2c3b39da134e819e1290175b0889f0dec784c0565c2534b0e1f29f191ed6a8ae",
+      "bytes": 16870,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-baseline/small-rows.json",
+      "source": "jpeg-baseline/small-rows.json",
+      "source_sha256": "a234b545b1e89e8bafee5b70f0693efd8c676de5c49f91ea13b878ea33233a7c",
+      "sha256": "a234b545b1e89e8bafee5b70f0693efd8c676de5c49f91ea13b878ea33233a7c",
+      "bytes": 13431,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-baseline/scale-rows.json",
+      "source": "jpeg-baseline/scale-rows.json",
+      "source_sha256": "e16cf2ea37970f3a41d0989b3829e52a41776ae54bd7bc130617f8ee5f8f17be",
+      "sha256": "e16cf2ea37970f3a41d0989b3829e52a41776ae54bd7bc130617f8ee5f8f17be",
+      "bytes": 2282,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-baseline/large-rows.json",
+      "source": "jpeg-baseline/large-rows.json",
+      "source_sha256": "a102f18ec7273f07be67e6c35ac96836da9cda65c9a8269c6c104a97fdc7eafb",
+      "sha256": "a102f18ec7273f07be67e6c35ac96836da9cda65c9a8269c6c104a97fdc7eafb",
+      "bytes": 13687,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-reference/bcr-source.json",
+      "source": "jpeg-reference/bcr-source.json",
+      "source_sha256": "4b4e6a77dfcd9b7abfece7e977817acf9db30f6e1313a10ea4a80f2e9f58ad7f",
+      "sha256": "4b4e6a77dfcd9b7abfece7e977817acf9db30f6e1313a10ea4a80f2e9f58ad7f",
+      "bytes": 410,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-reference/source-identity.json",
+      "source": "jpeg-reference/source-identity.json",
+      "source_sha256": "c07e81bdc55cade5ec14c1eea10e8d4440b165c91e54fdf26988cce2acb43b76",
+      "sha256": "c07e81bdc55cade5ec14c1eea10e8d4440b165c91e54fdf26988cce2acb43b76",
+      "bytes": 2373,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-reference/qualified.json",
+      "source": "jpeg-reference/qualified.json",
+      "source_sha256": "75e57dd927084e387b68849441a32709d7888a2cadc0f5597d011eda14146445",
+      "sha256": "75e57dd927084e387b68849441a32709d7888a2cadc0f5597d011eda14146445",
+      "bytes": 104728,
+      "paths_relocated": false
+    },
+    {
+      "path": "evidence/jpeg-reference/binary-cost-result.json",
+      "source": "jpeg-reference/binary-cost-result.json",
+      "source_sha256": "42c06437d0a8aae8871a375a5c37524312daebd0849d5592172f4707dc18b85b",
+      "sha256": "42c06437d0a8aae8871a375a5c37524312daebd0849d5592172f4707dc18b85b",
+      "bytes": 31091,
+      "paths_relocated": false
     }
   ],
   "source_archive": {
     "path": "source-snapshots.tar.gz",
-    "sha256": "c234bb5c8f0fab92e7ddc4176a136d27144bfb6587aba9487d5d657add9f94be",
-    "bytes": 1347739,
+    "sha256": "34f1dd27fb1c3563889a467122815deaf78063febbdf301733ceffad192352de",
+    "bytes": 1420920,
     "entries": [
       {
         "path": "research/jpeg-entropy/atomic_profile_probe.c",
@@ -8331,6 +8427,123 @@
         "bytes": 21908,
         "paths_relocated": false,
         "member": "qualified/resize_command_probe.cc"
+      },
+      {
+        "path": "research/jpeg-baseline/diagnose-workers.py",
+        "source": "jpeg-baseline/diagnose-workers.py",
+        "source_sha256": "17a384cc8a6b146736e9640b1df6698bcbe583ebee847c6c4c77603ab23dadcd",
+        "sha256": "17a384cc8a6b146736e9640b1df6698bcbe583ebee847c6c4c77603ab23dadcd",
+        "bytes": 1505,
+        "paths_relocated": false,
+        "member": "research/jpeg-baseline/diagnose-workers.py"
+      },
+      {
+        "path": "research/jpeg-baseline/run.py",
+        "source": "jpeg-baseline/run.py",
+        "source_sha256": "cae44d6778f9360387efe54fcc46a7f9c3a43c17a8a71d6942a16d96204726bc",
+        "sha256": "cae44d6778f9360387efe54fcc46a7f9c3a43c17a8a71d6942a16d96204726bc",
+        "bytes": 4457,
+        "paths_relocated": false,
+        "member": "research/jpeg-baseline/run.py"
+      },
+      {
+        "path": "research/jpeg-baseline/stage.py",
+        "source": "jpeg-baseline/stage.py",
+        "source_sha256": "94521fb50feac7a837c7db65deacdb92dea135f7d75279a21bbaca1cbc09d468",
+        "sha256": "dda1659919689434a91bbeaa01e60db9137fe63958be5dcd469aec20025f690d",
+        "bytes": 4319,
+        "paths_relocated": true,
+        "member": "research/jpeg-baseline/stage.py"
+      },
+      {
+        "path": "research/jpeg-baseline/summarize.py",
+        "source": "jpeg-baseline/summarize.py",
+        "source_sha256": "637b12fb52fcc9a3f7472dae8756177f187178aad1998fe8544b3dbc6286cf28",
+        "sha256": "637b12fb52fcc9a3f7472dae8756177f187178aad1998fe8544b3dbc6286cf28",
+        "bytes": 2746,
+        "paths_relocated": false,
+        "member": "research/jpeg-baseline/summarize.py"
+      },
+      {
+        "path": "research/jpeg-reference/analyze.py",
+        "source": "jpeg-reference/analyze.py",
+        "source_sha256": "1c735149fae23b6a4b7fa566bf79c5c31bd890602d7758cef71a38259246544d",
+        "sha256": "1c735149fae23b6a4b7fa566bf79c5c31bd890602d7758cef71a38259246544d",
+        "bytes": 12261,
+        "paths_relocated": false,
+        "member": "research/jpeg-reference/analyze.py"
+      },
+      {
+        "path": "research/jpeg-reference/build_codec_matrix.py",
+        "source": "jpeg-reference/build_codec_matrix.py",
+        "source_sha256": "2f21a53fc4b13bd0723b311c2fa39b70d6e6e7a3c5f2f3df46d09f8d534102c6",
+        "sha256": "2f21a53fc4b13bd0723b311c2fa39b70d6e6e7a3c5f2f3df46d09f8d534102c6",
+        "bytes": 2297,
+        "paths_relocated": false,
+        "member": "research/jpeg-reference/build_codec_matrix.py"
+      },
+      {
+        "path": "research/jpeg-reference/build_size_pair.py",
+        "source": "jpeg-reference/build_size_pair.py",
+        "source_sha256": "b053d6aa54bf72cee1b1de6e12d506e0af15dfbb458a03b69c7e6718413d00d3",
+        "sha256": "b053d6aa54bf72cee1b1de6e12d506e0af15dfbb458a03b69c7e6718413d00d3",
+        "bytes": 1863,
+        "paths_relocated": false,
+        "member": "research/jpeg-reference/build_size_pair.py"
+      },
+      {
+        "path": "research/jpeg-reference/inspect_size_pair.py",
+        "source": "jpeg-reference/inspect_size_pair.py",
+        "source_sha256": "76fce66d47ae78b2d790895ae422d4f00b1c94b71a7aac2db59ad1763710d992",
+        "sha256": "76fce66d47ae78b2d790895ae422d4f00b1c94b71a7aac2db59ad1763710d992",
+        "bytes": 6875,
+        "paths_relocated": false,
+        "member": "research/jpeg-reference/inspect_size_pair.py"
+      },
+      {
+        "path": "research/jpeg-reference/run_probe.py",
+        "source": "jpeg-reference/run_probe.py",
+        "source_sha256": "2a0bf584a94ae44411752943003a487b74769d6394b6d6dccb3be81324475a3e",
+        "sha256": "2a0bf584a94ae44411752943003a487b74769d6394b6d6dccb3be81324475a3e",
+        "bytes": 2709,
+        "paths_relocated": false,
+        "member": "research/jpeg-reference/run_probe.py"
+      },
+      {
+        "path": "research/jpeg-baseline/jpeg_baseline.cc",
+        "source": "jpeg-baseline/jpeg_baseline.cc",
+        "source_sha256": "0ad745c92d3de896cb073f9d04efceb39b588fd2046153828f4b827e22bc2ea2",
+        "sha256": "0ad745c92d3de896cb073f9d04efceb39b588fd2046153828f4b827e22bc2ea2",
+        "bytes": 18064,
+        "paths_relocated": false,
+        "member": "research/jpeg-baseline/jpeg_baseline.cc"
+      },
+      {
+        "path": "research/jpeg-baseline/jpeg_pipeline_baseline.cc",
+        "source": "jpeg-baseline/jpeg_pipeline_baseline.cc",
+        "source_sha256": "fb1b3f55564a17f7f12a864d4af07febf380dc07748d321776d014a338d4776b",
+        "sha256": "fb1b3f55564a17f7f12a864d4af07febf380dc07748d321776d014a338d4776b",
+        "bytes": 18125,
+        "paths_relocated": false,
+        "member": "research/jpeg-baseline/jpeg_pipeline_baseline.cc"
+      },
+      {
+        "path": "research/jpeg-baseline/jpeg_resize_baseline.cc",
+        "source": "jpeg-baseline/jpeg_resize_baseline.cc",
+        "source_sha256": "495ebae661f32dfcad9fc7c7c9d3733c57bd8676d5fd603c37720206575bf271",
+        "sha256": "495ebae661f32dfcad9fc7c7c9d3733c57bd8676d5fd603c37720206575bf271",
+        "bytes": 23454,
+        "paths_relocated": false,
+        "member": "research/jpeg-baseline/jpeg_resize_baseline.cc"
+      },
+      {
+        "path": "research/jpeg-reference/jpeg_probe.c",
+        "source": "jpeg-reference/jpeg_probe.c",
+        "source_sha256": "fd6d57c326ec7df8dd970faef59185e794a682e90b94f2383b85d886de78d46f",
+        "sha256": "fd6d57c326ec7df8dd970faef59185e794a682e90b94f2383b85d886de78d46f",
+        "bytes": 19629,
+        "paths_relocated": false,
+        "member": "research/jpeg-reference/jpeg_probe.c"
       }
     ]
   }

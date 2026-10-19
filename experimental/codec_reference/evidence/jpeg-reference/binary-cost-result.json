@@ -1,0 +1,1198 @@
+{
+  "state": "Complete executable size comparison; no execution or performance test.",
+  "strip_version": "GNU strip version 2.46.1-1.fc44",
+  "variants": {
+    "baseline": {
+      "invocation": {
+        "recorded_utc": "2026-10-17T13:47:03.980368+00:00",
+        "arguments": [
+          "bureau-bazel",
+          "build",
+          "--tag=codec-image-deps-baseline",
+          "--json",
+          "--config=opt",
+          "--//loom/config/serve:image_input=true",
+          "--//loom/config/serve:image_codecs=png,jpeg,gif,webp",
+          "//loom/src/loom/tools/loom-serve:loom-serve"
+        ],
+        "source_identity": {
+          "head": "50e8bdac75f41a64896e2731cb2303460e95eaf2",
+          "status": "",
+          "files": [
+            {
+              "path": ".bazelrc",
+              "resolved": "/home/ben/src/hrx-system/codec/.bazelrc",
+              "bytes": 10186,
+              "sha256": "7e01222ea68e6513f8febf9bd80917e388ce9a1047e9b7b3dc8ea52d33d4ae59"
+            },
+            {
+              "path": ".bazelrc.configured",
+              "resolved": "/home/ben/src/hrx-system/codec/.bazelrc.configured",
+              "bytes": 1094,
+              "sha256": "79610ec210aadee0a39ee75a8b55a28db1c4d758cec834561845090d14ce0055"
+            },
+            {
+              "path": ".bazelrc.local",
+              "resolved": "/home/ben/src/hrx-system/main/.bazelrc.local",
+              "bytes": 336,
+              "sha256": "24fbcf2b9a388d84c5d65981e00a7bb0ccb38c57d69c963a5fb649e9f9a9f032"
+            },
+            {
+              "path": "loom/config/serve/BUILD.bazel",
+              "resolved": "/home/ben/src/hrx-system/codec/loom/config/serve/BUILD.bazel",
+              "bytes": 2780,
+              "sha256": "7d7b6022fec743d0754271dd67875e52767e4494bdfed2f2d9a537176c15ff51"
+            },
+            {
+              "path": "loom/src/loom/tools/loom-serve/BUILD.bazel",
+              "resolved": "/home/ben/src/hrx-system/codec/loom/src/loom/tools/loom-serve/BUILD.bazel",
+              "bytes": 4485,
+              "sha256": "4a06b1ec4f5b44c0fb7eb111aa47adffc90a819e16828c7fc460bef35115f901"
+            }
+          ]
+        }
+      },
+      "path": "/var/cache/bureau/bazel-tags/1002/generations/3546f7f08a5e30eacde1d1a4271aff75/view/loom/src/loom/tools/loom-serve/loom-serve",
+      "bytes": 20524104,
+      "sha256": "348664ae86d514c8210728a16853308273cf4fa83e060ac4fb35dd3adcdefe8e",
+      "stripped": {
+        "bytes": 18949096,
+        "sha256": "992118c934c79f9b2e09e73aa54e7d2624227732ec1fcceaa2d9fbd1766daf38"
+      },
+      "allocated_sections": [
+        {
+          "name": ".interp",
+          "type": 1,
+          "flags": 2,
+          "bytes": 28,
+          "alignment": 1
+        },
+        {
+          "name": ".note.ABI-tag",
+          "type": 7,
+          "flags": 2,
+          "bytes": 32,
+          "alignment": 4
+        },
+        {
+          "name": ".note.package",
+          "type": 7,
+          "flags": 2,
+          "bytes": 112,
+          "alignment": 4
+        },
+        {
+          "name": ".dynsym",
+          "type": 11,
+          "flags": 2,
+          "bytes": 5232,
+          "alignment": 8
+        },
+        {
+          "name": ".gnu.version",
+          "type": 1879048191,
+          "flags": 2,
+          "bytes": 436,
+          "alignment": 2
+        },
+        {
+          "name": ".gnu.version_r",
+          "type": 1879048190,
+          "flags": 2,
+          "bytes": 368,
+          "alignment": 4
+        },
+        {
+          "name": ".gnu.hash",
+          "type": 1879048182,
+          "flags": 2,
+          "bytes": 28,
+          "alignment": 8
+        },
+        {
+          "name": ".dynstr",
+          "type": 3,
+          "flags": 2,
+          "bytes": 2209,
+          "alignment": 1
+        },
+        {
+          "name": ".rela.dyn",
+          "type": 4,
+          "flags": 2,
+          "bytes": 490320,
+          "alignment": 8
+        },
+        {
+          "name": ".rela.plt",
+          "type": 4,
+          "flags": 66,
+          "bytes": 4608,
+          "alignment": 8
+        },
+        {
+          "name": ".rodata",
+          "type": 1,
+          "flags": 50,
+          "bytes": 6010983,
+          "alignment": 64
+        },
+        {
+          "name": ".eh_frame_hdr",
+          "type": 1,
+          "flags": 2,
+          "bytes": 90828,
+          "alignment": 4
+        },
+        {
+          "name": ".eh_frame",
+          "type": 1,
+          "flags": 2,
+          "bytes": 533436,
+          "alignment": 8
+        },
+        {
+          "name": ".text",
+          "type": 1,
+          "flags": 6,
+          "bytes": 11319467,
+          "alignment": 32
+        },
+        {
+          "name": ".init",
+          "type": 1,
+          "flags": 6,
+          "bytes": 27,
+          "alignment": 4
+        },
+        {
+          "name": ".fini",
+          "type": 1,
+          "flags": 6,
+          "bytes": 13,
+          "alignment": 4
+        },
+        {
+          "name": ".plt",
+          "type": 1,
+          "flags": 6,
+          "bytes": 3088,
+          "alignment": 16
+        },
+        {
+          "name": ".tdata",
+          "type": 1,
+          "flags": 1027,
+          "bytes": 4,
+          "alignment": 4
+        },
+        {
+          "name": ".tbss",
+          "type": 8,
+          "flags": 1027,
+          "bytes": 16,
+          "alignment": 8
+        },
+        {
+          "name": ".fini_array",
+          "type": 15,
+          "flags": 3,
+          "bytes": 8,
+          "alignment": 8
+        },
+        {
+          "name": ".init_array",
+          "type": 14,
+          "flags": 3,
+          "bytes": 664,
+          "alignment": 8
+        },
+        {
+          "name": ".data.rel.ro",
+          "type": 1,
+          "flags": 3,
+          "bytes": 461320,
+          "alignment": 16
+        },
+        {
+          "name": ".dynamic",
+          "type": 6,
+          "flags": 3,
+          "bytes": 448,
+          "alignment": 8
+        },
+        {
+          "name": ".got",
+          "type": 1,
+          "flags": 3,
+          "bytes": 728,
+          "alignment": 8
+        },
+        {
+          "name": ".got.plt",
+          "type": 1,
+          "flags": 3,
+          "bytes": 1560,
+          "alignment": 8
+        },
+        {
+          "name": ".relro_padding",
+          "type": 8,
+          "flags": 3,
+          "bytes": 872,
+          "alignment": 1
+        },
+        {
+          "name": ".tm_clone_table",
+          "type": 1,
+          "flags": 3,
+          "bytes": 0,
+          "alignment": 8
+        },
+        {
+          "name": ".data",
+          "type": 1,
+          "flags": 3,
+          "bytes": 19760,
+          "alignment": 16
+        },
+        {
+          "name": ".bss",
+          "type": 8,
+          "flags": 3,
+          "bytes": 2872,
+          "alignment": 16
+        }
+      ],
+      "load_segments": [
+        {
+          "flags": 4,
+          "file_bytes": 7139380,
+          "memory_bytes": 7139380,
+          "alignment": 4096
+        },
+        {
+          "flags": 5,
+          "file_bytes": 11322608,
+          "memory_bytes": 11322608,
+          "alignment": 4096
+        },
+        {
+          "flags": 6,
+          "file_bytes": 464744,
+          "memory_bytes": 465616,
+          "alignment": 4096
+        },
+        {
+          "flags": 6,
+          "file_bytes": 19768,
+          "memory_bytes": 22640,
+          "alignment": 4096
+        }
+      ],
+      "text_bytes": 11319467,
+      "rodata_bytes": 6010983,
+      "allocated_file_bytes": 18945707,
+      "allocated_zerofill_bytes": 3760,
+      "load_segment_file_bytes": 18946500,
+      "jpeg_named_symbols": [
+        {
+          "name": "jinit_1pass_quantizer",
+          "type": "T",
+          "bytes": 1575
+        },
+        {
+          "name": "jinit_2pass_quantizer",
+          "type": "T",
+          "bytes": 420
+        },
+        {
+          "name": "jinit_color_deconverter",
+          "type": "T",
+          "bytes": 1654
+        },
+        {
+          "name": "jinit_d_coef_controller",
+          "type": "T",
+          "bytes": 570
+        },
+        {
+          "name": "jinit_d_diff_controller",
+          "type": "T",
+          "bytes": 683
+        },
+        {
+          "name": "jinit_d_main_controller",
+          "type": "T",
+          "bytes": 594
+        },
+        {
+          "name": "jinit_d_post_controller",
+          "type": "T",
+          "bytes": 272
+        },
+        {
+          "name": "jinit_marker_reader",
+          "type": "T",
+          "bytes": 273
+        },
+        {
+          "name": "jinit_master_decompress",
+          "type": "T",
+          "bytes": 6619
+        },
+        {
+          "name": "jinit_memory_mgr",
+          "type": "T",
+          "bytes": 404
+        },
+        {
+          "name": "jinit_merged_upsampler",
+          "type": "T",
+          "bytes": 642
+        },
+        {
+          "name": "jinit_upsampler",
+          "type": "T",
+          "bytes": 977
+        },
+        {
+          "name": "jpeg12_idct_10x10",
+          "type": "T",
+          "bytes": 3504
+        },
+        {
+          "name": "jpeg12_idct_11x11",
+          "type": "T",
+          "bytes": 5383
+        },
+        {
+          "name": "jpeg12_idct_12x12",
+          "type": "T",
+          "bytes": 4213
+        },
+        {
+          "name": "jpeg12_idct_13x13",
+          "type": "T",
+          "bytes": 1730
+        },
+        {
+          "name": "jpeg12_idct_14x14",
+          "type": "T",
+          "bytes": 5230
+        },
+        {
+          "name": "jpeg12_idct_15x15",
+          "type": "T",
+          "bytes": 5533
+        },
+        {
+          "name": "jpeg12_idct_16x16",
+          "type": "T",
+          "bytes": 6483
+        },
+        {
+          "name": "jpeg12_idct_1x1",
+          "type": "T",
+          "bytes": 53
+        },
+        {
+          "name": "jpeg12_idct_2x2",
+          "type": "T",
+          "bytes": 1457
+        },
+        {
+          "name": "jpeg12_idct_3x3",
+          "type": "T",
+          "bytes": 729
+        },
+        {
+          "name": "jpeg12_idct_4x4",
+          "type": "T",
+          "bytes": 945
+        },
+        {
+          "name": "jpeg12_idct_5x5",
+          "type": "T",
+          "bytes": 2677
+        },
+        {
+          "name": "jpeg12_idct_6x6",
+          "type": "T",
+          "bytes": 661
+        },
+        {
+          "name": "jpeg12_idct_7x7",
+          "type": "T",
+          "bytes": 918
+        },
+        {
+          "name": "jpeg12_idct_9x9",
+          "type": "T",
+          "bytes": 2983
+        },
+        {
+          "name": "jpeg12_idct_float",
+          "type": "T",
+          "bytes": 1368
+        },
+        {
+          "name": "jpeg12_idct_ifast",
+          "type": "T",
+          "bytes": 1175
+        },
+        {
+          "name": "jpeg12_idct_islow",
+          "type": "T",
+          "bytes": 1432
+        },
+        {
+          "name": "jpeg_aritab",
+          "type": "R",
+          "bytes": 912
+        },
+        {
+          "name": "jpeg_consume_input",
+          "type": "T",
+          "bytes": 607
+        },
+        {
+          "name": "jpeg_fill_bit_buffer",
+          "type": "T",
+          "bytes": 376
+        },
+        {
+          "name": "jpeg_finish_decompress",
+          "type": "T",
+          "bytes": 249
+        },
+        {
+          "name": "jpeg_huff_decode",
+          "type": "T",
+          "bytes": 273
+        },
+        {
+          "name": "jpeg_idct_10x10",
+          "type": "T",
+          "bytes": 1163
+        },
+        {
+          "name": "jpeg_idct_11x11",
+          "type": "T",
+          "bytes": 1504
+        },
+        {
+          "name": "jpeg_idct_12x12",
+          "type": "T",
+          "bytes": 1415
+        },
+        {
+          "name": "jpeg_idct_13x13",
+          "type": "T",
+          "bytes": 1737
+        },
+        {
+          "name": "jpeg_idct_14x14",
+          "type": "T",
+          "bytes": 1647
+        },
+        {
+          "name": "jpeg_idct_15x15",
+          "type": "T",
+          "bytes": 1752
+        },
+        {
+          "name": "jpeg_idct_16x16",
+          "type": "T",
+          "bytes": 2083
+        },
+        {
+          "name": "jpeg_idct_1x1",
+          "type": "T",
+          "bytes": 55
+        },
+        {
+          "name": "jpeg_idct_2x2",
+          "type": "T",
+          "bytes": 1374
+        },
+        {
+          "name": "jpeg_idct_3x3",
+          "type": "T",
+          "bytes": 725
+        },
+        {
+          "name": "jpeg_idct_4x4",
+          "type": "T",
+          "bytes": 961
+        },
+        {
+          "name": "jpeg_idct_5x5",
+          "type": "T",
+          "bytes": 2663
+        },
+        {
+          "name": "jpeg_idct_6x6",
+          "type": "T",
+          "bytes": 661
+        },
+        {
+          "name": "jpeg_idct_7x7",
+          "type": "T",
+          "bytes": 908
+        },
+        {
+          "name": "jpeg_idct_9x9",
+          "type": "T",
+          "bytes": 1064
+        },
+        {
+          "name": "jpeg_idct_float",
+          "type": "T",
+          "bytes": 1360
+        },
+        {
+          "name": "jpeg_idct_ifast",
+          "type": "T",
+          "bytes": 1231
+        },
+        {
+          "name": "jpeg_idct_islow",
+          "type": "T",
+          "bytes": 1411
+        },
+        {
+          "name": "jpeg_make_d_derived_tbl",
+          "type": "T",
+          "bytes": 5677
+        },
+        {
+          "name": "jpeg_natural_order",
+          "type": "R",
+          "bytes": 320
+        },
+        {
+          "name": "jpeg_read_scanlines",
+          "type": "T",
+          "bytes": 275
+        },
+        {
+          "name": "jpeg_resync_to_restart",
+          "type": "T",
+          "bytes": 341
+        },
+        {
+          "name": "jpeg_start_decompress",
+          "type": "T",
+          "bytes": 243
+        },
+        {
+          "name": "jpeg_std_message_table.llvm.16094650273490019113",
+          "type": "d",
+          "bytes": 1040
+        },
+        {
+          "name": "jpeg_undifference1",
+          "type": "t",
+          "bytes": 154
+        },
+        {
+          "name": "jpeg_undifference1",
+          "type": "t",
+          "bytes": 154
+        },
+        {
+          "name": "jpeg_undifference1",
+          "type": "t",
+          "bytes": 154
+        },
+        {
+          "name": "jpeg_undifference2",
+          "type": "t",
+          "bytes": 363
+        },
+        {
+          "name": "jpeg_undifference2",
+          "type": "t",
+          "bytes": 363
+        },
+        {
+          "name": "jpeg_undifference2",
+          "type": "t",
+          "bytes": 363
+        },
+        {
+          "name": "jpeg_undifference3",
+          "type": "t",
+          "bytes": 438
+        },
+        {
+          "name": "jpeg_undifference3",
+          "type": "t",
+          "bytes": 438
+        },
+        {
+          "name": "jpeg_undifference3",
+          "type": "t",
+          "bytes": 438
+        },
+        {
+          "name": "jpeg_undifference4",
+          "type": "t",
+          "bytes": 139
+        },
+        {
+          "name": "jpeg_undifference4",
+          "type": "t",
+          "bytes": 139
+        },
+        {
+          "name": "jpeg_undifference4",
+          "type": "t",
+          "bytes": 139
+        },
+        {
+          "name": "jpeg_undifference5",
+          "type": "t",
+          "bytes": 167
+        },
+        {
+          "name": "jpeg_undifference5",
+          "type": "t",
+          "bytes": 167
+        },
+        {
+          "name": "jpeg_undifference5",
+          "type": "t",
+          "bytes": 167
+        },
+        {
+          "name": "jpeg_undifference6",
+          "type": "t",
+          "bytes": 141
+        },
+        {
+          "name": "jpeg_undifference6",
+          "type": "t",
+          "bytes": 141
+        },
+        {
+          "name": "jpeg_undifference6",
+          "type": "t",
+          "bytes": 141
+        },
+        {
+          "name": "jpeg_undifference7",
+          "type": "t",
+          "bytes": 126
+        },
+        {
+          "name": "jpeg_undifference7",
+          "type": "t",
+          "bytes": 126
+        },
+        {
+          "name": "jpeg_undifference7",
+          "type": "t",
+          "bytes": 126
+        },
+        {
+          "name": "jpeg_undifference_first_row",
+          "type": "t",
+          "bytes": 250
+        },
+        {
+          "name": "jpeg_undifference_first_row",
+          "type": "t",
+          "bytes": 250
+        },
+        {
+          "name": "jpeg_undifference_first_row",
+          "type": "t",
+          "bytes": 250
+        },
+        {
+          "name": "jsimd_h2v1_fancy_upsample",
+          "type": "T",
+          "bytes": 109
+        },
+        {
+          "name": "jsimd_h2v1_merged_upsample",
+          "type": "T",
+          "bytes": 139
+        },
+        {
+          "name": "jsimd_h2v1_upsample",
+          "type": "T",
+          "bytes": 93
+        },
+        {
+          "name": "jsimd_h2v2_fancy_upsample",
+          "type": "T",
+          "bytes": 109
+        },
+        {
+          "name": "jsimd_h2v2_merged_upsample",
+          "type": "T",
+          "bytes": 139
+        },
+        {
+          "name": "jsimd_h2v2_upsample",
+          "type": "T",
+          "bytes": 93
+        },
+        {
+          "name": "jsimd_idct_2x2",
+          "type": "T",
+          "bytes": 23
+        },
+        {
+          "name": "jsimd_idct_4x4",
+          "type": "T",
+          "bytes": 23
+        },
+        {
+          "name": "jsimd_idct_float",
+          "type": "T",
+          "bytes": 23
+        },
+        {
+          "name": "jsimd_idct_ifast",
+          "type": "T",
+          "bytes": 23
+        },
+        {
+          "name": "jsimd_idct_islow",
+          "type": "T",
+          "bytes": 92
+        },
+        {
+          "name": "jsimd_ycc_rgb_convert",
+          "type": "T",
+          "bytes": 154
+        },
+        {
+          "name": "loom_serve_media_image_codec_jpeg",
+          "type": "D",
+          "bytes": 40
+        },
+        {
+          "name": "loom_serve_media_jpeg_decode",
+          "type": "t",
+          "bytes": 1338
+        },
+        {
+          "name": "loom_serve_media_jpeg_decode_batch.llvm.16454297317428805482",
+          "type": "t",
+          "bytes": 70
+        },
+        {
+          "name": "loom_serve_media_jpeg_error_exit",
+          "type": "t",
+          "bytes": 39
+        },
+        {
+          "name": "loom_serve_media_jpeg_inspect",
+          "type": "t",
+          "bytes": 1165
+        },
+        {
+          "name": "loom_serve_media_jpeg_inspect_batch.llvm.16454297317428805482",
+          "type": "t",
+          "bytes": 167
+        }
+      ],
+      "dynamic_section": "\nDynamic section at offset 0x120c1e8 contains 28 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000007 (RELA)               0x23e8\n 0x0000000000000008 (RELASZ)             490320 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x000000006ffffff9 (RELACOUNT)          20362\n 0x0000000000000017 (JMPREL)             0x79f38\n 0x0000000000000002 (PLTRELSZ)           4608 (bytes)\n 0x0000000000000003 (PLTGOT)             0x120e680\n 0x0000000000000014 (PLTREL)             RELA\n 0x0000000000000006 (SYMTAB)             0x390\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000005 (STRTAB)             0x1b44\n 0x000000000000000a (STRSZ)              2209 (bytes)\n 0x000000006ffffef5 (GNU_HASH)           0x1b28\n 0x0000000000000019 (INIT_ARRAY)         0x119d540\n 0x000000000000001b (INIT_ARRAYSZ)       664 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x119d538\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x000000000000000c (INIT)               0x119b8ec\n 0x000000000000000d (FINI)               0x119b908\n 0x000000006ffffff0 (VERSYM)             0x1800\n 0x000000006ffffffe (VERNEED)            0x19b4\n 0x000000006fffffff (VERNEEDNUM)         2\n 0x0000000000000000 (NULL)               0x0\n"
+    },
+    "candidate": {
+      "invocation": {
+        "recorded_utc": "2026-10-17T13:47:14.551820+00:00",
+        "arguments": [
+          "bureau-bazel",
+          "build",
+          "--tag=codec-image-deps-candidate",
+          "--json",
+          "--config=opt",
+          "--//loom/config/serve:image_input=true",
+          "--//loom/config/serve:image_codecs=png,gif,webp",
+          "//loom/src/loom/tools/loom-serve:loom-serve"
+        ],
+        "source_identity": {
+          "head": "50e8bdac75f41a64896e2731cb2303460e95eaf2",
+          "status": "",
+          "files": [
+            {
+              "path": ".bazelrc",
+              "resolved": "/home/ben/src/hrx-system/codec/.bazelrc",
+              "bytes": 10186,
+              "sha256": "7e01222ea68e6513f8febf9bd80917e388ce9a1047e9b7b3dc8ea52d33d4ae59"
+            },
+            {
+              "path": ".bazelrc.configured",
+              "resolved": "/home/ben/src/hrx-system/codec/.bazelrc.configured",
+              "bytes": 1094,
+              "sha256": "79610ec210aadee0a39ee75a8b55a28db1c4d758cec834561845090d14ce0055"
+            },
+            {
+              "path": ".bazelrc.local",
+              "resolved": "/home/ben/src/hrx-system/main/.bazelrc.local",
+              "bytes": 336,
+              "sha256": "24fbcf2b9a388d84c5d65981e00a7bb0ccb38c57d69c963a5fb649e9f9a9f032"
+            },
+            {
+              "path": "loom/config/serve/BUILD.bazel",
+              "resolved": "/home/ben/src/hrx-system/codec/loom/config/serve/BUILD.bazel",
+              "bytes": 2780,
+              "sha256": "7d7b6022fec743d0754271dd67875e52767e4494bdfed2f2d9a537176c15ff51"
+            },
+            {
+              "path": "loom/src/loom/tools/loom-serve/BUILD.bazel",
+              "resolved": "/home/ben/src/hrx-system/codec/loom/src/loom/tools/loom-serve/BUILD.bazel",
+              "bytes": 4485,
+              "sha256": "4a06b1ec4f5b44c0fb7eb111aa47adffc90a819e16828c7fc460bef35115f901"
+            }
+          ]
+        }
+      },
+      "path": "/var/cache/bureau/bazel-tags/1002/generations/83fbcaf2a0e9747eb387dde4b668d099/view/loom/src/loom/tools/loom-serve/loom-serve",
+      "bytes": 20074272,
+      "sha256": "1329d38e57fea3c4a3ecdf3e52cfe88935707f446a24bc71980a068a97ccefc9",
+      "stripped": {
+        "bytes": 18563232,
+        "sha256": "99d09d7e9200422e77c522463a773856eef936f6e3844f173a4a751ec1d27503"
+      },
+      "allocated_sections": [
+        {
+          "name": ".interp",
+          "type": 1,
+          "flags": 2,
+          "bytes": 28,
+          "alignment": 1
+        },
+        {
+          "name": ".note.ABI-tag",
+          "type": 7,
+          "flags": 2,
+          "bytes": 32,
+          "alignment": 4
+        },
+        {
+          "name": ".note.package",
+          "type": 7,
+          "flags": 2,
+          "bytes": 112,
+          "alignment": 4
+        },
+        {
+          "name": ".dynsym",
+          "type": 11,
+          "flags": 2,
+          "bytes": 5184,
+          "alignment": 8
+        },
+        {
+          "name": ".gnu.version",
+          "type": 1879048191,
+          "flags": 2,
+          "bytes": 432,
+          "alignment": 2
+        },
+        {
+          "name": ".gnu.version_r",
+          "type": 1879048190,
+          "flags": 2,
+          "bytes": 368,
+          "alignment": 4
+        },
+        {
+          "name": ".gnu.hash",
+          "type": 1879048182,
+          "flags": 2,
+          "bytes": 28,
+          "alignment": 8
+        },
+        {
+          "name": ".dynstr",
+          "type": 3,
+          "flags": 2,
+          "bytes": 2185,
+          "alignment": 1
+        },
+        {
+          "name": ".rela.dyn",
+          "type": 4,
+          "flags": 2,
+          "bytes": 484800,
+          "alignment": 8
+        },
+        {
+          "name": ".rela.plt",
+          "type": 4,
+          "flags": 66,
+          "bytes": 4560,
+          "alignment": 8
+        },
+        {
+          "name": ".rodata",
+          "type": 1,
+          "flags": 50,
+          "bytes": 5994791,
+          "alignment": 64
+        },
+        {
+          "name": ".eh_frame_hdr",
+          "type": 1,
+          "flags": 2,
+          "bytes": 87932,
+          "alignment": 4
+        },
+        {
+          "name": ".eh_frame",
+          "type": 1,
+          "flags": 2,
+          "bytes": 518180,
+          "alignment": 8
+        },
+        {
+          "name": ".text",
+          "type": 1,
+          "flags": 6,
+          "bytes": 10975579,
+          "alignment": 16
+        },
+        {
+          "name": ".init",
+          "type": 1,
+          "flags": 6,
+          "bytes": 27,
+          "alignment": 4
+        },
+        {
+          "name": ".fini",
+          "type": 1,
+          "flags": 6,
+          "bytes": 13,
+          "alignment": 4
+        },
+        {
+          "name": ".plt",
+          "type": 1,
+          "flags": 6,
+          "bytes": 3056,
+          "alignment": 16
+        },
+        {
+          "name": ".tbss",
+          "type": 8,
+          "flags": 1027,
+          "bytes": 16,
+          "alignment": 8
+        },
+        {
+          "name": ".fini_array",
+          "type": 15,
+          "flags": 3,
+          "bytes": 8,
+          "alignment": 8
+        },
+        {
+          "name": ".init_array",
+          "type": 14,
+          "flags": 3,
+          "bytes": 664,
+          "alignment": 8
+        },
+        {
+          "name": ".data.rel.ro",
+          "type": 1,
+          "flags": 3,
+          "bytes": 459592,
+          "alignment": 16
+        },
+        {
+          "name": ".dynamic",
+          "type": 6,
+          "flags": 3,
+          "bytes": 448,
+          "alignment": 8
+        },
+        {
+          "name": ".got",
+          "type": 1,
+          "flags": 3,
+          "bytes": 600,
+          "alignment": 8
+        },
+        {
+          "name": ".got.plt",
+          "type": 1,
+          "flags": 3,
+          "bytes": 1544,
+          "alignment": 8
+        },
+        {
+          "name": ".relro_padding",
+          "type": 8,
+          "flags": 3,
+          "bytes": 1640,
+          "alignment": 1
+        },
+        {
+          "name": ".tm_clone_table",
+          "type": 1,
+          "flags": 3,
+          "bytes": 0,
+          "alignment": 8
+        },
+        {
+          "name": ".data",
+          "type": 1,
+          "flags": 3,
+          "bytes": 19760,
+          "alignment": 16
+        },
+        {
+          "name": ".bss",
+          "type": 8,
+          "flags": 3,
+          "bytes": 2872,
+          "alignment": 16
+        }
+      ],
+      "load_segments": [
+        {
+          "flags": 4,
+          "file_bytes": 7099404,
+          "memory_bytes": 7099404,
+          "alignment": 4096
+        },
+        {
+          "flags": 5,
+          "file_bytes": 10978688,
+          "memory_bytes": 10978688,
+          "alignment": 4096
+        },
+        {
+          "flags": 6,
+          "file_bytes": 462856,
+          "memory_bytes": 464496,
+          "alignment": 4096
+        },
+        {
+          "flags": 6,
+          "file_bytes": 19768,
+          "memory_bytes": 22640,
+          "alignment": 4096
+        }
+      ],
+      "text_bytes": 10975579,
+      "rodata_bytes": 5994791,
+      "allocated_file_bytes": 18559923,
+      "allocated_zerofill_bytes": 4528,
+      "load_segment_file_bytes": 18560716,
+      "jpeg_named_symbols": [],
+      "dynamic_section": "\nDynamic section at offset 0x11adf78 contains 28 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000007 (RELA)               0x2398\n 0x0000000000000008 (RELASZ)             484800 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x000000006ffffff9 (RELACOUNT)          20132\n 0x0000000000000017 (JMPREL)             0x78958\n 0x0000000000000002 (PLTRELSZ)           4560 (bytes)\n 0x0000000000000003 (PLTGOT)             0x11b0390\n 0x0000000000000014 (PLTREL)             RELA\n 0x0000000000000006 (SYMTAB)             0x390\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000005 (STRTAB)             0x1b0c\n 0x000000000000000a (STRSZ)              2185 (bytes)\n 0x000000006ffffef5 (GNU_HASH)           0x1af0\n 0x0000000000000019 (INIT_ARRAY)         0x113f998\n 0x000000000000001b (INIT_ARRAYSZ)       664 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x113f990\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x000000000000000c (INIT)               0x113dd6c\n 0x000000000000000d (FINI)               0x113dd88\n 0x000000006ffffff0 (VERSYM)             0x17d0\n 0x000000006ffffffe (VERNEED)            0x1980\n 0x000000006fffffff (VERNEEDNUM)         2\n 0x0000000000000000 (NULL)               0x0\n"
+    }
+  },
+  "savings_bytes": {
+    "bytes": 449832,
+    "text_bytes": 343888,
+    "rodata_bytes": 16192,
+    "allocated_file_bytes": 385784,
+    "allocated_zerofill_bytes": -768,
+    "load_segment_file_bytes": 385784,
+    "stripped": 385864
+  },
+  "section_deltas": [
+    {
+      "name": ".data.rel.ro",
+      "baseline": 461320,
+      "candidate": 459592,
+      "savings": 1728
+    },
+    {
+      "name": ".dynstr",
+      "baseline": 2209,
+      "candidate": 2185,
+      "savings": 24
+    },
+    {
+      "name": ".dynsym",
+      "baseline": 5232,
+      "candidate": 5184,
+      "savings": 48
+    },
+    {
+      "name": ".eh_frame",
+      "baseline": 533436,
+      "candidate": 518180,
+      "savings": 15256
+    },
+    {
+      "name": ".eh_frame_hdr",
+      "baseline": 90828,
+      "candidate": 87932,
+      "savings": 2896
+    },
+    {
+      "name": ".gnu.version",
+      "baseline": 436,
+      "candidate": 432,
+      "savings": 4
+    },
+    {
+      "name": ".got",
+      "baseline": 728,
+      "candidate": 600,
+      "savings": 128
+    },
+    {
+      "name": ".got.plt",
+      "baseline": 1560,
+      "candidate": 1544,
+      "savings": 16
+    },
+    {
+      "name": ".plt",
+      "baseline": 3088,
+      "candidate": 3056,
+      "savings": 32
+    },
+    {
+      "name": ".rela.dyn",
+      "baseline": 490320,
+      "candidate": 484800,
+      "savings": 5520
+    },
+    {
+      "name": ".rela.plt",
+      "baseline": 4608,
+      "candidate": 4560,
+      "savings": 48
+    },
+    {
+      "name": ".relro_padding",
+      "baseline": 872,
+      "candidate": 1640,
+      "savings": -768
+    },
+    {
+      "name": ".rodata",
+      "baseline": 6010983,
+      "candidate": 5994791,
+      "savings": 16192
+    },
+    {
+      "name": ".tdata",
+      "baseline": 4,
+      "candidate": 0,
+      "savings": 4
+    },
+    {
+      "name": ".text",
+      "baseline": 11319467,
+      "candidate": 10975579,
+      "savings": 343888
+    }
+  ]
+}

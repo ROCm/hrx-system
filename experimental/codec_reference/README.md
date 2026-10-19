@@ -36,6 +36,8 @@ measurement boundary](RESULTS.md) explain the stopping decision.
 * `evidence/` contains structured observations, native instruction listings,
   source/resource pins, and the final chart. Historical hashes identify the
   measured artifacts; they do not claim a fresh measurement on another build.
+  [Input and comparator provenance](PROVENANCE.md) identifies the external
+  photographic inputs, generated controls, and pinned CPU reference.
 
 `manifest.json` records original and archived SHA-256 identities. Exact measured
 kernel bytes remain in the source bundle; the runnable copies follow repository

@@ -1,0 +1,466 @@
+[
+  {
+    "name": "006mp-cathedral.jpg",
+    "bytes": 823353,
+    "sha256": "ee148ec6f6475538466004fe5fbb02d0b9146557715d85c6860ea8ff6aaeab74",
+    "width": 2000,
+    "height": 3008,
+    "sampling": [
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 0,
+    "stuffed": 2714,
+    "entropy_bytes": 822973,
+    "component_blocks": 282000,
+    "full_i16_coefficient_bytes": 36096000,
+    "rgb_bytes": 18048000
+  },
+  {
+    "name": "006mp-cathedral.jpg.progressive.jpg",
+    "bytes": 825405,
+    "sha256": "993f25a4126ab2e826f0ff21e593ad8d039dd413d220a0e8c9dd3c5e44659a49",
+    "width": 2000,
+    "height": 3008,
+    "sampling": [
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c2",
+    "scans": 10,
+    "restarts": 0,
+    "stuffed": 1704,
+    "entropy_bytes": 824687,
+    "component_blocks": 282000,
+    "full_i16_coefficient_bytes": 36096000,
+    "rgb_bytes": 18048000
+  },
+  {
+    "name": "006mp-cathedral.jpg.r0.jpg",
+    "bytes": 823353,
+    "sha256": "ee148ec6f6475538466004fe5fbb02d0b9146557715d85c6860ea8ff6aaeab74",
+    "width": 2000,
+    "height": 3008,
+    "sampling": [
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 0,
+    "stuffed": 2714,
+    "entropy_bytes": 822973,
+    "component_blocks": 282000,
+    "full_i16_coefficient_bytes": 36096000,
+    "rgb_bytes": 18048000
+  },
+  {
+    "name": "006mp-cathedral.jpg.r64.jpg",
+    "bytes": 828997,
+    "sha256": "14ddf33b26b341cbb7f4ac024d83abd1d80038c39b507c05327486a9bd55ef2a",
+    "width": 2000,
+    "height": 3008,
+    "sampling": [
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 1468,
+    "stuffed": 2776,
+    "entropy_bytes": 828611,
+    "component_blocks": 282000,
+    "full_i16_coefficient_bytes": 36096000,
+    "rgb_bytes": 18048000
+  },
+  {
+    "name": "012mp-bus.jpg",
+    "bytes": 3423409,
+    "sha256": "08eeaf6cf97e9d188efc2c2608d8b45f7fae2a2193f0c1c8913b84b4eb3e0e24",
+    "width": 4032,
+    "height": 3024,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 188,
+    "stuffed": 16805,
+    "entropy_bytes": 3409756,
+    "component_blocks": 285768,
+    "full_i16_coefficient_bytes": 36578304,
+    "rgb_bytes": 36578304
+  },
+  {
+    "name": "012mp-bus.jpg.progressive.jpg",
+    "bytes": 3214109,
+    "sha256": "ea1b722e2c5f026d4e21ac2883dea32715571a990f4f8a0afeee0c08f6719779",
+    "width": 4032,
+    "height": 3024,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c2",
+    "scans": 10,
+    "restarts": 0,
+    "stuffed": 10956,
+    "entropy_bytes": 3213278,
+    "component_blocks": 285768,
+    "full_i16_coefficient_bytes": 36578304,
+    "rgb_bytes": 36578304
+  },
+  {
+    "name": "012mp-bus.jpg.r0.jpg",
+    "bytes": 3361185,
+    "sha256": "18a96a46ffbc049bb3d90ed336ba86791cc1fa55c04e8021331f3603c431e558",
+    "width": 4032,
+    "height": 3024,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 0,
+    "stuffed": 8331,
+    "entropy_bytes": 3360741,
+    "component_blocks": 285768,
+    "full_i16_coefficient_bytes": 36578304,
+    "rgb_bytes": 36578304
+  },
+  {
+    "name": "012mp-bus.jpg.r64.jpg",
+    "bytes": 3364239,
+    "sha256": "2f11cf71e9dee676472e00bcca2e61cc62b7afadfa345d881cc4a22c244e31bd",
+    "width": 4032,
+    "height": 3024,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 744,
+    "stuffed": 8294,
+    "entropy_bytes": 3363789,
+    "component_blocks": 285768,
+    "full_i16_coefficient_bytes": 36578304,
+    "rgb_bytes": 36578304
+  },
+  {
+    "name": "synthetic-1024.jpg",
+    "bytes": 450686,
+    "sha256": "6da5ee12494e9c4094fc63d028596c707e5b9346b1a2758d9df8c02636257b85",
+    "width": 1024,
+    "height": 768,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 0,
+    "stuffed": 5748,
+    "entropy_bytes": 450061,
+    "component_blocks": 18432,
+    "full_i16_coefficient_bytes": 2359296,
+    "rgb_bytes": 2359296
+  },
+  {
+    "name": "synthetic-1024.jpg.progressive.jpg",
+    "bytes": 392140,
+    "sha256": "67f589e45ce1f12cdf3ecd27ae7b8d47f2821efaa264c6562b790c18bec7c67c",
+    "width": 1024,
+    "height": 768,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c2",
+    "scans": 10,
+    "restarts": 0,
+    "stuffed": 1575,
+    "entropy_bytes": 391383,
+    "component_blocks": 18432,
+    "full_i16_coefficient_bytes": 2359296,
+    "rgb_bytes": 2359296
+  },
+  {
+    "name": "synthetic-1024.jpg.r0.jpg",
+    "bytes": 418457,
+    "sha256": "72b2683bdd28f97c8ffd863d22355ce76ef04248d420931752a4fa228f74a346",
+    "width": 1024,
+    "height": 768,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 0,
+    "stuffed": 1678,
+    "entropy_bytes": 418025,
+    "component_blocks": 18432,
+    "full_i16_coefficient_bytes": 2359296,
+    "rgb_bytes": 2359296
+  },
+  {
+    "name": "synthetic-1024.jpg.r64.jpg",
+    "bytes": 418563,
+    "sha256": "7fd41bd898086585b9b6fd898e68b0f266018ad821587aa245bd57979e02e1cc",
+    "width": 1024,
+    "height": 768,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 47,
+    "stuffed": 1653,
+    "entropy_bytes": 418125,
+    "component_blocks": 18432,
+    "full_i16_coefficient_bytes": 2359296,
+    "rgb_bytes": 2359296
+  },
+  {
+    "name": "synthetic-256.jpg",
+    "bytes": 38788,
+    "sha256": "7dc70ec7b1f46598a9d5dfc7863519cee6530b936aae47fa458c9f03bd7a8b5d",
+    "width": 256,
+    "height": 256,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 0,
+    "stuffed": 484,
+    "entropy_bytes": 38163,
+    "component_blocks": 1536,
+    "full_i16_coefficient_bytes": 196608,
+    "rgb_bytes": 196608
+  },
+  {
+    "name": "synthetic-256.jpg.progressive.jpg",
+    "bytes": 33894,
+    "sha256": "8da5d3bc8e6bf3fd29b8f4ac5fb91407bdc1e7c83fefc3cc9c863dcd444e265d",
+    "width": 256,
+    "height": 256,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c2",
+    "scans": 10,
+    "restarts": 0,
+    "stuffed": 136,
+    "entropy_bytes": 33165,
+    "component_blocks": 1536,
+    "full_i16_coefficient_bytes": 196608,
+    "rgb_bytes": 196608
+  },
+  {
+    "name": "synthetic-256.jpg.r0.jpg",
+    "bytes": 35839,
+    "sha256": "9558df136ad97302d428d88a1611e86dcb8ecb47f06c89938144ee47bf3e796b",
+    "width": 256,
+    "height": 256,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 0,
+    "stuffed": 123,
+    "entropy_bytes": 35418,
+    "component_blocks": 1536,
+    "full_i16_coefficient_bytes": 196608,
+    "rgb_bytes": 196608
+  },
+  {
+    "name": "synthetic-256.jpg.r64.jpg",
+    "bytes": 35853,
+    "sha256": "ae577527a523351d026dffe49cc583cf2e0c6abd1aab96811bc0a6030f3ba151",
+    "width": 256,
+    "height": 256,
+    "sampling": [
+      [
+        2,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "sof": "c0",
+    "scans": 1,
+    "restarts": 3,
+    "stuffed": 123,
+    "entropy_bytes": 35426,
+    "component_blocks": 1536,
+    "full_i16_coefficient_bytes": 196608,
+    "rgb_bytes": 196608
+  }
+]

@@ -1,0 +1,649 @@
+{
+  "commit": "f084e0270580e2608524afb22699b8c7f2769219",
+  "source_sha256": "0ad745c92d3de896cb073f9d04efceb39b588fd2046153828f4b827e22bc2ea2",
+  "binary_sha256": "5027e5de9bdc93d052a027e12198422ac62cc7a17e97a49c5077420f2b6920de",
+  "configuration": "--config=opt",
+  "broker_held": true,
+  "boundary": "complete queued CPU batch, one final release wait",
+  "repetitions_per_window": 9,
+  "warmups_per_window": 2,
+  "input_residency": "warm; homogeneous jobs share immutable compressed input",
+  "output_residency": "one distinct preallocated RGB buffer per job",
+  "rows": [
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-1024.jpg.progressive.jpg"
+      ],
+      "batch": 16,
+      "workers": 0,
+      "window_medians_ns": [
+        119685665,
+        119212786
+      ],
+      "median_batch_ns": 119449225.5,
+      "images_per_second": 133.94812677123636,
+      "compressed_bytes_per_batch": 6274240,
+      "rgb_bytes_per_batch": 37748736,
+      "logical_rgb_GB_per_second": 0.3160232796988709
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-1024.jpg.progressive.jpg"
+      ],
+      "batch": 16,
+      "workers": 1,
+      "window_medians_ns": [
+        118713017
+      ],
+      "median_batch_ns": 118713017,
+      "images_per_second": 134.77881705255626,
+      "compressed_bytes_per_batch": 6274240,
+      "rgb_bytes_per_batch": 37748736,
+      "logical_rgb_GB_per_second": 0.31798312395682776
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-1024.jpg.progressive.jpg"
+      ],
+      "batch": 16,
+      "workers": 4,
+      "window_medians_ns": [
+        30015786,
+        30484558
+      ],
+      "median_batch_ns": 30250172.0,
+      "images_per_second": 528.9226124069642,
+      "compressed_bytes_per_batch": 6274240,
+      "rgb_bytes_per_batch": 37748736,
+      "logical_rgb_GB_per_second": 1.247885003761301
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-1024.jpg.r0.jpg"
+      ],
+      "batch": 16,
+      "workers": 0,
+      "window_medians_ns": [
+        40820899,
+        40803565
+      ],
+      "median_batch_ns": 40812232.0,
+      "images_per_second": 392.0393278172093,
+      "compressed_bytes_per_batch": 6695312,
+      "rgb_bytes_per_batch": 37748736,
+      "logical_rgb_GB_per_second": 0.9249368179618307
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-1024.jpg.r0.jpg"
+      ],
+      "batch": 16,
+      "workers": 1,
+      "window_medians_ns": [
+        40855414
+      ],
+      "median_batch_ns": 40855414,
+      "images_per_second": 391.62496309546634,
+      "compressed_bytes_per_batch": 6695312,
+      "rgb_bytes_per_batch": 37748736,
+      "logical_rgb_GB_per_second": 0.9239592089312815
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-1024.jpg.r0.jpg"
+      ],
+      "batch": 16,
+      "workers": 4,
+      "window_medians_ns": [
+        10327043,
+        10267312
+      ],
+      "median_batch_ns": 10297177.5,
+      "images_per_second": 1553.8238512446735,
+      "compressed_bytes_per_batch": 6695312,
+      "rgb_bytes_per_batch": 37748736,
+      "logical_rgb_GB_per_second": 3.6659303969461536
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-1024.jpg.r64.jpg"
+      ],
+      "batch": 16,
+      "workers": 0,
+      "window_medians_ns": [
+        42850864,
+        42750685
+      ],
+      "median_batch_ns": 42800774.5,
+      "images_per_second": 373.825011040396,
+      "compressed_bytes_per_batch": 6697008,
+      "rgb_bytes_per_batch": 37748736,
+      "logical_rgb_GB_per_second": 0.8819638532475621
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-1024.jpg.r64.jpg"
+      ],
+      "batch": 16,
+      "workers": 1,
+      "window_medians_ns": [
+        42837519
+      ],
+      "median_batch_ns": 42837519,
+      "images_per_second": 373.50435724347153,
+      "compressed_bytes_per_batch": 6697008,
+      "rgb_bytes_per_batch": 37748736,
+      "logical_rgb_GB_per_second": 0.8812073360270934
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-1024.jpg.r64.jpg"
+      ],
+      "batch": 16,
+      "workers": 4,
+      "window_medians_ns": [
+        10809089,
+        10792629
+      ],
+      "median_batch_ns": 10800859.0,
+      "images_per_second": 1481.3636582053334,
+      "compressed_bytes_per_batch": 6697008,
+      "rgb_bytes_per_batch": 37748736,
+      "logical_rgb_GB_per_second": 3.4949753533492105
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-256.jpg.progressive.jpg"
+      ],
+      "batch": 16,
+      "workers": 0,
+      "window_medians_ns": [
+        9919899,
+        9907145
+      ],
+      "median_batch_ns": 9913522.0,
+      "images_per_second": 1613.957178891619,
+      "compressed_bytes_per_batch": 542304,
+      "rgb_bytes_per_batch": 3145728,
+      "logical_rgb_GB_per_second": 0.3173168930275234
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-256.jpg.progressive.jpg"
+      ],
+      "batch": 16,
+      "workers": 1,
+      "window_medians_ns": [
+        9954715
+      ],
+      "median_batch_ns": 9954715,
+      "images_per_second": 1607.2785609633224,
+      "compressed_bytes_per_batch": 542304,
+      "rgb_bytes_per_batch": 3145728,
+      "logical_rgb_GB_per_second": 0.3160038233138769
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-256.jpg.progressive.jpg"
+      ],
+      "batch": 16,
+      "workers": 4,
+      "window_medians_ns": [
+        2642067,
+        3021800
+      ],
+      "median_batch_ns": 2831933.5,
+      "images_per_second": 5649.85018186338,
+      "compressed_bytes_per_batch": 542304,
+      "rgb_bytes_per_batch": 3145728,
+      "logical_rgb_GB_per_second": 1.1108057445557955
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-256.jpg.r0.jpg"
+      ],
+      "batch": 16,
+      "workers": 0,
+      "window_medians_ns": [
+        2813920,
+        2814381
+      ],
+      "median_batch_ns": 2814150.5,
+      "images_per_second": 5685.5523540763015,
+      "compressed_bytes_per_batch": 573424,
+      "rgb_bytes_per_batch": 3145728,
+      "logical_rgb_GB_per_second": 1.1178250772302334
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-256.jpg.r0.jpg"
+      ],
+      "batch": 16,
+      "workers": 1,
+      "window_medians_ns": [
+        2810484
+      ],
+      "median_batch_ns": 2810484,
+      "images_per_second": 5692.969609504982,
+      "compressed_bytes_per_batch": 573424,
+      "rgb_bytes_per_batch": 3145728,
+      "logical_rgb_GB_per_second": 1.1192833689855555
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-256.jpg.r0.jpg"
+      ],
+      "batch": 16,
+      "workers": 4,
+      "window_medians_ns": [
+        718200,
+        843225
+      ],
+      "median_batch_ns": 780712.5,
+      "images_per_second": 20494.099940759243,
+      "compressed_bytes_per_batch": 573424,
+      "rgb_bytes_per_batch": 3145728,
+      "logical_rgb_GB_per_second": 4.029304001152793
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-256.jpg.r64.jpg"
+      ],
+      "batch": 16,
+      "workers": 0,
+      "window_medians_ns": [
+        3201348,
+        3186820
+      ],
+      "median_batch_ns": 3194084.0,
+      "images_per_second": 5009.260871035327,
+      "compressed_bytes_per_batch": 573648,
+      "rgb_bytes_per_batch": 3145728,
+      "logical_rgb_GB_per_second": 0.9848607613325134
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-256.jpg.r64.jpg"
+      ],
+      "batch": 16,
+      "workers": 1,
+      "window_medians_ns": [
+        3184696
+      ],
+      "median_batch_ns": 3184696,
+      "images_per_second": 5024.027411093555,
+      "compressed_bytes_per_batch": 573648,
+      "rgb_bytes_per_batch": 3145728,
+      "logical_rgb_GB_per_second": 0.9877639812402816
+    },
+    {
+      "phase": "small",
+      "images": [
+        "synthetic-256.jpg.r64.jpg"
+      ],
+      "batch": 16,
+      "workers": 4,
+      "window_medians_ns": [
+        1005810,
+        887668
+      ],
+      "median_batch_ns": 946739.0,
+      "images_per_second": 16900.11713893692,
+      "compressed_bytes_per_batch": 573648,
+      "rgb_bytes_per_batch": 3145728,
+      "logical_rgb_GB_per_second": 3.3226982304521098
+    },
+    {
+      "phase": "large",
+      "images": [
+        "006mp-cathedral.jpg.progressive.jpg"
+      ],
+      "batch": 4,
+      "workers": 0,
+      "window_medians_ns": [
+        158784434,
+        162671572
+      ],
+      "median_batch_ns": 160728003.0,
+      "images_per_second": 24.886764753743627,
+      "compressed_bytes_per_batch": 3301620,
+      "rgb_bytes_per_batch": 72192000,
+      "logical_rgb_GB_per_second": 0.449156330275565
+    },
+    {
+      "phase": "large",
+      "images": [
+        "006mp-cathedral.jpg.progressive.jpg"
+      ],
+      "batch": 4,
+      "workers": 1,
+      "window_medians_ns": [
+        159127860
+      ],
+      "median_batch_ns": 159127860,
+      "images_per_second": 25.137018747062896,
+      "compressed_bytes_per_batch": 3301620,
+      "rgb_bytes_per_batch": 72192000,
+      "logical_rgb_GB_per_second": 0.45367291434699114
+    },
+    {
+      "phase": "large",
+      "images": [
+        "006mp-cathedral.jpg.progressive.jpg"
+      ],
+      "batch": 4,
+      "workers": 4,
+      "window_medians_ns": [
+        45890488,
+        46051722
+      ],
+      "median_batch_ns": 45971105.0,
+      "images_per_second": 87.01117799974571,
+      "compressed_bytes_per_batch": 3301620,
+      "rgb_bytes_per_batch": 72192000,
+      "logical_rgb_GB_per_second": 1.5703777405394106
+    },
+    {
+      "phase": "large",
+      "images": [
+        "006mp-cathedral.jpg.r0.jpg"
+      ],
+      "batch": 4,
+      "workers": 0,
+      "window_medians_ns": [
+        49723053,
+        49948497
+      ],
+      "median_batch_ns": 49835775.0,
+      "images_per_second": 80.26362587920023,
+      "compressed_bytes_per_batch": 3293412,
+      "rgb_bytes_per_batch": 72192000,
+      "logical_rgb_GB_per_second": 1.4485979198678058
+    },
+    {
+      "phase": "large",
+      "images": [
+        "006mp-cathedral.jpg.r0.jpg"
+      ],
+      "batch": 4,
+      "workers": 1,
+      "window_medians_ns": [
+        50071026
+      ],
+      "median_batch_ns": 50071026,
+      "images_per_second": 79.88651960117613,
+      "compressed_bytes_per_batch": 3293412,
+      "rgb_bytes_per_batch": 72192000,
+      "logical_rgb_GB_per_second": 1.441791905762027
+    },
+    {
+      "phase": "large",
+      "images": [
+        "006mp-cathedral.jpg.r0.jpg"
+      ],
+      "batch": 4,
+      "workers": 4,
+      "window_medians_ns": [
+        12527911,
+        12576843
+      ],
+      "median_batch_ns": 12552377.0,
+      "images_per_second": 318.6647437373814,
+      "compressed_bytes_per_batch": 3293412,
+      "rgb_bytes_per_batch": 72192000,
+      "logical_rgb_GB_per_second": 5.7512612949722595
+    },
+    {
+      "phase": "large",
+      "images": [
+        "006mp-cathedral.jpg.r64.jpg"
+      ],
+      "batch": 4,
+      "workers": 0,
+      "window_medians_ns": [
+        50681306,
+        50725828
+      ],
+      "median_batch_ns": 50703567.0,
+      "images_per_second": 78.88991320867031,
+      "compressed_bytes_per_batch": 3315988,
+      "rgb_bytes_per_batch": 72192000,
+      "logical_rgb_GB_per_second": 1.4238051535900818
+    },
+    {
+      "phase": "large",
+      "images": [
+        "006mp-cathedral.jpg.r64.jpg"
+      ],
+      "batch": 4,
+      "workers": 1,
+      "window_medians_ns": [
+        50909123
+      ],
+      "median_batch_ns": 50909123,
+      "images_per_second": 78.57137904339857,
+      "compressed_bytes_per_batch": 3315988,
+      "rgb_bytes_per_batch": 72192000,
+      "logical_rgb_GB_per_second": 1.4180562489752573
+    },
+    {
+      "phase": "large",
+      "images": [
+        "006mp-cathedral.jpg.r64.jpg"
+      ],
+      "batch": 4,
+      "workers": 4,
+      "window_medians_ns": [
+        12745931,
+        12788170
+      ],
+      "median_batch_ns": 12767050.5,
+      "images_per_second": 313.30650724691657,
+      "compressed_bytes_per_batch": 3315988,
+      "rgb_bytes_per_batch": 72192000,
+      "logical_rgb_GB_per_second": 5.654555842792351
+    },
+    {
+      "phase": "large",
+      "images": [
+        "012mp-bus.jpg.progressive.jpg"
+      ],
+      "batch": 4,
+      "workers": 0,
+      "window_medians_ns": [
+        345989571,
+        347470842
+      ],
+      "median_batch_ns": 346730206.5,
+      "images_per_second": 11.536347064702596,
+      "compressed_bytes_per_batch": 12856436,
+      "rgb_bytes_per_batch": 146313216,
+      "logical_rgb_GB_per_second": 0.42198000998219926
+    },
+    {
+      "phase": "large",
+      "images": [
+        "012mp-bus.jpg.progressive.jpg"
+      ],
+      "batch": 4,
+      "workers": 1,
+      "window_medians_ns": [
+        348934646
+      ],
+      "median_batch_ns": 348934646,
+      "images_per_second": 11.463464708517366,
+      "compressed_bytes_per_batch": 12856436,
+      "rgb_bytes_per_batch": 146313216,
+      "logical_rgb_GB_per_second": 0.4193140970014196
+    },
+    {
+      "phase": "large",
+      "images": [
+        "012mp-bus.jpg.progressive.jpg"
+      ],
+      "batch": 4,
+      "workers": 4,
+      "window_medians_ns": [
+        93697960,
+        93683050
+      ],
+      "median_batch_ns": 93690505.0,
+      "images_per_second": 42.69376069645478,
+      "compressed_bytes_per_batch": 12856436,
+      "rgb_bytes_per_batch": 146313216,
+      "logical_rgb_GB_per_second": 1.5616653576581747
+    },
+    {
+      "phase": "large",
+      "images": [
+        "012mp-bus.jpg.r0.jpg"
+      ],
+      "batch": 4,
+      "workers": 0,
+      "window_medians_ns": [
+        101783960,
+        101933130
+      ],
+      "median_batch_ns": 101858545.0,
+      "images_per_second": 39.27014665289005,
+      "compressed_bytes_per_batch": 13444740,
+      "rgb_bytes_per_batch": 146313216,
+      "logical_rgb_GB_per_second": 1.4364353623939945
+    },
+    {
+      "phase": "large",
+      "images": [
+        "012mp-bus.jpg.r0.jpg"
+      ],
+      "batch": 4,
+      "workers": 1,
+      "window_medians_ns": [
+        101565550
+      ],
+      "median_batch_ns": 101565550,
+      "images_per_second": 39.38343266983736,
+      "compressed_bytes_per_batch": 13444740,
+      "rgb_bytes_per_batch": 146313216,
+      "logical_rgb_GB_per_second": 1.4405791727608426
+    },
+    {
+      "phase": "large",
+      "images": [
+        "012mp-bus.jpg.r0.jpg"
+      ],
+      "batch": 4,
+      "workers": 4,
+      "window_medians_ns": [
+        25627688,
+        25689272
+      ],
+      "median_batch_ns": 25658480.0,
+      "images_per_second": 155.89387991806217,
+      "compressed_bytes_per_batch": 13444740,
+      "rgb_bytes_per_batch": 146313216,
+      "logical_rgb_GB_per_second": 5.702333731382374
+    },
+    {
+      "phase": "large",
+      "images": [
+        "012mp-bus.jpg.r64.jpg"
+      ],
+      "batch": 4,
+      "workers": 0,
+      "window_medians_ns": [
+        104365342,
+        104428170
+      ],
+      "median_batch_ns": 104396756.0,
+      "images_per_second": 38.31536681082313,
+      "compressed_bytes_per_batch": 13456956,
+      "rgb_bytes_per_batch": 146313216,
+      "logical_rgb_GB_per_second": 1.4015111350777987
+    },
+    {
+      "phase": "large",
+      "images": [
+        "012mp-bus.jpg.r64.jpg"
+      ],
+      "batch": 4,
+      "workers": 1,
+      "window_medians_ns": [
+        104368889
+      ],
+      "median_batch_ns": 104368889,
+      "images_per_second": 38.32559719975557,
+      "compressed_bytes_per_batch": 13456956,
+      "rgb_bytes_per_batch": 146313216,
+      "logical_rgb_GB_per_second": 1.401885345354208
+    },
+    {
+      "phase": "large",
+      "images": [
+        "012mp-bus.jpg.r64.jpg"
+      ],
+      "batch": 4,
+      "workers": 4,
+      "window_medians_ns": [
+        26500457,
+        26337189
+      ],
+      "median_batch_ns": 26418823.0,
+      "images_per_second": 151.40719932905412,
+      "compressed_bytes_per_batch": 13456956,
+      "rgb_bytes_per_batch": 146313216,
+      "logical_rgb_GB_per_second": 5.538218564846738
+    },
+    {
+      "phase": "scale",
+      "images": [
+        "012mp-bus.jpg.r0.jpg"
+      ],
+      "batch": 16,
+      "workers": 4,
+      "window_medians_ns": [
+        102613478,
+        102454949,
+        102315998
+      ],
+      "median_batch_ns": 102454949,
+      "images_per_second": 156.1661994483058,
+      "compressed_bytes_per_batch": 53778960,
+      "rgb_bytes_per_batch": 585252864,
+      "logical_rgb_GB_per_second": 5.712294717944762
+    },
+    {
+      "phase": "scale",
+      "images": [
+        "012mp-bus.jpg.r0.jpg"
+      ],
+      "batch": 16,
+      "workers": 16,
+      "window_medians_ns": [
+        26926117,
+        26964158
+      ],
+      "median_batch_ns": 26945137.5,
+      "images_per_second": 593.799159495846,
+      "compressed_bytes_per_batch": 53778960,
+      "rgb_bytes_per_batch": 585252864,
+      "logical_rgb_GB_per_second": 21.72016617098354
+    }
+  ]
+}

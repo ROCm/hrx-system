@@ -1,0 +1,752 @@
+[
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 3293412,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      49977873,
+      49950039,
+      49838260,
+      49726089,
+      49723053,
+      49627765,
+      49675774,
+      49644154,
+      49649055
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 49723053
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 3293412,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      12913436,
+      12590879,
+      12555983,
+      12575402,
+      12505889,
+      12509246,
+      12503045,
+      12527911,
+      12509526
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 12527911
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 4,
+    "compressed_bytes": 3293412,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      50117505,
+      50005475,
+      49988011,
+      50071868,
+      50110713,
+      50117253,
+      50071026,
+      50015764,
+      50014461
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 50071026
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 3293412,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      12957790,
+      12607821,
+      12594226,
+      12557697,
+      12580009,
+      12576843,
+      12543761,
+      12518402,
+      12534092
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 12576843
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 3293412,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      50177918,
+      50093129,
+      49932106,
+      49881691,
+      49913772,
+      49865831,
+      49948497,
+      49971951,
+      50020002
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 49948497
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 3315988,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      50915034,
+      50826948,
+      50804776,
+      50644104,
+      50675645,
+      50679040,
+      50770822,
+      50681306,
+      50680141
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 50681306
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 3315988,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      13156492,
+      12786396,
+      12745931,
+      12771148,
+      12715293,
+      12726394,
+      12725383,
+      12716805,
+      12747465
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 12745931
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 4,
+    "compressed_bytes": 3315988,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      51042092,
+      52407379,
+      50925655,
+      50942706,
+      50879877,
+      50907811,
+      50830765,
+      50909123,
+      50865802
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 50909123
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 3315988,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      13025255,
+      12831532,
+      12816793,
+      12793850,
+      12768063,
+      12788170,
+      12747744,
+      12764507,
+      12746812
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 12788170
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 3315988,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      50908201,
+      50860521,
+      50613717,
+      50668821,
+      50619238,
+      50721930,
+      50733432,
+      50778969,
+      50725828
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 50725828
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 3301620,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      159906875,
+      160137468,
+      159327796,
+      158994650,
+      158567607,
+      158270688,
+      158784434,
+      158504107,
+      158771651
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 158784434
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 3301620,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      46415485,
+      45829433,
+      45835044,
+      46121312,
+      45953016,
+      46555378,
+      45886931,
+      45890488,
+      45876001
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 45890488
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 4,
+    "compressed_bytes": 3301620,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      156520008,
+      154964453,
+      155581353,
+      157849126,
+      159248856,
+      159300554,
+      159922073,
+      159344566,
+      159127860
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 159127860
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 3301620,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      46111594,
+      45950130,
+      46194840,
+      46065647,
+      46142431,
+      46017547,
+      45989745,
+      46051722,
+      45964678
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 46051722
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 3301620,
+    "rgb_bytes": 72192000,
+    "images": [
+      "006mp-cathedral.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      162982947,
+      162353763,
+      162671572,
+      162753724,
+      163004257,
+      162985140,
+      162289723,
+      162493687,
+      162177932
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 162671572
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 13444740,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      101814657,
+      101802736,
+      101783960,
+      101796855,
+      101762490,
+      101752160,
+      101789901,
+      101732413,
+      101733096
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 101783960
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 13444740,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      25719719,
+      25719941,
+      25629379,
+      25627688,
+      25586979,
+      25583905,
+      25630842,
+      25541225,
+      25585436
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 25627688
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 4,
+    "compressed_bytes": 13444740,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      101517890,
+      101565550,
+      101631534,
+      101519904,
+      101614260,
+      101533589,
+      101562553,
+      101571821,
+      101578123
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 101565550
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 13444740,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      25776606,
+      25726483,
+      25692087,
+      25730560,
+      25689272,
+      25612297,
+      25617568,
+      25568926,
+      25548729
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 25689272
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 13444740,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      101933130,
+      101934252,
+      101962104,
+      101983865,
+      101969889,
+      101824365,
+      101894007,
+      101753904,
+      101728295
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 101933130
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 13456956,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      104385160,
+      104434062,
+      104329085,
+      104208086,
+      104250847,
+      104365342,
+      104405438,
+      104503703,
+      104208488
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 104365342
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 13456956,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      26671488,
+      26660108,
+      26364030,
+      26390461,
+      26500457,
+      26386484,
+      26541524,
+      26372416,
+      26660658
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 26500457
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 4,
+    "compressed_bytes": 13456956,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      104409594,
+      104164726,
+      104707235,
+      104347860,
+      104317363,
+      104369218,
+      104368889,
+      104249354,
+      104408875
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 104368889
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 13456956,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      26410237,
+      26496198,
+      26365885,
+      26289980,
+      26692188,
+      26337189,
+      26328335,
+      26243834,
+      26313215
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 26337189
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 13456956,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.r64.jpg"
+    ],
+    "batch_ns": [
+      104374359,
+      104428170,
+      104470691,
+      104334023,
+      104473394,
+      104458758,
+      104667200,
+      104333151,
+      104104973
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 104428170
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 12856436,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      345477208,
+      345221427,
+      347289956,
+      345305916,
+      345989571,
+      347313549,
+      344228320,
+      346530296,
+      348025939
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4",
+    "median_batch_ns": 345989571
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 12856436,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      92911591,
+      93752972,
+      93999285,
+      93771837,
+      93697960,
+      93527297,
+      93343662,
+      94069597,
+      93681888
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "4-7",
+    "median_batch_ns": 93697960
+  },
+  {
+    "kind": "timing",
+    "workers": 1,
+    "batch": 4,
+    "compressed_bytes": 12856436,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      348934646,
+      348405231,
+      348680940,
+      347345198,
+      351437361,
+      348794943,
+      348983888,
+      351223117,
+      350740119
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4",
+    "median_batch_ns": 348934646
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 4,
+    "compressed_bytes": 12856436,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      92815389,
+      93740518,
+      93909936,
+      94441647,
+      93644427,
+      93509614,
+      93683050,
+      93989186,
+      93607969
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "4-7",
+    "median_batch_ns": 93683050
+  },
+  {
+    "kind": "timing",
+    "workers": 0,
+    "batch": 4,
+    "compressed_bytes": 12856436,
+    "rgb_bytes": 146313216,
+    "images": [
+      "012mp-bus.jpg.progressive.jpg"
+    ],
+    "batch_ns": [
+      344315772,
+      345984459,
+      347470842,
+      345720131,
+      346436047,
+      347755488,
+      349327311,
+      348493935,
+      348272920
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4",
+    "median_batch_ns": 347470842
+  }
+]

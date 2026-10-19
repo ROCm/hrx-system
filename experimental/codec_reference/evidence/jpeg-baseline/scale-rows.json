@@ -1,0 +1,127 @@
+[
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 53778960,
+    "rgb_bytes": 585252864,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      102665865,
+      102613478,
+      102401117,
+      102489824,
+      102682497,
+      102729816,
+      102330186,
+      102138434,
+      102631911
+    ],
+    "full_rgb_and_guards": true,
+    "window": 0,
+    "cpus": "4-7",
+    "median_batch_ns": 102613478
+  },
+  {
+    "kind": "timing",
+    "workers": 16,
+    "batch": 16,
+    "compressed_bytes": 53778960,
+    "rgb_bytes": 585252864,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      27166529,
+      27226571,
+      27218066,
+      26926117,
+      26866434,
+      26919384,
+      26865032,
+      26922471,
+      27208507
+    ],
+    "full_rgb_and_guards": true,
+    "window": 1,
+    "cpus": "0-15",
+    "median_batch_ns": 26926117
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 53778960,
+    "rgb_bytes": 585252864,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      102706152,
+      102333430,
+      102599070,
+      102238963,
+      102454949,
+      102352447,
+      102483173,
+      102496307,
+      102393673
+    ],
+    "full_rgb_and_guards": true,
+    "window": 2,
+    "cpus": "4-7",
+    "median_batch_ns": 102454949
+  },
+  {
+    "kind": "timing",
+    "workers": 16,
+    "batch": 16,
+    "compressed_bytes": 53778960,
+    "rgb_bytes": 585252864,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      27318625,
+      27377856,
+      26919685,
+      26874339,
+      26947687,
+      27337160,
+      27263010,
+      26958869,
+      26964158
+    ],
+    "full_rgb_and_guards": true,
+    "window": 3,
+    "cpus": "0-15",
+    "median_batch_ns": 26964158
+  },
+  {
+    "kind": "timing",
+    "workers": 4,
+    "batch": 16,
+    "compressed_bytes": 53778960,
+    "rgb_bytes": 585252864,
+    "images": [
+      "012mp-bus.jpg.r0.jpg"
+    ],
+    "batch_ns": [
+      102584703,
+      102623877,
+      102583421,
+      102315998,
+      102136771,
+      102098960,
+      102174442,
+      102446723,
+      102306530
+    ],
+    "full_rgb_and_guards": true,
+    "window": 4,
+    "cpus": "4-7",
+    "median_batch_ns": 102315998
+  }
+]

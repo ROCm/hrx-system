@@ -1,0 +1,38 @@
+{
+  "binary_sha256": "5027e5de9bdc93d052a027e12198422ac62cc7a17e97a49c5077420f2b6920de",
+  "routes": [
+    [
+      "decode_mcu.llvm.711456821314764280",
+      "0x5555555b6800"
+    ],
+    [
+      "jsimd_idct_islow_avx2",
+      "0x5555555f4740"
+    ],
+    [
+      "jsimd_h2v2_fancy_upsample_avx2",
+      "0x555555608ea0"
+    ],
+    [
+      "jsimd_ycc_rgb_convert_avx2",
+      "0x5555555ee620"
+    ],
+    [
+      "decode_mcu_DC_first",
+      "0x5555555b9e20"
+    ],
+    [
+      "decode_mcu_AC_first",
+      "0x5555555ba170"
+    ],
+    [
+      "decode_mcu_AC_refine",
+      "0x5555555ba620"
+    ],
+    [
+      "decode_mcu_DC_refine",
+      "0x5555555ba480"
+    ]
+  ],
+  "inputs": 16
+}

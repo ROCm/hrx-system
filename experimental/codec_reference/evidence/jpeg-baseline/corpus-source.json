@@ -1,0 +1,19 @@
+{
+  "revision": "0b23d4b59353c31b2e2471a1c5b3f51e3b78e537",
+  "files": [
+    {
+      "name": "006mp-cathedral.jpg",
+      "url": "https://raw.githubusercontent.com/nolmoonen/jpeg-test-images/0b23d4b59353c31b2e2471a1c5b3f51e3b78e537/unique/006mp-cathedral.jpg",
+      "bytes": 823353,
+      "git_blob": "df34049155649d0028b82eacec22ed346feb25d5",
+      "sha256": "ee148ec6f6475538466004fe5fbb02d0b9146557715d85c6860ea8ff6aaeab74"
+    },
+    {
+      "name": "012mp-bus.jpg",
+      "url": "https://raw.githubusercontent.com/nolmoonen/jpeg-test-images/0b23d4b59353c31b2e2471a1c5b3f51e3b78e537/unique/012mp-bus.jpg",
+      "bytes": 3423409,
+      "git_blob": "a934ec56f348257cc2e2cfe0bb28d5a54b355c75",
+      "sha256": "08eeaf6cf97e9d188efc2c2608d8b45f7fae2a2193f0c1c8913b84b4eb3e0e24"
+    }
+  ]
+}

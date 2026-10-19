@@ -1,0 +1,4181 @@
+{
+  "state": "Untimed CPU reference; no decoder or image ABI selected.",
+  "library": {
+    "kind": "library",
+    "jpeg_api_version": 80,
+    "sample_bytes": 1
+  },
+  "cases": [
+    {
+      "name": "ycbcr_444",
+      "compressed_bytes": 2266,
+      "sha256": "c6abe96f9fa32c96b36d949c6bb1c3958de41d7d56adb4e4519389ee4718abc7",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 623,
+            "restarts": [],
+            "stuffed_bytes": 2,
+            "entropy_end": 2264
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c0",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 210
+          },
+          {
+            "marker": "c4",
+            "offset": 393
+          },
+          {
+            "marker": "c4",
+            "offset": 426
+          },
+          {
+            "marker": "da",
+            "offset": 609
+          },
+          {
+            "marker": "d9",
+            "offset": 2264
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "aed3009fc7396c8349063055a768e4f811c1a56a3f7cb9f591a3a3f539eebf4c",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "7f61be69454ca28b0d77e0d41572c8ca4984ad774376ad930aa3ee289118affb",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "32808274a11f5bcdcb3b6cdc65243105e140f5b467a6ecc248eafd0ba32fdd2a",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 0,
+        "total_samples": 1995,
+        "maximum": 0,
+        "mean_absolute": 0.0
+      }
+    },
+    {
+      "name": "ycbcr_422",
+      "compressed_bytes": 1781,
+      "sha256": "c0b1b951cf92bc14af2433356919dc05710d396cb57477589aa026cfda90eb17",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 2,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 623,
+            "restarts": [],
+            "stuffed_bytes": 3,
+            "entropy_end": 1779
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c0",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 210
+          },
+          {
+            "marker": "c4",
+            "offset": 393
+          },
+          {
+            "marker": "c4",
+            "offset": 426
+          },
+          {
+            "marker": "da",
+            "offset": 609
+          },
+          {
+            "marker": "d9",
+            "offset": 1779
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 2,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 3,
+          "count": 576,
+          "coefficients_sha256": "77eb9cb602ed3a6a3461aa3f566311ac9a16a4bb78d00b04d10679f1adb4fc28",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 3,
+          "count": 576,
+          "coefficients_sha256": "7997f9fc99922af8c39bf1820240f43a1e3b870a65ddba1a97741b7f2b175acd",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "d45a5e90c4b1182ab7aeedd6b9df496080cebcf4fd0798711a5f14af0b1884f1",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1770,
+        "total_samples": 1995,
+        "maximum": 62,
+        "mean_absolute": 14.504260651629073
+      }
+    },
+    {
+      "name": "ycbcr_420",
+      "compressed_bytes": 1522,
+      "sha256": "88c84dfbf3fb03623af9f101a61caac014afbe84b777fa2d66cda2cac84294ff",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 2,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 623,
+            "restarts": [],
+            "stuffed_bytes": 1,
+            "entropy_end": 1520
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c0",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 210
+          },
+          {
+            "marker": "c4",
+            "offset": 393
+          },
+          {
+            "marker": "c4",
+            "offset": 426
+          },
+          {
+            "marker": "da",
+            "offset": 609
+          },
+          {
+            "marker": "d9",
+            "offset": 1520
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 2,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "0e4c2f21926a58ca47383ebca95322e7699745ca5145339d504f29ed36f0785d",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "05748489f747398fb195aa75b2057118eb18ef074f8e780f1125aecf4b5f30d5",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "1727319c44afb43d529e6926d84907b6923312fe6ce014f90c1b346854697e1b",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1930,
+        "total_samples": 1995,
+        "maximum": 102,
+        "mean_absolute": 20.55438596491228
+      }
+    },
+    {
+      "name": "ycbcr_440",
+      "compressed_bytes": 1820,
+      "sha256": "a5b5b79d452be1d32707f1689816c0a138a22efc1669071bbeb7bdc15aa9503d",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 1,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 623,
+            "restarts": [],
+            "stuffed_bytes": 1,
+            "entropy_end": 1818
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c0",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 210
+          },
+          {
+            "marker": "c4",
+            "offset": 393
+          },
+          {
+            "marker": "c4",
+            "offset": 426
+          },
+          {
+            "marker": "da",
+            "offset": 609
+          },
+          {
+            "marker": "d9",
+            "offset": 1818
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 1,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 2,
+          "count": 640,
+          "coefficients_sha256": "c5213862808b5dec9426f65147f9dbeb3d8cae47663a619892c543a2071b6e66",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 2,
+          "count": 640,
+          "coefficients_sha256": "8c1d1de3a103d51f1666b66f6d871ed33f4488c9a7da7a402ab56a765adc80a9",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "e905f24cd7529ff911fa15d1447656f893b387bd7e02c6b52c33f5daf27f1c75",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1807,
+        "total_samples": 1995,
+        "maximum": 64,
+        "mean_absolute": 15.594987468671679
+      }
+    },
+    {
+      "name": "ycbcr_411",
+      "compressed_bytes": 1509,
+      "sha256": "8f3886233fc1f60b7c1f62c2a6e828fd59ef67bba2fee27c68ba4e2faf364853",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 4,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 623,
+            "restarts": [],
+            "stuffed_bytes": 5,
+            "entropy_end": 1507
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c0",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 210
+          },
+          {
+            "marker": "c4",
+            "offset": 393
+          },
+          {
+            "marker": "c4",
+            "offset": 426
+          },
+          {
+            "marker": "da",
+            "offset": 609
+          },
+          {
+            "marker": "d9",
+            "offset": 1507
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 4,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 2,
+          "block_height": 3,
+          "count": 384,
+          "coefficients_sha256": "df64ab26ece7247eba90a20e5b8cf430f137f3253c8892734206e37b48c67784",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 2,
+          "block_height": 3,
+          "count": 384,
+          "coefficients_sha256": "79d9915890c2433e82254af1857da3163d95f85f6ccf6a0016daa17d00a7737f",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "4711c02e14d3340f33dcbce4244e2d76cad42c6c26002f9c58e12764e812483f",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 0,
+        "total_samples": 1995,
+        "maximum": 0,
+        "mean_absolute": 0.0
+      }
+    },
+    {
+      "name": "ycbcr_410",
+      "compressed_bytes": 1381,
+      "sha256": "7bfaa03c8ae5c8b581e9430c7730cf3bf83c2730e102a2a855ab6e287247ad9c",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 4,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 623,
+            "restarts": [],
+            "stuffed_bytes": 5,
+            "entropy_end": 1379
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c0",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 210
+          },
+          {
+            "marker": "c4",
+            "offset": 393
+          },
+          {
+            "marker": "c4",
+            "offset": 426
+          },
+          {
+            "marker": "da",
+            "offset": 609
+          },
+          {
+            "marker": "d9",
+            "offset": 1379
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 4,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 2,
+          "block_height": 2,
+          "count": 256,
+          "coefficients_sha256": "0f7e6e402fa8fd73dc8c6bdb4012760261f950185fe2ba0525d4b12d04f19ffe",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 2,
+          "block_height": 2,
+          "count": 256,
+          "coefficients_sha256": "5566bcd950896ea75f0d47e9f1a50549609afe64ef41c853110177bb0124b59d",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "c759ee4c4e836518302d44cdcc6256542304173fa09c99746848d3ea457e5fbc",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 0,
+        "total_samples": 1995,
+        "maximum": 0,
+        "mean_absolute": 0.0
+      }
+    },
+    {
+      "name": "ycbcr_420_restart_1",
+      "compressed_bytes": 1539,
+      "sha256": "4c31291d4d8f786e7c96665bdac1991823e5dd7bc8027b2e9a16e12c968529f2",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 2,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 1,
+            "entropy_start": 629,
+            "restarts": [
+              {
+                "offset": 856,
+                "index": 0
+              },
+              {
+                "offset": 1097,
+                "index": 1
+              },
+              {
+                "offset": 1218,
+                "index": 2
+              },
+              {
+                "offset": 1342,
+                "index": 3
+              },
+              {
+                "offset": 1467,
+                "index": 4
+              }
+            ],
+            "stuffed_bytes": 1,
+            "entropy_end": 1537
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c0",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 210
+          },
+          {
+            "marker": "c4",
+            "offset": 393
+          },
+          {
+            "marker": "c4",
+            "offset": 426
+          },
+          {
+            "marker": "dd",
+            "offset": 609
+          },
+          {
+            "marker": "da",
+            "offset": 615
+          },
+          {
+            "marker": "d9",
+            "offset": 1537
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 2,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "0e4c2f21926a58ca47383ebca95322e7699745ca5145339d504f29ed36f0785d",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "05748489f747398fb195aa75b2057118eb18ef074f8e780f1125aecf4b5f30d5",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "1727319c44afb43d529e6926d84907b6923312fe6ce014f90c1b346854697e1b",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1930,
+        "total_samples": 1995,
+        "maximum": 102,
+        "mean_absolute": 20.55438596491228
+      }
+    },
+    {
+      "name": "ycbcr_420_restart_3",
+      "compressed_bytes": 1530,
+      "sha256": "a512652166ddce71ddcafc1b9596ce1b4a34b689b326c96aef7ea524efb35bcd",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 2,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 3,
+            "entropy_start": 629,
+            "restarts": [
+              {
+                "offset": 1214,
+                "index": 0
+              }
+            ],
+            "stuffed_bytes": 1,
+            "entropy_end": 1528
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c0",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 210
+          },
+          {
+            "marker": "c4",
+            "offset": 393
+          },
+          {
+            "marker": "c4",
+            "offset": 426
+          },
+          {
+            "marker": "dd",
+            "offset": 609
+          },
+          {
+            "marker": "da",
+            "offset": 615
+          },
+          {
+            "marker": "d9",
+            "offset": 1528
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 2,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "0e4c2f21926a58ca47383ebca95322e7699745ca5145339d504f29ed36f0785d",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "05748489f747398fb195aa75b2057118eb18ef074f8e780f1125aecf4b5f30d5",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "1727319c44afb43d529e6926d84907b6923312fe6ce014f90c1b346854697e1b",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1930,
+        "total_samples": 1995,
+        "maximum": 102,
+        "mean_absolute": 20.55438596491228
+      }
+    },
+    {
+      "name": "ycbcr_420_progressive",
+      "compressed_bytes": 1444,
+      "sha256": "d13674132a0f5d89d152b0d5d9fe3a093939c39afdd75a5864b669902d5c2069",
+      "structure": {
+        "frame": {
+          "sof": "c2",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 2,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 0,
+            "successive_high": 0,
+            "successive_low": 1,
+            "restart_interval": 0,
+            "entropy_start": 247,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 274
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 5,
+            "successive_high": 0,
+            "successive_low": 2,
+            "restart_interval": 0,
+            "entropy_start": 314,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 364
+          },
+          {
+            "components": [
+              3
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 1,
+            "restart_interval": 0,
+            "entropy_start": 415,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 495
+          },
+          {
+            "components": [
+              2
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 1,
+            "restart_interval": 0,
+            "entropy_start": 547,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 620
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 6,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 2,
+            "restart_interval": 0,
+            "entropy_start": 676,
+            "restarts": [],
+            "stuffed_bytes": 3,
+            "entropy_end": 845
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 2,
+            "successive_low": 1,
+            "restart_interval": 0,
+            "entropy_start": 888,
+            "restarts": [],
+            "stuffed_bytes": 1,
+            "entropy_end": 1024
+          },
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 0,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 1038,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 1043
+          },
+          {
+            "components": [
+              3
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 1086,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 1143
+          },
+          {
+            "components": [
+              2
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 1186,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 1245
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 1286,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 1442
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c2",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 204
+          },
+          {
+            "marker": "da",
+            "offset": 233
+          },
+          {
+            "marker": "c4",
+            "offset": 274
+          },
+          {
+            "marker": "da",
+            "offset": 304
+          },
+          {
+            "marker": "c4",
+            "offset": 364
+          },
+          {
+            "marker": "da",
+            "offset": 405
+          },
+          {
+            "marker": "c4",
+            "offset": 495
+          },
+          {
+            "marker": "da",
+            "offset": 537
+          },
+          {
+            "marker": "c4",
+            "offset": 620
+          },
+          {
+            "marker": "da",
+            "offset": 666
+          },
+          {
+            "marker": "c4",
+            "offset": 845
+          },
+          {
+            "marker": "da",
+            "offset": 878
+          },
+          {
+            "marker": "da",
+            "offset": 1024
+          },
+          {
+            "marker": "c4",
+            "offset": 1043
+          },
+          {
+            "marker": "da",
+            "offset": 1076
+          },
+          {
+            "marker": "c4",
+            "offset": 1143
+          },
+          {
+            "marker": "da",
+            "offset": 1176
+          },
+          {
+            "marker": "c4",
+            "offset": 1245
+          },
+          {
+            "marker": "da",
+            "offset": 1276
+          },
+          {
+            "marker": "d9",
+            "offset": 1442
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 2,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "0e4c2f21926a58ca47383ebca95322e7699745ca5145339d504f29ed36f0785d",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "05748489f747398fb195aa75b2057118eb18ef074f8e780f1125aecf4b5f30d5",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "1727319c44afb43d529e6926d84907b6923312fe6ce014f90c1b346854697e1b",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1930,
+        "total_samples": 1995,
+        "maximum": 102,
+        "mean_absolute": 20.55438596491228
+      }
+    },
+    {
+      "name": "ycbcr_420_progressive_restart_1",
+      "compressed_bytes": 1663,
+      "sha256": "b4c3afcb1f9d58bdc6636f5b26a10671b78609339ef3729472e84bcccb651463",
+      "structure": {
+        "frame": {
+          "sof": "c2",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 2,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 0,
+            "successive_high": 0,
+            "successive_low": 1,
+            "restart_interval": 1,
+            "entropy_start": 253,
+            "restarts": [
+              {
+                "offset": 259,
+                "index": 0
+              },
+              {
+                "offset": 267,
+                "index": 1
+              },
+              {
+                "offset": 273,
+                "index": 2
+              },
+              {
+                "offset": 280,
+                "index": 3
+              },
+              {
+                "offset": 286,
+                "index": 4
+              }
+            ],
+            "stuffed_bytes": 0,
+            "entropy_end": 292
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 5,
+            "successive_high": 0,
+            "successive_low": 2,
+            "restart_interval": 1,
+            "entropy_start": 332,
+            "restarts": [
+              {
+                "offset": 336,
+                "index": 0
+              },
+              {
+                "offset": 342,
+                "index": 1
+              },
+              {
+                "offset": 348,
+                "index": 2
+              },
+              {
+                "offset": 354,
+                "index": 3
+              },
+              {
+                "offset": 360,
+                "index": 4
+              },
+              {
+                "offset": 365,
+                "index": 5
+              },
+              {
+                "offset": 371,
+                "index": 6
+              },
+              {
+                "offset": 377,
+                "index": 7
+              },
+              {
+                "offset": 382,
+                "index": 0
+              },
+              {
+                "offset": 388,
+                "index": 1
+              },
+              {
+                "offset": 393,
+                "index": 2
+              },
+              {
+                "offset": 398,
+                "index": 3
+              },
+              {
+                "offset": 404,
+                "index": 4
+              },
+              {
+                "offset": 410,
+                "index": 5
+              }
+            ],
+            "stuffed_bytes": 0,
+            "entropy_end": 416
+          },
+          {
+            "components": [
+              3
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 1,
+            "restart_interval": 1,
+            "entropy_start": 467,
+            "restarts": [
+              {
+                "offset": 485,
+                "index": 0
+              },
+              {
+                "offset": 510,
+                "index": 1
+              },
+              {
+                "offset": 519,
+                "index": 2
+              },
+              {
+                "offset": 534,
+                "index": 3
+              },
+              {
+                "offset": 549,
+                "index": 4
+              }
+            ],
+            "stuffed_bytes": 1,
+            "entropy_end": 561
+          },
+          {
+            "components": [
+              2
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 1,
+            "restart_interval": 1,
+            "entropy_start": 613,
+            "restarts": [
+              {
+                "offset": 631,
+                "index": 0
+              },
+              {
+                "offset": 654,
+                "index": 1
+              },
+              {
+                "offset": 665,
+                "index": 2
+              },
+              {
+                "offset": 676,
+                "index": 3
+              },
+              {
+                "offset": 688,
+                "index": 4
+              }
+            ],
+            "stuffed_bytes": 0,
+            "entropy_end": 697
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 6,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 2,
+            "restart_interval": 1,
+            "entropy_start": 753,
+            "restarts": [
+              {
+                "offset": 765,
+                "index": 0
+              },
+              {
+                "offset": 782,
+                "index": 1
+              },
+              {
+                "offset": 798,
+                "index": 2
+              },
+              {
+                "offset": 814,
+                "index": 3
+              },
+              {
+                "offset": 826,
+                "index": 4
+              },
+              {
+                "offset": 840,
+                "index": 5
+              },
+              {
+                "offset": 853,
+                "index": 6
+              },
+              {
+                "offset": 867,
+                "index": 7
+              },
+              {
+                "offset": 883,
+                "index": 0
+              },
+              {
+                "offset": 897,
+                "index": 1
+              },
+              {
+                "offset": 908,
+                "index": 2
+              },
+              {
+                "offset": 922,
+                "index": 3
+              },
+              {
+                "offset": 933,
+                "index": 4
+              },
+              {
+                "offset": 945,
+                "index": 5
+              }
+            ],
+            "stuffed_bytes": 1,
+            "entropy_end": 955
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 2,
+            "successive_low": 1,
+            "restart_interval": 1,
+            "entropy_start": 998,
+            "restarts": [
+              {
+                "offset": 1007,
+                "index": 0
+              },
+              {
+                "offset": 1019,
+                "index": 1
+              },
+              {
+                "offset": 1030,
+                "index": 2
+              },
+              {
+                "offset": 1044,
+                "index": 3
+              },
+              {
+                "offset": 1052,
+                "index": 4
+              },
+              {
+                "offset": 1065,
+                "index": 5
+              },
+              {
+                "offset": 1079,
+                "index": 6
+              },
+              {
+                "offset": 1093,
+                "index": 7
+              },
+              {
+                "offset": 1104,
+                "index": 0
+              },
+              {
+                "offset": 1118,
+                "index": 1
+              },
+              {
+                "offset": 1129,
+                "index": 2
+              },
+              {
+                "offset": 1140,
+                "index": 3
+              },
+              {
+                "offset": 1151,
+                "index": 4
+              },
+              {
+                "offset": 1161,
+                "index": 5
+              }
+            ],
+            "stuffed_bytes": 1,
+            "entropy_end": 1170
+          },
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 0,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 1,
+            "entropy_start": 1184,
+            "restarts": [
+              {
+                "offset": 1185,
+                "index": 0
+              },
+              {
+                "offset": 1188,
+                "index": 1
+              },
+              {
+                "offset": 1192,
+                "index": 2
+              },
+              {
+                "offset": 1195,
+                "index": 3
+              },
+              {
+                "offset": 1198,
+                "index": 4
+              }
+            ],
+            "stuffed_bytes": 1,
+            "entropy_end": 1201
+          },
+          {
+            "components": [
+              3
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 1,
+            "entropy_start": 1244,
+            "restarts": [
+              {
+                "offset": 1255,
+                "index": 0
+              },
+              {
+                "offset": 1268,
+                "index": 1
+              },
+              {
+                "offset": 1280,
+                "index": 2
+              },
+              {
+                "offset": 1294,
+                "index": 3
+              },
+              {
+                "offset": 1307,
+                "index": 4
+              }
+            ],
+            "stuffed_bytes": 0,
+            "entropy_end": 1314
+          },
+          {
+            "components": [
+              2
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 1,
+            "entropy_start": 1357,
+            "restarts": [
+              {
+                "offset": 1369,
+                "index": 0
+              },
+              {
+                "offset": 1383,
+                "index": 1
+              },
+              {
+                "offset": 1397,
+                "index": 2
+              },
+              {
+                "offset": 1409,
+                "index": 3
+              },
+              {
+                "offset": 1422,
+                "index": 4
+              }
+            ],
+            "stuffed_bytes": 1,
+            "entropy_end": 1430
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 1,
+            "entropy_start": 1471,
+            "restarts": [
+              {
+                "offset": 1483,
+                "index": 0
+              },
+              {
+                "offset": 1495,
+                "index": 1
+              },
+              {
+                "offset": 1508,
+                "index": 2
+              },
+              {
+                "offset": 1520,
+                "index": 3
+              },
+              {
+                "offset": 1532,
+                "index": 4
+              },
+              {
+                "offset": 1546,
+                "index": 5
+              },
+              {
+                "offset": 1558,
+                "index": 6
+              },
+              {
+                "offset": 1570,
+                "index": 7
+              },
+              {
+                "offset": 1583,
+                "index": 0
+              },
+              {
+                "offset": 1595,
+                "index": 1
+              },
+              {
+                "offset": 1609,
+                "index": 2
+              },
+              {
+                "offset": 1622,
+                "index": 3
+              },
+              {
+                "offset": 1636,
+                "index": 4
+              },
+              {
+                "offset": 1648,
+                "index": 5
+              }
+            ],
+            "stuffed_bytes": 1,
+            "entropy_end": 1661
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c2",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 204
+          },
+          {
+            "marker": "dd",
+            "offset": 233
+          },
+          {
+            "marker": "da",
+            "offset": 239
+          },
+          {
+            "marker": "c4",
+            "offset": 292
+          },
+          {
+            "marker": "da",
+            "offset": 322
+          },
+          {
+            "marker": "c4",
+            "offset": 416
+          },
+          {
+            "marker": "da",
+            "offset": 457
+          },
+          {
+            "marker": "c4",
+            "offset": 561
+          },
+          {
+            "marker": "da",
+            "offset": 603
+          },
+          {
+            "marker": "c4",
+            "offset": 697
+          },
+          {
+            "marker": "da",
+            "offset": 743
+          },
+          {
+            "marker": "c4",
+            "offset": 955
+          },
+          {
+            "marker": "da",
+            "offset": 988
+          },
+          {
+            "marker": "da",
+            "offset": 1170
+          },
+          {
+            "marker": "c4",
+            "offset": 1201
+          },
+          {
+            "marker": "da",
+            "offset": 1234
+          },
+          {
+            "marker": "c4",
+            "offset": 1314
+          },
+          {
+            "marker": "da",
+            "offset": 1347
+          },
+          {
+            "marker": "c4",
+            "offset": 1430
+          },
+          {
+            "marker": "da",
+            "offset": 1461
+          },
+          {
+            "marker": "d9",
+            "offset": 1661
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 2,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "0e4c2f21926a58ca47383ebca95322e7699745ca5145339d504f29ed36f0785d",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "05748489f747398fb195aa75b2057118eb18ef074f8e780f1125aecf4b5f30d5",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "1727319c44afb43d529e6926d84907b6923312fe6ce014f90c1b346854697e1b",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1930,
+        "total_samples": 1995,
+        "maximum": 102,
+        "mean_absolute": 20.55438596491228
+      }
+    },
+    {
+      "name": "ycbcr_420_separate_scans",
+      "compressed_bytes": 1533,
+      "sha256": "0a2b322b910aa12ffe4dd86c125b0f4a74f7deb6d4cf76cb4e52eb86d8015140",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 2,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 403,
+            "restarts": [],
+            "stuffed_bytes": 1,
+            "entropy_end": 978
+          },
+          {
+            "components": [
+              2
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 1204,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 1360
+          },
+          {
+            "components": [
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 1370,
+            "restarts": [],
+            "stuffed_bytes": 1,
+            "entropy_end": 1531
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c0",
+            "offset": 158
+          },
+          {
+            "marker": "c4",
+            "offset": 177
+          },
+          {
+            "marker": "c4",
+            "offset": 210
+          },
+          {
+            "marker": "da",
+            "offset": 393
+          },
+          {
+            "marker": "c4",
+            "offset": 978
+          },
+          {
+            "marker": "c4",
+            "offset": 1011
+          },
+          {
+            "marker": "da",
+            "offset": 1194
+          },
+          {
+            "marker": "da",
+            "offset": 1360
+          },
+          {
+            "marker": "d9",
+            "offset": 1531
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 2,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "0e4c2f21926a58ca47383ebca95322e7699745ca5145339d504f29ed36f0785d",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "05748489f747398fb195aa75b2057118eb18ef074f8e780f1125aecf4b5f30d5",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "1727319c44afb43d529e6926d84907b6923312fe6ce014f90c1b346854697e1b",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1930,
+        "total_samples": 1995,
+        "maximum": 102,
+        "mean_absolute": 20.55438596491228
+      }
+    },
+    {
+      "name": "ycbcr_420_arithmetic",
+      "compressed_bytes": 1100,
+      "sha256": "6986fcb9144b13875dd4e487ea3e10883254729307736ea48d927b5055dd72c2",
+      "structure": {
+        "frame": {
+          "sof": "c9",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 2,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 203,
+            "restarts": [],
+            "stuffed_bytes": 3,
+            "entropy_end": 1098
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "c9",
+            "offset": 158
+          },
+          {
+            "marker": "cc",
+            "offset": 177
+          },
+          {
+            "marker": "da",
+            "offset": 189
+          },
+          {
+            "marker": "d9",
+            "offset": 1098
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 2,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "0e4c2f21926a58ca47383ebca95322e7699745ca5145339d504f29ed36f0785d",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "05748489f747398fb195aa75b2057118eb18ef074f8e780f1125aecf4b5f30d5",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "1727319c44afb43d529e6926d84907b6923312fe6ce014f90c1b346854697e1b",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1930,
+        "total_samples": 1995,
+        "maximum": 102,
+        "mean_absolute": 20.55438596491228
+      }
+    },
+    {
+      "name": "ycbcr_420_arithmetic_progressive",
+      "compressed_bytes": 1235,
+      "sha256": "7fbb9444b9e2fb5b1dd895930ffb1b2843c5e134dfa18f994030a269af9c4249",
+      "structure": {
+        "frame": {
+          "sof": "ca",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 2,
+              "vertical": 2,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 0,
+            "successive_high": 0,
+            "successive_low": 1,
+            "restart_interval": 0,
+            "entropy_start": 199,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 233
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 5,
+            "successive_high": 0,
+            "successive_low": 2,
+            "restart_interval": 0,
+            "entropy_start": 249,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 303
+          },
+          {
+            "components": [
+              3
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 1,
+            "restart_interval": 0,
+            "entropy_start": 319,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 415
+          },
+          {
+            "components": [
+              2
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 1,
+            "restart_interval": 0,
+            "entropy_start": 431,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 516
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 6,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 2,
+            "restart_interval": 0,
+            "entropy_start": 532,
+            "restarts": [],
+            "stuffed_bytes": 2,
+            "entropy_end": 703
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 2,
+            "successive_low": 1,
+            "restart_interval": 0,
+            "entropy_start": 719,
+            "restarts": [],
+            "stuffed_bytes": 1,
+            "entropy_end": 866
+          },
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 0,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 880,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 885
+          },
+          {
+            "components": [
+              3
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 901,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 965
+          },
+          {
+            "components": [
+              2
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 981,
+            "restarts": [],
+            "stuffed_bytes": 1,
+            "entropy_end": 1049
+          },
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 63,
+            "successive_high": 1,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 1065,
+            "restarts": [],
+            "stuffed_bytes": 1,
+            "entropy_end": 1233
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 89
+          },
+          {
+            "marker": "ca",
+            "offset": 158
+          },
+          {
+            "marker": "cc",
+            "offset": 177
+          },
+          {
+            "marker": "da",
+            "offset": 185
+          },
+          {
+            "marker": "cc",
+            "offset": 233
+          },
+          {
+            "marker": "da",
+            "offset": 239
+          },
+          {
+            "marker": "cc",
+            "offset": 303
+          },
+          {
+            "marker": "da",
+            "offset": 309
+          },
+          {
+            "marker": "cc",
+            "offset": 415
+          },
+          {
+            "marker": "da",
+            "offset": 421
+          },
+          {
+            "marker": "cc",
+            "offset": 516
+          },
+          {
+            "marker": "da",
+            "offset": 522
+          },
+          {
+            "marker": "cc",
+            "offset": 703
+          },
+          {
+            "marker": "da",
+            "offset": 709
+          },
+          {
+            "marker": "da",
+            "offset": 866
+          },
+          {
+            "marker": "cc",
+            "offset": 885
+          },
+          {
+            "marker": "da",
+            "offset": 891
+          },
+          {
+            "marker": "cc",
+            "offset": 965
+          },
+          {
+            "marker": "da",
+            "offset": 971
+          },
+          {
+            "marker": "cc",
+            "offset": 1049
+          },
+          {
+            "marker": "da",
+            "offset": 1055
+          },
+          {
+            "marker": "d9",
+            "offset": 1233
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 2,
+          "vertical": 2,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "da45951d3a256ecb4b6e33a9bc06d7dec3ce78e528a50fea0bcdf75d04fa9a30",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "0e4c2f21926a58ca47383ebca95322e7699745ca5145339d504f29ed36f0785d",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 3,
+          "block_height": 2,
+          "count": 384,
+          "coefficients_sha256": "05748489f747398fb195aa75b2057118eb18ef074f8e780f1125aecf4b5f30d5",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        }
+      ],
+      "rgb8_sha256": "1727319c44afb43d529e6926d84907b6923312fe6ce014f90c1b346854697e1b",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 1930,
+        "total_samples": 1995,
+        "maximum": 102,
+        "mean_absolute": 20.55438596491228
+      }
+    },
+    {
+      "name": "ycbcr_444_extended_quantization",
+      "compressed_bytes": 780,
+      "sha256": "663382c1605eb339f0b6500324a3c6cbe1b47e1a25380b2eb183e87354bb6265",
+      "structure": {
+        "frame": {
+          "sof": "c1",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 751,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 778
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "db",
+            "offset": 153
+          },
+          {
+            "marker": "c1",
+            "offset": 286
+          },
+          {
+            "marker": "c4",
+            "offset": 305
+          },
+          {
+            "marker": "c4",
+            "offset": 338
+          },
+          {
+            "marker": "c4",
+            "offset": 521
+          },
+          {
+            "marker": "c4",
+            "offset": 554
+          },
+          {
+            "marker": "da",
+            "offset": 737
+          },
+          {
+            "marker": "d9",
+            "offset": 778
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 16,
+            "minimum": 500,
+            "maximum": 6050
+          },
+          {
+            "id": 1,
+            "precision": 16,
+            "minimum": 850,
+            "maximum": 4950
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 3,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "155e437b946ac82ae591ff382b8d19efda9397b2282672dbabd91ec31ce8a651",
+          "quantization_sha256": "4e3358c3b4c2fc404c960bc7c9426de5bdbbec71748fa7265610606cb3d5bfc0"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "155e437b946ac82ae591ff382b8d19efda9397b2282672dbabd91ec31ce8a651",
+          "quantization_sha256": "efbef4b67a1813c00b58ba80feab6b13a3dd1b0f41aacde4ef50055cfdc4cba6"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "30b06e61c88aa353b920fe980d2107b783687661ce3c5f76c53fa8ba18a38fd8",
+          "quantization_sha256": "efbef4b67a1813c00b58ba80feab6b13a3dd1b0f41aacde4ef50055cfdc4cba6"
+        }
+      ],
+      "rgb8_sha256": "b527df44530b6ba1659951521463fbf02ee69bdd792a1e5615b062066b8256bd",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 0,
+        "total_samples": 1995,
+        "maximum": 0,
+        "mean_absolute": 0.0
+      }
+    },
+    {
+      "name": "rgb_sequential",
+      "compressed_bytes": 2444,
+      "sha256": "c1d78aaa2837ad453b7e94fb9f5572702205724d8e273543a36c047d08815f72",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 82,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 71,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 66,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              82,
+              71,
+              66
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 336,
+            "restarts": [],
+            "stuffed_bytes": 10,
+            "entropy_end": 2442
+          }
+        ],
+        "markers": [
+          {
+            "marker": "ee",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 18
+          },
+          {
+            "marker": "c0",
+            "offset": 87
+          },
+          {
+            "marker": "c4",
+            "offset": 106
+          },
+          {
+            "marker": "c4",
+            "offset": 139
+          },
+          {
+            "marker": "da",
+            "offset": 322
+          },
+          {
+            "marker": "d9",
+            "offset": 2442
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 2,
+      "coefficient_planes": [
+        {
+          "id": 82,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "c81857e6bdaa3cd2896f007990a20c01dba35ebd5813a76ef0b0fac3f7ae093a",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 71,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "33dc03d02a9c5698baff378442e2b5bb667e04514b6504341f9b27acb8ead46c",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 66,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "68df58a1aa50e6a831e1f3b14924e0625493956846c5c1d27c6b08ce0a93df23",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        }
+      ],
+      "rgb8_sha256": "a2849b01797e820fd637d349308da23d4d4d844caaa46f9c693280cdb090063e",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 0,
+        "total_samples": 1995,
+        "maximum": 0,
+        "mean_absolute": 0.0
+      }
+    },
+    {
+      "name": "grayscale",
+      "compressed_bytes": 1018,
+      "sha256": "95f9e692aee035a21c79b91924daa6ad5e3a130b117fc4fda11f1e155a093c44",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 328,
+            "restarts": [],
+            "stuffed_bytes": 8,
+            "entropy_end": 1016
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "c0",
+            "offset": 89
+          },
+          {
+            "marker": "c4",
+            "offset": 102
+          },
+          {
+            "marker": "c4",
+            "offset": 135
+          },
+          {
+            "marker": "da",
+            "offset": 318
+          },
+          {
+            "marker": "d9",
+            "offset": 1016
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 1,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "c81857e6bdaa3cd2896f007990a20c01dba35ebd5813a76ef0b0fac3f7ae093a",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        }
+      ],
+      "rgb8_sha256": "fd3d5450ad531755c8feaa86c14a8f639d8781f558fd5b063ebcfc4413d8c970",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 0,
+        "total_samples": 1995,
+        "maximum": 0,
+        "mean_absolute": 0.0
+      }
+    },
+    {
+      "name": "cmyk_sequential",
+      "compressed_bytes": 3144,
+      "sha256": "32e89632b8e08c9700d6acec9909f57734f6a946e6fbf4607b411b64a8f4324c",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 67,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 77,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 89,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 75,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              67,
+              77,
+              89,
+              75
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 341,
+            "restarts": [],
+            "stuffed_bytes": 11,
+            "entropy_end": 3142
+          }
+        ],
+        "markers": [
+          {
+            "marker": "ee",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 18
+          },
+          {
+            "marker": "c0",
+            "offset": 87
+          },
+          {
+            "marker": "c4",
+            "offset": 109
+          },
+          {
+            "marker": "c4",
+            "offset": 142
+          },
+          {
+            "marker": "da",
+            "offset": 325
+          },
+          {
+            "marker": "d9",
+            "offset": 3142
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": false,
+      "rgb8_error": "Unsupported color conversion request",
+      "color_space": 4,
+      "coefficient_planes": [
+        {
+          "id": 67,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "c81857e6bdaa3cd2896f007990a20c01dba35ebd5813a76ef0b0fac3f7ae093a",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 77,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "33dc03d02a9c5698baff378442e2b5bb667e04514b6504341f9b27acb8ead46c",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 89,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "68df58a1aa50e6a831e1f3b14924e0625493956846c5c1d27c6b08ce0a93df23",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 75,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "13bfb5098875fe551a33b204ef0a33aac274af6f8e2f90a1fce7a6fbccdd358a",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        }
+      ]
+    },
+    {
+      "name": "ycck_sequential",
+      "compressed_bytes": 2960,
+      "sha256": "1821af237c156d3a81d7f73b4984a6fff289339bf4034e4abbf720ed4450071f",
+      "structure": {
+        "frame": {
+          "sof": "c0",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 2,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 3,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 1
+            },
+            {
+              "id": 4,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 626,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 2958
+          }
+        ],
+        "markers": [
+          {
+            "marker": "ee",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 18
+          },
+          {
+            "marker": "db",
+            "offset": 87
+          },
+          {
+            "marker": "c0",
+            "offset": 156
+          },
+          {
+            "marker": "c4",
+            "offset": 178
+          },
+          {
+            "marker": "c4",
+            "offset": 211
+          },
+          {
+            "marker": "c4",
+            "offset": 394
+          },
+          {
+            "marker": "c4",
+            "offset": 427
+          },
+          {
+            "marker": "da",
+            "offset": 610
+          },
+          {
+            "marker": "d9",
+            "offset": 2958
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          },
+          {
+            "id": 1,
+            "precision": 8,
+            "minimum": 3,
+            "maximum": 20
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": false,
+      "rgb8_error": "Unsupported color conversion request",
+      "color_space": 5,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "ab9162ee763ce6c13f2d9d14914d873977b81a6b1148fcdaba4a9d30db645e56",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        },
+        {
+          "id": 2,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "12df28b1236904cc38c63c81726155f36000fa9da010616b791f83eeae07c092",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 3,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "9b0646e3b9201598578b0ac3c981c46e502aef5fa666d27c753a26b80e5bd29a",
+          "quantization_sha256": "af29ee5cf8ee2c39ea6ccb6bc24bbe739b5262208c7a00ad6f42a79a8321221a"
+        },
+        {
+          "id": 4,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "13bfb5098875fe551a33b204ef0a33aac274af6f8e2f90a1fce7a6fbccdd358a",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        }
+      ]
+    },
+    {
+      "name": "rgb_lossless_8",
+      "compressed_bytes": 1883,
+      "sha256": "51043a3e0b065764bc83fbd28027a6c6975f46e5a985f2fa1c507c7293265a2a",
+      "structure": {
+        "frame": {
+          "sof": "c3",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 82,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 71,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 66,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              82,
+              71,
+              66
+            ],
+            "spectral_start": 1,
+            "spectral_end": 0,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 77,
+            "restarts": [],
+            "stuffed_bytes": 1,
+            "entropy_end": 1881
+          }
+        ],
+        "markers": [
+          {
+            "marker": "ee",
+            "offset": 2
+          },
+          {
+            "marker": "c3",
+            "offset": 18
+          },
+          {
+            "marker": "c4",
+            "offset": 37
+          },
+          {
+            "marker": "da",
+            "offset": 63
+          },
+          {
+            "marker": "d9",
+            "offset": 1881
+          }
+        ],
+        "quantization_tables": [],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": true,
+      "rgb8_error": "",
+      "color_space": 2,
+      "rgb8_sha256": "3dc37fbaa0c2dbd01449a4572e484a989975a249ff9c193ca59bc1d0de4751d4",
+      "default_dct_method": 0,
+      "fancy_vs_simple": {
+        "different_samples": 0,
+        "total_samples": 1995,
+        "maximum": 0,
+        "mean_absolute": 0.0
+      },
+      "exact_original_rgb": true
+    },
+    {
+      "name": "gray_lossless_8",
+      "compressed_bytes": 671,
+      "sha256": "2ccd4f7f755690737c2ae255fe7e9187a8c19d1f66e9d075bac9d146d9d7233c",
+      "structure": {
+        "frame": {
+          "sof": "c3",
+          "precision": 8,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 0,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 68,
+            "restarts": [],
+            "stuffed_bytes": 0,
+            "entropy_end": 669
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "c3",
+            "offset": 20
+          },
+          {
+            "marker": "c4",
+            "offset": 33
+          },
+          {
+            "marker": "da",
+            "offset": 58
+          },
+          {
+            "marker": "d9",
+            "offset": 669
+          }
+        ],
+        "quantization_tables": [],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": false,
+      "rgb8_error": "Unsupported color conversion request",
+      "color_space": 1
+    },
+    {
+      "name": "gray_dct_12",
+      "compressed_bytes": 1280,
+      "sha256": "556d7264a4aec8ed466f2335af81d50fc2c0b351a4eb707e5b6fa9a3381d57b8",
+      "structure": {
+        "frame": {
+          "sof": "c1",
+          "precision": 12,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 0,
+            "spectral_end": 63,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 182,
+            "restarts": [],
+            "stuffed_bytes": 6,
+            "entropy_end": 1278
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "db",
+            "offset": 20
+          },
+          {
+            "marker": "c1",
+            "offset": 89
+          },
+          {
+            "marker": "c4",
+            "offset": 102
+          },
+          {
+            "marker": "c4",
+            "offset": 128
+          },
+          {
+            "marker": "da",
+            "offset": 172
+          },
+          {
+            "marker": "d9",
+            "offset": 1278
+          }
+        ],
+        "quantization_tables": [
+          {
+            "id": 0,
+            "precision": 8,
+            "minimum": 2,
+            "maximum": 24
+          }
+        ],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": false,
+      "rgb8_error": "Unsupported JPEG data precision 12",
+      "color_space": 1,
+      "coefficient_planes": [
+        {
+          "id": 1,
+          "horizontal": 1,
+          "vertical": 1,
+          "block_width": 5,
+          "block_height": 3,
+          "count": 960,
+          "coefficients_sha256": "6bc5500acec8a2532df8a09fdbec7aaff08888240668be0a8779c17fc981ff82",
+          "quantization_sha256": "b7546554415e00e370a2ea12b70bfa79a0a895fdb755b1a72ed2cfcfbe5919c6"
+        }
+      ]
+    },
+    {
+      "name": "rgb_lossless_12",
+      "compressed_bytes": 2919,
+      "sha256": "850e7ff1692da592bee4fc0ea328e7498d65c0ace9c3cc9d25485ff5b6c22504",
+      "structure": {
+        "frame": {
+          "sof": "c3",
+          "precision": 12,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 82,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 71,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            },
+            {
+              "id": 66,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              82,
+              71,
+              66
+            ],
+            "spectral_start": 1,
+            "spectral_end": 0,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 78,
+            "restarts": [],
+            "stuffed_bytes": 4,
+            "entropy_end": 2917
+          }
+        ],
+        "markers": [
+          {
+            "marker": "ee",
+            "offset": 2
+          },
+          {
+            "marker": "c3",
+            "offset": 18
+          },
+          {
+            "marker": "c4",
+            "offset": 37
+          },
+          {
+            "marker": "da",
+            "offset": 64
+          },
+          {
+            "marker": "d9",
+            "offset": 2917
+          }
+        ],
+        "quantization_tables": [],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": false,
+      "rgb8_error": "Unsupported JPEG data precision 12",
+      "color_space": 2
+    },
+    {
+      "name": "gray_lossless_16",
+      "compressed_bytes": 1273,
+      "sha256": "99cba4d28d2da86b7c437c11746f645c51ec6a9fff4d6647d89a17a74ff89c28",
+      "structure": {
+        "frame": {
+          "sof": "c3",
+          "precision": 16,
+          "height": 19,
+          "width": 35,
+          "components": [
+            {
+              "id": 1,
+              "horizontal": 1,
+              "vertical": 1,
+              "quantization": 0
+            }
+          ]
+        },
+        "scans": [
+          {
+            "components": [
+              1
+            ],
+            "spectral_start": 1,
+            "spectral_end": 0,
+            "successive_high": 0,
+            "successive_low": 0,
+            "restart_interval": 0,
+            "entropy_start": 69,
+            "restarts": [],
+            "stuffed_bytes": 3,
+            "entropy_end": 1271
+          }
+        ],
+        "markers": [
+          {
+            "marker": "e0",
+            "offset": 2
+          },
+          {
+            "marker": "c3",
+            "offset": 20
+          },
+          {
+            "marker": "c4",
+            "offset": 33
+          },
+          {
+            "marker": "da",
+            "offset": 59
+          },
+          {
+            "marker": "d9",
+            "offset": 1271
+          }
+        ],
+        "quantization_tables": [],
+        "exif_orientation": null
+      },
+      "header_ok": true,
+      "rgb8_complete": false,
+      "rgb8_error": "Unsupported color conversion request",
+      "color_space": 1
+    }
+  ],
+  "equivalent_420_variants": [
+    "ycbcr_420_restart_1",
+    "ycbcr_420_restart_3",
+    "ycbcr_420_progressive",
+    "ycbcr_420_progressive_restart_1",
+    "ycbcr_420_separate_scans",
+    "ycbcr_420_arithmetic",
+    "ycbcr_420_arithmetic_progressive"
+  ],
+  "warning_recovery": [
+    {
+      "name": "missing_eoi",
+      "header_ok": true,
+      "complete": true,
+      "warnings": [
+        "Premature end of JPEG file"
+      ],
+      "same_pixels_as_intact": true
+    },
+    {
+      "name": "truncated_entropy",
+      "header_ok": true,
+      "complete": true,
+      "warnings": [
+        "Premature end of JPEG file",
+        "Corrupt JPEG data: premature end of data segment"
+      ],
+      "same_pixels_as_intact": false
+    }
+  ],
+  "existing_fixture": {
+    "sha256": "f427cebb85fa55fb6808b4b1c0ec71e0c0419a379136bf924c529f5c15c7fe27",
+    "structure": {
+      "frame": {
+        "sof": "c0",
+        "precision": 8,
+        "height": 3,
+        "width": 2,
+        "components": [
+          {
+            "id": 1,
+            "horizontal": 1,
+            "vertical": 1,
+            "quantization": 0
+          },
+          {
+            "id": 2,
+            "horizontal": 1,
+            "vertical": 1,
+            "quantization": 1
+          },
+          {
+            "id": 3,
+            "horizontal": 1,
+            "vertical": 1,
+            "quantization": 1
+          }
+        ]
+      },
+      "scans": [
+        {
+          "components": [
+            1,
+            2,
+            3
+          ],
+          "spectral_start": 0,
+          "spectral_end": 63,
+          "successive_high": 0,
+          "successive_low": 0,
+          "restart_interval": 0,
+          "entropy_start": 659,
+          "restarts": [],
+          "stuffed_bytes": 2,
+          "entropy_end": 796
+        }
+      ],
+      "markers": [
+        {
+          "marker": "e0",
+          "offset": 2
+        },
+        {
+          "marker": "e1",
+          "offset": 20
+        },
+        {
+          "marker": "db",
+          "offset": 56
+        },
+        {
+          "marker": "db",
+          "offset": 125
+        },
+        {
+          "marker": "c0",
+          "offset": 194
+        },
+        {
+          "marker": "c4",
+          "offset": 213
+        },
+        {
+          "marker": "c4",
+          "offset": 246
+        },
+        {
+          "marker": "c4",
+          "offset": 429
+        },
+        {
+          "marker": "c4",
+          "offset": 462
+        },
+        {
+          "marker": "da",
+          "offset": 645
+        },
+        {
+          "marker": "d9",
+          "offset": 796
+        }
+      ],
+      "quantization_tables": [
+        {
+          "id": 0,
+          "precision": 8,
+          "minimum": 1,
+          "maximum": 12
+        },
+        {
+          "id": 1,
+          "precision": 8,
+          "minimum": 2,
+          "maximum": 10
+        }
+      ],
+      "exif_orientation": 6
+    },
+    "rgb8_sha256": "a4a03ee54b8f7d3183598bddaf4dcaf2aa875a1cb2a31f118346b800bcc5acb0"
+  },
+  "probe_log_sha256": "0fb2b7b63183ef72c71838b63b7655e3eeef8778f23420a14e1a80ec53e11a9a"
+}
