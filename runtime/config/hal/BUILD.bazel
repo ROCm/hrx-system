@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("@bazel_skylib//rules:common_settings.bzl", "string_list_flag")
+load("//build_tools/bazel:settings.bzl", "iree_string_list_flag")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -35,9 +35,10 @@ SUPPORTED_EXECUTABLE_LOADERS = [
     "system-library",
 ]
 
-string_list_flag(
+iree_string_list_flag(
     name = "drivers",
     build_setting_default = DEFAULT_DRIVERS,
+    values = SUPPORTED_DRIVERS,
 )
 
 # External applications replace this empty registry with a generated aggregate
@@ -57,9 +58,10 @@ label_flag(
     for driver in SUPPORTED_DRIVERS
 ]
 
-string_list_flag(
+iree_string_list_flag(
     name = "executable_loaders",
     build_setting_default = DEFAULT_EXECUTABLE_LOADERS,
+    values = SUPPORTED_EXECUTABLE_LOADERS,
 )
 
 [
