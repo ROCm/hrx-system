@@ -7,6 +7,7 @@
 load("//build_tools/bazel:python.bzl", "iree_py_binary")
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "AMDGPU_TSAN_PROFILE")
+load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -27,6 +28,16 @@ iree_py_binary(
     srcs = ["check_service.py"],
     main = "check_service.py",
     visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "control_test",
+    srcs = [
+        "control.loom",
+        "tests/control.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
 )
 
 loom_test(

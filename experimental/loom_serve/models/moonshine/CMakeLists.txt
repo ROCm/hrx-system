@@ -42,6 +42,30 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
 
 loom_test_module(
   NAME
+    control_test_module
+  SRCS
+    "control.loom"
+    "tests/control.loom"
+)
+
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    control_test_execute_vm_reference_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::control_test_module"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+endif()
+
+loom_test_module(
+  NAME
     state_test_module
   SRCS
     "encoder_state.loom"

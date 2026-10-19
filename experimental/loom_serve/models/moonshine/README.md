@@ -111,16 +111,26 @@ preparation rather than silently leaving the source geometry unchanged.
 | Input bound | 655,360 samples, or 40.96 seconds |
 | Encoder positions | 2,048 |
 | Decoder hypothesis capacity | 512 tokens, including EOS |
-| Provisional hypothesis cadence | Every 6,400 consumed samples, or 400 ms |
+| Provisional hypothesis cadence | An attempt every 6,400 consumed samples, or 400 ms |
+| Provisional prediction budget | 6.5 predictions per second of published encoder memory, rounded up |
 | Per-resident device history | 40,320,208 bytes |
 | Language and decoding | English, empty prompt, temperature zero |
 
 These storage bounds belong to this source package. The shared recognition
-service does not impose them on other models. A request exceeding the input or
-token capacity fails explicitly. The checkpoint provides neither diarization
-nor word alignment. The source emits one stable utterance ID, increasing
-revisions, and the real consumed sample range; it does not invent speakers or
-word timestamps.
+service does not impose them on other models. A request exceeding the input
+bound or final hypothesis capacity fails explicitly. The checkpoint provides
+neither diarization nor word alignment. The source emits one stable utterance
+ID, increasing revisions, and the real consumed sample range; it does not
+invent speakers or word timestamps.
+
+An incomplete audio prefix can make the decoder repeat tokens without reaching
+EOS. Provisional attempts have a duration-based work budget: if an attempt
+exhausts that budget, the source keeps its last published transcript and resumes
+encoding new audio. The next attempt starts with an empty decoder draft against
+the updated encoder memory. It neither publishes a truncated hypothesis nor
+marks the utterance complete. Final input retains the full 512-token capacity
+and requires EOS; a final hypothesis that exhausts that capacity returns an
+error. Other conversations retain their independent progress throughout.
 
 The frontend normalizes 80-sample frames, applies learned compression and a
 projection, and runs two causal stride-two convolutions. Six encoder layers

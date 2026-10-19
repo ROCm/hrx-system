@@ -69,7 +69,8 @@ func.def @event(%text: buffer, %length64: i64, %revision: i32, %end: i32, %final
 // sample end occupy words 0..6. Word 7 is the reusable draft length; the
 // next word records a suffix retry after a mismatch. Matching predictions
 // restore that allowance; a second mismatch abandons the remaining draft.
-// The remaining words pad the 512-token buffer to 64 bytes.
+// Word 9 holds this hypothesis's prediction budget, established with its
+// encoder memory. The remaining words pad the 512-token buffer to 64 bytes.
 // Phases 0/1/2 select reset/encode/decode; the phase is also the compatibility tag.
 func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
   %language_length = buffer.length %language
@@ -148,7 +149,7 @@ func.def public @prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %pos
   %four = scalar.constant 4 : i32
   %fits = scalar.cmpi ult, %available, %four : i32
   %chunk = scf.select %fits, %available, %four : i32
-  %limit = scalar.constant 512 : i32
+  %limit = view.load %fields[9] : view<16xi32> -> i32
   %room = scalar.subi %limit, %decode_position : i32
   %fits_room = scalar.cmpi ult, %chunk, %room : i32
   %bounded_chunk = scf.select %fits_room, %chunk, %room : i32
@@ -315,6 +316,23 @@ func.def public @generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffe
   func.return
 }
 
+// Provisional decoding follows the reference's 6.5 predictions per second
+// of encoder memory (one position per 20 ms). Final input retains the full
+// admitted cache and must produce EOS before publishing its transcript.
+func.def @hypothesis_limit(%features: i32, %finished: i32) -> (i32) {
+  %numerator = scalar.constant 13 : i32
+  %rounding = scalar.constant 99 : i32
+  %denominator = scalar.constant 100 : i32
+  %scaled = scalar.muli %features, %numerator : i32
+  %rounded = scalar.addi %scaled, %rounding : i32
+  %provisional = scalar.divui %rounded, %denominator : i32
+  %capacity = scalar.constant 512 : i32
+  %zero = scalar.constant 0 : i32
+  %final = scalar.cmpi ne, %finished, %zero : i32
+  %limit = scf.select %final, %capacity, %provisional : i32
+  func.return %limit : i32
+}
+
 func.def @encoded(%state: buffer, %work: buffer, %feedback: buffer, %output_offset: offset) -> (i64, buffer, i32) {
   %origin = index.constant 0 : offset
   %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
@@ -347,6 +365,8 @@ func.def @encoded(%state: buffer, %work: buffer, %feedback: buffer, %output_offs
     %nonempty = scalar.cmpi ne, %features, %zero : i32
     %decode = scalar.andi %trigger, %nonempty : i1
     scf.if %decode {
+      %limit = func.call @hypothesis_limit(%features, %finished) : (i32, i32) -> (i32)
+      view.store %limit, %fields[9] : i32, view<16xi32>
       %previous_length = view.load %fields[3] : view<16xi32> -> i32
       %has_previous = scalar.cmpi ugt, %previous_length, %zero : i32
       %without_eos = scalar.subi %previous_length, %one : i32
@@ -362,31 +382,60 @@ func.def @encoded(%state: buffer, %work: buffer, %feedback: buffer, %output_offs
   func.return %count64, %packet, %complete : i64, buffer, i32
 }
 
-func.def @decoded_token(%state: buffer, %feedback: buffer, %output_offset: offset) -> (buffer, i32) {
+// A provisional hypothesis without EOS is expendable; source audio and the
+// published transcript are not. Resume encoding after its bounded attempt.
+// The next encoder revision sees position zero and starts with an empty draft.
+// Returns EOS, valid final extent, and whether this hypothesis can continue.
+func.def @accept_token(%state: buffer, %token: i32) -> (i1, i1, i1) {
   %origin = index.constant 0 : offset
   %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
-  %output = buffer.view %feedback[%output_offset] : buffer -> view<1xi32>
-  %token = view.load %output[0] : view<1xi32> -> i32
   %position = view.load %fields[3] : view<16xi32> -> i32
   %finished = view.load %fields[2] : view<16xi32> -> i32
   %end = view.load %fields[6] : view<16xi32> -> i32
+  %limit = view.load %fields[9] : view<16xi32> -> i32
   %zero = scalar.constant 0 : i32
   %one = scalar.constant 1 : i32
   %eos = scalar.constant 2 : i32
-  %limit = scalar.constant 511 : i32
   %is_eos = scalar.cmpi eq, %token, %eos : i32
-  %room = scalar.cmpi ult, %position, %limit : i32
+  %next = scalar.addi %position, %one : i32
+  %room = scalar.cmpi ult, %next, %limit : i32
+  %provisional = scalar.cmpi eq, %finished, %zero : i32
   %can_finish = scalar.ori %room, %is_eos : i1
-  %condition = scalar.extui %can_finish : i1 to i32
-  %error = global.load @tokens_error : buffer
-  func.call @require(%condition, %error) : (i32, buffer)
+  %valid = scalar.ori %can_finish, %provisional : i1
   %token_offset = index.constant 64 : offset
   %tokens = buffer.view %state[%token_offset] : buffer -> view<512xi32>
   %bounded_position = scalar.assume %position [range(%position, 0, 511)] : i32
   %index = index.cast %bounded_position : i32 to index
   view.store %token, %tokens[%index] : i32, view<512xi32>
-  %next = scalar.addi %position, %one : i32
   view.store %next, %fields[3] : i32, view<16xi32>
+  %true = scalar.constant true : i1
+  %exhausted = scalar.xori %can_finish, %true : i1
+  %suspend = scalar.andi %exhausted, %provisional : i1
+  scf.if %suspend {
+    view.store %one, %fields[0] : i32, view<16xi32>
+    view.store %zero, %fields[3] : i32, view<16xi32>
+    view.store %end, %fields[5] : i32, view<16xi32>
+  }
+  %not_eos = scalar.xori %is_eos, %true : i1
+  %continuing = scalar.andi %room, %not_eos : i1
+  func.return %is_eos, %valid, %continuing : i1, i1, i1
+}
+
+func.def @decoded_token(%state: buffer, %feedback: buffer, %output_offset: offset) -> (buffer, i32, i1) {
+  %origin = index.constant 0 : offset
+  %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
+  %output = buffer.view %feedback[%output_offset] : buffer -> view<1xi32>
+  %token = view.load %output[0] : view<1xi32> -> i32
+  %is_eos, %valid, %continuing = func.call @accept_token(%state, %token) : (buffer, i32) -> (i1, i1, i1)
+  %condition = scalar.extui %valid : i1 to i32
+  %error = global.load @tokens_error : buffer
+  func.call @require(%condition, %error) : (i32, buffer)
+  %next = view.load %fields[3] : view<16xi32> -> i32
+  %finished = view.load %fields[2] : view<16xi32> -> i32
+  %end = view.load %fields[6] : view<16xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %token_offset = index.constant 64 : offset
   %packet, %complete = scf.if %is_eos -> (buffer, i32) {
     %bounded_next = scalar.assume %next [range(%next, 1, 512)] : i32
     %count = index.cast %bounded_next : i32 to index
@@ -407,7 +456,7 @@ func.def @decoded_token(%state: buffer, %feedback: buffer, %output_offset: offse
     %empty = global.load @empty : buffer
     scf.yield %empty, %zero : buffer, i32
   }
-  func.return %packet, %complete : buffer, i32
+  func.return %packet, %complete, %continuing : buffer, i32, i1
 }
 
 // Predictions are compared before overwriting the old draft. The first
@@ -423,7 +472,6 @@ func.def @decoded(%state: buffer, %feedback: buffer, %output_offset: offset, %co
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %zero32 = scalar.constant 0 : i32
-  %eos = scalar.constant 2 : i32
   %stride = index.constant 16 : offset
   %true = scalar.constant true : i1
   %empty = global.load @empty : buffer
@@ -456,9 +504,8 @@ func.def @decoded(%state: buffer, %feedback: buffer, %output_offset: offset, %co
       %retrying = scalar.andi %retained, %mismatch : i1
       %next_retry = scalar.extui %retrying : i1 to i32
       view.store %next_retry, %fields[8] : i32, view<16xi32>
-      %text, %finished = func.call @decoded_token(%state, %feedback, %offset) : (buffer, buffer, offset) -> (buffer, i32)
-      %not_eos = scalar.cmpi ne, %token, %eos : i32
-      %more = scalar.andi %matches, %not_eos : i1
+      %text, %finished, %continuing = func.call @decoded_token(%state, %feedback, %offset) : (buffer, buffer, offset) -> (buffer, i32, i1)
+      %more = scalar.andi %matches, %continuing : i1
       scf.yield %more, %text, %finished : i1, buffer, i32
     } else {
       scf.yield %accepting, %event, %done : i1, buffer, i32
