@@ -67,8 +67,9 @@ static iree_status_t iree_shm_reservation_native_error(const char* operation) {
                           "%s failed (%lu)", operation, (unsigned long)error);
 }
 
-// Every installed view is exactly one replacement granule. Untouched holes
-// remain large placeholders; split only the unit about to receive backing.
+// Every installed view is one replacement unit, with a possibly shorter final
+// unit. Untouched holes remain large placeholders; split only the unit about
+// to receive backing.
 static iree_status_t iree_shm_reservation_prepare_unit(
     const iree_shm_reservation_api_t* api, uint8_t* address,
     iree_host_size_t granularity) {
@@ -124,7 +125,8 @@ iree_status_t iree_shm_reservation_initialize(
   }
   if (!byte_length || !granularity ||
       !iree_host_size_is_valid_alignment(granularity) ||
-      granularity < info.normal_page_size || byte_length % granularity ||
+      granularity < info.normal_page_size ||
+      byte_length % info.normal_page_size ||
       !iree_host_size_is_valid_alignment(alignment) ||
       alignment < info.normal_page_size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -188,7 +190,9 @@ iree_status_t iree_shm_reservation_update(
         update->byte_length >
             reservation->byte_length - update->target_offset ||
         update->target_offset % reservation->granularity ||
-        update->byte_length % reservation->granularity) {
+        (update->byte_length % reservation->granularity &&
+         update->byte_length !=
+             reservation->byte_length - update->target_offset)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "invalid shared mapping destination range");
     }
@@ -222,14 +226,16 @@ iree_status_t iree_shm_reservation_update(
     const iree_shm_mapping_update_t* update = &updates[i];
     for (iree_host_size_t offset = 0;
          offset < update->byte_length && iree_status_is_ok(status);
-         offset += reservation->granularity) {
+         offset +=
+         iree_min(reservation->granularity, update->byte_length - offset)) {
       uint8_t* address = reservation->base + update->target_offset + offset;
-      status = iree_shm_reservation_prepare_unit(&api, address,
-                                                 reservation->granularity);
+      const iree_host_size_t unit_length =
+          iree_min(reservation->granularity, update->byte_length - offset);
+      status = iree_shm_reservation_prepare_unit(&api, address, unit_length);
       if (iree_status_is_ok(status) && update->source &&
           !api.map((HANDLE)(uintptr_t)update->source->handle.value,
                    GetCurrentProcess(), address, update->source_offset + offset,
-                   reservation->granularity, MEM_REPLACE_PLACEHOLDER,
+                   unit_length, MEM_REPLACE_PLACEHOLDER,
                    (update->access & IREE_SHM_ACCESS_WRITE) ? PAGE_READWRITE
                                                             : PAGE_READONLY,
                    NULL, 0)) {

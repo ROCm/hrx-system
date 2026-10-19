@@ -237,9 +237,9 @@ enum iree_shm_access_bits_e {
 typedef struct iree_shm_reservation_t {
   // Aligned usable address, inaccessible until backing is installed.
   uint8_t* base;
-  // Usable byte extent, a multiple of |granularity|.
+  // Usable byte extent, a multiple of the native page size.
   iree_host_size_t byte_length;
-  // Independent replacement unit, selected at initialization.
+  // Independent replacement unit; the last unit may be shorter.
   iree_host_size_t granularity;
   // Complete native interval, including possible alignment slack.
   void* allocation_base;
@@ -266,8 +266,9 @@ typedef struct iree_shm_mapping_update_t {
 bool iree_shm_reservation_is_supported(void);
 
 // Reserves an inaccessible interval. Length must be a nonzero multiple of the
-// replacement granularity. Zero alignment/granularity selects the normal page
-// size; nonzero values must be powers of two at least as large as that size.
+// normal page size; the last replacement unit may be shorter than granularity.
+// Zero alignment/granularity selects the normal page size; nonzero values must
+// be powers of two at least as large as that size.
 // Larger granules reduce native mapping work on platforms requiring individual
 // views for independently replaceable ranges. Failure leaves output unchanged.
 iree_status_t iree_shm_reservation_initialize(
@@ -276,8 +277,10 @@ iree_status_t iree_shm_reservation_initialize(
 
 // Applies sorted, nonoverlapping updates. All ranges and access values are
 // validated before mutation. Sources remain caller-owned while aliases use
-// their backing. Success establishes CPU translation readiness; no execution
-// dependencies are inferred or waited. A native error may leave partial
+// their backing. Target offsets align to the replacement granularity. Lengths
+// align to that granularity or end exactly at the reservation's short tail.
+// Success establishes CPU translation readiness; no execution dependencies are
+// inferred or waited. A native error may leave partial
 // updates; after such an error only full detach or deinitialization is
 // permitted. The owner preserves that failure even if later detach succeeds.
 iree_status_t iree_shm_reservation_update(

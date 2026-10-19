@@ -185,6 +185,77 @@ TEST_F(ShmReservationTest, DetachesBackingWhileRetainingAddressesForReuse) {
   }
 }
 
+TEST_F(ShmReservationTest, CoarseUnitsPreserveShortTailAndNeighbors) {
+  IREE_ASSERT_OK(iree_shm_reservation_deinitialize(&reservation_));
+  iree_shm_close(&source_);
+  IREE_ASSERT_OK(iree_shm_create(nullptr, 9 * granularity_, &source_));
+  const iree_host_size_t unit = 4 * granularity_;
+  // Cover both a reservation smaller than one unit and a tail following full
+  // units. Each initial update spans the complete reservation in one call.
+  for (iree_host_size_t page_count : {1, 9}) {
+    SCOPED_TRACE(page_count);
+    const iree_host_size_t length = page_count * granularity_;
+    IREE_ASSERT_OK(
+        iree_shm_reservation_initialize(length, 0, unit, &reservation_));
+    EXPECT_EQ(reservation_.byte_length, length);
+    EXPECT_EQ(reservation_.granularity, unit);
+    auto* source = static_cast<uint8_t*>(source_.base);
+    for (iree_host_size_t i = 0; i < page_count; ++i) {
+      std::memset(source + i * granularity_, static_cast<int>(i + 1),
+                  granularity_);
+    }
+    auto initial = Mapping(0, 0, length);
+    IREE_ASSERT_OK(iree_shm_reservation_update(&reservation_, 1, &initial));
+    for (iree_host_size_t i = 0; i < length; ++i) {
+      ASSERT_EQ(reservation_.base[i], i / granularity_ + 1);
+    }
+    const iree_host_size_t tail_offset = length - granularity_;
+    auto replacement = Mapping(tail_offset, 0, granularity_);
+    IREE_ASSERT_OK(iree_shm_reservation_update(&reservation_, 1, &replacement));
+    reservation_.base[tail_offset + 7] = 93;
+    EXPECT_EQ(source[7], 93);
+    if (page_count > 1) {
+      // A short interior update remains invalid, including when an earlier
+      // valid update in the same batch could otherwise change the neighbor.
+      const iree_shm_mapping_update_t invalid[] = {
+          Mapping(0, unit, unit),
+          Mapping(unit, 0, granularity_),
+      };
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_OUT_OF_RANGE,
+          iree_shm_reservation_update(&reservation_, 2, invalid));
+      EXPECT_EQ(reservation_.base[7], 93);
+      EXPECT_EQ(reservation_.base[unit + 7], 5);
+      const auto full_unit = Mapping(0, unit, unit);
+      IREE_ASSERT_OK(iree_shm_reservation_update(&reservation_, 1, &full_unit));
+      EXPECT_EQ(reservation_.base[7], 5);
+      EXPECT_EQ(reservation_.base[tail_offset + 7], 93);
+    }
+    const iree_shm_mapping_update_t detach = {tail_offset, granularity_};
+    IREE_ASSERT_OK(iree_shm_reservation_update(&reservation_, 1, &detach));
+    replacement.source_offset = granularity_;
+    IREE_ASSERT_OK(iree_shm_reservation_update(&reservation_, 1, &replacement));
+    reservation_.base[length - 1] = 71;
+    EXPECT_EQ(source[2 * granularity_ - 1], 71);
+    if (page_count > 1) {
+      EXPECT_EQ(reservation_.base[unit + 7], 5);
+    }
+    IREE_ASSERT_OK(iree_shm_reservation_detach(&reservation_));
+    IREE_ASSERT_OK(iree_shm_reservation_update(&reservation_, 1, &initial));
+    IREE_ASSERT_OK(iree_shm_reservation_deinitialize(&reservation_));
+  }
+}
+
+TEST_F(ShmTest, ShortReservationStillRequiresWholeNativePages) {
+  const iree_host_size_t page = iree_shm_required_size(0);
+  iree_shm_reservation_t reservation = {.byte_length = 17};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_shm_reservation_initialize(5 * page - 1, 0, 4 * page, &reservation));
+  EXPECT_EQ(reservation.byte_length, 17u);
+  EXPECT_EQ(reservation.base, nullptr);
+}
+
 TEST_F(ShmTest, RequiredSizeZeroReturnsOnePage) {
   iree_host_size_t page = iree_shm_required_size(0);
   EXPECT_GT(page, 0);
