@@ -114,8 +114,8 @@ iree_cc_test(
     ::test_device
     iree::base
     iree::hal
+    iree::hal::cts::util::pool_test_util
     iree::hal::drivers::amd::gpu::image::asan_images
-    iree::hal::drivers::amd::status
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

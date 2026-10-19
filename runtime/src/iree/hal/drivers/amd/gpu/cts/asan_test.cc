@@ -6,12 +6,13 @@
 
 #include <array>
 #include <cstring>
+#include <semaphore>
 #include <vector>
 
 #include "iree/hal/api.h"
+#include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/image/asan_images.h"
-#include "iree/hal/drivers/amd/status.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -21,24 +22,8 @@ namespace {
 class GpuAsanTest : public GpuNativeTest,
                     public ::testing::WithParamInterface<bool> {
  protected:
-  static void SetUpTestSuite() {
-    const amdf_api_t* api = nullptr;
-    IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
-        amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
-        "API"));
-    IREE_ASSERT_OK(iree_hal_amd_fabric_create(api, AMDF_NATIVE_LIFETIME_PROCESS,
-                                              iree_allocator_system(),
-                                              &suite_fabric_));
-  }
-
-  static void TearDownTestSuite() {
-    iree_hal_amd_fabric_release(suite_fabric_);
-    suite_fabric_ = nullptr;
-  }
-
   void SetUp() override {
-    fabric_ = suite_fabric_;
-    iree_hal_amd_fabric_retain(fabric_);
+    IREE_ASSERT_OK(NativeMemoryGate::AcquireProcessFabric(&fabric_));
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
       return;
@@ -164,8 +149,6 @@ class GpuAsanTest : public GpuNativeTest,
 
   // Explicit source shared by owned and imported buffers.
   iree_hal_pool_t* pool_ = nullptr;
-  // Host registration borrows process memory through one native instance.
-  inline static iree_hal_amd_fabric_t* suite_fabric_ = nullptr;
   // Shader-readable device address slot fixed during pool construction.
   iree_hal_buffer_native_binding_slot_t slot_ = {};
   // Real compiler artifact whose globals receive the production configuration.
@@ -178,6 +161,8 @@ class GpuAsanTest : public GpuNativeTest,
   iree_hal_buffer_t* target_ = nullptr;
   // Attachment under test; external storage remains owned by this fixture.
   iree_hal_buffer_t* imported_ = nullptr;
+  // Publishes completion of native detachment before observing quarantine.
+  std::binary_semaphore import_released_{0};
   // Explicit completion timeline for shadow observation.
   iree_hal_semaphore_t* done_ = nullptr;
   // Last submitted timeline value.
@@ -187,6 +172,8 @@ class GpuAsanTest : public GpuNativeTest,
 };
 
 TEST_P(GpuAsanTest, OwnedSlabReleasePoisonsAndQuarantinesBeforeFinalCleanup) {
+  iree_hal_pool_stats_t before;
+  iree_hal_pool_query_stats(pool_, &before);
   Allocate(19, &target_);
   ASSERT_FALSE(HasFatalFailure());
   const uint64_t address = Address(target_);
@@ -195,6 +182,8 @@ TEST_P(GpuAsanTest, OwnedSlabReleasePoisonsAndQuarantinesBeforeFinalCleanup) {
   target_ = nullptr;
   iree_hal_pool_trim(pool_, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  ASSERT_TRUE(
+      iree::hal::cts::WaitPoolCommittedBytes(pool_, before.bytes_committed));
   ExpectShadow(address, {0xfa, 0xfa, 0xfa, 0xfa});
   EXPECT_GE(Observe().quarantine_size, 19u + 2u * 256u);
 }
@@ -207,6 +196,12 @@ TEST_P(GpuAsanTest,
       .byte_length = external_.size(),
       .host_cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK,
       .maintenance_range = {4096, 4096},
+      .release =
+          [](void* user_data, iree_hal_external_storage_class_t,
+             iree_hal_external_storage_payload_t) {
+            static_cast<std::binary_semaphore*>(user_data)->release();
+          },
+      .release_user_data = &import_released_,
   };
   IREE_ASSERT_OK(
       iree_hal_pool_import_buffer(pool_, &storage, {4099, 13}, &imported_));
@@ -217,6 +212,7 @@ TEST_P(GpuAsanTest,
   iree_hal_buffer_release(imported_);
   imported_ = nullptr;
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  import_released_.acquire();
   EXPECT_EQ(Observe().quarantine_size, before.quarantine_size);
 }
 
