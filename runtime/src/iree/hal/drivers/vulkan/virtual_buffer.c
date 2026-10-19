@@ -208,7 +208,7 @@ iree_status_t iree_hal_vulkan_virtual_buffer_create(
   // Sparse addresses already satisfy the native alignment. Larger requested
   // alignments use an interior view without committing any physical storage.
   iree_device_size_t native_length = 0;
-  if (options->byte_length % granularity ||
+  if (options->byte_length % plan.capabilities.reservation_granularity ||
       alignment > plan.capabilities.max_alignment ||
       !iree_device_size_checked_add(
           options->byte_length,

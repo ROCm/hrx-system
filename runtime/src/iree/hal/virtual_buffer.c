@@ -420,8 +420,10 @@ static iree_status_t iree_hal_memory_mapping_resolve(
       view.byte_offset + mapping->target_range.byte_offset;
   if (!iree_device_size_has_alignment(target_offset,
                                       target->mapping_granularity) ||
-      !iree_device_size_has_alignment(mapping->target_range.byte_length,
-                                      target->mapping_granularity)) {
+      (!iree_device_size_has_alignment(mapping->target_range.byte_length,
+                                       target->mapping_granularity) &&
+       mapping->target_range.byte_length !=
+           target->buffer.byte_length - target_offset)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "mapping range is misaligned in native coordinates");

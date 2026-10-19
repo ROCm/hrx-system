@@ -288,6 +288,13 @@ TEST_F(MemoryTest, MixedSlabsAndShortTailsShareExactNativeBudget) {
   EXPECT_EQ(loom_serve_virtual_buffer_slab_count(first), 2u);
   EXPECT_EQ(loom_serve_virtual_buffer_slab_range(first, 1).byte_length,
             tail_bytes);
+  iree_hal_virtual_buffer_info_t info;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_info(
+      loom_serve_virtual_buffer_handle(first), &info));
+  EXPECT_EQ(info.mapping_granularity, bulk.slab_size);
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_info(
+      loom_serve_virtual_buffer_handle(second), &info));
+  EXPECT_EQ(info.mapping_granularity, state.slab_size);
 
   // Duplicate and overlapping logical ranges charge each physical extent once.
   const loom_serve_memory_range_t ranges[] = {
@@ -351,6 +358,38 @@ TEST_F(MemoryTest, MixedSlabsAndShortTailsShareExactNativeBudget) {
   IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool, 1, &extra, &admitted));
   ASSERT_TRUE(admitted);
   RoundTrip(loom_serve_virtual_buffer_handle(second), state.slab_size,
+            0xABCDEF01);
+}
+
+TEST_F(MemoryTest, NonPowerOfTwoSlabsRetainCoarseMappingsAndExactTails) {
+  auto geometry = loom_serve_device_state_geometry(device);
+  geometry.slab_size = 3 * kSlabSize;
+  const uint64_t tail = geometry.minimum_size;
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(geometry.slab_size + tail));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, geometry, geometry.slab_size + tail - 1, 256, &statistics[0],
+      &first));
+  iree_hal_virtual_buffer_info_t info;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_info(
+      loom_serve_virtual_buffer_handle(first), &info));
+  EXPECT_EQ(info.mapping_granularity, kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_buffer_slab_count(first), 2u);
+  EXPECT_EQ(statistics[0].reserved_bytes, geometry.slab_size + tail);
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(first, 0, geometry.slab_size + tail));
+  EXPECT_EQ(statistics[0].committed_bytes, geometry.slab_size + tail);
+  RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
+  RoundTrip(loom_serve_virtual_buffer_handle(first), geometry.slab_size,
+            0x87654321);
+  loom_serve_virtual_buffer_begin_trim(first);
+  loom_serve_virtual_buffer_keep(first, 0, 1);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(first));
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  EXPECT_EQ(statistics[0].committed_bytes, geometry.slab_size);
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(first, geometry.slab_size, tail));
+  CheckRetained(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
+  RoundTrip(loom_serve_virtual_buffer_handle(first), geometry.slab_size,
             0xABCDEF01);
 }
 

@@ -299,6 +299,67 @@ TEST_P(VulkanSparseBindingTest, ReservationScopeAndGeometryQualification) {
   EXPECT_EQ(nullptr, reservation);
 }
 
+TEST_P(VulkanSparseBindingTest, CoarseMappingUnitsPreserveExactTail) {
+  auto source_family = family_;
+  source_family.interfaces = UINT64_C(1)
+                             << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
+  const iree_hal_slab_pool_options_t pool_options = {};
+  Ref<iree_hal_pool_t> source_pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      device_group_, {1, &source_family, {}}, &pool_options,
+      iree_allocator_system(), source_pool.out()));
+  const auto requirements =
+      iree_hal_pool_query_mapping_requirements(source_pool);
+  const auto tail = iree_max(capabilities_.reservation_granularity,
+                             requirements.minimum_granularity);
+  const auto unit = 2 * tail;
+  const auto length = unit + tail;
+  Ref<iree_hal_buffer_t> source;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      source_pool, iree_hal_make_pool_reservation_request(length, tail),
+      iree_infinite_timeout(), source.out()));
+  const iree_hal_virtual_buffer_options_t options = {
+      .byte_length = length,
+      .mapping_granularity = unit,
+  };
+  Ref<iree_hal_buffer_t> target;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+      device_group_, Scope(), &options, iree_allocator_system(), target.out()));
+  const iree_hal_memory_scope_t all = {
+      iree_hal_device_group_memory_domain(device_group_),
+      IREE_HAL_MEMORY_SCOPE_ANY};
+  iree_hal_memory_mapping_t mapping = {
+      .target = target,
+      .scope = all,
+      .target_range = {0, length},
+      .source = source,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+  };
+  SemaphoreList mapped(device_, {0}, {1});
+  IREE_ASSERT_OK(
+      iree_hal_queue_map(&sparse_queue_->base, {}, mapped, 1, &mapping, 0));
+  std::vector<uint32_t> input(length / sizeof(uint32_t));
+  for (size_t i = 0; i < input.size(); ++i) {
+    input[i] = 0x12340000u + i;
+  }
+  SemaphoreList uploaded(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_queue_upload(transfer_queue_, mapped, uploaded,
+                                       input.data(), source, 0, length,
+                                       nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(uploaded, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  ExpectPage(target, unit, input[unit / sizeof(uint32_t)]);
+  mapping.target_range = {unit, tail};
+  SemaphoreList replaced(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_queue_map(&sparse_queue_->base, uploaded, replaced, 1,
+                                    &mapping, 0));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(replaced, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  ExpectPage(target, 0, input[0]);
+  ExpectPage(target, unit, input[0]);
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target, all));
+}
+
 TEST_P(VulkanSparseBindingTest, QueueMapCapturesPendingAllocations) {
   iree_hal_pool_family_access_t source_family = family_;
   source_family.interfaces = UINT64_C(1)

@@ -304,7 +304,7 @@ iree_status_t iree_hal_amdgpu_virtual_buffer_create(
   }
   const iree_device_size_t granularity =
       iree_max(options->mapping_granularity, capabilities.mapping_granularity);
-  if (options->byte_length % granularity) {
+  if (options->byte_length % capabilities.reservation_granularity) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "ROCr reservation length is not granule aligned");
   }

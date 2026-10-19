@@ -65,9 +65,11 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_query_capabilities(
 
 // Geometry of an address reservation, independent of physical storage pools.
 // Zero alignment/granularity selects the backend's minimum. The achieved
-// granularity is queried after creation and applies to every mapping range.
-// A larger granularity may reduce native mapping work (for example, the number
-// of independently replaceable section views on Windows).
+// granularity is queried after creation. Mapping offsets and interior lengths
+// are multiples of that unit; only the root reservation's final unit may be
+// shorter. Reservation lengths still satisfy native capabilities. A larger
+// granularity may reduce native mapping work (for example, the number of
+// independently replaceable section views on Windows).
 typedef struct iree_hal_virtual_buffer_options_t {
   // Nonzero length of the stable virtual buffer, in bytes.
   iree_device_size_t byte_length;
@@ -92,7 +94,8 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_create(
 typedef struct iree_hal_virtual_buffer_info_t {
   // Visible byte zero in the native mapping target's coordinates.
   iree_device_size_t mapping_byte_offset;
-  // Independently replaceable offset and length unit, in bytes.
+  // Independently replaceable unit, in bytes; the root's final unit may be
+  // short.
   iree_device_size_t mapping_granularity;
   // Operations supported across the admitted native projections.
   iree_hal_memory_mapping_operations_t operations;
@@ -126,7 +129,9 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_detach(
 
 // One change to a virtual range. Mapping borrows physical storage; it does not
 // copy contents, transfer ownership, or retain backing after queue completion.
-// Target offsets and lengths satisfy the reservation's mapping granularity.
+// Target offsets in root coordinates satisfy the reservation's mapping
+// granularity. Lengths are whole units or end exactly at the root reservation's
+// end. A subspan ending inside the root does not permit a short final unit.
 // Native source offsets and lengths satisfy the source's independently prepared
 // granularity, which may be smaller than the target's replacement unit.
 // Binding and protection changes require their declared prior state. HAL does

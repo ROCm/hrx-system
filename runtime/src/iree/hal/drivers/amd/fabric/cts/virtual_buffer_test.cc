@@ -355,7 +355,7 @@ TEST_P(FabricVirtualBufferTest,
   family.interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
   const iree_hal_virtual_buffer_options_t options = {
       .byte_length = unit,
-      .mapping_granularity = unit,
+      .mapping_granularity = 2 * unit,
   };
   Ref<iree_hal_buffer_t> root;
   IREE_ASSERT_OK(iree_hal_virtual_buffer_create(

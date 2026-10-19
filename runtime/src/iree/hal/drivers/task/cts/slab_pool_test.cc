@@ -1418,6 +1418,100 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
   EXPECT_EQ(stats.bytes_committed, 0u);
 }
 
+TEST_P(TaskSlabPoolTest, OnlyRootReservationEndPermitsAShortMappingUnit) {
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, Scope(), iree_allocator_system(), &capabilities));
+  for (auto& family : families_) {
+    family.interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
+  }
+  Ref<iree_hal_pool_t> source;
+  IREE_ASSERT_OK(CreateSource(source.out()));
+  const auto requirements = iree_hal_pool_query_mapping_requirements(source);
+  const iree_device_size_t tail = iree_max(capabilities.reservation_granularity,
+                                           requirements.minimum_granularity);
+  const iree_device_size_t unit = 4 * tail;
+  Ref<iree_hal_buffer_t> backing;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      source, iree_hal_make_pool_reservation_request(unit + tail, tail),
+      iree_infinite_timeout(), backing.out()));
+  for (auto& family : families_) {
+    family.interfaces = 0;
+  }
+  const iree_hal_memory_scope_t all = {
+      iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY};
+  for (const iree_device_size_t length : {tail, unit + tail}) {
+    SCOPED_TRACE(length);
+    const iree_hal_virtual_buffer_options_t options = {
+        .byte_length = length,
+        .mapping_granularity = unit,
+    };
+    Ref<iree_hal_buffer_t> root;
+    IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+        group_, Scope(), &options, iree_allocator_system(), root.out()));
+    iree_hal_virtual_buffer_info_t info;
+    IREE_ASSERT_OK(iree_hal_virtual_buffer_query_info(root, &info));
+    EXPECT_EQ(info.mapping_granularity, unit);
+    iree_hal_memory_mapping_t mapping = {
+        .target = root,
+        .scope = all,
+        .target_range = {0, length},
+        .source = backing,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+    };
+    SemaphoreList mapped(devices_[0], {0}, {1});
+    IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {}, mapped, 1, &mapping, 0));
+    IREE_ASSERT_OK(Wait(mapped));
+    if (length > unit) {
+      Ref<iree_hal_buffer_t> interior;
+      IREE_ASSERT_OK(iree_hal_buffer_subspan(
+          root, 0, tail, iree_allocator_system(), interior.out()));
+      auto invalid = mapping;
+      invalid.target = interior;
+      invalid.target_range.byte_length = tail;
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_OUT_OF_RANGE,
+          iree_hal_queue_map(queues_[0], {}, {}, 1, &invalid, 0));
+      invalid.target = root;
+      invalid.target_range = {tail, unit};
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_OUT_OF_RANGE,
+          iree_hal_queue_map(queues_[0], {}, {}, 1, &invalid, 0));
+    }
+    Ref<iree_hal_buffer_t> final_view;
+    IREE_ASSERT_OK(iree_hal_buffer_subspan(
+        root, length - tail, tail, iree_allocator_system(), final_view.out()));
+    mapping.target = final_view;
+    mapping.target_range = {0, tail};
+    mapping.source_offset = unit;
+    SemaphoreList replaced(devices_[1], {0}, {1});
+    IREE_ASSERT_OK(
+        iree_hal_queue_map(queues_[1], {}, replaced, 1, &mapping, 0));
+    const uint32_t pattern = 0xA5B61234u;
+    SemaphoreList filled(devices_[0], {0}, {1});
+    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], replaced, filled, final_view,
+                                       0, tail, &pattern, sizeof(pattern),
+                                       nullptr, IREE_HAL_FILL_FLAG_NONE));
+    std::array<uint32_t, 16> observed = {};
+    SemaphoreList downloaded(devices_[1], {0}, {1});
+    IREE_ASSERT_OK(iree_hal_queue_download(queues_[1], filled, downloaded,
+                                           backing, unit, observed.data(),
+                                           sizeof(observed), nullptr));
+    IREE_ASSERT_OK(Wait(downloaded));
+    for (const auto value : observed) {
+      EXPECT_EQ(value, pattern);
+    }
+    mapping.source = nullptr;
+    mapping.source_offset = 0;
+    mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;
+    SemaphoreList detached(devices_[0], {0}, {1});
+    IREE_ASSERT_OK(
+        iree_hal_queue_map(queues_[0], {}, detached, 1, &mapping, 0));
+    IREE_ASSERT_OK(Wait(detached));
+    IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(root, all));
+  }
+}
+
 TEST_P(TaskSlabPoolTest, RejectsMappingConflictsAndUnpreparedSources) {
   constexpr iree_device_size_t kUnit = 64 * 1024;
   Ref<iree_hal_pool_t> ordinary;

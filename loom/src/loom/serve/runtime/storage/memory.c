@@ -521,10 +521,15 @@ iree_status_t loom_serve_virtual_buffer_allocate(
   buffer->geometry = geometry;
   buffer->byte_length = byte_length;
   buffer->slab_count = (iree_host_size_t)count;
+  // A coarse replacement unit keeps Windows section views proportional to
+  // slabs. The largest power-of-two divisor also preserves boundaries for
+  // non-power-of-two slab sizes. Only the reservation's last unit may be short.
+  const iree_device_size_t mapping_granularity =
+      geometry.slab_size & (0 - geometry.slab_size);
   const iree_hal_virtual_buffer_options_t options = {
       .byte_length = byte_length,
       .min_alignment = alignment,
-      .mapping_granularity = geometry.granularity,
+      .mapping_granularity = mapping_granularity,
   };
   iree_status_t status =
       iree_hal_virtual_buffer_create(pool->group, pool->scope, &options,

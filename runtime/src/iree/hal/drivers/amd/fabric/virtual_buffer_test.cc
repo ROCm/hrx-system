@@ -67,11 +67,12 @@ TEST_F(MemoryBackendTest, QueriesReservationGeometryBeforeAcquiringAddresses) {
   EXPECT_EQ(reservation, nullptr);
   EXPECT_EQ(native_.reservation_count, 0);
   options.byte_length = capabilities.reservation_granularity;
+  options.mapping_granularity = 4 * capabilities.mapping_granularity;
   IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, scope, &options,
                                                 allocator_, &reservation));
   iree_hal_virtual_buffer_info_t info;
   IREE_ASSERT_OK(iree_hal_virtual_buffer_query_info(reservation, &info));
-  EXPECT_EQ(info.mapping_granularity, capabilities.mapping_granularity);
+  EXPECT_EQ(info.mapping_granularity, options.mapping_granularity);
   EXPECT_EQ(native_.reservation_count, 1);
   EXPECT_EQ(native_.create_count, 0);
   iree_hal_buffer_release(reservation);

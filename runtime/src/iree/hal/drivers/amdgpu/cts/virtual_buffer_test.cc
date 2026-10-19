@@ -344,6 +344,41 @@ TEST_P(AmdgpuVirtualBufferTest, PartialBatchFailureCanDetachEveryTarget) {
   IREE_EXPECT_OK(status);
 }
 
+TEST_P(AmdgpuVirtualBufferTest, EntireReservationCanBeShorterThanMappingUnit) {
+  const iree_hal_virtual_buffer_options_t options = {
+      .byte_length = granularity_,
+      .mapping_granularity = 2 * granularity_,
+  };
+  Ref<iree_hal_buffer_t> target;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+      device_group_, scope_, &options, iree_allocator_system(), target.out()));
+  Ref<iree_hal_buffer_t> source;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(granularity_, 1),
+      iree_infinite_timeout(), source.out()));
+  const iree_hal_memory_mapping_t mapping = {
+      .target = target,
+      .scope = any_,
+      .target_range = {0, granularity_},
+      .source = source,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+  };
+  SemaphoreList mapped(device_, {0}, {1});
+  IREE_ASSERT_OK(
+      iree_hal_queue_map(transfer_queue_, {}, mapped, 1, &mapping, 0));
+  const uint32_t pattern = 0xA0B01234u;
+  SemaphoreList filled(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_queue_fill(transfer_queue_, mapped, filled, target, 0,
+                                     granularity_, &pattern, sizeof(pattern),
+                                     nullptr, IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(filled, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  ExpectPattern(target, granularity_ - 64, pattern);
+  ExpectPattern(source, granularity_ - 64, pattern);
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target, any_));
+}
+
 TEST_P(AmdgpuVirtualBufferTest, NativeCapabilitiesRejectUnrepresentableScopes) {
   EXPECT_EQ(capabilities_.operations,
             (1u << IREE_HAL_MEMORY_MAPPING_OPERATION_BIND) |
