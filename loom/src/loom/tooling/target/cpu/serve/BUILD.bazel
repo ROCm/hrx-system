@@ -86,6 +86,28 @@ loom_py_test(
     deps = ["//loom/src/loom/serve/testing:http"],
 )
 
+loom_py_test(
+    name = "pressure_test",
+    size = "small",
+    srcs = ["//loom/src/loom/serve/server:pressure_test.py"],
+    args = [
+        "--server=$(rootpath :loom-serve-test-tool)",
+        "--source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "--device=task",
+    ],
+    data = TEXT_SOURCES + [":loom-serve-test-tool"],
+    main = "pressure_test.py",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//loom/src/loom/serve/testing:http"],
+)
+
 loom_cc_test(
     name = "execution_queues_test",
     target_compatible_with = loom_config_compatible_with([

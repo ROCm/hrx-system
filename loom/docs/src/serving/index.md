@@ -101,19 +101,18 @@ programs rather than assuming a GPU command program also runs on the NPU.
 Device-group membership alone does not distribute a model or share its memory
 between members.
 
-Use `--pool_backing=fixed` for task and Vulkan in the current server. Both
-backends support virtual memory: task uses host virtual memory where available,
-and Vulkan requires suitable sparse-memory capabilities. Their VMM implementations
-use HAL's device-group interfaces, while serving's elastic retained pool still
-consumes the allocator-level contract currently implemented by AMDGPU. The
-fixed-backing requirement is a serving integration boundary, not an absence of
-backend VMM support.
+Elastic backing supports retained-memory budgets and reclamation of idle,
+unpinned parameters on task and AMDGPU. It requires virtual reservations,
+mapping-source allocations, and bind/unbind operations from the selected device.
+Task uses host virtual memory where available; Vulkan requires suitable
+sparse-memory capabilities. Fixed backing eagerly retains storage and does not
+support parameter deactivation or a retained-memory budget.
 
-Elastic backing fails during device-group initialization when that allocator
-contract is unavailable. Model-specific resource requirements are checked during
-preparation. Neither path silently changes the memory policy. Address-sanitized
-devices require fixed backing so their allocations can be published to the
-sanitizer shadow state.
+Elastic backing fails during device-group initialization when the required
+mapping capabilities are unavailable. Model-specific resource requirements are
+checked during preparation. Neither path silently changes the memory policy.
+Address-sanitized devices require fixed backing so their allocations can be
+published to the sanitizer shadow state.
 
 All listeners share one catalog, worker pool and connection budget. A port of
 zero requests an ephemeral port. One JSON `ready` record is written to stderr

@@ -394,6 +394,7 @@ iree_py_test(
   ARGS
     "--server={{$<TARGET_FILE:loom::tooling::target::amdgpu::serve::loom-serve-test-tool>}}"
     "--source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
+    "--device=amdgpu"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
@@ -433,6 +434,7 @@ iree_py_test(
   ARGS
     "--server={{$<TARGET_FILE:loom::tooling::target::amdgpu::serve::loom-serve-test-tool>}}"
     "--source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
+    "--device=amdgpu"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"

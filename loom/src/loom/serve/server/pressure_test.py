@@ -93,7 +93,7 @@ def oracle(text):
     return result
 
 
-def check(server, source, directory, workers, memory_bytes, retention):
+def check(server, source, directory, device, workers, memory_bytes, retention):
     configuration = directory / "models.flags"
     weights = directory / "weights.safetensors"
     header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
@@ -124,7 +124,7 @@ def check(server, source, directory, workers, memory_bytes, retention):
     configuration.write_text("\n".join(flags) + "\n")
     command = [
         str(server),
-        "--device=amdgpu",
+        f"--device={device}",
         "--pool_backing=elastic",
         "--slab_bytes=2097152",
         f"--memory_bytes={memory_bytes}",
@@ -361,6 +361,7 @@ def run_from_command_line(cases):
     parser = argparse.ArgumentParser()
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--device", required=True)
     arguments = parser.parse_args()
     server, source = arguments.server.absolute(), arguments.source.absolute().parent
     failures = []
@@ -370,7 +371,15 @@ def run_from_command_line(cases):
             directory = root / f"{workers}-{memory_bytes}-{retention}"
             directory.mkdir()
             try:
-                check(server, source, directory, workers, memory_bytes, retention)
+                check(
+                    server,
+                    source,
+                    directory,
+                    arguments.device,
+                    workers,
+                    memory_bytes,
+                    retention,
+                )
             except AssertionError as error:
                 failures.append((workers, memory_bytes, retention, str(error)))
     assert not failures, failures

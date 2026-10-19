@@ -285,6 +285,7 @@ loom_py_test(
     args = [
         "--server=$(rootpath :loom-serve-test-tool)",
         "--source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "--device=amdgpu",
     ],
     data = TEXT_SOURCES + [
         ":loom-serve-test-tool",
@@ -311,6 +312,7 @@ loom_py_test(
     args = [
         "--server=$(rootpath :loom-serve-test-tool)",
         "--source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "--device=amdgpu",
     ],
     data = TEXT_SOURCES + [
         ":loom-serve-test-tool",
