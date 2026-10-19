@@ -14,7 +14,7 @@ kernel.decl @hc_normalize() launch(%span: buffer, %residual: buffer, %gamma: buf
 
 kernel.decl @hc_up_mix() launch(%span: buffer, %normalized: buffer, %lowrank: buffer, %weight: buffer, %mixed: buffer)
 
-template.decl @sampling.categorical_f32(%columns: index, %logits: buffer, %logits_origin: offset, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
+template.decl @sampling.categorical_excluding_f32(%columns: index, %logits: buffer, %logits_origin: offset, %excluded_id: i32, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
 
 // The controller has already selected each requested last span row. Gather
 // only those rows before the final hyperconnection and vocabulary projection.
@@ -184,13 +184,21 @@ kernel.def @flash_next_sample() {
     %temperature = view.load %floats[0] : view<6xf32> -> f32
     %top_p = view.load %floats[1] : view<6xf32> -> f32
     %top_k = view.load %words[2] : view<6xi32> -> i32
+    %flags = view.load %words[3] : view<6xi32> -> i32
+    %tool_bit = scalar.constant 2 : i32
+    %zero = scalar.constant 0 : i32
+    %none = scalar.constant -1 : i32
+    %tool_open = scalar.constant 248058 : i32
+    %permission = scalar.andi %flags, %tool_bit : i32
+    %disabled = scalar.cmpi ne, %permission, %zero : i32
+    %excluded = scf.select %disabled, %tool_open, %none : i32
     %seed = view.load %seeds[0] : view<1xi64> -> i64
     %row_bytes = index.constant 993280 : offset
     %logits_origin = index.scale %row, %row_bytes : index, offset -> offset
     // The checkpoint pads its physical vocabulary to 248320 rows. Only
     // the 248077 tokenizer IDs may be sampled.
     %columns = index.constant 248077 : index
-    %selected = template.apply<@sampling.categorical_f32>(%columns, %logits, %logits_origin, %temperature, %top_p, %top_k, %seed, %position) : (index, buffer, offset, f32, f32, i32, i64, i64) -> (i32)
+    %selected = template.apply<@sampling.categorical_excluding_f32>(%columns, %logits, %logits_origin, %excluded, %temperature, %top_p, %top_k, %seed, %position) : (index, buffer, offset, i32, f32, f32, i32, i64, i64) -> (i32)
     %c0 = index.constant 0 : index
     %publishes = index.cmp eq, %thread, %c0 : index
     scf.if %publishes {

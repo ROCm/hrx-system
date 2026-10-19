@@ -541,11 +541,49 @@ class RequestCheckTest(unittest.TestCase):
             {"sampling": {"typo": 1}},
             {"samplng": {}},
             {"sampling": []},
+            {"sampling": {"tool_choice": "none"}},
         ):
             with self.subTest(defaults=defaults):
                 result = self.execute(source, self.request(), defaults=defaults)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, "")
+
+    def test_tool_permission_is_request_local_and_preserves_history(self):
+        source = PACKAGE / "control.loom"
+        for thinking in (False, True):
+            request = self.request(enable_thinking=thinking, tools=TOOLS)
+            ordinary = self.success(self.execute(source, request))
+            for choice, expected_flag in (("auto", 0), ("none", 2)):
+                request["tool_choice"] = choice
+                value = self.success(self.execute(source, request))
+                self.assertEqual(value["prompt"], ordinary["prompt"])
+                self.assertEqual(value["tokens"], ordinary["tokens"])
+                self.assertEqual(value["declared_tool_count"], len(TOOLS))
+                self.assertEqual(
+                    struct.unpack("<ffiiq", bytes(value["request_options"])),
+                    (0, 1, 0, expected_flag, 1),
+                )
+            # Seed and turn permission compose regardless of JSON field order,
+            # and a request-local choice does not modify deployment defaults.
+            for order in (
+                {"seed": 17, "tool_choice": "none"},
+                {"tool_choice": "none", "seed": 17},
+            ):
+                value = self.success(
+                    self.execute(source, self.request(tools=TOOLS, **order))
+                )
+                self.assertEqual(
+                    struct.unpack("<ffiiq", bytes(value["request_options"])),
+                    (0, 1, 0, 3, 17),
+                )
+            request["tool_choice"] = "none"
+            value = self.success(
+                self.execute(source, request, defaults={"sampling": {"seed": 19}})
+            )
+            self.assertEqual(
+                struct.unpack("<ffiiq", bytes(value["request_options"])),
+                (0, 1, 0, 3, 19),
+            )
 
     def test_sampling_spelling_and_extreme_exponents(self):
         source = PACKAGE / "control.loom"
