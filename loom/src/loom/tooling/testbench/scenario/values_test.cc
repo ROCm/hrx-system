@@ -346,5 +346,31 @@ TEST_F(ScenarioValuesTest, InvokeMaterializesOnlyTargetValues) {
   loom_module_free(module);
 }
 
+TEST_F(ScenarioValuesTest, ExplicitEntropyDomainOverridesScenarioName) {
+  loom_module_t* module = ParseModule();
+  ASSERT_NE(module, nullptr);
+  loom_testbench_module_plan_t plan = PlanModule(module);
+  ASSERT_EQ(plan.issue_count, 0u);
+  const loom_testbench_scenario_plan_t& scenario = plan.scenarios[0];
+
+  loom_testbench_value_materializer_options_t options = MaterializerOptions();
+  loom_testbench_scenario_configuration_values_t configuration = {};
+  IREE_ASSERT_OK(loom_testbench_scenario_configuration_values_initialize(
+      module, &scenario, host_allocator_, &configuration));
+  const loom_testbench_entropy_t entropy_root = loom_testbench_entropy_root(7);
+  IREE_ASSERT_OK(
+      loom_testbench_scenario_configuration_values_materialize_in_entropy_domain(
+          &options, entropy_root, IREE_SV("shared-comparison"),
+          /*configuration_ordinal=*/0, &configuration));
+
+  const loom_testbench_entropy_t expected =
+      loom_testbench_entropy_fork(entropy_root, IREE_SV("shared-comparison"));
+  EXPECT_EQ(configuration.scenario_entropy.low, expected.low);
+  EXPECT_EQ(configuration.scenario_entropy.high, expected.high);
+
+  loom_testbench_scenario_configuration_values_deinitialize(&configuration);
+  loom_module_free(module);
+}
+
 }  // namespace
 }  // namespace loom

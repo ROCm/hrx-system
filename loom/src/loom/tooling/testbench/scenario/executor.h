@@ -55,16 +55,25 @@ typedef iree_status_t(IREE_API_PTR* loom_testbench_product_benchmark_fn_t)(
 typedef void(IREE_API_PTR* loom_testbench_product_destroy_fn_t)(
     void* user_data);
 
+// Typed implementation shared by prepared products from one execution profile.
+//
+// The stable vtable address identifies the concrete product implementation to
+// target-specific consumers without string keys or callback heuristics.
+typedef struct loom_testbench_product_vtable_t {
+  // Executes one bounded batch.
+  loom_testbench_product_execute_fn_t execute;
+  // Benchmarks one target-only batch, or NULL when unsupported.
+  loom_testbench_product_benchmark_fn_t benchmark;
+} loom_testbench_product_vtable_t;
+
 // One ordinary executable product prepared for a static subject invocation.
 typedef struct loom_testbench_prepared_product_t {
   // External profile that prepared this product.
   iree_string_view_t profile;
   // Representative static invocation compiled into this product.
   const loom_testbench_invocation_plan_t* invocation;
-  // Executes one bounded batch.
-  loom_testbench_product_execute_fn_t execute;
-  // Benchmarks one target-only batch, or NULL when unsupported.
-  loom_testbench_product_benchmark_fn_t benchmark;
+  // Typed implementation used by this product.
+  const loom_testbench_product_vtable_t* vtable;
   // Optional teardown for |user_data|, cleared on borrowed product handles.
   loom_testbench_product_destroy_fn_t destroy;
   // Product-owned state passed to callbacks.
@@ -251,6 +260,33 @@ iree_status_t loom_testbench_scenario_trial_executor_initialize(
 // Releases all storage owned by |executor|.
 void loom_testbench_scenario_trial_executor_deinitialize(
     loom_testbench_scenario_trial_executor_t* executor);
+
+// Callback that consumes independently materialized calls for one trial.
+//
+// |product|, |invocation|, and |calls| remain valid only for the callback. The
+// executor resets every materialized value after the callback returns.
+typedef iree_status_t(
+    IREE_API_PTR* loom_testbench_scenario_trial_calls_callback_fn_t)(
+    void* user_data, const loom_testbench_prepared_product_t* product,
+    const loom_testbench_invocation_plan_t* invocation,
+    iree_host_size_t call_count, loom_testbench_product_call_t* calls);
+
+typedef struct loom_testbench_scenario_trial_calls_callback_t {
+  // Callback invoked after every requested call has been materialized.
+  loom_testbench_scenario_trial_calls_callback_fn_t fn;
+  // Opaque caller state passed to |fn|.
+  void* user_data;
+} loom_testbench_scenario_trial_calls_callback_t;
+
+// Materializes independent realizations of one semantic trial for a callback.
+//
+// Configuration and trial recipes execute before the callback. The executor
+// owns all call values and resets them before returning, including when the
+// callback fails.
+iree_status_t loom_testbench_scenario_trial_with_materialized_calls(
+    loom_testbench_scenario_trial_executor_t* executor,
+    iree_host_size_t trial_ordinal, iree_host_size_t call_count,
+    loom_testbench_scenario_trial_calls_callback_t callback);
 
 // Materializes and executes a contiguous range within one trial domain.
 //

@@ -739,6 +739,11 @@ static iree_status_t loom_vm_testbench_product_execute(
   return iree_ok_status();
 }
 
+static const loom_testbench_product_vtable_t loom_vm_testbench_product_vtable =
+    {
+        .execute = loom_vm_testbench_product_execute,
+};
+
 static iree_status_t loom_vm_testbench_product_prepare(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     const loom_testbench_value_table_t* configuration,
@@ -783,7 +788,7 @@ static iree_status_t loom_vm_testbench_product_prepare(
     return status;
   }
   *out_product = (loom_testbench_prepared_product_t){
-      .execute = loom_vm_testbench_product_execute,
+      .vtable = &loom_vm_testbench_product_vtable,
       .destroy = loom_vm_testbench_product_destroy,
       .user_data = product,
   };

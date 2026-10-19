@@ -43,6 +43,15 @@ typedef struct iree_benchmark_loom_hal_compilation_options_t {
   loomc_artifact_manifest_options_t artifact_manifest;
 } iree_benchmark_loom_hal_compilation_options_t;
 
+// Initializes shared HAL provider options for benchmark-owned compilation.
+// |invocation| may be NULL when a scenario profile selects subjects lazily.
+void iree_benchmark_loom_hal_provider_options_initialize(
+    iree_benchmark_loom_hal_context_t* context,
+    const iree_benchmark_loom_hal_compilation_options_t* compilation_options,
+    const loom_testbench_invocation_plan_t* invocation,
+    loom_testbench_compile_result_callback_t result_callback,
+    loom_run_hal_testbench_actual_provider_options_t* out_options);
+
 // Initializes a benchmark-owned HAL actual provider for one candidate.
 void iree_benchmark_loom_hal_actual_provider_initialize(
     iree_benchmark_loom_hal_context_t* context,

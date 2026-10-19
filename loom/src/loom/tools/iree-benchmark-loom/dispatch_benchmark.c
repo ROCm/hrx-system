@@ -13,10 +13,9 @@
 #include "loom/tooling/execution/hal/benchmark.h"
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
-#include "loom/tooling/io/file.h"
 #include "loom/tools/iree-benchmark-loom/case_execution.h"
 #include "loom/tools/iree-benchmark-loom/input_ring.h"
-#include "loom/tools/iree-benchmark-loom/output.h"
+#include "loom/tools/iree-benchmark-loom/profile_report.h"
 
 typedef struct iree_benchmark_loom_hal_input_ring_t {
   // Host allocator used for ring-owned arrays.
@@ -30,21 +29,6 @@ typedef struct iree_benchmark_loom_hal_input_ring_t {
   // Data/cache summary derived while materializing the ring.
   iree_benchmark_loom_data_cache_summary_t summary;
 } iree_benchmark_loom_hal_input_ring_t;
-
-static bool iree_benchmark_loom_hal_invocation_options_equal(
-    const loom_run_hal_invocation_options_t* lhs,
-    const loom_run_hal_invocation_options_t* rhs) {
-  if (!iree_string_view_equal(lhs->function_name, rhs->function_name) ||
-      lhs->constant_byte_length != rhs->constant_byte_length) {
-    return false;
-  }
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(lhs->workgroup_count); ++i) {
-    if (lhs->workgroup_count[i] != rhs->workgroup_count[i]) {
-      return false;
-    }
-  }
-  return memcmp(lhs->constants, rhs->constants, lhs->constant_byte_length) == 0;
-}
 
 static iree_status_t iree_benchmark_loom_prepare_hal_invocation_plan_for_sample(
     const loom_testbench_module_plan_t* module_plan,
@@ -135,8 +119,8 @@ static iree_status_t iree_benchmark_loom_hal_input_ring_initialize(
         module_plan, case_plan, provider, materializer_options, sample_ordinal,
         allocator, &out_ring->plans[i]);
     if (iree_status_is_ok(status) &&
-        !iree_benchmark_loom_hal_invocation_options_equal(
-            &out_ring->plans[0].options, &out_ring->plans[i].options)) {
+        !loom_run_hal_invocation_options_equal(&out_ring->plans[0].options,
+                                               &out_ring->plans[i].options)) {
       status = iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "HAL benchmark input ring materialization changed dispatch constants "
@@ -378,7 +362,7 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
     for (iree_host_size_t step_index = 0;
          iree_status_is_ok(status) && step_index < sequence->provider_count;
          ++step_index) {
-      if (!iree_benchmark_loom_hal_invocation_options_equal(
+      if (!loom_run_hal_invocation_options_equal(
               &out_ring->plans[step_index].options,
               &ring_plans[step_index].options)) {
         status = iree_make_status(
@@ -445,36 +429,6 @@ static void iree_benchmark_loom_hal_sequence_input_ring_deinitialize(
   *ring = (iree_benchmark_loom_hal_sequence_input_ring_t){0};
 }
 
-static iree_status_t iree_benchmark_loom_append_profile_artifact_path(
-    const iree_benchmark_loom_run_identity_t* run,
-    const iree_benchmark_loom_candidate_identity_t* candidate,
-    const loom_run_hal_benchmark_options_t* options,
-    iree_host_size_t sample_ordinal, iree_string_builder_t* artifact_path) {
-  if (!iree_any_bit_set(options->flags,
-                        LOOM_RUN_HAL_BENCHMARK_FLAG_PROFILE_FINAL_BATCH)) {
-    return iree_ok_status();
-  }
-  const iree_host_size_t initial_size = iree_string_builder_size(artifact_path);
-  IREE_RETURN_IF_ERROR(
-      iree_benchmark_loom_append_effective_profile_artifacts_dir(
-          run, options->profile_data_families, artifact_path));
-  if (iree_string_builder_size(artifact_path) == initial_size) {
-    return iree_ok_status();
-  }
-  iree_string_view_t artifacts_dir = iree_string_builder_view(artifact_path);
-  if (!iree_string_view_ends_with(artifacts_dir, IREE_SV("/"))) {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(artifact_path, "/"));
-  }
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_string(artifact_path, run->run_id));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(artifact_path, "_"));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
-      artifact_path, candidate->candidate_id));
-  return iree_string_builder_append_format(
-      artifact_path, "_sample%" PRIhsz ".irpf", sample_ordinal);
-}
-
 iree_status_t iree_benchmark_loom_run_hal_benchmark_sample(
     const iree_benchmark_loom_run_identity_t* run,
     const iree_benchmark_loom_candidate_identity_t* candidate,
@@ -520,27 +474,12 @@ iree_status_t iree_benchmark_loom_run_hal_benchmark_sample(
     out_result->data_cache = input_ring.summary;
     loom_run_hal_benchmark_options_t hal_options = policy->hal_options;
     iree_string_builder_t profile_artifact_path;
-    iree_string_builder_initialize(allocator, &profile_artifact_path);
-    status = iree_benchmark_loom_append_profile_artifact_path(
-        run, candidate, &hal_options, case_sample_ordinal,
-        &profile_artifact_path);
-    if (iree_status_is_ok(status) &&
-        iree_string_builder_size(&profile_artifact_path) != 0) {
-      status = loom_tooling_create_parent_directory(
-          iree_string_builder_view(&profile_artifact_path), allocator);
-    }
-    if (iree_status_is_ok(status) &&
-        iree_string_builder_size(&profile_artifact_path) != 0) {
-      status = iree_benchmark_loom_artifact_bundle_record_file(
-          provider->context->artifact_bundle,
-          IREE_BENCHMARK_LOOM_BUNDLE_FILE_PROFILE,
-          iree_string_builder_view(&profile_artifact_path));
-    }
-    if (iree_status_is_ok(status) &&
-        iree_string_builder_size(&profile_artifact_path) != 0) {
-      hal_options.profile_artifact_path =
-          iree_string_builder_view(&profile_artifact_path);
-    }
+    status = iree_benchmark_loom_prepare_profile_artifact(
+        run, candidate, provider->context,
+        (iree_benchmark_loom_profile_replay_identity_t){
+            .case_sample_ordinal = case_sample_ordinal,
+        },
+        allocator, &hal_options, &profile_artifact_path);
     if (iree_status_is_ok(status)) {
       status = loom_run_hal_benchmark_dispatch_binding_ring(
           &provider->context->execution.runtime,
@@ -603,26 +542,12 @@ iree_status_t iree_benchmark_loom_run_hal_sequence_benchmark_sample(
     out_result->data_cache = input_ring.summary;
     loom_run_hal_benchmark_options_t hal_options = policy->hal_options;
     iree_string_builder_t profile_artifact_path;
-    iree_string_builder_initialize(allocator, &profile_artifact_path);
-    status = iree_benchmark_loom_append_profile_artifact_path(
-        run, candidate, &hal_options, case_sample_ordinal,
-        &profile_artifact_path);
-    if (iree_status_is_ok(status) &&
-        iree_string_builder_size(&profile_artifact_path) != 0) {
-      status = loom_tooling_create_parent_directory(
-          iree_string_builder_view(&profile_artifact_path), allocator);
-    }
-    if (iree_status_is_ok(status) &&
-        iree_string_builder_size(&profile_artifact_path) != 0) {
-      status = iree_benchmark_loom_artifact_bundle_record_file(
-          hal_context->artifact_bundle, IREE_BENCHMARK_LOOM_BUNDLE_FILE_PROFILE,
-          iree_string_builder_view(&profile_artifact_path));
-    }
-    if (iree_status_is_ok(status) &&
-        iree_string_builder_size(&profile_artifact_path) != 0) {
-      hal_options.profile_artifact_path =
-          iree_string_builder_view(&profile_artifact_path);
-    }
+    status = iree_benchmark_loom_prepare_profile_artifact(
+        run, candidate, hal_context,
+        (iree_benchmark_loom_profile_replay_identity_t){
+            .case_sample_ordinal = case_sample_ordinal,
+        },
+        allocator, &hal_options, &profile_artifact_path);
     if (iree_status_is_ok(status)) {
       status = loom_run_hal_benchmark_dispatch_sequence_plan_ring(
           &hal_context->execution.runtime, sequence->provider_count,

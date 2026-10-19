@@ -238,13 +238,14 @@ iree_status_t iree_benchmark_loom_event_sink_emit_profile_replay(
     iree_host_size_t work_item_index, const loom_module_t* module,
     const loom_testbench_benchmark_plan_t* benchmark_plan,
     const loom_testbench_case_plan_t* case_plan,
+    const loom_testbench_scenario_plan_t* scenario_plan,
     const iree_benchmark_loom_benchmark_policy_t* policy,
     const iree_benchmark_loom_benchmark_result_t* benchmark_result) {
   IREE_ASSERT_ARGUMENT(run);
   IREE_ASSERT_ARGUMENT(candidate);
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(benchmark_plan);
-  IREE_ASSERT_ARGUMENT(case_plan);
+  IREE_ASSERT((case_plan != NULL) != (scenario_plan != NULL));
   IREE_ASSERT_ARGUMENT(policy);
   IREE_ASSERT_ARGUMENT(benchmark_result);
   return iree_benchmark_loom_event_sink_emit(
@@ -258,6 +259,7 @@ iree_status_t iree_benchmark_loom_event_sink_emit_profile_replay(
                         .module = module,
                         .benchmark_plan = benchmark_plan,
                         .case_plan = case_plan,
+                        .scenario_plan = scenario_plan,
                         .policy = policy,
                         .benchmark_result = benchmark_result,
                     },
@@ -445,7 +447,8 @@ static iree_status_t iree_benchmark_loom_jsonl_event_sink_emit(
               event->profile_replay.work_item_index,
               event->profile_replay.module,
               event->profile_replay.benchmark_plan,
-              event->profile_replay.case_plan, event->profile_replay.policy,
+              event->profile_replay.case_plan,
+              event->profile_replay.scenario_plan, event->profile_replay.policy,
               event->profile_replay.benchmark_result,
               jsonl_sink->host_allocator,
               iree_benchmark_loom_jsonl_sink_begin(jsonl_sink)));

@@ -90,7 +90,9 @@ typedef struct loom_serve_recognition_generator_t {
   // into caller-owned event storage before another source call can overwrite
   // its packet. Storage has this generator's event count and byte bounds and
   // outlives the collected views. No source submission occurs during
-  // collection.
+  // collection. Failure terminates only this ordinal's request; its outputs
+  // are ignored. The batch and remaining ordinals stay collectible, and the
+  // failed handle remains releasable at the retired batch cut.
   iree_status_t (*collect)(void* self, iree_host_size_t ordinal,
                            loom_serve_recognition_events_t* events,
                            loom_serve_recognition_result_t* out_result);

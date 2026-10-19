@@ -274,12 +274,10 @@ iree_status_t iree_benchmark_loom_emit_work_item_result_aliases(
         module_plan->module, selection->benchmark_plan, selection->case_plan,
         selection->scenario_plan, &selection->policy, &alias_result,
         correctness_sample_count, correctness_failed_sample_count));
-    if (selection->case_plan != NULL) {
-      IREE_RETURN_IF_ERROR(iree_benchmark_loom_event_sink_emit_profile_replay(
-          event_sink, run, &selection->identity, work_item->work_item_index,
-          module_plan->module, selection->benchmark_plan, selection->case_plan,
-          &selection->policy, &alias_result));
-    }
+    IREE_RETURN_IF_ERROR(iree_benchmark_loom_event_sink_emit_profile_replay(
+        event_sink, run, &selection->identity, work_item->work_item_index,
+        module_plan->module, selection->benchmark_plan, selection->case_plan,
+        selection->scenario_plan, &selection->policy, &alias_result));
   }
   return iree_ok_status();
 }

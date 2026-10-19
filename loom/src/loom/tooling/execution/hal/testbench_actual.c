@@ -1535,9 +1535,12 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
   IREE_ASSERT(workload_offset == span->workload_count);
   IREE_ASSERT(input_offset == span->input_count);
   IREE_ASSERT(binding_offset == span->binding_count);
+  loom_run_hal_dispatch_sequence_options_t sequence_options;
+  loom_run_hal_dispatch_sequence_options_initialize(&sequence_options);
   return loom_run_hal_dispatch_sequence_prepare(
       &span->context->runtime, span->invocation_count, span->steps,
-      span->context->host_allocator, &span->sample_sequences[sample_ordinal]);
+      &sequence_options, span->context->host_allocator,
+      &span->sample_sequences[sample_ordinal]);
 }
 
 static void loom_run_hal_testbench_actual_sequence_populate_binding_table(

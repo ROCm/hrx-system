@@ -378,7 +378,7 @@ iree_status_t iree_benchmark_loom_options_from_flags(
       !iree_string_view_is_empty(out_options->selected_case)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "--compare selects benchmark/case pairs directly and cannot be "
+        "--compare selects benchmark subjects directly and cannot be "
         "combined with --case");
   }
   if (iree_string_view_equal(out_options->file_output_root, IREE_SV("-"))) {

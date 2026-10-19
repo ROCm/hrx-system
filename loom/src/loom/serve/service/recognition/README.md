@@ -118,6 +118,11 @@ Collection copies the produced source extent into that storage before the source
 can reuse its buffer for another ordinal. The copy preserves earlier revisions
 independently of the latest document value, without allocating a new VM buffer
 per completion. The serialized owner publishes results and returns input credit.
+Source completion or document errors terminate only the affected request. Every
+other original ordinal is still collected, including cancelled members. Failed
+output is discarded, and the failed row releases at the same retired batch cut
+as successful rows. The HTTP caller receives an error response while peers and
+subsequent requests continue using the prepared model.
 
 No service worker waits for a device or socket. The model package determines
 its input quantum, lookahead, revision cadence, and numerical phases. Native

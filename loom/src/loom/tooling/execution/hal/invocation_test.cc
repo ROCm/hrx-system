@@ -86,6 +86,16 @@ TEST_F(HalInvocationTest, DispatchSequenceInitializeIsNotPrepared) {
   loom_run_hal_dispatch_sequence_deinitialize(&sequence);
 }
 
+TEST_F(HalInvocationTest, DispatchSequenceOptionsPreserveBorrowedBindings) {
+  loom_run_hal_dispatch_sequence_options_t options = {};
+  loom_run_hal_dispatch_sequence_options_initialize(&options);
+
+  EXPECT_EQ(options.command_buffer_mode, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
+  EXPECT_TRUE(iree_all_bits_set(
+      options.execute_flags,
+      IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME));
+}
+
 TEST_F(HalInvocationTest,
        DispatchSequenceRejectsMixedRepresentationsBeforeDeviceUse) {
   const loom_run_hal_prepared_candidate_t kernel_candidate = {
@@ -113,10 +123,13 @@ TEST_F(HalInvocationTest,
 
   loom_run_hal_runtime_t runtime = {};
   loom_run_hal_dispatch_sequence_t sequence = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_run_hal_dispatch_sequence_prepare(
-                            &runtime, IREE_ARRAYSIZE(steps), steps,
-                            iree_allocator_system(), &sequence));
+  loom_run_hal_dispatch_sequence_options_t sequence_options = {};
+  loom_run_hal_dispatch_sequence_options_initialize(&sequence_options);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_run_hal_dispatch_sequence_prepare(
+          &runtime, IREE_ARRAYSIZE(steps), steps, &sequence_options,
+          iree_allocator_system(), &sequence));
   EXPECT_FALSE(loom_run_hal_dispatch_sequence_is_prepared(&sequence));
 
   loom_run_hal_dispatch_sequence_deinitialize(&sequence);
@@ -138,10 +151,13 @@ TEST_F(HalInvocationTest,
 
   loom_run_hal_runtime_t runtime = {};
   loom_run_hal_dispatch_sequence_t sequence = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_run_hal_dispatch_sequence_prepare(
-                            &runtime, /*step_count=*/1, &step,
-                            iree_allocator_system(), &sequence));
+  loom_run_hal_dispatch_sequence_options_t sequence_options = {};
+  loom_run_hal_dispatch_sequence_options_initialize(&sequence_options);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      loom_run_hal_dispatch_sequence_prepare(
+          &runtime, /*step_count=*/1, &step, &sequence_options,
+          iree_allocator_system(), &sequence));
   EXPECT_FALSE(loom_run_hal_dispatch_sequence_is_prepared(&sequence));
 
   loom_run_hal_dispatch_sequence_deinitialize(&sequence);

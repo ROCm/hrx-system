@@ -213,9 +213,33 @@ iree-benchmark-loom program.loom \
 ```
 
 ABABA supports a baseline and one candidate. Round-robin interleaving supports
-larger candidate sets. Comparison candidates must select the same concrete
-parameter layout and values; a parameterized case therefore uses `--sample=N`
-when more than one sample remains.
+larger candidate sets. All candidates must benchmark cases, or all must
+benchmark scenarios. Case candidates must select the same concrete parameter
+layout and values; a parameterized case therefore uses `--sample=N` when more
+than one sample remains.
+
+Scenario comparisons likewise select one concrete configuration and trial per
+candidate:
+
+```shell
+iree-benchmark-loom program.loom \
+  --device=amdgpu \
+  --compare=@baseline_scenario,@variant_scenario \
+  --sample=3 \
+  --interleave=ABABA \
+  --output=scenario-comparison.json
+```
+
+Separately named scenarios ordinarily have independent entropy namespaces. In
+comparison mode, every candidate uses the baseline scenario's entropy namespace
+so equivalent recipes produce equivalent inputs. Before timing, the tool checks
+the complete retained input ring: invocation types, scalar payloads, tensor
+shape and encoding, buffer bytes and ranges, and alias relationships must match.
+Compilation and target-product preparation finish before the interleaved
+schedule. The same deterministic input ring is rematerialized outside each
+timed window, restoring inputs that a previous dispatch may have mutated. Each
+repetition records the benchmark sample index and exact scenario configuration,
+trial domain, and trial ordinal.
 
 Final profiling is suppressed during interleaved windows so profile collection
 cannot bias one candidate. The event stream records every repetition and the

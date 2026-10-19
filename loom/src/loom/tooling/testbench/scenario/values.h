@@ -99,6 +99,18 @@ iree_status_t loom_testbench_scenario_configuration_values_materialize(
     iree_host_size_t configuration_ordinal,
     loom_testbench_scenario_configuration_values_t* values);
 
+// Materializes one configuration in an explicit entropy domain.
+//
+// Independently named scenarios can share |entropy_domain| when they must
+// realize identical generated values, such as candidates in one controlled
+// benchmark comparison. The ordinary materializer uses the scenario name.
+iree_status_t
+loom_testbench_scenario_configuration_values_materialize_in_entropy_domain(
+    const loom_testbench_value_materializer_options_t* options,
+    loom_testbench_entropy_t entropy_root, iree_string_view_t entropy_domain,
+    iree_host_size_t configuration_ordinal,
+    loom_testbench_scenario_configuration_values_t* values);
+
 // Initializes reusable target and optional oracle storage for |trial_index|.
 iree_status_t loom_testbench_scenario_trial_values_initialize(
     const loom_module_t* module,

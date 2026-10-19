@@ -143,6 +143,13 @@ typedef enum loom_run_hal_dispatch_sequence_representation_e {
   LOOM_RUN_HAL_DISPATCH_SEQUENCE_REPRESENTATION_DIRECT = 2,
 } loom_run_hal_dispatch_sequence_representation_e;
 
+typedef struct loom_run_hal_dispatch_sequence_options_t {
+  // Command-buffer mode used by an indirect sequence.
+  iree_hal_command_buffer_mode_t command_buffer_mode;
+  // Queue execute flags used by an indirect sequence submission.
+  iree_hal_queue_execute_flags_t execute_flags;
+} loom_run_hal_dispatch_sequence_options_t;
+
 typedef struct loom_run_hal_dispatch_sequence_direct_step_t
     loom_run_hal_dispatch_sequence_direct_step_t;
 
@@ -161,6 +168,8 @@ typedef struct loom_run_hal_dispatch_sequence_t {
     iree_hal_semaphore_t* completion_semaphore;
     // Completion payload value assigned to the next execution.
     uint64_t next_signal_value;
+    // Queue execute flags used for each submission.
+    iree_hal_queue_execute_flags_t execute_flags;
   } command_buffer;
   // Reusable direct queue-dispatch representation.
   struct {
@@ -234,6 +243,12 @@ typedef struct loom_run_hal_invocation_result_t {
 void loom_run_hal_invocation_options_initialize(
     loom_run_hal_invocation_options_t* out_options);
 
+// Returns true when two materialized invocations dispatch the same function,
+// geometry, and constant payload.
+bool loom_run_hal_invocation_options_equal(
+    const loom_run_hal_invocation_options_t* lhs,
+    const loom_run_hal_invocation_options_t* rhs);
+
 // Initializes a request to dispatch the single executable function over one
 // workgroup.
 void loom_run_hal_invocation_request_initialize(
@@ -264,6 +279,10 @@ void loom_run_hal_iteration_deinitialize(loom_run_hal_iteration_t* iteration);
 // Initializes batch options for one reusable unvalidated/unretained dispatch.
 void loom_run_hal_dispatch_batch_options_initialize(
     loom_run_hal_dispatch_batch_options_t* out_options);
+
+// Initializes sequence options matching ordinary correctness execution.
+void loom_run_hal_dispatch_sequence_options_initialize(
+    loom_run_hal_dispatch_sequence_options_t* out_options);
 
 // Initializes an empty direct HAL queue dispatch.
 void loom_run_hal_queue_dispatch_initialize(
@@ -432,6 +451,7 @@ iree_status_t loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
 iree_status_t loom_run_hal_dispatch_sequence_prepare(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t step_count,
     const loom_run_hal_dispatch_sequence_step_t* steps,
+    const loom_run_hal_dispatch_sequence_options_t* options,
     iree_allocator_t host_allocator,
     loom_run_hal_dispatch_sequence_t* out_sequence);
 

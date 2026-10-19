@@ -42,6 +42,21 @@ void loom_run_hal_invocation_options_initialize(
   };
 }
 
+bool loom_run_hal_invocation_options_equal(
+    const loom_run_hal_invocation_options_t* lhs,
+    const loom_run_hal_invocation_options_t* rhs) {
+  if (!iree_string_view_equal(lhs->function_name, rhs->function_name) ||
+      lhs->constant_byte_length != rhs->constant_byte_length) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(lhs->workgroup_count); ++i) {
+    if (lhs->workgroup_count[i] != rhs->workgroup_count[i]) {
+      return false;
+    }
+  }
+  return memcmp(lhs->constants, rhs->constants, lhs->constant_byte_length) == 0;
+}
+
 void loom_run_hal_invocation_request_initialize(
     loom_run_hal_invocation_request_t* out_request) {
   *out_request = (loom_run_hal_invocation_request_t){0};
@@ -98,6 +113,15 @@ void loom_run_hal_dispatch_batch_options_initialize(
       .dispatch_count = 1,
       .command_buffer_mode = IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED |
                              IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
+      .execute_flags =
+          IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME,
+  };
+}
+
+void loom_run_hal_dispatch_sequence_options_initialize(
+    loom_run_hal_dispatch_sequence_options_t* out_options) {
+  *out_options = (loom_run_hal_dispatch_sequence_options_t){
+      .command_buffer_mode = IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
       .execute_flags =
           IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME,
   };
@@ -537,12 +561,13 @@ static iree_status_t loom_run_hal_record_indirect_dispatch_sequence(
     iree_hal_queue_t* queue, iree_host_size_t step_count,
     const loom_run_hal_dispatch_sequence_step_t* steps,
     iree_host_size_t binding_count,
+    iree_hal_command_buffer_mode_t command_buffer_mode,
     iree_hal_command_buffer_t** out_command_buffer) {
   *out_command_buffer = NULL;
 
   iree_hal_command_buffer_t* command_buffer = NULL;
   iree_status_t status = iree_hal_command_buffer_create(
-      iree_hal_queue_family(queue), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      iree_hal_queue_family(queue), command_buffer_mode,
       IREE_HAL_COMMAND_CATEGORY_DISPATCH, binding_count, &command_buffer);
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_begin(command_buffer);
@@ -1556,6 +1581,7 @@ static iree_status_t loom_run_hal_dispatch_sequence_prepare_direct(
 iree_status_t loom_run_hal_dispatch_sequence_prepare(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t step_count,
     const loom_run_hal_dispatch_sequence_step_t* steps,
+    const loom_run_hal_dispatch_sequence_options_t* options,
     iree_allocator_t host_allocator,
     loom_run_hal_dispatch_sequence_t* out_sequence) {
   loom_run_hal_dispatch_sequence_initialize(out_sequence);
@@ -1569,6 +1595,10 @@ iree_status_t loom_run_hal_dispatch_sequence_prepare(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL runtime is not initialized");
   }
+  if (options == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HAL dispatch sequence options are required");
+  }
 
   out_sequence->representation = representation;
   iree_status_t status = iree_ok_status();
@@ -1579,6 +1609,7 @@ iree_status_t loom_run_hal_dispatch_sequence_prepare(
   } else {
     status = loom_run_hal_record_indirect_dispatch_sequence(
         runtime->dispatch_queue, step_count, steps, binding_count,
+        options->command_buffer_mode,
         &out_sequence->command_buffer.command_buffer);
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_create(
@@ -1588,6 +1619,7 @@ iree_status_t loom_run_hal_dispatch_sequence_prepare(
     }
     if (iree_status_is_ok(status)) {
       out_sequence->command_buffer.next_signal_value = 1;
+      out_sequence->command_buffer.execute_flags = options->execute_flags;
     }
   }
   if (iree_status_is_ok(status)) {
@@ -1796,7 +1828,7 @@ iree_status_t loom_run_hal_dispatch_sequence_execute(
   iree_status_t status = iree_hal_queue_execute(
       runtime->dispatch_queue, wait_semaphores, signal_semaphores,
       sequence->command_buffer.command_buffer, binding_table,
-      IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME);
+      sequence->command_buffer.execute_flags);
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_semaphore_wait(
         sequence->command_buffer.completion_semaphore, signal_value,

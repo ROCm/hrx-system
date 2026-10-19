@@ -191,6 +191,30 @@ typedef struct loom_run_hal_benchmark_result_t {
   loom_run_hal_profile_summary_t profile_replay;
 } loom_run_hal_benchmark_result_t;
 
+// One physical ring of deferred HAL bindings for repeated dispatch.
+//
+// Each ring slot describes an independently reusable realization of the same
+// logical operation. Invocation options and binding lengths are stored in
+// ring-major order so dynamic launch configurations remain representable.
+// |binding_table| contains |ring_count * binding_count| entries in the same
+// order and must remain live for the benchmark call.
+typedef struct loom_run_hal_dispatch_binding_table_ring_t {
+  // Prepared executable dispatched by every ring slot.
+  const loom_run_hal_prepared_candidate_t* candidate;
+  // Submission representation required by the executable ABI.
+  loom_run_hal_dispatch_sequence_representation_t representation;
+  // Per-ring-slot executable function, geometry, and constant payload.
+  const loom_run_hal_invocation_options_t* invocation_options;
+  // Per-ring-slot binding lengths in binding ordinal order.
+  const iree_device_size_t* binding_lengths;
+  // Per-ring-slot physical HAL bindings in binding ordinal order.
+  const iree_hal_buffer_binding_t* binding_table;
+  // Number of physical ring slots.
+  iree_host_size_t ring_count;
+  // Number of bindings in each ring slot.
+  iree_host_size_t binding_count;
+} loom_run_hal_dispatch_binding_table_ring_t;
+
 // Initializes HAL benchmark options for rigorous batched dispatch timing.
 void loom_run_hal_benchmark_options_initialize(
     loom_run_hal_benchmark_options_t* out_options);
@@ -219,6 +243,19 @@ iree_status_t loom_run_hal_benchmark_dispatch_binding_ring(
     const loom_run_hal_invocation_plan_t* plan,
     iree_host_size_t binding_list_count,
     const loom_run_hal_binding_list_t* binding_lists,
+    const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
+    loom_run_hal_benchmark_result_t* out_result);
+
+// Benchmarks one logical dispatch batch over a physical deferred-binding ring.
+//
+// Logical batch slots rotate across |ring|. Distinct physical slots may execute
+// concurrently; a slot reused within the same logical batch is ordered after
+// its prior use. Indirect batches rotate enough pre-recorded command buffers to
+// cover the physical ring. A requested final profile uses a separate command
+// buffer retaining profile metadata.
+iree_status_t loom_run_hal_benchmark_dispatch_binding_table_ring(
+    const loom_run_hal_runtime_t* runtime,
+    const loom_run_hal_dispatch_binding_table_ring_t* ring,
     const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
     loom_run_hal_benchmark_result_t* out_result);
 

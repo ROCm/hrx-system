@@ -135,11 +135,47 @@ iree_native_test(
     "--benchmark=@scenario_scalar_results_throughput"
     "--sample=2"
     "--batch-size=2"
+    "--input-ring-count=1"
     "--iterations=1"
     "--warmup-iterations=0"
     "--min-time-ms=0"
     "--warmup-time-ms=0"
     "--max-batches=1"
+    "--profile-final-batch=true"
+    "--profile-data=dispatch-events"
+  SRC
+    loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/scenario_compare_hal_vm.loom"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "scenario_benchmark_comparison_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/scenario_compare_hal_vm.loom}}"
+    "--device=amdgpu"
+    "--compare=@scenario_benchmark_baseline_throughput,@scenario_benchmark_candidate_throughput"
+    "--sample=2"
+    "--repetitions=1"
+    "--interleave=ABABA"
+    "--batch-size=1"
+    "--input-ring-count=2"
+    "--iterations=1"
+    "--warmup-iterations=0"
+    "--min-time-ms=0"
+    "--warmup-time-ms=0"
+    "--max-batches=1"
+    "--profile-final-batch=true"
+    "--profile-data=dispatch-events"
   SRC
     loom::tools::iree-benchmark-loom
   DATA
@@ -248,6 +284,7 @@ loom_cc_library(
   SRCS
     "scenario_profile.c"
   DEPS
+    ::benchmark
     ::invocation
     ::testbench_actual
     ::testbench_staging

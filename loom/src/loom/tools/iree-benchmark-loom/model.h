@@ -265,9 +265,9 @@ typedef struct iree_benchmark_loom_hal_actual_sequence_t {
 } iree_benchmark_loom_hal_actual_sequence_t;
 
 typedef struct iree_benchmark_loom_dispatch_comparison_candidate_t {
-  // Selected benchmark/case/policy identity for this comparison member.
+  // Selected benchmark/subject/policy identity for this comparison member.
   const iree_benchmark_loom_selected_benchmark_t* selection;
-  // Module owning the selected benchmark and case plans.
+  // Module owning the selected benchmark and subject plans.
   const loom_module_t* module;
   // Deduplicated physical work item index used for setup.
   iree_host_size_t work_item_index;

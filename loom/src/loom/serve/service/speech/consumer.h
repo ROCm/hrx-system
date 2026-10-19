@@ -28,6 +28,8 @@ typedef struct loom_serve_speech_consumer_t {
   // Copies/converts one retired source block into bounded consumer storage.
   // Source views stay borrowed only through this finite CPU call. No owner
   // field is touched and no transport or device operation is submitted.
+  // Failure terminates this request; the partially encoded block is never
+  // published. end consumes the receipt after all accepted borrowers retire.
   iree_status_t (*encode)(void* self, const loom_serve_speech_block_t* block);
   // Publishes the encoded block after its CPU borrower retires. False is
   // output pressure; no bytes/state were accepted. Success with true consumes

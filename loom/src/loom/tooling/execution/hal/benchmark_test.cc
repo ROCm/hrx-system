@@ -69,5 +69,35 @@ TEST(HalBenchmarkTest, DispatchPlanRejectsUnknownFlagsBeforeDeviceUse) {
   loom_run_hal_invocation_plan_deinitialize(&plan);
 }
 
+TEST(HalBenchmarkTest, BindingTableRingRequiresPhysicalSlots) {
+  loom_run_hal_runtime_t runtime = {};
+  loom_run_hal_dispatch_binding_table_ring_t ring = {};
+  loom_run_hal_benchmark_options_t options = {};
+  loom_run_hal_benchmark_options_initialize(&options);
+
+  loom_run_hal_benchmark_result_t result = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_run_hal_benchmark_dispatch_binding_table_ring(
+          &runtime, &ring, &options, iree_allocator_system(), &result));
+}
+
+TEST(HalBenchmarkTest, BindingTableRingRequiresInvocationOptions) {
+  loom_run_hal_runtime_t runtime = {};
+  loom_run_hal_prepared_candidate_t candidate = {};
+  loom_run_hal_dispatch_binding_table_ring_t ring = {
+      .candidate = &candidate,
+      .ring_count = 1,
+  };
+  loom_run_hal_benchmark_options_t options = {};
+  loom_run_hal_benchmark_options_initialize(&options);
+
+  loom_run_hal_benchmark_result_t result = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_run_hal_benchmark_dispatch_binding_table_ring(
+          &runtime, &ring, &options, iree_allocator_system(), &result));
+}
+
 }  // namespace
 }  // namespace loom

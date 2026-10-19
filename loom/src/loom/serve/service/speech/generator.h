@@ -134,6 +134,9 @@ typedef struct loom_serve_speech_generator_t {
   // through encoding; no new submission occurs until the consumer releases it.
   // Original batch ordinal is stable even when peers cancel. Every successful
   // unit is collected, including source phases producing no audio/readback.
+  // Failure terminates only this ordinal's request and invalidates its block;
+  // the remaining ordinals stay collectible. Release the failed request after
+  // every batch borrower retires, using the ordinary release contract.
   iree_status_t (*collect)(void* self, iree_host_size_t ordinal,
                            loom_serve_speech_block_t* out_block);
   // Releases an unsubmitted plan, or a successfully retired batch after every

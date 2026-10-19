@@ -690,6 +690,11 @@ static void loom_wasm_testbench_product_destroy(void* user_data) {
   iree_allocator_free(host_allocator, product);
 }
 
+static const loom_testbench_product_vtable_t
+    loom_wasm_testbench_product_vtable = {
+        .execute = loom_wasm_testbench_product_execute,
+};
+
 static iree_status_t loom_wasm_testbench_product_prepare(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     const loom_testbench_value_table_t* configuration,
@@ -711,7 +716,7 @@ static iree_status_t loom_wasm_testbench_product_prepare(
       user_data, invocation, function_name, source_function, host_allocator,
       &product));
   *out_product = (loom_testbench_prepared_product_t){
-      .execute = loom_wasm_testbench_product_execute,
+      .vtable = &loom_wasm_testbench_product_vtable,
       .destroy = loom_wasm_testbench_product_destroy,
       .user_data = product,
   };

@@ -157,7 +157,7 @@ TEST(BenchmarkEventSinkTest, EmitsTypedOutputRowEvents) {
       /*correctness_failed_sample_count=*/4));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_profile_replay(
       &sink, &run, &candidate, /*work_item_index=*/7, &module, &benchmark_plan,
-      &case_plan, &policy, &benchmark_result));
+      &case_plan, /*scenario_plan=*/nullptr, &policy, &benchmark_result));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_failure(
       &sink, &run, IREE_SV("verify"), IREE_SV("diagnostics"), IREE_SV("failed"),
       &diagnostics));

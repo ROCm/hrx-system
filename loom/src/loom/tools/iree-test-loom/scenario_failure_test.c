@@ -174,6 +174,11 @@ static iree_status_t iree_test_loom_scenario_failure_execute(
                           (int)subject.size, subject.data);
 }
 
+static const loom_testbench_product_vtable_t
+    iree_test_loom_scenario_failure_product_vtable = {
+        .execute = iree_test_loom_scenario_failure_execute,
+};
+
 static iree_status_t iree_test_loom_scenario_failure_prepare(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     const loom_testbench_value_table_t* configuration,
@@ -183,7 +188,7 @@ static iree_status_t iree_test_loom_scenario_failure_prepare(
   (void)configuration;
   (void)host_allocator;
   *out_product = (loom_testbench_prepared_product_t){
-      .execute = iree_test_loom_scenario_failure_execute,
+      .vtable = &iree_test_loom_scenario_failure_product_vtable,
       .user_data = user_data,
   };
   return iree_ok_status();

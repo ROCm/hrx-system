@@ -210,6 +210,18 @@ jq 'select(.row == "comparison") |
      candidate_p50_spread_ppm}' comparison.jsonl
 ```
 
+Scenario repetition rows additionally identify the concrete trial selected by
+`--sample`:
+
+```shell
+jq 'select(.row == "benchmark.repetition" and has("trial_ordinal")) |
+    {candidate_id,
+     benchmark_sample_index,
+     configuration_ordinal,
+     trial_index,
+     trial_ordinal}' comparison.jsonl
+```
+
 ## Follow retained artifacts
 
 `--artifact-bundle-dir=DIR` collects the result, `manifest.json`, file outputs,

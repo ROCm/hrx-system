@@ -19,6 +19,7 @@
 #include "loom/tools/iree-benchmark-loom/hal_actual.h"
 #include "loom/tools/iree-benchmark-loom/launch_evidence.h"
 #include "loom/tools/iree-benchmark-loom/manifest.h"
+#include "loom/tools/iree-benchmark-loom/profile_report.h"
 #include "loomc/artifact_manifest.h"
 #include "loomc/compile_report.h"
 #include "loomc/iree.h"
@@ -226,6 +227,59 @@ TEST(BenchmarkReportTest, WritesScenarioResultCoordinate) {
   ExpectObjectValueEquals(root, IREE_SV("trial_ordinal"), IREE_SV("5"));
   EXPECT_TRUE(
       iree_string_view_is_empty(TryLookupObject(root, IREE_SV("case"))));
+
+  iree_string_builder_deinitialize(&builder);
+}
+
+TEST(BenchmarkReportTest, WritesScenarioRepetitionCoordinate) {
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run")};
+  loom_module_t module = {};
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("scenario_throughput"),
+  };
+  loom_testbench_scenario_plan_t scenario_plan = {.name = IREE_SV("scenario")};
+  iree_benchmark_loom_selected_benchmark_t selection = {
+      .identity = {.candidate_id = IREE_SV("candidate")},
+      .benchmark_plan = &benchmark_plan,
+      .scenario_plan = &scenario_plan,
+      .policy =
+          {
+              .measure_kind = IREE_BENCHMARK_LOOM_MEASURE_DISPATCH_COMPLETE,
+              .measure = IREE_SV("dispatch_complete"),
+          },
+  };
+  iree_benchmark_loom_dispatch_comparison_candidate_t candidate = {
+      .selection = &selection,
+      .module = &module,
+  };
+  iree_benchmark_loom_benchmark_result_t result = {
+      .executed = true,
+      .passed = true,
+      .has_benchmark_sample_ordinal = true,
+      .benchmark_sample_ordinal = 17,
+      .has_scenario_coordinate = true,
+      .scenario_coordinate = {2, 3, 5},
+      .samples_per_iteration = 1,
+  };
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(iree_benchmark_loom_append_benchmark_repetition_row(
+      &run, &candidate, &selection.identity, IREE_SV("group"), IREE_SV("ABABA"),
+      /*order_index=*/0, /*repetition_index=*/0, 'A',
+      /*profile_suppressed=*/true, &result, &builder));
+
+  const iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  ExpectObjectValueEquals(root, IREE_SV("benchmark_sample_index"),
+                          IREE_SV("17"));
+  ExpectObjectValueEquals(root, IREE_SV("configuration_ordinal"), IREE_SV("2"));
+  ExpectObjectValueEquals(root, IREE_SV("trial_index"), IREE_SV("3"));
+  ExpectObjectValueEquals(root, IREE_SV("trial_ordinal"), IREE_SV("5"));
+  const iree_string_view_t benchmark_result =
+      LookupObject(root, IREE_SV("benchmark_result"));
+  ExpectObjectValueEquals(benchmark_result, IREE_SV("scenario"),
+                          IREE_SV("scenario"));
 
   iree_string_builder_deinitialize(&builder);
 }
@@ -862,6 +916,53 @@ TEST(BenchmarkReportTest, ScopesComparableDispatchTimingToProfileReplay) {
   EXPECT_FALSE(JsonArrayContainsString(serialized_profile_warnings,
                                        IREE_SV("dispatch_overlap")));
 
+  iree_string_builder_deinitialize(&builder);
+}
+
+TEST(BenchmarkReportTest, WritesScenarioProfileReplayIdentity) {
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run")};
+  iree_benchmark_loom_candidate_identity_t candidate = {
+      .candidate_id = IREE_SV("candidate"),
+      .candidate_index = 4,
+  };
+  loom_module_t module = {};
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("scenario_benchmark"),
+  };
+  loom_testbench_scenario_plan_t scenario_plan = {
+      .name = IREE_SV("scenario"),
+  };
+  iree_benchmark_loom_benchmark_policy_t policy = {};
+  iree_benchmark_loom_benchmark_result_t result = {
+      .has_scenario_coordinate = true,
+      .scenario_coordinate = {2, 3, 5},
+      .has_hal_benchmark = true,
+  };
+  result.hal_benchmark.timing.batch_size = 7;
+  result.hal_benchmark.profile_replay.requested = true;
+  result.hal_benchmark.profile_replay.executed = true;
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(iree_benchmark_loom_append_profile_replay_row(
+      &run, &candidate, /*work_item_index=*/11, &module, &benchmark_plan,
+      /*case_plan=*/nullptr, &scenario_plan, &policy, &result,
+      iree_allocator_system(), &builder));
+
+  const iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  ExpectObjectValueEquals(root, IREE_SV("row"), IREE_SV("profile_replay"));
+  ExpectObjectValueEquals(root, IREE_SV("benchmark"),
+                          IREE_SV("scenario_benchmark"));
+  ExpectObjectValueEquals(root, IREE_SV("scenario"), IREE_SV("scenario"));
+  EXPECT_TRUE(
+      iree_string_view_is_empty(TryLookupObject(root, IREE_SV("case"))));
+  ExpectObjectValueEquals(root, IREE_SV("configuration_ordinal"), IREE_SV("2"));
+  ExpectObjectValueEquals(root, IREE_SV("trial_index"), IREE_SV("3"));
+  ExpectObjectValueEquals(root, IREE_SV("trial_ordinal"), IREE_SV("5"));
+  ExpectObjectValueEquals(root, IREE_SV("batch_size"), IREE_SV("7"));
+  EXPECT_FALSE(iree_string_view_is_empty(
+      TryLookupObject(root, IREE_SV("profile_replay"))));
   iree_string_builder_deinitialize(&builder);
 }
 

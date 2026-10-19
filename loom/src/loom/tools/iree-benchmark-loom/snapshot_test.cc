@@ -105,12 +105,20 @@ TEST(BenchmarkSnapshotSinkTest, PreservesInterleavedProfileSuppression) {
               .measure = IREE_SV("dispatch_complete"),
           },
   };
+  loom_testbench_scenario_plan_t scenario_plan = {
+      .name = IREE_SV("scenario"),
+  };
+  selection.scenario_plan = &scenario_plan;
   iree_benchmark_loom_dispatch_comparison_candidate_t candidate = {
       .selection = &selection,
   };
   iree_benchmark_loom_benchmark_result_t result = {
       .executed = true,
       .passed = true,
+      .has_benchmark_sample_ordinal = true,
+      .benchmark_sample_ordinal = 7,
+      .has_scenario_coordinate = true,
+      .scenario_coordinate = {2, 3, 5},
       .has_hal_benchmark = true,
       .hal_benchmark =
           {
@@ -147,6 +155,16 @@ TEST(BenchmarkSnapshotSinkTest, PreservesInterleavedProfileSuppression) {
         repetition, IREE_SV("profile_suppressed_for_interleave"));
     EXPECT_TRUE(iree_string_view_equal(
         suppressed, i == 0 ? iree_string_view_empty() : IREE_SV("true")));
+    EXPECT_TRUE(iree_string_view_equal(
+        LookupObject(repetition, IREE_SV("benchmark_sample_index")),
+        IREE_SV("7")));
+    EXPECT_TRUE(iree_string_view_equal(
+        LookupObject(repetition, IREE_SV("configuration_ordinal")),
+        IREE_SV("2")));
+    EXPECT_TRUE(iree_string_view_equal(
+        LookupObject(repetition, IREE_SV("trial_index")), IREE_SV("3")));
+    EXPECT_TRUE(iree_string_view_equal(
+        LookupObject(repetition, IREE_SV("trial_ordinal")), IREE_SV("5")));
   }
   iree_string_builder_deinitialize(&output);
   iree_benchmark_loom_snapshot_sink_deinitialize(&snapshot);

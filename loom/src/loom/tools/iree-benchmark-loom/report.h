@@ -84,6 +84,11 @@ iree_status_t iree_benchmark_loom_write_sample_fields_json(
     const loom_module_t* module, const loom_testbench_case_plan_t* case_plan,
     iree_host_size_t sample_ordinal, loom_json_object_writer_t* object);
 
+// Writes the three fields identifying one concrete scenario trial.
+iree_status_t iree_benchmark_loom_write_scenario_coordinate_fields_json(
+    loom_testbench_scenario_sample_coordinate_t coordinate,
+    loom_json_object_writer_t* object);
+
 // Writes sample-plan fields for a parameterized case.
 iree_status_t iree_benchmark_loom_write_case_sample_plan_fields_json(
     const loom_module_t* module, const loom_testbench_case_plan_t* case_plan,

@@ -586,6 +586,17 @@ exceed the relevant cache prevents a small model slice from masquerading as a
 streaming workload. A deliberate cache-hot experiment is valid when it is
 labeled and compared with the same reuse contract.
 
+The candidates may be `check.scenario` benchmarks when a recipe, rather than a
+flat case parameter list, describes the production workload. Select one
+concrete trial with `--sample=N`. The runner gives separately named candidate
+scenarios the baseline entropy namespace, verifies their complete input rings,
+and rejects the experiment unless types, scalar values, buffer contents, views,
+and alias relationships match exactly. It rematerializes that deterministic
+ring outside each timed window so mutable inputs begin from the same state. This
+allows two different target products to retain the same generated ragged,
+routed, or indirected workload without copying fixtures or trusting parallel
+recipes to stay equivalent.
+
 The score's time domain is part of its identity:
 
 - synchronous host completion includes submission, execution, and completion;

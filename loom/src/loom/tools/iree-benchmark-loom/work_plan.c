@@ -67,22 +67,6 @@ static iree_status_t iree_benchmark_loom_policy_from_benchmark(
         "scenario benchmark `%.*s` requires measure = \"dispatch_complete\"",
         (int)benchmark_plan->name.size, benchmark_plan->name.data);
   }
-  if (is_scenario &&
-      (options->profile_final_batch || options->profile_data_requested ||
-       options->profile_counters.count != 0 ||
-       !iree_string_view_is_empty(options->profile_artifacts_dir))) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "scenario benchmark `%.*s` does not yet support final-batch profiling",
-        (int)benchmark_plan->name.size, benchmark_plan->name.data);
-  }
-  if (is_scenario && (options->input_ring_min_bytes_specified ||
-                      options->input_ring_count_specified)) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "scenario benchmark `%.*s` does not yet support input-ring overrides",
-        (int)benchmark_plan->name.size, benchmark_plan->name.data);
-  }
   if (measure_kind != IREE_BENCHMARK_LOOM_MEASURE_DISPATCH_COMPLETE &&
       (!iree_string_view_is_empty(options->profile_artifacts_dir) ||
        options->profile_data_requested ||
@@ -211,12 +195,6 @@ static iree_status_t iree_benchmark_loom_selected_benchmark_initialize(
         IREE_STATUS_FAILED_PRECONDITION,
         "benchmark `%.*s` must reference exactly one planned check.case or "
         "check.scenario",
-        (int)benchmark_plan->name.size, benchmark_plan->name.data);
-  }
-  if (is_scenario && !iree_string_view_is_empty(options->compare)) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "--compare does not yet support scenario benchmark `%.*s`",
         (int)benchmark_plan->name.size, benchmark_plan->name.data);
   }
   if (benchmark_plan->sample_count == 0) {
@@ -698,6 +676,20 @@ static iree_status_t iree_benchmark_loom_select_compare_benchmarks(
     }
     ++selection_index;
     remaining = iree_string_view_trim(remaining);
+  }
+  if (iree_status_is_ok(status)) {
+    const bool compares_scenarios =
+        plan->selected_benchmarks[0].scenario_plan != NULL;
+    for (iree_host_size_t i = 1; i < selection_count; ++i) {
+      if ((plan->selected_benchmarks[i].scenario_plan != NULL) !=
+          compares_scenarios) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "--compare candidates must all reference check.case or all "
+            "reference check.scenario");
+        break;
+      }
+    }
   }
   if (iree_status_is_ok(status)) {
     plan->selected_benchmark_count = selection_count;

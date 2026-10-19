@@ -17,6 +17,34 @@ static iree_status_t iree_benchmark_loom_hal_actual_observe_result(
       (iree_benchmark_loom_diagnostic_capture_t*)user_data, result);
 }
 
+void iree_benchmark_loom_hal_provider_options_initialize(
+    iree_benchmark_loom_hal_context_t* context,
+    const iree_benchmark_loom_hal_compilation_options_t* compilation_options,
+    const loom_testbench_invocation_plan_t* invocation,
+    loom_testbench_compile_result_callback_t result_callback,
+    loom_run_hal_testbench_actual_provider_options_t* out_options) {
+  loomc_emit_artifact_flags_t artifact_flags = 0;
+  if (context->artifact_bundle != NULL && context->artifact_bundle->enabled &&
+      context->artifact_bundle->policy >=
+          IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG) {
+    artifact_flags |= LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING;
+  }
+  *out_options = (loom_run_hal_testbench_actual_provider_options_t){
+      .context = &context->execution,
+      .compilation = compilation_options->compilation,
+      .module = compilation_options->compilation->module,
+      .native_module = compilation_options->native_module,
+      .pass_program = compilation_options->pass_program,
+      .requested_target_profile = compilation_options->requested_target_profile,
+      .sanitizer = compilation_options->sanitizer,
+      .invocation = invocation,
+      .result_callback = result_callback,
+      .compile_report = compilation_options->compile_report,
+      .artifact_manifest = compilation_options->artifact_manifest,
+      .emit_artifact_flags = artifact_flags,
+  };
+}
+
 void iree_benchmark_loom_hal_actual_provider_initialize(
     iree_benchmark_loom_hal_context_t* context,
     const iree_benchmark_loom_hal_compilation_options_t* compilation_options,
@@ -30,30 +58,14 @@ void iree_benchmark_loom_hal_actual_provider_initialize(
   iree_allocator_t host_allocator = context->execution.host_allocator;
   iree_benchmark_loom_diagnostic_capture_initialize(host_allocator,
                                                     &out_provider->diagnostics);
-  loomc_emit_artifact_flags_t artifact_flags = 0;
-  if (context->artifact_bundle != NULL && context->artifact_bundle->enabled &&
-      context->artifact_bundle->policy >=
-          IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG) {
-    artifact_flags |= LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING;
-  }
-  loom_run_hal_testbench_actual_provider_options_t provider_options = {
-      .context = &context->execution,
-      .compilation = compilation_options->compilation,
-      .module = compilation_options->compilation->module,
-      .native_module = compilation_options->native_module,
-      .pass_program = compilation_options->pass_program,
-      .requested_target_profile = compilation_options->requested_target_profile,
-      .sanitizer = compilation_options->sanitizer,
-      .invocation = kernel_launch,
-      .result_callback =
-          {
-              .fn = iree_benchmark_loom_hal_actual_observe_result,
-              .user_data = &out_provider->diagnostics,
-          },
-      .compile_report = compilation_options->compile_report,
-      .artifact_manifest = compilation_options->artifact_manifest,
-      .emit_artifact_flags = artifact_flags,
-  };
+  loom_run_hal_testbench_actual_provider_options_t provider_options;
+  iree_benchmark_loom_hal_provider_options_initialize(
+      context, compilation_options, kernel_launch,
+      (loom_testbench_compile_result_callback_t){
+          .fn = iree_benchmark_loom_hal_actual_observe_result,
+          .user_data = &out_provider->diagnostics,
+      },
+      &provider_options);
   loom_run_hal_testbench_actual_provider_initialize(&provider_options,
                                                     &out_provider->execution);
 }

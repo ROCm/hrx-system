@@ -57,9 +57,10 @@ void loom_testbench_scenario_configuration_values_deinitialize(
   memset(values, 0, sizeof(*values));
 }
 
-iree_status_t loom_testbench_scenario_configuration_values_materialize(
+iree_status_t
+loom_testbench_scenario_configuration_values_materialize_in_entropy_domain(
     const loom_testbench_value_materializer_options_t* options,
-    loom_testbench_entropy_t entropy_root,
+    loom_testbench_entropy_t entropy_root, iree_string_view_t entropy_domain,
     iree_host_size_t configuration_ordinal,
     loom_testbench_scenario_configuration_values_t* values) {
   const loom_testbench_scenario_plan_t* scenario = values->scenario_plan;
@@ -75,7 +76,7 @@ iree_status_t loom_testbench_scenario_configuration_values_materialize(
   values->entropy_root = entropy_root;
   values->configuration_ordinal = configuration_ordinal;
   values->scenario_entropy =
-      loom_testbench_entropy_fork(entropy_root, scenario->name);
+      loom_testbench_entropy_fork(entropy_root, entropy_domain);
 
   iree_status_t status = iree_ok_status();
   if (scenario->is_configured) {
@@ -99,6 +100,16 @@ iree_status_t loom_testbench_scenario_configuration_values_materialize(
     loom_testbench_value_table_reset(&values->values);
   }
   return status;
+}
+
+iree_status_t loom_testbench_scenario_configuration_values_materialize(
+    const loom_testbench_value_materializer_options_t* options,
+    loom_testbench_entropy_t entropy_root,
+    iree_host_size_t configuration_ordinal,
+    loom_testbench_scenario_configuration_values_t* values) {
+  return loom_testbench_scenario_configuration_values_materialize_in_entropy_domain(
+      options, entropy_root, values->scenario_plan->name, configuration_ordinal,
+      values);
 }
 
 iree_status_t loom_testbench_scenario_trial_values_initialize(

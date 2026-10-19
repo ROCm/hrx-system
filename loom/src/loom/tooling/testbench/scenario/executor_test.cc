@@ -159,6 +159,11 @@ static void DestroyTestProduct(void* user_data) {
   ++state->destroy_count;
 }
 
+static const loom_testbench_product_vtable_t kTestProductVtable = {
+    .execute = ExecuteTestProduct,
+    .benchmark = BenchmarkTestProduct,
+};
+
 static iree_status_t PrepareTestProduct(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     const loom_testbench_value_table_t* configuration,
@@ -183,8 +188,7 @@ static iree_status_t PrepareTestProduct(
                             "injected scenario product preparation failure");
   }
   *out_product = {};
-  out_product->execute = ExecuteTestProduct;
-  out_product->benchmark = BenchmarkTestProduct;
+  out_product->vtable = &kTestProductVtable;
   out_product->destroy = DestroyTestProduct;
   out_product->user_data = state;
   return iree_ok_status();

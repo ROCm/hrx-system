@@ -194,7 +194,7 @@ iree_status_t iree_benchmark_loom_run_work_plan(
       case IREE_BENCHMARK_LOOM_WORK_ITEM_SCENARIO_TRIAL: {
         if (scenario_execution == NULL) {
           status = iree_benchmark_loom_scenario_execution_allocate(
-              options, &scenario_execution);
+              options, iree_string_view_empty(), &scenario_execution);
         }
         if (iree_status_is_ok(status)) {
           status = iree_benchmark_loom_run_scenario_work_item(
