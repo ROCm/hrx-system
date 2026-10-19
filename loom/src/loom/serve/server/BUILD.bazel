@@ -262,6 +262,10 @@ loom_cc_library(
     name = "registry_speech_tests",
     testonly = True,
     srcs = ["registry_speech_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":configuration",
         ":model_registration",
@@ -314,6 +318,10 @@ loom_cc_library(
     name = "registry_recognition_tests",
     testonly = True,
     srcs = ["registry_recognition_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":configuration",
         ":model_registration",

@@ -289,7 +289,7 @@ loom_cc_test(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM)
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_library(
   NAME
     registry_speech_tests
@@ -349,7 +349,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM)
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_library(
   NAME
     registry_recognition_tests
