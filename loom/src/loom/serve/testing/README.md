@@ -13,6 +13,23 @@ tokenizer, prepares a real chat request and reports its tokens and completed
 transcript. Both the deterministic text fixture and external model checks use
 this path without loading numerical weights or acquiring a device.
 
+`input_check` runs authored input checks with the real serving tokenizer and
+native encoder/decoder capabilities. Model packages keep their assertions in
+`.loom` source, provide the tokenizer and source providers, and export a
+zero-argument, zero-result entry named `check` (or select one with `--entry`).
+The source can use `input.require` to report an assertion failure. Compilation,
+linking, and source failures preserve their diagnostics and return nonzero.
+
+```bash
+iree-bazel-run //loom/src/loom/serve/testing:input_check -- \
+  --source=checks.loom --provider=text_input.loom \
+  --tokenizer=tokenizer.json
+```
+
+This path exercises source input preparation without numerical model weights
+or a device. Native stream lifetime and waveform behavior remain integration
+tests of the serving services.
+
 The local `loom_serve_testing` Python package contains these helpers:
 
 - `http_harness` owns child-process startup, HTTP control calls, joined shutdown,
