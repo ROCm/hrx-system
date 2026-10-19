@@ -429,6 +429,7 @@ loom_cc_library(
 loom_cc_library(
     name = "model",
     srcs = [
+        "control.c",
         "epoch_plan.c",
         "media_epoch.c",
         "model.c",
@@ -438,6 +439,7 @@ loom_cc_library(
         "variant.c",
     ],
     hdrs = [
+        "control.h",
         "epoch_plan.h",
         "media_epoch.h",
         "media_input.h",

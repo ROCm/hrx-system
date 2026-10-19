@@ -503,6 +503,7 @@ loom_cc_library(
   NAME
     model
   HDRS
+    "control.h"
     "epoch_plan.h"
     "media_epoch.h"
     "media_input.h"
@@ -512,6 +513,7 @@ loom_cc_library(
     "state.h"
     "variant.h"
   SRCS
+    "control.c"
     "epoch_plan.c"
     "media_epoch.c"
     "model.c"
