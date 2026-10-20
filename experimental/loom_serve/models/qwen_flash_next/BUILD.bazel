@@ -235,6 +235,23 @@ loom_test(
 )
 
 loom_test(
+    name = "gdn_fusion_test",
+    srcs = ["tests/gdn_fusion.loom"],
+    benchmark_smoke = False,
+    configs = {
+        "flash_next.span_capacity": "16",
+        "flash_next.token_count": "384",
+        "flash_next.verification_width": "8",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        AMDGPU_TSAN_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
     name = "expert_buckets_test",
     srcs = ["tests/expert_buckets.loom"],
     benchmark_smoke = False,
