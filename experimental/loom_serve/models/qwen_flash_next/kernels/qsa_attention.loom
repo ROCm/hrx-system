@@ -16,8 +16,13 @@ func.decl @flash_next_row_state(%rows: buffer, %row: index, %position: index, %l
 
 amdgpu.target<gfx11-generic> @qsa_attention_wave32 {subgroup_size = 32}
 
-func.decl @qsa_normalize_rotate(%width: index, %position: index, %input: buffer, %input_origin: offset, %weight: buffer, %output: buffer, %output_origin: offset)
+func.decl @qsa_normalize_rotate(%width: index, %position: index, %input: buffer, %input_origin: offset, %weight: buffer, %output: buffer, %output_origin: offset, %output_group_stride: index)
 
+// Four-token panels remain entirely within each 64-token physical cache page.
+// K uses [block, head, channel/16, member, channel%16]; V uses
+// [block, head, channel, member]. This permits contiguous matrix operand loads
+// without a second cache or a repacking pass. Page byte size, copy-on-write,
+// and retention ownership are unchanged. Each appender writes only its member.
 kernel.def target(@qsa_attention_wave32) @qsa_append_kv() {
   %heads = index.constant 2 : index
   %tokens = config.get @flash_next.token_count : index
@@ -40,20 +45,30 @@ kernel.def target(@qsa_attention_wave32) @qsa_append_kv() {
     %c2 = index.constant 2 : index
     %width = index.constant 256 : index
     %input_head = index.madd %token, %c2, %head : index
-    %output_head = index.madd %physical, %c2, %head : index
+    %members = index.constant 4 : index
+    %physical_block = index.div %physical, %members : index
+    %physical_member = index.rem %physical, %members : index
+    %blocks = index.div %pool, %members : index
+    %output_block_head = index.madd %physical_block, %c2, %head : index
+    %block_head_bytes = index.constant 2048 : offset
+    %member_bytes = index.constant 32 : offset
+    %output_block_relative = index.scale %output_block_head, %block_head_bytes : index, offset -> offset
+    %member_relative = index.scale %physical_member, %member_bytes : index, offset -> offset
+    %output_group_stride = index.constant 64 : index
     %head_bytes = index.constant 512 : offset
     %input_origin = index.scale %input_head, %head_bytes : index, offset -> offset
-    %output_relative = index.scale %output_head, %head_bytes : index, offset -> offset
+    %output_relative = index.add %output_block_relative, %member_relative : offset
     %output_origin = index.add %key_base, %output_relative : offset
-    func.call @qsa_normalize_rotate(%width, %position, %keys, %input_origin, %weight, %arena, %output_origin) : (index, index, buffer, offset, buffer, buffer, offset)
+    func.call @qsa_normalize_rotate(%width, %position, %keys, %input_origin, %weight, %arena, %output_origin, %output_group_stride) : (index, index, buffer, offset, buffer, buffer, offset, index)
     %origin = index.constant 0 : offset
     %input_view = buffer.view %values[%origin] : buffer -> view<[%tokens]x2x256xbf16>
-    %output_view = buffer.view %arena[%value_base] : buffer -> view<[%pool]x2x256xbf16>
+    %value_layout = encoding.layout.strided [2048, 1024, 1, 4] : encoding<layout>
+    %output_view = buffer.view %arena[%value_base] : buffer -> view<[%blocks]x2x4x256xbf16, %value_layout>
     %lane = kernel.subgroup.lane.id : index
     %c8 = index.constant 8 : index
     %channel = index.mul %lane, %c8 : index
     %packed = vector.load %input_view[%token, %head, %channel] : view<[%tokens]x2x256xbf16> -> vector<8xbf16>
-    vector.store %packed, %output_view[%physical, %head, %channel] : vector<8xbf16>, view<[%pool]x2x256xbf16>
+    vector.store %packed, %output_view[%physical_block, %head, %physical_member, %channel] : vector<8xbf16>, view<[%blocks]x2x4x256xbf16, %value_layout>
   }
   kernel.return
 }
@@ -104,8 +119,10 @@ kernel.def target(@qsa_attention_wave32) @qsa_selected_attention() {
     %origin = index.constant 0 : offset
     %query_view = buffer.view %queries[%origin] : buffer -> view<[%tokens]x24x256xbf16>
     %gate_view = buffer.view %query_gate[%origin] : buffer -> view<[%tokens]x24x512xbf16>
-    %key_view = buffer.view %arena[%key_base] : buffer -> view<[%pool]x2x256xbf16>
-    %value_view = buffer.view %arena[%value_base] : buffer -> view<[%pool]x2x256xbf16>
+    %blocks = index.div %pool, %c4 : index
+    %key_view = buffer.view %arena[%key_base] : buffer -> view<[%blocks]x2x16x4x16xbf16>
+    %value_layout = encoding.layout.strided [2048, 1024, 1, 4] : encoding<layout>
+    %value_view = buffer.view %arena[%value_base] : buffer -> view<[%blocks]x2x4x256xbf16, %value_layout>
     %ids_view = buffer.view %selected_blocks[%origin] : buffer -> view<[%tokens]x512xi32>
     %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x24x256xbf16>
     %query = vector.load %query_view[%token, %head, %channel] : view<[%tokens]x24x256xbf16> -> vector<8xbf16>
@@ -140,7 +157,12 @@ kernel.def target(@qsa_attention_wave32) @qsa_selected_attention() {
       }
       %logical_token = index.assume %key_position [lt(%key_position, %visible)] : index
       %key_token = func.call @flash_next_physical_token(%rows, %row, %logical_token) : (buffer, index, index) -> (index)
-      %key = vector.load %key_view[%key_token, %kv_head, %channel] : view<[%pool]x2x256xbf16> -> vector<8xbf16>
+      %group_width = index.constant 16 : index
+      %physical_block = index.div %key_token, %c4 : index
+      %physical_member = index.rem %key_token, %c4 : index
+      %channel_group = index.div %channel, %group_width : index
+      %channel_component = index.rem %channel, %group_width : index
+      %key = vector.load %key_view[%physical_block, %kv_head, %channel_group, %physical_member, %channel_component] : view<[%blocks]x2x16x4x16xbf16> -> vector<8xbf16>
       %pairs = vector.dot2f %query, %key, %dot_zeros : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
       %partial = vector.reduce<addf> %pairs, %c0 : vector<4xf32>, f32
       %dot = kernel.subgroup.reduce<addf> %partial : f32
@@ -151,7 +173,7 @@ kernel.def target(@qsa_attention_wave32) @qsa_selected_attention() {
       %rescale = scalar.expf<afn> %old_delta : f32
       %weight = scalar.expf<afn> %new_delta : f32
       %new_denominator = scalar.fmaf %old_denominator, %rescale, %weight : f32
-      %packed = vector.load %value_view[%key_token, %kv_head, %channel] : view<[%pool]x2x256xbf16> -> vector<8xbf16>
+      %packed = vector.load %value_view[%physical_block, %kv_head, %physical_member, %channel] : view<[%blocks]x2x4x256xbf16, %value_layout> -> vector<8xbf16>
       %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
       %rescale_vector = vector.splat %rescale : vector<8xf32>
       %weight_vector = vector.splat %weight : vector<8xf32>

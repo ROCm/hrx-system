@@ -1,0 +1,364 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
+
+amdgpu.target<gfx11-generic> @qsa_cohort_wave32 {subgroup_size = 32}
+
+// One cohort owns up to four consecutive queries within one epoch span.
+// Rounding each span independently can add at most span_count - 1 cohorts.
+// This capacity bounds the temporary records without host work or a clear.
+func.def public pure inline @qsa_cohort_capacity() -> (index) {
+  %tokens = config.get @flash_next.token_count : index
+  %spans = config.get @flash_next.span_capacity : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %rounded = index.add %tokens, %c3 : index
+  %groups = index.div %rounded, %c4 : index
+  %slack = index.sub %spans, %c1 : index
+  %capacity = index.add %groups, %slack : index
+  func.return %capacity : index
+}
+
+// Resolve a cohort once in the producer. Four-query groups cannot cross an
+// authoritative span, even when resident rows share physical prefix pages.
+// Inactive capacity groups return a zero query count.
+func.def inline @qsa_cohort_binding(%epoch: buffer, %group: index) -> (index, index, index, index) {
+  %tokens = config.get @flash_next.token_count : index
+  %spans = config.get @flash_next.span_capacity : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %span_word = view.load %header[1] : view<3xi32> -> i32
+  %span_value = index.cast %span_word : i32 to index
+  %span_count = index.assume %span_value [range(%span_value, 0, %spans)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %header_bytes = index.constant 12 : offset
+  %record_bytes = index.constant 20 : offset
+  %no = scalar.constant false : i1
+  %yes = scalar.constant true : i1
+  %last_span, %remaining, %begin, %length, %row, %position, %found = scf.while(%span_before = %c0 : index, %remaining_before = %group : index, %begin_before = %c0 : index, %length_before = %c0 : index, %row_before = %c0 : index, %position_before = %c0 : index, %found_before = %no : i1) -> (index, index, index, index, index, index, i1) {
+    %has_span = index.cmp ult, %span_before, %span_count : index
+    %searching = scalar.xori %found_before, %yes : i1
+    %more = scalar.andi %has_span, %searching : i1
+    scf.condition %more, %span_before, %remaining_before, %begin_before, %length_before, %row_before, %position_before, %found_before : i1, index, index, index, index, index, index, i1
+  } do(%span: index, %left: index, %old_begin: index, %old_length: index, %old_row: index, %old_position: index, %old_found: i1) {
+    %relative = index.scale %span, %record_bytes : index, offset -> offset
+    %record_origin = index.add %header_bytes, %relative : offset
+    %record = buffer.view %epoch[%record_origin] : buffer -> view<5xi32>
+    %length_word = view.load %record[0] : view<5xi32> -> i32
+    %position_word = view.load %record[1] : view<5xi32> -> i32
+    %begin_word = view.load %record[2] : view<5xi32> -> i32
+    %row_word = view.load %record[3] : view<5xi32> -> i32
+    %length_value = index.cast %length_word : i32 to index
+    %span_length = index.assume %length_value [range(%length_value, 1, %tokens)] : index
+    %rounded = index.add %span_length, %c3 : index
+    %groups = index.div %rounded, %c4 : index
+    %belongs = index.cmp ult, %left, %groups : index
+    %next_left, %next_begin, %next_length, %next_row, %next_position = scf.if %belongs -> (index, index, index, index, index) {
+      %relative = index.mul %left, %c4 : index
+      %unbounded_begin = index.cast %begin_word : i32 to index
+      %begin_value = index.add %unbounded_begin, %relative : index
+      %begin = index.assume %begin_value [range(%begin_value, 0, 32767), lt(%begin_value, %tokens)] : index
+      %remaining = index.sub %span_length, %relative : index
+      %partial = index.cmp ult, %remaining, %c4 : index
+      %count_value = scf.select %partial, %remaining, %c4 : index
+      %count = index.assume %count_value [range(%count_value, 1, 4)] : index
+      %row_value = index.cast %row_word : i32 to index
+      %row = index.assume %row_value [range(%row_value, 0, 15)] : index
+      %first = index.cast %position_word : i32 to index
+      %position = index.add %first, %relative : index
+      scf.yield %left, %begin, %count, %row, %position : index, index, index, index, index
+    } else {
+      %next = index.sub %left, %groups : index
+      scf.yield %next, %old_begin, %old_length, %old_row, %old_position : index, index, index, index, index
+    }
+    %next_span = index.add %span, %c1 : index
+    scf.yield %next_span, %next_left, %next_begin, %next_length, %next_row, %next_position, %belongs : index, index, index, index, index, index, i1
+  }
+  func.return %begin, %length, %row, %position : index, index, index, index
+}
+
+func.def inline @qsa_cohort_lower_bound(%lists: view<4x516xi32>, %query: index, %length: index, %key: i32) -> (index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %mask = scalar.constant 65535 : i32
+  %first, %last = scf.while(%first_before = %c0 : index, %last_before = %length : index) -> (index, index) {
+    %more = index.cmp ult, %first_before, %last_before : index
+    scf.condition %more, %first_before, %last_before : i1, index, index
+  } do(%left: index, %right: index) {
+    %sum_value = index.add %left, %right : index
+    %sum = index.assume %sum_value [range(%sum_value, 0, 1026)] : index
+    %middle_value = index.div %sum, %c2 : index
+    %middle = index.assume %middle_value [range(%middle_value, 0, 512)] : index
+    %record = view.load %lists[%query, %middle] : view<4x516xi32> -> i32
+    %block = scalar.andi %record, %mask : i32
+    %before = scalar.cmpi ult, %block, %key : i32
+    %after_middle = index.add %middle, %c1 : index
+    %next_left = scf.select %before, %after_middle, %left : index
+    %next_right = scf.select %before, %right, %middle : index
+    scf.yield %next_left, %next_right : index, index
+  }
+  func.return %first : index
+}
+
+// The out-of-range sentinel is a local merge cursor value, not a stored block
+// ID. All sixteen bits of a real block ID remain usable.
+func.def inline @qsa_cohort_head(%lists: view<4x516xi32>, %query: index, %cursor: index, %end: index) -> (i32, i32) {
+  %active = index.cmp ult, %cursor, %end : index
+  %key, %members = scf.if %active -> (i32, i32) {
+    %slot = index.assume %cursor [range(%cursor, 0, 512)] : index
+    %record = view.load %lists[%query, %slot] : view<4x516xi32> -> i32
+    %mask = scalar.constant 65535 : i32
+    %shift = scalar.constant 16 : i32
+    %key = scalar.andi %record, %mask : i32
+    %members = scalar.shrui %record, %shift : i32
+    scf.yield %key, %members : i32, i32
+  } else {
+    %sentinel = scalar.constant 65536 : i32
+    %zero = scalar.constant 0 : i32
+    scf.yield %sentinel, %zero : i32, i32
+  }
+  func.return %key, %members : i32, i32
+}
+
+func.def inline @qsa_cohort_walk(%publish: i1, %lists: view<4x516xi32>, %p0: index, %p1: index, %p2: index, %p3: index, %e0: index, %e1: index, %e2: index, %e3: index, %output: view<2052xi32>, %offset: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %zero = scalar.constant 0 : i32
+  %shift0 = scalar.constant 16 : i32
+  %shift1 = scalar.constant 20 : i32
+  %shift2 = scalar.constant 24 : i32
+  %shift3 = scalar.constant 28 : i32
+  %unused0, %unused1, %unused2, %unused3, %count, %last_key, %last_m0, %last_m1, %last_m2, %last_m3, %last_h0, %last_h1, %last_h2, %last_h3 = scf.while(%before0 = %p0 : index, %before1 = %p1 : index, %before2 = %p2 : index, %before3 = %p3 : index, %count_before = %c0 : index) -> (index, index, index, index, index, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+    %h0, %m0 = func.call @qsa_cohort_head(%lists, %c0, %before0, %e0) : (view<4x516xi32>, index, index, index) -> (i32, i32)
+    %h1, %m1 = func.call @qsa_cohort_head(%lists, %c1, %before1, %e1) : (view<4x516xi32>, index, index, index) -> (i32, i32)
+    %h2, %m2 = func.call @qsa_cohort_head(%lists, %c2, %before2, %e2) : (view<4x516xi32>, index, index, index) -> (i32, i32)
+    %h3, %m3 = func.call @qsa_cohort_head(%lists, %c3, %before3, %e3) : (view<4x516xi32>, index, index, index) -> (i32, i32)
+    %a = scalar.minui %h0, %h1 : i32
+    %b = scalar.minui %h2, %h3 : i32
+    %key = scalar.minui %a, %b : i32
+    %sentinel = scalar.constant 65536 : i32
+    %more = scalar.cmpi ult, %key, %sentinel : i32
+    scf.condition %more, %before0, %before1, %before2, %before3, %count_before, %key, %m0, %m1, %m2, %m3, %h0, %h1, %h2, %h3 : i1, index, index, index, index, index, i32, i32, i32, i32, i32, i32, i32, i32, i32
+  } do(%cursor0: index, %cursor1: index, %cursor2: index, %cursor3: index, %count_so_far: index, %key: i32, %members0: i32, %members1: i32, %members2: i32, %members3: i32, %head0: i32, %head1: i32, %head2: i32, %head3: i32) {
+    %match0 = scalar.cmpi eq, %head0, %key : i32
+    %match1 = scalar.cmpi eq, %head1, %key : i32
+    %match2 = scalar.cmpi eq, %head2, %key : i32
+    %match3 = scalar.cmpi eq, %head3, %key : i32
+    %step0 = scf.select %match0, %c1, %c0 : index
+    %step1 = scf.select %match1, %c1, %c0 : index
+    %step2 = scf.select %match2, %c1, %c0 : index
+    %step3 = scf.select %match3, %c1, %c0 : index
+    %next0 = index.add %cursor0, %step0 : index
+    %next1 = index.add %cursor1, %step1 : index
+    %next2 = index.add %cursor2, %step2 : index
+    %next3 = index.add %cursor3, %step3 : index
+    scf.if %publish {
+      %selected0 = scf.select %match0, %members0, %zero : i32
+      %selected1 = scf.select %match1, %members1, %zero : i32
+      %selected2 = scf.select %match2, %members2, %zero : i32
+      %selected3 = scf.select %match3, %members3, %zero : i32
+      %bits0 = scalar.shli %selected0, %shift0 : i32
+      %bits1 = scalar.shli %selected1, %shift1 : i32
+      %bits2 = scalar.shli %selected2, %shift2 : i32
+      %bits3 = scalar.shli %selected3, %shift3 : i32
+      %bits01 = scalar.ori %bits0, %bits1 : i32
+      %bits23 = scalar.ori %bits2, %bits3 : i32
+      %bits = scalar.ori %bits01, %bits23 : i32
+      %record = scalar.ori %key, %bits : i32
+      %slot_value = index.add %offset, %count_so_far : index
+      %slot = index.assume %slot_value [range(%slot_value, 0, 2051)] : index
+      view.store %record, %output[%slot] : i32, view<2052xi32>
+    }
+    %next_count = index.add %count_so_far, %c1 : index
+    scf.yield %next0, %next1, %next2, %next3, %next_count : index, index, index, index, index
+  }
+  func.return %count : index
+}
+
+// Each 8,224-byte record begins with four i32 words: packed query begin, live
+// query count, resident row, and descriptor count padded to four. Its remaining
+// 2,052 words hold the union of four selections of at most 512 complete blocks
+// plus their causal tails. A descriptor packs a 16-bit logical block ID and
+// four 4-bit membership masks, one per query. Zero membership marks padding;
+// block 65,535 remains a valid ID. Only live records and aligned tails are
+// written; inactive capacity records publish a zero descriptor count.
+//
+// Threads partition the sorted inputs by reference-row quantiles, count their
+// union, scan counts, and publish disjoint intervals. The consumer uses the
+// resolved row and visibility directly, without repeating span lookup or sort.
+kernel.def target(@qsa_cohort_wave32) @qsa_merge_cohorts() {
+  %groups = func.call pure @qsa_cohort_capacity() : () -> (index)
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %selected: buffer, %cohorts: buffer) {
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %threads = index.constant 128 : index
+  %budget = index.constant 512 : index
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 8224 : offset
+  %header_bytes = index.constant 16 : offset
+  %record_origin = index.scale %group, %record_bytes : index, offset -> offset
+  %descriptors_origin = index.add %record_origin, %header_bytes : offset
+  %header = buffer.view %cohorts[%record_origin] : buffer -> view<4xi32>
+  %output = buffer.view %cohorts[%descriptors_origin] : buffer -> view<2052xi32>
+  %begin, %query_count, %row, %position = func.call @qsa_cohort_binding(%epoch, %group) : (buffer, index) -> (index, index, index, index)
+  %leader = index.cmp eq, %thread, %c0 : index
+  scf.if %leader {
+    %begin_word = index.cast %begin : index to i32
+    %count_word = index.cast %query_count : index to i32
+    %row_word = index.cast %row : index to i32
+    view.store %begin_word, %header[0] : i32, view<4xi32>
+    view.store %count_word, %header[1] : i32, view<4xi32>
+    view.store %row_word, %header[2] : i32, view<4xi32>
+  }
+  %active = index.cmp ugt, %query_count, %c0 : index
+  scf.if %active {
+    %tokens = config.get @flash_next.token_count : index
+    %ids = buffer.view %selected[%origin] : buffer -> view<[%tokens]x512xi32>
+    %shared_bytes = index.constant 8272 : offset
+    %count_origin = index.constant 8256 : offset
+    %shared = buffer.alloca<workgroup> align(16) %shared_bytes : buffer
+    %lists = buffer.view %shared[%origin] : buffer -> view<4x516xi32>
+    %lengths = buffer.view %shared[%count_origin] : buffer -> view<4xi32>
+    %zero = scalar.constant 0 : i32
+    %one = scalar.constant 1 : i32
+    %full_members = scalar.constant 15 : i32
+    %record_shift = scalar.constant 16 : i32
+    scf.for %query = [%c0 to %c4 step %c1] unroll {
+      %live = index.cmp ult, %query, %query_count : index
+      %length = scf.if %live -> (index) {
+        %token_value = index.add %begin, %query : index
+        %token = index.assume %token_value [range(%token_value, 0, 32767), lt(%token_value, %tokens)] : index
+        %query_position = index.add %position, %query : index
+        %visible_value = index.add %query_position, %c1 : index
+        %visible = index.assume %visible_value [range(%visible_value, 1, 262144)] : index
+        %complete = index.div %visible, %c4 : index
+        %sparse = index.cmp ugt, %complete, %budget : index
+        %chosen_value = scf.select %sparse, %budget, %complete : index
+        %chosen = index.assume %chosen_value [range(%chosen_value, 0, 512)] : index
+        %tail = index.rem %visible, %c4 : index
+        %has_tail = index.cmp ugt, %tail, %c0 : index
+        %tail_slots = scf.select %has_tail, %c1, %c0 : index
+        %length = index.add %chosen, %tail_slots : index
+        scf.for %slot = [%thread to %length step %threads] {
+          %complete_block = index.cmp ult, %slot, %chosen : index
+          %block, %members = scf.if %complete_block -> (i32, i32) {
+            %bounded_slot = index.assume %slot [range(%slot, 0, 511)] : index
+            %id = view.load %ids[%token, %bounded_slot] : view<[%tokens]x512xi32> -> i32
+            scf.yield %id, %full_members : i32, i32
+          } else {
+            %id = index.cast %complete : index to i32
+            %tail_shift = index.cast %tail : index to i32
+            %power = scalar.shli %one, %tail_shift : i32
+            %mask = scalar.subi %power, %one : i32
+            scf.yield %id, %mask : i32, i32
+          }
+          %bits = scalar.shli %members, %record_shift : i32
+          %record = scalar.ori %block, %bits : i32
+          %destination = index.assume %slot [range(%slot, 0, 512)] : index
+          view.store %record, %lists[%query, %destination] : i32, view<4x516xi32>
+        }
+        scf.yield %length : index
+      } else {
+        scf.yield %c0 : index
+      }
+      scf.if %leader {
+        %word = index.cast %length : index to i32
+        view.store %word, %lengths[%query] : i32, view<4xi32>
+      }
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %reference_word = view.load %lengths[0] : view<4xi32> -> i32
+    %reference_value = index.cast %reference_word : i32 to index
+    %reference_length = index.assume %reference_value [range(%reference_value, 1, 513)] : index
+    %key_mask = scalar.constant 65535 : i32
+    %lo = scf.if %leader -> (i32) {
+      scf.yield %zero : i32
+    } else {
+      %product = index.mul %reference_length, %thread : index
+      %quantile_value = index.div %product, %threads : index
+      %quantile = index.assume %quantile_value [range(%quantile_value, 0, 512)] : index
+      %record = view.load %lists[0, %quantile] : view<4x516xi32> -> i32
+      %key = scalar.andi %record, %key_mask : i32
+      scf.yield %key : i32
+    }
+    %next_thread = index.add %thread, %c1 : index
+    %last_thread = index.cmp eq, %next_thread, %threads : index
+    %hi = scf.if %last_thread -> (i32) {
+      %limit = scalar.constant 65536 : i32
+      scf.yield %limit : i32
+    } else {
+      %product = index.mul %reference_length, %next_thread : index
+      %quantile_value = index.div %product, %threads : index
+      %quantile = index.assume %quantile_value [range(%quantile_value, 0, 512)] : index
+      %record = view.load %lists[0, %quantile] : view<4x516xi32> -> i32
+      %key = scalar.andi %record, %key_mask : i32
+      scf.yield %key : i32
+    }
+    %l0_word = view.load %lengths[0] : view<4xi32> -> i32
+    %l1_word = view.load %lengths[1] : view<4xi32> -> i32
+    %l2_word = view.load %lengths[2] : view<4xi32> -> i32
+    %l3_word = view.load %lengths[3] : view<4xi32> -> i32
+    %l0 = index.cast %l0_word : i32 to index
+    %l1 = index.cast %l1_word : i32 to index
+    %l2 = index.cast %l2_word : i32 to index
+    %l3 = index.cast %l3_word : i32 to index
+    %p0 = func.call @qsa_cohort_lower_bound(%lists, %c0, %l0, %lo) : (view<4x516xi32>, index, index, i32) -> (index)
+    %p1 = func.call @qsa_cohort_lower_bound(%lists, %c1, %l1, %lo) : (view<4x516xi32>, index, index, i32) -> (index)
+    %p2 = func.call @qsa_cohort_lower_bound(%lists, %c2, %l2, %lo) : (view<4x516xi32>, index, index, i32) -> (index)
+    %p3 = func.call @qsa_cohort_lower_bound(%lists, %c3, %l3, %lo) : (view<4x516xi32>, index, index, i32) -> (index)
+    %e0 = func.call @qsa_cohort_lower_bound(%lists, %c0, %l0, %hi) : (view<4x516xi32>, index, index, i32) -> (index)
+    %e1 = func.call @qsa_cohort_lower_bound(%lists, %c1, %l1, %hi) : (view<4x516xi32>, index, index, i32) -> (index)
+    %e2 = func.call @qsa_cohort_lower_bound(%lists, %c2, %l2, %hi) : (view<4x516xi32>, index, index, i32) -> (index)
+    %e3 = func.call @qsa_cohort_lower_bound(%lists, %c3, %l3, %hi) : (view<4x516xi32>, index, index, i32) -> (index)
+    %no = scalar.constant false : i1
+    %yes = scalar.constant true : i1
+    %local_count = func.call @qsa_cohort_walk(%no, %lists, %p0, %p1, %p2, %p3, %e0, %e1, %e2, %e3, %output, %c0) : (i1, view<4x516xi32>, index, index, index, index, index, index, index, index, view<2052xi32>, index) -> (index)
+    %local_word = index.cast %local_count : index to i32
+    %inclusive = kernel.workgroup.scan<addi> %local_word {direction = forward, mode = inclusive} : i32
+    %offset_word = scalar.subi %inclusive, %local_word : i32
+    %offset = index.cast %offset_word : i32 to index
+    %written = func.call @qsa_cohort_walk(%yes, %lists, %p0, %p1, %p2, %p3, %e0, %e1, %e2, %e3, %output, %offset) : (i1, view<4x516xi32>, index, index, index, index, index, index, index, index, view<2052xi32>, index) -> (index)
+    scf.if %last_thread {
+      %total_value = index.cast %inclusive : i32 to index
+      %total = index.assume %total_value [range(%total_value, 0, 2052)] : index
+      %rounded = index.add %total, %c3 : index
+      %chunks = index.div %rounded, %c4 : index
+      %padded = index.mul %chunks, %c4 : index
+      scf.for %slot_value = [%total to %padded step %c1] {
+        %slot = index.assume %slot_value [range(%slot_value, 0, 2051)] : index
+        view.store %zero, %output[%slot] : i32, view<2052xi32>
+      }
+      %padded_word = index.cast %padded : index to i32
+      view.store %padded_word, %header[3] : i32, view<4xi32>
+    }
+  } else {
+    scf.if %leader {
+      %zero = scalar.constant 0 : i32
+      view.store %zero, %header[3] : i32, view<4xi32>
+    }
+  }
+  kernel.return
+}

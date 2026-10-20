@@ -1,0 +1,192 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @qsa_append_kv() launch(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %keys: buffer, %values: buffer, %weight: buffer, %arena: buffer)
+
+// A unit-magnitude head normalizes back to exactly +/-1 in BF16. Zero gamma
+// on rotary channels isolates publication and page ownership from trigonometry.
+// The remaining channels vary with both channel and sign. Arbitrary payloads
+// cover every V component. The full arena comparison preserves all other bytes.
+func.def @append_fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer, %keys: buffer, %values: buffer, %weight: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %five = index.constant 5 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %nine = index.constant 9 : index
+  %eleven = index.constant 11 : index
+  %seventeen = index.constant 17 : index
+  %pages = index.constant 33 : index
+  %rotary = index.constant 64 : index
+  %modulus = index.constant 127 : index
+  %width = index.constant 256 : index
+  %origin = index.constant 0 : offset
+  %map_origin = index.constant 2048 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %bindings = buffer.view %mapping[%origin] : buffer -> view<8x4xi32>
+  %origins = buffer.view %rows[%origin] : buffer -> view<16x4xi64>
+  %maps = buffer.view %rows[%map_origin] : buffer -> view<16x33xi32>
+  %key_input = buffer.view %keys[%origin] : buffer -> view<8x2x256xbf16>
+  %value_input = buffer.view %values[%origin] : buffer -> view<8x2x256xbf16>
+  %norm = buffer.view %weight[%origin] : buffer -> view<256xf32>
+  %empty = index.cmp eq, %trial, %zero : index
+  %partial = index.cmp eq, %trial, %one : index
+  %nonempty_count = scf.select %partial, %seven, %eight : index
+  %count = scf.select %empty, %zero, %nonempty_count : index
+  %count_word = index.cast %count : index to i32
+  view.store %count_word, %header[0] : i32, view<3xi32>
+  %first_position = index.constant 61 : index
+  %second_position = index.constant 128 : index
+  %base = scalar.constant 256 : i64
+  %positive = scalar.constant 1.0 : bf16
+  %negative = scalar.constant -1.0 : bf16
+  %center = scalar.constant 63.0 : f32
+  %sixteenth = scalar.constant 0.0625 : f32
+  %eighth = scalar.constant 0.125 : f32
+  %fzero = scalar.constant 0.0 : f32
+  scf.for %channel = [%zero to %width step %one] {
+    %pattern = index.rem %channel, %nine : index
+    %biased = index.add %pattern, %one : index
+    %word = index.cast %biased : index to i32
+    %number = scalar.uitofp %word : i32 to f32
+    %gamma = scalar.mulf %number, %eighth : f32
+    %rotates = index.cmp ult, %channel, %rotary : index
+    %selected = scf.select %rotates, %fzero, %gamma : f32
+    view.store %selected, %norm[%channel] : f32, view<256xf32>
+  }
+  scf.for %token = [%zero to %eight step %one] {
+    %first = index.cmp ult, %token, %four : index
+    %begin = scf.select %first, %zero, %four : index
+    %first_logical = scf.select %first, %first_position, %second_position : index
+    %relative = index.sub %token, %begin : index
+    %position = index.add %first_logical, %relative : index
+    %row = scf.select %first, %one, %five : index
+    %position_word = index.cast %position : index to i32
+    %row_word = index.cast %row : index to i32
+    %begin_word = index.cast %begin : index to i32
+    %first_word = index.cast %first_logical : index to i32
+    view.store %position_word, %bindings[%token, 0] : i32, view<8x4xi32>
+    view.store %row_word, %bindings[%token, 1] : i32, view<8x4xi32>
+    view.store %begin_word, %bindings[%token, 2] : i32, view<8x4xi32>
+    view.store %first_word, %bindings[%token, 3] : i32, view<8x4xi32>
+    view.store %base, %origins[%row, 2] : i64, view<16x4xi64>
+    scf.for %page = [%zero to %pages step %one] {
+      %biased = index.madd %page, %seven, %row : index
+      %physical = index.rem %biased, %pages : index
+      %word = index.cast %physical : index to i32
+      view.store %word, %maps[%row, %page] : i32, view<16x33xi32>
+    }
+    scf.for %head = [%zero to %two step %one] {
+      scf.for %channel = [%zero to %width step %one] {
+        %token_head = index.add %token, %head : index
+        %sum = index.add %token_head, %channel : index
+        %parity = index.rem %sum, %two : index
+        %even = index.cmp eq, %parity, %zero : index
+        %sign = scf.select %even, %positive, %negative : bf16
+        view.store %sign, %key_input[%token, %head, %channel] : bf16, view<8x2x256xbf16>
+        %head_channel = index.madd %head, %seventeen, %channel : index
+        %value_seed = index.madd %token, %eleven, %head_channel : index
+        %pattern = index.rem %value_seed, %modulus : index
+        %word = index.cast %pattern : index to i32
+        %number = scalar.uitofp %word : i32 to f32
+        %centered = scalar.subf %number, %center : f32
+        %scaled = scalar.mulf %centered, %sixteenth : f32
+        %packed = scalar.fptrunc %scaled : f32 to bf16
+        view.store %packed, %value_input[%token, %head, %channel] : bf16, view<8x2x256xbf16>
+      }
+    }
+  }
+  func.return
+}
+
+func.def @append_reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %keys: buffer, %values: buffer, %weight: buffer, %arena: buffer) {
+  %origin = index.constant 0 : offset
+  %row_base = index.constant 256 : offset
+  %key_base = index.add %key_origin, %row_base : offset
+  %value_base = index.add %value_origin, %row_base : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %key_input = buffer.view %keys[%origin] : buffer -> view<8x2x256xbf16>
+  %value_input = buffer.view %values[%origin] : buffer -> view<8x2x256xbf16>
+  %norm = buffer.view %weight[%origin] : buffer -> view<256xf32>
+  %key = buffer.view %arena[%key_base] : buffer -> view<1081344xbf16>
+  %value = buffer.view %arena[%value_base] : buffer -> view<1081344xbf16>
+  %count_word = view.load %header[0] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 0, 8)] : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %five = index.constant 5 : index
+  %seven = index.constant 7 : index
+  %sixteen = index.constant 16 : index
+  %pages = index.constant 33 : index
+  %page_tokens = index.constant 64 : index
+  %width = index.constant 256 : index
+  %head_elements = index.constant 1024 : index
+  %block_elements = index.constant 2048 : index
+  %first_position = index.constant 61 : index
+  %second_position = index.constant 128 : index
+  scf.for %token = [%zero to %count step %one] {
+    %first = index.cmp ult, %token, %four : index
+    %begin = scf.select %first, %zero, %four : index
+    %start = scf.select %first, %first_position, %second_position : index
+    %relative = index.sub %token, %begin : index
+    %position = index.add %start, %relative : index
+    %row = scf.select %first, %one, %five : index
+    %logical_page = index.div %position, %page_tokens : index
+    %within_page = index.rem %position, %page_tokens : index
+    %page_seed = index.madd %logical_page, %seven, %row : index
+    %physical_page = index.rem %page_seed, %pages : index
+    %physical = index.madd %physical_page, %page_tokens, %within_page : index
+    %block = index.div %physical, %four : index
+    %member = index.rem %physical, %four : index
+    scf.for %head = [%zero to %two step %one] {
+      %head_start = index.mul %head, %head_elements : index
+      %block_start = index.madd %block, %block_elements, %head_start : index
+      scf.for %channel = [%zero to %width step %one] {
+        %group = index.div %channel, %sixteen : index
+        %component = index.rem %channel, %sixteen : index
+        %member_start = index.madd %member, %sixteen, %component : index
+        %channel_start = index.madd %group, %page_tokens, %member_start : index
+        %key_element = index.add %block_start, %channel_start : index
+        %sign_packed = view.load %key_input[%token, %head, %channel] : view<8x2x256xbf16> -> bf16
+        %sign = scalar.extf %sign_packed : bf16 to f32
+        %gamma = view.load %norm[%channel] : view<256xf32> -> f32
+        %normalized = scalar.mulf %sign, %gamma : f32
+        %key_packed = scalar.fptrunc %normalized : f32 to bf16
+        view.store %key_packed, %key[%key_element] : bf16, view<1081344xbf16>
+        %value_within = index.madd %channel, %four, %member : index
+        %value_element = index.add %block_start, %value_within : index
+        %value_packed = view.load %value_input[%token, %head, %channel] : view<8x2x256xbf16> -> bf16
+        view.store %value_packed, %value[%value_element] : bf16, view<1081344xbf16>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario public @packed_cache_publication {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %key_origin = check.literal value(128) : offset
+  %value_origin = check.literal value(2162816) : offset
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %epoch = check.generate.fill value(0) : tensor<3xi32>
+    %mapping = check.generate.fill value(-99) : tensor<8x4xi32>
+    %rows = check.generate.fill value(0) : tensor<4160xi8>
+    %keys = check.generate.fill value(0.0) : tensor<8x2x256xbf16>
+    %values = check.generate.fill value(0.0) : tensor<8x2x256xbf16>
+    %weight = check.generate.fill value(0.0) : tensor<256xf32>
+    %arena = check.generate.fill value(-17.0) : tensor<2162880xbf16>
+    check.generate<@append_fixture>(%trial, %epoch, %mapping, %rows, %keys, %values, %weight) : (index, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x2x256xbf16>, tensor<8x2x256xbf16>, tensor<256xf32>) -> ()
+    check.compare<@qsa_append_kv, @append_reference>(%key_origin, %value_origin, %epoch, %mapping, %rows, %keys, %values, %weight, %arena) : (offset, offset, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x2x256xbf16>, tensor<8x2x256xbf16>, tensor<256xf32>, tensor<2162880xbf16>) -> () {
+      check.expect.close actual(%arena) expected(%arena) atol(0.0) rtol(0.0) nan(different) : tensor<2162880xbf16>
+    }
+  }
+  check.return
+}

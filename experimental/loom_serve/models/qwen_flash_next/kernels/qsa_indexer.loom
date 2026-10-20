@@ -206,7 +206,10 @@ kernel.def target(@qsa_wave32) @qsa_linear_bf16(%width: index) {
 
 // One wave normalizes a packed head. Input/output regions are disjoint.
 // Normalization and trigonometric values round to BF16 before rotation.
-func.def public inline @qsa_normalize_rotate(%width_arg: index, %position: index, %input: buffer, %input_origin: offset, %weight: buffer, %output: buffer, %output_origin: offset) {
+// Output groups contain sixteen contiguous channels. A stride of 16 produces
+// ordinary packed rows; a stride of 64 writes one member of a four-token cache
+// panel while leaving the other three members untouched.
+func.def public inline @qsa_normalize_rotate(%width_arg: index, %position: index, %input: buffer, %input_origin: offset, %weight: buffer, %output: buffer, %output_origin: offset, %output_group_stride: index) {
   %width = index.assume %width_arg [range(%width_arg, 128, 256), multiple_of(%width_arg, 32)] : index
   %lane = kernel.subgroup.lane.id : index
   %stride = index.constant 32 : index
@@ -214,7 +217,10 @@ func.def public inline @qsa_normalize_rotate(%width_arg: index, %position: index
   %origin = index.constant 0 : offset
   %inputs = buffer.view %input[%input_origin] : buffer -> view<[%width]xbf16>
   %weights = buffer.view %weight[%origin] : buffer -> view<[%width]xf32>
-  %outputs = buffer.view %output[%output_origin] : buffer -> view<[%width]xbf16>
+  %group_width = index.constant 16 : index
+  %groups = index.div %width, %group_width : index
+  %output_layout = encoding.layout.strided [%output_group_stride, 1] : encoding<layout>
+  %outputs = buffer.view %output[%output_origin] : buffer -> view<[%groups]x16xbf16, %output_layout>
   %c0 = scalar.constant 0.0 : f32
   %partial = scf.for %channel = [%lane to %width step %stride](%accumulator = %c0 : f32) -> (f32) {
     %packed = view.load %inputs[%channel] : view<[%width]xbf16> -> bf16
@@ -271,7 +277,10 @@ func.def public inline @qsa_normalize_rotate(%width_arg: index, %position: index
       scf.yield %norm : f32
     }
     %packed = scalar.fptrunc %result : f32 to bf16
-    view.store %packed, %outputs[%channel] : bf16, view<[%width]xbf16>
+    %group_value = index.div %channel, %group_width : index
+    %group = index.assume %group_value [range(%group_value, 0, 15), lt(%group_value, %groups)] : index
+    %component = index.rem %channel, %group_width : index
+    view.store %packed, %outputs[%group, %component] : bf16, view<[%groups]x16xbf16, %output_layout>
   }
   func.return
 }
@@ -297,7 +306,8 @@ kernel.def target(@qsa_wave32) @qsa_prepare_queries(%heads: index) {
     %element_bytes = index.constant 2 : offset
     %input_origin = index.scale %input_element, %element_bytes : index, offset -> offset
     %output_origin = index.scale %output_element, %element_bytes : index, offset -> offset
-    func.call @qsa_normalize_rotate(%width, %position, %input, %input_origin, %weight, %output, %output_origin) : (index, index, buffer, offset, buffer, buffer, offset)
+    %output_group_stride = index.constant 16 : index
+    func.call @qsa_normalize_rotate(%width, %position, %input, %input_origin, %weight, %output, %output_origin, %output_group_stride) : (index, index, buffer, offset, buffer, buffer, offset, index)
   }
   kernel.return
 }
@@ -385,7 +395,8 @@ kernel.def target(@qsa_wave32) @qsa_prepare_blocks() {
       %output_relative = index.scale %block, %row_bytes : index, offset -> offset
       %output_origin = index.add %base, %output_relative : offset
       %width = index.constant 128 : index
-      func.call @qsa_normalize_rotate(%width, %logical, %pooled, %input_origin, %weight, %arena, %output_origin) : (index, index, buffer, offset, buffer, buffer, offset)
+      %output_group_stride = index.constant 16 : index
+      func.call @qsa_normalize_rotate(%width, %logical, %pooled, %input_origin, %weight, %arena, %output_origin, %output_group_stride) : (index, index, buffer, offset, buffer, buffer, offset, index)
     }
   }
   kernel.return

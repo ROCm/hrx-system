@@ -4,9 +4,63 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+func.decl pure @qsa_cohort_capacity() -> (index)
+
+kernel.decl @qsa_merge_cohorts() launch(%epoch: buffer, %selected: buffer, %cohorts: buffer)
+
+kernel.decl @qsa_cohort_attention() launch(%key_origin: offset, %value_origin: offset, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %cohorts: buffer, %output: buffer)
+
 kernel.decl @qsa_selected_attention() launch(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer)
 
-kernel.decl @qsa_matrix_attention() launch(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer)
+func.def @cohort_fixture_span(%trial: index, %span: index) -> (index, index, index, index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c6 = index.constant 6 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %p63 = index.constant 63 : index
+  %p2045 = index.constant 2045 : index
+  %p2046 = index.constant 2046 : index
+  %p2104 = index.constant 2104 : index
+  %p2105 = index.constant 2105 : index
+  %p2107 = index.constant 2107 : index
+  %p2108 = index.constant 2108 : index
+  %mixed = index.cmp eq, %trial, %c1 : index
+  %split = index.cmp eq, %trial, %c2 : index
+  %singles = index.cmp eq, %trial, %c3 : index
+  %late = index.cmp eq, %trial, %c5 : index
+  %poisoned_tail = index.cmp eq, %trial, %c6 : index
+  %first = index.cmp eq, %span, %c0 : index
+  %second = index.cmp eq, %span, %c1 : index
+  %mixed_length0 = scf.select %second, %c4, %c1 : index
+  %mixed_length = scf.select %first, %c3, %mixed_length0 : index
+  %split_length = scf.select %first, %c5, %c3 : index
+  %length0 = scf.select %split, %split_length, %c8 : index
+  %length1 = scf.select %mixed, %mixed_length, %length0 : index
+  %length2 = scf.select %singles, %c1, %length1 : index
+  %length = scf.select %poisoned_tail, %c3, %length2 : index
+  %mixed_position0 = scf.select %second, %p2046, %p2107 : index
+  %mixed_position = scf.select %first, %p63, %mixed_position0 : index
+  %split_position = scf.select %first, %p2045, %p2105 : index
+  %single_position = index.sub %p2108, %span : index
+  %long_prefix = scalar.ori %late, %poisoned_tail : i1
+  %position0 = scf.select %long_prefix, %p2104, %c0 : index
+  %position1 = scf.select %mixed, %mixed_position, %position0 : index
+  %position2 = scf.select %split, %split_position, %position1 : index
+  %position = scf.select %singles, %single_position, %position2 : index
+  %mixed_begin0 = scf.select %second, %c3, %c7 : index
+  %mixed_begin = scf.select %first, %c0, %mixed_begin0 : index
+  %split_begin = scf.select %first, %c0, %c5 : index
+  %begin0 = scf.select %mixed, %mixed_begin, %c0 : index
+  %begin1 = scf.select %split, %split_begin, %begin0 : index
+  %begin = scf.select %singles, %span, %begin1 : index
+  %row = index.madd %span, %c4, %c1 : index
+  func.return %length, %position, %begin, %row : index, index, index, index
+}
 
 // Keys repeat two values across alternating channels. Queries vary across all
 // channels, exercising every matrix panel and wave while letting the oracle
@@ -15,7 +69,7 @@ kernel.decl @qsa_matrix_attention() launch(%key_origin: offset, %value_origin: o
 // offsets let the oracle reconstruct every channel from one weighted value.
 // Page permutations and nonzero plane origins make logical/physical addressing
 // observable without making the oracle repeat the production address helpers.
-func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer) {
+func.def @cohort_fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -32,15 +86,24 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
   %value_base = index.constant 2163072 : offset
   %map_base = index.constant 2048 : offset
   %counts = buffer.view %epoch[%origin] : buffer -> view<3xi32>
-  %c3_i32 = scalar.constant 3 : i32
-  view.store %c3_i32, %counts[0] : i32, view<3xi32>
+  %three = index.constant 3 : index
+  %six = index.constant 6 : index
+  %eight = index.constant 8 : index
+  %singles = index.cmp eq, %trial, %three : index
+  %poisoned_tail = index.cmp eq, %trial, %six : index
+  %empty = index.cmp eq, %trial, %c4 : index
+  %partial = scalar.ori %singles, %poisoned_tail : i1
+  %live0 = scf.select %partial, %three, %eight : index
+  %live = scf.select %empty, %c0, %live0 : index
+  %live_word = index.cast %live : index to i32
+  view.store %live_word, %counts[0] : i32, view<3xi32>
   %positions = buffer.view %mapping[%origin] : buffer -> view<8x4xi32>
   %entries = buffer.view %rows[%origin] : buffer -> view<16x4xi64>
   %maps = buffer.view %rows[%map_base] : buffer -> view<16x33xi32>
   %query = buffer.view %queries[%origin] : buffer -> view<8x24x256xbf16>
   %gate = buffer.view %gates[%origin] : buffer -> view<8x24x512xbf16>
-  %key = buffer.view %arena[%key_base] : buffer -> view<2112x2x256xbf16>
-  %value = buffer.view %arena[%value_base] : buffer -> view<2112x2x256xbf16>
+  %key = buffer.view %arena[%key_base] : buffer -> view<1081344xbf16>
+  %value = buffer.view %arena[%value_base] : buffer -> view<1081344xbf16>
   %ids = buffer.view %selected[%origin] : buffer -> view<8x512xi32>
   %half = scalar.constant 0.5 : f64
   %quarter = scalar.constant 0.25 : f64
@@ -54,7 +117,14 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
   %c13 = index.constant 13 : index
   %c17 = index.constant 17 : index
   %c31 = index.constant 31 : index
+  // Trial six ends at logical position 2,106 in resident row one. The next
+  // member maps to physical token 1,787 and is not published. Raw packet loads
+  // may contain these NaNs, but membership must mask them before arithmetic.
+  %unpublished_physical = index.constant 1787 : index
+  %poison = scalar.constant nan : bf16
   scf.for %physical = [%c0 to %pool step %c1] {
+    %is_unpublished = index.cmp eq, %physical, %unpublished_physical : index
+    %poison_member = scalar.andi %poisoned_tail, %is_unpublished : i1
     %key_index = index.madd %physical, %c7, %c1 : index
     %key_remainder = index.rem %key_index, %c31 : index
     %key_word = index.cast %key_remainder : index to i32
@@ -81,32 +151,73 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
       scf.for %channel = [%c0 to %channels step %c1] {
         %parity = index.rem %channel, %c2 : index
         %even = index.cmp eq, %parity, %c0 : index
-        %key_component = scf.select %even, %key0, %key1 : bf16
-        view.store %key_component, %key[%physical, %head, %channel] : bf16, view<2112x2x256xbf16>
+        %key_value = scf.select %even, %key0, %key1 : bf16
+        %key_component = scf.select %poison_member, %poison, %key_value : bf16
+        %sixteen = index.constant 16 : index
+        %sixty_four = index.constant 64 : index
+        %head_elements = index.constant 1024 : index
+        %block_elements = index.constant 2048 : index
+        %block = index.div %physical, %c4 : index
+        %member = index.rem %physical, %c4 : index
+        %head_start = index.mul %head, %head_elements : index
+        %block_start = index.madd %block, %block_elements, %head_start : index
+        %group = index.div %channel, %sixteen : index
+        %component = index.rem %channel, %sixteen : index
+        %member_start = index.madd %member, %sixteen, %component : index
+        %channel_start = index.madd %group, %sixty_four, %member_start : index
+        %key_element = index.add %block_start, %channel_start : index
+        view.store %key_component, %key[%key_element] : bf16, view<1081344xbf16>
         %channel_remainder = index.rem %channel, %c9 : index
         %channel_word = index.cast %channel_remainder : index to i32
         %channel_float = scalar.uitofp %channel_word : i32 to f64
         %channel_offset = scalar.mulf %channel_float, %sixty_fourth : f64
         %value_float = scalar.addf %value_base, %channel_offset : f64
-        %packed = scalar.fptrunc %value_float : f64 to bf16
-        view.store %packed, %value[%physical, %head, %channel] : bf16, view<2112x2x256xbf16>
+        %value_packed = scalar.fptrunc %value_float : f64 to bf16
+        %packed = scf.select %poison_member, %poison, %value_packed : bf16
+        %value_within = index.madd %channel, %c4, %member : index
+        %value_element = index.add %block_start, %value_within : index
+        view.store %packed, %value[%value_element] : bf16, view<1081344xbf16>
       }
     }
   }
   %base_word = scalar.constant 256 : i64
-  %rows_count = index.constant 3 : index
-  %first_trial = index.cmp eq, %trial, %c0 : index
-  %second_trial = index.cmp eq, %trial, %c1 : index
-  %third_trial = index.cmp eq, %trial, %c2 : index
-  %short = index.constant 3 : index
-  %boundary = index.constant 65 : index
-  %dense_end = index.constant 2048 : index
-  %sparse_end = index.constant 2109 : index
-  %long = scf.select %third_trial, %dense_end, %sparse_end : index
-  %middle = scf.select %second_trial, %boundary, %long : index
-  %visible = scf.select %first_trial, %short, %middle : index
-  scf.for %token = [%c0 to %rows_count step %c1] {
-    %resident_row = index.madd %token, %c4, %c1 : index
+
+  %mixed = index.cmp eq, %trial, %c1 : index
+  %split = index.cmp eq, %trial, %c2 : index
+  %several = scalar.ori %mixed, %singles : i1
+  %span_count0 = scf.select %split, %c2, %c1 : index
+  %span_count1 = scf.select %several, %three, %span_count0 : index
+  %span_count = scf.select %empty, %c0, %span_count1 : index
+  %span_word = index.cast %span_count : index to i32
+  view.store %span_word, %counts[1] : i32, view<3xi32>
+  %span_header_bytes = index.constant 12 : offset
+  %span_record_bytes = index.constant 20 : offset
+  scf.for %span = [%c0 to %span_count step %c1] {
+    %length, %position, %begin, %row = func.call @cohort_fixture_span(%trial, %span) : (index, index) -> (index, index, index, index)
+    %relative = index.scale %span, %span_record_bytes : index, offset -> offset
+    %record_origin = index.add %span_header_bytes, %relative : offset
+    %record = buffer.view %epoch[%record_origin] : buffer -> view<5xi32>
+    %length_word = index.cast %length : index to i32
+    %position_word = index.cast %position : index to i32
+    %begin_word = index.cast %begin : index to i32
+    %row_word = index.cast %row : index to i32
+    view.store %length_word, %record[0] : i32, view<5xi32>
+    view.store %position_word, %record[1] : i32, view<5xi32>
+    view.store %begin_word, %record[2] : i32, view<5xi32>
+    view.store %row_word, %record[3] : i32, view<5xi32>
+  }
+  scf.for %token = [%c0 to %live step %c1] {
+    %after_three = index.cmp uge, %token, %three : index
+    %after_seven = index.cmp uge, %token, %c7 : index
+    %after_five = index.cmp uge, %token, %c5 : index
+    %mixed_span0 = scf.select %after_three, %c1, %c0 : index
+    %mixed_span = scf.select %after_seven, %c2, %mixed_span0 : index
+    %split_span = scf.select %after_five, %c1, %c0 : index
+    %span0 = scf.select %mixed, %mixed_span, %c0 : index
+    %span1 = scf.select %split, %split_span, %span0 : index
+    %span = scf.select %singles, %token, %span1 : index
+    %span_length, %first_position, %first_token, %resident_value = func.call @cohort_fixture_span(%trial, %span) : (index, index) -> (index, index, index, index)
+    %resident_row = index.assume %resident_value [range(%resident_value, 0, 15)] : index
     view.store %base_word, %entries[%resident_row, 2] : i64, view<16x4xi64>
     scf.for %page = [%c0 to %pages step %c1] {
       %biased = index.madd %page, %c7, %resident_row : index
@@ -114,15 +225,19 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
       %word = index.cast %physical : index to i32
       view.store %word, %maps[%resident_row, %page] : i32, view<16x33xi32>
     }
-    %length = index.sub %visible, %token : index
-    %position = index.sub %length, %c1 : index
+    %relative_token = index.sub %token, %first_token : index
+    %position_value = index.add %first_position, %relative_token : index
+    %position = index.assume %position_value [range(%position_value, 0, 2111)] : index
+    %length = index.add %position, %c1 : index
     %position_word = index.cast %position : index to i32
     %row_word = index.cast %resident_row : index to i32
     %c0_i32 = scalar.constant 0 : i32
     view.store %position_word, %positions[%token, 0] : i32, view<8x4xi32>
     view.store %row_word, %positions[%token, 1] : i32, view<8x4xi32>
-    view.store %c0_i32, %positions[%token, 2] : i32, view<8x4xi32>
-    view.store %c0_i32, %positions[%token, 3] : i32, view<8x4xi32>
+    %first_token_word = index.cast %first_token : index to i32
+    %first_position_word = index.cast %first_position : index to i32
+    view.store %first_token_word, %positions[%token, 2] : i32, view<8x4xi32>
+    view.store %first_position_word, %positions[%token, 3] : i32, view<8x4xi32>
     %complete = index.div %length, %c4 : index
     %sparse = index.cmp ugt, %complete, %budget : index
     %count = scf.select %sparse, %budget, %complete : index
@@ -147,14 +262,16 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
         %even = index.cmp eq, %parity, %c0 : index
         %component = scf.select %even, %query0, %query1 : f64
         %pattern = index.rem %channel, %c5 : index
-        %factor = index.add %pattern, %c1 : index
+        %factor0 = index.add %pattern, %c1 : index
+        %factor = index.add %factor0, %token : index
         %factor_word = index.cast %factor : index to i32
         %factor_float = scalar.uitofp %factor_word : i32 to f64
         %factor_scaled = scalar.mulf %factor_float, %sixteenth : f64
         %query_value = scalar.mulf %component, %factor_scaled : f64
         %query_packed = scalar.fptrunc %query_value : f64 to bf16
         view.store %query_packed, %query[%token, %head, %channel] : bf16, view<8x24x256xbf16>
-        %biased = index.add %head, %channel : index
+        %biased0 = index.add %head, %channel : index
+        %biased = index.add %biased0, %token : index
         %remainder = index.rem %biased, %c17 : index
         %word = index.cast %remainder : index to i32
         %unsigned = scalar.uitofp %word : i32 to f64
@@ -171,7 +288,7 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
 
 // The VM exposes F32 exponential. Keep its error separate from F64 reductions;
 // this fixture's finite logits bound its error far below one BF16 output step.
-func.def @reference_exp(%value: f64) -> (f64) {
+func.def @cohort_reference_exp(%value: f64) -> (f64) {
   %narrow = scalar.fptrunc %value : f64 to f32
   %exponential = scalar.expf<afn> %narrow : f32
   %wide = scalar.extf %exponential : f32 to f64
@@ -182,7 +299,7 @@ func.def @reference_exp(%value: f64) -> (f64) {
 // It shares no subgroup reductions, matrix layout, partition merge, or page
 // helper with the production kernel. Accumulation, normalization, and output gating
 // use F64, with explicit BF16 attention and output rounding boundaries.
-func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer) {
+func.def @cohort_reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -203,8 +320,8 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
   %maps = buffer.view %rows[%map_base] : buffer -> view<16x33xi32>
   %query = buffer.view %queries[%origin] : buffer -> view<8x24x256xbf16>
   %gate = buffer.view %gates[%origin] : buffer -> view<8x24x512xbf16>
-  %key = buffer.view %arena[%key_base] : buffer -> view<2112x2x256xbf16>
-  %value = buffer.view %arena[%value_base] : buffer -> view<2112x2x256xbf16>
+  %key = buffer.view %arena[%key_base] : buffer -> view<1081344xbf16>
+  %value = buffer.view %arena[%value_base] : buffer -> view<1081344xbf16>
   %ids = buffer.view %selected[%origin] : buffer -> view<8x512xi32>
   %result = buffer.view %output[%origin] : buffer -> view<8x24x256xbf16>
   %fzero = scalar.constant 0.0 : f64
@@ -212,7 +329,11 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
   %lowest = scalar.constant -1e+30 : f64
   %scale = scalar.constant 0.0625 : f64
   %channel_scale = scalar.constant 0.015625 : f64
-  scf.for %token = [%c0 to %c3 step %c1] {
+  %epoch_header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %live_word = view.load %epoch_header[0] : view<3xi32> -> i32
+  %live_value = index.cast %live_word : i32 to index
+  %live = index.assume %live_value [range(%live_value, 0, 8)] : index
+  scf.for %token = [%c0 to %live step %c1] {
     %position_word = view.load %positions[%token, 0] : view<8x4xi32> -> i32
     %row_word = view.load %positions[%token, 1] : view<8x4xi32> -> i32
     %position_value = index.cast %position_word : i32 to index
@@ -260,12 +381,36 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
         %physical_value = index.cast %physical_word : i32 to index
         %physical_page = index.assume %physical_value [range(%physical_value, 0, 32)] : index
         %physical = index.madd %physical_page, %page_tokens, %within : index
-        %k0_packed = view.load %key[%physical, %kv_head, 0] : view<2112x2x256xbf16> -> bf16
-        %k1_packed = view.load %key[%physical, %kv_head, 1] : view<2112x2x256xbf16> -> bf16
-        %v_packed = view.load %value[%physical, %kv_head, 0] : view<2112x2x256xbf16> -> bf16
-        %k0 = scalar.extf %k0_packed : bf16 to f64
-        %k1 = scalar.extf %k1_packed : bf16 to f64
-        %v = scalar.extf %v_packed : bf16 to f64
+        %seven = index.constant 7 : index
+        %thirteen = index.constant 13 : index
+        %seventeen = index.constant 17 : index
+        %thirty_one = index.constant 31 : index
+        %key_seed = index.madd %physical, %seven, %c1 : index
+        %key_remainder = index.rem %key_seed, %thirty_one : index
+        %other_remainder = index.rem %physical, %thirteen : index
+        %value_remainder = index.rem %physical, %seventeen : index
+        %key_word = index.cast %key_remainder : index to i32
+        %other_word = index.cast %other_remainder : index to i32
+        %value_word = index.cast %value_remainder : index to i32
+        %head_word = index.cast %kv_head : index to i32
+        %key_unsigned = scalar.uitofp %key_word : i32 to f64
+        %other_unsigned = scalar.uitofp %other_word : i32 to f64
+        %value_unsigned = scalar.uitofp %value_word : i32 to f64
+        %head_unsigned = scalar.uitofp %head_word : i32 to f64
+        %fifteen = scalar.constant 15.0 : f64
+        %six = scalar.constant 6.0 : f64
+        %eight = scalar.constant 8.0 : f64
+        %eighth = scalar.constant 0.125 : f64
+        %quarter = scalar.constant 0.25 : f64
+        %sixteenth = scalar.constant 0.0625 : f64
+        %key_centered = scalar.subf %key_unsigned, %fifteen : f64
+        %other_centered = scalar.subf %other_unsigned, %six : f64
+        %value_centered = scalar.subf %value_unsigned, %eight : f64
+        %k0 = scalar.mulf %key_centered, %eighth : f64
+        %k1 = scalar.mulf %other_centered, %quarter : f64
+        %value_scaled = scalar.mulf %value_centered, %sixteenth : f64
+        %head_scaled = scalar.mulf %head_unsigned, %eighth : f64
+        %v = scalar.addf %value_scaled, %head_scaled : f64
         %product0 = scalar.mulf %q0, %k0 : f64
         %product1 = scalar.mulf %q1, %k1 : f64
         %dot = scalar.addf %product0, %product1 : f64
@@ -273,8 +418,8 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
         %next_maximum = scalar.maxnumf %old_maximum, %logit : f64
         %old_delta = scalar.subf %old_maximum, %next_maximum : f64
         %delta = scalar.subf %logit, %next_maximum : f64
-        %rescale = func.call @reference_exp(%old_delta) : (f64) -> (f64)
-        %weight = func.call @reference_exp(%delta) : (f64) -> (f64)
+        %rescale = func.call @cohort_reference_exp(%old_delta) : (f64) -> (f64)
+        %weight = func.call @cohort_reference_exp(%delta) : (f64) -> (f64)
         %old_sum = scalar.mulf %old_denominator, %rescale : f64
         %next_sum = scalar.addf %old_sum, %weight : f64
         %old_value = scalar.mulf %old_accumulator, %rescale : f64
@@ -295,7 +440,7 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
         %gate_packed = view.load %gate[%token, %head, %gate_channel] : view<8x24x512xbf16> -> bf16
         %gate_value = scalar.extf %gate_packed : bf16 to f64
         %negative = scalar.negf %gate_value : f64
-        %exponential = func.call @reference_exp(%negative) : (f64) -> (f64)
+        %exponential = func.call @cohort_reference_exp(%negative) : (f64) -> (f64)
         %gate_denominator = scalar.addf %fone, %exponential : f64
         %gated = scalar.divf %attention, %gate_denominator : f64
         %packed = scalar.fptrunc %gated : f64 to bf16
@@ -306,42 +451,64 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
   func.return
 }
 
-check.scenario public @paged_sparse_attention {
+command.program.def @cohort_attention_subject() launch(%epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer) {
+  %groups = func.call pure @qsa_cohort_capacity() : () -> (index)
+  %record_bytes = index.constant 8224 : offset
+  %bytes = index.scale %groups, %record_bytes : index, offset -> offset
+  %cohorts = buffer.alloca<global> align(16) %bytes : buffer
+  %key_origin = index.constant 128 : offset
+  %value_origin = index.constant 2162816 : offset
+  kernel.launch @qsa_merge_cohorts(%epoch, %selected, %cohorts) : (buffer, buffer, buffer)
+  kernel.launch @qsa_cohort_attention(%key_origin, %value_origin, %rows, %queries, %gates, %arena, %cohorts, %output) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+func.def @cohort_attention_reference(%epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer) {
+  %key_origin = index.constant 128 : offset
+  %value_origin = index.constant 2162816 : offset
+  func.call @cohort_reference(%key_origin, %value_origin, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  func.return
+}
+
+command.program.def @partitioned_attention_subject() launch(%epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer) {
+  %key_origin = index.constant 128 : offset
+  %value_origin = index.constant 2162816 : offset
+  kernel.launch @qsa_selected_attention(%key_origin, %value_origin, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+check.scenario public @paged_sparse_attention_original_f64 {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  %key_origin = check.literal value(128) : offset
-  %value_origin = check.literal value(2162816) : offset
-  check.trial[4](%trial: index, %entropy: check.entropy) {
-    %epoch = check.generate.fill value(0) : tensor<3xi32>
+  check.trial[7](%trial: index, %entropy: check.entropy) {
+    %epoch = check.generate.fill value(0) : tensor<83xi32>
     %mapping = check.generate.fill value(-99) : tensor<8x4xi32>
     %rows = check.generate.fill value(0) : tensor<4160xi8>
     %queries = check.generate.fill value(0.0) : tensor<8x24x256xbf16>
     %gates = check.generate.fill value(0.0) : tensor<8x24x512xbf16>
     %arena = check.generate.fill value(0) : tensor<4325760xi8>
     %selected = check.generate.fill value(-99) : tensor<8x512xi32>
-    check.generate<@fixture>(%trial, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected) : (index, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>) -> ()
     %output = check.generate.fill value(-17.0) : tensor<8x24x256xbf16>
-    check.compare<@qsa_selected_attention, @reference>(%key_origin, %value_origin, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : (offset, offset, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>, tensor<8x24x256xbf16>) -> () {
+    check.generate<@cohort_fixture>(%trial, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected) : (index, tensor<83xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>) -> ()
+    check.compare<@cohort_attention_subject, @cohort_attention_reference>(%epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : (tensor<83xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>, tensor<8x24x256xbf16>) -> () {
       check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<8x24x256xbf16>
     }
   }
   check.return
 }
 
-check.scenario public @paged_sparse_matrix_attention {
+check.scenario public @paged_partitioned_attention_original_f64 {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  %key_origin = check.literal value(128) : offset
-  %value_origin = check.literal value(2162816) : offset
-  check.trial[4](%trial: index, %entropy: check.entropy) {
-    %epoch = check.generate.fill value(0) : tensor<3xi32>
+  check.trial[7](%trial: index, %entropy: check.entropy) {
+    %epoch = check.generate.fill value(0) : tensor<83xi32>
     %mapping = check.generate.fill value(-99) : tensor<8x4xi32>
     %rows = check.generate.fill value(0) : tensor<4160xi8>
     %queries = check.generate.fill value(0.0) : tensor<8x24x256xbf16>
     %gates = check.generate.fill value(0.0) : tensor<8x24x512xbf16>
     %arena = check.generate.fill value(0) : tensor<4325760xi8>
     %selected = check.generate.fill value(-99) : tensor<8x512xi32>
-    check.generate<@fixture>(%trial, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected) : (index, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>) -> ()
     %output = check.generate.fill value(-17.0) : tensor<8x24x256xbf16>
-    check.compare<@qsa_matrix_attention, @reference>(%key_origin, %value_origin, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : (offset, offset, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>, tensor<8x24x256xbf16>) -> () {
+    check.generate<@cohort_fixture>(%trial, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected) : (index, tensor<83xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>) -> ()
+    check.compare<@partitioned_attention_subject, @cohort_attention_reference>(%epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : (tensor<83xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>, tensor<8x24x256xbf16>) -> () {
       check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<8x24x256xbf16>
     }
   }

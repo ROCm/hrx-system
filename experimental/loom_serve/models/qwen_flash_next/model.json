@@ -33,6 +33,7 @@
       "kernels/q8_matrix.loom",
       "kernels/q8_projection.loom",
       "kernels/qsa_attention.loom",
+      "kernels/qsa_cohorts.loom",
       "kernels/qsa_matrix.loom",
       "kernels/qsa_indexer.loom",
       "kernels/qsa_rotary.loom",
