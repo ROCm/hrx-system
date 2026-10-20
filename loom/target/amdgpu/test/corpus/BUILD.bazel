@@ -7,11 +7,11 @@
 load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_corpus_build",
-    "loom_scenario_test",
+    "loom_corpus_test",
     "loom_test",
 )
 load("//loom/src/loom/test/corpus:catalog.bzl", "LOOM_CORPUS")
-load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_HARDWARE_PROFILE")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -149,7 +149,7 @@ loom_corpus_build(
     },
 )
 
-loom_scenario_test(
+loom_corpus_test(
     name = "scenario_execution",
     allowed_failures = {
         AMDGPU_HARDWARE_PROFILE.name: {
@@ -157,7 +157,13 @@ loom_scenario_test(
         },
     },
     catalog = LOOM_CORPUS,
-    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    profile_sources = {
+        AMDGPU_ACCESS_PROFILE.name: ["numeric/vector/dynamic_windows.loom"],
+    },
     xfails = {
         AMDGPU_HARDWARE_PROFILE.name: {
             "function/buffer/arguments.loom:@buffer_extent_values": "TARGET/001",

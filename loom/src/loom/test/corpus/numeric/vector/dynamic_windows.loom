@@ -386,3 +386,455 @@ check.scenario @dynamic_register_window_values {
   }
   check.return
 }
+
+// The write after the tile load requires an immutable snapshot. Runtime
+// windows cross row boundaries, and their concatenation has an interior
+// partial register. Output guards and the changed input are both observable.
+func.def @reshaped_byte_windows(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 8)] : index
+  %c5 = index.constant 5 : index
+  %tail_position = index.add %position, %c5 : index
+  %base = index.constant 0 : offset
+  %tile_view = buffer.view %input[%base] : buffer -> view<4x4xi8>
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<10xi8>
+  %tile = vector.load %tile_view[0, 0] : view<4x4xi8> -> vector<4x4xi8>
+  %changed = scalar.constant 91 : i8
+  view.store %changed, %input_view[0] : i8, view<16xi8>
+  %flat = vector.bitcast %tile : vector<4x4xi8> to vector<16xi8>
+  %head = vector.slice %flat[%position] : vector<16xi8> -> vector<3xi8>
+  %tail = vector.slice %flat[%tail_position] : vector<16xi8> -> vector<3xi8>
+  %joined = vector.concat<0> %head, %tail : vector<3xi8>, vector<3xi8> -> vector<6xi8>
+  vector.store %joined, %output_view[2] : vector<6xi8>, view<10xi8>
+  func.return
+}
+
+func.def @reshaped_byte_windows_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<10xi8>
+  %begin = index.constant 0 : index
+  %end = index.constant 6 : index
+  %step = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c2 = index.constant 2 : index
+  %c0 = index.constant 0 : index
+  scf.for %i = [%begin to %end step %step] {
+    %tail = index.cmp sge, %i, %c3 : index
+    %gap = scf.select %tail, %c2, %c0 : index
+    %relative = index.add %i, %gap : index
+    %source_index = index.add %position, %relative : index
+    %destination_index = index.add %i, %c2 : index
+    %value = view.load %input_view[%source_index] : view<16xi8> -> i8
+    view.store %value, %output_view[%destination_index] : i8, view<10xi8>
+  }
+  %changed = scalar.constant 91 : i8
+  view.store %changed, %input_view[0] : i8, view<16xi8>
+  func.return
+}
+
+check.scenario @reshaped_byte_window_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(17) : tensor<16xi8>
+    %output = check.generate.fill value(-85) : tensor<10xi8>
+    check.compare<@reshaped_byte_windows, @reshaped_byte_windows_oracle>(%trial, %input, %output) : (index, tensor<16xi8>, tensor<10xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10xi8>
+    }
+  }
+  check.return
+}
+
+// A reshape also changes the lane interpretation. Loading raw integer bits
+// before the write and reinterpreting through f16 preserves signed zero and
+// NaN payloads without floating-point arithmetic.
+func.def @reshaped_half_windows(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 8)] : index
+  %c5 = index.constant 5 : index
+  %tail_position = index.add %position, %c5 : index
+  %base = index.constant 0 : offset
+  %tile_view = buffer.view %input[%base] : buffer -> view<4x4xi16>
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi16>
+  %output_view = buffer.view %output[%base] : buffer -> view<10xi16>
+  %tile = vector.load %tile_view[0, 0] : view<4x4xi16> -> vector<4x4xi16>
+  %changed = scalar.constant 91 : i16
+  view.store %changed, %input_view[0] : i16, view<16xi16>
+  %flat = vector.bitcast %tile : vector<4x4xi16> to vector<16xf16>
+  %head = vector.slice %flat[%position] : vector<16xf16> -> vector<3xf16>
+  %tail = vector.slice %flat[%tail_position] : vector<16xf16> -> vector<3xf16>
+  %joined = vector.concat<0> %head, %tail : vector<3xf16>, vector<3xf16> -> vector<6xf16>
+  %bits = vector.bitcast %joined : vector<6xf16> to vector<6xi16>
+  vector.store %bits, %output_view[2] : vector<6xi16>, view<10xi16>
+  func.return
+}
+
+func.def @reshaped_half_windows_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi16>
+  %output_view = buffer.view %output[%base] : buffer -> view<10xi16>
+  %begin = index.constant 0 : index
+  %end = index.constant 6 : index
+  %step = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c2 = index.constant 2 : index
+  %c0 = index.constant 0 : index
+  scf.for %i = [%begin to %end step %step] {
+    %tail = index.cmp sge, %i, %c3 : index
+    %gap = scf.select %tail, %c2, %c0 : index
+    %relative = index.add %i, %gap : index
+    %source_index = index.add %position, %relative : index
+    %destination_index = index.add %i, %c2 : index
+    %value = view.load %input_view[%source_index] : view<16xi16> -> i16
+    view.store %value, %output_view[%destination_index] : i16, view<10xi16>
+  }
+  %changed = scalar.constant 91 : i16
+  view.store %changed, %input_view[0] : i16, view<16xi16>
+  func.return
+}
+
+check.scenario @reshaped_half_window_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(4369) : tensor<16xi16>
+    %output = check.generate.fill value(23130) : tensor<10xi16>
+    check.compare<@reshaped_half_windows, @reshaped_half_windows_oracle>(%trial, %input, %output) : (index, tensor<16xi16>, tensor<10xi16>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi16>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10xi16>
+    }
+  }
+  check.return
+}
+
+// Every byte rectangle origin is exercised. The volume shares its row origin
+// but preserves gaps between planes; both destinations retain guard borders.
+func.def @rectangular_windows(%trial: index, %bytes: buffer, %halves: buffer, %byte_output: buffer, %half_output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 17)] : index
+  %c6 = index.constant 6 : index
+  %row = index.div %ordinal, %c6 : index
+  %column = index.rem %ordinal, %c6 : index
+  %base = index.constant 0 : offset
+  %byte_view = buffer.view %bytes[%base] : buffer -> view<4x8xi8>
+  %half_view = buffer.view %halves[%base] : buffer -> view<3x4x4xi16>
+  %byte_result = buffer.view %byte_output[%base] : buffer -> view<4x6xi8>
+  %half_result = buffer.view %half_output[%base] : buffer -> view<4x4x8xi16>
+  %tile = vector.load %byte_view[0, 0] : view<4x8xi8> -> vector<4x8xi8>
+  %rectangle = vector.slice %tile[%row, %column] : vector<4x8xi8> -> vector<2x3xi8>
+  vector.store %rectangle, %byte_result[1, 2] : vector<2x3xi8>, view<4x6xi8>
+  %volume = vector.load %half_view[0, 0, 0] : view<3x4x4xi16> -> vector<3x4x4xi16>
+  %planes = vector.slice %volume[1, %row, 0] : vector<3x4x4xi16> -> vector<2x2x4xi16>
+  vector.store %planes, %half_result[1, 1, 2] : vector<2x2x4xi16>, view<4x4x8xi16>
+  func.return
+}
+
+func.def @rectangular_windows_oracle(%trial: index, %bytes: buffer, %halves: buffer, %byte_output: buffer, %half_output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 17)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c6 = index.constant 6 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %row = index.div %ordinal, %c6 : index
+  %column = index.rem %ordinal, %c6 : index
+  %base = index.constant 0 : offset
+  %byte_view = buffer.view %bytes[%base] : buffer -> view<32xi8>
+  %half_view = buffer.view %halves[%base] : buffer -> view<48xi16>
+  %byte_result = buffer.view %byte_output[%base] : buffer -> view<24xi8>
+  %half_result = buffer.view %half_output[%base] : buffer -> view<128xi16>
+  scf.for %i = [%c0 to %c6 step %c1] {
+    %dy = index.div %i, %c3 : index
+    %dx = index.rem %i, %c3 : index
+    %source_row = index.add %row, %dy : index
+    %source_column = index.add %column, %dx : index
+    %source_index = index.madd %source_row, %c8, %source_column : index
+    %destination_row = index.add %dy, %c1 : index
+    %destination_column = index.add %dx, %c2 : index
+    %destination_index = index.madd %destination_row, %c6, %destination_column : index
+    %value = view.load %byte_view[%source_index] : view<32xi8> -> i8
+    view.store %value, %byte_result[%destination_index] : i8, view<24xi8>
+  }
+  scf.for %i = [%c0 to %c16 step %c1] {
+    %plane = index.div %i, %c8 : index
+    %plane_index = index.rem %i, %c8 : index
+    %dy = index.div %plane_index, %c4 : index
+    %dx = index.rem %plane_index, %c4 : index
+    %source_plane = index.add %plane, %c1 : index
+    %source_row = index.add %row, %dy : index
+    %source_in_plane = index.madd %source_row, %c4, %dx : index
+    %source_index = index.madd %source_plane, %c16, %source_in_plane : index
+    %destination_row = index.add %dy, %c1 : index
+    %destination_column = index.add %dx, %c2 : index
+    %destination_in_plane = index.madd %destination_row, %c8, %destination_column : index
+    %destination_index = index.madd %source_plane, %c32, %destination_in_plane : index
+    %value = view.load %half_view[%source_index] : view<48xi16> -> i16
+    view.store %value, %half_result[%destination_index] : i16, view<128xi16>
+  }
+  func.return
+}
+
+check.scenario @rectangular_window_values {
+  check.trial[18](%trial: index, %entropy: check.entropy) {
+    %bytes = check.generate.iota offset(-128) step(7) : tensor<32xi8>
+    %halves = check.generate.iota offset(-32768) step(1031) : tensor<48xi16>
+    %byte_output = check.generate.fill value(85) : tensor<24xi8>
+    %half_output = check.generate.fill value(23130) : tensor<128xi16>
+    check.compare<@rectangular_windows, @rectangular_windows_oracle>(%trial, %bytes, %halves, %byte_output, %half_output) : (index, tensor<32xi8>, tensor<48xi16>, tensor<24xi8>, tensor<128xi16>) -> () {
+      check.expect.bitwise actual(%byte_output) expected(%byte_output) : tensor<24xi8>
+      check.expect.bitwise actual(%half_output) expected(%half_output) : tensor<128xi16>
+    }
+  }
+  check.return
+}
+
+// The view has a leading batch axis outside the vector footprint. Both static
+// and runtime load origins contribute to the selected trailing coordinates.
+func.def @composed_rectangle(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 8)] : index
+  %c3 = index.constant 3 : index
+  %batch = index.div %ordinal, %c3 : index
+  %column = index.rem %ordinal, %c3 : index
+  %row = index.mul %column, %c3 : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<3x8x12xi16>
+  %result_view = buffer.view %output[%base] : buffer -> view<8xi16>
+  %tile = vector.load %view[%batch, %row, 2] : view<3x8x12xi16> -> vector<2x4xi16>
+  %rectangle = vector.slice %tile[1, %column] : vector<2x4xi16> -> vector<1x2xi16>
+  %flat = vector.bitcast %rectangle : vector<1x2xi16> to vector<2xi16>
+  vector.store %flat, %result_view[3] : vector<2xi16>, view<8xi16>
+  func.return
+}
+
+func.def @composed_rectangle_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 8)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c12 = index.constant 12 : index
+  %c96 = index.constant 96 : index
+  %batch = index.div %ordinal, %c3 : index
+  %column = index.rem %ordinal, %c3 : index
+  %row = index.madd %column, %c3, %c1 : index
+  %row_base = index.mul %row, %c12 : index
+  %batch_row_base = index.madd %batch, %c96, %row_base : index
+  %column_base = index.add %column, %c2 : index
+  %source_base = index.add %batch_row_base, %column_base : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<288xi16>
+  %result_view = buffer.view %output[%base] : buffer -> view<8xi16>
+  scf.for %i = [%c0 to %c2 step %c1] {
+    %source_index = index.add %source_base, %i : index
+    %destination_index = index.add %c3, %i : index
+    %value = view.load %view[%source_index] : view<288xi16> -> i16
+    view.store %value, %result_view[%destination_index] : i16, view<8xi16>
+  }
+  func.return
+}
+
+check.scenario @composed_rectangle_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(223) : tensor<288xi16>
+    %output = check.generate.fill value(23130) : tensor<8xi16>
+    check.compare<@composed_rectangle, @composed_rectangle_oracle>(%trial, %input, %output) : (index, tensor<288xi16>, tensor<8xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<8xi16>
+    }
+  }
+  check.return
+}
+
+// A conditional write changes a selected lane after the load. Every crop
+// origin runs with both branch outcomes, and all input/output bits are checked.
+func.def @rectangle_snapshot(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 17)] : index
+  %c3 = index.constant 3 : index
+  %c9 = index.constant 9 : index
+  %position = index.rem %ordinal, %c9 : index
+  %row = index.div %position, %c3 : index
+  %column = index.rem %position, %c3 : index
+  %replace = index.cmp sge, %ordinal, %c9 : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %result_view = buffer.view %output[%base] : buffer -> view<4x6xi32>
+  %tile = vector.load %view[0, 0] : view<4x4xi32> -> vector<4x4xi32>
+  scf.if %replace {
+    %replacement = scalar.constant 19088743 : i32
+    view.store %replacement, %view[%row, %column] : i32, view<4x4xi32>
+  }
+  %rectangle = vector.slice %tile[%row, %column] : vector<4x4xi32> -> vector<2x2xi32>
+  vector.store %rectangle, %result_view[1, 2] : vector<2x2xi32>, view<4x6xi32>
+  func.return
+}
+
+func.def @rectangle_snapshot_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 17)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c6 = index.constant 6 : index
+  %c9 = index.constant 9 : index
+  %position = index.rem %ordinal, %c9 : index
+  %row = index.div %position, %c3 : index
+  %column = index.rem %position, %c3 : index
+  %replace = index.cmp sge, %ordinal, %c9 : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<16xi32>
+  %result_view = buffer.view %output[%base] : buffer -> view<24xi32>
+  scf.for %i = [%c0 to %c4 step %c1] {
+    %dy = index.div %i, %c2 : index
+    %dx = index.rem %i, %c2 : index
+    %source_row = index.add %row, %dy : index
+    %source_column = index.add %column, %dx : index
+    %source_index = index.madd %source_row, %c4, %source_column : index
+    %destination_row = index.add %dy, %c1 : index
+    %destination_column = index.add %dx, %c2 : index
+    %destination_index = index.madd %destination_row, %c6, %destination_column : index
+    %value = view.load %view[%source_index] : view<16xi32> -> i32
+    view.store %value, %result_view[%destination_index] : i32, view<24xi32>
+  }
+  scf.if %replace {
+    %replacement = scalar.constant 19088743 : i32
+    %changed_index = index.madd %row, %c4, %column : index
+    view.store %replacement, %view[%changed_index] : i32, view<16xi32>
+  }
+  func.return
+}
+
+check.scenario @rectangle_snapshot_values {
+  check.trial[18](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-2147483648) step(252645135) : tensor<16xi32>
+    %output = check.generate.fill value(1515870810) : tensor<24xi32>
+    check.compare<@rectangle_snapshot, @rectangle_snapshot_oracle>(%trial, %input, %output) : (index, tensor<16xi32>, tensor<24xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi32>
+    }
+  }
+  check.return
+}
+
+// Four element widths capture the same bytes before the entire source is
+// overwritten. Each captured value serves two separately positioned windows;
+// the full wide value also remains observable through a separate output.
+func.def @shared_snapshot_windows(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 8)] : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %byte_position = index.mul %ordinal, %c2 : index
+  %word_position = index.div %ordinal, %c2 : index
+  %byte_tail = index.add %byte_position, %c32 : index
+  %half_tail = index.add %ordinal, %c16 : index
+  %word_tail = index.add %word_position, %c8 : index
+  %base = index.constant 0 : offset
+  %bytes = buffer.view %input[%base] : buffer -> view<128xi8>
+  %halves = buffer.view %input[%base] : buffer -> view<64xi16>
+  %words = buffer.view %input[%base] : buffer -> view<32xi32>
+  %wide = buffer.view %input[%base] : buffer -> view<16xi64>
+  %byte_source = vector.load %bytes[0] : view<128xi8> -> vector<64xi8>
+  %half_source = vector.load %halves[0] : view<64xi16> -> vector<32xi16>
+  %word_source = vector.load %words[0] : view<32xi32> -> vector<16xi32>
+  %wide_source = vector.load %wide[0] : view<16xi64> -> vector<16xi64>
+  %cleared = vector.constant 0 : vector<128xi8>
+  vector.store %cleared, %bytes[0] : vector<128xi8>, view<128xi8>
+  %byte_head = vector.slice %byte_source[%byte_position] : vector<64xi8> -> vector<16xi8>
+  %byte_last = vector.slice %byte_source[%byte_tail] : vector<64xi8> -> vector<16xi8>
+  %byte_result = vector.concat<0> %byte_head, %byte_last : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %half_head = vector.slice %half_source[%ordinal] : vector<32xi16> -> vector<8xi16>
+  %half_last = vector.slice %half_source[%half_tail] : vector<32xi16> -> vector<8xi16>
+  %half_result = vector.concat<0> %half_head, %half_last : vector<8xi16>, vector<8xi16> -> vector<16xi16>
+  %word_head = vector.slice %word_source[%word_position] : vector<16xi32> -> vector<4xi32>
+  %word_last = vector.slice %word_source[%word_tail] : vector<16xi32> -> vector<4xi32>
+  %word_result = vector.concat<0> %word_head, %word_last : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %wide_head = vector.slice %wide_source[%word_position] : vector<16xi64> -> vector<4xi64>
+  %wide_last = vector.slice %wide_source[%word_tail] : vector<16xi64> -> vector<4xi64>
+  %wide_result = vector.concat<0> %wide_head, %wide_last : vector<4xi64>, vector<4xi64> -> vector<8xi64>
+  %byte_base = index.constant 8 : offset
+  %half_base = index.constant 48 : offset
+  %word_base = index.constant 88 : offset
+  %wide_base = index.constant 128 : offset
+  %byte_output = buffer.view %output[%byte_base] : buffer -> view<32xi8>
+  %half_output = buffer.view %output[%half_base] : buffer -> view<16xi16>
+  %word_output = buffer.view %output[%word_base] : buffer -> view<8xi32>
+  %wide_output = buffer.view %output[%wide_base] : buffer -> view<8xi64>
+  vector.store %byte_result, %byte_output[0] : vector<32xi8>, view<32xi8>
+  vector.store %half_result, %half_output[0] : vector<16xi16>, view<16xi16>
+  vector.store %word_result, %word_output[0] : vector<8xi32>, view<8xi32>
+  vector.store %wide_result, %wide_output[0] : vector<8xi64>, view<8xi64>
+  %full_base = index.constant 200 : offset
+  %full_output = buffer.view %output[%full_base] : buffer -> view<16xi64>
+  vector.store %wide_source, %full_output[0] : vector<16xi64>, view<16xi64>
+  func.return
+}
+
+func.def @shared_snapshot_windows_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 8)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c48 = index.constant 48 : index
+  %c64 = index.constant 64 : index
+  %c88 = index.constant 88 : index
+  %c128 = index.constant 128 : index
+  %c200 = index.constant 200 : index
+  %byte_position = index.mul %ordinal, %c2 : index
+  %word_position = index.div %ordinal, %c2 : index
+  %word_byte_position = index.mul %word_position, %c4 : index
+  %wide_byte_position = index.mul %word_position, %c8 : index
+  %base = index.constant 0 : offset
+  %bytes = buffer.view %input[%base] : buffer -> view<128xi8>
+  %result = buffer.view %output[%base] : buffer -> view<336xi8>
+  scf.for %i = [%c0 to %c32 step %c1] {
+    %tail = index.cmp sge, %i, %c16 : index
+    %gap = scf.select %tail, %c16, %c0 : index
+    %relative = index.add %i, %gap : index
+    %byte_index = index.add %byte_position, %relative : index
+    %word_index = index.add %word_byte_position, %relative : index
+    %byte_value = view.load %bytes[%byte_index] : view<128xi8> -> i8
+    %word_value = view.load %bytes[%word_index] : view<128xi8> -> i8
+    %byte_destination = index.add %i, %c8 : index
+    %half_destination = index.add %i, %c48 : index
+    %word_destination = index.add %i, %c88 : index
+    view.store %byte_value, %result[%byte_destination] : i8, view<336xi8>
+    view.store %byte_value, %result[%half_destination] : i8, view<336xi8>
+    view.store %word_value, %result[%word_destination] : i8, view<336xi8>
+  }
+  scf.for %i = [%c0 to %c64 step %c1] {
+    %tail = index.cmp sge, %i, %c32 : index
+    %gap = scf.select %tail, %c32, %c0 : index
+    %relative = index.add %i, %gap : index
+    %source_index = index.add %wide_byte_position, %relative : index
+    %destination_index = index.add %i, %c128 : index
+    %value = view.load %bytes[%source_index] : view<128xi8> -> i8
+    view.store %value, %result[%destination_index] : i8, view<336xi8>
+  }
+  %cleared_byte = scalar.constant 0 : i8
+  scf.for %i = [%c0 to %c128 step %c1] {
+    %value = view.load %bytes[%i] : view<128xi8> -> i8
+    %destination = index.add %i, %c200 : index
+    view.store %value, %result[%destination] : i8, view<336xi8>
+    view.store %cleared_byte, %bytes[%i] : i8, view<128xi8>
+  }
+  func.return
+}
+
+check.scenario @shared_snapshot_window_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(2) : tensor<128xi8>
+    %output = check.generate.fill value(85) : tensor<336xi8>
+    check.compare<@shared_snapshot_windows, @shared_snapshot_windows_oracle>(%trial, %input, %output) : (index, tensor<128xi8>, tensor<336xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<128xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<336xi8>
+    }
+  }
+  check.return
+}

@@ -1,0 +1,73 @@
+// RUN: verify
+// Slice is a shape/bit-preserving operation over the complete admitted scalar
+// family. Exact output mechanisms are checked in vector_slices.cxx-test.
+#include <loomcxx/vector.h>
+namespace loomt = loom::type;
+
+template <class T>
+using Dynamic = loomt::vector<loomt::shape<loomt::dynamic>, T>;
+template <class T>
+using Fixed = loomt::vector<loomt::shape<2>, T>;
+template <class T>
+using Tile = loomt::vector<loomt::shape<2, loomt::dynamic, 4>, T>;
+template <class T>
+using Part = loomt::vector<loomt::shape<1, loomt::dynamic, 2>, T>;
+
+#define SEMANTIC(T, Name) \
+  Fixed<T> Name##_fixed(Dynamic<T> source, loomt::index offset) { \
+    return loom::vector::slice<Fixed<T>>(source, offset); \
+  } \
+  Dynamic<T> Name##_dynamic(Dynamic<T> source, loomt::index offset, \
+                            loomt::index count) { \
+    return loom::vector::slice<Dynamic<T>>(source, offset, {count}); \
+  } \
+  Part<T> Name##_tile(Tile<T> source, loomt::index count) { \
+    return loom::vector::slice<Part<T>>(source, {0, 0, 1}, {count}); \
+  }
+
+#define NATIVE(T, Name) \
+  using Name##Wide = T __attribute__((ext_vector_type(8))); \
+  using Name##Narrow = T __attribute__((ext_vector_type(2))); \
+  Name##Narrow Name##_native(Name##Wide source, signed char offset) { \
+    return loom::vector::slice<Name##Narrow>(source, offset); \
+  } \
+  Name##Narrow Name##_from_semantic(Dynamic<T> source, unsigned offset) { \
+    return loom::vector::slice<Name##Narrow>(source, {offset}); \
+  } \
+  Fixed<T> Name##_to_semantic(Name##Wide source, loomt::index offset) { \
+    return loom::vector::slice<Fixed<T>>(source, offset); \
+  } \
+  Dynamic<T> Name##_to_dynamic(Name##Wide source, loomt::index count) { \
+    return loom::vector::slice<Dynamic<T>>(source, 0u, {count}); \
+  }
+
+#define BOTH(T, Name) SEMANTIC(T, Name) NATIVE(T, Name)
+BOTH(signed char, i8)
+BOTH(unsigned char, u8)
+BOTH(short, i16)
+BOTH(unsigned short, u16)
+BOTH(int, i32)
+BOTH(unsigned, u32)
+BOTH(long long, i64)
+BOTH(unsigned long long, u64)
+BOTH(_Float16, f16)
+BOTH(__bf16, bf16)
+BOTH(float, f32)
+BOTH(double, f64)
+BOTH(__float8_e4m3fn, f8e4m3)
+BOTH(__float8_e5m2, f8e5m2)
+SEMANTIC(bool, predicate)
+SEMANTIC(loomt::index, logical_index)
+SEMANTIC(loomt::offset, logical_offset)
+enum class Code : unsigned short { first, last };
+SEMANTIC(Code, code)
+
+// All supported source ranks use the same offset-record contract, including
+// ranks above the inline type representation and the highest admitted rank.
+using Rank15 = loomt::vector<loomt::shape<
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2>, unsigned>;
+using Rank15Part = loomt::vector<loomt::shape<
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1>, unsigned>;
+Rank15Part maximum_rank(Rank15 source, loomt::indices<15> offsets) {
+  return loom::vector::slice<Rank15Part>(source, offsets);
+}

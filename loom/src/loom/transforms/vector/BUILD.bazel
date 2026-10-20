@@ -308,6 +308,7 @@ loom_cc_library(
     srcs = ["shape_legalization.c"],
     hdrs = ["shape_legalization.h"],
     deps = [
+        "//loom/src/loom/analysis:motion",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/vector",

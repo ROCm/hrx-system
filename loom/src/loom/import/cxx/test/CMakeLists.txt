@@ -206,6 +206,9 @@ loom_check_test_suite(
     "vector_memory.cxx-test"
     "vector_memory_cleanup.cxx-test"
     "vector_memory_invalid.cxx-test"
+    "vector_slices.cxx-test"
+    "vector_slices_family.cxx-test"
+    "vector_slices_invalid.cxx-test"
     "vector_tensors.cxx-test"
     "vector_tensors_invalid.cxx-test"
     "vectors.cxx-test"
@@ -1426,6 +1429,15 @@ loom_test_module(
     vector_math_module
   SRCS
     "vector_math.cxx"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    vector_slices_module
+  SRCS
+    "vector_slices.cxx"
 )
 endif()
 

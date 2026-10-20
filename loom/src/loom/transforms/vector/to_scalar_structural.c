@@ -739,23 +739,42 @@ iree_status_t loom_vector_to_scalar_build_bitcast_lane(
   loom_value_id_t input = loom_vector_bitcast_input(state->op);
   loom_type_t input_type =
       loom_module_value_type(state->rewriter->module, input);
-  if (!loom_type_shape_equals(input_type, state->vector_type)) {
-    if (loom_vector_to_scalar_indices_are_dynamic(indices) ||
-        !loom_type_is_all_static(input_type) ||
-        !loom_type_is_all_static(state->vector_type)) {
-      return loom_vector_to_scalar_build_dynamic_shape_changing_bitcast_lane(
-          state, indices, out_lane);
-    }
-    return loom_vector_to_scalar_build_static_shape_changing_bitcast_lane(
-        state, indices.static_indices, out_lane);
-  }
-  loom_scalar_type_t input_element_type = loom_type_element_type(input_type);
-  loom_scalar_type_t result_element_type =
+  const loom_scalar_type_t input_element_type =
+      loom_type_element_type(input_type);
+  const loom_scalar_type_t result_element_type =
       loom_type_element_type(state->vector_type);
-
+  const bool shape_preserving =
+      loom_type_shape_equals(input_type, state->vector_type);
+  if (!shape_preserving) {
+    const int32_t input_width = loom_scalar_type_bitwidth(input_element_type);
+    const bool width_preserving =
+        input_element_type == result_element_type ||
+        (input_width > 0 &&
+         input_width == loom_scalar_type_bitwidth(result_element_type));
+    if (!width_preserving) {
+      if (loom_vector_to_scalar_indices_are_dynamic(indices) ||
+          !loom_type_is_all_static(input_type) ||
+          !loom_type_is_all_static(state->vector_type)) {
+        return loom_vector_to_scalar_build_dynamic_shape_changing_bitcast_lane(
+            state, indices, out_lane);
+      }
+      return loom_vector_to_scalar_build_static_shape_changing_bitcast_lane(
+          state, indices.static_indices, out_lane);
+    }
+  }
   loom_value_id_t input_lane = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
-      state, input, indices, &input_lane));
+  if (shape_preserving) {
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
+        state, input, indices, &input_lane));
+  } else {
+    // Equal-width reshapes change coordinates, not lane boundaries. Preserve
+    // the whole element instead of reconstructing its bits independently.
+    loom_vector_to_scalar_index_term_t ordinal = {0};
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_linear_ordinal_term(
+        state, state->vector_type, indices, &ordinal));
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_linear_lane(
+        state, input, input_type, ordinal, &input_lane));
+  }
   if (input_element_type == result_element_type) {
     *out_lane = input_lane;
     return iree_ok_status();

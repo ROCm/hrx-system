@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "loom/analysis/motion.h"
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/vector/construction.h"
@@ -493,32 +494,137 @@ static iree_status_t loom_vector_static_shape_broadcast_rewrite(
   return iree_ok_status();
 }
 
-// Returns the row-major source ordinal for one trailing-axis result row.
-// Slice rows are contiguous along the trailing axis; leading result
-// coordinates select which source row supplies that interval.
-static uint64_t loom_vector_static_shape_slice_row_source_ordinal(
-    loom_type_t source_type, loom_type_t result_type,
-    const int64_t* static_offsets, uint64_t result_row) {
+// Keeps an exclusive load and its rectangle together before structural
+// expansion introduces independent row consumers. The selected footprint may
+// move only across the shared motion analysis's ordinary-read intervals.
+static iree_status_t loom_vector_static_shape_slice_load_rewrite(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_type_t source_type, loom_type_t result_type, bool* out_rewritten) {
+  const loom_value_id_t source = loom_vector_slice_source(op);
+  const loom_value_t* source_value = loom_module_value(context->module, source);
+  if (loom_value_is_block_arg(source_value)) {
+    return iree_ok_status();
+  }
+  loom_op_t* source_op = loom_value_def_op(source_value);
+  if (!loom_vector_load_isa(source_op) || source_type.encoding_id != 0 ||
+      !loom_value_has_single_use(source_value) ||
+      loom_value_has_attribute_uses(source_value) ||
+      loom_module_value_has_type_uses(context->module, source) ||
+      !loom_motion_op_is_ordinary_load(context->module, source_op)) {
+    return iree_ok_status();
+  }
+  loom_vector_memory_cache_policy_t cache_policy = {0};
+  if (!loom_vector_memory_cache_policy_from_op(context->module, source_op,
+                                               &cache_policy)) {
+    return iree_ok_status();
+  }
+  if (context->read_motion_barriers == NULL) {
+    IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_allocate(
+        context->module, context->arena, &context->read_motion_barriers));
+  }
+  bool can_cross = false;
+  IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_can_cross(
+      context->read_motion_barriers, source_op, op, &can_cross));
+  if (!can_cross) {
+    return iree_ok_status();
+  }
+
+  const loom_value_id_t view = loom_vector_load_view(source_op);
+  const loom_type_t view_type = loom_module_value_type(context->module, view);
+  const uint8_t view_rank = loom_type_rank(view_type);
+  const uint8_t first_vector_axis = view_rank - loom_type_rank(source_type);
+  const loom_attribute_t load_origins =
+      loom_vector_load_static_indices(source_op);
+  const loom_value_slice_t load_indices = loom_vector_load_indices(source_op);
+  const loom_attribute_t slice_origins = loom_vector_slice_static_offsets(op);
+  const loom_value_slice_t slice_indices = loom_vector_slice_offsets(op);
+  int64_t static_indices[LOOM_TYPE_MAX_RANK];
+  loom_value_id_t dynamic_indices[LOOM_TYPE_MAX_RANK];
+  uint16_t load_index_position = 0;
+  uint16_t slice_index_position = 0;
+  uint16_t dynamic_index_count = 0;
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(rewriter);
+  const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  for (uint8_t axis = 0; axis < view_rank; ++axis) {
+    int64_t static_index = load_origins.i64_array[axis];
+    loom_value_id_t dynamic_index = LOOM_VALUE_ID_INVALID;
+    if (static_index == INT64_MIN) {
+      dynamic_index = load_indices.values[load_index_position++];
+      static_index = 0;
+    }
+    if (axis >= first_vector_axis) {
+      const int64_t slice_origin =
+          slice_origins.i64_array[axis - first_vector_axis];
+      if (slice_origin == INT64_MIN) {
+        const loom_value_id_t slice_index =
+            slice_indices.values[slice_index_position++];
+        if (dynamic_index == LOOM_VALUE_ID_INVALID) {
+          dynamic_index = slice_index;
+        } else {
+          loom_op_t* add_op = NULL;
+          IREE_RETURN_IF_ERROR(loom_index_add_build(builder, dynamic_index,
+                                                    slice_index, index_type,
+                                                    op->location, &add_op));
+          dynamic_index = loom_index_add_result(add_op);
+        }
+      } else {
+        static_index += slice_origin;
+      }
+    }
+    static_indices[axis] = static_index;
+    if (dynamic_index != LOOM_VALUE_ID_INVALID) {
+      if (static_index != 0) {
+        loom_op_t* constant_op = NULL;
+        IREE_RETURN_IF_ERROR(
+            loom_index_constant_build(builder, loom_attr_i64(static_index),
+                                      index_type, op->location, &constant_op));
+        loom_op_t* add_op = NULL;
+        IREE_RETURN_IF_ERROR(loom_index_add_build(
+            builder, dynamic_index, loom_index_constant_result(constant_op),
+            index_type, op->location, &add_op));
+        dynamic_index = loom_index_add_result(add_op);
+      }
+      static_indices[axis] = INT64_MIN;
+      dynamic_indices[dynamic_index_count++] = dynamic_index;
+    }
+  }
+
+  loom_op_t* load_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_load_build(
+      builder, cache_policy.build_flags,
+      loom_vector_load_memory_flags(source_op), view, dynamic_indices,
+      dynamic_index_count, static_indices, view_rank, cache_policy.cache_scope,
+      cache_policy.cache_temporal, result_type, op->location, &load_op));
+  const loom_value_id_t replacement = loom_vector_load_result(load_op);
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, value_checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, source_op));
+  *out_rewritten = true;
+  return iree_ok_status();
+}
+
+// Maps a result-relative ordinal to its displacement in the source rectangle.
+// The common origin is linearized once, independently of these static strides.
+static uint64_t loom_vector_static_shape_slice_source_offset(
+    loom_type_t source_type, loom_type_t result_type, uint64_t result_ordinal) {
   const uint8_t rank = loom_type_rank(source_type);
-  const uint8_t trailing_axis = rank - 1;
-  uint64_t source_ordinal = (uint64_t)static_offsets[trailing_axis];
-  uint64_t source_suffix_extent =
-      (uint64_t)loom_type_dim_static_size_at(source_type, trailing_axis);
-  uint64_t result_suffix_extent = 1;
-  for (uint8_t reverse_axis = 1; reverse_axis < rank; ++reverse_axis) {
+  uint64_t source_offset = 0;
+  uint64_t source_stride = 1;
+  for (uint8_t reverse_axis = 0; reverse_axis < rank; ++reverse_axis) {
     const uint8_t axis = rank - reverse_axis - 1;
     const uint64_t result_extent =
         (uint64_t)loom_type_dim_static_size_at(result_type, axis);
-    const uint64_t result_coordinate =
-        (result_row / result_suffix_extent) % result_extent;
-    const uint64_t source_coordinate =
-        (uint64_t)static_offsets[axis] + result_coordinate;
-    source_ordinal += source_coordinate * source_suffix_extent;
-    source_suffix_extent *=
-        (uint64_t)loom_type_dim_static_size_at(source_type, axis);
-    result_suffix_extent *= result_extent;
+    source_offset += (result_ordinal % result_extent) * source_stride;
+    result_ordinal /= result_extent;
+    source_stride *= (uint64_t)loom_type_dim_static_size_at(source_type, axis);
   }
-  return source_ordinal;
+  return source_offset;
 }
 
 static iree_status_t loom_vector_static_shape_slice_rewrite(
@@ -531,41 +637,43 @@ static iree_status_t loom_vector_static_shape_slice_rewrite(
       loom_module_value_type(context->module, loom_vector_slice_result(op));
   const uint8_t rank = loom_type_rank(source_type);
   const loom_attribute_t static_offsets = loom_vector_slice_static_offsets(op);
+  const loom_value_slice_t dynamic_offsets = loom_vector_slice_offsets(op);
   uint64_t source_count = 0;
   uint64_t result_count = 0;
-  if (rank <= 1 || loom_type_rank(result_type) != rank ||
+  if (rank <= 1 ||
       !loom_type_static_element_count(source_type, &source_count) ||
       !loom_type_static_element_count(result_type, &result_count) ||
       source_count == 0 || result_count == 0 || source_count > INT64_MAX ||
-      result_count > INT64_MAX || static_offsets.kind != LOOM_ATTR_I64_ARRAY ||
-      static_offsets.count != rank ||
-      loom_vector_slice_offsets(op).count != 0) {
+      result_count > INT64_MAX) {
     return iree_ok_status();
   }
-  for (uint8_t axis = 0; axis < rank; ++axis) {
-    if (static_offsets.i64_array[axis] < 0) {
-      return iree_ok_status();
-    }
+
+  IREE_RETURN_IF_ERROR(loom_vector_static_shape_slice_load_rewrite(
+      context, op, source_type, result_type, out_rewritten));
+  if (*out_rewritten) {
+    return iree_ok_status();
   }
 
-  const uint64_t row_length =
-      (uint64_t)loom_type_dim_static_size_at(result_type, rank - 1);
-  const uint64_t row_count = result_count / row_length;
-  uint64_t run_count = 1;
-  uint64_t previous_end =
-      loom_vector_static_shape_slice_row_source_ordinal(
-          source_type, result_type, static_offsets.i64_array, 0) +
-      row_length;
-  for (uint64_t row = 1; row < row_count; ++row) {
-    const uint64_t source_ordinal =
-        loom_vector_static_shape_slice_row_source_ordinal(
-            source_type, result_type, static_offsets.i64_array, row);
-    if (source_ordinal != previous_end) {
-      ++run_count;
-    }
-    previous_end = source_ordinal + row_length;
+  // Complete trailing dimensions form one contiguous run. Only the remaining
+  // leading coordinates introduce gaps; run geometry does not depend on the
+  // runtime origin. This avoids enumerating every row to discover adjacency.
+  uint8_t run_axis = rank - 1;
+  uint64_t run_length =
+      (uint64_t)loom_type_dim_static_size_at(result_type, run_axis);
+  while (run_axis > 0 &&
+         loom_type_dim_static_size_at(result_type, run_axis) ==
+             loom_type_dim_static_size_at(source_type, run_axis)) {
+    --run_axis;
+    run_length *= (uint64_t)loom_type_dim_static_size_at(result_type, run_axis);
   }
-  if (run_count > IREE_HOST_SIZE_MAX) {
+  const uint64_t run_count = result_count / run_length;
+  // Two shape bitcasts and one concat surround the slices. A runtime origin
+  // adds at most two operations per axis and a constant/add for later runs.
+  const uint32_t setup_operation_count =
+      3u + (dynamic_offsets.count != 0 ? 2u * rank - 2u : 0u);
+  const uint32_t run_operation_count = dynamic_offsets.count != 0 ? 3u : 1u;
+  if (run_count > (LOOM_VECTOR_STATIC_SHAPE_OP_LIMIT - setup_operation_count) /
+                      run_operation_count) {
     return iree_ok_status();
   }
 
@@ -581,6 +689,11 @@ static iree_status_t loom_vector_static_shape_slice_rewrite(
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(rewriter);
+  loom_value_id_t dynamic_origin = LOOM_VALUE_ID_INVALID;
+  int64_t static_origin = 0;
+  IREE_RETURN_IF_ERROR(loom_vector_static_shape_linearize_indices(
+      &rewriter->builder, source_type, static_offsets, dynamic_offsets,
+      op->location, &dynamic_origin, &static_origin));
   loom_value_id_t flat_source = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_flatten_value(
       &rewriter->builder, source, source_type, source_count, op->location,
@@ -588,37 +701,42 @@ static iree_status_t loom_vector_static_shape_slice_rewrite(
 
   const loom_type_t flat_result_type =
       loom_vector_static_shape_flat_type(result_type, result_count);
-  const uint64_t first_ordinal =
-      loom_vector_static_shape_slice_row_source_ordinal(
-          source_type, result_type, static_offsets.i64_array, 0);
-  if (run_count == 1 && first_ordinal == 0 && result_count == source_count) {
+  if (dynamic_origin == LOOM_VALUE_ID_INVALID && static_origin == 0 &&
+      result_count == source_count) {
     runs[0] = flat_source;
   } else {
-    uint64_t run_start = first_ordinal;
-    uint64_t run_length = row_length;
-    iree_host_size_t run_index = 0;
-    for (uint64_t row = 1; row <= row_count; ++row) {
-      uint64_t source_ordinal = 0;
-      if (row < row_count) {
-        source_ordinal = loom_vector_static_shape_slice_row_source_ordinal(
-            source_type, result_type, static_offsets.i64_array, row);
-        if (source_ordinal == run_start + run_length) {
-          run_length += row_length;
-          continue;
+    const loom_type_t run_type =
+        loom_vector_static_shape_flat_type(result_type, run_length);
+    const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+    for (uint64_t run = 0; run < run_count; ++run) {
+      const int64_t relative_offset =
+          (int64_t)loom_vector_static_shape_slice_source_offset(
+              source_type, result_type, run * run_length);
+      loom_value_id_t dynamic_offset = dynamic_origin;
+      int64_t static_offset = static_origin + relative_offset;
+      uint16_t dynamic_offset_count = 0;
+      if (dynamic_origin != LOOM_VALUE_ID_INVALID) {
+        if (relative_offset != 0) {
+          loom_op_t* displacement_op = NULL;
+          IREE_RETURN_IF_ERROR(loom_index_constant_build(
+              &rewriter->builder, loom_attr_i64(relative_offset), index_type,
+              op->location, &displacement_op));
+          loom_op_t* add_op = NULL;
+          IREE_RETURN_IF_ERROR(
+              loom_index_add_build(&rewriter->builder, dynamic_origin,
+                                   loom_index_constant_result(displacement_op),
+                                   index_type, op->location, &add_op));
+          dynamic_offset = loom_index_add_result(add_op);
         }
+        static_offset = INT64_MIN;
+        dynamic_offset_count = 1;
       }
-
-      const int64_t static_offset = (int64_t)run_start;
-      const loom_type_t run_type =
-          loom_vector_static_shape_flat_type(result_type, run_length);
       loom_op_t* slice_op = NULL;
       IREE_RETURN_IF_ERROR(loom_vector_slice_build(
-          &rewriter->builder, flat_source, /*offsets=*/NULL,
-          /*offsets_count=*/0, &static_offset,
-          /*static_offsets_count=*/1, run_type, op->location, &slice_op));
-      runs[run_index++] = loom_vector_slice_result(slice_op);
-      run_start = source_ordinal;
-      run_length = row_length;
+          &rewriter->builder, flat_source, &dynamic_offset,
+          dynamic_offset_count, &static_offset, 1, run_type, op->location,
+          &slice_op));
+      runs[run] = loom_vector_slice_result(slice_op);
     }
   }
 

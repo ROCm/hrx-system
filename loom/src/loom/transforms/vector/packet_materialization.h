@@ -127,9 +127,13 @@ iree_status_t loom_vector_packet_staging_store(
     const loom_vector_packet_slice_t* slice, loom_vector_packet_value_t packet,
     const loom_op_t* source_op);
 
+// Reifies snapshots as shared immutable private storage. When restricted to
+// dynamic windows, same-block packets are stored at their definitions and other
+// consumers retain the original captured SSA values. The selected chunk width
+// divides each regular snapshot packet width.
 iree_status_t loom_vector_packet_canonicalize_snapshots(
     loom_vector_packetization_t* packetization,
-    const loom_vector_packet_shape_t* shape);
+    const loom_vector_packet_shape_t* shape, bool dynamic_windows_only);
 
 iree_status_t loom_vector_packet_staged_store(
     loom_vector_packetization_t* packetization,

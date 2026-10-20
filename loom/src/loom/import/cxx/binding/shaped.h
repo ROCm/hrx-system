@@ -30,10 +30,10 @@ class ShapedIntrinsic {
     bool operator==(const Splat&) const = default;
   };
   struct Slice {
-    enum class OffsetKind { Unresolved, SignedInteger, UnsignedInteger, Index };
-
-    // Source representation retained until the call constructs its index.
-    OffsetKind offset_kind;
+    // Unsigned integer interpretations of the flattened offset components.
+    uint16_t offset_unsigned_mask = 0;
+    // Whether the source call supplies dependent result dimensions.
+    bool has_dimensions = false;
     bool operator==(const Slice&) const = default;
   };
   struct TableLookup {

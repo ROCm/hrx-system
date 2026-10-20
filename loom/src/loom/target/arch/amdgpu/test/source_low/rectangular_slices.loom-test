@@ -1,0 +1,117 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+// A crop reads only its two selected rows, including a partial packed lane.
+func.def @rectangle(%input: buffer, %row0: index, %column0: index) -> (vector<2x3xi8>) {
+  %column = index.assume %column0 [range(%column0, 0, 5)] : index
+  %row = index.assume %row0 [range(%row0, 0, 2)] : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x8xi8>
+  %values = vector.load %view[0, 0] : view<4x8xi8> -> vector<4x8xi8>
+  %result = vector.slice %values[%row, %column] : vector<4x8xi8> -> vector<2x3xi8>
+  func.return %result : vector<2x3xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @rectangle(%row: reg<amdgpu.sgpr>, %column: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  %view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %35 = v_mov_b32 0
+  %36 = s_lshl_b32_rhs_inline %row, 3
+  %37 = s_add_u32 %column, %36
+  %38 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = s_mov_b32 0
+  %41, %42 = s_add_co_u32 %38, %37
+  %43, %44 = s_addc_u32 %39, %40, %42
+  %45 = concat(%41, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %46 = global_load_u16_saddr %35, %45
+  %48 = s_lshl_b32_rhs_inline %row, 3
+  %49 = s_add_u32 %column, %48
+  %53, %54 = s_add_co_u32 %38, %49
+  %55, %56 = s_addc_u32 %39, %40, %54
+  %57 = concat(%53, %55) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %58 = global_load_u8_saddr %35, %57 {offset = 2}
+  %59 = v_lshlrev_b32_src0_inline %58, 16
+  %60 = v_or_b32 %46, %59
+  %62 = s_lshl_b32_rhs_inline %row, 3
+  %63 = s_add_u32 %column, %62
+  %67, %68 = s_add_co_u32 %38, %63
+  %69, %70 = s_addc_u32 %39, %40, %68
+  %71 = concat(%67, %69) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %72 = global_load_u16_saddr %35, %71 {offset = 8}
+  %74 = s_lshl_b32_rhs_inline %row, 3
+  %75 = s_add_u32 %column, %74
+  %79, %80 = s_add_co_u32 %38, %75
+  %81, %82 = s_addc_u32 %39, %40, %80
+  %83 = concat(%79, %81) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %84 = global_load_u8_saddr %35, %83 {offset = 10}
+  %85 = v_lshlrev_b32_src0_inline %84, 16
+  %86 = v_or_b32 %72, %85
+  %87 = v_bfe_i32_offset_width_inline %60 {offset = 0, width = 8}
+  %88 = v_bfe_i32_offset_width_inline %60 {offset = 8, width = 8}
+  %89 = v_bfe_i32_offset_width_inline %60 {offset = 16, width = 8}
+  %90 = v_bfe_i32_offset_width_inline %86 {offset = 0, width = 8}
+  %91 = v_bfe_i32_offset_width_inline %86 {offset = 8, width = 8}
+  %92 = v_bfe_i32_offset_width_inline %86 {offset = 16, width = 8}
+  %93 = v_and_b32_lit %87, 255
+  %94 = v_and_b32_lit %88, 255
+  %95 = v_lshlrev_b32_src0_inline %94, 8
+  %96 = v_or_b32 %93, %95
+  %97 = v_and_b32_lit %89, 255
+  %98 = v_lshlrev_b32_src0_inline %97, 16
+  %99 = v_or_b32 %96, %98
+  %100 = v_and_b32_lit %90, 255
+  %101 = v_lshlrev_b32_src0_inline %100, 24
+  %102 = v_or_b32 %99, %101
+  %103 = v_and_b32_lit %91, 255
+  %104 = v_and_b32_lit %92, 255
+  %105 = v_lshlrev_b32_src0_inline %104, 8
+  %106 = v_or_b32 %103, %105
+  %result = concat(%102, %106) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
+// The full innermost axis joins rows but the cropped middle axis separates
+// planes. A static leading offset participates in the common runtime base.
+func.def @cropped_planes(%input: buffer, %row0: index) -> (vector<2x2x4xi16>) {
+  %row = index.assume %row0 [range(%row0, 0, 2)] : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<3x4x4xi16>
+  %values = vector.load %view[0, 0, 0] : view<3x4x4xi16> -> vector<3x4x4xi16>
+  %result = vector.slice %values[1, %row, 0] : vector<3x4x4xi16> -> vector<2x2x4xi16>
+  func.return %result : vector<2x2x4xi16>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @cropped_planes(%row: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x8>) asm {
+  %view = resource<hal_binding> {extent = 96, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %50 = v_mov_b32 0
+  %51 = s_lshl_b32_rhs_inline %row, 3
+  %52 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %53 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54 = s_mov_b32 0
+  %55, %56 = s_add_co_u32 %52, %51
+  %57, %58 = s_addc_u32 %53, %54, %56
+  %59 = concat(%55, %57) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %60 = global_load_b64_saddr %50, %59 {offset = 32}
+  %62 = s_lshl_b32_rhs_inline %row, 3
+  %66, %67 = s_add_co_u32 %52, %62
+  %68, %69 = s_addc_u32 %53, %54, %67
+  %70 = concat(%66, %68) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %71 = global_load_b64_saddr %50, %70 {offset = 40}
+  %73 = s_lshl_b32_rhs_inline %row, 3
+  %77, %78 = s_add_co_u32 %52, %73
+  %79, %80 = s_addc_u32 %53, %54, %78
+  %81 = concat(%77, %79) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %82 = global_load_b64_saddr %50, %81 {offset = 64}
+  %84 = s_lshl_b32_rhs_inline %row, 3
+  %88, %89 = s_add_co_u32 %52, %84
+  %90, %91 = s_addc_u32 %53, %54, %89
+  %92 = concat(%88, %90) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %93 = global_load_b64_saddr %50, %92 {offset = 72}
+  %94 = concat(%60, %71) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %95 = concat(%82, %93) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %result = concat(%94, %95) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  return %result
+}

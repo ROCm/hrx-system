@@ -1,0 +1,98 @@
+// RUN: pass target=spirv:vulkan1.3+bda target-legalize{mode=eager,policy=require-native},canonicalize,dce,target-legalize{mode=complete,policy=require-native},canonicalize,dce
+
+// Runtime windows share captured packets across an intervening write. When
+// packet loads become scalar loads, the retained partition must follow their
+// new assembly values before another window selects from the snapshot.
+func.def @captured_windows(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 4)] : index
+  %c8 = index.constant 8 : index
+  %tail_position = index.add %position, %c8 : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<16xi32>
+  %result_view = buffer.view %output[%base] : buffer -> view<8xi32>
+  %source = vector.load %view[0] : view<16xi32> -> vector<16xi32>
+  %replacement = scalar.constant 0 : i32
+  view.store %replacement, %view[0] : i32, view<16xi32>
+  %head = vector.slice %source[%position] : vector<16xi32> -> vector<4xi32>
+  %tail = vector.slice %source[%tail_position] : vector<16xi32> -> vector<4xi32>
+  %result = vector.concat<0> %head, %tail : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  vector.store %result, %result_view[0] : vector<8xi32>, view<8xi32>
+  func.return
+}
+
+// ----
+func.def @captured_windows(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 4)] : index
+  %c8 = index.constant 8 : index
+  %tail_position = index.add %position, %c8 : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<16xi32>
+  %result_view = buffer.view %output[%base] : buffer -> view<8xi32>
+  %55 = view.load %view[0] : view<16xi32> -> i32
+  %56 = view.load %view[1] : view<16xi32> -> i32
+  %57 = view.load %view[2] : view<16xi32> -> i32
+  %58 = view.load %view[3] : view<16xi32> -> i32
+  %59 = vector.from_elements %55, %56, %57, %58 : vector<4xi32>
+  %50 = view.load %view[4] : view<16xi32> -> i32
+  %51 = view.load %view[5] : view<16xi32> -> i32
+  %52 = view.load %view[6] : view<16xi32> -> i32
+  %53 = view.load %view[7] : view<16xi32> -> i32
+  %54 = vector.from_elements %50, %51, %52, %53 : vector<4xi32>
+  %45 = view.load %view[8] : view<16xi32> -> i32
+  %46 = view.load %view[9] : view<16xi32> -> i32
+  %47 = view.load %view[10] : view<16xi32> -> i32
+  %48 = view.load %view[11] : view<16xi32> -> i32
+  %49 = vector.from_elements %45, %46, %47, %48 : vector<4xi32>
+  %40 = view.load %view[12] : view<16xi32> -> i32
+  %41 = view.load %view[13] : view<16xi32> -> i32
+  %42 = view.load %view[14] : view<16xi32> -> i32
+  %43 = view.load %view[15] : view<16xi32> -> i32
+  %44 = vector.from_elements %40, %41, %42, %43 : vector<4xi32>
+  %replacement = scalar.constant 0 : i32
+  view.store %replacement, %view[0] : i32, view<16xi32>
+  %60 = index.constant 1 : index
+  %61 = index.cmp eq, %position, %60 : index
+  %62 = index.constant 2 : index
+  %63 = index.cmp eq, %position, %62 : index
+  %64 = index.constant 3 : index
+  %65 = index.cmp eq, %position, %64 : index
+  %66 = index.constant 4 : index
+  %67 = index.cmp eq, %position, %66 : index
+  %92 = vector.from_elements %56, %57, %58 : vector<3xi32>
+  %96 = vector.splat %50 : vector<1xi32>
+  %70 = vector.concat<0> %92, %96 : vector<3xi32>, vector<1xi32> -> vector<4xi32>
+  %71 = scf.select %61, %70, %59 : vector<4xi32>
+  %90 = vector.from_elements %57, %58 : vector<2xi32>
+  %89 = vector.from_elements %50, %51 : vector<2xi32>
+  %74 = vector.concat<0> %90, %89 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %75 = scf.select %63, %74, %71 : vector<4xi32>
+  %95 = vector.splat %58 : vector<1xi32>
+  %87 = vector.from_elements %50, %51, %52 : vector<3xi32>
+  %78 = vector.concat<0> %95, %87 : vector<1xi32>, vector<3xi32> -> vector<4xi32>
+  %79 = scf.select %65, %78, %75 : vector<4xi32>
+  %head = scf.select %67, %54, %79 : vector<4xi32>
+  %19 = index.constant 9 : index
+  %20 = index.cmp eq, %tail_position, %19 : index
+  %21 = index.constant 10 : index
+  %22 = index.cmp eq, %tail_position, %21 : index
+  %23 = index.constant 11 : index
+  %24 = index.cmp eq, %tail_position, %23 : index
+  %25 = index.constant 12 : index
+  %26 = index.cmp eq, %tail_position, %25 : index
+  %86 = vector.from_elements %46, %47, %48 : vector<3xi32>
+  %94 = vector.splat %40 : vector<1xi32>
+  %29 = vector.concat<0> %86, %94 : vector<3xi32>, vector<1xi32> -> vector<4xi32>
+  %30 = scf.select %20, %29, %49 : vector<4xi32>
+  %84 = vector.from_elements %47, %48 : vector<2xi32>
+  %83 = vector.from_elements %40, %41 : vector<2xi32>
+  %33 = vector.concat<0> %84, %83 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %34 = scf.select %22, %33, %30 : vector<4xi32>
+  %93 = vector.splat %48 : vector<1xi32>
+  %81 = vector.from_elements %40, %41, %42 : vector<3xi32>
+  %37 = vector.concat<0> %93, %81 : vector<1xi32>, vector<3xi32> -> vector<4xi32>
+  %38 = scf.select %24, %37, %34 : vector<4xi32>
+  %tail = scf.select %26, %44, %38 : vector<4xi32>
+  %result = vector.concat<0> %head, %tail : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  vector.store %result, %result_view[0] : vector<8xi32>, view<8xi32>
+  func.return
+}

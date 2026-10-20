@@ -1,0 +1,83 @@
+// RUN: verify
+// Rank-changing access is extract/reshape, not a rank-preserving slice.
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4, 8>, unsigned>;
+using Result = unsigned __attribute__((ext_vector_type(4)));
+// ERROR@+1: LOWERING/059 "vector.slice must preserve the source rank"
+[[loom::op("vector.slice")]] Result invalid(Source, unsigned);
+
+// ====
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4, 8>, unsigned>;
+using Result = loom::type::vector<loom::type::shape<2, 9>, unsigned>;
+// ERROR@+1: LOWERING/059 "vector.slice result must preserve the element type and fit within the source"
+[[loom::op("vector.slice")]] Result invalid(Source, loom::type::coordinates<2>);
+
+// ====
+#include <loomcxx/vector.h>
+using Source = loom::type::vector<loom::type::shape<4, 8>, unsigned>;
+using Result = loom::type::vector<loom::type::shape<2, 4>, int>;
+// ERROR@+1: LOWERING/059 "vector.slice result must preserve the element type and fit within the source"
+[[loom::op("vector.slice")]] Result invalid(Source, loom::type::coordinates<2>);
+
+// ====
+#include <loomcxx/vector.h>
+using Tile = loom::type::vector<loom::type::shape<4, 8>, float>;
+// ERROR@+1: LOWERING/059 "vector.slice offsets require a full-rank record"
+[[loom::op("vector.slice")]] Tile invalid(Tile, unsigned);
+
+// ====
+#include <loomcxx/vector.h>
+using Tile = loom::type::vector<loom::type::shape<4, 8>, float>;
+// ERROR@+1: LOWERING/059 "vector.slice offsets has the wrong arity"
+[[loom::op("vector.slice")]] Tile invalid(Tile, loom::type::coordinates<1>);
+
+// ====
+#include <loomcxx/vector.h>
+using Tile = loom::type::vector<loom::type::shape<4, 8>, float>;
+struct Offsets { float row; unsigned column; };
+// ERROR@+1: LOWERING/059 "vector.slice offsets requires an integer value"
+[[loom::op("vector.slice")]] Tile invalid(Tile, Offsets);
+
+// ====
+#include <loomcxx/vector.h>
+using Tile = loom::type::vector<loom::type::shape<4, 8>, float>;
+struct Offsets { loom::type::offset row; unsigned column; };
+// ERROR@+1: LOWERING/059 "vector.slice offsets requires logical index fields"
+[[loom::op("vector.slice")]] Tile invalid(Tile, Offsets);
+
+// ====
+#include <loomcxx/vector.h>
+using Vector = loom::type::vector<loom::type::shape<4>, float>;
+// ERROR@+1: LOWERING/059 "vector.slice offset requires an integer value"
+[[loom::op("vector.slice")]] Vector invalid(Vector, bool);
+
+// ====
+#include <loomcxx/vector.h>
+using Vector = loom::type::vector<loom::type::shape<loom::type::dynamic>, float>;
+// ERROR@+1: LOWERING/059 "dependent vector.slice requires result dimensions"
+[[loom::op("vector.slice")]] Vector invalid(Vector, unsigned);
+
+// ====
+#include <loomcxx/vector.h>
+using Vector = float __attribute__((ext_vector_type(4)));
+// ERROR@+1: LOWERING/059 "native vector.slice does not accept result dimensions"
+[[loom::op("vector.slice")]] Vector invalid(Vector, unsigned, loom::type::indices<0>);
+
+// ====
+#include <loomcxx/vector.h>
+using Tile = loom::type::vector<loom::type::shape<loom::type::dynamic, 4, loom::type::dynamic>, float>;
+// ERROR@+1: LOWERING/059 "vector.slice dimensions have the wrong arity"
+[[loom::op("vector.slice")]] Tile invalid(Tile, loom::type::coordinates<3>, loom::type::indices<1>);
+
+// ====
+#include <loomcxx/vector.h>
+using Vector = loom::type::vector<loom::type::shape<loom::type::dynamic>, float>;
+// ERROR@+1: LOWERING/059 "vector.slice dimensions require logical indices"
+[[loom::op("vector.slice")]] Vector invalid(Vector, unsigned, loom::type::coordinates<1>);
+
+// ====
+#include <loomcxx/vector.h>
+using Vector = loom::type::vector<loom::type::shape<4>, float>;
+// ERROR@+1: LOWERING/059 "vector.slice requires a source, offsets, and optional result dimensions"
+[[loom::op("vector.slice")]] Vector invalid(Vector);

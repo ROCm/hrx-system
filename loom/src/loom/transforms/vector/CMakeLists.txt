@@ -335,6 +335,7 @@ loom_cc_library(
     "shape_legalization.c"
   DEPS
     iree::base
+    loom::analysis::motion
     loom::ir
     loom::ops::index
     loom::ops::vector

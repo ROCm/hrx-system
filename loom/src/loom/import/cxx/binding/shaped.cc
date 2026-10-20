@@ -63,7 +63,7 @@ std::optional<ShapedIntrinsic::Operation> ShapedIntrinsic::admit(
     if (attribute.arguments.size() != 1) {
       diagnostics.reject(unit, owner, "vector slice has no semantic arguments");
     }
-    return Slice{Slice::OffsetKind::Unresolved};
+    return Slice{};
   }
   if (name == "vector.table.lookup") {
     if (attribute.arguments.size() != 1) {
@@ -176,35 +176,85 @@ ShapedIntrinsic ShapedIntrinsic::resolve(Operation operation,
     return ShapedIntrinsic(operation, loom_type_none(), &result);
   }
   if (auto* slice = std::get_if<Slice>(&operation)) {
-    if (signature->isVariadic() || signature->parameterTypes().size() != 2) {
+    auto parameters = signature->parameterTypes();
+    if (signature->isVariadic() ||
+        (parameters.size() != 2 && parameters.size() != 3)) {
       diagnostics.reject(unit, owner,
-                         "vector.slice requires a source and lane offset");
+                         "vector.slice requires a source, offsets, and "
+                         "optional result dimensions");
     }
-    auto* source = types.native_vector(signature->parameterTypes()[0]);
-    auto* result = types.native_vector(signature->returnType());
-    if (!source || !result) {
+    const std::array<const cxx::Type*, 2> vectors = {parameters[0],
+                                                     signature->returnType()};
+    std::array<const cxx::Type*, 2> elements;
+    std::array<const VectorPartition*, 2> semantic = {};
+    std::array<int64_t, 2> native_extents;
+    std::array<std::span<const int64_t>, 2> extents;
+    for (size_t index = 0; index < vectors.size(); ++index) {
+      if (const auto* native = types.native_vector(vectors[index])) {
+        elements[index] = types.unqualified(native->elementType());
+        native_extents[index] = native->elementCount();
+        extents[index] = {&native_extents[index], 1};
+      } else {
+        const auto& admitted = types.partition(vectors[index], owner);
+        if (admitted.kind != ValueKind::Vector) {
+          diagnostics.reject(unit, owner,
+                             "vector.slice requires source and result vectors");
+        }
+        semantic[index] = &static_cast<const VectorPartition&>(admitted);
+        elements[index] = semantic[index]->element_type;
+        extents[index] = semantic[index]->extents;
+      }
+    }
+    if (extents[0].size() != extents[1].size()) {
       diagnostics.reject(unit, owner,
-                         "vector.slice requires source and result vectors");
+                         "vector.slice must preserve the source rank");
     }
-    if (types.unqualified(source->elementType()) !=
-            types.unqualified(result->elementType()) ||
-        result->elementCount() > source->elementCount()) {
+    bool fits = true;
+    for (size_t axis = 0; axis < extents[0].size(); ++axis) {
+      if (extents[0][axis] >= 0 && extents[1][axis] > extents[0][axis]) {
+        fits = false;
+      }
+    }
+    if (elements[0] != elements[1] || !fits) {
       diagnostics.reject(
           unit, owner,
           "vector.slice result must preserve the element type and fit within "
           "the source");
     }
-    const auto* offset_type = signature->parameterTypes()[1];
-    if (types.address_domain(offset_type, owner) == LOOM_SCALAR_TYPE_INDEX) {
-      slice->offset_kind = Slice::OffsetKind::Index;
+    const auto& offsets = types.partition(parameters[1], owner);
+    if (offsets.kind == ValueKind::Record) {
+      slice->offset_unsigned_mask = require_index_record(
+          unit, diagnostics, types, parameters[1], extents[0].size(), owner,
+          "vector.slice offsets");
     } else {
-      slice->offset_kind =
-          require_integral(unit, diagnostics, types, offset_type, owner,
-                           "vector.slice offset")
-              ? Slice::OffsetKind::UnsignedInteger
-              : Slice::OffsetKind::SignedInteger;
+      if (extents[0].size() != 1) {
+        diagnostics.reject(unit, owner,
+                           "vector.slice offsets require a full-rank record");
+      }
+      slice->offset_unsigned_mask =
+          require_index_value(unit, diagnostics, types, parameters[1], owner,
+                              "vector.slice offset");
     }
-    return ShapedIntrinsic(operation, types.get(result, owner));
+    slice->has_dimensions = parameters.size() == 3;
+    if (semantic[1]) {
+      if (semantic[1]->is_dynamic() && !slice->has_dimensions) {
+        diagnostics.reject(unit, owner,
+                           "dependent vector.slice requires result dimensions");
+      }
+      if (slice->has_dimensions) {
+        require_logical_index_record(unit, diagnostics, types, parameters[2],
+                                     semantic[1]->component_count - 1, owner,
+                                     "vector.slice dimensions");
+      }
+    } else if (slice->has_dimensions) {
+      diagnostics.reject(unit, owner,
+                         "native vector.slice does not accept result "
+                         "dimensions");
+    }
+    return ShapedIntrinsic(
+        operation,
+        semantic[1] ? loom_type_none() : types.get(vectors[1], owner),
+        semantic[1], {semantic[0], nullptr, nullptr});
   }
   bool lookup = std::holds_alternative<TableLookup>(operation);
   if (auto* absolute = std::get_if<Absolute>(&operation)) {
@@ -413,25 +463,47 @@ Value ShapedIntrinsic::call(std::span<const Value> arguments, ValueArena& arena,
     return semantic ? semantic->vector_value(arguments[index].components())
                     : arguments[index].ssa();
   };
+  if (auto* slice = std::get_if<Slice>(&operation_)) {
+    auto offsets = arguments[1].components();
+    std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK> indices;
+    std::array<int64_t, LOOM_TYPE_MAX_RANK> static_offsets;
+    static_offsets.fill(std::numeric_limits<int64_t>::min());
+    for (size_t axis = 0; axis < offsets.size(); ++axis) {
+      indices[axis] =
+          cast_index(Value(offsets[axis]),
+                     is_unsigned_component(slice->offset_unsigned_mask, axis),
+                     builder, location);
+    }
+    std::span<const loom_value_id_t> dimensions;
+    if (slice->has_dimensions) {
+      dimensions = arguments[2].components();
+    }
+    BoundTypeStorage type_storage;
+    auto result_type = result_vector_
+                           ? result_vector_->bind_type(dimensions, type_storage)
+                           : result_type_;
+    loom_op_t* op;
+    check(loom_vector_slice_build(builder, vector_value(0), indices.data(),
+                                  offsets.size(), static_offsets.data(),
+                                  offsets.size(), result_type, location, &op));
+    if (!result_vector_) {
+      return Value(loom_op_results(op)[0]);
+    }
+    std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK + 1> components;
+    std::copy(dimensions.begin(), dimensions.end(), components.begin());
+    components[dimensions.size()] = loom_op_results(op)[0];
+    return arena.capture(*result_vector_,
+                         std::span<const loom_value_id_t>(components)
+                             .first(dimensions.size() + 1));
+  }
   loom_op_t* op;
   check(std::visit(
       [&](auto operation) -> iree_status_t {
         using T = decltype(operation);
-        if constexpr (std::is_same_v<T, Splat>) {
-          IREE_ASSERT_UNREACHABLE("splat handled before static dispatch");
+        if constexpr (std::is_same_v<T, Splat> || std::is_same_v<T, Slice>) {
+          IREE_ASSERT_UNREACHABLE(
+              "shaped result handled before static dispatch");
           IREE_BUILTIN_UNREACHABLE();
-        } else if constexpr (std::is_same_v<T, Slice>) {
-          const loom_value_id_t offset =
-              operation.offset_kind == Slice::OffsetKind::Index
-                  ? arguments[1].ssa()
-                  : cast_index(arguments[1],
-                               operation.offset_kind ==
-                                   Slice::OffsetKind::UnsignedInteger,
-                               builder, location);
-          const int64_t static_offset = std::numeric_limits<int64_t>::min();
-          return loom_vector_slice_build(builder, arguments[0].ssa(), &offset,
-                                         1, &static_offset, 1, result_type_,
-                                         location, &op);
         } else if constexpr (std::is_same_v<T, TableLookup>) {
           return loom_vector_table_lookup_build(builder, arguments[0].ssa(),
                                                 arguments[1].ssa(),

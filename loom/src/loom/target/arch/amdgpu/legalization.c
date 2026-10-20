@@ -441,12 +441,16 @@ static iree_status_t loom_amdgpu_legalize_static_vector_shape(
   bool rewritten = false;
   loom_type_t carrier_type = loom_type_none();
   loom_amdgpu_vector_storage_t carrier_storage = {0};
-  if (loom_amdgpu_static_shape_carrier_type(context->module, op,
-                                            &carrier_type) &&
-      loom_amdgpu_type_vector_storage(carrier_type, &carrier_storage) &&
-      carrier_storage.register_count != 0 &&
-      carrier_storage.register_count <=
-          LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES) {
+  // A rectangular slice can stream only its selected runs from a source
+  // larger than the native carrier. The shared rewrite bounds expansion;
+  // packet legalization retains ownership of the resulting rank-one windows.
+  if (loom_vector_slice_isa(op) ||
+      (loom_amdgpu_static_shape_carrier_type(context->module, op,
+                                             &carrier_type) &&
+       loom_amdgpu_type_vector_storage(carrier_type, &carrier_storage) &&
+       carrier_storage.register_count != 0 &&
+       carrier_storage.register_count <=
+           LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES)) {
     IREE_RETURN_IF_ERROR(
         loom_vector_static_shape_rewrite_op(context, op, &rewritten));
   }

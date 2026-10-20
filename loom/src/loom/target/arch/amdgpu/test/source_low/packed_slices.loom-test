@@ -1,0 +1,113 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+func.def @i8_cross_register(%input: vector<16xi8>) -> (vector<6xi8>) {
+  %result = vector.slice %input[1] : vector<16xi8> -> vector<6xi8>
+  func.return %result : vector<6xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8_cross_register(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = v_mov_b32 8
+  %6 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = v_alignbit_b32 %7, %6, %5
+  %10 = v_lshrrev_b32_src0_inline %7, 8
+  %result = concat(%8, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
+func.def @i16_cross_register(%input: vector<8xi16>) -> (vector<3xi16>) {
+  %result = vector.slice %input[1] : vector<8xi16> -> vector<3xi16>
+  func.return %result : vector<3xi16>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i16_cross_register(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = v_mov_b32 16
+  %6 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = v_alignbit_b32 %7, %6, %5
+  %10 = v_lshrrev_b32_src0_inline %7, 16
+  %result = concat(%8, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
+func.def @bytes_offset_2_count_4(%input: vector<16xi8>) -> (vector<4xi8>) {
+  %result = vector.slice %input[2] : vector<16xi8> -> vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bytes_offset_2_count_4(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+  %5 = v_mov_b32 16
+  %6 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %result = v_alignbit_b32 %7, %6, %5
+  return %result
+}
+
+// ====
+
+func.def @bytes_offset_3_count_9(%input: vector<16xi8>) -> (vector<9xi8>) {
+  %result = vector.slice %input[3] : vector<16xi8> -> vector<9xi8>
+  func.return %result : vector<9xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bytes_offset_3_count_9(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x3>) asm {
+  %5 = v_mov_b32 24
+  %6 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = v_alignbit_b32 %7, %6, %5
+  %10 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = v_alignbit_b32 %10, %7, %5
+  %13 = v_lshrrev_b32_src0_inline %10, 24
+  %result = concat(%8, %11, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  return %result
+}
+
+// ====
+
+func.def @bytes_offset_4_count_8(%input: vector<16xi8>) -> (vector<8xi8>) {
+  %result = vector.slice %input[4] : vector<16xi8> -> vector<8xi8>
+  func.return %result : vector<8xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bytes_offset_4_count_8(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %result = concat(%5, %6) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
+func.def @bytes_offset_13_count_3(%input: vector<16xi8>) -> (vector<3xi8>) {
+  %result = vector.slice %input[13] : vector<16xi8> -> vector<3xi8>
+  func.return %result : vector<3xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bytes_offset_13_count_3(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+  %5 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %result = v_lshrrev_b32_src0_inline %5, 8
+  return %result
+}
+
+// ====
+
+func.def @bytes_offset_15_count_1(%input: vector<16xi8>) -> (vector<1xi8>) {
+  %result = vector.slice %input[15] : vector<16xi8> -> vector<1xi8>
+  func.return %result : vector<1xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bytes_offset_15_count_1(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+  %5 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %result = v_lshrrev_b32_src0_inline %5, 24
+  return %result
+}
