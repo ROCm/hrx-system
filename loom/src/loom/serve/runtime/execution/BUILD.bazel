@@ -80,6 +80,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "await",
+    srcs = ["await.c"],
+    hdrs = ["await.h"],
+    deps = [
+        ":execution",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "dispatch",
     srcs = ["dispatch.c"],
     hdrs = ["dispatch.h"],
@@ -87,6 +98,21 @@ loom_cc_library(
         ":execution",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_test(
+    name = "await_test",
+    srcs = ["await_test.cc"],
+    deps = [
+        ":await",
+        ":execution",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

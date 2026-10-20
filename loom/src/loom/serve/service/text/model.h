@@ -345,10 +345,13 @@ enum loom_serve_text_load_flag_bits_e {
 };
 typedef uint32_t loom_serve_text_load_flags_t;
 
-// Serialized owner turn. Never joins CPU or device work. Terminal advance
-// joins every load callback, but a failed initialization can still own queue
-// consumers. Success means initialization readiness and a fully linked model.
+// Serialized owner turn. Never waits for CPU or device work. QoS selects each
+// unaccepted phase; accepted work retains its class through retirement.
+// Task completion or changed application admission schedules another turn.
+// Terminal advance joins every callback and failed-load native retirement.
+// Success means initialization readiness and a fully linked model.
 iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
+                                           loom_serve_execution_qos_t qos,
                                            loom_serve_text_load_flags_t flags,
                                            bool* out_complete);
 
@@ -357,8 +360,8 @@ const loom_serve_compilation_report_t* loom_serve_text_load_report(
     const loom_serve_text_load_t* load);
 
 // Transfers partial or complete model ownership on EVERY terminal outcome.
-// Failure/cancellation still requires model_retire and free_retired; neither
-// a failed readiness wait nor a cancelled load proves consumer retirement.
+// Failed loads have joined native retirement; the caller still owns the
+// partial model and releases it with model_free_retired.
 loom_serve_text_model_t* loom_serve_text_load_take_model(
     loom_serve_text_load_t* load);
 

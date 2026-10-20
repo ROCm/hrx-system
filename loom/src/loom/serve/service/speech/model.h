@@ -50,11 +50,13 @@ enum loom_serve_speech_load_flag_bits_e {
 };
 typedef uint32_t loom_serve_speech_load_flags_t;
 
-// Bounded nonblocking owner turn. A nonterminal result owes a wake. Terminal
-// completion, including failure, means no callback can still borrow the load.
+// Bounded nonblocking owner turn. QoS selects each unaccepted phase; accepted
+// work retains its class through retirement. Task completion or changed
+// application admission schedules another turn. Terminal completion joins all
+// callbacks, initialization readiness, and failed-load native retirement.
 iree_status_t loom_serve_speech_load_advance(
-    loom_serve_speech_load_t* load, loom_serve_speech_load_flags_t flags,
-    bool* out_complete);
+    loom_serve_speech_load_t* load, loom_serve_execution_qos_t qos,
+    loom_serve_speech_load_flags_t flags, bool* out_complete);
 
 // Terminal-only queries. Evidence is borrowed; take transfers a successful
 // unactivated model and leaves the load empty.

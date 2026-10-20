@@ -582,6 +582,7 @@ loom_cc_library(
     loom::binding::c::loomc
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::await
     loom::serve::runtime::execution::retirement
     loom::serve::runtime::execution::scheduler
     loom::serve::runtime::parameter::admission

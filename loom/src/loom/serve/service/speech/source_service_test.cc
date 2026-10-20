@@ -420,6 +420,156 @@ class RegisteredSourceSpeechServiceTest : public SourceSpeechServiceTest {
   bool NeedsStandaloneModel() const override { return false; }
 };
 
+class SourceSpeechLoadTest : public SourceSpeechServiceTest {
+ protected:
+  void SetUp() override {
+    iree_notification_initialize(&notification_);
+    SourceSpeechServiceTest::SetUp();
+  }
+
+  void TearDown() override {
+    loom_serve_execution_permit_deinitialize(&voice_);
+    if (load_) {
+      if (!complete_) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                              Finish(LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+                                     LOOM_SERVE_SPEECH_LOAD_FLAG_CANCEL));
+      }
+      IREE_EXPECT_OK(loom_serve_speech_load_free(load_));
+    }
+    iree_notification_deinitialize(&notification_);
+    SourceSpeechServiceTest::TearDown();
+  }
+
+  void Begin() {
+    static const iree_string_view_t providers[] = {
+        IREE_SVL("generate.loom"), IREE_SVL("variants/weights.loom")};
+    const loom_serve_speech_model_options_t options = {
+        .sources =
+            {
+                .base_directory = iree_make_cstring_view(directory_.c_str()),
+                .prepare = GetParam() ? IREE_SV("variants/prepare.loom")
+                                      : IREE_SV("prepare.loom"),
+                .control = IREE_SV("control.loom"),
+                .count = GetParam() ? 2u : 1u,
+                .values = providers,
+            },
+        .asset_directory = iree_make_cstring_view(assets_.c_str()),
+    };
+    complete_ = false;
+    IREE_ASSERT_OK(loom_serve_speech_load_allocate(
+        loom_serve_device_group_at(group_, 0), &options,
+        [](void* self) {
+          iree_notification_post(static_cast<iree_notification_t*>(self),
+                                 IREE_ALL_WAITERS);
+        },
+        &notification_, allocator_, &load_));
+  }
+
+  iree_status_t Advance(loom_serve_execution_qos_t qos,
+                        loom_serve_speech_load_flags_t flags = 0) {
+    return loom_serve_speech_load_advance(load_, qos, flags, &complete_);
+  }
+
+  iree_status_t Finish(loom_serve_execution_qos_t qos,
+                       loom_serve_speech_load_flags_t flags = 0) {
+    iree_status_t status = iree_ok_status();
+    while (!complete_ && iree_status_is_ok(status)) {
+      const auto ticket = iree_notification_prepare_wait(&notification_);
+      status = Advance(qos, flags);
+      if (complete_) {
+        iree_notification_cancel_wait(&notification_);
+      } else {
+        iree_notification_commit_wait(&notification_, ticket,
+                                      IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+    }
+    return status;
+  }
+
+  void RequestVoice() {
+    loom_serve_execution_permit_initialize(
+        scheduler_, LOOM_SERVE_EXECUTION_RESOURCE_HOST, &voice_);
+    loom_serve_execution_permit_request(&voice_,
+                                        LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  }
+
+  void CheckWaveform() {
+    void* invocation = nullptr;
+    IREE_ASSERT_OK(Prepare("negative", 3, &invocation));
+    IREE_ASSERT_OK(Admit(invocation));
+    std::vector<float> samples;
+    std::vector<size_t> blocks;
+    IREE_ASSERT_OK(Generate(invocation, SIZE_MAX, &samples, &blocks));
+    ASSERT_EQ(samples.size(), 17u);
+    for (size_t i = 0; i < samples.size(); ++i) {
+      EXPECT_EQ(samples[i], -static_cast<float>((i + 3) % 8) * 0.125f);
+    }
+    IREE_ASSERT_OK(Retire(invocation));
+  }
+
+  // Private source load joined before its borrowed package paths expire.
+  loom_serve_speech_load_t* load_ = nullptr;
+  // Terminal advance has returned exclusive access to the fixture.
+  bool complete_ = false;
+  // Outer owner notification, never waited on by an executor worker.
+  iree_notification_t notification_;
+  // Independent realtime host demand, using the actual application's policy.
+  loom_serve_execution_permit_t voice_ = {};
+};
+
+TEST_P(SourceSpeechLoadTest, VoiceDefersLoadAndReplacementProducesAudio) {
+  RequestVoice();
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&voice_));
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  IREE_ASSERT_OK(Advance(LOOM_SERVE_EXECUTION_QOS_BACKGROUND));
+  EXPECT_FALSE(complete_);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        Advance(LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+                                LOOM_SERVE_SPEECH_LOAD_FLAG_CANCEL));
+  ASSERT_TRUE(complete_);
+  IREE_ASSERT_OK(loom_serve_speech_load_free(load_));
+  load_ = nullptr;
+
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  IREE_ASSERT_OK(Advance(LOOM_SERVE_EXECUTION_QOS_BACKGROUND));
+  EXPECT_FALSE(complete_);
+  IREE_ASSERT_OK(Finish(LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  IREE_ASSERT_OK(loom_serve_speech_model_free(model_));
+  model_ = loom_serve_speech_load_take_model(load_);
+  IREE_ASSERT_OK(loom_serve_speech_load_free(load_));
+  load_ = nullptr;
+  generator_ = loom_serve_speech_model_generator(model_);
+  loom_serve_execution_permit_complete(&voice_);
+  ASSERT_NO_FATAL_FAILURE(CheckWaveform());
+}
+
+TEST_P(SourceSpeechLoadTest, CancelledBootstrapRetainsHostUntilWorkerRelease) {
+  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  for (int i = 0; i < SpeechWorkerCount(); ++i) {
+    gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
+        loom_serve_host_executor(host_)));
+  }
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  IREE_ASSERT_OK(Advance(LOOM_SERVE_EXECUTION_QOS_BACKGROUND));
+  RequestVoice();
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&voice_));
+  IREE_ASSERT_OK(Advance(LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+                         LOOM_SERVE_SPEECH_LOAD_FLAG_CANCEL));
+  EXPECT_FALSE(complete_);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&voice_));
+  gates.clear();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        Finish(LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+                               LOOM_SERVE_SPEECH_LOAD_FLAG_CANCEL));
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&voice_));
+  loom_serve_execution_permit_complete(&voice_);
+  ASSERT_NO_FATAL_FAILURE(CheckWaveform());
+}
+
+INSTANTIATE_TEST_SUITE_P(Weights, SourceSpeechLoadTest, ::testing::Bool());
+
 TEST_P(SourceSpeechServiceTest, SourceStagesPublishVariableAndEmptyBlocks) {
   for (int sign : {1, -1}) {
     void* invocation = nullptr;

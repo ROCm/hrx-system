@@ -160,6 +160,8 @@ loom_cc_library(
     "model.c"
   DEPS
     ::generator
+    iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::hal
     iree::module::hal::types
@@ -169,6 +171,7 @@ loom_cc_library(
     loom::binding::c::loomc
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::await
     loom::serve::runtime::execution::retirement
     loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host

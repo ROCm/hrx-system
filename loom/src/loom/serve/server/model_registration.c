@@ -259,8 +259,8 @@ static iree_status_t loom_serve_image_registration_prepare(
     loom_serve_compilation_report_t* out_report) {
   loom_serve_image_registration_t* registration = self;
   iree_status_t status = loom_serve_image_load_advance(
-      registration->load, cancel ? LOOM_SERVE_IMAGE_LOAD_FLAG_CANCEL : 0,
-      out_complete);
+      registration->load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+      cancel ? LOOM_SERVE_IMAGE_LOAD_FLAG_CANCEL : 0, out_complete);
   if (!*out_complete) {
     return status;
   }
@@ -437,8 +437,8 @@ static iree_status_t loom_serve_speech_registration_prepare(
     loom_serve_compilation_report_t* out_report) {
   loom_serve_speech_registration_t* registration = self;
   iree_status_t status = loom_serve_speech_load_advance(
-      registration->load, cancel ? LOOM_SERVE_SPEECH_LOAD_FLAG_CANCEL : 0,
-      out_complete);
+      registration->load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+      cancel ? LOOM_SERVE_SPEECH_LOAD_FLAG_CANCEL : 0, out_complete);
   if (!*out_complete) {
     return status;
   }
@@ -608,8 +608,8 @@ static iree_status_t loom_serve_recognition_registration_prepare(
     loom_serve_compilation_report_t* out_report) {
   loom_serve_recognition_registration_t* registration = self;
   iree_status_t status = loom_serve_recognition_load_advance(
-      registration->load, cancel ? LOOM_SERVE_RECOGNITION_LOAD_FLAG_CANCEL : 0,
-      out_complete);
+      registration->load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+      cancel ? LOOM_SERVE_RECOGNITION_LOAD_FLAG_CANCEL : 0, out_complete);
   if (!*out_complete) {
     return status;
   }
@@ -789,8 +789,8 @@ static iree_status_t loom_serve_text_registration_prepare(
     loom_serve_compilation_report_t* out_report) {
   loom_serve_text_registration_t* registration = self;
   iree_status_t status = loom_serve_text_load_advance(
-      registration->load, cancel ? LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL : 0,
-      out_complete);
+      registration->load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+      cancel ? LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL : 0, out_complete);
   if (!*out_complete) {
     return status;
   }

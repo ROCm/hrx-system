@@ -97,6 +97,22 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    await
+  HDRS
+    "await.h"
+  SRCS
+    "await.c"
+  DEPS
+    ::execution
+    iree::async
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     dispatch
   HDRS
     "dispatch.h"
@@ -107,6 +123,26 @@ loom_cc_library(
     iree::base
     iree::hal
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    await_test
+  SRCS
+    "await_test.cc"
+  DEPS
+    ::await
+    ::execution
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
 )
 endif()
 

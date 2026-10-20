@@ -649,13 +649,15 @@ TEST_F(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
       },
       &notification, host_allocator_, &load));
   bool complete = false;
-  IREE_ASSERT_OK(loom_serve_text_load_advance(load, 0, &complete));
+  IREE_ASSERT_OK(loom_serve_text_load_advance(
+      load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0, &complete));
   ASSERT_FALSE(complete);
   iree_status_t status = iree_ok_status();
   while (!complete) {
     const auto ticket = iree_notification_prepare_wait(&notification);
     status = loom_serve_text_load_advance(
-        load, LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL, &complete);
+        load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+        LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL, &complete);
     if (complete) {
       iree_notification_cancel_wait(&notification);
     } else {
@@ -735,7 +737,8 @@ TEST_F(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
   iree_status_t status = iree_ok_status();
   while (!complete) {
     const auto ticket = iree_notification_prepare_wait(&notification);
-    status = loom_serve_text_load_advance(load, 0, &complete);
+    status = loom_serve_text_load_advance(
+        load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0, &complete);
     if (complete) {
       iree_notification_cancel_wait(&notification);
     } else {

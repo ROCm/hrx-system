@@ -10,6 +10,7 @@
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/await.h"
 #include "loom/serve/runtime/execution/retirement.h"
 #include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/admission.h"
@@ -550,6 +551,7 @@ typedef enum loom_serve_image_load_phase_e {
   IMAGE_LOAD_BIND,
   IMAGE_LOAD_WEIGHTS,
   IMAGE_LOAD_LINK,
+  IMAGE_LOAD_READY,
   IMAGE_LOAD_COMPLETE,
 } loom_serve_image_load_phase_t;
 
@@ -576,6 +578,12 @@ struct loom_serve_image_load_t {
   iree_status_t task_status;
   // Tokenizer construction overlaps control/native compilation and indexing.
   loom_serve_tokenizer_load_t* tokenizer_load;
+  // Bootstrap and its tokenizer child retain one accepted host claim.
+  loom_serve_execution_permit_t bootstrap;
+  // Stage compilation or compound native initialization claim on the owner.
+  loom_serve_execution_permit_t work;
+  // Bootstrap publication makes tokenizer_load safe for owner inspection.
+  bool bootstrap_released;
   // Terminal outcome retained until tokenizer and backing ownership retire.
   iree_status_t terminal_status;
   // Completion publication shared with workers; owner consumes under mutex.
@@ -591,6 +599,8 @@ struct loom_serve_image_load_t {
     // Borrowed notification payload, retained through terminal advance.
     void* user_data;
   } event;
+  // Initialization readiness; failure still requires model retirement.
+  loom_serve_execution_await_t readiness;
 };
 
 static void loom_serve_image_load_complete(void* user_data,
@@ -601,6 +611,25 @@ static void loom_serve_image_load_complete(void* user_data,
   load->event.pending = false;
   load->event.wake(load->event.user_data);
   iree_slim_mutex_unlock(&load->event.mutex);
+}
+
+static void loom_serve_image_load_ready(void* user_data,
+                                        iree_async_operation_t* operation,
+                                        iree_status_t status,
+                                        iree_async_completion_flags_t flags) {
+  loom_serve_image_load_complete(user_data, status);
+}
+
+static iree_status_t loom_serve_image_load_await(
+    loom_serve_image_load_t* load) {
+  iree_async_proactor_t* proactor = NULL;
+  IREE_RETURN_IF_ERROR(iree_async_proactor_pool_get(
+      loom_serve_host_proactor_pool(loom_serve_device_host(load->model->owner)),
+      0, &proactor));
+  const loom_serve_execution_frontier_t frontier =
+      loom_serve_execution_frontier(load->model->execution);
+  return loom_serve_execution_await(
+      proactor, &frontier, loom_serve_image_load_ready, load, &load->readiness);
 }
 
 static iree_status_t loom_serve_image_load_prepare(
@@ -695,6 +724,12 @@ iree_status_t loom_serve_image_load_allocate(
   load->event.user_data = user_data;
   iree_slim_mutex_initialize(&load->event.mutex);
   loomc_task_initialize(&image_load_vtable, &load->task);
+  loom_serve_execution_permit_initialize(loom_serve_device_scheduler(device),
+                                         LOOM_SERVE_EXECUTION_RESOURCE_HOST,
+                                         &load->bootstrap);
+  loom_serve_execution_permit_initialize(loom_serve_device_scheduler(device),
+                                         LOOM_SERVE_EXECUTION_RESOURCE_HOST,
+                                         &load->work);
   iree_status_t status = iree_allocator_malloc(
       host_allocator, sizeof(*load->model), (void**)&load->model);
   if (iree_status_is_ok(status)) {
@@ -718,21 +753,56 @@ iree_status_t loom_serve_image_load_allocate(
   return status;
 }
 
+static bool loom_serve_image_load_acquire(
+    loom_serve_execution_permit_t* permit,
+    loom_serve_execution_resources_t resources,
+    loom_serve_execution_qos_t qos) {
+  if (permit->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING &&
+      permit->qos != qos) {
+    loom_serve_execution_permit_cancel(permit);
+  }
+  if (permit->phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE) {
+    permit->resources = resources;
+    loom_serve_execution_permit_request(permit, qos);
+  }
+  return loom_serve_execution_permit_try_acquire(permit);
+}
+
+static void loom_serve_image_load_collect_bootstrap(
+    loom_serve_image_load_t* load) {
+  if (load->bootstrap_released &&
+      load->bootstrap.phase == LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED &&
+      loom_serve_tokenizer_load_take(&load->tokenizer_load,
+                                     &load->terminal_status,
+                                     &load->model->tokenizer)) {
+    loom_serve_execution_permit_complete(&load->bootstrap);
+  }
+}
+
 iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
+                                            loom_serve_execution_qos_t qos,
                                             loom_serve_image_load_flags_t flags,
                                             bool* out_complete) {
   *out_complete = false;
   load->cancelled |= iree_any_bit_set(flags, LOOM_SERVE_IMAGE_LOAD_FLAG_CANCEL);
+  loom_serve_image_load_collect_bootstrap(load);
   iree_slim_mutex_lock(&load->event.mutex);
   if (load->event.pending) {
     iree_slim_mutex_unlock(&load->event.mutex);
     return iree_ok_status();
   }
-  iree_status_t status =
-      iree_status_join(load->terminal_status, load->event.status);
-  load->terminal_status = iree_ok_status();
+  iree_status_t status = load->event.status;
   load->event.status = iree_ok_status();
   iree_slim_mutex_unlock(&load->event.mutex);
+  if (load->phase == IMAGE_LOAD_STAGES) {
+    load->bootstrap_released = true;
+    loom_serve_image_load_collect_bootstrap(load);
+  } else if (load->phase == IMAGE_LOAD_BIND &&
+             load->work.phase == LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED) {
+    loom_serve_execution_permit_complete(&load->work);
+  }
+  status = iree_status_join(load->terminal_status, status);
+  load->terminal_status = iree_ok_status();
   if (iree_status_is_ok(status) && load->cancelled) {
     status = iree_make_status(IREE_STATUS_CANCELLED, "model load cancelled");
   }
@@ -743,6 +813,10 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
          load->phase != IMAGE_LOAD_COMPLETE) {
     switch (load->phase) {
       case IMAGE_LOAD_PREPARE:
+        if (!loom_serve_image_load_acquire(
+                &load->bootstrap, LOOM_SERVE_EXECUTION_RESOURCE_HOST, qos)) {
+          return iree_ok_status();
+        }
         load->phase = IMAGE_LOAD_STAGES;
         iree_slim_mutex_lock(&load->event.mutex);
         load->event.pending = true;
@@ -752,6 +826,10 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
         submitted = iree_status_is_ok(status);
         break;
       case IMAGE_LOAD_STAGES:
+        if (!loom_serve_image_load_acquire(
+                &load->work, LOOM_SERVE_EXECUTION_RESOURCE_HOST, qos)) {
+          return iree_ok_status();
+        }
         load->phase = IMAGE_LOAD_BIND;
         iree_slim_mutex_lock(&load->event.mutex);
         load->event.pending = true;
@@ -762,6 +840,15 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
         submitted = iree_status_is_ok(status);
         break;
       case IMAGE_LOAD_BIND:
+        // Fixed backing and its preparation share one claim: a nested compiler
+        // claim would deadlock a task device with one accepted-unit slot.
+        if (!loom_serve_image_load_acquire(
+                &load->work,
+                LOOM_SERVE_EXECUTION_RESOURCE_HOST |
+                    loom_serve_device_execution_resources(model->owner),
+                qos)) {
+          return iree_ok_status();
+        }
         status = loom_serve_image_model_bind(model);
         load->phase = IMAGE_LOAD_WEIGHTS;
         break;
@@ -781,6 +868,7 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
               loom_serve_image_load_complete, load);
           submitted = iree_status_is_ok(status);
         } else {
+          loom_serve_execution_permit_complete(&load->work);
           load->phase = IMAGE_LOAD_LINK;
         }
         break;
@@ -789,10 +877,29 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
                                             &model->tokenizer)) {
           return iree_ok_status();
         }
+        loom_serve_execution_permit_complete(&load->bootstrap);
+        if (iree_status_is_ok(status) &&
+            !loom_serve_image_load_acquire(
+                &load->work,
+                LOOM_SERVE_EXECUTION_RESOURCE_HOST |
+                    loom_serve_device_execution_resources(model->owner),
+                qos)) {
+          return iree_ok_status();
+        }
         if (iree_status_is_ok(status)) {
           status = loom_serve_image_model_link(
               model, load->module, &load->options.sources, load->command_mode);
         }
+        if (iree_status_is_ok(status)) {
+          iree_slim_mutex_lock(&load->event.mutex);
+          load->event.pending = true;
+          iree_slim_mutex_unlock(&load->event.mutex);
+          status = loom_serve_image_load_await(load);
+          submitted = iree_status_is_ok(status);
+          load->phase = IMAGE_LOAD_READY;
+        }
+        break;
+      case IMAGE_LOAD_READY:
         load->phase = IMAGE_LOAD_COMPLETE;
         break;
       case IMAGE_LOAD_COMPLETE:
@@ -804,6 +911,8 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
     iree_slim_mutex_lock(&load->event.mutex);
     load->event.pending = false;
     iree_slim_mutex_unlock(&load->event.mutex);
+    loom_serve_execution_permit_cancel(&load->bootstrap);
+    loom_serve_execution_permit_cancel(&load->work);
     load->phase = IMAGE_LOAD_COMPLETE;
   }
   if (load->phase == IMAGE_LOAD_COMPLETE &&
@@ -823,6 +932,10 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
     }
   }
   *out_complete = load->phase == IMAGE_LOAD_COMPLETE;
+  if (*out_complete) {
+    loom_serve_execution_permit_complete(&load->bootstrap);
+    loom_serve_execution_permit_complete(&load->work);
+  }
   return status;
 }
 
@@ -844,6 +957,8 @@ iree_status_t loom_serve_image_load_free(loom_serve_image_load_t* load) {
   }
   iree_status_t status = loom_serve_image_model_destroy_resources(load->model);
   if (iree_status_is_ok(status)) {
+    loom_serve_execution_permit_deinitialize(&load->bootstrap);
+    loom_serve_execution_permit_deinitialize(&load->work);
     iree_vm_module_release(load->module);
     iree_slim_mutex_deinitialize(&load->event.mutex);
     iree_allocator_free(load->host_allocator, load);
@@ -869,7 +984,8 @@ iree_status_t loom_serve_image_model_allocate(
   bool complete = false;
   while (iree_status_is_ok(status) && !complete) {
     const uint32_t ticket = iree_notification_prepare_wait(&notification);
-    status = loom_serve_image_load_advance(load, 0, &complete);
+    status = loom_serve_image_load_advance(
+        load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0, &complete);
     if (complete) {
       iree_notification_cancel_wait(&notification);
     } else {

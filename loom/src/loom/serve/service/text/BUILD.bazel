@@ -495,6 +495,7 @@ loom_cc_library(
         "//loom/binding/c:loomc",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:await",
         "//loom/src/loom/serve/runtime/execution:retirement",
         "//loom/src/loom/serve/runtime/execution:scheduler",
         "//loom/src/loom/serve/runtime/parameter:admission",
