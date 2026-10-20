@@ -13,6 +13,25 @@ kernel.def export("materialize") @materialize() {
   %width = index.constant 32 : index
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
 } launch(%ring: buffer, %packets: buffer, %ring_address: i64, %packet_address: i64, %ring_mask: i32, %first: i32, %packet_count: i32) {
+  %profiled = scalar.constant false : i1
+  %zero64 = scalar.constant 0 : i64
+  func.call @materialize_block(%ring, %packets, %ring_address, %packet_address, %ring_mask, %first, %packet_count, %profiled, %ring, %zero64) : (buffer, buffer, i64, i64, i32, i32, i32, i1, buffer, i64) -> ()
+  kernel.return
+}
+
+kernel.def export("materialize_profile") @materialize_profile() {
+  %one = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%ring: buffer, %packets: buffer, %ring_address: i64, %packet_address: i64, %ring_mask: i32, %first: i32, %packet_count: i32, %signals: buffer, %signal_address: i64) {
+  %profiled = scalar.constant true : i1
+  func.call @materialize_block(%ring, %packets, %ring_address, %packet_address, %ring_mask, %first, %packet_count, %profiled, %signals, %signal_address) : (buffer, buffer, i64, i64, i32, i32, i32, i1, buffer, i64) -> ()
+  kernel.return
+}
+
+// Constant specialization removes all profiling work from ordinary kernels.
+func.def inline @materialize_block(%ring: buffer, %packets: buffer, %ring_address: i64, %packet_address: i64, %ring_mask: i32, %first: i32, %packet_count: i32, %profiled: i1, %signals: buffer, %signal_address: i64) {
+  %disabled = scalar.constant false : i1
   %lane = kernel.workitem.id<x> : index
   %zero = index.constant 0 : index
   %zero32 = scalar.constant 0 : i32
@@ -40,9 +59,53 @@ kernel.def export("materialize") @materialize() {
     %source = buffer.view %packets[%source_offset] : buffer -> view<1xi32>
     %value = view.load %source[0] : view<1xi32> -> i32
     %not_first = scalar.cmpi ne, %word32, %zero32 : i32
-    scf.if %not_first {
-      %destination = buffer.view %ring_global[%destination_offset] : buffer -> view<1xi32>
-      view.store %value, %destination[0] : i32, view<1xi32>
+    scf.if %profiled {
+      // Only private templates carry ordinals. Every native completion field
+      // receives a complete pointer, or zero when capture is disabled.
+      %completion_word = scalar.constant 14 : i32
+      %completion_high_word = scalar.constant 15 : i32
+      %is_completion = scalar.cmpi eq, %within, %completion_word : i32
+      %is_completion_high = scalar.cmpi eq, %within, %completion_high_word : i32
+      scf.if %is_completion {
+        %zero64 = scalar.constant 0 : i64
+        %one64 = scalar.constant 1 : i64
+        %tagged = scalar.cmpi ne, %value, %zero32 : i32
+        %enabled = scalar.cmpi ne, %signal_address, %zero64 : i64
+        %capture = scalar.andi %tagged, %enabled : i1
+        %completion_address = scf.if %capture -> (i64) {
+          %ordinal = scalar.subi %value, %one32 : i32
+          %sample_bytes = scalar.shli %ordinal, %six32 : i32
+          %sample_offset = index.cast %sample_bytes : i32 to offset
+          %sample = buffer.view %signals[%sample_offset] : buffer -> view<8xi64>
+          view.store %one64, %sample[0] : i64, view<8xi64>
+          view.store %one64, %sample[1] : i64, view<8xi64>
+          view.store %zero64, %sample[2] : i64, view<8xi64>
+          view.store %zero64, %sample[3] : i64, view<8xi64>
+          view.store %zero64, %sample[4] : i64, view<8xi64>
+          view.store %zero64, %sample[5] : i64, view<8xi64>
+          view.store %zero64, %sample[6] : i64, view<8xi64>
+          view.store %zero64, %sample[7] : i64, view<8xi64>
+          %sample_bytes64 = scalar.extui %sample_bytes : i32 to i64
+          %address = scalar.addi %signal_address, %sample_bytes64 : i64
+          scf.yield %address : i64
+        } else {
+          scf.yield %zero64 : i64
+        }
+        %completion_target = buffer.view %ring_global[%destination_offset] : buffer -> view<1xi64>
+        view.store %completion_address, %completion_target[0] : i64, view<1xi64>
+      } else {
+        %not_completion_high = scalar.cmpi eq, %is_completion_high, %disabled : i1
+        %copy = scalar.andi %not_first, %not_completion_high : i1
+        scf.if %copy {
+          %destination = buffer.view %ring_global[%destination_offset] : buffer -> view<1xi32>
+          view.store %value, %destination[0] : i32, view<1xi32>
+        }
+      }
+    } else {
+      scf.if %not_first {
+        %destination = buffer.view %ring_global[%destination_offset] : buffer -> view<1xi32>
+        view.store %value, %destination[0] : i32, view<1xi32>
+      }
     }
     %is_header = scalar.cmpi eq, %within, %zero32 : i32
     %is_indirect = scalar.cmpi eq, %value, %one32 : i32
@@ -75,5 +138,5 @@ kernel.def export("materialize") @materialize() {
     %first_target = buffer.view %ring_global[%first_offset] : buffer -> view<1xi32>
     view.atomic.store %header, %first_target[0] {ordering = release, scope = system} : i32, view<1xi32>
   }
-  kernel.return
+  func.return
 }

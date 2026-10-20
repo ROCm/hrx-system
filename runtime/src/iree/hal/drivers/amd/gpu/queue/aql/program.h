@@ -30,6 +30,8 @@ typedef struct iree_hal_amd_gpu_aql_program_pool_t {
   uint64_t fixup;
   // Native descriptor for write-only packet materialization.
   uint64_t materialize;
+  // Native descriptor for tagged completion operands and private samples.
+  uint64_t materialize_profile;
   // Native descriptor for execution-time grid/hidden-count publication.
   uint64_t indirect;
 } iree_hal_amd_gpu_aql_program_pool_t;

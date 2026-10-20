@@ -41,15 +41,20 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
        .kernel_object = &out_pool->materialize},
       {.argument_length = sizeof(iree_hal_amd_gpu_aql_indirect_arguments_t),
        .kernel_object = &out_pool->indirect},
+      {.argument_length =
+           sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t),
+       .kernel_object = &out_pool->materialize_profile},
   };
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_blit_program_query(
       gfxip, &builtins[0].code, &builtins[0].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_fixup_program_query(
       gfxip, &builtins[1].code, &builtins[1].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_materialize_program_query(
-      gfxip, &builtins[2].code, &builtins[2].kernel));
+      gfxip, false, &builtins[2].code, &builtins[2].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_indirect_program_query(
       gfxip, &builtins[3].code, &builtins[3].kernel));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_materialize_program_query(
+      gfxip, true, &builtins[4].code, &builtins[4].kernel));
   const uint64_t descriptor_length = 64;
   const uint64_t code_begin =
       iree_align_uint64(IREE_ARRAYSIZE(builtins) * descriptor_length, 256);

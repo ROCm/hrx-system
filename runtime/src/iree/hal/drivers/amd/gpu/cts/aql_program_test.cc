@@ -338,4 +338,123 @@ TEST_F(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
   EXPECT_GT(ring_.reserved, ring_.capacity * 8);
 }
 
+TEST_F(AqlProgramTest, TaggedCompletionsCaptureAndElideAcrossRingWrap) {
+  constexpr uint32_t kHeader = IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                               IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+                               IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
+  constexpr uint32_t kPacketCount = 5;
+  constexpr uint32_t kSampleCount = 3;
+  auto* packets = reinterpret_cast<iree_hal_amd_gpu_aql_packet_t*>(
+      control_.contents.data + 512);
+  auto* samples = reinterpret_cast<iree_hal_amd_gpu_aql_signal_t*>(
+      control_.contents.data + 2048);
+  for (uint32_t i = 0; i < kSampleCount; ++i) {
+    const iree_hal_amd_gpu_blit_arguments_t fill = {
+        .target = control_address_ + 4096 + i * 4,
+        .length = 4,
+        .pattern = 100 + i,
+        .fill = 1,
+    };
+    std::memcpy(control_.contents.data + 256 + i * sizeof(fill), &fill,
+                sizeof(fill));
+  }
+  packets[0] = Dispatch(pool_.blit, control_address_ + 256, 1, kHeader);
+  packets[0].words[14] = 1;
+  packets[1] = iree_hal_amd_gpu_aql_indirect_packet(pool_.indirect,
+                                                    control_address_ + 1024);
+  packets[2] = Dispatch(
+      pool_.blit,
+      control_address_ + 256 + sizeof(iree_hal_amd_gpu_blit_arguments_t), 1,
+      kHeader);
+  packets[2].words[14] = 2;
+  const iree_hal_amd_gpu_aql_indirect_arguments_t patch = {
+      .counts = control_address_ + 1088,
+      .header = packets[2].words[0],
+      .workgroup_size = {64, 1, 1},
+      .count_offsets = {UINT32_MAX, UINT32_MAX, UINT32_MAX},
+  };
+  std::memcpy(control_.contents.data + 1024, &patch, sizeof(patch));
+  const uint32_t counts[] = {1, 1, 1};
+  std::memcpy(control_.contents.data + 1088, counts, sizeof(counts));
+  packets[2].words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
+  packets[3] = iree_hal_amd_gpu_aql_packet_barrier(
+      IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND | kHeader, 0, nullptr, 0);
+  packets[4] = Dispatch(
+      pool_.blit,
+      control_address_ + 256 + 2 * sizeof(iree_hal_amd_gpu_blit_arguments_t), 1,
+      kHeader);
+  packets[4].words[14] = 3;
+
+  uint64_t previous_end = 0;
+  for (bool enabled : {true, false, true, false}) {
+    SCOPED_TRACE(enabled);
+    IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
+        context_->gpu->user_queue_set_dispatch_timestamps(queue_.queue,
+                                                          enabled),
+        "configure native dispatch timestamps"));
+    for (uint32_t iteration = 0; iteration < 17; ++iteration) {
+      SCOPED_TRACE(iteration);
+      std::memset(control_.contents.data + 1984, 0xA5, (kSampleCount + 2) * 64);
+      std::memset(control_.contents.data + 4096, 0, kSampleCount * 4);
+      uint64_t position = 0;
+      ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(
+          &ring_, kPacketCount + 2, &position));
+      const iree_hal_amd_gpu_aql_materialize_profile_arguments_t arguments = {
+          .materialize =
+              {
+                  .ring = ring_.device_address,
+                  .packets = control_address_ + 512,
+                  .ring_address = ring_.device_address,
+                  .packet_address = control_address_ + 512,
+                  .ring_mask = ring_.capacity_mask,
+                  .first =
+                      static_cast<uint32_t>(position + 1) & ring_.capacity_mask,
+                  .packet_count = kPacketCount,
+              },
+          .signals = enabled ? control_address_ + 2048 : 0,
+          .signal_address = enabled ? control_address_ + 2048 : 0,
+      };
+      std::memcpy(control_.contents.data + 128, &arguments, sizeof(arguments));
+      signal_->value = 1;
+      Write(position,
+            iree_hal_amd_gpu_aql_materialize_packet(
+                pool_.materialize_profile, control_address_ + 128, kHeader));
+      Write(position + 1 + kPacketCount,
+            iree_hal_amd_gpu_aql_packet_barrier(
+                IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND | kHeader, 0, nullptr,
+                control_address_));
+      pending_ = true;
+      iree_hal_amd_gpu_aql_ring_notify(&ring_);
+      ASSERT_NO_FATAL_FAILURE(Wait());
+      const auto* output =
+          reinterpret_cast<const uint32_t*>(control_.contents.data + 4096);
+      for (uint32_t i = 0; i < kSampleCount; ++i) {
+        EXPECT_EQ(output[i], 100 + i);
+        if (enabled) {
+          EXPECT_EQ(samples[i].kind, 1u);
+          EXPECT_EQ(samples[i].value, 0u);
+          EXPECT_GT(samples[i].start_timestamp, previous_end);
+          EXPECT_GE(samples[i].end_timestamp, samples[i].start_timestamp);
+          previous_end = samples[i].end_timestamp;
+          EXPECT_EQ(samples[i].event_mailbox, 0u);
+          EXPECT_EQ(samples[i].event_id, 0u);
+          EXPECT_EQ(samples[i].reserved0, 0u);
+          EXPECT_EQ(samples[i].queue_address, 0u);
+          EXPECT_EQ(samples[i].reserved1, 0u);
+        } else {
+          const auto* bytes = reinterpret_cast<const uint8_t*>(&samples[i]);
+          EXPECT_TRUE(std::all_of(bytes, bytes + 64,
+                                  [](uint8_t value) { return value == 0xA5; }));
+        }
+      }
+      for (uint32_t offset : {1984u, 2048u + kSampleCount * 64}) {
+        const auto* bytes = control_.contents.data + offset;
+        EXPECT_TRUE(std::all_of(bytes, bytes + 64,
+                                [](uint8_t value) { return value == 0xA5; }));
+      }
+    }
+  }
+  EXPECT_GT(ring_.reserved, ring_.capacity * 4);
+}
+
 }  // namespace

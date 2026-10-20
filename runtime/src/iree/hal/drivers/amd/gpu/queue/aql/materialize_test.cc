@@ -27,8 +27,10 @@ class MaterializeProgramTest : public ::testing::TestWithParam<size_t> {
 
 TEST_P(MaterializeProgramTest, EmbeddedInstructionsAndDescriptorMatchSource) {
   const auto& file =
-      iree_hal_amd_gpu_aql_materialize_programs_create()[GetParam()];
+      iree_hal_amd_gpu_aql_materialize_programs_create()[GetParam() / 2];
+  const bool profiling = GetParam() % 2;
   SCOPED_TRACE(file.name);
+  SCOPED_TRACE(profiling);
   iree_byte_span_t source = {nullptr, file.size};
   IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(), file.size,
                                        reinterpret_cast<void**>(&source.data)));
@@ -43,15 +45,25 @@ TEST_P(MaterializeProgramTest, EmbeddedInstructionsAndDescriptorMatchSource) {
   iree_byte_sequence_release(sequence);
   IREE_ASSERT_OK(status);
 
-  ASSERT_EQ(image_.metadata.kernel_count, 1u);
+  ASSERT_EQ(image_.metadata.kernel_count, 2u);
   ASSERT_EQ(image_.relocation_count, 0u);
   ASSERT_EQ(image_.import_count, 0u);
-  const auto& metadata = image_.metadata.kernels[0];
+  const auto name =
+      profiling ? IREE_SV("materialize_profile") : IREE_SV("materialize");
+  size_t ordinal = 0;
+  while (ordinal < image_.metadata.kernel_count &&
+         !iree_string_view_equal(image_.metadata.kernels[ordinal].name, name)) {
+    ++ordinal;
+  }
+  ASSERT_LT(ordinal, image_.metadata.kernel_count);
+  const auto& metadata = image_.metadata.kernels[ordinal];
   EXPECT_EQ(metadata.kernarg_segment_size,
-            sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t));
+            profiling
+                ? sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t)
+                : sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t));
   EXPECT_EQ(metadata.private_segment_fixed_size, 0u);
   EXPECT_EQ(metadata.group_segment_fixed_size, 0u);
-  ASSERT_EQ(metadata.argument_count, 7u);
+  ASSERT_EQ(metadata.argument_count, profiling ? 9u : 7u);
   for (size_t i = 0; i < 4; ++i) {
     EXPECT_EQ(metadata.arguments[i].offset, i * 8);
     EXPECT_EQ(metadata.arguments[i].size, 8u);
@@ -60,18 +72,23 @@ TEST_P(MaterializeProgramTest, EmbeddedInstructionsAndDescriptorMatchSource) {
     EXPECT_EQ(metadata.arguments[i].offset, 32 + (i - 4) * 4);
     EXPECT_EQ(metadata.arguments[i].size, 4u);
   }
+  if (profiling) {
+    for (size_t i = 7; i < 9; ++i) {
+      EXPECT_EQ(metadata.arguments[i].offset, 48 + (i - 7) * 8);
+      EXPECT_EQ(metadata.arguments[i].size, 8u);
+    }
+  }
   iree_const_byte_span_t code;
   iree_hal_amd_gpu_image_kernel_t descriptor;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_materialize_program_query(
-      image_.target.version, &code, &descriptor));
-  const auto& kernel = image_.kernels[0];
+      image_.target.version, profiling, &code, &descriptor));
+  const auto& kernel = image_.kernels[ordinal];
   EXPECT_EQ(kernel.compute_pgm_rsrc1, descriptor.compute_pgm_rsrc1);
   EXPECT_EQ(kernel.compute_pgm_rsrc2, descriptor.compute_pgm_rsrc2);
   EXPECT_EQ(kernel.compute_pgm_rsrc3, descriptor.compute_pgm_rsrc3);
   EXPECT_EQ(kernel.code_properties, descriptor.code_properties);
   EXPECT_EQ(kernel.kernarg_preload, descriptor.kernarg_preload);
-  const auto* symbol =
-      iree_hal_amd_gpu_image_find_symbol(&image_, IREE_SV("materialize"));
+  const auto* symbol = iree_hal_amd_gpu_image_find_symbol(&image_, name);
   ASSERT_NE(symbol, nullptr);
   ASSERT_EQ(symbol->length, code.data_length);
   EXPECT_EQ(symbol->address.offset, kernel.entry_offset);
@@ -92,6 +109,6 @@ TEST_P(MaterializeProgramTest, EmbeddedInstructionsAndDescriptorMatchSource) {
 INSTANTIATE_TEST_SUITE_P(
     Targets, MaterializeProgramTest,
     ::testing::Range(size_t{0},
-                     iree_hal_amd_gpu_aql_materialize_programs_size()));
+                     iree_hal_amd_gpu_aql_materialize_programs_size() * 2));
 
 }  // namespace

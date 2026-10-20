@@ -42,11 +42,31 @@ typedef struct iree_hal_amd_gpu_aql_materialize_arguments_t {
 static_assert(sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t) == 48,
               "materialization arguments occupy one cache line");
 
+// Instrumented private templates use one-based per-block dispatch ordinals in
+// their completion fields. The profiling materializer replaces these with
+// native signal addresses before publishing any header. Untagged packets have
+// zero completions. Only this variant may consume instrumented templates.
+typedef struct iree_hal_amd_gpu_aql_materialize_profile_arguments_t {
+  // The same block/ring contract as ordinary materialization.
+  iree_hal_amd_gpu_aql_materialize_arguments_t materialize;
+  // GPU buffer root of chunk-private, 64-byte-aligned native USER signals.
+  // The GPU initializes one signal per ordinal before publishing the block.
+  uint64_t signals;
+  // Same address as integer data, or zero to elide all tagged completions
+  // without accessing signals when capture is disabled.
+  uint64_t signal_address;
+} iree_hal_amd_gpu_aql_materialize_profile_arguments_t;
+static_assert(sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t) ==
+                  64,
+              "profiling materialization arguments occupy one cache line");
+
 // Returns relocation-free instructions and descriptor facts. One wave copies
 // a complete block, then publishes its first header with SYSTEM release. The
 // ring is write-only; indirect pointer preparation reads resident templates.
+// profiling selects the instrumented template ABI and its extended arguments.
 iree_status_t iree_hal_amd_gpu_aql_materialize_program_query(
-    iree_hal_amd_gpu_gfxip_version_t gfxip, iree_const_byte_span_t* out_code,
+    iree_hal_amd_gpu_gfxip_version_t gfxip, bool profiling,
+    iree_const_byte_span_t* out_code,
     iree_hal_amd_gpu_image_kernel_t* out_kernel);
 
 // Encodes one wave. The caller resolves ordering/cache scopes in header and
