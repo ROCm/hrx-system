@@ -373,6 +373,41 @@ void NativeMemoryGate::Hold::ReleaseAndHoldNext() {
   owner_->entered_.acquire();
 }
 
+// Runner selection uses the same stable native identity as libamdf CTS. Query
+// before activation so an exclusive hardware lease never touches another GPU.
+iree_status_t GpuNativeTest::MatchesNativeIdentity(
+    iree_hal_amd_fabric_t* fabric, const amdf_endpoint_id_t* id,
+    const char* selected, bool* out_matches) {
+  *out_matches = true;
+  if (!selected) {
+    return iree_ok_status();
+  }
+  amdf_endpoint_native_identity_t identity = {};
+  if (!amdf::cts::ParseNativeIdentity(selected, &identity)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid native GPU identity: %s", selected);
+  }
+  amdf_endpoint_t* endpoint = nullptr;
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      fabric->api->endpoint_open(fabric->instance, id, &endpoint),
+      "endpoint_open"));
+  amdf_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(info),
+  };
+  const amdf_status_t status =
+      fabric->api->endpoint_query_info(endpoint, &info);
+  const amdf_status_t close_status = fabric->api->endpoint_close(endpoint);
+  if (!amdf_status_is_ok(close_status)) {
+    iree_hal_amd_fabric_retain(fabric);
+  }
+  IREE_RETURN_IF_ERROR(iree_status_join(
+      IREE_HAL_AMD_STATUS_FROM_AMDF(status, "endpoint_query_info"),
+      IREE_HAL_AMD_STATUS_FROM_AMDF(close_status, "endpoint_close")));
+  *out_matches = amdf::cts::NativeIdentityIsEqual(info.native_identity, identity);
+  return iree_ok_status();
+}
+
 void GpuNativeTest::SetUp() {
   const char* selected_identity_text =
       std::getenv("AMDF_CTS_GPU_NATIVE_IDENTITY");

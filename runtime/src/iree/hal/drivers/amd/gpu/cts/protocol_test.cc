@@ -5,11 +5,13 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <cstdlib>
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
+#include "iree/hal/drivers/amd/status.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
@@ -19,8 +21,9 @@ using iree::hal::amd::gpu::cts::GpuNativeTest;
 using iree::hal::cts::Ref;
 
 // Both protocol owners remain alive through every direction and recording
-// mode. Sharing one physical endpoint isolates protocol interoperability from
-// peer-memory topology; each HAL device still owns a distinct native domain.
+// mode. By default both protocols use the selected physical endpoint. An
+// explicit peer identity admits a second physical endpoint without allowing
+// ordinary single-GPU runs to activate another device.
 class GpuProtocolInteropTest : public GpuNativeTest {
  protected:
   amdf_queue_command_type_t command_type() const override {
@@ -32,21 +35,37 @@ class GpuProtocolInteropTest : public GpuNativeTest {
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
-    uint32_t pm4_family = UINT32_MAX;
-    for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
-      if (iree_hal_amd_gpu_pm4_queue_publication_modes(
-              &context_->families[i])) {
-        pm4_family = i;
-        break;
+    const amdf_endpoint_id_t* peer_id = &context_->endpoint_info.id;
+    const char* selected_peer =
+        std::getenv("AMDF_CTS_GPU_PEER_NATIVE_IDENTITY");
+    if (selected_peer) {
+      ASSERT_NE(std::getenv("AMDF_CTS_GPU_NATIVE_IDENTITY"), nullptr)
+          << "Peer selection requires an explicit primary GPU";
+      peer_id = nullptr;
+      for (uint32_t i = 0; i < fabric_->endpoint_count && !peer_id; ++i) {
+        if (fabric_->endpoints[i].engine_kind != AMDF_ENGINE_KIND_GPU) {
+          continue;
+        }
+        bool selected = false;
+        IREE_ASSERT_OK(MatchesNativeIdentity(fabric_, &fabric_->endpoints[i].id,
+                                             selected_peer, &selected));
+        if (selected) {
+          peer_id = &fabric_->endpoints[i].id;
+        }
       }
+      ASSERT_NE(peer_id, nullptr) << "Selected peer GPU was not discovered";
+      ASSERT_FALSE(
+          amdf_endpoint_id_is_equal(peer_id, &context_->endpoint_info.id));
+      RecordProperty("peer_native_identity", selected_peer);
     }
+    uint32_t pm4_family = UINT32_MAX;
+    IREE_ASSERT_OK(FindPm4Family(peer_id, &pm4_family));
     if (pm4_family == UINT32_MAX) {
       GTEST_SKIP() << "Selected endpoint has no supported PM4 family";
     }
     IREE_ASSERT_OK(iree_hal_amd_gpu_context_allocate(
-        fabric_, &context_->endpoint_info.id,
-        iree_hal_device_event_sink_stderr(), iree_allocator_system(),
-        &peer_context_));
+        fabric_, peer_id, iree_hal_device_event_sink_stderr(),
+        iree_allocator_system(), &peer_context_));
     options_.queue_count = 1;
     options_.queue.ring_byte_length = 4096;
     options_.queue.retirement_capacity = 4;
@@ -95,6 +114,40 @@ class GpuProtocolInteropTest : public GpuNativeTest {
     EXPECT_EQ(peer_allocator_.live_count.load(), 0u);
     iree_hal_amd_gpu_context_free(peer_context_);
     GpuNativeTest::TearDown();
+  }
+
+  // Qualifies the requested peer's packet family before native activation.
+  iree_status_t FindPm4Family(const amdf_endpoint_id_t* id,
+                              uint32_t* out_family) {
+    amdf_endpoint_t* endpoint = nullptr;
+    IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+        fabric_->api->endpoint_open(fabric_->instance, id, &endpoint),
+        "endpoint_open"));
+    amdf_endpoint_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+        .structure_size = sizeof(info),
+    };
+    iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        fabric_->api->endpoint_query_info(endpoint, &info),
+        "endpoint_query_info");
+    for (uint32_t i = 0; i < info.queue_family_count &&
+                         *out_family == UINT32_MAX && iree_status_is_ok(status);
+         ++i) {
+      amdf_queue_family_info_t family = {
+          .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+          .structure_size = sizeof(family),
+      };
+      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+          fabric_->api->endpoint_query_queue_family_info(endpoint, i, &family),
+          "endpoint_query_queue_family_info");
+      if (iree_status_is_ok(status) &&
+          iree_hal_amd_gpu_pm4_queue_publication_modes(&family)) {
+        *out_family = i;
+      }
+    }
+    return iree_status_join(
+        status, IREE_HAL_AMD_STATUS_FROM_AMDF(
+                    fabric_->api->endpoint_close(endpoint), "endpoint_close"));
   }
 
   // Pending native ownership transfers only after complete peer construction.

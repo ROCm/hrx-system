@@ -163,6 +163,13 @@ class GpuNativeTest : public ::testing::Test {
                    iree_hal_amd_fabric_memory_t* memory,
                    iree_hal_amd_gpu_code_upload_t** upload);
 
+  // Matches the runner's portable identity string using passive discovery.
+  // NULL admits every endpoint; opening the query handle activates no device.
+  static iree_status_t MatchesNativeIdentity(iree_hal_amd_fabric_t* fabric,
+                                             const amdf_endpoint_id_t* id,
+                                             const char* selected,
+                                             bool* out_matches);
+
   // Independent native discovery ownership, released after device cleanup.
   iree_hal_amd_fabric_t* fabric_ = nullptr;
   // Constructing native owner, transferred to device on success.
