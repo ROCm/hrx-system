@@ -322,7 +322,8 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
                          ",\"expected\":" + std::to_string(expected) + "}"));
   }
 
-  void CheckAbandonedImage(loom_serve_service_flags_t flags) {
+  void CheckAbandonedImage(loom_serve_service_flags_t flags,
+                           bool before_preparation = false) {
     ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
     const loom_serve_image_service_options_t options = {
         .name = loom_serve_image_model_name(model_),
@@ -331,11 +332,39 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         .pending_capacity = 8,
         .heartbeat_interval = 0,
     };
-    std::unique_ptr<loom_serve_image_service_t,
-                    decltype(&loom_serve_image_service_free)>
-        service(nullptr, loom_serve_image_service_free);
     loom_serve_service_t interface = {};
+    loom_serve_execution_permit_t peer = {};
     auto* notification = loom_serve_http_server_notification(server_);
+    auto advance_until = [&](auto ready, loom_serve_service_flags_t flags = 0) {
+      while (!ready()) {
+        const auto ticket = iree_notification_prepare_wait(notification);
+        bool progress = false;
+        IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
+        if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+          const loom_serve_resources_t resources = {.device_group = group_};
+          progress |= loom_serve_resources_schedule(&resources);
+        }
+        if (ready() || progress) {
+          iree_notification_cancel_wait(notification);
+        } else {
+          iree_notification_commit_wait(notification, ticket,
+                                        IREE_DURATION_ZERO,
+                                        IREE_TIME_INFINITE_FUTURE);
+        }
+      }
+    };
+    auto destroy = [&](loom_serve_image_service_t* service) {
+      loom_serve_execution_permit_deinitialize(&peer);
+      bool progress = false;
+      IREE_EXPECT_OK(interface.advance(
+          interface.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+      advance_until([&] { return !interface.is_pending(interface.self); },
+                    LOOM_SERVE_SERVICE_FLAG_STOPPING);
+      interface.set_observer(interface.self, {});
+      loom_serve_image_service_free(service);
+    };
+    std::unique_ptr<loom_serve_image_service_t, decltype(destroy)> service(
+        nullptr, destroy);
     auto create_service = [&] {
       loom_serve_image_service_t* value = nullptr;
       IREE_ASSERT_OK(loom_serve_image_service_allocate(
@@ -357,24 +386,14 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       IREE_ASSERT_OK(http_.TakeRequest(client, connection, &request));
       IREE_ASSERT_OK(interface.accept(interface.self, *connection, request, 0));
     };
-    auto advance_until = [&](auto ready, loom_serve_service_flags_t flags = 0) {
-      while (!ready()) {
-        const auto ticket = iree_notification_prepare_wait(notification);
-        bool progress = false;
-        IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
-        if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
-          const loom_serve_resources_t resources = {.device_group = group_};
-          progress |= loom_serve_resources_schedule(&resources);
-        }
-        if (ready() || progress) {
-          iree_notification_cancel_wait(notification);
-        } else {
-          iree_notification_commit_wait(notification, ticket,
-                                        IREE_DURATION_ZERO,
-                                        IREE_TIME_INFINITE_FUTURE);
-        }
-      }
-    };
+    if (before_preparation) {
+      loom_serve_execution_permit_initialize(
+          loom_serve_device_scheduler(device_),
+          LOOM_SERVE_EXECUTION_RESOURCE_HOST, &peer);
+      loom_serve_execution_permit_request(&peer,
+                                          LOOM_SERVE_EXECUTION_QOS_REALTIME);
+      ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer));
+    }
 
     std::array<int, 2> clients;
     std::array<loom_serve_http_connection_t*, 2> connections = {};
@@ -385,9 +404,15 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
     ASSERT_NO_FATAL_FAILURE(advance_until([&] {
       return std::string(interface.snapshot(interface.self).phase) ==
-             "generating";
+             (before_preparation ? "waiting_cpu" : "generating");
     }));
     EXPECT_EQ(interface.snapshot(interface.self).active_requests, 2u);
+    if (before_preparation) {
+      bool progress = false;
+      IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+      EXPECT_FALSE(progress);
+      EXPECT_EQ(interface.telemetry.counters->batches, 0u);
+    }
     if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
       for (size_t i = 0; i < clients.size(); ++i) {
         const linger reset = {1, 0};
@@ -409,10 +434,15 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     // neither path needs a PNG/base64 borrower for an absent consumer.
     ASSERT_NO_FATAL_FAILURE(advance_until(
         [&] { return interface.telemetry.counters->cancelled == 2; }, flags));
-    EXPECT_EQ(interface.telemetry.counters->batches, 1u);
+    EXPECT_EQ(interface.telemetry.counters->batches,
+              before_preparation ? 0u : 1u);
     EXPECT_STREQ(interface.snapshot(interface.self).phase, "idle");
     EXPECT_FALSE(interface.is_pending(interface.self));
     EXPECT_EQ(interface.telemetry.counters->cancelled, 2u);
+    if (before_preparation) {
+      EXPECT_EQ(peer.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+      loom_serve_execution_permit_complete(&peer);
+    }
     ASSERT_NO_FATAL_FAILURE(
         advance_until([&] { return !interface.is_pending(interface.self); }));
     if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
@@ -477,7 +507,9 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         }
       }
     };
+    loom_serve_execution_permit_t peer = {};
     auto destroy = [&](loom_serve_image_service_t* service) {
+      loom_serve_execution_permit_deinitialize(&peer);
       bool progress = false;
       IREE_EXPECT_OK(interface.advance(
           interface.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
@@ -530,11 +562,34 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     EXPECT_EQ(request.id, 1u);
     ASSERT_TRUE(interface.inspection.request_at(interface.self, 2, &request));
     EXPECT_EQ(request.id, 3u);
+    const bool pause_encoding =
+        reset_phase && std::string(reset_phase) == "waiting_cpu";
+    if (pause_encoding) {
+      // Let split models accept their last numerical part before voice
+      // becomes ready. The next fresh work is PNG/base64 encoding.
+      ASSERT_NO_FATAL_FAILURE(advance_until([&] {
+        return std::string(interface.snapshot(interface.self).phase) ==
+                   "generating" &&
+               interface.telemetry.counters->batches == (GetParam() ? 1u : 0u);
+      }));
+      loom_serve_execution_permit_initialize(
+          loom_serve_device_scheduler(device_),
+          LOOM_SERVE_EXECUTION_RESOURCE_HOST, &peer);
+      loom_serve_execution_permit_request(&peer,
+                                          LOOM_SERVE_EXECUTION_QOS_REALTIME);
+      EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer));
+    }
     if (reset_phase) {
       ASSERT_NO_FATAL_FAILURE(advance_until([&] {
         return std::string(interface.snapshot(interface.self).phase) ==
                reset_phase;
       }));
+      if (pause_encoding) {
+        ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer));
+        bool progress = false;
+        IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+        EXPECT_FALSE(progress);
+      }
       const linger reset = {1, 0};
       ASSERT_EQ(setsockopt(clients[0].get(), SOL_SOCKET, SO_LINGER, &reset,
                            sizeof(reset)),
@@ -547,6 +602,12 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
                 static_cast<loom_serve_http_connection_t*>(self));
           },
           connections[0], iree_infinite_timeout());
+    }
+    if (pause_encoding) {
+      bool progress = false;
+      IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+      EXPECT_STREQ(interface.snapshot(interface.self).phase, "waiting_cpu");
+      loom_serve_execution_permit_complete(&peer);
     }
     ASSERT_NO_FATAL_FAILURE(advance_until([&] {
       return interface.telemetry.counters->completed +
@@ -1496,6 +1557,10 @@ TEST_P(SourceImageServiceTest, CancelledDeviceImageSkipsEncoding) {
   CheckAbandonedImage(0);
 }
 
+TEST_P(SourceImageServiceTest, UnacceptedPreparationCancelsUnderVoice) {
+  CheckAbandonedImage(0, true);
+}
+
 TEST_P(SourceImageServiceTest, CompatibleCohortPreservesHttpOutputs) {
   CheckHttpCohort(nullptr);
 }
@@ -1507,6 +1572,10 @@ TEST_P(SourceImageServiceTest, CohortPeerResetPreservesSurvivingHttpOutput) {
 TEST_P(SourceImageServiceTest,
        CohortPeerResetDuringEncodingPreservesNextOutput) {
   CheckHttpCohort("encoding");
+}
+
+TEST_P(SourceImageServiceTest, VoiceDefersEncodingWithoutLosingSurvivingImage) {
+  CheckHttpCohort("waiting_cpu");
 }
 
 TEST_P(SourceImageServiceTest, StoppingDeviceImageSkipsEncoding) {

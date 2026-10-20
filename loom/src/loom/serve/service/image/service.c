@@ -49,6 +49,7 @@ typedef struct loom_serve_image_job_t {
 
 typedef enum loom_serve_image_phase_e {
   IMAGE_PHASE_IDLE = 0,
+  IMAGE_PHASE_WAITING_CPU,
   IMAGE_PHASE_PREPARING,
   IMAGE_PHASE_BATCHING,
   IMAGE_PHASE_SPECIALIZING,
@@ -59,8 +60,8 @@ typedef enum loom_serve_image_phase_e {
 } loom_serve_image_phase_t;
 
 static const char* const image_phases[] = {
-    "idle",    "preparing", "batching",   "specializing",
-    "waiting", "ready",     "generating", "encoding"};
+    "idle",    "waiting_cpu", "preparing",  "batching", "specializing",
+    "waiting", "ready",       "generating", "encoding"};
 
 enum { IMAGE_EVENT_CPU = 1u << 0, IMAGE_EVENT_DEVICE = 1u << 1 };
 
@@ -103,6 +104,8 @@ struct loom_serve_image_service_t {
   } events;
   // Exclusive finite CPU job, reused only after the process release callback.
   struct {
+    // Host admission retained through the finite task's release publication.
+    loom_serve_execution_permit_t permit;
     // Source preparation or image encoding, never device waiting.
     iree_task_process_t process;
     // Immutable operation selector while the CPU process is live.
@@ -434,18 +437,6 @@ static void loom_serve_image_cpu_released(iree_task_process_t* process) {
   iree_slim_mutex_unlock(&service->events.mutex);
 }
 
-static void loom_serve_image_schedule_cpu(loom_serve_image_service_t* service,
-                                          loom_serve_image_phase_t phase) {
-  service->phase = phase;
-  service->cpu.phase = phase;
-  iree_task_process_initialize(loom_serve_image_cpu_run, 0, 1,
-                               &service->cpu.process);
-  service->cpu.process.user_data = service;
-  service->cpu.process.completion_fn = loom_serve_image_cpu_completed;
-  service->cpu.process.release_fn = loom_serve_image_cpu_released;
-  iree_task_executor_schedule_process(service->executor, &service->cpu.process);
-}
-
 static void loom_serve_image_device_completed(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
@@ -545,6 +536,7 @@ static void loom_serve_image_job_finish(
 
 static void loom_serve_image_finish(loom_serve_image_service_t* service,
                                     loom_serve_telemetry_outcome_t outcome) {
+  loom_serve_execution_permit_cancel(&service->cpu.permit);
   for (iree_host_size_t i = service->cohort.next; i < service->cohort.count;
        ++i) {
     loom_serve_image_job_finish(service, service->cohort.jobs[i], outcome);
@@ -552,6 +544,55 @@ static void loom_serve_image_finish(loom_serve_image_service_t* service,
   service->cohort.count = 0;
   service->cohort.next = 0;
   service->phase = IMAGE_PHASE_IDLE;
+}
+
+static bool loom_serve_image_submit_cpu(loom_serve_image_service_t* service) {
+  if (service->phase != IMAGE_PHASE_WAITING_CPU) {
+    return false;
+  }
+  if (service->stopping || !loom_serve_image_has_peer(service)) {
+    // Source capture has not started, or native output has already retired.
+    // Neither case owes a CPU result when every consumer has left.
+    loom_serve_image_finish(service, service->telemetry.failure_code
+                                         ? LOOM_SERVE_TELEMETRY_FAILED
+                                         : LOOM_SERVE_TELEMETRY_CANCELLED);
+    return true;
+  }
+  if (service->cpu.permit.phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE) {
+    loom_serve_execution_permit_request(&service->cpu.permit,
+                                        LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+  }
+  if (!loom_serve_execution_permit_try_acquire(&service->cpu.permit)) {
+    return false;
+  }
+  if (service->cpu.phase == IMAGE_PHASE_ENCODING) {
+    // The retained RGB cohort is immutable until its last encoder retires.
+    // Skipping absent consumers preserves the original output offsets.
+    while (!service->cohort.jobs[service->cohort.next]->connection) {
+      loom_serve_image_job_finish(service,
+                                  service->cohort.jobs[service->cohort.next++],
+                                  LOOM_SERVE_TELEMETRY_CANCELLED);
+    }
+    const loom_serve_image_job_t* job =
+        service->cohort.jobs[service->cohort.next];
+    service->cpu.rgb = iree_make_const_byte_span(
+        service->cohort.rgb.data + job->output_offset, job->output_length);
+  }
+  service->phase = service->cpu.phase;
+  iree_task_process_initialize(loom_serve_image_cpu_run, 0, 1,
+                               &service->cpu.process);
+  service->cpu.process.user_data = service;
+  service->cpu.process.completion_fn = loom_serve_image_cpu_completed;
+  service->cpu.process.release_fn = loom_serve_image_cpu_released;
+  iree_task_executor_schedule_process(service->executor, &service->cpu.process);
+  return true;
+}
+
+static void loom_serve_image_schedule_cpu(loom_serve_image_service_t* service,
+                                          loom_serve_image_phase_t phase) {
+  service->phase = IMAGE_PHASE_WAITING_CPU;
+  service->cpu.phase = phase;
+  loom_serve_image_submit_cpu(service);
 }
 
 static void loom_serve_image_reject_cohort(loom_serve_image_service_t* service,
@@ -638,26 +679,6 @@ static void loom_serve_image_select(loom_serve_image_service_t* service) {
   loom_serve_image_schedule_cpu(service, IMAGE_PHASE_BATCHING);
 }
 
-// Device work has retired, but its complete RGB result remains borrowed until
-// the last surviving encoder releases it. Only one PNG/base64 buffer is live.
-static void loom_serve_image_encode_next(loom_serve_image_service_t* service) {
-  while (service->cohort.next < service->cohort.count &&
-         !service->cohort.jobs[service->cohort.next]->connection) {
-    loom_serve_image_job_finish(service,
-                                service->cohort.jobs[service->cohort.next++],
-                                LOOM_SERVE_TELEMETRY_COMPLETED);
-  }
-  if (service->cohort.next == service->cohort.count) {
-    loom_serve_image_finish(service, LOOM_SERVE_TELEMETRY_COMPLETED);
-  } else {
-    const loom_serve_image_job_t* job =
-        service->cohort.jobs[service->cohort.next];
-    service->cpu.rgb = iree_make_const_byte_span(
-        service->cohort.rgb.data + job->output_offset, job->output_length);
-    loom_serve_image_schedule_cpu(service, IMAGE_PHASE_ENCODING);
-  }
-}
-
 static void loom_serve_image_prepared(loom_serve_image_service_t* service,
                                       loom_serve_service_flags_t flags,
                                       bool* progress) {
@@ -728,6 +749,7 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
     }
   });
   if (iree_any_bit_set(ready, IMAGE_EVENT_CPU)) {
+    loom_serve_execution_permit_complete(&service->cpu.permit);
     if (service->phase == IMAGE_PHASE_PREPARING ||
         service->phase == IMAGE_PHASE_BATCHING) {
       service->telemetry.totals.work.prepare_ns += service->cpu.elapsed_ns;
@@ -803,7 +825,7 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
           (uint64_t)job->request.width * job->request.height;
       loom_serve_image_event(service, &LOOM_SERVE_IMAGE_GENERATED, job->id);
     }
-    loom_serve_image_encode_next(service);
+    loom_serve_image_schedule_cpu(service, IMAGE_PHASE_ENCODING);
   } else if (service->phase == IMAGE_PHASE_PREPARING) {
     loom_serve_image_preparation_complete(service);
   } else if (service->phase == IMAGE_PHASE_BATCHING) {
@@ -826,7 +848,7 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
     loom_serve_image_job_finish(service,
                                 service->cohort.jobs[service->cohort.next++],
                                 LOOM_SERVE_TELEMETRY_COMPLETED);
-    loom_serve_image_encode_next(service);
+    loom_serve_image_schedule_cpu(service, IMAGE_PHASE_ENCODING);
   }
 }
 
@@ -1022,7 +1044,8 @@ static void loom_serve_image_set_observer(void* self,
 
 static bool loom_serve_image_is_active(void* self) {
   const loom_serve_image_service_t* service = self;
-  return service->phase == IMAGE_PHASE_PREPARING ||
+  return service->phase == IMAGE_PHASE_WAITING_CPU ||
+         service->phase == IMAGE_PHASE_PREPARING ||
          service->phase == IMAGE_PHASE_BATCHING ||
          service->phase == IMAGE_PHASE_SPECIALIZING ||
          service->phase == IMAGE_PHASE_READY ||
@@ -1068,6 +1091,7 @@ static iree_status_t loom_serve_image_advance(void* self,
     loom_serve_image_stop(service);
     *out_progress = true;
   }
+  *out_progress |= loom_serve_image_submit_cpu(service);
   if (service->phase == IMAGE_PHASE_SPECIALIZING) {
     const bool cancel =
         service->stopping || !loom_serve_image_has_peer(service);
@@ -1184,6 +1208,7 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
     return;
   }
   IREE_ASSERT(!loom_serve_image_is_pending(service));
+  loom_serve_execution_permit_deinitialize(&service->cpu.permit);
   const iree_allocator_t host_allocator = service->host_allocator;
   loom_serve_execution_permit_cancel(service->generator.permit);
   if (!service->stopping) {
@@ -1239,6 +1264,9 @@ iree_status_t loom_serve_image_service_allocate(
       iree_alignof(loom_serve_image_service_t), 0, (void**)&service));
   service->host_allocator = host_allocator;
   service->generator = generator;
+  loom_serve_execution_permit_initialize(
+      generator.permit ? generator.permit->scheduler : NULL,
+      LOOM_SERVE_EXECUTION_RESOURCE_HOST, &service->cpu.permit);
   service->options = *options;
   service->capacity = options->pending_capacity + 1;
   service->telemetry.stream = stream;
