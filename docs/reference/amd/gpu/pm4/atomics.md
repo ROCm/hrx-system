@@ -123,9 +123,11 @@ other operations; their presence is not a complete command-processor caller
 or mapping contract.
 
 SWAP still issues a read-modify-write transaction. Support for an ordinary
-aligned store does not establish that stronger route. A confirmed
-[`RELEASE_MEM`](release.md) immediate update supplies a write without an RMW;
-its target mapping separately determines atomic width and observer reach.
+aligned store does not establish that stronger route. PAL's CP-stage immediate
+write uses confirmed [`COPY_DATA`](copy.md#execution-and-ordering); a
+[`RELEASE_MEM`](release.md) update instead runs at the selected pipeline stage
+and does not stop subsequent CP commands. Both supply writes without RMW;
+their target mapping separately determines atomic width and observer reach.
 WDDM makes this distinction explicit for CPU-visible fence updates:
 `DXGK_VIDSCHCAPS::No64BitAtomics` distinguishes 32-bit updates from atomic
 64-bit updates to coherent memory. The adapter's

@@ -250,22 +250,21 @@ TEST(Pm4EncodingTest, OrderedDataAcquirePreservesTargetCachePolicy) {
   }
 }
 
-TEST(Pm4EncodingTest, ReleaseStoresPreserveWidthsAndOperands) {
+TEST(Pm4EncodingTest, ConfirmedStoresPreserveWidthsAndOperands) {
   for (const auto target :
        {std::array<uint32_t, 2>{11, 0}, {11, 5}, {11, 7}, {12, 0}, {12, 5}}) {
     SCOPED_TRACE(::testing::Message() << target[0] << '.' << target[1]);
-    std::array<uint32_t, 18> words;
+    std::array<uint32_t, 14> words;
     words.fill(0x24681357);
     Pm4CommandWriter commands(words.data() + 1, Profile(target[0], target[1]));
-    commands.Release32(UINT64_C(0x000012345678903c), 0xfedcba98);
-    commands.Release64(UINT64_C(0x00003456789abff0),
-                       UINT64_C(0x13579bdf2468ace0));
-    // Both widths use ordinary RELEASE_MEM writes, without ATOMIC_MEM RMW,
-    // interrupt, cache action, or a reserved scope field.
-    const std::array<uint32_t, 16> expected = {
-        0xc0064900, 0x00000528, 0x23010000, 0x5678903c, 0x1234,     0xfedcba98,
-        0,          0,          0xc0064900, 0x00000528, 0x43010000, 0x789abff0,
-        0x3456,     0x2468ace0, 0x13579bdf, 0,
+    commands.Store32(UINT64_C(0x000012345678903c), 0xfedcba98);
+    commands.Store64(UINT64_C(0x00003456789abff0),
+                     UINT64_C(0x13579bdf2468ace0));
+    // Both widths use CP-ordered ordinary writes with confirmation, without
+    // ATOMIC_MEM RMW, pipeline-event deferral, or a reserved scope field.
+    const std::array<uint32_t, 12> expected = {
+        0xc0044000, 0x00100205, 0xfedcba98, 0,          0x5678903c, 0x1234,
+        0xc0044000, 0x00110205, 0x2468ace0, 0x13579bdf, 0x789abff0, 0x3456,
     };
     ASSERT_EQ(commands.word_count(), expected.size());
     ExpectWords(words.data() + 1, expected);

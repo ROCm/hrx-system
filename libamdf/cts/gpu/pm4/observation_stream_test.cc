@@ -473,8 +473,7 @@ TEST_P(Pm4ObservationStreamTest, DrainsMirroredRecordsBeforeQueueCompletion) {
     commands.CopyGpuClock64(target + offsetof(RecordHeader, end_ticks));
     commands.SystemBarrier();
     // Commit identifies a complete ordered prefix, never a reserved header.
-    commands.Release32(control_->device_address + kPublishedOffset,
-                       ordinal + 1);
+    commands.Store32(control_->device_address + kPublishedOffset, ordinal + 1);
     // The atomic cell can be a GL2 client. Finish its host transition before
     // the next update to this shared committed-prefix cell.
     commands.AcquireFromSystem();
@@ -489,7 +488,7 @@ TEST_P(Pm4ObservationStreamTest, DrainsMirroredRecordsBeforeQueueCompletion) {
                  control_->device_address + kReadbackOffset + 64, 64);
   second.WaitDma();
   second.SystemBarrier();
-  second.Release32(control_->device_address + kDoneOffset, 1);
+  second.Store32(control_->device_address + kDoneOffset, 1);
   second.AcquireFromSystem();
   second.PadToEightWords();
   ASSERT_LT(second.word_count() * 4, kBlockBytes);

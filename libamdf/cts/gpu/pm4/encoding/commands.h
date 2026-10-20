@@ -89,7 +89,11 @@ class Pm4CommandWriter {
   // read-modify-write. The marker alone does not publish other addresses to
   // the host. Atomicity and reach require the target mapping's STORE contract.
   void Release32(uint64_t target_address, uint32_t value);
-  void Release64(uint64_t target_address, uint64_t value);
+  // Writes one naturally aligned value at the CP stage with confirmation.
+  // Atomicity and reach require the target mapping's STORE contract; shader
+  // completion and other payload visibility are separate operations.
+  void Store32(uint64_t target_address, uint32_t value);
+  void Store64(uint64_t target_address, uint64_t value);
   // Joins bottom-of-pipe through a private known-value fence and PAL's compute
   // equality wait, then writes back GL2. The caller owns the fence through a
   // subsequent completion; this fixed recipe performs no invalidation.

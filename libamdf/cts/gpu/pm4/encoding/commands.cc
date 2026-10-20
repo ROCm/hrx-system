@@ -219,13 +219,24 @@ void Pm4CommandWriter::ReleaseGpuClock64(uint64_t target_address) {
 }
 
 void Pm4CommandWriter::Release32(uint64_t target_address, uint32_t value) {
-  word_count_ += pm4::ReleaseImmediate(words_ + word_count_, target_address,
-                                       value, pm4::ReleaseDataWidth::k32Bit);
+  words_[word_count_++] = MakeHeader(0x49, 8);
+  words_[word_count_++] = 0x28 | (5 << 8);
+  words_[word_count_++] = (1 << 29) | (3 << 24) | (1 << 16);
+  words_[word_count_++] = static_cast<uint32_t>(target_address);
+  words_[word_count_++] = static_cast<uint32_t>(target_address >> 32);
+  words_[word_count_++] = value;
+  words_[word_count_++] = 0;
+  words_[word_count_++] = 0;
 }
 
-void Pm4CommandWriter::Release64(uint64_t target_address, uint64_t value) {
-  word_count_ += pm4::ReleaseImmediate(words_ + word_count_, target_address,
-                                       value, pm4::ReleaseDataWidth::k64Bit);
+void Pm4CommandWriter::Store32(uint64_t target_address, uint32_t value) {
+  word_count_ += pm4::StoreImmediate(words_ + word_count_, target_address,
+                                     value, pm4::CopyDataWidth::k32Bit);
+}
+
+void Pm4CommandWriter::Store64(uint64_t target_address, uint64_t value) {
+  word_count_ += pm4::StoreImmediate(words_ + word_count_, target_address,
+                                     value, pm4::CopyDataWidth::k64Bit);
 }
 
 void Pm4CommandWriter::WaitEndOfPipeAndWriteback(uint64_t fence_address,

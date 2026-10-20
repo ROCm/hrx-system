@@ -307,10 +307,10 @@ void Pm4WaitTest::RunHandoff(Producer producer_kind) {
     produce.SystemBarrier();
     if (producer_kind == Producer::kAtomicStore) {
       if (GetParam().byte_length == 4) {
-        produce.Release32(control->device_address,
-                          static_cast<uint32_t>(GetParam().final_value));
+        produce.Store32(control->device_address,
+                        static_cast<uint32_t>(GetParam().final_value));
       } else {
-        produce.Release64(control->device_address, GetParam().final_value);
+        produce.Store64(control->device_address, GetParam().final_value);
       }
     } else if (GetParam().byte_length == 4) {
       produce.CopyData32(source->device_address, control->device_address);

@@ -45,7 +45,7 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
     constexpr uint32_t kCompletionByteOffset = 128;
     constexpr uint32_t kEpochCount = 2;
     constexpr uint32_t kCellCount = 2;
-    constexpr uint32_t kWordsPerEpoch = 48;
+    constexpr uint32_t kWordsPerEpoch = 40;
     constexpr uint32_t kCommandWordCount = kEpochCount * kWordsPerEpoch;
     constexpr amdf_memory_access_t kReadWrite =
         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
@@ -243,10 +243,9 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
       for (size_t cell = 0; cell < kCellCount; ++cell) {
         const uint64_t address = target->device_address + kOffsets[cell];
         if constexpr (sizeof(T) == 4) {
-          commands.Release32(address,
-                             static_cast<uint32_t>(values[epoch][cell]));
+          commands.Store32(address, static_cast<uint32_t>(values[epoch][cell]));
         } else {
-          commands.Release64(address, values[epoch][cell]);
+          commands.Store64(address, values[epoch][cell]);
         }
       }
       commands.SystemBarrier();

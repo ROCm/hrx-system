@@ -10,19 +10,16 @@
 
 namespace pm4 {
 
-size_t ReleaseImmediate(uint32_t* words, uint64_t target_address,
-                        uint64_t value, ReleaseDataWidth width) {
-  words[0] = (3u << 30) | (6u << 16) | (0x49u << 8);
-  // Bottom-of-pipe timestamp event, without a release GCR request.
-  words[1] = 0x28u | (5u << 8);
-  // Immediate data, write confirmation without interrupt, TC/L2 destination.
-  words[2] = (static_cast<uint32_t>(width) << 29) | (3u << 24) | (1u << 16);
-  words[3] = static_cast<uint32_t>(target_address);
-  words[4] = static_cast<uint32_t>(target_address >> 32);
-  words[5] = static_cast<uint32_t>(value);
-  words[6] = static_cast<uint32_t>(value >> 32);
-  words[7] = 0;
-  return 8;
+size_t StoreImmediate(uint32_t* words, uint64_t target_address, uint64_t value,
+                      CopyDataWidth width) {
+  words[0] = (3u << 30) | (4u << 16) | (0x40u << 8);
+  // Immediate source, TC/L2 destination, width and CP write confirmation.
+  words[1] = 5u | (2u << 8) | (static_cast<uint32_t>(width) << 16) | (1u << 20);
+  words[2] = static_cast<uint32_t>(value);
+  words[3] = static_cast<uint32_t>(value >> 32);
+  words[4] = static_cast<uint32_t>(target_address);
+  words[5] = static_cast<uint32_t>(target_address >> 32);
+  return 6;
 }
 
 size_t CopyData(uint32_t* words, uint64_t source_address,
