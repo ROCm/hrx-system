@@ -168,6 +168,7 @@ synthesize empty state instead of depending on cleared recurrent storage.
 | `kernels/quantized.loom`, `kernels/q8.loom`, `kernels/experts.loom` | Q4_K, Q5_K, Q5_1, and Q8_0 expert projections in the checkpoint's actual encodings. |
 | `kernels/q8_matrix.loom`, `kernels/hyperconnection_matrix.loom` | Shared original-Q8 matrix contraction and fused hyperconnection publication. |
 | `kernels/expert_buckets.loom` | Device-owned expert grouping and finite workers that reuse weights across routed rows. |
+| `kernels/expert_matrix.loom`, `kernels/expert_block.loom` | Matrix schedules and register-resident packed blocks for routed gate/up and down projections. |
 
 The text model uses 36 GDN layers and 12 sparse-attention layers, with 512
 experts and ten selected experts plus a shared expert in each layer. Dense
@@ -264,12 +265,21 @@ decoding; compact records limit padded matrix work when expert populations
 are smaller. These choices specialize into the command and kernel programs,
 without a host routing decision or a distinct prefill execution path.
 
-The matrix body accepts tile and wave geometry as SSA values. It stages exact
-integer weight codes and BF16 activations in padded LDS panels, contracts them
-with BF16 matrix instructions, and applies the original scales and affine
-corrections in F32. Fused gate/up retains F32 values through SiLU and the
-product before publishing BF16. The same body covers Q4_K, Q5_K, and Q8_0
-gate/up, plus Q5_1 and Q8_0 down, without an expanded parameter bank.
+The 128-row gate/up schedule assigns eight wave32 subgroups to 64 channels
+per branch. Each lane retains packed weight codes and their original headers
+in registers: one K256 block for Q4_K/Q5_K, or four K32 blocks for Q8_0.
+Gate and up share a padded K64 activation window in LDS. Masked loads fetch
+the following window while the current one computes, suppressing inactive
+rows and the final refill. Weight blocks remain resident across those windows,
+so each K32 contraction reuses their headers and code packets.
+
+Integer weight codes are represented exactly in BF16 and consumed by matrix
+instructions. Original scales and affine corrections are applied in F32 after
+each K32 partial product; fused gate/up retains F32 values through SiLU and
+the product before publishing BF16. The smaller routed, shared, and down
+matrix schedules stage both codes and activations in padded LDS panels, with
+tile and wave geometry passed as SSA values. All schedules consume original
+Q4_K, Q5_K, Q5_1, or Q8_0 storage without an expanded parameter bank.
 
 The producer's dispatch dependency publishes the complete table to consumers.
 The count word is an extent, and the command owns record storage until both

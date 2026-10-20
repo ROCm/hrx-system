@@ -13,6 +13,7 @@
       "kernels/embedding.loom",
       "kernels/experts.loom",
       "kernels/expert_buckets.loom",
+      "kernels/expert_block.loom",
       "kernels/expert_matrix.loom",
       "kernels/gdn.loom",
       "kernels/hyperconnection.loom",
