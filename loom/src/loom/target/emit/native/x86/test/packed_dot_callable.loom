@@ -39,3 +39,14 @@ low.func.def public target<x86.packed_dot.core> abi(object_function) abi_layout(
   %r5 = avx_vnni_int8.vpdpbuuds.ymm %r4, %acc, %rhs
   return %r5
 }
+
+// Exercise both byte and word classic VNNI operations through the VEX object
+// writer.
+low.func.def public target<x86.packed_dot.core> abi(object_function) abi_layout({signature = (vector<8xi32>, vector<32xi8>, vector<32xi8>, vector<16xi16>, vector<16xi16>) -> (vector<8xi32>)}) @avx_vnni_ymm(%acc: reg<x86.ymm>, %byte_lhs: reg<x86.ymm>, %byte_rhs: reg<x86.ymm>, %word_lhs: reg<x86.ymm>, %word_rhs: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %dot_acc = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
+  %r0 = avx_vnni.vpdpbusd.ymm %dot_acc, %byte_lhs, %byte_rhs
+  %r1 = avx_vnni.vpdpbusds.ymm %r0, %byte_lhs, %byte_rhs
+  %r2 = avx_vnni.vpdpwssd.ymm %r1, %word_lhs, %word_rhs
+  %r3 = avx_vnni.vpdpwssds.ymm %r2, %word_lhs, %word_rhs
+  return %r3
+}

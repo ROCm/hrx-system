@@ -8,6 +8,8 @@ from loom.target.arch.x86.descriptors import (
     X86_AVX2_DESCRIPTOR_SET,
     X86_AVX512_CORE_DESCRIPTOR_SET,
     X86_AVX512_FP16_DESCRIPTOR_SET,
+    X86_AVX512_VNNI_DESCRIPTOR_SET,
+    X86_AVX_VNNI_DESCRIPTOR_SET,
     X86_AVX_VNNI_INT8_DESCRIPTOR_SET,
 )
 from loom.target.arch.x86.vector_encoding import (
@@ -41,7 +43,7 @@ from loom.target.arch.x86.vector_families import (
     X86_VECTOR_INTEGER_NARROWING_FAMILIES,
     X86_VECTOR_INTEGER_WIDENING_FAMILIES,
 )
-from loom.target.low_descriptors import Constraint, ConstraintKind
+from loom.target.low_descriptors import Constraint, ConstraintKind, DescriptorSet
 
 
 def test_extended_evex_opcode_maps_preserve_legacy_encoding_ids() -> None:
@@ -324,28 +326,55 @@ def test_integer_narrowing_rows_cover_every_pair_and_register_width() -> None:
         )
 
 
+def _assert_direct_dot_encodings(
+    descriptor_set: DescriptorSet,
+    *,
+    prefix_bits: int,
+    opcode_bits_by_mnemonic: dict[str, int],
+) -> None:
+    vector_length_bits = {"xmm": 0x0000, "ymm": 0x4000, "zmm": 0x8000}
+    for descriptor in descriptor_set.descriptors:
+        vector_class = descriptor.key.rsplit(".", maxsplit=1)[1]
+        assert descriptor.encoding_format_id == 0x8320
+        assert descriptor.encoding_id == (
+            prefix_bits
+            | opcode_bits_by_mnemonic[descriptor.mnemonic]
+            | vector_length_bits[vector_class]
+        )
+
+
+def test_classic_vnni_rows_have_complete_direct_encodings() -> None:
+    opcode_bits = {
+        "vpdpbusd": 0x50,
+        "vpdpbusds": 0x51,
+        "vpdpwssd": 0x52,
+        "vpdpwssds": 0x53,
+    }
+    _assert_direct_dot_encodings(
+        X86_AVX_VNNI_DESCRIPTOR_SET,
+        prefix_bits=0x0600,
+        opcode_bits_by_mnemonic=opcode_bits,
+    )
+    _assert_direct_dot_encodings(
+        X86_AVX512_VNNI_DESCRIPTOR_SET,
+        prefix_bits=0x2600,
+        opcode_bits_by_mnemonic=opcode_bits,
+    )
+
+
 def test_avx_vnni_int8_rows_have_complete_direct_encodings() -> None:
-    descriptors = {
-        descriptor.key: (descriptor.encoding_format_id, descriptor.encoding_id)
-        for descriptor in X86_AVX_VNNI_INT8_DESCRIPTOR_SET.descriptors
-    }
-    expected_encoding_ids = {
-        "x86.avx_vnni_int8.vpdpbssd.xmm": 0x0E50,
-        "x86.avx_vnni_int8.vpdpbssd.ymm": 0x4E50,
-        "x86.avx_vnni_int8.vpdpbssds.xmm": 0x0E51,
-        "x86.avx_vnni_int8.vpdpbssds.ymm": 0x4E51,
-        "x86.avx_vnni_int8.vpdpbsud.xmm": 0x0A50,
-        "x86.avx_vnni_int8.vpdpbsud.ymm": 0x4A50,
-        "x86.avx_vnni_int8.vpdpbsuds.xmm": 0x0A51,
-        "x86.avx_vnni_int8.vpdpbsuds.ymm": 0x4A51,
-        "x86.avx_vnni_int8.vpdpbuud.xmm": 0x0250,
-        "x86.avx_vnni_int8.vpdpbuud.ymm": 0x4250,
-        "x86.avx_vnni_int8.vpdpbuuds.xmm": 0x0251,
-        "x86.avx_vnni_int8.vpdpbuuds.ymm": 0x4251,
-    }
-    assert descriptors == {
-        key: (0x8320, encoding_id) for key, encoding_id in expected_encoding_ids.items()
-    }
+    _assert_direct_dot_encodings(
+        X86_AVX_VNNI_INT8_DESCRIPTOR_SET,
+        prefix_bits=0x0200,
+        opcode_bits_by_mnemonic={
+            "vpdpbssd": 0x0C50,
+            "vpdpbssds": 0x0C51,
+            "vpdpbsud": 0x0850,
+            "vpdpbsuds": 0x0851,
+            "vpdpbuud": 0x0050,
+            "vpdpbuuds": 0x0051,
+        },
+    )
 
 
 def test_avx512_direct_integer_matrix_matches_core_isa_families() -> None:

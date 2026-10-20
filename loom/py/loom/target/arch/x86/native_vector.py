@@ -1237,6 +1237,22 @@ VPDPBSUDS = _instruction(
     _IMMEDIATES_0,
     _encoding(_VEX, _MAP_2, 2, 0, 0x51, (128, 256)),
 )
+VPDPBUSD = _instruction(
+    "vpdpbusd",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 1, 0, 0x50, (128, 256)),
+    _encoding(_EVEX, _MAP_2, 1, 0, 0x50, (128, 256, 512)),
+)
+VPDPBUSDS = _instruction(
+    "vpdpbusds",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 1, 0, 0x51, (128, 256)),
+    _encoding(_EVEX, _MAP_2, 1, 0, 0x51, (128, 256, 512)),
+)
 VPDPBUUD = _instruction(
     "vpdpbuud",
     _DESTRUCTIVE_NDS,
@@ -1250,6 +1266,22 @@ VPDPBUUDS = _instruction(
     _OPERANDS_17,
     _IMMEDIATES_0,
     _encoding(_VEX, _MAP_2, 0, 0, 0x51, (128, 256)),
+)
+VPDPWSSD = _instruction(
+    "vpdpwssd",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 1, 0, 0x52, (128, 256)),
+    _encoding(_EVEX, _MAP_2, 1, 0, 0x52, (128, 256, 512)),
+)
+VPDPWSSDS = _instruction(
+    "vpdpwssds",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 1, 0, 0x53, (128, 256)),
+    _encoding(_EVEX, _MAP_2, 1, 0, 0x53, (128, 256, 512)),
 )
 VPERMD = _instruction(
     "vpermd",
@@ -2280,6 +2312,7 @@ PACKED_INTEGER_WIDEN = (
     (VPMOVSXDQ, VPMOVZXDQ),
 )
 PACKED_INTEGER_NARROW = (VPMOVWB, VPMOVDB, VPMOVQB, VPMOVDW, VPMOVQW, VPMOVQD)
+VNNI = (VPDPBUSD, VPDPBUSDS, VPDPWSSD, VPDPWSSDS)
 AVX_VNNI_INT8 = (
     VPDPBSSD,
     VPDPBSSDS,

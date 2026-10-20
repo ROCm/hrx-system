@@ -31,6 +31,38 @@ code: c5 fc 51 c0 c5 fd 51 c0 c5 fc 52 c0 c3
 
 // ====
 
+// RUN: emit x86-native-bytes @avx_vnni_ymm
+x86.target<avx2> @target {features = [avxvnni]}
+
+low.func.def target<x86.avx2_features.core>(@target) @avx_vnni_ymm(%acc: reg<x86.ymm>, %byte_lhs: reg<x86.ymm>, %byte_rhs: reg<x86.ymm>, %word_lhs: reg<x86.ymm>, %word_rhs: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %r0 = avx_vnni.vpdpbusd.ymm %acc, %byte_lhs, %byte_rhs
+  %r1 = avx_vnni.vpdpbusds.ymm %r0, %byte_lhs, %byte_rhs
+  %r2 = avx_vnni.vpdpwssd.ymm %r1, %word_lhs, %word_rhs
+  %r3 = avx_vnni.vpdpwssds.ymm %r2, %word_lhs, %word_rhs
+  return %r3
+}
+
+// ----
+code: c4 e2 75 50 c2 c4 e2 75 51 c2 c4 e2 65 52 c4 c4 e2 65 53 c4 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @avx512_vnni_zmm
+x86.target<avx512> @target {features = [avx512vnni]}
+
+low.func.def target<x86.avx512_features.core>(@target) @avx512_vnni_zmm(%acc: reg<x86.zmm>, %byte_lhs: reg<x86.zmm>, %byte_rhs: reg<x86.zmm>, %word_lhs: reg<x86.zmm>, %word_rhs: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %r0 = avx512_vnni.vpdpbusd %acc, %byte_lhs, %byte_rhs
+  %r1 = avx512_vnni.vpdpbusds %r0, %byte_lhs, %byte_rhs
+  %r2 = avx512_vnni.vpdpwssd %r1, %word_lhs, %word_rhs
+  %r3 = avx512_vnni.vpdpwssds %r2, %word_lhs, %word_rhs
+  return %r3
+}
+
+// ----
+code: 62 f2 75 48 50 c2 62 f2 75 48 51 c2 62 f2 65 48 52 c4 62 f2 65 48 53 c4 c3
+
+// ====
+
 // RUN: emit x86-native-bytes @avx512_xmm
 x86.target<avx512> @target
 

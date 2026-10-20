@@ -64,13 +64,9 @@ _PACKED_DOT_VECTOR_WIDTH_TO_SCHEDULE = {
     256: _SCHEDULE_VECTOR_DOT_YMM,
     512: _SCHEDULE_VECTOR_DOT_ZMM,
 }
-_X86_VEX_PACKED_DOT_FAMILIES = frozenset(
-    (
-        FAMILY_AVX_VNNI,
-        FAMILY_AVX_VNNI_INT8,
-        FAMILY_AVX_VNNI_INT16,
-    )
-)
+_VNNI_INSTRUCTIONS = {
+    instruction.descriptor_mnemonic: instruction for instruction in native.VNNI
+}
 _AVX_VNNI_INT8_INSTRUCTIONS = {
     instruction.descriptor_mnemonic: instruction for instruction in native.AVX_VNNI_INT8
 }
@@ -163,7 +159,20 @@ def _packed_dot_target_descriptor(
         descriptor_data,
         qualify_asm_mnemonic=qualify_asm_mnemonic,
     )
-    if descriptor_data.family == FAMILY_AVX_VNNI_INT8:
+    if descriptor_data.family in (FAMILY_AVX512_VNNI, FAMILY_AVX_VNNI):
+        try:
+            instruction = _VNNI_INSTRUCTIONS[descriptor_data.mnemonic]
+        except KeyError as error:
+            raise ValueError(
+                f"{descriptor_data.key}: missing VNNI machine facts"
+            ) from error
+        prefix = (
+            VectorEncodingPrefix.EVEX
+            if descriptor_data.family == FAMILY_AVX512_VNNI
+            else VectorEncodingPrefix.VEX
+        )
+        descriptor = instruction.bind(descriptor, prefix)
+    elif descriptor_data.family == FAMILY_AVX_VNNI_INT8:
         try:
             instruction = _AVX_VNNI_INT8_INSTRUCTIONS[descriptor_data.mnemonic]
         except KeyError as error:
@@ -171,7 +180,7 @@ def _packed_dot_target_descriptor(
                 f"{descriptor_data.key}: missing AVX-VNNI-INT8 machine facts"
             ) from error
         descriptor = instruction.bind(descriptor, VectorEncodingPrefix.VEX)
-    elif descriptor_data.family in _X86_VEX_PACKED_DOT_FAMILIES:
+    elif descriptor_data.family == FAMILY_AVX_VNNI_INT16:
         descriptor = restrict_vex_registers(descriptor)
     return descriptor
 
