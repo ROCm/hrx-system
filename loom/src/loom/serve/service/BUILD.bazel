@@ -92,6 +92,7 @@ loom_cc_library(
     hdrs = ["execution_reconfiguration.h"],
     deps = [
         ":reconfiguration",
+        "//loom/src/loom/serve/runtime/execution:scheduler",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/runtime/program:compilation",
         "//loom/src/loom/serve/runtime/program:sources",

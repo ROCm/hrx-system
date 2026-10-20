@@ -464,7 +464,7 @@ class GenerationSelectionTest : public DeviceResultTest,
     DeviceResultTest::TearDown();
   }
 
-  void CompileReplacement() {
+  void CaptureReplacement(loom_serve_package_t** out_package) {
     const std::string stage = GetParam()
                                   ? (SourceServiceDirectStageSource()[0]
                                          ? SourceServiceDirectStageSource()
@@ -488,7 +488,11 @@ class GenerationSelectionTest : public DeviceResultTest,
          iree_make_const_byte_span(contents[1].data(), contents[1].size())}};
     IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model/model.json"),
                                              IREE_ARRAYSIZE(files), files,
-                                             host_allocator_, &package_));
+                                             host_allocator_, out_package));
+  }
+
+  void CompileReplacement() {
+    ASSERT_NO_FATAL_FAILURE(CaptureReplacement(&package_));
     const iree_string_view_t providers[] = {IREE_SV("config.loom"),
                                             IREE_SV("stage.loom")};
     const loom_serve_sources_t sources = {
@@ -600,6 +604,9 @@ class RequestChoiceTest : public GenerationSelectionTest {
       loom_serve_finite_model_release_batch(model_);
       ReleaseInputs();
     }
+    while (service_ && interface_.is_pending(interface_.self)) {
+      AdvanceService(LOOM_SERVE_SERVICE_FLAG_STOPPING);
+    }
     loom_serve_package_release(package_);
     GenerationSelectionTest::TearDown();
   }
@@ -706,7 +713,7 @@ class RequestChoiceTest : public GenerationSelectionTest {
     update_ = loom_serve_finite_model_execution_update(model_);
     loom_serve_package_release(std::exchange(package_, nullptr));
     ASSERT_NO_FATAL_FAILURE(CreateService(0));
-    loom_serve_finite_model_set_observer(model_, {Wake, this});
+    interface_.set_observer(interface_.self, {Wake, this});
   }
 
   static iree_status_t Allocate(void* self, iree_allocator_command_t command,
@@ -803,6 +810,32 @@ class RequestChoiceTest : public GenerationSelectionTest {
                                            &peer_);
     loom_serve_execution_permit_request(&peer_,
                                         LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  }
+
+  void StageReplacement(loom_serve_variant_id_t* out_id) {
+    ASSERT_NO_FATAL_FAILURE(CaptureReplacement(&package_));
+    const iree_string_view_t providers[] = {IREE_SV("config.loom"),
+                                            IREE_SV("stage.loom")};
+    const loom_serve_sources_t sources = {
+        .count = IREE_ARRAYSIZE(providers),
+        .values = providers,
+        .package = package_,
+    };
+    const auto& configuration = interface_.reconfiguration;
+    IREE_ASSERT_OK(configuration.stage_native(
+        configuration.self, configuration.selected(configuration.self),
+        &sources, out_id));
+    loom_serve_package_release(std::exchange(package_, nullptr));
+  }
+
+  void AdvanceService(loom_serve_service_flags_t flags = 0) {
+    const auto previous = wakes_.load();
+    bool progress = false;
+    IREE_ASSERT_OK(interface_.advance(interface_.self, flags, &progress));
+    if (!progress && interface_.is_pending(interface_.self)) {
+      std::unique_lock<std::mutex> lock(mutex_);
+      condition_.wait(lock, [&] { return wakes_.load() != previous; });
+    }
   }
 
   // Outer test thread drives serialized preparation/admission, not compilation.
@@ -932,6 +965,91 @@ TEST_P(RequestChoiceTest, UnstartedCompilationCanCancelUnderVoice) {
   loom_serve_finite_model_release_batch(model_);
   ReleaseInputs();
   batch_active_ = false;
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(
+      RunChoice(R"({"model":"fixture","input":"a"})", false, {1, 1, 1, 1}));
+}
+
+TEST_P(RequestChoiceTest, VoiceDefersProviderReplacementUntilHostAdmission) {
+  RequestVoice();
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  const auto allocations = worker_allocations_.load();
+  loom_serve_variant_id_t candidate = 0;
+  ASSERT_NO_FATAL_FAILURE(StageReplacement(&candidate));
+  bool progress = false;
+  IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+  EXPECT_EQ(worker_allocations_.load(), allocations);
+  const auto& configuration = interface_.reconfiguration;
+  loom_serve_variant_snapshot_t snapshot = {};
+  ASSERT_TRUE(loom_serve_variant_pool_snapshot(configuration.pool, candidate,
+                                               &snapshot));
+  EXPECT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_COMPILING);
+  loom_serve_execution_permit_complete(&peer_);
+  while (snapshot.phase == LOOM_SERVE_VARIANT_COMPILING) {
+    AdvanceService();
+    ASSERT_TRUE(loom_serve_variant_pool_snapshot(configuration.pool, candidate,
+                                                 &snapshot));
+  }
+  ASSERT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_READY)
+      << std::string(snapshot.message.data ? snapshot.message.data : "",
+                     snapshot.message.size);
+  bool selected = false;
+  IREE_ASSERT_OK(configuration.select(
+      configuration.self, candidate, configuration.selected(configuration.self),
+      [](void* self, iree_status_t status, loom_serve_variant_id_t id) {
+        IREE_EXPECT_OK(status);
+        *static_cast<bool*>(self) = true;
+      },
+      &selected));
+  while (!selected) {
+    AdvanceService();
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      RunChoice(R"({"model":"fixture","input":"a"})", false, {2, 1, 2, 1}));
+}
+
+TEST_P(RequestChoiceTest, StoppingWithdrawsUnstartedProviderCompilation) {
+  RequestVoice();
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  const auto allocations = worker_allocations_.load();
+  loom_serve_variant_id_t candidate = 0;
+  ASSERT_NO_FATAL_FAILURE(StageReplacement(&candidate));
+  while (interface_.is_pending(interface_.self)) {
+    AdvanceService(LOOM_SERVE_SERVICE_FLAG_STOPPING);
+  }
+  EXPECT_EQ(worker_allocations_.load(), allocations);
+  loom_serve_variant_snapshot_t snapshot = {};
+  ASSERT_TRUE(loom_serve_variant_pool_snapshot(interface_.reconfiguration.pool,
+                                               candidate, &snapshot));
+  EXPECT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_FAILED);
+  EXPECT_EQ(snapshot.code, IREE_STATUS_CANCELLED);
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(
+      RunChoice(R"({"model":"fixture","input":"a"})", false, {1, 1, 1, 1}));
+}
+
+TEST_P(RequestChoiceTest, StoppingRetainsAcceptedProviderCompilerUntilRelease) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    holding_ = true;
+  }
+  loom_serve_variant_id_t candidate = 0;
+  ASSERT_NO_FATAL_FAILURE(StageReplacement(&candidate));
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return entered_; });
+  }
+  RequestVoice();
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  bool progress = false;
+  IREE_ASSERT_OK(interface_.advance(
+      interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  ReleaseCompiler();
+  while (interface_.is_pending(interface_.self)) {
+    AdvanceService(LOOM_SERVE_SERVICE_FLAG_STOPPING);
+  }
+  EXPECT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
   loom_serve_execution_permit_complete(&peer_);
   ASSERT_NO_FATAL_FAILURE(
       RunChoice(R"({"model":"fixture","input":"a"})", false, {1, 1, 1, 1}));

@@ -1073,8 +1073,9 @@ iree_status_t loom_serve_finite_service_allocate(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_execution_reconfiguration_allocate(
-        loom_serve_finite_model_execution_update(model), variant_capacity,
-        host_allocator, &service->reconfiguration);
+        loom_serve_finite_model_execution_update(model),
+        service->permit->scheduler, variant_capacity, host_allocator,
+        &service->reconfiguration);
   }
   if (iree_status_is_ok(status) && !stream) {
     status = loom_serve_telemetry_stream_allocate(128, host_allocator,

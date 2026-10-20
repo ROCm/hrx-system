@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_EXECUTION_RECONFIGURATION_H_
 #define LOOM_SERVE_SERVICE_EXECUTION_RECONFIGURATION_H_
 
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/service/reconfiguration.h"
 
 #ifdef __cplusplus
@@ -37,9 +38,11 @@ typedef struct loom_serve_execution_reconfiguration_t
 
 // Bounded choices and preferred-choice bookkeeping. The service determines
 // quiescence; the pool itself imposes no active/default choice on consumers.
+// Compilation uses background host admission through actual producer release.
 // Zero capacity or an absent update capability returns NULL.
 iree_status_t loom_serve_execution_reconfiguration_allocate(
-    loom_serve_execution_update_t update, iree_host_size_t capacity,
+    loom_serve_execution_update_t update,
+    loom_serve_execution_scheduler_t* scheduler, iree_host_size_t capacity,
     iree_allocator_t host_allocator,
     loom_serve_execution_reconfiguration_t** out_reconfiguration);
 
@@ -54,8 +57,9 @@ bool loom_serve_execution_reconfiguration_pending(
     const loom_serve_execution_reconfiguration_t* reconfiguration);
 
 // Collects compiler results independently of inference. Selects only when the
-// service declares quiescence. Stopping cancels selection and joins producers
-// without binding anything. Failures stay with management, not inference.
+// service declares quiescence. Stopping cancels unstarted compilation and
+// selection, and joins accepted producers without binding anything. Failures
+// stay with management, not inference.
 bool loom_serve_execution_reconfiguration_advance(
     loom_serve_execution_reconfiguration_t* reconfiguration, bool quiescent,
     bool stopping);

@@ -1814,7 +1814,8 @@ iree_status_t loom_serve_text_service_allocate(
   if (iree_status_is_ok(status)) {
     status = loom_serve_execution_reconfiguration_allocate(
         loom_serve_text_model_execution_update(model),
-        options->variant_capacity, host_allocator, &service->reconfiguration);
+        service->permit->scheduler, options->variant_capacity, host_allocator,
+        &service->reconfiguration);
   }
   if (iree_status_is_ok(status)) {
     loom_serve_execution_source_initialize(service->permit->scheduler,

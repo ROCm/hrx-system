@@ -116,6 +116,7 @@ loom_cc_library(
   DEPS
     ::reconfiguration
     iree::base
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host::wake
     loom::serve::runtime::program::compilation
     loom::serve::runtime::program::sources

@@ -1296,8 +1296,8 @@ iree_status_t loom_serve_image_service_allocate(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_execution_reconfiguration_allocate(
-        generator.execution_update, options->variant_capacity, host_allocator,
-        &service->reconfiguration);
+        generator.execution_update, service->cpu.permit.scheduler,
+        options->variant_capacity, host_allocator, &service->reconfiguration);
   }
   if (iree_status_is_ok(status) && !stream) {
     status = loom_serve_telemetry_stream_allocate(128, host_allocator,
