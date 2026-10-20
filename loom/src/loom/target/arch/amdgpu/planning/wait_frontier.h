@@ -76,10 +76,14 @@ typedef struct loom_amdgpu_wait_frontier_node_t {
   // Source refinement and incoming memory-ordering obligations on this node.
   loom_amdgpu_wait_frontier_node_flags_t flags;
   // Completion-order class for asynchronous VMEM results.
-  loom_amdgpu_vmem_result_order_class_t vmem_result_order_class;
+  uint8_t vmem_result_order_class;
+  // Same-class ordered requests issued later in this block, saturated at
+  // UINT16_MAX. Leaving the block issues them all; if this producer remains
+  // pending, their ordered completions must remain pending too.
+  uint16_t younger_vmem_result_count;
 } loom_amdgpu_wait_frontier_node_t;
 
-static_assert(sizeof(loom_amdgpu_wait_frontier_node_t) == 12,
+static_assert(sizeof(loom_amdgpu_wait_frontier_node_t) == 10,
               "wait frontier node facts must remain compact");
 
 // Outstanding counter masks indexed by aliasing consumer memory space.
@@ -135,7 +139,7 @@ typedef struct loom_amdgpu_wait_frontier_t {
     // Conservative transitive outgoing words for every block.
     uint64_t* static_outgoing_words;
     // Per-block incoming result instances completed by retained dependencies.
-    // Static propagation filters these bits before unioning incoming state;
+    // Static and resolved transfers filter these bits from incoming state;
     // locally issued instances remain live. NULL when counter drains suffice.
     uint64_t* completed_incoming_words;
     // Refined outgoing words recorded after each processed block.
@@ -171,6 +175,21 @@ typedef struct loom_amdgpu_wait_frontier_t {
 // Returns the normalized memory-space bit for |memory_space|.
 loom_amdgpu_wait_memory_space_flags_t loom_amdgpu_wait_memory_space_flag(
     loom_low_memory_space_t memory_space);
+
+// Returns the completion class usable for ordered VMEM counter bounds.
+static inline loom_amdgpu_vmem_result_order_class_t
+loom_amdgpu_wait_frontier_node_vmem_completion_order(
+    const loom_amdgpu_wait_frontier_node_t* node) {
+  // Generic-address requests may complete through LDS instead of VMEM.
+  if (node->vmem_result_order_class == LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE ||
+      node->read_counter_mask != LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD ||
+      iree_any_bit_set(
+          node->read_space_flags,
+          loom_amdgpu_wait_memory_space_flag(LOOM_LOW_MEMORY_SPACE_GENERIC))) {
+    return LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN;
+  }
+  return (loom_amdgpu_vmem_result_order_class_t)node->vmem_result_order_class;
+}
 
 // Initializes bounded cross-block state from the schedule CFG, allocation,
 // retained node classifications/completion facts, and counter dependencies.

@@ -1232,9 +1232,20 @@ void loom_amdgpu_wait_frontier_end_block(
                 frontier, frontier->storage_leases.resolved_outgoing_words,
                 block_index);
   if (outgoing_storage_lease_words != NULL) {
-    memcpy(outgoing_storage_lease_words, frontier->storage_leases.active_words,
-           frontier->storage_leases.word_count *
-               sizeof(*outgoing_storage_lease_words));
+    const uint64_t* completed_words =
+        frontier->storage_leases.completed_incoming_words == NULL
+            ? NULL
+            : loom_amdgpu_wait_frontier_const_storage_lease_block_words(
+                  frontier, frontier->storage_leases.completed_incoming_words,
+                  block_index);
+    // Apply the same retained result-completion transfer as static propagation.
+    // Partial waits complete individual incoming producers without draining
+    // their counter. Locally issued instances are published separately below.
+    for (iree_host_size_t i = 0; i < frontier->storage_leases.word_count; ++i) {
+      outgoing_storage_lease_words[i] =
+          frontier->storage_leases.active_words[i] &
+          ~(completed_words == NULL ? 0 : completed_words[i]);
+    }
   }
   loom_amdgpu_wait_xcnt_group_flags_t* outgoing_xcnt_group_flags =
       frontier->xcnt.resolved_outgoing_flags == NULL

@@ -1127,11 +1127,12 @@ typedef struct loom_target_compile_report_wait_action_row_t {
   // Target-owned wait bound, including packed dependency fields for ALU waits.
   // Zero drains all outstanding packets for an ordinary counting counter.
   uint32_t target_count;
-  // Outstanding packet count for this counter before the wait action.
+  // Locally tracked outstanding packet count before the wait action. Incoming
+  // requests may justify a larger wait bound without a precise total count.
   uint32_t outstanding_before;
-  // Outstanding packet count for this counter after the wait action.
+  // Locally tracked outstanding packet count after the wait action.
   uint32_t outstanding_after;
-  // Number of outstanding packets drained by this wait action.
+  // Number of locally tracked outstanding packets drained by this wait action.
   uint32_t drained_count;
 } loom_target_compile_report_wait_action_row_t;
 

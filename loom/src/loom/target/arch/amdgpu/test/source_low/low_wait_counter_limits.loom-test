@@ -5,8 +5,6 @@ amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @incoming_count_limit(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %old = global_load_b32_saddr %address, %base
-  low.br ^issue
-^issue:
   %younger0 = global_load_b32_saddr %address, %base {offset = 4}
   %younger1 = global_load_b32_saddr %address, %base {offset = 8}
   %younger2 = global_load_b32_saddr %address, %base {offset = 12}
@@ -71,6 +69,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @incoming_count_limit(%address
   %younger61 = global_load_b32_saddr %address, %base {offset = 248}
   %younger62 = global_load_b32_saddr %address, %base {offset = 252}
   %younger63 = global_load_b32_saddr %address, %base {offset = 256}
+  low.br ^consume
+^consume:
   %result = v_add_u32 %old, %address
   return %result
 }

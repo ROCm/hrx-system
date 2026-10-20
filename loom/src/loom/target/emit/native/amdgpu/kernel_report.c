@@ -243,10 +243,12 @@ iree_status_t loom_amdgpu_kernel_report_record_plan(
              packet_plan, &counter_cursor, &state_cursor, &report_action)) {
     const loom_amdgpu_wait_plan_action_t* action = &report_action;
     // The ALU target packs dependency fields, not an outstanding packet count.
+    // Incoming requests can justify a threshold above the locally tracked
+    // count; a wait cannot increase that tracked count.
     const uint32_t outstanding_after =
         action->counter_id == LOOM_AMDGPU_WAIT_COUNTER_ALU
             ? 0
-            : action->target_count;
+            : iree_min(action->outstanding_before, action->target_count);
     const uint32_t drained_count =
         action->outstanding_before > outstanding_after
             ? action->outstanding_before - outstanding_after

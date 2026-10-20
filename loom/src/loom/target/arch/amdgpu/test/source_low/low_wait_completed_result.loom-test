@@ -353,8 +353,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @reissued_result_stays_pending(%
   global_load_b32 v4, v0, s[0:1] offset:0
   global_load_b32 v8, v0, s[0:1] offset:4
 .Lbb3:
-  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_waitcnt vmcnt(1) lgkmcnt(63)
   v_mul_f32 v6, v4, v0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v7, v8, v6
   s_add_u32 s3, s3, s4

@@ -581,6 +581,30 @@ static void loom_amdgpu_wait_classification_finish_nodes(
   }
 }
 
+static void loom_amdgpu_wait_classification_classify_vmem_suffixes(
+    const loom_low_schedule_table_t* schedule,
+    loom_amdgpu_wait_frontier_node_t* nodes) {
+  for (iree_host_size_t block_index = 0; block_index < schedule->block_count;
+       ++block_index) {
+    const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
+    uint16_t younger_counts[LOOM_AMDGPU_VMEM_RESULT_ORDER_CLASS_COUNT] = {0};
+    for (uint32_t i = block->scheduled_node_count; i > 0; --i) {
+      const uint32_t node_index =
+          schedule->scheduled_node_indices[block->scheduled_node_start + i - 1];
+      loom_amdgpu_wait_frontier_node_t* node = &nodes[node_index];
+      const loom_amdgpu_vmem_result_order_class_t order_class =
+          loom_amdgpu_wait_frontier_node_vmem_completion_order(node);
+      if (order_class == LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN) {
+        continue;
+      }
+      node->younger_vmem_result_count = younger_counts[order_class];
+      if (younger_counts[order_class] != UINT16_MAX) {
+        ++younger_counts[order_class];
+      }
+    }
+  }
+}
+
 // Classification has one hot caller. Preserve its caller specialization while
 // retaining an external definition for ordinary non-LTO builds.
 IREE_ATTRIBUTE_ALWAYS_INLINE extern inline iree_status_t
@@ -609,5 +633,10 @@ loom_amdgpu_wait_classification_build(
   loom_amdgpu_wait_classification_finish_nodes(
       schedule, allocation, processor_properties, wait_packet_target,
       out_classification);
+  if (schedule->block_count > 1 &&
+      out_classification->vmem_result_node_count != 0) {
+    loom_amdgpu_wait_classification_classify_vmem_suffixes(
+        schedule, out_classification->frontier_nodes);
+  }
   return iree_ok_status();
 }

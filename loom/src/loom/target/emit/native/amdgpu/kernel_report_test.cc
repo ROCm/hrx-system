@@ -141,5 +141,31 @@ TEST_F(AmdgpuKernelReportTest, SummaryDoesNotRetainActionDetails) {
   EXPECT_EQ(report_.wait_reason_summary_rows.count, 1u);
 }
 
+TEST_F(AmdgpuKernelReportTest, IncomingBoundDoesNotIncreaseTrackedCount) {
+  const loom_amdgpu_wait_plan_action_t counter = {
+      .kind = LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED,
+      .reason = LOOM_AMDGPU_WAIT_PLAN_REASON_SSA_USE,
+      .counter_id = LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD,
+      .target_count = 5,
+      .node_index = 2,
+      .scheduled_ordinal = 2,
+      .producer_node = 0,
+      .consumer_node = 2,
+      .outstanding_before = 4,
+  };
+  plan_.wait_plan.actions = &counter;
+  plan_.wait_plan.action_count = 1;
+  IREE_ASSERT_OK(loom_amdgpu_kernel_report_record_plan(&report_, &plan_));
+  ASSERT_EQ(report_.wait_action_rows.count, 1u);
+  const auto* row =
+      static_cast<const loom_target_compile_report_wait_action_row_t*>(
+          loom_target_compile_report_vec_const_rows(
+              report_.wait_action_rows.head));
+  EXPECT_EQ(row->target_count, 5u);
+  EXPECT_EQ(row->outstanding_before, 4u);
+  EXPECT_EQ(row->outstanding_after, 4u);
+  EXPECT_EQ(row->drained_count, 0u);
+}
+
 }  // namespace
 }  // namespace loom

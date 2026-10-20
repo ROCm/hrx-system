@@ -1522,8 +1522,6 @@ static uint16_t loom_amdgpu_wait_plan_normalize_target_count(
     const loom_amdgpu_wait_plan_builder_t* builder, uint16_t counter_id,
     uint16_t target_count) {
   const uint32_t slot = loom_amdgpu_wait_counter_slot_from_id(counter_id);
-  const uint32_t outstanding_count = builder->outstanding_counts[slot];
-  target_count = (uint16_t)iree_min((uint32_t)target_count, outstanding_count);
   if (iree_any_bit_set(builder->unordered_flat_counter_mask,
                        loom_amdgpu_wait_counter_mask_from_slot(slot))) {
     // Early completion in the unused flat domain breaks issue-position bounds.
@@ -1548,8 +1546,13 @@ static void loom_amdgpu_wait_plan_apply_counter_progress(
   const uint32_t slot = loom_amdgpu_wait_counter_slot_from_id(counter_id);
   const uint32_t counter_mask = loom_amdgpu_wait_counter_mask_from_slot(slot);
   const uint32_t outstanding_before = builder->outstanding_counts[slot];
-  IREE_ASSERT_LE(target_count, outstanding_before);
-  const uint32_t drained_position_count = outstanding_before - target_count;
+  // The hardware bound may retain ordered incoming requests in addition to
+  // this block's tracked suffix. Only the local prefix beyond that bound is
+  // proven complete; an empty local suffix is not a full hardware drain.
+  const uint32_t outstanding_after =
+      iree_min(outstanding_before, (uint32_t)target_count);
+  const uint32_t drained_position_count =
+      outstanding_before - outstanding_after;
   const uint32_t completed_position_count = iree_math_saturating_add_u32(
       builder->completed_position_counts[slot], drained_position_count);
   loom_amdgpu_wait_plan_mark_drained_producers(builder, node_index, slot,
@@ -1576,7 +1579,7 @@ static void loom_amdgpu_wait_plan_apply_counter_progress(
   } else {
     builder->completed_position_counts[slot] = completed_position_count;
   }
-  builder->outstanding_counts[slot] = target_count;
+  builder->outstanding_counts[slot] = outstanding_after;
   builder->outstanding_write_counts[slot] =
       iree_min(builder->outstanding_write_counts[slot], (uint32_t)target_count);
   builder->outstanding_workgroup_access_counts[slot] =
@@ -1593,26 +1596,11 @@ static void loom_amdgpu_wait_plan_apply_counter_progress(
   }
 }
 
-static loom_amdgpu_vmem_result_order_class_t
-loom_amdgpu_wait_plan_vmem_completion_order(
-    const loom_amdgpu_wait_frontier_node_t* node) {
-  // Generic-address requests can complete through LDS on targets whose flat
-  // memory instructions do not preserve VMEM completion order.
-  if (node->vmem_result_order_class == LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE ||
-      node->read_counter_mask != LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD ||
-      iree_any_bit_set(
-          node->read_space_flags,
-          loom_amdgpu_wait_memory_space_flag(LOOM_LOW_MEMORY_SPACE_GENERIC))) {
-    return LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN;
-  }
-  return node->vmem_result_order_class;
-}
-
 static void loom_amdgpu_wait_plan_note_vmem_order(
     loom_amdgpu_wait_plan_builder_t* builder,
     const loom_amdgpu_wait_frontier_node_t* node) {
   const loom_amdgpu_vmem_result_order_class_t order_class =
-      loom_amdgpu_wait_plan_vmem_completion_order(node);
+      loom_amdgpu_wait_frontier_node_vmem_completion_order(node);
   if (builder->vmem_epoch_order_class == LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE) {
     builder->vmem_epoch_order_class = order_class;
   } else if (builder->vmem_epoch_order_class != order_class) {
@@ -1771,23 +1759,26 @@ static uint16_t loom_amdgpu_wait_plan_incoming_producer_target_count(
       LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD) {
     return 0;
   }
+  const loom_amdgpu_wait_frontier_node_t* producer =
+      &builder->classification.frontier_nodes[producer_node];
   const loom_amdgpu_vmem_result_order_class_t order_class =
-      loom_amdgpu_wait_plan_vmem_completion_order(
-          &builder->classification.frontier_nodes[producer_node]);
-  if (order_class == LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN ||
-      order_class != builder->vmem_epoch_order_class) {
+      loom_amdgpu_wait_frontier_node_vmem_completion_order(producer);
+  if (order_class == LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN) {
     return 0;
   }
+  uint32_t target_count = producer->younger_vmem_result_count;
   const iree_host_size_t frontier_index =
       loom_amdgpu_wait_plan_loop_entry_slot_index(consumer_block, slot);
-  if (builder->cyclic_frontiers != NULL &&
-      builder->cyclic_frontiers[frontier_index].outstanding_count != 0) {
-    return 0;
+  const bool has_cyclic_suffix =
+      builder->cyclic_frontiers != NULL &&
+      builder->cyclic_frontiers[frontier_index].outstanding_count != 0;
+  if (!has_cyclic_suffix && order_class == builder->vmem_epoch_order_class) {
+    // These requests are new instances issued after entering the consumer
+    // block, disjoint from the producer block's retained younger requests.
+    target_count = iree_math_saturating_add_u32(
+        target_count, builder->outstanding_counts[slot]);
   }
-  // Every tracked request was issued after block entry, hence after the
-  // incoming producer. Matching completion order lets the older result retire
-  // while those younger requests remain pending, regardless of incoming count.
-  return (uint16_t)iree_min(builder->outstanding_counts[slot], UINT16_MAX);
+  return (uint16_t)iree_min(target_count, UINT16_MAX);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_handle_loop_entry_dependencies(

@@ -1,0 +1,342 @@
+// RUN: emit amdgpu-assembly @diamond strategy=source
+
+// Both loads issue before the diamond. The older use preserves the younger
+// request; the final add still requires its completion.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @diamond(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b32_saddr %address, %base
+  %younger = global_load_b32_saddr %address, %base {offset = 4}
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %first = v_add_u32_src0_inline %address, 1
+  low.br ^consume(%first: reg<amdgpu.vgpr>)
+^right:
+  %second = v_add_u32_src0_inline %address, 2
+  low.br ^consume(%second: reg<amdgpu.vgpr>)
+^consume(%delta: reg<amdgpu.vgpr>):
+  %used = v_add_u32 %old, %delta
+  %result = v_add_u32 %used, %younger
+  return %result
+}
+
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+  global_load_b32 v2, v0, s[0:1] offset:4
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  v_add_u32 v0, 1, v0
+  s_branch .Lbb3
+.Lbb2:
+  v_add_u32 v0, 2, v0
+.Lbb3:
+  s_waitcnt vmcnt(1) lgkmcnt(63)
+  v_add_u32 v0, v1, v0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @completed_incoming_overwrite strategy=source fixed=%old:physical_register:4:1 fixed=%replacement:physical_register:4:1 fixed=%younger:physical_register:5:1 fixed=%used:physical_register:6:1
+
+// The first join consumes the old incoming result with a partial wait. Both
+// paths through the second diamond inherit that completion, so replacing its
+// register must leave the younger request pending.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @completed_incoming_overwrite(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b32_saddr %address, %base
+  %younger = global_load_b32_saddr %address, %base {offset = 4}
+  low.cond_br %condition, ^first_left, ^first_right : reg<amdgpu.scc>
+^first_left:
+  %first = v_add_u32_src0_inline %address, 1
+  low.br ^consume(%first: reg<amdgpu.vgpr>)
+^first_right:
+  %second = v_add_u32_src0_inline %address, 2
+  low.br ^consume(%second: reg<amdgpu.vgpr>)
+^consume(%delta: reg<amdgpu.vgpr>):
+  %used = v_add_u32 %old, %delta
+  low.cond_br %condition, ^second_left, ^second_right : reg<amdgpu.scc>
+^second_left:
+  %left = v_add_u32_src0_inline %used, 3
+  low.br ^overwrite(%left: reg<amdgpu.vgpr>)
+^second_right:
+  %right = v_add_u32_src0_inline %used, 4
+  low.br ^overwrite(%right: reg<amdgpu.vgpr>)
+^overwrite(%carried: reg<amdgpu.vgpr>):
+  %replacement = v_mov_b32 42
+  %partial = v_add_u32 %replacement, %carried
+  %result = v_add_u32 %partial, %younger
+  return %result
+}
+
+// ----
+  global_load_b32 v4, v0, s[0:1] offset:0
+  global_load_b32 v5, v0, s[0:1] offset:4
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  v_add_u32 v0, 1, v0
+  s_branch .Lbb3
+.Lbb2:
+  v_add_u32 v0, 2, v0
+.Lbb3:
+  s_waitcnt vmcnt(1) lgkmcnt(63)
+  v_add_u32 v6, v4, v0
+  s_cbranch_scc0 .Lbb5
+.Lbb4:
+  v_add_u32 v0, 3, v6
+  s_branch .Lbb6
+.Lbb5:
+  v_add_u32 v0, 4, v6
+.Lbb6:
+  v_mov_b32 v4, 42
+  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
+  v_add_u32 v0, v4, v0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v0, v0, v5
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @incoming_and_local strategy=source
+
+// The join adds one new request to the retained incoming request. Successive
+// uses retire only the required prefix, including the final local result.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @incoming_and_local(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b32_saddr %address, %base
+  %younger = global_load_b32_saddr %address, %base {offset = 4}
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %first = v_add_u32_src0_inline %address, 1
+  low.br ^consume(%first: reg<amdgpu.vgpr>)
+^right:
+  %second = v_add_u32_src0_inline %address, 2
+  low.br ^consume(%second: reg<amdgpu.vgpr>)
+^consume(%delta: reg<amdgpu.vgpr>):
+  %local = global_load_b32_saddr %address, %base {offset = 8}
+  %used = v_add_u32 %old, %delta
+  %used_again = v_add_u32 %used, %old
+  %partial = v_add_u32 %used_again, %younger
+  %result = v_add_u32 %partial, %local
+  return %result
+}
+
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+  global_load_b32 v2, v0, s[0:1] offset:4
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  v_add_u32 v3, 1, v0
+  s_branch .Lbb3
+.Lbb2:
+  v_add_u32 v3, 2, v0
+.Lbb3:
+  global_load_b32 v0, v0, s[0:1] offset:8
+  s_waitcnt vmcnt(2) lgkmcnt(63)
+  v_add_u32 v3, v1, v3
+  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
+  v_add_u32 v1, v3, v1
+  s_waitcnt vmcnt(1) lgkmcnt(63)
+  v_add_u32 v1, v1, v2
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v1, v0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @predecessor_completion strategy=source
+
+// Only one predecessor consumes the old result. Its positive wait must not
+// mark the whole counter empty or retire the younger result at the join.
+amdgpu.target<gfx1200> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @predecessor_completion(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b32_saddr %address, %base
+  %younger = global_load_b32_saddr %address, %base {offset = 4}
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %first = v_add_u32_src0_inline %old, 1
+  low.br ^consume(%first: reg<amdgpu.vgpr>)
+^right:
+  %second = v_add_u32_src0_inline %address, 2
+  low.br ^consume(%second: reg<amdgpu.vgpr>)
+^consume(%delta: reg<amdgpu.vgpr>):
+  %used = v_add_u32 %old, %delta
+  %result = v_add_u32 %used, %younger
+  return %result
+}
+
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+  global_load_b32 v2, v0, s[0:1] offset:4
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_wait_loadcnt loadcnt(1)
+  v_add_u32 v0, 1, v1
+  s_branch .Lbb3
+.Lbb2:
+  v_add_u32 v0, 2, v0
+.Lbb3:
+  s_wait_loadcnt loadcnt(1)
+  v_add_u32 v0, v1, v0
+  s_wait_loadcnt loadcnt(0)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @optional_younger strategy=source fixed=%old:physical_register:5:1 fixed=%younger:physical_register:4:1 fixed=%delta:physical_register:4:1
+
+// The join cannot credit a request that only one predecessor issues. Coalesced
+// transport keeps that request pending until after the independent old use.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @optional_younger(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b32_saddr %address, %base
+  low.cond_br %condition, ^issue, ^skip : reg<amdgpu.scc>
+^issue:
+  %younger = global_load_b32_saddr %address, %base {offset = 4}
+  low.br ^consume(%younger: reg<amdgpu.vgpr>)
+^skip:
+  low.br ^consume(%address: reg<amdgpu.vgpr>)
+^consume(%delta: reg<amdgpu.vgpr>):
+  %used = v_add_u32 %old, %address
+  %result = v_add_u32 %used, %delta
+  return %result
+}
+
+// ----
+  global_load_b32 v5, v0, s[0:1] offset:0
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  global_load_b32 v4, v0, s[0:1] offset:4
+  s_branch .Lbb3
+.Lbb2:
+  v_mov_b32 v4, v0
+.Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v0, v5, v0
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v4
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @unordered_scalar_pair strategy=source
+
+// Issuing both scalar requests before the diamond does not establish ordered
+// completion. The older scalar use still requires a full scalar-memory wait.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @unordered_scalar_pair(%base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) asm {
+  %old = s_load_dword_offset_only %base
+  %younger = s_load_dword_offset_only %base {offset = 4}
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %first = s_mov_b32 1
+  low.br ^consume(%first: reg<amdgpu.sgpr>)
+^right:
+  %second = s_mov_b32 2
+  low.br ^consume(%second: reg<amdgpu.sgpr>)
+^consume(%delta: reg<amdgpu.sgpr>):
+  %used = s_add_u32 %old, %delta
+  %result = s_add_u32 %used, %younger
+  return %result
+}
+
+// ----
+  s_load_dword s2, s[0:1], 0
+  s_load_dword s3, s[0:1], 4
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_mov_b32 s0, 1
+  s_branch .Lbb3
+.Lbb2:
+  s_mov_b32 s0, 2
+.Lbb3:
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_add_u32 s0, s2, s0
+  s_add_u32 s0, s0, s3
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @incoming_overwrite strategy=source fixed=%old:physical_register:4:1 fixed=%replacement:physical_register:4:1 fixed=%younger:physical_register:5:1
+
+// The old result is dead, but its asynchronous register write must complete
+// before the replacement. Retain the disjoint younger load through that wait.
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @incoming_overwrite(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b32_saddr %address, %base
+  %younger = global_load_b32_saddr %address, %base {offset = 4}
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %first = v_add_u32_src0_inline %address, 1
+  low.br ^consume(%first: reg<amdgpu.vgpr>)
+^right:
+  %second = v_add_u32_src0_inline %address, 2
+  low.br ^consume(%second: reg<amdgpu.vgpr>)
+^consume(%delta: reg<amdgpu.vgpr>):
+  %replacement = v_mov_b32 42
+  %used = v_add_u32 %replacement, %delta
+  %result = v_add_u32 %used, %younger
+  return %result
+}
+
+// ----
+  global_load_b32 v4, v0, s[0:1] offset:0
+  global_load_b32 v5, v0, s[0:1] offset:4
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  v_add_u32 v0, 1, v0
+  s_branch .Lbb3
+.Lbb2:
+  v_add_u32 v0, 2, v0
+.Lbb3:
+  s_wait_loadcnt loadcnt(1)
+  v_mov_b32 v4, 42
+  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
+  v_add_u32 v0, v4, v0
+  s_wait_loadcnt loadcnt(0)
+  v_add_u32 v0, v0, v5
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cdna_diamond strategy=source
+
+// Both loads issue before the diamond. The older use preserves the younger
+// request; the final add still requires its completion.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @cdna_diamond(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  %younger = global_load_dword_saddr %address, %base {offset = 4} : reg<amdgpu.vgpr>
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %first = v_add_u32_src0_inline %address, 1
+  low.br ^consume(%first: reg<amdgpu.vgpr>)
+^right:
+  %second = v_add_u32_src0_inline %address, 2
+  low.br ^consume(%second: reg<amdgpu.vgpr>)
+^consume(%delta: reg<amdgpu.vgpr>):
+  %used = v_add_u32 %old, %delta
+  %result = v_add_u32 %used, %younger
+  return %result
+}
+
+// ----
+  global_load_dword v1, v0, s[0:1] offset:0
+  global_load_dword v2, v0, s[0:1] offset:4
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  v_add_u32 v0, 1, v0
+  s_branch .Lbb3
+.Lbb2:
+  v_add_u32 v0, 2, v0
+.Lbb3:
+  s_waitcnt vmcnt(1) lgkmcnt(15)
+  v_add_u32 v0, v1, v0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_u32 v0, v0, v2
+  s_endpgm

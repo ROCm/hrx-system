@@ -81,7 +81,7 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   // A loop-entry SSA dependency requires a conservative full counter drain.
   LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_ENTRY_CONSERVATIVE_SSA_USE = 13,
   // A loop-carried SSA dependency uses a target count derived from the stable
-  // producer frontier or a known younger suffix issued in the current block.
+  // producer frontier or known ordered younger requests.
   LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_CARRIED_DERIVED_SSA_USE = 14,
   // A loop-carried SSA dependency requires a conservative full counter drain.
   LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_CARRIED_CONSERVATIVE_SSA_USE = 15,
@@ -127,8 +127,8 @@ typedef struct loom_amdgpu_wait_plan_action_t {
   uint32_t producer_node;
   // Consumer node that needs the wait, or LOOM_LOW_SCHEDULE_NODE_NONE.
   uint32_t consumer_node;
-  // Locally tracked outstanding packet count before the wait action. An
-  // authored bound may exceed this count without proving a full drain.
+  // Locally tracked outstanding packet count before the wait action. Authored
+  // bounds and bounds justified by incoming requests may exceed this count.
   uint32_t outstanding_before;
 } loom_amdgpu_wait_plan_action_t;
 
