@@ -19,6 +19,7 @@
 #include "loom/serve/runtime/parameter/admission.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/kind.h"
+#include "loom/serve/service/qos.h"
 #include "loom/serve/service/text/admission.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/checkpoint_http.h"
@@ -242,8 +243,14 @@ static bool loom_serve_text_begin_input_count(
        service->completion.work != TEXT_WORK_EPOCH)) {
     return false;
   }
-  return loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_INPUT_COUNT,
-                                      LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+  const loom_serve_text_input_count_request_t* request =
+      loom_serve_text_input_count_next(&service->input_counts);
+  if (!request) {
+    return false;
+  }
+  const loom_serve_execution_qos_t qos = request->qos;
+  loom_serve_text_input_count_select(&service->input_counts, request);
+  return loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_INPUT_COUNT, qos,
                                       loom_serve_text_count_input);
 }
 
@@ -389,8 +396,8 @@ static void loom_serve_text_pending_observe(
   service->heartbeat.snapshot.oldest_queued_arrival =
       loom_serve_text_pending_queue_oldest_arrival(&service->pending);
   if (service->input_counts.count) {
-    const iree_time_t arrival =
-        service->input_counts.requests[0].receipt.arrival_time;
+    const iree_time_t arrival = loom_serve_text_input_count_oldest_arrival(
+        &service->input_counts, /*borrowed=*/false);
     service->heartbeat.snapshot.oldest_queued_arrival =
         service->pending.count
             ? iree_min(service->heartbeat.snapshot.oldest_queued_arrival,
@@ -1144,10 +1151,17 @@ static iree_status_t loom_serve_text_enqueue(
                          "Content-Type must be application/json"),
         service->host_allocator);
   }
+  loom_serve_execution_qos_t qos;
+  iree_status_t status = loom_serve_qos_parse(request, &qos);
+  if (!iree_status_is_ok(status)) {
+    return loom_serve_text_http_reject(&service->telemetry, connection, receipt,
+                                       400, "Bad Request", status,
+                                       service->host_allocator);
+  }
   if (input_count) {
-    iree_status_t status = loom_serve_text_input_count_enqueue(
-        &service->input_counts, connection, request, receipt,
-        &service->telemetry);
+    status = loom_serve_text_input_count_enqueue(&service->input_counts,
+                                                 connection, request, receipt,
+                                                 qos, &service->telemetry);
     loom_serve_text_pending_observe(service);
     return status;
   }
@@ -1156,11 +1170,11 @@ static iree_status_t loom_serve_text_enqueue(
       request, IREE_SV("X-Loom-Session"), &name);
   loom_serve_text_sequence_t sequence = {0};
   if (encodes) {
-    iree_status_t status =
-        named ? iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                 "sequences use a body session handle, not "
-                                 "X-Loom-Session")
-              : loom_serve_text_sequence_parse(request->body, &sequence);
+    status = named
+                 ? iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                    "sequences use a body session handle, not "
+                                    "X-Loom-Session")
+                 : loom_serve_text_sequence_parse(request->body, &sequence);
     if (!iree_status_is_ok(status)) {
       return loom_serve_text_http_reject(&service->telemetry, connection,
                                          receipt, 400, "Bad Request", status,
@@ -1186,7 +1200,7 @@ static iree_status_t loom_serve_text_enqueue(
         service->host_allocator);
   }
   loom_serve_text_checkpoint_entry_t* checkpoint = NULL;
-  iree_status_t status = loom_serve_text_pending_queue_select_request(
+  status = loom_serve_text_pending_queue_select_request(
       &service->pending, name, checkpoint_name, service->row_count,
       service->sessions, &service->checkpoints, &checkpoint);
   if (!iree_status_is_ok(status)) {
@@ -1217,6 +1231,7 @@ static iree_status_t loom_serve_text_enqueue(
                                        503, "Service Unavailable", status,
                                        service->host_allocator);
   }
+  consumer.qos = qos;
   loom_serve_text_pending_push(service, consumer, request->body, name,
                                checkpoint, encodes ? &sequence : NULL, receipt);
   return iree_ok_status();
@@ -1327,6 +1342,11 @@ static loom_serve_execution_qos_t loom_serve_text_output_qos(
   if (!live) {
     return qos;
   }
+  const loom_serve_text_input_count_request_t* count =
+      loom_serve_text_input_count_next(&service->input_counts);
+  if (count) {
+    qos = iree_max(qos, count->qos);
+  }
   for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
     const loom_serve_text_consumer_t consumer =
         service->pending.values[i]->consumer;
@@ -1369,6 +1389,14 @@ static loom_serve_execution_resources_t loom_serve_text_execution_demand(
                 : 0);
   }
   if (service->cpu.work == TEXT_CPU_WORK_NONE) {
+    if (service->completion.work == TEXT_WORK_NONE ||
+        service->completion.work == TEXT_WORK_EPOCH) {
+      const loom_serve_text_input_count_request_t* count =
+          loom_serve_text_input_count_next(&service->input_counts);
+      if (count && count->qos == LOOM_SERVE_EXECUTION_QOS_REALTIME) {
+        return projection | LOOM_SERVE_EXECUTION_RESOURCE_HOST;
+      }
+    }
     for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
       const loom_serve_text_pending_request_t* request =
           service->pending.values[i];
@@ -2373,11 +2401,9 @@ static loom_serve_service_snapshot_t loom_serve_text_snapshot(void* self) {
     active_arrival = iree_min(
         active_arrival, service->input_counts.requests[0].receipt.arrival_time);
   }
-  if (service->input_counts.count > (iree_host_size_t)active_count) {
-    queued_arrival = iree_min(
-        queued_arrival,
-        service->input_counts.requests[active_count].receipt.arrival_time);
-  }
+  queued_arrival =
+      iree_min(queued_arrival, loom_serve_text_input_count_oldest_arrival(
+                                   &service->input_counts, active_count));
   return (loom_serve_service_snapshot_t){
       .phase = phase,
       .queued_requests = service->pending.count +

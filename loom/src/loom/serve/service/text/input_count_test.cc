@@ -6,10 +6,12 @@
 
 #include "loom/serve/service/text/input_count.h"
 
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 
 namespace {
 
+using loom_serve::testing::text::Oracle;
 using loom_serve::testing::text::OwnerTurn;
 using loom_serve::testing::text::SourceTextServiceTest;
 using loom_serve::testing::text::StalledClient;
@@ -71,6 +73,121 @@ class InputCountTest : public SourceTextServiceTest {
   // Borrowed production interface driven by serialized test-owner turns.
   loom_serve_service_t interface_ = {};
 };
+
+class TextHttpQosTest : public InputCountTest {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(InputCountTest::SetUp());
+    loom_serve_execution_permit_initialize(
+        loom_serve_text_model_permit(model_)->scheduler,
+        LOOM_SERVE_EXECUTION_RESOURCE_HOST, &peer_);
+  }
+
+  void TearDown() override {
+    loom_serve_execution_permit_deinitialize(&peer_);
+    InputCountTest::TearDown();
+  }
+
+  // Peer models actual realtime work in the shared host interference scope.
+  loom_serve_execution_permit_t peer_ = {};
+};
+
+TEST_F(TextHttpQosTest, RealtimeCountsPassQueuedBackgroundWithoutWarmingModel) {
+  loom_serve_execution_permit_request(&peer_,
+                                      LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  loom_serve::testing::HttpClient background(
+      Send(Request(Message("user", "abxa")), "", kInputTokens));
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(background.get(), interface_, &connection));
+  loom_serve::testing::HttpClient realtime(Send(Request(Message("user", "bax")),
+                                                "X-Loom-QoS: realtime\r\n",
+                                                kInputTokens));
+  ASSERT_NO_FATAL_FAILURE(Accept(realtime.get(), interface_, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return interface_.telemetry.counters->completed == 1;
+  }));
+  EXPECT_NE(Read(realtime.release()).find("\r\n\r\n{\"input_tokens\":3}"),
+            std::string::npos);
+  IREE_EXPECT_OK(http_.CheckPending(background.get()));
+  EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 1u);
+  ExpectCold();
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
+  EXPECT_NE(Read(background.release()).find("\r\n\r\n{\"input_tokens\":4}"),
+            std::string::npos);
+  ExpectCold();
+}
+
+TEST_F(TextHttpQosTest, ChatPriorityPrecedesInputPreparation) {
+  loom_serve_execution_permit_request(&peer_,
+                                      LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  loom_serve::testing::HttpClient background(
+      Send(Request(Message("user", "abxa"), 4)));
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(background.get(), interface_, &connection));
+  loom_serve::testing::HttpClient realtime(
+      Send(Request(Message("user", "bax"), 4), "X-Loom-QoS: realtime\r\n"));
+  ASSERT_NO_FATAL_FAILURE(Accept(realtime.get(), interface_, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return interface_.telemetry.counters->completed == 1;
+  }));
+  EXPECT_EQ(Content(Read(realtime.release())), Oracle::Complete("bax", 4));
+  IREE_EXPECT_OK(http_.CheckPending(background.get()));
+  EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 1u);
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
+  EXPECT_EQ(Content(Read(background.release())), Oracle::Complete("abxa", 4));
+}
+
+TEST_F(TextHttpQosTest, CountReleasesDependentOutputWithoutNewBackgroundEpoch) {
+  loom_serve::testing::HttpClient background(
+      Send(Request(Message("user", "abxa"), 16)));
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(background.get(), interface_, &connection));
+  // A partial prefill has no output borrower. Reach a decode epoch after the
+  // first actual prediction so that holding host admission tests completion.
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return interface_.telemetry.counters->output_tokens &&
+           std::string(interface_.snapshot(interface_.self).phase) == "execute";
+  }));
+  loom_serve_execution_permit_request(&peer_,
+                                      LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return std::string(interface_.snapshot(interface_.self).phase) ==
+           "waiting_cpu";
+  }));
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  const uint64_t batches = interface_.telemetry.counters->batches;
+  loom_serve::testing::HttpClient realtime(Send(Request(Message("user", "bax")),
+                                                "X-Loom-QoS: realtime\r\n",
+                                                kInputTokens));
+  ASSERT_NO_FATAL_FAILURE(Accept(realtime.get(), interface_, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return interface_.telemetry.counters->completed == 1;
+  }));
+  EXPECT_NE(Read(realtime.release()).find("\r\n\r\n{\"input_tokens\":3}"),
+            std::string::npos);
+  EXPECT_EQ(interface_.telemetry.counters->batches, batches);
+  EXPECT_EQ(peer_.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
+  EXPECT_EQ(Content(Read(background.release())), Oracle::Complete("abxa", 16));
+}
+
+TEST_F(InputCountTest, UnknownQosRejectsBeforePreparation) {
+  for (const char* endpoint : {kInputTokens, "/v1/chat/completions"}) {
+    loom_serve::testing::HttpClient client(Send(
+        Request(Message("user", "abxa")), "X-Loom-QoS: urgent\r\n", endpoint));
+    loom_serve_http_connection_t* connection = nullptr;
+    ASSERT_NO_FATAL_FAILURE(Accept(client.get(), interface_, &connection));
+    EXPECT_EQ(Read(client.release()).find("HTTP/1.1 400"), 0u);
+    EXPECT_TRUE(Idle());
+  }
+  ExpectCold();
+}
 
 TEST_F(InputCountTest, FreshChatCountsWithoutActivatingOrReserving) {
   ExpectCold();
@@ -156,13 +273,24 @@ TEST_F(InputCountTest, StopJoinsBorrowedHeadAndCancelsQueuedQueries) {
   const loom_serve_http_request_t* requests[2] = {};
   const int first = Send(body, "", kInputTokens);
   IREE_ASSERT_OK(http_.TakeRequest(first, &connections[0], &requests[0]));
-  const int second = Send(body, "", kInputTokens);
+  const int second = Send(body, "X-Loom-QoS: realtime\r\n", kInputTokens);
   IREE_ASSERT_OK(http_.TakeRequest(second, &connections[1], &requests[1]));
   OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
     for (size_t i = 0; i < 2; ++i) {
       IREE_ASSERT_OK(
           interface_.accept(interface_.self, connections[i], requests[i], 0));
     }
+    // Later priority cannot move the head already borrowed by the CPU task.
+    bool found_head = false;
+    loom_serve_http_request_snapshot_t snapshot;
+    for (size_t i = 0;
+         interface_.inspection.request_at(interface_.self, i, &snapshot); ++i) {
+      if (snapshot.id == 1) {
+        found_head = true;
+        EXPECT_STREQ(snapshot.phase, "count_input");
+      }
+    }
+    EXPECT_TRUE(found_head);
     // The sole worker is still running this owner turn, so the first query
     // cannot have released its CPU loan. Stopping may cancel only the tail.
     bool progress = false;
@@ -295,7 +423,8 @@ class InputCountOutcomeTest : public SourceTextServiceTest {
     IREE_ASSERT_OK(http_.TakeRequest(*out_client, &connection, &request));
     IREE_ASSERT_OK(loom_serve_text_input_count_enqueue(
         &queries_, connection, request,
-        loom_serve_text_telemetry_begin(&telemetry_), &telemetry_));
+        loom_serve_text_telemetry_begin(&telemetry_),
+        LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &telemetry_));
   }
 
   // Real HTTP claims retained until their task outcomes are consumed.

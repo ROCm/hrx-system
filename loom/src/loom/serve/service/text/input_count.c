@@ -37,7 +37,7 @@ iree_status_t loom_serve_text_input_count_enqueue(
     loom_serve_text_input_count_t* queue,
     loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request, loom_serve_text_receipt_t receipt,
-    loom_serve_text_telemetry_t* telemetry) {
+    loom_serve_execution_qos_t qos, loom_serve_text_telemetry_t* telemetry) {
   iree_string_view_t header;
   if (loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Session"),
                                             &header) ||
@@ -57,9 +57,48 @@ iree_status_t loom_serve_text_input_count_enqueue(
                          "input counting queue is full"),
         queue->host_allocator);
   }
-  queue->requests[queue->count++] = (loom_serve_text_input_count_request_t){
-      .connection = connection, .body = request->body, .receipt = receipt};
+  queue->requests[queue->count++] =
+      (loom_serve_text_input_count_request_t){.connection = connection,
+                                              .body = request->body,
+                                              .receipt = receipt,
+                                              .qos = qos};
   return iree_ok_status();
+}
+
+const loom_serve_text_input_count_request_t* loom_serve_text_input_count_next(
+    const loom_serve_text_input_count_t* queue) {
+  const loom_serve_text_input_count_request_t* first = NULL;
+  for (iree_host_size_t i = 0; i < queue->count; ++i) {
+    const loom_serve_text_input_count_request_t* request = &queue->requests[i];
+    if (loom_serve_http_connection_failed(request->connection)) {
+      continue;
+    }
+    if (!first || request->qos > first->qos) {
+      first = request;
+    }
+    if (first->qos == LOOM_SERVE_EXECUTION_QOS_REALTIME) {
+      break;
+    }
+  }
+  return first;
+}
+
+void loom_serve_text_input_count_select(
+    loom_serve_text_input_count_t* queue,
+    const loom_serve_text_input_count_request_t* request) {
+  const iree_host_size_t index = request - queue->requests;
+  const loom_serve_text_input_count_request_t selected = *request;
+  memmove(queue->requests + 1, queue->requests, index * sizeof(*request));
+  queue->requests[0] = selected;
+}
+
+iree_time_t loom_serve_text_input_count_oldest_arrival(
+    const loom_serve_text_input_count_t* queue, bool borrowed) {
+  iree_time_t oldest = IREE_TIME_INFINITE_FUTURE;
+  for (iree_host_size_t i = borrowed ? 1 : 0; i < queue->count; ++i) {
+    oldest = iree_min(oldest, queue->requests[i].receipt.arrival_time);
+  }
+  return oldest;
 }
 
 iree_status_t loom_serve_text_input_count_run(

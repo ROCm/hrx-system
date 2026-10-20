@@ -157,6 +157,7 @@ loom_cc_library(
     ::stream
     ::telemetry
     iree::base::internal::base64
+    loom::serve::runtime::execution::scheduler
     loom::serve::service::finite::component
     loom::serve::telemetry::latency
   TESTONLY
@@ -1187,6 +1188,7 @@ loom_cc_library(
     ::http
     ::telemetry
     iree::base
+    loom::serve::runtime::execution::scheduler
     loom::serve::telemetry::stream
     loom::serve::transport::http::request
     loom::serve::transport::http::server
@@ -1250,6 +1252,7 @@ loom_cc_library(
     loom::serve::service::execution_reconfiguration
     loom::serve::service::finite::component
     loom::serve::service::kind
+    loom::serve::service::qos
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
     loom::serve::telemetry::tracing

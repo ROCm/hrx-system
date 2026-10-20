@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_INPUT_COUNT_H_
 #define LOOM_SERVE_SERVICE_TEXT_INPUT_COUNT_H_
 
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/telemetry.h"
 
@@ -23,6 +24,8 @@ typedef struct loom_serve_text_input_count_request_t {
   iree_string_view_t body;
   // Original receipt retained across CPU queueing and completion.
   loom_serve_text_receipt_t receipt;
+  // Immutable class used before borrowing the source VM.
+  loom_serve_execution_qos_t qos;
 } loom_serve_text_input_count_request_t;
 
 // The serialized service lends the head to its existing finite CPU channel.
@@ -31,7 +34,7 @@ typedef struct loom_serve_text_input_count_request_t {
 typedef struct loom_serve_text_input_count_t {
   // Allocator owning the queue and temporary source preparation storage.
   iree_allocator_t host_allocator;
-  // Bounded FIFO storage allocated once with the service.
+  // Bounded storage retaining FIFO order within each class.
   loom_serve_text_input_count_request_t* requests;
   // Number of retained claims, including an accepted head borrower.
   iree_host_size_t count;
@@ -55,7 +58,23 @@ iree_status_t loom_serve_text_input_count_enqueue(
     loom_serve_text_input_count_t* queue,
     loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request, loom_serve_text_receipt_t receipt,
-    loom_serve_text_telemetry_t* telemetry);
+    loom_serve_execution_qos_t qos, loom_serve_text_telemetry_t* telemetry);
+
+// Owner-only observation of the oldest live request in the highest class, or
+// null when every queued connection has failed. Does not move a borrowed head.
+const loom_serve_text_input_count_request_t* loom_serve_text_input_count_next(
+    const loom_serve_text_input_count_t* queue);
+
+// Moves a selected queue member to the head before its CPU loan begins.
+// No head may be borrowed, and all other requests retain their relative order.
+void loom_serve_text_input_count_select(
+    loom_serve_text_input_count_t* queue,
+    const loom_serve_text_input_count_request_t* request);
+
+// Oldest retained receipt, excluding the head when it is already borrowed.
+// An empty range returns IREE_TIME_INFINITE_FUTURE.
+iree_time_t loom_serve_text_input_count_oldest_arrival(
+    const loom_serve_text_input_count_t* queue, bool borrowed);
 
 // Finite CPU work with the model's exclusive source invocation loan. Counts
 // full fresh input, bounded by context_capacity but without output credit.
