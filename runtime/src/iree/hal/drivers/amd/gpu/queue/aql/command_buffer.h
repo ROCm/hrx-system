@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_COMMAND_BUFFER_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_COMMAND_BUFFER_H_
 
+#include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/inputs.h"
 
@@ -21,6 +22,13 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
   uint32_t offset;
   // Complete 64-byte packets copied by one materializer launch.
   uint32_t packet_count;
+  // Immutable dispatch subrange for independently retiring profile samples.
+  struct {
+    // First public dispatch in the recording.
+    uint32_t first;
+    // Public dispatches in this block, excluding builtin kernels.
+    uint32_t count;
+  } dispatches;
 } iree_hal_amd_gpu_aql_program_block_t;
 
 typedef struct iree_hal_amd_gpu_aql_command_program_t {
@@ -28,6 +36,8 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   iree_hal_amd_gpu_program_t resident;
   // Immutable indexed native blocks, owned by the command buffer.
   iree_hal_amd_gpu_aql_program_block_t* blocks;
+  // Optional host-only attribution; its presence selects tagged templates.
+  iree_hal_amd_gpu_profile_commands_t* profile;
   // Number of complete blocks; zero is an empty recording.
   uint32_t block_count;
   // Unique input count including instance base at index zero.

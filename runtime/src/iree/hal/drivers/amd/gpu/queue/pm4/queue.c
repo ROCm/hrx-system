@@ -2172,15 +2172,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
       constants, bindings.count, flags, &dispatch));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_dispatch_validate_direct_bindings(
       function->base.kernarg, config.workgroup_count_ref, bindings, flags));
-  iree_hal_amd_gpu_profile_executable_t* metadata = NULL;
-  if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile) &&
-      (iree_hal_dispatch_uses_indirect_parameters(flags) ||
-       (dispatch.geometry.workgroup_count[0] &&
-        dispatch.geometry.workgroup_count[1] &&
-        dispatch.geometry.workgroup_count[2]))) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amd_gpu_executable_profile_metadata(executable, &metadata));
-  }
   iree_hal_amd_gpu_profile_operation_t profile_storage;
   iree_hal_amd_gpu_profile_operation_t* operation = NULL;
   if (queue->profile) {
@@ -2189,20 +2180,13 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
         queue->profile, queue->options.queue_ordinal,
         IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH, waits.count, signals.count,
         1, operation);
-    if (metadata) {
-      operation->dispatch.executable = metadata;
-      iree_hal_profile_dispatch_event_t* event = &operation->dispatch.event;
-      *event = iree_hal_profile_dispatch_event_default();
-      event->executable_id = iree_hal_amd_gpu_profile_executable_id(metadata);
-      event->function_ordinal = (uint32_t)token.value;
-      event->flags =
-          iree_hal_dispatch_uses_indirect_parameters(flags)
-              ? IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_INDIRECT_PARAMETERS
-              : 0;
-      memcpy(event->workgroup_count, dispatch.geometry.workgroup_count,
-             sizeof(event->workgroup_count));
-      memcpy(event->workgroup_size, dispatch.geometry.workgroup_size,
-             sizeof(event->workgroup_size));
+    if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile) &&
+        (iree_hal_dispatch_uses_indirect_parameters(flags) ||
+         (dispatch.geometry.workgroup_count[0] &&
+          dispatch.geometry.workgroup_count[1] &&
+          dispatch.geometry.workgroup_count[2]))) {
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_executable_profile_dispatch(
+          executable, token, &dispatch.geometry, flags, &operation->dispatch));
       operation->completion.count = 1;
       operation->completion.sample_stride =
           iree_hal_amd_gpu_profile_timestamps_dispatches(queue->profile)

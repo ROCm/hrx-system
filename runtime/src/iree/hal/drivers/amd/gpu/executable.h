@@ -107,12 +107,15 @@ iree_status_t iree_hal_amd_gpu_executable_lookup_aql_for_queue(
 const uint64_t* iree_hal_amd_gpu_executable_queue_image_addresses(
     iree_hal_executable_t* executable);
 
-// Lazily prepares host-only profile reflection on the recording/submission
-// caller. Returns a borrow dominated by executable; completed profile records
-// can retain it independently without keeping native code allocations alive.
-iree_status_t iree_hal_amd_gpu_executable_profile_metadata(
-    iree_hal_executable_t* executable,
-    iree_hal_amd_gpu_profile_executable_t** out_metadata);
+// Captures admitted launch attribution and lazily prepares host-only reflection
+// on the recording/submission caller. The result borrows executable metadata;
+// recorded and completed profile records retain it without keeping native code
+// allocations alive. The caller supplies command-buffer identity when needed.
+iree_status_t iree_hal_amd_gpu_executable_profile_dispatch(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    const iree_hal_amd_gpu_dispatch_geometry_t* geometry,
+    iree_hal_dispatch_flags_t flags,
+    iree_hal_amd_gpu_profile_dispatch_t* out_dispatch);
 
 #ifdef __cplusplus
 }  // extern "C"

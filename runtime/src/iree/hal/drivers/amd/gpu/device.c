@@ -1323,9 +1323,21 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
                             "GPU profiling session is already active");
   }
   if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
-      (options->data_families & ~IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS)) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "AQL profiling supports public queue events");
+      (options->data_families &
+       IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS)) {
+    if (device->context->gpu->extension_version <
+        AMDF_GPU_EXTENSION_VERSION_5) {
+      return iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "AQL dispatch profiling requires GPU extension v5");
+    }
+    const amdf_queue_family_info_t* family =
+        &device->context->families[device->memory.family.queue_family_ordinal];
+    if (!(family->format_features &
+          AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS)) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "AQL queue family has no dispatch timestamps");
+    }
   }
   amdf_observation_clock_info_t clock = {0};
   if (options->data_families & IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS) {
@@ -1335,21 +1347,36 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
             &clock),
         "device_query_queue_clock_info"));
   }
+  iree_hal_amd_gpu_profile_t* profile = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_begin(
       options, ++device->next_profile_session_id, device->queue_count,
-      clock.frequency_hz, device->host_allocator, &device->profile));
-  device->memory.allocations.profile = device->profile;
-  device->memory.mappings.profile = device->profile;
-  for (uint32_t i = 0; i < device->queue_count; ++i) {
+      clock.frequency_hz, device->host_allocator, &profile));
+  iree_status_t status = iree_ok_status();
+  uint32_t configured_count = 0;
+  for (; configured_count < device->queue_count && iree_status_is_ok(status);
+       ++configured_count) {
     if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
-      iree_hal_amd_gpu_aql_queue_set_profile(device->queues[i],
-                                             device->profile);
+      status = iree_hal_amd_gpu_aql_queue_set_profile(
+          device->queues[configured_count], profile);
     } else {
-      iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[i],
-                                             device->profile);
+      iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[configured_count],
+                                             profile);
     }
   }
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    device->profile = profile;
+    device->memory.allocations.profile = profile;
+    device->memory.mappings.profile = profile;
+  } else {
+    // Native configuration can fail after the sink begins. Drop all queue
+    // borrows and join rollback errors before ending that same sink session.
+    for (uint32_t i = 0; i < configured_count; ++i) {
+      status = iree_status_join(status, iree_hal_amd_gpu_aql_queue_set_profile(
+                                            device->queues[i], NULL));
+    }
+    status = iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_amd_gpu_device_profiling_flush(
@@ -1365,14 +1392,16 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_end(
   device->profile = NULL;
   device->memory.allocations.profile = NULL;
   device->memory.mappings.profile = NULL;
+  iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
-      iree_hal_amd_gpu_aql_queue_set_profile(device->queues[i], NULL);
+      status = iree_status_join(status, iree_hal_amd_gpu_aql_queue_set_profile(
+                                            device->queues[i], NULL));
     } else {
       iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[i], NULL);
     }
   }
-  return iree_hal_amd_gpu_profile_end(profile);
+  return iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
 }
 
 static const iree_hal_device_vtable_t iree_hal_amd_gpu_device_vtable = {

@@ -582,6 +582,7 @@ iree_cc_library(
     ::transfer
     iree::base::internal::arena
     iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::queue::inputs
     iree::hal::drivers::amd::gpu::queue::recording
     iree::hal::drivers::amd::gpu::queue::transfer
@@ -698,6 +699,7 @@ iree_cc_library(
     iree::base
     iree::base::cpu_data
     iree::base::internal
+    iree::base::threading::thread
     iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::profile

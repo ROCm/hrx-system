@@ -66,9 +66,11 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
 uint32_t iree_hal_amd_gpu_aql_queue_maximum_program_packet_count(
     iree_hal_queue_t* queue);
 
-// Called with idle queues and submission externally serialized. The device
-// owns the session; captures borrow it until their publication has finished.
-void iree_hal_amd_gpu_aql_queue_set_profile(
+// Called with idle queues and submission externally serialized. Joins final
+// host retirement before native timestamp configuration; native failure makes
+// the queue terminal. The device owns the session; captures borrow it until
+// their publication has finished.
+iree_status_t iree_hal_amd_gpu_aql_queue_set_profile(
     iree_hal_queue_t* queue, iree_hal_amd_gpu_profile_t* profile);
 
 iree_status_t iree_hal_amd_gpu_aql_queue_assign_frontier(

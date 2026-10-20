@@ -45,9 +45,11 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
 void iree_hal_amd_gpu_aql_program_pool_deinitialize(
     iree_hal_amd_gpu_aql_program_pool_t* pool);
 
-// Initial invocation upload, followed immediately by the dense uint64_t value
-// table. Later chunks upload only their materializer arguments. The first
-// native chunk's completion releases this table independently of later work.
+// Initial invocation upload. Instrumented recordings extend materialize to
+// materialize_profile_arguments_t; the dense uint64_t value table follows
+// that complete argument record. Later chunks upload only their materializer
+// arguments. The first native chunk releases the table independently of later
+// work.
 typedef struct iree_hal_amd_gpu_aql_program_arguments_t {
   // Optional initial resident copy, including the first instance's fixups.
   iree_hal_amd_gpu_blit_arguments_t copy;
@@ -56,6 +58,15 @@ typedef struct iree_hal_amd_gpu_aql_program_arguments_t {
   // First native packet block and its exact reserved ring slots.
   iree_hal_amd_gpu_aql_materialize_arguments_t materialize;
 } iree_hal_amd_gpu_aql_program_arguments_t;
+
+// Instrumented materialization extends the last argument record by 16 bytes
+// before the value table. Ordinary invocation uploads retain their compact ABI.
+enum iree_hal_amd_gpu_aql_program_flag_bits_e {
+  IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST = 1u << 0,
+  IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE = 1u << 1,
+  IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE = 1u << 2,
+};
+typedef uint32_t iree_hal_amd_gpu_aql_program_flags_t;
 
 // Counts host-owned prelude packets; block packets and the terminal barrier
 // are separate. The unpublished instance remains reserved through emission.
@@ -71,9 +82,9 @@ void iree_hal_amd_gpu_aql_program_emit(
     const iree_hal_amd_gpu_aql_program_pool_t* pool,
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
-    uint32_t packet_count, bool first, bool initialize,
-    iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
-    uint64_t argument_address, void* upload);
+    uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
+    uint64_t argument_address, uint64_t signal_address, void* upload,
+    iree_hal_amd_gpu_aql_program_flags_t flags);
 
 #ifdef __cplusplus
 }  // extern "C"

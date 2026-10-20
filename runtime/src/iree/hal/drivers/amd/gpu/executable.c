@@ -971,7 +971,7 @@ const uint64_t* iree_hal_amd_gpu_executable_queue_image_addresses(
   return ((iree_hal_amd_gpu_executable_t*)executable)->queue_image_addresses;
 }
 
-iree_status_t iree_hal_amd_gpu_executable_profile_metadata(
+static iree_status_t iree_hal_amd_gpu_executable_profile_metadata(
     iree_hal_executable_t* base,
     iree_hal_amd_gpu_profile_executable_t** out_metadata) {
   iree_hal_amd_gpu_executable_t* executable = (void*)base;
@@ -1000,6 +1000,31 @@ iree_status_t iree_hal_amd_gpu_executable_profile_metadata(
   iree_slim_mutex_unlock(&executable->global_mutex);
   *out_metadata = metadata;
   return status;
+}
+
+iree_status_t iree_hal_amd_gpu_executable_profile_dispatch(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    const iree_hal_amd_gpu_dispatch_geometry_t* geometry,
+    iree_hal_dispatch_flags_t flags,
+    iree_hal_amd_gpu_profile_dispatch_t* out_dispatch) {
+  iree_hal_amd_gpu_profile_executable_t* metadata = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_executable_profile_metadata(executable, &metadata));
+  *out_dispatch = (iree_hal_amd_gpu_profile_dispatch_t){
+      .executable = metadata,
+      .event = iree_hal_profile_dispatch_event_default(),
+  };
+  iree_hal_profile_dispatch_event_t* event = &out_dispatch->event;
+  event->executable_id = iree_hal_amd_gpu_profile_executable_id(metadata);
+  event->function_ordinal = (uint32_t)function.value;
+  event->flags = iree_hal_dispatch_uses_indirect_parameters(flags)
+                     ? IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_INDIRECT_PARAMETERS
+                     : 0;
+  memcpy(event->workgroup_count, geometry->workgroup_count,
+         sizeof(event->workgroup_count));
+  memcpy(event->workgroup_size, geometry->workgroup_size,
+         sizeof(event->workgroup_size));
+  return iree_ok_status();
 }
 
 static iree_host_size_t iree_hal_amd_gpu_executable_function_count(

@@ -143,18 +143,19 @@ void iree_hal_amd_gpu_aql_program_emit(
     const iree_hal_amd_gpu_aql_program_pool_t* pool,
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
-    uint32_t packet_count, bool first, bool initialize,
-    iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
-    uint64_t argument_address, void* upload) {
+    uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
+    uint64_t argument_address, uint64_t signal_address, void* upload,
+    iree_hal_amd_gpu_aql_program_flags_t flags) {
+  const bool profiling = (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE) != 0;
   iree_hal_amd_gpu_aql_packet_t prefix[3];
   uint32_t count = 0;
   iree_hal_amd_gpu_aql_materialize_arguments_t* materialize = upload;
   uint64_t materialize_address = argument_address;
-  if (first) {
+  if (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST) {
     iree_hal_amd_gpu_aql_program_arguments_t* arguments = upload;
     const iree_hal_amd_gpu_program_source_t source =
         iree_hal_amd_gpu_program_source(program);
-    if (initialize) {
+    if (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE) {
       arguments->copy = (iree_hal_amd_gpu_blit_arguments_t){
           .source = source.address,
           .target = instance->address,
@@ -170,7 +171,13 @@ void iree_hal_amd_gpu_aql_program_emit(
     if (program->fixup_count) {
       arguments->fixup = (iree_hal_amd_gpu_fixup_arguments_t){
           .entries = source.fixups,
-          .values = argument_address + sizeof(*arguments),
+          .values =
+              argument_address + sizeof(*arguments) +
+              (profiling
+                   ? sizeof(
+                         iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
+                         sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
+                   : 0),
           .target = instance->address,
           .entry_count = program->fixup_count,
       };
@@ -194,8 +201,15 @@ void iree_hal_amd_gpu_aql_program_emit(
       .first = (uint32_t)(position + count + 1) & ring->capacity_mask,
       .packet_count = packet_count,
   };
+  if (profiling) {
+    iree_hal_amd_gpu_aql_materialize_profile_arguments_t* profile =
+        (void*)materialize;
+    profile->signals = signal_address;
+    profile->signal_address = signal_address;
+  }
   prefix[count++] = iree_hal_amd_gpu_aql_materialize_packet(
-      pool->materialize, materialize_address,
+      profiling ? pool->materialize_profile : pool->materialize,
+      materialize_address,
       IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
           IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
   // Every argument is complete before a valid header can run ahead of the host.

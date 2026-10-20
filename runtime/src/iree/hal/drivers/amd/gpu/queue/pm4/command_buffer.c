@@ -662,27 +662,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
         buffer, false, profile_end_offset + 6 * 4,
         IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_ADDRESS, sample_offset + 8, false));
-    iree_hal_amd_gpu_profile_executable_t* metadata = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amd_gpu_executable_profile_metadata(executable, &metadata));
-    iree_hal_amd_gpu_profile_dispatch_t capture = {
-        .executable = metadata,
-        .event = iree_hal_profile_dispatch_event_default(),
-    };
-    capture.event.flags =
-        IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_COMMAND_BUFFER |
-        (indirect_parameters
-             ? IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_INDIRECT_PARAMETERS
-             : 0);
+    iree_hal_amd_gpu_profile_dispatch_t capture;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_executable_profile_dispatch(
+        executable, token, &dispatch.geometry, flags, &capture));
+    capture.event.flags |= IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_COMMAND_BUFFER;
     capture.event.command_buffer_id = iree_hal_command_buffer_profile_id(base);
     capture.event.command_index = buffer->program->operation_count;
-    capture.event.executable_id =
-        iree_hal_amd_gpu_profile_executable_id(metadata);
-    capture.event.function_ordinal = (uint32_t)token.value;
-    memcpy(capture.event.workgroup_count, dispatch.geometry.workgroup_count,
-           sizeof(capture.event.workgroup_count));
-    memcpy(capture.event.workgroup_size, dispatch.geometry.workgroup_size,
-           sizeof(capture.event.workgroup_size));
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_commands_append(
         buffer->program->profile, capture));
   }

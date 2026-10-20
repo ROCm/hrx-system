@@ -57,6 +57,7 @@ static void iree_hal_amd_gpu_aql_command_buffer_destroy(
   iree_hal_device_t* device = base->queue_family->device;
   iree_status_free(buffer->recording_status);
   iree_hal_amd_gpu_recording_deinitialize(&buffer->recording);
+  iree_hal_amd_gpu_profile_commands_release(buffer->program.profile);
   iree_hal_amd_gpu_command_inputs_deinitialize(&buffer->inputs);
   iree_hal_resource_set_free(buffer->resources);
   iree_arena_block_pool_deinitialize(&buffer->resource_blocks);
@@ -106,7 +107,22 @@ iree_status_t iree_hal_amd_gpu_aql_command_buffer_create(
   iree_arena_block_pool_initialize(4096, host_allocator,
                                    &buffer->resource_blocks);
   iree_status_t status = iree_ok_status();
-  if (!(mode & IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED)) {
+  if (iree_any_bit_set(
+          mode, IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
+                    IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA)) {
+    iree_hal_profile_command_buffer_record_t record =
+        iree_hal_profile_command_buffer_record_default();
+    record.command_buffer_id =
+        iree_hal_command_buffer_profile_id(&buffer->base);
+    record.mode = mode;
+    record.command_categories = categories;
+    record.queue_family_ordinal = family->ordinal;
+    record.physical_device_ordinal = 0;
+    status = iree_hal_amd_gpu_profile_commands_create(&record, host_allocator,
+                                                      &buffer->program.profile);
+  }
+  if (iree_status_is_ok(status) &&
+      !(mode & IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED)) {
     status = iree_hal_resource_set_allocate(&buffer->resource_blocks,
                                             &buffer->resources);
   }
@@ -142,7 +158,9 @@ static iree_status_t iree_hal_amd_gpu_aql_command_packets(
     }
     program->blocks[program->block_count++] =
         (iree_hal_amd_gpu_aql_program_block_t){
-            .offset = buffer->recording.commands.length};
+            .offset = buffer->recording.commands.length,
+            .dispatches = {.first = program->dispatch_count},
+        };
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_commands(
       &buffer->recording, count * 64, 64, out_offset, (void**)out_packets));
@@ -388,6 +406,22 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
         IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
     target->words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
   }
+  iree_hal_amd_gpu_aql_program_block_t* block =
+      &buffer->program.blocks[buffer->program.block_count - 1];
+  if (buffer->program.profile) {
+    iree_hal_amd_gpu_profile_dispatch_t capture;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_executable_profile_dispatch(
+        executable, token, &geometry, flags, &capture));
+    capture.event.flags |= IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_COMMAND_BUFFER;
+    capture.event.command_buffer_id =
+        iree_hal_command_buffer_profile_id(&buffer->base);
+    capture.event.command_index = buffer->program.operation_count;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_commands_append(
+        buffer->program.profile, capture));
+    // Private template operand, replaced before a native header is published.
+    target->words[14] = block->dispatches.count + 1;
+  }
+  ++block->dispatches.count;
   ++buffer->program.dispatch_count;
   ++buffer->program.operation_count;
   return iree_ok_status();
