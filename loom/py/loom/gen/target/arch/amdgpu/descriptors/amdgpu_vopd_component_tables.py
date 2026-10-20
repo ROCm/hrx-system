@@ -414,6 +414,7 @@ def _component_definitions() -> tuple[_VopdComponentDefinition, ...]:
         _component(
             "dot2_f32_f16",
             12,
+            descriptor_set_group=_DESCRIPTOR_SET_GROUP_GFX11_GFX12,
             assembly_mnemonic="v_dual_dot2acc_f32_f16",
             form=_FORM_TIED_ACCUMULATE,
             operand_layout=(2, 0, 1),
@@ -422,6 +423,7 @@ def _component_definitions() -> tuple[_VopdComponentDefinition, ...]:
         _component(
             "dot2_f32_bf16",
             13,
+            descriptor_set_group=_DESCRIPTOR_SET_GROUP_GFX11_GFX12,
             assembly_mnemonic="v_dual_dot2acc_f32_bf16",
             form=_FORM_TIED_ACCUMULATE,
             operand_layout=(2, 0, 1),

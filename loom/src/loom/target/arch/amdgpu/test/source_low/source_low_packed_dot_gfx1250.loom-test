@@ -1,59 +1,102 @@
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx1250 output=low
 
-amdgpu.target<gfx1250> @target
+// GFX12.5 retains the complete LLVM Dot7/8 integer family inherited from
+// RDNA4. Keep every signedness mode visible at the target boundary.
+func.def @gfx1250_dot4i_modes(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>) {
+  %s8s8 = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %u8u8 = vector.dot4i<u8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %u8s8 = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %s8u8 = vector.dot4i<s8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %s8s8, %u8u8, %u8s8, %s8u8 : vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>
+}
 
-func.def target(@target) @gfx1250_dot4f8_fp8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core> abi(hal_kernel) @gfx1250_dot4i_modes(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %s8s8 = v_dot4_i32_i8 %lhs, %rhs, %acc
+  %u8u8 = v_dot4_u32_u8 %lhs, %rhs, %acc
+  %u8s8 = v_dot4_i32_iu8_u8s8 %lhs, %rhs, %acc
+  %s8u8 = v_dot4_i32_iu8_s8u8 %lhs, %rhs, %acc
+  return %s8s8, %u8u8, %u8s8, %s8u8
+}
+
+// ====
+
+func.def @gfx1250_dot8i4_modes(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>) {
+  %s4s4 = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<1xi32>
+  %u4u4 = vector.dot8i4<u4u4> %lhs, %rhs, %acc : vector<1xi32>
+  %u4s4 = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
+  %s4u4 = vector.dot8i4<s4u4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %s4s4, %u4u4, %u4s4, %s4u4 : vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core> abi(hal_kernel) @gfx1250_dot8i4_modes(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %s4s4 = v_dot8_i32_i4 %lhs, %rhs, %acc
+  %u4u4 = v_dot8_u32_u4 %lhs, %rhs, %acc
+  %u4s4 = v_dot8_i32_iu4_u4s4 %lhs, %rhs, %acc
+  %s4u4 = v_dot8_i32_iu4_s4u4 %lhs, %rhs, %acc
+  return %s4s4, %u4u4, %u4s4, %s4u4
+}
+
+// ====
+
+// GFX12.5 has no native BF16 DOT2 instruction. Reuse the shared composed
+// widening and FMA rule instead of emitting the rejected RDNA4 descriptor.
+func.def @gfx1250_bf16_dot2f(%lhs: vector<2xbf16>, %rhs: vector<2xbf16>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  %dot = vector.dot2f %lhs, %rhs, %acc : vector<2xbf16>, vector<2xbf16>, vector<1xf32>
+  func.return %dot : vector<1xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core> abi(hal_kernel) @gfx1250_bf16_dot2f(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %9 = copy %lhs : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %10 = copy %rhs : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %11 = copy %acc : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %12 = v_lshlrev_b32_lit %9, 16
+  %13 = v_lshlrev_b32_lit %10, 16
+  %14 = v_and_b32_lit %9, 4294901760
+  %15 = v_and_b32_lit %10, 4294901760
+  %16 = v_fma_f32 %12, %13, %11
+  %dot = v_fma_f32 %14, %15, %16
+  return %dot
+}
+
+// ====
+
+func.def @gfx1250_f16_dot2f(%lhs: vector<2xf16>, %rhs: vector<2xf16>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot2_f32_f16", constraint_key="amdgpu.dot2f.f16_descriptor"}
+  %dot = vector.dot2f %lhs, %rhs, %acc : vector<2xf16>, vector<2xf16>, vector<1xf32>
+  func.return %dot : vector<1xf32>
+}
+
+// ====
+
+func.def @gfx1250_dot4f8_fp8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot4_f32", constraint_key="amdgpu.dot4f8.descriptor"}
   %dot = vector.dot4f8<fp8bf8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %dot : vector<1xf32>
 }
 
-// ----
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @gfx1250_dot4f8_fp8bf8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %dot = v_dot4_f32_fp8_bf8 %lhs, %rhs, %acc
-  return %dot
-}
-
 // ====
 
-amdgpu.target<gfx1250> @target
-
-func.def target(@target) @gfx1250_dot4f8_bf8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+func.def @gfx1250_dot4f8_bf8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot4_f32", constraint_key="amdgpu.dot4f8.descriptor"}
   %dot = vector.dot4f8<bf8fp8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %dot : vector<1xf32>
 }
 
-// ----
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @gfx1250_dot4f8_bf8fp8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %dot = v_dot4_f32_bf8_fp8 %lhs, %rhs, %acc
-  return %dot
-}
-
 // ====
 
-amdgpu.target<gfx1250> @target
-
-func.def target(@target) @gfx1250_dot4f8_fp8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+func.def @gfx1250_dot4f8_fp8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot4_f32", constraint_key="amdgpu.dot4f8.descriptor"}
   %dot = vector.dot4f8<fp8fp8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %dot : vector<1xf32>
 }
 
-// ----
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @gfx1250_dot4f8_fp8fp8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %dot = v_dot4_f32_fp8_fp8 %lhs, %rhs, %acc
-  return %dot
-}
-
 // ====
 
-amdgpu.target<gfx1250> @target
-
-func.def target(@target) @gfx1250_dot4f8_bf8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+func.def @gfx1250_dot4f8_bf8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot4_f32", constraint_key="amdgpu.dot4f8.descriptor"}
   %dot = vector.dot4f8<bf8bf8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %dot : vector<1xf32>
-}
-
-// ----
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @gfx1250_dot4f8_bf8bf8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %dot = v_dot4_f32_bf8_bf8 %lhs, %rhs, %acc
-  return %dot
 }

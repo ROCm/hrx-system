@@ -1,172 +1,33 @@
-// RUN: emit source-low target=amdgpu:gfx1250 output=low
+// RUN: with-checks emit source-low target=amdgpu:gfx1250 output=low
 // INPUT: cxx root=mxfp4_group_dot I=../../../../../import/cxx/test
 #include "mxfp_group_dot.cxx"
 
+// The compact packed-DOT target test owns exact BF16 composition wiring. This
+// large CXX integration case verifies that the 32-element MXFP group scales
+// that composition across all 16 result lanes while retaining native decode.
 // ----
-low.func.def public target<amdgpu.rdna4.gfx125x.core> abi(hal_kernel) @mxfp4_group_dot(%payload: reg<amdgpu.vgpr x4>, %scale: reg<amdgpu.vgpr>, %activations: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr>) asm {
-  %16 = slice %payload[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %17 = v_cvt_scale_pk8_bf16_fp4 %16, %scale
-  %18 = slice %payload[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %19 = v_cvt_scale_pk8_bf16_fp4 %18, %scale
-  %20 = slice %payload[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %21 = v_cvt_scale_pk8_bf16_fp4 %20, %scale
-  %22 = slice %payload[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %23 = v_cvt_scale_pk8_bf16_fp4 %22, %scale
-  %weights = concat(%17, %19, %21, %23) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x16>
-  %25 = v_mov_b32 0
-  %42 = slice %weights[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %43 = slice %activations[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %45 = v_dot2_f32_bf16 %42, %43, %25 : reg<amdgpu.vgpr>
-  %46 = slice %weights[1] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %47 = slice %activations[1] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %49 = v_dot2_f32_bf16 %46, %47, %25 : reg<amdgpu.vgpr>
-  %50 = slice %weights[2] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %51 = slice %activations[2] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %53 = v_dot2_f32_bf16 %50, %51, %25 : reg<amdgpu.vgpr>
-  %54 = slice %weights[3] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %55 = slice %activations[3] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %57 = v_dot2_f32_bf16 %54, %55, %25 : reg<amdgpu.vgpr>
-  %58 = slice %weights[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %59 = slice %activations[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %61 = v_dot2_f32_bf16 %58, %59, %25 : reg<amdgpu.vgpr>
-  %62 = slice %weights[5] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %63 = slice %activations[5] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %65 = v_dot2_f32_bf16 %62, %63, %25 : reg<amdgpu.vgpr>
-  %66 = slice %weights[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %67 = slice %activations[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %69 = v_dot2_f32_bf16 %66, %67, %25 : reg<amdgpu.vgpr>
-  %70 = slice %weights[7] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %71 = slice %activations[7] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %73 = v_dot2_f32_bf16 %70, %71, %25 : reg<amdgpu.vgpr>
-  %74 = slice %weights[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %75 = slice %activations[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %77 = v_dot2_f32_bf16 %74, %75, %25 : reg<amdgpu.vgpr>
-  %78 = slice %weights[9] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %79 = slice %activations[9] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %81 = v_dot2_f32_bf16 %78, %79, %25 : reg<amdgpu.vgpr>
-  %82 = slice %weights[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %83 = slice %activations[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %85 = v_dot2_f32_bf16 %82, %83, %25 : reg<amdgpu.vgpr>
-  %86 = slice %weights[11] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %87 = slice %activations[11] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %89 = v_dot2_f32_bf16 %86, %87, %25 : reg<amdgpu.vgpr>
-  %90 = slice %weights[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %91 = slice %activations[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %93 = v_dot2_f32_bf16 %90, %91, %25 : reg<amdgpu.vgpr>
-  %94 = slice %weights[13] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %95 = slice %activations[13] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %97 = v_dot2_f32_bf16 %94, %95, %25 : reg<amdgpu.vgpr>
-  %98 = slice %weights[14] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %99 = slice %activations[14] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %101 = v_dot2_f32_bf16 %98, %99, %25 : reg<amdgpu.vgpr>
-  %102 = slice %weights[15] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %103 = slice %activations[15] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %105 = v_dot2_f32_bf16 %102, %103, %25 : reg<amdgpu.vgpr>
-  %108 = v_add_f32_lit %45, 0
-  %110 = v_add_f32 %108, %49
-  %112 = v_add_f32 %110, %53
-  %114 = v_add_f32 %112, %57
-  %116 = v_add_f32 %114, %61
-  %118 = v_add_f32 %116, %65
-  %120 = v_add_f32 %118, %69
-  %122 = v_add_f32 %120, %73
-  %124 = v_add_f32 %122, %77
-  %126 = v_add_f32 %124, %81
-  %128 = v_add_f32 %126, %85
-  %130 = v_add_f32 %128, %89
-  %132 = v_add_f32 %130, %93
-  %134 = v_add_f32 %132, %97
-  %136 = v_add_f32 %134, %101
-  %138 = v_add_f32 %136, %105
-  return %138
-}
+CHECK: low.func.def public target<amdgpu.rdna4.gfx125x.core> abi(hal_kernel) @mxfp4_group_dot*
+CHECK-COUNT-4: * = v_cvt_scale_pk8_bf16_fp4 *, %scale
+CHECK-COUNT-32: * = v_lshlrev_b32_lit *, 16
+CHECK-COUNT-32: * = v_and_b32_lit *, 4294901760
+CHECK-COUNT-32: * = v_fma_f32 *, *, *
+CHECK-COUNT-1: * = v_add_f32_lit *, 0
+CHECK-COUNT-15: * = v_add_f32 *, *
+CHECK-NOT: *v_dot2_f32_bf16*
+CHECK: return *
 
 // ====
 // INPUT: cxx root=mxfp8_group_dot I=../../../../../import/cxx/test
 #include "mxfp_group_dot.cxx"
 
+// FP8 uses a different native decoder and the same complete BF16 dot family.
 // ----
-low.func.def public target<amdgpu.rdna4.gfx125x.core> abi(hal_kernel) @mxfp8_group_dot(%payload: reg<amdgpu.vgpr x8>, %scale: reg<amdgpu.vgpr>, %activations: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr>) asm {
-  %16 = slice %payload[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %17 = slice %payload[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %18 = concat(%16, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %19 = v_cvt_scale_pk8_bf16_fp8 %18, %scale
-  %20 = slice %19[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %21 = slice %19[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %22 = slice %19[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %23 = slice %19[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %24 = slice %payload[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %25 = slice %payload[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %26 = concat(%24, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %27 = v_cvt_scale_pk8_bf16_fp8 %26, %scale
-  %28 = slice %27[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %29 = slice %27[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %30 = slice %27[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %31 = slice %27[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %32 = slice %payload[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %33 = slice %payload[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %34 = concat(%32, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %35 = v_cvt_scale_pk8_bf16_fp8 %34, %scale
-  %36 = slice %35[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %37 = slice %35[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %38 = slice %35[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %39 = slice %35[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %40 = slice %payload[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %41 = slice %payload[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %42 = concat(%40, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %43 = v_cvt_scale_pk8_bf16_fp8 %42, %scale
-  %44 = slice %43[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %45 = slice %43[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %46 = slice %43[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %47 = slice %43[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %49 = v_mov_b32 0
-  %67 = slice %activations[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %69 = v_dot2_f32_bf16 %20, %67, %49 : reg<amdgpu.vgpr>
-  %71 = slice %activations[1] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %73 = v_dot2_f32_bf16 %21, %71, %49 : reg<amdgpu.vgpr>
-  %75 = slice %activations[2] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %77 = v_dot2_f32_bf16 %22, %75, %49 : reg<amdgpu.vgpr>
-  %79 = slice %activations[3] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %81 = v_dot2_f32_bf16 %23, %79, %49 : reg<amdgpu.vgpr>
-  %83 = slice %activations[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %85 = v_dot2_f32_bf16 %28, %83, %49 : reg<amdgpu.vgpr>
-  %87 = slice %activations[5] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %89 = v_dot2_f32_bf16 %29, %87, %49 : reg<amdgpu.vgpr>
-  %91 = slice %activations[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %93 = v_dot2_f32_bf16 %30, %91, %49 : reg<amdgpu.vgpr>
-  %95 = slice %activations[7] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %97 = v_dot2_f32_bf16 %31, %95, %49 : reg<amdgpu.vgpr>
-  %99 = slice %activations[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %101 = v_dot2_f32_bf16 %36, %99, %49 : reg<amdgpu.vgpr>
-  %103 = slice %activations[9] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %105 = v_dot2_f32_bf16 %37, %103, %49 : reg<amdgpu.vgpr>
-  %107 = slice %activations[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %109 = v_dot2_f32_bf16 %38, %107, %49 : reg<amdgpu.vgpr>
-  %111 = slice %activations[11] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %113 = v_dot2_f32_bf16 %39, %111, %49 : reg<amdgpu.vgpr>
-  %115 = slice %activations[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %117 = v_dot2_f32_bf16 %44, %115, %49 : reg<amdgpu.vgpr>
-  %119 = slice %activations[13] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %121 = v_dot2_f32_bf16 %45, %119, %49 : reg<amdgpu.vgpr>
-  %123 = slice %activations[14] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %125 = v_dot2_f32_bf16 %46, %123, %49 : reg<amdgpu.vgpr>
-  %127 = slice %activations[15] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
-  %129 = v_dot2_f32_bf16 %47, %127, %49 : reg<amdgpu.vgpr>
-  %132 = v_add_f32_lit %69, 0
-  %134 = v_add_f32 %132, %73
-  %136 = v_add_f32 %134, %77
-  %138 = v_add_f32 %136, %81
-  %140 = v_add_f32 %138, %85
-  %142 = v_add_f32 %140, %89
-  %144 = v_add_f32 %142, %93
-  %146 = v_add_f32 %144, %97
-  %148 = v_add_f32 %146, %101
-  %150 = v_add_f32 %148, %105
-  %152 = v_add_f32 %150, %109
-  %154 = v_add_f32 %152, %113
-  %156 = v_add_f32 %154, %117
-  %158 = v_add_f32 %156, %121
-  %160 = v_add_f32 %158, %125
-  %162 = v_add_f32 %160, %129
-  return %162
-}
+CHECK: low.func.def public target<amdgpu.rdna4.gfx125x.core> abi(hal_kernel) @mxfp8_group_dot*
+CHECK-COUNT-4: * = v_cvt_scale_pk8_bf16_fp8 *, %scale
+CHECK-COUNT-32: * = v_lshlrev_b32_lit *, 16
+CHECK-COUNT-32: * = v_and_b32_lit *, 4294901760
+CHECK-COUNT-32: * = v_fma_f32 *, *, *
+CHECK-COUNT-1: * = v_add_f32_lit *, 0
+CHECK-COUNT-15: * = v_add_f32 *, *
+CHECK-NOT: *v_dot2_f32_bf16*
+CHECK: return *

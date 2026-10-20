@@ -2418,6 +2418,22 @@ def _gfx12_core_overlay_descriptors(
     )
 
 
+_GFX125X_NATIVE_PACKED_DOT_DESCRIPTOR_KEYS = frozenset(
+    {
+        # LLVM FeatureDot7Insts.
+        "amdgpu.v_dot4_i32_i8",
+        "amdgpu.v_dot4_i32_iu8.s8u8",
+        "amdgpu.v_dot4_i32_iu8.u8s8",
+        "amdgpu.v_dot4_u32_u8",
+        # LLVM FeatureDot8Insts.
+        "amdgpu.v_dot8_i32_i4",
+        "amdgpu.v_dot8_i32_iu4.s4u4",
+        "amdgpu.v_dot8_i32_iu4.u4s4",
+        "amdgpu.v_dot8_u32_u4",
+    }
+)
+
+
 @cache
 def _gfx125x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
@@ -2426,6 +2442,10 @@ def _gfx125x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             for overlay in _rdna4_core_overlays(include_f64_atomic_arithmetic=True)
             if not (overlay.semantic_tag or "").startswith(
                 ("float.interpolation.", "matrix.wmma.")
+            )
+            and (
+                not (overlay.semantic_tag or "").startswith("dot.")
+                or overlay.descriptor_key in _GFX125X_NATIVE_PACKED_DOT_DESCRIPTOR_KEYS
             )
         ),
         _s_getreg_b32_cluster_workgroup_flat_id_overlay(),

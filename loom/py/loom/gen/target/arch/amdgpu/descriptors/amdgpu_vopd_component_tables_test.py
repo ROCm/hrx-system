@@ -104,6 +104,31 @@ def test_vopd_component_rows_have_unique_descriptor_keys() -> None:
     assert len(descriptor_keys) == len(set(descriptor_keys))
 
 
+def test_packed_float_dot_components_exclude_gfx125x_profiles() -> None:
+    descriptor_set_infos = sorted_descriptor_set_infos()
+    components = {component.descriptor_key: component for component in amdgpu_vopd_component_tables._component_definitions() if component.descriptor_key.startswith("amdgpu.v_dot")}
+    assert set(components) == {
+        "amdgpu.v_dot2_f32_f16",
+        "amdgpu.v_dot2_f32_bf16",
+    }
+    expected_descriptor_sets = (
+        "amdgpu.gfx11.generic.core",
+        "amdgpu.gfx12.generic.core",
+        "amdgpu.rdna3.core",
+        "amdgpu.rdna3_5.core",
+        "amdgpu.rdna4.core",
+        "amdgpu.rdna4m.core",
+    )
+    for component in components.values():
+        assert (
+            amdgpu_vopd_component_tables._descriptor_set_keys_for_group(
+                component.descriptor_set_group,
+                descriptor_set_infos,
+            )
+            == expected_descriptor_sets
+        )
+
+
 def test_vopd_component_source_forms_share_canonical_native_info() -> None:
     components = amdgpu_vopd_component_tables._component_definitions()
     move_components = tuple(component for component in components if component.op_value == 8)
