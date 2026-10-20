@@ -100,7 +100,7 @@ loom_corpus_test(
     "XDNA/051"
     "numeric/vector/f32.loom"
     "@vector_f32_division_values"
-    "TARGET/001"
+    "LOWERING/036"
     "numeric/vector/f32.loom"
     "@vector_f32_rounding_values"
     "LOWERING/036"
