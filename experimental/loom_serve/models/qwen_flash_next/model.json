@@ -22,6 +22,7 @@
       "kernels/hyperconnection.loom",
       "kernels/hyperconnection_matrix.loom",
       "kernels/iq4.loom",
+      "kernels/matrix.loom",
       "kernels/pages.loom",
       "kernels/ple_consumer.loom",
       "kernels/ple_hash.loom",

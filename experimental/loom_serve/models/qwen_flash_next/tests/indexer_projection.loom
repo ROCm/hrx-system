@@ -1,0 +1,105 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+kernel.decl @qsa_linear_bf16(%width: index) launch(%width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+// The packed epoch owns a live prefix. Poison all remaining backing rows,
+// including storage beyond the configured capacity, independently of the dot.
+kernel.def @indexer_fixture() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%requested_arg: index, %epoch: buffer, %input: buffer) {
+  %requested = index.assume %requested_arg [range(%requested_arg, 0, 257)] : index
+  %capacity = config.get @flash_next.token_count : index
+  %count = index.min %requested, %capacity : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %threads = index.constant 256 : index
+  %hidden = index.constant 2560 : index
+  %backing = index.constant 663040 : index
+  %thread = kernel.workitem.id<x> : index
+  %leader = index.cmp eq, %thread, %c0 : index
+  scf.if %leader {
+    %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+    %word = index.cast %count : index to i32
+    view.store %word, %header[0] : i32, view<3xi32>
+  }
+  %values = buffer.view %input[%origin] : buffer -> view<663040xbf16>
+  %poison_word = scalar.constant 32705 : i16
+  %poison = scalar.bitcast %poison_word : i16 to bf16
+  %first = index.madd %count, %hidden, %thread : index
+  scf.for %element = [%first to %backing step %threads] {
+    view.store %poison, %values[%element] : bf16, view<663040xbf16>
+  }
+  kernel.return
+}
+
+// Each thread contracts original BF16 values in scalar F64, with no matrix
+// fragments, staging, subgroup reduction, or production addressing helper.
+kernel.def @indexer_reference(%width: index) {
+  %threads = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded = index.add %width, %rounding : index
+  %groups = index.div %padded, %threads : index
+  %capacity = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%requested_arg: index, %width_arg: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %requested = index.assume %requested_arg [range(%requested_arg, 0, 257)] : index
+  %width = index.assume %width_arg [range(%width_arg, 128, 512), multiple_of(%width_arg, 4)] : index
+  %capacity = config.get @flash_next.token_count : index
+  %count = index.min %requested, %capacity : index
+  %token = kernel.workgroup.id<y> : index
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %threads = index.constant 64 : index
+  %feature = index.madd %group, %threads, %thread : index
+  %live_row = index.cmp ult, %token, %count : index
+  %live_feature = index.cmp ult, %feature, %width : index
+  %live = scalar.andi %live_row, %live_feature : i1
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %hidden = index.constant 2560 : index
+    %inputs = buffer.view %input[%origin] : buffer -> view<259x2560xbf16>
+    %weights = buffer.view %weight[%origin] : buffer -> view<[%width]x2560xbf16>
+    %outputs = buffer.view %output[%origin] : buffer -> view<259x[%width]xbf16>
+    %c0_f64 = scalar.constant 0.0 : f64
+    %sum = scf.for %column = [%c0 to %hidden step %c1](%partial = %c0_f64 : f64) -> (f64) {
+      %left = view.load %inputs[%token, %column] : view<259x2560xbf16> -> bf16
+      %right = view.load %weights[%feature, %column] : view<[%width]x2560xbf16> -> bf16
+      %left_wide = scalar.extf %left : bf16 to f64
+      %right_wide = scalar.extf %right : bf16 to f64
+      %next = scalar.fmaf %left_wide, %right_wide, %partial : f64
+      scf.yield %next : f64
+    }
+    %packed = scalar.fptrunc %sum : f64 to bf16
+    view.store %packed, %outputs[%token, %feature] : bf16, view<259x[%width]xbf16>
+  }
+  kernel.return
+}
+
+check.case public @indexer_projection {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %requested = check.param.choice values([0, 1, 15, 16, 127, 128, 129, 257]) name("active") : index
+  %width = check.param.choice values([128, 132, 512]) name("features") : index
+  %input_seed = check.literal value(10391) : i64
+  %weight_seed = check.literal value(94153) : i64
+  %epoch = check.generate.fill value(0) : tensor<3xi32>
+  %input = check.generate.random.uniform seed(%input_seed) range(-0.5 to 0.5) : tensor<259x2560xbf16>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.25 to 0.25) : tensor<[%width]x2560xbf16>
+  %actual = check.generate.fill value(-17.0) : tensor<259x[%width]xbf16>
+  %expected = check.generate.fill value(-17.0) : tensor<259x[%width]xbf16>
+  kernel.launch @indexer_fixture(%requested, %epoch, %input) : (index, tensor<3xi32>, tensor<259x2560xbf16>)
+  kernel.launch @indexer_reference[%width](%requested, %width, %input, %weight, %expected) : [index](index, index, tensor<259x2560xbf16>, tensor<[%width]x2560xbf16>, tensor<259x[%width]xbf16>)
+  kernel.launch @qsa_linear_bf16[%width](%width, %epoch, %input, %weight, %actual) : [index](index, tensor<3xi32>, tensor<259x2560xbf16>, tensor<[%width]x2560xbf16>, tensor<259x[%width]xbf16>)
+  check.expect.close actual(%actual) expected(%expected) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<259x[%width]xbf16>
+  check.return
+}
