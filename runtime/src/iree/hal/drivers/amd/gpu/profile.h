@@ -52,17 +52,31 @@ typedef struct iree_hal_amd_gpu_profile_dispatch_t {
   iree_hal_profile_dispatch_event_t event;
 } iree_hal_amd_gpu_profile_dispatch_t;
 
-// Two native clock writes owned by one invocation through host retirement.
-// These occupy the ordinary argument ring and are never in a reusable IB.
-// Active capture serializes dispatches around these samples. Intervals include
-// native dispatch issue and its completion join, not wave occupancy. Raw ticks
-// use the native queue's declared frequency without an inferred host epoch.
+// Native dispatch interval owned through host retirement. PM4 samples bracket
+// dispatch issue and completion joins; AQL samples are written by firmware in
+// native completion signals. Raw ticks use the queue's declared frequency
+// without an inferred host epoch and do not describe wave occupancy.
 typedef struct iree_hal_amd_gpu_profile_sample_t {
-  // CP clock sampled after preceding compute has joined.
+  // Native dispatch-start clock tick.
   uint64_t begin;
-  // CP clock sampled after this dispatch's compute work has joined.
+  // Native dispatch-end clock tick.
   uint64_t end;
 } iree_hal_amd_gpu_profile_sample_t;
+
+// An independently retiring dispatch range. Its native owner keeps samples
+// alive until completion copies them into the bounded host stream. Chunked
+// publication stores this view in each retirement record, not the shared
+// invocation: later publication can overlap earlier retirement.
+typedef struct iree_hal_amd_gpu_profile_completion_t {
+  // First timestamp pair, or NULL for metadata-only capture.
+  const iree_hal_amd_gpu_profile_sample_t* samples;
+  // Byte distance between timestamp pairs; zero for metadata-only capture.
+  uint32_t sample_stride;
+  // First dispatch in the immutable command metadata, or zero for direct work.
+  uint32_t first;
+  // Completed dispatches in this range, including metadata-only dispatches.
+  uint32_t count;
+} iree_hal_amd_gpu_profile_completion_t;
 
 // Host-only command metadata retained independently of resident IB storage.
 typedef struct iree_hal_amd_gpu_profile_commands_t
@@ -93,10 +107,9 @@ typedef struct iree_hal_amd_gpu_profile_operation_t {
   iree_hal_amd_gpu_profile_commands_t* commands;
   // Direct dispatch attribution; executable metadata is borrowed by capture.
   iree_hal_amd_gpu_profile_dispatch_t dispatch;
-  // Invocation-private native samples, read only after native retirement.
-  const iree_hal_amd_gpu_profile_sample_t* samples;
-  // Sample count fixed at public acceptance; zero for metadata-only capture.
-  uint32_t sample_count;
+  // Whole-operation completion facts. Chunked execution derives independent
+  // subranges and sample views in each native retirement record.
+  iree_hal_amd_gpu_profile_completion_t completion;
   // The stream has received this operation, including a possible ring drop.
   bool recorded;
 } iree_hal_amd_gpu_profile_operation_t;
@@ -120,7 +133,8 @@ bool iree_hal_amd_gpu_profile_timestamps_dispatches(
 // host rings, retaining only host metadata. No sink/native call or allocation.
 void iree_hal_amd_gpu_profile_operation_complete(
     iree_hal_amd_gpu_profile_t* profile,
-    const iree_hal_amd_gpu_profile_operation_t* operation);
+    const iree_hal_amd_gpu_profile_operation_t* operation,
+    const iree_hal_amd_gpu_profile_completion_t* completion);
 
 // Writes stable stream snapshots outside their mutexes. Failed writes retain
 // the snapshot for retry. The caller serializes flush/end with each other.

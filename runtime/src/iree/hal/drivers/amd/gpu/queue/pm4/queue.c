@@ -667,10 +667,9 @@ iree_hal_amd_gpu_pm4_publish_execute(
   iree_hal_amd_gpu_program_t* program = &command->resident;
   iree_hal_amd_gpu_profile_operation_t* profile =
       iree_hal_amd_gpu_pm4_submission_profile(submission);
-  const uint64_t sample_length =
-      profile ? (uint64_t)profile->sample_count *
-                    sizeof(iree_hal_amd_gpu_profile_sample_t)
-              : 0;
+  const uint64_t sample_length = profile ? (uint64_t)profile->completion.count *
+                                               profile->completion.sample_stride
+                                         : 0;
   const uint64_t argument_length = command->argument_length + sample_length;
   iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   if (argument_length > arguments->capacity) {
@@ -757,7 +756,7 @@ iree_hal_amd_gpu_pm4_publish_execute(
       sample_length ? arguments->address + offset + command->argument_length
                     : 0;
   if (sample_length) {
-    profile->samples = (void*)(upload + command->argument_length);
+    profile->completion.samples = (void*)(upload + command->argument_length);
   }
   iree_status_t status = iree_hal_amd_gpu_pm4_command_invocation_write(
       invocation, queue->options.queue_ordinal, dispatch_id, continuation,
@@ -883,10 +882,9 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
                                                        dispatch_request->flags)
                : (iree_hal_amd_gpu_pm4_dispatch_storage_t){0};
   iree_hal_amd_gpu_profile_operation_t* profile = request->profile;
-  const uint64_t sample_length =
-      profile ? (uint64_t)profile->sample_count *
-                    sizeof(iree_hal_amd_gpu_profile_sample_t)
-              : 0;
+  const uint64_t sample_length = profile ? (uint64_t)profile->completion.count *
+                                               profile->completion.sample_stride
+                                         : 0;
   const uint64_t sample_offset =
       sample_length ? iree_align_uint64(argument_storage.length, 8) : 0;
   const uint64_t argument_length =
@@ -1100,8 +1098,8 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
     const uint64_t sample_address =
         arguments->address + argument_offset + sample_offset;
     if (sample_length) {
-      profile->samples = (void*)(arguments->memory.contents.data +
-                                 argument_offset + sample_offset);
+      profile->completion.samples = (void*)(arguments->memory.contents.data +
+                                            argument_offset + sample_offset);
       words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
       words = iree_hal_amd_gpu_pm4_emit_clock(words, sample_address);
     }
@@ -1554,10 +1552,10 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
     }
     iree_hal_amd_gpu_profile_operation_t* profile =
         iree_hal_amd_gpu_pm4_submission_profile(submission);
-    if (profile && profile->sample_count) {
+    if (profile && profile->completion.sample_stride) {
       required = iree_align_uint64(required, 8) +
-                 (uint64_t)profile->sample_count *
-                     sizeof(iree_hal_amd_gpu_profile_sample_t);
+                 (uint64_t)profile->completion.count *
+                     profile->completion.sample_stride;
     }
     capacity = queue->producer.arguments->capacity;
     while (capacity < required) {
@@ -1810,9 +1808,10 @@ static bool iree_hal_amd_gpu_pm4_retire(
     }
     if (action->terminal) {
       if (submission->profiled) {
-        iree_hal_amd_gpu_profile_operation_complete(
-            queue->profile,
-            iree_hal_amd_gpu_pm4_submission_profile(submission));
+        const iree_hal_amd_gpu_profile_operation_t* operation =
+            iree_hal_amd_gpu_pm4_submission_profile(submission);
+        iree_hal_amd_gpu_profile_operation_complete(queue->profile, operation,
+                                                    &operation->completion);
       }
       iree_hal_amd_gpu_pm4_submission_release_payload(submission);
     }
@@ -2204,9 +2203,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
              sizeof(event->workgroup_count));
       memcpy(event->workgroup_size, dispatch.geometry.workgroup_size,
              sizeof(event->workgroup_size));
-      operation->sample_count =
-          iree_hal_amd_gpu_profile_timestamps_dispatches(queue->profile) ? 1
-                                                                         : 0;
+      operation->completion.count = 1;
+      operation->completion.sample_stride =
+          iree_hal_amd_gpu_profile_timestamps_dispatches(queue->profile)
+              ? sizeof(iree_hal_amd_gpu_profile_sample_t)
+              : 0;
     }
   }
   const iree_hal_amd_gpu_pm4_dispatch_request_t request = {
@@ -2603,10 +2604,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_execute(
         iree_hal_command_buffer_profile_id(command_buffer);
     if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile)) {
       operation->commands = submission->execute.program->profile;
-      if (iree_hal_amd_gpu_profile_timestamps_dispatches(queue->profile)) {
-        operation->sample_count =
-            iree_hal_amd_gpu_profile_commands_count(operation->commands);
-      }
+      operation->completion.count =
+          iree_hal_amd_gpu_profile_commands_count(operation->commands);
+      operation->completion.sample_stride =
+          iree_hal_amd_gpu_profile_timestamps_dispatches(queue->profile)
+              ? sizeof(iree_hal_amd_gpu_profile_sample_t)
+              : 0;
     }
   }
   iree_hal_amd_gpu_pm4_submit(queue, submission);

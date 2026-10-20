@@ -689,11 +689,9 @@ bool iree_hal_amd_gpu_profile_timestamps_dispatches(
 
 void iree_hal_amd_gpu_profile_operation_complete(
     iree_hal_amd_gpu_profile_t* profile,
-    const iree_hal_amd_gpu_profile_operation_t* operation) {
-  const uint32_t count = operation->commands
-                             ? operation->commands->count
-                             : (operation->dispatch.executable ? 1 : 0);
-  if (!count) {
+    const iree_hal_amd_gpu_profile_operation_t* operation,
+    const iree_hal_amd_gpu_profile_completion_t* completion) {
+  if (!completion->count) {
     return;
   }
   iree_hal_amd_gpu_profile_stream_t* stream =
@@ -701,23 +699,27 @@ void iree_hal_amd_gpu_profile_operation_complete(
   // Only completed native owners reach this boundary. Each retained record
   // copies its sample before invocation storage can return to the producer.
   iree_slim_mutex_lock(&stream->mutex);
-  for (uint32_t i = 0; i < count; ++i) {
+  for (uint32_t i = 0; i < completion->count; ++i) {
     uint64_t position = 0, event_id = 0;
     if (!iree_hal_profile_event_ring_try_append(&stream->dispatches, &position,
                                                 &event_id)) {
       continue;
     }
     const iree_hal_amd_gpu_profile_dispatch_t* dispatch =
-        operation->commands ? &operation->commands->dispatches[i]
-                            : &operation->dispatch;
+        operation->commands
+            ? &operation->commands->dispatches[completion->first + i]
+            : &operation->dispatch;
     iree_hal_profile_dispatch_event_t* event =
         iree_hal_profile_event_ring_record_at(&stream->dispatches, position);
     *event = dispatch->event;
     event->event_id = event_id;
     event->submission_id = operation->event.submission_id;
-    if (operation->samples) {
-      event->start_tick = operation->samples[i].begin;
-      event->end_tick = operation->samples[i].end;
+    if (completion->samples) {
+      const iree_hal_amd_gpu_profile_sample_t* sample =
+          (const void*)((const uint8_t*)completion->samples +
+                        (iree_host_size_t)i * completion->sample_stride);
+      event->start_tick = sample->begin;
+      event->end_tick = sample->end;
     }
     stream->metadata[position & stream->dispatches.mask] =
         (iree_hal_amd_gpu_profile_metadata_t){
