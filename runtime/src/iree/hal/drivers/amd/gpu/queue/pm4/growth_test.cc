@@ -14,6 +14,7 @@
 
 #include "iree/hal/device.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
+#include "iree/hal/drivers/amd/gpu/queue/program.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -290,12 +291,12 @@ class GrowthTest : public ::testing::Test {
               iree_containerof(entry, iree_hal_amd_gpu_pm4_submission_t, entry);
           auto* program = &submission->execute.program->resident;
           uint64_t frontier[3] = {};
-          auto* instance = iree_hal_amd_gpu_pm4_program_try_acquire(
+          auto* instance = iree_hal_amd_gpu_program_try_acquire(
               program, growth_.queue_ordinal, frontier);
           EXPECT_NE(instance, nullptr);
           if (instance) {
             submission->execute.instance = instance;
-            iree_hal_amd_gpu_pm4_program_publish(
+            iree_hal_amd_gpu_program_publish(
                 program, instance, growth_.queue_ordinal, completed_ + 1);
             submission->execute.published = true;
           }
@@ -572,13 +573,12 @@ class ProgramGrowthTest : public GrowthTest {
         &previous));
     auto* program = &capture->execute.program->resident;
     uint64_t frontier[3] = {};
-    auto* initial =
-        iree_hal_amd_gpu_pm4_program_try_acquire(program, 1, frontier);
+    auto* initial = iree_hal_amd_gpu_program_try_acquire(program, 1, frontier);
     ASSERT_NE(initial, nullptr);
     previous->execute.instance = initial;
-    iree_hal_amd_gpu_pm4_program_publish(program, initial, 1, 1);
+    iree_hal_amd_gpu_program_publish(program, initial, 1, 1);
     previous->execute.published = true;
-    ASSERT_EQ(iree_hal_amd_gpu_pm4_program_try_acquire(program, 0, frontier),
+    ASSERT_EQ(iree_hal_amd_gpu_program_try_acquire(program, 0, frontier),
               nullptr);
 
     hold_ = true;
@@ -618,7 +618,7 @@ class ProgramGrowthTest : public GrowthTest {
       JoinPublication();
       EXPECT_EQ(completed_, completed);
       EXPECT_EQ(failed_, 0u);
-      EXPECT_EQ(programs_.head, program);
+      EXPECT_EQ(programs_.storage.head, program);
       EXPECT_EQ(
           iree_atomic_load(&growth_.pending_count, iree_memory_order_acquire),
           1);
@@ -634,7 +634,7 @@ class ProgramGrowthTest : public GrowthTest {
     iree_hal_amd_gpu_context_join_memory(&context_);
     JoinPublication();
     iree_hal_amd_gpu_context_join_memory(&context_);
-    EXPECT_EQ(programs_.head, nullptr);
+    EXPECT_EQ(programs_.storage.head, nullptr);
     EXPECT_EQ(
         iree_atomic_load(&growth_.pending_count, iree_memory_order_acquire), 0);
     EXPECT_EQ(completed_, completed);

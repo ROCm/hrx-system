@@ -23,6 +23,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/kmq/storage.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/retirement.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/submission.h"
+#include "iree/hal/drivers/amd/gpu/queue/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
 #include "iree/hal/drivers/amd/status.h"
 
@@ -388,7 +389,7 @@ iree_hal_amd_gpu_pm4_publish_accepted(
   if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
     iree_hal_amd_gpu_pm4_command_invocation_t* invocation =
         &submission->execute;
-    iree_hal_amd_gpu_pm4_program_publish(
+    iree_hal_amd_gpu_program_publish(
         &invocation->program->resident, invocation->instance,
         queue->options.queue_ordinal, position + 1);
     invocation->published = true;
@@ -662,7 +663,7 @@ iree_hal_amd_gpu_pm4_publish_execute(
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
   iree_hal_amd_gpu_pm4_command_invocation_t* invocation = &submission->execute;
   iree_hal_amd_gpu_pm4_command_program_t* command = invocation->program;
-  iree_hal_amd_gpu_pm4_program_t* program = &command->resident;
+  iree_hal_amd_gpu_program_t* program = &command->resident;
   iree_hal_amd_gpu_profile_operation_t* profile =
       iree_hal_amd_gpu_pm4_submission_profile(submission);
   const uint64_t sample_length =
@@ -690,14 +691,14 @@ iree_hal_amd_gpu_pm4_publish_execute(
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
   }
   if (!invocation->instance) {
-    invocation->instance = iree_hal_amd_gpu_pm4_program_try_acquire(
+    invocation->instance = iree_hal_amd_gpu_program_try_acquire(
         program, queue->options.queue_ordinal,
         queue->producer.frontier.pending);
     if (!invocation->instance) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_PROGRAM;
     }
   }
-  iree_hal_amd_gpu_pm4_program_instance_t* instance = invocation->instance;
+  iree_hal_amd_gpu_program_instance_t* instance = invocation->instance;
   const uint32_t program_words = iree_hal_amd_gpu_pm4_program_word_count(
       program, instance, &queue->options.barriers);
   const uint32_t scratch_words = iree_hal_amd_gpu_pm4_scratch_word_count(
@@ -1530,8 +1531,8 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
   // another ready invocation on this queue attempts to acquire the program.
   if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE &&
       submission->execute.instance) {
-    iree_hal_amd_gpu_pm4_program_cancel(&submission->execute.program->resident,
-                                        submission->execute.instance);
+    iree_hal_amd_gpu_program_cancel(&submission->execute.program->resident,
+                                    submission->execute.instance);
     submission->execute.instance = NULL;
   }
   iree_hal_amd_gpu_pm4_entry_kind_t kind =

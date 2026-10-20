@@ -53,7 +53,7 @@ TEST_F(RecordingTest, NativeCommandsAndPackedArgumentsSpanIndependentChunks) {
   EXPECT_EQ(iree_hal_amd_gpu_pm4_recording_fixup_count(&recording_),
             kCount * 4);
   std::vector<uint8_t> contents(data_offset + recording_.data.length, 0xAA);
-  std::vector<iree_hal_amd_gpu_pm4_fixup_t> fixups(kCount * 4);
+  std::vector<iree_hal_amd_gpu_fixup_t> fixups(kCount * 4);
   iree_hal_amd_gpu_pm4_recording_write(&recording_, contents.data(),
                                        fixups.data());
   iree_hal_amd_gpu_pm4_recording_deinitialize(&recording_);
@@ -107,7 +107,7 @@ TEST_P(RecordingBlockTest, SuccessorEdgesPreservePacketsAndInstanceFixups) {
   ASSERT_EQ(fixup_count, chain ? 6u : 4u);
   std::vector<uint32_t> words(
       iree_hal_amd_gpu_pm4_recording_data_offset(&recording_) / 4);
-  std::vector<iree_hal_amd_gpu_pm4_fixup_t> fixups(fixup_count);
+  std::vector<iree_hal_amd_gpu_fixup_t> fixups(fixup_count);
   iree_hal_amd_gpu_pm4_recording_write(
       &recording_, reinterpret_cast<uint8_t*>(words.data()), fixups.data());
   uint32_t word_count = recording_.entry_word_count;

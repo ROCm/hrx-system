@@ -21,7 +21,7 @@ struct iree_hal_amd_gpu_pm4_recording_chunk_t {
 
 typedef struct iree_hal_amd_gpu_pm4_recording_fixup_t {
   // Native replacement, with offsets still relative to their sections.
-  iree_hal_amd_gpu_pm4_fixup_t value;
+  iree_hal_amd_gpu_fixup_t value;
   // Destination is in private data instead of native command words.
   bool target_data;
   // Displacement is relative to private data instead of instance byte zero.
@@ -229,7 +229,7 @@ static void iree_hal_amd_gpu_pm4_recording_copy(
 
 void iree_hal_amd_gpu_pm4_recording_write(
     const iree_hal_amd_gpu_pm4_recording_t* recording, uint8_t* destination,
-    iree_hal_amd_gpu_pm4_fixup_t* table) {
+    iree_hal_amd_gpu_fixup_t* table) {
   const uint32_t data_offset =
       iree_hal_amd_gpu_pm4_recording_data_offset(recording);
   memset(destination, 0, data_offset + recording->data.length);
@@ -245,7 +245,7 @@ void iree_hal_amd_gpu_pm4_recording_write(
     for (uint32_t i = 0; i < count; ++i) {
       // The destination may be write-combined VRAM. Resolve in host storage
       // before writing the final entry so no adjustment reads it back.
-      iree_hal_amd_gpu_pm4_fixup_t value = entries[i].value;
+      iree_hal_amd_gpu_fixup_t value = entries[i].value;
       if (entries[i].target_data) {
         value.target_offset += data_offset;
       }

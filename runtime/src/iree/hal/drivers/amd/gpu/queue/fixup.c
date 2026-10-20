@@ -4,13 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amd/gpu/queue/pm4/fixup.h"
-
-#include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
+#include "iree/hal/drivers/amd/gpu/queue/fixup.h"
 
 // Relocation-free instruction words from fixup.loom. The source comparison
 // covers the complete code and descriptor ABI for every supported family.
-static const uint32_t iree_hal_amd_gpu_pm4_fixup_gfx11[] = {
+static const uint32_t iree_hal_amd_gpu_fixup_gfx11[] = {
     0xf40000c0u, 0xf8000018u, 0x9604c002u, 0x4a020004u, 0xf4040100u,
     0xf8000010u, 0xf4080200u, 0xf8000000u, 0xbf89fc07u, 0xbf870091u,
     0xd4490000u, 0x02000701u, 0xbe802100u, 0xbfa10031u, 0xbe830080u,
@@ -27,7 +25,7 @@ static const uint32_t iree_hal_amd_gpu_pm4_fixup_gfx11[] = {
     0xbfb00000u,
 };
 
-static const uint32_t iree_hal_amd_gpu_pm4_fixup_gfx12[] = {
+static const uint32_t iree_hal_amd_gpu_fixup_gfx12[] = {
     0xf4000080u, 0xf8000018u, 0x9603c075u, 0x4a020003u, 0xf4002100u,
     0xf8000010u, 0xf4004200u, 0xf8000000u, 0xbfc70000u, 0xbf870091u,
     0xd4490000u, 0x02000501u, 0xbe802100u, 0xbfa10043u, 0xbe820080u,
@@ -47,7 +45,7 @@ static const uint32_t iree_hal_amd_gpu_pm4_fixup_gfx12[] = {
     0x00000000u, 0xbefe0100u, 0xbfc10000u, 0xbfb00000u,
 };
 
-static const uint32_t iree_hal_amd_gpu_pm4_fixup_gfx125[] = {
+static const uint32_t iree_hal_amd_gpu_fixup_gfx125[] = {
     0xee174000u, 0x00040000u, 0x00000000u, 0x7e000000u, 0xb9800641u,
     0x00000001u, 0xf4000080u, 0xf8000018u, 0x9603c075u, 0x4a020003u,
     0xf4002100u, 0xf8000010u, 0xf4004200u, 0xf8000000u, 0xbfc70000u,
@@ -68,7 +66,7 @@ static const uint32_t iree_hal_amd_gpu_pm4_fixup_gfx125[] = {
     0xbfc10000u, 0xbfb00000u,
 };
 
-iree_status_t iree_hal_amd_gpu_pm4_fixup_program_query(
+iree_status_t iree_hal_amd_gpu_fixup_program_query(
     iree_hal_amd_gpu_gfxip_version_t gfxip, iree_const_byte_span_t* out_code,
     iree_hal_amd_gpu_image_kernel_t* out_kernel) {
   *out_code = iree_const_byte_span_empty();
@@ -76,19 +74,16 @@ iree_status_t iree_hal_amd_gpu_pm4_fixup_program_query(
                                                   .code_properties = 0x408};
   if (gfxip.major == 11 &&
       (gfxip.minor == 0 || gfxip.minor == 5 || gfxip.minor == 7)) {
-    *out_code =
-        iree_make_const_byte_span(iree_hal_amd_gpu_pm4_fixup_gfx11,
-                                  sizeof(iree_hal_amd_gpu_pm4_fixup_gfx11));
+    *out_code = iree_make_const_byte_span(iree_hal_amd_gpu_fixup_gfx11,
+                                          sizeof(iree_hal_amd_gpu_fixup_gfx11));
     out_kernel->compute_pgm_rsrc1 = 0xe0af0000u;
   } else if (gfxip.major == 12 && gfxip.minor == 0) {
-    *out_code =
-        iree_make_const_byte_span(iree_hal_amd_gpu_pm4_fixup_gfx12,
-                                  sizeof(iree_hal_amd_gpu_pm4_fixup_gfx12));
+    *out_code = iree_make_const_byte_span(iree_hal_amd_gpu_fixup_gfx12,
+                                          sizeof(iree_hal_amd_gpu_fixup_gfx12));
     out_kernel->compute_pgm_rsrc1 = 0xe00f0000u;
   } else if (gfxip.major == 12 && gfxip.minor == 5) {
-    *out_code =
-        iree_make_const_byte_span(iree_hal_amd_gpu_pm4_fixup_gfx125,
-                                  sizeof(iree_hal_amd_gpu_pm4_fixup_gfx125));
+    *out_code = iree_make_const_byte_span(
+        iree_hal_amd_gpu_fixup_gfx125, sizeof(iree_hal_amd_gpu_fixup_gfx125));
     out_kernel->compute_pgm_rsrc1 = 0xc00f0000u;
   } else {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -97,18 +92,4 @@ iree_status_t iree_hal_amd_gpu_pm4_fixup_program_query(
                             gfxip.major, gfxip.minor, gfxip.stepping);
   }
   return iree_ok_status();
-}
-
-uint32_t* iree_hal_amd_gpu_pm4_fixup_emit(
-    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
-    uint64_t arguments_address, uint32_t entry_count) {
-  const uint32_t size[3] = {64, 1, 1};
-  const uint32_t partial[3] = {0, 0, 0};
-  const uint32_t groups[3] = {(entry_count - 1) / 64 + 1, 1, 1};
-  const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {.kernarg_pointer =
-                                                           arguments_address};
-  words = iree_hal_amd_gpu_pm4_launch_emit(words, launch, size, partial, 0,
-                                           &inputs);
-  return iree_hal_amd_gpu_pm4_emit_dispatch_direct(words, groups,
-                                                   launch->dispatch_initiator);
 }

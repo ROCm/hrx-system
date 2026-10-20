@@ -40,7 +40,7 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   // Allocator owning this separately retained program record.
   iree_allocator_t host_allocator;
   // Owned native instances and shared immutable fixup table.
-  iree_hal_amd_gpu_pm4_program_t resident;
+  iree_hal_amd_gpu_program_t resident;
   // Entry block; native successors and exits are encoded in resident commands.
   iree_hal_amd_gpu_pm4_program_block_t entry;
   // Dense uint64_t inputs uploaded once per invocation.
@@ -90,7 +90,7 @@ typedef struct iree_hal_amd_gpu_pm4_command_invocation_t {
   // Captured table in submission-owned storage.
   iree_hal_amd_gpu_pm4_command_binding_t* bindings;
   // Reserved or published native placement, returned on rejection/retirement.
-  iree_hal_amd_gpu_pm4_program_instance_t* instance;
+  iree_hal_amd_gpu_program_instance_t* instance;
   // Native acceptance transferred the reservation to a causal lease.
   bool published;
   // Binding buffers are borrowed; the table itself is always copied.

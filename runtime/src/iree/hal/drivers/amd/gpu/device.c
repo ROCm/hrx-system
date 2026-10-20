@@ -26,6 +26,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/scratch.h"
+#include "iree/hal/drivers/amd/gpu/queue/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 #include "iree/hal/drivers/amd/status.h"
@@ -947,11 +948,12 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
           context->families[family_ordinal].format_features,
           &device->scratch.profile);
     }
-    device->scratch.access = aql ? device->aql.access : device->programs.access;
+    device->scratch.access =
+        aql ? device->aql.access : device->programs.storage.access;
     device->scratch.access.requirements.access =
         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
     device->scratch.memory =
-        aql ? device->aql.resident : device->programs.resident;
+        aql ? device->aql.resident : device->programs.storage.resident;
     device->scratch.memory.accesses = &device->scratch.access;
     device->scratch.memory.required_flags &= ~AMDF_MEMORY_FLAG_HOST_VISIBLE;
     device->scratch.memory.host_access = 0;
@@ -1113,8 +1115,8 @@ static void iree_hal_amd_gpu_device_trim_caches(void* user_data) {
   iree_hal_amd_gpu_device_t* device = user_data;
   iree_hal_amd_gpu_file_staging_trim(device->transfers.file_staging);
   iree_arena_block_pool_trim(&device->memory.allocations.blocks);
-  if (device->programs.context) {
-    iree_hal_amd_gpu_pm4_program_pool_trim(&device->programs);
+  if (device->programs.storage.context) {
+    iree_hal_amd_gpu_program_pool_trim(&device->programs.storage);
   }
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     device->queue_lifecycle->trim(device->queues[i]);
@@ -1207,7 +1209,7 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
   iree_hal_amd_fabric_memory_options_t memory =
       device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
           ? device->aql.resident
-          : device->programs.resident;
+          : device->programs.storage.resident;
   if (memory.host_access) {
     memory.host_access =
         memory.profile.host_mapping.supported_access &
@@ -1219,7 +1221,7 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .memory = &memory,
       .upload = {.memory = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                                ? &device->aql.upload
-                               : &device->programs.upload,
+                               : &device->programs.storage.upload,
                  .queue = device->transfers.queue,
                  .family_ordinal = device->transfers.family_ordinal},
       .notification = device->memory.notification,

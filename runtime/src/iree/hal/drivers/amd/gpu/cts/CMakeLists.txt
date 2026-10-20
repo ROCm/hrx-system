@@ -681,14 +681,15 @@ iree_cc_test(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::queue::fixup
     iree::hal::drivers::amd::gpu::queue::pm4::barrier
     iree::hal::drivers::amd::gpu::queue::pm4::commands
-    iree::hal::drivers::amd::gpu::queue::pm4::fixup
     iree::hal::drivers::amd::gpu::queue::pm4::kmq::storage
     iree::hal::drivers::amd::gpu::queue::pm4::launch
     iree::hal::drivers::amd::gpu::queue::pm4::program
     iree::hal::drivers::amd::gpu::queue::pm4::queue
     iree::hal::drivers::amd::gpu::queue::pm4::ring
+    iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::gpu::queue::user_queue
     iree::hal::drivers::amd::gpu::target::identity
     iree::hal::drivers::amd::status

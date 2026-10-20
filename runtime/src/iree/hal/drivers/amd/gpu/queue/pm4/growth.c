@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/growth.h"
 
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
+#include "iree/hal/drivers/amd/gpu/queue/program.h"
 
 struct iree_hal_amd_gpu_pm4_growth_t {
   // Native completion and an enrolled program reuse hint own separate borrows.
@@ -48,7 +49,7 @@ struct iree_hal_amd_gpu_pm4_growth_t {
       };
     } backing;
     // Indexed physical clone reservation and native acquisition ownership.
-    iree_hal_amd_gpu_pm4_program_growth_t program;
+    iree_hal_amd_gpu_program_growth_t program;
   };
 };
 
@@ -137,7 +138,7 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
     iree_hal_amd_gpu_pm4_entry_kind_t kind,
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t capacity) {
   iree_hal_amd_gpu_pm4_growth_t* pending = NULL;
-  iree_hal_amd_gpu_pm4_program_t* program = NULL;
+  iree_hal_amd_gpu_program_t* program = NULL;
   switch (kind) {
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS:
       pending = context->arguments;
@@ -164,7 +165,7 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
     if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS) {
       iree_hal_amd_gpu_pm4_growth_await_signals(context);
     } else if (program) {
-      iree_hal_amd_gpu_pm4_program_grow_await_reuse(
+      iree_hal_amd_gpu_program_grow_await_reuse(
           &pending->program, iree_hal_amd_gpu_pm4_growth_program_available,
           pending);
     }
@@ -190,7 +191,7 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
   if (program) {
     growth->command_program = submission->execute.program;
     iree_hal_amd_gpu_pm4_command_program_retain(growth->command_program);
-    status = iree_hal_amd_gpu_pm4_program_grow_begin(
+    status = iree_hal_amd_gpu_program_grow_begin(
         program, context->queue_ordinal, completion, &growth->program);
   } else {
     iree_hal_amd_fabric_memory_t* memory = NULL;
@@ -245,7 +246,7 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
   } else if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS) {
     iree_hal_amd_gpu_pm4_growth_await_signals(context);
   } else if (program) {
-    iree_hal_amd_gpu_pm4_program_grow_await_reuse(
+    iree_hal_amd_gpu_program_grow_await_reuse(
         &growth->program, iree_hal_amd_gpu_pm4_growth_program_available,
         growth);
   }
@@ -304,7 +305,7 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_end(
       }
       break;
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PROGRAM:
-      status = iree_hal_amd_gpu_pm4_program_grow_end(&growth->program, status);
+      status = iree_hal_amd_gpu_program_grow_end(&growth->program, status);
       break;
     default:
       IREE_BUILTIN_UNREACHABLE();
@@ -339,7 +340,7 @@ void iree_hal_amd_gpu_pm4_growth_reuse_program(
   if (!growth->completed) {
     // A hint may precede native completion by an arbitrary duration. Empty
     // cohorts need no notification; a later miss enrolls again explicitly.
-    iree_hal_amd_gpu_pm4_program_grow_cancel_reuse(&growth->program);
+    iree_hal_amd_gpu_program_grow_cancel_reuse(&growth->program);
     iree_hal_amd_gpu_publication_entry_t* first = growth->first;
     iree_hal_amd_gpu_publication_entry_t* last = growth->last;
     growth->first = growth->last = NULL;

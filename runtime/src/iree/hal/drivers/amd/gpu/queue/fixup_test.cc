@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amd/gpu/queue/pm4/fixup.h"
+#include "iree/hal/drivers/amd/gpu/queue/fixup.h"
 
 #include <cstring>
 #include <vector>
 
 #include "iree/base/byte_sequence.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/fixup_programs.h"
+#include "iree/hal/drivers/amd/gpu/queue/fixup_programs.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -26,7 +26,7 @@ class FixupTest : public ::testing::TestWithParam<size_t> {
 };
 
 TEST_P(FixupTest, EmbeddedInstructionsAndDescriptorMatchSource) {
-  const auto& file = iree_hal_amd_gpu_pm4_fixup_programs_create()[GetParam()];
+  const auto& file = iree_hal_amd_gpu_fixup_programs_create()[GetParam()];
   SCOPED_TRACE(file.name);
   iree_byte_span_t source = {nullptr, file.size};
   IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(), file.size,
@@ -58,8 +58,8 @@ TEST_P(FixupTest, EmbeddedInstructionsAndDescriptorMatchSource) {
   EXPECT_EQ(metadata.arguments[3].size, 4u);
   iree_const_byte_span_t code;
   iree_hal_amd_gpu_image_kernel_t descriptor;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_fixup_program_query(image_.target.version,
-                                                          &code, &descriptor));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_fixup_program_query(image_.target.version,
+                                                      &code, &descriptor));
   const auto& kernel = image_.kernels[0];
   EXPECT_EQ(kernel.compute_pgm_rsrc1, descriptor.compute_pgm_rsrc1);
   EXPECT_EQ(kernel.compute_pgm_rsrc2, descriptor.compute_pgm_rsrc2);
@@ -87,6 +87,6 @@ TEST_P(FixupTest, EmbeddedInstructionsAndDescriptorMatchSource) {
 
 INSTANTIATE_TEST_SUITE_P(
     Targets, FixupTest,
-    ::testing::Range(size_t{0}, iree_hal_amd_gpu_pm4_fixup_programs_size()));
+    ::testing::Range(size_t{0}, iree_hal_amd_gpu_fixup_programs_size()));
 
 }  // namespace

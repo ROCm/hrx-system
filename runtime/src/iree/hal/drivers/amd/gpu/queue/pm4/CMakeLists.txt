@@ -54,24 +54,6 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
-iree_cc_library(
-  NAME
-    fixup
-  HDRS
-    "fixup.h"
-  SRCS
-    "fixup.c"
-  DEPS
-    ::commands
-    ::launch
-    iree::base
-    iree::hal::drivers::amd::gpu::image
-    iree::hal::drivers::amd::gpu::target::identity
-  PUBLIC
-)
-endif()
-
 iree_cc_library(
   NAME
     retirement
@@ -312,86 +294,6 @@ endif()
 if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
 loom_kernel_binary(
   NAME
-    "fixup_program_gfx11-generic"
-  COMPONENT
-    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:fixup_program_gfx11-generic"
-  TARGET
-    "::dispatch_program_profile_gfx11-generic"
-  OUTPUT
-    "fixup_program_gfx11-generic.hsaco"
-  SRCS
-    "fixup.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
-loom_kernel_binary(
-  NAME
-    "fixup_program_gfx1151"
-  COMPONENT
-    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:fixup_program_gfx1151"
-  TARGET
-    "::dispatch_program_profile_gfx1151"
-  OUTPUT
-    "fixup_program_gfx1151.hsaco"
-  SRCS
-    "fixup.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
-loom_kernel_binary(
-  NAME
-    "fixup_program_gfx1170"
-  COMPONENT
-    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:fixup_program_gfx1170"
-  TARGET
-    "::dispatch_program_profile_gfx1170"
-  OUTPUT
-    "fixup_program_gfx1170.hsaco"
-  SRCS
-    "fixup.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
-loom_kernel_binary(
-  NAME
-    "fixup_program_gfx12-generic"
-  COMPONENT
-    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:fixup_program_gfx12-generic"
-  TARGET
-    "::dispatch_program_profile_gfx12-generic"
-  OUTPUT
-    "fixup_program_gfx12-generic.hsaco"
-  SRCS
-    "fixup.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
-loom_kernel_binary(
-  NAME
-    "fixup_program_gfx12-5-generic"
-  COMPONENT
-    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:fixup_program_gfx12-5-generic"
-  TARGET
-    "::dispatch_program_profile_gfx12-5-generic"
-  OUTPUT
-    "fixup_program_gfx12-5-generic.hsaco"
-  SRCS
-    "fixup.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
-loom_kernel_binary(
-  NAME
     "blit_program_gfx11-generic"
   COMPONENT
     "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:blit_program_gfx11-generic"
@@ -466,45 +368,6 @@ loom_kernel_binary(
   SRCS
     "blit.loom"
   TESTONLY
-)
-endif()
-
-if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
-iree_c_embed_data(
-  NAME
-    fixup_programs
-  SRCS
-    "${CMAKE_CURRENT_BINARY_DIR}/fixup_program_gfx11-generic.hsaco"
-    "${CMAKE_CURRENT_BINARY_DIR}/fixup_program_gfx1151.hsaco"
-    "${CMAKE_CURRENT_BINARY_DIR}/fixup_program_gfx1170.hsaco"
-    "${CMAKE_CURRENT_BINARY_DIR}/fixup_program_gfx12-5-generic.hsaco"
-    "${CMAKE_CURRENT_BINARY_DIR}/fixup_program_gfx12-generic.hsaco"
-  C_FILE_OUTPUT
-    "fixup_programs.c"
-  H_FILE_OUTPUT
-    "fixup_programs.h"
-  IDENTIFIER
-    "iree_hal_amd_gpu_pm4_fixup_programs"
-  TESTONLY
-  PUBLIC
-)
-endif()
-
-if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE AND AMDF_BUILD)
-iree_cc_test(
-  NAME
-    fixup_test
-  SRCS
-    "fixup_test.cc"
-  DEPS
-    ::fixup
-    ::fixup_programs
-    iree::base
-    iree::hal::drivers::amd::gpu::image
-    iree::hal::drivers::amd::gpu::image::hsaco
-    iree::hal::drivers::amd::gpu::target::identity
-    iree::testing::gtest
-    iree::testing::gtest_main
 )
 endif()
 
@@ -588,6 +451,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::kernarg
     iree::hal::drivers::amd::gpu::profile
+    iree::hal::drivers::amd::gpu::queue::program
     iree::hal::utils::resource_set
   PUBLIC
 )
@@ -603,8 +467,8 @@ iree_cc_library(
     "recording.c"
   DEPS
     ::commands
-    ::fixup
     iree::base
+    iree::hal::drivers::amd::gpu::queue::fixup
   PUBLIC
 )
 endif()
@@ -639,7 +503,6 @@ iree_cc_library(
     ::barrier
     ::blit
     ::commands
-    ::fixup
     ::launch
     amdf::headers
     iree::base
@@ -648,6 +511,8 @@ iree_cc_library(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::code
     iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::queue::fixup
+    iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::status
   PUBLIC
 )
@@ -709,6 +574,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::gpu::queue::publisher
   PUBLIC
 )
@@ -765,6 +631,7 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::gpu::queue::signal
     iree::testing::gtest
@@ -978,6 +845,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::host_wait
     iree::hal::drivers::amd::gpu::queue::memory_mapping
     iree::hal::drivers::amd::gpu::queue::pm4::kmq::storage
+    iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::gpu::queue::semaphore
     iree::hal::drivers::amd::gpu::queue::signal
@@ -1047,7 +915,6 @@ iree_cc_test(
   DEPS
     ::barrier
     ::blit
-    ::fixup
     ::launch
     ::program
     amdf::headers
@@ -1057,6 +924,8 @@ iree_cc_test(
     iree::hal::drivers::amd::fabric
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::queue::fixup
+    iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::gpu::target::identity
     iree::testing::gtest
     iree::testing::gtest_main
@@ -1071,9 +940,9 @@ iree_cc_test(
     "recording_test.cc"
   DEPS
     ::commands
-    ::fixup
     ::recording
     iree::base
+    iree::hal::drivers::amd::gpu::queue::fixup
     iree::testing::gtest
     iree::testing::gtest_main
 )

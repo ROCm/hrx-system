@@ -7,7 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_RECORDING_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_RECORDING_H_
 
-#include "iree/hal/drivers/amd/gpu/queue/pm4/fixup.h"
+#include "iree/hal/drivers/amd/gpu/queue/fixup.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -99,7 +99,7 @@ uint32_t iree_hal_amd_gpu_pm4_recording_fixup_count(
 // Both outputs may be write-combined device memory and are only written.
 void iree_hal_amd_gpu_pm4_recording_write(
     const iree_hal_amd_gpu_pm4_recording_t* recording, uint8_t* destination,
-    iree_hal_amd_gpu_pm4_fixup_t* table);
+    iree_hal_amd_gpu_fixup_t* table);
 
 #ifdef __cplusplus
 }  // extern "C"

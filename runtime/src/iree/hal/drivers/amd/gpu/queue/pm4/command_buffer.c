@@ -11,6 +11,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/recording.h"
+#include "iree/hal/drivers/amd/gpu/queue/program.h"
 #include "iree/hal/utils/resource_set.h"
 
 enum {
@@ -130,7 +131,7 @@ void iree_hal_amd_gpu_pm4_command_program_release(
   }
   const iree_allocator_t host_allocator = program->host_allocator;
   iree_hal_amd_gpu_profile_commands_release(program->profile);
-  iree_hal_amd_gpu_pm4_program_deinitialize(&program->resident);
+  iree_hal_amd_gpu_program_deinitialize(&program->resident);
   iree_allocator_free(host_allocator, program);
 }
 
@@ -480,15 +481,15 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_flush_barrier(
 // sealing on its caller, independently of queued asynchronous slab batches.
 static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
     iree_hal_amd_gpu_pm4_command_buffer_t* buffer, uint32_t length) {
-  iree_hal_amd_gpu_pm4_program_t* program = &buffer->program->resident;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_program_initialize(
-      buffer->pool, buffer->recording.alignment, length,
+  iree_hal_amd_gpu_program_t* program = &buffer->program->resident;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_initialize(
+      &buffer->pool->storage, buffer->recording.alignment, length,
       iree_hal_amd_gpu_pm4_recording_fixup_count(&buffer->recording), program));
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_amd_gpu_pm4_recording_write(
       &buffer->recording, program->contents.data,
       (void*)(program->contents.data + program->fixup_offset));
-  iree_status_t status = iree_hal_amd_gpu_pm4_program_seal(program);
+  iree_status_t status = iree_hal_amd_gpu_program_seal(program);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -1174,11 +1175,11 @@ void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
     iree_hal_amd_gpu_pm4_command_invocation_t* invocation) {
   if (invocation->instance) {
     if (invocation->published) {
-      iree_hal_amd_gpu_pm4_program_release(&invocation->program->resident,
-                                           invocation->instance);
+      iree_hal_amd_gpu_program_release(&invocation->program->resident,
+                                       invocation->instance);
     } else {
-      iree_hal_amd_gpu_pm4_program_cancel(&invocation->program->resident,
-                                          invocation->instance);
+      iree_hal_amd_gpu_program_cancel(&invocation->program->resident,
+                                      invocation->instance);
     }
   }
   if (!invocation->borrow_bindings) {
