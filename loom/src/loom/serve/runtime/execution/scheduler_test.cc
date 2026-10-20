@@ -248,8 +248,8 @@ TEST(ExecutionPolicyTest, InvalidCountsAndIncompleteCoverageReject) {
                1, LOOM_SERVE_EXECUTION_COEXISTENCE_EXCLUDE},
            loom_serve_execution_scope_t{
                7, LOOM_SERVE_EXECUTION_COEXISTENCE_EXCLUDE},
-           loom_serve_execution_scope_t{
-               3, static_cast<loom_serve_execution_coexistence_t>(2)},
+           loom_serve_execution_scope_t{3, 2},
+           loom_serve_execution_scope_t{3, UINT32_MAX},
        }) {
     const loom_serve_execution_policy_t policy = {
         .scope_count = 1,

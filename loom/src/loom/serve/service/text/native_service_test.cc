@@ -429,10 +429,9 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
 TEST_F(NativeTextRegistryTest, InvalidQosPreservesCallerInput) {
   ASSERT_NO_FATAL_FAILURE(Prepare());
   NativeStream stream(nullptr, loom_serve_text_stream_close);
-  for (int value : {-1, 2}) {
+  for (loom_serve_execution_qos_t qos : {UINT32_MAX, 2u}) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          Open(body_, "native", &stream, "",
-                               static_cast<loom_serve_execution_qos_t>(value)));
+                          Open(body_, "native", &stream, "", qos));
     EXPECT_EQ(stream, nullptr);
   }
 }

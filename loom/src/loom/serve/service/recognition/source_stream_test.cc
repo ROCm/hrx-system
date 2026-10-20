@@ -409,10 +409,10 @@ class SourceRecognitionStreamTest : public ::testing::Test {
 };
 
 TEST_F(SourceRecognitionStreamTest, InvalidQosDoesNotAdmit) {
-  for (int value : {-1, 2}) {
+  for (loom_serve_execution_qos_t qos : {UINT32_MAX, 2u}) {
     const loom_serve_recognition_request_t request = {
         .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
-        .qos = static_cast<loom_serve_execution_qos_t>(value),
+        .qos = qos,
     };
     loom_serve_recognition_stream_t* rejected = nullptr;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

@@ -1471,8 +1471,8 @@ TEST_P(SourceSpeechServiceTest, InvalidQosPreservesCallerInput) {
       IREE_SV("hello"), IREE_SV("positive"), {}, 7, 1.0f,
       iree_allocator_system(), &request));
   const auto* input = iree_string_builder_buffer(&request.input);
-  for (int value : {-1, 2}) {
-    request.qos = static_cast<loom_serve_execution_qos_t>(value);
+  for (loom_serve_execution_qos_t qos : {UINT32_MAX, 2u}) {
+    request.qos = qos;
     loom_serve_speech_stream_t* rejected = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,

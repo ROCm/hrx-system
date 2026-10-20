@@ -13,10 +13,12 @@ extern "C" {
 #endif
 
 // Immutable request policy, independent of residency and source compatibility.
+// Native admission validates supported values before accepting a request.
+typedef uint32_t loom_serve_execution_qos_t;
 typedef enum loom_serve_execution_qos_e {
   LOOM_SERVE_EXECUTION_QOS_BACKGROUND = 0,
   LOOM_SERVE_EXECUTION_QOS_REALTIME = 1,
-} loom_serve_execution_qos_t;
+} loom_serve_execution_qos_e;
 
 // Indexed application resources, resolved before model construction. A bit
 // denotes an actual bound resource, never a queue or model registration.
@@ -26,12 +28,14 @@ typedef uint64_t loom_serve_execution_resources_t;
 // Device resources occupy the remaining bits; a task device also uses this bit.
 #define LOOM_SERVE_EXECUTION_RESOURCE_HOST UINT64_C(1)
 
+// Cross-class interference policy, validated during scheduler allocation.
+typedef uint32_t loom_serve_execution_coexistence_t;
 typedef enum loom_serve_execution_coexistence_e {
   // Different classes take separate turns across this entire scope.
   LOOM_SERVE_EXECUTION_COEXISTENCE_EXCLUDE = 0,
   // Different classes may overlap subject to their individual resource limits.
   LOOM_SERVE_EXECUTION_COEXISTENCE_OVERLAP = 1,
-} loom_serve_execution_coexistence_t;
+} loom_serve_execution_coexistence_e;
 
 // Resources can interfere without sharing an admission count. Overlapping
 // scopes compose their restrictions; an overlap scope never cancels exclusion.
