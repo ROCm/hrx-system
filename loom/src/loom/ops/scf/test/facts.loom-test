@@ -1220,8 +1220,9 @@ func.def @for_ranged_additive_state(%seed: i32, %stride: offset) {
 
 // RUN: pass canonicalize
 
-// Changing increments, coupled states, narrowing casts, and a wrapping fixed
-// scalar carrier are not same-type nonwrapping additive recurrences.
+// Exact short loops replay changing increments, coupled states, narrowing
+// casts, and wrapping fixed-width arithmetic without requiring an additive
+// recurrence equation.
 func.def @for_non_additive_carried_state() {
   %begin = index.constant 0 : index
   %end = index.constant 4 : index
@@ -1271,10 +1272,10 @@ func.def @for_non_additive_carried_state() {
   %wrapping_seed = scalar.constant 2147483646 : i32
   %word_step = scalar.constant 1 : i32
   %cursor_end, %stride_end, %coupled_end, %cast_end, %wrapping_end = scf.for %iteration = [%begin to %end step %step](%cursor = %origin : offset, %changing_stride = %initial_stride : offset, %coupled = %coupled_seed : offset, %cast_state = %cast_seed : i64, %wrapping = %wrapping_seed : i32) -> (offset, offset, offset, i64, i32) {
-    %cursor_hi = scalar.constant 9223372036854775807 : i64
+    %cursor_hi = scalar.constant 6 : i64
     %stride_hi = scalar.constant 4 : i64
-    %coupled_hi = scalar.constant 9223372036854775807 : i64
-    %cast_lo = scalar.constant -2147483647 : i64
+    %coupled_hi = scalar.constant 20 : i64
+    %cast_lo = scalar.constant -1 : i64
     %cast_hi = scalar.constant 4294967294 : i64
     %wrapping_hi = scalar.constant 2147483647 : i64
     test.use %cursor_hi, %stride_hi, %coupled_hi, %cast_lo, %cast_hi, %wrapping_hi : i64, i64, i64, i64, i64, i64
@@ -1287,10 +1288,10 @@ func.def @for_non_additive_carried_state() {
     %wrapping_next = scalar.addi %wrapping, %word_step : i32
     scf.yield %cursor_next, %stride_next, %coupled_next, %cast_next, %wrapping_next : offset, offset, offset, i64, i32
   }
-  %cursor_end_hi = scalar.constant 9223372036854775807 : i64
-  %coupled_end_hi = scalar.constant 9223372036854775807 : i64
-  %cast_end_hi = scalar.constant 2147483648 : i64
-  %wrapping_end_hi = scalar.constant 2147483647 : i64
+  %cursor_end_hi = scalar.constant 10 : i64
+  %coupled_end_hi = scalar.constant 26 : i64
+  %cast_end_hi = scalar.constant 2 : i64
+  %wrapping_end_hi = scalar.constant -2147483646 : i64
   test.use %cursor_end_hi, %coupled_end_hi, %cast_end_hi, %wrapping_end_hi, %stride_end : i64, i64, i64, i64, offset
   func.return
 }
@@ -1460,4 +1461,64 @@ func.def @for_additive_companion_after_fallback() -> (i64, i64, i64) {
   %cursor_end_lo = scalar.constant 8192 : i64
   %cursor_end_hi = scalar.constant 8192 : i64
   func.return %cursor_end_lo, %cursor_end_hi, %decay_end : i64, i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// An exact short outer loop carries the result of an exact short inner
+// additive loop. Facts cover every outer and inner body observation while the
+// outer result retains the exact composed translation.
+func.def @for_nested_additive_carried_facts() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 32 : offset
+  %byte_step = index.constant 2 : offset
+  %outer_end = scf.for %outer = [%begin to %limit step %step](%outer_cursor = %origin : offset) -> (offset) {
+    %outer_lo = test.fact_range_lo %outer_cursor : offset -> i64
+    %outer_hi = test.fact_range_hi %outer_cursor : offset -> i64
+    %inner_end = scf.for %inner = [%begin to %limit step %step](%inner_cursor = %outer_cursor : offset) -> (offset) {
+      %inner_lo = test.fact_range_lo %inner_cursor : offset -> i64
+      %inner_hi = test.fact_range_hi %inner_cursor : offset -> i64
+      test.use %inner_lo, %inner_hi : i64, i64
+      %inner_next = index.add %inner_cursor, %byte_step : offset
+      scf.yield %inner_next : offset
+    }
+    %inner_end_lo = test.fact_range_lo %inner_end : offset -> i64
+    %inner_end_hi = test.fact_range_hi %inner_end : offset -> i64
+    test.use %outer_lo, %outer_hi, %inner_end_lo, %inner_end_hi : i64, i64, i64, i64
+    scf.yield %inner_end : offset
+  }
+  %outer_end_lo = test.fact_range_lo %outer_end : offset -> i64
+  %outer_end_hi = test.fact_range_hi %outer_end : offset -> i64
+  func.return %outer_end_lo, %outer_end_hi : i64, i64
+}
+
+// ----
+func.def @for_nested_additive_carried_facts() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 32 : offset
+  %byte_step = index.constant 2 : offset
+  %outer_end = scf.for %outer = [%begin to %limit step %step](%outer_cursor = %origin : offset) -> (offset) {
+    %outer_lo = scalar.constant 32 : i64
+    %outer_hi = scalar.constant 36 : i64
+    %inner_end = scf.for %inner = [%begin to %limit step %step](%inner_cursor = %outer_cursor : offset) -> (offset) {
+      %inner_lo = scalar.constant 32 : i64
+      %inner_hi = scalar.constant 38 : i64
+      test.use %inner_lo, %inner_hi : i64, i64
+      %inner_next = index.add %inner_cursor, %byte_step : offset
+      scf.yield %inner_next : offset
+    }
+    %inner_end_lo = scalar.constant 36 : i64
+    %inner_end_hi = scalar.constant 40 : i64
+    test.use %outer_lo, %outer_hi, %inner_end_lo, %inner_end_hi : i64, i64, i64, i64
+    scf.yield %inner_end : offset
+  }
+  %outer_end_lo = scalar.constant 40 : i64
+  %outer_end_hi = scalar.constant 40 : i64
+  func.return %outer_end_lo, %outer_end_hi : i64, i64
 }

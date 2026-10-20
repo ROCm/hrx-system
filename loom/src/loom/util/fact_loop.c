@@ -464,6 +464,84 @@ static iree_status_t loom_value_fact_table_join_loop_backedge(
   return iree_ok_status();
 }
 
+// Exact short loops can preserve integer transfers that do not fit the
+// additive equation representation, including state returned by a nested
+// loop. Replay is bounded by the existing solve budget and only selected when
+// at least one integer state has no retained additive equation.
+static bool loom_value_fact_counted_loop_needs_exact_replay(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_loop_like_t loop, const loom_type_t* types,
+    const loom_value_fact_loop_equations_t* equations) {
+  const uint16_t count = loom_value_fact_loop_state_count(loop);
+  loom_region_t* body = loom_loop_like_body(loop);
+  const loom_block_t* body_block = loom_region_const_entry_block(body);
+  const loom_op_t* yield = loom_value_fact_region_terminator(body);
+  if (!body_block || !yield || yield->operand_count < count) {
+    return false;
+  }
+  const uint16_t argument_offset =
+      loom_value_fact_loop_carried_arg_offset(loop);
+  const loom_value_slice_t initial_values = loom_loop_like_iter_args(loop);
+  const loom_value_id_t* yielded_values = loom_op_const_operands(yield);
+  for (uint16_t i = 0; i < count; ++i) {
+    int64_t domain_lo = 0;
+    int64_t domain_hi = 0;
+    if (!loom_type_is_scalar(types[i]) ||
+        !loom_value_facts_scalar_type_domain(loom_type_element_type(types[i]),
+                                             &domain_lo, &domain_hi) ||
+        loom_value_fact_recurrence_set_lookup(&equations->recurrences, i)) {
+      continue;
+    }
+    const loom_value_id_t yielded =
+        loom_value_fact_table_query_identity(table, yielded_values[i]);
+    const loom_value_id_t argument = loom_value_fact_table_query_identity(
+        table, loom_block_arg_id(body_block, argument_offset + i));
+    const loom_value_id_t initial =
+        loom_value_fact_table_query_identity(table, initial_values.values[i]);
+    if (yielded != argument && yielded != initial) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Replays the remaining body executions from the first evaluated state,
+// retaining both the union of body observations and the exact final state.
+// The caller has already evaluated execution zero into |yielded_facts|.
+static iree_status_t loom_value_fact_table_replay_counted_loop(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_loop_like_t loop, const loom_type_t* types,
+    const loom_value_facts_t* init_facts, loom_value_facts_t* current_facts,
+    loom_value_facts_t* yielded_facts, loom_value_facts_t* body_facts,
+    uint16_t count, uint64_t trip_count) {
+  loom_region_t* body = loom_loop_like_body(loop);
+  const uint16_t argument_offset =
+      loom_value_fact_loop_carried_arg_offset(loop);
+  memcpy(body_facts, init_facts, count * sizeof(*body_facts));
+  for (uint64_t execution = 1; execution < trip_count; ++execution) {
+    memcpy(current_facts, yielded_facts, count * sizeof(*current_facts));
+    for (uint16_t i = 0; i < count; ++i) {
+      loom_value_facts_t joined = loom_value_facts_unknown();
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_meet_for_type(
+          table, module, types[i], table, body_facts[i], table,
+          current_facts[i], &joined));
+      body_facts[i] = joined;
+    }
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
+        table, module, body, argument_offset, current_facts, count));
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region_tree(
+        table, module, body, loop.op));
+    loom_value_fact_table_collect_terminator_operands(
+        table, loom_value_fact_region_terminator(body), /*operand_offset=*/0,
+        yielded_facts, count);
+  }
+  memcpy(current_facts, yielded_facts, count * sizeof(*current_facts));
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
+      table, module, body, argument_offset, body_facts, count));
+  return loom_value_fact_table_compute_region_tree(table, module, body,
+                                                   loop.op);
+}
+
 static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
     loom_value_fact_table_t* table, const loom_module_t* module,
     loom_loop_like_t loop, iree_arena_allocator_t* recurrence_arena,
@@ -515,6 +593,7 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
           ? LOOM_LOOP_TRIP_COUNT_EXACT
           : LOOM_LOOP_TRIP_COUNT_BOUNDED;
   bool converged = false;
+  bool exact_replayed = false;
   for (uint32_t iteration = 0; iteration < LOOM_VALUE_FACT_LOOP_MAX_ITERATIONS;
        ++iteration) {
     IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
@@ -530,6 +609,17 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
           table, module, loop, recurrence_arena, &forwarding.recurrences));
       forwarding.domain.trip_count = trip_count;
       forwarding.domain.trip_count_kind = trip_count_kind;
+      if (trip_count_kind == LOOM_LOOP_TRIP_COUNT_EXACT && trip_count > 0 &&
+          trip_count <= LOOM_VALUE_FACT_LOOP_MAX_ITERATIONS &&
+          loom_value_fact_counted_loop_needs_exact_replay(table, module, loop,
+                                                          types, &forwarding)) {
+        IREE_RETURN_IF_ERROR(loom_value_fact_table_replay_counted_loop(
+            table, module, loop, types, init_facts, current_facts,
+            yielded_facts, next_facts, count, trip_count));
+        converged = true;
+        exact_replayed = true;
+        break;
+      }
     }
 
     bool changed = false;
@@ -580,6 +670,8 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
   for (uint16_t i = 0; i < count; ++i) {
     if (zero_trip) {
       result_facts[i] = init_facts[i];
+    } else if (exact_replayed) {
+      result_facts[i] = current_facts[i];
     } else if (at_least_one_trip) {
       result_facts[i] = yielded_facts[i];
     } else {

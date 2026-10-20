@@ -760,7 +760,7 @@ func.def @counted_zero_trip(%count: index, %repeat: i1, %choose: i1) {
 
 // RUN: pass canonicalize
 
-// A positive trip count excludes the first seed from the head and fixes the tail.
+// An exact short rotation retains each body observation and its final slot.
 func.def @counted_positive_trip(%count: index, %repeat: i1, %choose: i1) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
@@ -825,7 +825,7 @@ func.def @counted_positive_trip(%count: index, %repeat: i1, %choose: i1) {
   %out0, %out1, %out2, %out3, %out4, %out5, %out6, %out7, %out8, %out9, %out10, %out11 = scf.for %iv = [%begin to %limit step %step](%slot0 = %seed0 : offset, %slot1 = %seed1 : offset, %slot2 = %seed2 : offset, %slot3 = %seed3 : offset, %slot4 = %seed4 : offset, %slot5 = %seed5 : offset, %slot6 = %seed6 : offset, %slot7 = %seed7 : offset, %slot8 = %seed8 : offset, %slot9 = %seed9 : offset, %slot10 = %seed10 : offset, %slot11 = %seed11 : offset) -> (offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset) {
     %before0_range_lo = scalar.constant 0 : i64
     test.use %before0_range_lo : i64
-    %before0_range_hi = scalar.constant 96 : i64
+    %before0_range_hi = scalar.constant 24 : i64
     test.use %before0_range_hi : i64
     %before0_divisor = scalar.constant 8 : i64
     test.use %before0_divisor : i64
@@ -837,9 +837,9 @@ func.def @counted_positive_trip(%count: index, %repeat: i1, %choose: i1) {
     test.use %before11_divisor : i64
     scf.yield %slot1, %slot2, %slot3, %slot4, %slot5, %slot6, %slot7, %slot8, %slot9, %slot10, %slot11, %injected : offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset
   }
-  %result0_range_lo = scalar.constant 8 : i64
+  %result0_range_lo = scalar.constant 32 : i64
   test.use %result0_range_lo : i64
-  %result0_range_hi = scalar.constant 96 : i64
+  %result0_range_hi = scalar.constant 32 : i64
   test.use %result0_range_hi : i64
   %result11_range_lo = scalar.constant 96 : i64
   test.use %result11_range_lo : i64

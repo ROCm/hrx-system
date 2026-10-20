@@ -1804,7 +1804,8 @@ TEST_P(StructuredForwardingFactsRewriteTest,
   loom_op_t* injected = constant(count + 8, i32);
   const auto injected_id = loom_test_constant_result(injected);
   const auto begin = loom_test_constant_result(constant(0, index));
-  const auto limit = loom_test_constant_result(constant(4, index));
+  constexpr int64_t kTripCount = 4;
+  const auto limit = loom_test_constant_result(constant(kTripCount, index));
   const auto step = loom_test_constant_result(constant(1, index));
   const auto enabled = loom_test_constant_result(constant(1, i1));
   loom_op_t* unknown_input = nullptr;
@@ -1914,7 +1915,29 @@ TEST_P(StructuredForwardingFactsRewriteTest,
             fresh, loom_value_fact_table_lookup(fresh, value)));
       }
       const auto value = loom_value_fact_table_lookup(facts, carried[i]);
-      if (state != State::kUnknownInput) {
+      if (!is_while && state != State::kClosed) {
+        const bool transfer_reaches_body = i + kTripCount - 1 >= count;
+        if (state == State::kUnknownInput && transfer_reaches_body) {
+          EXPECT_FALSE(loom_value_facts_is_cluster_uniform(value));
+        } else {
+          EXPECT_EQ(value.range_lo, i);
+          EXPECT_EQ(value.range_hi, transfer_reaches_body ? injected_value
+                                                          : i + kTripCount - 1);
+          EXPECT_TRUE(loom_value_facts_is_cluster_uniform(value));
+        }
+        const auto output =
+            loom_value_fact_table_lookup(facts, loom_op_results(loop)[i]);
+        const bool transfer_reaches_result = i + kTripCount >= count;
+        if (state == State::kUnknownInput && transfer_reaches_result) {
+          EXPECT_FALSE(loom_value_facts_is_cluster_uniform(output));
+        } else {
+          const int64_t expected =
+              transfer_reaches_result ? injected_value : i + kTripCount;
+          EXPECT_EQ(output.range_lo, expected);
+          EXPECT_EQ(output.range_hi, expected);
+          EXPECT_TRUE(loom_value_facts_is_cluster_uniform(output));
+        }
+      } else if (state != State::kUnknownInput) {
         EXPECT_EQ(value.range_lo, state == State::kClosed ? 0 : i);
         EXPECT_EQ(value.range_hi,
                   state == State::kClosed ? count - 1 : injected_value);
