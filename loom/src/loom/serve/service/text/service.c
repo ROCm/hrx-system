@@ -173,6 +173,18 @@ static bool loom_serve_text_has_work(const loom_serve_text_service_t* service) {
          loom_serve_text_epoch_is_prepared(service);
 }
 
+static loom_serve_execution_qos_t loom_serve_text_pending_qos(
+    const loom_serve_text_service_t* service) {
+  for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
+    const loom_serve_text_consumer_t consumer =
+        service->pending.values[i]->consumer;
+    if (consumer.vtable->is_open(consumer.self)) {
+      return consumer.qos;
+    }
+  }
+  return LOOM_SERVE_EXECUTION_QOS_BACKGROUND;
+}
+
 static iree_status_t loom_serve_text_await_work(
     loom_serve_text_service_t* service, loom_serve_text_work_t work) {
   service->completion.start_time = iree_time_now();
@@ -683,6 +695,9 @@ static iree_status_t loom_serve_text_prepare_media(
   *out_ready = loom_serve_text_media_request_bind(pending->media,
                                                   &pending->input, consumed);
   if (*out_ready) {
+    return iree_ok_status();
+  }
+  if (pending->consumer.qos < loom_serve_text_pending_qos(service)) {
     return iree_ok_status();
   }
   if (!service->media_preparation_end &&
@@ -1343,12 +1358,15 @@ static loom_serve_execution_resources_t loom_serve_text_execution_demand(
   if (service->stopping) {
     return 0;
   }
+  const loom_serve_execution_resources_t projection =
+      loom_serve_text_media_projector_demand(service->projector);
   if (service->cpu.work == TEXT_CPU_WORK_OUTPUT) {
-    return service->cpu.permit.phase != LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED &&
-                   loom_serve_text_output_qos(service) ==
-                       LOOM_SERVE_EXECUTION_QOS_REALTIME
-               ? LOOM_SERVE_EXECUTION_RESOURCE_HOST
-               : 0;
+    return projection |
+           (service->cpu.permit.phase != LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED &&
+                    loom_serve_text_output_qos(service) ==
+                        LOOM_SERVE_EXECUTION_QOS_REALTIME
+                ? LOOM_SERVE_EXECUTION_RESOURCE_HOST
+                : 0);
   }
   if (service->cpu.work == TEXT_CPU_WORK_NONE) {
     for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
@@ -1356,10 +1374,11 @@ static loom_serve_execution_resources_t loom_serve_text_execution_demand(
           service->pending.values[i];
       if (request->consumer.qos == LOOM_SERVE_EXECUTION_QOS_REALTIME &&
           request != service->pending.prepared.request &&
+          loom_serve_text_media_request_is_ready(request->media) &&
           request->consumer.vtable->is_open(request->consumer.self) &&
           loom_serve_text_session_select(service->row_count, service->sessions,
                                          request->name, NULL)) {
-        return LOOM_SERVE_EXECUTION_RESOURCE_HOST;
+        return projection | LOOM_SERVE_EXECUTION_RESOURCE_HOST;
       }
     }
   }
@@ -1371,10 +1390,10 @@ static loom_serve_execution_resources_t loom_serve_text_execution_demand(
         !consumer.vtable->is_blocked(consumer.self) &&
         (session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL ||
          session->request.phase == LOOM_SERVE_TEXT_REQUEST_DECODE)) {
-      return service->permit->resources;
+      return projection | service->permit->resources;
     }
   }
-  return 0;
+  return projection;
 }
 
 // Class selection precedes source geometry: background rows cannot inherit a
@@ -2194,10 +2213,12 @@ static bool loom_serve_text_media_lookahead(
        service->completion.work != TEXT_WORK_EPOCH)) {
     return false;
   }
+  const loom_serve_execution_qos_t qos = loom_serve_text_pending_qos(service);
   for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
     const loom_serve_text_pending_request_t* request =
         service->pending.values[i];
-    if (request->receipt.serial > service->media_preparation_end) {
+    if (request->receipt.serial > service->media_preparation_end ||
+        request->consumer.qos < qos) {
       continue;
     }
     if (service->projector && request->media) {
@@ -2243,7 +2264,8 @@ static iree_status_t loom_serve_text_advance(void* self,
     projection_flags |= LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
   }
   iree_status_t projection_status = loom_serve_text_media_projector_advance(
-      service->projector, projection_flags, &projection_progress);
+      service->projector, loom_serve_text_pending_qos(service),
+      projection_flags, &projection_progress);
   if (!iree_status_is_ok(projection_status)) {
     flags |= LOOM_SERVE_SERVICE_FLAG_STOPPING;
   }

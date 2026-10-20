@@ -39,6 +39,11 @@ bool loom_serve_text_media_request_bind(
     loom_serve_text_media_request_t* request,
     const loom_serve_text_input_t* input, iree_host_size_t consumed);
 
+// Whether every currently bound occurrence has a published feature root.
+// NULL represents text-only input. No CPU-task payload is observed.
+bool loom_serve_text_media_request_is_ready(
+    const loom_serve_text_media_request_t* request);
+
 // Commits the bound input after admission and projector detachment. Drops
 // projected images superseded by a retained prefix and ends the chat borrow.
 void loom_serve_text_media_request_begin(
@@ -63,8 +68,10 @@ void loom_serve_text_media_request_free(
 // One bounded host preparation window over an independently prepared component.
 // capacity bounds queued image occurrences; the source batch limit further
 // bounds the window. Decoded packet bytes target the source upload capacity;
-// one larger checked image is allowed alone. Prepared windows drain before new
-// decoding. CPU and producer readiness are independent of text's channels.
+// one larger checked image is allowed alone. Each window has one request class
+// before decoding. A higher pending class can replace it after accepted
+// borrowers retire. CPU and producer readiness are independent of text's
+// channels.
 iree_status_t loom_serve_text_media_projector_allocate(
     loom_serve_finite_model_t* model, iree_host_size_t capacity,
     iree_task_executor_t* executor, iree_async_proactor_t* proactor,
@@ -72,7 +79,8 @@ iree_status_t loom_serve_text_media_projector_allocate(
     loom_serve_text_media_projector_t** out_projector);
 
 // Offers missing images in request order. False means the current window is
-// sealed/full, not request failure. Each occurrence is selected at most once.
+// sealed/full or has a different class, not request failure. A higher class
+// replaces a gathering window. Each occurrence is selected at most once.
 bool loom_serve_text_media_projector_offer(
     loom_serve_text_media_projector_t* projector,
     loom_serve_text_media_request_t* request);
@@ -106,9 +114,19 @@ void loom_serve_text_media_projector_set_observer(
 // Owner-published activity for service inspection; NULL means no active window.
 const char* loom_serve_text_media_projector_phase(
     const loom_serve_text_media_projector_t* projector);
+
+// Current ready host demand, excluding accepted tasks and physical-admission
+// waits. The text service includes this in its owner-only scheduling query.
+loom_serve_execution_resources_t loom_serve_text_media_projector_demand(
+    const loom_serve_text_media_projector_t* projector);
+
+// pending_qos is the current highest live pending text class. Lower-class
+// windows withdraw after accepted borrowers retire; a past offer never keeps
+// urgency alive after its requesting consumer leaves.
 iree_status_t loom_serve_text_media_projector_advance(
     loom_serve_text_media_projector_t* projector,
-    loom_serve_service_flags_t flags, bool* out_progress);
+    loom_serve_execution_qos_t pending_qos, loom_serve_service_flags_t flags,
+    bool* out_progress);
 
 // All accepted callbacks have retired. Request owners have detached their jobs.
 // Failed device work remains component-owned until actual model retirement.

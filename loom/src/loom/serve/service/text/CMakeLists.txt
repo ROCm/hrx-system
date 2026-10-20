@@ -300,10 +300,13 @@ loom_cc_library(
     ::model
     ::readiness
     ::source_service_fixture
+    ::stream
     iree::base::internal::json
     loom::serve::media::image_codec
     loom::serve::media::image_codecs
     loom::serve::media::image_request
+    loom::serve::runtime::device
+    loom::serve::runtime::execution::scheduler
     loom::serve::service::finite::component
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model

@@ -6,16 +6,22 @@
 
 #include <array>
 #include <cstdlib>
+#include <initializer_list>
 
 #include "loom/serve/media/image_codec.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/service/finite/component.h"
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/serve/service/text/stream.h"
 
 namespace {
 
 using loom_serve::testing::text::Oracle;
 using loom_serve::testing::text::OwnerTurn;
 using loom_serve::testing::text::SourceTextServiceTest;
+using NativeStream = std::unique_ptr<loom_serve_text_stream_t,
+                                     decltype(&loom_serve_text_stream_close)>;
 
 class MediaServiceTest : public SourceTextServiceTest {
  protected:
@@ -50,6 +56,7 @@ class MediaServiceTest : public SourceTextServiceTest {
   }
 
   void TearDown() override {
+    loom_serve_execution_permit_deinitialize(&peer_);
     if (service_) {
       AdvanceUntil(
           interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING);
@@ -80,6 +87,78 @@ class MediaServiceTest : public SourceTextServiceTest {
     return !interface_.is_pending(interface_.self) &&
            !interface_.is_active(interface_.self) &&
            !interface_.snapshot(interface_.self).queued_requests;
+  }
+
+  void PrepareProjector() {
+    loom_serve_finite_model_t* model = nullptr;
+    IREE_ASSERT_OK(loom_serve_finite_component_prepare(image_, &model));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+      return loom_serve_finite_component_phase(image_) !=
+             LOOM_SERVE_FINITE_COMPONENT_PREPARING;
+    }));
+    IREE_ASSERT_OK(loom_serve_finite_component_prepare(image_, &model));
+    ASSERT_NE(model, nullptr);
+  }
+
+  void RequestVoice() {
+    loom_serve_execution_permit_initialize(loom_serve_device_scheduler(device_),
+                                           LOOM_SERVE_EXECUTION_RESOURCE_HOST,
+                                           &peer_);
+    loom_serve_execution_permit_request(&peer_,
+                                        LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  }
+
+  iree_status_t Open(const std::string& body, const char* session,
+                     loom_serve_execution_qos_t qos, NativeStream* stream) {
+    loom_serve_text_request_t request = {
+        .session = iree_make_cstring_view(session),
+        .qos = qos,
+    };
+    iree_string_builder_initialize(host_allocator_, &request.body);
+    iree_status_t status = iree_string_builder_append_string(
+        &request.body, iree_make_string_view(body.data(), body.size()));
+    loom_serve_text_stream_t* value = nullptr;
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_text_service_try_open(service_, &request, &value);
+    }
+    iree_string_builder_deinitialize(&request.body);
+    stream->reset(value);
+    return status;
+  }
+
+  void ReadFinal(const NativeStream& stream,
+                 std::initializer_list<int32_t> input) {
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+      if (loom_serve_text_stream_peek(stream.get())) {
+        loom_serve_text_stream_consume(stream.get());
+      }
+      return loom_serve_text_stream_is_complete(stream.get());
+    }));
+    IREE_ASSERT_OK(loom_serve_text_stream_status(stream.get()));
+    const auto* result = loom_serve_text_stream_result(stream.get());
+    ASSERT_NE(result, nullptr);
+    Oracle oracle;
+    for (int32_t value : input) {
+      oracle.Consume(value);
+    }
+    EXPECT_EQ(std::string(result->content.data, result->content.size),
+              Complete(oracle, 4));
+  }
+
+  void HoldBeforeDecode(const std::string& body, NativeStream* stream) {
+    ASSERT_NO_FATAL_FAILURE(PrepareProjector());
+    OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+      IREE_ASSERT_OK(Open(body, "background",
+                          LOOM_SERVE_EXECUTION_QOS_BACKGROUND, stream));
+      // Accept text preparation before requesting competing host admission.
+      bool progress = false;
+      IREE_ASSERT_OK(Advance(interface_, 0, &progress));
+      RequestVoice();
+      EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+    });
+    ASSERT_NO_FATAL_FAILURE(AtImagePhase("image_waiting_cpu", [&] {
+      ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+    }));
   }
 
   static int32_t Feature(float value) {
@@ -150,6 +229,8 @@ class MediaServiceTest : public SourceTextServiceTest {
   loom_serve_text_service_t* service_ = nullptr;
   // Borrowed callbacks driven on the ordinary shared executor.
   loom_serve_service_t interface_ = {};
+  // Independent realtime host owner, detached before service teardown.
+  loom_serve_execution_permit_t peer_ = {};
 };
 
 class SplitMediaServiceTest : public MediaServiceTest {
@@ -165,6 +246,80 @@ class FailedMediaServiceTest : public MediaServiceTest {
     return IREE_SV("{\"batch_units\":0}");
   }
 };
+
+TEST_F(MediaServiceTest,
+       VoiceReplacesUnstartedDecodeWithoutPromotingBackground) {
+  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+    return;
+  }
+  const auto body = Request(
+      ImageMessage("a", "image/x-portable-arbitrarymap", kPam, "low", "b"), 4);
+  NativeStream background(nullptr, loom_serve_text_stream_close);
+  ASSERT_NO_FATAL_FAILURE(HoldBeforeDecode(body, &background));
+  NativeStream voice(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(Request(ImageMessage("x", "image/x-portable-arbitrarymap",
+                                           kAlphaPam, "low", "a"),
+                              4),
+                      "voice", LOOM_SERVE_EXECUTION_QOS_REALTIME, &voice));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(voice, {2, Feature(11), 0}));
+  EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 1u);
+  EXPECT_FALSE(loom_serve_text_stream_is_complete(background.get()));
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(background, {0, Feature(511), 1}));
+}
+
+TEST_F(MediaServiceTest, CancelledDecodeReleasesSelectionWhileVoiceOwnsHost) {
+  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+    return;
+  }
+  const auto body = Request(
+      ImageMessage("a", "image/x-portable-arbitrarymap", kPam, "low", "b"), 4);
+  NativeStream background(nullptr, loom_serve_text_stream_close);
+  ASSERT_NO_FATAL_FAILURE(HoldBeforeDecode(body, &background));
+  background.reset();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
+  NativeStream replacement(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body, "background", LOOM_SERVE_EXECUTION_QOS_REALTIME,
+                      &replacement));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(replacement, {0, Feature(511), 1}));
+  loom_serve_execution_permit_complete(&peer_);
+}
+
+class InterruptedMediaServiceTest
+    : public MediaServiceTest,
+      public ::testing::WithParamInterface<const char*> {};
+
+TEST_P(InterruptedMediaServiceTest, VoiceWaitsForBorrowerThenReplacesWindow) {
+  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+    return;
+  }
+  NativeStream background(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(
+      Request(
+          ImageMessage("a", "image/x-portable-arbitrarymap", kPam, "low", "b"),
+          4),
+      "background", LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &background));
+  NativeStream voice(nullptr, loom_serve_text_stream_close);
+  ASSERT_NO_FATAL_FAILURE(AtImagePhase(GetParam(), [&] {
+    RequestVoice();
+    EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+    IREE_ASSERT_OK(
+        Open(Request(ImageMessage("x", "image/x-portable-arbitrarymap",
+                                  kAlphaPam, "low", "a"),
+                     4),
+             "voice", LOOM_SERVE_EXECUTION_QOS_REALTIME, &voice));
+  }));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(voice, {2, Feature(11), 0}));
+  EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 1u);
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(background, {0, Feature(511), 1}));
+}
+
+INSTANTIATE_TEST_SUITE_P(CodecBatchAndCompiler, InterruptedMediaServiceTest,
+                         ::testing::Values("image_prepare", "image_batch",
+                                           "image_specialize"));
 
 TEST_F(FailedMediaServiceTest, ComponentFailureRejectsImagesButPreservesText) {
   const std::string image =
