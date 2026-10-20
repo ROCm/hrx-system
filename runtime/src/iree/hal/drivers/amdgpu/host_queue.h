@@ -459,7 +459,8 @@ typedef struct iree_hal_amdgpu_host_queue_t {
     // release after signal commit. The proactor thread does not acquire this.
     iree_slim_mutex_t submission_mutex;
     // Serializes notification-ring drain between the completion thread and
-    // direct host waiters observing a producer epoch.
+    // direct host waiters observing a producer epoch. When nested with
+    // submission_mutex, this lock comes first: drain callbacks may submit.
     iree_slim_mutex_t completion_drain_mutex;
     // Serializes the post-drain continuation list.
     iree_slim_mutex_t post_drain_mutex;
@@ -788,7 +789,8 @@ iree_status_t iree_hal_amdgpu_host_queue_enqueue_host_action(
 
 // Enqueues |action| to run after the current or next notification-ring drain
 // has fully published completed entries. The action storage must remain valid
-// until |action->fn| is invoked.
+// until |action->fn| is invoked. Capacity retries must hold submission_mutex
+// continuously from the failed capacity observation through this registration.
 void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
     iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_amdgpu_host_queue_post_drain_action_t* action,

@@ -15,9 +15,16 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Starts wait registration or capacity retry for a captured operation.
-iree_status_t iree_hal_amdgpu_pending_op_start(iree_hal_amdgpu_pending_op_t* op,
-                                               bool wait_for_capacity);
+// Starts semantic wait registration outside submission_mutex. Callbacks may
+// synchronously issue or fail the operation; failures are published through its
+// signal semaphores.
+void iree_hal_amdgpu_pending_op_enqueue_waits(iree_hal_amdgpu_pending_op_t* op);
+
+// Registers a retry while submission_mutex still protects the capacity
+// observation. The completion service joins this critical section before
+// consuming the release notification that makes the retry ready.
+void iree_hal_amdgpu_pending_op_enqueue_capacity_retry(
+    iree_hal_amdgpu_pending_op_t* op);
 
 // Enqueues the cold alloca memory-readiness wait prepared on |op|.
 void iree_hal_amdgpu_pending_op_enqueue_alloca_memory_wait(

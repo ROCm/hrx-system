@@ -514,12 +514,12 @@ static void iree_hal_amdgpu_wait_entry_resolved(
 // The wait_semaphore_list on the op (cloned into the arena by allocate)
 // retains all semaphores for the lifetime of the op. Wait entries do not
 // independently retain semaphores.
-static iree_status_t iree_hal_amdgpu_pending_op_enqueue_waits(
+void iree_hal_amdgpu_pending_op_enqueue_waits(
     iree_hal_amdgpu_pending_op_t* op) {
   iree_hal_semaphore_list_t wait_semaphores = op->wait_semaphore_list;
   if (wait_semaphores.count == 0) {
     iree_hal_amdgpu_pending_op_issue(op);
-    return iree_ok_status();
+    return;
   }
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, wait_semaphores.count);
@@ -532,14 +532,14 @@ static iree_status_t iree_hal_amdgpu_pending_op_enqueue_waits(
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_pending_op_fail(op, status);
     IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
+    return;
   }
   status = iree_arena_allocate(&op->arena, wait_entry_bytes,
                                (void**)&op->wait_entries);
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_pending_op_fail(op, status);
     IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
+    return;
   }
   memset(op->wait_entries, 0, wait_entry_bytes);
   // Unregistered entries never receive callbacks, so they start complete.
@@ -597,7 +597,6 @@ static iree_status_t iree_hal_amdgpu_pending_op_enqueue_waits(
     iree_hal_amdgpu_pending_op_complete_resolved_waits(op);
   }
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
 }
 
 static void iree_hal_amdgpu_alloca_memory_wait_resolved(void* user_data,
@@ -765,7 +764,7 @@ void iree_hal_amdgpu_pending_op_enqueue_alloca_memory_wait(
   }
 }
 
-static void iree_hal_amdgpu_pending_op_enqueue_capacity_retry(
+void iree_hal_amdgpu_pending_op_enqueue_capacity_retry(
     iree_hal_amdgpu_pending_op_t* op) {
   iree_atomic_store(&op->lifecycle_state,
                     IREE_HAL_AMDGPU_PENDING_OP_LIFECYCLE_COMPLETING,
@@ -777,15 +776,6 @@ static void iree_hal_amdgpu_pending_op_enqueue_capacity_retry(
 
 static void iree_hal_amdgpu_pending_op_capacity_post_drain(void* user_data) {
   iree_hal_amdgpu_pending_op_issue((iree_hal_amdgpu_pending_op_t*)user_data);
-}
-
-iree_status_t iree_hal_amdgpu_pending_op_start(iree_hal_amdgpu_pending_op_t* op,
-                                               bool wait_for_capacity) {
-  if (wait_for_capacity) {
-    iree_hal_amdgpu_pending_op_enqueue_capacity_retry(op);
-    return iree_ok_status();
-  }
-  return iree_hal_amdgpu_pending_op_enqueue_waits(op);
 }
 
 // Allocates and initializes a pending operation from a fresh arena.

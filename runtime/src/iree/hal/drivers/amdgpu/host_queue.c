@@ -307,6 +307,12 @@ static uint64_t iree_hal_amdgpu_host_queue_run_post_drain_actions(
   // Join that retirement before detaching its actions so their callbacks cannot
   // publish terminal completion while reclaim entries still own resources.
   iree_slim_mutex_lock(&queue->locks.completion_drain_mutex);
+  // A submitter may have observed exhausted capacity before this drain released
+  // it and still be registering its retry. Join that registration before
+  // marking the drained epoch serviced: no later GPU completion may remain to
+  // wake us. Drain callbacks can submit, so completion must precede submission
+  // here.
+  iree_slim_mutex_lock(&queue->locks.submission_mutex);
   iree_slim_mutex_lock(&queue->locks.post_drain_mutex);
   iree_hal_amdgpu_host_queue_post_drain_action_t* action =
       queue->post_drain.head;
@@ -317,6 +323,7 @@ static uint64_t iree_hal_amdgpu_host_queue_run_post_drain_actions(
   const uint64_t serviced_epoch = (uint64_t)iree_atomic_load(
       &queue->notification_ring.epoch.last_drained, iree_memory_order_relaxed);
   iree_slim_mutex_unlock(&queue->locks.post_drain_mutex);
+  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
   iree_slim_mutex_unlock(&queue->locks.completion_drain_mutex);
 
   while (action) {
@@ -1377,18 +1384,25 @@ static inline void iree_hal_amdgpu_host_queue_op_submission_defer_for_capacity(
   submission->wait_for_capacity = submission->wait_semaphore_count == 0;
 }
 
-// Ends one direct/deferred queue operation attempt by releasing
-// submission_mutex and starting any captured pending op outside the lock.
+// Registers capacity retries before releasing admission. Semantic waits start
+// outside the lock because their callbacks may synchronously submit.
 static inline iree_status_t iree_hal_amdgpu_host_queue_op_submission_end(
     iree_hal_amdgpu_host_queue_op_submission_t* submission,
     iree_status_t status) {
-  iree_slim_mutex_unlock(&submission->queue->locks.submission_mutex);
-
+  iree_hal_amdgpu_pending_op_t* waiting_op = NULL;
   if (iree_status_is_ok(status) && submission->deferred_op) {
     submission->deferred_op->payload_barriers =
         submission->resolution.payload_barriers;
-    status = iree_hal_amdgpu_pending_op_start(submission->deferred_op,
-                                              submission->wait_for_capacity);
+    if (submission->wait_for_capacity) {
+      iree_hal_amdgpu_pending_op_enqueue_capacity_retry(
+          submission->deferred_op);
+    } else {
+      waiting_op = submission->deferred_op;
+    }
+  }
+  iree_slim_mutex_unlock(&submission->queue->locks.submission_mutex);
+  if (waiting_op) {
+    iree_hal_amdgpu_pending_op_enqueue_waits(waiting_op);
   }
   return status;
 }

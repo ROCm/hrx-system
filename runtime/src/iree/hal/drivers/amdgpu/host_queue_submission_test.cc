@@ -276,6 +276,35 @@ TEST_F(HostQueueSubmissionTest, DeferredSignalsRetireAfterHostAssembly) {
   }
 }
 
+TEST_F(HostQueueSubmissionTest,
+       CapacityRetryMakesProgressWithoutNewSubmissions) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.host_queues.notification_capacity = 1;
+  options.preallocate_pools = 0;
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  auto* queue = test_device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
+  iree::hal::cts::SemaphoreList completed(test_device.base_device(), {0}, {0});
+
+  // The first operation occupies the only completion slot. The second races
+  // its retirement and must resume even when no later submission can wake the
+  // completion thread. Repeat with the same queue to cover ring wraparound.
+  for (uint64_t iteration = 0; iteration < 1024; ++iteration) {
+    SCOPED_TRACE(iteration);
+    for (uint64_t operation = 1; operation <= 2; ++operation) {
+      completed.payload_values[0] = iteration * 2 + operation;
+      IREE_ASSERT_OK(iree_hal_queue_barrier(
+          &queue->base, iree_hal_semaphore_list_empty(), completed,
+          /*barriers=*/NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+    }
+    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+        completed, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+}
+
 TEST_F(HostQueueSubmissionTest, HostWaitRequiresPublishedProducerRetirement) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
