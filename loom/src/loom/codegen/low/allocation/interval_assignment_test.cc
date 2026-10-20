@@ -736,5 +736,241 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   loom_module_free(module);
 }
 
+// Four required owners occupy the low window before a fifth required value
+// arrives. The earlier fixed interval distinguishes current availability from
+// availability over a moved owner's complete lifetime.
+class LowRequiredRegisterRelocationTest
+    : public LowAllocationIntervalAssignmentTest {
+ protected:
+  void Run() {
+    loom_module_t* module = AllocateModule();
+    constexpr uint64_t kDescriptorSetId = 29;
+    constexpr uint32_t kValueCount = 6;
+    loom_value_id_t values[kValueCount];
+    uint32_t interval_indices[kValueCount];
+    loom_liveness_interval_t intervals[kValueCount] = {};
+    loom_low_allocation_unit_liveness_value_t unit_values[kValueCount] = {};
+    uint32_t starts[kValueCount] = {0, 1, 2, 3, 4, 6};
+    uint32_t ends[kValueCount] = {prior_end_, 12, 12, 12, 12, 12};
+    uint64_t required_bits = 0;
+    loom_module_value_ordinal_scratch_acquire(module);
+    for (uint32_t i = 0; i < kValueCount; ++i) {
+      const uint16_t class_id = alias_class_ && i == 5 ? 1 : 0;
+      IREE_ASSERT_OK(loom_module_define_value(
+          module, loom_low_register_type(kDescriptorSetId, class_id, 1),
+          &values[i]));
+      loom_module_value_ordinal_scratch_set(module, values[i], i);
+      interval_indices[i] = i;
+      intervals[i] = {
+          .value_id = values[i],
+          .start_point = starts[i],
+          .end_point = ends[i],
+          .value_class =
+              {
+                  .type_kind = LOOM_TYPE_REGISTER,
+                  .register_class_id = class_id,
+                  .register_descriptor_set_stable_id = kDescriptorSetId,
+              },
+          .unit_count = 1,
+      };
+      unit_values[i] = {i, starts[i]};
+      required_bits |= UINT64_C(1) << values[i];
+    }
+    loom_local_value_domain_t value_domain = {
+        .module = module,
+        .value_ids = values,
+        .value_count = kValueCount,
+        .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+    };
+    loom_liveness_analysis_t liveness = {
+        .intervals = intervals,
+        .interval_count = kValueCount,
+        .value_ids = values,
+        .value_count = kValueCount,
+        .value_interval_indices = interval_indices,
+    };
+    uint64_t incomplete_storage = 0;
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .values = unit_values,
+        .start_points = starts,
+        .end_points = ends,
+        .point_count = kValueCount,
+        .values_with_incomplete_storage_segments = {kValueCount,
+                                                    &incomplete_storage},
+    };
+    loom_low_placement_relation_range_t ranges[kValueCount] = {};
+    loom_low_placement_operand_constraints_t operands[kValueCount] = {};
+    operands[5].addressable_unit_count = 4;
+    if (constrain_blockers_) {
+      for (uint32_t i = 1; i < 5; ++i) {
+        operands[i].addressable_unit_count = 4;
+      }
+    }
+    loom_low_placement_table_t placement = {
+        .module = module,
+        .value_ids = values,
+        .value_count = kValueCount,
+        .ranges_by_result_ordinal = ranges,
+        .ranges_by_source_ordinal = ranges,
+        .operand_constraints_by_interval = operands,
+    };
+    const loom_low_reg_class_t classes[] = {
+        {
+            .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+            .alloc_unit_bits = 64,
+            .allocatable_count = capacity_,
+            .alias_set_id = 1,
+            .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+        },
+        {
+            .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+            .alloc_unit_bits = 32,
+            .allocatable_count = 4,
+            .alias_set_id = 1,
+            .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+        },
+    };
+    const loom_low_descriptor_set_t descriptors = {
+        .stable_id = kDescriptorSetId,
+        .reg_classes = classes,
+        .reg_class_count = IREE_ARRAYSIZE(classes),
+    };
+    const loom_low_resolved_target_t target = {
+        .descriptor_set = &descriptors,
+    };
+    loom_op_t function = {};
+    loom_low_allocation_target_constraints_t constraints = {};
+    IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+        module, &function, &target, nullptr, 0, nullptr, 0, {}, &arena_,
+        &constraints));
+    loom_low_allocation_fixed_value_t fixed[5] = {
+        {
+            .value_id = values[0],
+            .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+            .location_base = 4,
+            .location_count = 1,
+        },
+    };
+    iree_host_size_t fixed_count = 1;
+    if (fix_blockers_) {
+      for (uint32_t i = 1; i < 5; ++i) {
+        fixed[fixed_count++] = {
+            .value_id = values[i],
+            .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+            .location_base = i - 1,
+            .location_count = 1,
+        };
+      }
+    }
+    IREE_ASSERT_OK(
+        loom_low_allocation_target_constraints_resolve_fixed_locations(
+            &constraints, &liveness, &value_domain, operands, nullptr, fixed,
+            fixed_count, &arena_));
+    IREE_ASSERT_OK(loom_low_allocation_target_constraints_finalize_fixed_values(
+        &constraints, &liveness, &unit_liveness, &arena_));
+    loom_low_allocation_storage_lease_state_t leases = {};
+    const loom_low_allocation_interval_assignment_context_t context = {
+        .module = module,
+        .function_op = &function,
+        .target = &target,
+        .liveness = &liveness,
+        .value_domain = &value_domain,
+        .placement = &placement,
+        .target_constraints = &constraints,
+        .unit_liveness = &unit_liveness,
+        .storage_leases = &leases,
+        .arena = &arena_,
+        .required_register_values = {module->values.count, &required_bits},
+    };
+    loom_low_allocation_interval_assignment_result_t result = {};
+    IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
+        &context, &decision_arena_, &result));
+    error_count_ = constraints.error_count;
+    if (!error_count_) {
+      ASSERT_EQ(result.assignment_count, kValueCount);
+      EXPECT_EQ(result.spill_count, 0u);
+      for (uint32_t i = 0; i < kValueCount; ++i) {
+        assignments_[i] =
+            result.assignments[result.assignment_indices_by_value_ordinal[i]];
+      }
+    }
+    loom_local_value_domain_release(&value_domain);
+    loom_module_free(module);
+  }
+
+  void CheckMoved(uint32_t destination) {
+    ASSERT_EQ(error_count_, 0u);
+    ASSERT_LT(assignments_[5].location_base, 4u);
+    uint64_t occupied = UINT64_C(1) << assignments_[5].location_base;
+    uint32_t moved = 0;
+    for (uint32_t i = 1; i < 5; ++i) {
+      const auto& assignment = assignments_[i];
+      EXPECT_EQ(assignment.location_kind,
+                LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
+      EXPECT_TRUE(iree_any_bit_set(
+          assignment.flags,
+          LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER));
+      EXPECT_EQ(occupied & (UINT64_C(1) << assignment.location_base), 0u);
+      occupied |= UINT64_C(1) << assignment.location_base;
+      if (assignment.location_base >= 4) {
+        EXPECT_EQ(assignment.location_base, destination);
+        ++moved;
+      }
+    }
+    EXPECT_EQ(moved, 1u);
+  }
+
+  // Physical extent of the owners' register class.
+  uint16_t capacity_ = 5;
+  // End point of the earlier value fixed above the low window.
+  uint32_t prior_end_ = 1;
+  // Whether each blocking owner also has a low-window instruction constraint.
+  bool constrain_blockers_ = false;
+  // Whether immutable fixed-location claims protect all blocking owners.
+  bool fix_blockers_ = false;
+  // Whether the incoming value uses a distinct class sharing the same bank.
+  bool alias_class_ = false;
+  // Placement errors reported by the production assignment attempt.
+  uint32_t error_count_ = 0;
+  // Copies of completed assignments indexed by the fixture's value ordinal.
+  loom_low_allocation_assignment_t assignments_[6] = {};
+};
+
+TEST_F(LowRequiredRegisterRelocationTest, MovesAboveInstructionWindow) {
+  Run();
+  CheckMoved(4);
+}
+
+TEST_F(LowRequiredRegisterRelocationTest, ChecksExpiredAssignments) {
+  capacity_ = 6;
+  prior_end_ = 5;
+  Run();
+  CheckMoved(5);
+}
+
+TEST_F(LowRequiredRegisterRelocationTest, RejectsEarlierInterference) {
+  prior_end_ = 5;
+  Run();
+  EXPECT_NE(error_count_, 0u);
+}
+
+TEST_F(LowRequiredRegisterRelocationTest, PreservesOwnerInstructionLimits) {
+  constrain_blockers_ = true;
+  Run();
+  EXPECT_NE(error_count_, 0u);
+}
+
+TEST_F(LowRequiredRegisterRelocationTest, PreservesFixedLocations) {
+  fix_blockers_ = true;
+  Run();
+  EXPECT_NE(error_count_, 0u);
+}
+
+TEST_F(LowRequiredRegisterRelocationTest, MovesAliasClassOwners) {
+  alias_class_ = true;
+  Run();
+  CheckMoved(4);
+}
+
 }  // namespace
 }  // namespace loom
