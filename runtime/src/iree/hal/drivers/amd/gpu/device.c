@@ -771,10 +771,6 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   }
   const bool aql = context->families[family_ordinal].command_type ==
                    AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
-  if (aql && tsan_enabled) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "AQL race sanitizer is not admitted");
-  }
   const amdf_queue_publication_modes_t publication_mode =
       aql ? AMDF_QUEUE_PUBLICATION_MODE_USER
           : iree_hal_amd_gpu_device_select_publication(

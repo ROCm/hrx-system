@@ -6,6 +6,8 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/aql/dispatch.h"
 
+#include "iree/hal/drivers/amd/gpu/queue/aql/barrier.h"
+
 iree_status_t iree_hal_amd_gpu_aql_dispatch_prepare(
     const iree_hal_amd_gpu_aql_function_t* function,
     uint32_t maximum_group_segment_byte_length,
@@ -62,7 +64,7 @@ iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_dispatch_packet(
   if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
     dimensions = 3;
   }
-  packet.header =
-      header | IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (dimensions << 16);
+  packet.header = iree_hal_amd_gpu_aql_barrier_join(header, function->header) |
+                  IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (dimensions << 16);
   return iree_hal_amd_gpu_aql_packet_dispatch(&packet);
 }

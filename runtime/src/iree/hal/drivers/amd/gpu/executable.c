@@ -709,6 +709,13 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
       function->kernel_object = variant->bindings[1].device_address +
                                 image->kernels[i].descriptor_offset;
       function->code_properties = image->kernels[i].code_properties;
+      // Every instrumented dispatch reuses its queue's shadow arena. Join
+      // prior users and publish their writes before the next arena reset.
+      function->header = tsan_enabled
+                             ? IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                                   IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT |
+                                   IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT
+                             : 0;
     }
   }
   if (iree_status_is_ok(status) && options->asan) {

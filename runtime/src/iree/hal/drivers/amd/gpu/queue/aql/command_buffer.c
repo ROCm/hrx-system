@@ -358,8 +358,9 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   *target = iree_hal_amd_gpu_aql_dispatch_packet(function, &geometry, header, 0,
                                                  0, flags);
   // An indirect producer is itself ordered before publishing its target.
-  buffer->last_ordered = indirect || !buffer->last_header ||
-                         (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
+  buffer->last_ordered =
+      indirect || !buffer->last_header ||
+      (target->words[0] & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
   buffer->last_header = &target->words[0];
   const iree_hal_amd_gpu_recording_fixup_flags_t argument_flags =
       external_arguments ? 0 : IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA;

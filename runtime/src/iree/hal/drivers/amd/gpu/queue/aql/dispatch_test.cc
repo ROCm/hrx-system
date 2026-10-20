@@ -83,6 +83,33 @@ TEST_F(AqlDispatchTest, PacketGridIsAlwaysBoundedInWorkitems) {
   EXPECT_EQ(std::memcmp(&saved, &dispatch_, sizeof(saved)), 0);
 }
 
+TEST_F(AqlDispatchTest, FunctionRequirementsPreserveStrongerCallerScopes) {
+  function_.header = IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                     IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT |
+                     IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT;
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = config.workgroup_size[1] =
+      config.workgroup_size[2] = 1;
+  IREE_ASSERT_OK(Prepare(config));
+  // Native scope encodings are 0/1/2; combining agent and system must never
+  // produce the reserved encoding 3 in either fence field.
+  const std::array<std::array<uint32_t, 2>, 5> headers = {{
+      {0, 0x00010b02},
+      {0x0a00, 0x00010b02},
+      {0x1400, 0x00011502},
+      {0x0c00, 0x00010d02},
+      {0x1200, 0x00011302},
+  }};
+  for (const auto& header : headers) {
+    const auto packet = iree_hal_amd_gpu_aql_dispatch_packet(
+        &function_, &dispatch_, header[0], 0x4000, 0x8000, 0);
+    const std::array<uint32_t, 16> expected = {
+        header[1],  0x00010001, 1,      1, 1, 1, 0,      0,
+        0x56780040, 0x1234,     0x4000, 0, 0, 0, 0x8000, 0};
+    EXPECT_EQ(std::memcmp(packet.words, expected.data(), sizeof(packet)), 0);
+  }
+}
+
 TEST_F(AqlDispatchTest,
        EveryIndirectModeLeavesGeometryForDeviceMaterialization) {
   auto config =

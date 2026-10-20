@@ -498,6 +498,7 @@ iree_cc_library(
   SRCS
     "dispatch.c"
   DEPS
+    ::barrier
     ::packet
     iree::hal::drivers::amd::gpu::dispatch
   PUBLIC

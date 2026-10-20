@@ -23,6 +23,8 @@ typedef struct iree_hal_amd_gpu_aql_function_t {
   uint64_t kernel_object;
   // Descriptor properties admitted by the image frontend.
   uint16_t code_properties;
+  // Minimum ordering/fence bits required by executable-owned shared state.
+  uint16_t header;
 } iree_hal_amd_gpu_aql_function_t;
 static_assert(sizeof(void*) != 8 ||
                   sizeof(iree_hal_amd_gpu_aql_function_t) == 32,
@@ -40,7 +42,8 @@ iree_status_t iree_hal_amd_gpu_aql_dispatch_prepare(
     iree_hal_amd_gpu_dispatch_geometry_t* out_dispatch);
 
 // Encodes admitted geometry and the placed function as a native packet.
-// header contains resolved ordering/fence bits, without type/setup. Indirect
+// header contains resolved ordering/fence bits, without type/setup, joined
+// with the function's minimum requirements. Indirect
 // geometry starts at zero with rank three; the device materializer owns the
 // final counts and header publication. Invocation addresses are supplied by
 // the storage owner and remain live through execution, not just consumption.

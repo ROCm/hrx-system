@@ -7,6 +7,8 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <string>
+#include <tuple>
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/profile_test_util.h"
@@ -24,8 +26,13 @@ namespace {
 constexpr uint32_t kWorkgroupShadowStride = 32 + 16 + 16 * 16;
 
 class GpuTsanTest : public GpuNativeTest,
-                    public ::testing::WithParamInterface<uint32_t> {
+                    public ::testing::WithParamInterface<
+                        std::tuple<amdf_queue_command_type_t, uint32_t>> {
  protected:
+  amdf_queue_command_type_t command_type() const override {
+    return std::get<0>(GetParam());
+  }
+
   void SetUp() override {
     IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_, UINT64_MAX,
                                              AMDF_NATIVE_LIFETIME_PROCESS));
@@ -39,16 +46,19 @@ class GpuTsanTest : public GpuNativeTest,
       GTEST_SKIP() << "Native shader notification is unavailable";
     }
     context_->event_sink = {Publish, this};
-    const uint32_t gfx_major = context_->target_info.gfx_ip.major;
+    const auto gfx = context_->target_info.gfx_ip;
     const auto* files = iree_hal_amd_gpu_tsan_images_create();
-    const char* selector = gfx_major == 11 ? "gfx11-generic" : "gfx12-generic";
+    const char* selector = gfx.major == 9
+                               ? (gfx.minor == 4 ? "gfx9-4-generic" : "gfx90a")
+                           : gfx.major == 11 ? "gfx11-generic"
+                                             : "gfx12-generic";
     for (size_t i = 0; i < iree_hal_amd_gpu_tsan_images_size(); ++i) {
       if (std::strstr(files[i].name, selector)) {
         artifact_ = iree_make_const_byte_span(files[i].data, files[i].size);
       }
     }
     ASSERT_NE(artifact_.data, nullptr);
-    options_.tsan.memory.shadow_size = GetParam();
+    options_.tsan.memory.shadow_size = std::get<1>(GetParam());
   }
 
   void TearDown() override {
@@ -308,7 +318,8 @@ TEST_P(GpuTsanTest, CapacityFailurePreservesStatusAndNativeRetirement) {
   ASSERT_FALSE(HasFatalFailure());
   // Only the first excess workgroup reports capacity; valid preceding
   // workgroups have disjoint data.
-  const uint32_t workgroups = GetParam() / kWorkgroupShadowStride + 1;
+  const uint32_t workgroups =
+      options_.tsan.memory.shadow_size / kWorkgroupShadowStride + 1;
   uint64_t value = 1;
   IREE_ASSERT_OK(iree_hal_queue_dispatch(
       queues_[0], iree_hal_semaphore_list_empty(), {1, &done_[0], &value},
@@ -417,10 +428,21 @@ TEST_P(GpuTsanTest, IndirectDispatchRelocatesPacketAndPreparationProgram) {
 
 // Each arena admits the three-workgroup replay cases while exercising
 // different capacity boundaries.
-INSTANTIATE_TEST_SUITE_P(ShadowBytes, GpuTsanTest,
-                         ::testing::Values(4 * kWorkgroupShadowStride,
-                                           8 * kWorkgroupShadowStride,
-                                           64 * kWorkgroupShadowStride));
+INSTANTIATE_TEST_SUITE_P(
+    ShadowBytes, GpuTsanTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Values(4 * kWorkgroupShadowStride,
+                                         8 * kWorkgroupShadowStride,
+                                         64 * kWorkgroupShadowStride)),
+    [](const ::testing::TestParamInfo<
+        std::tuple<amdf_queue_command_type_t, uint32_t>>& info) {
+      return std::string(std::get<0>(info.param) ==
+                                 AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                             ? "Aql"
+                             : "Pm4") +
+             std::to_string(std::get<1>(info.param));
+    });
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu::cts
