@@ -944,6 +944,21 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "storage_reservations",
+    srcs = ["storage_reservations.c"],
+    hdrs = ["storage_reservations.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":unit_liveness",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "unit_liveness_builder",
     srcs = ["unit_liveness_builder.c"],
     hdrs = ["unit_liveness_builder.h"],
@@ -952,6 +967,7 @@ loom_cc_library(
         ":clobber_index",
         ":live_range",
         ":storage",
+        ":storage_reservations",
         ":unit_liveness",
         ":write_interference",
         "//loom/src/loom/analysis:liveness",

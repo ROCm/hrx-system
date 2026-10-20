@@ -7,6 +7,7 @@
 #include <inttypes.h>
 
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/function.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/low_emit.h"
 #include "loom/tools/loom-check/test/low/providers.h"
@@ -19,6 +20,7 @@ enum loom_check_test_low_allocation_option_flag_bits_e {
   LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_COPY_COUNT = 1u << 4,
   LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_FAILURE = 1u << 5,
   LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_EDGE_MOVES = 1u << 6,
+  LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_REVERSE_BLOCKS = 1u << 7,
 };
 typedef uint32_t loom_check_test_low_allocation_option_flags_t;
 
@@ -154,6 +156,17 @@ static iree_status_t loom_check_test_low_allocation_parse_option(
           "duplicate low-allocation-query option 'edge-moves'");
     }
     options->flags |= LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_EDGE_MOVES;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(token, IREE_SV("reverse-blocks"))) {
+    if (iree_any_bit_set(
+            options->flags,
+            LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_REVERSE_BLOCKS)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "duplicate low-allocation-query option 'reverse-blocks'");
+    }
+    options->flags |= LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_REVERSE_BLOCKS;
     return iree_ok_status();
   }
 
@@ -566,6 +579,30 @@ static iree_status_t loom_check_test_low_allocation_execute(
   loom_check_test_low_allocation_options_t options;
   IREE_RETURN_IF_ERROR(
       loom_check_test_low_allocation_parse_options(request, &options));
+
+  if (iree_any_bit_set(options.flags,
+                       LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_REVERSE_BLOCKS)) {
+    loom_op_t* function = NULL;
+    IREE_RETURN_IF_ERROR(loom_check_low_emit_find_low_function_def(
+        native_module->module, options.function_symbol_name, request->test_case,
+        request->filename, request->diagnostic_collector,
+        (iree_diagnostic_emitter_t){0}, &function));
+    if (function == NULL) {
+      return iree_ok_status();
+    }
+    // Text keeps definitions before uses. Physical layout may put a use block
+    // before its dominator; reverse nonentry blocks after verified parsing to
+    // exercise that allocation contract without forward SSA declarations.
+    loom_region_t* body = loom_low_function_body(function);
+    for (uint16_t first = 1, last = body->block_count - 1; first < last;
+         ++first, --last) {
+      loom_block_t* temporary = body->blocks[first];
+      body->blocks[first] = body->blocks[last];
+      body->blocks[last] = temporary;
+      body->blocks[first]->region_index = first;
+      body->blocks[last]->region_index = last;
+    }
+  }
 
   const loom_low_emission_frame_options_t frame_options = {
       .schedule_strategy = options.schedule_strategy,

@@ -25,6 +25,13 @@ extern "C" {
 typedef struct loom_low_allocation_write_interference_t
     loom_low_allocation_write_interference_t;
 
+typedef struct loom_low_allocation_storage_demand_t {
+  // Source whose physical storage is observed.
+  loom_value_ordinal_t value_ordinal;
+  // Block-local physical lifetime contributed by the observation.
+  loom_liveness_segment_t segment;
+} loom_low_allocation_storage_demand_t;
+
 // Per-value storage lifetime facts retained beside the per-unit lifetime
 // cursor.
 typedef struct loom_low_allocation_unit_liveness_value_t {
@@ -92,13 +99,20 @@ typedef struct loom_low_allocation_unit_liveness_t {
   uint16_t* implicit_location_counts_by_reg_class;
   // Sparse physical reservations, separate from semantic SSA liveness.
   struct {
+    // Decision-owned decomposed reads that require earlier acquisition,
+    // including their CFG predecessor closure.
+    loom_low_allocation_storage_demand_t* demands;
+    // Number of initialized physical lifetime contributions.
+    iree_host_size_t demand_count;
+    // Allocated capacity of |demands|.
+    iree_host_size_t demand_capacity;
     // Borrowed semantic segments, or result-arena-owned semantic prefix
-    // followed by tied-source reservations. Assignment ranges index this table.
+    // followed by physical reservations. Assignment ranges index this table.
     const loom_liveness_segment_t* entries;
-    // Optional decision-arena-owned tied-source ranges indexed by value
-    // ordinal. Empty entries retain conservative per-unit bounds for incomplete
-    // values.
-    const loom_liveness_segment_range_t* tied_sources;
+    // Optional decision-arena-owned physical ranges indexed by value ordinal.
+    // Empty entries use semantic segments or conservative per-unit bounds,
+    // according to whether the value's semantic storage segments are complete.
+    const loom_liveness_segment_range_t* refined_ranges;
   } storage_segments;
   // Decision-arena-owned implicit physical writes indexed by storage location.
   loom_low_allocation_clobber_index_t clobbers;
@@ -139,9 +153,8 @@ loom_low_allocation_unit_liveness_start_points_for_value_ordinal(
     loom_value_ordinal_t value_ordinal);
 
 // Returns the sparse segment range that is complete for physical storage
-// conflicts, indexing |unit_liveness->storage_segments.entries|. Values with
-// decomposed edge-handoff units return an empty range so conflict checks
-// conservatively use their refined linear unit lifetimes.
+// conflicts, indexing |unit_liveness->storage_segments.entries|. An empty range
+// requires conflict checks to use the conservative per-unit lifetime bounds.
 loom_liveness_segment_range_t
 loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
     const loom_low_allocation_unit_liveness_t* unit_liveness,
@@ -151,7 +164,7 @@ loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
 // Returns true when any unit in |unit_offset, unit_count| of |value_ordinal|'s
 // required tied component retains concrete storage across |program_point|.
 // The retained component origin owns the complete per-unit ends and sparse
-// physical segments after retain_tied_storage, making the query independent of
+// physical segments after retain_storage, making the query independent of
 // tied-chain depth.
 bool loom_low_allocation_unit_liveness_storage_component_live_at_point(
     const loom_low_allocation_unit_liveness_t* unit_liveness,

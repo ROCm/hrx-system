@@ -210,8 +210,8 @@ loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
   IREE_ASSERT_LT(value_ordinal, liveness->value_count);
   if (iree_bitmap_test(unit_liveness->values_with_incomplete_storage_segments,
                        value_ordinal)) {
-    return unit_liveness->storage_segments.tied_sources != NULL
-               ? unit_liveness->storage_segments.tied_sources[value_ordinal]
+    return unit_liveness->storage_segments.refined_ranges != NULL
+               ? unit_liveness->storage_segments.refined_ranges[value_ordinal]
                : (loom_liveness_segment_range_t){0};
   }
   return loom_liveness_segment_range_for_value_ordinal(liveness, value_ordinal);

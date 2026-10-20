@@ -714,7 +714,7 @@ static iree_status_t loom_low_allocate_function_impl(
         &state.unit_liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
-    status = loom_low_allocation_unit_liveness_retain_tied_storage(
+    status = loom_low_allocation_unit_liveness_retain_storage(
         &state.unit_liveness, &state.liveness, &state.placement, arena,
         &decision_arena);
   }

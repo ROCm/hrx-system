@@ -378,7 +378,7 @@ class WriteInterferenceTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_initialize(
         &target_, &placement_, &domain_, &liveness_, &graph_, {}, &result_,
         &decision_, &unit_liveness_));
-    IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_retain_tied_storage(
+    IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_retain_storage(
         &unit_liveness_, &liveness_, &placement_, &result_, &decision_));
     loom_low_allocation_unit_liveness_propagate_storage_relations(
         &unit_liveness_, &placement_);

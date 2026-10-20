@@ -79,7 +79,7 @@ class LowAllocationUnitLivenessTest : public ::testing::Test {
       loom_low_allocation_unit_liveness_t* unit_liveness,
       const loom_liveness_analysis_t* liveness,
       const loom_low_placement_table_t* placement) {
-    IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_tied_storage(
+    IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_storage(
         unit_liveness, liveness, placement, &arena_, &decision_arena_));
     loom_low_allocation_unit_liveness_propagate_storage_relations(unit_liveness,
                                                                   placement);
@@ -1144,7 +1144,7 @@ TEST_F(LowAllocationUnitLivenessTest,
   // An incomplete component without sparse reservations uses its acquisition
   // point as the conservative hull start, including before the SSA origin.
   loom_low_allocation_unit_liveness_t linear_liveness = unit_liveness;
-  linear_liveness.storage_segments.tied_sources = nullptr;
+  linear_liveness.storage_segments.refined_ranges = nullptr;
   EXPECT_TRUE(loom_low_allocation_unit_liveness_storage_component_live_at_point(
       &linear_liveness, &liveness, &placement, 0, 0, 1, 3));
   EXPECT_TRUE(loom_low_allocation_unit_liveness_storage_component_live_at_point(

@@ -63,6 +63,14 @@ decision annotations. `emit low-allocation ... diagnostics=placement-decisions`
 similarly checks storage affinities directly instead of pinning incidental
 value IDs, interval endpoints, and physical register choices in JSON.
 
+`emit low-allocation-query @function` selects exact assignments with
+`values=%source,%result`, reports spill counts with `spill-count`, and lists
+physical edge transfers with `edge-moves`. Optional `fixed=%source:target_id:0:2`
+bindings constrain locations through the production allocation interface.
+`reverse-blocks` reverses the nonentry block table after parsing, preserving the
+CFG and SSA dominance while exercising allocation when physical block order
+differs from dominance order. Authored text still defines values before uses.
+
 Focused lowering examples use exact goldens. When a case lowers one operation
 and the output is small, the complete before/after IR is the assertion and
 `--update` maintains it. `with-checks` is for large transforms and reports whose

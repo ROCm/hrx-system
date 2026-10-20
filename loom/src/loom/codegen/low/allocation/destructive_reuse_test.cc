@@ -147,7 +147,7 @@ class DestructiveReuseTest : public ::testing::Test {
         .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
         .tied_storage_origins_by_value_ordinal = tied_origins,
     };
-    IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_tied_storage(
+    IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_storage(
         &units, &liveness, &placement, &arena_, &decision_arena_));
     IREE_ASSERT_OK(loom_low_allocation_refine_destructive_reuse(
         &units, &liveness, &placement, &arena_));
@@ -255,7 +255,7 @@ TEST_F(DestructiveReuseTest, PreservesRequiredTiedFamilyObservations) {
       .tied_storage_origins_by_value_ordinal = tied_origins,
   };
 
-  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_tied_storage(
+  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_storage(
       &units, &liveness, &placement, &arena_, &decision_arena_));
   IREE_ASSERT_OK(loom_low_allocation_refine_destructive_reuse(
       &units, &liveness, &placement, &arena_));
@@ -328,7 +328,7 @@ TEST_F(DestructiveReuseTest, PreservesMappedResultUnitAcrossSourceWrite) {
       .tied_storage_origins_by_value_ordinal = tied_origins,
   };
 
-  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_tied_storage(
+  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_storage(
       &units, &liveness, &placement, &arena_, &decision_arena_));
   IREE_ASSERT_OK(loom_low_allocation_refine_destructive_reuse(
       &units, &liveness, &placement, &arena_));

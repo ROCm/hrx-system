@@ -1,0 +1,110 @@
+// RUN: emit low-allocation-query @pending_pair reverse-blocks spill-count edge-moves values=%low,%high,%initial,%unrelated,%state fixed=%low:target_id:0:1 fixed=%high:target_id:1:1 fixed=%unrelated:target_id:0:1 fixed=%state:target_id:4:2
+
+// Reverse the nonentry block table after parsing. The handoff then precedes
+// its dominator physically, while the bypass remains a sparse lifetime hole.
+// Both component registers must survive initialization until the edge reads.
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @pending_pair(%condition: reg<test.i32>) -> (reg<test.i32 x2>, reg<test.i32>) asm {
+  low.br ^producer
+^producer:
+  %low = test.const.i32 11
+  %high = test.const.i32 23
+  %pair = concat(%low, %high) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  low.cond_br %condition, ^handoff, ^bypass : reg<test.i32>
+^bypass:
+  %unrelated = test.const.i32 37
+  %unrelated_pair = concat(%unrelated, %unrelated) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %unrelated_pair, %unrelated
+^handoff:
+  %initial = test.const.i32 0
+  low.br ^receive(%pair: reg<test.i32 x2>, %initial: reg<test.i32>)
+^receive(%state: reg<test.i32 x2>, %iteration: reg<test.i32>):
+  return %state, %iteration
+}
+
+// ----
+spills: 0
+edge moves: 3
+move test.i32:target_id[4] <- test.i32:target_id[0]
+move test.i32:target_id[5] <- test.i32:target_id[1]
+move test.i32:target_id[0] <- test.i32:target_id[2]
+value %low: test.i32 -> target_id[0:1]
+value %high: test.i32 -> target_id[1:1]
+value %initial: test.i32 -> target_id[2:1]
+value %unrelated: test.i32 -> target_id[0:1]
+value %state: test.i32 -> target_id[4:2]
+
+// ====
+
+// RUN: emit low-allocation-query @partial_pending_pair reverse-blocks spill-count edge-moves values=%wide,%initial,%unrelated,%state fixed=%wide:target_id:0:4 fixed=%initial:target_id:0:1 fixed=%unrelated:target_id:0:1 fixed=%state:target_id:4:2
+
+// Only the upper half of the vector is transported. The lower half and the
+// sibling path remain reusable even with the physically reversed block order.
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @partial_pending_pair(%seed: reg<test.i32>) -> (reg<test.i32 x2>, reg<test.i32>) asm {
+  low.br ^producer
+^producer:
+  %wide = test.from_elements.v4i32 %seed, %seed, %seed, %seed
+  %tail = slice %wide[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %pair = concat(%tail) : (reg<test.i32 x2>) -> reg<test.i32 x2>
+  low.cond_br %seed, ^handoff, ^bypass : reg<test.i32>
+^bypass:
+  %unrelated = test.const.i32 37
+  %unrelated_pair = concat(%unrelated, %unrelated) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %unrelated_pair, %unrelated
+^handoff:
+  %initial = test.const.i32 0
+  low.br ^receive(%pair: reg<test.i32 x2>, %initial: reg<test.i32>)
+^receive(%state: reg<test.i32 x2>, %iteration: reg<test.i32>):
+  return %state, %iteration
+}
+
+// ----
+spills: 0
+edge moves: 2
+move test.i32:target_id[4] <- test.i32:target_id[2]
+move test.i32:target_id[5] <- test.i32:target_id[3]
+value %wide: test.i32 -> target_id[0:4]
+value %initial: test.i32 -> target_id[0:1]
+value %unrelated: test.i32 -> target_id[0:1]
+value %state: test.i32 -> target_id[4:2]
+
+// ====
+
+// RUN: emit low-allocation-query @pending_loop reverse-blocks spill-count edge-moves values=%seed,%initial,%state,%result fixed=%seed:target_id:0:1 fixed=%state:target_id:4:4
+
+// A decomposed invariant is read on every loop iteration. Its source must
+// survive initialization and the destructive body along the entire backedge.
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @pending_loop(%repeat: reg<test.i32>) -> (reg<test.i32 x4>, reg<test.i32>) asm {
+  low.br ^producer
+^producer:
+  %seed = test.const.i32 7
+  %tuple = concat(%seed, %seed, %seed, %seed) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  low.br ^header
+^header:
+  %initial = test.const.i32 0
+  low.br ^body(%tuple: reg<test.i32 x4>, %initial: reg<test.i32>)
+^body(%state: reg<test.i32 x4>, %iteration: reg<test.i32>):
+  %result = test.early_tied.v4i32 %state
+  low.cond_br %repeat, ^latch, ^exit : reg<test.i32>
+^latch:
+  low.br ^header
+^exit:
+  return %result, %iteration
+}
+
+// ----
+spills: 0
+edge moves: 4
+move test.i32:target_id[4] <- test.i32:target_id[0]
+move test.i32:target_id[5] <- test.i32:target_id[0]
+move test.i32:target_id[6] <- test.i32:target_id[0]
+move test.i32:target_id[7] <- test.i32:target_id[0]
+value %seed: test.i32 -> target_id[0:1]
+value %initial: test.i32 -> target_id[2:1]
+value %state: test.i32 -> target_id[4:4]
+value %result: test.i32 -> target_id[4:4]

@@ -221,10 +221,13 @@ value %out1: test.i32 -> target_id[1:1]
 
 // ====
 
-// RUN: emit low-allocation-query @multiple_edge_concats_remain_distinct values=%first_state,%second_state
+// RUN: emit low-allocation-query @multiple_edge_concats_remain_distinct spill-count edge-moves values=%first_state,%second_state
 
 test.target<low_core> @test_target
 
+// The shared zero remains live on the bypass path. Its hole at the join
+// permits reuse, but eagerly reserving the join destination from the zero
+// would grow the four-register placement to five just to avoid edge copies.
 low.func.def target<test.low.core>(@test_target) @multiple_edge_concats_remain_distinct(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>, %zero: reg<test.i32>) -> (reg<test.i32>) asm {
   low.cond_br %condition, ^build, ^exit : reg<test.i32>
 ^build:
@@ -243,6 +246,11 @@ low.func.def target<test.low.core>(@test_target) @multiple_edge_concats_remain_d
 }
 
 // ----
+spills: 0
+edge moves: 3
+move test.i32:target_id[1] <- test.i32:target_id[0]
+move test.i32:target_id[0] <- test.i32:target_id[2]
+move test.i32:target_id[2] <- test.i32:target_id[1]
 value %first_state: test.i32 -> target_id[2:2]
 value %second_state: test.i32 -> target_id[0:2]
 

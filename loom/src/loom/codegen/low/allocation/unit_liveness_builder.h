@@ -41,13 +41,14 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
     iree_arena_allocator_t* decision_arena,
     loom_low_allocation_unit_liveness_t* out_unit_liveness);
 
-// Completes physical lifetime facts for mandatory tied-storage components.
+// Completes physical lifetime facts for tied components and decomposed reads.
 // Each ancestor acquires storage by its earliest mandatory descendant start.
 // Component origins retain every member's physical unit lifetime and sparse
-// segments so destructive-reuse refinement can query exact old-content
-// observations before deciding which optional relations remain aliasable.
+// segments, including edge-copy reads that bypass aggregate storage. Later
+// destructive-reuse refinement queries these old-content observations before
+// deciding which optional relations remain aliasable.
 // Published segments use |result_arena|; query ranges use |decision_arena|.
-iree_status_t loom_low_allocation_unit_liveness_retain_tied_storage(
+iree_status_t loom_low_allocation_unit_liveness_retain_storage(
     loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_liveness_analysis_t* liveness,
     const loom_low_placement_table_t* placement,

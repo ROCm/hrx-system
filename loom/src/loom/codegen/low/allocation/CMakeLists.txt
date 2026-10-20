@@ -1059,6 +1059,23 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    storage_reservations
+  HDRS
+    "storage_reservations.h"
+  SRCS
+    "storage_reservations.c"
+  DEPS
+    ::unit_liveness
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::liveness
+    loom::codegen::low::placement
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     unit_liveness_builder
   HDRS
     "unit_liveness_builder.h"
@@ -1069,6 +1086,7 @@ loom_cc_library(
     ::clobber_index
     ::live_range
     ::storage
+    ::storage_reservations
     ::unit_liveness
     ::write_interference
     iree::base

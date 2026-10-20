@@ -22,6 +22,7 @@ loom_cc_library(
     iree::base
     loom::codegen::low::allocation
     loom::codegen::low::descriptors
+    loom::codegen::low::function
     loom::codegen::low::function_model
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::packet_hazard_plan_json

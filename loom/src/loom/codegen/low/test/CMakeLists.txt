@@ -21,6 +21,7 @@ loom_check_test_suite(
     "allocation_copy_sources.loom-test"
     "allocation_destructive_concat.loom-test"
     "allocation_destructive_paths.loom-test"
+    "allocation_edge_lifetimes.loom-test"
     "allocation_fixed.loom-test"
     "allocation_fragmentation.loom-test"
     "allocation_identity_edges.loom-test"
