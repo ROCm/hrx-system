@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstring>
 #include <semaphore>
+#include <string>
 #include <tuple>
 
 #include "iree/hal/api.h"
@@ -21,9 +22,15 @@ namespace {
 
 class GpuAsanReportTest
     : public GpuNativeTest,
-      public ::testing::WithParamInterface<std::tuple<bool, bool>> {
+      public ::testing::WithParamInterface<
+          std::tuple<bool, bool, amdf_queue_command_type_t>> {
  protected:
+  amdf_queue_command_type_t command_type() const override {
+    return std::get<2>(GetParam());
+  }
+
   void SetUp() override {
+    IREE_ASSERT_OK(NativeMemoryGate::AcquireProcessFabric(&fabric_));
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
       return;
@@ -32,7 +39,7 @@ class GpuAsanReportTest
           AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS)) {
       GTEST_SKIP() << "Native shader notification is unavailable";
     }
-    const uint32_t gfx_major = context_->target_info.gfx_ip.major;
+    const auto gfx = context_->target_info.gfx_ip;
     context_->event_sink = {Publish, this};
     options_.asan.memory.shadow_slab_size = 1024 * 1024;
     options_.asan.report_policy =
@@ -69,7 +76,10 @@ class GpuAsanReportTest
         pool_, program_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
         &slot_));
     const auto* files = iree_hal_amd_gpu_asan_report_images_create();
-    const char* selector = gfx_major == 11 ? "gfx11-generic" : "gfx12-generic";
+    const char* selector = gfx.major == 9
+                               ? (gfx.minor == 4 ? "gfx9-4-generic" : "gfx90a")
+                           : gfx.major == 11 ? "gfx11-generic"
+                                             : "gfx12-generic";
     iree_hal_executable_load_params_t load;
     iree_hal_executable_load_params_initialize(&load);
     for (size_t i = 0; i < iree_hal_amd_gpu_asan_report_images_size(); ++i) {
@@ -101,6 +111,8 @@ class GpuAsanReportTest
       released_.acquire();
     }
     iree_hal_pool_release(pool_);
+    iree_hal_semaphore_release(pending_gate_);
+    iree_hal_semaphore_release(pending_done_);
     iree_hal_semaphore_release(done_);
     GpuNativeTest::TearDown();
     EXPECT_EQ(errors_.load(), 0u);
@@ -114,7 +126,11 @@ class GpuAsanReportTest
       const auto* failure =
           reinterpret_cast<const iree_hal_device_driver_failure_event_t*>(
               event->payload.data);
-      EXPECT_EQ(failure->status_code, IREE_STATUS_ABORTED);
+      // Unpublished work waiting on a dependency is cancelled by device
+      // failure; a capture reaching admission observes the original failure.
+      EXPECT_TRUE(failure->status_code == IREE_STATUS_ABORTED ||
+                  (self.pending_done_ &&
+                   failure->status_code == IREE_STATUS_CANCELLED));
       self.queue_failures_.fetch_add(1);
       return;
     }
@@ -188,6 +204,10 @@ class GpuAsanReportTest
   std::binary_semaphore released_{0};
   // Public success or fail-device signal for the current dispatch.
   iree_hal_semaphore_t* done_ = nullptr;
+  // Deliberately unsignaled dependency for a capture on the other queue.
+  iree_hal_semaphore_t* pending_gate_ = nullptr;
+  // Public completion that must fail without satisfying pending_gate_.
+  iree_hal_semaphore_t* pending_done_ = nullptr;
   // Expected address set before publishing the faulting dispatch.
   std::atomic<uint64_t> expected_fault_ = 0;
   // Sanitizer reports consumed before completion becomes observable.
@@ -227,6 +247,15 @@ TEST_P(GpuAsanReportTest, ValidAccessThenRedzoneReportPreservesRetirement) {
   // The access stays inside owned backing; its logical allocation is too short.
   expected_fault_.store(
       iree_hal_buffer_native_binding(buffers_[1], slot_).device_address + 4);
+  if (std::get<0>(GetParam())) {
+    CreateSemaphore(&pending_gate_);
+    CreateSemaphore(&pending_done_);
+    ASSERT_FALSE(HasFatalFailure());
+    uint64_t pending_value = 1;
+    IREE_ASSERT_OK(iree_hal_queue_barrier(
+        queues_[1], {1, &pending_gate_, &pending_value},
+        {1, &pending_done_, &pending_value}, nullptr, 0));
+  }
   Submit(buffers_[1], 2);
   ASSERT_FALSE(HasFatalFailure());
   iree_hal_executable_release(executable_);
@@ -240,14 +269,29 @@ TEST_P(GpuAsanReportTest, ValidAccessThenRedzoneReportPreservesRetirement) {
   EXPECT_EQ(reports_.load(), 1u);
   if (std::get<0>(GetParam())) {
     EXPECT_GE(queue_failures_.load(), 1u);
+    const Status pending_status(
+        iree_hal_semaphore_wait(pending_done_, 1, iree_infinite_timeout(), 0));
+    EXPECT_TRUE(pending_status.code() == StatusCode::kCancelled ||
+                pending_status.code() == StatusCode::kAborted);
   }
   // The fixture waits for actual capture, native memory, and worker
   // reclamation.
 }
 
-INSTANTIATE_TEST_SUITE_P(PolicyAndRecording, GpuAsanReportTest,
-                         ::testing::Combine(::testing::Bool(),
-                                            ::testing::Bool()));
+INSTANTIATE_TEST_SUITE_P(
+    PolicyAndRecording, GpuAsanReportTest,
+    ::testing::Combine(::testing::Bool(), ::testing::Bool(),
+                       ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL)),
+    [](const ::testing::TestParamInfo<
+        std::tuple<bool, bool, amdf_queue_command_type_t>>& info) {
+      return std::string(std::get<2>(info.param) ==
+                                 AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                             ? "Aql"
+                             : "Pm4") +
+             (std::get<0>(info.param) ? "Fail" : "Report") +
+             (std::get<1>(info.param) ? "Recorded" : "Direct");
+    });
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu::cts

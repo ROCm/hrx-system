@@ -45,6 +45,8 @@ typedef struct iree_hal_amd_gpu_queue_lifecycle_t {
   amdf_status_t (*shutdown)(iree_hal_queue_t* queue);
   // Returns unreferenced cache storage without blocking publication.
   void (*trim)(iree_hal_queue_t* queue);
+  // Wakes admission after the device latches a logical shader failure.
+  void (*notify_failure)(iree_hal_queue_t* queue);
   // Assigns the sealed group's immutable completion axis.
   iree_status_t (*assign_frontier)(iree_hal_queue_t* queue,
                                    iree_async_frontier_tracker_t* tracker,
@@ -57,6 +59,7 @@ static const iree_hal_amd_gpu_queue_lifecycle_t
         .is_idle = iree_hal_amd_gpu_pm4_queue_is_idle,
         .shutdown = iree_hal_amd_gpu_pm4_queue_shutdown,
         .trim = iree_hal_amd_gpu_pm4_queue_trim,
+        .notify_failure = iree_hal_amd_gpu_pm4_queue_notify_failure,
         .assign_frontier = iree_hal_amd_gpu_pm4_queue_assign_frontier,
 };
 static const iree_hal_amd_gpu_queue_lifecycle_t
@@ -65,6 +68,7 @@ static const iree_hal_amd_gpu_queue_lifecycle_t
         .is_idle = iree_hal_amd_gpu_aql_queue_is_idle,
         .shutdown = iree_hal_amd_gpu_aql_queue_shutdown,
         .trim = iree_hal_amd_gpu_aql_queue_trim,
+        .notify_failure = iree_hal_amd_gpu_aql_queue_notify_failure,
         .assign_frontier = iree_hal_amd_gpu_aql_queue_assign_frontier,
 };
 
@@ -431,7 +435,7 @@ static void iree_hal_amd_gpu_device_initialize_memory(
           .scope = context->fabric->system_scope,
           .memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
           .minimum_access = device->memory.capabilities.minimum_access,
-  };
+      };
   const iree_hal_amd_fabric_memory_backend_options_t options = {
       .api = context->api,
       .instance = context->fabric->instance,
@@ -646,7 +650,7 @@ static void iree_hal_amd_gpu_device_notify_failure(void* user_data) {
   iree_hal_amd_gpu_device_t* device = user_data;
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     if (device->queues[i]) {
-      iree_hal_amd_gpu_pm4_queue_notify_failure(device->queues[i]);
+      device->queue_lifecycle->notify_failure(device->queues[i]);
     }
   }
   const amdf_status_t status = iree_hal_amd_gpu_context_signal(device->context);
@@ -767,9 +771,9 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   }
   const bool aql = context->families[family_ordinal].command_type ==
                    AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
-  if (aql && feedback_enabled) {
+  if (aql && tsan_enabled) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "AQL shader feedback is not admitted");
+                            "AQL race sanitizer is not admitted");
   }
   const amdf_queue_publication_modes_t publication_mode =
       aql ? AMDF_QUEUE_PUBLICATION_MODE_USER
@@ -986,6 +990,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
           .allocations = queue_options.allocations,
           .mappings = queue_options.mappings,
           .file_staging = queue_options.file_staging,
+          .feedback = queue_options.feedback,
           .retirement_capacity = queue_options.retirement_capacity,
           .argument_capacity = queue_options.argument_capacity,
           .capture_block_size = queue_options.capture_block_size,

@@ -18,8 +18,12 @@
 namespace iree::hal::amd::gpu::cts {
 namespace {
 
-class GpuFeedbackTest : public GpuNativeTest {
+class GpuFeedbackTest
+    : public GpuNativeTest,
+      public ::testing::WithParamInterface<amdf_queue_command_type_t> {
  protected:
+  amdf_queue_command_type_t command_type() const override { return GetParam(); }
+
   void SetUp() override {
     IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_, UINT64_MAX,
                                              AMDF_NATIVE_LIFETIME_PROCESS));
@@ -32,14 +36,17 @@ class GpuFeedbackTest : public GpuNativeTest {
           AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS)) {
       GTEST_SKIP() << "Native shader notification is unavailable";
     }
-    const uint32_t gfx_major = context_->target_info.gfx_ip.major;
+    const auto gfx = context_->target_info.gfx_ip;
     context_->event_sink = {Publish, this};
     Create(IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK);
     if (HasFatalFailure()) {
       return;
     }
     const auto* files = iree_hal_amd_gpu_feedback_images_create();
-    const char* selector = gfx_major == 11 ? "gfx11-generic" : "gfx12-generic";
+    const char* selector = gfx.major == 9
+                               ? (gfx.minor == 4 ? "gfx9-4-generic" : "gfx90a")
+                           : gfx.major == 11 ? "gfx11-generic"
+                                             : "gfx12-generic";
     for (size_t i = 0; i < iree_hal_amd_gpu_feedback_images_size(); ++i) {
       if (std::strstr(files[i].name, selector)) {
         artifact_ = iree_make_const_byte_span(files[i].data, files[i].size);
@@ -124,7 +131,7 @@ class GpuFeedbackTest : public GpuNativeTest {
   std::array<iree_hal_semaphore_t*, 2> done_ = {};
 };
 
-TEST_F(GpuFeedbackTest, SharedChannelSurvivesConcurrentQueuesAndCircularReuse) {
+TEST_P(GpuFeedbackTest, SharedChannelSurvivesConcurrentQueuesAndCircularReuse) {
   // More than twice the channel's physical capacity over bounded batches.
   constexpr uint32_t kDispatches = 128;
   constexpr uint64_t kReplays = 160;
@@ -154,6 +161,14 @@ TEST_F(GpuFeedbackTest, SharedChannelSurvivesConcurrentQueuesAndCircularReuse) {
     ASSERT_EQ(errors_.load(), 0u);
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    Protocol, GpuFeedbackTest,
+    ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                      AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+    [](const ::testing::TestParamInfo<amdf_queue_command_type_t>& info) {
+      return info.param == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ? "Aql" : "Pm4";
+    });
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu::cts

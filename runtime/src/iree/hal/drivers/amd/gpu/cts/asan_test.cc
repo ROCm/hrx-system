@@ -7,6 +7,8 @@
 #include <array>
 #include <cstring>
 #include <semaphore>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "iree/hal/api.h"
@@ -20,8 +22,13 @@ namespace iree::hal::amd::gpu::cts {
 namespace {
 
 class GpuAsanTest : public GpuNativeTest,
-                    public ::testing::WithParamInterface<bool> {
+                    public ::testing::WithParamInterface<
+                        std::tuple<amdf_queue_command_type_t, bool>> {
  protected:
+  amdf_queue_command_type_t command_type() const override {
+    return std::get<0>(GetParam());
+  }
+
   void SetUp() override {
     IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_, UINT64_MAX,
                                              AMDF_NATIVE_LIFETIME_PROCESS));
@@ -34,11 +41,12 @@ class GpuAsanTest : public GpuNativeTest,
           AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS)) {
       GTEST_SKIP() << "Native shader notification is unavailable";
     }
-    const uint32_t gfx_major = context_->target_info.gfx_ip.major;
+    const auto gfx = context_->target_info.gfx_ip;
     options_.asan.memory.shadow_slab_size = 1024 * 1024;
     options_.asan.shadow_backing =
-        GetParam() ? IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_HOST_LOCAL
-                   : IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL;
+        std::get<1>(GetParam())
+            ? IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_HOST_LOCAL
+            : IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL;
     Create(IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_ASAN);
     if (HasFatalFailure()) {
       return;
@@ -73,7 +81,10 @@ class GpuAsanTest : public GpuNativeTest,
         pool_, program_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
         &slot_));
     const auto* files = iree_hal_amd_gpu_asan_images_create();
-    const char* selector = gfx_major == 11 ? "gfx11_generic" : "gfx12_generic";
+    const char* selector = gfx.major == 9
+                               ? (gfx.minor == 4 ? "gfx9_4_generic" : "gfx90a")
+                           : gfx.major == 11 ? "gfx11_generic"
+                                             : "gfx12_generic";
     iree_hal_executable_load_params_t load;
     iree_hal_executable_load_params_initialize(&load);
     for (size_t i = 0; i < iree_hal_amd_gpu_asan_images_size(); ++i) {
@@ -221,10 +232,19 @@ TEST_P(GpuAsanTest, HostImportEnablesRegisteredEnvelopeAndBypassesQuarantine) {
   EXPECT_EQ(Observe().quarantine_size, before.quarantine_size);
 }
 
-INSTANTIATE_TEST_SUITE_P(ShadowBacking, GpuAsanTest, ::testing::Bool(),
-                         [](const ::testing::TestParamInfo<bool>& info) {
-                           return info.param ? "System" : "Local";
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    ShadowBacking, GpuAsanTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Bool()),
+    [](const ::testing::TestParamInfo<
+        std::tuple<amdf_queue_command_type_t, bool>>& info) {
+      return std::string(std::get<0>(info.param) ==
+                                 AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                             ? "Aql"
+                             : "Pm4") +
+             (std::get<1>(info.param) ? "System" : "Local");
+    });
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu::cts

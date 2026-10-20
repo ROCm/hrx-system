@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_QUEUE_H_
 
 #include "iree/hal/drivers/amd/gpu/completion.h"
+#include "iree/hal/drivers/amd/gpu/feedback.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
@@ -41,6 +42,8 @@ typedef struct iree_hal_amd_gpu_aql_queue_options_t {
   iree_hal_amd_gpu_memory_mapping_context_t* mappings;
   // Device-owned direct-I/O fallback through independent native copy queues.
   iree_hal_amd_gpu_file_staging_t* file_staging;
+  // Optional device-owned shader channel, drained before public completion.
+  iree_hal_amd_gpu_feedback_t* feedback;
   // Power-of-two simultaneously published completion capacity.
   uint32_t retirement_capacity;
   // Initial argument generation capacity, in power-of-two bytes.
@@ -72,6 +75,10 @@ uint32_t iree_hal_amd_gpu_aql_queue_maximum_program_packet_count(
 // their publication has finished.
 iree_status_t iree_hal_amd_gpu_aql_queue_set_profile(
     iree_hal_queue_t* queue, iree_hal_amd_gpu_profile_t* profile);
+
+// Wakes pending admission after the device latches a logical shader failure.
+// Accepted native work retains its resources until actual completion.
+void iree_hal_amd_gpu_aql_queue_notify_failure(iree_hal_queue_t* queue);
 
 iree_status_t iree_hal_amd_gpu_aql_queue_assign_frontier(
     iree_hal_queue_t* queue, iree_async_frontier_tracker_t* tracker,

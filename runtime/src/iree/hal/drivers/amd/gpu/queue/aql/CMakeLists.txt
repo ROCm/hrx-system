@@ -702,6 +702,7 @@ iree_cc_library(
     iree::base::threading::thread
     iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::feedback
     iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::gpu::queue::allocation

@@ -177,16 +177,27 @@ struct iree_hal_amd_gpu_aql_queue_t {
   iree_atomic_int32_t failure;
   // Completion owner has reported failure to all accepted native captures.
   bool failure_delivered;
+  // Logical shader failure has been reported without stopping retirement.
+  bool feedback_failure_delivered;
   // Host metadata parallel to the finite native execution credit.
   iree_hal_amd_gpu_aql_retirement_t* issued;
 };
 
 static const iree_hal_queue_vtable_t iree_hal_amd_gpu_aql_queue_vtable;
 
+static iree_status_code_t iree_hal_amd_gpu_aql_feedback_failure(
+    const iree_hal_amd_gpu_aql_queue_t* queue) {
+  return queue->options.feedback ? (iree_status_code_t)iree_atomic_load(
+                                       &queue->options.feedback->failure_code,
+                                       iree_memory_order_acquire)
+                                 : IREE_STATUS_OK;
+}
+
 static void iree_hal_amd_gpu_aql_wake_terminal(
     iree_hal_amd_gpu_aql_queue_t* queue) {
   if (iree_atomic_load(&queue->closed, iree_memory_order_acquire) ||
-      iree_atomic_load(&queue->failure, iree_memory_order_acquire)) {
+      iree_atomic_load(&queue->failure, iree_memory_order_acquire) ||
+      iree_hal_amd_gpu_aql_feedback_failure(queue)) {
     const amdf_status_t status =
         iree_hal_amd_gpu_context_signal(queue->context);
     if (!amdf_status_is_ok(status)) {
@@ -198,8 +209,13 @@ static void iree_hal_amd_gpu_aql_wake_terminal(
 
 static iree_status_t iree_hal_amd_gpu_aql_check_failure(
     iree_hal_amd_gpu_aql_queue_t* queue) {
-  return iree_status_from_code((iree_status_code_t)iree_atomic_load(
-      &queue->failure, iree_memory_order_acquire));
+  const iree_status_code_t native_failure =
+      (iree_status_code_t)iree_atomic_load(&queue->failure,
+                                           iree_memory_order_acquire);
+  return iree_status_from_code(
+      native_failure != IREE_STATUS_OK
+          ? native_failure
+          : iree_hal_amd_gpu_aql_feedback_failure(queue));
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_check_acceptance(
@@ -1068,6 +1084,14 @@ static void iree_hal_amd_gpu_aql_capacity_available(
   }
 }
 
+void iree_hal_amd_gpu_aql_queue_notify_failure(iree_hal_queue_t* base) {
+  iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
+  iree_hal_amd_gpu_host_wait_set_cancel(&queue->pending.waits);
+  // The one-time failure notification resumes parked captures through the
+  // publication FIFO; native retirement remains independent.
+  iree_hal_amd_gpu_aql_capacity_available(queue);
+}
+
 static void iree_hal_amd_gpu_aql_park_capacity(
     iree_hal_amd_gpu_aql_queue_t* queue,
     iree_hal_amd_gpu_aql_submission_t* submission, uint64_t completed) {
@@ -1438,6 +1462,26 @@ static bool iree_hal_amd_gpu_aql_retire(
     }
     return false;
   }
+  const iree_status_code_t feedback_failure =
+      iree_hal_amd_gpu_aql_feedback_failure(queue);
+  if (feedback_failure != IREE_STATUS_OK &&
+      !queue->feedback_failure_delivered) {
+    // This consumer owns published captures until native completion, even
+    // after their public timelines fail from a shader report.
+    for (uint64_t i = position; i < published; ++i) {
+      iree_hal_amd_gpu_aql_fail_submission(
+          queue,
+          queue->issued[i & (queue->options.retirement_capacity - 1)]
+              .submission,
+          iree_make_status(feedback_failure, "GPU sanitizer failure"));
+    }
+    if (published && queue->frontier.tracker) {
+      iree_async_frontier_tracker_fail_axis(
+          queue->frontier.tracker, queue->frontier.axis,
+          iree_make_status(feedback_failure, "GPU sanitizer failure"));
+    }
+    queue->feedback_failure_delivered = true;
+  }
   const uint64_t initial = position;
   const uint64_t limit = iree_min(published, position + 64);
   for (; position < limit; ++position) {
@@ -1455,6 +1499,14 @@ static bool iree_hal_amd_gpu_aql_retire(
       break;
     }
     IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_aql_retire");
+    if (queue->options.feedback) {
+      // Native completion makes this work's reports observable before its
+      // public completion can wake a host consumer.
+      iree_hal_amd_gpu_feedback_drain(queue->options.feedback);
+      if (code == IREE_STATUS_OK) {
+        code = iree_hal_amd_gpu_aql_feedback_failure(queue);
+      }
+    }
     const uint64_t arguments = action->arguments;
     if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
         code == IREE_STATUS_OK && action->download.length) {
