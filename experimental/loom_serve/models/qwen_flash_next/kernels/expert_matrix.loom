@@ -64,6 +64,29 @@ func.def inline @expert_affine_coefficients(%down: i1, %q8: i1, %q5: i1, %weight
 
 func.decl @expert_block_gate(%q8: i1, %q5: i1, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
 
+func.decl @expert_down_stream(%q8: i1, %input: buffer, %tasks: buffer, %weight: buffer, %output: buffer)
+
+// Exchange half-wave register payloads to replicate both halves of a native
+// wave32 RHS fragment. The packed gate/up and down schedules share this map.
+func.def public inline @expert_fragment_pair(%own: vector<8xi32>, %second_half: i1) -> (vector<8xi32>, vector<8xi32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %xor_half = scalar.constant 16 : i32
+  %width = scalar.constant 32 : i32
+  %seed = vector.constant 0 : vector<8xi32>
+  %peer = scf.for %element = [%c0 to %c8 step %c1](%values = %seed : vector<8xi32>) -> (vector<8xi32>) unroll schedule(linear) {
+    %word = vector.extract %own[%element] : vector<8xi32> -> i32
+    %exchanged, %valid = kernel.subgroup.shuffle<xor> %word, %xor_half, %width : i32, i32, i32
+    %next = vector.insert %exchanged into %values[%element] : i32, vector<8xi32>
+    scf.yield %next : vector<8xi32>
+  }
+  %mask = vector.splat %second_half : vector<8xi1>
+  %first = vector.select %mask, %peer, %own : vector<8xi32>
+  %second = vector.select %mask, %own, %peer : vector<8xi32>
+  func.return %first, %second : vector<8xi32>, vector<8xi32>
+}
+
 template.decl @flash_next.expert_tile(%routed: i1, %down: i1, %q8: i1, %q5: i1, %capacity: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %input: buffer, %row_metadata: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
 
 // Routed contractions read immutable records naming an expert, a live count,
@@ -495,12 +518,14 @@ template.def<@flash_next.expert_schedule> device @expert_schedule_gate_q8_128(%c
 }
 
 template.def<@flash_next.expert_schedule> device @expert_schedule_down_q51_128(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) where [eq(%contraction, 1), eq(%format, 1), eq(%rows, 128)] {
-  func.call @expert_matrix_schedule(%contraction, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  %q8 = scalar.constant false : i1
+  func.call @expert_down_stream(%q8, %input, %tasks, %weight, %output) : (i1, buffer, buffer, buffer, buffer)
   template.return
 }
 
 template.def<@flash_next.expert_schedule> device @expert_schedule_down_q8_128(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) where [eq(%contraction, 1), eq(%format, 0), eq(%rows, 128)] {
-  func.call @expert_matrix_schedule(%contraction, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  %q8 = scalar.constant true : i1
+  func.call @expert_down_stream(%q8, %input, %tasks, %weight, %output) : (i1, buffer, buffer, buffer, buffer)
   template.return
 }
 
