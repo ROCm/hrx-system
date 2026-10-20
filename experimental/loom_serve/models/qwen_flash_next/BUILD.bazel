@@ -139,11 +139,18 @@ loom_library(
 
 [
     loom_test(
-        name = "q8_matrix_{}x{}_waves_{}x{}_test".format(rows, columns, wave_rows, wave_columns),
+        name = "q8_matrix_{}x{}_waves_{}x{}{}_test".format(
+            rows,
+            columns,
+            wave_rows,
+            wave_columns,
+            "_read_ahead" if depth == 2 else "",
+        ),
         srcs = ["tests/q8_matrix.loom"],
         benchmark_smoke = False,
         configs = {
             "flash_next.token_count": str(rows + 3),
+            "q8_test.pipeline_depth": str(depth),
             "q8_test.tile_columns": str(columns),
             "q8_test.tile_rows": str(rows),
             "q8_test.wave_columns": str(wave_columns),
@@ -159,13 +166,14 @@ loom_library(
             ":q8_reference",
         ],
     )
-    for rows, columns, wave_rows, wave_columns in [
-        (16, 64, 1, 4),
-        (32, 64, 2, 2),
-        (32, 32, 2, 2),
-        (64, 64, 2, 2),
-        (64, 64, 4, 2),
-        (128, 128, 4, 2),
+    for rows, columns, wave_rows, wave_columns, depth in [
+        (16, 64, 1, 4, 1),
+        (32, 64, 2, 2, 1),
+        (32, 32, 2, 2, 1),
+        (64, 64, 2, 2, 1),
+        (64, 64, 4, 2, 1),
+        (128, 128, 4, 2, 1),
+        (128, 128, 4, 2, 2),
     ]
 ]
 

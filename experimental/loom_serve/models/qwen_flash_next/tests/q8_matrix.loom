@@ -12,6 +12,8 @@ config.decl @q8_test.wave_rows : %value: index where [range(%value, 1, 4)]
 
 config.decl @q8_test.wave_columns : %value: index where [range(%value, 1, 4)]
 
+config.decl @q8_test.pipeline_depth : %value: index where [range(%value, 1, 2)]
+
 amdgpu.target<gfx11-generic> @q8_matrix_test_wave32 {subgroup_size = 32}
 
 template.decl @flash_next.q8_schedule(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
@@ -35,7 +37,7 @@ kernel.def target(@q8_matrix_test_wave32) @matrix() {
   %tile_columns = config.get @q8_test.tile_columns : index
   %wave_rows = config.get @q8_test.wave_rows : index
   %wave_columns = config.get @q8_test.wave_columns : index
-  %depth = index.constant 1 : index
+  %depth = config.get @q8_test.pipeline_depth : index
   template.apply<@flash_next.q8_schedule>(%capacity, %inputs, %outputs, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %depth, %epoch, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
   kernel.return
 }
