@@ -62,6 +62,8 @@ func.def inline @expert_affine_coefficients(%down: i1, %q8: i1, %q5: i1, %weight
   func.return %values, %scale, %bias : vector<16xbf16>, f32, f32
 }
 
+func.decl @expert_block_gate(%q8: i1, %q5: i1, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
+
 template.decl @flash_next.expert_tile(%routed: i1, %down: i1, %q8: i1, %q5: i1, %capacity: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %input: buffer, %row_metadata: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
 
 // Routed contractions read immutable records naming an expert, a live count,
@@ -472,17 +474,23 @@ template.def<@flash_next.expert_schedule> device @expert_schedule_down_q8_64(%co
 }
 
 template.def<@flash_next.expert_schedule> device @expert_schedule_gate_q4k_128(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) where [eq(%contraction, 0), eq(%format, 2), eq(%rows, 128)] {
-  func.call @expert_matrix_schedule(%contraction, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  %q8 = scalar.constant false : i1
+  %q5 = scalar.constant false : i1
+  func.call @expert_block_gate(%q8, %q5, %input, %tasks, %weight, %up_weight, %output) : (i1, i1, buffer, buffer, buffer, buffer, buffer)
   template.return
 }
 
 template.def<@flash_next.expert_schedule> device @expert_schedule_gate_q5k_128(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) where [eq(%contraction, 0), eq(%format, 3), eq(%rows, 128)] {
-  func.call @expert_matrix_schedule(%contraction, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  %q8 = scalar.constant false : i1
+  %q5 = scalar.constant true : i1
+  func.call @expert_block_gate(%q8, %q5, %input, %tasks, %weight, %up_weight, %output) : (i1, i1, buffer, buffer, buffer, buffer, buffer)
   template.return
 }
 
 template.def<@flash_next.expert_schedule> device @expert_schedule_gate_q8_128(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) where [eq(%contraction, 0), eq(%format, 0), eq(%rows, 128)] {
-  func.call @expert_matrix_schedule(%contraction, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  %q8 = scalar.constant true : i1
+  %q5 = scalar.constant false : i1
+  func.call @expert_block_gate(%q8, %q5, %input, %tasks, %weight, %up_weight, %output) : (i1, i1, buffer, buffer, buffer, buffer, buffer)
   template.return
 }
 
