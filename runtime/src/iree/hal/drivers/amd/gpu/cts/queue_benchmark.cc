@@ -33,6 +33,7 @@ enum class Program { kDispatch, kTransfers };
 enum class Barriers { kDefault, kExplicitEmpty };
 enum class Timing { kSubmit, kCompletion, kSampledSubmit };
 enum class Capture { kNone, kMetadata, kActive };
+enum class Completion { kBarrier, kSubmission };
 
 // KFD's process VM belongs to this fabric throughout the benchmark process.
 // Rows still join and release their devices, queues, and execution storage.
@@ -633,6 +634,13 @@ class NativeQueue {
         queue_, {1, &lane.timeline, &before}, {1, &lane.timeline, &after},
         nullptr, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
     lane.epoch = after;
+    return Wait(producer, wait_flags);
+  }
+
+  // Recorded programs carry their own outgoing visibility boundary. Waiting
+  // on their signal does not require another submission or doorbell store.
+  iree_status_t Wait(size_t producer, iree_async_wait_flags_t wait_flags) {
+    const auto& lane = lanes_[producer];
     return iree_hal_semaphore_wait(lane.timeline, lane.epoch,
                                    iree_infinite_timeout(), wait_flags);
   }
@@ -955,8 +963,9 @@ BENCHMARK_CAPTURE(BM_Record, AqlTable, BindingMode::kTable, Program::kDispatch,
     ->Iterations(50)
     ->UseRealTime();
 
-// Each iteration submits a fixed number of command buffers before one final
-// wait. Submit timing excludes that wait; completion timing includes it.
+// Each iteration submits a fixed number of command buffers before completing
+// through either a separate queue barrier or the submission's own signal.
+// Submit timing excludes that boundary; completion timing includes it.
 // Sampled rows isolate each API call at the cost of two clock reads. Bursts
 // additionally separate the first call after a wait from subsequent calls, so
 // idle/wake costs cannot be mistaken for steady submission costs. No row
@@ -965,6 +974,7 @@ static void BM_Execute(
     benchmark::State& state, BindingMode bindings, Timing timing,
     Program program, uint32_t burst_count, Capture capture,
     amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+    Completion completion = Completion::kBarrier,
     iree_async_wait_flags_t wait_flags = IREE_ASYNC_WAIT_FLAG_NONE) {
   NativeQueue queue(command_type);
   if (!queue.Initialize(state)) {
@@ -980,11 +990,15 @@ static void BM_Execute(
   if (capture == Capture::kActive) {
     IREE_CHECK_OK(queue.BeginCapture());
   }
+  const auto complete = [&] {
+    return completion == Completion::kBarrier ? queue.Complete(0, wait_flags)
+                                              : queue.Wait(0, wait_flags);
+  };
   for (uint32_t i = 0; i < 2; ++i) {
     for (uint32_t j = 0; j < burst_count; ++j) {
       IREE_CHECK_OK(queue.Execute(recording, bindings));
     }
-    IREE_CHECK_OK(queue.Complete(0, wait_flags));
+    IREE_CHECK_OK(complete());
     IREE_CHECK_OK(queue.CheckOutput(0));
   }
   if (capture == Capture::kActive) {
@@ -1018,7 +1032,7 @@ static void BM_Execute(
     if (timing != Timing::kCompletion) {
       state.PauseTiming();
     }
-    IREE_CHECK_OK(queue.Complete(0, wait_flags));
+    IREE_CHECK_OK(complete());
     if (timing == Timing::kCompletion) {
       state.PauseTiming();
     }
@@ -1121,15 +1135,16 @@ AQL_EXECUTE_CASE(TableBurstCompletion, kTable, kCompletion, 8);
 // Keep the complete public wait boundary while isolating caller sleep/wakeup
 // from native preparation and retirement. ACTIVE is an application policy,
 // never an implicit change to the ordinary completion rows above.
-#define ACTIVE_EXECUTE_CASE(name, bindings, protocol)                      \
-  BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings,               \
-                    Timing::kCompletion, Program::kDispatch, 1,            \
-                    Capture::kNone, protocol, IREE_ASYNC_WAIT_FLAG_ACTIVE) \
-      ->Arg(1)                                                             \
-      ->Arg(100)                                                           \
-      ->Arg(1000)                                                          \
-      ->Arg(5000)                                                          \
-      ->Iterations(50)                                                     \
+#define ACTIVE_EXECUTE_CASE(name, bindings, protocol)               \
+  BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings,        \
+                    Timing::kCompletion, Program::kDispatch, 1,     \
+                    Capture::kNone, protocol, Completion::kBarrier, \
+                    IREE_ASYNC_WAIT_FLAG_ACTIVE)                    \
+      ->Arg(1)                                                      \
+      ->Arg(100)                                                    \
+      ->Arg(1000)                                                   \
+      ->Arg(5000)                                                   \
+      ->Iterations(50)                                              \
       ->UseRealTime()
 ACTIVE_EXECUTE_CASE(DirectActiveCompletion, kDirect,
                     AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
@@ -1140,6 +1155,42 @@ ACTIVE_EXECUTE_CASE(AqlDirectActiveCompletion, kDirect,
 ACTIVE_EXECUTE_CASE(AqlTableActiveCompletion, kTable,
                     AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
 #undef ACTIVE_EXECUTE_CASE
+
+// These rows time queue_execute followed directly by its semaphore wait.
+// Completion rows above retain a separate queue_barrier before waiting, which
+// also measures publication of later work while the recording is still live.
+#define SUBMISSION_COMPLETION_CASE(name, bindings, protocol, wait_flags) \
+  BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings,             \
+                    Timing::kCompletion, Program::kDispatch, 1,          \
+                    Capture::kNone, protocol, Completion::kSubmission,   \
+                    wait_flags)                                          \
+      ->Arg(1)                                                           \
+      ->Arg(100)                                                         \
+      ->Arg(1000)                                                        \
+      ->Arg(5000)                                                        \
+      ->Iterations(50)                                                   \
+      ->UseRealTime()
+SUBMISSION_COMPLETION_CASE(DirectSubmissionCompletion, kDirect,
+                           AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 0);
+SUBMISSION_COMPLETION_CASE(TableSubmissionCompletion, kTable,
+                           AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 0);
+SUBMISSION_COMPLETION_CASE(AqlDirectSubmissionCompletion, kDirect,
+                           AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 0);
+SUBMISSION_COMPLETION_CASE(AqlTableSubmissionCompletion, kTable,
+                           AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 0);
+SUBMISSION_COMPLETION_CASE(DirectActiveSubmissionCompletion, kDirect,
+                           AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                           IREE_ASYNC_WAIT_FLAG_ACTIVE);
+SUBMISSION_COMPLETION_CASE(TableActiveSubmissionCompletion, kTable,
+                           AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                           IREE_ASYNC_WAIT_FLAG_ACTIVE);
+SUBMISSION_COMPLETION_CASE(AqlDirectActiveSubmissionCompletion, kDirect,
+                           AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+                           IREE_ASYNC_WAIT_FLAG_ACTIVE);
+SUBMISSION_COMPLETION_CASE(AqlTableActiveSubmissionCompletion, kTable,
+                           AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+                           IREE_ASYNC_WAIT_FLAG_ACTIVE);
+#undef SUBMISSION_COMPLETION_CASE
 
 // Identical resident programs distinguish ordinary execution, retained but
 // disabled packet regions, and active device samples. The caller upload is
