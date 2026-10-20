@@ -107,6 +107,7 @@ iree_cc_library(
     "argument_payloads_test.cc"
     "barrier_test.cc"
     "byte_copy_test.cc"
+    "device_publication_test.cc"
     "dispatch_test.cc"
     "dispatch_timing_test.cc"
     "epoch_test.cc"
@@ -131,6 +132,8 @@ iree_cc_library(
     ::queue_fixture
     amdf::headers
     iree::third_party::google_test
+    libamdf::cts::gpu::kernels::aql_publish
+    libamdf::cts::gpu::kernels::aql_publish_kernels
     libamdf::cts::gpu::kernels::argument_payloads_kernels
     libamdf::cts::gpu::kernels::byte_copy_unaligned
     libamdf::cts::gpu::kernels::byte_copy_unaligned_kernels

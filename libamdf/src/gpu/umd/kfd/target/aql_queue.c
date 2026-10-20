@@ -98,7 +98,8 @@ bool amdf_gpu_kfd_aql_queue_plan(const amdf_gpu_kfd_topology_t* topology,
                                   AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,
               .cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL,
               .user_queue_capabilities =
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                  AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
               .producer_modes = AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE |
                                 AMDF_QUEUE_PRODUCER_MODE_BIT_MULTI,
               .priority_capabilities = AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL,

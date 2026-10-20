@@ -413,6 +413,15 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// releases ring storage, not code, kernargs, scratch, or kernel data: those
 /// require native execution completion.
 ///
+/// DEVICE_PRODUCER mappings expose the owning GPU's ring, indices and
+/// doorbell addresses. A device publisher uses system-scope release stores
+/// for the complete header/setup dword and notification. A host may reserve
+/// and notify a later INVALID packet that an earlier dispatch will publish;
+/// it must not publish that packet's header itself. Host and device producers
+/// coordinate reservation ownership and capacity before touching a slot.
+/// Packet templates and fixup data may reside independently in local memory.
+/// No producer needs to read or modify an existing ring header to publish it.
+///
 /// Dispatches use AMD kernel descriptors and caller-owned kernargs. Completion
 /// and barrier dependencies use native 64-byte AMD signal blocks, not bare
 /// counters or handles created by libamdf. Callers initialize USER kind (1), a

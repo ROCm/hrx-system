@@ -22,6 +22,7 @@ package(
 
 exports_files([
     "README.md",
+    "aql_publish.loom",
     "argument_payloads.loom",
     "byte_copy_unaligned.loom",
     "completed_tick.cxx",
@@ -128,6 +129,20 @@ amdf_cc_library(
     name = "shader_event",
     testonly = True,
     hdrs = ["shader_event.h"],
+)
+
+amdf_cc_library(
+    name = "aql_publish",
+    testonly = True,
+    hdrs = ["aql_publish.h"],
+)
+
+amdf_cts_gpu_kernel_set(
+    name = "aql_publish_kernels",
+    srcs = ["aql_publish.loom"],
+    entry_point = "aql_publish",
+    namespace = "kernels::aql_publish",
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
 )
 
 amdf_cc_library(

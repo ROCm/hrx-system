@@ -40,6 +40,9 @@ TEST(KfdTargetUserQueueTest, KeepsSupportedPlansDense) {
             AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
   EXPECT_EQ(plans.values[1].family.command_type,
             AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+  EXPECT_EQ(plans.values[1].family.user_queue_capabilities,
+            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER);
   EXPECT_EQ(plans.values[2].family.command_type,
             AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
 
@@ -460,6 +463,9 @@ TEST(KfdTargetUserQueueTest, MultiXccAqlFamiliesRetainTransferRole) {
     const auto& family = plans.values[0].family;
     EXPECT_EQ(family.command_type, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
     EXPECT_EQ(family.format_version, AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1);
+    EXPECT_EQ(family.user_queue_capabilities,
+              AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                  AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER);
     EXPECT_EQ(family.format_features,
               AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE |
                   AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS);

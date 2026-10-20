@@ -1,0 +1,61 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Publishes one owned, available AQL slot. The immutable template supplies
+// every body word and the complete header/setup word; the ring is write-only.
+// Device-produced counts replace the template's grid dimensions. The host
+// either already reserved/notified this slot behind the executing dispatch,
+// or transfers sole reservation and notification ownership to this dispatch.
+kernel.def export("aql_publish") @aql_publish() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%slot: buffer, %packet_template: buffer, %counts: buffer, %write_index: buffer, %notification: buffer, %packet_index: i64, %notify: i32) {
+  %origin = index.constant 0 : offset
+  %first = index.constant 1 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  %zero = scalar.constant 0 : i32
+  %one64 = scalar.constant 1 : i64
+  %low_mask = scalar.constant 65535 : i32
+  %high_shift = scalar.constant 16 : i32
+  %slot_global = buffer.assume.memory_space<global> %slot : buffer
+  %write_global = buffer.assume.memory_space<global> %write_index : buffer
+  %notification_global = buffer.assume.memory_space<global> %notification : buffer
+  %target = buffer.view %slot_global[%origin] : buffer -> view<16xi32>
+  %source = buffer.view %packet_template[%origin] : buffer -> view<16xi32>
+  %groups = buffer.view %counts[%origin] : buffer -> view<3xi32>
+  %write_word = buffer.view %write_global[%origin] : buffer -> view<1xi64>
+  %notification_word = buffer.view %notification_global[%origin] : buffer -> view<1xi64>
+  %owns_notification = scalar.cmpi ne, %notify, %zero : i32
+  scf.if %owns_notification {
+    %reserved = scalar.addi %packet_index, %one64 : i64
+    view.atomic.store %reserved, %write_word[0] {ordering = release, scope = system} : i64, view<1xi64>
+  }
+  scf.for %word = [%first to %end step %step] {
+    %value = view.load %source[%word] : view<16xi32> -> i32
+    view.store %value, %target[%word] : i32, view<16xi32>
+  }
+  %workgroup_xy = view.load %source[1] : view<16xi32> -> i32
+  %workgroup_z_word = view.load %source[2] : view<16xi32> -> i32
+  %workgroup_x = scalar.andi %workgroup_xy, %low_mask : i32
+  %workgroup_y = scalar.shrui %workgroup_xy, %high_shift : i32
+  %workgroup_z = scalar.andi %workgroup_z_word, %low_mask : i32
+  %groups_x = view.load %groups[0] : view<3xi32> -> i32
+  %groups_y = view.load %groups[1] : view<3xi32> -> i32
+  %groups_z = view.load %groups[2] : view<3xi32> -> i32
+  %grid_x = scalar.muli %groups_x, %workgroup_x : i32
+  %grid_y = scalar.muli %groups_y, %workgroup_y : i32
+  %grid_z = scalar.muli %groups_z, %workgroup_z : i32
+  view.store %grid_x, %target[3] : i32, view<16xi32>
+  view.store %grid_y, %target[4] : i32, view<16xi32>
+  view.store %grid_z, %target[5] : i32, view<16xi32>
+  %header_setup = view.load %source[0] : view<16xi32> -> i32
+  view.atomic.store %header_setup, %target[0] {ordering = release, scope = system} : i32, view<16xi32>
+  scf.if %owns_notification {
+    view.atomic.store %packet_index, %notification_word[0] {ordering = release, scope = system} : i64, view<1xi64>
+  }
+  kernel.return
+}
