@@ -168,6 +168,25 @@ static iree_status_t ProveSemanticallyEquivalentRelativeUpperBound(
   return loom_symbolic_expr_prove_le(context, &lower, &upper, out_result);
 }
 
+static iree_status_t ProveExclusiveUpperBound(
+    loom_symbolic_expr_context_t* context, loom_value_id_t selected_value,
+    int64_t increment, loom_value_id_t upper_bound,
+    loom_symbolic_proof_result_t* out_result) {
+  loom_symbolic_expr_t selected = {};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_from_value(context, selected_value, &selected));
+  loom_symbolic_expr_t increment_expression = {};
+  loom_symbolic_expr_constant(increment, &increment_expression);
+  loom_symbolic_expr_t exclusive_end = {};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_add(
+      context, &selected, &increment_expression, &exclusive_end));
+  loom_symbolic_expr_t upper_bound_expression = {};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(context, upper_bound,
+                                                     &upper_bound_expression));
+  return loom_symbolic_expr_prove_le(context, &exclusive_end,
+                                     &upper_bound_expression, out_result);
+}
+
 TEST_F(SymbolicExprTest, AddSubNormalizeAndCancelTerms) {
   loom_value_id_t value_id = DefineIndexValue();
   loom_symbolic_expr_t value_expression = {0};
@@ -1715,6 +1734,235 @@ TEST_F(SymbolicExprTest, ConditionRefinementMemoReusesPersistentStorage) {
     EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
   }
   EXPECT_EQ(analysis_arena_.used_allocation_size, warmed_allocation_size);
+}
+
+TEST_F(SymbolicExprTest,
+       RangeCheckedArithmeticSelectHandlesComparisonAndArmOrientations) {
+  const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  const loom_value_id_t group = DefineIndexValue();
+  DefineFacts(group, loom_value_facts_make(0, 3, 1));
+  const loom_value_id_t thread = DefineIndexValue();
+  DefineFacts(thread, loom_value_facts_make(0, 127, 1));
+  const loom_value_id_t threads =
+      loom_index_constant_result(BuildIndexConstant(128));
+  DefineFacts(threads, loom_value_facts_exact_i64(128));
+  loom_op_t* row_op = nullptr;
+  IREE_ASSERT_OK(loom_index_madd_build(&builder_, group, threads, thread,
+                                       LOOM_LOCATION_UNKNOWN, &row_op));
+  ComputeFacts(row_op);
+  const loom_value_id_t row = loom_index_madd_result(row_op);
+  const loom_value_id_t width = DefineIndexValue();
+  DefineFacts(width, loom_value_facts_make(128, 512, 1));
+  const loom_value_id_t zero =
+      loom_index_constant_result(BuildIndexConstant(0));
+  DefineFacts(zero, loom_value_facts_exact_i64(0));
+
+  struct TestCase {
+    loom_index_cmp_predicate_t predicate;
+    bool swap_operands;
+    bool row_on_true;
+    int64_t exclusive_increment;
+  };
+  const TestCase test_cases[] = {
+      {LOOM_INDEX_CMP_PREDICATE_ULT, false, true, 1},
+      {LOOM_INDEX_CMP_PREDICATE_UGT, true, true, 1},
+      {LOOM_INDEX_CMP_PREDICATE_UGE, false, false, 1},
+      {LOOM_INDEX_CMP_PREDICATE_ULE, true, false, 1},
+      {LOOM_INDEX_CMP_PREDICATE_ULE, false, true, 0},
+      {LOOM_INDEX_CMP_PREDICATE_UGE, true, true, 0},
+      {LOOM_INDEX_CMP_PREDICATE_UGT, false, false, 0},
+      {LOOM_INDEX_CMP_PREDICATE_ULT, true, false, 0},
+  };
+  for (const TestCase& test_case : test_cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << "predicate=" << test_case.predicate
+                 << ", swap=" << test_case.swap_operands
+                 << ", row_on_true=" << test_case.row_on_true);
+    const loom_value_id_t lhs = test_case.swap_operands ? width : row;
+    const loom_value_id_t rhs = test_case.swap_operands ? row : width;
+    loom_op_t* valid_op = nullptr;
+    IREE_ASSERT_OK(loom_index_cmp_build(&builder_, test_case.predicate, lhs,
+                                        rhs, LOOM_LOCATION_UNKNOWN, &valid_op));
+    ComputeFacts(valid_op);
+    loom_op_t* safe_row_op = nullptr;
+    IREE_ASSERT_OK(loom_scf_select_build(
+        &builder_, loom_index_cmp_result(valid_op),
+        test_case.row_on_true ? row : zero, test_case.row_on_true ? zero : row,
+        index_type, LOOM_LOCATION_UNKNOWN, &safe_row_op));
+    ComputeFacts(safe_row_op);
+
+    loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_ASSERT_OK(ProveExclusiveUpperBound(
+        &expression_context_, loom_scf_select_result(safe_row_op),
+        test_case.exclusive_increment, width, &proof));
+    EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+  }
+}
+
+TEST_F(SymbolicExprTest,
+       RangeCheckedSelectSpecializesOffsetAndFixedWidthArithmetic) {
+  const auto prove_address_case = [&](loom_scalar_type_t scalar_type) {
+    const loom_type_t type = loom_type_scalar(scalar_type);
+    loom_value_id_t base = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_define_value(&builder_, type, &base));
+    DefineFacts(base, loom_value_facts_make(0, 384, 1));
+    loom_value_id_t lane = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_define_value(&builder_, type, &lane));
+    DefineFacts(lane, loom_value_facts_make(0, 127, 1));
+    loom_op_t* row_op = nullptr;
+    IREE_ASSERT_OK(loom_index_add_build(&builder_, base, lane, type,
+                                        LOOM_LOCATION_UNKNOWN, &row_op));
+    ComputeFacts(row_op);
+    const loom_value_id_t row = loom_index_add_result(row_op);
+    loom_value_id_t width = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_define_value(&builder_, type, &width));
+    DefineFacts(width, loom_value_facts_make(128, 512, 1));
+    loom_op_t* zero_op = nullptr;
+    IREE_ASSERT_OK(loom_index_constant_build(&builder_, loom_attr_i64(0), type,
+                                             LOOM_LOCATION_UNKNOWN, &zero_op));
+    ComputeFacts(zero_op);
+    const loom_value_id_t zero = loom_index_constant_result(zero_op);
+    loom_op_t* valid_op = nullptr;
+    IREE_ASSERT_OK(loom_index_cmp_build(&builder_, LOOM_INDEX_CMP_PREDICATE_ULT,
+                                        row, width, LOOM_LOCATION_UNKNOWN,
+                                        &valid_op));
+    ComputeFacts(valid_op);
+    loom_op_t* safe_row_op = nullptr;
+    IREE_ASSERT_OK(
+        loom_scf_select_build(&builder_, loom_index_cmp_result(valid_op), row,
+                              zero, type, LOOM_LOCATION_UNKNOWN, &safe_row_op));
+    ComputeFacts(safe_row_op);
+
+    loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_ASSERT_OK(ProveExclusiveUpperBound(&expression_context_,
+                                            loom_scf_select_result(safe_row_op),
+                                            1, width, &proof));
+    EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+  };
+  for (loom_scalar_type_t scalar_type :
+       {LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_OFFSET}) {
+    SCOPED_TRACE(static_cast<int>(scalar_type));
+    prove_address_case(scalar_type);
+  }
+
+  const loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+  const loom_value_id_t base = DefineI64Value();
+  DefineFacts(base, loom_value_facts_make(0, 384, 1));
+  const loom_value_id_t lane = DefineI64Value();
+  DefineFacts(lane, loom_value_facts_make(0, 127, 1));
+  loom_op_t* row_op = nullptr;
+  IREE_ASSERT_OK(loom_scalar_addi_build(&builder_, /*instance_flags=*/0, base,
+                                        lane, i64_type, LOOM_LOCATION_UNKNOWN,
+                                        &row_op));
+  ComputeFacts(row_op);
+  const loom_value_id_t row = loom_scalar_addi_result(row_op);
+  const loom_value_id_t width = DefineI64Value();
+  DefineFacts(width, loom_value_facts_make(128, 512, 1));
+  const loom_value_id_t zero = DefineI64Value();
+  DefineFacts(zero, loom_value_facts_exact_i64(0));
+  loom_op_t* valid_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_scalar_cmpi_build(&builder_, LOOM_SCALAR_CMPI_PREDICATE_ULT, row,
+                             width, LOOM_LOCATION_UNKNOWN, &valid_op));
+  ComputeFacts(valid_op);
+  loom_op_t* safe_row_op = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(
+      &builder_, loom_scalar_cmpi_result(valid_op), row, zero, i64_type,
+      LOOM_LOCATION_UNKNOWN, &safe_row_op));
+  ComputeFacts(safe_row_op);
+
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(ProveExclusiveUpperBound(&expression_context_,
+                                          loom_scf_select_result(safe_row_op),
+                                          1, width, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+}
+
+TEST_F(SymbolicExprTest, RangeCheckedSelectDoesNotInventPositiveDynamicExtent) {
+  const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  const loom_value_id_t row = DefineIndexValue();
+  DefineFacts(row, loom_value_facts_make(0, 511, 1));
+  const loom_value_id_t zero =
+      loom_index_constant_result(BuildIndexConstant(0));
+  DefineFacts(zero, loom_value_facts_exact_i64(0));
+  const struct {
+    loom_index_cmp_predicate_t predicate;
+    int64_t width_lower_bound;
+  } test_cases[] = {
+      {LOOM_INDEX_CMP_PREDICATE_ULT, 0},
+      {LOOM_INDEX_CMP_PREDICATE_SLT, -8},
+  };
+  for (const auto& test_case : test_cases) {
+    SCOPED_TRACE(test_case.width_lower_bound);
+    const loom_value_id_t width = DefineIndexValue();
+    DefineFacts(width,
+                loom_value_facts_make(test_case.width_lower_bound, 512, 1));
+    loom_op_t* valid_op = nullptr;
+    IREE_ASSERT_OK(loom_index_cmp_build(&builder_, test_case.predicate, row,
+                                        width, LOOM_LOCATION_UNKNOWN,
+                                        &valid_op));
+    ComputeFacts(valid_op);
+    loom_op_t* safe_row_op = nullptr;
+    IREE_ASSERT_OK(loom_scf_select_build(
+        &builder_, loom_index_cmp_result(valid_op), row, zero, index_type,
+        LOOM_LOCATION_UNKNOWN, &safe_row_op));
+    ComputeFacts(safe_row_op);
+
+    loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_ASSERT_OK(ProveExclusiveUpperBound(&expression_context_,
+                                            loom_scf_select_result(safe_row_op),
+                                            1, width, &proof));
+    EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
+  }
+}
+
+TEST_F(SymbolicExprTest, RangeCheckedSelectPreservesWrappingArithmetic) {
+  const loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+  const loom_value_id_t left = DefineI64Value();
+  DefineFacts(left, loom_value_facts_make(INT64_MAX - 1, INT64_MAX, 1));
+  const loom_value_id_t right = DefineI64Value();
+  DefineFacts(right, loom_value_facts_make(INT64_MAX - 1, INT64_MAX, 1));
+  loom_op_t* one_op = nullptr;
+  IREE_ASSERT_OK(loom_scalar_constant_build(
+      &builder_, loom_attr_i64(1), i64_type, LOOM_LOCATION_UNKNOWN, &one_op));
+  ComputeFacts(one_op);
+  const loom_value_id_t one = loom_scalar_constant_result(one_op);
+
+  loom_op_t* left_plus_one_op = nullptr;
+  IREE_ASSERT_OK(loom_scalar_addi_build(&builder_, /*instance_flags=*/0, left,
+                                        one, i64_type, LOOM_LOCATION_UNKNOWN,
+                                        &left_plus_one_op));
+  ComputeFacts(left_plus_one_op);
+  loom_op_t* right_plus_one_op = nullptr;
+  IREE_ASSERT_OK(loom_scalar_addi_build(&builder_, /*instance_flags=*/0, right,
+                                        one, i64_type, LOOM_LOCATION_UNKNOWN,
+                                        &right_plus_one_op));
+  ComputeFacts(right_plus_one_op);
+
+  loom_op_t* ordered_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_scalar_cmpi_build(&builder_, LOOM_SCALAR_CMPI_PREDICATE_SLE, left,
+                             right, LOOM_LOCATION_UNKNOWN, &ordered_op));
+  ComputeFacts(ordered_op);
+  loom_op_t* selected_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_scf_select_build(&builder_, loom_scalar_cmpi_result(ordered_op),
+                            loom_scalar_addi_result(left_plus_one_op),
+                            loom_scalar_addi_result(right_plus_one_op),
+                            i64_type, LOOM_LOCATION_UNKNOWN, &selected_op));
+  ComputeFacts(selected_op);
+
+  loom_symbolic_expr_t selected = {};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_scf_select_result(selected_op), &selected));
+  loom_symbolic_expr_t upper_bound = {};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_scalar_addi_result(right_plus_one_op),
+      &upper_bound));
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(&expression_context_, &selected,
+                                             &upper_bound, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
 }
 
 TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopLowerBound) {

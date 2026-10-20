@@ -1661,6 +1661,133 @@ static iree_status_t loom_symbolic_expr_select_iterator_for_le(
   return iree_ok_status();
 }
 
+// Rebuilds an existing linear expression while an active condition scope can
+// resolve each retained SSA identity to its selected value. Expressions handed
+// to the proof API may have been composed after their SSA producers expanded,
+// so resetting the value memo alone cannot specialize those already-retained
+// terms. relation_value_id is an equal SSA value that preserves the strongest
+// available predicate and selector provenance for exactly this purpose.
+static bool loom_symbolic_expr_has_select_dependencies(
+    const loom_symbolic_expr_context_t* context,
+    const loom_symbolic_expr_t* expression) {
+  for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
+    const loom_symbolic_term_t term = expression->terms[i];
+    loom_value_set_cursor_t cursor;
+    if (loom_value_fact_table_select_dependencies_begin(
+            context->fact_table, term.value_id, &cursor)) {
+      return true;
+    }
+    if (term.relation_value_id != term.value_id &&
+        term.relation_value_id != LOOM_VALUE_ID_INVALID &&
+        loom_value_fact_table_select_dependencies_begin(
+            context->fact_table, term.relation_value_id, &cursor)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool loom_symbolic_expr_is_unscaled_symbol(
+    const loom_symbolic_expr_t* expression) {
+  return loom_symbolic_expr_is_linear(expression) &&
+         expression->constant == 0 && expression->term_count == 1 &&
+         expression->terms[0].coefficient == 1;
+}
+
+#if IREE_HAVE_ATTRIBUTE(minsize)
+__attribute__((minsize))
+#endif  // IREE_HAVE_ATTRIBUTE(minsize)
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_symbolic_expr_recompose_for_active_condition(
+    loom_symbolic_expr_context_t* context,
+    const loom_symbolic_expr_t* expression,
+    loom_symbolic_expr_t* out_expression, bool* out_has_composite_expansion) {
+  *out_expression = *expression;
+  *out_has_composite_expansion = false;
+  if (!loom_symbolic_expr_has_select_dependencies(context, expression)) {
+    return iree_ok_status();
+  }
+
+  // Most selector dependencies arrive through an assume predicate or resolve
+  // one leaf value to another. The ordinary semantic matcher already handles
+  // those forms. Admit recomposition only when the active branch exposes a
+  // constant or composite expression that the pre-scoped term cannot model.
+  for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
+    const loom_symbolic_term_t term = expression->terms[i];
+    const loom_value_id_t value_id =
+        term.relation_value_id != LOOM_VALUE_ID_INVALID ? term.relation_value_id
+                                                        : term.value_id;
+    loom_symbolic_expr_t value_expression = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_symbolic_expr_from_value(context, value_id, &value_expression));
+    if (!loom_symbolic_expr_is_unscaled_symbol(&value_expression)) {
+      *out_has_composite_expansion = true;
+      break;
+    }
+  }
+  if (!*out_has_composite_expansion) {
+    return iree_ok_status();
+  }
+
+  loom_symbolic_expr_constant(expression->constant, out_expression);
+  for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
+    const loom_symbolic_term_t term = expression->terms[i];
+    const loom_value_id_t value_id =
+        term.relation_value_id != LOOM_VALUE_ID_INVALID ? term.relation_value_id
+                                                        : term.value_id;
+    loom_symbolic_expr_t value_expression = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_symbolic_expr_from_value(context, value_id, &value_expression));
+    loom_symbolic_expr_t scaled_expression = {0};
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_mul_i64(
+        context, &value_expression, term.coefficient, &scaled_expression));
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_add(
+        context, out_expression, &scaled_expression, out_expression));
+  }
+  out_expression->facts = loom_symbolic_expr_intersect_integer_facts(
+      expression->facts, out_expression->facts);
+  return iree_ok_status();
+}
+
+#if IREE_HAVE_ATTRIBUTE(minsize)
+__attribute__((minsize))
+#endif  // IREE_HAVE_ATTRIBUTE(minsize)
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_symbolic_expr_prove_le_by_recomposed_condition(
+    const loom_symbolic_expr_context_t* context,
+    const loom_symbolic_expr_t* left_expression,
+    const loom_symbolic_expr_t* right_expression,
+    const loom_condition_fact_scope_t* condition_scope,
+    iree_arena_allocator_t* arena, loom_symbolic_proof_result_t* out_result) {
+  // The scoped context keeps branch expansion out of the caller's retained
+  // arena and memo. All case-specific storage expires with |arena|.
+  loom_symbolic_expr_context_t scoped_context;
+  loom_symbolic_expr_context_initialize(context->module, context->value_domain,
+                                        context->fact_table, arena,
+                                        &scoped_context);
+  scoped_context.value_identities = context->value_identities;
+  scoped_context.condition_scope = condition_scope;
+  scoped_context.maximum_term_count = context->maximum_term_count;
+
+  loom_symbolic_expr_t scoped_left = {0};
+  bool left_has_composite_expansion = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_recompose_for_active_condition(
+      &scoped_context, left_expression, &scoped_left,
+      &left_has_composite_expansion));
+  loom_symbolic_expr_t scoped_right = {0};
+  bool right_has_composite_expansion = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_recompose_for_active_condition(
+      &scoped_context, right_expression, &scoped_right,
+      &right_has_composite_expansion));
+  if (!left_has_composite_expansion && !right_has_composite_expansion) {
+    *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    return iree_ok_status();
+  }
+  return loom_symbolic_expr_prove_le_with_scope(
+      &scoped_context, &scoped_left, &scoped_right,
+      LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_CONDITION_ASSUMPTION, out_result);
+}
+
 #if IREE_HAVE_ATTRIBUTE(minsize)
 __attribute__((minsize))
 #endif  // IREE_HAVE_ATTRIBUTE(minsize)
@@ -1691,6 +1818,12 @@ loom_symbolic_expr_prove_le_with_condition_assumption(
     status = loom_symbolic_expr_prove_le_with_scope(
         context, left_expression, right_expression,
         LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_CONDITION_ASSUMPTION, out_result);
+    if (iree_status_is_ok(status) &&
+        *out_result == LOOM_SYMBOLIC_PROOF_UNKNOWN) {
+      status = loom_symbolic_expr_prove_le_by_recomposed_condition(
+          context, left_expression, right_expression, &condition_scope,
+          &derivation_arena, out_result);
+    }
     context->condition_scope = previous_scope;
     loom_symbolic_expr_context_reset(context);
   }
@@ -1795,6 +1928,12 @@ static iree_status_t loom_symbolic_expr_prove_le_by_select_cases(
       status = loom_symbolic_expr_prove_le_with_scope(
           context, left_expression, right_expression,
           LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_CONDITION_ASSUMPTION, out_result);
+      if (iree_status_is_ok(status) &&
+          *out_result == LOOM_SYMBOLIC_PROOF_UNKNOWN) {
+        status = loom_symbolic_expr_prove_le_by_recomposed_condition(
+            context, left_expression, right_expression, &residual_scope,
+            &condition_arena, out_result);
+      }
       if (*out_result == LOOM_SYMBOLIC_PROOF_FALSE) {
         *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
       }
