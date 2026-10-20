@@ -331,6 +331,7 @@ iree_runtime_cc_test(
         "aql_program_test.cc",
         "dispatch_test.cc",
         "native_test.cc",
+        "protocol_test.cc",
     ],
     target_compatible_with = select({
         "//runtime/config/hal:driver_amd": [],
@@ -358,6 +359,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:command_buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:program",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:ring",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:queue",
         "//runtime/src/iree/hal/memory:fixed_block_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

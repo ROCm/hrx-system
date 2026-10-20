@@ -706,6 +706,7 @@ iree_cc_test(
     "aql_program_test.cc"
     "dispatch_test.cc"
     "native_test.cc"
+    "protocol_test.cc"
   DEPS
     ::test_device
     amdf::amdf_static
@@ -724,6 +725,7 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::queue::aql::command_buffer
     iree::hal::drivers::amd::gpu::queue::aql::program
     iree::hal::drivers::amd::gpu::queue::aql::ring
+    iree::hal::drivers::amd::gpu::queue::pm4::queue
     iree::hal::drivers::amd::gpu::queue::semaphore
     iree::hal::drivers::amd::gpu::queue::signal
     iree::hal::drivers::amd::gpu::queue::user_queue
