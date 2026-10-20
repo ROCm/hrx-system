@@ -18,6 +18,14 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
     amdf_device_t* device, const amdf_gpu_user_queue_create_info_t* create_info,
     amdf_user_queue_t** out_queue);
 
+// Samples a firmware scratch request without native calls or allocation.
+amdf_status_t AMDF_CALL amdf_gpu_user_queue_query_scratch(
+    amdf_user_queue_t* queue, amdf_gpu_aql_scratch_request_t* out_request);
+
+// Validates caller backing, installs it, and releases the firmware pause.
+amdf_status_t AMDF_CALL amdf_gpu_user_queue_resume_scratch(
+    amdf_user_queue_t* queue, const amdf_gpu_queue_scratch_t* scratch);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

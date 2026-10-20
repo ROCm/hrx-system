@@ -89,6 +89,7 @@ bool amdf_gpu_kfd_aql_queue_plan(const amdf_gpu_kfd_topology_t* topology,
               .format_version = AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1,
               .format_features =
                   AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
+                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE |
                   (barrier_value ? AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE
                                  : 0),
               .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_USER,

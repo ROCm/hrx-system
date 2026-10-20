@@ -22,7 +22,7 @@ typedef struct amdf_gpu_umd_user_queue_mapping_t
     amdf_gpu_umd_user_queue_mapping_t;
 
 // Queue-device scratch range resolved by the shared GPU layer. The caller
-// keeps its backing live until queue destruction succeeds.
+// keeps its backing live until a scratch request or successful destruction.
 typedef struct amdf_gpu_umd_queue_scratch_t {
   // Queue-device address of the first scratch byte, or zero when disabled.
   uint64_t device_address;
@@ -46,6 +46,10 @@ typedef struct amdf_gpu_umd_user_queue_create_info_t {
   amdf_queue_producer_mode_t producer_mode;
   // Enables native dispatch timestamps in each AQL completion signal.
   bool dispatch_timestamps;
+  // Enables caller servicing of native scratch requests.
+  bool scratch_service;
+  // Optional native wake operands for scratch requests and queue errors.
+  amdf_gpu_event_info_t inactive_event;
   // Direct producer operations required by the caller.
   amdf_user_queue_capabilities_t required_capabilities;
   // Semantic operations advertised for the selected family.
@@ -110,6 +114,17 @@ amdf_status_t amdf_gpu_umd_user_queue_mapping_destroy(
 // Samples native publication, consumption, and sticky terminal state.
 amdf_status_t amdf_gpu_umd_user_queue_query_status(
     amdf_gpu_umd_user_queue_t* queue, amdf_user_queue_status_t* out_status);
+
+// Samples a pending request; zero byte_length means none. Does not enter the
+// kernel or allocate. The caller serializes this with scratch installation.
+amdf_status_t amdf_gpu_umd_user_queue_query_scratch(
+    amdf_gpu_umd_user_queue_t* queue,
+    amdf_gpu_aql_scratch_request_t* out_request);
+
+// Installs backing into a paused scratch-service queue and resumes firmware.
+amdf_status_t amdf_gpu_umd_user_queue_resume_scratch(
+    amdf_gpu_umd_user_queue_t* queue,
+    const amdf_gpu_umd_queue_scratch_t* scratch);
 
 // Waits for one already-published format index under `deadline`.
 amdf_status_t amdf_gpu_umd_user_queue_wait_consumed(

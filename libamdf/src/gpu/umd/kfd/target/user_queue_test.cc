@@ -99,7 +99,8 @@ TEST(KfdTargetUserQueueTest, ExposesBothComputeLanguagesOnRdna) {
     EXPECT_EQ(plans.values[1].family.command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
     EXPECT_EQ(plans.values[1].family.format_features,
-              AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS);
+              AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
+                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE);
     EXPECT_NE(plans.values[1].family.roles & AMDF_QUEUE_ROLE_TRANSFER, 0u);
     EXPECT_EQ(plans.values[2].family.command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
@@ -132,6 +133,7 @@ TEST(KfdTargetUserQueueTest, CdnaDoesNotAdvertisePm4) {
     EXPECT_EQ(
         plans.values[0].family.format_features,
         AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
+            AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE |
             (target == 90010u ? 0 : AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE));
     EXPECT_NE(plans.values[0].family.roles & AMDF_QUEUE_ROLE_TRANSFER, 0u);
     EXPECT_EQ(plans.values[1].family.command_type,
@@ -187,7 +189,8 @@ TEST(KfdTargetUserQueueTest, Pm4TrapRequirementsFollowNativeGcIdentity) {
     EXPECT_EQ(plans.values[1].family.command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
     EXPECT_EQ(plans.values[1].family.format_features,
-              AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS);
+              AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
+                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE);
   }
 }
 
@@ -462,7 +465,8 @@ TEST(KfdTargetUserQueueTest, Cdna2SaveLayoutMatchesReportedNativeGeometry) {
     const auto& plan = plans.values[0];
     EXPECT_EQ(plan.family.command_type, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
     EXPECT_EQ(plan.family.format_features,
-              AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS);
+              AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
+                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE);
     EXPECT_EQ(plan.compute.context_count, 1u);
     EXPECT_EQ(plan.compute.control_stack_byte_length, 36864u);
     EXPECT_EQ(plan.compute.context_save_restore_byte_length, 63508480u);
@@ -502,7 +506,8 @@ TEST(KfdTargetUserQueueTest, MultiXccAqlFamiliesRetainTransferRole) {
                   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER);
     EXPECT_EQ(family.format_features,
               AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE |
-                  AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS);
+                  AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
+                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE);
     const amdf_queue_roles_t expected_roles = AMDF_QUEUE_ROLE_COMPUTE |
                                               AMDF_QUEUE_ROLE_CACHE_CONTROL |
                                               AMDF_QUEUE_ROLE_TRANSFER;

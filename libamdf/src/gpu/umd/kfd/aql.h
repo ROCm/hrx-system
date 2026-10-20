@@ -50,7 +50,7 @@ typedef struct amdf_gpu_kfd_aql_descriptor_t {
   uint64_t read_dispatch_id;
   // Offset of read_dispatch_id from the descriptor base.
   uint32_t read_dispatch_id_byte_offset;
-  // COMPUTE_TMPRING_SIZE encoding for fixed scratch.
+  // COMPUTE_TMPRING_SIZE encoding for the currently bound scratch.
   uint32_t compute_temporary_ring_size;
   // Native scratch buffer resource descriptor.
   uint32_t scratch_resource_descriptor[4];
@@ -97,13 +97,27 @@ typedef struct amdf_gpu_kfd_aql_signal_t {
 extern "C" {
 #endif
 
-// Encodes the caller's fixed scratch before any native allocation. Failure is
+// Encodes the caller's initial scratch before any native allocation. Failure is
 // a nonrepresentable or unsupported caller request and leaves output unchanged.
 // The remaining descriptor fields are populated after addresses are assigned.
 amdf_status_t amdf_gpu_kfd_aql_descriptor_initialize(
     const amdf_gpu_kfd_user_queue_plan_t* plan,
     const amdf_gpu_umd_user_queue_create_info_t* create_info,
     amdf_gpu_kfd_aql_descriptor_t* out_descriptor);
+
+// Resolves the target's complete physical scratch requirement for a firmware
+// request. Input private bytes originate in the caller-published dispatch.
+amdf_status_t amdf_gpu_kfd_aql_scratch_requirements(
+    const amdf_gpu_kfd_user_queue_plan_t* plan,
+    uint32_t private_segment_byte_length, uint32_t wavefront_size,
+    amdf_gpu_aql_scratch_request_t* out_request);
+
+// Encodes a validated target wave size and caller backing into only the
+// descriptor's scratch fields. Failure leaves the descriptor unchanged.
+amdf_status_t amdf_gpu_kfd_aql_scratch_initialize(
+    const amdf_gpu_kfd_user_queue_plan_t* plan,
+    const amdf_gpu_umd_queue_scratch_t* scratch, uint64_t wave_byte_length,
+    amdf_gpu_kfd_aql_descriptor_t* descriptor);
 
 #ifdef __cplusplus
 }  // extern "C"

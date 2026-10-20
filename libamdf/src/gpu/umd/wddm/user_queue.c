@@ -6,6 +6,22 @@
 
 #include "libamdf/src/gpu/umd/user_queue.h"
 
+amdf_status_t amdf_gpu_umd_user_queue_query_scratch(
+    amdf_gpu_umd_user_queue_t* queue,
+    amdf_gpu_aql_scratch_request_t* out_request) {
+  (void)queue;
+  (void)out_request;
+  return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+}
+
+amdf_status_t amdf_gpu_umd_user_queue_resume_scratch(
+    amdf_gpu_umd_user_queue_t* queue,
+    const amdf_gpu_umd_queue_scratch_t* scratch) {
+  (void)queue;
+  (void)scratch;
+  return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+}
+
 // This leaf exposes no user queue family while every operation is unsupported.
 amdf_status_t amdf_gpu_umd_user_queue_create(
     amdf_gpu_umd_device_t* device,

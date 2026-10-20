@@ -77,6 +77,7 @@ amdf_cc_library(
     hdrs = ["user_queue.h"],
     deps = [
         ":device",
+        ":event",
         "//libamdf/src:allocator",
         "//libamdf/src:device",
         "//libamdf/src:endpoint",
@@ -178,6 +179,7 @@ amdf_cc_test(
     srcs = ["user_queue_test.cc"],
     deps = [
         ":device",
+        ":event",
         ":user_queue",
         "//libamdf/src:allocator",
         "//libamdf/src:child_tracker",

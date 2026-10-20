@@ -92,6 +92,7 @@ iree_cc_library(
     "user_queue.c"
   DEPS
     ::device
+    ::event
     amdf::headers
     libamdf::src::allocator
     libamdf::src::device
@@ -227,6 +228,7 @@ iree_cc_test(
     "user_queue_test.cc"
   DEPS
     ::device
+    ::event
     ::user_queue
     amdf::headers
     iree::third_party::google_test

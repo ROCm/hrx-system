@@ -22,6 +22,9 @@ amdf_status_t AMDF_CALL amdf_gpu_event_create(
 amdf_status_t AMDF_CALL amdf_gpu_event_query_info(
     amdf_gpu_event_t* event, amdf_gpu_event_info_t* out_info);
 
+// Returns the borrowed exact native device that owns the event.
+amdf_device_t* amdf_gpu_event_get_device(const amdf_gpu_event_t* event);
+
 // Publishes a coalescible host wake, independent of application predicates.
 amdf_status_t AMDF_CALL amdf_gpu_event_signal(amdf_gpu_event_t* event);
 

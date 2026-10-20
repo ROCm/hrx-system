@@ -52,37 +52,76 @@ amdf_status_t amdf_gpu_kfd_aql_descriptor_initialize(
     const uint64_t wave_byte_length =
         ((uint64_t)scratch->maximum_private_segment_byte_length * 64 + 1023) &
         ~UINT64_C(1023);
-    const uint64_t wave_count =
-        (uint64_t)plan->aql.scratch.slot_count_per_xcc * plan->aql.xcc_count;
-    // Retained scratch uses physical slot addressing. A smaller pool requires
-    // firmware's one-dispatch reclaim protocol, not just a lower occupancy cap.
-    if (scratch->maximum_wave_count != wave_count) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    const amdf_status_t status = amdf_gpu_kfd_aql_scratch_initialize(
+        plan, scratch, wave_byte_length, &descriptor);
+    if (!amdf_status_is_ok(status)) {
+      return status;
     }
-    const uint64_t xcc_byte_length =
-        wave_byte_length * plan->aql.scratch.slot_count_per_xcc;
-    if (wave_byte_length == 0 ||
-        wave_byte_length > plan->aql.scratch.maximum_wave_byte_length ||
-        xcc_byte_length > UINT32_MAX ||
-        scratch->byte_length < xcc_byte_length * plan->aql.xcc_count ||
-        scratch->device_address % 4096 != 0 ||
-        scratch->device_address >= (UINT64_C(1) << 48) ||
-        scratch->byte_length > (UINT64_C(1) << 48) - scratch->device_address) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-    }
-    descriptor.compute_temporary_ring_size =
-        plan->aql.scratch.temporary_ring_wave_count |
-        ((uint32_t)(wave_byte_length >> plan->aql.scratch.wave_size_shift)
-         << 12);
-    descriptor.scratch_resource_descriptor[0] =
-        (uint32_t)scratch->device_address;
-    descriptor.scratch_resource_descriptor[1] |=
-        (uint32_t)(scratch->device_address >> 32);
-    descriptor.scratch_resource_descriptor[2] = (uint32_t)xcc_byte_length;
-    descriptor.scratch_backing_address = scratch->device_address;
-    descriptor.scratch_wave64_lane_byte_length =
-        (uint32_t)(wave_byte_length / 64);
   }
   *out_descriptor = descriptor;
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_gpu_kfd_aql_scratch_requirements(
+    const amdf_gpu_kfd_user_queue_plan_t* plan,
+    uint32_t private_segment_byte_length, uint32_t wavefront_size,
+    amdf_gpu_aql_scratch_request_t* out_request) {
+  const uint64_t alignment = UINT64_C(1) << plan->aql.scratch.wave_size_shift;
+  const uint64_t wave_byte_length =
+      ((uint64_t)private_segment_byte_length * wavefront_size + alignment - 1) &
+      ~(alignment - 1);
+  const uint64_t xcc_byte_length =
+      wave_byte_length * plan->aql.scratch.slot_count_per_xcc;
+  if (wave_byte_length == 0 ||
+      wave_byte_length > plan->aql.scratch.maximum_wave_byte_length ||
+      xcc_byte_length > UINT32_MAX) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  *out_request = (amdf_gpu_aql_scratch_request_t){
+      .byte_length =
+          (xcc_byte_length * plan->aql.xcc_count + 4095) & ~UINT64_C(4095),
+      .private_segment_byte_length = private_segment_byte_length,
+      .wavefront_size = wavefront_size,
+      .wave_count = plan->aql.scratch.slot_count_per_xcc * plan->aql.xcc_count,
+  };
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_gpu_kfd_aql_scratch_initialize(
+    const amdf_gpu_kfd_user_queue_plan_t* plan,
+    const amdf_gpu_umd_queue_scratch_t* scratch, uint64_t wave_byte_length,
+    amdf_gpu_kfd_aql_descriptor_t* descriptor) {
+  const uint64_t wave_count =
+      (uint64_t)plan->aql.scratch.slot_count_per_xcc * plan->aql.xcc_count;
+  // Retained scratch uses physical slot addressing. A smaller pool requires
+  // firmware's one-dispatch reclaim protocol, not just a lower occupancy cap.
+  if (scratch->maximum_wave_count != wave_count) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  const uint64_t xcc_byte_length =
+      wave_byte_length * plan->aql.scratch.slot_count_per_xcc;
+  if (wave_byte_length == 0 ||
+      wave_byte_length > plan->aql.scratch.maximum_wave_byte_length ||
+      xcc_byte_length > UINT32_MAX ||
+      scratch->byte_length < xcc_byte_length * plan->aql.xcc_count ||
+      scratch->device_address % 4096 != 0 ||
+      scratch->device_address >= (UINT64_C(1) << 48) ||
+      scratch->byte_length > (UINT64_C(1) << 48) - scratch->device_address) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  descriptor->compute_temporary_ring_size =
+      plan->aql.scratch.temporary_ring_wave_count |
+      ((uint32_t)(wave_byte_length >> plan->aql.scratch.wave_size_shift) << 12);
+  descriptor->scratch_resource_descriptor[0] =
+      (uint32_t)scratch->device_address;
+  descriptor->scratch_resource_descriptor[1] =
+      plan->aql.scratch.resource_descriptor[1] |
+      (uint32_t)(scratch->device_address >> 32);
+  descriptor->scratch_resource_descriptor[2] = (uint32_t)xcc_byte_length;
+  descriptor->scratch_resource_descriptor[3] =
+      plan->aql.scratch.resource_descriptor[3];
+  descriptor->scratch_backing_address = scratch->device_address;
+  descriptor->scratch_wave64_lane_byte_length =
+      (uint32_t)(wave_byte_length / 64);
   return AMDF_STATUS_OK;
 }

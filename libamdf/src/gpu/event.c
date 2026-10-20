@@ -111,6 +111,10 @@ amdf_status_t AMDF_CALL amdf_gpu_event_signal(amdf_gpu_event_t* event) {
   return amdf_gpu_umd_event_signal(event->umd);
 }
 
+amdf_device_t* amdf_gpu_event_get_device(const amdf_gpu_event_t* event) {
+  return event->device;
+}
+
 amdf_status_t AMDF_CALL amdf_gpu_event_wait(amdf_gpu_event_t* event,
                                             uint64_t timeout_nanoseconds) {
   if (event == NULL) {

@@ -122,6 +122,7 @@ iree_cc_library(
     "publication_test.cc"
     "resource_test.cc"
     "scope_test.cc"
+    "scratch_test.cc"
     "shader_event_test.cc"
     "timestamp_test.cc"
     "transfer_test.cc"

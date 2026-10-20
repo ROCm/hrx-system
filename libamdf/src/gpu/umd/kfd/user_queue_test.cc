@@ -1617,6 +1617,127 @@ TEST_F(KfdUserQueueTest, AqlStatusObservesItsNativeInactiveSignal) {
   EXPECT_EQ(status.state, AMDF_QUEUE_STATE_FAILED);
 }
 
+TEST_F(KfdUserQueueTest, AqlScratchServicePreservesOwnershipAcrossGrowth) {
+  for (const uint32_t wavefront_size : {32u, 64u}) {
+    SCOPED_TRACE(wavefront_size);
+    SelectAqlTopology();
+    if (wavefront_size == 32) {
+      device_.topology.properties.gfx_ip = {11, 0, 0};
+      device_.topology.properties.compute.wavefront_size = 32;
+      device_.topology.properties.topology.xcc_count = 1;
+    }
+    native_state_.Reset();
+    auto create_info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+    create_info.scratch_service = true;
+    create_info.inactive_event = {
+        .format = AMDF_GPU_EVENT_FORMAT_KFD_SIGNAL,
+        .format_version = 1,
+        .mailbox_address = 0x76540000,
+        .interrupt_context = 23,
+    };
+    ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                             &queue_result_),
+              AMDF_STATUS_OK);
+    ASSERT_NO_FATAL_FAILURE(MapQueue());
+    auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+        native_state_.buffers[1].storage.data());
+    auto* signal = reinterpret_cast<amdf_gpu_kfd_aql_signal_t*>(
+        reinterpret_cast<uint8_t*>(descriptor) + 256);
+    EXPECT_EQ(signal->event_mailbox_address, 0x76540000u);
+    EXPECT_EQ(signal->event_id, 23u);
+    amdf_gpu_aql_scratch_request_t request;
+    ASSERT_EQ(amdf_gpu_umd_user_queue_query_scratch(queue_, &request),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(request.byte_length, 0u);
+    const uint32_t alignment = wavefront_size == 32 ? 256 : 1024;
+    for (const uint32_t private_bytes : {17u, 33u, 65u}) {
+      // A preceding barrier and invalid slot exercise EOP lag and ring wrap.
+      auto* packets = reinterpret_cast<uint32_t*>(mapping_result_.ring_address);
+      packets[62 * 16] = 3;
+      packets[63 * 16] = 1;
+      packets[0] = 2;
+      packets[6] = private_bytes;
+      amdf_atomic_uint64_store_release(ReadIndex(), 62);
+      amdf_atomic_uint64_store_release(WriteIndex(), 65);
+      signal->value = wavefront_size == 32 ? 0x401 : 1;
+      ASSERT_EQ(amdf_gpu_umd_user_queue_query_scratch(queue_, &request),
+                AMDF_STATUS_OK);
+      const uint64_t wave_bytes =
+          (private_bytes * wavefront_size + alignment - 1) & ~(alignment - 1);
+      EXPECT_EQ(request.dispatch_index, 64u);
+      EXPECT_EQ(request.wavefront_size, wavefront_size);
+      EXPECT_EQ(request.private_segment_byte_length, private_bytes);
+      EXPECT_EQ(request.wave_count, 512u);
+      EXPECT_EQ(request.byte_length, wave_bytes * 512);
+      amdf_user_queue_status_t status;
+      ASSERT_EQ(amdf_gpu_umd_user_queue_query_status(queue_, &status),
+                AMDF_STATUS_OK);
+      EXPECT_EQ(status.state, AMDF_QUEUE_STATE_ACTIVE);
+      EXPECT_EQ(status.terminal_status, AMDF_STATUS_OK);
+      amdf_gpu_umd_queue_scratch_t scratch = {
+          .device_address =
+              UINT64_C(0x120000000000) + uint64_t{private_bytes} * 0x100000000,
+          .byte_length = request.byte_length,
+          .maximum_private_segment_byte_length = private_bytes,
+          .maximum_wave_count = request.wave_count,
+      };
+      const auto original_descriptor = *descriptor;
+      --scratch.byte_length;
+      EXPECT_EQ(amdf_gpu_umd_user_queue_resume_scratch(queue_, &scratch),
+                amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+      EXPECT_EQ(std::memcmp(descriptor, &original_descriptor,
+                            sizeof(original_descriptor)),
+                0);
+      EXPECT_NE(signal->value, 0u);
+      ++scratch.byte_length;
+      ASSERT_EQ(amdf_gpu_umd_user_queue_resume_scratch(queue_, &scratch),
+                AMDF_STATUS_OK);
+      EXPECT_EQ(signal->value, 0u);
+      EXPECT_EQ(descriptor->scratch_backing_address, scratch.device_address);
+      EXPECT_EQ(descriptor->scratch_resource_descriptor[1] & 0xffff,
+                scratch.device_address >> 32);
+      EXPECT_EQ(descriptor->scratch_wave64_lane_byte_length, wave_bytes / 64);
+      EXPECT_EQ(
+          descriptor->scratch_resource_descriptor[2],
+          request.byte_length / device_.topology.properties.topology.xcc_count);
+      EXPECT_EQ(descriptor->compute_temporary_ring_size >> 12,
+                wave_bytes / alignment);
+      EXPECT_EQ(descriptor->read_dispatch_id, 62u);
+      EXPECT_EQ(descriptor->write_dispatch_id, 65u);
+      ASSERT_EQ(amdf_gpu_umd_user_queue_query_scratch(queue_, &request),
+                AMDF_STATUS_OK);
+      EXPECT_EQ(request.byte_length, 0u);
+      EXPECT_EQ(amdf_gpu_umd_user_queue_resume_scratch(queue_, &scratch),
+                amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION));
+    }
+    // Service does not recreate or allocate native queue storage.
+    EXPECT_EQ(native_state_.queue_create_count, 1);
+    EXPECT_EQ(native_state_.buffer_create_count, wavefront_size == 32 ? 5 : 4);
+    ASSERT_NO_FATAL_FAILURE(TearDown());
+  }
+}
+
+TEST_F(KfdUserQueueTest, ScratchServiceDoesNotHideOtherFirmwareErrors) {
+  SelectAqlTopology();
+  auto create_info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+  create_info.scratch_service = true;
+  ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                           &queue_result_),
+            AMDF_STATUS_OK);
+  auto* signal = reinterpret_cast<amdf_gpu_kfd_aql_signal_t*>(
+      reinterpret_cast<uint8_t*>(native_state_.buffers[1].storage.data()) +
+      256);
+  signal->value = 0x401 | 2;
+  amdf_gpu_aql_scratch_request_t request = {.byte_length = 123};
+  EXPECT_EQ(amdf_gpu_umd_user_queue_query_scratch(queue_, &request),
+            amdf_make_status(AMDF_STATUS_DOMAIN_FIRMWARE, signal->value));
+  EXPECT_EQ(request.byte_length, 123u);
+  amdf_user_queue_status_t status;
+  ASSERT_EQ(amdf_gpu_umd_user_queue_query_status(queue_, &status),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(status.state, AMDF_QUEUE_STATE_FAILED);
+}
+
 TEST_F(KfdUserQueueTest, ComputeFamilyCannotSilentlyIgnoreRequestedScratch) {
   auto create_info = MakeCreateInfo();
   create_info.scratch = {

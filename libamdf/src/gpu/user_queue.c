@@ -12,6 +12,7 @@
 #include "libamdf/src/device.h"
 #include "libamdf/src/endpoint.h"
 #include "libamdf/src/gpu/device.h"
+#include "libamdf/src/gpu/event.h"
 #include "libamdf/src/gpu/umd/user_queue.h"
 #include "libamdf/src/memory.h"
 #include "libamdf/src/structure.h"
@@ -168,7 +169,7 @@ static const amdf_user_queue_vtable_t amdf_gpu_user_queue_vtable = {
 };
 
 static amdf_status_t amdf_gpu_user_queue_validate_scratch(
-    amdf_device_t* device, const amdf_queue_family_info_t* family_info,
+    amdf_device_t* device, amdf_queue_roles_t roles,
     const amdf_gpu_queue_scratch_t* scratch,
     amdf_gpu_umd_queue_scratch_t* out_scratch) {
   const bool disabled = scratch->memory == NULL &&
@@ -186,7 +187,7 @@ static amdf_status_t amdf_gpu_user_queue_validate_scratch(
       scratch->maximum_wave_count == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  if ((family_info->roles & AMDF_QUEUE_ROLE_COMPUTE) == 0) {
+  if ((roles & AMDF_QUEUE_ROLE_COMPUTE) == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   const amdf_memory_t* memory = scratch->memory;
@@ -237,11 +238,21 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
                ? amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT)
                : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  amdf_status_t status = amdf_structure_validate_input(
+  amdf_status_t status = amdf_structure_validate_header(
       create_info, AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
       (uint32_t)sizeof(amdf_gpu_user_queue_create_info_t));
   if (!amdf_status_is_ok(status)) {
     return status;
+  }
+  const amdf_gpu_aql_scratch_service_info_t* scratch_service =
+      create_info->next;
+  if (scratch_service != NULL) {
+    status = amdf_structure_validate_input(
+        scratch_service, AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_SERVICE_INFO,
+        sizeof(*scratch_service));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
   }
   if ((create_info->flags & ~(amdf_gpu_user_queue_flags_t)
                                 AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS) !=
@@ -284,6 +295,25 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
         AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS) == 0)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
+  if (scratch_service != NULL &&
+      (family_info.command_type != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ||
+       (family_info.format_features &
+        AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE) == 0)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  amdf_gpu_event_info_t inactive_event = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_EVENT_INFO,
+      .structure_size = sizeof(inactive_event),
+  };
+  if (scratch_service != NULL && scratch_service->event != NULL) {
+    if (amdf_gpu_event_get_device(scratch_service->event) != device) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+    status = amdf_gpu_event_query_info(scratch_service->event, &inactive_event);
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+  }
   if (create_info->ring_byte_length != 0 &&
       ((create_info->ring_byte_length & (create_info->ring_byte_length - 1)) !=
            0 ||
@@ -296,7 +326,7 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
 
   amdf_gpu_umd_queue_scratch_t scratch = {0};
   status = amdf_gpu_user_queue_validate_scratch(
-      device, &family_info, &create_info->scratch, &scratch);
+      device, family_info.roles, &create_info->scratch, &scratch);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -322,6 +352,8 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
       .priority = create_info->priority,
       .producer_mode = create_info->producer_mode,
       .dispatch_timestamps = dispatch_timestamps,
+      .scratch_service = scratch_service != NULL,
+      .inactive_event = inactive_event,
       .required_capabilities = create_info->required_capabilities,
       .roles = family_info.roles,
       .ring_byte_length = create_info->ring_byte_length,
@@ -356,4 +388,49 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
     amdf_free(host_allocator, queue);
   }
   return status;
+}
+
+amdf_status_t AMDF_CALL
+amdf_gpu_user_queue_query_scratch(amdf_user_queue_t* base_queue,
+                                  amdf_gpu_aql_scratch_request_t* out_request) {
+  if (base_queue == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if (base_queue->vtable != &amdf_gpu_user_queue_vtable) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  amdf_status_t status = amdf_structure_validate_output(
+      out_request, AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_REQUEST,
+      sizeof(*out_request));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  amdf_gpu_aql_scratch_request_t request = {0};
+  status = amdf_gpu_umd_user_queue_query_scratch(
+      ((amdf_gpu_user_queue_t*)base_queue)->umd, &request);
+  if (amdf_status_is_ok(status)) {
+    request.type = out_request->type;
+    request.structure_size = out_request->structure_size;
+    request.next = out_request->next;
+    *out_request = request;
+  }
+  return status;
+}
+
+amdf_status_t AMDF_CALL amdf_gpu_user_queue_resume_scratch(
+    amdf_user_queue_t* base_queue, const amdf_gpu_queue_scratch_t* scratch) {
+  if (base_queue == NULL || scratch == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if (base_queue->vtable != &amdf_gpu_user_queue_vtable) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  amdf_gpu_umd_queue_scratch_t umd_scratch = {0};
+  const amdf_status_t status = amdf_gpu_user_queue_validate_scratch(
+      base_queue->device, base_queue->info.roles, scratch, &umd_scratch);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  return amdf_gpu_umd_user_queue_resume_scratch(
+      ((amdf_gpu_user_queue_t*)base_queue)->umd, &umd_scratch);
 }

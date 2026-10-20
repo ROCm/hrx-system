@@ -73,7 +73,8 @@ class GpuCommandTest : public GpuDeviceFixture {
                    amdf_user_queue_capabilities_t required_capabilities =
                        AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
                    uint64_t ring_byte_length = 0,
-                   amdf_gpu_user_queue_flags_t flags = 0);
+                   amdf_gpu_user_queue_flags_t flags = 0,
+                   const void* next = nullptr);
   // Requests finite command storage; zero retains the native/default capacity.
   void CreateQueue(GpuCommandQueue** out_queue,
                    uint64_t command_byte_length = 0);
