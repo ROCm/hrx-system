@@ -130,7 +130,9 @@ typedef struct iree_hal_amd_gpu_device_t {
   } transfers;
   // Sole native-event completion/retirement worker.
   iree_hal_amd_gpu_completion_t completion;
-  // Optional shared shader reports, drained by the same completion worker.
+  // Immutable native observation policy borrowed by this device's semaphores.
+  iree_hal_amd_gpu_semaphore_wait_context_t semaphore_wait;
+  // Optional shared shader reports, consumed within the serialized drain.
   iree_hal_amd_gpu_feedback_t feedback;
   // Optional profiling session, owned until externally serialized idle end.
   iree_hal_amd_gpu_profile_t* profile;
@@ -605,6 +607,7 @@ static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
   // after its final retirement round; joining includes every callback tail.
   iree_thread_release(device->completion.thread);
   device->completion.thread = NULL;
+  iree_slim_mutex_deinitialize(&device->completion.drain_mutex);
   if (!iree_hal_amd_gpu_device_is_idle(device)) {
     iree_hal_amd_gpu_context_join_memory(device->context);
     iree_hal_amd_fabric_allocation_queue_drain(device->context->memory.queue);
@@ -619,6 +622,10 @@ static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
   }
   iree_hal_amd_gpu_context_free(device->context);
   iree_allocator_free(device->host_allocator, device);
+}
+
+static void iree_hal_amd_gpu_device_try_retire(void* user_data) {
+  iree_hal_amd_gpu_completion_try_drain(user_data);
 }
 
 // Queue protocol and publication are native family properties, independent of
@@ -826,6 +833,14 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   device->command_type = context->families[family_ordinal].command_type;
   device->queue_lifecycle = aql ? &iree_hal_amd_gpu_aql_queue_lifecycle
                                 : &iree_hal_amd_gpu_pm4_queue_lifecycle;
+  if (publication_mode == AMDF_QUEUE_PUBLICATION_MODE_USER) {
+    device->semaphore_wait = (iree_hal_amd_gpu_semaphore_wait_context_t){
+        .domain = context,
+        .pending_value = aql ? 1 : 0,
+        .try_retire = iree_hal_amd_gpu_device_try_retire,
+        .user_data = &device->completion,
+    };
+  }
   device->queues = (iree_hal_queue_t**)(device + 1);
   device->sources =
       (iree_hal_amd_gpu_completion_source_t*)(device->queues +
@@ -1231,6 +1246,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_semaphore(
   iree_hal_amd_gpu_device_t* device = (void*)base;
   return iree_hal_amd_gpu_semaphore_create(
       iree_async_proactor_pool_entry_proactor(device->proactor_entry),
+      device->semaphore_wait.domain ? &device->semaphore_wait : NULL,
       initial_value, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
       device->host_allocator, out_semaphore);
 }

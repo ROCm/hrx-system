@@ -18,7 +18,7 @@ struct Storage {
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor));
     IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_create(
-        proactor, 0, 16, iree_allocator_system(), &semaphore));
+        proactor, nullptr, 0, 16, iree_allocator_system(), &semaphore));
     iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
     iree_hal_amd_gpu_signal_block_initialize(
         &pool, this, values.data(), 0x1000, 8, 0, signals.data(),

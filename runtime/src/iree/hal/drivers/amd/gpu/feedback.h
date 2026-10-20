@@ -131,9 +131,9 @@ typedef struct iree_hal_amd_gpu_feedback_t {
   void(IREE_API_PTR* failure_callback)(void* user_data);
   // Borrowed device owner for failure_callback.
   void* failure_user_data;
-  // First reported channel failure; only the completion worker accesses it.
+  // First reported channel failure; accessed within the serialized drain.
   iree_status_t failure;
-  // Last drop counter reported by the completion worker.
+  // Last drop counter reported within the serialized drain.
   uint64_t reported_drops;
 } iree_hal_amd_gpu_feedback_t;
 
@@ -165,7 +165,8 @@ bool iree_hal_amd_gpu_feedback_poll(
     iree_hal_amd_gpu_completion_wait_t* out_wait);
 
 // Drains the ready prefix observed at entry before publishing host completion.
-// Called only by the sole completion worker; never waits for a reserved hole.
+// Called within the serialized completion drain; never waits for a reserved
+// hole.
 void iree_hal_amd_gpu_feedback_drain(iree_hal_amd_gpu_feedback_t* feedback);
 
 #ifdef __cplusplus

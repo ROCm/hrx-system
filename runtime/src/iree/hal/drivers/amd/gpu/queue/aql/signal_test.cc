@@ -84,7 +84,7 @@ TEST(AqlSignalTest, SemaphoreCacheDoesNotOwnTheLastDependentReader) {
                                           iree_allocator_system(), &proactor));
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
-      proactor, 0, 2, iree_allocator_system(), &semaphore));
+      proactor, nullptr, 0, 2, iree_allocator_system(), &semaphore));
   iree_hal_amd_gpu_aql_signal_t native;
   iree_hal_amd_gpu_signal_t metadata;
   uint64_t frontier;

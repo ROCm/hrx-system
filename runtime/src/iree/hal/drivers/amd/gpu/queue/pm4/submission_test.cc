@@ -65,7 +65,7 @@ TEST_P(SubmissionTest, PayloadRetiresBeforePublicCompletion) {
                                           iree_allocator_system(), &proactor));
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
-      proactor, 0, 4, iree_allocator_system(), &semaphore));
+      proactor, nullptr, 0, 4, iree_allocator_system(), &semaphore));
   const iree_hal_queue_family_t family = {};
   const iree_hal_executable_vtable_t vtable = {.destroy = Executable::Destroy};
   Executable executable;
@@ -184,7 +184,7 @@ TEST_P(SubmissionTest, RetirementOwnsNativeReadersWithoutCallerInputs) {
                                           iree_allocator_system(), &proactor));
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
-      proactor, 0, 4, iree_allocator_system(), &semaphore));
+      proactor, nullptr, 0, 4, iree_allocator_system(), &semaphore));
   uint64_t native_value = 0, native_frontier = 1;
   iree_hal_amd_gpu_signal_t native_signal = {};
   iree_hal_amd_gpu_signal_pool_t signal_pool;
@@ -405,7 +405,7 @@ TEST_P(SubmissionTest, FailedDependencyStillJoinsOtherProducers) {
   std::array<iree_hal_semaphore_t*, 2> semaphores = {};
   for (auto& semaphore : semaphores) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
-        proactor, 0, 4, iree_allocator_system(), &semaphore));
+        proactor, nullptr, 0, 4, iree_allocator_system(), &semaphore));
   }
   std::array<uint64_t, 2> values = {1, 1};
   std::array<uint64_t, 2> native_values = {};
@@ -813,7 +813,7 @@ TEST_P(SubmissionTest, RejectedDownloadSuffixJoinsBeforeFailingPublicSignals) {
                                           iree_allocator_system(), &proactor));
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
-      proactor, 0, 4, iree_allocator_system(), &semaphore));
+      proactor, nullptr, 0, 4, iree_allocator_system(), &semaphore));
   const uint16_t types[] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS};
   const iree_hal_buffer_binding_layout_t binding_layout = {
       sizeof(iree_hal_buffer_native_binding_t), 1, 0, types};

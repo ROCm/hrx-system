@@ -121,7 +121,7 @@ class GpuFeedbackTest
   NativeMemoryGate memory_gate_;
   // Real Loom artifact compiled for this native device family.
   iree_const_byte_span_t artifact_ = {};
-  // Public reports observed on the completion worker.
+  // Public reports observed during serialized retirement.
   std::atomic<uint64_t> reports_ = 0;
   // Driver failures, including dropped or malformed packets.
   std::atomic<uint64_t> errors_ = 0;
@@ -153,9 +153,11 @@ TEST_P(GpuFeedbackTest, SharedChannelSurvivesConcurrentQueuesAndCircularReuse) {
       }
     }
     for (auto* semaphore : done_) {
-      IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, value,
-                                             iree_infinite_timeout(),
-                                             IREE_ASYNC_WAIT_FLAG_NONE));
+      // Both the ordinary observer and an active caller must consume reports
+      // before exposing completion, including the final early-release batch.
+      IREE_ASSERT_OK(iree_hal_semaphore_wait(
+          semaphore, value, iree_infinite_timeout(),
+          value & 1 ? IREE_ASYNC_WAIT_FLAG_ACTIVE : IREE_ASYNC_WAIT_FLAG_NONE));
     }
     ASSERT_EQ(reports_.load(), value * recordings_.size() * kDispatches);
     ASSERT_EQ(errors_.load(), 0u);

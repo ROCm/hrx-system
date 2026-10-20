@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 
+#include "iree/base/threading/processor.h"
 #include "iree/hal/utils/host_semaphore.h"
 
 typedef struct iree_hal_amd_gpu_semaphore_t {
@@ -20,6 +21,8 @@ typedef struct iree_hal_amd_gpu_semaphore_t {
   } submitted;
   // Optional owned host semaphore, installed once under async.mutex.
   iree_hal_semaphore_t* submission_semaphore;
+  // Optional immutable device-owned policy, borrowed only by active waits.
+  const iree_hal_amd_gpu_semaphore_wait_context_t* wait_context;
 } iree_hal_amd_gpu_semaphore_t;
 
 static const iree_hal_semaphore_vtable_t iree_hal_amd_gpu_semaphore_vtable;
@@ -31,9 +34,10 @@ static iree_hal_amd_gpu_semaphore_t* iree_hal_amd_gpu_semaphore_cast(
 }
 
 iree_status_t iree_hal_amd_gpu_semaphore_create(
-    iree_async_proactor_t* proactor, uint64_t initial_value,
-    uint8_t frontier_capacity, iree_allocator_t host_allocator,
-    iree_hal_semaphore_t** out_semaphore) {
+    iree_async_proactor_t* proactor,
+    const iree_hal_amd_gpu_semaphore_wait_context_t* wait_context,
+    uint64_t initial_value, uint8_t frontier_capacity,
+    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore) {
   *out_semaphore = NULL;
   iree_host_size_t frontier_offset = 0;
   iree_host_size_t total_size = 0;
@@ -46,6 +50,7 @@ iree_status_t iree_hal_amd_gpu_semaphore_create(
   iree_async_semaphore_initialize(
       &iree_hal_amd_gpu_semaphore_vtable.async, proactor, initial_value,
       frontier_offset, frontier_capacity, host_allocator, &semaphore->async);
+  semaphore->wait_context = wait_context;
   *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   return iree_ok_status();
 }
@@ -252,12 +257,58 @@ static void iree_hal_amd_gpu_semaphore_on_fail(
   }
 }
 
+// A later cached producer may require host work performed after this wait.
+// Only the exact requested value can accelerate a synchronous host wait.
+static iree_hal_amd_gpu_signal_t*
+iree_hal_amd_gpu_semaphore_acquire_host_wait_signal(
+    iree_hal_amd_gpu_semaphore_t* semaphore, uint64_t value) {
+  iree_hal_amd_gpu_signal_t* signal = NULL;
+  iree_slim_mutex_lock(&semaphore->async.mutex);
+  if (semaphore->submitted.value == value && semaphore->submitted.signal &&
+      semaphore->submitted.signal->block->domain ==
+          semaphore->wait_context->domain) {
+    signal = semaphore->submitted.signal;
+    iree_hal_amd_gpu_signal_retain(signal);
+  }
+  iree_slim_mutex_unlock(&semaphore->async.mutex);
+  return signal;
+}
+
 static iree_status_t iree_hal_amd_gpu_semaphore_wait(
-    iree_hal_semaphore_t* semaphore, uint64_t value, iree_timeout_t timeout,
-    iree_async_wait_flags_t flags) {
+    iree_hal_semaphore_t* base_semaphore, uint64_t value,
+    iree_timeout_t timeout, iree_async_wait_flags_t flags) {
+  iree_hal_amd_gpu_semaphore_t* semaphore =
+      iree_hal_amd_gpu_semaphore_cast(base_semaphore);
+  const iree_hal_amd_gpu_semaphore_wait_context_t* context =
+      semaphore->wait_context;
+  if (context && iree_any_bit_set(flags, IREE_ASYNC_WAIT_FLAG_ACTIVE) &&
+      !iree_timeout_is_immediate(timeout) &&
+      iree_hal_amd_gpu_semaphore_query(&semaphore->async) < value) {
+    iree_convert_timeout_to_absolute(&timeout);
+    iree_hal_amd_gpu_signal_t* signal =
+        iree_hal_amd_gpu_semaphore_acquire_host_wait_signal(semaphore, value);
+    if (signal) {
+      while (iree_hal_amd_gpu_semaphore_query(&semaphore->async) < value) {
+        if ((uint64_t)iree_atomic_load(
+                (const iree_atomic_int64_t*)signal->host_value,
+                iree_memory_order_acquire) != context->pending_value) {
+          context->try_retire(context->user_data);
+          break;
+        }
+        if (timeout.nanos != IREE_TIME_INFINITE_FUTURE &&
+            iree_time_now() >= timeout.nanos) {
+          break;
+        }
+        iree_processor_yield();
+      }
+      iree_hal_amd_gpu_signal_release(signal);
+    }
+  }
+  // Only retirement publishes public success, after host ownership and shader
+  // reports join. Preserve the same deadline if native observation used time.
   return iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, (iree_async_semaphore_t**)&semaphore, &value, 1,
-      timeout, flags, iree_allocator_system());
+      IREE_ASYNC_WAIT_MODE_ALL, (iree_async_semaphore_t**)&base_semaphore,
+      &value, 1, timeout, flags, iree_allocator_system());
 }
 
 static const iree_hal_semaphore_vtable_t iree_hal_amd_gpu_semaphore_vtable = {

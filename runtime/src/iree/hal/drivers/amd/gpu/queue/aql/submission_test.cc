@@ -46,7 +46,7 @@ TEST_P(AqlSubmissionTest, CapturesInputsAndReleasesPayloadBeforeCompletion) {
                                           iree_allocator_system(), &proactor));
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
-      proactor, 0, 2, iree_allocator_system(), &semaphore));
+      proactor, nullptr, 0, 2, iree_allocator_system(), &semaphore));
   const iree_hal_queue_family_t family = {};
   const iree_hal_executable_vtable_t vtable = {.destroy = Executable::Destroy};
   Executable executable;
@@ -213,7 +213,7 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
                                           iree_allocator_system(), &proactor));
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
-      proactor, 0, 2, iree_allocator_system(), &semaphore));
+      proactor, nullptr, 0, 2, iree_allocator_system(), &semaphore));
   const iree_hal_buffer_vtable_t vtable = {.destroy = Buffer::Destroy};
   Buffer buffer = {};
   iree_hal_buffer_initialize(

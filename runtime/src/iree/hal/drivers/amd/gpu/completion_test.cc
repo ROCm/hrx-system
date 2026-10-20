@@ -201,6 +201,7 @@ TEST_F(CompletionTest, CoherentChangeProgressesWithoutNativeWake) {
   // Joining directly avoids a controller stop racing the changed-word drain.
   iree_thread_release(completion_.thread);
   completion_.thread = nullptr;
+  iree_slim_mutex_deinitialize(&completion_.drain_mutex);
   EXPECT_EQ(calls, 3u);
   EXPECT_EQ(other_calls, 3u);
   EXPECT_EQ(event_.signal_count(), 1u);  // Only the callback's final stop.
@@ -413,6 +414,7 @@ TEST_F(CompletionTest, NativeWaitFailureReachesEverySourceAndStops) {
       return false;
     }
     EXPECT_EQ(status, failure);
+    EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
     ++failures[0];
     return true;
   };
@@ -433,9 +435,110 @@ TEST_F(CompletionTest, NativeWaitFailureReachesEverySourceAndStops) {
   event_.AwaitWaitCount(1);
   event_.SetWaitStatus(failure);
   delivered.acquire();
+  EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
   EXPECT_EQ(failures, (std::array<uint32_t, 2>{1, 1}));
   EXPECT_EQ(reports_, (std::vector<uint64_t>{failure}));
+}
+
+TEST_F(CompletionTest, CallerRetiresWhileWorkerParks) {
+  uint32_t calls = 0;
+  uint32_t retired = 0;
+  Callback callback = [&](amdf_status_t status) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    // A nested submission or continuation cannot recursively consume sources.
+    EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+    if (++calls == 1) {
+      return false;
+    }
+    ++retired;
+    return true;
+  };
+  auto source = Source(callback);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, 0, {}, {}, iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
+  EXPECT_TRUE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  EXPECT_EQ(retired, 1u);
+  EXPECT_EQ(event_.signal_count(), 0u);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(calls, 2u);
+}
+
+TEST_F(CompletionTest, ActiveObservationProtectsBorrowedHintFromCallerDrain) {
+  auto* word = new iree_atomic_int32_t;
+  iree_atomic_store(word, 0, iree_memory_order_relaxed);
+  std::binary_semaphore armed{0};
+  std::binary_semaphore consumed{0};
+  uint32_t calls = 0;
+  WaitCallback callback = [&](amdf_status_t status,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    if (++calls == 3) {
+      delete word;
+      word = nullptr;
+      EXPECT_TRUE(amdf_status_is_ok(
+          iree_hal_amd_gpu_completion_request_stop(&completion_)));
+      consumed.release();
+      return false;
+    }
+    *out_wait = {.address = word, .value = 0};
+    if (calls == 2) {
+      armed.release();
+    }
+    return calls == 1;
+  };
+  auto source = Source(callback);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, IREE_DURATION_INFINITE, {}, {},
+      iree_allocator_system(), &completion_));
+  armed.acquire();
+  // The worker owns the hint until observation ends. A caller cannot retire
+  // its backing concurrently with that coherent load.
+  EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  iree_atomic_store(word, 1, iree_memory_order_release);
+  consumed.acquire();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(word, nullptr);
+  EXPECT_EQ(calls, 3u);
+}
+
+TEST_F(CompletionTest, StopJoinsCallerDrainBeforeOwnerExit) {
+  std::binary_semaphore entered{0};
+  std::binary_semaphore finish{0};
+  std::atomic<bool> exited = false;
+  uint32_t calls = 0;
+  Callback callback = [&](amdf_status_t status) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    if (++calls == 1) {
+      return false;
+    }
+    entered.release();
+    finish.acquire();
+    return false;
+  };
+  auto source = Source(callback);
+  const iree_hal_amd_gpu_completion_exit_callback_t exit_callback = {
+      [](void* data) { static_cast<std::atomic<bool>*>(data)->store(true); },
+      &exited,
+  };
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, 0, exit_callback, {}, iree_allocator_system(),
+      &completion_));
+  event_.AwaitWaitCount(1);
+  std::thread caller([&] {
+    EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  });
+  entered.acquire();
+  EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  EXPECT_TRUE(amdf_status_is_ok(
+      iree_hal_amd_gpu_completion_request_stop(&completion_)));
+  EXPECT_FALSE(exited.load());
+  finish.release();
+  caller.join();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_TRUE(exited.load());
+  EXPECT_EQ(calls, 2u);
 }
 
 TEST_F(CompletionTest, FailedStopWakePreservesTheOwnerForRetry) {

@@ -14,16 +14,33 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Immutable device-owned policy for active host observation of native signals.
+// Retirement remains authoritative for cleanup, frontiers, and shader failure;
+// a native value alone never satisfies the public timeline. The semaphore and
+// its callers borrow this context through the parent device's lifetime.
+typedef struct iree_hal_amd_gpu_semaphore_wait_context_t {
+  // Qualified native signal domain whose coherent words the host may observe.
+  const void* domain;
+  // Value before native completion: zero for PM4 or one for AQL.
+  uint64_t pending_value;
+  // Attempts bounded retirement after a native value changes. Contention
+  // returns immediately; the ordinary observer continues independently.
+  void (*try_retire)(void* user_data);
+  // Borrowed retirement owner, live through all semaphore calls.
+  void* user_data;
+} iree_hal_amd_gpu_semaphore_wait_context_t;
+
 // Creates a HAL timeline with independently retained native signal
 // acceleration. The proactor is borrowed through destruction. Frontier storage
 // is allocated inline at creation; only completed signals contribute to that
 // frontier. Submission availability has separate, lazily allocated host wait
 // state. This object owns no native backing, queue, worker, or device
-// reference.
+// reference. A NULL wait_context uses only public timeline observation.
 iree_status_t iree_hal_amd_gpu_semaphore_create(
-    iree_async_proactor_t* proactor, uint64_t initial_value,
-    uint8_t frontier_capacity, iree_allocator_t host_allocator,
-    iree_hal_semaphore_t** out_semaphore);
+    iree_async_proactor_t* proactor,
+    const iree_hal_amd_gpu_semaphore_wait_context_t* wait_context,
+    uint64_t initial_value, uint8_t frontier_capacity,
+    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore);
 
 // Returns whether the semaphore provides this native signal contract.
 // Type identity alone does not establish native addressability or visibility.

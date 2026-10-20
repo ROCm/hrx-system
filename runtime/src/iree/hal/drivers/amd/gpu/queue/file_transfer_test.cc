@@ -149,7 +149,7 @@ class FileTransferTest : public ::testing::Test {
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_));
     IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
-        proactor_, 0, 1, iree_allocator_system(), &completion_));
+        proactor_, nullptr, 0, 1, iree_allocator_system(), &completion_));
     iree_async_semaphore_wait_context_initialize(&waits_);
     iree_hal_amd_gpu_capture_pool_initialize(4096, iree_allocator_system(),
                                              &captures_);

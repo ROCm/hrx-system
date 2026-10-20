@@ -544,8 +544,10 @@ TEST_P(GpuNativeTransferTest,
         IREE_ASSERT_OK(iree_hal_queue_download(
             queues_[0], {1, &timeline, &uploaded}, {1, &timeline, &downloaded},
             buffers[lane], 3, target.data() + 1, kTransferLength, barriers));
-        IREE_ASSERT_OK(iree_hal_semaphore_wait(timeline, downloaded,
-                                               iree_infinite_timeout(), 0));
+        IREE_ASSERT_OK(iree_hal_semaphore_wait(
+            timeline, downloaded, iree_infinite_timeout(),
+            (lane + iteration) & 1 ? IREE_ASYNC_WAIT_FLAG_ACTIVE
+                                   : IREE_ASYNC_WAIT_FLAG_NONE));
         EXPECT_EQ(target.front(), 0xCC);
         EXPECT_EQ(target.back(), 0xCC);
         EXPECT_EQ(
