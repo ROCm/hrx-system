@@ -18,15 +18,6 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
     amdf_platform_endpoint_t* platform_endpoint,
     amdf_allocator_t host_allocator,
     amdf_gpu_endpoint_profile_t** out_profile) {
-  D3DKMT_WDDM_2_0_CAPS observed_caps = {0};
-  const amdf_status_t observed_caps_status = amdf_kmt_query_adapter_info(
-      &platform_endpoint->instance->kmt, platform_endpoint->adapter,
-      KMTQAITYPE_WDDM_2_0_CAPS, &observed_caps, sizeof(observed_caps));
-  D3DKMT_QUERY_GPUMMU_CAPS observed_mmu = {0};
-  observed_mmu.PhysicalAdapterIndex = platform_endpoint->physical_adapter_index;
-  const amdf_status_t observed_mmu_status = amdf_kmt_query_adapter_info(
-      &platform_endpoint->instance->kmt, platform_endpoint->adapter,
-      KMTQAITYPE_QUERY_GPUMMU_CAPS, &observed_mmu, sizeof(observed_mmu));
   amdf_gpu_wddm_wkmi_loader_t loader = {0};
   amdf_gpu_wddm_wkmi_adapter_t adapter = {0};
   bool profile_available = false;
@@ -45,8 +36,19 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   }
 
   if (amdf_status_is_ok(status) && adapter.native != NULL) {
+    D3DKMT_WDDM_2_0_CAPS observed_caps = {0};
+    const amdf_status_t observed_caps_status = amdf_kmt_query_adapter_info(
+        &platform_endpoint->instance->kmt, platform_endpoint->adapter,
+        KMTQAITYPE_WDDM_2_0_CAPS, &observed_caps, sizeof(observed_caps));
+    D3DKMT_QUERY_GPUMMU_CAPS observed_mmu = {0};
+    observed_mmu.PhysicalAdapterIndex =
+        platform_endpoint->physical_adapter_index;
+    const amdf_status_t observed_mmu_status = amdf_kmt_query_adapter_info(
+        &platform_endpoint->instance->kmt, platform_endpoint->adapter,
+        KMTQAITYPE_QUERY_GPUMMU_CAPS, &observed_mmu, sizeof(observed_mmu));
     fprintf(stderr,
             "PM4_STORE_EVIDENCE phase=endpoint adapter=0x%x physical=%u "
+            "private_query_first=1 "
             "wddm_status=0x%llx wddm=0x%x mmu_status=0x%llx "
             "coherent=%u va_bits=%u gfx=%u.%u.%u platform_atomics=%u\n",
             (unsigned)platform_endpoint->adapter,
