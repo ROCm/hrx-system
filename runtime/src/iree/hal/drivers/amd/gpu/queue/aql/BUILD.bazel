@@ -465,6 +465,7 @@ iree_runtime_cc_library(
         ":materialize",
         ":ring",
         "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/gpu:code",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
     ],

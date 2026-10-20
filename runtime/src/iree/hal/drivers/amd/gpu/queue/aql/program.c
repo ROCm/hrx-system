@@ -63,24 +63,22 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
     byte_length += iree_align_uint64(builtins[i].code.data_length, 256);
   }
   byte_length += 256;  // Instruction fetch padding after the final kernel.
-  const iree_hal_amd_fabric_memory_options_t* code_memory =
-      out_pool->storage.resident.host_access ? &out_pool->storage.resident
-                                             : &out_pool->storage.upload;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_allocate(
-      context->api, code_memory, byte_length, 256, context->event_sink,
-      &out_pool->code, NULL));
+  iree_byte_span_t contents;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_code_allocate(
+      context, &out_pool->storage.resident, &out_pool->storage.upload,
+      byte_length, 256, host_allocator, &out_pool->code, &out_pool->code_upload,
+      &contents));
   uint64_t address = 0;
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       context->api->memory_query_address(out_pool->code.handle, 0,
                                          AMDF_MEMORY_ADDRESS_GPU, &address),
       "query AQL builtin address"));
-  uint8_t* contents = out_pool->code.contents.data;
-  memset(contents, 0, byte_length);
+  memset(contents.data, 0, byte_length);
   uint64_t code_offset = code_begin;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(builtins); ++i) {
     const iree_hal_amd_gpu_aql_builtin_t* builtin = &builtins[i];
     const uint64_t descriptor_offset = i * descriptor_length;
-    uint8_t* descriptor = contents + descriptor_offset;
+    uint8_t* descriptor = contents.data + descriptor_offset;
     // Fixed LDS/private sizes and all reserved descriptor bytes remain zero.
     iree_unaligned_store_le_u32(descriptor + 8, builtin->argument_length);
     iree_unaligned_store_le_u64(descriptor + 16,
@@ -95,16 +93,15 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
                                 builtin->kernel.code_properties);
     iree_unaligned_store_le_u16(descriptor + 58,
                                 builtin->kernel.kernarg_preload);
-    memcpy(contents + code_offset, builtin->code.data,
+    memcpy(contents.data + code_offset, builtin->code.data,
            builtin->code.data_length);
     *builtin->kernel_object = address + descriptor_offset;
     code_offset += iree_align_uint64(builtin->code.data_length, 256);
   }
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(
-      context->api->host_mapping_cache_control(out_pool->code.mapping,
-                                               AMDF_HOST_CACHE_OPERATION_FLUSH,
-                                               0, byte_length),
-      "publish AQL builtins");
+  return out_pool->code_upload ? iree_ok_status()
+                          : iree_hal_amd_gpu_code_publish(
+                                context, NULL, 0, native_family_ordinal,
+                                &out_pool->code, &out_pool->code_upload);
 }
 
 void iree_hal_amd_gpu_aql_program_pool_deinitialize(
@@ -112,6 +109,7 @@ void iree_hal_amd_gpu_aql_program_pool_deinitialize(
   if (!pool->storage.context) {
     return;
   }
+  iree_hal_amd_gpu_code_upload_free(pool->storage.context, pool->code_upload);
   iree_hal_amd_fabric_memory_deinitialize(
       pool->storage.context->api, pool->storage.context->event_sink, &pool->code);
   iree_hal_amd_gpu_program_pool_deinitialize(&pool->storage);

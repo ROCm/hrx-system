@@ -71,17 +71,19 @@ class GpuProtocolInteropTest : public GpuNativeTest {
     options_.queue.retirement_capacity = 4;
     auto params = iree_hal_device_create_params_default();
     params.proactor_pool = proactors_;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_device_create(
-        context_, IREE_SV("AQL interoperability"), &options_, &params,
-        allocator_.allocator(), &device_));
+    auto* context = context_;
     context_ = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_device_create(
+        context, IREE_SV("AQL interoperability"), &options_, &params,
+        allocator_.allocator(), &device_));
     allocator_.armed.store(true);
     auto peer_options = options_;
     peer_options.queue_family_ordinal = pm4_family;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_device_create(
-        peer_context_, IREE_SV("PM4 interoperability"), &peer_options, &params,
-        peer_allocator_.allocator(), &peer_));
+    context = peer_context_;
     peer_context_ = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_device_create(
+        context, IREE_SV("PM4 interoperability"), &peer_options, &params,
+        peer_allocator_.allocator(), &peer_));
     peer_allocator_.armed.store(true);
 
     iree_hal_device_group_builder_t builder;

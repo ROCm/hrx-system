@@ -48,7 +48,11 @@ class GpuNativeDispatchTest
 
   void SetUp() override {
     if (GetParam().staged) {
-      IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
+      IREE_ASSERT_OK(memory_gate_.CreateFabric(
+          &fabric_, UINT64_MAX,
+          command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+              ? AMDF_NATIVE_LIFETIME_PROCESS
+              : AMDF_NATIVE_LIFETIME_INSTANCE));
       memory_gate_.RequireCodeUpload();
     }
     GpuNativeTest::SetUp();
@@ -182,153 +186,6 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
     }
     EXPECT_EQ(observed, values[i] + increment);
   }
-}
-
-TEST_P(GpuNativeDispatchTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
-  constexpr uint32_t kThreads = 4;
-  constexpr uint32_t kSteps = 256;
-  const uint32_t queue_count = GetParam().queue_count;
-  options_.pm4.argument_capacity = 8;
-  options_.pm4.retirement_capacity = 8;
-  Create();
-  if (HasFatalFailure()) {
-    return;
-  }
-
-  const auto* family = iree_hal_queue_family(queues_[0]);
-  const iree_hal_pool_family_access_t access = {
-      .family = family,
-      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
-      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
-  };
-  const iree_hal_pool_scope_t scope = {
-      .family_count = 1,
-      .families = &access,
-      .host =
-          {
-              .access = IREE_HAL_MEMORY_ACCESS_READ,
-              .modes = IREE_HAL_MAPPING_MODE_SCOPED,
-          },
-  };
-  iree_hal_slab_pool_options_t pool_options;
-  iree_hal_slab_pool_options_initialize(&pool_options);
-  iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options,
-                                           iree_allocator_system(), &pool));
-  iree_hal_buffer_t* output = nullptr;
-  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-      pool, iree_hal_make_pool_reservation_request(kThreads * kSteps * 4, 4),
-      iree_infinite_timeout(), &output));
-  iree_hal_memory_scope_t program_scope;
-  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
-      group_, {IREE_HAL_MEMORY_SITE_PROGRAM, family}, &program_scope));
-  iree_hal_buffer_native_binding_slot_t address_slot;
-  IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
-      pool, program_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
-      &address_slot));
-  const uint64_t address =
-      iree_hal_buffer_native_binding(output, address_slot).device_address;
-
-  std::array<iree_hal_executable_t*, kThreads> executables = {};
-  std::array<iree_hal_executable_function_t, kThreads> functions = {};
-  std::array<iree_hal_semaphore_t*, kThreads> timelines = {};
-  for (uint32_t t = 0; t < kThreads; ++t) {
-    IREE_ASSERT_OK(Load(&executables[t]));
-    IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
-        executables[t], IREE_SV("image_increment"), &functions[t]));
-    CreateSemaphore(&timelines[t]);
-  }
-  // An idle caller can discover failure before creating any capture. It still
-  // completes the rejected operation through its output timeline and leaves
-  // later independent dispatches runnable. Executing this dispatch by mistake
-  // would also change image_increment's global and corrupt the checks below.
-  iree_hal_semaphore_t* failed_input = nullptr;
-  iree_hal_semaphore_t* failed_output = nullptr;
-  CreateSemaphore(&failed_input);
-  CreateSemaphore(&failed_output);
-  iree_hal_semaphore_fail(
-      failed_input, iree_make_status(IREE_STATUS_ABORTED, "producer failed"));
-  uint64_t failed_value = 1;
-  uint32_t increment = 1;
-  auto failed_binding = iree_hal_make_buffer_ref(output, 0, sizeof(uint32_t));
-  auto failed_config = iree_hal_make_static_dispatch_config(1, 1, 1);
-  failed_config.workgroup_size[0] = 32;
-  failed_config.workgroup_size[1] = failed_config.workgroup_size[2] = 1;
-  IREE_ASSERT_OK(iree_hal_queue_dispatch(
-      queues_[0], {1, &failed_input, &failed_value},
-      {1, &failed_output, &failed_value}, executables[0], functions[0],
-      failed_config, iree_make_const_byte_span(&increment, sizeof(increment)),
-      {1, &failed_binding}, nullptr, 0));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
-                        iree_hal_semaphore_wait(failed_output, failed_value,
-                                                iree_infinite_timeout(),
-                                                IREE_ASYNC_WAIT_FLAG_NONE));
-  iree_hal_semaphore_release(failed_output);
-  iree_hal_semaphore_release(failed_input);
-  std::array<std::thread, kThreads> threads;
-  for (uint32_t t = 0; t < kThreads; ++t) {
-    threads[t] = std::thread([&, t] {
-      auto submit = [&](uint32_t i) {
-        struct {
-          uint64_t output;
-          uint32_t value;
-        } arguments = {address + (t * kSteps + i) * 4, 1};
-        uint64_t before = i, after = i + 1;
-        auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
-        config.workgroup_size[0] = 32;
-        config.workgroup_size[1] = config.workgroup_size[2] = 1;
-        auto binding =
-            iree_hal_make_buffer_ref(output, (t * kSteps + i) * 4, 4);
-        IREE_ASSERT_OK(iree_hal_queue_dispatch(
-            queues_[i % queue_count], {i ? 1u : 0u, &timelines[t], &before},
-            {1, &timelines[t], &after}, executables[t], functions[t], config,
-            t & 1 ? iree_make_const_byte_span(&arguments, 12)
-                  : iree_make_const_byte_span(&arguments.value, 4),
-            t & 1 ? iree_hal_buffer_ref_list_empty()
-                  : iree_hal_buffer_ref_list_t{1, &binding},
-            nullptr,
-            t & 1 ? IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS : 0));
-        std::memset(&arguments, 0xCD, sizeof(arguments));
-      };
-      // A consumer cannot occupy the native FIFO until its producer has been
-      // published, including when both operations target the same queue.
-      for (uint32_t i = 0; i < kSteps; i += 2) {
-        submit(i + 1);
-        submit(i);
-      }
-      iree_hal_executable_release(executables[t]);
-    });
-  }
-  for (auto& thread : threads) {
-    thread.join();
-  }
-  // Trim can overlap native execution and retirement without taking storage
-  // away from publishers or peer queues retaining binary-signal readers.
-  IREE_ASSERT_OK(iree_hal_device_trim(device_));
-  for (auto* timeline : timelines) {
-    IREE_ASSERT_OK(iree_hal_semaphore_wait(
-        timeline, kSteps, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-    CompletedFrontier frontier;
-    const uint8_t count = iree_async_semaphore_query_frontier(
-        reinterpret_cast<iree_async_semaphore_t*>(timeline),
-        iree_async_fixed_frontier_as_frontier(&frontier), 2);
-    ASSERT_EQ(count, queue_count);
-    for (uint8_t i = 0; i < count; ++i) {
-      EXPECT_TRUE(iree_async_frontier_tracker_query_epoch(
-          tracker_, frontier.entries[i].axis, frontier.entries[i].epoch));
-    }
-    iree_hal_semaphore_release(timeline);
-  }
-  std::array<uint32_t, kThreads * kSteps> values;
-  IREE_ASSERT_OK(
-      iree_hal_buffer_map_read(output, 0, values.data(), sizeof(values)));
-  for (uint32_t t = 0; t < kThreads; ++t) {
-    for (uint32_t i = 0; i < kSteps; ++i) {
-      EXPECT_EQ(values[t * kSteps + i], 20 + i) << t << ":" << i;
-    }
-  }
-  iree_hal_buffer_release(output);
-  iree_hal_pool_release(pool);
 }
 
 TEST_P(GpuNativeDispatchTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
@@ -689,9 +546,9 @@ void GpuNativeDispatchTest::RunIndirect(bool recorded) {
     uint64_t completed = 2 * kInvocations;
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &boundary));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
-    IREE_ASSERT_OK(
-        iree_hal_queue_execute(queues_[GetParam().queue_count - 1], {1, &gate, &one},
-                               {1, &done, &completed}, recording, {}, 0));
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queues_[GetParam().queue_count - 1], {1, &gate, &one},
+        {1, &done, &completed}, recording, {}, 0));
     recording.reset();
   }
   executable_owner.reset();
@@ -983,7 +840,8 @@ INSTANTIATE_TEST_SUITE_P(
         DispatchPlacement{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 2, false},
         DispatchPlacement{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 1, false},
         DispatchPlacement{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 2, false},
-        DispatchPlacement{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 1, true}),
+        DispatchPlacement{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 1, true},
+        DispatchPlacement{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 1, true}),
     [](const auto& info) {
       return std::string(info.param.command_type ==
                                  AMDF_QUEUE_COMMAND_TYPE_GPU_AQL

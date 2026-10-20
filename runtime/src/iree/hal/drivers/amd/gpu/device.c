@@ -1085,12 +1085,15 @@ iree_status_t iree_hal_amd_gpu_device_create(
     return status;
   }
   iree_hal_amd_gpu_device_t* device = (void*)base;
-  if (device->command_type != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
-      device->programs.pm4.code_upload) {
+  const bool aql = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
+  iree_hal_amd_fabric_memory_t* code =
+      aql ? &device->programs.aql.code : &device->programs.pm4.code;
+  iree_hal_amd_gpu_code_upload_t** upload =
+      aql ? &device->programs.aql.code_upload : &device->programs.pm4.code_upload;
+  if (*upload) {
     status = iree_hal_amd_gpu_code_publish(
         context, device->transfers.queue, device->transfers.family_ordinal,
-        device->memory.family.queue_family_ordinal, &device->programs.pm4.code,
-        &device->programs.pm4.code_upload);
+        device->memory.family.queue_family_ordinal, code, upload);
   }
   if (iree_status_is_ok(status)) {
     *out_device = base;
@@ -1206,13 +1209,11 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
     const iree_hal_executable_load_params_t* params,
     iree_hal_executable_t** out_executable) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
-  // Live control storage can require uncached device access. Executable bytes
-  // use the qualified program profile: the loader flushes host writes and
-  // queues establish instruction-cache visibility before dispatch.
-  iree_hal_amd_fabric_memory_options_t memory =
+  const iree_hal_amd_gpu_program_pool_t* storage =
       device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
-          ? device->programs.aql.storage.resident
-          : device->programs.pm4.storage.resident;
+          ? &device->programs.aql.storage
+          : &device->programs.pm4.storage;
+  iree_hal_amd_fabric_memory_options_t memory = storage->resident;
   if (memory.host_access) {
     memory.host_access =
         memory.profile.host_mapping.supported_access &
@@ -1222,9 +1223,7 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .target = &device->target,
       .native_family_ordinal = device->memory.family.queue_family_ordinal,
       .memory = &memory,
-      .upload = {.memory = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
-                               ? &device->programs.aql.storage.upload
-                               : &device->programs.pm4.storage.upload,
+      .upload = {.memory = &storage->upload,
                  .queue = device->transfers.queue,
                  .family_ordinal = device->transfers.family_ordinal},
       .notification = device->memory.notification,

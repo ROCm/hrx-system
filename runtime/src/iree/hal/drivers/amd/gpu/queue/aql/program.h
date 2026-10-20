@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_PROGRAM_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_PROGRAM_H_
 
+#include "iree/hal/drivers/amd/gpu/code.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/indirect.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/materialize.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/ring.h"
@@ -24,6 +25,8 @@ typedef struct iree_hal_amd_gpu_aql_program_pool_t {
   iree_hal_amd_gpu_program_pool_t storage;
   // One immutable descriptor/instruction allocation for all builtin kernels.
   iree_hal_amd_fabric_memory_t code;
+  // Temporary initialization bytes, published before the device is exposed.
+  iree_hal_amd_gpu_code_upload_t* code_upload;
   // Native descriptor for resident instance initialization and copy/fill.
   uint64_t blit;
   // Native descriptor for independent complete-DWORD replacements.

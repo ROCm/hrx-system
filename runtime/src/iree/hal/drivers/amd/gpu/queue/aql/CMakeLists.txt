@@ -763,6 +763,7 @@ iree_cc_library(
     ::indirect
     ::materialize
     ::ring
+    iree::hal::drivers::amd::gpu::code
     iree::hal::drivers::amd::gpu::queue::blit
     iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::status

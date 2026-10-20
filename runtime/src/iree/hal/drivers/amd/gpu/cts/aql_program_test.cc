@@ -40,6 +40,9 @@ class AqlProgramTest : public GpuNativeTest {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_program_pool_initialize(
         context_, options_.queue_family_ordinal, 1, iree_allocator_system(),
         &pool_));
+    ASSERT_NO_FATAL_FAILURE(
+        PublishCode(options_.queue_family_ordinal, &pool_.code, &pool_.code_upload));
+    EXPECT_NE(pool_.code.info.flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL, 0u);
     // Exercise the actual first-copy path even on large-BAR machines. This is
     // the same local allocation policy with no host mapping requested.
     pool_.storage.resident.host_access = 0;
