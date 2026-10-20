@@ -81,16 +81,26 @@ iree_status_t loom_serve_speech_load_free(loom_serve_speech_load_t* load);
 //
 // Warm prepare_request(model_state, input, voice, instructions: buffer,
 //                      seed: i64, speed: f32)
-//   -> (request_state, payload: buffer).
-// prepare_work(model_state, request_state: buffer)
+//   -> (request_state..., payload: buffer).
+// prepare_work(model_state: buffer, request_state...)
 //   -> (work: buffer, units, compatibility_tag: i64).
 // prepare_batch(model_state, stage_tags, ranges, packed_work: buffer)
 //   -> (payload, plan: buffer).
 // generate(plan: buffer, work, requests, conditioning, streams,
 //          output: hal.buffer).
-// complete(model_state, request_state, plan: buffer, ordinal: i64,
+// complete(model_state: buffer, request_state..., plan: buffer, ordinal: i64,
 //          feedback: buffer)
-//   -> (frame_position, pcm_byte_offset, frame_count: i64, complete: i32).
+//   -> (request_state..., frame_position, pcm_byte_offset, frame_count: i64,
+//       complete: i32).
+//
+// request_state... is the source-selected ordered scalar/reference prefix of
+// prepare_request's results. All consumers declare exactly that prefix, and
+// complete returns its replacement with the same types. Zero state values and
+// null references are valid; function values are not part of this ABI. Binding
+// checks the entire contract before service publication. Each request owns its
+// values independently of call carriers; source can replace a buffer while
+// retaining other state objects. Failure preserves prior ownership for teardown
+// but does not roll back mutations the source made inside retained objects.
 //
 // Request payload may be empty when source carries all request inputs in its
 // host state or subsequent work. Admission uploads only nonempty payloads and
