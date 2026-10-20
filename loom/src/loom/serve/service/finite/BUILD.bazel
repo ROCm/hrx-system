@@ -85,6 +85,7 @@ loom_cc_library(
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service:execution_reconfiguration",
         "//loom/src/loom/serve/service:kind",
+        "//loom/src/loom/serve/service:qos",
         "//loom/src/loom/serve/telemetry:latency",
         "//loom/src/loom/serve/telemetry:stream",
         "//loom/src/loom/serve/telemetry:tracing",

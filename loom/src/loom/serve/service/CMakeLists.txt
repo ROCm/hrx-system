@@ -44,6 +44,22 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    qos
+  HDRS
+    "qos.h"
+  SRCS
+    "qos.c"
+  DEPS
+    iree::base
+    loom::serve::runtime::execution::scheduler
+    loom::serve::transport::http::request
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
     kind_test

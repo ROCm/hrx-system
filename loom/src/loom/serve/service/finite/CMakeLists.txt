@@ -100,6 +100,7 @@ loom_cc_library(
     loom::serve::service
     loom::serve::service::execution_reconfiguration
     loom::serve::service::kind
+    loom::serve::service::qos
     loom::serve::telemetry::latency
     loom::serve::telemetry::stream
     loom::serve::telemetry::tracing

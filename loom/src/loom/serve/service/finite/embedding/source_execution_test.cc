@@ -31,6 +31,162 @@ namespace loom_serve::testing::embedding {
 
 using loom_serve::testing::StalledStderr;
 
+class FiniteQosServiceTest : public SourceEmbeddingServiceTest {
+ protected:
+  void TearDown() override {
+    for (auto& permit : peers_) {
+      loom_serve_execution_permit_deinitialize(&permit);
+    }
+    SourceEmbeddingServiceTest::TearDown();
+  }
+
+  void Offer(loom_serve_execution_permit_t* permit,
+             loom_serve_execution_qos_t qos,
+             loom_serve_execution_resources_t resources) {
+    loom_serve_execution_permit_initialize(loom_serve_device_scheduler(device_),
+                                           resources, permit);
+    loom_serve_execution_permit_request(permit, qos);
+    ASSERT_TRUE(loom_serve_execution_permit_try_acquire(permit));
+  }
+
+  // Real application claims held through each explicitly controlled boundary.
+  loom_serve_execution_permit_t peers_[2] = {};
+};
+
+class FiniteQosTest : public FiniteQosServiceTest,
+                      public ::testing::WithParamInterface<bool> {};
+
+TEST_P(FiniteQosTest, ReplacesUnacceptedBackgroundAndKeepsClassesSeparate) {
+  const auto resources = loom_serve_device_execution_resources(device_) &
+                         ~LOOM_SERVE_EXECUTION_RESOURCE_HOST;
+  if (GetParam()) {
+    // Fill this device's configured two-unit capacity while leaving host
+    // preparation free. The real source reaches its parameter-admission cut.
+    for (auto& permit : peers_) {
+      ASSERT_NO_FATAL_FAILURE(
+          Offer(&permit, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, resources));
+    }
+  } else {
+    ASSERT_NO_FATAL_FAILURE(Offer(&peers_[0], LOOM_SERVE_EXECUTION_QOS_REALTIME,
+                                  LOOM_SERVE_EXECUTION_RESOURCE_HOST));
+  }
+  const int background = Send(R"({"model":"fixture","input":"a"})");
+  ASSERT_NO_FATAL_FAILURE(Accept(background));
+  const int abandoned = Send(R"({"model":"fixture","input":"bbb"})");
+  loom_serve_http_connection_t* abandoned_connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(abandoned, &abandoned_connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(GetParam() ? "waiting" : "waiting_cpu"));
+  EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
+
+  // This receipt still belongs to the selected preparation/capture. A later
+  // priority replacement must retire it before returning survivors to pending.
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(abandoned, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+            0);
+  ASSERT_EQ(close(abandoned), 0);
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* self) {
+        return loom_serve_http_connection_failed(
+            static_cast<loom_serve_http_connection_t*>(self));
+      },
+      abandoned_connection, iree_infinite_timeout());
+
+  const int realtime =
+      Send(R"({"model":"fixture","input":["a","bbb"]})", "/v1/embeddings",
+           "POST", "x-loom-qos: realtime\r\n");
+  ASSERT_NO_FATAL_FAILURE(Accept(realtime));
+  if (GetParam()) {
+    // Let the new request replace the captured cohort while device admission
+    // remains closed; no original payload has been consumed or relabelled.
+    bool progress = false;
+    IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+    EXPECT_TRUE(progress);
+    EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "waiting_cpu");
+    for (auto& permit : peers_) {
+      loom_serve_execution_permit_complete(&permit);
+    }
+    ASSERT_NO_FATAL_FAILURE(Offer(&peers_[0], LOOM_SERVE_EXECUTION_QOS_REALTIME,
+                                  LOOM_SERVE_EXECUTION_RESOURCE_HOST));
+  }
+  while (!interface_.telemetry.counters->completed) {
+    ASSERT_TRUE(Step());
+  }
+  const auto output = Read(realtime);
+  EXPECT_EQ(output.find("HTTP/1.1 200"), 0u) << output;
+  // The fourth component is computed from the actual device cohort. The
+  // compatible background request must not ride on realtime's permission.
+  EXPECT_NE(output.find(R"("index":0,"embedding":[1,1,1,2])"),
+            std::string::npos)
+      << output;
+  EXPECT_NE(output.find(R"("index":1,"embedding":[6,3,2,2])"),
+            std::string::npos)
+      << output;
+  EXPECT_EQ(interface_.telemetry.counters->completed, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->batches, 1u);
+
+  loom_serve_execution_permit_complete(&peers_[0]);
+  Drain();
+  EXPECT_NE(Read(background).find(R"("embedding":[1,1,1,1])"),
+            std::string::npos);
+  EXPECT_EQ(interface_.telemetry.counters->completed, 2u);
+  EXPECT_EQ(interface_.telemetry.counters->batches, 2u);
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
+}
+
+INSTANTIATE_TEST_SUITE_P(PreparationAndActivation, FiniteQosTest,
+                         ::testing::Bool());
+
+TEST_F(FiniteQosServiceTest,
+       AcceptedBackgroundFinishesBeforeRealtimeReusesSource) {
+  const int background = Send(R"({"model":"fixture","input":"a"})");
+  ASSERT_NO_FATAL_FAILURE(Accept(background));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil("running"));
+  loom_serve_execution_permit_initialize(loom_serve_device_scheduler(device_),
+                                         LOOM_SERVE_EXECUTION_RESOURCE_HOST,
+                                         &peers_[0]);
+  loom_serve_execution_permit_request(&peers_[0],
+                                      LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  // The already accepted numerical unit still owns its resource. A new class
+  // cannot revoke it even when the device completed before owner collection.
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peers_[0]));
+  const int realtime =
+      Send(R"({"model":"fixture","input":"bbb"})", "/v1/embeddings", "POST",
+           "X-Loom-QoS: realtime\r\n");
+  ASSERT_NO_FATAL_FAILURE(Accept(realtime));
+  while (interface_.telemetry.counters->completed != 2) {
+    ASSERT_TRUE(Step());
+  }
+  // Background completion encoding is a prerequisite of this same source's
+  // realtime request. It can retire despite the realtime peer's pending claim.
+  EXPECT_NE(Read(background).find(R"("embedding":[1,1,1,1])"),
+            std::string::npos);
+  EXPECT_NE(Read(realtime).find(R"("embedding":[6,3,2,1])"), std::string::npos);
+  EXPECT_EQ(interface_.telemetry.counters->batches, 2u);
+  EXPECT_TRUE(loom_serve_execution_permit_try_acquire(&peers_[0]));
+  loom_serve_execution_permit_complete(&peers_[0]);
+}
+
+TEST_F(SourceEmbeddingServiceTest, RejectsUnknownQosBeforePreparingInput) {
+  for (const char* value : {"", "urgent", "Realtime", "realtime, background"}) {
+    const int client =
+        Send(R"({"model":"fixture","input":"a"})", "/v1/embeddings", "POST",
+             std::string("X-Loom-QoS: ") + value + "\r\n");
+    ASSERT_NO_FATAL_FAILURE(Accept(client));
+    const auto output = Read(client);
+    EXPECT_EQ(output.find("HTTP/1.1 400"), 0u) << output;
+    EXPECT_NE(output.find("X-Loom-QoS"), std::string::npos);
+  }
+  EXPECT_EQ(interface_.telemetry.counters->rejected, 4u);
+  EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
+  const int client =
+      Send(R"({"model":"fixture","input":"a"})", "/v1/embeddings", "POST",
+           "X-Loom-QoS: background\r\n");
+  ASSERT_NO_FATAL_FAILURE(Accept(client));
+  Drain();
+  EXPECT_NE(Read(client).find(R"("embedding":[1,1,1,1])"), std::string::npos);
+}
+
 TEST_F(SourceEmbeddingServiceTest, ReconfiguresCommandToEliminateWorkspace) {
   StartRouter();
   const auto inventory =

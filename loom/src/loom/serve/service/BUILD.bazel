@@ -43,6 +43,17 @@ loom_cc_library(
     deps = ["//runtime/src/iree/base"],
 )
 
+loom_cc_library(
+    name = "qos",
+    srcs = ["qos.c"],
+    hdrs = ["qos.h"],
+    deps = [
+        "//loom/src/loom/serve/runtime/execution:scheduler",
+        "//loom/src/loom/serve/transport/http:request",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_cc_test(
     name = "kind_test",
     srcs = ["kind_test.cc"],
