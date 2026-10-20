@@ -622,7 +622,8 @@ class NativeQueue {
     return frontier.entries[0].epoch;
   }
 
-  iree_status_t Complete(size_t producer) {
+  iree_status_t Complete(size_t producer, iree_async_wait_flags_t wait_flags =
+                                              IREE_ASYNC_WAIT_FLAG_NONE) {
     auto& lane = lanes_[producer];
     // Explicit-empty dispatches have no inter-kernel data dependency: each
     // reads immutable globals and overwrites the same output in semaphore
@@ -633,8 +634,7 @@ class NativeQueue {
         nullptr, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
     lane.epoch = after;
     return iree_hal_semaphore_wait(lane.timeline, lane.epoch,
-                                   iree_infinite_timeout(),
-                                   IREE_ASYNC_WAIT_FLAG_NONE);
+                                   iree_infinite_timeout(), wait_flags);
   }
 
   iree_status_t CheckOutput(size_t producer) {
@@ -964,7 +964,8 @@ BENCHMARK_CAPTURE(BM_Record, AqlTable, BindingMode::kTable, Program::kDispatch,
 static void BM_Execute(
     benchmark::State& state, BindingMode bindings, Timing timing,
     Program program, uint32_t burst_count, Capture capture,
-    amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {
+    amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+    iree_async_wait_flags_t wait_flags = IREE_ASYNC_WAIT_FLAG_NONE) {
   NativeQueue queue(command_type);
   if (!queue.Initialize(state)) {
     return;
@@ -983,7 +984,7 @@ static void BM_Execute(
     for (uint32_t j = 0; j < burst_count; ++j) {
       IREE_CHECK_OK(queue.Execute(recording, bindings));
     }
-    IREE_CHECK_OK(queue.Complete(0));
+    IREE_CHECK_OK(queue.Complete(0, wait_flags));
     IREE_CHECK_OK(queue.CheckOutput(0));
   }
   if (capture == Capture::kActive) {
@@ -1017,7 +1018,7 @@ static void BM_Execute(
     if (timing != Timing::kCompletion) {
       state.PauseTiming();
     }
-    IREE_CHECK_OK(queue.Complete(0));
+    IREE_CHECK_OK(queue.Complete(0, wait_flags));
     if (timing == Timing::kCompletion) {
       state.PauseTiming();
     }
@@ -1116,6 +1117,29 @@ AQL_EXECUTE_CASE(TableBurstSubmit, kTable, kSubmit, 8);
 AQL_EXECUTE_CASE(DirectBurstCompletion, kDirect, kCompletion, 8);
 AQL_EXECUTE_CASE(TableBurstCompletion, kTable, kCompletion, 8);
 #undef AQL_EXECUTE_CASE
+
+// Keep the complete public wait boundary while isolating caller sleep/wakeup
+// from native preparation and retirement. ACTIVE is an application policy,
+// never an implicit change to the ordinary completion rows above.
+#define ACTIVE_EXECUTE_CASE(name, bindings, protocol)                      \
+  BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings,               \
+                    Timing::kCompletion, Program::kDispatch, 1,            \
+                    Capture::kNone, protocol, IREE_ASYNC_WAIT_FLAG_ACTIVE) \
+      ->Arg(1)                                                             \
+      ->Arg(100)                                                           \
+      ->Arg(1000)                                                          \
+      ->Arg(5000)                                                          \
+      ->Iterations(50)                                                     \
+      ->UseRealTime()
+ACTIVE_EXECUTE_CASE(DirectActiveCompletion, kDirect,
+                    AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
+ACTIVE_EXECUTE_CASE(TableActiveCompletion, kTable,
+                    AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
+ACTIVE_EXECUTE_CASE(AqlDirectActiveCompletion, kDirect,
+                    AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+ACTIVE_EXECUTE_CASE(AqlTableActiveCompletion, kTable,
+                    AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+#undef ACTIVE_EXECUTE_CASE
 
 // Identical resident programs distinguish ordinary execution, retained but
 // disabled packet regions, and active device samples. The caller upload is
