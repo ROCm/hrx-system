@@ -26,7 +26,7 @@ specialized batch shapes share that domain. Renaming a differently quantized or
 modified model does not make its tensor layouts compatible. Vision is separate;
 the optional MTP predictor uses the additional asset described below.
 
-The parameter bank occupies approximately **103.69 GiB**, including the
+The parameter bank occupies approximately **103.68 GiB**, including the
 **26.82 GiB** IQ4_NL n-gram table. Original packed weights remain packed; there
 is no whole-model dequantized copy. A 192 GB unified-memory machine has room for
 the resident model, cache pools, recurrent endpoints, and working storage.
@@ -85,9 +85,10 @@ jq --arg draft "$flash_draft" \
 
 Use that document with `--model`. The sidecar's embedding and vocabulary tensors
 are identical to the target's tensors and share their device allocations. Only
-2,775,621,632 additional parameter bytes are needed; allocation rounding brings
-the observed total parameter commitment to approximately **106.31 GiB**. The
-predictor reads its Q8_0 expert and injection weights directly.
+2,775,621,632 additional parameter bytes are needed, bringing the logical
+parameter bank to approximately **106.26 GiB**. Physical backing granularity
+and mutable state add capacity independently. The predictor reads its Q8_0
+expert and injection weights directly.
 
 The predictor proposes greedily, and the target verifies under the request's
 sampling policy. Accepted prefixes publish target state and refresh the
@@ -126,6 +127,26 @@ checkpoint slots. KV storage is 25,344 bytes per pool token, including compresse
 attention indexes. A recurrent endpoint is 115,651,840 bytes: 36 GDN states,
 PLE token and convolution history, and incomplete sparse-index blocks. Endpoint
 capacity therefore matters independently of KV capacity.
+
+For 128K contexts on a 192 GB machine, this deployment provides eight execution
+rows, eight checkpoint slots, and a shared 256K-token page pool while retaining
+16K-token epochs:
+
+```sh
+jq '.definition += {
+      rows: 8, context_capacity: 131072, pool_capacity: 262144,
+      prefill_capacity: 16384, checkpoint_capacity: 8
+    }' /tmp/flash-next-deployment.json \
+  > /tmp/flash-next-128k-deployment.json
+```
+
+Use the resulting document with `--model`. Apply the same override to the MTP
+deployment to combine long context with prediction. The context ceiling includes
+both input and generated tokens. The page pool is shared across live sessions
+and retained checkpoints; eight rows do not reserve eight independent 128K
+histories. Shared prefixes retain their pages, while new continuation tokens
+consume additional pool slots. Recurrent endpoints have their own storage and
+lifetime, independently of those shared pages.
 
 The scheduler chooses among prepared token/span capacities for each epoch;
 raising `prefill_capacity` does not force every request to use that largest
