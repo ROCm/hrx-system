@@ -598,3 +598,13 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
     ],
 )
+
+iree_runtime_cc_library(
+    name = "recording",
+    srcs = ["recording.c"],
+    hdrs = ["recording.h"],
+    deps = [
+        ":fixup",
+        "//runtime/src/iree/base",
+    ],
+)

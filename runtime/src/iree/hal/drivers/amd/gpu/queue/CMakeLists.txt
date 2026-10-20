@@ -910,4 +910,17 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    recording
+  HDRS
+    "recording.h"
+  SRCS
+    "recording.c"
+  DEPS
+    ::fixup
+    iree::base
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

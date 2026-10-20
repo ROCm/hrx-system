@@ -20,7 +20,7 @@ class RecordingTest : public ::testing::Test {
                                               &recording_);
   }
   void TearDown() override {
-    iree_hal_amd_gpu_pm4_recording_deinitialize(&recording_);
+    iree_hal_amd_gpu_recording_deinitialize(&recording_.storage);
   }
   // Actual temporary native recorder, freed after each test's sealed output.
   iree_hal_amd_gpu_pm4_recording_t recording_;
@@ -31,8 +31,8 @@ TEST_F(RecordingTest, NativeCommandsAndPackedArgumentsSpanIndependentChunks) {
   for (uint32_t i = 0; i < kCount; ++i) {
     uint32_t data_offset = 0;
     void* data = nullptr;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_recording_data(&recording_, 9, 64,
-                                                       &data_offset, &data));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_recording_data(&recording_.storage, 9, 64,
+                                                   &data_offset, &data));
     EXPECT_EQ(data_offset, i * 64);
     static_cast<uint8_t*>(data)[0] = 0x7B;
     uint32_t command_offset = 0;
@@ -40,23 +40,27 @@ TEST_F(RecordingTest, NativeCommandsAndPackedArgumentsSpanIndependentChunks) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_recording_commands(
         &recording_, 5, &command_offset, &words));
     iree_hal_amd_gpu_pm4_emit_write(words, 0, 1, &i);
-    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_recording_fixup(
-        &recording_, false, command_offset + 8, 0, data_offset + 1, true, 0,
-        true));
-    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_recording_fixup(
-        &recording_, true, data_offset + 1, 3, i, false, 0, true));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_recording_fixup(
+        &recording_.storage, command_offset + 8, 0, data_offset + 1, 0,
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA |
+            IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_recording_fixup(
+        &recording_.storage, data_offset + 1, 3, i, 0,
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
+            IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
   }
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_recording_end(&recording_, 9, false));
   const uint32_t data_offset =
-      iree_hal_amd_gpu_pm4_recording_data_offset(&recording_);
+      iree_hal_amd_gpu_recording_data_offset(&recording_.storage);
   EXPECT_EQ(data_offset % 64, 0u);
-  EXPECT_EQ(iree_hal_amd_gpu_pm4_recording_fixup_count(&recording_),
+  EXPECT_EQ(iree_hal_amd_gpu_recording_fixup_count(&recording_.storage),
             kCount * 4);
-  std::vector<uint8_t> contents(data_offset + recording_.data.length, 0xAA);
+  std::vector<uint8_t> contents(data_offset + recording_.storage.data.length,
+                                0xAA);
   std::vector<iree_hal_amd_gpu_fixup_t> fixups(kCount * 4);
-  iree_hal_amd_gpu_pm4_recording_write(&recording_, contents.data(),
-                                       fixups.data());
-  iree_hal_amd_gpu_pm4_recording_deinitialize(&recording_);
+  iree_hal_amd_gpu_recording_write(&recording_.storage, contents.data(),
+                                   fixups.data());
+  iree_hal_amd_gpu_recording_deinitialize(&recording_.storage);
   for (uint32_t i = 0; i < kCount; ++i) {
     uint32_t expected[5];
     iree_hal_amd_gpu_pm4_emit_write(expected, 0, 1, &i);
@@ -103,13 +107,14 @@ TEST_P(RecordingBlockTest, SuccessorEdgesPreservePacketsAndInstanceFixups) {
   }
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_recording_end(&recording_, 9, chain));
   const uint32_t fixup_count =
-      iree_hal_amd_gpu_pm4_recording_fixup_count(&recording_);
+      iree_hal_amd_gpu_recording_fixup_count(&recording_.storage);
   ASSERT_EQ(fixup_count, chain ? 6u : 4u);
   std::vector<uint32_t> words(
-      iree_hal_amd_gpu_pm4_recording_data_offset(&recording_) / 4);
+      iree_hal_amd_gpu_recording_data_offset(&recording_.storage) / 4);
   std::vector<iree_hal_amd_gpu_fixup_t> fixups(fixup_count);
-  iree_hal_amd_gpu_pm4_recording_write(
-      &recording_, reinterpret_cast<uint8_t*>(words.data()), fixups.data());
+  iree_hal_amd_gpu_recording_write(&recording_.storage,
+                                   reinterpret_cast<uint8_t*>(words.data()),
+                                   fixups.data());
   uint32_t word_count = recording_.entry_word_count;
   for (uint32_t block = 0; block < 3; ++block) {
     EXPECT_EQ(offsets[block] % 32, 0u);
@@ -151,7 +156,7 @@ TEST_P(RecordingBlockTest, SuccessorEdgesPreservePacketsAndInstanceFixups) {
     if (block != 2) {
       EXPECT_EQ(offsets[block + 1], end * 4);
     } else {
-      EXPECT_EQ(recording_.commands.length, end * 4);
+      EXPECT_EQ(recording_.storage.commands.length, end * 4);
     }
   }
 }

@@ -148,7 +148,7 @@ static void iree_hal_amd_gpu_pm4_command_buffer_destroy(
   // resources now so an immediately following pool release sees no live
   // children. Cold growth independently retains only the resident program.
   iree_status_free(buffer->recording_status);
-  iree_hal_amd_gpu_pm4_recording_deinitialize(&buffer->recording);
+  iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
   iree_hal_resource_set_free(buffer->resources);
   iree_arena_block_pool_deinitialize(&buffer->resource_blocks);
   iree_allocator_free(host_allocator, buffer->inputs);
@@ -483,11 +483,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
     iree_hal_amd_gpu_pm4_command_buffer_t* buffer, uint32_t length) {
   iree_hal_amd_gpu_program_t* program = &buffer->program->resident;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_initialize(
-      &buffer->pool->storage, buffer->recording.alignment, length,
-      iree_hal_amd_gpu_pm4_recording_fixup_count(&buffer->recording), program));
+      &buffer->pool->storage, buffer->recording.storage.alignment, length,
+      iree_hal_amd_gpu_recording_fixup_count(&buffer->recording.storage),
+      program));
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_amd_gpu_pm4_recording_write(
-      &buffer->recording, program->contents.data,
+  iree_hal_amd_gpu_recording_write(
+      &buffer->recording.storage, program->contents.data,
       (void*)(program->contents.data + program->fixup_offset));
   iree_status_t status = iree_hal_amd_gpu_program_seal(program);
   IREE_TRACE_ZONE_END(z0);
@@ -526,9 +527,10 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
       .offset = 0,
       .word_count = buffer->recording.entry_word_count,
   };
-  const uint64_t length = iree_align_uint64(buffer->recording.commands.length,
-                                            buffer->recording.alignment) +
-                          buffer->recording.data.length;
+  const uint64_t length =
+      iree_align_uint64(buffer->recording.storage.commands.length,
+                        buffer->recording.storage.alignment) +
+      buffer->recording.storage.data.length;
   if (length > UINT32_MAX - 15) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "resident command/data placement exceeds 4 GiB");
@@ -551,7 +553,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
     if (buffer->resources) {
       iree_hal_resource_set_freeze(buffer->resources);
     }
-    iree_hal_amd_gpu_pm4_recording_deinitialize(&buffer->recording);
+    iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
     iree_allocator_free(buffer->host_allocator, buffer->input_index);
     buffer->input_index = NULL;
   }
@@ -624,9 +626,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_advise_buffer(
 static iree_status_t iree_hal_amd_gpu_pm4_command_pointer(
     iree_hal_amd_gpu_pm4_command_buffer_t* buffer, bool data, uint32_t offset,
     uint32_t value, uint64_t displacement, bool private_data) {
-  return iree_hal_amd_gpu_pm4_recording_fixup(&buffer->recording, data, offset,
-                                              value, displacement, private_data,
-                                              0, true);
+  return iree_hal_amd_gpu_recording_fixup(
+      &buffer->recording.storage, offset, value, displacement, 0,
+      (data ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA : 0) |
+          (private_data ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA : 0) |
+          IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
@@ -667,8 +671,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
   uint32_t update_offset = 0;
   if (update) {
     void* bytes = NULL;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_data(
-        &buffer->recording, (uint32_t)length, 1, &update_offset, &bytes));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+        &buffer->recording.storage, (uint32_t)length, 1, &update_offset,
+        &bytes));
     memcpy(bytes, source_bytes, (iree_host_size_t)length);
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
@@ -705,8 +710,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
   } else {
     uint32_t argument_offset = 0;
     iree_hal_amd_gpu_blit_arguments_t* arguments = NULL;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_data(
-        &buffer->recording, sizeof(*arguments), 8, &argument_offset,
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+        &buffer->recording.storage, sizeof(*arguments), 8, &argument_offset,
         (void**)&arguments));
     *arguments = (iree_hal_amd_gpu_blit_arguments_t){
         .length = length == IREE_HAL_WHOLE_BUFFER ? 0 : length,
@@ -805,9 +810,10 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_image(
   uint32_t value = 0;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_pm4_command_input(buffer, input, &value));
-  return iree_hal_amd_gpu_pm4_recording_fixup(&buffer->recording, data, offset,
-                                              value, address - addresses[0],
-                                              false, shift, true);
+  return iree_hal_amd_gpu_recording_fixup(
+      &buffer->recording.storage, offset, value, address - addresses[0], shift,
+      (data ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA : 0) |
+          IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
@@ -856,9 +862,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   uint32_t argument_offset = 0;
   void* arguments = NULL;
   if (storage.length) {
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_data(
-        &buffer->recording, storage.length, storage.alignment, &argument_offset,
-        &arguments));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+        &buffer->recording.storage, storage.length, storage.alignment,
+        &argument_offset, &arguments));
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
         function, &dispatch, constants, NULL, flags, arguments);
   }
@@ -920,12 +926,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     iree_hal_amd_gpu_pm4_emit_clock(end, 0);
     const uint64_t sample_offset = (uint64_t)buffer->program->dispatch_count *
                                    sizeof(iree_hal_amd_gpu_profile_sample_t);
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_fixup(
-        &buffer->recording, false, profile_begin_offset,
-        IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_HEADER, 0, false, 0, false));
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_fixup(
-        &buffer->recording, false, profile_end_offset,
-        IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_HEADER, 0, false, 0, false));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
+        &buffer->recording.storage, profile_begin_offset,
+        IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_HEADER, 0, 0, 0));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
+        &buffer->recording.storage, profile_end_offset,
+        IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_HEADER, 0, 0, 0));
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
         buffer, false, profile_begin_offset + 6 * 4,
         IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_ADDRESS, sample_offset, false));

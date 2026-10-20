@@ -215,6 +215,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu:profile",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:recording",
         "//runtime/src/iree/hal/utils:resource_set",
     ],
 )
@@ -227,7 +228,7 @@ iree_runtime_cc_library(
     deps = [
         ":commands",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/hal/drivers/amd/gpu/queue:fixup",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:recording",
     ],
 )
 
@@ -622,6 +623,7 @@ iree_runtime_cc_test(
         ":recording",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:fixup",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:recording",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

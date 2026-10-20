@@ -333,6 +333,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::queue::blit
     iree::hal::drivers::amd::gpu::queue::program
+    iree::hal::drivers::amd::gpu::queue::recording
     iree::hal::utils::resource_set
   PUBLIC
 )
@@ -349,7 +350,7 @@ iree_cc_library(
   DEPS
     ::commands
     iree::base
-    iree::hal::drivers::amd::gpu::queue::fixup
+    iree::hal::drivers::amd::gpu::queue::recording
   PUBLIC
 )
 endif()
@@ -806,6 +807,7 @@ iree_cc_test(
     ::recording
     iree::base
     iree::hal::drivers::amd::gpu::queue::fixup
+    iree::hal::drivers::amd::gpu::queue::recording
     iree::testing::gtest
     iree::testing::gtest_main
 )
