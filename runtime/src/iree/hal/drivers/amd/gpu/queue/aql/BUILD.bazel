@@ -4,6 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -12,6 +15,60 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+_PROGRAM_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:amdgpu_artifacts",
+    "//loom/config/target/amdgpu:descriptor_set_cdna2_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx9_4_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_rdna3_5_core",
+    "//loom/config/target/amdgpu:descriptor_set_rdna4m_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_5_generic_core",
+])
+
+_PROGRAM_TARGETS = [
+    "gfx90a",
+    "gfx9-4-generic",
+    "gfx11-generic",
+    "gfx1151",
+    "gfx1170",
+    "gfx12-generic",
+    "gfx12-5-generic",
+]
+
+[
+    loom_target_profile(
+        name = "program_profile_" + target,
+        family = "amdgpu",
+        selector = target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+        visibility = ["//visibility:private"],
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+[
+    loom_kernel_binary(
+        name = "indirect_program_" + target,
+        testonly = True,
+        srcs = ["indirect.loom"],
+        out = "indirect_program_" + target + ".hsaco",
+        target = ":program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+iree_c_embed_data(
+    name = "indirect_programs",
+    testonly = True,
+    srcs = [":indirect_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "indirect_programs.c",
+    h_file_output = "indirect_programs.h",
+    identifier = "iree_hal_amd_gpu_aql_indirect_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
 )
 
 iree_runtime_cc_library(
@@ -110,6 +167,43 @@ iree_runtime_cc_library(
     deps = [
         ":packet",
         "//runtime/src/iree/hal/drivers/amd/gpu:dispatch",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "indirect",
+    srcs = ["indirect.c"],
+    hdrs = ["indirect.h"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":dispatch",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/gpu:context",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "indirect_test",
+    srcs = ["indirect_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH + select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":indirect",
+        ":indirect_programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -229,6 +323,7 @@ iree_runtime_cc_library(
     }),
     deps = [
         ":growth",
+        ":indirect",
         ":ring",
         ":scratch",
         "//runtime/src/iree/async",

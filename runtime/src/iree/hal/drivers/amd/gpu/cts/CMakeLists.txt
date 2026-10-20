@@ -593,6 +593,8 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::device
     iree::hal::drivers::amd::gpu::image::hip_images
+    iree::hal::drivers::amd::gpu::image::hsaco
+    iree::hal::drivers::amd::gpu::kernarg
     iree::hal::drivers::amd::gpu::queue::semaphore
     iree::hal::drivers::amd::gpu::queue::signal
     iree::hal::drivers::amd::status

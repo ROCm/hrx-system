@@ -18,6 +18,7 @@
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/indirect.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
@@ -104,6 +105,8 @@ typedef struct iree_hal_amd_gpu_device_t {
     iree_hal_amd_fabric_memory_options_t upload;
     // Preferred physical-local packet/program storage.
     iree_hal_amd_fabric_memory_options_t resident;
+    // Shared immutable device-time dispatch geometry publisher.
+    iree_hal_amd_gpu_aql_indirect_t indirect;
   } aql;
   // Resident command programs, shared builtins, and idle-instance trimming.
   iree_hal_amd_gpu_pm4_program_pool_t programs;
@@ -511,6 +514,8 @@ static bool iree_hal_amd_gpu_device_release_children(
     device->queues[i] = NULL;
   }
   iree_hal_amd_gpu_pm4_program_pool_deinitialize(&device->programs);
+  iree_hal_amd_gpu_aql_indirect_deinitialize(device->context,
+                                             &device->aql.indirect);
   iree_hal_amd_gpu_allocation_context_deinitialize(&device->memory.allocations);
   iree_hal_amd_gpu_memory_mapping_context_deinitialize(
       &device->memory.mappings);
@@ -912,6 +917,10 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
       status = iree_hal_amd_gpu_context_query_program_memory(
           context, family_ordinal, &device->aql.access, &device->aql.upload,
           &device->aql.resident);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_amd_gpu_aql_indirect_initialize(
+            context, &device->aql.upload, &device->aql.indirect);
+      }
     } else {
       status = iree_hal_amd_gpu_pm4_program_pool_initialize(
           device->context, family_ordinal, options->queue_count,
@@ -986,6 +995,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
           .command_byte_capacity = queue_options.command_byte_capacity,
           .memory = queue_options.memory,
           .scratch_memory = queue_options.scratch_memory,
+          .indirect = &device->aql.indirect,
           .publication = queue_options.publication,
           .allocations = queue_options.allocations,
           .mappings = queue_options.mappings,

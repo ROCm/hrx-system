@@ -1,0 +1,49 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Executes after the producer of the indirect counts. The host or an earlier
+// materializer has completed the target body while leaving its header INVALID.
+// All target accesses are stores. The final complete header publishes both
+// the grid and runtime-owned hidden arguments to the command processor.
+kernel.def export("patch_indirect") @patch_indirect() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%packet: buffer, %counts: buffer, %arguments: buffer, %header: i32, %size_x: i32, %size_y: i32, %size_z: i32, %offset_x: i32, %offset_y: i32, %offset_z: i32) {
+  %origin = index.constant 0 : offset
+  %absent = scalar.constant -1 : i32
+  %packet_global = buffer.assume.memory_space<global> %packet : buffer
+  %target = buffer.view %packet_global[%origin] : buffer -> view<16xi32>
+  %groups = buffer.view %counts[%origin] : buffer -> view<3xi32>
+  %x = view.load %groups[0] : view<3xi32> -> i32
+  %y = view.load %groups[1] : view<3xi32> -> i32
+  %z = view.load %groups[2] : view<3xi32> -> i32
+  %grid_x = scalar.muli %x, %size_x : i32
+  %grid_y = scalar.muli %y, %size_y : i32
+  %grid_z = scalar.muli %z, %size_z : i32
+  view.store %grid_x, %target[3] : i32, view<16xi32>
+  view.store %grid_y, %target[4] : i32, view<16xi32>
+  view.store %grid_z, %target[5] : i32, view<16xi32>
+  %has_x = scalar.cmpi ne, %offset_x, %absent : i32
+  scf.if %has_x {
+    %offset = index.cast %offset_x : i32 to offset
+    %hidden = buffer.view %arguments[%offset] : buffer -> view<1xi32, align(1)>
+    view.store %x, %hidden[0] : i32, view<1xi32, align(1)>
+  }
+  %has_y = scalar.cmpi ne, %offset_y, %absent : i32
+  scf.if %has_y {
+    %offset = index.cast %offset_y : i32 to offset
+    %hidden = buffer.view %arguments[%offset] : buffer -> view<1xi32, align(1)>
+    view.store %y, %hidden[0] : i32, view<1xi32, align(1)>
+  }
+  %has_z = scalar.cmpi ne, %offset_z, %absent : i32
+  scf.if %has_z {
+    %offset = index.cast %offset_z : i32 to offset
+    %hidden = buffer.view %arguments[%offset] : buffer -> view<1xi32, align(1)>
+    view.store %z, %hidden[0] : i32, view<1xi32, align(1)>
+  }
+  view.atomic.store %header, %target[0] {ordering = release, scope = system} : i32, view<16xi32>
+  kernel.return
+}
