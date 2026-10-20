@@ -33,6 +33,8 @@ controls, pressure, counters and telemetry cursors.
 | `--model=path` | None, repeatable | One JSON deployment document per value; omission starts empty. |
 | `--listen=address` | `127.0.0.1:8080`, repeatable | Numeric IPv4 `host:port`, IPv6 `[host]:port`, or `unix:path`. |
 | `--workers=N` | `8` | Shared CPU workers for JIT, model scheduling and media work. |
+| `--execution_scope=MODE:RESOURCES` | One exclusion scope over host and every device | Repeatable interference scopes; `MODE` is `exclude` or `overlap`, and resources are comma-separated `host` or device indices. |
+| `--execution_limit=RESOURCE:COUNT` | No additional software limit | Repeatable accepted-unit ceilings per host/device resource; `0` adds no ceiling. |
 | `--model_capacity=N` | `32` | Registered names, including drained, failed and removing entries. |
 | `--connections=N` | `64` | Simultaneous admitted HTTP connections across all listeners. |
 | `--held_requests=N` | `-1` | Closed-gate holding credit; `-1` selects half the connection limit, `0` rejects rather than holds. |
@@ -56,6 +58,64 @@ not a whole-process or whole-device memory cap.
 `--help` shows serving options; `--help=all` also shows linked runtime options.
 `--agents_md` prints compact integration guidance without initializing devices.
 Unexpected positional arguments fail instead of being interpreted as models.
+
+## Request priority and interference
+
+Inference requests can carry `X-Loom-QoS: realtime` or
+`X-Loom-QoS: background`; omission selects background. Priority applies before
+CPU preparation and compatible batch selection as well as before device
+submission. An open microphone without ready input or a stalled audio consumer
+does not reserve execution merely by retaining its request.
+
+The default gives ready realtime work exclusive turns across the host and
+every device. This accounts for CPU, GPU, and NPU work competing for shared
+memory bandwidth. Already accepted work retains its storage and runs to its
+existing completion boundary; priority cannot interrupt an indivisible kernel
+or shorten a previously submitted epoch. Background requests keep their
+history and resume when conflicting realtime demand clears. Weight pinning
+controls residency independently.
+
+Interference and accepted-unit limits are separate controls. A scope closes
+cross-class admission across all its resources; it has no shared count budget.
+`--execution_limit=0:1` permits one accepted unit on device zero, while
+`--execution_limit=host:8` permits eight host units. These units are source
+operations or finite host tasks, with durations determined by the source;
+their counts describe neither hardware queues nor compute occupancy. Task
+devices claim both their device resource and the shared host resource.
+
+Explicit overlap allows both classes to execute subject to resource limits:
+
+```sh
+loom-serve --device=task --pool_backing=fixed \
+  --execution_scope=overlap:host,0 --execution_limit=0:2
+```
+
+The `host` resource denotes the shared application executor, and numeric
+resources use the same zero-based `--device` order as model documents.
+Repeated scopes can describe independent devices or shared interference:
+
+```text
+--device=amdgpu://0
+--device=amdgpu://1
+--execution_scope=exclude:host,0
+--execution_scope=overlap:1
+--execution_limit=0:1
+--execution_limit=1:4
+```
+
+Here, ready realtime work on the host or device zero excludes background
+admission in that scope; device one's native work can overlap it. All models
+still use the shared host for preparation. Overlapping scopes compose their
+restrictions: an `overlap` declaration cannot erase an `exclude` declaration.
+Explicit scopes must cover the host and every device. Omitting all scopes
+retains default exclusion even when limits are supplied. Invalid resource
+names, duplicate limits, incomplete coverage, and malformed counts fail startup.
+
+The configuration is fixed at process creation and can be kept in an ordinary
+flagfile. With no competing realtime work, the policy preserves normal batch
+shapes and submission boundaries. Under continuous contention, realtime has
+priority for the next contested admission; a positive background share is not
+implied by allowing overlap.
 
 ## Devices and listeners
 

@@ -14,7 +14,9 @@
           "--workers",
           "--pool_backing",
           "--weight_slab_bytes=1073741824",
-          "--state_slab_bytes=67108864"
+          "--state_slab_bytes=67108864",
+          "--execution_scope",
+          "--execution_limit"
         ]
       },
       "stderr": {"not_contains": ["\"event\":\"ready\""]}

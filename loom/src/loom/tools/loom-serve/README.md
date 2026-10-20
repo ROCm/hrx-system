@@ -88,6 +88,24 @@ trusted; deployment-owned tunnels and isolation supply any required boundary.
 devices. `/metrics`, `/logz` and `/logz/stream` expose counters and telemetry;
 slow observers do not retain model resources or backpressure record producers.
 
+## Configure execution interference
+
+`X-Loom-QoS: realtime` gives a ready inference request priority over background
+work; requests without the header are background. By default, realtime demand
+closes new background admission across the shared host and every device.
+Accepted work drains to its existing completion boundary before conflicting
+work can start.
+
+Repeated `--execution_scope=exclude:host,0` or
+`--execution_scope=overlap:host,0` flags describe interference using `host` and
+zero-based `--device` ordinals. Explicit scopes must cover every resource.
+Repeated `--execution_limit=0:1` or `--execution_limit=host:8` flags independently
+bound accepted units; their counts are not hardware queues or core counts.
+Omitting scopes retains default exclusion even when limits are configured.
+These options also work in flagfiles. The
+[execution policy reference](../../../../docs/src/serving/index.md#request-priority-and-interference)
+explains cross-device scopes, task-device claims, and explicit overlap.
+
 ## Trace live work
 
 A Tracy-enabled build exposes CPU work from serving, JIT compilation, task

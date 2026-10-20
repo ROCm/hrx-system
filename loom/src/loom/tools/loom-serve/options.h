@@ -26,7 +26,8 @@ iree_status_t loom_serve_host_create_from_flags(
 // physical byte limit requires a single device. Models resolve their own
 // bindings; the entry point destroys the group after every model retires. URI
 // interpretation belongs to the HAL driver, with no implicit local device or
-// backend fallback.
+// backend fallback. Repeated execution scopes and accepted-unit limits resolve
+// host and device ordinals before group construction copies the policy.
 iree_status_t loom_serve_device_group_allocate_from_flags(
     loom_serve_host_t* host, iree_hal_driver_registry_t* driver_registry,
     iree_allocator_t host_allocator, loom_serve_device_group_t** out_group);

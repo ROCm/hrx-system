@@ -11,6 +11,7 @@
 #include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/tooling/device_flags.h"
+#include "loom/tools/loom-serve/execution_options.h"
 
 IREE_FLAG(int32_t, workers, 8,
           "Shared CPU workers for compilation, scheduling and media jobs.");
@@ -31,6 +32,16 @@ IREE_FLAG(int64_t, memory_bytes, 0,
           "Shared physical parameter/state budget; a nonzero limit requires "
           "one device. Zero imposes no serving limit. Invocation workspace "
           "is accounted separately.");
+IREE_FLAG_LIST(string, execution_scope,
+               "Interference policy: exclude:host,0,1 or overlap:host,0,1. "
+               "Numeric resources are zero-based --device ordinals. Repeat "
+               "to describe independent or overlapping scopes; explicit "
+               "scopes must cover host and every device. Omission excludes "
+               "cross-class work across the whole group.");
+IREE_FLAG_LIST(string, execution_limit,
+               "Accepted-unit limit as RESOURCE:COUNT, for example host:8 "
+               "or 0:1. Repeat for independent resources. Zero adds no "
+               "software limit. Counts are not cores or hardware queues.");
 
 iree_status_t loom_serve_host_create_from_flags(
     const loom_serve_compiler_options_t* compiler_options,
@@ -76,6 +87,10 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
         "--memory_bytes requires one device; independent device pools cannot "
         "enforce a shared byte limit");
   }
+  loom_serve_execution_options_t execution_options;
+  IREE_RETURN_IF_ERROR(loom_serve_execution_options_initialize(
+      devices.count, FLAG_execution_limit_list(), FLAG_execution_scope_list(),
+      host_allocator, &execution_options));
   iree_status_t status = iree_ok_status();
   struct {
     // URI scheme borrowed from the device flag list through this function.
@@ -123,10 +138,12 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_allocate(host, devices.count, options,
-                                              NULL, host_allocator, out_group);
+                                              &execution_options.policy,
+                                              host_allocator, out_group);
   }
   for (iree_host_size_t i = 0; i < driver_count; ++i) {
     iree_hal_driver_release(drivers[i].handle);
   }
+  loom_serve_execution_options_deinitialize(&execution_options);
   return status;
 }

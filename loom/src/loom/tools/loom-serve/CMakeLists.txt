@@ -12,12 +12,46 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    execution_options
+  HDRS
+    "execution_options.h"
+  SRCS
+    "execution_options.c"
+  DEPS
+    iree::base
+    iree::base::internal::json
+    loom::serve::runtime::execution::scheduler
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    execution_options_test
+  SRCS
+    "execution_options_test.cc"
+  DEPS
+    ::execution_options
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::runtime::execution::scheduler
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     options
   HDRS
     "options.h"
   SRCS
     "options.c"
   DEPS
+    ::execution_options
     iree::base
     iree::base::internal::path
     iree::base::tooling::flags

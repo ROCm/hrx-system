@@ -92,6 +92,29 @@ class ServerTest(unittest.TestCase):
         self.assertIn("--memory_bytes requires one device", result.stderr)
         self.assertNotIn('"event":"ready"', result.stderr)
 
+    def test_execution_policy_rejects_before_listening(self):
+        for option, diagnostic in (
+            ("--execution_scope=overlap:0", "must cover every resource"),
+            ("--execution_scope=overlap:host,1", "--device ordinal"),
+            ("--execution_limit=0:-1", "execution limit"),
+        ):
+            with self.subTest(option=option):
+                result = subprocess.run(
+                    [
+                        str(SERVER),
+                        "--device=task",
+                        "--pool_backing=fixed",
+                        "--workers=1",
+                        "--listen=127.0.0.1:0",
+                        option,
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn(diagnostic, result.stderr)
+                self.assertNotIn('"event":"ready"', result.stderr)
+
     def test_positional_model_is_rejected_before_listening(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -164,6 +187,11 @@ class ServerTest(unittest.TestCase):
                     "--workspace_idle_ms=1",
                 ]
                 if workers == 4:
+                    options += [
+                        "--execution_scope=overlap:host,0",
+                        "--execution_limit=host:1",
+                        "--execution_limit=0:1",
+                    ]
                     (directory / "server flags.txt").write_text(
                         "\n".join(options) + "\n"
                     )
