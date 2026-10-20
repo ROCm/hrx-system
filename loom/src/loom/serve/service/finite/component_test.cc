@@ -205,8 +205,8 @@ class FiniteComponentTest : public ::testing::Test {
     IREE_ASSERT_OK(
         loom_serve_finite_model_prepare_batch(model, 1, &prepared, &rows));
     bool code_ready = false;
-    IREE_ASSERT_OK(
-        loom_serve_finite_model_advance_batch(model, false, &code_ready));
+    IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+        model, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &code_ready));
     ASSERT_TRUE(code_ready);
     iree_vm_buffer_release(prepared.bytes);
     iree_vm_buffer_release(input);

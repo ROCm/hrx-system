@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVICE_EXECUTABLES_H_
 
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/bank.h"
 #include "loom/serve/runtime/program/jit.h"
 #include "loom/serve/runtime/program/module.h"
@@ -116,9 +117,12 @@ void loom_serve_executables_set_observer(loom_serve_executables_t* executables,
 // another owner turn. Cancellation skips unstarted work but joins accepted
 // producers. Terminal failure retains the invocation until release. New banks
 // reserve their final storage and prepare source plans; checkpoint payload I/O
-// and execution admission remain separate.
+// and execution admission remain separate. A miss claims the actual shared host
+// resource through compiler/recording retirement. The caller supplies its
+// selected cohort class; an unaccepted claim may change class or be withdrawn.
 iree_status_t loom_serve_executables_advance(
-    loom_serve_executables_t* executables, bool cancel, bool* out_complete);
+    loom_serve_executables_t* executables, loom_serve_execution_qos_t qos,
+    bool cancel, bool* out_complete);
 
 // Releases an unsubmitted or fully retired invocation; no compiler/device wait.
 void loom_serve_executables_release(loom_serve_executables_t* executables);

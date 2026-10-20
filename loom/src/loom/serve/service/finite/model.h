@@ -222,8 +222,10 @@ void loom_serve_finite_model_set_observer(loom_serve_finite_model_t* model,
 // owner. Call again until complete, including after cancellation. A terminal
 // result permits release_batch; success without cancellation permits
 // admission/submit. No worker/device wait or checkpoint admission occurs here.
+// A cache miss uses the selected cohort's class for shared-host admission.
 iree_status_t loom_serve_finite_model_advance_batch(
-    loom_serve_finite_model_t* model, bool cancel, bool* out_complete);
+    loom_serve_finite_model_t* model, loom_serve_execution_qos_t qos,
+    bool cancel, bool* out_complete);
 
 // Scheduler-only submission after residency_try_admit/acquire succeeds. Ends
 // this cohort's admission interest without releasing its parameter pin.

@@ -1151,8 +1151,9 @@ void loom_serve_image_model_set_observer(loom_serve_image_model_t* model,
 
 iree_status_t loom_serve_image_model_advance_batch(
     loom_serve_image_model_t* model, bool cancel, bool* out_complete) {
-  IREE_RETURN_IF_ERROR(
-      loom_serve_executables_advance(model->executables, cancel, out_complete));
+  IREE_RETURN_IF_ERROR(loom_serve_executables_advance(
+      model->executables, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, cancel,
+      out_complete));
   if (!cancel && *out_complete) {
     const loom_serve_stage_launch_t* stage = loom_serve_executables_stage(
         model->executables, model->invocation.stage);

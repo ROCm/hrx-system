@@ -215,6 +215,8 @@ struct loom_serve_text_media_projector_t {
   loom_serve_text_media_job_t** cohort;
   // Number of selected source requests.
   iree_host_size_t cohort_count;
+  // Selected homogeneous class through specialization and native retirement.
+  loom_serve_execution_qos_t qos;
   // Contiguous codec descriptors borrowing the selected jobs.
   loom_serve_media_image_request_t* requests;
   // Codec result buffers transferred into jobs after realization.
@@ -467,6 +469,7 @@ static void loom_serve_text_media_projector_select(
     projector->rows[index] = job->rows;
   }
   if (projector->cohort_count) {
+    projector->qos = qos;
     projector->phase = MEDIA_BATCHING;
     loom_serve_text_readiness_schedule(&projector->readiness,
                                        loom_serve_text_media_projector_batch,
@@ -632,8 +635,8 @@ iree_status_t loom_serve_text_media_projector_advance(
     }
     const bool cancel = stopping || !live;
     bool complete = false;
-    status = loom_serve_finite_model_advance_batch(projector->model, cancel,
-                                                   &complete);
+    status = loom_serve_finite_model_advance_batch(
+        projector->model, projector->qos, cancel, &complete);
     if (!iree_status_is_ok(status)) {
       loom_serve_finite_model_release_batch(projector->model);
       status = loom_serve_text_media_projector_reject(
@@ -662,19 +665,10 @@ iree_status_t loom_serve_text_media_projector_advance(
       loom_serve_text_media_projector_complete(projector);
       *out_progress = true;
     } else {
-      loom_serve_execution_qos_t qos = LOOM_SERVE_EXECUTION_QOS_BACKGROUND;
-      for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
-        const loom_serve_text_media_request_t* request =
-            projector->cohort[i]->request;
-        if (request) {
-          qos = request->qos;
-          break;
-        }
-      }
       loom_serve_residency_admission_t admission;
       status = loom_serve_admission_try_acquire(
           loom_serve_finite_model_residency(projector->model),
-          projector->permit, qos, &admission);
+          projector->permit, projector->qos, &admission);
       if (iree_status_is_ok(status) &&
           admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
         loom_serve_residency_cancel_admission(

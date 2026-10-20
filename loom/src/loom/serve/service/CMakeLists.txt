@@ -140,6 +140,7 @@ loom_cc_library(
     loom::binding::c::loomc
     loom::binding::c::task_pool
     loom::serve::runtime::device
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::bank
     loom::serve::runtime::parameter::residency

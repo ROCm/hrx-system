@@ -72,8 +72,8 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest {
     bool complete = false;
     while (!complete) {
       const auto ticket = iree_notification_prepare_wait(notification);
-      auto status =
-          loom_serve_finite_model_advance_batch(projector_, false, &complete);
+      auto status = loom_serve_finite_model_advance_batch(
+          projector_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &complete);
       if (complete || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
         IREE_ASSERT_OK(status);

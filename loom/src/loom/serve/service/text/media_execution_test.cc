@@ -82,8 +82,8 @@ class MediaExecutionTest : public SourceTextServiceTest {
     IREE_ASSERT_OK(loom_serve_finite_model_prepare_batch(
         producer_, prepared_.size(), prepared_.data(), rows.data()));
     bool code_ready = false;
-    IREE_ASSERT_OK(
-        loom_serve_finite_model_advance_batch(producer_, false, &code_ready));
+    IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+        producer_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &code_ready));
     ASSERT_TRUE(code_ready);
     loom_serve_residency_admission_t admission;
     IREE_ASSERT_OK(loom_serve_residency_try_admit(

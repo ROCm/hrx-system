@@ -771,8 +771,8 @@ static iree_status_t loom_serve_finite_advance(void* self,
     }
     const bool cancel = service->stopping || !has_peer;
     bool complete = false;
-    status = loom_serve_finite_model_advance_batch(service->model, cancel,
-                                                   &complete);
+    status = loom_serve_finite_model_advance_batch(
+        service->model, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, cancel, &complete);
     if (!iree_status_is_ok(status)) {
       loom_serve_finite_model_release_batch(service->model);
       loom_serve_finite_error(service, 0, status);

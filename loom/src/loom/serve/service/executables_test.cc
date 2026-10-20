@@ -214,7 +214,8 @@ class ExecutablesTest : public WeightsTest {
     iree_status_t status = iree_ok_status();
     while (!complete && iree_status_is_ok(status)) {
       const uint32_t ticket = iree_notification_prepare_wait(&notification_);
-      status = loom_serve_executables_advance(executables_, cancel, &complete);
+      status = loom_serve_executables_advance(
+          executables_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, cancel, &complete);
       if (!complete && iree_status_is_ok(status)) {
         iree_notification_commit_wait(&notification_, ticket,
                                       IREE_DURATION_ZERO,
@@ -372,8 +373,8 @@ TEST_P(ExecutablesTest, CancellationJoinsRecordingWithoutActivatingParameters) {
   const auto activity = loom_serve_residency_activity(residency_);
   IREE_ASSERT_OK(Begin("domains", true));
   bool complete = false;
-  IREE_ASSERT_OK(
-      loom_serve_executables_advance(executables_, false, &complete));
+  IREE_ASSERT_OK(loom_serve_executables_advance(
+      executables_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &complete));
   IREE_ASSERT_OK(Advance(true));
   loom_serve_executables_release(executables_);
   EXPECT_EQ(compilation_.commands, commands);
@@ -633,8 +634,9 @@ TEST_P(ExecutablesTest, CancellationJoinsNewBankAllocationBeforeReuse) {
     bool complete = false;
     while (!complete && iree_status_is_ok(status)) {
       const uint32_t ticket = iree_notification_prepare_wait(&notification_);
-      status = loom_serve_executables_advance(executables_, cancel.load(),
-                                              &complete);
+      status = loom_serve_executables_advance(
+          executables_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, cancel.load(),
+          &complete);
       if (!complete && iree_status_is_ok(status)) {
         iree_notification_commit_wait(&notification_, ticket,
                                       IREE_DURATION_ZERO,

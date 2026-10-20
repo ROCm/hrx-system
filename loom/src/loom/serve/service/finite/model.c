@@ -1027,8 +1027,9 @@ void loom_serve_finite_model_set_observer(loom_serve_finite_model_t* model,
 }
 
 iree_status_t loom_serve_finite_model_advance_batch(
-    loom_serve_finite_model_t* model, bool cancel, bool* out_complete) {
-  return loom_serve_executables_advance(model->executables, cancel,
+    loom_serve_finite_model_t* model, loom_serve_execution_qos_t qos,
+    bool cancel, bool* out_complete) {
+  return loom_serve_executables_advance(model->executables, qos, cancel,
                                         out_complete);
 }
 

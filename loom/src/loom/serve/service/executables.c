@@ -117,6 +117,8 @@ struct loom_serve_executables_t {
   loom_serve_generation_t* captured;
   // Retained owner of the runner's current copied execution table.
   loom_serve_generation_t* bound;
+  // Request specialization's host loan through terminal producer publication.
+  loom_serve_execution_permit_t compilation;
   // Sole invocation's request declaration and compilation ownership.
   struct {
     // Unresolved declarations transferred from the source capability.
@@ -267,6 +269,9 @@ iree_status_t loom_serve_executables_allocate(
       host_allocator, sizeof(*executables), (void**)&executables));
   executables->host_allocator = host_allocator;
   executables->options = *options;
+  loom_serve_execution_permit_initialize(
+      loom_serve_device_scheduler(options->device),
+      LOOM_SERVE_EXECUTION_RESOURCE_HOST, &executables->compilation);
   iree_status_t status = loom_serve_sources_clone(
       options->sources, host_allocator, &executables->sources);
   if (iree_status_is_ok(status)) {
@@ -296,6 +301,7 @@ void loom_serve_executables_retire(loom_serve_executables_t* executables) {
     return;
   }
   executables->retiring = true;
+  loom_serve_execution_permit_cancel(&executables->compilation);
   loom_serve_preparation_free(executables->invocation.declarations);
   loom_serve_module_clear_stages(executables->options.runner);
   loom_serve_variant_entry_release(executables->invocation.entry);
@@ -352,6 +358,7 @@ iree_status_t loom_serve_executables_free(
   loom_serve_generation_release(executables->selected);
   loom_serve_generation_release(executables->original);
   loom_serve_sources_free(executables->sources, executables->host_allocator);
+  loom_serve_execution_permit_deinitialize(&executables->compilation);
   iree_allocator_free(executables->host_allocator, executables);
   return iree_ok_status();
 }
@@ -402,6 +409,7 @@ static iree_status_t loom_serve_executables_bind(
 }
 
 void loom_serve_executables_release(loom_serve_executables_t* executables) {
+  loom_serve_execution_permit_cancel(&executables->compilation);
   loom_serve_residency_cancel_admission(
       loom_serve_executables_residency(executables));
   loom_serve_preparation_free(executables->invocation.declarations);
@@ -1124,7 +1132,9 @@ static void loom_serve_choice_advance(loom_serve_executables_t* executables,
 }
 
 static iree_status_t loom_serve_choice_begin(
-    loom_serve_executables_t* executables) {
+    loom_serve_executables_t* executables, loom_serve_execution_qos_t qos,
+    bool* out_started) {
+  *out_started = true;
   if (!executables->cache.pool) {
     IREE_RETURN_IF_ERROR(loom_serve_variant_pool_allocate(
         executables->options.cache.capacity + 2, NULL, loom_serve_choice_free,
@@ -1158,6 +1168,18 @@ static iree_status_t loom_serve_choice_begin(
             choice->preparation, executables->invocation.declarations)) {
       shared = choice->code;
     }
+  }
+  loom_serve_execution_permit_t* permit = &executables->compilation;
+  if (permit->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING &&
+      permit->qos != qos) {
+    loom_serve_execution_permit_cancel(permit);
+  }
+  if (permit->phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE) {
+    loom_serve_execution_permit_request(permit, qos);
+  }
+  if (!loom_serve_execution_permit_try_acquire(permit)) {
+    *out_started = false;
+    return iree_ok_status();
   }
   loom_serve_choice_t* choice = NULL;
   const iree_host_size_t count =
@@ -1235,15 +1257,27 @@ static iree_status_t loom_serve_choice_begin(
 }
 
 iree_status_t loom_serve_executables_advance(
-    loom_serve_executables_t* executables, bool cancel, bool* out_complete) {
+    loom_serve_executables_t* executables, loom_serve_execution_qos_t qos,
+    bool cancel, bool* out_complete) {
   *out_complete = true;
   IREE_RETURN_IF_ERROR(loom_serve_executables_query_status(executables));
   if (!cancel && executables->invocation.declarations) {
     if (executables->parameters.retired) {
+      // Native retirement must progress before a compiler can use this input.
+      loom_serve_execution_permit_cancel(&executables->compilation);
       *out_complete = false;
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(loom_serve_choice_begin(executables));
+    bool started = false;
+    iree_status_t status = loom_serve_choice_begin(executables, qos, &started);
+    if (!iree_status_is_ok(status)) {
+      loom_serve_execution_permit_complete(&executables->compilation);
+      return status;
+    }
+    if (!started) {
+      *out_complete = false;
+      return iree_ok_status();
+    }
   }
   if (executables->invocation.job) {
     loom_serve_choice_advance(executables, cancel);
@@ -1258,6 +1292,9 @@ iree_status_t loom_serve_executables_advance(
       return iree_ok_status();
     }
     executables->invocation.pending = false;
+    // The variant publication joins every real compiler/recording borrower,
+    // including cancelled and failed producers.
+    loom_serve_execution_permit_complete(&executables->compilation);
     if (snapshot.phase == LOOM_SERVE_VARIANT_FAILED) {
       iree_status_t status = loom_serve_variant_entry_status(entry);
       loom_serve_variant_entry_discard(entry);
@@ -1278,6 +1315,7 @@ iree_status_t loom_serve_executables_advance(
     loom_serve_account_natives(executables, choice->generation);
     loom_serve_variant_entry_retain(entry);
   }
+  loom_serve_execution_permit_cancel(&executables->compilation);
   return cancel ? iree_ok_status() : loom_serve_executables_bind(executables);
 }
 

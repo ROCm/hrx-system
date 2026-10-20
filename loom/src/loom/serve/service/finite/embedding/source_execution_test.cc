@@ -386,8 +386,8 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
 
   void SubmitPrepared(size_t ordinal) {
     bool code_ready = false;
-    IREE_ASSERT_OK(
-        loom_serve_finite_model_advance_batch(model_, false, &code_ready));
+    IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+        model_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &code_ready));
     ASSERT_TRUE(code_ready);
     loom_serve_residency_admission_t admission;
     IREE_ASSERT_OK(loom_serve_residency_try_admit(
@@ -593,6 +593,7 @@ class RequestChoiceTest : public GenerationSelectionTest {
   }
 
   void TearDown() override {
+    loom_serve_execution_permit_deinitialize(&peer_);
     ReleaseCompiler();
     if (batch_active_) {
       IREE_EXPECT_OK(Resolve(true));
@@ -737,12 +738,14 @@ class RequestChoiceTest : public GenerationSelectionTest {
     batch_active_ = true;
   }
 
-  iree_status_t Resolve(bool cancel = false) {
+  iree_status_t Resolve(
+      bool cancel = false,
+      loom_serve_execution_qos_t qos = LOOM_SERVE_EXECUTION_QOS_BACKGROUND) {
     bool complete = false;
     while (!complete) {
       const auto previous = wakes_.load();
-      IREE_RETURN_IF_ERROR(
-          loom_serve_finite_model_advance_batch(model_, cancel, &complete));
+      IREE_RETURN_IF_ERROR(loom_serve_finite_model_advance_batch(
+          model_, qos, cancel, &complete));
       if (!complete) {
         std::unique_lock<std::mutex> lock(mutex_);
         condition_.wait(lock, [&] { return wakes_.load() != previous; });
@@ -794,6 +797,14 @@ class RequestChoiceTest : public GenerationSelectionTest {
     condition_.notify_all();
   }
 
+  void RequestVoice() {
+    loom_serve_execution_permit_initialize(loom_serve_device_scheduler(device_),
+                                           LOOM_SERVE_EXECUTION_RESOURCE_HOST,
+                                           &peer_);
+    loom_serve_execution_permit_request(&peer_,
+                                        LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  }
+
   // Outer test thread drives serialized preparation/admission, not compilation.
   const std::thread::id owner_ = std::this_thread::get_id();
   // Actual asynchronous compiler allocations, used to distinguish reuse/misses.
@@ -810,6 +821,8 @@ class RequestChoiceTest : public GenerationSelectionTest {
   bool entered_ = false;
   // Preparation succeeded; teardown must collect/release this invocation.
   bool batch_active_ = false;
+  // Real competing host claim, detached before compiler cleanup on failure.
+  loom_serve_execution_permit_t peer_ = {};
   // Temporary input package, released before the first request specialization.
   loom_serve_package_t* package_ = nullptr;
 };
@@ -878,23 +891,76 @@ TEST_P(RequestChoiceTest, CancellationCollectsAcceptedCompilerBeforeRelease) {
     holding_ = true;
   }
   bool complete = false;
-  IREE_ASSERT_OK(
-      loom_serve_finite_model_advance_batch(model_, false, &complete));
+  IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+      model_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &complete));
   EXPECT_FALSE(complete);
   {
     std::unique_lock<std::mutex> lock(mutex_);
     condition_.wait(lock, [&] { return entered_; });
   }
-  IREE_ASSERT_OK(
-      loom_serve_finite_model_advance_batch(model_, true, &complete));
+  RequestVoice();
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+      model_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, true, &complete));
   EXPECT_FALSE(complete);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
   ReleaseCompiler();
   IREE_ASSERT_OK(Resolve(true));
+  EXPECT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
   loom_serve_finite_model_release_batch(model_);
   ReleaseInputs();
   batch_active_ = false;
+  loom_serve_execution_permit_complete(&peer_);
   ASSERT_NO_FATAL_FAILURE(
       RunChoice(R"({"model":"fixture","input":"a"})", true, {1, 1, 1, 1}));
+}
+
+TEST_P(RequestChoiceTest, UnstartedCompilationCanCancelUnderVoice) {
+  ASSERT_NO_FATAL_FAILURE(PrepareChoice(R"({"model":"fixture","input":"a"})"));
+  RequestVoice();
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  const auto allocations = worker_allocations_.load();
+  bool complete = false;
+  IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+      model_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &complete));
+  EXPECT_FALSE(complete);
+  EXPECT_EQ(worker_allocations_.load(), allocations);
+  IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+      model_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, true, &complete));
+  EXPECT_TRUE(complete);
+  EXPECT_EQ(worker_allocations_.load(), allocations);
+  loom_serve_finite_model_release_batch(model_);
+  ReleaseInputs();
+  batch_active_ = false;
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(
+      RunChoice(R"({"model":"fixture","input":"a"})", false, {1, 1, 1, 1}));
+}
+
+TEST_P(RequestChoiceTest, WaitingSpecializationUsesCurrentCohortClass) {
+  ASSERT_NO_FATAL_FAILURE(PrepareChoice(R"({"model":"fixture","input":"a"})"));
+  RequestVoice();
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  const auto allocations = worker_allocations_.load();
+  bool complete = false;
+  IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+      model_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &complete));
+  EXPECT_FALSE(complete);
+  EXPECT_EQ(worker_allocations_.load(), allocations);
+  IREE_ASSERT_OK(Resolve(false, LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  EXPECT_GT(worker_allocations_.load(), allocations);
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(CheckChoice({1, 1, 1, 1}));
+
+  // Reusing the same specialization has no compiler borrower to admit.
+  ASSERT_NO_FATAL_FAILURE(PrepareChoice(R"({"model":"fixture","input":"a"})"));
+  RequestVoice();
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+      model_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &complete));
+  EXPECT_TRUE(complete);
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(CheckChoice({1, 1, 1, 1}));
 }
 
 TEST_P(RequestChoiceTest, CapturedGenerationSurvivesReplacementAndRemoval) {
@@ -905,8 +971,8 @@ TEST_P(RequestChoiceTest, CapturedGenerationSurvivesReplacementAndRemoval) {
     holding_ = true;
   }
   bool complete = false;
-  IREE_ASSERT_OK(
-      loom_serve_finite_model_advance_batch(model_, false, &complete));
+  IREE_ASSERT_OK(loom_serve_finite_model_advance_batch(
+      model_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &complete));
   EXPECT_FALSE(complete);
   {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -932,9 +998,12 @@ TEST_P(RequestChoiceTest, FailedCompilationReleasesChoiceAndKeepsSourceIndex) {
     ASSERT_NO_FATAL_FAILURE(
         PrepareChoice(R"({"model":"fixture","input":"a"})"));
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Resolve());
+    RequestVoice();
+    EXPECT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
     loom_serve_finite_model_release_batch(model_);
     ReleaseInputs();
     batch_active_ = false;
+    loom_serve_execution_permit_complete(&peer_);
     ASSERT_NO_FATAL_FAILURE(RunChoice(R"({"model":"fixture","input":"bbb"})",
                                       i != 0, {6, 3, 2, 1}));
   }
