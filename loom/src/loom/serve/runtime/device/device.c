@@ -244,7 +244,8 @@ iree_status_t loom_serve_device_group_allocate(
     group->devices[i].owner = group;
     group->devices[i].execution_resources = UINT64_C(1) << (i + 1);
     if (options[i].driver == loom_serve_host_task_driver(host)) {
-      group->devices[i].execution_resources |= UINT64_C(1);
+      group->devices[i].execution_resources |=
+          LOOM_SERVE_EXECUTION_RESOURCE_HOST;
     }
   }
   status = loom_serve_execution_scheduler_allocate(

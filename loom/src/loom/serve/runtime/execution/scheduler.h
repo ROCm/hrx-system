@@ -22,6 +22,10 @@ typedef enum loom_serve_execution_qos_e {
 // denotes an actual bound resource, never a queue or model registration.
 typedef uint64_t loom_serve_execution_resources_t;
 
+// The application binding reserves resource zero for its shared host executor.
+// Device resources occupy the remaining bits; a task device also uses this bit.
+#define LOOM_SERVE_EXECUTION_RESOURCE_HOST UINT64_C(1)
+
 typedef enum loom_serve_execution_coexistence_e {
   // Different classes take separate turns across this entire scope.
   LOOM_SERVE_EXECUTION_COEXISTENCE_EXCLUDE = 0,
@@ -106,10 +110,12 @@ typedef enum loom_serve_execution_permit_phase_e {
   LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED,
 } loom_serve_execution_permit_phase_t;
 
-// Stable model-owned record, retained through actual native retirement. Each
-// accepted unit claims all its bound resources atomically. Preparation,
+// Stable operation-owner record, retained through actual borrower retirement.
+// Each accepted unit claims all its bound resources atomically. Preparation,
 // execution, and retirement keep their actual ownership; this object owns no
-// plan, callback, or buffer. NULL permits explicitly bypass coordination.
+// plan, callback, or buffer. Native claims belong to models, finite host claims
+// to the owner joining task release. NULL permits explicitly bypass
+// coordination.
 struct loom_serve_execution_permit_t {
   // Borrowed application owner through withdrawal or actual model retirement.
   loom_serve_execution_scheduler_t* scheduler;
@@ -153,8 +159,8 @@ bool loom_serve_execution_is_preempted(
 bool loom_serve_execution_permit_try_acquire(
     loom_serve_execution_permit_t* permit);
 
-// Releases ACCEPTED permission after successful native readiness, before
-// subsequent CPU publication. Failure notification alone cannot release it.
+// Releases ACCEPTED permission after successful native readiness or final host
+// task release. A failed native notification alone cannot release its claim.
 void loom_serve_execution_permit_complete(
     loom_serve_execution_permit_t* permit);
 
@@ -162,8 +168,8 @@ void loom_serve_execution_permit_complete(
 // interest cannot revoke a native loan. The source separately releases plans.
 void loom_serve_execution_permit_cancel(loom_serve_execution_permit_t* permit);
 
-// Detaches final model storage after actual native retirement. Only the model
-// owner may discharge an accepted claim here; service destruction cannot.
+// Detaches final storage after actual borrower retirement. Only the model owner
+// may discharge native claims here; service destruction cannot.
 void loom_serve_execution_permit_deinitialize(
     loom_serve_execution_permit_t* permit);
 

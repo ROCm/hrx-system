@@ -1021,6 +1021,108 @@ TEST_P(SourceSpeechServiceTest,
 }
 
 TEST_P(SourceSpeechServiceTest,
+       ColdPreparationWaitsForHostAdmissionAndCanBeCancelled) {
+  ASSERT_NO_FATAL_FAILURE(StartManual());
+  auto& peer = blockers_[0];
+  loom_serve_execution_permit_initialize(
+      scheduler_, LOOM_SERVE_EXECUTION_RESOURCE_HOST, &peer);
+  loom_serve_execution_permit_request(&peer, LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer));
+  SpeechStream stream(nullptr, loom_serve_speech_stream_close);
+  IREE_ASSERT_OK(OpenSpeech(service_, IREE_SV("abcdefgh"), IREE_SV("positive"),
+                            3, &stream));
+  bool progress = false;
+  IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+  EXPECT_TRUE(progress);
+  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "waiting_cpu");
+  IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+  EXPECT_FALSE(progress);
+  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "waiting_cpu");
+  EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
+  EXPECT_EQ(loom_serve_speech_stream_peek(stream.get()), nullptr);
+
+  // No task has borrowed the request. Cancellation retires it while the host
+  // peer still owns its claim, with no synthetic preparation result.
+  stream.reset();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->cancelled == 1; }));
+  EXPECT_EQ(peer.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+  EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
+  ReleaseExecution();
+  IREE_ASSERT_OK(
+      OpenSpeech(service_, IREE_SV("hi"), IREE_SV("negative"), 11, &stream));
+  size_t frames = 0;
+  bool complete = false;
+  while (!complete) {
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+      return loom_serve_speech_stream_peek(stream.get()) != nullptr;
+    }));
+    const auto* block = loom_serve_speech_stream_peek(stream.get());
+    EXPECT_EQ(block->position, frames);
+    for (size_t i = 0; i < block->frame_count; ++i) {
+      EXPECT_EQ(iree_unaligned_load_le_f32(block->samples.data + i * 4),
+                -static_cast<float>((frames + i + 11) % 8) * 0.125f);
+    }
+    frames += block->frame_count;
+    complete = block->complete;
+    loom_serve_speech_stream_consume(stream.get());
+  }
+  EXPECT_EQ(frames, 17u);
+}
+
+TEST_P(SourceSpeechServiceTest,
+       VoiceCanFinishDependentBackgroundFeedbackWithoutNewBackgroundWork) {
+  ASSERT_NO_FATAL_FAILURE(StartManual());
+  SpeechStream background(nullptr, loom_serve_speech_stream_close);
+  IREE_ASSERT_OK(OpenSpeech(service_, IREE_SV("abcdefgh"), IREE_SV("positive"),
+                            3, &background));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return generator_.permit->phase == LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED;
+  }));
+  const uint64_t submitted = interface_.telemetry.counters->batches;
+  auto& peer = blockers_[0];
+  loom_serve_execution_permit_initialize(
+      scheduler_, LOOM_SERVE_EXECUTION_RESOURCE_HOST, &peer);
+  loom_serve_execution_permit_request(&peer, LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return generator_.permit->phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE;
+  }));
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer));
+  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "waiting_cpu");
+
+  SpeechStream voice(nullptr, loom_serve_speech_stream_close);
+  IREE_ASSERT_OK(OpenSpeech(service_, IREE_SV("hi"), IREE_SV("negative"), 11,
+                            &voice, LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return loom_serve_speech_stream_peek(voice.get()) != nullptr; }));
+  const auto* block = loom_serve_speech_stream_peek(voice.get());
+  ASSERT_NE(block, nullptr);
+  EXPECT_EQ(block->position, 0u);
+  for (size_t i = 0; i < block->frame_count; ++i) {
+    EXPECT_EQ(iree_unaligned_load_le_f32(block->samples.data + i * 4),
+              -static_cast<float>((i + 11) % 8) * 0.125f);
+  }
+  EXPECT_GT(interface_.telemetry.counters->batches, submitted);
+  EXPECT_EQ(loom_serve_speech_stream_peek(background.get()), nullptr);
+  EXPECT_EQ(peer.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+
+  // With the voice reader stalled, the unrelated realtime peer still excludes
+  // fresh background work. Releasing it permits the original waveform to
+  // resume.
+  ReleaseExecution();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_speech_stream_peek(background.get()) != nullptr;
+  }));
+  block = loom_serve_speech_stream_peek(background.get());
+  EXPECT_EQ(block->position, 0u);
+  for (size_t i = 0; i < block->frame_count; ++i) {
+    EXPECT_EQ(iree_unaligned_load_le_f32(block->samples.data + i * 4),
+              static_cast<float>((i + 3) % 8) * 0.125f);
+  }
+}
+
+TEST_P(SourceSpeechServiceTest,
        ReturnedVoiceCreditReplacesWaitingBackgroundCohort) {
   ASSERT_NO_FATAL_FAILURE(StartManual());
   SpeechStream background(nullptr, loom_serve_speech_stream_close);
