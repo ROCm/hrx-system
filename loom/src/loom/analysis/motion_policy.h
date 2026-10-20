@@ -46,10 +46,19 @@ bool loom_motion_op_can_relocate_effect_free(const loom_module_t* module,
 bool loom_motion_op_can_rematerialize_effect_free(const loom_module_t* module,
                                                   const loom_op_t* op);
 
+// Returns true when |op| has the effect, identity, ownership, and
+// source-context properties required to execute on additional control paths.
+// The caller must separately prove unconditional or fact-dependent execution
+// safety. Accepting already-loaded |traits| keeps transform scans to one trait
+// query per op.
+bool loom_motion_op_is_speculation_compatible_with_traits(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_trait_flags_t traits);
+
 // Returns true if |op| may unconditionally execute on additional control
 // paths under its current effective |traits|. Accepting the already-loaded
 // traits keeps hot transform scans to one cached trait query per operation.
-// Fact-dependent speculation requires the full motion analysis.
+// Fact-dependent speculation requires a separate fact-aware proof.
 bool loom_motion_op_can_speculate_with_traits(const loom_module_t* module,
                                               const loom_op_t* op,
                                               loom_trait_flags_t traits);

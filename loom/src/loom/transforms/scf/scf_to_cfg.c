@@ -549,26 +549,6 @@ static bool loom_scf_to_cfg_integer_assume_kind(loom_type_t type,
   return false;
 }
 
-static loom_value_facts_t loom_scf_to_cfg_integer_carrier_facts(
-    const loom_scf_to_cfg_state_t* state, loom_type_t type) {
-  const loom_scalar_type_t scalar_type = loom_type_element_type(type);
-  const int32_t carrier_bitwidth = loom_index_target_carrier_bitwidth(
-      &state->fact_table->context, scalar_type);
-  if (carrier_bitwidth > 0 && scalar_type == LOOM_SCALAR_TYPE_INDEX) {
-    return loom_value_facts_make_signed_bit_count_range(carrier_bitwidth);
-  }
-  if (carrier_bitwidth > 0 && carrier_bitwidth < 64 &&
-      scalar_type == LOOM_SCALAR_TYPE_OFFSET) {
-    return loom_value_facts_make_unsigned_bit_count_range(carrier_bitwidth);
-  }
-  int64_t range_lo = 0;
-  int64_t range_hi = 0;
-  if (loom_value_facts_scalar_type_domain(scalar_type, &range_lo, &range_hi)) {
-    return loom_value_facts_make(range_lo, range_hi, 1);
-  }
-  return loom_value_facts_unknown();
-}
-
 static uint16_t loom_scf_to_cfg_integer_refinement_count(
     const loom_scf_to_cfg_state_t* state, loom_value_id_t structured_value,
     loom_value_id_t lowered_value, loom_type_t type, uint16_t position,
@@ -576,7 +556,9 @@ static uint16_t loom_scf_to_cfg_integer_refinement_count(
     uint16_t extra_predicate_count) {
   loom_predicate_t refinements[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
   uint16_t count = loom_value_facts_export_integer_refinements(
-      lowered_value, loom_scf_to_cfg_integer_carrier_facts(state, type),
+      lowered_value,
+      loom_index_integer_carrier_domain_facts(&state->fact_table->context,
+                                              loom_type_element_type(type)),
       loom_value_fact_table_lookup(state->fact_table, structured_value),
       refinements, IREE_ARRAYSIZE(refinements));
   if (uses_index_assume && position == extra_position) {
@@ -716,7 +698,9 @@ static iree_status_t loom_scf_to_cfg_materialize_integer_facts(
 
       loom_predicate_t refinements[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
       uint16_t refinement_count = loom_value_facts_export_integer_refinements(
-          lowered_values[i], loom_scf_to_cfg_integer_carrier_facts(state, type),
+          lowered_values[i],
+          loom_index_integer_carrier_domain_facts(&state->fact_table->context,
+                                                  loom_type_element_type(type)),
           loom_value_fact_table_lookup(state->fact_table, structured_values[i]),
           refinements, IREE_ARRAYSIZE(refinements));
       const uint16_t value_extra_predicate_count =

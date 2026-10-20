@@ -15,6 +15,7 @@ loom_check_test_suite(
   SRCS
     "canonicalize.loom-test"
     "canonicalize_condition_loop.loom-test"
+    "canonicalize_conditioned_select.loom-test"
     "canonicalize_counted_while.loom-test"
     "canonicalize_select.loom-test"
     "canonicalize_select_extensions.loom-test"

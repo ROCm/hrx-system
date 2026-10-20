@@ -120,6 +120,7 @@ loom_generated_cc_library(
     deps = [
         "//loom/src/loom/analysis:availability",
         "//loom/src/loom/analysis:condition_facts",
+        "//loom/src/loom/analysis:execution_condition",
         "//loom/src/loom/analysis:motion_policy",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
@@ -134,6 +135,7 @@ loom_generated_cc_library(
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],

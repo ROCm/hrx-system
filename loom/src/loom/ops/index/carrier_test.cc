@@ -40,6 +40,32 @@ TEST(IndexCarrierTest, DistinguishesTargetlessAndInvalidCarriers) {
       loom_index_target_carrier_bitwidth(&context, LOOM_SCALAR_TYPE_INDEX), -1);
 }
 
+TEST(IndexCarrierTest, DescribesSelectedIntegerCarrierDomains) {
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.snapshot.index_bitwidth = 32;
+  target_facts.storage.snapshot.offset_bitwidth = 32;
+  loom_fact_context_t context = {.target_facts = &target_facts};
+
+  loom_value_facts_t index_facts =
+      loom_index_integer_carrier_domain_facts(&context, LOOM_SCALAR_TYPE_INDEX);
+  EXPECT_EQ(index_facts.range_lo, INT32_MIN);
+  EXPECT_EQ(index_facts.range_hi, INT32_MAX);
+
+  loom_value_facts_t offset_facts = loom_index_integer_carrier_domain_facts(
+      &context, LOOM_SCALAR_TYPE_OFFSET);
+  EXPECT_EQ(offset_facts.range_lo, 0);
+  EXPECT_EQ(offset_facts.range_hi, (int64_t)UINT32_MAX);
+
+  loom_value_facts_t i16_facts =
+      loom_index_integer_carrier_domain_facts(&context, LOOM_SCALAR_TYPE_I16);
+  EXPECT_EQ(i16_facts.range_lo, INT16_MIN);
+  EXPECT_EQ(i16_facts.range_hi, INT16_MAX);
+
+  loom_value_facts_t targetless_index =
+      loom_index_integer_carrier_domain_facts(nullptr, LOOM_SCALAR_TYPE_INDEX);
+  EXPECT_TRUE(loom_value_facts_is_unknown(targetless_index));
+}
+
 TEST(IndexCarrierTest, WrapsOffsetFactsAtSelectedWidth) {
   loom_target_facts_t target_facts = {};
   loom_fact_context_t context = {.target_facts = &target_facts};

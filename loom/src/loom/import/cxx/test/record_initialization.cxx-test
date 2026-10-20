@@ -86,15 +86,11 @@ func.def public @sequence(%count$0: i32) -> (i32, i32, i32, i32) {
   %8 = scalar.andi %count$6, %5 : i32
   %9 = scalar.constant 0 : i32
   %10 = scalar.cmpi ne, %8, %9 : i32
-  %11, %count$12 = scf.if %10 -> (i32, i32) {
-    %346 = scalar.constant 4 : i32
-    %count = scalar.addi %count$0, %346 : i32
-    scf.yield %count, %count : i32, i32
-  } else {
-    %count = scalar.shli %count$6, %5 : i32
-    scf.yield %count, %count : i32, i32
-  }
-  func.return %count$12, %count$6, %11, %count$12 : i32, i32, i32, i32
+  %346 = scalar.constant 4 : i32
+  %count$347 = scalar.addi %count$0, %346 : i32
+  %count$349 = scalar.shli %count$6, %5 : i32
+  %350 = scf.select %10, %count$347, %count$349 : i32
+  func.return %350, %count$6, %350, %350 : i32, i32, i32, i32
 }
 
 func.def public @seed_value() -> (i32) {
@@ -111,8 +107,8 @@ func.def public @synthesized() -> (i32, i32, i32) {
   %count$33 = scalar.addi %count$25, %26 : i32
   %34 = scalar.constant 2 : i32
   %count$35 = scalar.addi %count$25, %34 : i32
-  %350 = scf.select %29, %count$33, %count$35 : i32
-  func.return %350, %350, %350 : i32, i32, i32
+  %352 = scf.select %29, %count$33, %count$35 : i32
+  func.return %352, %352, %352 : i32, i32, i32
 }
 
 func.def public @nested_sequence() -> (i32, i32, i32) {
@@ -130,8 +126,8 @@ func.def public @stored_synthesized_array() -> (i32) {
   %57 = index.constant 24 : offset
   %values_storage = buffer.alloca<private> align(4) %57 : buffer
   %63 = func.call pure @seed_value() : () -> (i32)
-  %369 = index.constant 0 : offset
-  %65 = buffer.view %values_storage[%369] : buffer -> view<1xi32>
+  %371 = index.constant 0 : offset
+  %65 = buffer.view %values_storage[%371] : buffer -> view<1xi32>
   view.store<volatile> %63, %65[0] : i32, view<1xi32>
   %count$72 = view.load<volatile> %65[0] : view<1xi32> -> i32
   %73 = scalar.constant 1 : i32
@@ -150,15 +146,15 @@ func.def public @stored_synthesized_array() -> (i32) {
     view.store<volatile> %91, %65[0] : i32, view<1xi32>
     scf.yield %91 : i32
   }
-  %367 = index.constant 4 : offset
-  %93 = buffer.view %values_storage[%367] : buffer -> view<1xi32>
+  %369 = index.constant 4 : offset
+  %93 = buffer.view %values_storage[%369] : buffer -> view<1xi32>
   view.store<volatile> %77, %93[0] : i32, view<1xi32>
   %count$100 = view.load<volatile> %65[0] : view<1xi32> -> i32
-  %365 = index.constant 8 : offset
-  %102 = buffer.view %values_storage[%365] : buffer -> view<1xi32>
+  %367 = index.constant 8 : offset
+  %102 = buffer.view %values_storage[%367] : buffer -> view<1xi32>
   view.store<volatile> %count$100, %102[0] : i32, view<1xi32>
-  %364 = index.constant 12 : offset
-  %109 = buffer.view %values_storage[%364] : buffer -> view<1xi32>
+  %366 = index.constant 12 : offset
+  %109 = buffer.view %values_storage[%366] : buffer -> view<1xi32>
   view.store<volatile> %63, %109[0] : i32, view<1xi32>
   %count$116 = view.load<volatile> %109[0] : view<1xi32> -> i32
   %118 = scalar.andi %count$116, %73 : i32
@@ -175,12 +171,12 @@ func.def public @stored_synthesized_array() -> (i32) {
     view.store<volatile> %135, %109[0] : i32, view<1xi32>
     scf.yield %135 : i32
   }
-  %362 = index.constant 16 : offset
-  %137 = buffer.view %values_storage[%362] : buffer -> view<1xi32>
+  %364 = index.constant 16 : offset
+  %137 = buffer.view %values_storage[%364] : buffer -> view<1xi32>
   view.store<volatile> %121, %137[0] : i32, view<1xi32>
   %count$144 = view.load<volatile> %109[0] : view<1xi32> -> i32
-  %360 = index.constant 20 : offset
-  %146 = buffer.view %values_storage[%360] : buffer -> view<1xi32>
+  %362 = index.constant 20 : offset
+  %146 = buffer.view %values_storage[%362] : buffer -> view<1xi32>
   view.store<volatile> %count$144, %146[0] : i32, view<1xi32>
   %final$159 = view.load<volatile> %102[0] : view<1xi32> -> i32
   %final$172 = view.load<volatile> %146[0] : view<1xi32> -> i32
@@ -192,14 +188,14 @@ func.def public @stored_nested_sequence() -> (i32) {
   %175 = index.constant 12 : offset
   %value_storage = buffer.alloca<private> align(4) %175 : buffer
   %zero$i32 = scalar.constant 0 : i32
-  %380 = index.constant 0 : offset
-  %185 = buffer.view %value_storage[%380] : buffer -> view<1xi32>
+  %382 = index.constant 0 : offset
+  %185 = buffer.view %value_storage[%382] : buffer -> view<1xi32>
   view.store<volatile> %zero$i32, %185[0] : i32, view<1xi32>
-  %379 = index.constant 4 : offset
-  %190 = buffer.view %value_storage[%379] : buffer -> view<1xi32>
+  %381 = index.constant 4 : offset
+  %190 = buffer.view %value_storage[%381] : buffer -> view<1xi32>
   view.store<volatile> %zero$i32, %190[0] : i32, view<1xi32>
-  %378 = index.constant 8 : offset
-  %195 = buffer.view %value_storage[%378] : buffer -> view<1xi32>
+  %380 = index.constant 8 : offset
+  %195 = buffer.view %value_storage[%380] : buffer -> view<1xi32>
   view.store<volatile> %zero$i32, %195[0] : i32, view<1xi32>
   %200 = scalar.constant 2 : i32
   view.store<volatile> %200, %185[0] : i32, view<1xi32>
@@ -222,17 +218,17 @@ func.def public @stored_copy_isolation() -> (i32) {
   %247 = index.constant 16 : offset
   %value_storage = buffer.alloca<private> align(4) %247 : buffer
   %zero$i32 = scalar.constant 0 : i32
-  %395 = index.constant 0 : offset
-  %257 = buffer.view %value_storage[%395] : buffer -> view<1xi32>
+  %397 = index.constant 0 : offset
+  %257 = buffer.view %value_storage[%397] : buffer -> view<1xi32>
   view.store<volatile> %zero$i32, %257[0] : i32, view<1xi32>
-  %394 = index.constant 4 : offset
-  %264 = buffer.view %value_storage[%394] : buffer -> view<1xi32>
+  %396 = index.constant 4 : offset
+  %264 = buffer.view %value_storage[%396] : buffer -> view<1xi32>
   view.store<volatile> %zero$i32, %264[0] : i32, view<1xi32>
-  %393 = index.constant 8 : offset
-  %269 = buffer.view %value_storage[%393] : buffer -> view<1xi32>
+  %395 = index.constant 8 : offset
+  %269 = buffer.view %value_storage[%395] : buffer -> view<1xi32>
   view.store<volatile> %zero$i32, %269[0] : i32, view<1xi32>
-  %392 = index.constant 12 : offset
-  %274 = buffer.view %value_storage[%392] : buffer -> view<1xi32>
+  %394 = index.constant 12 : offset
+  %274 = buffer.view %value_storage[%394] : buffer -> view<1xi32>
   view.store<volatile> %zero$i32, %274[0] : i32, view<1xi32>
   %279 = scalar.constant 2 : i32
   view.store<volatile> %279, %257[0] : i32, view<1xi32>

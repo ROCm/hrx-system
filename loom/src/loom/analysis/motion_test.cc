@@ -219,6 +219,11 @@ TEST_F(MotionTest, LocalClassificationSeparatesEraseRelocateAndSpeculate) {
   EXPECT_FALSE(
       loom_motion_op_can_rematerialize_effect_free(module_, convergent_op));
   EXPECT_FALSE(loom_motion_op_can_rematerialize_effect_free(module_, alloc_op));
+  EXPECT_TRUE(loom_motion_op_is_speculation_compatible_with_traits(
+      module_, add_op, loom_op_effective_traits(module_, add_op)));
+  EXPECT_FALSE(loom_motion_op_is_speculation_compatible_with_traits(
+      module_, convergent_op,
+      loom_op_effective_traits(module_, convergent_op)));
   EXPECT_FALSE(loom_motion_op_can_speculate_with_traits(
       module_, add_op, loom_op_effective_traits(module_, add_op)));
   EXPECT_FALSE(loom_motion_op_can_speculate_with_traits(

@@ -111,13 +111,9 @@ func.def @guarded_identity(%value: i32, %take: i1) -> (i32, i1) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %inner = scalar.shrui %value, %c1 : i32
-  %result = scf.if %take -> (i32) {
-    %bounded = scalar.assume %inner [range(%inner, 0, 10)] : i32
-    %outer = scalar.shrui %bounded, %c1 : i32
-    scf.yield %outer : i32
-  } else {
-    scf.yield %c0 : i32
-  }
+  %outer = scalar.shrui %inner, %c1 : i32
+  %12 = scf.select %take, %outer, %c0 : i32
+  %result = scalar.assume %12 [range(%12, 0, 5)] : i32
   %limit = scalar.constant 10 : i32
   %original = scalar.cmpi slt, %inner, %limit : i32
   func.return %result, %original : i32, i1

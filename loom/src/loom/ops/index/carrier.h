@@ -24,6 +24,13 @@ extern "C" {
 int32_t loom_index_target_carrier_bitwidth(const loom_fact_context_t* context,
                                            loom_scalar_type_t scalar_type);
 
+// Returns the complete integer domain represented by |scalar_type| in the
+// selected target carrier. Fixed-width integers use their declared domain;
+// index and offset use their signed and unsigned target-selected carriers.
+// Targetless or invalid target carriers use the widest source domain.
+loom_value_facts_t loom_index_integer_carrier_domain_facts(
+    const loom_fact_context_t* context, loom_scalar_type_t scalar_type);
+
 // Maps mathematical offset facts into the selected unsigned carrier. A
 // targetless context uses the widest source carrier; an invalid carrier
 // produces the complete representable offset envelope.

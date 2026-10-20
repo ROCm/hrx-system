@@ -101,9 +101,9 @@ bool loom_motion_op_can_rematerialize_effect_free(const loom_module_t* module,
   return !loom_op_requires_source_context(module, op);
 }
 
-bool loom_motion_op_can_speculate_with_traits(const loom_module_t* module,
-                                              const loom_op_t* op,
-                                              loom_trait_flags_t traits) {
+bool loom_motion_op_is_speculation_compatible_with_traits(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_trait_flags_t traits) {
   if (!module || !op || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
     return false;
   }
@@ -111,12 +111,19 @@ bool loom_motion_op_can_speculate_with_traits(const loom_module_t* module,
     return false;
   }
   if (!loom_motion_traits_are_speculation_compatible(traits,
-                                                     /*is_root_op=*/true) ||
-      !loom_traits_are_safe_to_speculate(traits)) {
+                                                     /*is_root_op=*/true)) {
     return false;
   }
   if (loom_op_requires_source_context(module, op)) {
     return false;
   }
   return op->region_count == 0 || !loom_motion_op_has_retained_regions(op);
+}
+
+bool loom_motion_op_can_speculate_with_traits(const loom_module_t* module,
+                                              const loom_op_t* op,
+                                              loom_trait_flags_t traits) {
+  return loom_motion_op_is_speculation_compatible_with_traits(module, op,
+                                                              traits) &&
+         loom_traits_are_safe_to_speculate(traits);
 }

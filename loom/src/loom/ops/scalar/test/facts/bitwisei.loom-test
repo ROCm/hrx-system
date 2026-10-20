@@ -316,13 +316,9 @@ func.def @guarded_first_set_bit(%mask: i32) -> (i32, i1) {
 func.def @guarded_first_set_bit(%mask: i32) -> (i32, i1) {
   %c0 = scalar.constant 0 : i32
   %has_bit = scalar.cmpi ne, %mask, %c0 : i32
-  %lane = scf.if %has_bit -> (i32) {
-    %9 = scalar.assume %mask [ne(%mask, 0)] : i32
-    %first = scalar.cttzi %9 : i32
-    scf.yield %first : i32
-  } else {
-    scf.yield %c0 : i32
-  }
+  %first = scalar.cttzi %mask : i32
+  %10 = scf.select %has_bit, %first, %c0 : i32
+  %lane = scalar.assume %10 [range(%10, 0, 31)] : i32
   %bounded = scalar.constant true : i1
   func.return %lane, %bounded : i32, i1
 }

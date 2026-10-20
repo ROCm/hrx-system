@@ -142,8 +142,9 @@ CHECK-NOT: *scf.select*
 
 // RUN: pass canonicalize,canonicalize
 
-// Speculation must retain the branch when stripping its assumption would
-// weaken facts already published for the result.
+// Speculation can strip the branch-local assumption when it materializes the
+// structured result's range on the selected value. Downstream consumers retain
+// the proof that the bit position is bounded by the integer width.
 func.def @guarded_bit_count_preserves_result_facts(%condition: i1, %mask: i32) -> (i32, i1) {
   %c0 = scalar.constant 0 : i32
   %width = scalar.constant 32 : i32
@@ -161,13 +162,9 @@ func.def @guarded_bit_count_preserves_result_facts(%condition: i1, %mask: i32) -
 // ----
 func.def @guarded_bit_count_preserves_result_facts(%condition: i1, %mask: i32) -> (i32, i1) {
   %c0 = scalar.constant 0 : i32
-  %lane = scf.if %condition -> (i32) {
-    %nonzero = scalar.assume %mask [ne(%mask, 0)] : i32
-    %first = scalar.cttzi %nonzero : i32
-    scf.yield %first : i32
-  } else {
-    scf.yield %c0 : i32
-  }
+  %first = scalar.cttzi %mask : i32
+  %11 = scf.select %condition, %first, %c0 : i32
+  %lane = scalar.assume %11 [range(%11, 0, 31)] : i32
   %bounded = scalar.constant true : i1
   func.return %lane, %bounded : i32, i1
 }

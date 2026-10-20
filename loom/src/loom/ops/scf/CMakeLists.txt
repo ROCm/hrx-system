@@ -129,6 +129,7 @@ loom_generated_cc_library(
     iree::base::internal::arena
     loom::analysis::availability
     loom::analysis::condition_facts
+    loom::analysis::execution_condition
     loom::analysis::motion_policy
     loom::error::emitter
     loom::error::error_defs
@@ -143,6 +144,7 @@ loom_generated_cc_library(
     loom::rewrite::remap
     loom::rewrite::rewriter
     loom::util::fact_table
+    loom::util::predicate_facts
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
