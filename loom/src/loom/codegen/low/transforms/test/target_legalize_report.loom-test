@@ -289,7 +289,8 @@ CHECK: COMPILE-REPORT: target_legalization[*] function=cast_reference_domains so
 test.target<low_core> @test_target
 
 // The scalar operations remain outside the applicable reference domains. The
-// vector casts contribute rows and reference policy records their scalarization.
+// vector casts contribute rows while preserving width boundaries until final
+// reference legalization.
 func.def target(@test_target) @cast_reference_domains(%left: i32, %right: i32, %wide_left: i64, %wide_right: i64, %condition: i1, %other_condition: i1, %bytes: vector<4xi8>, %halfwords: vector<4xi16>) -> (i32, i64, i1, vector<4xi32>, vector<4xi32>) {
   %sum = scalar.addi %left, %right : i32
   %wide_sum = scalar.addi %wide_left, %wide_right : i64
@@ -301,9 +302,9 @@ func.def target(@test_target) @cast_reference_domains(%left: i32, %right: i32, %
 
 // ----
 CHECK: COMPILE-REPORT: summary artifact=none status=OK *
-CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=2 scalarized=2 target_rewritten=0 reference_rewritten=2 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=2 *
-CHECK: COMPILE-REPORT: target_legalization[*] function=cast_reference_domains source_op=vector.extsi mode=eager policy=reference-only action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference * scalarized=true *
-CHECK: COMPILE-REPORT: target_legalization[*] function=cast_reference_domains source_op=vector.extui mode=eager policy=reference-only action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference * scalarized=true *
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=0 scalarized=0 target_rewritten=0 reference_rewritten=0 deferred=2 invalid_ir=0 unsupported=0 unhandled=0 rows=2 *
+CHECK: COMPILE-REPORT: target_legalization[*] function=cast_reference_domains source_op=vector.extsi mode=eager policy=reference-only action=deferred outcome=deferred contract=unhandled legalizer=vector strategy=reference * scalarized=false *
+CHECK: COMPILE-REPORT: target_legalization[*] function=cast_reference_domains source_op=vector.extui mode=eager policy=reference-only action=deferred outcome=deferred contract=unhandled legalizer=vector strategy=reference * scalarized=false *
 
 // ====
 // RUN: with-checks compile-report target-legalize{mode=complete}

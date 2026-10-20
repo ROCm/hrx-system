@@ -279,7 +279,7 @@ def _boolean_constant_rule(row: BooleanConstant) -> DescriptorRule:
 
 
 def _float_payload_constant_rule(
-    source_types: tuple[str, ...], carrier_suffix: str
+    source_op: Op, result_pattern: TypePattern, carrier_suffix: str
 ) -> DescriptorRule:
     # Raw FP8 payloads span 0..255, beyond the signed-i8 constant immediate.
     # An i32 literal followed by integer narrowing preserves every payload bit.
@@ -304,11 +304,11 @@ def _float_payload_constant_rule(
             )
         )
     return DescriptorRule(
-        source_op=scalar_conversion.scalar_constant,
+        source_op=source_op,
         descriptor=emits[-1].descriptor,
         guards=(
             Guard.attr_kind("value", "f64"),
-            Guard.value_type("result", Scalar(source_types)),
+            Guard.value_type("result", result_pattern),
             Guard.value_exact_float("result"),
             *_feature_guards(*(step.descriptor for step in emits)),
         ),
@@ -325,8 +325,14 @@ def _scalar_constant_rules() -> tuple[DescriptorRule, ...]:
         )
         + tuple(_float_constant_rule(scalar) for scalar in FLOAT_CONSTANT_TYPES)
         + (
-            _float_payload_constant_rule(("f8E4M3", "f8E5M2"), "i8"),
-            _float_payload_constant_rule(("bf16",), "i32"),
+            _float_payload_constant_rule(
+                scalar_conversion.scalar_constant,
+                Scalar(("f8E4M3", "f8E5M2")),
+                "i8",
+            ),
+            _float_payload_constant_rule(
+                scalar_conversion.scalar_constant, Scalar("bf16"), "i32"
+            ),
         )
     )
 
@@ -1366,6 +1372,15 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *bit_count_rules(),
         *rotation_rules(),
         *SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
+        # Singleton vectors use the scalar physical carrier. Native BF16 rows
+        # precede these software alternatives just as for scalar constants.
+        _float_payload_constant_rule(
+            vector.vector_constant, Vector(("f8E4M3", "f8E5M2"), lanes=1), "i8"
+        ),
+        _float_payload_constant_rule(
+            vector.vector_constant, Vector("bf16", lanes=1), "i32"
+        ),
+        _select_rule(Vector("bf16", lanes=1), "spirv.op_select.i32"),
         *SPIRV_ORDINARY_VECTOR_ALU_CONTRACT_CASES,
         *_compare_rules(),
         *_select_rules(),

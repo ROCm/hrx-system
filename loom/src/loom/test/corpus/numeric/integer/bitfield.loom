@@ -124,3 +124,144 @@ check.scenario @bitfield_values {
   }
   check.return
 }
+
+// Vector extraction crosses every integer carrier width and both extension
+// kinds. Results are widened only after the declared result type is observed.
+func.def @vector_bitfield_extractions(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<2xi64>
+  %outputs = buffer.view %output[%base] : buffer -> view<24xi64>
+  %wide = vector.load %inputs[0] : view<2xi64> -> vector<2xi64>
+  %predicates = vector.trunci %wide : vector<2xi64> to vector<2xi1>
+  %bytes = vector.trunci %wide : vector<2xi64> to vector<2xi8>
+  %halfwords = vector.trunci %wide : vector<2xi64> to vector<2xi16>
+  %words = vector.trunci %wide : vector<2xi64> to vector<2xi32>
+
+  %boolean_signed = vector.bitfield.extracts %predicates {offset = 0, width = 1} : vector<2xi1> -> vector<2xi64>
+  %boolean_unsigned = vector.bitfield.extractu %predicates {offset = 0, width = 1} : vector<2xi1> -> vector<2xi64>
+  vector.store %boolean_signed, %outputs[0] : vector<2xi64>, view<24xi64>
+  vector.store %boolean_unsigned, %outputs[2] : vector<2xi64>, view<24xi64>
+
+  %byte_signed = vector.bitfield.extracts %bytes {offset = 2, width = 3} : vector<2xi8> -> vector<2xi64>
+  %byte_unsigned = vector.bitfield.extractu %bytes {offset = 2, width = 3} : vector<2xi8> -> vector<2xi64>
+  vector.store %byte_signed, %outputs[4] : vector<2xi64>, view<24xi64>
+  vector.store %byte_unsigned, %outputs[6] : vector<2xi64>, view<24xi64>
+
+  %halfword_signed = vector.bitfield.extracts %halfwords {offset = 7, width = 9} : vector<2xi16> -> vector<2xi16>
+  %halfword_unsigned = vector.bitfield.extractu %halfwords {offset = 7, width = 9} : vector<2xi16> -> vector<2xi16>
+  %halfword_signed_wide = vector.extsi %halfword_signed : vector<2xi16> to vector<2xi64>
+  %halfword_unsigned_wide = vector.extsi %halfword_unsigned : vector<2xi16> to vector<2xi64>
+  vector.store %halfword_signed_wide, %outputs[8] : vector<2xi64>, view<24xi64>
+  vector.store %halfword_unsigned_wide, %outputs[10] : vector<2xi64>, view<24xi64>
+
+  %word_signed = vector.bitfield.extracts %words {offset = 13, width = 11} : vector<2xi32> -> vector<2xi16>
+  %word_unsigned = vector.bitfield.extractu %words {offset = 13, width = 11} : vector<2xi32> -> vector<2xi16>
+  %word_signed_wide = vector.extsi %word_signed : vector<2xi16> to vector<2xi64>
+  %word_unsigned_wide = vector.extsi %word_unsigned : vector<2xi16> to vector<2xi64>
+  vector.store %word_signed_wide, %outputs[12] : vector<2xi64>, view<24xi64>
+  vector.store %word_unsigned_wide, %outputs[14] : vector<2xi64>, view<24xi64>
+
+  %wide_signed = vector.bitfield.extracts %wide {offset = 33, width = 31} : vector<2xi64> -> vector<2xi64>
+  %wide_unsigned = vector.bitfield.extractu %wide {offset = 33, width = 31} : vector<2xi64> -> vector<2xi64>
+  vector.store %wide_signed, %outputs[16] : vector<2xi64>, view<24xi64>
+  vector.store %wide_unsigned, %outputs[18] : vector<2xi64>, view<24xi64>
+
+  %identity = vector.bitfield.extractu %wide {offset = 0, width = 64} : vector<2xi64> -> vector<2xi64>
+  %high_predicate = vector.bitfield.extracts %wide {offset = 63, width = 1} : vector<2xi64> -> vector<2xi1>
+  %high_bit = vector.extui %high_predicate : vector<2xi1> to vector<2xi64>
+  vector.store %identity, %outputs[20] : vector<2xi64>, view<24xi64>
+  vector.store %high_bit, %outputs[22] : vector<2xi64>, view<24xi64>
+  func.return
+}
+
+// The oracle keeps unsigned fields in i64 and forms signed values by toggling
+// and subtracting the field sign bit. It uses neither extraction nor casts.
+func.def @vector_bitfield_extractions_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<2xi64>
+  %outputs = buffer.view %output[%base] : buffer -> view<12x2xi64>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c0_i64 = scalar.constant 0 : i64
+  %boolean_mask = scalar.constant 1 : i64
+  %byte_offset = scalar.constant 2 : i64
+  %byte_mask = scalar.constant 7 : i64
+  %byte_sign = scalar.constant 4 : i64
+  %halfword_offset = scalar.constant 7 : i64
+  %halfword_mask = scalar.constant 511 : i64
+  %halfword_sign = scalar.constant 256 : i64
+  %word_offset = scalar.constant 13 : i64
+  %word_mask = scalar.constant 2047 : i64
+  %word_sign = scalar.constant 1024 : i64
+  %wide_offset = scalar.constant 33 : i64
+  %wide_sign = scalar.constant 1073741824 : i64
+  %sign_offset = scalar.constant 63 : i64
+  scf.for %lane = [%c0 to %c2 step %c1] {
+    %value = view.load %inputs[%lane] : view<2xi64> -> i64
+    %boolean_unsigned = scalar.andi %value, %boolean_mask : i64
+    %boolean_signed = scalar.subi %c0_i64, %boolean_unsigned : i64
+    view.store %boolean_signed, %outputs[0, %lane] : i64, view<12x2xi64>
+    view.store %boolean_unsigned, %outputs[1, %lane] : i64, view<12x2xi64>
+    %byte_shifted = scalar.shrui %value, %byte_offset : i64
+    %byte_unsigned = scalar.andi %byte_shifted, %byte_mask : i64
+    %byte_flipped = scalar.xori %byte_unsigned, %byte_sign : i64
+    %byte_signed = scalar.subi %byte_flipped, %byte_sign : i64
+    view.store %byte_signed, %outputs[2, %lane] : i64, view<12x2xi64>
+    view.store %byte_unsigned, %outputs[3, %lane] : i64, view<12x2xi64>
+    %halfword_shifted = scalar.shrui %value, %halfword_offset : i64
+    %halfword_unsigned = scalar.andi %halfword_shifted, %halfword_mask : i64
+    %halfword_flipped = scalar.xori %halfword_unsigned, %halfword_sign : i64
+    %halfword_signed = scalar.subi %halfword_flipped, %halfword_sign : i64
+    view.store %halfword_signed, %outputs[4, %lane] : i64, view<12x2xi64>
+    view.store %halfword_unsigned, %outputs[5, %lane] : i64, view<12x2xi64>
+    %word_shifted = scalar.shrui %value, %word_offset : i64
+    %word_unsigned = scalar.andi %word_shifted, %word_mask : i64
+    %word_flipped = scalar.xori %word_unsigned, %word_sign : i64
+    %word_signed = scalar.subi %word_flipped, %word_sign : i64
+    view.store %word_signed, %outputs[6, %lane] : i64, view<12x2xi64>
+    view.store %word_unsigned, %outputs[7, %lane] : i64, view<12x2xi64>
+    %wide_unsigned = scalar.shrui %value, %wide_offset : i64
+    %wide_flipped = scalar.xori %wide_unsigned, %wide_sign : i64
+    %wide_signed = scalar.subi %wide_flipped, %wide_sign : i64
+    view.store %wide_signed, %outputs[8, %lane] : i64, view<12x2xi64>
+    view.store %wide_unsigned, %outputs[9, %lane] : i64, view<12x2xi64>
+    %high_bit = scalar.shrui %value, %sign_offset : i64
+    view.store %value, %outputs[10, %lane] : i64, view<12x2xi64>
+    view.store %high_bit, %outputs[11, %lane] : i64, view<12x2xi64>
+  }
+  func.return
+}
+
+func.def @vector_bitfield_inputs(%trial: index, %output: buffer) {
+  %base = index.constant 0 : offset
+  %outputs = buffer.view %output[%base] : buffer -> view<2xi64>
+  %position = index.cast %trial : index to i64
+  %c1 = scalar.constant 1 : i64
+  %all_bits = scalar.constant -1 : i64
+  %power = scalar.shli %c1, %position : i64
+  %complement = scalar.xori %power, %all_bits : i64
+  view.store %power, %outputs[0] : i64, view<2xi64>
+  view.store %complement, %outputs[1] : i64, view<2xi64>
+  func.return
+}
+
+check.scenario @vector_bitfield_extraction_values {
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<2xi64>
+    check.generate<@vector_bitfield_inputs>(%trial, %input) : (index, tensor<2xi64>) -> ()
+    %output = check.generate.fill value(-1) : tensor<24xi64>
+    check.compare<@vector_bitfield_extractions, @vector_bitfield_extractions_oracle>(%input, %output) : (tensor<2xi64>, tensor<24xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<2xi64>
+    %output = check.generate.fill value(-1) : tensor<24xi64>
+    check.compare<@vector_bitfield_extractions, @vector_bitfield_extractions_oracle>(%input, %output) : (tensor<2xi64>, tensor<24xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi64>
+    }
+  }
+  check.return
+}

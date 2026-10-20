@@ -14,7 +14,9 @@ loom_check_test_suite(
     test
   SRCS
     "bank_sroa.loom-test"
+    "bitwise_legalization.loom-test"
     "dynamic_extract.loom-test"
+    "integer_cast.loom-test"
     "mask_range_relations.loom-test"
     "memory_footprint.loom-test"
     "memory_footprint_affine_preimage.loom-test"

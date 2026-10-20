@@ -1,6 +1,6 @@
-// RUN: with-checks emit source-low target=vm:core output=low
+// RUN: emit source-low target=vm:core output=low
 
-// Packed byte accesses retain their byte alignment when split into words.
+// Byte-aligned vector accesses retain every byte offset through scalarization.
 kernel.def @byte_origin() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -9,22 +9,33 @@ kernel.def @byte_origin() {
   %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
   %start = index.constant 1 : offset
   %c0 = index.constant 0 : offset
-  %source_view = buffer.view %source[%start] : buffer -> view<32xi8>
-  %value = vector.load %source_view[0] : view<32xi8> -> vector<32xi8>
-  %destination_view = buffer.view %destination[%c0] : buffer -> view<32xi8>
-  vector.store %value, %destination_view[0] : vector<32xi8>, view<32xi8>
+  %source_view = buffer.view %source[%start] : buffer -> view<5xi8>
+  %value = vector.load %source_view[0] : view<5xi8> -> vector<5xi8>
+  %destination_view = buffer.view %destination[%c0] : buffer -> view<5xi8>
+  vector.store %value, %destination_view[0] : vector<5xi8>, view<5xi8>
   kernel.return
 }
 
 // ----
-CHECK: %110 = constant.i64 1
-CHECK: %111 = buffer.load %source_view, %110, %110, 0, "i8.x1" : reg<vm.value : i8>
-CHECK: %172 = constant.i64 32
-CHECK: %173 = buffer.load %source_view, %172, %172, 0, "i8.x1" : reg<vm.value : i8>
-CHECK: %174 = constant.i64 0
-CHECK: buffer.store %destination_view, %174, %174, %111, 0, "i8.x1"
-CHECK: %170 = constant.i64 31
-CHECK: buffer.store %destination_view, %170, %170, %173, 0, "i8.x1"
+low.kernel.def target<vm.core> workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @byte_origin(%source_view: reg<vm.ref : buffer>, %destination_view: reg<vm.ref : buffer>) asm {
+  %24 = constant.i64 1
+  %25 = buffer.load %source_view, %24, %24, 0, "i8.x1" : reg<vm.value : i8>
+  %26 = constant.i64 2
+  %27 = buffer.load %source_view, %26, %26, 0, "i8.x1" : reg<vm.value : i8>
+  %28 = constant.i64 3
+  %29 = buffer.load %source_view, %28, %28, 0, "i8.x1" : reg<vm.value : i8>
+  %30 = constant.i64 4
+  %31 = buffer.load %source_view, %30, %30, 0, "i8.x1" : reg<vm.value : i8>
+  %32 = constant.i64 5
+  %33 = buffer.load %source_view, %32, %32, 0, "i8.x1" : reg<vm.value : i8>
+  %34 = constant.i64 0
+  buffer.store %destination_view, %34, %34, %25, 0, "i8.x1"
+  buffer.store %destination_view, %24, %24, %27, 0, "i8.x1"
+  buffer.store %destination_view, %26, %26, %29, 0, "i8.x1"
+  buffer.store %destination_view, %28, %28, %31, 0, "i8.x1"
+  buffer.store %destination_view, %30, %30, %33, 0, "i8.x1"
+  return
+}
 
 // ====
 
@@ -37,22 +48,27 @@ kernel.def @halfword_origin() {
   %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
   %start = index.constant 2 : offset
   %c0 = index.constant 0 : offset
-  %source_view = buffer.view %source[%start] : buffer -> view<16xi16>
-  %value = vector.load %source_view[0] : view<16xi16> -> vector<16xi16>
-  %destination_view = buffer.view %destination[%c0] : buffer -> view<16xi16>
-  vector.store %value, %destination_view[0] : vector<16xi16>, view<16xi16>
+  %source_view = buffer.view %source[%start] : buffer -> view<3xi16>
+  %value = vector.load %source_view[0] : view<3xi16> -> vector<3xi16>
+  %destination_view = buffer.view %destination[%c0] : buffer -> view<3xi16>
+  vector.store %value, %destination_view[0] : vector<3xi16>, view<3xi16>
   kernel.return
 }
 
 // ----
-CHECK: %62 = constant.i64 2
-CHECK: %63 = buffer.load %source_view, %62, %62, 0, "i16.x1" : reg<vm.value : i16>
-CHECK: %92 = constant.i64 32
-CHECK: %93 = buffer.load %source_view, %92, %92, 0, "i16.x1" : reg<vm.value : i16>
-CHECK: %94 = constant.i64 0
-CHECK: buffer.store %destination_view, %94, %94, %63, 0, "i16.x1"
-CHECK: %90 = constant.i64 30
-CHECK: buffer.store %destination_view, %90, %90, %93, 0, "i16.x1"
+low.kernel.def target<vm.core> workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @halfword_origin(%source_view: reg<vm.ref : buffer>, %destination_view: reg<vm.ref : buffer>) asm {
+  %20 = constant.i64 2
+  %21 = buffer.load %source_view, %20, %20, 0, "i16.x1" : reg<vm.value : i16>
+  %22 = constant.i64 4
+  %23 = buffer.load %source_view, %22, %22, 0, "i16.x1" : reg<vm.value : i16>
+  %24 = constant.i64 6
+  %25 = buffer.load %source_view, %24, %24, 0, "i16.x1" : reg<vm.value : i16>
+  %26 = constant.i64 0
+  buffer.store %destination_view, %26, %26, %21, 0, "i16.x1"
+  buffer.store %destination_view, %20, %20, %23, 0, "i16.x1"
+  buffer.store %destination_view, %22, %22, %25, 0, "i16.x1"
+  return
+}
 
 // ====
 
@@ -65,19 +81,33 @@ kernel.def @word_origin() {
   %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
   %start = index.constant 4 : offset
   %c0 = index.constant 0 : offset
-  %source_view = buffer.view %source[%start] : buffer -> view<32xi8>
-  %value = vector.load %source_view[0] : view<32xi8> -> vector<32xi8>
-  %destination_view = buffer.view %destination[%c0] : buffer -> view<32xi8>
-  vector.store %value, %destination_view[0] : vector<32xi8>, view<32xi8>
+  %source_view = buffer.view %source[%start] : buffer -> view<5xi8>
+  %value = vector.load %source_view[0] : view<5xi8> -> vector<5xi8>
+  %destination_view = buffer.view %destination[%c0] : buffer -> view<5xi8>
+  vector.store %value, %destination_view[0] : vector<5xi8>, view<5xi8>
   kernel.return
 }
 
 // ----
-CHECK: %110 = constant.i64 4
-CHECK: %111 = buffer.load %source_view, %110, %110, 0, "i8.x1" : reg<vm.value : i8>
-CHECK: %172 = constant.i64 35
-CHECK: %173 = buffer.load %source_view, %172, %172, 0, "i8.x1" : reg<vm.value : i8>
-CHECK: %174 = constant.i64 0
-CHECK: buffer.store %destination_view, %174, %174, %111, 0, "i8.x1"
-CHECK: %164 = constant.i64 31
-CHECK: buffer.store %destination_view, %164, %164, %173, 0, "i8.x1"
+low.kernel.def target<vm.core> workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @word_origin(%source_view: reg<vm.ref : buffer>, %destination_view: reg<vm.ref : buffer>) asm {
+  %24 = constant.i64 4
+  %25 = buffer.load %source_view, %24, %24, 0, "i8.x1" : reg<vm.value : i8>
+  %26 = constant.i64 5
+  %27 = buffer.load %source_view, %26, %26, 0, "i8.x1" : reg<vm.value : i8>
+  %28 = constant.i64 6
+  %29 = buffer.load %source_view, %28, %28, 0, "i8.x1" : reg<vm.value : i8>
+  %30 = constant.i64 7
+  %31 = buffer.load %source_view, %30, %30, 0, "i8.x1" : reg<vm.value : i8>
+  %32 = constant.i64 8
+  %33 = buffer.load %source_view, %32, %32, 0, "i8.x1" : reg<vm.value : i8>
+  %34 = constant.i64 0
+  buffer.store %destination_view, %34, %34, %25, 0, "i8.x1"
+  %35 = constant.i64 1
+  buffer.store %destination_view, %35, %35, %27, 0, "i8.x1"
+  %36 = constant.i64 2
+  buffer.store %destination_view, %36, %36, %29, 0, "i8.x1"
+  %37 = constant.i64 3
+  buffer.store %destination_view, %37, %37, %31, 0, "i8.x1"
+  buffer.store %destination_view, %24, %24, %33, 0, "i8.x1"
+  return
+}

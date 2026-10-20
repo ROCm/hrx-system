@@ -1338,14 +1338,6 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
         .legalize = loom_amdgpu_legalize_oversized_vector_reduce,
     },
     {
-        .root_kind = LOOM_OP_VECTOR_BITFIELD_EXTRACTU,
-        .legalize = loom_amdgpu_retain_native_vector_op,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_BITFIELD_EXTRACTS,
-        .legalize = loom_amdgpu_retain_native_vector_op,
-    },
-    {
         .root_kind = LOOM_OP_VECTOR_BITFIELD_INSERT,
         .legalize = loom_amdgpu_retain_native_vector_op,
     },

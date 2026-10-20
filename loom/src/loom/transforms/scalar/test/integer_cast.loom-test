@@ -1,0 +1,61 @@
+// RUN: pass combine,target-legalize{mode=eager,policy=reference-only},dce,canonicalize
+
+test.target<low_core> @target
+
+func.def target(@target) @extract_unsigned_same_width(%source: i32) -> (i32) {
+  %intermediate = scalar.trunci %source : i32 to i1
+  %result = scalar.extui %intermediate : i1 to i32
+  func.return %result : i32
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @extract_unsigned_same_width(%source: i32) -> (i32) {
+  %5 = scalar.constant 1 : i32
+  %result = scalar.andi %source, %5 : i32
+  func.return %result : i32
+}
+
+// ====
+
+// The inner cast remains alive for its independent consumer.
+test.target<low_core> @target
+
+func.def target(@target) @retained_truncation(%source: i32) -> (i8, i64) {
+  %intermediate = scalar.trunci %source : i32 to i8
+  %result = scalar.extsi %intermediate : i8 to i64
+  func.return %intermediate, %result : i8, i64
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @retained_truncation(%source: i32) -> (i8, i64) {
+  %intermediate = scalar.trunci %source : i32 to i8
+  %6 = scalar.constant 24 : i32
+  %7 = scalar.shli %source, %6 : i32
+  %8 = scalar.constant 24 : i32
+  %9 = scalar.shrsi %7, %8 : i32
+  %result = scalar.extsi %9 : i32 to i64
+  func.return %intermediate, %result : i8, i64
+}
+
+// ====
+
+// Constant propagation keeps sign fill and zero fill distinct.
+test.target<low_core> @target
+
+func.def target(@target) @constant_sign_boundaries() -> (i32, i32) {
+  %source = scalar.constant true : i1
+  %intermediate = scalar.extsi %source : i1 to i8
+  %unsigned = scalar.extui %intermediate : i8 to i32
+  %signed = scalar.extsi %intermediate : i8 to i32
+  func.return %unsigned, %signed : i32, i32
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @constant_sign_boundaries() -> (i32, i32) {
+  %unsigned = scalar.constant 255 : i32
+  %signed = scalar.constant -1 : i32
+  func.return %unsigned, %signed : i32, i32
+}

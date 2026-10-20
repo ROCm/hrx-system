@@ -276,7 +276,6 @@ loom_corpus_build(
             "numeric/float/trigonometry_f8e4m3.loom",
             "numeric/float/trigonometry_f8e5m2.loom",
             "numeric/float/trigonometry_f32.loom",
-            "numeric/integer/bitfield.loom",
             "numeric/matrix/nvfp4.loom",
             "numeric/vector/address_conversion.loom",
         ],

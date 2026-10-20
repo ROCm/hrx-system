@@ -79,9 +79,9 @@ static bool loom_spirv_source_type_supported(void* user_data,
 }
 
 static bool loom_spirv_bitstream_packet_carrier_supported(
-    void* user_data, const loom_module_t* module,
-    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
-    loom_type_t source_type) {
+    void* user_data, const loom_target_facts_t* target_facts,
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, loom_type_t source_type) {
   (void)user_data;
   (void)module;
   (void)fact_table;
@@ -96,6 +96,14 @@ static bool loom_spirv_bitstream_packet_carrier_supported(
       return true;
     }
     source_type = loom_type_scalar(element_type);
+  } else if (loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_BF16 &&
+             !iree_all_bits_set(loom_target_facts_bundle(target_facts)
+                                    ->config->contract_feature_bits,
+                                LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR)) {
+    // Software BF16 uses scalar i32 payloads. Only native BF16 has a vector
+    // carrier; shared boundary projection splits the software form into
+    // scalars.
+    return false;
   }
   loom_spirv_value_type_t value_type = {0};
   return loom_spirv_value_type_from_loom_type(source_type, &value_type);
@@ -156,21 +164,23 @@ static bool loom_spirv_source_value_fragment(
 }
 
 static bool loom_spirv_source_vector_carrier_supported(
-    void* user_data, const loom_module_t* module,
-    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
-    loom_type_t source_type) {
+    void* user_data, const loom_target_facts_t* target_facts,
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, loom_type_t source_type) {
   loom_vector_fragment_fact_t fragment = {0};
   return (fact_table != NULL && value_id != LOOM_VALUE_ID_INVALID &&
           loom_spirv_source_value_fragment(fact_table, value_id, &fragment)) ||
          loom_spirv_bitstream_packet_carrier_supported(
-             user_data, module, NULL, LOOM_VALUE_ID_INVALID, source_type);
+             user_data, target_facts, module, NULL, LOOM_VALUE_ID_INVALID,
+             source_type);
 }
 
 static bool loom_spirv_source_function_vector_carrier_supported(
-    void* user_data, const loom_module_t* module,
-    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
-    loom_type_t source_type) {
+    void* user_data, const loom_target_facts_t* target_facts,
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, loom_type_t source_type) {
   (void)user_data;
+  (void)target_facts;
   (void)module;
   (void)fact_table;
   (void)value_id;

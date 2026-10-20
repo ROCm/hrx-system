@@ -715,10 +715,11 @@ static const loom_low_lower_function_storage_mapping_t kX86FunctionStorage[] = {
 };
 
 static bool loom_x86_avx2_source_vector_carrier_supported(
-    void* user_data, const loom_module_t* module,
-    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
-    loom_type_t source_type) {
+    void* user_data, const loom_target_facts_t* target_facts,
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, loom_type_t source_type) {
   (void)user_data;
+  (void)target_facts;
   (void)module;
   (void)fact_table;
   (void)value_id;
@@ -728,10 +729,11 @@ static bool loom_x86_avx2_source_vector_carrier_supported(
 }
 
 static bool loom_x86_avx512_source_vector_carrier_supported(
-    void* user_data, const loom_module_t* module,
-    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
-    loom_type_t source_type) {
+    void* user_data, const loom_target_facts_t* target_facts,
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, loom_type_t source_type) {
   (void)user_data;
+  (void)target_facts;
   (void)module;
   (void)fact_table;
   (void)value_id;

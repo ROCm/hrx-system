@@ -1,0 +1,99 @@
+// RUN: pass combine,target-legalize{mode=eager},dce,canonicalize
+
+test.target<low_core> @target
+
+func.def target(@target) @extract_unsigned_same_width(%count: index, %source: vector<[%count]xi32>) -> (vector<[%count]xi32>) {
+  %intermediate = vector.trunci %source : vector<[%count]xi32> to vector<[%count]xi1>
+  %result = vector.extui %intermediate : vector<[%count]xi1> to vector<[%count]xi32>
+  func.return %result : vector<[%count]xi32>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @extract_unsigned_same_width(%count: index, %source: vector<[%count]xi32>) -> (vector<[%count]xi32>) {
+  %6 = vector.constant 31 : vector<[%count]xi32>
+  %7 = vector.shli %source, %6 : vector<[%count]xi32>
+  %8 = vector.constant 31 : vector<[%count]xi32>
+  %result = vector.shrui %7, %8 : vector<[%count]xi32>
+  func.return %result : vector<[%count]xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @extract_signed_same_width(%source: vector<4xi64>) -> (vector<4xi64>) {
+  %intermediate = vector.trunci %source : vector<4xi64> to vector<4xi8>
+  %result = vector.extsi %intermediate : vector<4xi8> to vector<4xi64>
+  func.return %result : vector<4xi64>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @extract_signed_same_width(%source: vector<4xi64>) -> (vector<4xi64>) {
+  %intermediate = vector.trunci %source : vector<4xi64> to vector<4xi8>
+  %result = vector.extsi %intermediate : vector<4xi8> to vector<4xi64>
+  func.return %result : vector<4xi64>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @extract_unsigned_wider_result(%source: vector<4xi16>) -> (vector<4xi64>) {
+  %intermediate = vector.trunci %source : vector<4xi16> to vector<4xi1>
+  %result = vector.extui %intermediate : vector<4xi1> to vector<4xi64>
+  func.return %result : vector<4xi64>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @extract_unsigned_wider_result(%source: vector<4xi16>) -> (vector<4xi64>) {
+  %5 = vector.extui %source : vector<4xi16> to vector<4xi64>
+  %6 = vector.constant 63 : vector<4xi64>
+  %7 = vector.shli %5, %6 : vector<4xi64>
+  %8 = vector.constant 63 : vector<4xi64>
+  %result = vector.shrui %7, %8 : vector<4xi64>
+  func.return %result : vector<4xi64>
+}
+
+// ====
+
+// The inner cast remains alive for its independent consumer.
+test.target<low_core> @target
+
+func.def target(@target) @retained_truncation(%count: index, %source: vector<2x[%count]xi32>) -> (vector<2x[%count]xi1>, vector<2x[%count]xi64>) {
+  %intermediate = vector.trunci %source : vector<2x[%count]xi32> to vector<2x[%count]xi1>
+  %result = vector.extsi %intermediate : vector<2x[%count]xi1> to vector<2x[%count]xi64>
+  func.return %intermediate, %result : vector<2x[%count]xi1>, vector<2x[%count]xi64>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @retained_truncation(%count: index, %source: vector<2x[%count]xi32>) -> (vector<2x[%count]xi1>, vector<2x[%count]xi64>) {
+  %intermediate = vector.trunci %source : vector<2x[%count]xi32> to vector<2x[%count]xi1>
+  %7 = vector.extui %source : vector<2x[%count]xi32> to vector<2x[%count]xi64>
+  %8 = vector.constant 63 : vector<2x[%count]xi64>
+  %9 = vector.shli %7, %8 : vector<2x[%count]xi64>
+  %10 = vector.constant 63 : vector<2x[%count]xi64>
+  %result = vector.shrsi %9, %10 : vector<2x[%count]xi64>
+  func.return %intermediate, %result : vector<2x[%count]xi1>, vector<2x[%count]xi64>
+}
+
+// ====
+
+// Empty vectors fold without introducing scalar lane work.
+test.target<low_core> @target
+
+func.def target(@target) @empty_casts(%source: vector<0xi32>) -> (vector<0xi64>) {
+  %intermediate = vector.trunci %source : vector<0xi32> to vector<0xi8>
+  %result = vector.extsi %intermediate : vector<0xi8> to vector<0xi64>
+  func.return %result : vector<0xi64>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @empty_casts(%source: vector<0xi32>) -> (vector<0xi64>) {
+  %result = vector.empty : vector<0xi64>
+  func.return %result : vector<0xi64>
+}

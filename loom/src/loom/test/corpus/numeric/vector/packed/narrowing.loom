@@ -109,9 +109,14 @@ func.def @odd_width_bitstream(%input: buffer, %output: buffer) {
   %predicate_storage = vector.slice %values[0] : vector<16xi8> -> vector<2xi8>
   %predicates = vector.bitunpacks<1> %predicate_storage : vector<2xi8> -> vector<16xi1>
   %predicate_bytes = vector.extui %predicates : vector<16xi1> to vector<16xi8>
+  // Scalar consumers observe the same bits through the vector lane facts.
+  %low_predicate = vector.extract %predicate_bytes[0] : vector<16xi8> -> i8
+  %high_predicate = vector.extract %predicate_bytes[7] : vector<16xi8> -> i8
   vector.store %packed, %outputs[0] : vector<6xi8>, view<56xi8>
   vector.store %unsigned, %outputs[6] : vector<16xi8>, view<56xi8>
   vector.store %signed, %outputs[22] : vector<16xi8>, view<56xi8>
+  view.store %low_predicate, %outputs[38] : i8, view<56xi8>
+  view.store %high_predicate, %outputs[39] : i8, view<56xi8>
   vector.store %predicate_bytes, %outputs[40] : vector<16xi8>, view<56xi8>
   func.return
 }
@@ -179,6 +184,15 @@ func.def @odd_width_bitstream_oracle(%input: buffer, %output: buffer) {
       view.store %predicate_byte, %outputs[%position] : i8, view<56xi8>
     }
   }
+  %first_input = view.load %inputs[0] : view<16xi8> -> i8
+  %first_word = scalar.extui %first_input : i8 to i32
+  %low_bit = scalar.andi %first_word, %c1 : i32
+  %high_shift = scalar.constant 7 : i32
+  %high_bit = scalar.shrui %first_word, %high_shift : i32
+  %low_predicate = scalar.trunci %low_bit : i32 to i8
+  %high_predicate = scalar.trunci %high_bit : i32 to i8
+  view.store %low_predicate, %outputs[38] : i8, view<56xi8>
+  view.store %high_predicate, %outputs[39] : i8, view<56xi8>
   func.return
 }
 

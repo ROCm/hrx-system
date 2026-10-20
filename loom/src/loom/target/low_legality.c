@@ -571,7 +571,8 @@ static iree_status_t loom_target_low_legality_verify_type(
     }
     if (vector_carrier_supported.fn != NULL &&
         !vector_carrier_supported.fn(
-            vector_carrier_supported.user_data, context->module,
+            vector_carrier_supported.user_data,
+            context->options->environment->target_facts, context->module,
             context->options->environment->fact_table, value_id, type)) {
       return loom_target_low_legality_emit_type_constraint(
           context, op, type, IREE_SV("vector.target_carrier"));

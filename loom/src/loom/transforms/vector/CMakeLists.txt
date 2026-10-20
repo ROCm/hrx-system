@@ -351,11 +351,14 @@ loom_cc_library(
     "memory_legalization.h"
     "target_legalization.h"
   SRCS
+    "bitwise_legalization.c"
+    "bitwise_legalization.h"
     "memory_legalization.c"
     "target_legalization.c"
   DEPS
     ::bitstream_packet_legalization
     ::cast_packet_legalization
+    ::combine_patterns
     ::packet_legalization
     ::reduction_legalization
     ::to_scalar

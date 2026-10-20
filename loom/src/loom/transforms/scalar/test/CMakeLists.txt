@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "integer_cast.loom-test"
     "narrowing.loom-test"
     "narrowing_phases.loom-test"
     "symbolic_comparison.loom-test"

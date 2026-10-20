@@ -12,6 +12,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/transforms/scalar/combine_patterns.h"
 #include "loom/util/numeric_format.h"
 #include "loom/util/predicate_facts.h"
 
@@ -600,6 +601,20 @@ static iree_status_t loom_scalar_legalize_boolean_extension(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
+  // Producer legalization can expose an integer carrier behind the predicate.
+  // Compose it while replacements still enter the legalization worklist.
+  bool composed = false;
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_combine_conversion(op, context->rewriter, true, &composed));
+  if (composed) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+    return iree_ok_status();
+  }
+  // Keep the width boundary until eager producer rewrites have completed.
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
 
   const loom_value_id_t input = loom_op_operands(op)[0];
   const loom_type_t result_type =
@@ -642,6 +657,19 @@ static iree_status_t loom_scalar_legalize_narrow_integer_extension(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
+  // Compose casts exposed by producer legalization before decomposing the
+  // extension into carrier operations that discard the width boundary.
+  bool composed = false;
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_combine_conversion(op, context->rewriter, true, &composed));
+  if (composed) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+    return iree_ok_status();
+  }
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
 
   const bool signed_extension = loom_scalar_extsi_isa(op);
   const loom_value_id_t input = loom_op_operands(op)[0];

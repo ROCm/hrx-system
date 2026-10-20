@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "bitfield_facts.loom-test"
     "block_quant_canonicalize.loom-test"
     "block_quant_samples.loom-test"
     "boolean_extension.loom-test"

@@ -62,6 +62,7 @@ loom_cc_library(
     srcs = ["target_legalization.c"],
     hdrs = ["target_legalization.h"],
     deps = [
+        ":combine_patterns",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",

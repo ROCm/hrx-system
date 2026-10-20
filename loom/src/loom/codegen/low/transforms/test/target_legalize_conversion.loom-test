@@ -58,36 +58,30 @@ func.def target(@test_target) @narrow_integer_double(%flag: i1, %byte: i8, %word
 test.target<low_core> @test_target
 
 func.def target(@test_target) @signed_narrow_integer(%byte: i8, %word: i16) -> (bf16, f16) {
-  %74 = scalar.extui %byte : i8 to i32
-  %75 = scalar.constant 24 : i32
-  %76 = scalar.shli %74, %75 : i32
-  %77 = scalar.shrsi %76, %75 : i32
-  %73 = scalar.sitofp %77 : i32 to f32
-  %bfloat = scalar.fptrunc %73 : f32 to bf16
-  %66 = scalar.extui %word : i16 to i32
-  %67 = scalar.constant 16 : i32
-  %68 = scalar.shli %66, %67 : i32
-  %69 = scalar.shrsi %68, %67 : i32
-  %65 = scalar.sitofp %69 : i32 to f32
+  %68 = scalar.extsi %byte : i8 to i32
+  %69 = scalar.sitofp %68 : i32 to f32
+  %bfloat = scalar.fptrunc %69 : f32 to bf16
+  %64 = scalar.extsi %word : i16 to i32
+  %65 = scalar.sitofp %64 : i32 to f32
   %half = scalar.fptrunc %65 : f32 to f16
   func.return %bfloat, %half : bf16, f16
 }
 
 func.def target(@test_target) @unsigned_narrow_integer(%byte: i8, %word: i16) -> (f16, bf16) {
-  %84 = scalar.extui %byte : i8 to i32
-  %85 = scalar.uitofp %84 : i32 to f32
-  %half = scalar.fptrunc %85 : f32 to f16
-  %80 = scalar.extui %word : i16 to i32
-  %81 = scalar.uitofp %80 : i32 to f32
-  %bfloat = scalar.fptrunc %81 : f32 to bf16
+  %76 = scalar.extui %byte : i8 to i32
+  %77 = scalar.uitofp %76 : i32 to f32
+  %half = scalar.fptrunc %77 : f32 to f16
+  %72 = scalar.extui %word : i16 to i32
+  %73 = scalar.uitofp %72 : i32 to f32
+  %bfloat = scalar.fptrunc %73 : f32 to bf16
   func.return %half, %bfloat : f16, bf16
 }
 
 func.def target(@test_target) @wide_integer_half(%word: i32) -> (f16, f16) {
-  %88 = scalar.sitofp %word : i32 to f32
-  %signed = scalar.fptrunc %88 : f32 to f16
-  %86 = scalar.uitofp %word : i32 to f32
-  %unsigned = scalar.fptrunc %86 : f32 to f16
+  %80 = scalar.sitofp %word : i32 to f32
+  %signed = scalar.fptrunc %80 : f32 to f16
+  %78 = scalar.uitofp %word : i32 to f32
+  %unsigned = scalar.fptrunc %78 : f32 to f16
   func.return %signed, %unsigned : f16, f16
 }
 
@@ -100,14 +94,14 @@ func.def target(@test_target) @single_rounding_required(%word: i32, %wide: i64) 
 }
 
 func.def target(@test_target) @toward_zero(%half: f16, %bfloat: bf16) -> (i8, i16, i32, i64) {
-  %96 = scalar.extf %half : f16 to f32
-  %signed_half = scalar.fptosi %96 : f32 to i8
-  %94 = scalar.extf %half : f16 to f32
-  %unsigned_half = scalar.fptoui %94 : f32 to i16
-  %92 = scalar.extf %bfloat : bf16 to f32
-  %signed_bfloat = scalar.fptosi %92 : f32 to i32
-  %90 = scalar.extf %bfloat : bf16 to f32
-  %unsigned_bfloat = scalar.fptoui %90 : f32 to i64
+  %88 = scalar.extf %half : f16 to f32
+  %signed_half = scalar.fptosi %88 : f32 to i8
+  %86 = scalar.extf %half : f16 to f32
+  %unsigned_half = scalar.fptoui %86 : f32 to i16
+  %84 = scalar.extf %bfloat : bf16 to f32
+  %signed_bfloat = scalar.fptosi %84 : f32 to i32
+  %82 = scalar.extf %bfloat : bf16 to f32
+  %unsigned_bfloat = scalar.fptoui %82 : f32 to i64
   func.return %signed_half, %unsigned_half, %signed_bfloat, %unsigned_bfloat : i8, i16, i32, i64
 }
 
@@ -120,28 +114,18 @@ func.def target(@test_target) @single_precision_unchanged(%integer: i32, %single
 }
 
 func.def target(@test_target) @narrow_integer_double(%flag: i1, %byte: i8, %word: i16) -> (f64, f64, f64, f64, f64, f64) {
-  %121 = scalar.constant -1 : i32
-  %122 = scalar.constant 0 : i32
-  %123 = scf.select %flag, %121, %122 : i32
-  %signed_flag = scalar.sitofp %123 : i32 to f64
-  %116 = scalar.constant 1 : i32
-  %117 = scalar.constant 0 : i32
-  %118 = scf.select %flag, %116, %117 : i32
-  %unsigned_flag = scalar.uitofp %118 : i32 to f64
-  %110 = scalar.extui %byte : i8 to i32
-  %111 = scalar.constant 24 : i32
-  %112 = scalar.shli %110, %111 : i32
-  %113 = scalar.shrsi %112, %111 : i32
-  %signed_byte = scalar.sitofp %113 : i32 to f64
-  %106 = scalar.extui %byte : i8 to i32
-  %unsigned_byte = scalar.uitofp %106 : i32 to f64
-  %102 = scalar.extui %word : i16 to i32
-  %103 = scalar.constant 16 : i32
-  %104 = scalar.shli %102, %103 : i32
-  %105 = scalar.shrsi %104, %103 : i32
-  %signed_word = scalar.sitofp %105 : i32 to f64
-  %98 = scalar.extui %word : i16 to i32
-  %unsigned_word = scalar.uitofp %98 : i32 to f64
+  %100 = scalar.extsi %flag : i1 to i32
+  %signed_flag = scalar.sitofp %100 : i32 to f64
+  %98 = scalar.extui %flag : i1 to i32
+  %unsigned_flag = scalar.uitofp %98 : i32 to f64
+  %96 = scalar.extsi %byte : i8 to i32
+  %signed_byte = scalar.sitofp %96 : i32 to f64
+  %94 = scalar.extui %byte : i8 to i32
+  %unsigned_byte = scalar.uitofp %94 : i32 to f64
+  %92 = scalar.extsi %word : i16 to i32
+  %signed_word = scalar.sitofp %92 : i32 to f64
+  %90 = scalar.extui %word : i16 to i32
+  %unsigned_word = scalar.uitofp %90 : i32 to f64
   func.return %signed_flag, %unsigned_flag, %signed_byte, %unsigned_byte, %signed_word, %unsigned_word : f64, f64, f64, f64, f64, f64
 }
 
@@ -194,11 +178,8 @@ func.def target(@test_target) @integer_to_e4m3(%byte: i8) -> (f8E4M3) {
 test.target<low_core> @test_target
 
 func.def target(@test_target) @integer_to_e4m3(%byte: i8) -> (f8E4M3) {
-  %7 = scalar.extui %byte : i8 to i32
-  %8 = scalar.constant 24 : i32
-  %9 = scalar.shli %7, %8 : i32
-  %10 = scalar.shrsi %9, %8 : i32
-  %6 = scalar.sitofp %10 : i32 to f32
+  %5 = scalar.extsi %byte : i8 to i32
+  %6 = scalar.sitofp %5 : i32 to f32
   %result = scalar.fptrunc %6 : f32 to f8E4M3
   func.return %result : f8E4M3
 }
@@ -392,15 +373,11 @@ func.def target(@test_target) @scalar_integer_widths(%flag: i1, %wide: i64) -> (
 test.target<low_core> @test_target
 
 func.def target(@test_target) @scalar_integer_widths(%flag: i1, %wide: i64) -> (bf16, f16, f8E4M3, f8E5M2) {
-  %25 = scalar.constant -1 : i32
-  %26 = scalar.constant 0 : i32
-  %27 = scf.select %flag, %25, %26 : i32
-  %24 = scalar.sitofp %27 : i32 to f32
-  %signed_flag = scalar.fptrunc %24 : f32 to bf16
-  %18 = scalar.constant 1 : i32
-  %19 = scalar.constant 0 : i32
-  %20 = scf.select %flag, %18, %19 : i32
-  %17 = scalar.uitofp %20 : i32 to f32
+  %20 = scalar.extsi %flag : i1 to i32
+  %21 = scalar.sitofp %20 : i32 to f32
+  %signed_flag = scalar.fptrunc %21 : f32 to bf16
+  %16 = scalar.extui %flag : i1 to i32
+  %17 = scalar.uitofp %16 : i32 to f32
   %unsigned_flag = scalar.fptrunc %17 : f32 to f16
   %12 = scalar.sitofp %wide : i64 to f32
   %signed_wide = scalar.fptrunc %12 : f32 to f8E4M3

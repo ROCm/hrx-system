@@ -1,0 +1,264 @@
+// RUN: pass canonicalize
+
+// Signed boolean fields carry 0/1 into subsequent unsigned extension.
+func.def @boolean_fields(%input: i8) -> (i64, i64) {
+  %source = vector.splat %input : vector<32xi8>
+  %fields = vector.bitfield.extracts %source {offset = 3, width = 1} : vector<32xi8> -> vector<32xi1>
+  %bytes = vector.extui %fields : vector<32xi1> to vector<32xi8>
+  %lo = test.fact_all_equal_range_lo %bytes : vector<32xi8> -> i64
+  %hi = test.fact_all_equal_range_hi %bytes : vector<32xi8> -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @boolean_fields(%input: i8) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 1 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// A small nonuniform vector exercises per-lane extraction facts.
+func.def @boolean_field_lanes() -> (i8, i8) {
+  %c0 = scalar.constant 0 : i8
+  %c8 = scalar.constant 8 : i8
+  %source = vector.from_elements %c0, %c8 : vector<2xi8>
+  %fields = vector.bitfield.extracts %source {offset = 3, width = 1} : vector<2xi8> -> vector<2xi1>
+  %bytes = vector.extui %fields : vector<2xi1> to vector<2xi8>
+  %a = vector.extract %bytes[0] : vector<2xi8> -> i8
+  %b = vector.extract %bytes[1] : vector<2xi8> -> i8
+  func.return %a, %b : i8, i8
+}
+// ----
+func.def @boolean_field_lanes() -> (i8, i8) {
+  %a = scalar.constant 0 : i8
+  %b = scalar.constant 1 : i8
+  func.return %a, %b : i8, i8
+}
+
+// ====
+
+// Unknown unpacked lanes remain booleans in the small lane summary.
+func.def @boolean_unpack_8(%source: vector<1xi8>) -> (i64, i64, i64, i64) {
+  %signed = vector.bitunpacks<1> %source : vector<1xi8> -> vector<8xi1>
+  %unsigned = vector.bitunpacku<1> %source : vector<1xi8> -> vector<8xi1>
+  %signed_bytes = vector.extui %signed : vector<8xi1> to vector<8xi8>
+  %unsigned_bytes = vector.extui %unsigned : vector<8xi1> to vector<8xi8>
+  %signed_lane = vector.extract %signed_bytes[7] : vector<8xi8> -> i8
+  %unsigned_lane = vector.extract %unsigned_bytes[0] : vector<8xi8> -> i8
+  %signed_lo = test.fact_range_lo %signed_lane : i8 -> i64
+  %signed_hi = test.fact_range_hi %signed_lane : i8 -> i64
+  %unsigned_lo = test.fact_range_lo %unsigned_lane : i8 -> i64
+  %unsigned_hi = test.fact_range_hi %unsigned_lane : i8 -> i64
+  func.return %signed_lo, %signed_hi, %unsigned_lo, %unsigned_hi : i64, i64, i64, i64
+}
+// ----
+func.def @boolean_unpack_8(%source: vector<1xi8>) -> (i64, i64, i64, i64) {
+  %signed_lo = scalar.constant 0 : i64
+  %signed_hi = scalar.constant 1 : i64
+  %unsigned_lo = scalar.constant 0 : i64
+  %unsigned_hi = scalar.constant 1 : i64
+  func.return %signed_lo, %signed_hi, %unsigned_lo, %unsigned_hi : i64, i64, i64, i64
+}
+
+// ====
+
+// Unknown unpacked lanes remain booleans in the uniform summary.
+func.def @boolean_unpack_256(%source: vector<32xi8>) -> (i64, i64, i64, i64) {
+  %signed = vector.bitunpacks<1> %source : vector<32xi8> -> vector<256xi1>
+  %unsigned = vector.bitunpacku<1> %source : vector<32xi8> -> vector<256xi1>
+  %signed_bytes = vector.extui %signed : vector<256xi1> to vector<256xi8>
+  %unsigned_bytes = vector.extui %unsigned : vector<256xi1> to vector<256xi8>
+  %signed_lane = vector.extract %signed_bytes[255] : vector<256xi8> -> i8
+  %unsigned_lane = vector.extract %unsigned_bytes[0] : vector<256xi8> -> i8
+  %signed_lo = test.fact_range_lo %signed_lane : i8 -> i64
+  %signed_hi = test.fact_range_hi %signed_lane : i8 -> i64
+  %unsigned_lo = test.fact_range_lo %unsigned_lane : i8 -> i64
+  %unsigned_hi = test.fact_range_hi %unsigned_lane : i8 -> i64
+  func.return %signed_lo, %signed_hi, %unsigned_lo, %unsigned_hi : i64, i64, i64, i64
+}
+// ----
+func.def @boolean_unpack_256(%source: vector<32xi8>) -> (i64, i64, i64, i64) {
+  %signed_lo = scalar.constant 0 : i64
+  %signed_hi = scalar.constant 1 : i64
+  %unsigned_lo = scalar.constant 0 : i64
+  %unsigned_hi = scalar.constant 1 : i64
+  func.return %signed_lo, %signed_hi, %unsigned_lo, %unsigned_hi : i64, i64, i64, i64
+}
+
+// ====
+
+// Distinct packed bits retain their exact values through signed unpacking.
+func.def @boolean_unpack_lanes() -> (i8, i8, i8) {
+  %source = vector.constant -127 : vector<1xi8>
+  %fields = vector.bitunpacks<1> %source : vector<1xi8> -> vector<8xi1>
+  %bytes = vector.extui %fields : vector<8xi1> to vector<8xi8>
+  %first = vector.extract %bytes[0] : vector<8xi8> -> i8
+  %middle = vector.extract %bytes[3] : vector<8xi8> -> i8
+  %last = vector.extract %bytes[7] : vector<8xi8> -> i8
+  func.return %first, %middle, %last : i8, i8, i8
+}
+// ----
+func.def @boolean_unpack_lanes() -> (i8, i8, i8) {
+  %first = scalar.constant 1 : i8
+  %middle = scalar.constant 0 : i8
+  %last = scalar.constant 1 : i8
+  func.return %first, %middle, %last : i8, i8, i8
+}
+
+// ====
+
+// Exact i1 facts retain true; signed extension then produces integer -1.
+func.def @boolean_unpack_uniform() -> (vector<32xi8>) {
+  %source = vector.constant true : vector<32xi1>
+  %fields = vector.bitunpacks<1> %source : vector<32xi1> -> vector<32xi1>
+  %bytes = vector.extsi %fields : vector<32xi1> to vector<32xi8>
+  func.return %bytes : vector<32xi8>
+}
+// ----
+func.def @boolean_unpack_uniform() -> (vector<32xi8>) {
+  %bytes = vector.constant -1 : vector<32xi8>
+  func.return %bytes : vector<32xi8>
+}
+
+// ====
+
+func.def @unsigned_extract_bounds(%input: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %source8 = vector.splat %input : vector<32xi64>
+  %fields8 = vector.bitfield.extractu %source8 {offset = 0, width = 8} : vector<32xi64> -> vector<32xi8>
+  %lane8 = vector.extract %fields8[31] : vector<32xi8> -> i8
+  %lo8 = test.fact_range_lo %lane8 : i8 -> i64
+  %hi8 = test.fact_range_hi %lane8 : i8 -> i64
+  %source16 = vector.splat %input : vector<32xi64>
+  %fields16 = vector.bitfield.extractu %source16 {offset = 0, width = 16} : vector<32xi64> -> vector<32xi16>
+  %lane16 = vector.extract %fields16[31] : vector<32xi16> -> i16
+  %lo16 = test.fact_range_lo %lane16 : i16 -> i64
+  %hi16 = test.fact_range_hi %lane16 : i16 -> i64
+  %source32 = vector.splat %input : vector<32xi64>
+  %fields32 = vector.bitfield.extractu %source32 {offset = 0, width = 32} : vector<32xi64> -> vector<32xi32>
+  %lane32 = vector.extract %fields32[31] : vector<32xi32> -> i32
+  %lo32 = test.fact_range_lo %lane32 : i32 -> i64
+  %hi32 = test.fact_range_hi %lane32 : i32 -> i64
+  %source64 = vector.splat %input : vector<32xi64>
+  %fields64 = vector.bitfield.extractu %source64 {offset = 0, width = 64} : vector<32xi64> -> vector<32xi64>
+  %lane64 = vector.extract %fields64[31] : vector<32xi64> -> i64
+  %lo64 = test.fact_range_lo %lane64 : i64 -> i64
+  %hi64 = test.fact_range_hi %lane64 : i64 -> i64
+  func.return %lo8, %hi8, %lo16, %hi16, %lo32, %hi32, %lo64, %hi64 : i64, i64, i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @unsigned_extract_bounds(%input: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %lo8 = scalar.constant -128 : i64
+  %hi8 = scalar.constant 127 : i64
+  %lo16 = scalar.constant -32768 : i64
+  %hi16 = scalar.constant 32767 : i64
+  %lo32 = scalar.constant -2147483648 : i64
+  %hi32 = scalar.constant 2147483647 : i64
+  %lo64 = scalar.constant -9223372036854775808 : i64
+  %hi64 = scalar.constant 9223372036854775807 : i64
+  func.return %lo8, %hi8, %lo16, %hi16, %lo32, %hi32, %lo64, %hi64 : i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+func.def @unsigned_extract_exact() -> (i64, i64, i64, i64) {
+  %input = scalar.constant -1 : i64
+  %source8 = vector.splat %input : vector<32xi64>
+  %fields8 = vector.bitfield.extractu %source8 {offset = 0, width = 8} : vector<32xi64> -> vector<32xi8>
+  %lane8 = vector.extract %fields8[31] : vector<32xi8> -> i8
+  %result8 = scalar.extsi %lane8 : i8 to i64
+  %source16 = vector.splat %input : vector<32xi64>
+  %fields16 = vector.bitfield.extractu %source16 {offset = 0, width = 16} : vector<32xi64> -> vector<32xi16>
+  %lane16 = vector.extract %fields16[31] : vector<32xi16> -> i16
+  %result16 = scalar.extsi %lane16 : i16 to i64
+  %source32 = vector.splat %input : vector<32xi64>
+  %fields32 = vector.bitfield.extractu %source32 {offset = 0, width = 32} : vector<32xi64> -> vector<32xi32>
+  %lane32 = vector.extract %fields32[31] : vector<32xi32> -> i32
+  %result32 = scalar.extsi %lane32 : i32 to i64
+  %source64 = vector.splat %input : vector<32xi64>
+  %fields64 = vector.bitfield.extractu %source64 {offset = 0, width = 64} : vector<32xi64> -> vector<32xi64>
+  %lane64 = vector.extract %fields64[31] : vector<32xi64> -> i64
+  func.return %result8, %result16, %result32, %lane64 : i64, i64, i64, i64
+}
+// ----
+func.def @unsigned_extract_exact() -> (i64, i64, i64, i64) {
+  %result8 = scalar.constant -1 : i64
+  %result16 = scalar.constant -1 : i64
+  %result32 = scalar.constant -1 : i64
+  %lane64 = scalar.constant -1 : i64
+  func.return %result8, %result16, %result32, %lane64 : i64, i64, i64, i64
+}
+
+// ====
+
+func.def @unsigned_unpack_bounds(%input: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %narrow8 = scalar.trunci %input : i64 to i8
+  %source8 = vector.splat %narrow8 : vector<32xi8>
+  %fields8 = vector.bitunpacku<8> %source8 : vector<32xi8> -> vector<32xi8>
+  %lane8 = vector.extract %fields8[31] : vector<32xi8> -> i8
+  %lo8 = test.fact_range_lo %lane8 : i8 -> i64
+  %hi8 = test.fact_range_hi %lane8 : i8 -> i64
+  %narrow16 = scalar.trunci %input : i64 to i16
+  %source16 = vector.splat %narrow16 : vector<32xi16>
+  %fields16 = vector.bitunpacku<16> %source16 : vector<32xi16> -> vector<32xi16>
+  %lane16 = vector.extract %fields16[31] : vector<32xi16> -> i16
+  %lo16 = test.fact_range_lo %lane16 : i16 -> i64
+  %hi16 = test.fact_range_hi %lane16 : i16 -> i64
+  %narrow32 = scalar.trunci %input : i64 to i32
+  %source32 = vector.splat %narrow32 : vector<32xi32>
+  %fields32 = vector.bitunpacku<32> %source32 : vector<32xi32> -> vector<32xi32>
+  %lane32 = vector.extract %fields32[31] : vector<32xi32> -> i32
+  %lo32 = test.fact_range_lo %lane32 : i32 -> i64
+  %hi32 = test.fact_range_hi %lane32 : i32 -> i64
+  %source64 = vector.splat %input : vector<32xi64>
+  %fields64 = vector.bitunpacku<64> %source64 : vector<32xi64> -> vector<32xi64>
+  %lane64 = vector.extract %fields64[31] : vector<32xi64> -> i64
+  %lo64 = test.fact_range_lo %lane64 : i64 -> i64
+  %hi64 = test.fact_range_hi %lane64 : i64 -> i64
+  func.return %lo8, %hi8, %lo16, %hi16, %lo32, %hi32, %lo64, %hi64 : i64, i64, i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @unsigned_unpack_bounds(%input: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %lo8 = scalar.constant -128 : i64
+  %hi8 = scalar.constant 127 : i64
+  %lo16 = scalar.constant -32768 : i64
+  %hi16 = scalar.constant 32767 : i64
+  %lo32 = scalar.constant -2147483648 : i64
+  %hi32 = scalar.constant 2147483647 : i64
+  %lo64 = scalar.constant -9223372036854775808 : i64
+  %hi64 = scalar.constant 9223372036854775807 : i64
+  func.return %lo8, %hi8, %lo16, %hi16, %lo32, %hi32, %lo64, %hi64 : i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+func.def @unsigned_unpack_exact() -> (i64, i64, i64, i64) {
+  %input = scalar.constant -1 : i64
+  %narrow8 = scalar.trunci %input : i64 to i8
+  %source8 = vector.splat %narrow8 : vector<32xi8>
+  %fields8 = vector.bitunpacku<8> %source8 : vector<32xi8> -> vector<32xi8>
+  %lane8 = vector.extract %fields8[31] : vector<32xi8> -> i8
+  %result8 = scalar.extsi %lane8 : i8 to i64
+  %narrow16 = scalar.trunci %input : i64 to i16
+  %source16 = vector.splat %narrow16 : vector<32xi16>
+  %fields16 = vector.bitunpacku<16> %source16 : vector<32xi16> -> vector<32xi16>
+  %lane16 = vector.extract %fields16[31] : vector<32xi16> -> i16
+  %result16 = scalar.extsi %lane16 : i16 to i64
+  %narrow32 = scalar.trunci %input : i64 to i32
+  %source32 = vector.splat %narrow32 : vector<32xi32>
+  %fields32 = vector.bitunpacku<32> %source32 : vector<32xi32> -> vector<32xi32>
+  %lane32 = vector.extract %fields32[31] : vector<32xi32> -> i32
+  %result32 = scalar.extsi %lane32 : i32 to i64
+  %source64 = vector.splat %input : vector<32xi64>
+  %fields64 = vector.bitunpacku<64> %source64 : vector<32xi64> -> vector<32xi64>
+  %lane64 = vector.extract %fields64[31] : vector<32xi64> -> i64
+  func.return %result8, %result16, %result32, %lane64 : i64, i64, i64, i64
+}
+// ----
+func.def @unsigned_unpack_exact() -> (i64, i64, i64, i64) {
+  %result8 = scalar.constant -1 : i64
+  %result16 = scalar.constant -1 : i64
+  %result32 = scalar.constant -1 : i64
+  %lane64 = scalar.constant -1 : i64
+  func.return %result8, %result16, %result32, %lane64 : i64, i64, i64, i64
+}

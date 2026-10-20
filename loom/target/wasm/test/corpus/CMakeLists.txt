@@ -527,8 +527,6 @@ loom_corpus_build(
     "loom::target::wasm::simd128"
     "numeric/float/turns.loom"
     "loom::target::wasm::simd128"
-    "numeric/integer/bitfield.loom"
-    "loom::target::wasm::simd128"
     "numeric/matrix/nvfp4.loom"
     "loom::target::wasm::simd128"
     "numeric/vector/address_conversion.loom"

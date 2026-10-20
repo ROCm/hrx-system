@@ -44,6 +44,150 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @intege
 }
 
 // ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types
+
+// Seven i64 elements exceed the native vector carrier. Count normalization
+// must not recreate this rejected shape before carrier selection completes.
+kernel.def @wide_integer_shifts() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %count_input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %values_view = buffer.view %input[%base] : buffer -> view<7xi64>
+  %counts_view = buffer.view %count_input[%base] : buffer -> view<7xi64>
+  %results = buffer.view %output[%base] : buffer -> view<3x7xi64>
+  %values = vector.load %values_view[0] : view<7xi64> -> vector<7xi64>
+  %counts = vector.load %counts_view[0] : view<7xi64> -> vector<7xi64>
+  %left = vector.shli %values, %counts : vector<7xi64>
+  %logical = vector.shrui %values, %counts : vector<7xi64>
+  %arithmetic = vector.shrsi %values, %counts : vector<7xi64>
+  vector.store %left, %results[0, 0] : vector<7xi64>, view<3x7xi64>
+  vector.store %logical, %results[1, 0] : vector<7xi64>, view<3x7xi64>
+  vector.store %arithmetic, %results[2, 0] : vector<7xi64>, view<3x7xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @wide_integer_shifts() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %count_input = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %54 = OpConstant.offset64 0
+  %55 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %54
+  %56 = OpLoad.storage_buffer.i64 %55
+  %57 = OpConstant.offset64 8
+  %58 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %57
+  %59 = OpLoad.storage_buffer.i64 %58
+  %60 = OpConstant.offset64 16
+  %61 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %60
+  %62 = OpLoad.storage_buffer.i64 %61
+  %63 = OpConstant.offset64 24
+  %64 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %63
+  %65 = OpLoad.storage_buffer.i64 %64
+  %66 = OpConstant.offset64 32
+  %67 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %66
+  %68 = OpLoad.storage_buffer.i64 %67
+  %69 = OpConstant.offset64 40
+  %70 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %69
+  %71 = OpLoad.storage_buffer.i64 %70
+  %72 = OpConstant.offset64 48
+  %73 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %72
+  %74 = OpLoad.storage_buffer.i64 %73
+  %76 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %54
+  %77 = OpLoad.storage_buffer.i64 %76
+  %79 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %57
+  %80 = OpLoad.storage_buffer.i64 %79
+  %82 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %60
+  %83 = OpLoad.storage_buffer.i64 %82
+  %85 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %63
+  %86 = OpLoad.storage_buffer.i64 %85
+  %88 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %66
+  %89 = OpLoad.storage_buffer.i64 %88
+  %91 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %69
+  %92 = OpLoad.storage_buffer.i64 %91
+  %94 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %72
+  %95 = OpLoad.storage_buffer.i64 %94
+  %96 = OpShiftLeftLogical.i64 %56, %77
+  %97 = OpShiftLeftLogical.i64 %59, %80
+  %98 = OpShiftLeftLogical.i64 %62, %83
+  %99 = OpShiftLeftLogical.i64 %65, %86
+  %100 = OpShiftLeftLogical.i64 %68, %89
+  %101 = OpShiftLeftLogical.i64 %71, %92
+  %102 = OpShiftLeftLogical.i64 %74, %95
+  %104 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %54
+  OpStore.storage_buffer.i64 %104, %96
+  %106 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %57
+  OpStore.storage_buffer.i64 %106, %97
+  %108 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %60
+  OpStore.storage_buffer.i64 %108, %98
+  %110 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %63
+  OpStore.storage_buffer.i64 %110, %99
+  %112 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %66
+  OpStore.storage_buffer.i64 %112, %100
+  %114 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %69
+  OpStore.storage_buffer.i64 %114, %101
+  %116 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %72
+  OpStore.storage_buffer.i64 %116, %102
+  %117 = OpShiftRightLogical.i64 %56, %77
+  %118 = OpShiftRightLogical.i64 %59, %80
+  %119 = OpShiftRightLogical.i64 %62, %83
+  %120 = OpShiftRightLogical.i64 %65, %86
+  %121 = OpShiftRightLogical.i64 %68, %89
+  %122 = OpShiftRightLogical.i64 %71, %92
+  %123 = OpShiftRightLogical.i64 %74, %95
+  %124 = OpConstant.offset64 56
+  %125 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %124
+  OpStore.storage_buffer.i64 %125, %117
+  %126 = OpConstant.offset64 64
+  %127 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %126
+  OpStore.storage_buffer.i64 %127, %118
+  %128 = OpConstant.offset64 72
+  %129 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %128
+  OpStore.storage_buffer.i64 %129, %119
+  %130 = OpConstant.offset64 80
+  %131 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %130
+  OpStore.storage_buffer.i64 %131, %120
+  %132 = OpConstant.offset64 88
+  %133 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %132
+  OpStore.storage_buffer.i64 %133, %121
+  %134 = OpConstant.offset64 96
+  %135 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %134
+  OpStore.storage_buffer.i64 %135, %122
+  %136 = OpConstant.offset64 104
+  %137 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %136
+  OpStore.storage_buffer.i64 %137, %123
+  %138 = OpShiftRightArithmetic.i64 %56, %77
+  %139 = OpShiftRightArithmetic.i64 %59, %80
+  %140 = OpShiftRightArithmetic.i64 %62, %83
+  %141 = OpShiftRightArithmetic.i64 %65, %86
+  %142 = OpShiftRightArithmetic.i64 %68, %89
+  %143 = OpShiftRightArithmetic.i64 %71, %92
+  %144 = OpShiftRightArithmetic.i64 %74, %95
+  %145 = OpConstant.offset64 112
+  %146 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %145
+  OpStore.storage_buffer.i64 %146, %138
+  %147 = OpConstant.offset64 120
+  %148 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %147
+  OpStore.storage_buffer.i64 %148, %139
+  %149 = OpConstant.offset64 128
+  %150 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %149
+  OpStore.storage_buffer.i64 %150, %140
+  %151 = OpConstant.offset64 136
+  %152 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %151
+  OpStore.storage_buffer.i64 %152, %141
+  %153 = OpConstant.offset64 144
+  %154 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %153
+  OpStore.storage_buffer.i64 %154, %142
+  %155 = OpConstant.offset64 152
+  %156 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %155
+  OpStore.storage_buffer.i64 %156, %143
+  %157 = OpConstant.offset64 160
+  %158 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %157
+  OpStore.storage_buffer.i64 %158, %144
+  return
+}
+
+// ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 983547543582}
 

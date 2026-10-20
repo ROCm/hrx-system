@@ -538,3 +538,38 @@ func.def @vector_signed_roundtrip(%x: vector<4xi8>) -> (vector<4xi8>) {
 func.def @vector_unsigned_roundtrip(%x: vector<4xi8>) -> (vector<4xi8>) {
   func.return %x : vector<4xi8>
 }
+
+// ====
+// RUN: pass canonicalize
+
+// Final cleanup preserves the conversion path chosen by legalization. Generic
+// legalization can form bitfield extractions; cleanup cannot reintroduce them
+// after a target has decomposed those operations.
+func.def @retained_scalar_field(%source: i32) -> (i32, i32) {
+  %field = scalar.trunci %source : i32 to i8
+  %unsigned = scalar.extui %field : i8 to i32
+  %signed = scalar.extsi %field : i8 to i32
+  func.return %unsigned, %signed : i32, i32
+}
+
+func.def @retained_vector_field(%source: vector<3xi32>) -> (vector<3xi32>, vector<3xi32>) {
+  %field = vector.trunci %source : vector<3xi32> to vector<3xi8>
+  %unsigned = vector.extui %field : vector<3xi8> to vector<3xi32>
+  %signed = vector.extsi %field : vector<3xi8> to vector<3xi32>
+  func.return %unsigned, %signed : vector<3xi32>, vector<3xi32>
+}
+
+// ----
+func.def @retained_scalar_field(%source: i32) -> (i32, i32) {
+  %field = scalar.trunci %source : i32 to i8
+  %unsigned = scalar.extui %field : i8 to i32
+  %signed = scalar.extsi %field : i8 to i32
+  func.return %unsigned, %signed : i32, i32
+}
+
+func.def @retained_vector_field(%source: vector<3xi32>) -> (vector<3xi32>, vector<3xi32>) {
+  %field = vector.trunci %source : vector<3xi32> to vector<3xi8>
+  %unsigned = vector.extui %field : vector<3xi8> to vector<3xi32>
+  %signed = vector.extsi %field : vector<3xi8> to vector<3xi32>
+  func.return %unsigned, %signed : vector<3xi32>, vector<3xi32>
+}

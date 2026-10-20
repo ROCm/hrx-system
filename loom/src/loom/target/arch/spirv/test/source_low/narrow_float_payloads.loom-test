@@ -75,3 +75,303 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @native_narrow_p
   %brain_bits = OpBitcast.bf16.i16 %brain_selected
   return %e4_bits, %e5_bits, %half_bits, %brain_bits
 }
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS,-BFLOAT16_TYPE_KHR control-flow=structured-low
+
+// Singleton FP8 state carries the encoded byte, including its sign bit.
+kernel.def @constant_loop_f8e4m3_1() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%iterations: index, %selected: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %destination = buffer.view %output[%base] : buffer -> view<1xf8E4M3>
+  %initial = vector.constant -0.0 : vector<1xf8E4M3>
+  %loaded = vector.load %source[0] : view<1xf8E4M3> -> vector<1xf8E4M3>
+  %result = scf.for %iteration = [%begin to %iterations step %step](%state = %initial : vector<1xf8E4M3>) -> (vector<1xf8E4M3>) {
+    %chosen = index.cmp eq, %iteration, %selected : index
+    %next = scf.select %chosen, %loaded, %state : vector<1xf8E4M3>
+    scf.yield %next : vector<1xf8E4M3>
+  }
+  vector.store %result, %destination[0] : vector<1xf8E4M3>, view<1xf8E4M3>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (index, index, buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @constant_loop_f8e4m3_1(%iterations: reg<spirv.id : index>, %selected: reg<spirv.id : index>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %27 = OpConstant.i32 128
+  %initial = OpSConvert.i32.i8 %27
+  %29 = OpConstant.offset64 0
+  %30 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %29
+  %loaded = OpLoad.storage_buffer.i8 %30
+  %result = low.scf.for signed [%begin to %iterations step %step] iter_args(%initial: reg<spirv.id : i8>) -> (reg<spirv.id : i8>) do(%iteration: reg<spirv.id : index>, %state: reg<spirv.id : i8>) {
+    %chosen = OpIEqual %iteration, %selected
+    %next = OpSelect.i8 %chosen, %loaded, %state
+    low.scf.yield %next : reg<spirv.id : i8>
+  }
+  %38 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %29
+  OpStore.storage_buffer.i8 %38, %result
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS,-BFLOAT16_TYPE_KHR control-flow=structured-low
+
+// A three-lane FP8 loop projects into three independent byte carriers.
+kernel.def @constant_loop_f8e5m2_3() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%iterations: index, %selected: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<3xf8E5M2>
+  %destination = buffer.view %output[%base] : buffer -> view<3xf8E5M2>
+  %initial = vector.constant -0.0 : vector<3xf8E5M2>
+  %loaded = vector.load %source[0] : view<3xf8E5M2> -> vector<3xf8E5M2>
+  %result = scf.for %iteration = [%begin to %iterations step %step](%state = %initial : vector<3xf8E5M2>) -> (vector<3xf8E5M2>) {
+    %chosen = index.cmp eq, %iteration, %selected : index
+    %next = scf.select %chosen, %loaded, %state : vector<3xf8E5M2>
+    scf.yield %next : vector<3xf8E5M2>
+  }
+  vector.store %result, %destination[0] : vector<3xf8E5M2>, view<3xf8E5M2>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (index, index, buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @constant_loop_f8e5m2_3(%iterations: reg<spirv.id : index>, %selected: reg<spirv.id : index>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %83 = OpConstant.offset64 0
+  %84 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %83
+  %85 = OpLoad.storage_buffer.i8 %84
+  %86 = OpConstant.offset64 1
+  %87 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %86
+  %88 = OpLoad.storage_buffer.i8 %87
+  %89 = OpConstant.offset64 2
+  %90 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %89
+  %91 = OpLoad.storage_buffer.i8 %90
+  %92 = OpConstant.i32 128
+  %93 = OpSConvert.i32.i8 %92
+  %98, %99, %100 = low.scf.for signed [%begin to %iterations step %step] iter_args(%93: reg<spirv.id : i8>, %93: reg<spirv.id : i8>, %93: reg<spirv.id : i8>) -> (reg<spirv.id : i8>, reg<spirv.id : i8>, reg<spirv.id : i8>) do(%iteration: reg<spirv.id : index>, %95: reg<spirv.id : i8>, %96: reg<spirv.id : i8>, %97: reg<spirv.id : i8>) {
+    %chosen = OpIEqual %iteration, %selected
+    %102 = OpSelect.i8 %chosen, %85, %95
+    %103 = OpSelect.i8 %chosen, %88, %96
+    %104 = OpSelect.i8 %chosen, %91, %97
+    low.scf.yield %102, %103, %104 : reg<spirv.id : i8>, reg<spirv.id : i8>, reg<spirv.id : i8>
+  }
+  %106 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %83
+  OpStore.storage_buffer.i8 %106, %98
+  %108 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %86
+  OpStore.storage_buffer.i8 %108, %99
+  %110 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %89
+  OpStore.storage_buffer.i8 %110, %100
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS,-BFLOAT16_TYPE_KHR control-flow=structured-low
+
+// Software BF16 loop state projects into scalar i32 payloads, including the tail.
+kernel.def @constant_loop_bf16_7() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%iterations: index, %selected: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<7xbf16>
+  %destination = buffer.view %output[%base] : buffer -> view<7xbf16>
+  %initial = vector.constant -0.0 : vector<7xbf16>
+  %loaded = vector.load %source[0] : view<7xbf16> -> vector<7xbf16>
+  %result = scf.for %iteration = [%begin to %iterations step %step](%state = %initial : vector<7xbf16>) -> (vector<7xbf16>) {
+    %chosen = index.cmp eq, %iteration, %selected : index
+    %next = scf.select %chosen, %loaded, %state : vector<7xbf16>
+    scf.yield %next : vector<7xbf16>
+  }
+  vector.store %result, %destination[0] : vector<7xbf16>, view<7xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (index, index, buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @constant_loop_bf16_7(%iterations: reg<spirv.id : index>, %selected: reg<spirv.id : index>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %176 = OpConstant.offset64 0
+  %177 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %176
+  %178 = OpLoad.storage_buffer.i16 %177 : reg<spirv.id>
+  %179 = OpBitcast.i16.u16 %178
+  %180 = OpUConvert.u16.u32 %179
+  %181 = OpBitcast.u32.i32 %180
+  %182 = OpConstant.offset64 2
+  %183 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %182
+  %184 = OpLoad.storage_buffer.i16 %183 : reg<spirv.id>
+  %185 = OpBitcast.i16.u16 %184
+  %186 = OpUConvert.u16.u32 %185
+  %187 = OpBitcast.u32.i32 %186
+  %188 = OpConstant.offset64 4
+  %189 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %188
+  %190 = OpLoad.storage_buffer.i16 %189 : reg<spirv.id>
+  %191 = OpBitcast.i16.u16 %190
+  %192 = OpUConvert.u16.u32 %191
+  %193 = OpBitcast.u32.i32 %192
+  %194 = OpConstant.offset64 6
+  %195 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %194
+  %196 = OpLoad.storage_buffer.i16 %195 : reg<spirv.id>
+  %197 = OpBitcast.i16.u16 %196
+  %198 = OpUConvert.u16.u32 %197
+  %199 = OpBitcast.u32.i32 %198
+  %200 = OpConstant.offset64 8
+  %201 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %200
+  %202 = OpLoad.storage_buffer.i16 %201 : reg<spirv.id>
+  %203 = OpBitcast.i16.u16 %202
+  %204 = OpUConvert.u16.u32 %203
+  %205 = OpBitcast.u32.i32 %204
+  %206 = OpConstant.offset64 10
+  %207 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %206
+  %208 = OpLoad.storage_buffer.i16 %207 : reg<spirv.id>
+  %209 = OpBitcast.i16.u16 %208
+  %210 = OpUConvert.u16.u32 %209
+  %211 = OpBitcast.u32.i32 %210
+  %212 = OpConstant.offset64 12
+  %213 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %212
+  %214 = OpLoad.storage_buffer.i16 %213 : reg<spirv.id>
+  %215 = OpBitcast.i16.u16 %214
+  %216 = OpUConvert.u16.u32 %215
+  %217 = OpBitcast.u32.i32 %216
+  %218 = OpConstant.i32 32768
+  %227, %228, %229, %230, %231, %232, %233 = low.scf.for signed [%begin to %iterations step %step] iter_args(%218: reg<spirv.id : i32>, %218: reg<spirv.id : i32>, %218: reg<spirv.id : i32>, %218: reg<spirv.id : i32>, %218: reg<spirv.id : i32>, %218: reg<spirv.id : i32>, %218: reg<spirv.id : i32>) -> (reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>) do(%iteration: reg<spirv.id : index>, %220: reg<spirv.id : i32>, %221: reg<spirv.id : i32>, %222: reg<spirv.id : i32>, %223: reg<spirv.id : i32>, %224: reg<spirv.id : i32>, %225: reg<spirv.id : i32>, %226: reg<spirv.id : i32>) {
+    %chosen = OpIEqual %iteration, %selected
+    %235 = OpSelect %chosen, %181, %220
+    %236 = OpSelect %chosen, %187, %221
+    %237 = OpSelect %chosen, %193, %222
+    %238 = OpSelect %chosen, %199, %223
+    %239 = OpSelect %chosen, %205, %224
+    %240 = OpSelect %chosen, %211, %225
+    %241 = OpSelect %chosen, %217, %226
+    low.scf.yield %235, %236, %237, %238, %239, %240, %241 : reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>
+  }
+  %242 = OpSConvert.i32.i16 %227
+  %244 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %176
+  OpStore.storage_buffer.i16 %244, %242
+  %245 = OpSConvert.i32.i16 %228
+  %247 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %182
+  OpStore.storage_buffer.i16 %247, %245
+  %248 = OpSConvert.i32.i16 %229
+  %250 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %188
+  OpStore.storage_buffer.i16 %250, %248
+  %251 = OpSConvert.i32.i16 %230
+  %253 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %194
+  OpStore.storage_buffer.i16 %253, %251
+  %254 = OpSConvert.i32.i16 %231
+  %256 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %200
+  OpStore.storage_buffer.i16 %256, %254
+  %257 = OpSConvert.i32.i16 %232
+  %259 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %206
+  OpStore.storage_buffer.i16 %259, %257
+  %260 = OpSConvert.i32.i16 %233
+  %262 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %212
+  OpStore.storage_buffer.i16 %262, %260
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=BFLOAT16_TYPE_KHR,-INT16,STORAGE_BUFFER_16BIT_ACCESS control-flow=structured-low
+
+// Native BF16 retains vector carriers across the same loop without Int16.
+kernel.def @constant_loop_bf16_7_native() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%iterations: index, %selected: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<7xbf16>
+  %destination = buffer.view %output[%base] : buffer -> view<7xbf16>
+  %initial = vector.constant -0.0 : vector<7xbf16>
+  %loaded = vector.load %source[0] : view<7xbf16> -> vector<7xbf16>
+  %result = scf.for %iteration = [%begin to %iterations step %step](%state = %initial : vector<7xbf16>) -> (vector<7xbf16>) {
+    %chosen = index.cmp eq, %iteration, %selected : index
+    %next = scf.select %chosen, %loaded, %state : vector<7xbf16>
+    scf.yield %next : vector<7xbf16>
+  }
+  vector.store %result, %destination[0] : vector<7xbf16>, view<7xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (index, index, buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @constant_loop_bf16_7_native(%iterations: reg<spirv.id : index>, %selected: reg<spirv.id : index>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %87 = OpConstant.offset64 0
+  %88 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %87
+  %89 = OpLoad.storage_buffer.bf16 %88
+  %90 = OpConstant.offset64 2
+  %91 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %90
+  %92 = OpLoad.storage_buffer.bf16 %91
+  %93 = OpConstant.offset64 4
+  %94 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %93
+  %95 = OpLoad.storage_buffer.bf16 %94
+  %96 = OpConstant.offset64 6
+  %97 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %96
+  %98 = OpLoad.storage_buffer.bf16 %97
+  %99 = OpCompositeConstruct.v4bf16 %89, %92, %95, %98
+  %100 = OpConstant.offset64 8
+  %101 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %100
+  %102 = OpLoad.storage_buffer.bf16 %101
+  %103 = OpConstant.offset64 10
+  %104 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %103
+  %105 = OpLoad.storage_buffer.bf16 %104
+  %106 = OpCompositeConstruct.v2bf16 %102, %105
+  %107 = OpConstant.offset64 12
+  %108 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %107
+  %109 = OpLoad.storage_buffer.bf16 %108
+  %110 = OpConstant.bf16 32768
+  %111 = OpCompositeConstruct.v4bf16 %110, %110, %110, %110
+  %113 = OpCompositeConstruct.v3bf16 %110, %110, %110
+  %117, %118 = low.scf.for signed [%begin to %iterations step %step] iter_args(%111: reg<spirv.id : vector<4xbf16>>, %113: reg<spirv.id : vector<3xbf16>>) -> (reg<spirv.id : vector<4xbf16>>, reg<spirv.id : vector<3xbf16>>) do(%iteration: reg<spirv.id : index>, %115: reg<spirv.id : vector<4xbf16>>, %116: reg<spirv.id : vector<3xbf16>>) {
+    %chosen = OpIEqual %iteration, %selected
+    %120 = OpCompositeConstruct.v4bool %chosen, %chosen, %chosen, %chosen
+    %121 = OpSelect.v4bf16 %120, %99, %115
+    %122 = OpCompositeConstruct.v2bf16 %109, %109
+    %123 = OpVectorShuffle.v2bf16.v3bf16 %106, %122, 0, 1, 2
+    %124 = OpCompositeConstruct.v3bool %chosen, %chosen, %chosen
+    %125 = OpSelect.v3bf16 %124, %123, %116
+    low.scf.yield %121, %125 : reg<spirv.id : vector<4xbf16>>, reg<spirv.id : vector<3xbf16>>
+  }
+  %126 = OpCompositeExtract.v4bf16.bf16 %117, 0
+  %127 = OpCompositeExtract.v4bf16.bf16 %117, 1
+  %128 = OpCompositeExtract.v4bf16.bf16 %117, 2
+  %129 = OpCompositeExtract.v4bf16.bf16 %117, 3
+  %130 = OpCompositeExtract.v3bf16.bf16 %118, 0
+  %131 = OpCompositeExtract.v3bf16.bf16 %118, 1
+  %132 = OpCompositeExtract.v3bf16.bf16 %118, 2
+  %134 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %87
+  OpStore.storage_buffer.bf16 %134, %126
+  %136 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %90
+  OpStore.storage_buffer.bf16 %136, %127
+  %138 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %93
+  OpStore.storage_buffer.bf16 %138, %128
+  %140 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %96
+  OpStore.storage_buffer.bf16 %140, %129
+  %142 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %100
+  OpStore.storage_buffer.bf16 %142, %130
+  %144 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %103
+  OpStore.storage_buffer.bf16 %144, %131
+  %146 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %107
+  OpStore.storage_buffer.bf16 %146, %132
+  return
+}

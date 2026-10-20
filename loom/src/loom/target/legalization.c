@@ -354,7 +354,7 @@ bool loom_target_legalization_has_source_vector_carrier(
       context->source_vector_carrier_supported;
   return callback.fn == NULL ||
          callback.fn(
-             callback.user_data, context->module,
+             callback.user_data, context->target_facts, context->module,
              value_id != LOOM_VALUE_ID_INVALID ? context->fact_table : NULL,
              value_id, type);
 }
@@ -390,6 +390,6 @@ bool loom_target_legalization_has_bitstream_packet_carrier(
   const loom_target_vector_carrier_supported_callback_t callback =
       policy->packet_carrier_supported;
   IREE_ASSERT(callback.fn != NULL);
-  return callback.fn(callback.user_data, context->module, NULL,
-                     LOOM_VALUE_ID_INVALID, type);
+  return callback.fn(callback.user_data, context->target_facts, context->module,
+                     NULL, LOOM_VALUE_ID_INVALID, type);
 }

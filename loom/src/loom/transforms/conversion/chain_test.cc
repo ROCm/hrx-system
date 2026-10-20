@@ -26,6 +26,20 @@ uint64_t ConvertInteger(loom_conversion_kind_t kind, uint64_t value,
   return value & BitMask(result_width);
 }
 
+// Model a field extraction by routing each output bit independently of the
+// mask/sign-extension operations used to evaluate the original cast chain.
+uint64_t ExtractInteger(loom_conversion_kind_t kind, uint64_t value,
+                        int field_width, int result_width) {
+  uint64_t result = 0;
+  for (int bit = 0; bit < result_width; ++bit) {
+    const int source_bit = bit < field_width ? bit : field_width - 1;
+    if (bit < field_width || kind == LOOM_CONVERSION_EXTRACT_SIGNED) {
+      result |= ((value >> source_bit) & 1) << bit;
+    }
+  }
+  return result;
+}
+
 bool IsVerifiedIntegerConversion(loom_conversion_kind_t kind, int input_width,
                                  int result_width) {
   return kind == LOOM_CONVERSION_TRUNCI ? result_width < input_width
@@ -72,9 +86,7 @@ TEST(ConversionChainTest, IntegerCompositionsPreserveBits) {
               continue;
             }
             const auto match = loom_conversion_chain_match(outer, inner);
-            if (match.candidate == LOOM_CONVERSION_NONE) {
-              continue;
-            }
+            ASSERT_NE(match.candidate, LOOM_CONVERSION_NONE);
             const auto composed = loom_conversion_chain_resolve(
                 match.candidate, loom_type_scalar(input_type),
                 loom_type_scalar(result_type));
@@ -95,7 +107,12 @@ TEST(ConversionChainTest, IntegerCompositionsPreserveBits) {
               const uint64_t expected =
                   ConvertInteger(outer, middle, middle_width, result_width);
               const uint64_t actual =
-                  ConvertInteger(composed, input, input_width, result_width);
+                  composed == LOOM_CONVERSION_EXTRACT_SIGNED ||
+                          composed == LOOM_CONVERSION_EXTRACT_UNSIGNED
+                      ? ExtractInteger(composed, input, middle_width,
+                                       result_width)
+                      : ConvertInteger(composed, input, input_width,
+                                       result_width);
               EXPECT_EQ(actual, expected) << "input " << input;
             }
           }
@@ -118,7 +135,7 @@ TEST(ConversionChainTest, UnsignedAfterSignedRequiresIntermediateProof) {
             ConvertInteger(match.candidate, 1, 1, 32));
 }
 
-TEST(ConversionChainTest, IntermediateRoundingAndLostBitsRemainObservable) {
+TEST(ConversionChainTest, IntermediateRoundingRemainsObservable) {
   EXPECT_EQ(loom_conversion_chain_match(LOOM_CONVERSION_FPTRUNC,
                                         LOOM_CONVERSION_FPTRUNC)
                 .candidate,
@@ -127,14 +144,20 @@ TEST(ConversionChainTest, IntermediateRoundingAndLostBitsRemainObservable) {
       loom_conversion_chain_match(LOOM_CONVERSION_EXTF, LOOM_CONVERSION_FPTRUNC)
           .candidate,
       LOOM_CONVERSION_NONE);
-  EXPECT_EQ(
-      loom_conversion_chain_match(LOOM_CONVERSION_EXTSI, LOOM_CONVERSION_TRUNCI)
-          .candidate,
-      LOOM_CONVERSION_NONE);
-  EXPECT_EQ(
-      loom_conversion_chain_match(LOOM_CONVERSION_EXTUI, LOOM_CONVERSION_TRUNCI)
-          .candidate,
-      LOOM_CONVERSION_NONE);
+}
+
+TEST(ConversionChainTest, TruncatedFieldSurvivesEqualEndpointTypes) {
+  const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  for (auto outer : {LOOM_CONVERSION_EXTSI, LOOM_CONVERSION_EXTUI}) {
+    const auto match =
+        loom_conversion_chain_match(outer, LOOM_CONVERSION_TRUNCI);
+    const auto expected = outer == LOOM_CONVERSION_EXTSI
+                              ? LOOM_CONVERSION_EXTRACT_SIGNED
+                              : LOOM_CONVERSION_EXTRACT_UNSIGNED;
+    EXPECT_EQ(match.candidate, expected);
+    EXPECT_EQ(loom_conversion_chain_resolve(match.candidate, type, type),
+              expected);
+  }
 }
 
 TEST(ConversionChainTest, FloatCompositionUsesFormatsAndEndpointWidths) {

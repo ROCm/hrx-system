@@ -1237,6 +1237,11 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
     *out_changed = true;
     return iree_ok_status();
   }
+  // Replacements requeue their users. Refresh the retained facts before any
+  // legality query consumes them; no constant materializer is installed here.
+  bool folded = false;
+  IREE_RETURN_IF_ERROR(loom_rewriter_try_fold(&driver->rewriter, op, &folded));
+  loom_greedy_rewrite_result_record_rewriter_flags(result, &driver->rewriter);
   if (state->preflight.error_count != 0) {
     return iree_ok_status();
   }
@@ -1613,6 +1618,7 @@ static iree_status_t loom_low_target_legalize_verify_final(
 
 static bool loom_low_target_legalize_function_has_source_vector_carriers(
     const loom_module_t* module, loom_func_like_t function,
+    const loom_target_facts_t* target_facts,
     const loom_value_fact_table_t* fact_table,
     const loom_low_lower_policy_t* policy) {
   loom_target_vector_carrier_supported_callback_t callback =
@@ -1630,8 +1636,8 @@ static bool loom_low_target_legalize_function_has_source_vector_carriers(
   for (uint16_t i = 0; i < argument_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, argument_ids[i]);
     if (loom_type_is_vector(type) &&
-        !callback.fn(callback.user_data, module, fact_table, argument_ids[i],
-                     type)) {
+        !callback.fn(callback.user_data, target_facts, module, fact_table,
+                     argument_ids[i], type)) {
       return false;
     }
   }
@@ -1639,8 +1645,8 @@ static bool loom_low_target_legalize_function_has_source_vector_carriers(
   for (uint16_t i = 0; i < function.op->result_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, result_ids[i]);
     if (loom_type_is_vector(type) &&
-        !callback.fn(callback.user_data, module, fact_table, result_ids[i],
-                     type)) {
+        !callback.fn(callback.user_data, target_facts, module, fact_table,
+                     result_ids[i], type)) {
       return false;
     }
   }
@@ -1711,7 +1717,8 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
           selection->policy->source_vector_carrier_supported,
       .source_function_has_unsupported_vector_carrier =
           !loom_low_target_legalize_function_has_source_vector_carriers(
-              module, selection->func, fact_table, selection->policy),
+              module, selection->func, selection->target_facts, fact_table,
+              selection->policy),
       .mode = pass_state->mode,
       .boundary_representation = pass_state->boundary_representation,
       .policy = pass_state->policy,

@@ -108,27 +108,15 @@ test.target<low_core> @test_target
 func.def target(@test_target) @narrow_vector_comparison(%lhs: vector<2xi8>, %rhs: vector<2xi8>) -> (vector<2xi1>) {
   %4 = vector.extract %lhs[0] : vector<2xi8> -> i8
   %5 = vector.extract %rhs[0] : vector<2xi8> -> i8
-  %31 = scalar.extui %4 : i8 to i32
-  %32 = scalar.constant 24 : i32
-  %33 = scalar.shli %31, %32 : i32
-  %34 = scalar.shrsi %33, %32 : i32
-  %27 = scalar.extui %5 : i8 to i32
-  %28 = scalar.constant 24 : i32
-  %29 = scalar.shli %27, %28 : i32
-  %30 = scalar.shrsi %29, %28 : i32
-  %26 = scalar.cmpi slt, %34, %30 : i32
+  %16 = scalar.extsi %4 : i8 to i32
+  %17 = scalar.extsi %5 : i8 to i32
+  %18 = scalar.cmpi slt, %16, %17 : i32
   %7 = vector.extract %lhs[1] : vector<2xi8> -> i8
   %8 = vector.extract %rhs[1] : vector<2xi8> -> i8
-  %20 = scalar.extui %7 : i8 to i32
-  %21 = scalar.constant 24 : i32
-  %22 = scalar.shli %20, %21 : i32
-  %23 = scalar.shrsi %22, %21 : i32
-  %16 = scalar.extui %8 : i8 to i32
-  %17 = scalar.constant 24 : i32
-  %18 = scalar.shli %16, %17 : i32
-  %19 = scalar.shrsi %18, %17 : i32
-  %15 = scalar.cmpi slt, %23, %19 : i32
-  %11 = vector.splat %26 : vector<2xi1>
+  %13 = scalar.extsi %7 : i8 to i32
+  %14 = scalar.extsi %8 : i8 to i32
+  %15 = scalar.cmpi slt, %13, %14 : i32
+  %11 = vector.splat %18 : vector<2xi1>
   %mask = vector.insert %15 into %11[1] : i1, vector<2xi1>
   func.return %mask : vector<2xi1>
 }

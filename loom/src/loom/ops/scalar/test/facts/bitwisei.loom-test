@@ -445,3 +445,51 @@ func.def @signed_bitwise_divisibility(%lhs: i8, %rhs: i8) -> (i64, i64, i64) {
   %xor_divisor = scalar.constant 4 : i64
   func.return %and_divisor, %or_divisor, %xor_divisor : i64, i64, i64
 }
+
+// ====
+
+// A signed one-bit field is still a boolean when the result type is i1.
+func.def @signed_boolean_field(%input: i8) -> (i64, i64) {
+  %predicate = scalar.bitfield.extracts %input {offset = 3, width = 1} : i8 -> i1
+  %byte = scalar.extui %predicate : i1 to i8
+  %lo = test.fact_range_lo %byte : i8 -> i64
+  %hi = test.fact_range_hi %byte : i8 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @signed_boolean_field(%input: i8) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 1 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Full-width unsigned fields use the signed result domain, including i64.
+func.def @unsigned_fields_fill_result(%input: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %field8 = scalar.bitfield.extractu %input {offset = 0, width = 8} : i64 -> i8
+  %lo8 = test.fact_range_lo %field8 : i8 -> i64
+  %hi8 = test.fact_range_hi %field8 : i8 -> i64
+  %field16 = scalar.bitfield.extractu %input {offset = 0, width = 16} : i64 -> i16
+  %lo16 = test.fact_range_lo %field16 : i16 -> i64
+  %hi16 = test.fact_range_hi %field16 : i16 -> i64
+  %field32 = scalar.bitfield.extractu %input {offset = 0, width = 32} : i64 -> i32
+  %lo32 = test.fact_range_lo %field32 : i32 -> i64
+  %hi32 = test.fact_range_hi %field32 : i32 -> i64
+  %field64 = scalar.bitfield.extractu %input {offset = 0, width = 64} : i64 -> i64
+  %lo64 = test.fact_range_lo %field64 : i64 -> i64
+  %hi64 = test.fact_range_hi %field64 : i64 -> i64
+  func.return %lo8, %hi8, %lo16, %hi16, %lo32, %hi32, %lo64, %hi64 : i64, i64, i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @unsigned_fields_fill_result(%input: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %lo8 = scalar.constant -128 : i64
+  %hi8 = scalar.constant 127 : i64
+  %lo16 = scalar.constant -32768 : i64
+  %hi16 = scalar.constant 32767 : i64
+  %lo32 = scalar.constant -2147483648 : i64
+  %hi32 = scalar.constant 2147483647 : i64
+  %lo64 = scalar.constant -9223372036854775808 : i64
+  %hi64 = scalar.constant 9223372036854775807 : i64
+  func.return %lo8, %hi8, %lo16, %hi16, %lo32, %hi32, %lo64, %hi64 : i64, i64, i64, i64, i64, i64, i64, i64
+}

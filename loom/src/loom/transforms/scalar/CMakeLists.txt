@@ -71,6 +71,7 @@ loom_cc_library(
   SRCS
     "target_legalization.c"
   DEPS
+    ::combine_patterns
     iree::base
     loom::ir
     loom::ops::scalar

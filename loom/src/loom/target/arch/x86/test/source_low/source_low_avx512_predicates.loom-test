@@ -270,3 +270,22 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
   %selected = vpblendvb.xmm %rhs, %lhs, %14
   return %result, %selected
 }
+
+// ====
+
+// Generic bitfield extraction preserves SIMD lanes independently of predicate
+// representation at callable boundaries.
+x86.target<avx512> @target
+
+func.def target(@target) @predicate_fields(%input: vector<16xi32>) -> (vector<16xi32>, vector<16xi32>) {
+  %signed = vector.bitfield.extracts %input {offset = 0, width = 1} : vector<16xi32> -> vector<16xi32>
+  %unsigned = vector.bitfield.extractu %input {offset = 0, width = 1} : vector<16xi32> -> vector<16xi32>
+  func.return %signed, %unsigned : vector<16xi32>, vector<16xi32>
+}
+// ----
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (vector<16xi32>) -> (vector<16xi32>, vector<16xi32>)}) @predicate_fields(%input: reg<x86.zmm>) -> (reg<x86.zmm>, reg<x86.zmm>) asm {
+  %16 = avx512.vpslld.zmm %input, 31
+  %signed = avx512.vpsrad.zmm %16, 31
+  %unsigned = avx512.vpsrld.zmm %16, 31
+  return %signed, %unsigned
+}

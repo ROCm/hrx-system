@@ -372,7 +372,8 @@ func.def @bfloat_lookup_arithmetic(%input: buffer, %output: buffer) {
   func.return
 }
 
-// Finite quarter-valued operands make products and sums exactly representable.
+// Finite quarter-valued operands make the scalar reference exact. Native
+// grouped dots retain their target's intermediate precision and rounding.
 // The remaining halfwords retain arbitrary bits except for eight rotated IEEE
 // edge records; these bits participate only in payload-preserving operations.
 global.rodata.def @bfloat_sign_edges = align(2) bytes("00000080807f80ffc17fa5ff01000180")
@@ -549,9 +550,22 @@ check.scenario @bfloat_lookup_arithmetic_values {
     check.generate<@generate_bfloat_lookup>(%trial, %input) : (index, tensor<64xi16>) -> ()
     %output_storage = check.generate.fill value(-52) : tensor<896xi8>
     %output = check.tensor.view %output_storage offset(64) : tensor<896xi8> -> tensor<768xi8>
+    %payloads = check.tensor.view %output_storage offset(0) : tensor<896xi8> -> tensor<448xi8>
+    %dot_zero = check.tensor.view %output_storage offset(448) : tensor<896xi8> -> tensor<4xf32>
+    %dot_zero_guard = check.tensor.view %output_storage offset(464) : tensor<896xi8> -> tensor<48xi8>
+    %dot_initial = check.tensor.view %output_storage offset(512) : tensor<896xi8> -> tensor<4xf32>
+    %product_and_suffix = check.tensor.view %output_storage offset(528) : tensor<896xi8> -> tensor<368xi8>
     check.compare<@bfloat_lookup_arithmetic, @bfloat_lookup_oracle>(%input, %output) : (tensor<64xi16>, tensor<768xi8>) -> () {
       check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<128xi16>
-      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<896xi8>
+      check.expect.bitwise actual(%payloads) expected(%payloads) : tensor<448xi8>
+      check.expect.bitwise actual(%dot_zero_guard) expected(%dot_zero_guard) : tensor<48xi8>
+      check.expect.bitwise actual(%product_and_suffix) expected(%product_and_suffix) : tensor<368xi8>
+      // Native grouped dots need not match ordered f32 arithmetic. Products
+      // have magnitude at most 256 and the initial value at most 16, so the
+      // largest absolute intermediate sum is 528. Allow four f32 ULPs at that
+      // magnitude, while checking all non-dot bytes exactly above.
+      check.expect.close actual(%dot_zero) expected(%dot_zero) atol(0.000244140625) rtol(0.0) nan(same) : tensor<4xf32>
+      check.expect.close actual(%dot_initial) expected(%dot_initial) atol(0.000244140625) rtol(0.0) nan(same) : tensor<4xf32>
     }
   }
   check.return
