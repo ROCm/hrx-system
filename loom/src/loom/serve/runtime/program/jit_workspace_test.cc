@@ -26,7 +26,13 @@ class JitWorkspaceTest : public loom_serve::testing::JitModuleTest {
     if (held_.execution) {
       IREE_EXPECT_OK(loom_serve_execution_drain(held_.execution));
     }
+    if (held_.completion) {
+      IREE_EXPECT_OK(iree_hal_semaphore_wait(
+          held_.completion, held_.completion_value, iree_infinite_timeout(),
+          IREE_ASYNC_WAIT_FLAG_NONE));
+    }
     loom_serve_execution_release(held_.execution);
+    iree_hal_semaphore_release(held_.completion);
     iree_hal_semaphore_release(held_.gate);
     JitModuleTest::TearDown();
   }
@@ -37,6 +43,10 @@ class JitWorkspaceTest : public loom_serve::testing::JitModuleTest {
     loom_serve_execution_t* execution = nullptr;
     // Owned external predecessor, released only after independent output.
     iree_hal_semaphore_t* gate = nullptr;
+    // Retained work timeline when the model releases its execution early.
+    iree_hal_semaphore_t* completion = nullptr;
+    // Last accepted deallocation on the retained work timeline.
+    uint64_t completion_value = 0;
     // Private root, released after its dealloca is accepted.
     iree_hal_buffer_t* buffer = nullptr;
     // Borrowed feedback backing kept alive through teardown.
@@ -322,6 +332,10 @@ TEST_P(JitWorkspaceTest, RetiredModelDoesNotJoinRawQueueAllocationCaptures) {
   iree_hal_buffer_release(held_.buffer);
   held_.buffer = nullptr;
   EXPECT_TRUE(loom_serve_execution_is_retired(held_.execution));
+  const auto frontier = loom_serve_execution_frontier(held_.execution);
+  held_.completion = frontier.semaphores[0];
+  held_.completion_value = frontier.values[0];
+  iree_hal_semaphore_retain(held_.completion);
 
   // Neither raw queue operation can run yet, but no model consumer remains.
   // A hidden join in release blocks the shared worker and prevents this real
@@ -391,8 +405,8 @@ TEST_P(JitWorkspaceTest, RetiredModelDoesNotJoinRawQueueAllocationCaptures) {
   IREE_ASSERT_OK(iree_hal_semaphore_query(held_.gate, &observed));
   EXPECT_EQ(observed, 0u);
   IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
-  // Final application teardown owns the remaining raw captures. It opens the
-  // predecessor and joins them while keeping the shared pool/device alive.
+  // Fixture teardown opens the predecessor and joins the retained completion
+  // before checking the shared workspace for this test's remaining captures.
 }
 
 INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitWorkspaceTest,
