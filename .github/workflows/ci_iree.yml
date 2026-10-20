@@ -1059,6 +1059,7 @@ jobs:
               for generation in ("Initial", "GenerationWrap")
           ]
           options = ci_config.AMDGPU_WINDOWS_BAZEL_OPTIONS
+          test_options = options + ("--jobs=8", "--test_output=all")
           steps = [
               ci.bazel_configure_step(extra_options=options),
               ci.bazel_test_step(
@@ -1070,18 +1071,17 @@ jobs:
                   ),
                   config="asan",
                   available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
-                  bazel_options=options + ("--test_output=all",),
+                  bazel_options=test_options,
               ),
               ci.bazel_test_step(
                   "Prove finite coherent PM4 publication",
                   ("//libamdf/cts/gpu/pm4:pm4_dynamic",),
                   config="asan",
                   available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
-                  bazel_options=options + (
+                  bazel_options=test_options + (
                       "--test_arg=--amdf_gpu_target=gfx1201",
                       "--test_arg=--gtest_fail_fast=1",
                       "--test_filter=" + ":".join(required),
-                      "--test_output=all",
                   ) + tuple("--test_arg=--amdf_require_test=" + name for name in required),
               ),
           ]
