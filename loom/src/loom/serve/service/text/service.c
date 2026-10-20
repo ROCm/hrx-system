@@ -109,10 +109,13 @@ struct loom_serve_text_service_t {
     // Accepted epoch through readiness collection; zero for maintenance work.
     IREE_TRACE(iree_section_id_t section;)
   } completion;
-  // Exclusive host/VM borrow, cleared only after task process release. Input
-  // preparation selects among idle rows and may overlap device epoch work on
-  // active rows; the owner leaves all idle completions unchanged until release.
-  loom_serve_text_cpu_work_t cpu_work;
+  // Exclusive host/VM borrow, independent of numerical admission.
+  struct {
+    // One accepted finite task or completed output awaiting host admission.
+    loom_serve_text_cpu_work_t work;
+    // Host claim released only after readiness joins the task's final access.
+    loom_serve_execution_permit_t permit;
+  } cpu;
   // Retained cohort inputs and feedback through response CPU release.
   loom_serve_text_epoch_t epoch;
   // Independent known-input output bytes retained through response CPU release.
@@ -166,7 +169,7 @@ static bool loom_serve_text_epoch_is_prepared(
 
 static bool loom_serve_text_has_work(const loom_serve_text_service_t* service) {
   return service->completion.work != TEXT_WORK_NONE ||
-         service->cpu_work != TEXT_CPU_WORK_NONE ||
+         service->cpu.work != TEXT_CPU_WORK_NONE ||
          loom_serve_text_epoch_is_prepared(service);
 }
 
@@ -185,11 +188,29 @@ static iree_status_t loom_serve_text_await_work(
   return iree_ok_status();
 }
 
-static void loom_serve_text_schedule_cpu(loom_serve_text_service_t* service,
+static bool loom_serve_text_schedule_cpu(loom_serve_text_service_t* service,
                                          loom_serve_text_cpu_work_t work,
+                                         loom_serve_execution_qos_t qos,
                                          loom_serve_text_cpu_work_fn_t run) {
-  service->cpu_work = work;
+  loom_serve_execution_permit_t* permit = &service->cpu.permit;
+  if (permit->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING &&
+      permit->qos != qos) {
+    loom_serve_execution_permit_cancel(permit);
+  }
+  if (permit->phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE) {
+    loom_serve_execution_permit_request(permit, qos);
+  }
+  if (!loom_serve_execution_permit_try_acquire(permit)) {
+    // Fresh input remains queued without borrowing the source or preventing
+    // already-admitted inference. Completed output retains its epoch instead.
+    if (work != TEXT_CPU_WORK_OUTPUT) {
+      loom_serve_execution_permit_cancel(permit);
+    }
+    return false;
+  }
+  service->cpu.work = work;
   loom_serve_text_readiness_schedule(&service->readiness, run, service);
+  return true;
 }
 
 static iree_status_t loom_serve_text_count_input(void* user_data) {
@@ -204,14 +225,14 @@ static iree_status_t loom_serve_text_count_input(void* user_data) {
 // source VM after submission or when no generation can currently progress.
 static bool loom_serve_text_begin_input_count(
     loom_serve_text_service_t* service) {
-  if (!service->input_counts.count || service->cpu_work != TEXT_CPU_WORK_NONE ||
+  if (!service->input_counts.count || service->cpu.work != TEXT_CPU_WORK_NONE ||
       (service->completion.work != TEXT_WORK_NONE &&
        service->completion.work != TEXT_WORK_EPOCH)) {
     return false;
   }
-  loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_INPUT_COUNT,
-                               loom_serve_text_count_input);
-  return true;
+  return loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_INPUT_COUNT,
+                                      LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+                                      loom_serve_text_count_input);
 }
 
 static void loom_serve_text_observe(loom_serve_text_service_t* service,
@@ -383,7 +404,7 @@ static void loom_serve_text_pending_cancel(loom_serve_text_service_t* service,
 static void loom_serve_text_pending_cancel_failed(
     loom_serve_text_service_t* service, bool* out_progress) {
   const bool candidate_borrowed =
-      service->cpu_work == TEXT_CPU_WORK_PREPARE ||
+      service->cpu.work == TEXT_CPU_WORK_PREPARE ||
       service->completion.work == TEXT_WORK_RESERVE ||
       service->completion.work == TEXT_WORK_RETAIN;
   if (loom_serve_text_pending_queue_cancel_failed(
@@ -598,11 +619,15 @@ static bool loom_serve_text_begin_preparation_at(
   if (current) {
     return true;
   }
+  if (!loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_PREPARE,
+                                    pending->consumer.qos,
+                                    loom_serve_text_prepare_admission)) {
+    memset(&service->pending.prepared, 0, sizeof(service->pending.prepared));
+    return false;
+  }
   if (service->completion.work == TEXT_WORK_NONE) {
     loom_serve_text_observe(service, "prepare");
   }
-  loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_PREPARE,
-                               loom_serve_text_prepare_admission);
   return true;
 }
 
@@ -775,7 +800,7 @@ static iree_status_t loom_serve_text_admit_request(
   if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING) ||
       !pending->consumer.vtable->is_open(pending->consumer.self)) {
     loom_serve_text_reset_session(service, service->pending.prepared.session);
-    loom_serve_text_pending_cancel(service, service->pending.admission.cursor);
+    loom_serve_text_pending_cancel(service, service->pending.prepared.index);
     return iree_ok_status();
   }
   // Detach obsolete media loans before moving request ownership to the row.
@@ -799,7 +824,7 @@ static iree_status_t loom_serve_text_complete_reservation(
   if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING) ||
       !service->pending.prepared.request->consumer.vtable->is_open(
           service->pending.prepared.request->consumer.self)) {
-    loom_serve_text_pending_cancel(service, service->pending.admission.cursor);
+    loom_serve_text_pending_cancel(service, service->pending.prepared.index);
   }
   return iree_ok_status();
 }
@@ -974,7 +999,7 @@ static void loom_serve_text_pending_push(
   // accepted epoch owns different rows. The finite loan preserves already
   // accepted work and the exact selected request's storage.
   if (service->completion.work == TEXT_WORK_EPOCH &&
-      service->cpu_work == TEXT_CPU_WORK_NONE) {
+      service->cpu.work == TEXT_CPU_WORK_NONE) {
     loom_serve_text_begin_preparation(service);
   }
 }
@@ -1270,13 +1295,73 @@ static void loom_serve_text_separate_ready(
   }
 }
 
-// Output encoding owns request phases and consumer staging until its CPU loan
-// returns. Other source work does not mutate admitted row readiness.
+// Completed output is a prerequisite for the next invocation on this source.
+// Only that finite completion inherits a waiting realtime dependent's class.
+static loom_serve_execution_qos_t loom_serve_text_output_qos(
+    const loom_serve_text_service_t* service) {
+  loom_serve_execution_qos_t qos = LOOM_SERVE_EXECUTION_QOS_BACKGROUND;
+  bool live = false;
+  for (iree_host_size_t i = 0; i < service->epoch.count; ++i) {
+    const loom_serve_text_consumer_t consumer =
+        service->sessions[service->epoch.spans[i].row_index].request.consumer;
+    if (consumer.vtable->is_open(consumer.self)) {
+      live = true;
+      qos = iree_max(qos, consumer.qos);
+    }
+  }
+  if (!live) {
+    return qos;
+  }
+  for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
+    const loom_serve_text_consumer_t consumer =
+        service->pending.values[i]->consumer;
+    if (consumer.vtable->is_open(consumer.self)) {
+      qos = iree_max(qos, consumer.qos);
+    }
+  }
+  for (iree_host_size_t i = 0; i < service->row_count; ++i) {
+    const loom_serve_text_session_t* session = &service->sessions[i];
+    const loom_serve_text_consumer_t consumer = session->request.consumer;
+    if (consumer.self && consumer.qos == LOOM_SERVE_EXECUTION_QOS_REALTIME &&
+        consumer.vtable->is_open(consumer.self) &&
+        !consumer.vtable->is_blocked(consumer.self) &&
+        (session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL ||
+         session->request.phase == LOOM_SERVE_TEXT_REQUEST_DECODE)) {
+      qos = LOOM_SERVE_EXECUTION_QOS_REALTIME;
+    }
+  }
+  return qos;
+}
+
+// Output encoding owns request phases and consumer staging until task release.
+// Pending preparation becomes ready demand before another source can accept
+// background work; a prepared physical-admission wait contributes no host
+// demand.
 static loom_serve_execution_resources_t loom_serve_text_execution_demand(
     void* self) {
-  const loom_serve_text_service_t* service = self;
-  if (service->stopping || service->cpu_work == TEXT_CPU_WORK_OUTPUT) {
+  loom_serve_text_service_t* service = self;
+  if (service->stopping) {
     return 0;
+  }
+  if (service->cpu.work == TEXT_CPU_WORK_OUTPUT) {
+    return service->cpu.permit.phase != LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED &&
+                   loom_serve_text_output_qos(service) ==
+                       LOOM_SERVE_EXECUTION_QOS_REALTIME
+               ? LOOM_SERVE_EXECUTION_RESOURCE_HOST
+               : 0;
+  }
+  if (service->cpu.work == TEXT_CPU_WORK_NONE) {
+    for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
+      const loom_serve_text_pending_request_t* request =
+          service->pending.values[i];
+      if (request->consumer.qos == LOOM_SERVE_EXECUTION_QOS_REALTIME &&
+          request != service->pending.prepared.request &&
+          request->consumer.vtable->is_open(request->consumer.self) &&
+          loom_serve_text_session_select(service->row_count, service->sessions,
+                                         request->name, NULL)) {
+        return LOOM_SERVE_EXECUTION_RESOURCE_HOST;
+      }
+    }
   }
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     const loom_serve_text_session_t* session = &service->sessions[i];
@@ -1453,7 +1538,9 @@ static void loom_serve_text_begin_output(loom_serve_text_service_t* service) {
     has_output |= service->epoch.results[i].output_count != 0;
   }
   if (has_output) {
+    service->cpu.work = TEXT_CPU_WORK_OUTPUT;
     loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_OUTPUT,
+                                 loom_serve_text_output_qos(service),
                                  loom_serve_text_process_output);
   } else {
     service->epoch.count = 0;
@@ -1719,6 +1806,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
     loom_serve_text_session_deinitialize(&service->sessions[i]);
   }
   loom_serve_text_readiness_deinitialize(&service->readiness);
+  loom_serve_execution_permit_deinitialize(&service->cpu.permit);
   loom_serve_text_tool_calls_deinitialize(&service->tool_calls);
   loom_serve_text_chat_scratch_deinitialize(&service->completion_scratch);
   iree_string_builder_deinitialize(&service->scratch);
@@ -1808,6 +1896,9 @@ iree_status_t loom_serve_text_service_allocate(
           .shapes = loom_serve_text_model_shapes(model),
           .shape_count = loom_serve_text_model_shape_count(model)}};
   service->permit = loom_serve_text_model_permit(model);
+  loom_serve_execution_permit_initialize(service->permit->scheduler,
+                                         LOOM_SERVE_EXECUTION_RESOURCE_HOST,
+                                         &service->cpu.permit);
   if (!service->scheduling.shape_count) {
     service->scheduling.shapes = &service->isolated_shape;
     service->scheduling.shape_count = 1;
@@ -1888,7 +1979,7 @@ static iree_status_t loom_serve_text_advance_work(
   *out_progress = false;
   loom_serve_text_pending_cancel_failed(service, out_progress);
   const bool cancelled_counts = loom_serve_text_input_count_cancel(
-      &service->input_counts, service->cpu_work == TEXT_CPU_WORK_INPUT_COUNT,
+      &service->input_counts, service->cpu.work == TEXT_CPU_WORK_INPUT_COUNT,
       iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING),
       &service->telemetry);
   if (cancelled_counts) {
@@ -1896,13 +1987,34 @@ static iree_status_t loom_serve_text_advance_work(
     loom_serve_text_pending_observe(service);
   }
   bool yield_preparation = false;
-  if (service->cpu_work != TEXT_CPU_WORK_NONE) {
+  if (service->cpu.work == TEXT_CPU_WORK_OUTPUT &&
+      service->cpu.permit.phase != LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED) {
+    bool live = false;
+    for (iree_host_size_t i = 0; i < service->epoch.count; ++i) {
+      const loom_serve_text_consumer_t consumer =
+          service->sessions[service->epoch.spans[i].row_index].request.consumer;
+      live |= consumer.vtable->is_open(consumer.self);
+    }
+    if (service->stopping || !live) {
+      loom_serve_execution_permit_cancel(&service->cpu.permit);
+      service->cpu.work = TEXT_CPU_WORK_NONE;
+      loom_serve_text_complete_output(service);
+      *out_progress = true;
+    } else {
+      *out_progress |= loom_serve_text_schedule_cpu(
+          service, TEXT_CPU_WORK_OUTPUT, loom_serve_text_output_qos(service),
+          loom_serve_text_process_output);
+      return iree_ok_status();
+    }
+  }
+  if (service->cpu.work != TEXT_CPU_WORK_NONE) {
     iree_status_t status = iree_ok_status();
     if (!loom_serve_text_readiness_take_cpu(&service->readiness, &status)) {
       return iree_ok_status();
     }
-    const loom_serve_text_cpu_work_t work = service->cpu_work;
-    service->cpu_work = TEXT_CPU_WORK_NONE;
+    loom_serve_execution_permit_complete(&service->cpu.permit);
+    const loom_serve_text_cpu_work_t work = service->cpu.work;
+    service->cpu.work = TEXT_CPU_WORK_NONE;
     *out_progress = true;
     if (work == TEXT_CPU_WORK_PREPARE) {
       status = loom_serve_text_complete_preparation(service, flags, status);
@@ -2016,7 +2128,7 @@ static iree_status_t loom_serve_text_advance_work(
   if (service->pending.prepared.session &&
       !service->pending.prepared.request->consumer.vtable->is_open(
           service->pending.prepared.request->consumer.self)) {
-    loom_serve_text_pending_cancel(service, service->pending.admission.cursor);
+    loom_serve_text_pending_cancel(service, service->pending.prepared.index);
     *out_progress = true;
   }
   // Another model may have completed requests or maintenance since the last
@@ -2077,7 +2189,7 @@ static iree_status_t loom_serve_text_advance_work(
 static bool loom_serve_text_media_lookahead(
     loom_serve_text_service_t* service) {
   if (!service->media_preparation_end || service->pending.prepared.session ||
-      service->cpu_work != TEXT_CPU_WORK_NONE ||
+      service->cpu.work != TEXT_CPU_WORK_NONE ||
       (service->completion.work != TEXT_WORK_NONE &&
        service->completion.work != TEXT_WORK_EPOCH)) {
     return false;
@@ -2177,7 +2289,7 @@ static iree_status_t loom_serve_text_accept(
                                            /*allow_preparation=*/true);
   } else if (iree_status_is_ok(status) &&
              service->completion.work == TEXT_WORK_EPOCH &&
-             service->cpu_work == TEXT_CPU_WORK_NONE) {
+             service->cpu.work == TEXT_CPU_WORK_NONE) {
     loom_serve_text_begin_preparation(service);
   }
   if (iree_status_is_ok(status) &&
@@ -2211,9 +2323,15 @@ static loom_serve_service_snapshot_t loom_serve_text_snapshot(void* self) {
   const iree_time_t now = iree_time_now();
   const char* image_phase =
       loom_serve_text_media_projector_phase(service->projector);
+  const char* phase =
+      image_phase && !strcmp(state.phase, "idle") ? image_phase : state.phase;
+  if (service->cpu.work == TEXT_CPU_WORK_OUTPUT &&
+      service->cpu.permit.phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING) {
+    phase = "waiting_cpu";
+  }
   const bool active_control = service->control.consumer.self &&
                               service->completion.work == TEXT_WORK_CHECKPOINT;
-  const bool active_count = service->cpu_work == TEXT_CPU_WORK_INPUT_COUNT;
+  const bool active_count = service->cpu.work == TEXT_CPU_WORK_INPUT_COUNT;
   iree_time_t queued_arrival =
       service->pending.count
           ? loom_serve_text_pending_queue_oldest_arrival(&service->pending)
@@ -2239,8 +2357,7 @@ static loom_serve_service_snapshot_t loom_serve_text_snapshot(void* self) {
         service->input_counts.requests[active_count].receipt.arrival_time);
   }
   return (loom_serve_service_snapshot_t){
-      .phase = image_phase && !strcmp(state.phase, "idle") ? image_phase
-                                                           : state.phase,
+      .phase = phase,
       .queued_requests = service->pending.count +
                          (service->control.consumer.self && !active_control) +
                          service->input_counts.count - active_count,
@@ -2284,7 +2401,7 @@ static bool loom_serve_text_request_at(
     *out_snapshot = (loom_serve_http_request_snapshot_t){
         .id = query->receipt.serial,
         .phase =
-            query_index == 0 && service->cpu_work == TEXT_CPU_WORK_INPUT_COUNT
+            query_index == 0 && service->cpu.work == TEXT_CPU_WORK_INPUT_COUNT
                 ? "count_input"
                 : "queued",
         .arrival_time = query->receipt.arrival_time,

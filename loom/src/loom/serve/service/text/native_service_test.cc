@@ -94,6 +94,7 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
   }
 
   void TearDown() override {
+    loom_serve_execution_permit_deinitialize(&peer_);
     if (registry_ && loom_serve_registry_count(registry_)) {
       IREE_EXPECT_OK(
           loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_ABORT));
@@ -182,6 +183,14 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
            !service.snapshot(service.self).queued_requests;
   }
 
+  void RequestVoice() {
+    loom_serve_execution_permit_initialize(loom_serve_device_scheduler(device_),
+                                           LOOM_SERVE_EXECUTION_RESOURCE_HOST,
+                                           &peer_);
+    loom_serve_execution_permit_request(&peer_,
+                                        LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  }
+
   iree_status_t Open(
       const std::string& body, const char* session, NativeStream* stream,
       const char* checkpoint = "",
@@ -220,6 +229,21 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     }));
     IREE_ASSERT_OK(loom_serve_text_stream_status(stream.get()));
     ASSERT_NE(loom_serve_text_stream_peek(stream.get()), nullptr);
+  }
+
+  void HoldCompletedOutput(const std::string& body, NativeStream* background) {
+    IREE_ASSERT_OK(Open(body, "background", background));
+    ASSERT_NO_FATAL_FAILURE(AwaitBlock(*background));
+    auto& service = Model()->service;
+    ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+      return std::string(service.snapshot(service.self).phase) == "execute";
+    }));
+    RequestVoice();
+    EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+    ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+      return std::string(service.snapshot(service.self).phase) == "waiting_cpu";
+    }));
+    ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
   }
 
   iree_status_t OpenCheckpoint(loom_serve_text_checkpoint_action_t action,
@@ -390,6 +414,8 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
   iree_host_size_t index_ = 0;
   // Copied deployment identity, retained across model destruction.
   std::string name_;
+  // Competing host claim, released before registry teardown on every path.
+  loom_serve_execution_permit_t peer_ = {};
   // Complete supported request, reused across native and HTTP representations.
   std::string body_;
   // Outer socket reader, independent of the serialized serving owner.
@@ -439,6 +465,87 @@ TEST_F(NativeTextRegistryTest,
       EXPECT_EQ(String(result->content), Oracle::Complete("abxa", 4));
     }
   }
+}
+
+TEST_F(NativeTextRegistryTest,
+       VoiceDefersFreshHostWorkAndPreservesCancellation) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  RequestVoice();
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  NativeStream cancelled(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "cancelled", &cancelled));
+  auto& service = Model()->service;
+  bool progress = false;
+  IREE_ASSERT_OK(Advance(service, 0, &progress));
+  EXPECT_EQ(service.snapshot(service.self).queued_requests, 1u);
+  EXPECT_EQ(service.snapshot(service.self).active_requests, 0u);
+  cancelled.reset();
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
+      [&] { return service.snapshot(service.self).queued_requests == 0; }));
+  NativeStream background(nullptr, loom_serve_text_stream_close);
+  NativeStream voice(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "background", &background));
+  IREE_ASSERT_OK(
+      Open(body_, "voice", &voice, "", LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(voice));
+  EXPECT_EQ(service.snapshot(service.self).queued_requests, 1u);
+  EXPECT_FALSE(loom_serve_text_stream_is_complete(background.get()));
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(background));
+  for (const auto* stream : {voice.get(), background.get()}) {
+    const auto* result = loom_serve_text_stream_result(stream);
+    ASSERT_NE(result, nullptr);
+    if (!FLAG_native_text_model[0]) {
+      EXPECT_EQ(String(result->content), Oracle::Complete("abxa", 4));
+    }
+  }
+}
+
+TEST_F(NativeTextRegistryTest, CompletedOutputInheritsReadyVoiceDependency) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  const auto body =
+      FLAG_native_text_model[0] ? body_ : Request(Message("user", "abxa"), 16);
+  NativeStream background(nullptr, loom_serve_text_stream_close);
+  ASSERT_NO_FATAL_FAILURE(HoldCompletedOutput(body, &background));
+  auto& service = Model()->service;
+  loom_serve_http_session_snapshot_t before = {};
+  ASSERT_TRUE(service.inspection.session_at(service.self, 0, &before));
+  ASSERT_EQ(String(before.name), "background");
+  NativeStream voice(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(
+      Open(body_, "voice", &voice, "", LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(voice));
+  loom_serve_http_session_snapshot_t after = {};
+  ASSERT_TRUE(service.inspection.session_at(service.self, 0, &after));
+  EXPECT_EQ(after.position, before.position);
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(background));
+  if (!FLAG_native_text_model[0]) {
+    EXPECT_EQ(String(loom_serve_text_stream_result(voice.get())->content),
+              Oracle::Complete("abxa", 4));
+    EXPECT_EQ(String(loom_serve_text_stream_result(background.get())->content),
+              Oracle::Complete("abxa", 16));
+  }
+}
+
+TEST_F(NativeTextRegistryTest, AbandonedOutputRetiresWhileVoiceOwnsHost) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  const auto body =
+      FLAG_native_text_model[0] ? body_ : Request(Message("user", "abxa"), 16);
+  NativeStream background(nullptr, loom_serve_text_stream_close);
+  ASSERT_NO_FATAL_FAILURE(HoldCompletedOutput(body, &background));
+  background.reset();
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
+  EXPECT_EQ(Model()->service.telemetry.counters->cancelled, 1u);
+  NativeStream replacement(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "background", &replacement, "",
+                      LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(replacement));
+  if (!FLAG_native_text_model[0]) {
+    EXPECT_EQ(String(loom_serve_text_stream_result(replacement.get())->content),
+              Oracle::Complete("abxa", 4));
+  }
+  loom_serve_execution_permit_complete(&peer_);
 }
 
 TEST_F(NativeTextRegistryTest, StalledNativeAndHttpPeerRetainDetachedResult) {
