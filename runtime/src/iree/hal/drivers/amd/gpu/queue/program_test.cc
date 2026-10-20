@@ -67,7 +67,9 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
           profile->roles = AMDF_MEMORY_PROFILE_ROLE_CREATE |
                            (mapped ? AMDF_MEMORY_PROFILE_ROLE_HOST_MAP : 0);
           profile->supported_flags =
-              (scope->local ? AMDF_MEMORY_FLAG_DEVICE_LOCAL : 0) |
+              (scope->local || scope->owner->unified_
+                   ? AMDF_MEMORY_FLAG_DEVICE_LOCAL
+                   : 0) |
               (mapped ? AMDF_MEMORY_FLAG_HOST_VISIBLE : 0);
           profile->host_mapping.supported_access =
               mapped ? AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE
@@ -310,6 +312,8 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
   iree_hal_amd_gpu_context_t context_ = {};
   // System upload scope.
   Scope system_ = {this, false};
+  // SYSTEM storage is also device-local on a unified-memory device.
+  bool unified_ = false;
   // Physical-local program scope.
   Scope local_ = {this, true};
   // Context-owned native scope handle array.
@@ -337,6 +341,25 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
   // Permission for that native free to complete.
   std::binary_semaphore* free_resume_ = nullptr;
 };
+
+TEST_P(ProgramLifetimeTest, QualifiedUnifiedStorageIsResident) {
+  context_.memory_scope_count = 0;
+  unified_ = true;
+  iree_hal_amd_fabric_memory_options_t upload = {}, resident = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_query_program_memory(
+      &context_, 0, &pool_.access, &upload, &resident));
+  EXPECT_EQ(resident.scope, fabric_->system_scope);
+  EXPECT_NE(resident.required_flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL, 0u);
+  EXPECT_NE(resident.host_access, 0u);
+}
+
+TEST_P(ProgramLifetimeTest, UploadAvailabilityDoesNotPromiseLocalPlacement) {
+  context_.memory_scope_count = 0;
+  iree_hal_amd_fabric_memory_options_t upload = {}, resident = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_hal_amd_gpu_context_query_program_memory(
+                            &context_, 0, &pool_.access, &upload, &resident));
+}
 
 TEST_P(ProgramLifetimeTest, LastReleaseReturnsBeforeHeldNativeFree) {
   auto* program = new iree_hal_amd_gpu_program_t{};

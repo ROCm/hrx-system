@@ -44,15 +44,7 @@ class AqlProgramTest : public GpuNativeTest {
     // the same local allocation policy with no host mapping requested.
     pool_.storage.resident.host_access = 0;
     pool_.storage.resident.required_flags &= ~AMDF_MEMORY_FLAG_HOST_VISIBLE;
-    access_ = pool_.storage.access;
-    access_.requirements.flags |=
-        AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
-    iree_hal_amd_fabric_memory_options_t unused_resident;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_context_query_program_memory(
-        context_, options_.queue_family_ordinal, &access_, &control_policy_,
-        &unused_resident));
-    control_policy_.host_access =
-        AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+    ASSERT_NO_FATAL_FAILURE(SelectControlMemory(&access_, &control_policy_));
     IREE_ASSERT_OK(iree_hal_amd_fabric_memory_allocate(
         context_->api, &control_policy_, 8192, 256, context_->event_sink,
         &control_, nullptr));

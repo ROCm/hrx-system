@@ -33,7 +33,7 @@ typedef struct iree_hal_amd_gpu_program_pool_t {
   amdf_memory_device_access_t access;
   // Cached host-visible upload and immutable builtin instruction placement.
   iree_hal_amd_fabric_memory_options_t upload;
-  // Physical-local placement when advertised, otherwise cached system memory.
+  // Device-local storage, including qualified shared DRAM on unified devices.
   iree_hal_amd_fabric_memory_options_t resident;
   // Protects registered-program membership during explicit trim and removal.
   iree_slim_mutex_t registry_mutex;
