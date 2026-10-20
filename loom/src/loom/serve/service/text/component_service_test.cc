@@ -126,7 +126,8 @@ class TextComponentServiceTest : public SourceTextServiceTest {
 
   void BeginImagePreparation() {
     loom_serve_finite_model_t* model = nullptr;
-    IREE_ASSERT_OK(loom_serve_finite_component_prepare(image_, &model));
+    IREE_ASSERT_OK(loom_serve_finite_component_prepare(
+        image_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &model));
     EXPECT_EQ(model, nullptr);
     EXPECT_TRUE(loom_serve_finite_component_is_pending(image_));
     EXPECT_TRUE(interface_.is_pending(interface_.self));
@@ -169,8 +170,10 @@ TEST_F(TextComponentServiceTest, ImageFailureDoesNotFailConcurrentText) {
   EXPECT_EQ(loom_serve_finite_component_phase(image_),
             LOOM_SERVE_FINITE_COMPONENT_FAILED);
   loom_serve_finite_model_t* model = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        loom_serve_finite_component_prepare(image_, &model));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      loom_serve_finite_component_prepare(
+          image_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &model));
   EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
   ASSERT_NO_FATAL_FAILURE(CompleteTextRequest());
 }

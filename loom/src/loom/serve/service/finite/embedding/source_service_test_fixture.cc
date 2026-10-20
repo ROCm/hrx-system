@@ -60,14 +60,16 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
     }
   } else if (!self->complete) {
     self->status = iree_status_join(
-        self->status,
-        loom_serve_finite_load_advance(self->load, 0, &self->complete));
+        self->status, loom_serve_finite_load_advance(
+                          self->load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0,
+                          &self->complete));
     if (self->cancel_after_start && !self->complete) {
       // The first CPU task has been accepted, even with only one worker.
       self->status = iree_status_join(
           self->status,
           loom_serve_finite_load_advance(
-              self->load, LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL, &self->complete));
+              self->load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+              LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL, &self->complete));
     }
     if (self->complete) {
       self->report = *loom_serve_finite_load_report(self->load);
@@ -240,10 +242,7 @@ void SourceEmbeddingServiceTest::CreateService(
 }
 
 void SourceEmbeddingServiceTest::TearDown() {
-  if (http_.joinable()) {
-    loom_serve_http_server_request_stop(server_);
-    IREE_EXPECT_OK(http_.Join());
-  }
+  StopRouter();
   if (service_) {
     interface_.set_observer(interface_.self, {});
     loom_serve_finite_service_free(service_);
@@ -424,6 +423,13 @@ void SourceEmbeddingServiceTest::StartRouter() {
         host_allocator_);
     return iree_status_join(status, loom_serve_registry_free(registry));
   });
+}
+
+void SourceEmbeddingServiceTest::StopRouter() {
+  if (http_.joinable()) {
+    loom_serve_http_server_request_stop(server_);
+    IREE_EXPECT_OK(http_.Join());
+  }
 }
 
 void SourceEmbeddingServiceTest::StartManagedRouter(iree_host_size_t capacity) {

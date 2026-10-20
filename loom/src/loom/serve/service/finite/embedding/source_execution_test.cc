@@ -597,8 +597,17 @@ class RequestChoiceTest : public GenerationSelectionTest {
   }
 
   void TearDown() override {
-    loom_serve_execution_permit_deinitialize(&peer_);
     ReleaseCompiler();
+    StopRouter();
+    loom_serve_execution_permit_deinitialize(&peer_);
+    if (load_) {
+      if (!load_complete_) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                              FinishLoad(LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+                                         LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL));
+      }
+      IREE_EXPECT_OK(loom_serve_finite_load_free(load_));
+    }
     if (batch_active_) {
       IREE_EXPECT_OK(Resolve(true));
       loom_serve_finite_model_release_batch(model_);
@@ -804,6 +813,44 @@ class RequestChoiceTest : public GenerationSelectionTest {
     condition_.notify_all();
   }
 
+  void BeginLoad() {
+    load_complete_ = false;
+    IREE_ASSERT_OK(load_document_.Load(directory_ + "/model.json"));
+    const loom_serve_finite_model_options_t options = {
+        .sources = load_document_.value().sources,
+        .asset_directory = IREE_SV("."),
+        .options = IREE_SV("{}"),
+    };
+    IREE_ASSERT_OK(loom_serve_finite_load_allocate(
+        device_, &options, Wake, this, {this, Allocate}, &load_));
+  }
+
+  iree_status_t FinishLoad(loom_serve_execution_qos_t qos,
+                           loom_serve_finite_load_flags_t flags = 0) {
+    iree_status_t status = iree_ok_status();
+    while (!load_complete_ && iree_status_is_ok(status)) {
+      const auto previous = wakes_.load();
+      status =
+          loom_serve_finite_load_advance(load_, qos, flags, &load_complete_);
+      if (!load_complete_ && iree_status_is_ok(status)) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [&] { return wakes_.load() != previous; });
+      }
+    }
+    return status;
+  }
+
+  void InstallLoadedModel() {
+    interface_.set_observer(interface_.self, {});
+    loom_serve_finite_service_free(std::exchange(service_, nullptr));
+    IREE_ASSERT_OK(
+        loom_serve_finite_model_free(std::exchange(model_, nullptr)));
+    model_ = loom_serve_finite_load_take_model(load_);
+    IREE_ASSERT_OK(loom_serve_finite_load_free(std::exchange(load_, nullptr)));
+    ASSERT_NO_FATAL_FAILURE(CreateService(0));
+    interface_.set_observer(interface_.self, {Wake, this});
+  }
+
   void RequestVoice() {
     loom_serve_execution_permit_initialize(loom_serve_device_scheduler(device_),
                                            LOOM_SERVE_EXECUTION_RESOURCE_HOST,
@@ -858,7 +905,110 @@ class RequestChoiceTest : public GenerationSelectionTest {
   loom_serve_execution_permit_t peer_ = {};
   // Temporary input package, released before the first request specialization.
   loom_serve_package_t* package_ = nullptr;
+  // Borrowed cold-load inputs outlive every asynchronous bootstrap child.
+  loom_serve::testing::ModelDocument load_document_;
+  // Optional second model load, joined before fixture-owned compiler teardown.
+  loom_serve_finite_load_t* load_ = nullptr;
+  // Terminal load has returned ownership and must not be advanced again.
+  bool load_complete_ = false;
 };
+
+TEST_P(RequestChoiceTest, UnstartedLoadCancelsAndReplacementInheritsVoice) {
+  RequestVoice();
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  ASSERT_NO_FATAL_FAILURE(BeginLoad());
+  const auto before = worker_allocations_.load();
+  bool complete = false;
+  IREE_ASSERT_OK(loom_serve_finite_load_advance(
+      load_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0, &complete));
+  EXPECT_FALSE(complete);
+  EXPECT_EQ(worker_allocations_.load(), before);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        loom_serve_finite_load_advance(
+                            load_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+                            LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL, &complete));
+  ASSERT_TRUE(complete);
+  EXPECT_EQ(worker_allocations_.load(), before);
+  IREE_ASSERT_OK(loom_serve_finite_load_free(std::exchange(load_, nullptr)));
+  ASSERT_NO_FATAL_FAILURE(BeginLoad());
+  IREE_ASSERT_OK(loom_serve_finite_load_advance(
+      load_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0, &complete));
+  EXPECT_FALSE(complete);
+  IREE_ASSERT_OK(FinishLoad(LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_NO_FATAL_FAILURE(InstallLoadedModel());
+  loom_serve_execution_permit_complete(&peer_);
+  StartRouter();
+  EXPECT_NE(Read(Send(R"({"model":"fixture","input":"a"})"))
+                .find(R"("embedding":[1,1,1,1])"),
+            std::string::npos);
+}
+
+TEST_P(RequestChoiceTest, CancelledBootstrapRetainsHostUntilPublication) {
+  ASSERT_NO_FATAL_FAILURE(BeginLoad());
+  holding_ = true;
+  bool complete = false;
+  IREE_ASSERT_OK(loom_serve_finite_load_advance(
+      load_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0, &complete));
+  EXPECT_FALSE(complete);
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return entered_; });
+  }
+  RequestVoice();
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  IREE_ASSERT_OK(loom_serve_finite_load_advance(
+      load_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+      LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL, &complete));
+  EXPECT_FALSE(complete);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  ReleaseCompiler();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        FinishLoad(LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+                                   LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL));
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  IREE_ASSERT_OK(loom_serve_finite_load_free(std::exchange(load_, nullptr)));
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(
+      RunChoice(R"({"model":"fixture","input":"a"})", false, {1, 1, 1, 1}));
+}
+
+TEST_P(RequestChoiceTest, VoicePausesNextLoadStageAfterBootstrapRetires) {
+  ASSERT_NO_FATAL_FAILURE(BeginLoad());
+  holding_ = true;
+  IREE_ASSERT_OK(loom_serve_finite_load_advance(
+      load_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0, &load_complete_));
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return entered_; });
+  }
+  RequestVoice();
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  ReleaseCompiler();
+  bool acquired = false;
+  while (!acquired) {
+    const auto previous = wakes_.load();
+    IREE_ASSERT_OK(loom_serve_finite_load_advance(
+        load_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0, &load_complete_));
+    ASSERT_FALSE(load_complete_);
+    acquired = loom_serve_execution_permit_try_acquire(&peer_);
+    if (!acquired) {
+      std::unique_lock<std::mutex> lock(mutex_);
+      condition_.wait(lock, [&] { return wakes_.load() != previous; });
+    }
+  }
+  const auto before = worker_allocations_.load();
+  IREE_ASSERT_OK(loom_serve_finite_load_advance(
+      load_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, 0, &load_complete_));
+  EXPECT_FALSE(load_complete_);
+  EXPECT_EQ(worker_allocations_.load(), before);
+  loom_serve_execution_permit_complete(&peer_);
+  IREE_ASSERT_OK(FinishLoad(LOOM_SERVE_EXECUTION_QOS_BACKGROUND));
+  ASSERT_NO_FATAL_FAILURE(InstallLoadedModel());
+  StartRouter();
+  EXPECT_NE(Read(Send(R"({"model":"fixture","input":"a"})"))
+                .find(R"("embedding":[1,1,1,1])"),
+            std::string::npos);
+}
 
 TEST_P(RequestChoiceTest, ShapeReuseAndLruEvictionSurviveProviderRetirement) {
   ASSERT_NO_FATAL_FAILURE(

@@ -71,13 +71,15 @@ enum loom_serve_finite_load_flag_bits_e {
 };
 typedef uint32_t loom_serve_finite_load_flags_t;
 
-// Serialized pool-owner turn. Never waits for tasks or device work. After a
-// nonterminal result, wake schedules another turn. A terminal result transfers
-// exclusive access to the owner, including on failure; no callbacks remain.
+// Serialized pool-owner turn. Never waits for tasks or device work. QoS selects
+// each unaccepted phase; accepted work retains its class through retirement.
+// Task completion or changed application admission schedules another turn.
+// A terminal result transfers exclusive access to the owner, including on
+// failure; no callbacks remain.
 // Call until *out_complete, then inspect evidence and take or destroy the load.
 iree_status_t loom_serve_finite_load_advance(
-    loom_serve_finite_load_t* load, loom_serve_finite_load_flags_t flags,
-    bool* out_complete);
+    loom_serve_finite_load_t* load, loom_serve_execution_qos_t qos,
+    loom_serve_finite_load_flags_t flags, bool* out_complete);
 
 // Terminal-only queries. Evidence is borrowed until take_model or destruction;
 // take_model transfers a successfully prepared, still-unactivated model.
@@ -86,8 +88,8 @@ const loom_serve_compilation_report_t* loom_serve_finite_load_report(
 loom_serve_finite_model_t* loom_serve_finite_load_take_model(
     loom_serve_finite_load_t* load);
 
-// Destroys a terminal operation and any untaken model. Preparation submits no
-// queue work, so partial-load cleanup requires no asynchronous retirement.
+// Destroys a terminal operation and any untaken model. Terminal advance joins
+// accepted host work and any partial native backing on a failed load.
 // A platform release failure preserves the operation and remaining ownership.
 iree_status_t loom_serve_finite_load_free(loom_serve_finite_load_t* load);
 

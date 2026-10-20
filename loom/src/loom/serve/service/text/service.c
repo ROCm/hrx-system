@@ -710,8 +710,8 @@ static iree_status_t loom_serve_text_prepare_media(
   }
   if (!service->projector) {
     loom_serve_finite_model_t* model = NULL;
-    iree_status_t status =
-        loom_serve_finite_component_prepare(service->image, &model);
+    iree_status_t status = loom_serve_finite_component_prepare(
+        service->image, pending->consumer.qos, &model);
     if (!iree_status_is_ok(status)) {
       // Registration/source preparation is service availability, not a defect
       // in this HTTP payload. Preserve the component's original diagnostic.
@@ -2246,7 +2246,7 @@ static iree_status_t loom_serve_text_advance(void* self,
     flags |= LOOM_SERVE_SERVICE_FLAG_STOPPING;
   }
   const bool image_progress = loom_serve_finite_component_advance(
-      service->image,
+      service->image, loom_serve_text_pending_qos(service),
       iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING));
   const bool configuration_progress =
       loom_serve_execution_reconfiguration_advance(

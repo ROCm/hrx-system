@@ -89,8 +89,8 @@ static iree_status_t loom_serve_finite_registration_prepare(
     loom_serve_compilation_report_t* out_report) {
   loom_serve_finite_registration_t* registration = self;
   iree_status_t status = loom_serve_finite_load_advance(
-      registration->load, cancel ? LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL : 0,
-      out_complete);
+      registration->load, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+      cancel ? LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL : 0, out_complete);
   if (!*out_complete) {
     return status;
   }
@@ -924,8 +924,8 @@ static iree_status_t loom_serve_text_registration_activate(
       return iree_ok_status();
     }
     loom_serve_finite_model_t* model = NULL;
-    *out_component_status =
-        loom_serve_finite_component_prepare(registration->image, &model);
+    *out_component_status = loom_serve_finite_component_prepare(
+        registration->image, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &model);
     if (!iree_status_is_ok(*out_component_status)) {
       return iree_ok_status();
     }

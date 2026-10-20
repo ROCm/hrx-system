@@ -91,12 +91,14 @@ class MediaServiceTest : public SourceTextServiceTest {
 
   void PrepareProjector() {
     loom_serve_finite_model_t* model = nullptr;
-    IREE_ASSERT_OK(loom_serve_finite_component_prepare(image_, &model));
+    IREE_ASSERT_OK(loom_serve_finite_component_prepare(
+        image_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &model));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
       return loom_serve_finite_component_phase(image_) !=
              LOOM_SERVE_FINITE_COMPONENT_PREPARING;
     }));
-    IREE_ASSERT_OK(loom_serve_finite_component_prepare(image_, &model));
+    IREE_ASSERT_OK(loom_serve_finite_component_prepare(
+        image_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &model));
     ASSERT_NE(model, nullptr);
   }
 

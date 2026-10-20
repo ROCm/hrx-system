@@ -123,6 +123,10 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
 
   void StartManagedRouter(iree_host_size_t capacity = 2);
 
+  // Joins the serialized owner before the fixture resumes direct service
+  // access.
+  void StopRouter();
+
   std::string Declaration(const std::string& name, const std::string& source,
                           const char* admission = "open",
                           const std::string& base = "");

@@ -90,7 +90,8 @@ void loom_serve_finite_component_set_pinned(
 }
 
 bool loom_serve_finite_component_advance(
-    loom_serve_finite_component_t* component, bool stopping) {
+    loom_serve_finite_component_t* component, loom_serve_execution_qos_t qos,
+    bool stopping) {
   if (!component) {
     return false;
   }
@@ -107,7 +108,7 @@ bool loom_serve_finite_component_advance(
   }
   bool complete = false;
   component->status = loom_serve_finite_load_advance(
-      component->load,
+      component->load, qos,
       component->stopping ? LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL : 0, &complete);
   if (!complete) {
     return false;
@@ -130,7 +131,7 @@ bool loom_serve_finite_component_advance(
 }
 
 iree_status_t loom_serve_finite_component_prepare(
-    loom_serve_finite_component_t* component,
+    loom_serve_finite_component_t* component, loom_serve_execution_qos_t qos,
     loom_serve_finite_model_t** out_model) {
   *out_model = NULL;
   // A borrowed model must not escape a concurrent quiescent release or removal.
@@ -145,7 +146,7 @@ iree_status_t loom_serve_finite_component_prepare(
                            ? LOOM_SERVE_FINITE_COMPONENT_PREPARING
                            : LOOM_SERVE_FINITE_COMPONENT_FAILED;
   }
-  loom_serve_finite_component_advance(component, false);
+  loom_serve_finite_component_advance(component, qos, false);
   if (component->phase == LOOM_SERVE_FINITE_COMPONENT_READY) {
     *out_model = component->model;
   }
@@ -206,7 +207,8 @@ iree_status_t loom_serve_finite_component_retire(
   if (!component) {
     return iree_ok_status();
   }
-  loom_serve_finite_component_advance(component, true);
+  loom_serve_finite_component_advance(
+      component, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, true);
   if (loom_serve_finite_component_is_pending(component)) {
     *out_complete = false;
     return iree_ok_status();

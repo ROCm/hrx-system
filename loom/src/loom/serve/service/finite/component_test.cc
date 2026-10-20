@@ -170,8 +170,8 @@ class FiniteComponentTest : public ::testing::Test {
   iree_status_t Prepare(loom_serve_finite_component_t* component,
                         loom_serve_finite_model_t** out_model) {
     return owner_.Run(device_, [&](bool* complete) {
-      iree_status_t status =
-          loom_serve_finite_component_prepare(component, out_model);
+      iree_status_t status = loom_serve_finite_component_prepare(
+          component, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, out_model);
       *complete = *out_model != nullptr;
       return status;
     });
@@ -289,7 +289,8 @@ TEST_F(FiniteComponentTest,
   ASSERT_TRUE(std::filesystem::remove(directory_ + "/weights.safetensors"));
   EXPECT_EQ(loom_serve_finite_component_phase(component_),
             LOOM_SERVE_FINITE_COMPONENT_DECLARED);
-  EXPECT_FALSE(loom_serve_finite_component_advance(component_, false));
+  EXPECT_FALSE(loom_serve_finite_component_advance(
+      component_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false));
   EXPECT_FALSE(loom_serve_finite_component_is_pending(component_));
   EXPECT_EQ(loom_serve_finite_component_report(component_)->commands, 0u);
   IREE_ASSERT_OK(Trim());
@@ -300,10 +301,11 @@ TEST_F(FiniteComponentTest,
 TEST_F(FiniteComponentTest, RepeatedDemandSharesOneUnactivatedPreparation) {
   loom_serve_finite_model_t* model = nullptr;
   IREE_ASSERT_OK(owner_.Run(device_, [&](bool* complete) {
-    iree_status_t status =
-        loom_serve_finite_component_prepare(component_, &model);
+    iree_status_t status = loom_serve_finite_component_prepare(
+        component_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &model);
     if (iree_status_is_ok(status) && !model) {
-      status = loom_serve_finite_component_prepare(component_, &model);
+      status = loom_serve_finite_component_prepare(
+          component_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &model);
     }
     *complete = model != nullptr;
     return status;
@@ -339,7 +341,8 @@ TEST_F(FiniteComponentTest, PreparationFailureIsRetainedWithoutRetrying) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, Prepare(component_, &model));
   EXPECT_EQ(loom_serve_finite_component_report(component_)->commands,
             report.commands);
-  EXPECT_FALSE(loom_serve_finite_component_advance(component_, false));
+  EXPECT_FALSE(loom_serve_finite_component_advance(
+      component_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false));
 }
 
 TEST_F(FiniteComponentTest, RemovalJoinsAcceptedPreparation) {
@@ -347,8 +350,8 @@ TEST_F(FiniteComponentTest, RemovalJoinsAcceptedPreparation) {
   IREE_ASSERT_OK(owner_.Run(device_, [&](bool* complete) -> iree_status_t {
     if (!started) {
       loom_serve_finite_model_t* model = nullptr;
-      IREE_RETURN_IF_ERROR(
-          loom_serve_finite_component_prepare(component_, &model));
+      IREE_RETURN_IF_ERROR(loom_serve_finite_component_prepare(
+          component_, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &model));
       EXPECT_EQ(model, nullptr);
       EXPECT_TRUE(loom_serve_finite_component_is_pending(component_));
       started = true;

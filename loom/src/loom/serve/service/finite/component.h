@@ -42,6 +42,7 @@ loom_serve_finite_component_phase_t loom_serve_finite_component_phase(
     const loom_serve_finite_component_t* component);
 
 // Starts the first preparation on demand, or observes that same attempt.
+// qos is the current requesting class, inherited by unaccepted load phases.
 // Success with *out_model == NULL means pending; the observer schedules further
 // owner turns. Success with a model lends it until quiescent trim or
 // retirement. No parameter activation occurs. A failed attempt retains its
@@ -50,7 +51,7 @@ loom_serve_finite_component_phase_t loom_serve_finite_component_phase(
 // this shared preparation. The caller excludes concurrent trim and deployment
 // shutdown.
 iree_status_t loom_serve_finite_component_prepare(
-    loom_serve_finite_component_t* component,
+    loom_serve_finite_component_t* component, loom_serve_execution_qos_t qos,
     loom_serve_finite_model_t** out_model);
 
 // Advances accepted preparation without starting a dormant component. Returns
@@ -59,7 +60,8 @@ iree_status_t loom_serve_finite_component_prepare(
 // stopping is irreversible deployment shutdown, never request cancellation.
 // It cancels subsequent load phases and joins accepted work. NULL is inert.
 bool loom_serve_finite_component_advance(
-    loom_serve_finite_component_t* component, bool stopping);
+    loom_serve_finite_component_t* component, loom_serve_execution_qos_t qos,
+    bool stopping);
 
 // Accepted CPU/JIT work still needs owner turns. Does not include finite model
 // invocations: the borrowing service owns and joins those separately.
