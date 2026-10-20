@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: Loom
+name: Windows passive adapter metadata
 
 on:
   workflow_dispatch:
@@ -60,7 +60,121 @@ permissions:
   contents: read
 
 jobs:
+  passive_metadata:
+    name: Windows gfx1201 passive metadata
+    runs-on: windows-gfx1201-gpu-rocm
+    timeout-minutes: 5
+    steps:
+      - name: Read installed PCI and driver metadata
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $propertyKeys = @(
+              'DEVPKEY_Device_Parent',
+              'DEVPKEY_Device_DriverVersion',
+              'DEVPKEY_Device_DriverInfPath',
+              'DEVPKEY_Device_DriverProvider',
+              'DEVPKEY_Device_LocationInfo',
+              'DEVPKEY_Device_DeviceDesc',
+              '{3ab22e31-8264-4b4e-9af5-a8d2d8e33e62} 1',
+              '{3ab22e31-8264-4b4e-9af5-a8d2d8e33e62} 35'
+          )
+          $devices = @(Get-PnpDevice -PresentOnly -Class Display |
+              Where-Object { $_.InstanceId -like 'PCI\VEN_1002&*' })
+          if ($devices.Count -eq 0) { throw 'No AMD display endpoint found' }
+          $records = @()
+          foreach ($device in $devices) {
+              $instanceId = $device.InstanceId
+              $visited = @{}
+              for ($depth = 0; $depth -lt 8; ++$depth) {
+                  if ($visited.ContainsKey($instanceId)) {
+                      throw "PnP parent cycle at $instanceId"
+                  }
+                  $visited[$instanceId] = $true
+                  $properties = @()
+                  foreach ($key in $propertyKeys) {
+                      try {
+                          $property = Get-PnpDeviceProperty -InstanceId $instanceId -KeyName $key
+                          $properties += [ordered]@{
+                              requested_key = $key
+                              key_name = $property.KeyName
+                              type = $property.Type.ToString()
+                              data = $property.Data
+                          }
+                      } catch {
+                          $properties += [ordered]@{
+                              requested_key = $key
+                              error = $_.Exception.Message
+                              error_id = $_.FullyQualifiedErrorId
+                          }
+                      }
+                  }
+                  $policy = [ordered]@{}
+                  $policyPath = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Enum\$instanceId\Device Parameters\e5b3b5ac-9725-4f78-963f-03dfb1d828c7"
+                  try {
+                      $policy.key_present = Test-Path -LiteralPath $policyPath
+                      if ($policy.key_present) {
+                          $policy.value = Get-ItemPropertyValue -LiteralPath $policyPath -Name AtomicsOptIn
+                      }
+                  } catch {
+                      $policy.error = $_.Exception.Message
+                      $policy.error_id = $_.FullyQualifiedErrorId
+                  }
+                  $infEvidence = [ordered]@{}
+                  $infProperty = @($properties | Where-Object {
+                      $_.requested_key -eq 'DEVPKEY_Device_DriverInfPath'
+                  })
+                  if ($infProperty.Count -eq 1 -and $infProperty[0].data) {
+                      $infName = [string]$infProperty[0].data
+                      if ([IO.Path]::GetFileName($infName) -ne $infName) {
+                          throw "Unexpected driver INF name: $infName"
+                      }
+                      $infPath = Join-Path $env:windir "INF\$infName"
+                      try {
+                          $infEvidence.atomic_lines = @(
+                              Select-String -LiteralPath $infPath -Pattern 'AtomicsOptIn|PciAtomics' |
+                              Select-Object -First 20 |
+                              ForEach-Object { [ordered]@{ line = $_.LineNumber; text = $_.Line } }
+                          )
+                      } catch {
+                          $infEvidence.error = $_.Exception.Message
+                      }
+                  }
+                  $records += [ordered]@{
+                      endpoint = $device.InstanceId
+                      depth = $depth
+                      instance_id = $instanceId
+                      properties = $properties
+                      atomics_policy = $policy
+                      inf_evidence = $infEvidence
+                  }
+                  $parent = @($properties | Where-Object {
+                      $_.requested_key -eq 'DEVPKEY_Device_Parent'
+                  })
+                  if ($parent.Count -ne 1 -or $parent[0].Contains('error')) {
+                      throw "Cannot identify PnP parent for $instanceId"
+                  }
+                  if (!$parent[0].data -or $parent[0].data -notlike 'PCI\*') {
+                      break
+                  }
+                  $instanceId = $parent[0].data
+                  if ($depth -eq 7) {
+                      throw 'PnP parent chain exceeds bounded observation'
+                  }
+              }
+          }
+          [ordered]@{
+              source_commit = $env:GITHUB_SHA
+              machine = $env:COMPUTERNAME
+              observed_utc = [DateTime]::UtcNow.ToString('o')
+              os_version = [Environment]::OSVersion.VersionString
+              endpoint_count = $devices.Count
+              records = $records
+          } | ConvertTo-Json -Depth 8
+
   bazel_linux:
+    if: ${{ false }}
     name: Bazel / Linux x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -394,7 +508,7 @@ jobs:
 
   bazel_linux_binary_size:
     name: Bazel / Linux x86-64 / Clang / Release / Binary Size
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    if: ${{ false }}
     concurrency:
       group: iree-bazel-linux-binary-size-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -503,6 +617,7 @@ jobs:
           retention-days: 45
 
   bazel_windows:
+    if: ${{ false }}
     name: Bazel / Windows x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -843,6 +958,7 @@ jobs:
           retention-days: 7
 
   cmake_linux:
+    if: ${{ false }}
     name: CMake / Linux x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -1021,6 +1137,7 @@ jobs:
           retention-days: 7
 
   cmake_windows:
+    if: ${{ false }}
     name: CMake / Windows x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
