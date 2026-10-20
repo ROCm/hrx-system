@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_QUEUE_H_
 
 #include "iree/hal/drivers/amd/gpu/completion.h"
+#include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/program.h"
@@ -64,6 +65,11 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
 // for waits and publication packets. Family queues share construction geometry.
 uint32_t iree_hal_amd_gpu_aql_queue_maximum_program_packet_count(
     iree_hal_queue_t* queue);
+
+// Called with idle queues and submission externally serialized. The device
+// owns the session; captures borrow it until their publication has finished.
+void iree_hal_amd_gpu_aql_queue_set_profile(
+    iree_hal_queue_t* queue, iree_hal_amd_gpu_profile_t* profile);
 
 iree_status_t iree_hal_amd_gpu_aql_queue_assign_frontier(
     iree_hal_queue_t* queue, iree_async_frontier_tracker_t* tracker,

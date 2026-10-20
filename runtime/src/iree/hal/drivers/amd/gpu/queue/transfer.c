@@ -6,6 +6,34 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/transfer.h"
 
+void iree_hal_amd_gpu_transfer_profile(
+    const iree_hal_amd_gpu_transfer_t* transfer,
+    iree_hal_profile_queue_event_t* event) {
+  event->type = transfer->count ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER
+                                : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER;
+  event->operation_count = (uint32_t)iree_min(transfer->count, UINT32_MAX);
+  event->payload_length = 0;
+  if (transfer->count == 1) {
+    switch (transfer->operations[0].type) {
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+        event->type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_FILL;
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+        event->type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE;
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+        event->type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_COPY;
+        break;
+    }
+  }
+  for (iree_host_size_t i = 0; i < transfer->count; ++i) {
+    event->payload_length += iree_min(transfer->operations[i].length,
+                                      UINT64_MAX - event->payload_length);
+  }
+}
+
 static iree_device_size_t iree_hal_amd_gpu_transfer_length(
     const iree_hal_transfer_operation_t* operation) {
   switch (operation->type) {

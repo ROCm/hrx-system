@@ -408,25 +408,8 @@ void iree_hal_amd_gpu_pm4_submission_profile_transfer(
       count ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER
             : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER,
       submission->wait_count, submission->signals.count, count, operation);
-  if (count == 1) {
-    switch (submission->transfer.operations[0].type) {
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-        operation->event.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_FILL;
-        break;
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-        operation->event.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE;
-        break;
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-        operation->event.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_COPY;
-        break;
-    }
-  }
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    operation->event.payload_length +=
-        iree_min(submission->transfer.operations[i].length,
-                 UINT64_MAX - operation->event.payload_length);
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER) {
+    iree_hal_amd_gpu_transfer_profile(&submission->transfer, &operation->event);
   }
 }
 

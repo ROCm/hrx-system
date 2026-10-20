@@ -111,6 +111,12 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
 void iree_hal_amd_gpu_transfer_deinitialize(
     iree_hal_amd_gpu_transfer_t* transfer);
 
+// Fills type, encoded operation count, and payload bytes from the immutable
+// captured batch. Empty operations omitted during capture contribute nothing.
+void iree_hal_amd_gpu_transfer_profile(
+    const iree_hal_amd_gpu_transfer_t* transfer,
+    iree_hal_profile_queue_event_t* event);
+
 // Resolves a previously qualified device binding after its allocation waits.
 // A pending allocation without a committed native address is a real failure.
 iree_status_t iree_hal_amd_gpu_transfer_resolve(

@@ -76,12 +76,13 @@ TEST_P(AqlSubmissionTest, CapturesInputsAndReleasesPayloadBeforeCompletion) {
   if (GetParam()) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_retirement(
         &pool_, iree_make_byte_span(inline_storage, sizeof(inline_storage)),
-        &request, 0, nullptr, 0, {1, &semaphore, &value}, &capture));
+        nullptr, &request, 0, nullptr, 0, {1, &semaphore, &value}, &capture));
     EXPECT_EQ(capture->pool, nullptr);
     EXPECT_EQ(capture->dispatch.constants.data_length, 0u);
   } else {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_capture(
-        &pool_, &request, {}, {1, &semaphore, &value}, 17, 23, &capture));
+        &pool_, nullptr, &request, {}, {1, &semaphore, &value}, 17, 23,
+        &capture));
     constant = 0;
     uint32_t copied = 0;
     std::memcpy(&copied, capture->dispatch.constants.data, sizeof(copied));
@@ -131,7 +132,7 @@ TEST_P(AqlSubmissionTest, DependencyReadersJoinProducerHostRetirement) {
       &pool_,
       GetParam() ? iree_make_byte_span(inline_storage, sizeof(inline_storage))
                  : iree_byte_span_empty(),
-      &barrier, 1, &dependency, 1, {}, &consumer));
+      nullptr, &barrier, 1, &dependency, 1, {}, &consumer));
   native.value = 0;  // Firmware has finished; the host still owns the payload.
   iree_status_code_t code = IREE_STATUS_OK;
   EXPECT_FALSE(
@@ -149,6 +150,46 @@ TEST_P(AqlSubmissionTest, DependencyReadersJoinProducerHostRetirement) {
   iree_hal_amd_gpu_signal_release(reused);
   iree_hal_amd_gpu_signal_block_deinitialize(&block);
   iree_hal_amd_gpu_signal_pool_deinitialize(&signals);
+}
+
+TEST_P(AqlSubmissionTest, OptionalProfileSharesInlineAndPooledCapture) {
+  const iree_hal_amd_gpu_aql_dispatch_request_t barrier = {};
+  iree_alignas(8) uint8_t inline_storage[1024];
+  iree_host_size_t unprofiled_size = 0;
+  for (bool profiled : {false, true}) {
+    iree_hal_amd_gpu_profile_operation_t operation = {};
+    operation.event.submission_id = 42;
+    operation.event.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER;
+    iree_hal_amd_gpu_aql_submission_t* capture = nullptr;
+    if (GetParam()) {
+      IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_retirement(
+          &pool_, iree_make_byte_span(inline_storage, sizeof(inline_storage)),
+          profiled ? &operation : nullptr, &barrier, 0, nullptr, 0, {},
+          &capture));
+      EXPECT_EQ(capture->pool, nullptr);
+    } else {
+      IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_capture(
+          &pool_, profiled ? &operation : nullptr, &barrier, {}, {}, 0, 0,
+          &capture));
+      EXPECT_EQ(capture->pool, &pool_);
+    }
+    operation.event.submission_id = 0;
+    auto* captured = iree_hal_amd_gpu_aql_submission_profile(capture);
+    if (profiled) {
+      ASSERT_NE(captured, nullptr);
+      EXPECT_EQ(captured->event.submission_id, 42u);
+      EXPECT_EQ(captured->event.type,
+                IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER);
+      EXPECT_EQ(capture->capture_size, unprofiled_size + sizeof(operation));
+      EXPECT_EQ(static_cast<void*>(capture->waits),
+                static_cast<void*>(captured + 1));
+    } else {
+      EXPECT_EQ(captured, nullptr);
+      unprofiled_size = capture->capture_size;
+      EXPECT_EQ(unprofiled_size, sizeof(*capture));
+    }
+    iree_hal_amd_gpu_aql_submission_release(capture);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Storage, AqlSubmissionTest,
@@ -199,7 +240,7 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
   uint64_t value = 1;
   iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_transfer(
-      &pool, &family, {}, {1, &semaphore, &value}, 1, &operation, 0, 0,
+      &pool, nullptr, &family, {}, {1, &semaphore, &value}, 1, &operation, 0, 0,
       &submission));
   struct Completion {
     // File callbacks distinguish failure notification from ending borrows.
@@ -251,7 +292,7 @@ TEST(AqlTransferSubmissionTest, FileBoundaryJoinsFailureAndRetirement) {
   const iree_hal_queue_family_t family = {};
   iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_transfer(
-      &pool, &family, {}, {}, 0, nullptr, 17, 23, &submission));
+      &pool, nullptr, &family, {}, {}, 0, nullptr, 17, 23, &submission));
   EXPECT_EQ(submission->entry.kind, IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER);
   EXPECT_EQ(submission->transfer.capture.count, 0u);
   EXPECT_EQ(submission->before, 17u);

@@ -239,6 +239,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_buffer_barrier(
   }
   buffer->pending_barrier =
       iree_hal_amd_gpu_aql_barrier_join(buffer->pending_barrier, prepared);
+  ++buffer->program.operation_count;
   return iree_ok_status();
 }
 
@@ -388,6 +389,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
     target->words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
   }
   ++buffer->program.dispatch_count;
+  ++buffer->program.operation_count;
   return iree_ok_status();
 }
 
@@ -474,9 +476,11 @@ static iree_status_t iree_hal_amd_gpu_aql_command_transfer(
   buffer->last_ordered = !buffer->last_header ||
                          (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
   buffer->last_header = &packet->words[0];
-  return iree_hal_amd_gpu_aql_command_pointer(
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
       buffer, offset + 40, 0, argument_offset,
-      IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA);
+      IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+  ++buffer->program.operation_count;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_transfer(

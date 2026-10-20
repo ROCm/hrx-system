@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_SUBMISSION_H_
 
 #include "iree/hal/drivers/amd/gpu/completion.h"
+#include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/transfer.h"
@@ -90,6 +91,8 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
   uint32_t after;
   // Queue acceptance owns a host count until publication or rejection.
   bool has_host_owner;
+  // Optional profile operation occupies the immediately trailing storage.
+  bool profiled;
   // Retained HAL signal timelines and copied values in inline storage.
   iree_hal_semaphore_list_t signals;
   union {
@@ -114,10 +117,21 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
   };
 } iree_hal_amd_gpu_aql_submission_t;
 
+// Optional instrumentation shares capture ownership and consumes no storage
+// when disabled. The publisher alone updates readiness before native issue.
+static inline iree_hal_amd_gpu_profile_operation_t*
+iree_hal_amd_gpu_aql_submission_profile(
+    iree_hal_amd_gpu_aql_submission_t* submission) {
+  return submission->profiled
+             ? (iree_hal_amd_gpu_profile_operation_t*)(submission + 1)
+             : NULL;
+}
+
 // Captures a deferred call in one reusable block. Retains all external owners
 // unless flags explicitly borrow payload lifetimes. Failure retains nothing.
 iree_status_t iree_hal_amd_gpu_aql_submission_capture(
     iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
     uint32_t before, uint32_t after,
@@ -128,6 +142,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_capture(
 // nonterminal native piece borrows a reference; the terminal piece takes it.
 iree_status_t iree_hal_amd_gpu_aql_submission_execute(
     iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_queue_execute_flags_t flags,
@@ -137,6 +152,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_execute(
 // Empty transactions retain only their barrier and semaphore ownership.
 iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
     iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_host_size_t count,
     const iree_hal_transfer_operation_t* operations, uint32_t before,
@@ -158,6 +174,7 @@ void iree_hal_amd_gpu_aql_submission_set_frontier(
 // transfers nothing. Prefers inline_storage, falling back to a pool block.
 iree_status_t iree_hal_amd_gpu_aql_submission_retirement(
     iree_hal_amd_gpu_capture_pool_t* pool, iree_byte_span_t inline_storage,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_host_size_t wait_count, const iree_hal_amd_gpu_aql_wait_t* waits,
     uint32_t native_wait_count, iree_hal_semaphore_list_t signals,

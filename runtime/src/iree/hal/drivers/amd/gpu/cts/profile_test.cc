@@ -26,7 +26,7 @@ namespace {
 using iree::hal::amd::gpu::cts::GpuNativeTest;
 using iree::hal::cts::Ref;
 
-class GpuNativeProfileTest : public GpuNativeTest {
+class GpuNativeProfileTestBase : public GpuNativeTest {
  protected:
   virtual iree_hal_device_profiling_data_families_t Families() const {
     return IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS;
@@ -37,9 +37,15 @@ class GpuNativeProfileTest : public GpuNativeTest {
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
-    gfx_major_ = context_->target_info.gfx_ip.major;
+    const auto gfx = context_->target_info.gfx_ip;
+    image_selector_ = gfx.major == 9 ? (gfx.minor == 4       ? "gfx9_4_generic"
+                                        : gfx.stepping == 10 ? "gfx90a"
+                                                             : "gfx9_generic")
+                      : gfx.major == 11 ? "gfx11_generic"
+                                        : "gfx12_generic";
     options_.queue.retirement_capacity = 4;
     options_.queue.argument_capacity = 32;
+    options_.queue.ring_byte_length = 4096;
     Create();
     if (HasFatalFailure()) {
       return;
@@ -118,8 +124,7 @@ class GpuNativeProfileTest : public GpuNativeTest {
     iree_hal_executable_load_params_t params;
     iree_hal_executable_load_params_initialize(&params);
     for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
-      if (std::strstr(files[i].name,
-                      gfx_major_ == 11 ? "gfx11_generic" : "gfx12_generic")) {
+      if (std::strstr(files[i].name, image_selector_)) {
         params.executable_data =
             iree_make_const_byte_span(files[i].data, files[i].size);
       }
@@ -139,7 +144,8 @@ class GpuNativeProfileTest : public GpuNativeTest {
   void Record(iree_hal_executable_t* executable,
               iree_hal_executable_function_t function,
               iree_hal_command_buffer_mode_t mode,
-              iree_hal_command_buffer_t** out_recording) {
+              iree_hal_command_buffer_t** out_recording,
+              uint32_t dispatch_count = 2) {
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         iree_hal_queue_family(queues_[0]), mode,
         IREE_HAL_COMMAND_CATEGORY_DISPATCH, 1, out_recording));
@@ -171,17 +177,16 @@ class GpuNativeProfileTest : public GpuNativeTest {
     config.workgroup_size[0] = 32;
     config.workgroup_size[1] = config.workgroup_size[2] = 1;
     auto reference = iree_hal_make_indirect_buffer_ref(0, 0, 4);
-    uint32_t increment = 1;
-    IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
-        recording, executable, function, config,
-        iree_make_const_byte_span(&increment, sizeof(increment)),
-        {1, &reference}, 0));
-    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
-    increment = 2;
-    IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
-        recording, executable, function, config,
-        iree_make_const_byte_span(&increment, sizeof(increment)),
-        {1, &reference}, 0));
+    for (uint32_t i = 0; i < dispatch_count; ++i) {
+      if (i) {
+        IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
+      }
+      const uint32_t increment = i + 1;
+      IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+          recording, executable, function, config,
+          iree_make_const_byte_span(&increment, sizeof(increment)),
+          {1, &reference}, 0));
+    }
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
   }
@@ -200,7 +205,7 @@ class GpuNativeProfileTest : public GpuNativeTest {
   }
 
   // Native image selector captured before ownership transfers into the device.
-  uint32_t gfx_major_ = 0;
+  const char* image_selector_ = nullptr;
   // Borrowed embedded artifact passed to the most recent native executable
   // load.
   iree_const_byte_span_t loaded_image_ = {};
@@ -210,7 +215,14 @@ class GpuNativeProfileTest : public GpuNativeTest {
   iree::hal::cts::TestProfileSink sink_;
 };
 
-class GpuNativeDispatchProfileTest : public GpuNativeProfileTest {
+class GpuNativeProfileTest
+    : public GpuNativeProfileTestBase,
+      public ::testing::WithParamInterface<amdf_queue_command_type_t> {
+ protected:
+  amdf_queue_command_type_t command_type() const override { return GetParam(); }
+};
+
+class GpuNativeDispatchProfileTest : public GpuNativeProfileTestBase {
  protected:
   iree_hal_device_profiling_data_families_t Families() const override {
     return IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
@@ -451,7 +463,7 @@ TEST_F(GpuNativeDispatchProfileTest,
   }
 }
 
-TEST_F(GpuNativeProfileTest, ProfileCapableRecordingRunsWithoutDeviceCapture) {
+TEST_P(GpuNativeProfileTest, ProfileCapableRecordingRunsWithoutDeviceCapture) {
   Ref<iree_hal_buffer_t> output;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool_, iree_hal_make_pool_reservation_request(4, 4),
@@ -655,7 +667,7 @@ TEST_F(GpuNativeDispatchProfileTest,
   EXPECT_TRUE(sink_.dispatch_events.empty());
 }
 
-TEST_F(GpuNativeProfileTest, ConsumerBeforeProducerRecordsObservedReadiness) {
+TEST_P(GpuNativeProfileTest, ConsumerBeforeProducerRecordsObservedReadiness) {
   Ref<iree_hal_semaphore_t> producer, consumer;
   CreateSemaphore(producer.out());
   CreateSemaphore(consumer.out());
@@ -682,7 +694,7 @@ TEST_F(GpuNativeProfileTest, ConsumerBeforeProducerRecordsObservedReadiness) {
   EXPECT_GE(deferred.ready_host_time_ns, release_time);
 }
 
-TEST_F(GpuNativeProfileTest, FailedDependencyRecordsNoReadiness) {
+TEST_P(GpuNativeProfileTest, FailedDependencyRecordsNoReadiness) {
   Ref<iree_hal_semaphore_t> gate, done;
   CreateSemaphore(gate.out());
   CreateSemaphore(done.out());
@@ -700,7 +712,7 @@ TEST_F(GpuNativeProfileTest, FailedDependencyRecordsNoReadiness) {
   EXPECT_EQ(sink_.queue_events[0].ready_host_time_ns, 0);
 }
 
-TEST_F(GpuNativeProfileTest,
+TEST_P(GpuNativeProfileTest,
        DirectAndReusableRecordedWorkHaveSeparateIdentities) {
   Ref<iree_hal_buffer_t> output;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
@@ -775,7 +787,7 @@ TEST_F(GpuNativeProfileTest,
   }
 }
 
-TEST_F(GpuNativeProfileTest,
+TEST_P(GpuNativeProfileTest,
        QueuedAllocationFileAndHostEffectsExcludeTransportEvents) {
   Ref<iree_hal_semaphore_t> done;
   CreateSemaphore(done.out());
@@ -854,7 +866,7 @@ TEST_F(GpuNativeProfileTest,
             1u);
 }
 
-TEST_F(GpuNativeProfileTest, MappingBatchIsOnePublicEvent) {
+TEST_P(GpuNativeProfileTest, MappingBatchIsOnePublicEvent) {
   const iree_hal_pool_family_access_t access = {
       .family = iree_hal_queue_family(queues_[0]),
       .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
@@ -919,7 +931,83 @@ TEST_F(GpuNativeProfileTest, MappingBatchIsOnePublicEvent) {
   }
 }
 
-TEST_F(GpuNativeProfileTest, ConcurrentSubmittersPreserveEveryPublicIdentity) {
+TEST_P(GpuNativeProfileTest, EmptyOperationsPreservePublicIdentities) {
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), buffer.out()));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t one = 1, two = 2;
+  const uint32_t pattern = 0x12345678;
+  std::array<iree_hal_transfer_operation_t, 3> transfers = {};
+  for (size_t i = 0; i < transfers.size(); ++i) {
+    transfers[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+    transfers[i].fill = {buffer, 0, i == 1 ? 4u : 0u, &pattern, 4};
+  }
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {}, {1, &timeline, &one},
+                                         transfers.size(), transfers.data(),
+                                         nullptr));
+  Ref<iree_hal_command_buffer_t> recording;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queues_[0]), 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+      0, recording.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &timeline, &one},
+                                        {1, &timeline, &two}, recording, {},
+                                        0));
+  ASSERT_NO_FATAL_FAILURE(Wait(done, two));
+  ASSERT_NO_FATAL_FAILURE(End());
+  ASSERT_EQ(sink_.queue_events.size(), 2u);
+  const auto fills = Events(IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_FILL);
+  ASSERT_EQ(fills.size(), 1u);
+  EXPECT_EQ(fills[0].operation_count, 1u);
+  EXPECT_EQ(fills[0].payload_length, 4u);
+  const auto executions = Events(IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE);
+  ASSERT_EQ(executions.size(), 1u);
+  EXPECT_EQ(executions[0].operation_count, 0u);
+  EXPECT_EQ(executions[0].command_buffer_id,
+            iree_hal_command_buffer_profile_id(recording));
+}
+
+TEST_P(GpuNativeProfileTest, ChunkedRecordingHasOnePublicEvent) {
+  constexpr uint32_t kDispatchCount = 64;
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_executable_t> executable;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(Load(executable, function));
+  Ref<iree_hal_command_buffer_t> recording;
+  ASSERT_NO_FATAL_FAILURE(
+      Record(executable, function, 0, recording.out(), kDispatchCount));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t one = 1, two = 2, three = 3;
+  uint32_t zero = 0, observed = 0;
+  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &one},
+                                     output, 0, 4, &zero, 4, nullptr, 0));
+  iree_hal_buffer_binding_t binding = {.buffer = output, .length = 4};
+  IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &timeline, &one},
+                                        {1, &timeline, &two}, recording,
+                                        {1, &binding}, 0));
+  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], {1, &timeline, &two},
+                                         {1, &timeline, &three}, output, 0,
+                                         &observed, sizeof(observed), nullptr));
+  ASSERT_NO_FATAL_FAILURE(Wait(done, three));
+  EXPECT_EQ(observed, kDispatchCount * (kDispatchCount + 1) / 2);
+  ASSERT_NO_FATAL_FAILURE(End());
+  ASSERT_EQ(sink_.queue_events.size(), 3u);
+  const auto executions = Events(IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE);
+  ASSERT_EQ(executions.size(), 1u);
+  EXPECT_EQ(executions[0].operation_count, 2 * kDispatchCount + 1);
+}
+
+TEST_P(GpuNativeProfileTest, ConcurrentSubmittersPreserveEveryPublicIdentity) {
   constexpr size_t kThreads = 4, kOperations = 128;
   std::array<Ref<iree_hal_semaphore_t>, kThreads> completions;
   std::array<std::thread, kThreads> threads;
@@ -962,5 +1050,13 @@ TEST_F(GpuNativeProfileTest, ConcurrentSubmittersPreserveEveryPublicIdentity) {
     }
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    Protocol, GpuNativeProfileTest,
+    ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                      AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+    [](const ::testing::TestParamInfo<amdf_queue_command_type_t>& info) {
+      return info.param == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ? "Aql" : "Pm4";
+    });
 
 }  // namespace

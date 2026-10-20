@@ -34,6 +34,8 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   uint32_t value_count;
   // Public dispatches, independent of internal materializer/fixup dispatches.
   uint32_t dispatch_count;
+  // Public encoded operations, independent of native packet count or folding.
+  uint32_t operation_count;
 } iree_hal_amd_gpu_aql_command_program_t;
 
 // Seals resident templates and private arguments. maximum_packet_count is

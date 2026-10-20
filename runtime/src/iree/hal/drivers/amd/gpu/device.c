@@ -1318,13 +1318,14 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
     iree_hal_device_t* base,
     const iree_hal_device_profiling_options_t* options) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
-  if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "AQL profiling is not admitted");
-  }
   if (device->profile) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "GPU profiling session is already active");
+  }
+  if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
+      (options->data_families & ~IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS)) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "AQL profiling supports public queue events");
   }
   amdf_observation_clock_info_t clock = {0};
   if (options->data_families & IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS) {
@@ -1340,7 +1341,13 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
   device->memory.allocations.profile = device->profile;
   device->memory.mappings.profile = device->profile;
   for (uint32_t i = 0; i < device->queue_count; ++i) {
-    iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[i], device->profile);
+    if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      iree_hal_amd_gpu_aql_queue_set_profile(device->queues[i],
+                                             device->profile);
+    } else {
+      iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[i],
+                                             device->profile);
+    }
   }
   return iree_ok_status();
 }
@@ -1359,7 +1366,9 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_end(
   device->memory.allocations.profile = NULL;
   device->memory.mappings.profile = NULL;
   for (uint32_t i = 0; i < device->queue_count; ++i) {
-    if (device->command_type != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+    if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      iree_hal_amd_gpu_aql_queue_set_profile(device->queues[i], NULL);
+    } else {
       iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[i], NULL);
     }
   }
