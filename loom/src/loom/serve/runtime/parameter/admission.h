@@ -16,6 +16,7 @@ extern "C" {
 // Composes execution eligibility with physical parameter admission on the
 // serialized owner. Policy denial withdraws memory FIFO interest. Physical
 // denial releases execution permission, allowing peers to free needed capacity.
+// A changed class replaces waiting intent, never an accepted native claim.
 // ACQUIRED retains the model-owned permit through activation and any dependent
 // uploads. A source chaining activation into numerical execution retains the
 // same claim through that compound unit instead of acquiring a second slot.

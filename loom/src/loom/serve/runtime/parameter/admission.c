@@ -15,6 +15,10 @@ iree_status_t loom_serve_admission_try_acquire(
     loom_serve_admission_cancel(residency, permit);
     return iree_ok_status();
   }
+  if (permit && permit->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING &&
+      permit->qos != qos) {
+    loom_serve_execution_permit_cancel(permit);
+  }
   if (permit && permit->phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE) {
     loom_serve_execution_permit_request(permit, qos);
   }

@@ -112,6 +112,7 @@ class SourceRecognitionModelTest : public ::testing::Test {
     loom_serve_residency_admission_t admission;
     loom_serve_execution_frontier_t frontier;
     IREE_ASSERT_OK(generator_.try_admit(generator_.self, row.invocation,
+                                        LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
                                         &admission, &frontier));
     ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
     IREE_ASSERT_OK(Wait(frontier));

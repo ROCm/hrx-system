@@ -77,6 +77,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       IREE_RETURN_IF_ERROR(
           test->actual_.prepare(test->actual_.self, row, request, out));
       test->invocations_[row] = *out;
+      ++test->prepared_;
       return iree_ok_status();
     };
     observed.discard = [](void* self, void* invocation) {
@@ -85,11 +86,12 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       test->actual_.discard(test->actual_.self, invocation);
     };
     observed.try_admit = [](void* self, void* invocation,
+                            loom_serve_execution_qos_t qos,
                             loom_serve_residency_admission_t* admission,
                             loom_serve_execution_frontier_t* frontier) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
-      return test->actual_.try_admit(test->actual_.self, invocation, admission,
-                                     frontier);
+      return test->actual_.try_admit(test->actual_.self, invocation, qos,
+                                     admission, frontier);
     };
     observed.complete_admit = [](void* self, void* invocation) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
@@ -173,12 +175,13 @@ class SourceRecognitionStreamTest : public ::testing::Test {
                    &notification_});
   }
 
-  void HoldExecution(size_t count = 2) {
+  void HoldExecution(
+      size_t count = 2,
+      loom_serve_execution_qos_t qos = LOOM_SERVE_EXECUTION_QOS_BACKGROUND) {
     for (size_t i = 0; i < count; ++i) {
       loom_serve_execution_permit_initialize(
           scheduler_, actual_.permit->resources, &blockers_[i]);
-      loom_serve_execution_permit_request(&blockers_[i],
-                                          LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+      loom_serve_execution_permit_request(&blockers_[i], qos);
       ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&blockers_[i]));
     }
   }
@@ -383,6 +386,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   iree_notification_t notification_;
   // Source identities, accessed only on serialized source calls.
   std::array<void*, 4> invocations_ = {};
+  // Completed real request preparations, safely observable while tasks run.
+  std::atomic<size_t> prepared_ = 0;
   // Per-row CPU work offers, observable independently of callback timing.
   std::array<std::atomic<size_t>, 4> offers_ = {};
   // Original ordinal collections, including caller-cancelled requests.
@@ -420,14 +425,19 @@ TEST_F(SourceRecognitionStreamTest, InvalidQosDoesNotAdmit) {
 
 TEST_F(SourceRecognitionStreamTest,
        EmptyRealtimeInputLeavesBackgroundEligible) {
+  ASSERT_NO_FATAL_FAILURE(HoldExecution(1));
   loom_serve_recognition_stream_t* voice = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&voice, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
                                LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_FALSE(
+      loom_serve_execution_is_preempted(scheduler_, actual_.permit->resources,
+                                        LOOM_SERVE_EXECUTION_QOS_BACKGROUND));
   ASSERT_NO_FATAL_FAILURE(Settle());
   EXPECT_EQ(submitted_, 0u);
   EXPECT_FALSE(
       loom_serve_execution_is_preempted(scheduler_, actual_.permit->resources,
                                         LOOM_SERVE_EXECUTION_QOS_BACKGROUND));
+  ReleaseExecution();
   loom_serve_recognition_stream_t* background = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&background));
   ASSERT_NO_FATAL_FAILURE(Write(background, {5}, 1));
@@ -441,13 +451,111 @@ TEST_F(SourceRecognitionStreamTest,
 }
 
 TEST_F(SourceRecognitionStreamTest,
+       FirstInputPromotesPendingActivationWithoutRepeatingPreparation) {
+  ASSERT_NO_FATAL_FAILURE(HoldExecution());
+  loom_serve_recognition_stream_t* stream = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&stream,
+                               LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+                               LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  auto* admission = loom_serve_recognition_model_admission_permit(model_);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return admission->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING; }));
+  EXPECT_EQ(admission->qos, LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+  EXPECT_EQ(prepared_.load(), 1u);
+  ASSERT_NO_FATAL_FAILURE(Write(stream, {5}, 1));
+  loom_serve_recognition_stream_finish(stream);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return admission->qos == LOOM_SERVE_EXECUTION_QOS_REALTIME; }));
+  EXPECT_EQ(admission->phase, LOOM_SERVE_EXECUTION_PERMIT_WAITING);
+  EXPECT_EQ(prepared_.load(), 1u);
+  EXPECT_TRUE(
+      loom_serve_execution_is_preempted(scheduler_, actual_.permit->resources,
+                                        LOOM_SERVE_EXECUTION_QOS_BACKGROUND));
+  ReleaseExecution();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(stream); }));
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(stream, "F"));
+}
+
+TEST_F(SourceRecognitionStreamTest,
+       ColdHostDenialRetainsPcmAndCancelsWithoutSourcePreparation) {
+  auto& peer = blockers_[0];
+  loom_serve_execution_permit_initialize(
+      scheduler_, LOOM_SERVE_EXECUTION_RESOURCE_HOST, &peer);
+  loom_serve_execution_permit_request(&peer, LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer));
+  loom_serve_recognition_stream_t* stream = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&stream));
+  ASSERT_NO_FATAL_FAILURE(Write(stream, {5}, 1));
+  loom_serve_recognition_stream_finish(stream);
+  bool progress = false;
+  IREE_ASSERT_OK(Advance(false, &progress));
+  EXPECT_TRUE(progress);
+  IREE_ASSERT_OK(Advance(false, &progress));
+  EXPECT_FALSE(progress);
+  EXPECT_EQ(prepared_.load(), 0u);
+  EXPECT_EQ(submitted_, 0u);
+  EXPECT_EQ(loom_serve_recognition_stream_peek(stream), nullptr);
+  ASSERT_NO_FATAL_FAILURE(Close(stream));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return end_count_ == 1; }));
+  EXPECT_EQ(prepared_.load(), 0u);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_CANCELLED);
+  EXPECT_EQ(peer.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+
+  ReleaseExecution();
+  ASSERT_NO_FATAL_FAILURE(Open(&stream));
+  ASSERT_NO_FATAL_FAILURE(Write(stream, {5}, 1));
+  loom_serve_recognition_stream_finish(stream);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(stream); }));
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(stream, "F"));
+}
+
+TEST_F(SourceRecognitionStreamTest,
+       VoiceRetiresSameSourceFeedbackBeforePreparingItsInput) {
+  loom_serve_recognition_stream_t* background = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&background));
+  ASSERT_NO_FATAL_FAILURE(Write(background, {1, 2, 3}, 3));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return submitted_ == 1; }));
+  auto& peer = blockers_[0];
+  loom_serve_execution_permit_initialize(
+      scheduler_, LOOM_SERVE_EXECUTION_RESOURCE_HOST, &peer);
+  loom_serve_execution_permit_request(&peer, LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return actual_.permit->phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE;
+  }));
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer));
+  EXPECT_EQ(collected_[0].load(), 0u);
+
+  loom_serve_recognition_stream_t* voice = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&voice, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+                               LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_NO_FATAL_FAILURE(Write(voice, {7}, 1));
+  loom_serve_recognition_stream_finish(voice);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(voice); }));
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(voice, "H"));
+  EXPECT_EQ(collected_[0].load(), 1u);
+  EXPECT_EQ(submitted_, 2u);
+  EXPECT_EQ(peer.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+
+  // Background feedback retained its original input prefix, and no second
+  // background numerical unit ran while the voice peer owned the host.
+  ASSERT_NE(loom_serve_recognition_stream_peek(background), nullptr);
+  loom_serve_recognition_stream_consume(background);
+  ASSERT_NO_FATAL_FAILURE(Write(background, {4}, 1));
+  loom_serve_recognition_stream_finish(background);
+  ReleaseExecution();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(background); }));
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(background, "K"));
+}
+
+TEST_F(SourceRecognitionStreamTest,
        PreparedCancellationReturnsPermissionWithoutSubmittingOrConsumingPcm) {
   loom_serve_recognition_stream_t* cancelled = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&cancelled,
                                LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
                                LOOM_SERVE_EXECUTION_QOS_REALTIME));
   ASSERT_NO_FATAL_FAILURE(Settle());
-  ASSERT_NO_FATAL_FAILURE(HoldExecution());
+  ASSERT_NO_FATAL_FAILURE(HoldExecution(2, LOOM_SERVE_EXECUTION_QOS_REALTIME));
   ASSERT_NO_FATAL_FAILURE(Write(cancelled, {5}, 1));
   loom_serve_recognition_stream_finish(cancelled);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {

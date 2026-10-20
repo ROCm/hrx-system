@@ -65,7 +65,10 @@ typedef struct loom_serve_recognition_generator_t {
   // Owner-side release of an unadmitted request and its admission interest.
   void (*discard)(void* self, void* invocation);
   // ACQUIRED owns an activation pin/frontier, including a row-capacity denial.
+  // The stream owner supplies current input urgency; an empty stream may
+  // prepare at background priority before audio or EOF arrives.
   iree_status_t (*try_admit)(void* self, void* invocation,
+                             loom_serve_execution_qos_t qos,
                              loom_serve_residency_admission_t* out_admission,
                              loom_serve_execution_frontier_t* out_frontier);
   // Consumes successful admission readiness. False releases its activation pin.

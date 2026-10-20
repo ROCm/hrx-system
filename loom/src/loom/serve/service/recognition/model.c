@@ -50,8 +50,6 @@ typedef struct loom_serve_recognition_invocation_t {
   iree_vm_buffer_t* payload;
   // Stable resident row, independent of its ordinal in any numerical batch.
   iree_host_size_t row_index;
-  // Immutable request class retained for owner-side native admission.
-  loom_serve_execution_qos_t qos;
   // Successful state commitment retained through request release.
   bool reserved;
   // Source next-work bytes, refreshed at each retired model selection cut.
@@ -1233,7 +1231,6 @@ static iree_status_t loom_serve_recognition_generator_prepare(
     invocation->state = state;
     invocation->payload = payload;
     invocation->row_index = row_index;
-    invocation->qos = request->qos;
     invocation->outputs = request->outputs;
     invocation->next = model->invocations;
     invocation->previous_next = &model->invocations;
@@ -1256,15 +1253,14 @@ static void loom_serve_recognition_generator_discard(void* self,
 }
 
 static iree_status_t loom_serve_recognition_generator_admit(
-    void* self, void* opaque_invocation,
+    void* self, void* opaque_invocation, loom_serve_execution_qos_t qos,
     loom_serve_residency_admission_t* out_admission,
     loom_serve_execution_frontier_t* out_frontier) {
   *out_frontier = (loom_serve_execution_frontier_t){0};
   loom_serve_recognition_model_t* model = self;
   loom_serve_recognition_invocation_t* invocation = opaque_invocation;
   IREE_RETURN_IF_ERROR(loom_serve_admission_try_acquire(
-      model->residency, &model->admission_permit, invocation->qos,
-      out_admission));
+      model->residency, &model->admission_permit, qos, out_admission));
   if (*out_admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     return iree_ok_status();
   }
