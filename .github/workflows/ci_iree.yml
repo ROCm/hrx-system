@@ -329,6 +329,7 @@ jobs:
           if __name__ == "__main__":
               sys.exit(main())
           '@
+          $OutputEncoding = [Text.UTF8Encoding]::new($false)
           $source | python -B -
           if ($LASTEXITCODE -ne 0) { throw "Adapter snapshot failed: $LASTEXITCODE" }
 
