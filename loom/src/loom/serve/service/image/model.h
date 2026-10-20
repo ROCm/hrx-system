@@ -252,7 +252,8 @@ void loom_serve_image_model_set_observer(loom_serve_image_model_t* model,
 // Cancellation retires accepted compilation but submits no device work. The
 // owner calls until complete, then admits or discards the prepared cohort.
 iree_status_t loom_serve_image_model_advance_batch(
-    loom_serve_image_model_t* model, bool cancel, bool* out_complete);
+    loom_serve_image_model_t* model, loom_serve_execution_qos_t qos,
+    bool cancel, bool* out_complete);
 
 // Releases a successfully prepared cohort that has not been submitted. This
 // does not release residency pins or retire device work. The model is reusable.

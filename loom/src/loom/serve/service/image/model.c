@@ -1266,10 +1266,10 @@ void loom_serve_image_model_set_observer(loom_serve_image_model_t* model,
 }
 
 iree_status_t loom_serve_image_model_advance_batch(
-    loom_serve_image_model_t* model, bool cancel, bool* out_complete) {
-  IREE_RETURN_IF_ERROR(loom_serve_executables_advance(
-      model->executables, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, cancel,
-      out_complete));
+    loom_serve_image_model_t* model, loom_serve_execution_qos_t qos,
+    bool cancel, bool* out_complete) {
+  IREE_RETURN_IF_ERROR(loom_serve_executables_advance(model->executables, qos,
+                                                      cancel, out_complete));
   if (!cancel && *out_complete) {
     const loom_serve_stage_launch_t* stage = loom_serve_executables_stage(
         model->executables, model->invocation.stage);
@@ -1393,7 +1393,8 @@ iree_status_t loom_serve_image_model_generate(
   bool resolved = false;
   while (iree_status_is_ok(status) && !resolved) {
     const uint32_t ticket = iree_notification_prepare_wait(&notification);
-    status = loom_serve_image_model_advance_batch(model, false, &resolved);
+    status = loom_serve_image_model_advance_batch(
+        model, LOOM_SERVE_EXECUTION_QOS_BACKGROUND, false, &resolved);
     if (resolved || !iree_status_is_ok(status)) {
       iree_notification_cancel_wait(&notification);
     } else {
@@ -1433,12 +1434,12 @@ iree_status_t loom_serve_image_model_generate(
 }
 
 static iree_status_t loom_serve_image_generator_admit(
-    void* self, loom_serve_residency_admission_t* out_admission) {
+    void* self, loom_serve_execution_qos_t qos,
+    loom_serve_residency_admission_t* out_admission) {
   loom_serve_image_model_t* model = self;
   loom_serve_residency_t* residency = loom_serve_image_model_residency(model);
   IREE_RETURN_IF_ERROR(loom_serve_admission_try_acquire(
-      residency, &model->permit, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
-      out_admission));
+      residency, &model->permit, qos, out_admission));
   if (*out_admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     loom_serve_residency_cancel_admission(residency);
   }
@@ -1465,9 +1466,10 @@ static void loom_serve_image_generator_set_observer(
   loom_serve_image_model_set_observer(self, observer);
 }
 
-static iree_status_t loom_serve_image_generator_advance(void* self, bool cancel,
-                                                        bool* out_complete) {
-  return loom_serve_image_model_advance_batch(self, cancel, out_complete);
+static iree_status_t loom_serve_image_generator_advance(
+    void* self, loom_serve_execution_qos_t qos, bool cancel,
+    bool* out_complete) {
+  return loom_serve_image_model_advance_batch(self, qos, cancel, out_complete);
 }
 
 static iree_status_t loom_serve_image_generator_submit(

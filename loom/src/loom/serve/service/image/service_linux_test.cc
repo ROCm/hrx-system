@@ -62,7 +62,7 @@ struct loom_serve_test_image_gate_t {
   // Unsubmitted payloads discarded on denied admission, read after join.
   uint32_t discarded = 0;
 
-  static iree_status_t Admit(void* self,
+  static iree_status_t Admit(void* self, loom_serve_execution_qos_t,
                              loom_serve_residency_admission_t* out_admission) {
     auto* gate = static_cast<loom_serve_test_image_gate_t*>(self);
     const bool admitted =
@@ -237,7 +237,7 @@ class ImageServiceFixture : public ::testing::Test {
         .prepare_batch = loom_serve_test_image_gate_t::PrepareBatch,
         .set_observer = [](void*, loom_serve_wake_callback_t) {},
         .advance_batch =
-            [](void*, bool, bool* out_complete) {
+            [](void*, loom_serve_execution_qos_t, bool, bool* out_complete) {
               *out_complete = true;
               return iree_ok_status();
             },

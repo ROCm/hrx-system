@@ -138,6 +138,7 @@ loom_cc_library(
     loom::serve::service
     loom::serve::service::execution_reconfiguration
     loom::serve::service::kind
+    loom::serve::service::qos
     loom::serve::telemetry::latency
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
@@ -203,7 +204,9 @@ loom_cc_library(
   NAME
     source_service_tests
   SRCS
+    "http_qos_test.cc"
     "source_service_test.cc"
+    "source_test_fixture.h"
   DEPS
     iree::async
     iree::base
@@ -215,6 +218,7 @@ loom_cc_library(
     iree::vm
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::package

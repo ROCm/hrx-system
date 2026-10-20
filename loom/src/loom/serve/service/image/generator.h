@@ -68,14 +68,15 @@ typedef struct loom_serve_image_generator_t {
   void (*set_observer)(void* self, loom_serve_wake_callback_t observer);
   // Resolves prepared code before residency admission. A miss progresses
   // asynchronously; cancellation joins accepted producers before completion.
-  iree_status_t (*advance_batch)(void* self, bool cancel, bool* out_complete);
+  iree_status_t (*advance_batch)(void* self, loom_serve_execution_qos_t qos,
+                                 bool cancel, bool* out_complete);
   // Releases prepared CPU payload and withdraws any unsubmitted admission
   // interest. Runs on the owner, never concurrently with other services.
   void (*discard_batch)(void* self);
   // New-work admission on the shared owner; policy deferral differs from
   // physical denial. ACQUIRED pins and enqueues parameter activation, retaining
   // the numerical permit through the first part and its successful readiness.
-  iree_status_t (*try_admit)(void* self,
+  iree_status_t (*try_admit)(void* self, loom_serve_execution_qos_t qos,
                              loom_serve_residency_admission_t* out_admission);
   // Enqueues one source-controlled part, returning borrowed completion handles.
   // The first call follows admission; each subsequent call follows successful

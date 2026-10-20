@@ -21,6 +21,7 @@
 #include "loom/serve/service/image/output.h"
 #include "loom/serve/service/image/telemetry.h"
 #include "loom/serve/service/kind.h"
+#include "loom/serve/service/qos.h"
 #include "loom/serve/telemetry/tracing.h"
 #include "loom/util/json.h"
 
@@ -31,6 +32,8 @@ typedef struct loom_serve_image_job_t {
   loom_serve_http_connection_t* connection;
   // Immutable monotonic receipt time, preserved through queue and invocation.
   iree_time_t arrival_time;
+  // Immutable request class selected before source preparation and packing.
+  loom_serve_execution_qos_t qos;
   // Owned decoded input, stable until the CPU preparation task retires.
   loom_serve_image_request_t request;
   // Request work returned by CPU tasks through their existing release handoff.
@@ -80,6 +83,8 @@ struct loom_serve_image_service_t {
   iree_async_proactor_t* proactor;
   // Current invocation phase, mutated only by scheduler turns.
   loom_serve_image_phase_t phase;
+  // Current eligible demand, observed only by the serialized resource owner.
+  loom_serve_execution_source_t execution_source;
   // Stops admission while accepted tasks and model work finish naturally.
   bool stopping;
   // Owned failure accumulated on a turn, transferred to the router on return.
@@ -190,11 +195,96 @@ static bool loom_serve_image_has_peer(
     const loom_serve_image_service_t* service) {
   for (iree_host_size_t i = service->cohort.next; i < service->cohort.count;
        ++i) {
-    if (service->cohort.jobs[i]->connection) {
+    if (service->cohort.jobs[i]->connection &&
+        !loom_serve_http_connection_failed(
+            service->cohort.jobs[i]->connection)) {
       return true;
     }
   }
   return false;
+}
+
+static const loom_serve_image_job_t* loom_serve_image_pending_first(
+    const loom_serve_image_service_t* service) {
+  const loom_serve_image_job_t* first = NULL;
+  for (iree_host_size_t i = 0; i < service->pending_count; ++i) {
+    const loom_serve_image_job_t* job = service->pending[i];
+    if (loom_serve_http_connection_failed(job->connection)) {
+      continue;
+    }
+    if (job->qos == LOOM_SERVE_EXECUTION_QOS_REALTIME) {
+      return job;
+    }
+    if (!first) {
+      first = job;
+    }
+  }
+  return first;
+}
+
+static bool loom_serve_image_replan(const loom_serve_image_service_t* service) {
+  const loom_serve_image_job_t* first = loom_serve_image_pending_first(service);
+  return first && service->cohort.next < service->cohort.count &&
+         first->qos > service->cohort.jobs[service->cohort.next]->qos;
+}
+
+// Only final encoding is a dependency that can inherit a pending request's
+// class. Additional numerical parts still belong to their original cohort.
+static loom_serve_execution_qos_t loom_serve_image_cpu_qos(
+    const loom_serve_image_service_t* service) {
+  return service->cpu.phase == IMAGE_PHASE_ENCODING &&
+                 loom_serve_image_replan(service)
+             ? LOOM_SERVE_EXECUTION_QOS_REALTIME
+             : service->cohort.jobs[service->cohort.next]->qos;
+}
+
+static loom_serve_execution_resources_t loom_serve_image_execution_demand(
+    void* self) {
+  const loom_serve_image_service_t* service = self;
+  if (service->stopping || (service->phase != IMAGE_PHASE_IDLE &&
+                            !loom_serve_image_has_peer(service))) {
+    return 0;
+  }
+  switch (service->phase) {
+    case IMAGE_PHASE_IDLE: {
+      const loom_serve_image_job_t* first =
+          loom_serve_image_pending_first(service);
+      return first && first->qos == LOOM_SERVE_EXECUTION_QOS_REALTIME
+                 ? LOOM_SERVE_EXECUTION_RESOURCE_HOST
+                 : 0;
+    }
+    case IMAGE_PHASE_WAITING_CPU:
+      return loom_serve_image_cpu_qos(service) ==
+                         LOOM_SERVE_EXECUTION_QOS_REALTIME ||
+                     loom_serve_image_replan(service)
+                 ? LOOM_SERVE_EXECUTION_RESOURCE_HOST
+                 : 0;
+    case IMAGE_PHASE_SPECIALIZING:
+      return service->cohort.jobs[0]->qos ==
+                         LOOM_SERVE_EXECUTION_QOS_REALTIME ||
+                     loom_serve_image_replan(service)
+                 ? LOOM_SERVE_EXECUTION_RESOURCE_HOST
+                 : 0;
+    case IMAGE_PHASE_WAITING:
+      if (loom_serve_image_replan(service)) {
+        return LOOM_SERVE_EXECUTION_RESOURCE_HOST;
+      }
+      // Physical denial drops this offer so capacity-freeing work can run.
+      return service->generator.permit->phase ==
+                         LOOM_SERVE_EXECUTION_PERMIT_WAITING &&
+                     service->cohort.jobs[0]->qos ==
+                         LOOM_SERVE_EXECUTION_QOS_REALTIME
+                 ? service->generator.permit->resources
+                 : 0;
+    case IMAGE_PHASE_READY:
+      return service->cohort.jobs[0]->qos == LOOM_SERVE_EXECUTION_QOS_REALTIME
+                 ? service->generator.permit->resources
+                 : 0;
+    default:
+      // Accepted work owns the source until release. A waiting request cannot
+      // preempt the numerical parts needed to retire that same invocation.
+      return 0;
+  }
 }
 
 static void loom_serve_image_event(loom_serve_image_service_t* service,
@@ -546,6 +636,36 @@ static void loom_serve_image_finish(loom_serve_image_service_t* service,
   service->phase = IMAGE_PHASE_IDLE;
 }
 
+// Both lists preserve arrival identity. Merge an unborrowed cohort backwards
+// into the pending storage without moving request-owned prepared buffers.
+static void loom_serve_image_requeue(loom_serve_image_service_t* service) {
+  iree_host_size_t retained = 0;
+  for (iree_host_size_t i = 0; i < service->cohort.count; ++i) {
+    loom_serve_image_job_t* job = service->cohort.jobs[i];
+    if (job->connection) {
+      service->cohort.jobs[retained++] = job;
+    } else {
+      loom_serve_image_job_finish(service, job, LOOM_SERVE_TELEMETRY_CANCELLED);
+    }
+  }
+  iree_host_size_t pending = service->pending_count;
+  iree_host_size_t cohort = retained;
+  service->pending_count += cohort;
+  while (cohort) {
+    if (pending && service->pending[pending - 1]->id >
+                       service->cohort.jobs[cohort - 1]->id) {
+      service->pending[pending + cohort - 1] = service->pending[pending - 1];
+      --pending;
+    } else {
+      service->pending[pending + cohort - 1] = service->cohort.jobs[cohort - 1];
+      --cohort;
+    }
+  }
+  service->cohort.count = 0;
+  service->cohort.next = 0;
+  service->phase = IMAGE_PHASE_IDLE;
+}
+
 static bool loom_serve_image_submit_cpu(loom_serve_image_service_t* service) {
   if (service->phase != IMAGE_PHASE_WAITING_CPU) {
     return false;
@@ -558,9 +678,19 @@ static bool loom_serve_image_submit_cpu(loom_serve_image_service_t* service) {
                                          : LOOM_SERVE_TELEMETRY_CANCELLED);
     return true;
   }
+  if (service->cpu.phase != IMAGE_PHASE_ENCODING &&
+      loom_serve_image_replan(service)) {
+    loom_serve_execution_permit_cancel(&service->cpu.permit);
+    loom_serve_image_requeue(service);
+    return true;
+  }
+  const loom_serve_execution_qos_t qos = loom_serve_image_cpu_qos(service);
+  if (service->cpu.permit.phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING &&
+      service->cpu.permit.qos != qos) {
+    loom_serve_execution_permit_cancel(&service->cpu.permit);
+  }
   if (service->cpu.permit.phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE) {
-    loom_serve_execution_permit_request(&service->cpu.permit,
-                                        LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+    loom_serve_execution_permit_request(&service->cpu.permit, qos);
   }
   if (!loom_serve_execution_permit_try_acquire(&service->cpu.permit)) {
     return false;
@@ -616,9 +746,7 @@ static void loom_serve_image_reject_cohort(loom_serve_image_service_t* service,
   service->phase = IMAGE_PHASE_IDLE;
 }
 
-// Requeue the prepared snapshot ahead of arrivals that came while CPU work was
-// live. Request-local rejection cannot invalidate another request's source
-// bytes.
+// Request-local rejection cannot invalidate another request's source bytes.
 static void loom_serve_image_preparation_complete(
     loom_serve_image_service_t* service) {
   iree_host_size_t retained = 0;
@@ -645,32 +773,28 @@ static void loom_serve_image_preparation_complete(
       service->cohort.jobs[retained++] = job;
     }
   }
-  memmove(service->pending + retained, service->pending,
-          service->pending_count * sizeof(*service->pending));
-  memcpy(service->pending, service->cohort.jobs,
-         retained * sizeof(*service->pending));
-  service->pending_count += retained;
-  service->cohort.count = 0;
-  service->phase = IMAGE_PHASE_IDLE;
+  service->cohort.count = retained;
+  loom_serve_image_requeue(service);
 }
 
-static void loom_serve_image_select(loom_serve_image_service_t* service) {
+static void loom_serve_image_select(loom_serve_image_service_t* service,
+                                    const loom_serve_image_job_t* first) {
   uint64_t remaining = service->generator.batch_limit;
-  const uint64_t tag = service->pending[0]->prepared.tag;
+  const uint64_t tag = first->prepared.tag;
   const iree_time_t now = iree_time_now();
   iree_host_size_t retained = 0;
   for (iree_host_size_t i = 0; i < service->pending_count; ++i) {
     loom_serve_image_job_t* job = service->pending[i];
-    if (job->prepared.bytes && job->prepared.tag == tag &&
-        job->prepared.units <= remaining) {
+    if (job->qos == first->qos && job->prepared.bytes &&
+        job->prepared.tag == tag && job->prepared.units <= remaining) {
       remaining -= job->prepared.units;
       const iree_host_size_t index = service->cohort.count++;
       service->cohort.jobs[index] = job;
       service->cohort.requests[index] = job->prepared;
       service->cohort.output_lengths[index] = job->output_length;
+      service->telemetry.totals.work.queue_ns -= job->work.queue_ns;
       job->work.queue_ns = now - job->arrival_time - job->work.prepare_ns;
       service->telemetry.totals.work.queue_ns += job->work.queue_ns;
-      loom_serve_image_event(service, &LOOM_SERVE_IMAGE_STARTED, job->id);
     } else {
       service->pending[retained++] = job;
     }
@@ -691,8 +815,8 @@ static void loom_serve_image_prepared(loom_serve_image_service_t* service,
     return;
   }
   loom_serve_residency_admission_t admission;
-  service->status =
-      service->generator.try_admit(service->generator.self, &admission);
+  service->status = service->generator.try_admit(
+      service->generator.self, service->cohort.jobs[0]->qos, &admission);
   if (iree_status_is_ok(service->status) &&
       admission == LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
     return;
@@ -713,7 +837,12 @@ static void loom_serve_image_prepared(loom_serve_image_service_t* service,
   } else if (iree_status_is_ok(service->status)) {
     const iree_duration_t admission_ns = iree_time_now() - service->phase_start;
     for (iree_host_size_t i = 0; i < service->cohort.count; ++i) {
-      service->cohort.jobs[i]->work.admission_ns = admission_ns;
+      loom_serve_image_job_t* job = service->cohort.jobs[i];
+      job->work.admission_ns = admission_ns;
+      // Only accepted native work makes this selection permanent.
+      iree_vm_buffer_release(job->prepared.bytes);
+      job->prepared.bytes = NULL;
+      loom_serve_image_event(service, &LOOM_SERVE_IMAGE_STARTED, job->id);
     }
     service->telemetry.totals.work.admission_ns += admission_ns;
     // Parameter activation and the first part share one accepted native unit.
@@ -799,7 +928,7 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
     }
     if (!service->device.complete) {
       loom_serve_execution_permit_request(service->generator.permit,
-                                          LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+                                          service->cohort.jobs[0]->qos);
       service->phase = IMAGE_PHASE_READY;
       return;
     }
@@ -835,10 +964,6 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
       loom_serve_image_job_t* job = service->cohort.jobs[i];
       job->output_offset = offset;
       offset += job->output_length;
-      // Capture owns the packed payload now; request-local source storage is
-      // no longer borrowed by CPU or device work.
-      iree_vm_buffer_release(job->prepared.bytes);
-      job->prepared.bytes = NULL;
       loom_serve_image_record_prepared(service->telemetry.stream, job->id,
                                        &service->cohort.prepared);
     }
@@ -908,9 +1033,12 @@ static iree_status_t loom_serve_image_accept(
         service, connection, &receipt, "415 Unsupported Media Type",
         IREE_SV("Content-Type must be application/json"));
   }
-  iree_status_t status = loom_serve_image_request_initialize(
-      request->body, service->options.name, service->options.width,
-      service->options.height, service->host_allocator, &receipt.request);
+  iree_status_t status = loom_serve_qos_parse(request, &receipt.qos);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_image_request_initialize(
+        request->body, service->options.name, service->options.width,
+        service->options.height, service->host_allocator, &receipt.request);
+  }
   if (!iree_status_is_ok(status)) {
     iree_string_view_t message = iree_status_message(status);
     if (!message.size) {
@@ -1093,11 +1221,13 @@ static iree_status_t loom_serve_image_advance(void* self,
   }
   *out_progress |= loom_serve_image_submit_cpu(service);
   if (service->phase == IMAGE_PHASE_SPECIALIZING) {
+    const bool replan = loom_serve_image_replan(service);
     const bool cancel =
-        service->stopping || !loom_serve_image_has_peer(service);
+        service->stopping || !loom_serve_image_has_peer(service) || replan;
     bool complete = false;
     iree_status_t status = service->generator.advance_batch(
-        service->generator.self, cancel, &complete);
+        service->generator.self, service->cohort.jobs[0]->qos, cancel,
+        &complete);
     if (!iree_status_is_ok(status)) {
       service->generator.discard_batch(service->generator.self);
       loom_serve_image_diagnose(service, loom_serve_image_active(service),
@@ -1112,7 +1242,12 @@ static iree_status_t loom_serve_image_advance(void* self,
     } else if (complete) {
       if (cancel) {
         service->generator.discard_batch(service->generator.self);
-        loom_serve_image_finish(service, LOOM_SERVE_TELEMETRY_CANCELLED);
+        if (replan && !service->stopping &&
+            loom_serve_image_has_peer(service)) {
+          loom_serve_image_requeue(service);
+        } else {
+          loom_serve_image_finish(service, LOOM_SERVE_TELEMETRY_CANCELLED);
+        }
       } else {
         service->phase = IMAGE_PHASE_WAITING;
         service->phase_start = iree_time_now();
@@ -1121,7 +1256,13 @@ static iree_status_t loom_serve_image_advance(void* self,
     }
   }
   if (service->phase == IMAGE_PHASE_WAITING) {
-    loom_serve_image_prepared(service, flags, out_progress);
+    if (loom_serve_image_replan(service)) {
+      service->generator.discard_batch(service->generator.self);
+      loom_serve_image_requeue(service);
+      *out_progress = true;
+    } else {
+      loom_serve_image_prepared(service, flags, out_progress);
+    }
   }
   if (service->phase == IMAGE_PHASE_READY &&
       (service->stopping || !loom_serve_image_has_peer(service) ||
@@ -1137,16 +1278,24 @@ static iree_status_t loom_serve_image_advance(void* self,
   }
   if (!service->stopping && iree_status_is_ok(service->status) &&
       service->phase == IMAGE_PHASE_IDLE && service->pending_count) {
-    if (service->pending[0]->prepared.bytes) {
-      loom_serve_image_select(service);
-    } else {
-      memcpy(service->cohort.jobs, service->pending,
-             service->pending_count * sizeof(*service->cohort.jobs));
-      service->cohort.count = service->pending_count;
-      service->pending_count = 0;
+    const loom_serve_image_job_t* first =
+        loom_serve_image_pending_first(service);
+    if (first && first->prepared.bytes) {
+      loom_serve_image_select(service, first);
+    } else if (first) {
+      iree_host_size_t retained = 0;
+      for (iree_host_size_t i = 0; i < service->pending_count; ++i) {
+        loom_serve_image_job_t* job = service->pending[i];
+        if (job->qos == first->qos) {
+          service->cohort.jobs[service->cohort.count++] = job;
+        } else {
+          service->pending[retained++] = job;
+        }
+      }
+      service->pending_count = retained;
       loom_serve_image_schedule_cpu(service, IMAGE_PHASE_PREPARING);
     }
-    *out_progress = true;
+    *out_progress |= first != NULL;
   }
   bool timer_progress = false;
   bool tick = false;
@@ -1208,6 +1357,7 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
     return;
   }
   IREE_ASSERT(!loom_serve_image_is_pending(service));
+  loom_serve_execution_source_deinitialize(&service->execution_source);
   loom_serve_execution_permit_deinitialize(&service->cpu.permit);
   const iree_allocator_t host_allocator = service->host_allocator;
   loom_serve_execution_permit_cancel(service->generator.permit);
@@ -1267,6 +1417,9 @@ iree_status_t loom_serve_image_service_allocate(
   loom_serve_execution_permit_initialize(
       generator.permit ? generator.permit->scheduler : NULL,
       LOOM_SERVE_EXECUTION_RESOURCE_HOST, &service->cpu.permit);
+  loom_serve_execution_source_initialize(service->cpu.permit.scheduler,
+                                         loom_serve_image_execution_demand,
+                                         service, &service->execution_source);
   service->options = *options;
   service->capacity = options->pending_capacity + 1;
   service->telemetry.stream = stream;

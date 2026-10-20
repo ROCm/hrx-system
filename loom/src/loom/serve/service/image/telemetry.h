@@ -18,7 +18,7 @@ extern "C" {
 // it. Shared cohort work contributes to each member's latency, not additional
 // work. These durations are not GPU timestamps or individual kernel timings.
 typedef struct loom_serve_image_work_t {
-  // Receipt through cohort selection, excluding this request's CPU preparation.
+  // Receipt through final cohort selection, excluding accumulated preparation.
   uint64_t queue_ns;
   // CPU source-input preparation plus shared cohort capture time.
   uint64_t prepare_ns;
@@ -47,6 +47,7 @@ typedef struct loom_serve_image_totals_t {
   loom_serve_image_work_t work;
 } loom_serve_image_totals_t;
 
+// First native admission, after the cohort can no longer be replaced.
 extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_STARTED;
 extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SUBMITTED;
 // Successful device completion and pin release, before CPU output encoding.
