@@ -56,6 +56,9 @@ typedef struct loom_low_allocation_interval_assignment_state_t {
   loom_low_allocation_fixed_availability_t fixed_availability;
   // Victim-search arrays reused after each selected set has been consumed.
   loom_low_allocation_search_workspace_t search_workspace;
+  // Possibly interfering assignment indices reused by relocation queries.
+  // Allocated lazily with one entry per allocatable interval.
+  uint32_t* relocation_assignment_indices;
   // Cached predicted spill traffic, dense by liveness value ordinal.
   loom_low_allocation_spill_plan_traffic_t* spill_traffic_by_value_ordinal;
   // Lazily allocated decision array. Each allocatable interval spills at most
@@ -800,6 +803,33 @@ loom_low_allocation_interval_assignment_try_relocate_independent_assignment(
   }
   const uint32_t last_base =
       iree_min(capacity.max_units - assignment->location_count, maximum_base);
+  if (base > last_base) {
+    return iree_ok_status();
+  }
+  if (state->relocation_assignment_indices == NULL) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->scratch_arena, state->interval_count,
+        sizeof(*state->relocation_assignment_indices),
+        (void**)&state->relocation_assignment_indices));
+  }
+  // Relocation reaches backward from the current acquisition point, so
+  // expired assignments can still interfere. Their location-independent
+  // exclusions stay valid throughout this query; retain the remaining
+  // history once instead of scanning the entire prefix at each trial base.
+  iree_host_size_t relocation_assignment_count = 0;
+  for (iree_host_size_t i = 0; i < state->result.assignment_count; ++i) {
+    const loom_low_allocation_assignment_t* existing =
+        &state->result.assignments[i];
+    if (i != assignment_index &&
+        loom_low_allocation_assignment_is_register_like(existing) &&
+        assignment->start_point < existing->end_point &&
+        existing->start_point < assignment->end_point &&
+        loom_low_allocation_storage_assignment_classes_share(
+            state->context->target->descriptor_set, assignment, existing)) {
+      state->relocation_assignment_indices[relocation_assignment_count++] =
+          (uint32_t)i;
+    }
+  }
   while (base <= last_base) {
     loom_low_allocation_assignment_t candidate = *assignment;
     candidate.location_base = base;
@@ -836,17 +866,14 @@ loom_low_allocation_interval_assignment_try_relocate_independent_assignment(
             &candidate, /*ignored_value_ids=*/NULL,
             /*ignored_value_count=*/0,
             LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN);
-    for (iree_host_size_t i = 0;
-         !conflicts && i < state->result.assignment_count; ++i) {
-      if (i == assignment_index) {
-        continue;
-      }
+    for (iree_host_size_t i = 0; !conflicts && i < relocation_assignment_count;
+         ++i) {
       conflicts = loom_low_allocation_live_range_assignments_conflict(
           state->context->target->descriptor_set,
           state->unit_liveness.storage_segments.entries,
           state->unit_liveness.start_points, state->unit_liveness.end_points,
           state->unit_liveness.point_count, &candidate,
-          &state->result.assignments[i]);
+          &state->result.assignments[state->relocation_assignment_indices[i]]);
     }
     if (!conflicts) {
       loom_low_allocation_active_unit_index_remove_assignment(
