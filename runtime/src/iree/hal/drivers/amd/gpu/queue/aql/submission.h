@@ -9,6 +9,7 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/aql/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/transfer.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/publisher.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
@@ -47,6 +48,7 @@ typedef struct iree_hal_amd_gpu_aql_dispatch_request_t {
 typedef enum iree_hal_amd_gpu_aql_entry_kind_e {
   IREE_HAL_AMD_GPU_AQL_ENTRY_SUBMISSION,
   IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER,
   IREE_HAL_AMD_GPU_AQL_ENTRY_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_ENTRY_REUSE_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS,
@@ -94,6 +96,15 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
     iree_hal_amd_gpu_aql_dispatch_request_t dispatch;
     // Shared ownership across independently retiring native packet chunks.
     iree_hal_amd_gpu_aql_command_invocation_t execute;
+    // Shared transfer capture and its independently retiring native pieces.
+    struct {
+      // Pending suffix and nonterminal native pieces independently own capture.
+      iree_atomic_ref_count_t ref_count;
+      // Failed unpublished suffix, reported only after accepted host uses join.
+      iree_atomic_int32_t failure;
+      // Captured addresses/bytes and publisher-owned unpublished suffix.
+      iree_hal_amd_gpu_transfer_t capture;
+    } transfer;
   };
 } iree_hal_amd_gpu_aql_submission_t;
 
@@ -115,6 +126,15 @@ iree_status_t iree_hal_amd_gpu_aql_submission_execute(
     iree_hal_buffer_binding_table_t bindings, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_queue_execute_flags_t flags,
     iree_hal_amd_gpu_aql_submission_t** out_submission);
+
+// Captures the entire transfer transaction before any native operation runs.
+// Empty transactions retain only their barrier and semaphore ownership.
+iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t count,
+    const iree_hal_transfer_operation_t* operations, uint32_t before,
+    uint32_t after, iree_hal_amd_gpu_aql_submission_t** out_submission);
 
 // Captures only retirement ownership for an already prepared direct call.
 // Transfers native readers on success, retains signal timelines and payloads,

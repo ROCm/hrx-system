@@ -154,4 +154,75 @@ TEST_P(AqlSubmissionTest, DependencyReadersJoinProducerHostRetirement) {
 INSTANTIATE_TEST_SUITE_P(Storage, AqlSubmissionTest,
                          ::testing::Values(false, true));
 
+TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
+  struct Buffer {
+    // Real HAL resource retained by a captured transfer.
+    iree_hal_buffer_t base;
+    // Destruction observation independent of capture storage.
+    bool destroyed = false;
+    static void Destroy(iree_hal_buffer_t* base) {
+      reinterpret_cast<Buffer*>(base)->destroyed = true;
+    }
+  };
+  iree_hal_amd_gpu_capture_pool_t pool;
+  iree_hal_amd_gpu_capture_pool_initialize(512, iree_allocator_system(), &pool);
+  iree_async_proactor_t* proactor = nullptr;
+  IREE_ASSERT_OK(
+      iree_async_proactor_create_platform(iree_async_proactor_options_default(),
+                                          iree_allocator_system(), &proactor));
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
+      proactor, 0, 2, iree_allocator_system(), &semaphore));
+  const iree_hal_buffer_vtable_t vtable = {.destroy = Buffer::Destroy};
+  Buffer buffer = {};
+  iree_hal_buffer_initialize(
+      {}, &buffer.base, 8, 0, 8, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_TRANSFER, &vtable,
+      &buffer.base);
+  // The native binding belongs to the dependency, not the capture under test.
+  // Address commitment is deliberately deferred until native publication.
+  const iree_hal_queue_family_t family = {.memory = {.queue_scope_id = 1}};
+  std::array<iree_hal_memory_scope_access_t, 3> scopes = {};
+  scopes[2].bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
+  iree_hal_memory_contract_t contract = {.scopes = scopes.data()};
+  buffer.base.memory.contract = &contract;
+  std::array<uint8_t, 8> target = {};
+  const iree_hal_transfer_operation_t operation = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = &buffer.base,
+              .target = target.data(),
+              .length = target.size(),
+          },
+  };
+  uint64_t value = 1;
+  iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_transfer(
+      &pool, &family, {}, {1, &semaphore, &value}, 1, &operation, 0, 0,
+      &submission));
+  iree_hal_buffer_release(&buffer.base);
+  // One accepted native piece retains the capture while a later, unpublished
+  // suffix still owns its initial reference.
+  iree_atomic_ref_count_inc(&submission->transfer.ref_count);
+  iree_atomic_store(&submission->transfer.failure, IREE_STATUS_UNAVAILABLE,
+                    iree_memory_order_release);
+  iree_hal_amd_gpu_aql_submission_release(submission);
+  EXPECT_FALSE(buffer.destroyed);
+  uint64_t observed = UINT64_MAX;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &observed));
+  EXPECT_EQ(observed, 0u);
+  EXPECT_EQ(submission->transfer.capture.operations[0].target.host,
+            target.data());
+  // The capture may report failure only after its last accepted piece has
+  // stopped using the borrowed host destination.
+  iree_hal_amd_gpu_aql_submission_release(submission);
+  EXPECT_TRUE(buffer.destroyed);
+  EXPECT_THAT(iree_hal_semaphore_query(semaphore, &observed),
+              iree::testing::status::StatusIs(iree::StatusCode::kUnavailable));
+  iree_hal_semaphore_release(semaphore);
+  iree_async_proactor_release(proactor);
+  iree_hal_amd_gpu_capture_pool_deinitialize(&pool);
+}
+
 }  // namespace

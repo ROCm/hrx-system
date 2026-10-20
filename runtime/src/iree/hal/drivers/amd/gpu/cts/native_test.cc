@@ -10,6 +10,7 @@
 #include <cstring>
 #include <semaphore>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "iree/async/frontier_tracker.h"
@@ -58,8 +59,13 @@ TEST_F(GpuNativeTest, TrimReleasesUnusedCaptureCache) {
 }
 
 class GpuNativeTransferTest : public GpuNativeTest,
-                              public ::testing::WithParamInterface<bool> {
+                              public ::testing::WithParamInterface<
+                                  std::pair<amdf_queue_command_type_t, bool>> {
  protected:
+  amdf_queue_command_type_t command_type() const override {
+    return GetParam().first;
+  }
+
   void SetUp() override {
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
@@ -88,6 +94,19 @@ class GpuNativeTransferTest : public GpuNativeTest,
     iree_hal_slab_pool_options_initialize(&options);
     IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &options,
                                              iree_allocator_system(), &pool_));
+    iree_hal_memory_scope_t queue_scope;
+    IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+        group_, {IREE_HAL_MEMORY_SITE_QUEUE, access.family}, &queue_scope));
+    const auto transition =
+        iree_hal_pool_query_transition(pool_, queue_scope, queue_scope);
+    ASSERT_TRUE(iree_hal_memory_effects_is_supported(transition.release));
+    ASSERT_TRUE(iree_hal_memory_effects_is_supported(transition.acquire));
+    ASSERT_FALSE(
+        iree_hal_memory_effects_requires_resources(transition.release));
+    ASSERT_FALSE(
+        iree_hal_memory_effects_requires_resources(transition.acquire));
+    acquire_.effects = transition.acquire;
+    release_.effects = transition.release;
     for (auto& buffer : buffers_) {
       IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
           pool_, iree_hal_make_pool_reservation_request(kLength, 4),
@@ -113,9 +132,7 @@ class GpuNativeTransferTest : public GpuNativeTest,
   }
 
   const iree_hal_queue_barriers_t* Barriers() {
-    static const iree_hal_barrier_list_t empty = {};
-    static const iree_hal_queue_barriers_t barriers = {&empty, &empty};
-    return GetParam() ? &barriers : nullptr;
+    return GetParam().second ? &barriers_ : nullptr;
   }
 
   void Wait(uint64_t value) {
@@ -133,13 +150,24 @@ class GpuNativeTransferTest : public GpuNativeTest,
   iree_hal_semaphore_t* timeline_ = nullptr;
   // Host-controlled readiness for borrowed uploads and captured updates.
   iree_hal_semaphore_t* gate_ = nullptr;
+  // Exact pool transitions between shader or copy-engine accesses. An empty
+  // payload boundary is valid only when the queried transition is empty.
+  iree_hal_barrier_t acquire_ = {};
+  // Publishes every transfer in the batch before its completion semaphore.
+  iree_hal_barrier_t release_ = {};
+  // Stable descriptors shared by concurrent submitting threads.
+  iree_hal_barrier_list_t before_ = {1, &acquire_};
+  // Stable producer boundary paired with before_.
+  iree_hal_barrier_list_t after_ = {1, &release_};
+  // Explicit qualified alternatives to conservative default boundaries.
+  iree_hal_queue_barriers_t barriers_ = {&before_, &after_};
 };
 
 class GpuNativeRecordedTransferTest : public GpuNativeTransferTest {
  protected:
   iree_hal_buffer_ref_t Reference(size_t index, uint64_t offset,
                                   uint64_t length) {
-    return GetParam()
+    return GetParam().second
                ? iree_hal_make_indirect_buffer_ref(index + 1, offset, length)
                : iree_hal_make_buffer_ref(buffers_[index], offset, length);
   }
@@ -155,7 +183,8 @@ TEST_P(GpuNativeRecordedTransferTest,
   iree_hal_command_buffer_t* recording = nullptr;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, GetParam() ? 3 : 0, &recording));
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, GetParam().second ? 3 : 0,
+      &recording));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
   const iree_hal_barrier_t acquire = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
@@ -211,11 +240,11 @@ TEST_P(GpuNativeRecordedTransferTest,
   bindings[2] = {buffers_[1], 0, IREE_HAL_WHOLE_BUFFER};
   IREE_ASSERT_OK(iree_hal_queue_execute(
       queues_[0], {1, &gate_, &one}, {1, &timeline_, &one}, recording,
-      {GetParam() ? bindings.size() : 0, bindings.data()}, 0));
+      {GetParam().second ? bindings.size() : 0, bindings.data()}, 0));
   std::swap(bindings[1], bindings[2]);
   IREE_ASSERT_OK(iree_hal_queue_execute(
       queues_[1], {1, &timeline_, &one}, {1, &timeline_, &two}, recording,
-      {GetParam() ? bindings.size() : 0, bindings.data()}, 0));
+      {GetParam().second ? bindings.size() : 0, bindings.data()}, 0));
   bindings.fill({});
   iree_hal_command_buffer_release(recording);
   std::vector<uint8_t> downloaded(kLength, 0xCC);
@@ -223,7 +252,7 @@ TEST_P(GpuNativeRecordedTransferTest,
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
-              .source_buffer = buffers_[GetParam() ? 0 : 1],
+              .source_buffer = buffers_[GetParam().second ? 0 : 1],
               .target = downloaded.data(),
               .length = kLength,
           },
@@ -237,8 +266,18 @@ TEST_P(GpuNativeRecordedTransferTest,
   EXPECT_EQ(downloaded, expected);
 }
 
-INSTANTIATE_TEST_SUITE_P(BindingMode, GpuNativeRecordedTransferTest,
-                         ::testing::Values(false, true));
+INSTANTIATE_TEST_SUITE_P(
+    BindingMode, GpuNativeRecordedTransferTest,
+    ::testing::Values(std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, true),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true)),
+    [](const auto& info) {
+      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                             ? "Aql"
+                             : "Pm4") +
+             (info.param.second ? "Table" : "Direct");
+    });
 
 TEST_P(GpuNativeTransferTest, CapturedUpdatesAndDeferredHostTransfers) {
   std::vector<uint8_t> update(kLength), upload(kLength, 0);
@@ -367,6 +406,32 @@ TEST_P(GpuNativeTransferTest,
     EXPECT_EQ(target.back(), 0xCC);
     EXPECT_TRUE(std::equal(source.begin(), source.end(), target.begin() + 1));
   }
+}
+
+TEST_P(GpuNativeTransferTest,
+       HostStagingVisibilityIsIndependentOfPayloadBoundaries) {
+  const iree_hal_barrier_list_t empty = {};
+  const iree_hal_queue_barriers_t upload_barriers = {
+      GetParam().second ? &empty : nullptr, &after_};
+  const iree_hal_queue_barriers_t download_barriers = {
+      &before_, GetParam().second ? &empty : nullptr};
+  std::vector<uint8_t> source(kLength), target(kLength, 0xCC);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>((i * 31) ^ (i >> 8));
+  }
+  uint64_t uploaded = 1, downloaded = 2;
+  // Optional payload boundaries cover only the device-to-device handoff.
+  // Upload still acquires its host staging, and download still publishes its
+  // staging before the retirement worker reads it.
+  IREE_ASSERT_OK(iree_hal_queue_upload(
+      queues_[0], {}, {1, &timeline_, &uploaded}, source.data(), buffers_[0], 0,
+      source.size(), &upload_barriers));
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[1], {1, &timeline_, &uploaded}, {1, &timeline_, &downloaded},
+      buffers_[0], 0, target.data(), target.size(), &download_barriers));
+  ReleaseBuffers();
+  Wait(downloaded);
+  EXPECT_EQ(target, source);
 }
 
 TEST_P(GpuNativeTransferTest,
@@ -518,17 +583,28 @@ TEST_P(GpuNativeTransferTest, ZeroLengthOperationsAreOnlyABarrier) {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD, .download = {}},
   };
   uint64_t value = 1;
+  const iree_hal_barrier_list_t empty = {};
+  const iree_hal_queue_barriers_t barriers = {&empty, &empty};
   IREE_ASSERT_OK(iree_hal_queue_transfer(
       queues_[0], {1, &gate_, &value}, {1, &timeline_, &value},
-      IREE_ARRAYSIZE(operations), operations, Barriers()));
+      IREE_ARRAYSIZE(operations), operations,
+      GetParam().second ? &barriers : nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, value, nullptr));
   Wait(value);
 }
 
-INSTANTIATE_TEST_SUITE_P(Boundaries, GpuNativeTransferTest, ::testing::Bool(),
-                         [](const ::testing::TestParamInfo<bool>& info) {
-                           return info.param ? "ExplicitEmpty" : "Default";
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    Boundaries, GpuNativeTransferTest,
+    ::testing::Values(std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, true),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true)),
+    [](const auto& info) {
+      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                             ? "Aql"
+                             : "Pm4") +
+             (info.param.second ? "Explicit" : "Default");
+    });
 
 class GpuNativeAllocationTest : public GpuNativeTest {
  protected:

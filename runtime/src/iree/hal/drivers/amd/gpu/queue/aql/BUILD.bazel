@@ -94,10 +94,38 @@ iree_c_embed_data(
 )
 
 iree_runtime_cc_library(
+    name = "transfer",
+    srcs = ["transfer.c"],
+    hdrs = ["transfer.h"],
+    deps = [
+        ":packet",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "packet",
     srcs = ["packet.c"],
     hdrs = ["packet.h"],
     deps = ["//runtime/src/iree/base"],
+)
+
+iree_runtime_cc_test(
+    name = "transfer_test",
+    srcs = ["transfer_test.cc"],
+    deps = [
+        ":packet",
+        ":transfer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 iree_runtime_cc_library(
@@ -264,10 +292,12 @@ iree_runtime_cc_library(
     deps = [
         ":barrier",
         ":program",
+        ":transfer",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal/drivers/amd/gpu:executable",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:inputs",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:recording",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
         "//runtime/src/iree/hal/utils:resource_set",
     ],
 )
@@ -279,9 +309,11 @@ iree_runtime_cc_library(
     deps = [
         ":barrier",
         ":command_buffer",
+        ":transfer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:capture_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
     ],
 )
 
@@ -366,6 +398,7 @@ iree_runtime_cc_library(
         ":program",
         ":ring",
         ":scratch",
+        ":transfer",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:cpu_data",
@@ -378,6 +411,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:host_call",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:host_wait",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:memory_mapping",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
     ],
 )

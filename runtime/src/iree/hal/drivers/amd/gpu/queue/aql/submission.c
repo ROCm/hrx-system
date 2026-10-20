@@ -134,29 +134,27 @@ iree_status_t iree_hal_amd_gpu_aql_submission_retirement(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_gpu_aql_submission_execute(
+static iree_status_t iree_hal_amd_gpu_aql_submission_acquire(
     iree_hal_amd_gpu_capture_pool_t* pool,
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_buffer_binding_table_t bindings, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_queue_execute_flags_t flags,
-    iree_hal_amd_gpu_aql_submission_t** out_submission) {
+    iree_hal_amd_gpu_aql_entry_kind_t kind, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t payload_length,
+    iree_hal_amd_gpu_aql_submission_t** out_submission, void** out_payload) {
   *out_submission = NULL;
   iree_host_size_t size = 0, waits_offset = 0, signals_offset = 0;
-  iree_host_size_t values_offset = 0, bindings_offset = 0;
+  iree_host_size_t values_offset = 0, payload_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_gpu_aql_submission_t), &size,
       IREE_STRUCT_FIELD(waits.count, iree_hal_amd_gpu_aql_wait_t,
                         &waits_offset),
       IREE_STRUCT_FIELD(signals.count, iree_hal_semaphore_t*, &signals_offset),
       IREE_STRUCT_FIELD(signals.count, uint64_t, &values_offset),
-      IREE_STRUCT_FIELD(command_buffer->binding_count,
-                        iree_hal_amd_gpu_command_binding_t, &bindings_offset)));
+      IREE_STRUCT_FIELD(payload_length, uint8_t, &payload_offset)));
   iree_byte_span_t storage;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_capture_pool_acquire(pool, size, &storage));
   iree_hal_amd_gpu_aql_submission_t* submission = (void*)storage.data;
   *submission = (iree_hal_amd_gpu_aql_submission_t){
-      .entry.kind = IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE,
+      .entry.kind = kind,
       .pool = pool,
       .allocation_size = storage.data_length,
       .capture_size = size,
@@ -176,9 +174,67 @@ iree_status_t iree_hal_amd_gpu_aql_submission_execute(
     submission->signals.payload_values[i] = signals.payload_values[i];
     iree_hal_semaphore_retain(signals.semaphores[i]);
   }
+  *out_submission = submission;
+  *out_payload = storage.data + payload_offset;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_aql_submission_execute(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t bindings, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_queue_execute_flags_t flags,
+    iree_hal_amd_gpu_aql_submission_t** out_submission) {
+  *out_submission = NULL;
+  iree_host_size_t payload_length = 0;
+  if (!iree_host_size_checked_mul(command_buffer->binding_count,
+                                  sizeof(iree_hal_amd_gpu_command_binding_t),
+                                  &payload_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AQL binding capture overflows");
+  }
+  iree_hal_amd_gpu_aql_submission_t* submission = NULL;
+  void* payload = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
+      pool, IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE, waits, signals, payload_length,
+      &submission, &payload));
   iree_status_t status = iree_hal_amd_gpu_aql_command_invocation_initialize(
-      command_buffer, bindings, storage.data + bindings_offset, flags,
-      &submission->execute);
+      command_buffer, bindings, payload, flags, &submission->execute);
+  if (iree_status_is_ok(status)) {
+    *out_submission = submission;
+  } else {
+    iree_hal_amd_gpu_aql_submission_release(submission);
+  }
+  return status;
+}
+
+iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t count,
+    const iree_hal_transfer_operation_t* operations, uint32_t before,
+    uint32_t after, iree_hal_amd_gpu_aql_submission_t** out_submission) {
+  *out_submission = NULL;
+  iree_hal_amd_gpu_transfer_layout_t layout;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_transfer_measure(count, operations, &layout));
+  if (!layout.count) {
+    const iree_hal_amd_gpu_aql_dispatch_request_t request = {0};
+    return iree_hal_amd_gpu_aql_submission_capture(
+        pool, &request, waits, signals, before, after, out_submission);
+  }
+  iree_hal_amd_gpu_aql_submission_t* submission = NULL;
+  void* payload = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
+      pool, IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER, waits, signals,
+      layout.byte_length, &submission, &payload));
+  submission->before = before;
+  submission->after = after;
+  iree_atomic_ref_count_init(&submission->transfer.ref_count);
+  iree_status_t status = iree_hal_amd_gpu_transfer_initialize(
+      family, IREE_HAL_MEMORY_SITE_PROGRAM,
+      IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_STAGING_LENGTH, count, operations,
+      layout, payload, &submission->transfer.capture);
   if (iree_status_is_ok(status)) {
     *out_submission = submission;
   } else {
@@ -212,6 +268,11 @@ void iree_hal_amd_gpu_aql_submission_release_payload(
     iree_hal_amd_gpu_aql_command_invocation_deinitialize(&submission->execute);
     return;
   }
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
+    iree_hal_amd_gpu_transfer_deinitialize(&submission->transfer.capture);
+    submission->transfer.capture.count = 0;
+    return;
+  }
   iree_hal_amd_gpu_aql_dispatch_request_t* request = &submission->dispatch;
   if (request->function) {
     if (!(request->flags & IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES)) {
@@ -233,7 +294,19 @@ void iree_hal_amd_gpu_aql_submission_release(
       iree_atomic_ref_count_dec(&submission->execute.ref_count) != 1) {
     return;
   }
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
+      iree_atomic_ref_count_dec(&submission->transfer.ref_count) != 1) {
+    return;
+  }
   iree_hal_amd_gpu_aql_submission_release_payload(submission);
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
+    const iree_status_code_t failure = (iree_status_code_t)iree_atomic_load(
+        &submission->transfer.failure, iree_memory_order_acquire);
+    if (failure != IREE_STATUS_OK) {
+      iree_hal_semaphore_list_fail(submission->signals,
+                                   iree_status_from_code(failure));
+    }
+  }
   for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
     iree_hal_amd_gpu_signal_release(submission->waits[i].signal);
     iree_hal_semaphore_release(submission->waits[i].semaphore);

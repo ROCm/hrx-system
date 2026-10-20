@@ -358,6 +358,22 @@ endif()
 
 iree_cc_library(
   NAME
+    transfer
+  HDRS
+    "transfer.h"
+  SRCS
+    "transfer.c"
+  DEPS
+    ::packet
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::queue::blit
+    iree::hal::drivers::amd::gpu::queue::transfer
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     packet
   HDRS
     "packet.h"
@@ -366,6 +382,22 @@ iree_cc_library(
   DEPS
     iree::base
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    transfer_test
+  SRCS
+    "transfer_test.cc"
+  DEPS
+    ::packet
+    ::transfer
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::queue::blit
+    iree::hal::drivers::amd::gpu::queue::transfer
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_library(
@@ -547,10 +579,12 @@ iree_cc_library(
   DEPS
     ::barrier
     ::program
+    ::transfer
     iree::base::internal::arena
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::queue::inputs
     iree::hal::drivers::amd::gpu::queue::recording
+    iree::hal::drivers::amd::gpu::queue::transfer
     iree::hal::utils::resource_set
   PUBLIC
 )
@@ -566,9 +600,11 @@ iree_cc_library(
   DEPS
     ::barrier
     ::command_buffer
+    ::transfer
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::gpu::queue::semaphore
+    iree::hal::drivers::amd::gpu::queue::transfer
   PUBLIC
 )
 
@@ -655,6 +691,7 @@ iree_cc_library(
     ::program
     ::ring
     ::scratch
+    ::transfer
     iree::async
     iree::base
     iree::base::cpu_data
@@ -666,6 +703,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::host_call
     iree::hal::drivers::amd::gpu::queue::host_wait
     iree::hal::drivers::amd::gpu::queue::memory_mapping
+    iree::hal::drivers::amd::gpu::queue::transfer
     iree::hal::drivers::amd::gpu::queue::user_queue
     iree::hal::drivers::amd::status
   PUBLIC

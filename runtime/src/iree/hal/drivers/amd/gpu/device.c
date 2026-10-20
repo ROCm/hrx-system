@@ -266,9 +266,7 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .priorities = &priority,
       .physical_device_affinity = 1,
       .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-                    (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
-                         ? 0
-                         : IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER),
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
   };
   const iree_hal_device_queue_spec_t queues = {
       .family_count = 1,
