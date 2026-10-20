@@ -438,11 +438,13 @@ loom_cc_library(
     deps = [
         ":assignment",
         ":table",
+        "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

@@ -1,0 +1,59 @@
+// A later spill must reload the incoming value used by an edge store that an
+// earlier block-argument spill created in the same immutable batch.
+// RUN: emit low-allocation-query @generated_edge_store_source_spill strategy=source test.i32=2 materialize-spills
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @generated_edge_store_source_spill(%init: reg<test.i32>, %delta: reg<test.i32>, %cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  low.br ^loop(%init: reg<test.i32>, %init: reg<test.i32>, %init: reg<test.i32>)
+^loop(%a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>):
+  low.cond_br %cond, ^body, ^exit : reg<test.i32>
+^body:
+  %n0 = test.add.i32 %a0, %delta
+  %n1 = test.add.i32 %a1, %delta
+  %n2 = test.add.i32 %a2, %delta
+  low.br ^loop(%n0: reg<test.i32>, %n1: reg<test.i32>, %n2: reg<test.i32>)
+^exit:
+  return %a0, %a1, %a2
+}
+
+// ----
+storage: 5 reservations, 20 bytes
+traffic: 7 stores, 9 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @generated_edge_store_source_spill(%init: reg<test.i32>, %delta: reg<test.i32>, %cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %generated_edge_store_source_spill_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %generated_edge_store_source_spill_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %generated_edge_store_source_spill_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %generated_edge_store_source_spill_spill_storage_3 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %generated_edge_store_source_spill_spill_storage_4 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.spill %cond, %generated_edge_store_source_spill_spill_storage_0 : reg<test.i32>, low.storage<private>
+  low.spill %delta, %generated_edge_store_source_spill_spill_storage_3 : reg<test.i32>, low.storage<private>
+  low.spill %init, %generated_edge_store_source_spill_spill_storage_1 : reg<test.i32>, low.storage<private>
+  low.spill %init, %generated_edge_store_source_spill_spill_storage_2 : reg<test.i32>, low.storage<private>
+  low.br ^loop(%init: reg<test.i32>)
+^loop(%a0: reg<test.i32>):
+  %17 = low.reload %generated_edge_store_source_spill_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  low.cond_br %17, ^body, ^exit : reg<test.i32>
+^body:
+  %22 = low.reload %generated_edge_store_source_spill_spill_storage_3 : low.storage<private> -> reg<test.i32>
+  %n0 = test.add.i32 %a0, %22
+  %18 = low.reload %generated_edge_store_source_spill_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %23 = low.reload %generated_edge_store_source_spill_spill_storage_3 : low.storage<private> -> reg<test.i32>
+  %n1 = test.add.i32 %18, %23
+  %20 = low.reload %generated_edge_store_source_spill_spill_storage_2 : low.storage<private> -> reg<test.i32>
+  %24 = low.reload %generated_edge_store_source_spill_spill_storage_3 : low.storage<private> -> reg<test.i32>
+  %n2 = test.add.i32 %20, %24
+  low.spill %n2, %generated_edge_store_source_spill_spill_storage_4 : reg<test.i32>, low.storage<private>
+  low.spill %n1, %generated_edge_store_source_spill_spill_storage_1 : reg<test.i32>, low.storage<private>
+  %25 = low.reload %generated_edge_store_source_spill_spill_storage_4 : low.storage<private> -> reg<test.i32>
+  low.spill %25, %generated_edge_store_source_spill_spill_storage_2 : reg<test.i32>, low.storage<private>
+  low.br ^loop(%n0: reg<test.i32>)
+^exit:
+  %19 = low.reload %generated_edge_store_source_spill_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %21 = low.reload %generated_edge_store_source_spill_spill_storage_2 : low.storage<private> -> reg<test.i32>
+  return %a0, %19, %21
+}

@@ -488,6 +488,8 @@ loom_cc_library(
     ::table
     iree::base
     iree::base::internal
+    iree::base::internal::arena
+    loom::codegen::low::function
     loom::ir
     loom::ops::low
     loom::target::registers

@@ -29,6 +29,7 @@ loom_check_test_suite(
     "allocation_physical_domains.loom-test"
     "allocation_preferences.loom-test"
     "allocation_reachability.loom-test"
+    "allocation_spill_materialization.loom-test"
     "allocation_spill_storage.loom-test"
     "allocation_structured_liveness.loom-test"
     "allocation_tied_domains.loom-test"
