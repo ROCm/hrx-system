@@ -4,6 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import math
+
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
@@ -134,6 +136,29 @@ def _enum_keyword(rule: DescriptorRule, field: str) -> str:
         guard.enum_keyword
         for guard in rule.guards
         if guard.kind == GuardKind.ENUM_ATTR_EQUALS and guard.field == field
+    )
+
+
+def _static_index_lanes(rule: DescriptorRule) -> range:
+    guard = next(
+        guard
+        for guard in rule.guards
+        if guard.kind is GuardKind.I64_ARRAY_ELEMENT_RANGE
+        and guard.field == "static_indices"
+        and guard.element == 0
+    )
+    assert guard.minimum is not None
+    assert guard.maximum is not None
+    return range(guard.minimum, guard.maximum + 1)
+
+
+def _has_positive_zero_guard(rule: DescriptorRule) -> bool:
+    return any(
+        guard.kind is GuardKind.VALUE_FLOAT_EQUALS
+        and guard.field == "dest"
+        and guard.f64_value == 0.0
+        and math.copysign(1.0, guard.f64_value) > 0.0
+        for guard in rule.guards
     )
 
 
@@ -426,6 +451,30 @@ def test_lane_movement_preserves_the_xmm_scalar_carrier() -> None:
             (Vector("f16", lanes=32), Scalar("f16")),
         }
         assert all(transport_key in _descriptor_keys(rule) for rule in rules)
+
+
+def test_zero_insert_covers_every_wide_native_fp16_lane() -> None:
+    rules = tuple(
+        rule
+        for rule in _rules_for(vector.vector_insert)
+        if rule.priority == 2 and _has_positive_zero_guard(rule)
+    )
+    actual_cells = [
+        (_value_type(rule, "dest"), lane)
+        for rule in rules
+        for lane in _static_index_lanes(rule)
+    ]
+    expected_cells = {
+        (Vector("f16", lanes=vector_bit_width // 16), lane)
+        for vector_bit_width in AVX512_FP16_VECTOR_BIT_WIDTHS
+        if vector_bit_width > 128
+        for lane in range(vector_bit_width // 16)
+    }
+    assert set(actual_cells) == expected_cells
+    assert len(actual_cells) == len(expected_cells)
+    assert all(_value_type(rule, "value") == Scalar("f16") for rule in rules)
+    assert all(_register_class(rule, "value") == "x86.xmm" for rule in rules)
+    assert all("x86.avx2.vmovd.gpr32.xmm" in _descriptor_keys(rule) for rule in rules)
 
 
 def test_extrema_cover_exact_and_native_fast_semantics() -> None:

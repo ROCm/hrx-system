@@ -8,7 +8,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from loom.dialect.vector import defs as vector
 from loom.target.arch.x86.contracts.rule_builders import (
@@ -26,9 +28,11 @@ from loom.target.arch.x86.vector_families import (
 from loom.target.contracts import (
     AttrProject,
     ContractCase,
+    ContractEmit,
     DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
+    EmitRegisterCopy,
     Guard,
     Scalar,
     TypePattern,
@@ -466,6 +470,295 @@ def _insert_f32_rule(
     )
 
 
+def _insert_into_zero_rule(
+    *,
+    element_names: tuple[str, ...],
+    element_bit_width: int,
+    vector_bit_width: int,
+    chunk_index: int,
+    lane_minimum: int,
+    lane_maximum: int,
+    insert: Descriptor,
+    insert_operand_sources: Mapping[str, Literal["zero", "value"]],
+    insert_immediates: Mapping[str, AttrProject | int],
+    descriptor_lookup: _DescriptorLookup,
+    zero_is_float: bool,
+    value_source: ValueRef | None = None,
+    prefix_emits: Sequence[ContractEmit] = (),
+    dependencies: Sequence[Descriptor] = (),
+    value_register_class: str | None = None,
+    priority: int = 1,
+) -> DescriptorRule:
+    """Builds one sparse XMM chunk and widens its VEX-defined zero state."""
+
+    lane_count = vector_bit_width // element_bit_width
+    chunk_lane_count = 128 // element_bit_width
+    vector_type = Vector(element_names, lanes=lane_count)
+    value_type = Scalar(element_names)
+    value_source = ValueRef.operand("value") if value_source is None else value_source
+    emits = list(prefix_emits)
+    operand_values = {"value": value_source}
+    if "zero" in insert_operand_sources.values():
+        zero_chunk = ValueRef.operand("dest")
+        if vector_bit_width > 128:
+            zero_chunk = ValueRef.temporary("zero_chunk")
+            emits.append(
+                EmitRegisterCopy(
+                    source=ValueRef.operand("dest"),
+                    result=zero_chunk,
+                    result_type=Vector(element_names[0], lanes=chunk_lane_count),
+                )
+            )
+        operand_values["zero"] = zero_chunk
+    inserted = (
+        ValueRef.result("result")
+        if vector_bit_width <= 128
+        else ValueRef.temporary("inserted_chunk")
+    )
+    emits.append(
+        _op_emit(
+            descriptor=insert,
+            operands={
+                field: operand_values[source]
+                for field, source in insert_operand_sources.items()
+            },
+            results={"dst": inserted},
+            result_types=(
+                None if vector_bit_width <= 128 else {"dst": DescriptorResultType()}
+            ),
+            immediates=insert_immediates,
+        )
+    )
+    primary_descriptor = insert
+    required_descriptors = list(dependencies)
+    if vector_bit_width > 128:
+        if chunk_index == 0:
+            emits.append(
+                EmitRegisterCopy(
+                    source=inserted,
+                    result=ValueRef.result("result"),
+                )
+            )
+        else:
+            insert_chunk = descriptor_lookup(
+                _chunk_descriptor_keys(vector_bit_width)[1]
+            )
+            primary_descriptor = insert_chunk
+            required_descriptors.append(insert)
+            emits.append(
+                _op_emit(
+                    descriptor=insert_chunk,
+                    operands={
+                        "dest": ValueRef.operand("dest"),
+                        "value": inserted,
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    immediates={"lane": chunk_index},
+                )
+            )
+    required_descriptor_by_key = {
+        descriptor.key: descriptor for descriptor in required_descriptors
+    }
+    required_descriptors = [
+        descriptor
+        for descriptor in required_descriptor_by_key.values()
+        if descriptor.key != primary_descriptor.key
+    ]
+    zero_guards = (
+        (Guard.value_float_equals("dest", 0.0),)
+        if zero_is_float
+        else (
+            Guard.value_exact_i64("dest"),
+            Guard.value_i64_range("dest", 0, 0),
+        )
+    )
+    return DescriptorRule(
+        source_op=vector.vector_insert,
+        descriptor=primary_descriptor,
+        guards=(
+            Guard.value_type("value", value_type),
+            *(
+                (Guard.low_value_register_class("value", value_register_class),)
+                if value_register_class is not None
+                else ()
+            ),
+            Guard.value_type("dest", vector_type),
+            *zero_guards,
+            Guard.value_type("result", vector_type),
+            Guard.operand_segment_count("indices", 0),
+            Guard.i64_array_count("static_indices", 1),
+            Guard.i64_array_element_range(
+                "static_indices",
+                0,
+                lane_minimum,
+                lane_maximum,
+            ),
+            *(
+                Guard.descriptor_available(descriptor)
+                for descriptor in required_descriptors
+            ),
+        ),
+        emit=tuple(emits),
+        priority=priority,
+    )
+
+
+def _lane_insert_into_zero_rules(
+    vector_bit_widths: tuple[int, ...],
+    descriptor_lookup: _DescriptorLookup,
+) -> tuple[DescriptorRule, ...]:
+    rules: list[DescriptorRule] = []
+    for row in X86_LANE_FAMILIES:
+        descriptor = descriptor_lookup(
+            _lane_descriptor_key(row.insert_mnemonic, row.element_bit_width)
+        )
+        element_groups = (
+            (tuple(name for name in row.element_names if name.startswith("i")), False),
+            (
+                tuple(name for name in row.element_names if not name.startswith("i")),
+                True,
+            ),
+        )
+        for element_names, zero_is_float in element_groups:
+            if not element_names:
+                continue
+            for vector_bit_width in vector_bit_widths:
+                if vector_bit_width <= 128:
+                    continue
+                lane_count = vector_bit_width // row.element_bit_width
+                chunk_lane_count = 128 // row.element_bit_width
+                for chunk_index in range(max(1, vector_bit_width // 128)):
+                    first_lane = chunk_index * chunk_lane_count
+                    rules.append(
+                        _insert_into_zero_rule(
+                            element_names=element_names,
+                            element_bit_width=row.element_bit_width,
+                            vector_bit_width=vector_bit_width,
+                            chunk_index=chunk_index,
+                            lane_minimum=first_lane,
+                            lane_maximum=min(first_lane + chunk_lane_count, lane_count)
+                            - 1,
+                            insert=descriptor,
+                            insert_operand_sources={
+                                "dest": "zero",
+                                "value": "value",
+                            },
+                            insert_immediates={
+                                "lane": AttrProject.i64_array_element_remainder(
+                                    "static_indices",
+                                    element=0,
+                                    divisor=chunk_lane_count,
+                                )
+                            },
+                            descriptor_lookup=descriptor_lookup,
+                            zero_is_float=zero_is_float,
+                            value_register_class=(
+                                "x86.gpr64"
+                                if row.element_bit_width == 64
+                                else "x86.gpr32"
+                            ),
+                        )
+                    )
+    return tuple(rules)
+
+
+def _insert_f32_into_zero_rules(
+    vector_bit_widths: tuple[int, ...],
+    descriptor_lookup: _DescriptorLookup,
+) -> tuple[DescriptorRule, ...]:
+    insert = descriptor_lookup("x86.avx2.vinsertps.xmm")
+    rules: list[DescriptorRule] = []
+    for vector_bit_width in vector_bit_widths:
+        if vector_bit_width < 32:
+            continue
+        lane_count = vector_bit_width // 32
+        for chunk_index in range(max(1, vector_bit_width // 128)):
+            first_lane = chunk_index * 4
+            if chunk_index == 0:
+                rules.extend(
+                    (
+                        _insert_into_zero_rule(
+                            element_names=("f32",),
+                            element_bit_width=32,
+                            vector_bit_width=vector_bit_width,
+                            chunk_index=0,
+                            lane_minimum=lane,
+                            lane_maximum=lane,
+                            insert=insert,
+                            insert_operand_sources={
+                                "dest": "value",
+                                "value": "value",
+                            },
+                            insert_immediates={
+                                "control": (lane << 4) | (0xF ^ (1 << lane))
+                            },
+                            descriptor_lookup=descriptor_lookup,
+                            zero_is_float=True,
+                            value_register_class="x86.xmm",
+                        )
+                    )
+                    for lane in range(min(4, lane_count))
+                )
+            else:
+                rules.append(
+                    _insert_into_zero_rule(
+                        element_names=("f32",),
+                        element_bit_width=32,
+                        vector_bit_width=vector_bit_width,
+                        chunk_index=chunk_index,
+                        lane_minimum=first_lane,
+                        lane_maximum=min(first_lane + 4, lane_count) - 1,
+                        insert=insert,
+                        insert_operand_sources={
+                            "dest": "zero",
+                            "value": "value",
+                        },
+                        insert_immediates={
+                            "control": AttrProject.i64_array_element_remainder(
+                                "static_indices",
+                                element=0,
+                                divisor=4,
+                                target_bit_offset=4,
+                            )
+                        },
+                        descriptor_lookup=descriptor_lookup,
+                        zero_is_float=True,
+                        value_register_class="x86.xmm",
+                    )
+                )
+    return tuple(rules)
+
+
+def _insert_f64_into_zero_rules(
+    vector_bit_widths: tuple[int, ...],
+    descriptor_lookup: _DescriptorLookup,
+) -> tuple[DescriptorRule, ...]:
+    insert = descriptor_lookup("x86.avx2.vshufpd.xmm")
+    return tuple(
+        _insert_into_zero_rule(
+            element_names=("f64",),
+            element_bit_width=64,
+            vector_bit_width=vector_bit_width,
+            chunk_index=lane // 2,
+            lane_minimum=lane,
+            lane_maximum=lane,
+            insert=insert,
+            insert_operand_sources=(
+                {"lhs": "value", "rhs": "zero"}
+                if lane % 2 == 0
+                else {"lhs": "zero", "rhs": "value"}
+            ),
+            insert_immediates={"control": 0},
+            descriptor_lookup=descriptor_lookup,
+            zero_is_float=True,
+            value_register_class="x86.xmm",
+        )
+        for vector_bit_width in vector_bit_widths
+        if vector_bit_width > 128
+        for lane in range(vector_bit_width // 64)
+    )
+
+
 def _insert_f64_wide_rule(
     vector_bit_width: int, descriptor_lookup: _DescriptorLookup
 ) -> DescriptorRule:
@@ -548,7 +841,7 @@ def avx512_fp16_lane_movement_rules(
         extract=descriptor_lookup("x86.avx2.vmovd.xmm.gpr32"),
         insert=descriptor_lookup("x86.avx2.vmovd.gpr32.xmm"),
     )
-    return tuple(
+    rules = [
         rule
         for vector_bit_width in AVX512_FP16_VECTOR_BIT_WIDTHS
         for rule in (
@@ -571,7 +864,50 @@ def avx512_fp16_lane_movement_rules(
                 priority=1,
             ),
         )
-    )
+    ]
+    insert = descriptor_lookup(_lane_descriptor_key("vpinsrw", 16))
+    for vector_bit_width in AVX512_FP16_VECTOR_BIT_WIDTHS:
+        if vector_bit_width <= 128:
+            continue
+        lane_count = vector_bit_width // 16
+        for chunk_index in range(max(1, vector_bit_width // 128)):
+            first_lane = chunk_index * 8
+            lane_value = ValueRef.temporary("lane_value")
+            rules.append(
+                _insert_into_zero_rule(
+                    element_names=("f16",),
+                    element_bit_width=16,
+                    vector_bit_width=vector_bit_width,
+                    chunk_index=chunk_index,
+                    lane_minimum=first_lane,
+                    lane_maximum=min(first_lane + 8, lane_count) - 1,
+                    insert=insert,
+                    insert_operand_sources={
+                        "dest": "zero",
+                        "value": "value",
+                    },
+                    insert_immediates={
+                        "lane": AttrProject.i64_array_element_remainder(
+                            "static_indices", element=0, divisor=8
+                        )
+                    },
+                    descriptor_lookup=descriptor_lookup,
+                    zero_is_float=True,
+                    value_source=lane_value,
+                    prefix_emits=(
+                        _op_emit(
+                            descriptor=transport.insert,
+                            operands={"input": ValueRef.operand("value")},
+                            results={"dst": lane_value},
+                            result_types={"dst": _I16},
+                        ),
+                    ),
+                    dependencies=(transport.insert,),
+                    value_register_class="x86.xmm",
+                    priority=2,
+                )
+            )
+    return tuple(rules)
 
 
 def avx2_lane_movement_rules(
@@ -579,6 +915,11 @@ def avx2_lane_movement_rules(
 ) -> tuple[ContractCase, ...]:
     return (
         *_lane_movement_rules(AVX2_CARRIER_VECTOR_BIT_WIDTHS, descriptor_lookup),
+        *_lane_insert_into_zero_rules(
+            AVX2_CARRIER_VECTOR_BIT_WIDTHS, descriptor_lookup
+        ),
+        *_insert_f32_into_zero_rules(AVX2_CARRIER_VECTOR_BIT_WIDTHS, descriptor_lookup),
+        *_insert_f64_into_zero_rules(AVX2_CARRIER_VECTOR_BIT_WIDTHS, descriptor_lookup),
         *(
             _floating_extract_rule(element_name, vector_bit_width, descriptor_lookup)
             for element_name in ("f32", "f64")
@@ -602,6 +943,9 @@ def avx512_lane_movement_rules(
 ) -> tuple[ContractCase, ...]:
     return (
         *_lane_movement_rules(AVX512_VECTOR_BIT_WIDTHS, descriptor_lookup),
+        *_lane_insert_into_zero_rules(AVX512_VECTOR_BIT_WIDTHS, descriptor_lookup),
+        *_insert_f32_into_zero_rules(AVX512_VECTOR_BIT_WIDTHS, descriptor_lookup),
+        *_insert_f64_into_zero_rules(AVX512_VECTOR_BIT_WIDTHS, descriptor_lookup),
         *(
             _floating_extract_rule(element_name, vector_bit_width, descriptor_lookup)
             for element_name in ("f32", "f64")

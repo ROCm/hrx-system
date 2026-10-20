@@ -1,0 +1,107 @@
+// RUN: emit source-low output=low
+
+// Exact zero facts let scalar lane insertion construct only the populated XMM
+// chunk. VEX-defined upper zeros widen the low chunk without a machine
+// instruction; upper chunks need one insertion into the zero destination.
+x86.target<avx2> @target
+
+func.def target(@target) @zero_insert_avx2(%i8_value: i8, %bf16_value: bf16, %i64_value: i64, %f32_value: f32, %f64_value: f64) -> (vector<32xi8>, vector<16xbf16>, vector<4xi64>, vector<8xf32>, vector<8xf32>, vector<4xf64>) {
+  %c0_i8 = vector.constant 0 : vector<32xi8>
+  %c0_bf16 = vector.constant 0.0 : vector<16xbf16>
+  %c0_i64 = vector.constant 0 : vector<4xi64>
+  %c0_f32 = vector.constant 0.0 : vector<8xf32>
+  %c0_f64 = vector.constant 0.0 : vector<4xf64>
+  %i8_high = vector.insert %i8_value into %c0_i8[29] : i8, vector<32xi8>
+  %bf16_high = vector.insert %bf16_value into %c0_bf16[9] : bf16, vector<16xbf16>
+  %i64_high = vector.insert %i64_value into %c0_i64[3] : i64, vector<4xi64>
+  %f32_low = vector.insert %f32_value into %c0_f32[0] : f32, vector<8xf32>
+  %f32_high = vector.insert %f32_value into %c0_f32[6] : f32, vector<8xf32>
+  %f64_high = vector.insert %f64_value into %c0_f64[3] : f64, vector<4xf64>
+  func.return %i8_high, %bf16_high, %i64_high, %f32_low, %f32_high, %f64_high : vector<32xi8>, vector<16xbf16>, vector<4xi64>, vector<8xf32>, vector<8xf32>, vector<4xf64>
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (i8, bf16, i64, f32, f64) -> (vector<32xi8>, vector<16xbf16>, vector<4xi64>, vector<8xf32>, vector<8xf32>, vector<4xf64>)}) @zero_insert_avx2(%i8_value: reg<x86.gpr32>, %bf16_value: reg<x86.gpr32>, %i64_value: reg<x86.gpr64>, %f32_value: reg<x86.xmm>, %f64_value: reg<x86.xmm>) -> (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) asm {
+  %c0_i8 = vxorps.zero.ymm
+  %38 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %39 = vpinsrb.xmm %38, %i8_value, 13
+  %i8_high = vinsertf128.ymm.xmm %c0_i8, %39, 1
+  %41 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %42 = vpinsrw.xmm %41, %bf16_value, 1
+  %bf16_high = vinsertf128.ymm.xmm %c0_i8, %42, 1
+  %44 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %45 = vpinsrq.xmm %44, %i64_value, 1
+  %i64_high = vinsertf128.ymm.xmm %c0_i8, %45, 1
+  %47 = vinsertps.xmm %f32_value, %f32_value, 14
+  %f32_low = copy %47 : reg<x86.xmm> -> reg<x86.ymm>
+  %49 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %50 = vinsertps.xmm %49, %f32_value, 32
+  %f32_high = vinsertf128.ymm.xmm %c0_i8, %50, 1
+  %52 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %53 = vshufpd.xmm %52, %f64_value, 0
+  %f64_high = vinsertf128.ymm.xmm %c0_i8, %53, 1
+  return %i8_high, %bf16_high, %i64_high, %f32_low, %f32_high, %f64_high
+}
+
+// ====
+
+// Signed zero is payload, so a negative-zero destination retains the general
+// read-modify-write path.
+x86.target<avx2> @target
+
+func.def target(@target) @negative_zero_insert_avx2(%value: f32) -> (vector<8xf32>) {
+  %cn0 = vector.constant -0.0 : vector<8xf32>
+  %result = vector.insert %value into %cn0[0] : f32, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (f32) -> (vector<8xf32>)}) @negative_zero_insert_avx2(%value: reg<x86.xmm>) -> (reg<x86.ymm>) asm {
+  %6 = mov.imm32 -2147483648
+  %7 = vmovd.xmm.gpr32 %6
+  %cn0 = vpbroadcastd.ymm %7
+  %9 = vextractf128.xmm %cn0, 0
+  %10 = vinsertps.xmm %9, %value, 0
+  %result = vinsertf128.ymm.xmm %cn0, %10, 0
+  return %result
+}
+
+// ====
+
+// ZMM results reuse the same sparse XMM construction. Native FP16 keeps its
+// scalar in XMM and performs the required word transfer before lane insertion.
+x86.target<avx512> @target {features = [avx512fp16]}
+
+func.def target(@target) @zero_insert_avx512(%i32_value: i32, %f32_value: f32, %f64_value: f64, %f16_value: f16) -> (vector<16xi32>, vector<16xf32>, vector<16xf32>, vector<8xf64>, vector<32xf16>) {
+  %c0_i32 = vector.constant 0 : vector<16xi32>
+  %c0_f32 = vector.constant 0.0 : vector<16xf32>
+  %c0_f64 = vector.constant 0.0 : vector<8xf64>
+  %c0_f16 = vector.constant 0.0 : vector<32xf16>
+  %i32_high = vector.insert %i32_value into %c0_i32[14] : i32, vector<16xi32>
+  %f32_low = vector.insert %f32_value into %c0_f32[0] : f32, vector<16xf32>
+  %f32_high = vector.insert %f32_value into %c0_f32[14] : f32, vector<16xf32>
+  %f64_high = vector.insert %f64_value into %c0_f64[7] : f64, vector<8xf64>
+  %f16_high = vector.insert %f16_value into %c0_f16[25] : f16, vector<32xf16>
+  func.return %i32_high, %f32_low, %f32_high, %f64_high, %f16_high : vector<16xi32>, vector<16xf32>, vector<16xf32>, vector<8xf64>, vector<32xf16>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (i32, f32, f64, f16) -> (vector<16xi32>, vector<16xf32>, vector<16xf32>, vector<8xf64>, vector<32xf16>)}) @zero_insert_avx512(%i32_value: reg<x86.gpr32>, %f32_value: reg<x86.xmm>, %f64_value: reg<x86.xmm>, %f16_value: reg<x86.xmm>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>) asm {
+  %c0_i32 = vxorps.zero
+  %31 = copy %c0_i32 : reg<x86.zmm> -> reg<x86.xmm>
+  %32 = vpinsrd.xmm %31, %i32_value, 2
+  %i32_high = vinsertf32x4.zmm.xmm %c0_i32, %32, 3
+  %34 = vinsertps.xmm %f32_value, %f32_value, 14
+  %f32_low = copy %34 : reg<x86.xmm> -> reg<x86.zmm>
+  %36 = copy %c0_i32 : reg<x86.zmm> -> reg<x86.xmm>
+  %37 = vinsertps.xmm %36, %f32_value, 32
+  %f32_high = vinsertf32x4.zmm.xmm %c0_i32, %37, 3
+  %39 = copy %c0_i32 : reg<x86.zmm> -> reg<x86.xmm>
+  %40 = vshufpd.xmm %39, %f64_value, 0
+  %f64_high = vinsertf32x4.zmm.xmm %c0_i32, %40, 3
+  %42 = vmovd.gpr32.xmm %f16_value
+  %43 = copy %c0_i32 : reg<x86.zmm> -> reg<x86.xmm>
+  %44 = vpinsrw.xmm %43, %42, 1
+  %f16_high = vinsertf32x4.zmm.xmm %c0_i32, %44, 3
+  return %i32_high, %f32_low, %f32_high, %f64_high, %f16_high
+}
