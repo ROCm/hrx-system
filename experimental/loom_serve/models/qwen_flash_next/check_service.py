@@ -161,16 +161,16 @@ def run(address, model):
         try:
             operation("deactivate", 202)
             cold = settled()
-            assert not cold["parameters"]["active"], cold
-            assert cold["parameters"]["committed_bytes"] == 0, cold
+            assert not cold["parameters"]["primary"]["active"], cold
+            assert cold["parameters"]["primary"]["committed_bytes"] == 0, cold
             operation("activate", 202)
             warm = settled()
-            assert warm["parameters"]["active"], warm
+            assert warm["parameters"]["primary"]["active"], warm
             assert warm["incarnation"] == before["incarnation"], (before, warm)
             assert warm["compilation"] == before["compilation"], (before, warm)
             assert (
-                warm["parameters"]["committed_bytes"]
-                == (before["parameters"]["committed_bytes"])
+                warm["parameters"]["primary"]["committed_bytes"]
+                == (before["parameters"]["primary"]["committed_bytes"])
             ), (before, warm)
         finally:
             operation("undrain")
@@ -181,7 +181,7 @@ def run(address, model):
             json.dumps(
                 {
                     "qualified": "text, concurrent forks, page boundary, continuation, replay, and weight reactivation",
-                    "parameter_bytes": warm["parameters"]["committed_bytes"],
+                    "parameter_bytes": warm["parameters"]["primary"]["committed_bytes"],
                     "checkpoint_position": receipt["position"],
                 }
             ),

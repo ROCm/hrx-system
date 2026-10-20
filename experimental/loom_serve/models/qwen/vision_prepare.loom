@@ -4,7 +4,7 @@ func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
 func.decl @qwen38_vision_stage(%height: i64, %width: i64, %count: i64) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
 
 global.rodata.def @checkpoint = bytes("6d6d70726f6a2d4631362e67677566")
 
@@ -29,13 +29,14 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
 
   %geometry = scalar.constant 256 : i64
   %binding = scalar.constant 0 : i32
+  %source = scalar.constant 0 : i32
   %checkpoint = global.load @checkpoint : buffer
   %policy = global.load @policy : buffer
   // One canonical command establishes checkpoint placement. Actual cohort
   // dimensions and counts are declared on demand by request preparation.
   %single_image = scalar.constant 1 : i64
   %stage = func.call @qwen38_vision_stage(%geometry, %geometry, %single_image) : (i64, i64, i64) -> (i32)
-  func.call @parameter(%stage, %binding, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%stage, %binding, %source, %directory, %checkpoint, %policy) : (i32, i32, i32, buffer, buffer, buffer)
 
   %batch_units = scalar.constant 4 : i64
   // Admission ceilings reserve capacity, not backing. Uploads and outputs use

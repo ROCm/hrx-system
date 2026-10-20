@@ -8,7 +8,7 @@ func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
 
 // qwen38_prefill
 global.rodata.def @prefill_root = bytes("7177656e33385f70726566696c6c")
@@ -196,11 +196,12 @@ func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %capacity: i64
   %c1 = index.constant 1 : index
   %bounded_roots = scalar.assume %roots [range(%roots, 0, 7)] : i32
   %root_count = index.cast %bounded_roots : i32 to index
+  %source = scalar.constant 0 : i32
   %empty = global.load @empty : buffer
   %policy = global.load @policy : buffer
   scf.for %i = [%c0 to %root_count step %c1] {
     %binding = index.cast %i : index to i32
-    func.call @parameter(%stage, %binding, %empty, %weights, %policy) : (i32, i32, buffer, buffer, buffer)
+    func.call @parameter(%stage, %binding, %source, %empty, %weights, %policy) : (i32, i32, i32, buffer, buffer, buffer)
   }
   func.return %stage : i32
 }
@@ -464,16 +465,16 @@ func.def @declare_packed_stages(%shapes: buffer, %shape_count: i64, %context: i6
     %width_key = global.load @width_key : buffer
     func.call @config_i64(%proposal, %width_key, %width) : (i32, buffer, i64)
     scf.if %dflash {
-      func.call @parameter(%proposal, %two32, %empty, %draft_weights, %dflash_policy) : (i32, i32, buffer, buffer, buffer)
-      func.call @parameter(%proposal, %three32, %empty, %draft_weights, %dflash_policy) : (i32, i32, buffer, buffer, buffer)
+      func.call @parameter(%proposal, %two32, %zero32, %empty, %draft_weights, %dflash_policy) : (i32, i32, i32, buffer, buffer, buffer)
+      func.call @parameter(%proposal, %three32, %zero32, %empty, %draft_weights, %dflash_policy) : (i32, i32, i32, buffer, buffer, buffer)
     }
     scf.for %i = [%c0 to %count step %c1] {
       %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
       %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
       %warm = func.call @declare_stage(%warm_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %warm_roots, %mixed, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, buffer) -> (i32)
       scf.if %dflash {
-        func.call @parameter(%warm, %zero32, %empty, %draft_weights, %dflash_policy) : (i32, i32, buffer, buffer, buffer)
-        func.call @parameter(%warm, %one32, %empty, %draft_weights, %dflash_policy) : (i32, i32, buffer, buffer, buffer)
+        func.call @parameter(%warm, %zero32, %zero32, %empty, %draft_weights, %dflash_policy) : (i32, i32, i32, buffer, buffer, buffer)
+        func.call @parameter(%warm, %one32, %zero32, %empty, %draft_weights, %dflash_policy) : (i32, i32, i32, buffer, buffer, buffer)
       }
     }
     scf.for %i = [%c0 to %count step %c1] {

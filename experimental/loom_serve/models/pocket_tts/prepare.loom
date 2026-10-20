@@ -6,7 +6,7 @@
 
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
 
 func.decl @pocket.parse_options(%source: buffer) -> (buffer)
 
@@ -54,9 +54,9 @@ func.def @pocket.bind_weights(%stage: i32, %directory: buffer) {
   %zero = scalar.constant 0 : i32
   %one = scalar.constant 1 : i32
   %two = scalar.constant 2 : i32
-  func.call @parameter(%stage, %zero, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%stage, %one, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%stage, %two, %directory, %rotary, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%stage, %zero, %zero, %directory, %checkpoint, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%stage, %one, %zero, %directory, %checkpoint, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%stage, %two, %zero, %directory, %rotary, %policy) : (i32, i32, i32, buffer, buffer, buffer)
   func.return
 }
 
@@ -79,7 +79,8 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %voices = global.load @pocket.waveforms : buffer
   %policy = global.load @pocket.policy : buffer
   %three = scalar.constant 3 : i32
-  func.call @parameter(%voice_stage, %three, %directory, %voices, %policy) : (i32, i32, buffer, buffer, buffer)
+  %parameter_source = scalar.constant 0 : i32
+  func.call @parameter(%voice_stage, %three, %parameter_source, %directory, %voices, %policy) : (i32, i32, i32, buffer, buffer, buffer)
   %save_root = global.load @pocket.root_save : buffer
   %tag3 = scalar.constant 3 : i64
   %save_stage = func.call @stage(%save_root, %tag3) : (buffer, i64) -> (i32)

@@ -4,10 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-global.rodata.def @empty = bytes("")
-
-func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
-  %empty = global.load @empty : buffer
-  %c0 = scalar.constant 0 : i64
-  func.return %empty, %c0 : buffer, i64
+func.def public @prepare_weight(%key: buffer) -> (i64) {
+  %bytes = scalar.constant 0 : i64
+  func.return %bytes : i64
 }
