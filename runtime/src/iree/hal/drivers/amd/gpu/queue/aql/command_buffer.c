@@ -33,6 +33,12 @@ typedef struct iree_hal_amd_gpu_aql_command_buffer_t {
   uint32_t maximum_group_segment_byte_length;
   // Adjacent explicit execution/cache barriers, combined before emission.
   uint32_t pending_barrier;
+  // Last payload's complete header in stable host recording storage. Indirect
+  // dispatches name their patch arguments' desired header, never INVALID.
+  uint32_t* last_header;
+  // The last payload begins after all earlier payloads have completed, so its
+  // release fence can cover their writes without an additional native packet.
+  bool last_ordered;
   // First failed mutation, preventing partial native programs from sealing.
   iree_status_t recording_status;
   // Blocks backing optional direct-resource retention.
@@ -175,6 +181,11 @@ static iree_status_t iree_hal_amd_gpu_aql_command_buffer_begin(
 
 static iree_status_t iree_hal_amd_gpu_aql_command_end(
     iree_hal_amd_gpu_aql_command_buffer_t* buffer) {
+  // Each native chunk ends with an ordered completion packet. A trailing
+  // execution-only dependency needs no second packet before that boundary.
+  if (buffer->pending_barrier == IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) {
+    buffer->pending_barrier = 0;
+  }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_flush_barrier(buffer));
   const uint64_t length = iree_align_uint64(buffer->recording.commands.length,
                                             buffer->recording.alignment) +
@@ -214,7 +225,17 @@ static iree_status_t iree_hal_amd_gpu_aql_command_buffer_barrier(
     iree_hal_command_buffer_t* base, const iree_hal_barrier_t* barrier) {
   iree_hal_amd_gpu_aql_command_buffer_t* buffer = (void*)base;
   const iree_hal_barrier_list_t list = {.count = 1, .values = barrier};
-  const uint32_t prepared = iree_hal_amd_gpu_aql_barrier_prepare(&list);
+  uint32_t prepared = iree_hal_amd_gpu_aql_barrier_prepare(&list);
+  const uint32_t release_mask = 3u << 11;
+  if (buffer->last_ordered) {
+    // This is a host template, not the hardware ring. A dominating payload
+    // releases all prior writes; unordered cohorts keep a standalone barrier.
+    const uint32_t previous = *buffer->last_header;
+    *buffer->last_header =
+        (previous & ~release_mask) |
+        iree_max(previous & release_mask, prepared & release_mask);
+    prepared &= ~release_mask;
+  }
   buffer->pending_barrier =
       iree_hal_amd_gpu_aql_barrier_join(buffer->pending_barrier, prepared);
   return iree_ok_status();
@@ -253,7 +274,16 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
     IREE_RETURN_IF_ERROR(
         iree_hal_resource_set_insert(buffer->resources, 1, &executable));
   }
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_flush_barrier(buffer));
+  uint32_t header = buffer->pending_barrier;
+  if (header & (3u << 11)) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_flush_barrier(buffer));
+    header = IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
+  }
+  buffer->pending_barrier = 0;
+  if (indirect) {
+    header = iree_hal_amd_gpu_aql_barrier_join(
+        header, IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
+  }
   const iree_hal_amd_gpu_kernarg_layout_t* layout = function->base.kernarg;
   uint32_t argument_offset = 0;
   if (!external_arguments && layout->byte_length) {
@@ -294,11 +324,13 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_packets(
       buffer, indirect ? 2 : 1, &offset, &packets));
   const uint32_t target_offset = offset + (indirect ? 64 : 0);
-  const uint32_t header =
-      indirect ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM : 0;
   iree_hal_amd_gpu_aql_packet_t* target = packets + indirect;
   *target = iree_hal_amd_gpu_aql_dispatch_packet(function, &geometry, header, 0,
                                                  0, flags);
+  // An indirect producer is itself ordered before publishing its target.
+  buffer->last_ordered = indirect || !buffer->last_header ||
+                         (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
+  buffer->last_header = &target->words[0];
   const iree_hal_amd_gpu_recording_fixup_flags_t argument_flags =
       external_arguments ? 0 : IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA;
   if (layout->byte_length) {
@@ -327,6 +359,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
         &buffer->recording, sizeof(*patch), 8, &patch_offset, (void**)&patch));
     iree_hal_amd_gpu_aql_indirect_prepare(layout, &geometry, flags, 0, 0, 0,
                                           target->words[0], patch);
+    buffer->last_header = &patch->header;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
         buffer, patch_offset + 8, counts_value,
         config.workgroup_count_ref.offset,

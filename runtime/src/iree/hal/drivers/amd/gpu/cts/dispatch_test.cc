@@ -18,6 +18,7 @@
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
 #include "iree/hal/drivers/amd/gpu/kernarg.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -841,6 +842,31 @@ TEST_P(GpuNativeDispatchTest,
     }
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+    if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      const auto* program =
+          iree_hal_amd_gpu_aql_command_buffer_program(recording);
+      uint32_t dispatch_index = 0;
+      for (uint32_t i = 0; i < program->block_count; ++i) {
+        const auto& block = program->blocks[i];
+        const auto* packets =
+            reinterpret_cast<const iree_hal_amd_gpu_aql_packet_t*>(
+                program->resident.contents.data + block.offset);
+        for (uint32_t j = 0; j < block.packet_count; ++j, ++dispatch_index) {
+          const uint32_t acquire_scope =
+              dispatch_index == 0 ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM
+                                  : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT;
+          const uint32_t release_scope =
+              dispatch_index + 1 == count
+                  ? IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM
+                  : IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT;
+          EXPECT_EQ(packets[j].words[0] & 0xFFFFu,
+                    IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+                        IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | acquire_scope |
+                        release_scope);
+        }
+      }
+      EXPECT_EQ(dispatch_index, count);
+    }
     for (uint64_t epoch = 1; epoch <= 2; ++epoch) {
       std::array<uint32_t, kInvocations> initial;
       initial.fill(7);
@@ -876,9 +902,20 @@ TEST_P(GpuNativeDispatchTest,
   // caller releases them while the first dependency is still unavailable.
   iree_hal_command_buffer_t* recording = nullptr;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      family, 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH, 1, &recording));
+      family, 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH, 2, &recording));
   Ref<iree_hal_command_buffer_t> recording_owner(recording);
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &acquire));
+  // Independent producers may overlap. Their release cannot be folded into
+  // either dispatch, so the dependency must join the complete cohort.
+  for (uint32_t i = 0; i < 2; ++i) {
+    auto binding = iree_hal_make_indirect_buffer_ref(i, 0, 4);
+    uint32_t value = i + 1;
+    IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+        recording, executable, function, config,
+        iree_make_const_byte_span(&value, 4), {1, &binding}, 0));
+  }
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
   auto binding = iree_hal_make_indirect_buffer_ref(0, 0, 4);
   uint32_t value = 11;
   IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
@@ -886,20 +923,49 @@ TEST_P(GpuNativeDispatchTest,
       iree_make_const_byte_span(&value, 4), {1, &binding}, 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+    const auto* program =
+        iree_hal_amd_gpu_aql_command_buffer_program(recording);
+    ASSERT_EQ(program->block_count, 1u);
+    EXPECT_EQ(program->blocks[0].packet_count, 4u);
+    const auto* packets =
+        reinterpret_cast<const iree_hal_amd_gpu_aql_packet_t*>(
+            program->resident.contents.data + program->blocks[0].offset);
+    const uint32_t expected[] = {
+        IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+            IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM,
+        IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH,
+        IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+            IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT |
+            IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT,
+        IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+            IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM,
+    };
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
+      EXPECT_EQ(packets[i].words[0] & 0xFFFFu, expected[i]);
+    }
+  }
   uint64_t final_value = 1000;
-  iree_hal_buffer_binding_t table = {.buffer = output, .length = 4};
+  const iree_hal_buffer_binding_t table[] = {
+      {.buffer = output, .offset = 0, .length = 4},
+      {.buffer = output, .offset = 4, .length = 4},
+  };
   IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &gate, &final_value},
                                         {1, &done[0], &final_value}, recording,
-                                        {1, &table}, 0));
+                                        {IREE_ARRAYSIZE(table), table}, 0));
   recording_owner.reset();
   executable_owner.reset();
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, final_value, nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(done[0], final_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
-  uint32_t actual = 0;
-  IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 0, &actual, sizeof(actual)));
-  EXPECT_EQ(actual, 7u + 97u * 98u / 2 + 11u);
+  uint32_t actual[2] = {};
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 0, actual, sizeof(actual)));
+  EXPECT_EQ(actual[0], 7u + 97u * 98u / 2 + 12u);
+  EXPECT_EQ(actual[1], 7u + 97u * 98u / 2 + 2u);
 }
 
 INSTANTIATE_TEST_SUITE_P(

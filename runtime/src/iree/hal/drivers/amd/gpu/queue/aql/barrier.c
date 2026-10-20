@@ -31,9 +31,11 @@ uint32_t iree_hal_amd_gpu_aql_barrier_prepare(
     const iree_hal_access_scope_t external =
         IREE_HAL_ACCESS_SCOPE_HOST_READ | IREE_HAL_ACCESS_SCOPE_HOST_WRITE |
         IREE_HAL_ACCESS_SCOPE_MEMORY_READ | IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE;
-    if (source && target) {
-      acquire = iree_max(acquire, 1u);
+    if (source) {
       release = iree_max(release, 1u);
+    }
+    if (target) {
+      acquire = iree_max(acquire, 1u);
     }
     if ((source & external) ||
         (barrier->flags & IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE) ||

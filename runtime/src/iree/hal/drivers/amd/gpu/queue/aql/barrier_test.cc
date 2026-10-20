@@ -86,6 +86,19 @@ TEST(AqlBarrierTest, ExternalAccessPreservesDirection) {
   }
 }
 
+TEST(AqlBarrierTest, OneSidedAccessScopesRetainTheirFence) {
+  const iree_hal_memory_barrier_t acquire = {
+      0, IREE_HAL_ACCESS_SCOPE_DISPATCH_READ};
+  const iree_hal_memory_barrier_t release = {
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE, 0};
+  EXPECT_EQ(Prepare({.memory_barrier_count = 1, .memory_barriers = &acquire}),
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT);
+  EXPECT_EQ(Prepare({.memory_barrier_count = 1, .memory_barriers = &release}),
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT);
+}
+
 TEST(AqlBarrierTest, PreparedRangesPromoteToWholeCacheActions) {
   for (bool acquire : {false, true}) {
     const uint32_t range_effect =

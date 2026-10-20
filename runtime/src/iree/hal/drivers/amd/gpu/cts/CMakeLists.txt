@@ -597,6 +597,7 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::image::hip_images
     iree::hal::drivers::amd::gpu::image::hsaco
     iree::hal::drivers::amd::gpu::kernarg
+    iree::hal::drivers::amd::gpu::queue::aql::command_buffer
     iree::hal::drivers::amd::gpu::queue::aql::program
     iree::hal::drivers::amd::gpu::queue::aql::ring
     iree::hal::drivers::amd::gpu::queue::semaphore
