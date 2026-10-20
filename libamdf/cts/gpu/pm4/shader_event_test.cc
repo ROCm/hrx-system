@@ -11,11 +11,11 @@
 
 #include "libamdf/cts/gpu/kernels/shader_event_kernels.h"
 #include "libamdf/cts/gpu/pm4/dispatch_fixture.h"
-#include "libamdf/cts/gpu/util/shader_event_fixture.h"
+#include "libamdf/cts/gpu/util/event_fixture.h"
 
 namespace {
 
-using Pm4ShaderEventTest = GpuShaderEventTest<Pm4DispatchTest>;
+using Pm4ShaderEventTest = GpuEventTest<Pm4DispatchTest>;
 
 TEST_F(Pm4ShaderEventTest, PublishesAndWakesWithoutCommandProcessorInterrupts) {
   namespace protocol = kernels::shader_event;

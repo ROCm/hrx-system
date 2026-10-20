@@ -434,6 +434,17 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// cache transitions. This contract does not enable HSA runtime services,
 /// dynamic scratch growth, or device enqueue.
 ///
+/// USER completion signals can notify a same-device KFD_SIGNAL version-1
+/// event. Set the signal's 64-bit event mailbox at byte 16 to mailbox_address
+/// and its 32-bit event ID at byte 24 to interrupt_context. Firmware handles
+/// the mailbox write and interrupt for dispatch and AND/OR barrier completion.
+/// Multiple signals and queues may share one event. Notifications can coalesce
+/// and only prompt an acquire recheck of the authoritative signal values;
+/// event_wait success alone does not establish execution completion. Retain
+/// the event until every queue that can notify it has been destroyed, including
+/// notification tails after a completion value becomes visible. Signal reuse
+/// also waits for every dependent reader's execution completion.
+///
 /// AMD vendor format 1 carries a four-dword INDIRECT_BUFFER at packet byte 4,
 /// remaining-dword count 10 at byte 20, zero reserved words, and the native
 /// completion signal address at byte 56. The jump uses a dword-aligned 48-bit

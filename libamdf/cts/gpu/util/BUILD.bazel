@@ -72,9 +72,9 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
-    name = "shader_event_fixture",
+    name = "event_fixture",
     testonly = True,
-    hdrs = ["shader_event_fixture.h"],
+    hdrs = ["event_fixture.h"],
     target_compatible_with = ["@platforms//cpu:x86_64"],
     deps = [
         ":user_queue",

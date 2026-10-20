@@ -11,11 +11,11 @@
 
 #include "libamdf/cts/gpu/aql/dispatch_fixture.h"
 #include "libamdf/cts/gpu/kernels/shader_event_kernels.h"
-#include "libamdf/cts/gpu/util/shader_event_fixture.h"
+#include "libamdf/cts/gpu/util/event_fixture.h"
 
 namespace {
 
-using AqlShaderEventTest = GpuShaderEventTest<AqlDispatchTest>;
+using AqlShaderEventTest = GpuEventTest<AqlDispatchTest>;
 
 TEST_F(AqlShaderEventTest, PublishesAndWakesWithoutCompletionSignalEvents) {
   namespace protocol = kernels::shader_event;

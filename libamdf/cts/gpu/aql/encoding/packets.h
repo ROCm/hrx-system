@@ -17,11 +17,11 @@ namespace aql {
 
 // Native AMD signal, addressed by the complete block in AQL packets.
 struct alignas(64) Signal {
-  // AMD_SIGNAL_KIND_USER, with host polling and no event mailbox.
+  // AMD_SIGNAL_KIND_USER.
   int64_t kind;
   // Value atomically decremented by the command processor on completion.
   int64_t value;
-  // Native event payload; zero for these host-polled signals.
+  // Optional native event payload; zero for host-polled signals.
   struct {
     // GPU address of the event mailbox, or zero without an event.
     uint64_t mailbox_address;

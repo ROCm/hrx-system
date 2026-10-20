@@ -4,18 +4,18 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef AMDF_CTS_GPU_UTIL_SHADER_EVENT_FIXTURE_H_
-#define AMDF_CTS_GPU_UTIL_SHADER_EVENT_FIXTURE_H_
+#ifndef AMDF_CTS_GPU_UTIL_EVENT_FIXTURE_H_
+#define AMDF_CTS_GPU_UTIL_EVENT_FIXTURE_H_
 
 #include "amdf/gpu.h"
 #include "gtest/gtest.h"
 #include "libamdf/cts/gpu/util/user_queue.h"
 #include "libamdf/cts/util/wait.h"
 
-// Shares native wake ownership across the PM4 and AQL shader producers. Queue
+// Shares native wake ownership across firmware and shader producers. Queue
 // fixtures retain their own publication and execution-retirement protocols.
 template <typename QueueFixture>
-class GpuShaderEventTest : public QueueFixture {
+class GpuEventTest : public QueueFixture {
  protected:
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(QueueFixture::SetUp());
@@ -23,7 +23,7 @@ class GpuShaderEventTest : public QueueFixture {
       return;
     }
     if ((this->features_ & AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS) == 0) {
-      GTEST_SKIP() << "device has no native shader event producer";
+      GTEST_SKIP() << "device has no native event producer";
     }
     const amdf_gpu_event_create_info_t create_info = {
         .type = AMDF_STRUCTURE_TYPE_GPU_EVENT_CREATE_INFO,
@@ -38,7 +38,7 @@ class GpuShaderEventTest : public QueueFixture {
         event_info_.format_version != 1 ||
         (event_info_.publication_modes & this->family_.publication_modes) ==
             0) {
-      GTEST_SKIP() << "shader has no recipe for this native event format";
+      GTEST_SKIP() << "producer has no recipe for this native event format";
     }
   }
 
@@ -50,7 +50,7 @@ class GpuShaderEventTest : public QueueFixture {
     }
   }
 
-  // Only the shader can signal this event. The host acquires the authoritative
+  // Only the GPU can signal this event. The host acquires the authoritative
   // generation after each hint; spurious wakes cannot establish completion.
   ::testing::AssertionResult WaitForRecord(uint64_t generation_address,
                                            uint64_t generation) {
@@ -61,7 +61,7 @@ class GpuShaderEventTest : public QueueFixture {
           this->gpu_api_->event_wait(event_, remaining_ns);
       if (status != AMDF_STATUS_OK) {
         return ::testing::AssertionFailure()
-               << "shader event wait failed: domain="
+               << "native event wait failed: domain="
                << amdf_status_domain(status)
                << " code=" << amdf_status_code(status);
       }
@@ -71,7 +71,7 @@ class GpuShaderEventTest : public QueueFixture {
       remaining_ns = deadline.remaining_ns();
     }
     return ::testing::AssertionFailure()
-           << "shader event did not publish generation " << generation;
+           << "native event did not publish value " << generation;
   }
 
   // Native event retained through successful queue-first teardown.
@@ -83,4 +83,4 @@ class GpuShaderEventTest : public QueueFixture {
   };
 };
 
-#endif  // AMDF_CTS_GPU_UTIL_SHADER_EVENT_FIXTURE_H_
+#endif  // AMDF_CTS_GPU_UTIL_EVENT_FIXTURE_H_
