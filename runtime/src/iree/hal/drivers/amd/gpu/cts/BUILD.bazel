@@ -74,32 +74,57 @@ iree_runtime_cc_test(
     ],
 )
 
+_SCRATCH_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:amdgpu_artifacts",
+    "//loom/config/target/amdgpu:descriptor_set_cdna2_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx9_4_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
+])
+
+_SCRATCH_TARGETS = [
+    "gfx90a",
+    "gfx9-4-generic",
+    "gfx11-generic",
+    "gfx12-generic",
+]
+
+[
+    loom_target_profile(
+        name = "scratch_profile_" + target,
+        family = "amdgpu",
+        selector = target,
+        target_compatible_with = _SCRATCH_COMPATIBLE_WITH,
+    )
+    for target in _SCRATCH_TARGETS
+]
+
 [
     loom_kernel_binary(
         name = "scratch_" + target,
         testonly = True,
         srcs = ["scratch.loom"],
         out = "scratch_" + target + ".hsaco",
-        target = ":feedback_profile_" + target,
-        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+        target = ":scratch_profile_" + target,
+        target_compatible_with = _SCRATCH_COMPATIBLE_WITH,
     )
-    for target in _FEEDBACK_TARGETS
+    for target in _SCRATCH_TARGETS
 ]
 
 iree_c_embed_data(
     name = "scratch_images",
     testonly = True,
-    srcs = [":scratch_" + target for target in _FEEDBACK_TARGETS],
+    srcs = [":scratch_" + target for target in _SCRATCH_TARGETS],
     c_file_output = "scratch_images.c",
     h_file_output = "scratch_images.h",
     identifier = "iree_hal_amd_gpu_scratch_images",
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    target_compatible_with = _SCRATCH_COMPATIBLE_WITH,
 )
 
 iree_runtime_cc_test(
     name = "scratch_test",
     srcs = ["scratch_test.cc"],
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    target_compatible_with = _SCRATCH_COMPATIBLE_WITH,
     deps = [
         ":scratch_images",
         ":test_device",
@@ -311,7 +336,6 @@ iree_runtime_cc_test(
         "//libamdf:amdf_static",
         "//libamdf:headers",
         "//runtime/src/iree/async",
-        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
@@ -322,7 +346,6 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hip_images",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:signal",
-        "//runtime/src/iree/hal/drivers/amd/registration",
         "//runtime/src/iree/hal/memory:fixed_block_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

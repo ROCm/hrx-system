@@ -389,8 +389,13 @@ void GpuNativeTest::SetUp() {
       amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
       "amdf_query_api"));
   if (!fabric_) {
-    IREE_ASSERT_OK(iree_hal_amd_fabric_create(
-        api, AMDF_NATIVE_LIFETIME_INSTANCE, iree_allocator_system(), &fabric_));
+    if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      IREE_ASSERT_OK(NativeMemoryGate::AcquireProcessFabric(&fabric_));
+    } else {
+      IREE_ASSERT_OK(
+          iree_hal_amd_fabric_create(api, AMDF_NATIVE_LIFETIME_INSTANCE,
+                                     iree_allocator_system(), &fabric_));
+    }
   }
   bool selected_endpoint_found = false;
   for (uint32_t i = 0; i < fabric_->endpoint_count && !context_; ++i) {
@@ -418,8 +423,33 @@ void GpuNativeTest::SetUp() {
       }
       bool supported = false;
       if (iree_status_is_ok(status) && is_selected) {
-        status =
-            iree_hal_amd_gpu_device_query_support(api, endpoint, &supported);
+        amdf_endpoint_info_t info = {
+            .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+            .structure_size = sizeof(info),
+        };
+        status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+            api->endpoint_query_info(endpoint, &info), "endpoint_query_info");
+        for (uint32_t family = 0; family < info.queue_family_count &&
+                                  !supported && iree_status_is_ok(status);
+             ++family) {
+          amdf_queue_family_info_t native = {
+              .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+              .structure_size = sizeof(native),
+          };
+          status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+              api->endpoint_query_queue_family_info(endpoint, family, &native),
+              "endpoint_query_queue_family_info");
+          if (iree_status_is_ok(status)) {
+            supported =
+                command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                    ? native.command_type == command_type() &&
+                          (native.format_features &
+                           AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE) &&
+                          (native.user_queue_capabilities &
+                           AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER)
+                    : iree_hal_amd_gpu_pm4_queue_publication_modes(&native) != 0;
+          }
+        }
       }
       const amdf_status_t close_status = api->endpoint_close(endpoint);
       if (!amdf_status_is_ok(close_status)) {
@@ -439,8 +469,8 @@ void GpuNativeTest::SetUp() {
           context_status.code() == iree::StatusCode::kUnavailable) {
         if (selected_identity) {
           GTEST_SKIP()
-              << "Selected native AMD GPU does not support instance-lifetime "
-                 "PM4 conformance: "
+              << "Selected native AMD GPU does not support the requested "
+                 "packet family: "
               << context_status.ToString();
         }
         continue;
@@ -454,13 +484,21 @@ void GpuNativeTest::SetUp() {
           << "AMDF_CTS_GPU_NATIVE_IDENTITY does not identify an enumerated "
              "GPU: "
           << selected_identity_text;
-      GTEST_SKIP() << "Selected native AMD GPU has no supported PM4 family: "
+      GTEST_SKIP() << "Selected native AMD GPU has no supported requested packet family: "
                    << selected_identity_text;
     }
-    GTEST_SKIP() << "No native AMD GPU endpoint with a supported PM4 family";
+    GTEST_SKIP() << "No native AMD GPU endpoint with the requested packet family";
   }
   iree_hal_amd_gpu_device_options_initialize(&options_);
   options_.queue_count = 2;
+  if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+    for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
+      if (context_->families[i].command_type == command_type()) {
+        options_.queue_family_ordinal = i;
+        break;
+      }
+    }
+  }
   IREE_ASSERT_OK(iree_async_proactor_pool_create(
       1, nullptr, proactor_options_, iree_allocator_system(), &proactors_));
   IREE_ASSERT_OK(iree_async_frontier_tracker_create(
@@ -486,7 +524,7 @@ void GpuNativeTest::Create(
   auto* context = context_;
   context_ = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_device_create(
-      context, IREE_SV("PM4 native CTS"), &options_, &params,
+      context, IREE_SV("AMD GPU native CTS"), &options_, &params,
       allocator_.allocator(), &device_));
   IREE_ASSERT_OK(iree_hal_device_group_create_from_device(
       device_, tracker_, iree_allocator_system(), &group_));

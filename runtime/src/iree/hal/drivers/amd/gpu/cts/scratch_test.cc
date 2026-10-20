@@ -24,20 +24,31 @@ using iree::hal::cts::Ref;
 class GpuScratchTest : public GpuNativeTest {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
+    IREE_ASSERT_OK(memory_gate_.CreateFabric(
+        &fabric_, UINT64_MAX,
+        command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+            ? AMDF_NATIVE_LIFETIME_PROCESS
+            : AMDF_NATIVE_LIFETIME_INSTANCE));
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
+    const amdf_queue_format_features_t scratch_feature =
+        command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+            ? uint64_t{AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE}
+            : uint64_t{AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH};
     bool available = false;
     for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
-      available |= (context_->families[i].format_features &
-                    AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH) != 0;
+      const auto& family = context_->families[i];
+      available |= family.command_type == command_type() &&
+                   (family.format_features & scratch_feature);
     }
     if (!available) {
-      GTEST_SKIP() << "Command-owned PM4 scratch is unavailable";
+      GTEST_SKIP() << "Native private-memory service is unavailable";
     }
-    const uint32_t gfx_major = context_->target_info.gfx_ip.major;
+    const auto gfx = context_->target_info.gfx_ip;
+    options_.queue.ring_byte_length = 4096;
+    options_.queue.retirement_capacity = 128;
     Create();
     if (HasFatalFailure()) {
       return;
@@ -48,7 +59,10 @@ class GpuScratchTest : public GpuNativeTest {
         {IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_MAPPING_MODE_SCOPED},
         iree_allocator_system(), pool_.out()));
     const auto* files = iree_hal_amd_gpu_scratch_images_create();
-    const char* selector = gfx_major == 11 ? "gfx11-generic" : "gfx12-generic";
+    const char* selector = gfx.major == 9
+                               ? (gfx.minor == 4 ? "gfx9-4-generic" : "gfx90a")
+                           : gfx.major == 11 ? "gfx11-generic"
+                                             : "gfx12-generic";
     iree_hal_executable_load_params_t load;
     iree_hal_executable_load_params_initialize(&load);
     for (size_t i = 0; i < iree_hal_amd_gpu_scratch_images_size(); ++i) {
@@ -94,9 +108,14 @@ class GpuScratchTest : public GpuNativeTest {
                 uint64_t value) {
     const uint32_t constants[] = {seed, rotation};
     const auto reference = iree_hal_make_buffer_ref(output, 0, kOutputBytes);
+    uint64_t prior = value - 1;
+    const iree_hal_semaphore_list_t waits =
+        prior ? iree_hal_semaphore_list_t{1, &done, &prior}
+              : iree_hal_semaphore_list_empty();
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
-        queues_[queue], {}, {1, &done, &value}, executable_, functions_[kernel],
-        Config(), iree_make_const_byte_span(constants, sizeof(constants)),
+        queues_[queue], waits, {1, &done, &value}, executable_,
+        functions_[kernel], Config(),
+        iree_make_const_byte_span(constants, sizeof(constants)),
         {1, &reference}, nullptr, 0));
   }
 
@@ -143,7 +162,14 @@ class GpuScratchTest : public GpuNativeTest {
   std::array<iree_hal_executable_function_t, 2> functions_ = {};
 };
 
-TEST_F(GpuScratchTest, DirectGrowthReuseTrimAndRegrowth) {
+class GpuProtocolScratchTest
+    : public GpuScratchTest,
+      public ::testing::WithParamInterface<amdf_queue_command_type_t> {
+ protected:
+  amdf_queue_command_type_t command_type() const override { return GetParam(); }
+};
+
+TEST_P(GpuProtocolScratchTest, DirectGrowthReuseTrimAndRegrowth) {
   Ref<iree_hal_buffer_t> output;
   Allocate(output.out());
   Ref<iree_hal_semaphore_t> done;
@@ -180,6 +206,57 @@ TEST_F(GpuScratchTest, DirectGrowthReuseTrimAndRegrowth) {
   Wait(done, value);
   Check(output, 0, 123, 11);
   EXPECT_GT(memory_gate_.QueryUsage().allocation_count, warm.allocation_count);
+}
+
+INSTANTIATE_TEST_SUITE_P(Protocol, GpuProtocolScratchTest,
+                         ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                           AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                         [](const auto& info) {
+                           return info.param == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                                      ? "Aql"
+                                      : "Pm4";
+                         });
+
+class GpuAqlScratchTest : public GpuScratchTest {
+ protected:
+  amdf_queue_command_type_t command_type() const override {
+    return AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
+  }
+};
+
+TEST_F(GpuAqlScratchTest, PausedFullRingResumesWhileAnotherQueueProgresses) {
+  Ref<iree_hal_buffer_t> small, large;
+  Allocate(small.out());
+  Allocate(large.out());
+  Ref<iree_hal_semaphore_t> ready, grown;
+  CreateSemaphore(ready.out());
+  CreateSemaphore(grown.out());
+  ASSERT_FALSE(HasFatalFailure());
+  Dispatch(1, 0, small, 3, 0, ready, 1);
+  ASSERT_FALSE(HasFatalFailure());
+  Wait(ready, 1);
+  Check(small, 0, 3, 0);
+  {
+    NativeMemoryGate::Hold hold(&memory_gate_);
+    Dispatch(0, 1, large, 5, 1, grown, 1);
+    ASSERT_FALSE(HasFatalFailure());
+    hold.WaitEntered();
+    // Firmware has paused queue 0 for its first private allocation. Fill its
+    // 64-packet ring, then park further submissions for capacity. The completed
+    // allocation must bypass those submissions to resume the paused consumer.
+    for (uint64_t value = 2; value <= 65; ++value) {
+      Dispatch(0, 1, large, value, 1, grown, value);
+      ASSERT_FALSE(HasFatalFailure());
+    }
+    // Queue 1 already has suitable scratch. A kernel memory call held for
+    // queue 0 cannot block caller publication or retirement on this queue.
+    Dispatch(1, 0, small, 7, 2, ready, 2);
+    ASSERT_FALSE(HasFatalFailure());
+    Wait(ready, 2);
+    Check(small, 0, 7, 2);
+  }
+  Wait(grown, 65);
+  Check(large, 1, 65, 1);
 }
 
 TEST_F(GpuScratchTest, ExistingScratchProgressesWhileGrowthIsHeld) {

@@ -38,8 +38,8 @@ class GpuNativeProfileTest : public GpuNativeTest {
       return;
     }
     gfx_major_ = context_->target_info.gfx_ip.major;
-    options_.pm4.retirement_capacity = 4;
-    options_.pm4.argument_capacity = 32;
+    options_.queue.retirement_capacity = 4;
+    options_.queue.argument_capacity = 32;
     Create();
     if (HasFatalFailure()) {
       return;

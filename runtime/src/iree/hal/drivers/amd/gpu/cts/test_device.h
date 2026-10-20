@@ -140,6 +140,11 @@ class NativeMemoryGate {
 
 class GpuNativeTest : public ::testing::Test {
  protected:
+  // Native packet protocol exercised by this fixture, independent of ISA.
+  virtual amdf_queue_command_type_t command_type() const {
+    return AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
+  }
+
   void SetUp() override;
 
   void TearDown() override;

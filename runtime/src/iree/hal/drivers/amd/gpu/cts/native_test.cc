@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "iree/async/frontier_tracker.h"
-#include "iree/async/util/proactor_pool.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/fabric/fabric.h"
@@ -22,7 +21,6 @@
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 #include "iree/hal/drivers/amd/gpu/queue/signal.h"
-#include "iree/hal/drivers/amd/registration/driver_module.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/memory/fixed_block_pool.h"
 #include "iree/hal/slab_pool.h"
@@ -33,7 +31,6 @@ namespace {
 
 IREE_ASYNC_FIXED_FRONTIER_TYPE(CompletedFrontier, 2);
 
-using iree::hal::amd::gpu::cts::DeviceAllocator;
 using iree::hal::amd::gpu::cts::GpuNativeTest;
 
 TEST_F(GpuNativeTest, TrimReleasesUnusedCaptureCache) {
@@ -48,7 +45,7 @@ TEST_F(GpuNativeTest, TrimReleasesUnusedCaptureCache) {
   const size_t before = allocator_.live_count.load();
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
   EXPECT_EQ(allocator_.live_count.load(),
-            before - options_.queue_count * options_.pm4.capture_block_count);
+            before - options_.queue_count * options_.queue.capture_block_count);
   iree_hal_semaphore_t* done = nullptr;
   CreateSemaphore(&done);
   uint64_t value = 1;
@@ -59,6 +56,200 @@ TEST_F(GpuNativeTest, TrimReleasesUnusedCaptureCache) {
                                          IREE_ASYNC_WAIT_FLAG_NONE));
   iree_hal_semaphore_release(done);
 }
+
+class GpuNativeDispatchTest
+    : public GpuNativeTest,
+      public ::testing::WithParamInterface<
+          std::pair<amdf_queue_command_type_t, uint32_t>> {
+ protected:
+  amdf_queue_command_type_t command_type() const override {
+    return GetParam().first;
+  }
+};
+
+TEST_P(GpuNativeDispatchTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
+  constexpr uint32_t kThreads = 4;
+  constexpr uint32_t kSteps = 256;
+  const uint32_t queue_count = GetParam().second;
+  const auto gfx = context_->target_info.gfx_ip;
+  const uint32_t gfx_major = gfx.major;
+  options_.queue.ring_byte_length = 4096;
+  options_.queue.argument_capacity = 8;
+  options_.queue.retirement_capacity = 8;
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+
+  const auto* family = iree_hal_queue_family(queues_[0]);
+  const iree_hal_pool_family_access_t access = {
+      .family = family,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &access,
+      .host =
+          {
+              .access = IREE_HAL_MEMORY_ACCESS_READ,
+              .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+          },
+  };
+  iree_hal_slab_pool_options_t pool_options;
+  iree_hal_slab_pool_options_initialize(&pool_options);
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options,
+                                           iree_allocator_system(), &pool));
+  iree_hal_buffer_t* output = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(kThreads * kSteps * 4, 4),
+      iree_infinite_timeout(), &output));
+  iree_hal_memory_scope_t program_scope;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_PROGRAM, family}, &program_scope));
+  iree_hal_buffer_native_binding_slot_t address_slot;
+  IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
+      pool, program_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+      &address_slot));
+  const uint64_t address =
+      iree_hal_buffer_native_binding(output, address_slot).device_address;
+
+  const auto* files = iree_hal_amd_gpu_hip_images_create();
+  iree_const_byte_span_t artifact = iree_const_byte_span_empty();
+  const char* selector = gfx_major == 9
+                             ? (gfx.minor == 4       ? "gfx9_4_generic"
+                                : gfx.stepping == 10 ? "gfx90a"
+                                                     : "gfx9_generic")
+                         : gfx_major == 11 ? "gfx11_generic"
+                                           : "gfx12_generic";
+  for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
+    if (std::strstr(files[i].name, selector)) {
+      artifact = iree_make_const_byte_span(files[i].data, files[i].size);
+    }
+  }
+  ASSERT_NE(artifact.data, nullptr);
+  auto* target =
+      &iree_hal_device_spec_executables(iree_hal_device_spec(device_))
+           ->targets[0];
+  iree_hal_executable_load_params_t load;
+  iree_hal_executable_load_params_initialize(&load);
+  load.executable_data = artifact;
+  std::array<iree_hal_executable_t*, kThreads> executables = {};
+  std::array<iree_hal_executable_function_t, kThreads> functions = {};
+  std::array<iree_hal_semaphore_t*, kThreads> timelines = {};
+  for (uint32_t t = 0; t < kThreads; ++t) {
+    IREE_ASSERT_OK(
+        iree_hal_executable_load(family, target, &load, &executables[t]));
+    IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+        executables[t], IREE_SV("image_increment"), &functions[t]));
+    CreateSemaphore(&timelines[t]);
+  }
+  // An idle caller can discover failure before creating any capture. It still
+  // completes the rejected operation through its output timeline and leaves
+  // later independent dispatches runnable. Executing this dispatch by mistake
+  // would also change image_increment's global and corrupt the checks below.
+  iree_hal_semaphore_t* failed_input = nullptr;
+  iree_hal_semaphore_t* failed_output = nullptr;
+  CreateSemaphore(&failed_input);
+  CreateSemaphore(&failed_output);
+  iree_hal_semaphore_fail(
+      failed_input, iree_make_status(IREE_STATUS_ABORTED, "producer failed"));
+  uint64_t failed_value = 1;
+  uint32_t increment = 1;
+  auto failed_binding = iree_hal_make_buffer_ref(output, 0, sizeof(uint32_t));
+  auto failed_config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  failed_config.workgroup_size[0] = 32;
+  failed_config.workgroup_size[1] = failed_config.workgroup_size[2] = 1;
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queues_[0], {1, &failed_input, &failed_value},
+      {1, &failed_output, &failed_value}, executables[0], functions[0],
+      failed_config, iree_make_const_byte_span(&increment, sizeof(increment)),
+      {1, &failed_binding}, nullptr, 0));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_hal_semaphore_wait(failed_output, failed_value,
+                                                iree_infinite_timeout(),
+                                                IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_semaphore_release(failed_output);
+  iree_hal_semaphore_release(failed_input);
+  std::array<std::thread, kThreads> threads;
+  for (uint32_t t = 0; t < kThreads; ++t) {
+    threads[t] = std::thread([&, t] {
+      auto submit = [&](uint32_t i) {
+        struct {
+          uint64_t output;
+          uint32_t value;
+        } arguments = {address + (t * kSteps + i) * 4, 1};
+        uint64_t before = i, after = i + 1;
+        auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+        config.workgroup_size[0] = 32;
+        config.workgroup_size[1] = config.workgroup_size[2] = 1;
+        auto binding =
+            iree_hal_make_buffer_ref(output, (t * kSteps + i) * 4, 4);
+        IREE_ASSERT_OK(iree_hal_queue_dispatch(
+            queues_[i % queue_count], {i ? 1u : 0u, &timelines[t], &before},
+            {1, &timelines[t], &after}, executables[t], functions[t], config,
+            t & 1 ? iree_make_const_byte_span(&arguments, 12)
+                  : iree_make_const_byte_span(&arguments.value, 4),
+            t & 1 ? iree_hal_buffer_ref_list_empty()
+                  : iree_hal_buffer_ref_list_t{1, &binding},
+            nullptr,
+            t & 1 ? IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS : 0));
+        std::memset(&arguments, 0xCD, sizeof(arguments));
+      };
+      // A consumer cannot occupy the native FIFO until its producer has been
+      // published, including when both operations target the same queue.
+      for (uint32_t i = 0; i < kSteps; i += 2) {
+        submit(i + 1);
+        submit(i);
+      }
+      iree_hal_executable_release(executables[t]);
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  // Trim can overlap native execution and retirement without taking storage
+  // away from publishers or peer queues retaining binary-signal readers.
+  IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  for (auto* timeline : timelines) {
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        timeline, kSteps, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    CompletedFrontier frontier;
+    const uint8_t count = iree_async_semaphore_query_frontier(
+        reinterpret_cast<iree_async_semaphore_t*>(timeline),
+        iree_async_fixed_frontier_as_frontier(&frontier), 2);
+    ASSERT_EQ(count, queue_count);
+    for (uint8_t i = 0; i < count; ++i) {
+      EXPECT_TRUE(iree_async_frontier_tracker_query_epoch(
+          tracker_, frontier.entries[i].axis, frontier.entries[i].epoch));
+    }
+    iree_hal_semaphore_release(timeline);
+  }
+  std::array<uint32_t, kThreads * kSteps> values;
+  IREE_ASSERT_OK(
+      iree_hal_buffer_map_read(output, 0, values.data(), sizeof(values)));
+  for (uint32_t t = 0; t < kThreads; ++t) {
+    for (uint32_t i = 0; i < kSteps; ++i) {
+      EXPECT_EQ(values[t * kSteps + i], 20 + i) << t << ":" << i;
+    }
+  }
+  iree_hal_buffer_release(output);
+  iree_hal_pool_release(pool);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    QueuePlacement, GpuNativeDispatchTest,
+    ::testing::Values(std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 1u),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 2u),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 1u),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 2u)),
+    [](const auto& info) {
+      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                             ? "Aql"
+                             : "Pm4") +
+             (info.param.second == 1 ? "SameQueue" : "CrossQueue");
+    });
 
 class GpuNativeTransferTest : public GpuNativeTest,
                               public ::testing::WithParamInterface<bool> {
@@ -71,9 +262,9 @@ class GpuNativeTransferTest : public GpuNativeTest,
     // Start with small staging, retirement, and primary-ring capacities. Bulk
     // transfers must grow staging and reuse it through native completion
     // events.
-    options_.pm4.ring_byte_length = 4096;
-    options_.pm4.retirement_capacity = 4;
-    options_.pm4.argument_capacity = 1024;
+    options_.queue.ring_byte_length = 4096;
+    options_.queue.retirement_capacity = 4;
+    options_.queue.argument_capacity = 1024;
     Create();
     if (HasFatalFailure()) {
       return;
@@ -981,7 +1172,7 @@ TEST_F(GpuNativeTest, FinalReleaseAfterFailedAcceptedWait) {
 }
 
 TEST_F(GpuNativeTest, FailedQueueConstructionReleasesItsOwners) {
-  options_.pm4.argument_capacity = 0;
+  options_.queue.argument_capacity = 0;
   auto params = iree_hal_device_create_params_default();
   params.proactor_pool = proactors_;
   auto* context = context_;
@@ -1676,131 +1867,6 @@ TEST_F(GpuNativeTest, BatchedMappingsReplaceProtectAndReleaseNativeBacking) {
   iree_hal_pool_stats_t statistics;
   iree_hal_pool_query_stats(pool, &statistics);
   EXPECT_EQ(statistics.reservation_count, 0u);
-}
-
-class DriverTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    IREE_ASSERT_OK(
-        iree_hal_driver_registry_allocate(iree_allocator_system(), &registry_));
-    IREE_ASSERT_OK(iree_hal_amd_driver_module_register(registry_));
-    IREE_ASSERT_OK(iree_hal_driver_registry_acquire_driver(
-        registry_, IREE_SV("rdna"), &driver_));
-    IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
-        driver_, IREE_SV("rdna"), iree_allocator_system(), &count_, &infos_));
-    if (!count_) {
-      GTEST_SKIP() << "No RDNA endpoint";
-    }
-    IREE_ASSERT_OK(iree_async_proactor_pool_create(
-        1, nullptr, iree_async_proactor_pool_options_default(),
-        iree_allocator_system(), &proactors_));
-  }
-
-  void TearDown() override {
-    for (size_t i = 0; i < devices_.size(); ++i) {
-      iree_hal_semaphore_release(semaphores_[i]);
-      iree_hal_device_release(devices_[i]);
-      EXPECT_EQ(allocators_[i].live_count.load(), 0u);
-    }
-    iree_async_proactor_pool_release(proactors_);
-    iree_allocator_free(iree_allocator_system(), infos_);
-    iree_hal_driver_release(driver_);
-    iree_hal_driver_registry_free(registry_);
-  }
-
-  void Create(size_t index, iree_string_view_t path) {
-    auto params = iree_hal_device_create_params_default();
-    params.proactor_pool = proactors_;
-    const iree_string_pair_t options[] = {
-        {.key = IREE_SV("queue_count"), .value = IREE_SV("2")}};
-    iree::Status status = iree_hal_driver_create_device_by_path(
-        driver_, IREE_SV("rdna"), path, IREE_ARRAYSIZE(options), options,
-        &params, allocators_[index].allocator(), &devices_[index]);
-    if (status.code() == iree::StatusCode::kUnimplemented ||
-        status.code() == iree::StatusCode::kUnavailable) {
-      GTEST_SKIP() << status.ToString();
-    }
-    IREE_ASSERT_OK(status);
-    EXPECT_TRUE(iree_string_view_equal(iree_hal_device_id(devices_[index]),
-                                       IREE_SV("rdna")));
-    ASSERT_NE(iree_hal_device_queue(devices_[index], 0, 0), nullptr);
-    ASSERT_NE(iree_hal_device_queue(devices_[index], 0, 1), nullptr);
-  }
-
-  void Run(size_t index) {
-    iree_hal_device_t* device = devices_[index];
-    iree_hal_semaphore_t** semaphore = &semaphores_[index];
-    IREE_ASSERT_OK(
-        iree_hal_semaphore_create(device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-                                  IREE_HAL_SEMAPHORE_FLAG_NONE, semaphore));
-    uint64_t first = 1, second = 2;
-    IREE_ASSERT_OK(iree_hal_queue_barrier(
-        iree_hal_device_queue(device, 0, 1), {1, semaphore, &first},
-        {1, semaphore, &second}, nullptr, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
-    IREE_ASSERT_OK(iree_hal_queue_barrier(
-        iree_hal_device_queue(device, 0, 0), iree_hal_semaphore_list_empty(),
-        {1, semaphore, &first}, nullptr, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
-    IREE_ASSERT_OK(iree_hal_semaphore_wait(*semaphore, second,
-                                           iree_infinite_timeout(),
-                                           IREE_ASYNC_WAIT_FLAG_NONE));
-  }
-
-  // Public registry retaining the canonical AMD driver until explicitly freed.
-  iree_hal_driver_registry_t* registry_ = nullptr;
-  // Independent reference acquired through the RDNA scheme.
-  iree_hal_driver_t* driver_ = nullptr;
-  // Public discovery rows, independent of native execution resources.
-  iree_hal_device_info_t* infos_ = nullptr;
-  // Number of architecture-filtered discovery rows.
-  iree_host_size_t count_ = 0;
-  // Process progress service supplied to public device construction.
-  iree_async_proactor_pool_t* proactors_ = nullptr;
-  // Device ownership includes asynchronous final worker cleanup.
-  std::array<DeviceAllocator, 2> allocators_;
-  // Independently provisioned devices sharing one native fabric.
-  std::array<iree_hal_device_t*, 2> devices_ = {};
-  // Cross-queue dependencies and final completions observed by this test.
-  std::array<iree_hal_semaphore_t*, 2> semaphores_ = {};
-};
-
-TEST_F(DriverTest, SchemesShareOneDriverAndFabric) {
-  iree_hal_driver_t* xdna_driver = nullptr;
-  IREE_ASSERT_OK(iree_hal_driver_registry_acquire_driver(
-      registry_, IREE_SV("xdna"), &xdna_driver));
-  EXPECT_EQ(driver_, xdna_driver);
-  iree_hal_driver_release(xdna_driver);
-}
-
-TEST_F(DriverTest, OrdinalAndNativeIdentityOutliveDriver) {
-  // The registry selects PROCESS native lifetime for host registration. Both
-  // devices must share that owner: KFD cannot reacquire a destroyed primary VM.
-  Create(0, IREE_SV("0"));
-  if (HasFatalFailure() || IsSkipped()) {
-    return;
-  }
-  Create(1, infos_[0].path);
-  if (HasFatalFailure() || IsSkipped()) {
-    return;
-  }
-  iree_hal_driver_release(driver_);
-  driver_ = nullptr;
-  iree_hal_driver_registry_free(registry_);
-  registry_ = nullptr;
-  Run(0);
-  Run(1);
-}
-
-TEST_F(DriverTest, RejectsUnknownDeviceParametersBeforeActivation) {
-  auto params = iree_hal_device_create_params_default();
-  params.proactor_pool = proactors_;
-  const iree_string_pair_t invalid[] = {
-      {.key = IREE_SV("columns"), .value = IREE_SV("1")}};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_driver_create_device_by_id(
-          driver_, infos_[0].device_id, IREE_ARRAYSIZE(invalid), invalid,
-          &params, allocators_[0].allocator(), &devices_[0]));
-  EXPECT_EQ(devices_[0], nullptr);
 }
 
 }  // namespace

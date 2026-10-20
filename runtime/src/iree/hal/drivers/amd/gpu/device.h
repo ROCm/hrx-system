@@ -24,9 +24,8 @@ typedef enum iree_hal_amd_gpu_asan_shadow_backing_e {
   IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_HOST_LOCAL = 1,
 } iree_hal_amd_gpu_asan_shadow_backing_t;
 
-// Cold provisioning of a PM4 family with USER or KERNEL publication. Native
-// protocol and publication capability determine admission, independently of
-// RDNA/CDNA.
+// Cold provisioning of a native packet family. Protocol and publication
+// capability determine admission, independently of RDNA/CDNA.
 typedef struct iree_hal_amd_gpu_device_options_t {
   // Exact native family ordinal, or UINT32_MAX to select the first supported
   // PM4 family. File transfers separately select a native SDMA family.
@@ -53,7 +52,7 @@ typedef struct iree_hal_amd_gpu_device_options_t {
     iree_host_size_t capture_block_size;
     // Number of blocks preallocated for each queue.
     iree_host_size_t capture_block_count;
-  } pm4;
+  } queue;
   // Provisioning used when the device's runtime features enable ASAN.
   struct {
     // Placement of physical shadow backing; reservations consume only VA.

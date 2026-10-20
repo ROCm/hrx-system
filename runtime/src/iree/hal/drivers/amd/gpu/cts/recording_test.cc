@@ -30,9 +30,9 @@ class GpuNativeRecordingTest : public GpuNativeTest {
       return;
     }
     const uint32_t gfx_major = context_->target_info.gfx_ip.major;
-    options_.pm4.ring_byte_length = 4096;
-    options_.pm4.retirement_capacity = 4;
-    options_.pm4.argument_capacity = 32;
+    options_.queue.ring_byte_length = 4096;
+    options_.queue.retirement_capacity = 4;
+    options_.queue.argument_capacity = 32;
     Create();
     if (HasFatalFailure()) {
       return;

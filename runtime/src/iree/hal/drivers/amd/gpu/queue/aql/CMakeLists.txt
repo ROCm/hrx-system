@@ -141,4 +141,131 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_library(
+  NAME
+    barrier
+  HDRS
+    "barrier.h"
+  SRCS
+    "barrier.c"
+  DEPS
+    ::packet
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    submission
+  HDRS
+    "submission.h"
+  SRCS
+    "submission.c"
+  DEPS
+    ::barrier
+    ::dispatch
+    iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::publisher
+    iree::hal::drivers::amd::gpu::queue::semaphore
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    barrier_test
+  SRCS
+    "barrier_test.cc"
+  DEPS
+    ::barrier
+    ::packet
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    submission_test
+  SRCS
+    "submission_test.cc"
+  DEPS
+    ::dispatch
+    ::packet
+    ::signal
+    ::submission
+    amdf::headers
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::semaphore
+    iree::hal::drivers::amd::gpu::queue::signal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    growth
+  HDRS
+    "growth.h"
+  SRCS
+    "growth.c"
+  DEPS
+    ::signal
+    ::submission
+    iree::hal::drivers::amd::gpu::publication
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    scratch
+  HDRS
+    "scratch.h"
+  SRCS
+    "scratch.c"
+  DEPS
+    ::growth
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue
+  HDRS
+    "queue.h"
+  SRCS
+    "queue.c"
+  DEPS
+    ::growth
+    ::ring
+    ::scratch
+    iree::async
+    iree::base
+    iree::base::cpu_data
+    iree::base::internal
+    iree::hal::drivers::amd::gpu::completion
+    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::publication
+    iree::hal::drivers::amd::gpu::queue::allocation
+    iree::hal::drivers::amd::gpu::queue::host_call
+    iree::hal::drivers::amd::gpu::queue::host_wait
+    iree::hal::drivers::amd::gpu::queue::memory_mapping
+    iree::hal::drivers::amd::gpu::queue::user_queue
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
