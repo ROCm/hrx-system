@@ -30,13 +30,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_accumulator_p
   %centered = copy %27 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
   %29 = copy %centered : reg<aie2p.ebmll> -> reg<aie2p.mbms>
   %30 = vtanh.bf16x16 %29
-  %31 = vconv.fp32.bf16x16 %30
-  %activated = copy %31 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
-  set.rounding 12
-  %33 = copy %activated : reg<aie2p.ebmll> -> reg<aie2p.mbms>
-  %34 = vconv.bf16.fp32x16 %33
-  %35 = copy %34 : reg<aie2p.vec256> -> reg<aie2p.vec256>
-  %result = concat(%34, %35) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %result = concat(%30, %30) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %result
 }
 
