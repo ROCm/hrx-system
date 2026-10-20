@@ -1,18 +1,17 @@
-// UTF-8 bytes for "blk.", ".attn_qkv.weight", "flash_next_prepare_qkv", and
-// the empty root that preserves a tensor's original file representation.
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+// UTF-8 bytes for "blk.", ".attn_qkv.weight", and "flash_next_prepare_qkv".
 global.rodata.def @block = bytes("626c6b2e")
 
 global.rodata.def @qkv = bytes("2e6174746e5f716b762e776569676874")
 
 global.rodata.def @prepare = bytes("666c6173685f6e6578745f707265706172655f716b76")
 
-global.rodata.def @unchanged = bytes("")
-
 // All 36 GDN QKV tensors are K2560/N10240 Q8_0. Preparation permutes their
 // existing allocation into four-channel code/scale planes; ordinary, mixed,
 // and speculative consumers all read that layout. Other tensors stay in GGUF
 // order. Reactivation reloads original bytes before running the same command.
-func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
+func.def public @prepare_weight(%key: buffer) -> (i64) {
   %length = buffer.length %key
   %prefix = global.load @block : buffer
   %suffix = global.load @qkv : buffer
@@ -34,14 +33,15 @@ func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
     %false = scalar.constant false : i1
     scf.yield %false : i1
   }
-  %root, %bytes = scf.if %matches -> (buffer, i64) {
+  %bytes = scf.if %matches -> (i64) {
     %prepare = global.load @prepare : buffer
+    %tag = scalar.constant 0 : i64
+    %stage = func.call @stage(%prepare, %tag) : (buffer, i64) -> (i32)
     %size = scalar.constant 27852800 : i64
-    scf.yield %prepare, %size : buffer, i64
+    scf.yield %size : i64
   } else {
-    %unchanged = global.load @unchanged : buffer
     %size = scalar.constant 0 : i64
-    scf.yield %unchanged, %size : buffer, i64
+    scf.yield %size : i64
   }
-  func.return %root, %bytes : buffer, i64
+  func.return %bytes : i64
 }

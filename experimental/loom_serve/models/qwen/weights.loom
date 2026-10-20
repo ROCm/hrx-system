@@ -1,5 +1,7 @@
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
 // Read-only UTF-8 byte strings: "blk.", ".ffn_gate.weight",
-// ".ffn_up.weight", "qwen38_prepare_ffn", and the empty no-preparation root.
+// ".ffn_up.weight", "qwen38_prepare_ffn".
 global.rodata.def @block = bytes("626c6b2e")
 
 global.rodata.def @gate = bytes("2e66666e5f676174652e776569676874")
@@ -7,8 +9,6 @@ global.rodata.def @gate = bytes("2e66666e5f676174652e776569676874")
 global.rodata.def @up = bytes("2e66666e5f75702e776569676874")
 
 global.rodata.def @prepare = bytes("7177656e33385f707265706172655f66666e")
-
-global.rodata.def @unchanged = bytes("")
 
 func.def @ends_with(%key: buffer, %suffix: buffer) -> (i1) {
   %length = buffer.length %key
@@ -31,7 +31,7 @@ func.def @ends_with(%key: buffer, %suffix: buffer) -> (i1) {
 // Both target and MTP FFN gate/up tensors use K5120/N17408 Q5_K. All other
 // tensors retain their file representation. The loader sees only this policy's
 // result and command reflection; it has no Qwen naming or layout knowledge.
-func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
+func.def public @prepare_weight(%key: buffer) -> (i64) {
   %length = buffer.length %key
   %c4 = index.constant 4 : offset
   %fits = index.cmp uge, %length, %c4 : offset
@@ -52,14 +52,15 @@ func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
   %is_up = func.call @ends_with(%key, %up) : (buffer, buffer) -> (i1)
   %is_ffn = scalar.ori %is_gate, %is_up : i1
   %needs_preparation = scalar.andi %is_block, %is_ffn : i1
-  %root, %bytes = scf.if %needs_preparation -> (buffer, i64) {
+  %bytes = scf.if %needs_preparation -> (i64) {
     %prepare = global.load @prepare : buffer
+    %tag = scalar.constant 0 : i64
+    %stage = func.call @stage(%prepare, %tag) : (buffer, i64) -> (i32)
     %size = scalar.constant 61276160 : i64
-    scf.yield %prepare, %size : buffer, i64
+    scf.yield %size : i64
   } else {
-    %unchanged = global.load @unchanged : buffer
     %size = scalar.constant 0 : i64
-    scf.yield %unchanged, %size : buffer, i64
+    scf.yield %size : i64
   }
-  func.return %root, %bytes : buffer, i64
+  func.return %bytes : i64
 }

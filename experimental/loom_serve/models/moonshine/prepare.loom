@@ -6,7 +6,7 @@
 
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
@@ -56,9 +56,9 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %reset = func.call @stage(%reset_name, %c0) : (buffer, i64) -> (i32)
   %encode = func.call @stage(%encode_name, %c1) : (buffer, i64) -> (i32)
   %decode = func.call @stage(%decode_name, %c2) : (buffer, i64) -> (i32)
-  func.call @parameter(%encode, %zero32, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%decode, %zero32, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%decode, %one32, %directory, %rotary, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%encode, %zero32, %zero32, %directory, %checkpoint, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%decode, %zero32, %zero32, %directory, %checkpoint, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%decode, %one32, %zero32, %directory, %rotary, %policy) : (i32, i32, i32, buffer, buffer, buffer)
   // Four resident histories and four packed rows. State includes convolution
   // tails, encoder rings, immutable cross-attention memory, and decoder KV.
   %requests = scalar.constant 4 : i64

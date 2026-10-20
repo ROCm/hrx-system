@@ -4,7 +4,7 @@ func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl @krea2.declare_image_stage(%height: i64, %width: i64, %text: i64, %workspace_limit: i64, %adapted: i1, %int8_flag: i64) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
 
 // tokenizer/tokenizer.json
 global.rodata.def @tokenizer = bytes("746f6b656e697a65722f746f6b656e697a65722e6a736f6e")
@@ -139,23 +139,23 @@ func.def @declare_stage(%height: i64, %width: i64, %text: i64, %workspace_limit:
   %encoder = global.load @encoder : buffer
   %transformer = global.load @transformer : buffer
   %policy = global.load @policy : buffer
-  func.call @parameter(%stage, %c0, %directory, %encoder, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%stage, %c0, %c0, %directory, %encoder, %policy) : (i32, i32, i32, buffer, buffer, buffer)
   scf.if %is_int8 {
     %empty = global.load @empty : buffer
-    func.call @parameter(%stage, %c1, %int8_checkpoint, %empty, %policy) : (i32, i32, buffer, buffer, buffer)
+    func.call @parameter(%stage, %c1, %c0, %int8_checkpoint, %empty, %policy) : (i32, i32, i32, buffer, buffer, buffer)
   } else {
-    func.call @parameter(%stage, %c1, %directory, %transformer, %policy) : (i32, i32, buffer, buffer, buffer)
+    func.call @parameter(%stage, %c1, %c0, %directory, %transformer, %policy) : (i32, i32, i32, buffer, buffer, buffer)
   }
   %vae_binding = scf.if %adapted -> (i32) {
     %empty = global.load @empty : buffer
-    func.call @parameter(%stage, %c2, %adapter, %empty, %policy) : (i32, i32, buffer, buffer, buffer)
+    func.call @parameter(%stage, %c2, %c0, %adapter, %empty, %policy) : (i32, i32, i32, buffer, buffer, buffer)
     %c3 = scalar.constant 3 : i32
     scf.yield %c3 : i32
   } else {
     scf.yield %c2 : i32
   }
   %vae = global.load @vae : buffer
-  func.call @parameter(%stage, %vae_binding, %directory, %vae, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%stage, %vae_binding, %c0, %directory, %vae, %policy) : (i32, i32, i32, buffer, buffer, buffer)
   func.return
 }
 

@@ -186,11 +186,11 @@ kernel.def @flash_next_sample() {
     %top_k = view.load %words[2] : view<6xi32> -> i32
     %flags = view.load %words[3] : view<6xi32> -> i32
     %tool_bit = scalar.constant 2 : i32
-    %zero = scalar.constant 0 : i32
+    %c0_i32 = scalar.constant 0 : i32
     %none = scalar.constant -1 : i32
     %tool_open = scalar.constant 248058 : i32
     %permission = scalar.andi %flags, %tool_bit : i32
-    %disabled = scalar.cmpi ne, %permission, %zero : i32
+    %disabled = scalar.cmpi ne, %permission, %c0_i32 : i32
     %excluded = scf.select %disabled, %tool_open, %none : i32
     %seed = view.load %seeds[0] : view<1xi64> -> i64
     %row_bytes = index.constant 993280 : offset
