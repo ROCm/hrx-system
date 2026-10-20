@@ -11,6 +11,8 @@ template.decl @ggml.qk.scale_min.header(%header_words: vector<4xi32>, %group: in
 
 func.decl pure @expert_record_extent(%capacity: index, %record_rows: index) -> (index, index, offset)
 
+func.decl @expert_fragment_pair(%own: vector<8xi32>, %second_half: i1) -> (vector<8xi32>, vector<8xi32>)
+
 func.def inline @expert_block_input(%input: buffer, %ids: vector<4xi32>, %live: vector<4xi1>, %group: index, %thread: index, %enabled: i1) -> (vector<4x8xbf16>) {
   %capacity = config.get @flash_next.token_count : index
   %c0 = index.constant 0 : index
@@ -78,26 +80,6 @@ func.def inline @expert_block_publish_input(%affine: i1, %arena: buffer, %thread
     }
   }
   func.return
-}
-
-// Exchange half-wave register payloads to replicate the native RHS fragment.
-func.def inline @expert_block_pair(%own: vector<8xi32>, %second_half: i1) -> (vector<8xi32>, vector<8xi32>) {
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %c8 = index.constant 8 : index
-  %xor_half = scalar.constant 16 : i32
-  %width = scalar.constant 32 : i32
-  %seed = vector.constant 0 : vector<8xi32>
-  %peer = scf.for %element = [%c0 to %c8 step %c1](%values = %seed : vector<8xi32>) -> (vector<8xi32>) unroll schedule(linear) {
-    %word = vector.extract %own[%element] : vector<8xi32> -> i32
-    %exchanged, %valid = kernel.subgroup.shuffle<xor> %word, %xor_half, %width : i32, i32, i32
-    %next = vector.insert %exchanged into %values[%element] : i32, vector<8xi32>
-    scf.yield %next : vector<8xi32>
-  }
-  %mask = vector.splat %second_half : vector<8xi1>
-  %first = vector.select %mask, %peer, %own : vector<8xi32>
-  %second = vector.select %mask, %own, %peer : vector<8xi32>
-  func.return %first, %second : vector<8xi32>, vector<8xi32>
 }
 
 // The QK bank retains four packed K64 halves plus one common header and
@@ -241,7 +223,7 @@ func.def inline @expert_block_compute(%q8: i1, %q5: i1, %affine: i1, %arena: buf
     %chunk2 = index.add %first_chunk, %c2 : index
     %chunk3 = index.add %chunk2, %c1 : index
     %packed_codes = vector.bitcast %narrow : vector<16xbf16> to vector<8xi32>
-    %w0, %w1 = func.call @expert_block_pair(%packed_codes, %second_half) : (vector<8xi32>, i1) -> (vector<8xi32>, vector<8xi32>)
+    %w0, %w1 = func.call @expert_fragment_pair(%packed_codes, %second_half) : (vector<8xi32>, i1) -> (vector<8xi32>, vector<8xi32>)
     %codes0 = vector.bitcast %w0 : vector<8xi32> to vector<16xbf16>
     %codes1 = vector.bitcast %w1 : vector<8xi32> to vector<16xbf16>
     %rhs0 = vector.fragment<rhs> %codes0 shape [%c16, %c16] : vector<16xbf16>
