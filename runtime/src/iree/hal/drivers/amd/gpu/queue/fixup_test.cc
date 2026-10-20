@@ -17,6 +17,38 @@
 
 namespace {
 
+TEST(FixupApplyTest, PackedReplacementsPreserveCarriesShiftsAndUntouchedBytes) {
+  const iree_hal_amd_gpu_fixup_t entries[] = {
+      {5, 32u << 24, 1},         {1, 0, 1},  {9, 1u | (8u << 24), 0},
+      {13, 1u | (63u << 24), 0}, {17, 2, 2},
+  };
+  uint64_t values[] = {UINT64_C(0xFFFFFFFF), UINT64_C(0xFEDCBA9876543210),
+                       UINT64_MAX};
+  uint8_t actual[23];
+  std::memset(actual, 0xA5, sizeof(actual));
+  iree_hal_amd_gpu_fixup_apply(entries, IREE_ARRAYSIZE(entries), values,
+                               actual);
+  const uint8_t expected[] = {
+      0xA5, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x32, 0x54, 0x76,
+      0x98, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xA5, 0xA5,
+  };
+  EXPECT_EQ(std::memcmp(actual, expected, sizeof(expected)), 0);
+
+  // Reusing a template replaces every selected word regardless of its old
+  // value; pointer halves are independent and do not read each other's writes.
+  values[0] = UINT64_C(0x11223344FFFFFFFE);
+  iree_hal_amd_gpu_fixup_apply(entries, IREE_ARRAYSIZE(entries), values,
+                               actual);
+  EXPECT_EQ(iree_unaligned_load_le_u64(actual + 1),
+            UINT64_C(0x11223344FFFFFFFF));
+  EXPECT_EQ(std::memcmp(actual + 9, expected + 9, sizeof(expected) - 9), 0);
+  EXPECT_EQ(actual[0], 0xA5);
+}
+
+TEST(FixupApplyTest, EmptyTableNeedsNoStorage) {
+  iree_hal_amd_gpu_fixup_apply(nullptr, 0, nullptr, nullptr);
+}
+
 class FixupTest : public ::testing::TestWithParam<size_t> {
  protected:
   void TearDown() override { iree_hal_amd_gpu_image_deinitialize(&image_); }

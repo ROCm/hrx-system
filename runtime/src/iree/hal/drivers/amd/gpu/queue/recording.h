@@ -17,7 +17,7 @@ typedef struct iree_hal_amd_gpu_recording_chunk_t
     iree_hal_amd_gpu_recording_chunk_t;
 
 // Temporary append storage. Chunk boundaries have no native execution meaning;
-// sealing copies these bytes once into the program's resident block layout.
+// sealing copies these bytes once into the program's immutable template layout.
 typedef struct iree_hal_amd_gpu_recording_stream_t {
   // First initialized chunk, or NULL for an empty stream.
   iree_hal_amd_gpu_recording_chunk_t* head;

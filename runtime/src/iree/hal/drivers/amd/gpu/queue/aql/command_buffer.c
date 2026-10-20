@@ -63,6 +63,7 @@ static void iree_hal_amd_gpu_aql_command_buffer_destroy(
   iree_arena_block_pool_deinitialize(&buffer->resource_blocks);
   iree_hal_amd_gpu_program_deinitialize(&buffer->program.resident);
   iree_allocator_free(buffer->host_allocator, buffer->program.blocks);
+  iree_allocator_free(buffer->host_allocator, buffer->program.host_template);
   iree_allocator_free(buffer->host_allocator, buffer);
   iree_hal_device_release(device);
 }
@@ -215,14 +216,40 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
   }
   buffer->program.value_count = 1 + buffer->inputs.count;
   if (length) {
-    iree_hal_amd_gpu_program_t* program = &buffer->program.resident;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_initialize(
-        &buffer->pool->storage, buffer->recording.alignment, (uint32_t)length,
-        iree_hal_amd_gpu_recording_fixup_count(&buffer->recording), program));
-    iree_hal_amd_gpu_recording_write(
-        &buffer->recording, program->contents.data,
-        (void*)(program->contents.data + program->fixup_offset));
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_seal(program));
+    const uint32_t fixup_count =
+        iree_hal_amd_gpu_recording_fixup_count(&buffer->recording);
+    // Bound host publication to one native dispatch, eight cache lines of
+    // packet/private data, and sixteen replacement stores. Larger recordings
+    // keep resident instances and native parallel fixup/materialization.
+    if (buffer->program.block_count == 1 &&
+        buffer->program.blocks[0].packet_count == 1 &&
+        buffer->program.dispatch_count == 1 && length <= 512 &&
+        fixup_count <= 16) {
+      const uint32_t fixup_offset = (uint32_t)iree_align_uint64(length, 16);
+      IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+          buffer->host_allocator,
+          sizeof(*buffer->program.host_template) + fixup_offset +
+              fixup_count * sizeof(iree_hal_amd_gpu_fixup_t),
+          (void**)&buffer->program.host_template));
+      *buffer->program.host_template = (iree_hal_amd_gpu_aql_host_template_t){
+          .byte_length = (uint32_t)length,
+          .alignment = buffer->recording.alignment,
+          .fixup_count = fixup_count,
+          .fixup_offset = fixup_offset,
+      };
+      uint8_t* contents = (void*)(buffer->program.host_template + 1);
+      iree_hal_amd_gpu_recording_write(&buffer->recording, contents,
+                                       (void*)(contents + fixup_offset));
+    } else {
+      iree_hal_amd_gpu_program_t* program = &buffer->program.resident;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_initialize(
+          &buffer->pool->storage, buffer->recording.alignment, (uint32_t)length,
+          fixup_count, program));
+      iree_hal_amd_gpu_recording_write(
+          &buffer->recording, program->contents.data,
+          (void*)(program->contents.data + program->fixup_offset));
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_seal(program));
+    }
   }
   iree_hal_amd_gpu_command_inputs_seal(&buffer->inputs);
   if (buffer->resources) {
@@ -613,12 +640,33 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
 
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
-    uint32_t queue_ordinal, uint64_t* values) {
+    uint32_t queue_ordinal, uint64_t upload_address, void* upload) {
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
-  values[0] = invocation->instance->address;
-  return iree_hal_amd_gpu_command_inputs_write(
-      &buffer->inputs, invocation->bindings, queue_ordinal, values + 1);
+  const iree_hal_amd_gpu_aql_command_program_t* program = invocation->program;
+  const uint64_t values_offset =
+      program->host_template
+          ? program->host_template->fixup_offset
+          : sizeof(iree_hal_amd_gpu_aql_program_arguments_t) +
+                (program->profile
+                     ? sizeof(
+                           iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
+                           sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
+                     : 0);
+  uint64_t* values = (void*)((uint8_t*)upload + values_offset);
+  values[0] =
+      program->host_template ? upload_address : invocation->instance->address;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_write(
+      &buffer->inputs, invocation->bindings, queue_ordinal, values + 1));
+  if (IREE_UNLIKELY(program->host_template)) {
+    const uint8_t* contents = (const void*)(program->host_template + 1);
+    memcpy(upload, contents, program->host_template->byte_length);
+    const iree_hal_amd_gpu_fixup_t* fixups =
+        (const void*)(contents + program->host_template->fixup_offset);
+    iree_hal_amd_gpu_fixup_apply(fixups, program->host_template->fixup_count,
+                                 values, upload);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_begin_debug_group(

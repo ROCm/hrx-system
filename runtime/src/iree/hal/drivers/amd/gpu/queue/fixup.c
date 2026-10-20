@@ -6,6 +6,18 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/fixup.h"
 
+void iree_hal_amd_gpu_fixup_apply(const iree_hal_amd_gpu_fixup_t* entries,
+                                  uint32_t entry_count, const uint64_t* values,
+                                  void* target) {
+  for (uint32_t i = 0; i < entry_count; ++i) {
+    const iree_hal_amd_gpu_fixup_t entry = entries[i];
+    iree_unaligned_store_le_u32(
+        (uint8_t*)target + entry.target_offset,
+        (uint32_t)((values[entry.source & 0xFFFFFFu] + entry.addend) >>
+                   ((entry.source >> 24) & 63)));
+  }
+}
+
 // Relocation-free instruction words from fixup.loom. The source comparison
 // covers the complete code and descriptor ABI for every supported family.
 static const uint32_t iree_hal_amd_gpu_fixup_gfx90a[] = {

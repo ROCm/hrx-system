@@ -32,6 +32,14 @@ typedef struct iree_hal_amd_gpu_fixup_t {
 static_assert(sizeof(iree_hal_amd_gpu_fixup_t) == 16,
               "four independent fixups occupy one cache line");
 
+// Applies trusted replacement entries to a host-visible invocation template.
+// The recorder established disjoint targets and valid input indices. This has
+// the same add/shift/store semantics as the native fixup kernel and never reads
+// target bytes, including when the target address is unaligned.
+void iree_hal_amd_gpu_fixup_apply(const iree_hal_amd_gpu_fixup_t* entries,
+                                  uint32_t entry_count, const uint64_t* values,
+                                  void* target);
+
 // Invocation-private kernargs. The queue uploads these and its dense value
 // table once, then retains the upload through the native completion boundary.
 typedef struct iree_hal_amd_gpu_fixup_arguments_t {

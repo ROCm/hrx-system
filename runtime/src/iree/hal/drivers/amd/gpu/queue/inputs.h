@@ -43,7 +43,8 @@ typedef struct iree_hal_amd_gpu_command_input_t
     iree_hal_amd_gpu_command_input_t;
 
 // Recording-time deduplication produces the dense invocation input vector.
-// Recorded operations and fixups never survive as a host replay list.
+// Native fixups reference these indexed values; no operation replay list is
+// retained for submission.
 typedef struct iree_hal_amd_gpu_command_inputs_t {
   // Borrowed public identity, native family, and binding-count owner.
   iree_hal_command_buffer_t* command_buffer;

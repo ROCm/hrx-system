@@ -31,8 +31,22 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
   } dispatches;
 } iree_hal_amd_gpu_aql_program_block_t;
 
+// One native dispatch and bounded private data. The byte template and fixup
+// table follow this descriptor in the same host allocation. Each invocation
+// copies and patches its own argument-ring storage; no native instance exists.
+typedef struct iree_hal_amd_gpu_aql_host_template_t {
+  // Complete packet/private-data extent copied into each invocation.
+  uint32_t byte_length;
+  // Required power-of-two alignment of the invocation's upload address.
+  uint32_t alignment;
+  // Independent DWORD replacements applied after resolving unique inputs.
+  uint32_t fixup_count;
+  // Immutable fixup-table offset, also the invocation's dense-value offset.
+  uint32_t fixup_offset;
+} iree_hal_amd_gpu_aql_host_template_t;
+
 typedef struct iree_hal_amd_gpu_aql_command_program_t {
-  // Native ownership shared across protocols and retained by this recording.
+  // Native ownership for resident recordings; zero for bounded host templates.
   iree_hal_amd_gpu_program_t resident;
   // Immutable indexed native blocks, owned by the command buffer.
   iree_hal_amd_gpu_aql_program_block_t* blocks;
@@ -46,9 +60,11 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   uint32_t dispatch_count;
   // Public encoded operations, independent of native packet count or folding.
   uint32_t operation_count;
+  // Optional bounded native template, owned instead of resident storage.
+  iree_hal_amd_gpu_aql_host_template_t* host_template;
 } iree_hal_amd_gpu_aql_command_program_t;
 
-// Seals resident templates and private arguments. maximum_packet_count is
+// Seals native templates and private arguments. maximum_packet_count is
 // derived from the family's provisioned ring geometry, leaving publication
 // space for waits, initialization, and a terminal point. The recording retains
 // the device; UNRETAINED applies only to caller payload resources.
@@ -74,7 +90,8 @@ typedef struct iree_hal_amd_gpu_aql_command_invocation_t {
   iree_hal_amd_gpu_aql_command_program_t* program;
   // Copied/qualified public table in submission-owned storage.
   iree_hal_amd_gpu_command_binding_t* bindings;
-  // Exclusive unpublished instance, then causally reusable after final publish.
+  // Exclusive unpublished resident instance, then causally reusable after final
+  // publication. NULL for a bounded host template.
   iree_hal_amd_gpu_program_instance_t* instance;
   // Next unpublished block; only the publisher accesses this cursor.
   uint32_t block_ordinal;
@@ -99,11 +116,12 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_initialize(
 void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
     iree_hal_amd_gpu_aql_command_invocation_t* invocation);
 
-// Writes value_count uint64_t values once after address commitment. Cost is
-// proportional to unique inputs, independent of recorded packet/fixup counts.
+// Resolves unique input values once after upload address commitment. A bounded
+// host template is copied and patched into that invocation-private upload;
+// resident programs receive a dense value table for native fixup execution.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
-    uint32_t queue_ordinal, uint64_t* values);
+    uint32_t queue_ordinal, uint64_t upload_address, void* upload);
 
 #ifdef __cplusplus
 }  // extern "C"

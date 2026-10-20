@@ -845,12 +845,17 @@ TEST_P(GpuNativeDispatchTest,
     if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
       const auto* program =
           iree_hal_amd_gpu_aql_command_buffer_program(recording);
+      EXPECT_EQ(program->host_template != nullptr, count == 1);
+      EXPECT_EQ(program->resident.pool == nullptr, count == 1);
       uint32_t dispatch_index = 0;
       for (uint32_t i = 0; i < program->block_count; ++i) {
         const auto& block = program->blocks[i];
         const auto* packets =
             reinterpret_cast<const iree_hal_amd_gpu_aql_packet_t*>(
-                program->resident.contents.data + block.offset);
+                (program->host_template ? reinterpret_cast<const uint8_t*>(
+                                              program->host_template + 1)
+                                        : program->resident.contents.data) +
+                block.offset);
         for (uint32_t j = 0; j < block.packet_count; ++j, ++dispatch_index) {
           const uint32_t acquire_scope =
               dispatch_index == 0 ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM
@@ -881,6 +886,9 @@ TEST_P(GpuNativeDispatchTest,
             {1, &done[i], &gate_value}, recording, {table.size(), table.data()},
             0));
         table.fill({});
+      }
+      if (epoch == 2) {
+        recording_owner.reset();
       }
       IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, gate_value, nullptr));
       for (auto semaphore : done) {
