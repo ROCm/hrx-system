@@ -53,13 +53,9 @@ class AqlProgramTest : public GpuNativeTest {
         &unused_resident));
     control_policy_.host_access =
         AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
-    const iree_hal_amd_fabric_memory_request_t request = {
-        .options = &control_policy_,
-        .byte_length = 8192,
-        .alignment = 256,
-    };
-    IREE_ASSERT_OK(iree_hal_amd_gpu_context_acquire_memory_sync(
-        context_, 1, &request, &control_));
+    IREE_ASSERT_OK(iree_hal_amd_fabric_memory_allocate(
+        context_->api, &control_policy_, 8192, 256, context_->event_sink,
+        &control_, nullptr));
     IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
         context_->api->memory_query_address(
             control_.handle, 0, AMDF_MEMORY_ADDRESS_GPU, &control_address_),
@@ -108,7 +104,8 @@ class AqlProgramTest : public GpuNativeTest {
     iree_hal_amd_gpu_program_deinitialize(&program_);
     iree_hal_amd_gpu_aql_program_pool_deinitialize(&pool_);
     if (control_.handle) {
-      iree_hal_amd_gpu_context_release_memory_sync(context_, 1, &control_);
+      iree_hal_amd_fabric_memory_deinitialize(context_->api,
+                                               context_->event_sink, &control_);
     }
     GpuNativeTest::TearDown();
   }

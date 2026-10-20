@@ -58,9 +58,12 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
     byte_length += iree_align_uint64(builtins[i].code.data_length, 256);
   }
   byte_length += 256;  // Instruction fetch padding after the final kernel.
+  const iree_hal_amd_fabric_memory_options_t* code_memory =
+      out_pool->storage.resident.host_access ? &out_pool->storage.resident
+                                             : &out_pool->storage.upload;
   IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_allocate(
-      context->api, &out_pool->storage.upload, byte_length, 256,
-      context->event_sink, &out_pool->code, NULL));
+      context->api, code_memory, byte_length, 256, context->event_sink,
+      &out_pool->code, NULL));
   uint64_t address = 0;
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       context->api->memory_query_address(out_pool->code.handle, 0,
