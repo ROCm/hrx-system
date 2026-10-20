@@ -441,4 +441,24 @@ iree_cc_test(
 )
 endif()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    backing
+  HDRS
+    "backing.h"
+  SRCS
+    "backing.c"
+  DEPS
+    ::signal
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

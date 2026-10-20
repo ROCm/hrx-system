@@ -73,6 +73,7 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     signal
@@ -83,10 +84,13 @@ iree_cc_library(
   DEPS
     ::packet
     amdf::headers
+    iree::hal::drivers::amd::gpu::queue::backing
     iree::hal::drivers::amd::gpu::queue::signal
   PUBLIC
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_test(
   NAME
     signal_test
@@ -105,6 +109,7 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+endif()
 
 iree_cc_library(
   NAME

@@ -173,13 +173,13 @@ struct iree_hal_amd_gpu_pm4_queue_t {
     // Write-only 64-bit MMIO doorbell.
     volatile uint64_t* doorbell;
     // Current argument generation, owned by the publisher.
-    iree_hal_amd_gpu_pm4_argument_storage_t* arguments;
+    iree_hal_amd_gpu_argument_storage_t* arguments;
     // Replaced generations ordered by their final consumed byte position.
-    iree_hal_amd_gpu_pm4_argument_storage_t* retired_arguments;
+    iree_hal_amd_gpu_argument_storage_t* retired_arguments;
     // Constant-time append boundary; NULL when no generation awaits retirement.
-    iree_hal_amd_gpu_pm4_argument_storage_t* retired_arguments_tail;
+    iree_hal_amd_gpu_argument_storage_t* retired_arguments_tail;
     // All attached signal backings, visited only by cold trim and shutdown.
-    iree_hal_amd_gpu_pm4_signal_storage_t* signal_storage;
+    iree_hal_amd_gpu_signal_storage_t* signal_storage;
     // Accepted native publication count, release-published for completion.
     iree_atomic_int64_t count;
     // Next native dispatch ID, independent of publication chunk boundaries.
@@ -300,14 +300,14 @@ static void iree_hal_amd_gpu_pm4_abandon(
 
 static iree_status_t iree_hal_amd_gpu_pm4_prepare_arguments(
     iree_hal_amd_gpu_pm4_queue_t* queue, uint64_t capacity) {
-  return iree_hal_amd_gpu_pm4_argument_storage_allocate(
+  return iree_hal_amd_gpu_argument_storage_allocate(
       queue->context, queue->options.memory, capacity, 0, queue->host_allocator,
       &queue->producer.arguments);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_prepare_signals(
     iree_hal_amd_gpu_pm4_queue_t* queue) {
-  iree_hal_amd_gpu_pm4_signal_storage_t* storage = NULL;
+  iree_hal_amd_gpu_signal_storage_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_signal_storage_allocate(
       queue->context, &queue->signals, queue->options.memory,
       queue->options.retirement_capacity, queue->producer.frontier.count,
@@ -325,10 +325,10 @@ static void iree_hal_amd_gpu_pm4_trim_arguments(
       &queue->completed.arguments, iree_memory_order_acquire);
   while (queue->producer.retired_arguments &&
          queue->producer.retired_arguments->end <= completed) {
-    iree_hal_amd_gpu_pm4_argument_storage_t* storage =
+    iree_hal_amd_gpu_argument_storage_t* storage =
         queue->producer.retired_arguments;
     queue->producer.retired_arguments = storage->next;
-    iree_hal_amd_gpu_pm4_argument_storage_free(queue->context, storage);
+    iree_hal_amd_gpu_argument_storage_free(queue->context, storage);
   }
   if (!queue->producer.retired_arguments) {
     queue->producer.retired_arguments_tail = NULL;
@@ -344,16 +344,15 @@ static void iree_hal_amd_gpu_pm4_trim_storage(
       (uint64_t)iree_atomic_load(&queue->completed.count,
                                  iree_memory_order_acquire),
       &queue->producer.scratch);
-  iree_hal_amd_gpu_pm4_signal_storage_t** link =
-      &queue->producer.signal_storage;
+  iree_hal_amd_gpu_signal_storage_t** link = &queue->producer.signal_storage;
   while (*link) {
-    iree_hal_amd_gpu_pm4_signal_storage_t* storage = *link;
+    iree_hal_amd_gpu_signal_storage_t* storage = *link;
     // Keep one provisioned block. Detachment joins the last reader and removes
     // unused capacity from acquisition before its native release is submitted.
     if (storage != queue->producer.signal_storage &&
         iree_hal_amd_gpu_signal_block_try_deinitialize(&storage->block)) {
       *link = storage->next;
-      iree_hal_amd_gpu_pm4_signal_storage_free(queue->context, storage);
+      iree_hal_amd_gpu_signal_storage_free(queue->context, storage);
     } else {
       link = &storage->next;
     }
@@ -547,8 +546,7 @@ iree_hal_amd_gpu_pm4_publish_transfer(
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
   iree_hal_amd_gpu_pm4_transfer_t* transfer = &submission->transfer;
   const bool first = !transfer->cursor.index && !transfer->cursor.offset;
-  iree_hal_amd_gpu_pm4_argument_storage_t* arguments =
-      queue->producer.arguments;
+  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   if (arguments->capacity < transfer->staging_capacity) {
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
   }
@@ -672,8 +670,7 @@ iree_hal_amd_gpu_pm4_publish_execute(
                     sizeof(iree_hal_amd_gpu_profile_sample_t)
               : 0;
   const uint64_t argument_length = command->argument_length + sample_length;
-  iree_hal_amd_gpu_pm4_argument_storage_t* arguments =
-      queue->producer.arguments;
+  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   if (argument_length > arguments->capacity) {
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
   }
@@ -892,8 +889,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
       sample_length ? iree_align_uint64(argument_storage.length, 8) : 0;
   const uint64_t argument_length =
       sample_length ? sample_offset + sample_length : argument_storage.length;
-  iree_hal_amd_gpu_pm4_argument_storage_t* arguments =
-      queue->producer.arguments;
+  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   uint64_t argument_offset = 0;
   uint64_t argument_end = arguments->end;
   uint64_t argument_address = 0;
@@ -988,7 +984,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
        dispatch && i < dispatch_request->bindings.count &&
        iree_status_is_ok(status);
        ++i) {
-    status = iree_hal_amd_gpu_pm4_submission_resolve_address(
+    status = iree_hal_amd_gpu_dispatch_resolve_address(
         queue->base.queue_family, IREE_HAL_MEMORY_SITE_PROGRAM,
         dispatch_request->bindings.values[i],
         indirect ? IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS
@@ -997,7 +993,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
         indirect ? IREE_HAL_MEMORY_ACCESS_READ : 0, &addresses[i]);
   }
   if (indirect_parameters && iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_pm4_submission_resolve_address(
+    status = iree_hal_amd_gpu_dispatch_resolve_address(
         queue->base.queue_family, IREE_HAL_MEMORY_SITE_QUEUE,
         dispatch_request->parameters,
         IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
@@ -1478,7 +1474,7 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
         entry, queue->producer.arguments->end, &result);
     if (iree_status_is_ok(status)) {
       if (result.arguments) {
-        iree_hal_amd_gpu_pm4_argument_storage_t* previous =
+        iree_hal_amd_gpu_argument_storage_t* previous =
             queue->producer.arguments;
         if (queue->producer.retired_arguments_tail) {
           queue->producer.retired_arguments_tail->next = previous;
@@ -2265,7 +2261,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_prepare_native(
         (volatile uint64_t*)(uintptr_t)mapping.doorbell_address;
   }
   uint64_t control_address = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_backing_allocate(
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_backing_allocate(
       queue->context, queue->options.memory,
       (uint64_t)queue->options.retirement_capacity *
           sizeof(iree_hal_amd_gpu_pm4_retirement_record_t),
@@ -2331,13 +2327,11 @@ static amdf_status_t iree_hal_amd_gpu_pm4_cleanup(
   iree_hal_amd_gpu_pm4_scratch_trim(queue->context, UINT64_MAX,
                                     &queue->producer.scratch);
   while (queue->producer.signal_storage) {
-    iree_hal_amd_gpu_pm4_signal_storage_t* storage =
-        queue->producer.signal_storage;
+    iree_hal_amd_gpu_signal_storage_t* storage = queue->producer.signal_storage;
     queue->producer.signal_storage = storage->next;
-    iree_hal_amd_gpu_pm4_signal_storage_free(queue->context, storage);
+    iree_hal_amd_gpu_signal_storage_free(queue->context, storage);
   }
-  iree_hal_amd_gpu_pm4_argument_storage_t* arguments =
-      queue->producer.arguments;
+  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   if (arguments) {
     arguments->next = queue->producer.retired_arguments;
   } else {
@@ -2347,8 +2341,8 @@ static amdf_status_t iree_hal_amd_gpu_pm4_cleanup(
   queue->producer.retired_arguments = NULL;
   queue->producer.retired_arguments_tail = NULL;
   while (arguments) {
-    iree_hal_amd_gpu_pm4_argument_storage_t* next = arguments->next;
-    iree_hal_amd_gpu_pm4_argument_storage_free(queue->context, arguments);
+    iree_hal_amd_gpu_argument_storage_t* next = arguments->next;
+    iree_hal_amd_gpu_argument_storage_free(queue->context, arguments);
     arguments = next;
   }
   iree_hal_amd_fabric_memory_deinitialize(

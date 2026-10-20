@@ -208,3 +208,49 @@ void iree_hal_amd_gpu_dispatch_emplace_arguments(
     }
   }
 }
+
+iree_status_t iree_hal_amd_gpu_dispatch_resolve_address(
+    const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
+    iree_hal_buffer_ref_t reference, iree_hal_buffer_usage_t usage,
+    iree_hal_memory_access_t access, uint64_t* out_address) {
+  const iree_hal_memory_contract_t* contract =
+      reference.buffer->memory.contract;
+  const uint64_t scope_id = (uint64_t)family->memory.queue_scope_id +
+                            (site - IREE_HAL_MEMORY_SITE_QUEUE);
+  if (!contract || !family->memory.domain ||
+      family->memory.domain != contract->domain ||
+      scope_id >= contract->scope_count) {
+    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
+                            "buffer is outside the dispatch family domain");
+  }
+  const iree_hal_memory_scope_access_t* scope = &contract->scopes[scope_id];
+  const iree_hal_buffer_interface_t interface =
+      IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+  const uint16_t index = scope->bindings[interface];
+  if (!iree_any_bit_set(scope->interfaces, UINT32_C(1) << interface) ||
+      index == IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {
+    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
+                            "GPU address access is not prepared for this "
+                            "dispatch family");
+  }
+  if (access) {
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+        iree_hal_buffer_allowed_access(reference.buffer), access));
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage_any(
+      scope->usage & iree_hal_buffer_allowed_usage(reference.buffer), usage));
+  const uint64_t base =
+      iree_hal_buffer_native_binding(reference.buffer,
+                                     (iree_hal_buffer_native_binding_slot_t){
+                                         .index = index, .type = interface})
+          .device_address;
+  if (!base) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "dispatch buffer has no committed GPU address");
+  }
+  if (!iree_checked_add_u64(base, reference.offset, out_address)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "dispatch buffer address overflows");
+  }
+  return iree_ok_status();
+}

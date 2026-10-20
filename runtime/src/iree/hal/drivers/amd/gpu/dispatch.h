@@ -65,6 +65,15 @@ void iree_hal_amd_gpu_dispatch_emplace_arguments(
     iree_const_byte_span_t constants, const uint64_t* binding_addresses,
     iree_hal_dispatch_flags_t flags, void* target);
 
+// Resolves a prepared direct buffer binding at the point execution is ready.
+// Dispatch admission has checked the captured range. This checks its native
+// permissions, exact family domain, and queue-ordered backing commitment.
+// It never maps memory, retains a buffer, or inspects pointer-valued bytes.
+iree_status_t iree_hal_amd_gpu_dispatch_resolve_address(
+    const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
+    iree_hal_buffer_ref_t reference, iree_hal_buffer_usage_t usage,
+    iree_hal_memory_access_t access, uint64_t* out_address);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

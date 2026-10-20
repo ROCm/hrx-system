@@ -9,6 +9,7 @@
 
 #include "amdf/gpu.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/packet.h"
+#include "iree/hal/drivers/amd/gpu/queue/backing.h"
 #include "iree/hal/drivers/amd/gpu/queue/signal.h"
 
 #ifdef __cplusplus
@@ -30,6 +31,21 @@ void iree_hal_amd_gpu_aql_signal_block_initialize(
     iree_hal_amd_gpu_aql_signal_t* native_signals, uint64_t device_address,
     iree_hal_amd_gpu_signal_t* signals, uint32_t capacity, uint32_t queue_count,
     uint64_t* frontiers, iree_hal_amd_gpu_signal_block_t* out_block);
+
+// Attaches acquired 64-byte AQL USER descriptors to their shared host owners.
+iree_status_t iree_hal_amd_gpu_aql_signal_storage_initialize(
+    iree_hal_amd_gpu_context_t* context, iree_hal_amd_gpu_signal_pool_t* pool,
+    iree_hal_amd_gpu_signal_storage_t* storage);
+
+// Allocates coherent native cells, inline host reference metadata, and a dense
+// queue_count-entry frontier per cell. Both counts are already admitted by
+// device/queue construction. No cell is initially acquired.
+// Success returns the unique owner; failure leaves out_storage NULL.
+iree_status_t iree_hal_amd_gpu_aql_signal_storage_allocate(
+    iree_hal_amd_gpu_context_t* context, iree_hal_amd_gpu_signal_pool_t* pool,
+    const iree_hal_amd_fabric_memory_options_t* options, uint32_t capacity,
+    uint32_t queue_count, iree_allocator_t host_allocator,
+    iree_hal_amd_gpu_signal_storage_t** out_storage);
 
 #ifdef __cplusplus
 }  // extern "C"

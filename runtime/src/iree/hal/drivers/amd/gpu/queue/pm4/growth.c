@@ -40,11 +40,11 @@ struct iree_hal_amd_gpu_pm4_growth_t {
       iree_hal_amd_gpu_memory_acquire_t acquire;
       union {
         // Owned argument generation for GROW_ARGUMENTS.
-        iree_hal_amd_gpu_pm4_argument_storage_t* arguments;
+        iree_hal_amd_gpu_argument_storage_t* arguments;
         // Owned private-storage generation for GROW_SCRATCH.
         iree_hal_amd_gpu_pm4_scratch_storage_t* scratch;
         // Owned signal generation for GROW_SIGNALS.
-        iree_hal_amd_gpu_pm4_signal_storage_t* signals;
+        iree_hal_amd_gpu_signal_storage_t* signals;
       };
     } backing;
     // Indexed physical clone reservation and native acquisition ownership.
@@ -195,7 +195,7 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
   } else {
     iree_hal_amd_fabric_memory_t* memory = NULL;
     if (kind == IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS) {
-      status = iree_hal_amd_gpu_pm4_argument_storage_prepare(
+      status = iree_hal_amd_gpu_argument_storage_prepare(
           capacity, context->captures->host_allocator,
           &growth->backing.arguments);
       if (iree_status_is_ok(status)) {
@@ -221,7 +221,7 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
         context->scratch = growth;
       }
     } else {
-      status = iree_hal_amd_gpu_pm4_signal_storage_prepare(
+      status = iree_hal_amd_gpu_signal_storage_prepare(
           context->signal_capacity, context->queue_count,
           context->captures->host_allocator, &growth->backing.signals);
       if (iree_status_is_ok(status)) {
@@ -266,14 +266,14 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_end(
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS:
       context->arguments = NULL;
       if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_pm4_argument_storage_initialize(
+        status = iree_hal_amd_gpu_argument_storage_initialize(
             context->context, argument_begin, growth->backing.arguments);
       }
       if (iree_status_is_ok(status)) {
         out_result->arguments = growth->backing.arguments;
       } else {
-        iree_hal_amd_gpu_pm4_argument_storage_free(context->context,
-                                                   growth->backing.arguments);
+        iree_hal_amd_gpu_argument_storage_free(context->context,
+                                               growth->backing.arguments);
       }
       break;
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS:
@@ -286,8 +286,8 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_end(
       if (iree_status_is_ok(status)) {
         out_result->signals = growth->backing.signals;
       } else {
-        iree_hal_amd_gpu_pm4_signal_storage_free(context->context,
-                                                 growth->backing.signals);
+        iree_hal_amd_gpu_signal_storage_free(context->context,
+                                             growth->backing.signals);
       }
       break;
     case IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SCRATCH:

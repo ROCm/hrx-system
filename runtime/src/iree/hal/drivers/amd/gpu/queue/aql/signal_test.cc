@@ -125,4 +125,60 @@ TEST(AqlSignalTest, SemaphoreCacheDoesNotOwnTheLastDependentReader) {
   iree_async_proactor_release(proactor);
 }
 
+TEST(AqlSignalTest, AttachesAcquiredBackingWithExactDescriptorOperands) {
+  std::array<iree_hal_amd_gpu_aql_signal_t, 2> native;
+  std::memset(native.data(), 0xa5, sizeof(native));
+  std::array<iree_hal_amd_gpu_signal_t, 2> signals;
+  std::array<uint64_t, 4> frontiers;
+  const amdf_api_t api = {
+      .memory_query_address =
+          [](amdf_memory_t* memory, uint32_t ordinal,
+             amdf_memory_address_kind_t kind, uint64_t* address) {
+            EXPECT_NE(memory, nullptr);
+            EXPECT_EQ(ordinal, 0u);
+            EXPECT_EQ(kind, AMDF_MEMORY_ADDRESS_GPU);
+            *address = UINT64_C(0x123456780000);
+            return AMDF_STATUS_OK;
+          },
+  };
+  iree_hal_amd_gpu_context_t context = {
+      .api = &api,
+      .event_info = {.mailbox_address = 0x98760000, .interrupt_context = 17},
+  };
+  iree_hal_amd_gpu_signal_storage_t storage = {
+      .memory =
+          {
+              .handle = reinterpret_cast<amdf_memory_t*>(native.data()),
+              .contents = iree_make_byte_span(native.data(), sizeof(native)),
+              .host_cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK,
+          },
+      .capacity = 2,
+      .queue_count = 2,
+      .signals = signals.data(),
+      .frontiers = frontiers.data(),
+  };
+  iree_hal_amd_gpu_signal_pool_t pool;
+  iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_aql_signal_storage_initialize(&context, &pool,
+                                                                &storage));
+  auto* first = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1);
+  auto* second = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1);
+  EXPECT_EQ(first->block->domain, &context);
+  EXPECT_EQ(first->device_address, UINT64_C(0x123456780000));
+  EXPECT_EQ(second->device_address, first->device_address + 64);
+  EXPECT_EQ(second->host_value, &native[1].value);
+  for (const auto& signal : native) {
+    EXPECT_EQ(signal.kind, 1u);
+    EXPECT_EQ(signal.value, 1u);
+    EXPECT_EQ(signal.event_mailbox, UINT64_C(0x98760000));
+    EXPECT_EQ(signal.event_id, 17u);
+    EXPECT_EQ(signal.start_timestamp, 0u);
+    EXPECT_EQ(signal.end_timestamp, 0u);
+  }
+  iree_hal_amd_gpu_signal_release(first);
+  iree_hal_amd_gpu_signal_release(second);
+  iree_hal_amd_gpu_signal_block_deinitialize(&storage.block);
+  iree_hal_amd_gpu_signal_pool_deinitialize(&pool);
+}
+
 }  // namespace

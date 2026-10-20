@@ -249,8 +249,7 @@ class GrowthTest : public ::testing::Test {
             EXPECT_EQ(result.arguments->begin, 123456u);
             EXPECT_EQ(result.arguments->end, 123456u);
             EXPECT_EQ(result.arguments->capacity, 4096u);
-            iree_hal_amd_gpu_pm4_argument_storage_free(&context_,
-                                                       result.arguments);
+            iree_hal_amd_gpu_argument_storage_free(&context_, result.arguments);
           }
           if (result.signals) {
             EXPECT_EQ(result.signals->block.queue_count, 3u);
@@ -258,7 +257,7 @@ class GrowthTest : public ::testing::Test {
                 iree_hal_amd_gpu_signal_pool_try_acquire(&signals_, 0);
             EXPECT_NE(signal, nullptr);
             iree_hal_amd_gpu_signal_release(signal);
-            iree_hal_amd_gpu_pm4_signal_storage_free(&context_, result.signals);
+            iree_hal_amd_gpu_signal_storage_free(&context_, result.signals);
           }
           if (result.scratch) {
             EXPECT_EQ(result.scratch->wave_byte_length, 4096u);

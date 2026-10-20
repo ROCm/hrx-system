@@ -925,6 +925,7 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::queue::backing
     iree::hal::drivers::amd::gpu::queue::signal
     iree::hal::drivers::amd::status
   PUBLIC

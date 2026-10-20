@@ -69,9 +69,14 @@ iree_runtime_cc_library(
     name = "signal",
     srcs = ["signal.c"],
     hdrs = ["signal.h"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":packet",
         "//libamdf:headers",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:backing",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:signal",
     ],
 )
@@ -79,6 +84,10 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "signal_test",
     srcs = ["signal_test.cc"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":packet",
         ":signal",

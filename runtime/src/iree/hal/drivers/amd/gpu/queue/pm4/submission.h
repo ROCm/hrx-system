@@ -320,15 +320,6 @@ void iree_hal_amd_gpu_pm4_submission_release_payload(
 void iree_hal_amd_gpu_pm4_submission_release(
     iree_hal_amd_gpu_pm4_submission_t* submission);
 
-// Resolves a prepared direct buffer binding at the point execution is ready.
-// Dispatch admission has checked the captured range. This checks its native
-// permissions, exact family domain, and queue-ordered backing commitment.
-// It never maps memory, retains a buffer, or inspects pointer-valued bytes.
-iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
-    const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
-    iree_hal_buffer_ref_t reference, iree_hal_buffer_usage_t usage,
-    iree_hal_memory_access_t access, uint64_t* out_address);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
