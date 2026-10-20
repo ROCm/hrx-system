@@ -1575,6 +1575,10 @@ TEST_P(ConditionInductionFactsRewriteTest, SemanticEditsMatchFreshAnalysis) {
   const auto type = loom_type_scalar(scalar_type);
   const int64_t domain_minimum =
       scalar_type == LOOM_SCALAR_TYPE_OFFSET ? 0 : INT64_MIN;
+  const int64_t domain_maximum =
+      scalar_type == LOOM_SCALAR_TYPE_OFFSET && bitwidth < 63
+          ? (int64_t)((UINT64_C(1) << bitwidth) - 1)
+          : INT64_MAX;
   auto constant = [&](int64_t value) {
     loom_op_t* op = nullptr;
     IREE_EXPECT_OK(loom_index_constant_build(&builder_, loom_attr_i64(value),
@@ -1722,7 +1726,7 @@ TEST_P(ConditionInductionFactsRewriteTest, SemanticEditsMatchFreshAnalysis) {
   check(edited_initial, 4, 5, 5 - edited_initial);
   IREE_ASSERT_OK(loom_index_cmp_rewrite_predicate(
       &rewriter, compare, loom_attr_enum(LOOM_INDEX_CMP_PREDICATE_NE)));
-  check(domain_minimum, INT64_MAX, INT64_MAX, UINT64_MAX);
+  check(domain_minimum, domain_maximum, domain_maximum, UINT64_MAX);
   IREE_ASSERT_OK(loom_index_cmp_rewrite_predicate(
       &rewriter, compare, loom_attr_enum(LOOM_INDEX_CMP_PREDICATE_SLT)));
   check(edited_initial, 3, 4, 4 - edited_initial);
@@ -1763,7 +1767,7 @@ TEST_P(ConditionInductionFactsRewriteTest, SemanticEditsMatchFreshAnalysis) {
   set_constant(initial, maximum - 1);
   set_constant(upper, maximum);
   set_constant(step, 2);
-  check(domain_minimum, INT64_MAX, INT64_MAX, UINT64_MAX);
+  check(domain_minimum, domain_maximum, domain_maximum, UINT64_MAX);
   set_constant(initial, 0);
   set_constant(upper, 4);
   set_constant(step, 1);

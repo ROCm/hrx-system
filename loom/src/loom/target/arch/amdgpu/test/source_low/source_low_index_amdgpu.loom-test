@@ -638,3 +638,49 @@ func.def @logical_shift_carrier(%coordinate: index) -> (i64, i64) {
   %hi = scalar.constant 2147483647 : i64
   func.return %lo, %hi : i64, i64
 }
+
+// ====
+
+// RUN: pass target=amdgpu:gfx11-generic source-to-low,low-dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @cfg_binary_search_retains_narrow_index_carrier(%choose_upper: i1, %reference_value: index) -> (i32) {
+  %reference_length = index.assume %reference_value [range(%reference_value, 1, 513)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.br ^header(%c0: index)
+^header(%first: index):
+  %more = index.cmp ult, %first, %reference_length : index
+  cfg.cond_br %more, ^update, ^exit
+^update:
+  %sum = index.add %first, %reference_length : index
+  %middle = index.shrui %sum, %c1 : index
+  %increment = index.add %middle, %c1 : index
+  %next = scf.select %choose_upper, %increment, %first : index
+  cfg.br ^header(%next: index)
+^exit:
+  %result = index.cast %first : index to i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @cfg_binary_search_retains_narrow_index_carrier(%choose_upper: reg<amdgpu.sgpr>, %reference_length: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %c0 = s_mov_b32 0
+  %c1 = s_mov_b32 1
+  low.br ^header(%c0: reg<amdgpu.sgpr>)
+^header(%result: reg<amdgpu.sgpr>):
+  %more = s_cmp_lt_u32 %result, %reference_length
+  low.cond_br %more, ^update, ^exit : reg<amdgpu.scc>
+^update:
+  %sum = s_add_u32 %result, %reference_length
+  %middle = s_lshr_b32 %sum, %c1
+  %increment = s_add_u32 %middle, %c1
+  %23 = s_cmp_lg_i32_src1_inline %choose_upper {rhs = 0}
+  %next = s_cselect_b32 %increment, %result, %23
+  low.br ^header(%next: reg<amdgpu.sgpr>)
+^exit:
+  return %result
+}

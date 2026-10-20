@@ -313,7 +313,7 @@ TEST_F(FactExtensionsTest, TypedWidenRetainsStableFloatInterval) {
   EXPECT_TRUE(loom_value_facts_is_lane_varying(widened));
 }
 
-TEST_F(FactExtensionsTest, TypedWidenExpandsEndpointsIndependently) {
+TEST_F(FactExtensionsTest, TypedWidenAdvancesEndpointsThroughCarrierDomains) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
   const auto check = [&](loom_value_facts_t previous, loom_value_facts_t next,
@@ -330,23 +330,56 @@ TEST_F(FactExtensionsTest, TypedWidenExpandsEndpointsIndependently) {
     }
   };
   check(loom_value_facts_make(4, 36, 4), loom_value_facts_make(4, 68, 4), 4,
-        INT64_MAX, 4);
+        UINT32_MAX, 4);
   check(loom_value_facts_make(-36, -4, 4), loom_value_facts_make(-68, -4, 4),
-        INT64_MIN, -4, 4);
+        INT32_MIN, -4, 4);
   check(loom_value_facts_make(-24, 24, 12), loom_value_facts_make(-42, 42, 6),
-        INT64_MIN, INT64_MAX, 6);
+        INT32_MIN, INT32_MAX, 6);
   check(loom_value_facts_exact_i64(24), loom_value_facts_exact_i64(35), 24,
-        INT64_MAX, 1);
+        UINT32_MAX, 1);
   check(loom_value_facts_exact_i64(0), loom_value_facts_exact_i64(16), 0,
-        INT64_MAX, 16);
-  check(loom_value_facts_exact_i64(16), loom_value_facts_exact_i64(0),
-        INT64_MIN, 16, 16);
+        UINT32_MAX, 16);
+  check(loom_value_facts_exact_i64(16), loom_value_facts_exact_i64(0), 0, 16,
+        16);
   check(loom_value_facts_make(4, 36, 4), loom_value_facts_unknown(), INT64_MIN,
         INT64_MAX, 1);
   check(loom_value_facts_unknown(), loom_value_facts_make(4, 36, 4), INT64_MIN,
         INT64_MAX, 1);
   check(loom_value_facts_make(-24, 24, 12), loom_value_facts_make(-12, 12, 6),
         -24, 24, 6);
+}
+
+TEST_F(FactExtensionsTest, TypedWidenCarrierDomainFitsLoopSolveBudget) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+  const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  const struct {
+    loom_value_facts_t next;
+    loom_value_facts_t expected;
+  } steps[] = {
+      {loom_value_facts_make(0, 1, 1), loom_value_facts_make(0, 1, 1)},
+      {loom_value_facts_make(-1, 1, 1), loom_value_facts_make(INT32_MIN, 1, 1)},
+      {loom_value_facts_make((int64_t)INT32_MIN - 1, 1, 1),
+       loom_value_facts_make(INT64_MIN, 1, 1)},
+      {loom_value_facts_make(INT64_MIN, 2, 1),
+       loom_value_facts_make(INT64_MIN, INT32_MAX, 1)},
+      {loom_value_facts_make(INT64_MIN, (int64_t)INT32_MAX + 1, 1),
+       loom_value_facts_make(INT64_MIN, INT64_MAX, 1)},
+  };
+  loom_value_facts_t previous = loom_value_facts_exact_i64(1);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(steps); ++i) {
+    loom_value_facts_t widened;
+    IREE_ASSERT_OK(loom_value_fact_table_widen_for_type(
+        &table, nullptr, type, &table, previous, &table, steps[i].next,
+        /*iteration=*/static_cast<uint32_t>(2 + i), &widened));
+    EXPECT_TRUE(loom_value_facts_equal(widened, steps[i].expected));
+    previous = widened;
+  }
+  loom_value_facts_t converged;
+  IREE_ASSERT_OK(loom_value_fact_table_widen_for_type(
+      &table, nullptr, type, &table, previous, &table, previous,
+      /*iteration=*/7, &converged));
+  EXPECT_TRUE(loom_value_facts_equal(converged, previous));
 }
 
 TEST_F(FactExtensionsTest, TypedWidenRetainsIntegerTypeDomains) {
@@ -377,11 +410,14 @@ TEST_F(FactExtensionsTest, TypedWidenRetainsIntegerTypeDomains) {
           &table, nullptr, type, &table, loom_value_facts_exact_i64(0), &table,
           loom_value_facts_exact_i64(1), iteration, &widened));
       EXPECT_EQ(widened.range_lo, 0);
-      EXPECT_EQ(widened.range_hi, iteration < 2 ? 1 : domain.upper);
+      EXPECT_EQ(widened.range_hi,
+                iteration < 2
+                    ? 1
+                    : (domain.upper < UINT32_MAX ? domain.upper : UINT32_MAX));
       IREE_ASSERT_OK(loom_value_fact_table_widen_for_type(
           &table, nullptr, type, &table, loom_value_facts_exact_i64(1), &table,
           loom_value_facts_exact_i64(0), iteration, &widened));
-      EXPECT_EQ(widened.range_lo, iteration < 2 ? 0 : domain.lower);
+      EXPECT_EQ(widened.range_lo, 0);
       EXPECT_EQ(widened.range_hi, 1);
     }
     loom_value_facts_t widened;
@@ -432,7 +468,7 @@ TEST_F(FactExtensionsTest, TypedWidenPreservesStableExtension) {
       /*iteration=*/2, &widened));
 
   EXPECT_EQ(widened.range_lo, 4);
-  EXPECT_EQ(widened.range_hi, INT64_MAX);
+  EXPECT_EQ(widened.range_hi, UINT32_MAX);
   EXPECT_EQ(widened.known_divisor, 4);
   loom_value_fact_uniform_element_t uniform = {};
   EXPECT_TRUE(loom_value_facts_query_uniform_element(&table.context, widened,

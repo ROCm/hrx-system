@@ -1398,6 +1398,45 @@ iree_status_t loom_value_fact_table_meet_for_type(
   return iree_ok_status();
 }
 
+static int64_t loom_value_fact_widen_integer_lower(int64_t next,
+                                                   int64_t domain_lower) {
+  static const int64_t thresholds[] = {
+      0,
+      INT32_MIN,
+      INT64_MIN,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(thresholds); ++i) {
+    if (thresholds[i] <= next && thresholds[i] >= domain_lower) {
+      return thresholds[i];
+    }
+  }
+  return domain_lower;
+}
+
+static int64_t loom_value_fact_widen_integer_upper(int64_t next,
+                                                   int64_t domain_upper,
+                                                   bool is_non_negative) {
+  static const int64_t signed_thresholds[] = {
+      INT32_MAX,
+      INT64_MAX,
+  };
+  static const int64_t unsigned_thresholds[] = {
+      UINT32_MAX,
+      INT64_MAX,
+  };
+  const int64_t* thresholds =
+      is_non_negative ? unsigned_thresholds : signed_thresholds;
+  const iree_host_size_t threshold_count =
+      is_non_negative ? IREE_ARRAYSIZE(unsigned_thresholds)
+                      : IREE_ARRAYSIZE(signed_thresholds);
+  for (iree_host_size_t i = 0; i < threshold_count; ++i) {
+    if (thresholds[i] >= next && thresholds[i] <= domain_upper) {
+      return thresholds[i];
+    }
+  }
+  return domain_upper;
+}
+
 iree_status_t loom_value_fact_table_widen_for_type(
     loom_value_fact_table_t* target, const loom_module_t* module,
     loom_type_t type, const loom_value_fact_table_t* previous_table,
@@ -1446,13 +1485,20 @@ iree_status_t loom_value_fact_table_widen_for_type(
       loom_value_facts_scalar_type_domain(loom_type_element_type(type),
                                           &range_lo, &range_hi);
     }
-    // Each endpoint converges independently. A growing upper bound does not
-    // invalidate a stable lower bound, and vice versa.
+    // Each endpoint converges independently. Expanding ranges stop at the
+    // signed or nonnegative 32-bit boundary before reaching the complete type
+    // domain. Across both endpoints this permits at most five strict widening
+    // steps, preserving narrow-index proofs within the loop solve budget.
     if (next.range_lo >= previous.range_lo) {
       range_lo = iree_max(range_lo, previous.range_lo);
+    } else {
+      range_lo = loom_value_fact_widen_integer_lower(next.range_lo, range_lo);
     }
     if (next.range_hi <= previous.range_hi) {
       range_hi = iree_min(range_hi, previous.range_hi);
+    } else {
+      range_hi = loom_value_fact_widen_integer_upper(next.range_hi, range_hi,
+                                                     range_lo >= 0);
     }
     *out_facts = loom_value_facts_make(range_lo, range_hi, known_divisor);
     if (loom_value_facts_is_lane_varying(previous) ||

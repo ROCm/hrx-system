@@ -270,7 +270,7 @@ TEST_F(EncodingFactDomainTest, WideningRetainsStridedDescriptorShape) {
   EXPECT_EQ(result.address_layout.kind, LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED);
   ASSERT_EQ(result.address_layout.rank, 2);
   EXPECT_EQ(result.address_layout.strides[0].range_lo, 4);
-  EXPECT_EQ(result.address_layout.strides[0].range_hi, INT64_MAX);
+  EXPECT_EQ(result.address_layout.strides[0].range_hi, UINT32_MAX);
   EXPECT_EQ(result.address_layout.strides[0].known_divisor, 4);
   int64_t unit_stride = 0;
   EXPECT_TRUE(loom_value_facts_as_exact_i64(result.address_layout.strides[1],

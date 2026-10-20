@@ -501,8 +501,9 @@ iree_status_t loom_value_fact_table_meet_for_type(
 
 // Widens a loop-carried fact of |type| from |previous| to |next|. This is a
 // convergence accelerator for summary solvers, not a scalar transfer function.
-// Expanding integer endpoints widen to their scalar type domain; stable
-// endpoints remain bounded independently of other changing facts.
+// Expanding integer endpoints stop at the signed or nonnegative 32-bit carrier
+// boundary before reaching their scalar type domain. Stable endpoints remain
+// bounded independently of other changing facts.
 iree_status_t loom_value_fact_table_widen_for_type(
     loom_value_fact_table_t* target, const loom_module_t* module,
     loom_type_t type, const loom_value_fact_table_t* previous_table,
