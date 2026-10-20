@@ -18,6 +18,7 @@
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
@@ -1283,8 +1284,13 @@ static iree_status_t iree_hal_amd_gpu_device_create_command_buffer(
     iree_hal_command_buffer_t** out_command_buffer) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
   if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "AQL recorded programs are not admitted");
+    return iree_hal_amd_gpu_aql_command_buffer_create(
+        family, &device->programs.aql, mode, categories, binding_capacity,
+        iree_hal_amd_gpu_aql_queue_maximum_program_packet_count(
+            device->queues[0]),
+        (uint32_t)
+            device->context->target_info.compute.local_data_share_byte_length,
+        device->host_allocator, out_command_buffer);
   }
   iree_hal_amd_gpu_pm4_barrier_profile_t profile;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_barrier_profile_initialize(

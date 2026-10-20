@@ -108,3 +108,92 @@ void iree_hal_amd_gpu_aql_program_pool_deinitialize(
       pool->storage.context->api, pool->storage.context->event_sink, &pool->code);
   iree_hal_amd_gpu_program_pool_deinitialize(&pool->storage);
 }
+
+uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+    const iree_hal_amd_gpu_program_t* program,
+    const iree_hal_amd_gpu_program_instance_t* instance, bool first) {
+  return 1 + (first && !instance->initialized) +
+         (first && program->fixup_count);
+}
+
+static iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_program_dispatch(
+    uint64_t kernel, uint64_t arguments, uint32_t groups) {
+  const iree_hal_amd_gpu_aql_dispatch_t dispatch = {
+      .header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16) |
+                IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+                IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT,
+      .workgroup_size = {64, 1, 1},
+      .grid_size = {groups * 64, 1, 1},
+      .kernel_object = kernel,
+      .kernarg_address = arguments,
+  };
+  return iree_hal_amd_gpu_aql_packet_dispatch(&dispatch);
+}
+
+void iree_hal_amd_gpu_aql_program_emit(
+    const iree_hal_amd_gpu_aql_program_pool_t* pool,
+    const iree_hal_amd_gpu_program_t* program,
+    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
+    uint32_t packet_count, bool first, bool initialize,
+    iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
+    uint64_t argument_address, void* upload) {
+  iree_hal_amd_gpu_aql_packet_t prefix[3];
+  uint32_t count = 0;
+  iree_hal_amd_gpu_aql_materialize_arguments_t* materialize = upload;
+  uint64_t materialize_address = argument_address;
+  if (first) {
+    iree_hal_amd_gpu_aql_program_arguments_t* arguments = upload;
+    const iree_hal_amd_gpu_program_source_t source =
+        iree_hal_amd_gpu_program_source(program);
+    if (initialize) {
+      arguments->copy = (iree_hal_amd_gpu_blit_arguments_t){
+          .source = source.address,
+          .target = instance->address,
+          .length = instance->ordinal
+                        ? program->byte_length
+                        : program->fixup_offset +
+                              (uint64_t)program->fixup_count *
+                                  sizeof(iree_hal_amd_gpu_fixup_t),
+      };
+      prefix[count++] = iree_hal_amd_gpu_aql_program_dispatch(
+          pool->blit, argument_address, 256);
+    }
+    if (program->fixup_count) {
+      arguments->fixup = (iree_hal_amd_gpu_fixup_arguments_t){
+          .entries = source.fixups,
+          .values = argument_address + sizeof(*arguments),
+          .target = instance->address,
+          .entry_count = program->fixup_count,
+      };
+      prefix[count++] = iree_hal_amd_gpu_aql_program_dispatch(
+          pool->fixup,
+          argument_address +
+              offsetof(iree_hal_amd_gpu_aql_program_arguments_t, fixup),
+          (program->fixup_count + 63) / 64);
+    }
+    materialize = &arguments->materialize;
+    materialize_address +=
+        offsetof(iree_hal_amd_gpu_aql_program_arguments_t, materialize);
+  }
+  const uint64_t source = instance->address + block_offset;
+  *materialize = (iree_hal_amd_gpu_aql_materialize_arguments_t){
+      .ring = ring->device_address,
+      .packets = source,
+      .ring_address = ring->device_address,
+      .packet_address = source,
+      .ring_mask = ring->capacity_mask,
+      .first = (uint32_t)(position + count + 1) & ring->capacity_mask,
+      .packet_count = packet_count,
+  };
+  prefix[count++] = iree_hal_amd_gpu_aql_materialize_packet(
+      pool->materialize, materialize_address,
+      IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+          IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
+  // Every argument is complete before a valid header can run ahead of the host.
+  for (uint32_t i = 0; i < count; ++i) {
+    iree_hal_amd_gpu_aql_ring_write_body(ring, position + i, &prefix[i]);
+    iree_hal_amd_gpu_aql_ring_publish_header(ring, position + i,
+                                             prefix[i].words[0]);
+  }
+}

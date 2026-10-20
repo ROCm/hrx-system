@@ -22,6 +22,10 @@ extern "C" {
 uint32_t iree_hal_amd_gpu_aql_barrier_prepare(
     const iree_hal_barrier_list_t* barriers);
 
+// Joins prepared effects without inventing the reserved fence scope (3).
+// This is a pure arithmetic operation; it consults no topology or device.
+uint32_t iree_hal_amd_gpu_aql_barrier_join(uint32_t a, uint32_t b);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

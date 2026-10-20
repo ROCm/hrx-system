@@ -288,7 +288,7 @@ TEST_F(GpuScratchTest, ExistingScratchProgressesWhileGrowthIsHeld) {
   Check(large, 1, 5, 1);
 }
 
-TEST_F(GpuScratchTest, RecordedMixedExtentsReplayOnIndependentQueues) {
+TEST_P(GpuProtocolScratchTest, RecordedMixedExtentsReplayOnIndependentQueues) {
   Ref<iree_hal_command_buffer_t> recording;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       iree_hal_queue_family(queues_[0]), 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH,

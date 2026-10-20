@@ -56,3 +56,9 @@ uint32_t iree_hal_amd_gpu_aql_barrier_prepare(
   }
   return ordered | (acquire << 9) | (release << 11);
 }
+
+uint32_t iree_hal_amd_gpu_aql_barrier_join(uint32_t a, uint32_t b) {
+  return ((a | b) & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) |
+         iree_max(a & (3u << 9), b & (3u << 9)) |
+         iree_max(a & (3u << 11), b & (3u << 11));
+}

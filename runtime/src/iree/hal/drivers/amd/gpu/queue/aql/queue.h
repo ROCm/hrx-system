@@ -57,6 +57,11 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
     const iree_hal_queue_params_t* params, iree_allocator_t host_allocator,
     iree_hal_queue_t** out_queue);
 
+// Native block bound for resident recording, leaving at least half the ring
+// for waits and publication packets. Family queues share construction geometry.
+uint32_t iree_hal_amd_gpu_aql_queue_maximum_program_packet_count(
+    iree_hal_queue_t* queue);
+
 iree_status_t iree_hal_amd_gpu_aql_queue_assign_frontier(
     iree_hal_queue_t* queue, iree_async_frontier_tracker_t* tracker,
     iree_async_axis_t axis);

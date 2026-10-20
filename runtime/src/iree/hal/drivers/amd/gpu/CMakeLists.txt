@@ -66,6 +66,7 @@ iree_cc_library(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::fabric::memory_backend
     iree::hal::drivers::amd::gpu::queue::allocation
+    iree::hal::drivers::amd::gpu::queue::aql::command_buffer
     iree::hal::drivers::amd::gpu::queue::aql::program
     iree::hal::drivers::amd::gpu::queue::aql::queue
     iree::hal::drivers::amd::gpu::queue::file_staging

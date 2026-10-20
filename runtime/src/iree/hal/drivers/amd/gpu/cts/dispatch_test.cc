@@ -81,6 +81,8 @@ class GpuNativeDispatchTest
                                     &load, out_executable);
   }
 
+  void RunIndirect(bool recorded);
+
   // Native capability restriction; allocation and execution remain real.
   iree::hal::amd::gpu::cts::NativeMemoryGate memory_gate_;
 
@@ -478,7 +480,7 @@ TEST_P(GpuNativeDispatchTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
   iree_hal_pool_release(pool);
 }
 
-TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
+void GpuNativeDispatchTest::RunIndirect(bool recorded) {
   constexpr uint32_t kInvocations = 96;
   constexpr uint32_t kOutputLength = 64 * 8 * sizeof(uint32_t);
   constexpr uint32_t kMarker = 0xA3725901;
@@ -494,6 +496,7 @@ TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
 
   iree_hal_executable_t* executable = nullptr;
   IREE_ASSERT_OK(Load(&executable));
+  Ref<iree_hal_executable_t> executable_owner(executable);
   iree_hal_executable_function_t producer, consumer;
   IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
       executable, IREE_SV("image_counts"), &producer));
@@ -552,6 +555,8 @@ TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &options,
                                            iree_allocator_system(), &pool));
+  Ref<iree_hal_pool_t> pool_owner(pool);
+  std::array<Ref<iree_hal_buffer_t>, 3> buffer_owners;
   std::array<iree_hal_buffer_t*, 3> buffers = {};
   const std::array<uint64_t, 3> lengths = {kInvocations * 32,
                                            kInvocations * argument_stride,
@@ -560,6 +565,7 @@ TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
         pool, iree_hal_make_pool_reservation_request(lengths[i], 64),
         iree_infinite_timeout(), &buffers[i]));
+    buffer_owners[i].reset(buffers[i]);
   }
   iree_hal_memory_scope_t program_scope;
   IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
@@ -596,6 +602,27 @@ TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
   iree_hal_semaphore_t* done = nullptr;
   CreateSemaphore(&gate);
   CreateSemaphore(&done);
+  const auto release_gate = +[](iree_hal_semaphore_t* semaphore) {
+    iree_hal_semaphore_fail(semaphore,
+                            iree_status_from_code(IREE_STATUS_ABORTED));
+    iree_hal_semaphore_release(semaphore);
+  };
+  std::unique_ptr<iree_hal_semaphore_t, decltype(release_gate)> gate_owner(
+      gate, release_gate);
+  Ref<iree_hal_semaphore_t> done_owner(done);
+  Ref<iree_hal_command_buffer_t> recording;
+  const iree_hal_barrier_t boundary = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+               IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  if (recorded) {
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        family, 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH, 0, recording.out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &boundary));
+  }
   uint64_t one = 1;
   for (uint32_t i = 0; i < kInvocations; ++i) {
     const uint32_t mode = i % 3;
@@ -629,10 +656,12 @@ TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
         (mode == 1 ? IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS : 0) |
         (mode == 2 ? IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS : 0);
     uint64_t before = 2 * i, produced = before + 1, consumed = before + 2;
-    IREE_ASSERT_OK(iree_hal_queue_dispatch(
-        queues_[i % GetParam().queue_count], {1, &done, &produced},
-        {1, &done, &consumed}, executable, consumer, config, constants,
-        bindings, nullptr, flags));
+    if (!recorded) {
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          queues_[i % GetParam().queue_count], {1, &done, &produced},
+          {1, &done, &consumed}, executable, consumer, config, constants,
+          bindings, nullptr, flags));
+    }
     // Consumer-before-producer is legal even on the same HAL queue. Native
     // publication must wait for the edge without occupying its producer's FIFO.
     auto producer_config = iree_hal_make_static_dispatch_config(1, 1, 1);
@@ -641,13 +670,31 @@ TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
     const std::array<iree_hal_buffer_ref_t, 2> references = {
         config.workgroup_count_ref,
         iree_hal_make_buffer_ref(buffers[0], i * 32 + 16, 12)};
-    IREE_ASSERT_OK(iree_hal_queue_dispatch(
-        queues_[0], {1, i ? &done : &gate, i ? &before : &one},
-        {1, &done, &produced}, executable, producer, producer_config, {},
-        {references.size(), references.data()}, nullptr, 0));
+    if (recorded) {
+      IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+          recording, executable, producer, producer_config, {},
+          {references.size(), references.data()}, 0));
+      IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &boundary));
+      IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+          recording, executable, consumer, config, constants, bindings, flags));
+    } else {
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          queues_[0], {1, i ? &done : &gate, i ? &before : &one},
+          {1, &done, &produced}, executable, producer, producer_config, {},
+          {references.size(), references.data()}, nullptr, 0));
+    }
   }
-  iree_hal_executable_release(executable);
-  iree_hal_buffer_release(buffers[0]);
+  if (recorded) {
+    uint64_t completed = 2 * kInvocations;
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &boundary));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+    IREE_ASSERT_OK(
+        iree_hal_queue_execute(queues_[GetParam().queue_count - 1], {1, &gate, &one},
+                               {1, &done, &completed}, recording, {}, 0));
+    recording.reset();
+  }
+  executable_owner.reset();
+  buffer_owners[0].reset();
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(done, 2 * kInvocations,
                                          iree_infinite_timeout(), 0));
@@ -679,11 +726,180 @@ TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
   IREE_ASSERT_OK(iree_hal_buffer_map_read(buffers[1], 0, actual_native.data(),
                                           actual_native.size()));
   EXPECT_EQ(actual_native, native);
-  iree_hal_buffer_release(buffers[1]);
-  iree_hal_buffer_release(buffers[2]);
-  iree_hal_pool_release(pool);
-  iree_hal_semaphore_release(done);
-  iree_hal_semaphore_release(gate);
+}
+
+TEST_P(GpuNativeDispatchTest, DeviceCountsPublishArgumentsAndPacketBeforeUse) {
+  RunIndirect(false);
+}
+
+TEST_P(GpuNativeDispatchTest,
+       ResidentIndirectPairsCrossChunksWithDeviceCounts) {
+  RunIndirect(true);
+}
+
+TEST_P(GpuNativeDispatchTest,
+       ResidentProgramsRetainBindingsAcrossChunksAndQueues) {
+  options_.queue.ring_byte_length = 4096;
+  options_.queue.argument_capacity = 8;
+  options_.queue.retirement_capacity = 4;
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  const auto* family = iree_hal_queue_family(queues_[0]);
+  const iree_hal_pool_family_access_t access = {
+      .family = family,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &access,
+      .host =
+          {
+              .access =
+                  IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+              .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+          },
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &options,
+                                           iree_allocator_system(), &pool));
+  Ref<iree_hal_pool_t> pool_owner(pool);
+  constexpr uint32_t kInvocations = 16;
+  iree_hal_buffer_t* output = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(kInvocations * 4, 4),
+      iree_infinite_timeout(), &output));
+  Ref<iree_hal_buffer_t> output_owner(output);
+  iree_hal_executable_t* executable = nullptr;
+  IREE_ASSERT_OK(Load(&executable));
+  Ref<iree_hal_executable_t> executable_owner(executable);
+  iree_hal_executable_function_t function;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable, IREE_SV("image_accumulate"), &function));
+  iree_hal_semaphore_t* gate = nullptr;
+  CreateSemaphore(&gate);
+  const auto release_gate = +[](iree_hal_semaphore_t* semaphore) {
+    iree_hal_semaphore_fail(semaphore,
+                            iree_status_from_code(IREE_STATUS_ABORTED));
+    iree_hal_semaphore_release(semaphore);
+  };
+  std::unique_ptr<iree_hal_semaphore_t, decltype(release_gate)> gate_owner(
+      gate, release_gate);
+  std::vector<Ref<iree_hal_semaphore_t>> done_owners;
+  std::array<iree_hal_semaphore_t*, kInvocations> done = {};
+  for (auto& semaphore : done) {
+    CreateSemaphore(&semaphore);
+    done_owners.emplace_back(semaphore);
+  }
+  const iree_hal_barrier_t acquire = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  const iree_hal_memory_barrier_t dispatch_memory = {
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+          IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+  };
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .memory_barrier_count = 1,
+      .memory_barriers = &dispatch_memory,
+  };
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  // Small and multi-wrap recordings share exactly the same public lifecycle.
+  // Repeated invocations contend for instances on two FIFOs, then idle trim
+  // drops spare instances before the next epoch reuses the immutable program.
+  for (uint32_t count : {1u, 97u}) {
+    iree_hal_command_buffer_t* recording = nullptr;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        family, 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH, 3, &recording));
+    Ref<iree_hal_command_buffer_t> recording_owner(recording);
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+    const auto binding = iree_hal_make_indirect_buffer_ref(2, 0, 4);
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &acquire));
+    for (uint32_t i = 0; i < count; ++i) {
+      if (i) {
+        IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
+      }
+      uint32_t value = i + 1;
+      IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+          recording, executable, function, config,
+          iree_make_const_byte_span(&value, 4), {1, &binding}, 0));
+    }
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+    for (uint64_t epoch = 1; epoch <= 2; ++epoch) {
+      std::array<uint32_t, kInvocations> initial;
+      initial.fill(7);
+      IREE_ASSERT_OK(iree_hal_buffer_map_write(output, 0, initial.data(),
+                                               sizeof(initial)));
+      uint64_t gate_value = count * 2 + epoch;
+      for (uint32_t i = 0; i < kInvocations; ++i) {
+        std::array<iree_hal_buffer_binding_t, 3> table = {};
+        table[2] = {.buffer = output, .offset = i * 4, .length = 4};
+        IREE_ASSERT_OK(iree_hal_queue_execute(
+            queues_[i % GetParam().queue_count], {1, &gate, &gate_value},
+            {1, &done[i], &gate_value}, recording, {table.size(), table.data()},
+            0));
+        table.fill({});
+      }
+      IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, gate_value, nullptr));
+      for (auto semaphore : done) {
+        IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, gate_value,
+                                               iree_infinite_timeout(),
+                                               IREE_ASYNC_WAIT_FLAG_NONE));
+      }
+      std::array<uint32_t, kInvocations> actual = {};
+      IREE_ASSERT_OK(
+          iree_hal_buffer_map_read(output, 0, actual.data(), sizeof(actual)));
+      for (auto value : actual) {
+        EXPECT_EQ(value, 7 + count * (count + 1) / 2);
+      }
+      IREE_ASSERT_OK(iree_hal_device_trim(device_));
+    }
+    recording_owner.reset();
+  }
+  // Capture retains both the command buffer and its executable after the
+  // caller releases them while the first dependency is still unavailable.
+  iree_hal_command_buffer_t* recording = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      family, 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH, 1, &recording));
+  Ref<iree_hal_command_buffer_t> recording_owner(recording);
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  auto binding = iree_hal_make_indirect_buffer_ref(0, 0, 4);
+  uint32_t value = 11;
+  IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+      recording, executable, function, config,
+      iree_make_const_byte_span(&value, 4), {1, &binding}, 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  uint64_t final_value = 1000;
+  iree_hal_buffer_binding_t table = {.buffer = output, .length = 4};
+  IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &gate, &final_value},
+                                        {1, &done[0], &final_value}, recording,
+                                        {1, &table}, 0));
+  recording_owner.reset();
+  executable_owner.reset();
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, final_value, nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(done[0], final_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  uint32_t actual = 0;
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 0, &actual, sizeof(actual)));
+  EXPECT_EQ(actual, 7u + 97u * 98u / 2 + 11u);
 }
 
 INSTANTIATE_TEST_SUITE_P(

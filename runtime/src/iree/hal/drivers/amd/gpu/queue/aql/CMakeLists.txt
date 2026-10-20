@@ -536,6 +536,26 @@ iree_cc_library(
   PUBLIC
 )
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    command_buffer
+  HDRS
+    "command_buffer.h"
+  SRCS
+    "command_buffer.c"
+  DEPS
+    ::barrier
+    ::program
+    iree::base::internal::arena
+    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::queue::inputs
+    iree::hal::drivers::amd::gpu::queue::recording
+    iree::hal::utils::resource_set
+  PUBLIC
+)
+endif()
+
 iree_cc_library(
   NAME
     submission
@@ -545,7 +565,7 @@ iree_cc_library(
     "submission.c"
   DEPS
     ::barrier
-    ::dispatch
+    ::command_buffer
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::gpu::queue::semaphore
@@ -602,6 +622,7 @@ iree_cc_library(
     ::signal
     ::submission
     iree::hal::drivers::amd::gpu::publication
+    iree::hal::drivers::amd::gpu::queue::program
   PUBLIC
 )
 endif()
@@ -694,6 +715,7 @@ iree_cc_library(
   DEPS
     ::indirect
     ::materialize
+    ::ring
     iree::hal::drivers::amd::gpu::queue::blit
     iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::status

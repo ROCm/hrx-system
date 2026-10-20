@@ -60,9 +60,9 @@ void iree_hal_amd_gpu_aql_growth_enqueue(
     iree_hal_amd_gpu_aql_growth_context_t* context,
     iree_hal_amd_gpu_aql_entry_t* entry);
 
-// Transfers a detached submission to typed argument/signal acquisition.
-// capacity is the admitted power-of-two byte length for argument requests.
-// Success parks outside the ready FIFO; failure transfers nothing.
+// Transfers a detached submission to typed argument/signal/instance
+// acquisition. capacity is the admitted power-of-two byte length for argument
+// requests. Success parks outside the ready FIFO; failure transfers nothing.
 iree_status_t iree_hal_amd_gpu_aql_growth_begin(
     iree_hal_amd_gpu_aql_growth_context_t* context,
     iree_hal_amd_gpu_aql_entry_kind_t kind,
@@ -91,6 +91,11 @@ void iree_hal_amd_gpu_aql_growth_signals_available(void* user_data);
 // Requeues the parked cohort immediately when already-owned cells return.
 void iree_hal_amd_gpu_aql_growth_reuse_signals(
     iree_hal_amd_gpu_aql_growth_context_t* context);
+
+// Consumes the separately retained program availability hint. Native clone
+// acquisition may still be running; ready captures can reuse released backing.
+void iree_hal_amd_gpu_aql_growth_reuse_program(
+    iree_hal_amd_gpu_aql_entry_t* entry);
 
 #ifdef __cplusplus
 }  // extern "C"

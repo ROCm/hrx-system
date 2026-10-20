@@ -134,4 +134,18 @@ TEST(AqlBarrierTest, CombiningAgentAndSystemUsesScopeMaximum) {
                 IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM);
 }
 
+TEST(AqlBarrierTest, PreparedJoinPreservesValidScopes) {
+  for (uint32_t a = 0; a < 3; ++a) {
+    for (uint32_t b = 0; b < 3; ++b) {
+      const uint32_t first = (a << 9) | (b << 11);
+      const uint32_t second =
+          IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | (b << 9) | (a << 11);
+      const uint32_t maximum = std::max(a, b);
+      EXPECT_EQ(iree_hal_amd_gpu_aql_barrier_join(first, second),
+                IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | (maximum << 9) |
+                    (maximum << 11));
+    }
+  }
+}
+
 }  // namespace

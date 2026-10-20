@@ -8,7 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_SUBMISSION_H_
 
 #include "iree/hal/drivers/amd/gpu/queue/aql/barrier.h"
-#include "iree/hal/drivers/amd/gpu/queue/aql/dispatch.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/publisher.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
@@ -46,6 +46,9 @@ typedef struct iree_hal_amd_gpu_aql_dispatch_request_t {
 
 typedef enum iree_hal_amd_gpu_aql_entry_kind_e {
   IREE_HAL_AMD_GPU_AQL_ENTRY_SUBMISSION,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_PROGRAM,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_REUSE_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS,
   IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS,
   IREE_HAL_AMD_GPU_AQL_ENTRY_REUSE_SIGNALS,
@@ -61,8 +64,8 @@ typedef struct iree_hal_amd_gpu_aql_entry_t {
   iree_hal_amd_gpu_aql_entry_kind_t kind;
 } iree_hal_amd_gpu_aql_entry_t;
 
-// One direct dispatch or barrier's asynchronous ownership. Ready calls use the
-// reserved retirement slot; deferred calls capture their arguments in a pool.
+// One operation's asynchronous ownership. Ready direct calls use a reserved
+// retirement slot; deferred calls and recorded invocations use pooled storage.
 typedef struct iree_hal_amd_gpu_aql_submission_t {
   // Typed pending-publication record.
   iree_hal_amd_gpu_aql_entry_t entry;
@@ -86,10 +89,12 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
   bool has_host_owner;
   // Retained HAL signal timelines and copied values in inline storage.
   iree_hal_semaphore_list_t signals;
-  // Native execution point owned until all payload/public effects retire.
-  iree_hal_amd_gpu_signal_t* signal;
-  // Captured launch and retained payload resources.
-  iree_hal_amd_gpu_aql_dispatch_request_t dispatch;
+  union {
+    // Captured direct launch and retained payload resources.
+    iree_hal_amd_gpu_aql_dispatch_request_t dispatch;
+    // Shared ownership across independently retiring native packet chunks.
+    iree_hal_amd_gpu_aql_command_invocation_t execute;
+  };
 } iree_hal_amd_gpu_aql_submission_t;
 
 // Captures a deferred call in one reusable block. Retains all external owners
@@ -99,6 +104,16 @@ iree_status_t iree_hal_amd_gpu_aql_submission_capture(
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
     uint32_t before, uint32_t after,
+    iree_hal_amd_gpu_aql_submission_t** out_submission);
+
+// Captures one recorded invocation and its dependencies in reusable storage.
+// The pending suffix initially owns the sole invocation reference. Each
+// nonterminal native piece borrows a reference; the terminal piece takes it.
+iree_status_t iree_hal_amd_gpu_aql_submission_execute(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t bindings, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_queue_execute_flags_t flags,
     iree_hal_amd_gpu_aql_submission_t** out_submission);
 
 // Captures only retirement ownership for an already prepared direct call.

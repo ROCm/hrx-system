@@ -9,6 +9,7 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/aql/indirect.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/materialize.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/ring.h"
 #include "iree/hal/drivers/amd/gpu/queue/blit.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 
@@ -41,6 +42,36 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
     iree_hal_amd_gpu_aql_program_pool_t* out_pool);
 void iree_hal_amd_gpu_aql_program_pool_deinitialize(
     iree_hal_amd_gpu_aql_program_pool_t* pool);
+
+// Initial invocation upload, followed immediately by the dense uint64_t value
+// table. Later chunks upload only their materializer arguments. The first
+// native chunk's completion releases this table independently of later work.
+typedef struct iree_hal_amd_gpu_aql_program_arguments_t {
+  // Optional initial resident copy, including the first instance's fixups.
+  iree_hal_amd_gpu_blit_arguments_t copy;
+  // Invocation-wide disjoint replacements, applied once before any payload.
+  iree_hal_amd_gpu_fixup_arguments_t fixup;
+  // First native packet block and its exact reserved ring slots.
+  iree_hal_amd_gpu_aql_materialize_arguments_t materialize;
+} iree_hal_amd_gpu_aql_program_arguments_t;
+
+// Counts host-owned prelude packets; block packets and the terminal barrier
+// are separate. The unpublished instance remains reserved through emission.
+uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+    const iree_hal_amd_gpu_program_t* program,
+    const iree_hal_amd_gpu_program_instance_t* instance, bool first);
+
+// Emits one fully reserved block's host prelude. Resident templates are copied
+// exclusively by the GPU. upload is coherent native argument storage and its
+// value table is already written. The caller establishes ownership before
+// emission and publishes a terminal completion after the block's slots.
+void iree_hal_amd_gpu_aql_program_emit(
+    const iree_hal_amd_gpu_aql_program_pool_t* pool,
+    const iree_hal_amd_gpu_program_t* program,
+    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
+    uint32_t packet_count, bool first, bool initialize,
+    iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
+    uint64_t argument_address, void* upload);
 
 #ifdef __cplusplus
 }  // extern "C"

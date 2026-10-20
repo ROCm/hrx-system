@@ -254,12 +254,31 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "command_buffer",
+    srcs = ["command_buffer.c"],
+    hdrs = ["command_buffer.h"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":barrier",
+        ":program",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal/drivers/amd/gpu:executable",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:inputs",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:recording",
+        "//runtime/src/iree/hal/utils:resource_set",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "submission",
     srcs = ["submission.c"],
     hdrs = ["submission.h"],
     deps = [
         ":barrier",
-        ":dispatch",
+        ":command_buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:capture_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
@@ -316,6 +335,7 @@ iree_runtime_cc_library(
         ":signal",
         ":submission",
         "//runtime/src/iree/hal/drivers/amd/gpu:publication",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
     ],
 )
 
@@ -400,6 +420,7 @@ iree_runtime_cc_library(
     deps = [
         ":indirect",
         ":materialize",
+        ":ring",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
