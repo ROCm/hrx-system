@@ -888,9 +888,10 @@ BENCHMARK_CAPTURE(BM_AqlChain, DispatchCompletion, false, Timing::kCompletion)
 
 // Completion and destruction are excluded from recording timing. One actual
 // invocation verifies the recorded program before measuring its construction.
-static void BM_Record(benchmark::State& state, BindingMode bindings,
-                      Program program) {
-  NativeQueue queue;
+static void BM_Record(
+    benchmark::State& state, BindingMode bindings, Program program,
+    amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {
+  NativeQueue queue(command_type);
   if (!queue.Initialize(state)) {
     return;
   }
@@ -937,16 +938,34 @@ BENCHMARK_CAPTURE(BM_Record, TransfersTable, BindingMode::kTable,
     ->Iterations(50)
     ->UseRealTime();
 
+BENCHMARK_CAPTURE(BM_Record, AqlDirect, BindingMode::kDirect,
+                  Program::kDispatch, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL)
+    ->Arg(1)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(5000)
+    ->Iterations(50)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_Record, AqlTable, BindingMode::kTable, Program::kDispatch,
+                  AMDF_QUEUE_COMMAND_TYPE_GPU_AQL)
+    ->Arg(1)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(5000)
+    ->Iterations(50)
+    ->UseRealTime();
+
 // Each iteration submits a fixed number of command buffers before one final
 // wait. Submit timing excludes that wait; completion timing includes it.
 // Sampled rows isolate each API call at the cost of two clock reads. Bursts
 // additionally separate the first call after a wait from subsequent calls, so
 // idle/wake costs cannot be mistaken for steady submission costs. No row
 // measures calibrated time to first workgroup.
-static void BM_Execute(benchmark::State& state, BindingMode bindings,
-                       Timing timing, Program program, uint32_t burst_count,
-                       Capture capture) {
-  NativeQueue queue;
+static void BM_Execute(
+    benchmark::State& state, BindingMode bindings, Timing timing,
+    Program program, uint32_t burst_count, Capture capture,
+    amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {
+  NativeQueue queue(command_type);
   if (!queue.Initialize(state)) {
     return;
   }
@@ -1074,6 +1093,29 @@ EXECUTE_BURST_CASE(TableBurstCompletion, kTable, kCompletion);
 EXECUTE_BURST_CASE(DirectBurstLatency, kDirect, kSampledSubmit);
 EXECUTE_BURST_CASE(TableBurstLatency, kTable, kSampledSubmit);
 #undef EXECUTE_BURST_CASE
+
+// The same numerical program and memory barriers exercise native AQL packet
+// materialization. Direct references and one reused table slot distinguish
+// invocation work from the number of recorded dispatches and fixups.
+#define AQL_EXECUTE_CASE(name, bindings, timing, burst_count)        \
+  BENCHMARK_CAPTURE(BM_Execute, Aql##name, BindingMode::bindings,    \
+                    Timing::timing, Program::kDispatch, burst_count, \
+                    Capture::kNone, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) \
+      ->Arg(1)                                                       \
+      ->Arg(100)                                                     \
+      ->Arg(1000)                                                    \
+      ->Arg(5000)                                                    \
+      ->Iterations(50)                                               \
+      ->UseRealTime()
+AQL_EXECUTE_CASE(DirectSubmit, kDirect, kSubmit, 1);
+AQL_EXECUTE_CASE(TableSubmit, kTable, kSubmit, 1);
+AQL_EXECUTE_CASE(DirectCompletion, kDirect, kCompletion, 1);
+AQL_EXECUTE_CASE(TableCompletion, kTable, kCompletion, 1);
+AQL_EXECUTE_CASE(DirectBurstSubmit, kDirect, kSubmit, 8);
+AQL_EXECUTE_CASE(TableBurstSubmit, kTable, kSubmit, 8);
+AQL_EXECUTE_CASE(DirectBurstCompletion, kDirect, kCompletion, 8);
+AQL_EXECUTE_CASE(TableBurstCompletion, kTable, kCompletion, 8);
+#undef AQL_EXECUTE_CASE
 
 // Identical resident programs distinguish ordinary execution, retained but
 // disabled packet regions, and active device samples. The caller upload is
