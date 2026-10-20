@@ -742,13 +742,14 @@ vector_from_elements = Op(
     ],
     facts="loom_vector_from_elements_facts",
     canonicalize="loom_vector_from_elements_canonicalize",
-    traits=[PURE],
+    traits=[PURE, SAFE_TO_SPECULATE],
     format=[
         Refs("elements"),
         COLON,
         ResultType("result"),
     ],
     examples=["%v = vector.from_elements %a, %b, %c, %d : vector<4xf32>"],
+    eager_execution_cost=1,
 )
 
 

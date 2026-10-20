@@ -328,6 +328,67 @@ func.def @if_selectifies_vector_float_arithmetic(%cond: i1, %numerator: vector<4
 
 // ====
 
+// Explicit lane aggregation is total and carries unit eager cost. Together
+// with three cheap scalar operations it exactly fills the selectification
+// budget and lets the constructed pair leave the conditional.
+func.def @if_selectifies_scalar_pair_construction(%cond: i1, %left: i32, %right: i32, %bias: i32, %fallback: vector<2xi32>) -> (vector<2xi32>) {
+  %selected = scf.if %cond -> (vector<2xi32>) {
+    %product = scalar.muli %left, %right : i32
+    %scaled = scalar.muli %right, %bias : i32
+    %shifted = scalar.addi %scaled, %left : i32
+    %pair = vector.from_elements %product, %shifted : vector<2xi32>
+    scf.yield %pair : vector<2xi32>
+  } else {
+    scf.yield %fallback : vector<2xi32>
+  }
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+func.def @if_selectifies_scalar_pair_construction(%cond: i1, %left: i32, %right: i32, %bias: i32, %fallback: vector<2xi32>) -> (vector<2xi32>) {
+  %product = scalar.muli %left, %right : i32
+  %scaled = scalar.muli %right, %bias : i32
+  %shifted = scalar.addi %scaled, %left : i32
+  %pair = vector.from_elements %product, %shifted : vector<2xi32>
+  %selected = scf.select %cond, %pair, %fallback : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ====
+
+// One additional scalar operation exceeds the eager budget. The complete arm
+// remains guarded even though each constituent operation is total.
+func.def @if_preserves_oversized_pair_construction(%cond: i1, %left: i32, %right: i32, %bias: i32, %mask: i32, %fallback: vector<2xi32>) -> (vector<2xi32>) {
+  %selected = scf.if %cond -> (vector<2xi32>) {
+    %product = scalar.muli %left, %right : i32
+    %scaled = scalar.muli %right, %bias : i32
+    %shifted = scalar.addi %scaled, %left : i32
+    %masked = scalar.xori %product, %mask : i32
+    %pair = vector.from_elements %masked, %shifted : vector<2xi32>
+    scf.yield %pair : vector<2xi32>
+  } else {
+    scf.yield %fallback : vector<2xi32>
+  }
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+func.def @if_preserves_oversized_pair_construction(%cond: i1, %left: i32, %right: i32, %bias: i32, %mask: i32, %fallback: vector<2xi32>) -> (vector<2xi32>) {
+  %selected = scf.if %cond -> (vector<2xi32>) {
+    %product = scalar.muli %left, %right : i32
+    %scaled = scalar.muli %right, %bias : i32
+    %shifted = scalar.addi %scaled, %left : i32
+    %masked = scalar.xori %product, %mask : i32
+    %pair = vector.from_elements %masked, %shifted : vector<2xi32>
+    scf.yield %pair : vector<2xi32>
+  } else {
+    scf.yield %fallback : vector<2xi32>
+  }
+  func.return %selected : vector<2xi32>
+}
+
+// ====
+
 // Cheap total float primitives use the same eager budget as ordinary
 // arithmetic and can move into straight-line selection.
 func.def @if_selectifies_cheap_float_primitives(%cond: i1, %a: f32, %b: f32, %c: f32, %values: vector<4xf32>, %scalar_fallback: f32, %vector_fallback: vector<4xf32>) -> (f32, vector<4xf32>) {
