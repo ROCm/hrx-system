@@ -1176,7 +1176,7 @@ TEST(LinuxGpuMemoryProfileTest,
       AMDF_MEMORY_ACCESS_READ, AMDF_MEMORY_ACCESS_WRITE,
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE};
   // Compiler ISA is intentionally absent: it does not select SDMA cache policy.
-  for (uint32_t revision : {2u, 4u, 5u}) {
+  for (uint32_t revision : {0u, 2u, 4u, 5u}) {
     SCOPED_TRACE(revision);
     auto device = MakeLegacySdmaMemoryDevice();
     device.topology.sdma.ip.revision = revision;
@@ -1236,7 +1236,7 @@ TEST(LinuxGpuMemoryProfileTest,
 
 TEST(LinuxGpuMemoryProfileTest, LegacySdmaPolicyExcludesOtherNativeEngines) {
   const amdf_gpu_kfd_ip_version_t versions[] = {
-      {4, 4, 2, false}, {4, 4, 0, true}, {4, 4, 3, true}, {4, 4, 6, true},
+      {4, 4, 2, false}, {4, 4, 1, true}, {4, 4, 3, true}, {4, 4, 6, true},
       {4, 3, 2, true},  {5, 4, 2, true}, {6, 1, 1, true}, {7, 1, 0, true},
   };
   for (const auto& ip : versions) {

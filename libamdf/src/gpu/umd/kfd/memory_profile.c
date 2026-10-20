@@ -66,13 +66,14 @@ static amdf_status_t amdf_gpu_kfd_sdma_local_describe_site(
   return amdf_gpu_kfd_sdma_describe_site(query, out_description);
 }
 
-// Linux selects sdma_v4_4_2 for these engines; ROCr uses its V4 no-GCR path
-// across CDNA. This is independent of compiler ISA and compute PTE MTYPE.
+// SDMA 4.4 uses the V4 no-GCR visibility path across CDNA. This is independent
+// of compiler ISA and compute PTE MTYPE.
 static bool amdf_gpu_kfd_supports_legacy_sdma_visibility(
     const amdf_gpu_kfd_topology_t* topology) {
   const amdf_gpu_kfd_ip_version_t* ip = &topology->sdma.ip;
   return ip->exact && ip->major == 4 && ip->minor == 4 &&
-         (ip->revision == 2 || ip->revision == 4 || ip->revision == 5);
+         (ip->revision == 0 || ip->revision == 2 || ip->revision == 4 ||
+          ip->revision == 5);
 }
 
 static bool amdf_gpu_kfd_supports_gfx1151_system_visibility(

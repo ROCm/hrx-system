@@ -117,7 +117,7 @@ TEST(KfdTargetUserQueueTest, ExposesBothComputeLanguagesOnRdna) {
 }
 
 TEST(KfdTargetUserQueueTest, CdnaDoesNotAdvertisePm4) {
-  for (uint32_t target : {90400u, 90401u, 90402u, 90500u}) {
+  for (uint32_t target : {90010u, 90400u, 90401u, 90402u, 90500u}) {
     SCOPED_TRACE(target);
     auto topology = MakeTopology();
     topology.properties.gfx_ip = {target / 10000, (target / 100) % 100,
@@ -129,9 +129,10 @@ TEST(KfdTargetUserQueueTest, CdnaDoesNotAdvertisePm4) {
     ASSERT_EQ(plans.count, 2u);
     EXPECT_EQ(plans.values[0].family.command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
-    EXPECT_EQ(plans.values[0].family.format_features,
-              AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE |
-                  AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS);
+    EXPECT_EQ(
+        plans.values[0].family.format_features,
+        AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
+            (target == 90010u ? 0 : AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE));
     EXPECT_NE(plans.values[0].family.roles & AMDF_QUEUE_ROLE_TRANSFER, 0u);
     EXPECT_EQ(plans.values[1].family.command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
@@ -275,6 +276,7 @@ TEST(KfdTargetUserQueueTest, SdmaFormatsFollowExactIndependentEngineIp) {
       AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT |
       AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE;
   constexpr Case kCases[] = {
+      {{4, 4, 0, true}, AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT},
       {{4, 4, 2, true}, AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT},
       {{4, 4, 4, true}, AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT},
       {{4, 4, 5, true}, AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT},
@@ -335,8 +337,7 @@ TEST(KfdTargetUserQueueTest, SdmaFormatsFollowExactIndependentEngineIp) {
 
 TEST(KfdTargetUserQueueTest, UnknownSdmaIdentityPreservesComputeFamilies) {
   for (const amdf_gpu_kfd_ip_version_t ip :
-       {amdf_gpu_kfd_ip_version_t{4, 4, 0, true},
-        {4, 4, 1, true},
+       {amdf_gpu_kfd_ip_version_t{4, 4, 1, true},
         {4, 4, 3, true},
         {4, 3, 2, true},
         {6, 0, 4, true},
@@ -440,6 +441,39 @@ TEST(KfdTargetUserQueueTest, ResolvesMultiXccSaveLayoutOnOlderKernels) {
   ASSERT_EQ(plans.count, 1u);
   EXPECT_EQ(plans.values[0].family.command_type,
             AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
+}
+
+TEST(KfdTargetUserQueueTest, Cdna2SaveLayoutMatchesReportedNativeGeometry) {
+  auto topology = MakeTopology();
+  topology.properties.gfx_ip = {9, 0, 10};
+  topology.properties.compute.wavefront_size = 64;
+  topology.properties.compute.compute_unit_count = 104;
+  topology.properties.compute.local_data_share_byte_length = 65536;
+  topology.properties.topology.shader_engine_count_per_xcc = 8;
+  topology.sdma.ip = {4, 4, 0, true};
+  for (bool reported_sizes : {false, true}) {
+    SCOPED_TRACE(reported_sizes);
+    topology.context_save_restore_byte_length = reported_sizes ? 63508480 : 0;
+    topology.control_stack_byte_length = reported_sizes ? 36864 : 0;
+    amdf_gpu_kfd_user_queue_plans_t plans;
+    amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64,
+                                                    &plans);
+    ASSERT_EQ(plans.count, 2u);
+    const auto& plan = plans.values[0];
+    EXPECT_EQ(plan.family.command_type, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+    EXPECT_EQ(plan.family.format_features,
+              AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS);
+    EXPECT_EQ(plan.compute.context_count, 1u);
+    EXPECT_EQ(plan.compute.control_stack_byte_length, 36864u);
+    EXPECT_EQ(plan.compute.context_save_restore_byte_length, 63508480u);
+    EXPECT_EQ(plan.compute.debug_byte_offset, 63508480u);
+    EXPECT_EQ(plan.compute.debug_byte_length, 131072u);
+    EXPECT_EQ(plan.compute.end_of_pipe_storage.byte_length, 4096u);
+    EXPECT_EQ(plan.aql.scratch.slot_count_per_xcc, 3328u);
+    EXPECT_EQ(plan.aql.scratch.temporary_ring_wave_count, 3328u);
+    EXPECT_EQ(plans.values[1].family.command_type,
+              AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
+  }
 }
 
 TEST(KfdTargetUserQueueTest, MultiXccAqlFamiliesRetainTransferRole) {

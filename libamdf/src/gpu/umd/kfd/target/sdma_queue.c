@@ -25,7 +25,8 @@ static bool amdf_gpu_kfd_sdma_format_features(
     return false;
   }
   if (ip->major == 4 && ip->minor == 4 &&
-      (ip->revision == 2 || ip->revision == 4 || ip->revision == 5)) {
+      (ip->revision == 0 || ip->revision == 2 || ip->revision == 4 ||
+       ip->revision == 5)) {
     *out_features = AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT;
     return true;
   }

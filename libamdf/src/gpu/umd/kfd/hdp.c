@@ -39,6 +39,9 @@ struct amdf_gpu_kfd_hdp_t {
 
 bool amdf_gpu_kfd_hdp_supports_host_publication(
     const amdf_gpu_kfd_topology_t* topology) {
+  const bool gfx90a = topology->properties.gfx_ip.major == 9 &&
+                      topology->properties.gfx_ip.minor == 0 &&
+                      topology->properties.gfx_ip.stepping == 10;
   const bool gfx94x = topology->properties.gfx_ip.major == 9 &&
                       topology->properties.gfx_ip.minor >= 4 &&
                       topology->properties.gfx_ip.stepping <= 2;
@@ -49,7 +52,7 @@ bool amdf_gpu_kfd_hdp_supports_host_publication(
   const bool gfx11 = topology->properties.gfx_ip.major == 11 &&
                      (topology->properties.gfx_ip.minor == 0 ||
                       topology->properties.gfx_ip.minor == 5);
-  return gfx94x || gfx11 || gfx120x || gfx125x;
+  return gfx90a || gfx94x || gfx11 || gfx120x || gfx125x;
 }
 
 static int amdf_gpu_kfd_hdp_map_ioctl(amdf_gpu_umd_device_t* device,

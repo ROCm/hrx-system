@@ -23,7 +23,8 @@ bool amdf_gpu_kfd_compute_storage_plan(
       properties->compute.compute_unit_count / xcc_count;
   const bool cdna =
       properties->gfx_ip.major == 9 &&
-      (properties->gfx_ip.minor == 4 || properties->gfx_ip.minor == 5);
+      ((properties->gfx_ip.minor == 0 && properties->gfx_ip.stepping == 10) ||
+       properties->gfx_ip.minor == 4 || properties->gfx_ip.minor == 5);
   const bool expanded_save_area =
       properties->gfx_ip.major == 12 && properties->gfx_ip.minor == 5;
   if (!cdna && properties->gfx_ip.major != 11 &&
@@ -70,7 +71,7 @@ bool amdf_gpu_kfd_compute_storage_plan(
         (sizeof(struct kfd_context_save_area_header) +
          saved_wave_count * (cdna ? 8 : 12) + 8 + page_size - 1) &
         ~(uint64_t)(page_size - 1);
-    // CDNA3 saves 64 KiB LDS/CU; CDNA4 uses the topology's enlarged LDS.
+    // CDNA2/3 save 64 KiB LDS/CU; CDNA4 uses the topology's enlarged LDS.
     const uint64_t lds_byte_length =
         !cdna || properties->gfx_ip.minor == 5
             ? properties->compute.local_data_share_byte_length
