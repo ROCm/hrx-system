@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <atomic>
 #include <barrier>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -32,16 +34,83 @@ enum class Barriers { kDefault, kExplicitEmpty };
 enum class Timing { kSubmit, kCompletion, kSampledSubmit };
 enum class Capture { kNone, kMetadata, kActive };
 
+// KFD's process VM belongs to this fabric throughout the benchmark process.
+// Rows still join and release their devices, queues, and execution storage.
+struct ProcessFabric {
+  ProcessFabric() {
+    const amdf_api_t* api = nullptr;
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
+        "amdf_query_api");
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amd_fabric_create(api, AMDF_NATIVE_LIFETIME_PROCESS,
+                                          iree_allocator_system(), &fabric);
+    }
+  }
+  ~ProcessFabric() {
+    iree_hal_amd_fabric_release(fabric);
+    iree_status_free(status);
+  }
+  // One owning reference outlives every benchmark row.
+  iree_hal_amd_fabric_t* fabric = nullptr;
+  // A construction failure is reported by every row using this owner.
+  iree_status_t status = iree_ok_status();
+};
+
+static iree_status_t MatchesRunnerSelection(iree_hal_amd_fabric_t* fabric,
+                                            const amdf_endpoint_id_t* id,
+                                            bool* out_matches) {
+  *out_matches = true;
+  const char* selected = std::getenv("AMDF_CTS_GPU_NATIVE_IDENTITY");
+  if (!selected) {
+    return iree_ok_status();
+  }
+  amdf_endpoint_t* endpoint = nullptr;
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      fabric->api->endpoint_open(fabric->instance, id, &endpoint),
+      "endpoint_open"));
+  amdf_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(info),
+  };
+  const auto status = fabric->api->endpoint_query_info(endpoint, &info);
+  const auto close_status = fabric->api->endpoint_close(endpoint);
+  IREE_RETURN_IF_ERROR(iree_status_join(
+      IREE_HAL_AMD_STATUS_FROM_AMDF(status, "endpoint_query_info"),
+      IREE_HAL_AMD_STATUS_FROM_AMDF(close_status, "endpoint_close")));
+  char identity[96] = {};
+  if (info.native_identity.type ==
+      AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE) {
+    std::snprintf(identity, sizeof(identity), "linux_device:%u:%u",
+                  info.native_identity.value.linux_device.major,
+                  info.native_identity.value.linux_device.minor);
+  } else if (info.native_identity.type ==
+             AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER) {
+    std::snprintf(
+        identity, sizeof(identity), "windows_adapter:%" PRIx64 ":%u",
+        info.native_identity.value.windows_adapter.luid,
+        info.native_identity.value.windows_adapter.physical_adapter_index);
+  }
+  *out_matches = std::strcmp(selected, identity) == 0;
+  return iree_ok_status();
+}
+
 // Warm dispatches reuse capture blocks; allocation counts report slow-path
 // growth. Final device release joins workers and native owners between rows.
 class NativeQueue {
  public:
+  explicit NativeQueue(
+      amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+      bool private_stream = false)
+      : command_type_(command_type), private_stream_(private_stream) {}
+
   ~NativeQueue() {
     for (auto& lane : lanes_) {
       iree_hal_semaphore_release(lane.timeline);
       iree_hal_executable_release(lane.executable);
       iree_hal_buffer_release(lane.output);
     }
+    iree_hal_semaphore_release(completion_);
     iree_hal_pool_release(pool_);
     iree_hal_device_release(device_);
     iree_hal_device_group_release(group_);
@@ -61,7 +130,7 @@ class NativeQueue {
     }
     if (!device_) {
       state.SkipWithMessage(
-          "No native AMD GPU endpoint with a supported PM4 family");
+          "No native AMD GPU endpoint with the requested packet family");
       return false;
     }
     return true;
@@ -69,14 +138,19 @@ class NativeQueue {
 
   iree_status_t InitializeDevice(size_t producer_count, size_t buffer_length) {
     lanes_.resize(producer_count);
-    const amdf_api_t* api = nullptr;
-    IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
-        amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
-        "amdf_query_api"));
-    IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_create(
-        api, AMDF_NATIVE_LIFETIME_INSTANCE, iree_allocator_system(), &fabric_));
+    static ProcessFabric shared;
+    IREE_RETURN_IF_ERROR(iree_status_clone(shared.status));
+    fabric_ = shared.fabric;
+    iree_hal_amd_fabric_retain(fabric_);
+    uint32_t family_ordinal = UINT32_MAX;
     for (uint32_t i = 0; i < fabric_->endpoint_count; ++i) {
       if (fabric_->endpoints[i].engine_kind == AMDF_ENGINE_KIND_GPU) {
+        bool selected = false;
+        IREE_RETURN_IF_ERROR(MatchesRunnerSelection(
+            fabric_, &fabric_->endpoints[i].id, &selected));
+        if (!selected) {
+          continue;
+        }
         iree_status_t status = iree_hal_amd_gpu_context_allocate(
             fabric_, &fabric_->endpoints[i].id,
             iree_hal_device_event_sink_stderr(), iree_allocator_system(),
@@ -90,8 +164,21 @@ class NativeQueue {
         bool supported = false;
         for (uint32_t family = 0;
              family < context_->endpoint_info.queue_family_count; ++family) {
-          supported |= iree_hal_amd_gpu_pm4_queue_publication_modes(
-                           &context_->families[family]) != 0;
+          const auto& native = context_->families[family];
+          if (native.command_type != command_type_) {
+            continue;
+          }
+          supported =
+              command_type_ == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                  ? (native.format_features &
+                     AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE) &&
+                        (native.user_queue_capabilities &
+                         AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER)
+                  : iree_hal_amd_gpu_pm4_queue_publication_modes(&native) != 0;
+          if (supported) {
+            family_ordinal = family;
+            break;
+          }
         }
         if (supported) {
           break;
@@ -103,9 +190,10 @@ class NativeQueue {
     if (!context_) {
       return iree_ok_status();
     }
-    const uint32_t gfx_major = context_->target_info.gfx_ip.major;
+    const auto gfxip = context_->target_info.gfx_ip;
     iree_hal_amd_gpu_device_options_t options;
     iree_hal_amd_gpu_device_options_initialize(&options);
+    options.queue_family_ordinal = family_ordinal;
     IREE_RETURN_IF_ERROR(iree_async_proactor_pool_create(
         1, nullptr, iree_async_proactor_pool_options_default(),
         iree_allocator_system(), &proactors_));
@@ -117,7 +205,7 @@ class NativeQueue {
     auto* context = context_;
     context_ = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_device_create(
-        context, IREE_SV("PM4 queue benchmark"), &options, &params,
+        context, IREE_SV("AMD queue benchmark"), &options, &params,
         iree_allocator_t{this, Allocate}, &device_));
     IREE_RETURN_IF_ERROR(iree_hal_device_group_create_from_device(
         device_, tracker_, iree_allocator_system(), &group_));
@@ -151,7 +239,10 @@ class NativeQueue {
 
     const auto* files = iree_hal_amd_gpu_hip_images_create();
     iree_const_byte_span_t artifact = iree_const_byte_span_empty();
-    const char* selector = gfx_major == 11 ? "gfx11_generic" : "gfx12_generic";
+    const char* selector =
+        gfxip.major == 9    ? (gfxip.minor == 4 ? "gfx9_4_generic" : "gfx90a")
+        : gfxip.major == 11 ? "gfx11_generic"
+                            : "gfx12_generic";
     for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
       if (std::strstr(files[i].name, selector)) {
         artifact = iree_make_const_byte_span(files[i].data, files[i].size);
@@ -175,9 +266,55 @@ class NativeQueue {
           lane.executable, IREE_SV("image_transform"), &lane.function));
       IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
           device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-          IREE_HAL_SEMAPHORE_FLAG_NONE, &lane.timeline));
+          private_stream_ ? IREE_HAL_SEMAPHORE_FLAG_DEVICE_LOCAL |
+                                IREE_HAL_SEMAPHORE_FLAG_SINGLE_PRODUCER
+                          : IREE_HAL_SEMAPHORE_FLAG_NONE,
+          &lane.timeline));
+    }
+    if (private_stream_) {
+      IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+          device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+          IREE_HAL_SEMAPHORE_FLAG_NONE, &completion_));
     }
     return iree_ok_status();
+  }
+
+  // The final dispatch signals both its private stream and public completion.
+  // A zero grid measures admission/signaling only; it launches no kernel.
+  iree_status_t SubmitChain(uint32_t count, bool empty) {
+    auto& lane = lanes_[0];
+    const auto reference = iree_hal_make_buffer_ref(lane.output, 0, 4);
+    const uint32_t value = 1;
+    auto config = iree_hal_make_static_dispatch_config(empty ? 0 : 1, 1, 1);
+    config.workgroup_size[0] = 32;
+    config.workgroup_size[1] = config.workgroup_size[2] = 1;
+    iree_hal_semaphore_t* signal_semaphores[] = {lane.timeline, completion_};
+    iree_status_t status = iree_ok_status();
+    for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+      const bool final = i + 1 == count;
+      uint64_t before = lane.epoch;
+      uint64_t values[] = {before + 1, completion_value_ + 1};
+      status = iree_hal_queue_dispatch(
+          queue_, {i ? 1u : 0u, &lane.timeline, &before},
+          {final ? 2u : 1u, signal_semaphores, values}, lane.executable,
+          lane.function, config,
+          iree_make_const_byte_span(&value, sizeof(value)), {1, &reference},
+          nullptr, IREE_HAL_DISPATCH_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        ++lane.epoch;
+        if (final) {
+          ++completion_value_;
+        }
+      }
+    }
+    lane.expected = value * 3 + 19;
+    return status;
+  }
+
+  iree_status_t CompleteChain() {
+    return iree_hal_semaphore_wait(completion_, completion_value_,
+                                   iree_infinite_timeout(),
+                                   IREE_ASYNC_WAIT_FLAG_NONE);
   }
 
   iree_status_t Submit(size_t producer, Arguments arguments,
@@ -545,6 +682,14 @@ class NativeQueue {
     return iree_ok_status();
   }
 
+  // Exact requested packet family, independent of shader ISA.
+  amdf_queue_command_type_t command_type_;
+  // Chain rows use device-local single-producer dependencies.
+  bool private_stream_;
+  // Public final notification for a chain, distinct from its private stream.
+  iree_hal_semaphore_t* completion_ = nullptr;
+  // Last accepted public final notification.
+  uint64_t completion_value_ = 0;
   // Native discovery owner, independently of the transferred context.
   iree_hal_amd_fabric_t* fabric_ = nullptr;
   // Unique constructing owner, transferred to device on success.
@@ -593,9 +738,11 @@ class NativeQueue {
   std::atomic<uint64_t> allocation_count_ = 0;
 };
 
-static void BM_Dispatch(benchmark::State& state, Arguments arguments,
-                        Barriers barriers, Timing timing) {
-  NativeQueue dispatch;
+static void BM_Dispatch(
+    benchmark::State& state, Arguments arguments, Barriers barriers,
+    Timing timing,
+    amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {
+  NativeQueue dispatch(command_type);
   if (!dispatch.Initialize(state)) {
     return;
   }
@@ -661,6 +808,83 @@ DISPATCH_CASE(BindingsEmptyLatency, kBindings, kExplicitEmpty, kSampledSubmit);
 DISPATCH_CASE(NativeDefaultLatency, kNative, kDefault, kSampledSubmit);
 DISPATCH_CASE(NativeEmptyLatency, kNative, kExplicitEmpty, kSampledSubmit);
 #undef DISPATCH_CASE
+
+BENCHMARK_CAPTURE(BM_Dispatch, AqlBindingsDefaultSubmit, Arguments::kBindings,
+                  Barriers::kDefault, Timing::kSubmit,
+                  AMDF_QUEUE_COMMAND_TYPE_GPU_AQL)
+    ->Arg(1)
+    ->Arg(32)
+    ->Arg(1000)
+    ->Iterations(200)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_Dispatch, AqlBindingsEmptySubmit, Arguments::kBindings,
+                  Barriers::kExplicitEmpty, Timing::kSubmit,
+                  AMDF_QUEUE_COMMAND_TYPE_GPU_AQL)
+    ->Arg(1)
+    ->Arg(32)
+    ->Arg(1000)
+    ->Iterations(200)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_Dispatch, AqlBindingsDefaultCompletion,
+                  Arguments::kBindings, Barriers::kDefault, Timing::kCompletion,
+                  AMDF_QUEUE_COMMAND_TYPE_GPU_AQL)
+    ->Arg(1)
+    ->Arg(32)
+    ->Arg(1000)
+    ->Iterations(200)
+    ->UseRealTime();
+
+static void BM_AqlChain(benchmark::State& state, bool empty, Timing timing) {
+  NativeQueue queue(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true);
+  if (!queue.Initialize(state)) {
+    return;
+  }
+  const uint32_t count = state.range(0);
+  IREE_CHECK_OK(queue.SubmitChain(count, empty));
+  IREE_CHECK_OK(queue.CompleteChain());
+  const uint64_t allocations_before = queue.allocation_count();
+  for (auto _ : state) {
+    IREE_CHECK_OK(queue.SubmitChain(count, empty));
+    if (timing == Timing::kSubmit) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.CompleteChain());
+    if (timing == Timing::kCompletion) {
+      state.PauseTiming();
+    }
+    if (!empty) {
+      IREE_CHECK_OK(queue.CheckOutput(0));
+    }
+    state.ResumeTiming();
+  }
+  state.counters["host_allocations"] =
+      queue.allocation_count() - allocations_before;
+  state.SetItemsProcessed(state.iterations() * count);
+}
+BENCHMARK_CAPTURE(BM_AqlChain, EmptySubmit, true, Timing::kSubmit)
+    ->Arg(1)
+    ->Arg(20)
+    ->Arg(1000)
+    ->Iterations(200)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_AqlChain, EmptyCompletion, true, Timing::kCompletion)
+    ->Arg(1)
+    ->Arg(20)
+    ->Arg(1000)
+    ->Iterations(200)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_AqlChain, DispatchSubmit, false, Timing::kSubmit)
+    ->Arg(1)
+    ->Arg(20)
+    ->Arg(1000)
+    ->Iterations(200)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_AqlChain, DispatchCompletion, false, Timing::kCompletion)
+    ->Arg(1)
+    ->Arg(20)
+    ->Arg(1000)
+    ->Iterations(200)
+    ->UseRealTime();
 
 // Completion and destruction are excluded from recording timing. One actual
 // invocation verifies the recorded program before measuring its construction.
