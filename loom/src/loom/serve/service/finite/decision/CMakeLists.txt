@@ -44,6 +44,7 @@ loom_cc_library(
     loom::serve::runtime::device
     loom::serve::runtime::host
     loom::serve::server::registry
+    loom::serve::server::resources
     loom::serve::server::router
     loom::serve::service::finite::decision::protocol
     loom::serve::service::finite::embedding::protocol

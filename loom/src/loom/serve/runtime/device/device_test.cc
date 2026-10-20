@@ -28,9 +28,10 @@ TEST_F(DeviceTest, AllocationFailureReturnsNoOwner) {
       .driver = loom_serve_host_task_driver(host),
       .uri = IREE_SV("task"),
   };
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_serve_device_group_allocate(
-                            host, 1, &options, iree_allocator_null(), &group));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_device_group_allocate(host, 1, &options, nullptr,
+                                       iree_allocator_null(), &group));
   EXPECT_EQ(group, nullptr);
   IREE_EXPECT_OK(loom_serve_device_group_free(group));
 }
@@ -44,14 +45,14 @@ TEST_F(DeviceTest, InvalidBackingRejectsBeforeDeviceCreation) {
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_device_group_allocate(host, 1, &options,
+      loom_serve_device_group_allocate(host, 1, &options, nullptr,
                                        iree_allocator_system(), &group));
   EXPECT_EQ(group, nullptr);
   options.memory_limit = 0;
   options.backing = static_cast<loom_serve_device_backing_t>(2);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_device_group_allocate(host, 1, &options,
+      loom_serve_device_group_allocate(host, 1, &options, nullptr,
                                        iree_allocator_system(), &group));
   EXPECT_EQ(group, nullptr);
 }
@@ -62,7 +63,7 @@ TEST_F(DeviceTest, InvalidCountRejectsBeforeReadingOptions) {
   for (iree_host_size_t count : counts) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
-        loom_serve_device_group_allocate(host, count, nullptr,
+        loom_serve_device_group_allocate(host, count, nullptr, nullptr,
                                          iree_allocator_system(), &group));
     EXPECT_EQ(group, nullptr);
   }
@@ -77,10 +78,10 @@ TEST_F(DeviceTest, EveryOptionIsValidatedBeforeCreatingDevices) {
           .uri = IREE_SV("task"),
           .memory_limit = 1,
       }};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_device_group_allocate(host, IREE_ARRAYSIZE(options), options,
-                                       iree_allocator_system(), &group));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_device_group_allocate(
+                            host, IREE_ARRAYSIZE(options), options, nullptr,
+                            iree_allocator_system(), &group));
   EXPECT_EQ(group, nullptr);
 }
 

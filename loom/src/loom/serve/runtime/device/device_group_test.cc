@@ -72,10 +72,10 @@ TEST_F(DeviceGroupTest, LaterDeviceFailureReleasesEarlierHandle) {
           .driver = driver_,
           .uri = iree_make_string_view(invalid_uri.data(), invalid_uri.size()),
       }};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_device_group_allocate(host_, IREE_ARRAYSIZE(options), options,
-                                       iree_allocator_system(), &group_));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_device_group_allocate(
+                            host_, IREE_ARRAYSIZE(options), options, nullptr,
+                            iree_allocator_system(), &group_));
   EXPECT_EQ(group_, nullptr);
 }
 
@@ -98,7 +98,7 @@ TEST_F(DeviceGroupTest, LaterPoolFailureReleasesSealedGroupAndEarlierPool) {
         }};
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           loom_serve_device_group_allocate(
-                              host_, IREE_ARRAYSIZE(options), options,
+                              host_, IREE_ARRAYSIZE(options), options, nullptr,
                               iree_allocator_system(), &group_));
     EXPECT_EQ(group_, nullptr);
   }
@@ -114,7 +114,7 @@ TEST_F(DeviceGroupTest, IndependentSlabSizesPreserveShortTails) {
       .state_slab_size = kSlabBytes,
   };
   IREE_ASSERT_OK(loom_serve_device_group_allocate(
-      host_, 1, &options, iree_allocator_system(), &group_));
+      host_, 1, &options, nullptr, iree_allocator_system(), &group_));
   auto* device = loom_serve_device_group_at(group_, 0);
   const auto weights = loom_serve_device_weight_geometry(device);
   const auto state = loom_serve_device_state_geometry(device);
@@ -158,9 +158,9 @@ TEST_F(DeviceGroupTest, SeparateBudgetsAndWholeGroupLifetime) {
           .state_slab_size = kSlabBytes,
           .memory_limit = 2 * kSlabBytes,
       }};
-  IREE_ASSERT_OK(
-      loom_serve_device_group_allocate(host_, IREE_ARRAYSIZE(options), options,
-                                       iree_allocator_system(), &group_));
+  IREE_ASSERT_OK(loom_serve_device_group_allocate(
+      host_, IREE_ARRAYSIZE(options), options, nullptr, iree_allocator_system(),
+      &group_));
   auto* first = loom_serve_device_group_at(group_, 0);
   auto* second = loom_serve_device_group_at(group_, 1);
   EXPECT_EQ(loom_serve_device_group(first), loom_serve_device_group(second));

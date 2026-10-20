@@ -143,8 +143,9 @@ class ImageServiceFixture : public ::testing::Test {
     const loom_serve_device_options_t options[] = {
         {.driver = driver, .uri = uri}, {.driver = driver, .uri = uri}};
     if (iree_status_is_ok(status)) {
-      status = loom_serve_device_group_allocate(
-          host, device_count, options, iree_allocator_system(), out_group);
+      status =
+          loom_serve_device_group_allocate(host, device_count, options, nullptr,
+                                           iree_allocator_system(), out_group);
     }
     iree_hal_driver_release(driver);
     loom_serve_host_release(host);

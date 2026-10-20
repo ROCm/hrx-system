@@ -10,6 +10,7 @@
 #include "iree/tokenizer/tokenizer.h"
 #include "iree/vm/buffer.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/runtime/program/sources.h"
 #include "loom/serve/service/execution_reconfiguration.h"
@@ -164,6 +165,14 @@ const iree_tokenizer_t* loom_serve_finite_model_tokenizer(
     const loom_serve_finite_model_t* model);
 loom_serve_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model);
+// Borrowed logical device owning this model's queues and numerical policy.
+loom_serve_device_t* loom_serve_finite_model_device(
+    const loom_serve_finite_model_t* model);
+
+// Borrows the model's numerical claim on its serialized owner. It outlives
+// the service, retaining accepted accounting through failed native retirement.
+loom_serve_execution_permit_t* loom_serve_finite_model_permit(
+    loom_serve_finite_model_t* model);
 
 // Model-wide checkpoint accounting and policy, including idle cached banks.
 loom_serve_residency_snapshot_t loom_serve_finite_model_parameters(
@@ -225,6 +234,8 @@ iree_status_t loom_serve_finite_model_submit(
 // Scheduler consumes successful producer readiness, releasing the residency pin
 // and uploaded payload. Independent results may remain live across subsequent
 // cohorts, parameter eviction, reconfiguration, and model destruction.
+// A cancelled admitted cohort can complete without numerical submission after
+// its residency frontier succeeds; this releases the same pin and source plan.
 void loom_serve_finite_model_complete(loom_serve_finite_model_t* model);
 
 // Releases an unsubmitted cohort. Never used after

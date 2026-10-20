@@ -184,9 +184,9 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest {
       bool progress = false;
       OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
         if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
-          IREE_ASSERT_OK(model->service.advance(
-              model->service.self, loom_serve_registry_service_flags(model),
-              &progress));
+          IREE_ASSERT_OK(Advance(model->service,
+                                 loom_serve_registry_service_flags(model),
+                                 &progress));
         }
         bool advanced = false;
         IREE_ASSERT_OK(

@@ -18,10 +18,12 @@ bool SpeechElasticBacking() { return FLAG_test_elastic; }
 
 iree_status_t OpenSpeech(loom_serve_speech_service_t* service,
                          iree_string_view_t input, iree_string_view_t voice,
-                         uint64_t seed, SpeechStream* out_stream) {
+                         uint64_t seed, SpeechStream* out_stream,
+                         loom_serve_execution_qos_t qos) {
   loom_serve_speech_request_t request;
   IREE_RETURN_IF_ERROR(loom_serve_speech_request_initialize_text(
       input, voice, {}, seed, 1.0f, iree_allocator_system(), &request));
+  request.qos = qos;
   loom_serve_speech_stream_t* stream = nullptr;
   iree_status_t status =
       loom_serve_speech_service_try_open(service, &request, &stream);

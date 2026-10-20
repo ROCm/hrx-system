@@ -20,6 +20,27 @@ exports_files(
 )
 
 loom_cc_library(
+    name = "scheduler",
+    srcs = ["scheduler.c"],
+    hdrs = ["scheduler.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_test(
+    name = "scheduler_test",
+    srcs = ["scheduler_test.cc"],
+    deps = [
+        ":scheduler",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "workspace",
     srcs = ["workspace.c"],
     hdrs = ["workspace.h"],

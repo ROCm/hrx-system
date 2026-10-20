@@ -19,16 +19,17 @@ namespace loom_serve::testing {
 
 namespace {
 
-struct JitTestApplication {
+struct loom_serve_test_jit_application_t {
   // Host worker count selecting this application.
   iree_host_size_t worker_count;
   // Process-owned physical device group shared by matching test cases.
   loom_serve_device_group_t* group = nullptr;
 };
 
-std::array<JitTestApplication, 2>& GetJitTestApplications() {
-  static std::array<JitTestApplication, 2> applications = {
-      JitTestApplication{1}, JitTestApplication{4}};
+std::array<loom_serve_test_jit_application_t, 2>& GetJitTestApplications() {
+  static std::array<loom_serve_test_jit_application_t, 2> applications = {
+      loom_serve_test_jit_application_t{1},
+      loom_serve_test_jit_application_t{4}};
   return applications;
 }
 
@@ -36,7 +37,7 @@ iree_status_t AcquireJitTestApplication(iree_host_size_t worker_count,
                                         iree_allocator_t host_allocator,
                                         loom_serve_device_group_t** out_group) {
   *out_group = nullptr;
-  JitTestApplication* selected = nullptr;
+  loom_serve_test_jit_application_t* selected = nullptr;
   for (auto& application : GetJitTestApplications()) {
     if (application.worker_count == worker_count) {
       selected = &application;
@@ -63,8 +64,8 @@ iree_status_t AcquireJitTestApplication(iree_host_size_t worker_count,
         .driver = driver,
         .uri = loom_serve_test_device()->device_uri,
     };
-    status = loom_serve_device_group_allocate(host, 1, &options, host_allocator,
-                                              &selected->group);
+    status = loom_serve_device_group_allocate(host, 1, &options, nullptr,
+                                              host_allocator, &selected->group);
   }
   iree_hal_driver_release(driver);
   loom_serve_host_release(host);

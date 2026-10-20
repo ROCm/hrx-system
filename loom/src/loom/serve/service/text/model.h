@@ -11,6 +11,7 @@
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/runtime/program/sources.h"
@@ -403,6 +404,11 @@ iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model);
 // model invocation; this is not a model-private allocation domain.
 loom_serve_device_t* loom_serve_text_model_device(
     const loom_serve_text_model_t* model);
+
+// Borrows the model's numerical claim on its serialized owner. It outlives
+// the service, retaining accepted accounting through failed native retirement.
+loom_serve_execution_permit_t* loom_serve_text_model_permit(
+    loom_serve_text_model_t* model);
 
 // At a serialized model boundary, release/reload parameter backing while
 // preserving compiled commands and all retained row state. Deactivation

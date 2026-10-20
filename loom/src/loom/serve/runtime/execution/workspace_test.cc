@@ -44,8 +44,8 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
         {.driver = loom_serve_host_task_driver(host_), .uri = IREE_SV("task")},
         {.driver = loom_serve_host_task_driver(host_), .uri = IREE_SV("task")}};
     IREE_ASSERT_OK(loom_serve_device_group_allocate(
-        host_, IREE_ARRAYSIZE(options), options, iree_allocator_system(),
-        &group_));
+        host_, IREE_ARRAYSIZE(options), options, nullptr,
+        iree_allocator_system(), &group_));
     std::array<iree_hal_pool_family_access_t, 2> families = {};
     for (iree_host_size_t i = 0; i < families.size(); ++i) {
       auto* device = loom_serve_device_group_at(group_, i);

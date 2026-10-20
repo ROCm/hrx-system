@@ -120,8 +120,20 @@ iree_status_t loom_serve_test_application_acquire(
           .memory_limit = options->memory_limit,
       };
     }
+    // Each actual device admits two units; the host has no added count limit.
+    std::vector<uint32_t> max_active(options->device_count + 1, 2);
+    max_active[0] = 0;
+    const loom_serve_execution_scope_t scope = {
+        .resources = (UINT64_C(1) << (options->device_count + 1)) - 1,
+        .coexistence = LOOM_SERVE_EXECUTION_COEXISTENCE_EXCLUDE,
+    };
+    const loom_serve_execution_policy_t policy = {
+        .max_active = max_active.data(),
+        .scope_count = 1,
+        .scopes = &scope,
+    };
     status = loom_serve_device_group_allocate(
-        host, options->device_count, device_options.data(),
+        host, options->device_count, device_options.data(), &policy,
         application.native_allocator->allocator(), &group);
     if (iree_status_is_ok(status) &&
         options->backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {

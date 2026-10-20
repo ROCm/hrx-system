@@ -12,6 +12,37 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    scheduler
+  HDRS
+    "scheduler.h"
+  SRCS
+    "scheduler.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    scheduler_test
+  SRCS
+    "scheduler_test.cc"
+  DEPS
+    ::scheduler
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     workspace
   HDRS
     "workspace.h"

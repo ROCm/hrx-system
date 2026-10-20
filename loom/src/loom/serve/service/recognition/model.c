@@ -15,6 +15,7 @@
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/retirement.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/input.h"
 #include "loom/serve/runtime/program/json.h"
@@ -99,6 +100,8 @@ struct loom_serve_recognition_model_t {
   iree_tokenizer_t* tokenizer;
   // Borrowed shared device, outliving this model.
   loom_serve_device_t* owner;
+  // Numerical claim retained until successful completion or native retirement.
+  loom_serve_execution_permit_t permit;
   // Independent model work and feedback timelines on shared queues.
   loom_serve_execution_t* execution;
   // Stable source-addressed input/history and reusable conditioning ownership.
@@ -238,6 +241,7 @@ static iree_status_t loom_serve_recognition_model_destroy_resources(
   loom_serve_recognition_model_release_consumers(model);
   loom_serve_rows_retire(&model->state, NULL, NULL);
   IREE_ASSERT(loom_serve_recognition_model_is_retired(model));
+  loom_serve_execution_permit_deinitialize(&model->permit);
   loom_serve_residency_free(model->residency);
   model->residency = NULL;
   loom_serve_residency_group_free(model->parameter_group);
@@ -953,6 +957,9 @@ iree_status_t loom_serve_recognition_load_allocate(
     load->model->host_allocator = host_allocator;
     loom_serve_rows_initialize(host_allocator, &load->model->state);
     load->model->owner = device;
+    loom_serve_execution_permit_initialize(
+        loom_serve_device_scheduler(device),
+        loom_serve_device_execution_resources(device), &load->model->permit);
     *out_load = load;
   } else {
     iree_slim_mutex_deinitialize(&load->event.mutex);
@@ -1684,5 +1691,6 @@ loom_serve_recognition_generator_t loom_serve_recognition_model_generator(
       .release = loom_serve_recognition_generator_release,
       .tokenizer = model->tokenizer,
       .capacity_domain = loom_serve_residency_cache(model->residency),
+      .permit = &model->permit,
       .weight_activity = loom_serve_recognition_generator_weight_activity};
 }

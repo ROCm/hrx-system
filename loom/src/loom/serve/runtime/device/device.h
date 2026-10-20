@@ -7,6 +7,7 @@
 #define LOOM_SERVE_RUNTIME_DEVICE_DEVICE_H_
 
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/storage/memory.h"
@@ -63,10 +64,15 @@ typedef struct loom_serve_device_options_t {
 // driver overhead outside the retained-memory budget. Retains host through all
 // device and asynchronous service lifetimes. Failure returns no group and
 // releases partial state, including earlier devices.
+// Policy resource zero is the shared application host executor; resource i+1
+// is device i. CPU task execution also claims the host resource. Policy is
+// copied before device creation; NULL selects cross-class exclusion throughout
+// the group without imposing a software count limit.
 iree_status_t loom_serve_device_group_allocate(
     loom_serve_host_t* host, iree_host_size_t device_count,
-    const loom_serve_device_options_t* options, iree_allocator_t host_allocator,
-    loom_serve_device_group_t** out_group);
+    const loom_serve_device_options_t* options,
+    const loom_serve_execution_policy_t* policy,
+    iree_allocator_t host_allocator, loom_serve_device_group_t** out_group);
 
 // Releases all device resources and the host reference without an implicit
 // device wait. The caller first drains every model domain and releases all
@@ -153,6 +159,17 @@ iree_hal_device_group_t* loom_serve_device_group(
 iree_hal_queue_t* loom_serve_device_dispatch_queue(
     const loom_serve_device_t* device);
 iree_hal_queue_t* loom_serve_device_transfer_queue(
+    const loom_serve_device_t* device);
+// Borrowed application admission owner, shared by every device in this group.
+loom_serve_execution_scheduler_t* loom_serve_device_group_scheduler(
+    loom_serve_device_group_t* group);
+// Same application owner reached from an actual model binding.
+loom_serve_execution_scheduler_t* loom_serve_device_scheduler(
+    loom_serve_device_t* device);
+// Actual numerical resources of this binding, including the shared executor
+// for task devices. Transfer and host preparation have their own operation
+// cuts.
+loom_serve_execution_resources_t loom_serve_device_execution_resources(
     const loom_serve_device_t* device);
 // Creates an owned model timeline over this device's shared workspace. The
 // serialized device owner assigns the least borrowed provisioned queues;

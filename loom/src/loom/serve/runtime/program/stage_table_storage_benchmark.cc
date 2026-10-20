@@ -165,8 +165,8 @@ int main(int argc, char** argv) {
       .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
   };
   loom_serve_device_group_t* group = nullptr;
-  IREE_CHECK_OK(
-      loom_serve_device_group_allocate(host, 1, &options, tracked, &group));
+  IREE_CHECK_OK(loom_serve_device_group_allocate(host, 1, &options, nullptr,
+                                                 tracked, &group));
   iree_hal_driver_release(driver);
   auto* device = loom_serve_device_group_at(group, 0);
   loom_serve_compilation_report_t report = {};

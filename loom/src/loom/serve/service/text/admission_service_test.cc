@@ -126,7 +126,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     ASSERT_NO_FATAL_FAILURE(Accept(extra, interface, &connection));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
     bool progress = false;
-    IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+    IREE_ASSERT_OK(Advance(interface, 0, &progress));
     EXPECT_FALSE(progress);
     EXPECT_TRUE(quiescent());
     EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 2u);
@@ -279,7 +279,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
             EXPECT_TRUE(interface.is_pending(interface.self));
             EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 2u);
             bool progress = false;
-            IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+            IREE_ASSERT_OK(Advance(interface, 0, &progress));
             EXPECT_TRUE(progress);
             EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
             EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);

@@ -351,6 +351,10 @@ class SourceTextServiceTest : public ::testing::Test {
     }
   }
 
+  // Advances a manually owned service and observes eligible numerical work.
+  iree_status_t Advance(const loom_serve_service_t& interface,
+                        loom_serve_service_flags_t flags, bool* progress);
+
   template <typename Predicate>
   void AdvanceUntil(const loom_serve_service_t& interface, Predicate ready,
                     loom_serve_service_flags_t flags = 0) {
@@ -358,7 +362,7 @@ class SourceTextServiceTest : public ::testing::Test {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
+      IREE_ASSERT_OK(Advance(interface, flags, &progress));
       if (ready() || progress) {
         iree_notification_cancel_wait(notification);
       } else {

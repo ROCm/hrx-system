@@ -195,7 +195,7 @@ class MemoryLossTest : public ::testing::Test {
         .uri = IREE_SV("task"),
     };
     auto status = loom_serve_device_group_allocate(
-        host, 1, &options, iree_allocator_system(), &group_);
+        host, 1, &options, nullptr, iree_allocator_system(), &group_);
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
     auto* device = loom_serve_device_group_at(group_, 0);

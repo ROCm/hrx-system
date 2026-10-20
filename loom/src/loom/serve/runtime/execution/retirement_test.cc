@@ -50,7 +50,7 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
         .memory_limit = kSlabBytes,
     };
     auto status = loom_serve_device_group_allocate(
-        host, 1, &options, iree_allocator_system(), &group);
+        host, 1, &options, nullptr, iree_allocator_system(), &group);
     IREE_ASSERT_OK(status);
     device = loom_serve_device_group_at(group, 0);
     IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(

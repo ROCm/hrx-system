@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_CONSUMER_H_
 #define LOOM_SERVE_SERVICE_TEXT_CONSUMER_H_
 
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/service/text/chat.h"
 
 #ifdef __cplusplus
@@ -82,6 +83,8 @@ typedef struct loom_serve_text_consumer_t {
   void* self;
   // Process-lifetime operations; nonnull exactly when self is nonnull.
   const loom_serve_text_consumer_vtable_t* vtable;
+  // Immutable request class, moved with its receipt through retirement.
+  loom_serve_execution_qos_t qos;
 } loom_serve_text_consumer_t;
 
 #ifdef __cplusplus

@@ -46,9 +46,10 @@ controls, pressure, counters and telemetry cursors.
 | `--memory_bytes=N` | `0` | Serving-managed physical parameter/state limit; `0` imposes no serving limit. |
 
 Model, connection and body capacities must be positive. Holding credit must
-remain below connection capacity. Heartbeat/idle intervals, slab sizes and memory
-limits are nonnegative. A nonzero memory limit requires elastic backing and
-exactly one device: independent device pools cannot enforce a shared byte limit.
+remain below connection capacity. Heartbeat/idle intervals, slab sizes, memory
+limits are nonnegative. A nonzero memory limit
+requires elastic backing and exactly one device: independent device pools cannot
+enforce a shared byte limit.
 It excludes invocation workspace, host allocations and driver overhead; it is
 not a whole-process or whole-device memory cap.
 

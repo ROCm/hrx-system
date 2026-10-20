@@ -9,6 +9,7 @@
 
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/service/recognition/events.h"
 #include "loom/serve/service/recognition/input.h"
@@ -109,6 +110,9 @@ typedef struct loom_serve_recognition_generator_t {
   const iree_tokenizer_t* tokenizer;
   // Shared capacity identity, borrowed through service retirement.
   const void* capacity_domain;
+  // Borrowed model-owned claim, retained through actual native retirement even
+  // after service destruction. NULL declares independently managed execution.
+  loom_serve_execution_permit_t* permit;
   // Optional copied parameter activity, queried only on serialized owner turns.
   loom_serve_weight_activity_t (*weight_activity)(void* self);
 } loom_serve_recognition_generator_t;

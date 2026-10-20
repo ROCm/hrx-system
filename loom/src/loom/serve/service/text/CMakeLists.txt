@@ -117,6 +117,7 @@ loom_cc_library(
     loom::serve::runtime::program::variant_pool
     loom::serve::server::model_registration
     loom::serve::server::registry
+    loom::serve::server::resources
     loom::serve::server::router
     loom::serve::service::finite::component
     loom::serve::service::finite::model
@@ -325,6 +326,7 @@ loom_cc_library(
     ::stream
     iree::base::tooling::flags
     loom::serve::runtime::device
+    loom::serve::runtime::execution::scheduler
     loom::util::json
   TESTONLY
   ALWAYSLINK
@@ -578,6 +580,7 @@ loom_cc_library(
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::execution::retirement
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program
@@ -712,6 +715,7 @@ loom_cc_library(
   DEPS
     ::chat
     iree::base
+    loom::serve::runtime::execution::scheduler
   PUBLIC
 )
 endif()
@@ -1101,6 +1105,7 @@ loom_cc_library(
     loom::serve::media::image
     loom::serve::media::image_request
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::parameter::residency
     loom::serve::service
     loom::serve::service::finite::model
@@ -1229,6 +1234,7 @@ loom_cc_library(
     loom::serve::media::image_codecs
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake

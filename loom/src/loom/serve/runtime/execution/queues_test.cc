@@ -39,7 +39,7 @@ class ExecutionQueuesTest : public ::testing::TestWithParam<bool> {
                    : loom_serve_test_device()->device_uri,
     };
     IREE_ASSERT_OK(loom_serve_device_group_allocate(
-        host_, 1, &options, iree_allocator_system(), &group_));
+        host_, 1, &options, nullptr, iree_allocator_system(), &group_));
     auto* owner = loom_serve_device_group_at(group_, 0);
     device_ = loom_serve_device_handle(owner);
     dispatch_family_ =

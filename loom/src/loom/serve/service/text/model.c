@@ -53,6 +53,8 @@ struct loom_serve_text_model_t {
   loom_serve_text_source_t source;
   // Borrowed shared owner outliving every model resource and host I/O payload.
   loom_serve_device_t* device_owner;
+  // Numerical claim retained until successful completion or native retirement.
+  loom_serve_execution_permit_t permit;
   // GPU device and allocation domain borrowed from device_owner.
   iree_hal_device_t* device;
   // Semaphore namespace borrowed from device_owner.
@@ -435,6 +437,9 @@ iree_status_t loom_serve_text_load_allocate(
     loom_serve_text_model_t* model = load->model;
     model->host_allocator = host_allocator;
     model->device_owner = device;
+    loom_serve_execution_permit_initialize(
+        loom_serve_device_scheduler(device),
+        loom_serve_device_execution_resources(device), &model->permit);
     model->device = loom_serve_device_handle(device);
     model->group = loom_serve_device_group(device);
     model->dispatch = loom_serve_device_dispatch_queue(device);
@@ -670,6 +675,7 @@ iree_status_t loom_serve_text_model_free_retired(
     return iree_ok_status();
   }
   IREE_ASSERT(loom_serve_text_model_is_retired(model));
+  loom_serve_execution_permit_deinitialize(&model->permit);
   loom_serve_residency_free(model->residency);
   model->residency = NULL;
   loom_serve_residency_group_free(model->parameter_group);
@@ -722,6 +728,11 @@ iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model) {
 loom_serve_device_t* loom_serve_text_model_device(
     const loom_serve_text_model_t* model) {
   return model->device_owner;
+}
+
+loom_serve_execution_permit_t* loom_serve_text_model_permit(
+    loom_serve_text_model_t* model) {
+  return &model->permit;
 }
 
 iree_status_t loom_serve_text_model_compile_variant_async(

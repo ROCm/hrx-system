@@ -1532,6 +1532,9 @@ static void loom_serve_router_advance(loom_serve_router_t* router,
                                      &maintenance_progress));
   router->stopping |= !iree_status_is_ok(router->status);
   *out_progress |= maintenance_progress;
+  if (!router->stopping) {
+    *out_progress |= loom_serve_resources_schedule(&router->resources);
+  }
   if (router->stopping) {
     loom_serve_router_held_collect(router, out_progress);
   }

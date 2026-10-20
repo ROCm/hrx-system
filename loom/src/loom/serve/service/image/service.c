@@ -467,15 +467,11 @@ static iree_status_t loom_serve_image_service_submit(
       loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, loom_serve_image_active(service));
   const iree_time_t begin = iree_time_now();
-  if (service->phase == IMAGE_PHASE_WAITING) {
-    const iree_duration_t admission_ns = begin - service->phase_start;
-    for (iree_host_size_t i = 0; i < service->cohort.count; ++i) {
-      service->cohort.jobs[i]->work.admission_ns = admission_ns;
-    }
-    service->telemetry.totals.work.admission_ns += admission_ns;
-  }
   service->device.cancelled =
       service->stopping || !loom_serve_image_has_peer(service);
+  if (service->device.cancelled) {
+    loom_serve_execution_permit_cancel(service->generator.permit);
+  }
   const loom_serve_image_submit_flags_t flags =
       service->device.cancelled ? LOOM_SERVE_IMAGE_SUBMIT_FLAG_CANCEL : 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -694,7 +690,14 @@ static void loom_serve_image_prepared(loom_serve_image_service_t* service,
     *progress = true;
     return;
   } else if (iree_status_is_ok(service->status)) {
-    service->status = loom_serve_image_service_submit(service);
+    const iree_duration_t admission_ns = iree_time_now() - service->phase_start;
+    for (iree_host_size_t i = 0; i < service->cohort.count; ++i) {
+      service->cohort.jobs[i]->work.admission_ns = admission_ns;
+    }
+    service->telemetry.totals.work.admission_ns += admission_ns;
+    loom_serve_execution_permit_request(service->generator.permit,
+                                        LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+    service->phase = IMAGE_PHASE_READY;
   }
   *progress = true;
   if (!iree_status_is_ok(service->status)) {
@@ -770,9 +773,12 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
     }
     service->telemetry.totals.work.execution_ns += execution_ns;
     if (!service->device.cancelled) {
+      loom_serve_execution_permit_complete(service->generator.permit);
       ++service->telemetry.counters.batches;
     }
     if (!service->device.complete) {
+      loom_serve_execution_permit_request(service->generator.permit,
+                                          LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
       service->phase = IMAGE_PHASE_READY;
       return;
     }
@@ -1093,7 +1099,10 @@ static iree_status_t loom_serve_image_advance(void* self,
   }
   if (service->phase == IMAGE_PHASE_WAITING) {
     loom_serve_image_prepared(service, flags, out_progress);
-  } else if (service->phase == IMAGE_PHASE_READY) {
+  }
+  if (service->phase == IMAGE_PHASE_READY &&
+      (service->stopping || !loom_serve_image_has_peer(service) ||
+       loom_serve_execution_permit_try_acquire(service->generator.permit))) {
     service->status = loom_serve_image_service_submit(service);
     *out_progress = true;
     if (!iree_status_is_ok(service->status)) {
@@ -1174,6 +1183,7 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
   }
   IREE_ASSERT(!loom_serve_image_is_pending(service));
   const iree_allocator_t host_allocator = service->host_allocator;
+  loom_serve_execution_permit_cancel(service->generator.permit);
   if (!service->stopping) {
     loom_serve_image_stop(service);
   }

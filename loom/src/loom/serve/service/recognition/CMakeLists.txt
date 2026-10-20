@@ -85,6 +85,7 @@ loom_cc_library(
     iree::task
     iree::testing::gtest
     loom::serve::runtime::host
+    loom::serve::server::resources
     loom::serve::testing::http_harness
     loom::serve::testing::service_application
     loom::serve::testing::worker_gate
@@ -215,6 +216,7 @@ loom_cc_library(
     iree::base::threading
     iree::task
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::residency
@@ -233,6 +235,7 @@ loom_cc_library(
   DEPS
     ::events
     iree::base
+    loom::serve::runtime::execution::scheduler
   PUBLIC
 )
 endif()
@@ -250,6 +253,7 @@ loom_cc_library(
     iree::base
     iree::tokenizer
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::parameter::residency
   PUBLIC
 )
@@ -278,6 +282,7 @@ loom_cc_library(
     loom::serve::runtime::execution
     loom::serve::runtime::execution::dispatch
     loom::serve::runtime::execution::retirement
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::parameter::weights
@@ -361,9 +366,11 @@ loom_cc_library(
     iree::testing::gtest
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::telemetry::record
+    loom::serve::testing::device
     loom::serve::testing::native_allocator
     loom::serve::testing::service_application
     loom::serve::testing::worker_gate

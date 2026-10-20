@@ -35,7 +35,7 @@ class RelocationTest : public ::testing::Test {
         .weight_slab_size = 2 * 1024 * 1024,
         .state_slab_size = 2 * 1024 * 1024,
     };
-    auto status = loom_serve_device_group_allocate(host, 1, &options,
+    auto status = loom_serve_device_group_allocate(host, 1, &options, nullptr,
                                                    native.allocator(), &group);
     iree_hal_driver_release(driver);
     loom_serve_host_release(host);

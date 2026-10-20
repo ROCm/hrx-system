@@ -10,6 +10,7 @@
 
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/execution_reconfiguration.h"
@@ -53,19 +54,23 @@ typedef enum loom_serve_finite_phase_e {
   FINITE_BATCHING,
   FINITE_SPECIALIZING,
   FINITE_WAITING,
+  FINITE_READY,
   FINITE_RUNNING,
+  FINITE_RELEASING,
   FINITE_ENCODING,
 } loom_serve_finite_phase_t;
 
 static const char finite_phases[][16] = {
-    "idle",    "preparing", "batching", "specializing",
-    "waiting", "running",   "encoding"};
+    "idle",  "preparing", "batching",  "specializing", "waiting",
+    "ready", "running",   "releasing", "encoding"};
 
 struct loom_serve_finite_service_t {
   // Allocator owning the queue, jobs and encoded results.
   iree_allocator_t host_allocator;
   // Shared source residency, borrowing the device owner through model lifetime.
   loom_serve_finite_model_t* model;
+  // Borrowed model claim for the prepared source cohort.
+  loom_serve_execution_permit_t* permit;
   // Candidate pool and selection, retired before the borrowed model.
   loom_serve_execution_reconfiguration_t* reconfiguration;
   // Immutable native modality contract, borrowed through service lifetime.
@@ -408,6 +413,28 @@ static void loom_serve_finite_device_completed(
   iree_slim_mutex_unlock(&service->event.mutex);
 }
 
+static iree_status_t loom_serve_finite_await(
+    loom_serve_finite_service_t* service, loom_serve_finite_phase_t phase) {
+  iree_async_semaphore_wait_operation_t* wait = &service->device.operation;
+  memset(wait, 0, sizeof(*wait));
+  iree_async_operation_initialize(&wait->base,
+                                  IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
+                                  IREE_ASYNC_OPERATION_FLAG_NONE,
+                                  loom_serve_finite_device_completed, service);
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    service->device.semaphores[i] =
+        (iree_async_semaphore_t*)service->device.frontier.semaphores[i];
+  }
+  wait->semaphores = service->device.semaphores;
+  wait->values = service->device.frontier.values;
+  wait->count = 2;
+  wait->mode = IREE_ASYNC_WAIT_MODE_ALL;
+  IREE_RETURN_IF_ERROR(
+      iree_async_proactor_submit_one(service->proactor, &wait->base));
+  service->phase = phase;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_serve_finite_submit(
     loom_serve_finite_service_t* service) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -424,23 +451,8 @@ static iree_status_t loom_serve_finite_submit(
       result, &service->snapshot, &service->device.frontier);
   loom_serve_finite_result_release(result);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
-  iree_async_semaphore_wait_operation_t* wait = &service->device.operation;
-  memset(wait, 0, sizeof(*wait));
-  iree_async_operation_initialize(&wait->base,
-                                  IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
-                                  IREE_ASYNC_OPERATION_FLAG_NONE,
-                                  loom_serve_finite_device_completed, service);
-  for (iree_host_size_t i = 0; i < 2; ++i) {
-    service->device.semaphores[i] =
-        (iree_async_semaphore_t*)service->device.frontier.semaphores[i];
-  }
-  wait->semaphores = service->device.semaphores;
-  wait->values = service->device.frontier.values;
-  wait->count = 2;
-  wait->mode = IREE_ASYNC_WAIT_MODE_ALL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_async_proactor_submit_one(service->proactor, &wait->base));
-  service->phase = FINITE_RUNNING;
+      z0, loom_serve_finite_await(service, FINITE_RUNNING));
   IREE_TRACE(service->device.section = loom_serve_trace_section_enter(
                  LOOM_SERVE_TRACE_SECTION_EXECUTE, service->name));
   loom_serve_finite_batch_event(service, &LOOM_SERVE_TELEMETRY_BATCH_SUBMIT,
@@ -665,7 +677,11 @@ static iree_status_t loom_serve_finite_collect(
   } else if (service->phase == FINITE_BATCHING) {
     service->phase = FINITE_SPECIALIZING;
   } else if (service->phase == FINITE_RUNNING) {
+    loom_serve_execution_permit_complete(service->permit);
     loom_serve_finite_complete_execution(service);
+  } else if (service->phase == FINITE_RELEASING) {
+    loom_serve_finite_model_complete(service->model);
+    loom_serve_finite_finish(service, iree_ok_status());
   } else {
     for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
       loom_serve_finite_job_t* job = service->cohort[i];
@@ -741,7 +757,11 @@ static iree_status_t loom_serve_finite_advance(void* self,
           loom_serve_finite_model_residency(service->model), &admission);
       if (iree_status_is_ok(status) &&
           admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
-        status = loom_serve_finite_submit(service);
+        loom_serve_residency_cancel_admission(
+            loom_serve_finite_model_residency(service->model));
+        loom_serve_execution_permit_request(
+            service->permit, LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+        service->phase = FINITE_READY;
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
                  admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
@@ -768,6 +788,27 @@ static iree_status_t loom_serve_finite_advance(void* self,
         loom_serve_finite_error(service, 0, status);
         loom_serve_finite_finish(service, status);
       }
+    }
+  }
+  if (iree_status_is_ok(status) && service->phase == FINITE_READY) {
+    bool has_peer = false;
+    for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
+      has_peer |= service->cohort[i]->connection != NULL;
+    }
+    if (service->stopping || !has_peer) {
+      loom_serve_execution_permit_cancel(service->permit);
+      loom_serve_residency_t* residency =
+          loom_serve_finite_model_residency(service->model);
+      service->device.frontier = loom_serve_residency_frontier(residency);
+      status = loom_serve_finite_await(service, FINITE_RELEASING);
+      *out_progress = true;
+    } else if (loom_serve_execution_permit_try_acquire(service->permit)) {
+      status = loom_serve_finite_submit(service);
+      *out_progress = true;
+    }
+    if (!iree_status_is_ok(status)) {
+      loom_serve_finite_error(service, 0, status);
+      loom_serve_finite_finish(service, status);
     }
   }
   if (iree_status_is_ok(status) && !service->stopping &&
@@ -906,6 +947,7 @@ void loom_serve_finite_service_free(loom_serve_finite_service_t* service) {
     return;
   }
   IREE_ASSERT(!loom_serve_finite_is_pending(service));
+  loom_serve_execution_permit_cancel(service->permit);
   loom_serve_finite_model_set_observer(service->model,
                                        (loom_serve_wake_callback_t){0});
   service->stopping = true;
@@ -948,6 +990,7 @@ iree_status_t loom_serve_finite_service_allocate(
       iree_alignof(loom_serve_finite_service_t), 0, (void**)&service));
   service->host_allocator = host_allocator;
   service->model = model;
+  service->permit = loom_serve_finite_model_permit(model);
   service->protocol = protocol;
   service->name = name;
   service->capacity = capacity;

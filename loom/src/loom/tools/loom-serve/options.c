@@ -123,7 +123,7 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_allocate(host, devices.count, options,
-                                              host_allocator, out_group);
+                                              NULL, host_allocator, out_group);
   }
   for (iree_host_size_t i = 0; i < driver_count; ++i) {
     iree_hal_driver_release(drivers[i].handle);

@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/string_builder.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +27,8 @@ typedef struct loom_serve_speech_request_t {
   uint64_t seed;
   // Requested speech speed in [0.25, 4], with one meaning the natural speed.
   float speed;
+  // Immutable request class; zero selects background execution.
+  loom_serve_execution_qos_t qos;
 } loom_serve_speech_request_t;
 
 // Copies a native request without JSON encoding. Text, voice, and instructions

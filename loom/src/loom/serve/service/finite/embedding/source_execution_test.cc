@@ -103,8 +103,7 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_TRUE(interface_.inspection.request_at(interface_.self, 0, &preparing));
   EXPECT_EQ(preparing.id, 1u);
   EXPECT_STREQ(preparing.phase, "preparing");
-  EXPECT_TRUE(Step());  // Rejection collected; valid cohort constructed.
-  EXPECT_TRUE(Step());  // One command submitted, with compact feedback.
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil("running"));
   for (iree_host_size_t i = 0; i < 3; ++i) {
     loom_serve_http_request_snapshot_t snapshot = {};
     ASSERT_TRUE(
@@ -123,8 +122,8 @@ TEST_F(SourceEmbeddingServiceTest,
             static_cast<loom_serve_http_connection_t*>(value));
       },
       cancelled, iree_infinite_timeout());
-  EXPECT_TRUE(Step());  // Capture only live result views for CPU encoding.
-  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "encoding");
+  // Capture only live result views after actual device completion.
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil("encoding"));
   EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 2u);
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
   Drain();

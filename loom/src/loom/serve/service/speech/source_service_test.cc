@@ -21,6 +21,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/speech/model.h"
@@ -113,6 +114,7 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
           loom_serve_device_group_at(group_, 0), &options, allocator_,
           &model_));
       generator_ = loom_serve_speech_model_generator(model_);
+      scheduler_ = generator_.permit->scheduler;
       EXPECT_EQ(generator_.tokenizer != nullptr, weighted);
       EXPECT_EQ(generator_.format.sample_rate, 24000u);
       EXPECT_EQ(generator_.format.channels, 1u);
@@ -122,7 +124,24 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
     }
   }
 
+  void HoldExecution(size_t count = 2) {
+    for (size_t i = 0; i < count; ++i) {
+      loom_serve_execution_permit_initialize(
+          scheduler_, generator_.permit->resources, &blockers_[i]);
+      loom_serve_execution_permit_request(&blockers_[i],
+                                          LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+      ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&blockers_[i]));
+    }
+  }
+
+  void ReleaseExecution() {
+    for (auto& blocker : blockers_) {
+      loom_serve_execution_permit_deinitialize(&blocker);
+    }
+  }
+
   void TearDown() override {
+    ReleaseExecution();
     if (http_.joinable()) {
       loom_serve_http_server_request_stop(server_);
       IREE_EXPECT_OK(http_.Join());
@@ -199,6 +218,10 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       auto status = interface_.advance(interface_.self, flags, &progress);
+      if (iree_status_is_ok(status) &&
+          !iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+        progress |= loom_serve_execution_scheduler_is_ready(scheduler_);
+      }
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
       } else {
@@ -368,6 +391,10 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   loom_serve_speech_model_t* model_ = nullptr;
   // Borrowed callbacks into model_.
   loom_serve_speech_generator_t generator_ = {};
+  // Serialized numerical permission shared with the manually driven service.
+  loom_serve_execution_scheduler_t* scheduler_ = nullptr;
+  // Accepted peer units using the actual application resource budget.
+  std::array<loom_serve_execution_permit_t, 2> blockers_ = {};
   // Source asset base retained through asynchronous registration.
   std::string directory_;
   // Checkpoint files remain alive through model and registration retirement.
@@ -944,6 +971,126 @@ TEST_P(SourceSpeechServiceTest,
 }
 
 TEST_P(SourceSpeechServiceTest,
+       CancellationBeforeAcceptancePreservesPeersAndRequestReuse) {
+  ASSERT_NO_FATAL_FAILURE(StartManual());
+  std::array<loom_serve::testing::HttpClient, 2> clients;
+  std::array<loom_serve_http_connection_t*, 2> connections = {};
+  for (size_t i = 0; i < clients.size(); ++i) {
+    *clients[i].put() = Send("POST", "/v1/audio/speech",
+                             Request(i ? "negative" : "positive", "abcdefgh"));
+    ASSERT_NO_FATAL_FAILURE(Accept(clients[i].get(), &connections[i]));
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    const std::string phase = interface_.snapshot(interface_.self).phase;
+    return largest_batch_ == 2 && (phase == "ready" || phase == "delivering");
+  }));
+  ASSERT_NO_FATAL_FAILURE(HoldExecution());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return generator_.permit->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING;
+  }));
+  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "ready_batch");
+  const auto submitted = interface_.telemetry.counters->batches;
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(clients[0].get(), SOL_SOCKET, SO_LINGER, &reset,
+                       sizeof(reset)),
+            0);
+  ASSERT_EQ(close(clients[0].release()), 0);
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* self) {
+        return loom_serve_http_connection_failed(
+            static_cast<loom_serve_http_connection_t*>(self));
+      },
+      connections[0], iree_infinite_timeout());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->cancelled == 1; }));
+  EXPECT_EQ(interface_.telemetry.counters->batches, submitted);
+  EXPECT_EQ(generator_.permit->phase, LOOM_SERVE_EXECUTION_PERMIT_IDLE);
+
+  ReleaseExecution();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 1; }));
+  CheckAudio(Read(clients[1].release()), 65, -1);
+  *clients[0].put() =
+      Send("POST", "/v1/audio/speech", Request("positive", "abcdefgh", 11));
+  ASSERT_NO_FATAL_FAILURE(Accept(clients[0].get(), &connections[0]));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 2; }));
+  CheckAudio(Read(clients[0].release()), 65, 1, 11);
+  EXPECT_EQ(generator_.permit->phase, LOOM_SERVE_EXECUTION_PERMIT_IDLE);
+}
+
+TEST_P(SourceSpeechServiceTest,
+       ReturnedVoiceCreditReplacesWaitingBackgroundCohort) {
+  ASSERT_NO_FATAL_FAILURE(StartManual());
+  SpeechStream background(nullptr, loom_serve_speech_stream_close);
+  SpeechStream first(nullptr, loom_serve_speech_stream_close);
+  SpeechStream second(nullptr, loom_serve_speech_stream_close);
+  IREE_ASSERT_OK(OpenSpeech(service_, IREE_SV("abcdefgh"), IREE_SV("positive"),
+                            3, &background));
+  IREE_ASSERT_OK(OpenSpeech(service_, IREE_SV("abcdef"), IREE_SV("positive"), 7,
+                            &first, LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  IREE_ASSERT_OK(OpenSpeech(service_, IREE_SV("abcdefg"), IREE_SV("negative"),
+                            11, &second, LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_speech_stream_peek(background.get()) &&
+           loom_serve_speech_stream_peek(first.get()) &&
+           loom_serve_speech_stream_peek(second.get());
+  }));
+  const uint64_t first_position =
+      loom_serve_speech_stream_peek(first.get())->frame_count;
+  const uint64_t second_position =
+      loom_serve_speech_stream_peek(second.get())->frame_count;
+  const uint64_t background_position =
+      loom_serve_speech_stream_peek(background.get())->frame_count;
+
+  // Both voice readers are stalled. Background can prepare its next real
+  // source batch while accepted peer work holds the device's two-unit limit.
+  ASSERT_NO_FATAL_FAILURE(HoldExecution());
+  loom_serve_speech_stream_consume(background.get());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return generator_.permit->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING;
+  }));
+  EXPECT_EQ(generator_.permit->qos, LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+  const uint64_t submitted = interface_.telemetry.counters->batches;
+
+  // Returned native credit is visible before this service's next turn. The
+  // waiting background plan cannot retain permission ahead of either voice.
+  loom_serve_speech_stream_consume(first.get());
+  loom_serve_speech_stream_consume(second.get());
+  EXPECT_TRUE(loom_serve_execution_is_preempted(
+      scheduler_, generator_.permit->resources,
+      LOOM_SERVE_EXECUTION_QOS_BACKGROUND));
+  ReleaseExecution();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_speech_stream_peek(first.get()) &&
+           loom_serve_speech_stream_peek(second.get());
+  }));
+  EXPECT_GT(interface_.telemetry.counters->batches, submitted);
+  EXPECT_EQ(largest_batch_, 2u);
+  EXPECT_EQ(loom_serve_speech_stream_peek(background.get()), nullptr);
+  const auto check_block = [](loom_serve_speech_stream_t* stream,
+                              uint64_t position, int sign, uint64_t seed) {
+    const auto* block = loom_serve_speech_stream_peek(stream);
+    ASSERT_NE(block, nullptr);
+    EXPECT_EQ(block->position, position);
+    for (size_t i = 0; i < block->frame_count; ++i) {
+      EXPECT_EQ(iree_unaligned_load_le_f32(block->samples.data + i * 4),
+                sign * static_cast<float>((position + i + seed) % 8) * 0.125f);
+    }
+  };
+  check_block(first.get(), first_position, 1, 7);
+  check_block(second.get(), second_position, -1, 11);
+
+  // Stalling those readers withdraws demand and background resumes from its
+  // unchanged source position, with no inherited realtime admission.
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_speech_stream_peek(background.get()) != nullptr;
+  }));
+  check_block(background.get(), background_position, 1, 3);
+}
+
+TEST_P(SourceSpeechServiceTest,
        NativeCreditAndFinalOutputHaveIndependentOwners) {
   ASSERT_NO_FATAL_FAILURE(StartManual());
   SpeechStream stream(nullptr, loom_serve_speech_stream_close);
@@ -1015,6 +1162,25 @@ TEST_P(SourceSpeechServiceTest,
   loom_serve_speech_stream_consume(stream.get());
   EXPECT_TRUE(loom_serve_speech_stream_is_complete(stream.get()));
   IREE_EXPECT_OK(loom_serve_speech_stream_status(stream.get()));
+}
+
+TEST_P(SourceSpeechServiceTest, InvalidQosPreservesCallerInput) {
+  ASSERT_NO_FATAL_FAILURE(StartManual());
+  loom_serve_speech_request_t request;
+  IREE_ASSERT_OK(loom_serve_speech_request_initialize_text(
+      IREE_SV("hello"), IREE_SV("positive"), {}, 7, 1.0f,
+      iree_allocator_system(), &request));
+  const auto* input = iree_string_builder_buffer(&request.input);
+  for (int value : {-1, 2}) {
+    request.qos = static_cast<loom_serve_execution_qos_t>(value);
+    loom_serve_speech_stream_t* rejected = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_serve_speech_service_try_open(service_, &request, &rejected));
+    EXPECT_EQ(rejected, nullptr);
+    EXPECT_EQ(iree_string_builder_buffer(&request.input), input);
+  }
+  loom_serve_speech_request_deinitialize(&request);
 }
 
 TEST_P(SourceSpeechServiceTest, NativeSourceRejectionPreservesService) {

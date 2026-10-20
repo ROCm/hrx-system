@@ -9,6 +9,7 @@
 
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/image/request.h"
@@ -78,7 +79,8 @@ typedef struct loom_serve_image_generator_t {
   // Enqueues one source-controlled part, returning borrowed completion handles.
   // The first call follows admission; each subsequent call follows successful
   // retirement of both previous frontiers. A terminal part authorizes complete
-  // only after its frontiers retire. CANCEL is valid between submitted parts.
+  // only after its frontiers retire. CANCEL is valid after admission, including
+  // before the first part, and between successfully retired parts.
   iree_status_t (*submit)(void* self, loom_serve_image_submit_flags_t flags,
                           loom_serve_execution_frontier_t* out_frontier,
                           bool* out_complete);
@@ -106,6 +108,9 @@ typedef struct loom_serve_image_generator_t {
   // modalities. Equal non-NULL identities can release each other's pressure;
   // NULL declares no shared capacity. Outlives this generator and its service.
   const void* capacity_domain;
+  // Borrowed model-owned claim, retained through actual native retirement even
+  // after service destruction. NULL declares independently managed execution.
+  loom_serve_execution_permit_t* permit;
 } loom_serve_image_generator_t;
 
 #ifdef __cplusplus

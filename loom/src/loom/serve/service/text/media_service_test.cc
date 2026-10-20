@@ -127,7 +127,7 @@ class MediaServiceTest : public SourceTextServiceTest {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
-        IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+        IREE_ASSERT_OK(Advance(interface_, 0, &progress));
         if (std::string(interface_.snapshot(interface_.self).phase) == phase) {
           reached = true;
           action();
@@ -281,8 +281,8 @@ TEST_P(CancelledMediaServiceTest,
   ASSERT_NO_FATAL_FAILURE(AcceptTogether({first, second}));
   ASSERT_NO_FATAL_FAILURE(AtImagePhase(GetParam(), [&] {
     bool progress = false;
-    IREE_ASSERT_OK(interface_.advance(
-        interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+    IREE_ASSERT_OK(
+        Advance(interface_, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
     EXPECT_TRUE(interface_.is_pending(interface_.self));
     EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 2u);
     EXPECT_EQ(interface_.telemetry.counters->cancelled, 0u);

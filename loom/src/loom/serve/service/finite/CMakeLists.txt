@@ -91,6 +91,7 @@ loom_cc_library(
     iree::task
     iree::vm
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake
@@ -147,6 +148,7 @@ loom_cc_library(
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::execution::dispatch
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::bank
     loom::serve::runtime::parameter::residency

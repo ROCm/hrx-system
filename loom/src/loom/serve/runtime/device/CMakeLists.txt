@@ -26,6 +26,7 @@ loom_cc_library(
     iree::tooling::device_profiling
     loom::serve::runtime::execution
     loom::serve::runtime::execution::queues
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::execution::workspace
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
@@ -63,6 +64,7 @@ loom_cc_test(
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
   LABELS
     "iree-build-requirement=loom.target.arch.vm"

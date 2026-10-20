@@ -305,7 +305,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
               elastic ? (memory_limit ? memory_limit : 2 * slab_size) : 0,
       };
       IREE_ASSERT_OK(loom_serve_device_group_allocate(
-          host, 1, &options, native_allocators_[i].allocator(), &groups_[i]));
+          host, 1, &options, nullptr, native_allocators_[i].allocator(),
+          &groups_[i]));
       IREE_ASSERT_OK(native_allocators_[i].Observe(
           loom_serve_device_group_at(groups_[i], 0)));
     }

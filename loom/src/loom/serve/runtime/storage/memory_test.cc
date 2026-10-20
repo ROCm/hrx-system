@@ -108,7 +108,7 @@ class MemoryTest : public ::testing::Test {
         .state_slab_size = kSlabSize / 4,
         .memory_limit = 3 * kSlabSize,
     };
-    auto status = loom_serve_device_group_allocate(host, 1, &options,
+    auto status = loom_serve_device_group_allocate(host, 1, &options, nullptr,
                                                    native.allocator(), &group);
     iree_hal_driver_release(driver);
     loom_serve_host_release(host);

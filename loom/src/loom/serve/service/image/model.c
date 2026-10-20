@@ -11,6 +11,7 @@
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/retirement.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/bank.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/input.h"
@@ -40,6 +41,8 @@ struct loom_serve_image_model_t {
   iree_tokenizer_t* tokenizer;
   // Borrowed shared device/backing owner, outliving the model.
   loom_serve_device_t* owner;
+  // Numerical claim retained until successful completion or native retirement.
+  loom_serve_execution_permit_t permit;
   // Owned model work and feedback timelines, independent of other models.
   loom_serve_execution_t* execution;
   // Final input/output view ownership before host payload release.
@@ -172,6 +175,7 @@ static iree_status_t loom_serve_image_model_destroy_resources(
   loom_serve_image_model_release_consumers(model);
   loom_serve_parameter_bank_retire(model->parameters, NULL, NULL);
   IREE_ASSERT(loom_serve_image_model_is_retired(model));
+  loom_serve_execution_permit_deinitialize(&model->permit);
   IREE_RETURN_IF_ERROR(loom_serve_executables_free(model->executables));
   model->executables = NULL;
   loom_serve_residency_free(model->residency);
@@ -693,6 +697,9 @@ iree_status_t loom_serve_image_load_allocate(
     load->model->host_allocator = host_allocator;
     loom_serve_retirement_initialize(&load->model->retirement);
     load->model->owner = device;
+    loom_serve_execution_permit_initialize(
+        loom_serve_device_scheduler(device),
+        loom_serve_device_execution_resources(device), &load->model->permit);
     load->model->command_quantum = options->command_quantum;
     load->model->specialization_cache = options->specialization_cache;
     *out_load = load;
@@ -1377,5 +1384,6 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .is_pending = loom_serve_image_generator_is_pending,
       .execution_update = loom_serve_executables_update(model->executables),
       .tokenizer = model->tokenizer,
-      .capacity_domain = loom_serve_residency_cache(model->residency)};
+      .capacity_domain = loom_serve_residency_cache(model->residency),
+      .permit = &model->permit};
 }

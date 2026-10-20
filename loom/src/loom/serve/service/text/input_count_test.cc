@@ -166,8 +166,8 @@ TEST_F(InputCountTest, StopJoinsBorrowedHeadAndCancelsQueuedQueries) {
     // The sole worker is still running this owner turn, so the first query
     // cannot have released its CPU loan. Stopping may cancel only the tail.
     bool progress = false;
-    IREE_ASSERT_OK(interface_.advance(
-        interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+    IREE_ASSERT_OK(
+        Advance(interface_, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
     EXPECT_TRUE(progress);
     EXPECT_TRUE(interface_.is_pending(interface_.self));
     EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);

@@ -21,6 +21,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::json
     iree::base::internal::unicode
+    loom::serve::runtime::execution::scheduler
   PUBLIC
 )
 endif()
@@ -52,6 +53,7 @@ loom_cc_library(
     iree::base
     iree::tokenizer
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::parameter::residency
   PUBLIC
 )
@@ -110,6 +112,7 @@ loom_cc_library(
     loom::serve::runtime::execution
     loom::serve::runtime::execution::dispatch
     loom::serve::runtime::execution::retirement
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::parameter::weights
@@ -152,6 +155,7 @@ loom_cc_library(
     iree::testing::temp_file
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::server::model_registration
@@ -245,6 +249,7 @@ loom_cc_library(
     iree::base::threading
     iree::task
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake

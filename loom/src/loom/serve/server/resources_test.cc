@@ -38,8 +38,8 @@ class ResourcesTest : public ::testing::Test {
         {.driver = loom_serve_host_task_driver(host_), .uri = IREE_SV("task")},
         {.driver = loom_serve_host_task_driver(host_), .uri = IREE_SV("task")}};
     return loom_serve_device_group_allocate(host_, IREE_ARRAYSIZE(options),
-                                            options, iree_allocator_system(),
-                                            &group_);
+                                            options, nullptr,
+                                            iree_allocator_system(), &group_);
   }
 
   // Application owner outliving all borrowed records.

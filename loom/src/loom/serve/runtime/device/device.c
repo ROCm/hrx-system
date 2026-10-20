@@ -21,6 +21,8 @@ struct loom_serve_device_t {
   iree_hal_queue_t* transfer;
   // Fixed inventory shared by independently retained model executions.
   loom_serve_execution_queues_t* execution_queues;
+  // Resolved resource identity, including the host for shared task execution.
+  loom_serve_execution_resources_t execution_resources;
   // Native retained storage qualified for both execution and transfer.
   iree_hal_pool_t* storage_pool;
   // Shared private command backing, independent of model timelines.
@@ -40,6 +42,8 @@ struct loom_serve_device_group_t {
   iree_allocator_t host_allocator;
   // Retained workers and I/O services outliving every HAL device.
   loom_serve_host_t* host;
+  // Application-wide resource admission, retained through every model borrower.
+  loom_serve_execution_scheduler_t* scheduler;
   // Completion registry outliving the shared HAL group.
   iree_async_frontier_tracker_t* frontier_tracker;
   // Owned immutable topology and semaphore/memory namespace.
@@ -205,26 +209,29 @@ static iree_status_t loom_serve_device_initialize(
 
 iree_status_t loom_serve_device_group_allocate(
     loom_serve_host_t* host, iree_host_size_t device_count,
-    const loom_serve_device_options_t* options, iree_allocator_t host_allocator,
-    loom_serve_device_group_t** out_group) {
+    const loom_serve_device_options_t* options,
+    const loom_serve_execution_policy_t* policy,
+    iree_allocator_t host_allocator, loom_serve_device_group_t** out_group) {
   *out_group = NULL;
   if (!device_count || device_count > IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "serving group needs between 1 and %d devices",
                             IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT);
   }
-  for (iree_host_size_t i = 0; i < device_count; ++i) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
+       ++i) {
     if (options[i].backing != LOOM_SERVE_DEVICE_BACKING_FIXED &&
         options[i].backing != LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported physical backing strategy");
-    }
-    if (options[i].backing == LOOM_SERVE_DEVICE_BACKING_FIXED &&
-        options[i].memory_limit) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "a physical budget requires elastic backing");
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "unsupported physical backing strategy");
+    } else if (options[i].backing == LOOM_SERVE_DEVICE_BACKING_FIXED &&
+               options[i].memory_limit) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "a physical budget requires elastic backing");
     }
   }
+  IREE_RETURN_IF_ERROR(status);
   loom_serve_device_group_t* group = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, sizeof(*group) + device_count * sizeof(group->devices[0]),
@@ -235,8 +242,16 @@ iree_status_t loom_serve_device_group_allocate(
   loom_serve_host_retain(host);
   for (iree_host_size_t i = 0; i < device_count; ++i) {
     group->devices[i].owner = group;
+    group->devices[i].execution_resources = UINT64_C(1) << (i + 1);
+    if (options[i].driver == loom_serve_host_task_driver(host)) {
+      group->devices[i].execution_resources |= UINT64_C(1);
+    }
   }
-  iree_status_t status = loom_serve_device_group_initialize(group, options);
+  status = loom_serve_execution_scheduler_allocate(
+      device_count + 1, policy, host_allocator, &group->scheduler);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_device_group_initialize(group, options);
+  }
   for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
        ++i) {
     status = loom_serve_device_initialize(&group->devices[i], &options[i]);
@@ -285,6 +300,7 @@ iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group) {
     iree_hal_device_release(group->devices[i].handle);
   }
   iree_async_frontier_tracker_release(group->frontier_tracker);
+  loom_serve_execution_scheduler_free(group->scheduler);
   loom_serve_host_release(group->host);
   iree_allocator_free(group->host_allocator, group);
   return status;
@@ -379,6 +395,21 @@ iree_hal_queue_t* loom_serve_device_dispatch_queue(
 iree_hal_queue_t* loom_serve_device_transfer_queue(
     const loom_serve_device_t* device) {
   return device->transfer;
+}
+
+loom_serve_execution_scheduler_t* loom_serve_device_scheduler(
+    loom_serve_device_t* device) {
+  return device->owner->scheduler;
+}
+
+loom_serve_execution_scheduler_t* loom_serve_device_group_scheduler(
+    loom_serve_device_group_t* group) {
+  return group->scheduler;
+}
+
+loom_serve_execution_resources_t loom_serve_device_execution_resources(
+    const loom_serve_device_t* device) {
+  return device->execution_resources;
 }
 
 iree_status_t loom_serve_device_create_execution(

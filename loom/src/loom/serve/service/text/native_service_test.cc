@@ -6,6 +6,7 @@
 
 #include "iree/base/tooling/flags.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
@@ -23,6 +24,7 @@ namespace {
 using loom_serve::testing::text::Oracle;
 using loom_serve::testing::text::OwnerTurn;
 using loom_serve::testing::text::RegisteredSourceTextServiceTest;
+using loom_serve::testing::text::SourceTextServiceTest;
 
 using NativeStream = std::unique_ptr<loom_serve_text_stream_t,
                                      decltype(&loom_serve_text_stream_close)>;
@@ -147,9 +149,8 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
       auto status = iree_ok_status();
       if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
-        status = service.advance(service.self,
-                                 loom_serve_registry_service_flags(Model()),
-                                 &progress);
+        status = Advance(service, loom_serve_registry_service_flags(Model()),
+                         &progress);
       }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {
@@ -181,11 +182,14 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
            !service.snapshot(service.self).queued_requests;
   }
 
-  iree_status_t Open(const std::string& body, const char* session,
-                     NativeStream* stream, const char* checkpoint = "") {
+  iree_status_t Open(
+      const std::string& body, const char* session, NativeStream* stream,
+      const char* checkpoint = "",
+      loom_serve_execution_qos_t qos = LOOM_SERVE_EXECUTION_QOS_BACKGROUND) {
     loom_serve_text_request_t request = {
         .session = iree_make_cstring_view(session),
         .checkpoint = iree_make_cstring_view(checkpoint),
+        .qos = qos,
     };
     iree_string_builder_initialize(host_allocator_, &request.body);
     auto status = iree_string_builder_append_string(
@@ -396,6 +400,17 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
   iree_status_t read_status_ = iree_ok_status();
 };
 
+TEST_F(NativeTextRegistryTest, InvalidQosPreservesCallerInput) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream stream(nullptr, loom_serve_text_stream_close);
+  for (int value : {-1, 2}) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          Open(body_, "native", &stream, "",
+                               static_cast<loom_serve_execution_qos_t>(value)));
+    EXPECT_EQ(stream, nullptr);
+  }
+}
+
 TEST_F(NativeTextRegistryTest, StalledNativeAndHttpPeerRetainDetachedResult) {
   NativeStream stream(nullptr, loom_serve_text_stream_close);
   IREE_ASSERT_OK(Open(body_, "native", &stream));
@@ -577,8 +592,7 @@ TEST_F(NativeTextRegistryTest, StoppingSealsReadyServiceAdmission) {
   ASSERT_NO_FATAL_FAILURE(Prepare());
   bool progress = false;
   auto& service = Model()->service;
-  IREE_ASSERT_OK(service.advance(service.self, LOOM_SERVE_SERVICE_FLAG_STOPPING,
-                                 &progress));
+  IREE_ASSERT_OK(Advance(service, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
   NativeStream stream(nullptr, loom_serve_text_stream_close);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         Open(body_, "after-stop", &stream));
@@ -736,7 +750,7 @@ TEST_F(NativeTextRegistryTest,
   ASSERT_NE(submitted, nullptr);
   auto& service = Model()->service;
   bool progress = false;
-  IREE_ASSERT_OK(service.advance(service.self, 0, &progress));
+  IREE_ASSERT_OK(Advance(service, 0, &progress));
   ASSERT_TRUE(progress);
   ASSERT_FALSE(loom_serve_text_checkpoint_control_is_complete(submitted.get()));
   ASSERT_EQ(service.snapshot(service.self).active_requests, 1u);
@@ -993,6 +1007,122 @@ TEST_F(NativeTextRegistryTest,
   EXPECT_EQ(
       loom_serve_text_checkpoint_control_result(released.get())->host_bytes,
       0u);
+}
+
+class PreparedCohortTextServiceTest : public SourceTextServiceTest {
+ protected:
+  loom_serve_text_options_t ModelOptions() const override {
+    static const loom_serve_packing_shape_t shapes[] = {{2, 2}};
+    auto options = SourceTextServiceTest::ModelOptions();
+    options.prefill_capacity = 2;
+    options.epoch_count = IREE_ARRAYSIZE(shapes);
+    options.epoch_shapes = shapes;
+    return options;
+  }
+};
+
+TEST_F(PreparedCohortTextServiceTest,
+       CancelledPreparedPeerPreservesUnacceptedRowPriority) {
+  auto options = ServiceOptions();
+  loom_serve_text_service_t* service = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_service_allocate(model_, &options, nullptr,
+                                                  host_allocator_, &service));
+  const auto interface = loom_serve_text_service_interface(service);
+  Observe(interface);
+  const auto quiescent = [&] {
+    return !interface.is_pending(interface.self) &&
+           !interface.snapshot(interface.self).queued_requests &&
+           std::string(interface.snapshot(interface.self).phase) == "idle";
+  };
+
+  // Fill every row's bounded output credit, then let only the last row run.
+  // Its accepted turn leaves the first row next in the rotating order.
+  std::vector<NativeStream> streams;
+  for (size_t i = 0; i < 4; ++i) {
+    const std::string session = "row-" + std::to_string(i);
+    loom_serve_text_request_t request = {
+        .session = iree_make_cstring_view(session.c_str()),
+    };
+    iree_string_builder_initialize(host_allocator_, &request.body);
+    const std::string body = Request(Message("user", "abxa"), 16);
+    IREE_ASSERT_OK(iree_string_builder_append_string(
+        &request.body, iree_make_cstring_view(body.c_str())));
+    loom_serve_text_stream_t* stream = nullptr;
+    IREE_ASSERT_OK(
+        loom_serve_text_service_try_open(service, &request, &stream));
+    iree_string_builder_deinitialize(&request.body);
+    ASSERT_NE(stream, nullptr);
+    streams.emplace_back(stream, loom_serve_text_stream_close);
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+  ASSERT_EQ(interface.snapshot(interface.self).active_requests, 4u);
+  for (const auto& stream : streams) {
+    ASSERT_NE(loom_serve_text_stream_peek(stream.get()), nullptr);
+  }
+  const auto* last_row = loom_serve_text_model_row(model_, 3);
+  const auto last_position = loom_serve_text_row_position(last_row);
+  loom_serve_text_stream_consume(streams[3].get());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return loom_serve_text_row_position(last_row) > last_position &&
+           quiescent();
+  }));
+
+  // Other accepted work holds the shared budget while this service prepares
+  // rows zero and one. Withdrawing row one must not spend row zero's turn.
+  auto* scheduler = loom_serve_device_scheduler(device_);
+  // The shared test application configures two accepted units per device.
+  std::array<loom_serve_execution_permit_t, 2> peers;
+  for (auto& peer : peers) {
+    loom_serve_execution_permit_initialize(
+        scheduler, loom_serve_device_execution_resources(device_), &peer);
+    loom_serve_execution_permit_request(&peer,
+                                        LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+    ASSERT_TRUE(loom_serve_execution_scheduler_is_ready(scheduler));
+    ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer));
+  }
+  for (const auto& stream : streams) {
+    loom_serve_text_stream_consume(stream.get());
+  }
+  auto* permit = loom_serve_text_model_permit(model_);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return permit->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING;
+  }));
+  streams[1].reset();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return permit->phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE;
+  }));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return permit->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING;
+  }));
+
+  const auto position = [&](size_t row) {
+    return loom_serve_text_row_position(loom_serve_text_model_row(model_, row));
+  };
+  const size_t first = position(0), second = position(2), third = position(3);
+  const uint64_t batches = interface.telemetry.counters->batches;
+  for (auto& peer : peers) {
+    loom_serve_execution_permit_complete(&peer);
+    loom_serve_execution_permit_deinitialize(&peer);
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return interface.telemetry.counters->batches > batches;
+  }));
+  EXPECT_EQ(position(0), first + 1);
+  EXPECT_EQ(position(2), second + 1);
+  EXPECT_EQ(position(3), third);
+
+  for (auto& stream : streams) {
+    stream.reset();
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      interface,
+      [&] {
+        return !interface.is_pending(interface.self) &&
+               !interface.is_active(interface.self);
+      },
+      LOOM_SERVE_SERVICE_FLAG_STOPPING));
+  interface.set_observer(interface.self, {});
+  loom_serve_text_service_free(service, IREE_STATUS_OK);
 }
 
 }  // namespace

@@ -165,7 +165,7 @@ class SnapshotLifetimeTest : public ResultTest,
         .uri = IREE_SV("task"),
     };
     IREE_ASSERT_OK(loom_serve_device_group_allocate(
-        host_, 1, &options, iree_allocator_system(), &group_));
+        host_, 1, &options, nullptr, iree_allocator_system(), &group_));
     device_ = loom_serve_device_group_at(group_, 0);
     IREE_ASSERT_OK(loom_serve_device_create_execution(device_, &execution_));
     IREE_ASSERT_OK(loom_serve_execution_reserve_workspace(execution_, 32, 16));

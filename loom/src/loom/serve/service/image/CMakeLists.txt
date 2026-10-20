@@ -83,6 +83,7 @@ loom_cc_library(
     iree::base
     iree::tokenizer
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::parameter::residency
     loom::serve::service::execution_reconfiguration
     loom::serve::service::prepared_request
@@ -128,6 +129,7 @@ loom_cc_library(
     iree::task
     iree::vm
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::host::clock
     loom::serve::runtime::host::timer
@@ -168,6 +170,7 @@ loom_cc_library(
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::execution::retirement
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::parameter::bank
     loom::serve::runtime::parameter::residency
@@ -215,6 +218,7 @@ loom_cc_library(
     loom::serve::runtime::program::variant_pool
     loom::serve::server::model_registration
     loom::serve::server::registry
+    loom::serve::server::resources
     loom::serve::server::router
     loom::serve::service::image::model
     loom::serve::service::image::output

@@ -45,6 +45,8 @@ struct loom_serve_finite_model_t {
   iree_tokenizer_t* tokenizer;
   // Borrowed shared device/backing owner, outliving the model.
   loom_serve_device_t* owner;
+  // Numerical claim retained until successful completion or native retirement.
+  loom_serve_execution_permit_t permit;
   // Owned model work and feedback timelines, independent of other models.
   loom_serve_execution_t* execution;
   // Owned checkpoint roots and plans, outliving borrowing invocation
@@ -163,6 +165,7 @@ static iree_status_t loom_serve_finite_model_destroy_resources(
   loom_serve_finite_model_release_consumers(model);
   loom_serve_parameter_bank_retire(model->parameters, NULL, NULL);
   IREE_ASSERT(loom_serve_finite_model_is_retired(model));
+  loom_serve_execution_permit_deinitialize(&model->permit);
   IREE_RETURN_IF_ERROR(loom_serve_executables_free(model->executables));
   model->executables = NULL;
   loom_serve_residency_free(model->residency);
@@ -649,6 +652,9 @@ iree_status_t loom_serve_finite_load_allocate(
   if (iree_status_is_ok(status)) {
     load->model->host_allocator = host_allocator;
     load->model->owner = device;
+    loom_serve_execution_permit_initialize(
+        loom_serve_device_scheduler(device),
+        loom_serve_device_execution_resources(device), &load->model->permit);
     *out_load = load;
   } else {
     iree_slim_mutex_deinitialize(&load->event.mutex);
@@ -871,6 +877,16 @@ iree_status_t loom_serve_finite_model_query_status(
 bool loom_serve_finite_model_is_pending(
     const loom_serve_finite_model_t* model) {
   return model && loom_serve_executables_is_pending(model->executables);
+}
+
+loom_serve_device_t* loom_serve_finite_model_device(
+    const loom_serve_finite_model_t* model) {
+  return model->owner;
+}
+
+loom_serve_execution_permit_t* loom_serve_finite_model_permit(
+    loom_serve_finite_model_t* model) {
+  return &model->permit;
 }
 
 iree_status_t loom_serve_finite_model_prepare_request(

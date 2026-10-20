@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_RECOGNITION_REQUEST_H_
 #define LOOM_SERVE_SERVICE_RECOGNITION_REQUEST_H_
 
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/service/recognition/events.h"
 
 // Immutable source options, borrowed through asynchronous request preparation.
@@ -20,6 +21,8 @@ typedef struct loom_serve_recognition_request_t {
   float temperature;
   // Nonempty subset of the admitted source's supported output types.
   loom_serve_recognition_output_flags_t outputs;
+  // Immutable request class; zero selects background execution.
+  loom_serve_execution_qos_t qos;
 } loom_serve_recognition_request_t;
 
 #endif  // LOOM_SERVE_SERVICE_RECOGNITION_REQUEST_H_

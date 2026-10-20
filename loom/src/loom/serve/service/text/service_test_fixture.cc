@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "loom/serve/server/resources.h"
 #include "loom/serve/testing/service_application.h"
 
 namespace loom_serve::testing::text {
@@ -44,6 +45,17 @@ void SourceTextServiceTest::SetUp() {
   IREE_ASSERT_OK(loom_serve_http_listener_allocate(
       server_, &listener_options, host_allocator_, &listener_));
   IREE_ASSERT_OK(http_.Initialize(server_, listener_));
+}
+
+iree_status_t SourceTextServiceTest::Advance(
+    const loom_serve_service_t& interface, loom_serve_service_flags_t flags,
+    bool* progress) {
+  IREE_RETURN_IF_ERROR(interface.advance(interface.self, flags, progress));
+  if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+    const loom_serve_resources_t resources = {.device_group = group_};
+    *progress |= loom_serve_resources_schedule(&resources);
+  }
+  return iree_ok_status();
 }
 
 void SourceTextServiceTest::TearDown() {
