@@ -105,11 +105,24 @@ template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: 
         %values = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
         vector.store %values, %weight_view[%local_channel, %local_k] : vector<4xbf16>, view<[%tile_columns]x40xbf16>
         %leader = index.cmp eq, %packet, %c0 : index
-        scf.if %leader {
+        %overlapped = index.cmp ugt, %pipeline_depth, %c1 : index
+        // A uniform scale read keeps its value in the read-ahead stage;
+        // only the owner publishes it. Lanes sharing a channel request the
+        // same address, so this adds no distinct weight bytes.
+        scf.if %overlapped {
           %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
           %half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
           %scale = scalar.extf %half_scale : f16 to f32
-          view.store %scale, %metadata_view[%local_channel] : f32, view<[%tile_columns]xf32>
+          scf.if %leader {
+            view.store %scale, %metadata_view[%local_channel] : f32, view<[%tile_columns]xf32>
+          }
+        } else {
+          scf.if %leader {
+            %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+            %half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
+            %scale = scalar.extf %half_scale : f16 to f32
+            view.store %scale, %metadata_view[%local_channel] : f32, view<[%tile_columns]xf32>
+          }
         }
       }
     }
@@ -291,6 +304,11 @@ template.def<@flash_next.q8_schedule> device @flash_next_q8_64x64_waves_4x2(%cap
 }
 
 template.def<@flash_next.q8_schedule> device @flash_next_q8_128x128_waves_4x2(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [eq(%tile_rows, 128), eq(%tile_columns, 128), eq(%wave_rows, 4), eq(%wave_columns, 2), eq(%pipeline_depth, 1)] {
+  template.apply<@flash_next.q8_tile>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@flash_next.q8_schedule> device @flash_next_q8_128x128_read_ahead(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [eq(%tile_rows, 128), eq(%tile_columns, 128), eq(%wave_rows, 4), eq(%wave_columns, 2), eq(%pipeline_depth, 2)] {
   template.apply<@flash_next.q8_tile>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
   template.return
 }

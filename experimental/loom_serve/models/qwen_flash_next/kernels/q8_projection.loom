@@ -8,9 +8,9 @@ template.decl @flash_next.q8_schedule(%capacity: index, %input_width: index, %ou
 
 // The command caller supplies exact dimensions. The policy balances output
 // reuse against the number of independent workgroups: narrow output grids need
-// smaller tiles, while short reductions can afford more accumulators per wave.
+// smaller tiles, while large token cohorts reuse wider weight panels.
 // These values disappear into each materialized kernel and its launch config.
-func.def public pure inline @flash_next_q8_geometry(%capacity: index, %inputs: index, %outputs: index) -> (i1, index, index, index, index) {
+func.def public pure inline @flash_next_q8_geometry(%capacity: index, %outputs: index) -> (i1, index, index, index, index) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %c4 = index.constant 4 : index
@@ -20,7 +20,6 @@ func.def public pure inline @flash_next_q8_geometry(%capacity: index, %inputs: i
   %c128 = index.constant 128 : index
   %c256 = index.constant 256 : index
   %c512 = index.constant 512 : index
-  %c1024 = index.constant 1024 : index
   %c2560 = index.constant 2560 : index
   %small_batch = index.cmp ult, %capacity, %c16 : index
   %few_columns = index.cmp ule, %outputs, %c512 : index
@@ -37,10 +36,8 @@ func.def public pure inline @flash_next_q8_geometry(%capacity: index, %inputs: i
   } else {
     %narrow = index.cmp ule, %outputs, %c2560 : index
     %rows, %columns, %wave_rows, %wave_columns = scf.if %narrow -> (index, index, index, index) {
-      %short_k = index.cmp ule, %inputs, %c1024 : index
       %large_batch = index.cmp uge, %capacity, %c256 : index
-      %wide_tile = scalar.andi %short_k, %large_batch : i1
-      %tile = scf.select %wide_tile, %c128, %c64 : index
+      %tile = scf.select %large_batch, %c128, %c64 : index
       scf.yield %tile, %tile, %c4, %c2 : index, index, index, index
     } else {
       %under32 = index.cmp ult, %capacity, %c32 : index
@@ -98,9 +95,13 @@ template.decl @flash_next.project_dense_q8(%inputs: index, %outputs: index, %blo
 
 template.def<@flash_next.project_dense_q8> @flash_next_project_dense_q8(%inputs: index, %outputs: index, %blocks: index, %span: buffer, %input: buffer, %weight: view<[%outputs]x[%blocks]x34xi8>, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
-  %matrix, %rows, %columns, %wave_rows, %wave_columns = func.call pure @flash_next_q8_geometry(%capacity, %inputs, %outputs) : (index, index, index) -> (i1, index, index, index, index)
+  %matrix, %rows, %columns, %wave_rows, %wave_columns = func.call pure @flash_next_q8_geometry(%capacity, %outputs) : (index, index) -> (i1, index, index, index, index)
   scf.if %matrix {
-    %depth = index.constant 1 : index
+    %single = index.constant 1 : index
+    %double = index.constant 2 : index
+    %wide_rows = index.constant 128 : index
+    %use_overlap = index.cmp eq, %rows, %wide_rows : index
+    %depth = scf.select %use_overlap, %double, %single : index
     %wave_count = index.mul %wave_rows, %wave_columns : index
     %c4 = index.constant 4 : index
     %four_waves = index.cmp eq, %wave_count, %c4 : index
