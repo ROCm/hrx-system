@@ -411,6 +411,36 @@ TEST_F(NativeTextRegistryTest, InvalidQosPreservesCallerInput) {
   }
 }
 
+TEST_F(NativeTextRegistryTest,
+       QueuedClassPrecedesAdmissionAndPreservesArrival) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream background(nullptr, loom_serve_text_stream_close);
+  NativeStream first(nullptr, loom_serve_text_stream_close);
+  NativeStream second(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "background", &background));
+  IREE_ASSERT_OK(
+      Open(body_, "first", &first, "", LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  IREE_ASSERT_OK(
+      Open(body_, "second", &second, "", LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_NO_FATAL_FAILURE(AwaitBlock(first));
+  const auto& service = Model()->service;
+  loom_serve_http_session_snapshot_t session = {};
+  ASSERT_TRUE(service.inspection.session_at(service.self, 0, &session));
+  EXPECT_EQ(String(session.name), "first");
+  ASSERT_TRUE(service.inspection.session_at(service.self, 1, &session));
+  EXPECT_EQ(String(session.name), "second");
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(first));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(second));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(background));
+  for (const auto* stream : {first.get(), second.get(), background.get()}) {
+    const auto* result = loom_serve_text_stream_result(stream);
+    ASSERT_NE(result, nullptr);
+    if (!FLAG_native_text_model[0]) {
+      EXPECT_EQ(String(result->content), Oracle::Complete("abxa", 4));
+    }
+  }
+}
+
 TEST_F(NativeTextRegistryTest, StalledNativeAndHttpPeerRetainDetachedResult) {
   NativeStream stream(nullptr, loom_serve_text_stream_close);
   IREE_ASSERT_OK(Open(body_, "native", &stream));

@@ -18,8 +18,8 @@ extern "C" {
 #endif
 
 // Serialized admission ownership, independent of device rows and epoch spans.
-// Request slots stay fixed while the FIFO pointer order changes. The scheduler
-// owns readiness and identifies the exact request borrowed by CPU/device work.
+// Request slots stay fixed while pointers remain FIFO within request class.
+// The scheduler owns readiness and identifies the exact CPU/device borrower.
 typedef struct loom_serve_text_pending_queue_t {
   // Allocator owning stable slots and terminal request payloads.
   iree_allocator_t host_allocator;
@@ -29,21 +29,21 @@ typedef struct loom_serve_text_pending_queue_t {
   loom_serve_text_telemetry_t* telemetry;
   // One allocation holding stable request slots and their pointer order.
   uint8_t* storage;
-  // Live FIFO prefix followed by reusable free slots. Removing another entry
-  // never moves the payload of a request retained by a borrower.
+  // Live prefix ordered by descending class, then arrival, followed by reusable
+  // free slots. Reordering never moves payload retained by a borrower.
   loom_serve_text_pending_request_t** values;
-  // Number of claimed requests in FIFO order.
+  // Number of claimed requests in class/arrival order.
   iree_host_size_t count;
   // Maximum queued requests, allocated once during initialization.
   iree_host_size_t capacity;
   // Replaceable selection policy, independent of request/storage ownership.
   loom_serve_text_admission_t admission;
   // Scheduler-owned attempt retained through CPU preparation and reservation.
-  // Removal adjusts its FIFO index or clears it after all borrowers retire.
+  // Reordering adjusts its index or clears it after all borrowers retire.
   struct {
-    // Stable selected request, independent of FIFO removal and slot reuse.
+    // Stable selected request, independent of queue removal and slot reuse.
     loom_serve_text_pending_request_t* request;
-    // FIFO position of this borrow, independent of admission lookahead.
+    // Current pointer position of this borrow, independent of lookahead.
     iree_host_size_t index;
     // Idle slot borrowed through this attempt's preparation/reservation.
     loom_serve_text_session_t* session;
@@ -91,6 +91,16 @@ void loom_serve_text_pending_queue_push(
     loom_serve_text_checkpoint_entry_t* checkpoint,
     const loom_serve_text_sequence_t* sequence,
     loom_serve_text_receipt_t receipt);
+
+// Replaces a lower-class unaccepted attempt with the highest queued class.
+// CPU/device borrowers have retired. Capacity backfill within the ensuing
+// admission pass can still probe later entries without spending priority here.
+void loom_serve_text_pending_queue_prioritize(
+    loom_serve_text_pending_queue_t* queue);
+
+// Oldest arrival across classes, or zero for an empty queue.
+iree_time_t loom_serve_text_pending_queue_oldest_arrival(
+    const loom_serve_text_pending_queue_t* queue);
 
 // Resolves the selected request's exact completed frontier without acquiring
 // native ownership. Row/cache contents stay protected through preparation.

@@ -107,11 +107,11 @@ typedef struct loom_serve_text_admission_record_t {
   uint64_t restored_bytes;
   // Requested output bound.
   uint64_t max_tokens;
-  // Arrival-ordered queue position selected for this successful admission.
+  // Class/arrival queue position selected for this successful admission.
   uint64_t queue_rank;
-  // Successful overtakes of the current oldest request, including this one.
+  // Successful overtakes of the current queue head, including this one.
   uint64_t overtakes;
-  // Configured successful-overtake bound; zero is strict FIFO.
+  // Configured successful-overtake bound; zero preserves queue order.
   uint64_t overtake_budget;
   // Host time preparing the input, in nanoseconds.
   uint64_t prepare_ns;

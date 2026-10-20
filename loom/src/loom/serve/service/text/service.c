@@ -354,8 +354,7 @@ static void loom_serve_text_pending_observe(
   service->heartbeat.snapshot.queued_requests =
       service->pending.count + service->input_counts.count;
   service->heartbeat.snapshot.oldest_queued_arrival =
-      service->pending.count ? service->pending.values[0]->receipt.arrival_time
-                             : 0;
+      loom_serve_text_pending_queue_oldest_arrival(&service->pending);
   if (service->input_counts.count) {
     const iree_time_t arrival =
         service->input_counts.requests[0].receipt.arrival_time;
@@ -609,8 +608,13 @@ static bool loom_serve_text_begin_preparation_at(
 
 static bool loom_serve_text_begin_preparation(
     loom_serve_text_service_t* service) {
-  return loom_serve_text_begin_preparation_at(
-      service, service->pending.admission.cursor);
+  iree_host_size_t index = service->pending.admission.cursor;
+  if (service->pending.count &&
+      service->pending.values[0]->consumer.qos >
+          service->pending.values[index]->consumer.qos) {
+    index = 0;
+  }
+  return loom_serve_text_begin_preparation_at(service, index);
 }
 
 // Resolves prefix elision before starting the independent image component.
@@ -658,8 +662,11 @@ static iree_status_t loom_serve_text_prepare_media(
   }
   if (!service->media_preparation_end &&
       loom_serve_text_media_projector_is_collecting(service->projector)) {
-    service->media_preparation_end =
-        service->pending.values[service->pending.count - 1]->receipt.serial;
+    for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
+      service->media_preparation_end =
+          iree_max(service->media_preparation_end,
+                   service->pending.values[i]->receipt.serial);
+    }
   }
   if (!service->projector) {
     loom_serve_finite_model_t* model = NULL;
@@ -834,6 +841,7 @@ static void loom_serve_text_complete_retention(
 static iree_status_t loom_serve_text_admit_pending(
     loom_serve_text_service_t* service, loom_serve_service_flags_t flags,
     bool allow_preparation) {
+  loom_serve_text_pending_queue_prioritize(&service->pending);
   // Cancellation can leave a completed full-cache exchange without its
   // incoming admission. Settle that excess here, never in terminal teardown's
   // host-only pending removal while device ownership may remain unresolved.
@@ -851,7 +859,8 @@ static iree_status_t loom_serve_text_admit_pending(
         service->pending.values[service->pending.admission.cursor];
     if (!service->pending.prepared.session) {
       if (allow_preparation) {
-        loom_serve_text_begin_preparation(service);
+        loom_serve_text_begin_preparation_at(service,
+                                             service->pending.admission.cursor);
       }
       if (!service->pending.prepared.session ||
           loom_serve_text_has_work(service)) {
@@ -961,9 +970,9 @@ static void loom_serve_text_pending_push(
   loom_serve_text_pending_queue_push(&service->pending, consumer, body, name,
                                      checkpoint, sequence, receipt);
   loom_serve_text_pending_observe(service);
-  // Both ingress paths can prepare the oldest queued input while an accepted
-  // epoch owns different rows. Scheduling this finite loan cannot fail or
-  // change the accepted request's ownership.
+  // Both ingress paths can prepare the highest-class queued input while an
+  // accepted epoch owns different rows. The finite loan preserves already
+  // accepted work and the exact selected request's storage.
   if (service->completion.work == TEXT_WORK_EPOCH &&
       service->cpu_work == TEXT_CPU_WORK_NONE) {
     loom_serve_text_begin_preparation(service);
@@ -2049,7 +2058,7 @@ static iree_status_t loom_serve_text_advance_work(
       loom_serve_text_prepare_epoch(service, shape_index, count, spans);
       status = loom_serve_text_submit_ready_epoch(service, flags, out_progress);
     } else if (yield_preparation) {
-      // With no ready device work, rejection never stalls the remaining FIFO.
+      // With no ready device work, rejection never stalls the remaining queue.
       *out_progress |= loom_serve_text_begin_preparation(service);
     }
   }
@@ -2077,7 +2086,7 @@ static bool loom_serve_text_media_lookahead(
     const loom_serve_text_pending_request_t* request =
         service->pending.values[i];
     if (request->receipt.serial > service->media_preparation_end) {
-      break;
+      continue;
     }
     if (service->projector && request->media) {
       loom_serve_text_media_projector_offer(service->projector, request->media);
@@ -2206,8 +2215,9 @@ static loom_serve_service_snapshot_t loom_serve_text_snapshot(void* self) {
                               service->completion.work == TEXT_WORK_CHECKPOINT;
   const bool active_count = service->cpu_work == TEXT_CPU_WORK_INPUT_COUNT;
   iree_time_t queued_arrival =
-      service->pending.count ? service->pending.values[0]->receipt.arrival_time
-                             : IREE_TIME_INFINITE_FUTURE;
+      service->pending.count
+          ? loom_serve_text_pending_queue_oldest_arrival(&service->pending)
+          : IREE_TIME_INFINITE_FUTURE;
   iree_time_t active_arrival = state.active_rows ? state.oldest_active_arrival
                                                  : IREE_TIME_INFINITE_FUTURE;
   if (service->control.consumer.self) {

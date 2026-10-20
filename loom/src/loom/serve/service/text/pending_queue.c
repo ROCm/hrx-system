@@ -95,7 +95,7 @@ void loom_serve_text_pending_queue_push(
   if (checkpoint) {
     ++checkpoint->pending;
   }
-  loom_serve_text_pending_request_t* pending = queue->values[queue->count++];
+  loom_serve_text_pending_request_t* pending = queue->values[queue->count];
   *pending = (loom_serve_text_pending_request_t){
       .consumer = consumer,
       .body = body,
@@ -107,6 +107,46 @@ void loom_serve_text_pending_queue_push(
     pending->sequence = *sequence;
     pending->name = iree_make_cstring_view(pending->sequence.handle);
   }
+  iree_host_size_t index = queue->count;
+  while (index && queue->values[index - 1]->consumer.qos < consumer.qos) {
+    queue->values[index] = queue->values[index - 1];
+    --index;
+  }
+  queue->values[index] = pending;
+  if (queue->count && index <= queue->admission.cursor) {
+    ++queue->admission.cursor;
+  }
+  if (!index) {
+    queue->admission.overtakes = 0;
+  }
+  if (queue->prepared.request && index <= queue->prepared.index) {
+    ++queue->prepared.index;
+  }
+  ++queue->count;
+}
+
+void loom_serve_text_pending_queue_prioritize(
+    loom_serve_text_pending_queue_t* queue) {
+  if (!queue->count ||
+      queue->values[0]->consumer.qos <=
+          queue->values[queue->admission.cursor]->consumer.qos) {
+    return;
+  }
+  loom_serve_admission_cancel(
+      loom_serve_text_model_residency(queue->model),
+      loom_serve_text_model_admission_permit(queue->model));
+  memset(&queue->prepared, 0, sizeof(queue->prepared));
+  queue->admission.cursor = 0;
+}
+
+iree_time_t loom_serve_text_pending_queue_oldest_arrival(
+    const loom_serve_text_pending_queue_t* queue) {
+  iree_time_t arrival =
+      queue->count ? queue->values[0]->receipt.arrival_time : 0;
+  for (iree_host_size_t i = 1; i < queue->count; ++i) {
+    arrival = iree_min(arrival, queue->values[i]->receipt.arrival_time);
+  }
+  return arrival;
 }
 
 // Resolves the exact completed frontier without acquiring native ownership.
