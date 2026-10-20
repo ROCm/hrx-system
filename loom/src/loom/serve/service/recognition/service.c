@@ -12,6 +12,7 @@
 #include "loom/serve/media/audio_decoder.h"
 #include "loom/serve/runtime/parameter/telemetry.h"
 #include "loom/serve/service/kind.h"
+#include "loom/serve/service/qos.h"
 #include "loom/serve/service/recognition/transcription.h"
 #include "loom/util/json.h"
 
@@ -48,6 +49,15 @@ typedef struct loom_serve_recognition_job_t {
   bool finished;
 } loom_serve_recognition_job_t;
 
+// Immutable finite work captured by the serialized owner. A document is
+// available only after successful stream completion has released the source.
+typedef struct loom_serve_transcription_work_t {
+  // Borrowed upload and caller handle, retained through process release.
+  loom_serve_recognition_job_t* row;
+  // Completed source document for formatting; NULL selects input conversion.
+  const loom_serve_recognition_document_t* document;
+} loom_serve_transcription_work_t;
+
 struct loom_serve_recognition_service_t {
   // Allocator owning this adapter, request slots, and decoded staging.
   iree_allocator_t host_allocator;
@@ -57,8 +67,10 @@ struct loom_serve_recognition_service_t {
   loom_serve_recognition_generator_t generator;
   // Owned stream execution, independent of HTTP upload/decode lifetimes.
   loom_serve_recognition_stream_service_t* streams;
-  // Shared workers for finite decode operations.
+  // Shared workers for finite input conversion and response formatting.
   iree_task_executor_t* executor;
+  // Current conversion/output demand, detached before service destruction.
+  loom_serve_execution_source_t execution_source;
   // Stable HTTP/native request ledger, including the bounded admission queue.
   loom_serve_recognition_job_t* rows;
   // Number of allocated request ledger slots.
@@ -75,12 +87,16 @@ struct loom_serve_recognition_service_t {
   loom_serve_telemetry_counters_t counters;
   // Receipt-to-completion observations independent of event history.
   loom_serve_telemetry_latency_t latency;
-  // One accepted conversion operation, separate from the typed model CPU owner.
+  // Finite conversion and response work, separate from the typed model owner.
   struct {
+    // Shared host permission retained through final worker release.
+    loom_serve_execution_permit_t permit;
     // Intrusive storage reused only after the task's final release callback.
     iree_task_process_t process;
-    // Borrowed stable upload, held through release publication.
-    loom_serve_recognition_job_t* row;
+    // Exact upload or successful output borrowed by the accepted operation.
+    loom_serve_transcription_work_t work;
+    // Worker-owned response scratch, disjoint from owner-side rejections.
+    iree_string_builder_t response;
   } cpu;
   // Final task publication joins observer replacement and adapter destruction.
   struct {
@@ -88,10 +104,9 @@ struct loom_serve_recognition_service_t {
     iree_slim_mutex_t mutex;
     // Nonblocking owner wake installed before the first task.
     loom_serve_wake_callback_t observer;
-    // The accepted conversion task no longer borrows its row or process
-    // storage.
+    // The finite task no longer borrows its row, document, or process storage.
     bool ready;
-    // Owned conversion failure, published before final release.
+    // Owned conversion/formatting failure, published before final release.
     iree_status_t status;
   } events;
 };
@@ -205,7 +220,8 @@ static void loom_serve_transcription_release(
 // transcript survives this call, including failed/reset peers.
 static void loom_serve_transcription_send(
     loom_serve_recognition_service_t* service,
-    loom_serve_recognition_job_t* row, loom_serve_telemetry_outcome_t outcome,
+    loom_serve_recognition_job_t* row, iree_string_view_t response,
+    loom_serve_telemetry_outcome_t outcome,
     const iree_status_t borrowed_status) {
   if (loom_serve_http_connection_failed(row->connection) ||
       !loom_serve_http_connection_can_send(row->connection)) {
@@ -213,8 +229,8 @@ static void loom_serve_transcription_send(
         service, row, false, LOOM_SERVE_TELEMETRY_CANCELLED, borrowed_status);
     return;
   }
-  iree_status_t status = loom_serve_http_connection_send(
-      row->connection, iree_string_builder_view(&service->response));
+  iree_status_t status =
+      loom_serve_http_connection_send(row->connection, response);
   if (iree_status_is_ok(status)) {
     loom_serve_transcription_release(service, row, true, outcome,
                                      borrowed_status);
@@ -245,8 +261,9 @@ static iree_status_t loom_serve_transcription_reject(
     status = iree_string_builder_append_cstring(&service->response, "}}");
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_transcription_send(service, row, LOOM_SERVE_TELEMETRY_REJECTED,
-                                  borrowed_status);
+    loom_serve_transcription_send(
+        service, row, iree_string_builder_view(&service->response),
+        LOOM_SERVE_TELEMETRY_REJECTED, borrowed_status);
   } else {
     loom_serve_transcription_release(service, row, false,
                                      LOOM_SERVE_TELEMETRY_FAILED, status);
@@ -284,9 +301,20 @@ static iree_status_t loom_serve_transcription_cpu_run(
     iree_task_process_t* process, const iree_task_worker_context_t* context,
     iree_task_process_drain_result_t* result) {
   loom_serve_recognition_service_t* service = process->user_data;
-  loom_serve_recognition_job_t* row = service->cpu.row;
+  loom_serve_recognition_job_t* row = service->cpu.work.row;
   result->completed = true;
   result->did_work = true;
+  if (service->cpu.work.document) {
+    iree_string_builder_reset(&service->cpu.response);
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        &service->cpu.response,
+        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nConnection: close\r\n\r\n",
+        row->request.text_response ? "text/plain; charset=utf-8"
+                                   : "application/json"));
+    return loom_serve_transcription_format(service->cpu.work.document,
+                                           row->request.text_response,
+                                           &service->cpu.response);
+  }
   if (row->request.pcm) {
     const iree_host_size_t frame_bytes =
         service->generator.format.channels * sizeof(int16_t);
@@ -339,26 +367,77 @@ static void loom_serve_transcription_cpu_release(iree_task_process_t* process) {
   iree_slim_mutex_unlock(&service->events.mutex);
 }
 
-static void loom_serve_transcription_decode(
+// Only owner-published fields are inspected, never an active CPU borrow. Input
+// credit bounds conversion urgency independently of the upload's total length.
+static loom_serve_transcription_work_t loom_serve_transcription_select(
     loom_serve_recognition_service_t* service) {
+  loom_serve_transcription_work_t selected = {0};
   for (iree_host_size_t i = 0; i < service->capacity; ++i) {
     const iree_host_size_t index = (service->cursor + i) % service->capacity;
     loom_serve_recognition_job_t* row = &service->rows[index];
-    if (!row->connection || !row->stream || row->decoded || row->frame_count ||
-        loom_serve_recognition_stream_is_complete(row->stream)) {
+    if (!row->connection || !row->stream ||
+        loom_serve_http_connection_failed(row->connection)) {
       continue;
     }
-    service->cursor = (index + 1) % service->capacity;
-    service->cpu.row = row;
-    iree_task_process_initialize(loom_serve_transcription_cpu_run, 0, 1,
-                                 &service->cpu.process);
-    service->cpu.process.user_data = service;
-    service->cpu.process.completion_fn = loom_serve_transcription_cpu_complete;
-    service->cpu.process.release_fn = loom_serve_transcription_cpu_release;
-    iree_task_executor_schedule_process(service->executor,
-                                        &service->cpu.process);
-    break;
+    const bool complete =
+        loom_serve_recognition_stream_is_complete(row->stream);
+    const loom_serve_recognition_document_t* document =
+        complete ? loom_serve_recognition_stream_document(row->stream) : NULL;
+    if (complete ? (!row->finished || !document)
+                 : (row->decoded || row->frame_count ||
+                    !loom_serve_recognition_stream_credit(row->stream))) {
+      continue;
+    }
+    if (!selected.row ||
+        row->request.request.qos > selected.row->request.request.qos) {
+      selected =
+          (loom_serve_transcription_work_t){.row = row, .document = document};
+    }
   }
+  return selected;
+}
+
+static loom_serve_execution_resources_t loom_serve_transcription_demand(
+    void* self) {
+  loom_serve_recognition_service_t* service = self;
+  if (service->stopping || service->cpu.work.row) {
+    return 0;
+  }
+  const loom_serve_transcription_work_t work =
+      loom_serve_transcription_select(service);
+  return work.row && work.row->request.request.qos ==
+                         LOOM_SERVE_EXECUTION_QOS_REALTIME
+             ? LOOM_SERVE_EXECUTION_RESOURCE_HOST
+             : 0;
+}
+
+static void loom_serve_transcription_schedule_cpu(
+    loom_serve_recognition_service_t* service) {
+  const loom_serve_transcription_work_t work =
+      loom_serve_transcription_select(service);
+  if (!work.row) {
+    loom_serve_execution_permit_cancel(&service->cpu.permit);
+    return;
+  }
+  const loom_serve_execution_qos_t qos = work.row->request.request.qos;
+  if (service->cpu.permit.phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING &&
+      service->cpu.permit.qos != qos) {
+    loom_serve_execution_permit_cancel(&service->cpu.permit);
+  }
+  if (service->cpu.permit.phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE) {
+    loom_serve_execution_permit_request(&service->cpu.permit, qos);
+  }
+  if (!loom_serve_execution_permit_try_acquire(&service->cpu.permit)) {
+    return;
+  }
+  service->cursor = (work.row - service->rows + 1) % service->capacity;
+  service->cpu.work = work;
+  iree_task_process_initialize(loom_serve_transcription_cpu_run, 0, 1,
+                               &service->cpu.process);
+  service->cpu.process.user_data = service;
+  service->cpu.process.completion_fn = loom_serve_transcription_cpu_complete;
+  service->cpu.process.release_fn = loom_serve_transcription_cpu_release;
+  iree_task_executor_schedule_process(service->executor, &service->cpu.process);
 }
 
 static iree_status_t loom_serve_transcription_accept(
@@ -389,6 +468,9 @@ static iree_status_t loom_serve_transcription_accept(
   iree_status_t status = loom_serve_transcription_parse(
       loom_serve_http_multipart_parts(request->multipart),
       service->options.name, service->generator.format, &pending.request);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_qos_parse(request, &pending.request.request.qos);
+  }
   if (iree_status_is_ok(status) && pending.request.pcm &&
       pending.request.audio.data_length /
               (service->generator.format.channels * sizeof(int16_t)) >
@@ -413,41 +495,6 @@ static iree_status_t loom_serve_transcription_accept(
       IREE_SV("transcription admission queue is full"));
 }
 
-static iree_status_t loom_serve_transcription_deliver(
-    loom_serve_recognition_service_t* service,
-    loom_serve_recognition_job_t* row) {
-  // Typed sources may terminate an input session themselves. A finite upload
-  // cannot report success while its input tail has never reached the model.
-  if (!row->finished) {
-    iree_status_t status = iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "recognition completed before the uploaded audio reached end-of-input");
-    iree_status_t response =
-        loom_serve_transcription_fail(service, row, status);
-    iree_status_free(status);
-    return response;
-  }
-  iree_string_builder_reset(&service->response);
-  iree_status_t status = iree_string_builder_append_format(
-      &service->response,
-      "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nConnection: close\r\n\r\n",
-      row->request.text_response ? "text/plain; charset=utf-8"
-                                 : "application/json");
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_transcription_format(
-        loom_serve_recognition_stream_document(row->stream),
-        row->request.text_response, &service->response);
-  }
-  if (iree_status_is_ok(status)) {
-    loom_serve_transcription_send(service, row, LOOM_SERVE_TELEMETRY_COMPLETED,
-                                  iree_ok_status());
-  } else {
-    loom_serve_transcription_release(service, row, false,
-                                     LOOM_SERVE_TELEMETRY_FAILED, status);
-  }
-  return status;
-}
-
 static iree_status_t loom_serve_recognition_advance(
     void* self, loom_serve_service_flags_t flags, bool* out_progress) {
   loom_serve_recognition_service_t* service = self;
@@ -464,19 +511,23 @@ static iree_status_t loom_serve_recognition_advance(
   iree_slim_mutex_unlock(&service->events.mutex);
   iree_status_t status = iree_ok_status();
   if (ready) {
-    loom_serve_recognition_job_t* row = service->cpu.row;
-    service->cpu.row = NULL;
+    loom_serve_execution_permit_complete(&service->cpu.permit);
+    const loom_serve_transcription_work_t work = service->cpu.work;
+    loom_serve_recognition_job_t* row = work.row;
+    service->cpu.work = (loom_serve_transcription_work_t){0};
     *out_progress = true;
-    if (!iree_status_is_ok(cpu_status)) {
-      if (service->stopping ||
-          loom_serve_http_connection_failed(row->connection)) {
-        loom_serve_transcription_release(
-            service, row, false, LOOM_SERVE_TELEMETRY_CANCELLED, cpu_status);
-      } else {
-        status = loom_serve_transcription_fail(service, row, cpu_status);
-      }
-      iree_status_free(cpu_status);
+    if (service->stopping ||
+        loom_serve_http_connection_failed(row->connection)) {
+      loom_serve_transcription_release(
+          service, row, false, LOOM_SERVE_TELEMETRY_CANCELLED, cpu_status);
+    } else if (!iree_status_is_ok(cpu_status)) {
+      status = loom_serve_transcription_fail(service, row, cpu_status);
+    } else if (work.document) {
+      loom_serve_transcription_send(
+          service, row, iree_string_builder_view(&service->cpu.response),
+          LOOM_SERVE_TELEMETRY_COMPLETED, iree_ok_status());
     }
+    iree_status_free(cpu_status);
   }
   for (iree_host_size_t i = 0;
        i < service->capacity && iree_status_is_ok(status); ++i) {
@@ -486,12 +537,12 @@ static iree_status_t loom_serve_recognition_advance(
     }
     if (service->stopping ||
         loom_serve_http_connection_failed(row->connection)) {
-      if (row->stream) {
+      if (row->stream && row != service->cpu.work.row) {
         loom_serve_recognition_stream_close(row->stream);
         row->stream = NULL;
         *out_progress = true;
       }
-      if (row != service->cpu.row) {
+      if (row != service->cpu.work.row) {
         loom_serve_transcription_release(service, row, false,
                                          LOOM_SERVE_TELEMETRY_CANCELLED,
                                          iree_ok_status());
@@ -499,7 +550,7 @@ static iree_status_t loom_serve_recognition_advance(
       }
       continue;
     }
-    if (!row->stream || row == service->cpu.row) {
+    if (!row->stream || row == service->cpu.work.row) {
       continue;
     }
     // A source failure stops input before asynchronous release completes.
@@ -517,8 +568,17 @@ static iree_status_t loom_serve_recognition_advance(
       *out_progress = true;
     }
     if (loom_serve_recognition_stream_is_complete(row->stream)) {
-      status = loom_serve_transcription_deliver(service, row);
-      *out_progress = true;
+      // A typed source may terminate input itself. A finite upload cannot
+      // report success while its tail has never reached the source.
+      if (!row->finished) {
+        iree_status_t failure =
+            iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                             "recognition completed before the uploaded audio "
+                             "reached end-of-input");
+        status = loom_serve_transcription_fail(service, row, failure);
+        iree_status_free(failure);
+        *out_progress = true;
+      }
       continue;
     }
     if (row->frame_count) {
@@ -546,14 +606,16 @@ static iree_status_t loom_serve_recognition_advance(
       *out_progress = true;
     }
   }
-  // FIFO host admission is independent of resident numerical batch order.
+  // Request class precedes FIFO age before granting native input storage.
   bool admission_full = service->stopping;
   while (!admission_full && iree_status_is_ok(status)) {
     loom_serve_recognition_job_t* queued = NULL;
     for (iree_host_size_t i = 0; i < service->capacity; ++i) {
       loom_serve_recognition_job_t* row = &service->rows[i];
-      if (row->connection && !row->stream && row != service->cpu.row &&
-          (!queued || row->id < queued->id)) {
+      if (row->connection && !row->stream && row != service->cpu.work.row &&
+          (!queued || row->request.request.qos > queued->request.request.qos ||
+           (row->request.request.qos == queued->request.request.qos &&
+            row->id < queued->id))) {
         queued = row;
       }
     }
@@ -585,9 +647,12 @@ static iree_status_t loom_serve_recognition_advance(
         (flags & LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY) != 0, &progress);
     *out_progress |= progress;
   }
-  if (iree_status_is_ok(status) && !service->stopping && !service->cpu.row) {
-    loom_serve_transcription_decode(service);
-    *out_progress |= service->cpu.row != NULL;
+  if (iree_status_is_ok(status) && !service->stopping &&
+      !service->cpu.work.row) {
+    loom_serve_transcription_schedule_cpu(service);
+    *out_progress |= service->cpu.work.row != NULL;
+  } else if (service->stopping) {
+    loom_serve_execution_permit_cancel(&service->cpu.permit);
   }
   return status;
 }
@@ -604,7 +669,7 @@ static void loom_serve_recognition_set_observer(
 
 static bool loom_serve_recognition_is_active(void* self) {
   loom_serve_recognition_service_t* service = self;
-  return service->cpu.row ||
+  return service->cpu.work.row ||
          loom_serve_recognition_stream_service_is_active(service->streams);
 }
 
@@ -628,7 +693,7 @@ static loom_serve_service_snapshot_t loom_serve_recognition_snapshot(
     if (!row->id) {
       continue;
     }
-    if (row->stream || row == service->cpu.row) {
+    if (row->stream || row == service->cpu.work.row) {
       ++snapshot.active_requests;
       snapshot.oldest_active_age =
           iree_max(snapshot.oldest_active_age, now - row->arrival);
@@ -638,7 +703,8 @@ static loom_serve_service_snapshot_t loom_serve_recognition_snapshot(
           iree_max(snapshot.oldest_queued_age, now - row->arrival);
     }
   }
-  snapshot.phase = snapshot.active_requests   ? "recognizing"
+  snapshot.phase = service->cpu.work.document ? "encoding"
+                   : snapshot.active_requests ? "recognizing"
                    : snapshot.queued_requests ? "queued"
                                               : "idle";
   return snapshot;
@@ -683,12 +749,15 @@ void loom_serve_recognition_service_free(
   if (!service) {
     return;
   }
-  IREE_ASSERT(!service->cpu.row);
+  IREE_ASSERT(!service->cpu.work.row);
+  loom_serve_execution_source_deinitialize(&service->execution_source);
+  loom_serve_execution_permit_deinitialize(&service->cpu.permit);
   loom_serve_recognition_stream_service_free(service->streams);
   for (iree_host_size_t i = 0; service->rows && i < service->capacity; ++i) {
     IREE_ASSERT(!service->rows[i].id);
   }
   iree_string_builder_deinitialize(&service->response);
+  iree_string_builder_deinitialize(&service->cpu.response);
   iree_status_free(service->events.status);
   iree_slim_mutex_deinitialize(&service->events.mutex);
   iree_allocator_free(service->host_allocator, service->rows);
@@ -741,6 +810,10 @@ iree_status_t loom_serve_recognition_service_allocate(
   service->capacity = generator.request_capacity + options->pending_capacity;
   iree_slim_mutex_initialize(&service->events.mutex);
   iree_string_builder_initialize(host_allocator, &service->response);
+  iree_string_builder_initialize(host_allocator, &service->cpu.response);
+  loom_serve_execution_permit_initialize(
+      generator.permit ? generator.permit->scheduler : NULL,
+      LOOM_SERVE_EXECUTION_RESOURCE_HOST, &service->cpu.permit);
   const loom_serve_recognition_stream_service_options_t recognition_options = {
       .name = options->name,
       .request_limit = options->request_limit,
@@ -753,6 +826,9 @@ iree_status_t loom_serve_recognition_service_allocate(
                                          (void**)&service->rows);
   }
   if (iree_status_is_ok(status)) {
+    loom_serve_execution_source_initialize(service->cpu.permit.scheduler,
+                                           loom_serve_transcription_demand,
+                                           service, &service->execution_source);
     *out_service = service;
   } else {
     loom_serve_recognition_service_free(service);

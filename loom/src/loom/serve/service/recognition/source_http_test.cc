@@ -15,6 +15,7 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/server/resources.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/service.h"
@@ -28,7 +29,7 @@ IREE_FLAG(bool, test_elastic, false, "Use elastic backing for recognition.");
 namespace {
 
 std::string Request(bool encoded, size_t frame_count = 19,
-                    int16_t sample = 8192) {
+                    int16_t sample = 8192, const char* qos = nullptr) {
   std::string pcm(frame_count * sizeof(int16_t), '\0');
   for (size_t i = 0; i < frame_count; ++i) {
     iree_unaligned_store_le_u16(pcm.data() + i * sizeof(int16_t),
@@ -58,7 +59,9 @@ std::string Request(bool encoded, size_t frame_count = 19,
       "name=\"file\"; filename=\"voice.bin\"\r\n"
       "Content-Type: " +
       content_type + "\r\n\r\n" + pcm + "\r\n--voice--\r\n";
-  return "POST /v1/audio/transcriptions HTTP/1.1\r\nHost: local\r\n"
+  const std::string headers =
+      qos ? std::string("X-Loom-QoS: ") + qos + "\r\n" : "";
+  return "POST /v1/audio/transcriptions HTTP/1.1\r\nHost: local\r\n" + headers +
          "Content-Type: multipart/form-data; boundary=voice\r\n"
          "Content-Length: " +
          std::to_string(body.size()) + "\r\n\r\n" + body;
@@ -122,6 +125,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
                              loom_serve_http_server_notification(server_)});
   }
   void TearDown() override {
+    loom_serve_execution_permit_deinitialize(&peer_);
     if (service_) {
       Advance(true);
       AdvanceUntil([&] { return !interface_.is_pending(interface_.self); },
@@ -172,6 +176,15 @@ class SourceRecognitionHttpTest : public ::testing::Test {
         interface_.accept(interface_.self, *connection, *request, 0));
   }
 
+  void RequestPeer(loom_serve_execution_qos_t qos) {
+    loom_serve_execution_permit_initialize(
+        loom_serve_recognition_model_generator(model_).permit->scheduler,
+        LOOM_SERVE_EXECUTION_RESOURCE_HOST, &peer_);
+    loom_serve_execution_permit_request(&peer_, qos);
+  }
+
+  // Controlled application claim, detached before the fixture's service.
+  loom_serve_execution_permit_t peer_ = {};
   // Shared application host; its sole worker supplies the deterministic gate.
   loom_serve_host_t* host_ = nullptr;
   // Application group whose numerical permissions share the service owner.
@@ -193,6 +206,55 @@ class SourceRecognitionHttpTest : public ::testing::Test {
 class SourceRecognitionHttpCancellationTest
     : public SourceRecognitionHttpTest,
       public ::testing::WithParamInterface<std::tuple<bool, bool>> {};
+
+class SourceRecognitionHttpQosTest
+    : public SourceRecognitionHttpTest,
+      public ::testing::WithParamInterface<bool> {};
+
+TEST_P(SourceRecognitionHttpQosTest, RealtimeUploadUsesSharedHostAdmission) {
+  RequestPeer(LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  loom_serve::testing::HttpClient background;
+  loom_serve::testing::HttpClient realtime;
+  IREE_ASSERT_OK(http_.Send(Request(GetParam()), background.put()));
+  loom_serve_http_connection_t* connection = nullptr;
+  const loom_serve_http_request_t* request = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(background.get(), &connection, &request));
+  ASSERT_NO_FATAL_FAILURE(Advance(false));
+  EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
+  IREE_ASSERT_OK(
+      http_.Send(Request(GetParam(), 19, 8192, "realtime"), realtime.put()));
+  ASSERT_NO_FATAL_FAILURE(Accept(realtime.get(), &connection, &request));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 1; }));
+  std::string response;
+  IREE_ASSERT_OK(http_.Read(realtime.release(), false, &response));
+  EXPECT_NE(response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
+  EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
+  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 1u);
+  loom_serve_execution_permit_complete(&peer_);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 2; }));
+  IREE_ASSERT_OK(http_.Read(background.release(), false, &response));
+  EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
+}
+
+INSTANTIATE_TEST_SUITE_P(PCMAndEncoded, SourceRecognitionHttpQosTest,
+                         LOOM_TEST_AUDIO_WAV ? ::testing::Bool()
+                                             : ::testing::ValuesIn({false}));
+
+TEST_F(SourceRecognitionHttpTest, RejectsUnknownQosBeforeConversion) {
+  loom_serve::testing::HttpClient client;
+  IREE_ASSERT_OK(http_.Send(Request(false, 19, 8192, "urgent"), client.put()));
+  loom_serve_http_connection_t* connection = nullptr;
+  const loom_serve_http_request_t* request = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
+  std::string response;
+  IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
+  EXPECT_NE(response.find("HTTP/1.1 400 Bad Request\r\n"), std::string::npos);
+  EXPECT_NE(response.find("X-Loom-QoS"), std::string::npos);
+  EXPECT_FALSE(interface_.is_pending(interface_.self));
+}
 
 TEST_F(SourceRecognitionHttpTest, DeploymentRoleRequiresItsDeclaredOutput) {
   interface_.set_observer(interface_.self, {});
@@ -315,6 +377,48 @@ TEST_P(SourceRecognitionHttpCancellationTest,
     EXPECT_NE(response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
     EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
   }
+}
+
+TEST_P(SourceRecognitionHttpCancellationTest,
+       RealtimeCancellationRetainsHostUntilDecodeRelease) {
+  const auto [stopping, encoded] = GetParam();
+  loom_serve::testing::HttpClient client;
+  IREE_ASSERT_OK(
+      http_.Send(Request(encoded, 19, 8192, "realtime"), client.put()));
+  loom_serve_http_connection_t* connection = nullptr;
+  const loom_serve_http_request_t* request = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
+  const std::string body(request->body.data, request->body.size);
+  loom_serve::testing::WorkerGate gate(loom_serve_host_executor(host_));
+  ASSERT_NO_FATAL_FAILURE(Advance(false));
+  // Empty native initialization is background and is held by the ready
+  // realtime decoder. The decoder is the accepted realtime host borrower.
+  RequestPeer(LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  if (!stopping) {
+    const linger reset = {1, 0};
+    ASSERT_EQ(
+        setsockopt(client.get(), SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+        0);
+    ASSERT_EQ(close(client.release()), 0);
+    iree_notification_await(
+        loom_serve_http_server_notification(server_),
+        [](void* self) {
+          return loom_serve_http_connection_failed(
+              static_cast<loom_serve_http_connection_t*>(self));
+        },
+        connection, iree_infinite_timeout());
+  }
+  ASSERT_NO_FATAL_FAILURE(Advance(stopping));
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 0u);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  EXPECT_EQ(std::string(request->body.data, request->body.size), body);
+  gate.Open();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return !interface_.is_pending(interface_.self); }, stopping));
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
+  EXPECT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  loom_serve_execution_permit_complete(&peer_);
 }
 
 INSTANTIATE_TEST_SUITE_P(

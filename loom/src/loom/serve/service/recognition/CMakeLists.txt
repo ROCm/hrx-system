@@ -47,11 +47,13 @@ loom_cc_library(
     iree::base::threading
     iree::task
     loom::serve::media::audio_decoder
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::telemetry
     loom::serve::service
     loom::serve::service::kind
+    loom::serve::service::qos
     loom::serve::telemetry::latency
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
@@ -84,6 +86,7 @@ loom_cc_library(
     iree::base::tooling::flags
     iree::task
     iree::testing::gtest
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::server::resources
     loom::serve::testing::http_harness
