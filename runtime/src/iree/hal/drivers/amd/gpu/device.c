@@ -985,6 +985,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
           .publication = queue_options.publication,
           .allocations = queue_options.allocations,
           .mappings = queue_options.mappings,
+          .file_staging = queue_options.file_staging,
           .retirement_capacity = queue_options.retirement_capacity,
           .argument_capacity = queue_options.argument_capacity,
           .capture_block_size = queue_options.capture_block_size,

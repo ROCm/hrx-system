@@ -8,6 +8,8 @@
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "iree/async/operations/scheduling.h"
@@ -43,29 +45,49 @@ enum class FileBacking {
   kVirtualMixedRegistered,
 };
 
-class GpuNativeFileTest : public GpuNativeTest,
-                          public ::testing::WithParamInterface<FileBacking> {
+using FileTestParameters = std::tuple<amdf_queue_command_type_t, FileBacking>;
+
+std::string FileTestName(
+    const ::testing::TestParamInfo<FileTestParameters>& info) {
+  constexpr const char* backings[] = {
+      "PhysicalHost",          "VirtualHost",       "VirtualPrivate",
+      "PhysicalRegistered",    "VirtualRegistered", "PhysicalPrivate",
+      "NestedPrivate",         "NestedHost",        "VirtualMixed",
+      "VirtualMixedRegistered"};
+  return std::string(std::get<0>(info.param) == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                         ? "Aql"
+                         : "Pm4") +
+         backings[static_cast<size_t>(std::get<1>(info.param))];
+}
+
+class GpuNativeFileTest
+    : public GpuNativeTest,
+      public ::testing::WithParamInterface<FileTestParameters> {
  protected:
+  amdf_queue_command_type_t command_type() const override {
+    return std::get<0>(GetParam());
+  }
+  FileBacking backing_kind() const { return std::get<1>(GetParam()); }
   bool is_physical() const {
-    return GetParam() == FileBacking::kPhysicalHost ||
-           GetParam() == FileBacking::kPhysicalRegistered ||
-           GetParam() == FileBacking::kPhysicalPrivate || is_nested();
+    return backing_kind() == FileBacking::kPhysicalHost ||
+           backing_kind() == FileBacking::kPhysicalRegistered ||
+           backing_kind() == FileBacking::kPhysicalPrivate || is_nested();
   }
 
   bool is_nested() const {
-    return GetParam() == FileBacking::kNestedPrivate ||
-           GetParam() == FileBacking::kNestedHost;
+    return backing_kind() == FileBacking::kNestedPrivate ||
+           backing_kind() == FileBacking::kNestedHost;
   }
 
   bool is_registered() const {
-    return GetParam() == FileBacking::kPhysicalRegistered ||
-           GetParam() == FileBacking::kVirtualRegistered ||
-           GetParam() == FileBacking::kVirtualMixedRegistered;
+    return backing_kind() == FileBacking::kPhysicalRegistered ||
+           backing_kind() == FileBacking::kVirtualRegistered ||
+           backing_kind() == FileBacking::kVirtualMixedRegistered;
   }
 
   bool is_mixed() const {
-    return GetParam() == FileBacking::kVirtualMixed ||
-           GetParam() == FileBacking::kVirtualMixedRegistered;
+    return backing_kind() == FileBacking::kVirtualMixed ||
+           backing_kind() == FileBacking::kVirtualMixedRegistered;
   }
 
   void SetUp() override {
@@ -80,10 +102,10 @@ class GpuNativeFileTest : public GpuNativeTest,
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
-    const uint32_t gfx_major = context_->target_info.gfx_ip.major;
-    RecordProperty("gfx_ip_major", gfx_major);
-    RecordProperty("gfx_ip_minor", context_->target_info.gfx_ip.minor);
-    RecordProperty("gfx_ip_stepping", context_->target_info.gfx_ip.stepping);
+    const auto gfx = context_->target_info.gfx_ip;
+    RecordProperty("gfx_ip_major", gfx.major);
+    RecordProperty("gfx_ip_minor", gfx.minor);
+    RecordProperty("gfx_ip_stepping", gfx.stepping);
     native_device_ = context_->device;
     Create();
     if (HasFatalFailure() || IsSkipped()) {
@@ -110,9 +132,9 @@ class GpuNativeFileTest : public GpuNativeTest,
                 .modes = IREE_HAL_MAPPING_MODE_SCOPED,
             },
     };
-    if (GetParam() == FileBacking::kVirtualPrivate ||
-        GetParam() == FileBacking::kPhysicalPrivate ||
-        GetParam() == FileBacking::kNestedPrivate || is_registered()) {
+    if (backing_kind() == FileBacking::kVirtualPrivate ||
+        backing_kind() == FileBacking::kPhysicalPrivate ||
+        backing_kind() == FileBacking::kNestedPrivate || is_registered()) {
       scope.host = {};
     }
     iree_hal_slab_pool_options_t options;
@@ -135,10 +157,15 @@ class GpuNativeFileTest : public GpuNativeTest,
     CreateSemaphore(timeline_.out());
     iree_hal_executable_load_params_t load;
     iree_hal_executable_load_params_initialize(&load);
+    const char* selector = gfx.major == 9
+                               ? (gfx.minor == 4       ? "gfx9_4_generic"
+                                  : gfx.stepping == 10 ? "gfx90a"
+                                                       : "gfx9_generic")
+                           : gfx.major == 11 ? "gfx11_generic"
+                                             : "gfx12_generic";
     const auto* images = iree_hal_amd_gpu_hip_images_create();
     for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
-      if (std::strstr(images[i].name,
-                      gfx_major == 11 ? "gfx11_generic" : "gfx12_generic")) {
+      if (std::strstr(images[i].name, selector)) {
         load.executable_data =
             iree_make_const_byte_span(images[i].data, images[i].size);
       }
@@ -197,8 +224,8 @@ class GpuNativeFileTest : public GpuNativeTest,
                                           AMDF_HOST_MAPPING_FEATURE_FILE_IO);
       RecordProperty("physical_sources_host_visible", host_visible_);
       RecordProperty("physical_sources_file_io_capable", file_io_capable_);
-      if (GetParam() == FileBacking::kPhysicalPrivate ||
-          GetParam() == FileBacking::kNestedPrivate) {
+      if (backing_kind() == FileBacking::kPhysicalPrivate ||
+          backing_kind() == FileBacking::kNestedPrivate) {
         EXPECT_EQ(memory.contract->host.access, 0u);
       }
       if (host_visible_) {
@@ -1638,63 +1665,107 @@ TEST_P(GpuNativeFileProgressTest,
 
 INSTANTIATE_TEST_SUITE_P(
     PhysicalAndVirtual, GpuNativeFileTest,
-    ::testing::Values(
-        FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
-        FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
-        FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
-        FileBacking::kNestedPrivate, FileBacking::kNestedHost,
-        FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
+    ::testing::Combine(
+        ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                          AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+        ::testing::Values(
+            FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
+            FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
+            FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
+            FileBacking::kNestedPrivate, FileBacking::kNestedHost,
+            FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered)),
+    FileTestName);
 
 INSTANTIATE_TEST_SUITE_P(
     PhysicalAndVirtual, GpuNativeFileProgressTest,
-    ::testing::Values(
-        FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
-        FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
-        FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
-        FileBacking::kNestedPrivate, FileBacking::kNestedHost,
-        FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
+    ::testing::Combine(
+        ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                          AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+        ::testing::Values(
+            FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
+            FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
+            FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
+            FileBacking::kNestedPrivate, FileBacking::kNestedHost,
+            FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered)),
+    FileTestName);
 
 INSTANTIATE_TEST_SUITE_P(
     PhysicalAndVirtual, GpuNativeFileAccessTest,
-    ::testing::Values(
-        FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
-        FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
-        FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
-        FileBacking::kNestedPrivate, FileBacking::kNestedHost,
-        FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
+    ::testing::Combine(
+        ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                          AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+        ::testing::Values(
+            FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
+            FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
+            FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
+            FileBacking::kNestedPrivate, FileBacking::kNestedHost,
+            FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered)),
+    FileTestName);
 
 INSTANTIATE_TEST_SUITE_P(
     InstancePhysicalAndVirtual, GpuInstanceFileAccessTest,
-    ::testing::Values(
-        FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
-        FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
-        FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
-        FileBacking::kNestedPrivate, FileBacking::kNestedHost,
-        FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
+    ::testing::Combine(
+        ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                          AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+        ::testing::Values(
+            FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
+            FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
+            FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
+            FileBacking::kNestedPrivate, FileBacking::kNestedHost,
+            FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered)),
+    FileTestName);
 
-INSTANTIATE_TEST_SUITE_P(PrivateBacking, GpuSharedFileStagingTest,
-                         ::testing::Values(FileBacking::kPhysicalPrivate,
-                                           FileBacking::kVirtualPrivate));
+INSTANTIATE_TEST_SUITE_P(
+    PrivateBacking, GpuSharedFileStagingTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Values(FileBacking::kPhysicalPrivate,
+                                         FileBacking::kVirtualPrivate)),
+    FileTestName);
 
-INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuUnregisteredFileTest,
-                         ::testing::Values(FileBacking::kPhysicalHost,
-                                           FileBacking::kVirtualPrivate,
-                                           FileBacking::kPhysicalPrivate));
+INSTANTIATE_TEST_SUITE_P(
+    PhysicalAndVirtual, GpuUnregisteredFileTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Values(FileBacking::kPhysicalHost,
+                                         FileBacking::kVirtualPrivate,
+                                         FileBacking::kPhysicalPrivate)),
+    FileTestName);
 
-INSTANTIATE_TEST_SUITE_P(PrivateBacking, GpuUnregisteredFileOwnerTest,
-                         ::testing::Values(FileBacking::kPhysicalPrivate,
-                                           FileBacking::kVirtualPrivate));
+INSTANTIATE_TEST_SUITE_P(
+    PrivateBacking, GpuUnregisteredFileOwnerTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Values(FileBacking::kPhysicalPrivate,
+                                         FileBacking::kVirtualPrivate)),
+    FileTestName);
 
-INSTANTIATE_TEST_SUITE_P(VirtualPrivate, GpuSharedVirtualFileStagingTest,
-                         ::testing::Values(FileBacking::kVirtualPrivate));
+INSTANTIATE_TEST_SUITE_P(
+    VirtualPrivate, GpuSharedVirtualFileStagingTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Values(FileBacking::kVirtualPrivate)),
+    FileTestName);
 
-INSTANTIATE_TEST_SUITE_P(RegisteredVirtual, GpuNativeRegisteredFileProgressTest,
-                         ::testing::Values(FileBacking::kVirtualRegistered));
+INSTANTIATE_TEST_SUITE_P(
+    RegisteredVirtual, GpuNativeRegisteredFileProgressTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Values(FileBacking::kVirtualRegistered)),
+    FileTestName);
 
-INSTANTIATE_TEST_SUITE_P(VirtualPrivate, GpuNativeFileLimitTest,
-                         ::testing::Values(FileBacking::kVirtualPrivate));
+INSTANTIATE_TEST_SUITE_P(
+    VirtualPrivate, GpuNativeFileLimitTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Values(FileBacking::kVirtualPrivate)),
+    FileTestName);
 
-INSTANTIATE_TEST_SUITE_P(Executable, GpuNativeGlobalFileTest,
-                         ::testing::Values(FileBacking::kPhysicalHost));
+INSTANTIATE_TEST_SUITE_P(
+    Executable, GpuNativeGlobalFileTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Values(FileBacking::kPhysicalHost)),
+    FileTestName);
 
 }  // namespace

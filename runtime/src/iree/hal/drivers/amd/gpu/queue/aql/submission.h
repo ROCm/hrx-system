@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_SUBMISSION_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_AQL_SUBMISSION_H_
 
+#include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/transfer.h"
@@ -100,10 +101,15 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
     struct {
       // Pending suffix and nonterminal native pieces independently own capture.
       iree_atomic_ref_count_t ref_count;
-      // Failed unpublished suffix, reported only after accepted host uses join.
+      // First failure; a rejected suffix waits for accepted host uses to join.
       iree_atomic_int32_t failure;
       // Captured addresses/bytes and publisher-owned unpublished suffix.
       iree_hal_amd_gpu_transfer_t capture;
+      // Optional file owner, notified early on failure and finally at
+      // retirement.
+      iree_hal_amd_gpu_retirement_callback_t callback;
+      // Last retired native piece, written only by the completion owner.
+      iree_async_single_frontier_t frontier;
     } transfer;
   };
 } iree_hal_amd_gpu_aql_submission_t;
@@ -135,6 +141,16 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
     iree_hal_semaphore_list_t signals, iree_host_size_t count,
     const iree_hal_transfer_operation_t* operations, uint32_t before,
     uint32_t after, iree_hal_amd_gpu_aql_submission_t** out_submission);
+
+// Records the first transfer failure and notifies its optional file owner.
+// Borrows status. Notification does not end captured native or host uses.
+void iree_hal_amd_gpu_aql_submission_fail(
+    iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t status);
+
+// Preserves each retired file piece's epoch before releasing its reference.
+void iree_hal_amd_gpu_aql_submission_set_frontier(
+    iree_hal_amd_gpu_aql_submission_t* submission,
+    const iree_async_single_frontier_t* frontier);
 
 // Captures only retirement ownership for an already prepared direct call.
 // Transfers native readers on success, retains signal timelines and payloads,

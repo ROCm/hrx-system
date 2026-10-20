@@ -11,6 +11,7 @@
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/program.h"
+#include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
 
 #ifdef __cplusplus
@@ -37,6 +38,8 @@ typedef struct iree_hal_amd_gpu_aql_queue_options_t {
   iree_hal_amd_gpu_allocation_context_t* allocations;
   // Shared queue-ordered mapping admission.
   iree_hal_amd_gpu_memory_mapping_context_t* mappings;
+  // Device-owned direct-I/O fallback through independent native copy queues.
+  iree_hal_amd_gpu_file_staging_t* file_staging;
   // Power-of-two simultaneously published completion capacity.
   uint32_t retirement_capacity;
   // Initial argument generation capacity, in power-of-two bytes.

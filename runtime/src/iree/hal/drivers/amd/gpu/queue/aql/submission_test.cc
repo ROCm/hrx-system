@@ -201,6 +201,24 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_transfer(
       &pool, &family, {}, {1, &semaphore, &value}, 1, &operation, 0, 0,
       &submission));
+  struct Completion {
+    // File callbacks distinguish failure notification from ending borrows.
+    bool retired = false;
+    // Borrowed dependency must be destroyed before handing ownership back.
+    Buffer* buffer;
+  } completion = {.buffer = &buffer};
+  submission->transfer.callback = {
+      [](void* user_data, iree_status_t status,
+         const iree_async_single_frontier_t* frontier, bool retired) {
+        auto* completion = static_cast<Completion*>(user_data);
+        EXPECT_TRUE(retired);
+        EXPECT_TRUE(completion->buffer->destroyed);
+        EXPECT_EQ(frontier, nullptr);
+        EXPECT_EQ(iree_status_consume_code(status), IREE_STATUS_UNAVAILABLE);
+        completion->retired = true;
+      },
+      &completion,
+  };
   iree_hal_buffer_release(&buffer.base);
   // One accepted native piece retains the capture while a later, unpublished
   // suffix still owns its initial reference.
@@ -209,6 +227,7 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
                     iree_memory_order_release);
   iree_hal_amd_gpu_aql_submission_release(submission);
   EXPECT_FALSE(buffer.destroyed);
+  EXPECT_FALSE(completion.retired);
   uint64_t observed = UINT64_MAX;
   IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &observed));
   EXPECT_EQ(observed, 0u);
@@ -218,10 +237,67 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
   // stopped using the borrowed host destination.
   iree_hal_amd_gpu_aql_submission_release(submission);
   EXPECT_TRUE(buffer.destroyed);
+  EXPECT_TRUE(completion.retired);
   EXPECT_THAT(iree_hal_semaphore_query(semaphore, &observed),
               iree::testing::status::StatusIs(iree::StatusCode::kUnavailable));
   iree_hal_semaphore_release(semaphore);
   iree_async_proactor_release(proactor);
+  iree_hal_amd_gpu_capture_pool_deinitialize(&pool);
+}
+
+TEST(AqlTransferSubmissionTest, FileBoundaryJoinsFailureAndRetirement) {
+  iree_hal_amd_gpu_capture_pool_t pool;
+  iree_hal_amd_gpu_capture_pool_initialize(512, iree_allocator_system(), &pool);
+  const iree_hal_queue_family_t family = {};
+  iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_transfer(
+      &pool, &family, {}, {}, 0, nullptr, 17, 23, &submission));
+  EXPECT_EQ(submission->entry.kind, IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER);
+  EXPECT_EQ(submission->transfer.capture.count, 0u);
+  EXPECT_EQ(submission->before, 17u);
+  EXPECT_EQ(submission->after, 23u);
+  struct Completion {
+    // Early notification count, independent of ownership handoff.
+    unsigned failures = 0;
+    // Final ownership handoff count.
+    unsigned retirements = 0;
+    // Exact last accepted queue epoch returned with retirement.
+    iree_async_single_frontier_t frontier = {};
+  } completion;
+  submission->transfer.callback = {
+      [](void* user_data, iree_status_t status,
+         const iree_async_single_frontier_t* frontier, bool retired) {
+        auto* completion = static_cast<Completion*>(user_data);
+        EXPECT_EQ(iree_status_consume_code(status), IREE_STATUS_UNAVAILABLE);
+        if (retired) {
+          ++completion->retirements;
+          ASSERT_NE(frontier, nullptr);
+          completion->frontier = *frontier;
+        } else {
+          ++completion->failures;
+          EXPECT_EQ(frontier, nullptr);
+        }
+      },
+      &completion,
+  };
+  iree_atomic_ref_count_inc(&submission->transfer.ref_count);
+  iree_hal_amd_gpu_aql_submission_fail(
+      submission, iree_status_from_code(IREE_STATUS_UNAVAILABLE));
+  iree_hal_amd_gpu_aql_submission_fail(
+      submission, iree_status_from_code(IREE_STATUS_ABORTED));
+  EXPECT_EQ(completion.failures, 1u);
+  EXPECT_EQ(completion.retirements, 0u);
+  iree_hal_amd_gpu_aql_submission_release(submission);
+  EXPECT_EQ(completion.retirements, 0u);
+  iree_async_single_frontier_t frontier;
+  iree_async_single_frontier_initialize(&frontier, 3, 41);
+  iree_hal_amd_gpu_aql_submission_set_frontier(submission, &frontier);
+  iree_hal_amd_gpu_aql_submission_release(submission);
+  EXPECT_EQ(completion.failures, 1u);
+  EXPECT_EQ(completion.retirements, 1u);
+  EXPECT_EQ(completion.frontier.entry_count, frontier.entry_count);
+  EXPECT_EQ(completion.frontier.entries[0].axis, frontier.entries[0].axis);
+  EXPECT_EQ(completion.frontier.entries[0].epoch, frontier.entries[0].epoch);
   iree_hal_amd_gpu_capture_pool_deinitialize(&pool);
 }
 

@@ -218,11 +218,6 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
   iree_hal_amd_gpu_transfer_layout_t layout;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_transfer_measure(count, operations, &layout));
-  if (!layout.count) {
-    const iree_hal_amd_gpu_aql_dispatch_request_t request = {0};
-    return iree_hal_amd_gpu_aql_submission_capture(
-        pool, &request, waits, signals, before, after, out_submission);
-  }
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
@@ -241,6 +236,30 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
     iree_hal_amd_gpu_aql_submission_release(submission);
   }
   return status;
+}
+
+void iree_hal_amd_gpu_aql_submission_fail(
+    iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t status) {
+  if (submission->entry.kind != IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
+    return;
+  }
+  int32_t expected = IREE_STATUS_OK;
+  if (iree_atomic_compare_exchange_strong(
+          &submission->transfer.failure, &expected, iree_status_code(status),
+          iree_memory_order_relaxed, iree_memory_order_relaxed) &&
+      submission->transfer.callback.fn) {
+    submission->transfer.callback.fn(submission->transfer.callback.user_data,
+                                     iree_status_clone(status), NULL, false);
+  }
+}
+
+void iree_hal_amd_gpu_aql_submission_set_frontier(
+    iree_hal_amd_gpu_aql_submission_t* submission,
+    const iree_async_single_frontier_t* frontier) {
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
+      submission->transfer.callback.fn && frontier) {
+    submission->transfer.frontier = *frontier;
+  }
 }
 
 bool iree_hal_amd_gpu_aql_submission_retirement_ready(
@@ -288,16 +307,8 @@ void iree_hal_amd_gpu_aql_submission_release_payload(
   }
 }
 
-void iree_hal_amd_gpu_aql_submission_release(
+static void iree_hal_amd_gpu_aql_submission_destroy(
     iree_hal_amd_gpu_aql_submission_t* submission) {
-  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE &&
-      iree_atomic_ref_count_dec(&submission->execute.ref_count) != 1) {
-    return;
-  }
-  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
-      iree_atomic_ref_count_dec(&submission->transfer.ref_count) != 1) {
-    return;
-  }
   iree_hal_amd_gpu_aql_submission_release_payload(submission);
   if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
     const iree_status_code_t failure = (iree_status_code_t)iree_atomic_load(
@@ -318,5 +329,36 @@ void iree_hal_amd_gpu_aql_submission_release(
     iree_hal_amd_gpu_capture_pool_release(
         submission->pool,
         iree_make_byte_span(submission, submission->allocation_size));
+  }
+}
+
+static void iree_hal_amd_gpu_aql_submission_retire_transfer(
+    iree_hal_amd_gpu_aql_submission_t* submission) {
+  const iree_hal_amd_gpu_retirement_callback_t callback =
+      submission->transfer.callback;
+  const iree_async_single_frontier_t frontier = submission->transfer.frontier;
+  const iree_status_code_t failure = (iree_status_code_t)iree_atomic_load(
+      &submission->transfer.failure, iree_memory_order_relaxed);
+  iree_hal_amd_gpu_aql_submission_destroy(submission);
+  // The file owner may release the device and capture pool from its callback.
+  // End every submission and pool access before returning those borrows.
+  if (callback.fn) {
+    callback.fn(callback.user_data, iree_status_from_code(failure),
+                frontier.entry_count ? &frontier : NULL, true);
+  }
+}
+
+void iree_hal_amd_gpu_aql_submission_release(
+    iree_hal_amd_gpu_aql_submission_t* submission) {
+  if (!submission) {
+    return;
+  }
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
+    if (iree_atomic_ref_count_dec(&submission->transfer.ref_count) == 1) {
+      iree_hal_amd_gpu_aql_submission_retire_transfer(submission);
+    }
+  } else if (submission->entry.kind != IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE ||
+             iree_atomic_ref_count_dec(&submission->execute.ref_count) == 1) {
+    iree_hal_amd_gpu_aql_submission_destroy(submission);
   }
 }
