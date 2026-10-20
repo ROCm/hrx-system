@@ -162,6 +162,7 @@ synthesize empty state instead of depending on cleared recurrent storage.
 | `propose.loom`, `verify.loom`, `programs/mtp.loom` | Recursive proposals, target verification, and accepted-prefix predictor catch-up. |
 | `programs/` | Hyperconnection, recurrent attention, sparse attention, routed/shared experts, and output-head composition. |
 | `kernels/gdn.loom`, `kernels/gdn_window.loom`, `kernels/work.loom` | Recurrent updates and immutable span ownership. |
+| `kernels/gdn_fusion.loom` | QKV contraction, tile-local convolution, compact boundaries, and speculative capture. |
 | `kernels/speculation.loom`, `kernels/mtp_state.loom` | Compact target transition capture, accepted-prefix replay, and predictor carry ownership. |
 | `kernels/qsa_*.loom`, `kernels/pages.loom` | Paged K/V, four-token compression, exact top-512 block selection, and causal attention. |
 | `kernels/ple_*.loom`, `kernels/iq4.loom` | EOS-aware bigram/trigram hashes, IQ4_NL reads, and dilated convolution history. |
@@ -230,22 +231,37 @@ The allocation keeps exactly the original size. The loader publishes readiness
 after preparation and repeats it after reloading the original checkpoint; all
 QKV consumers, including speculative verification, use the prepared layout.
 
-Larger QKV epochs share each decoded Q8 block over a 64-channel by 32-token matrix
-tile. Exact integer codes and the existing BF16 activations feed WMMA, with the
-original block scales applied in F32. Padded LDS rows and a permuted producer
-assignment distribute staging traffic across banks; a two-stage loop acquires
-the next block while contracting the current one. Capacities of one to four
-tokens specialize to packed dot instructions without matrix shared memory.
-Live tails shorter than four rows use the same dot arithmetic. The scheduler
-continues to handle prompt and generated tokens through one epoch contract.
+At epoch capacities of at least 128, one workgroup contracts 128 tokens against
+one 128-channel Q/K/V head. Exact integer codes and existing BF16 activations
+feed matrix instructions; the original scales apply in F32 after each K32
+partial product. The shared Q8 contraction specializes its addressing for the
+prepared scale/code planes and keeps two stages in flight. Its F32 result rounds
+to BF16 in a padded 128-by-132 LDS tile, where interior tokens immediately pass
+through four-tap convolution, SiLU, and Q/K normalization. The complete raw QKV
+array is never written to global memory.
+
+Each intersection of a session and a token tile exports only its first and last
+three raw rows. A separate head/session worker resolves the prefixes against
+retained history and carries each suffix into the next tile. It consumes all
+boundaries before updating the private writer, including when that writer is
+also the history source. Compact storage needs at most
+`ceil(token_capacity / 128) + span_capacity - 1` six-row slots; unused slots
+require no clearing. Speculative spans publish their raw rows directly into
+their verification capture slots and leave retained history unchanged.
+
+Smaller epochs retain 64-channel by 32-token matrix tiles or packed dot
+instructions. Sparse accepted-prefix replay retains its wave implementation.
+Both paths share recurrence and gating after the same BF16 convolution
+publication. Prompt and generated tokens still use one epoch contract.
 
 Other dense Q8 projections retain the original checkpoint layout. One matrix
 template accepts the tile dimensions, wave geometry, and pipeline depth as SSA
 values. Shape selection keeps dot products for tiny epochs, uses smaller tiles
 when a narrow output needs more independent workgroups, and increases reuse to
-128-by-128 output tiles for wide prefill projections. Six declared schedules
-instantiate the same contraction body through 128-thread and 256-thread launch
-entries. The selection specializes during command compilation; no CPU decision
+128-by-128 output tiles for wide prefill projections. The wide schedule uses
+two stages of read-ahead; smaller schedules use one. All instantiate the same
+contraction through 128-thread and 256-thread launch entries. Selection
+specializes during command compilation; no CPU decision
 or parameter repacking is added to an epoch. The immutable epoch header bounds
 active rows, so partial tiles preserve inactive storage and cannot mix padding
 into valid results.

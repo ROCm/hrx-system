@@ -1,0 +1,375 @@
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+func.decl @flash_next_span_publishes(%verification: index, %epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_span_state(%epoch: buffer, %rows: buffer, %span: index, %layer_origin: offset, %capacity: index) -> (index, index, i1, offset, offset)
+
+command.program.decl @flash_next_capture_inputs(%prefix_bytes: offset, %row_bytes: offset) launch(%epoch: buffer, %input: buffer, %capture: buffer)
+
+command.program.decl @flash_next_gdn_finish(%layer: index, %state_origin: offset) launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %convolved: buffer, %inverse_norm: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer)
+
+template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
+
+// A matrix tile rounds its raw projections once into LDS. Only session/tile
+// boundaries leave LDS; the independent boundary pass owns history mutation.
+amdgpu.target<gfx11-generic> @gdn_fused_wave32 {subgroup_size = 32}
+
+func.def inline @gdn_fused_activate(%history0: vector<4xf32>, %history1: vector<4xf32>, %history2: vector<4xf32>, %current: vector<4xf32>, %taps: vector<4x4xf32>) -> (vector<4xbf16>) {
+  %weight0 = vector.extract %taps[0] : vector<4x4xf32> -> vector<4xf32>
+  %weight1 = vector.extract %taps[1] : vector<4x4xf32> -> vector<4xf32>
+  %weight2 = vector.extract %taps[2] : vector<4x4xf32> -> vector<4xf32>
+  %weight3 = vector.extract %taps[3] : vector<4x4xf32> -> vector<4xf32>
+  %product = vector.mulf %history0, %weight0 : vector<4xf32>
+  %sum1 = vector.fmaf %history1, %weight1, %product : vector<4xf32>
+  %sum2 = vector.fmaf %history2, %weight2, %sum1 : vector<4xf32>
+  %sum = vector.fmaf %current, %weight3, %sum2 : vector<4xf32>
+  %activated = vector.siluf<afn> %sum : vector<4xf32>
+  %packed = vector.fptrunc %activated : vector<4xf32> to vector<4xbf16>
+  func.return %packed : vector<4xbf16>
+}
+
+// The normalization uses the same rounded BF16 values consumed by recurrence.
+// One complete wave owns all 128 channels of a head for this token.
+func.def inline @gdn_fused_publish(%capacity: index, %token_value: index, %head: index, %packed: vector<4xbf16>, %output: buffer, %norm: buffer) {
+  %token = index.assume %token_value [ge(%token_value, 0), lt(%token_value, %capacity)] : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c4 = index.constant 4 : index
+  %width = index.constant 128 : index
+  %qk_heads = index.constant 32 : index
+  %lane = kernel.subgroup.lane.id : index
+  %local_channel = index.mul %lane, %c4 : index
+  %channel = index.madd %head, %width, %local_channel : index
+  %values = buffer.view %output[%origin] : buffer -> view<[%capacity]x10240xbf16>
+  vector.store %packed, %values[%token, %channel] : vector<4xbf16>, view<[%capacity]x10240xbf16>
+  %qk = index.cmp ult, %head, %qk_heads : index
+  scf.if %qk {
+    %published = vector.extf %packed : vector<4xbf16> to vector<4xf32>
+    %squares = vector.mulf %published, %published : vector<4xf32>
+    %initial = scalar.constant 0.0 : f32
+    %partial = vector.reduce<addf> %squares, %initial : vector<4xf32>, f32
+    %sum = kernel.subgroup.reduce<addf> %partial : f32
+    %leader = index.cmp eq, %lane, %c0 : index
+    scf.if %leader {
+      %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+      %biased = scalar.addf %sum, %epsilon : f32
+      %inverse = scalar.rsqrtf<afn> %biased : f32
+      %norms = buffer.view %norm[%origin] : buffer -> view<[%capacity]x32xf32>
+      view.store %inverse, %norms[%token, %head] : f32, view<[%capacity]x32xf32>
+    }
+  }
+  func.return
+}
+
+kernel.def target(@gdn_fused_wave32) @gdn_fused_projection() {
+  %capacity = config.get @flash_next.token_count : index
+  %rounding = index.constant 127 : index
+  %tile = index.constant 128 : index
+  %padded = index.add %capacity, %rounding : index
+  %tiles = index.div %padded, %tile : index
+  %heads = index.constant 80 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tiles, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %conv_arg: buffer, %halo_arg: buffer, %output_arg: buffer, %norm_arg: buffer, %capture_arg: buffer, %capture_origin: offset) {
+  %epoch, %input, %weight, %conv, %halo, %output, %norm, %capture = buffer.assume.noalias %epoch_arg, %input_arg, %weight_arg, %conv_arg, %halo_arg, %output_arg, %norm_arg, %capture_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %verification = config.get @flash_next.verification_width : index
+  %span_capacity = config.get @flash_next.span_capacity : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c6 = index.constant 6 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %tile = index.constant 128 : index
+  %inputs = index.constant 2560 : index
+  %outputs = index.constant 10240 : index
+  %head = kernel.workgroup.id<x> : index
+  %tile_index = kernel.workgroup.id<y> : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %first = index.mul %tile_index, %tile : index
+  %end = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
+  %active = index.cmp ult, %first, %end : index
+  scf.if %active {
+    %channel_base = index.mul %head, %tile : index
+    %split_scales = scalar.constant true : i1
+    %result = template.apply<@flash_next.q8_contract>(%capacity, %inputs, %outputs, %c1, %tile, %tile, %c4, %c2, %c2, %c8, %first, %end, %channel_base, %split_scales, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, buffer, buffer) -> (vector<[%c8]x8xf32>)
+    %stage_bytes = index.constant 33792 : offset
+    %stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+    %stage_view = buffer.view %stage[%origin] : buffer -> view<128x132xbf16>
+    %wave_row = index.div %wave, %c2 : index
+    %wave_column = index.rem %wave, %c2 : index
+    %row_base = index.mul %wave_row, %c32 : index
+    %column_base = index.mul %wave_column, %c64 : index
+    scf.for %ordinal = [%c0 to %c8 step %c1] unroll schedule(linear) {
+      %row_fragment = index.div %ordinal, %c4 : index
+      %column_fragment = index.rem %ordinal, %c4 : index
+      %row = index.madd %row_fragment, %c16, %row_base : index
+      %column = index.madd %column_fragment, %c16, %column_base : index
+      %values = vector.extract %result[%ordinal] : vector<[%c8]x8xf32> -> vector<8xf32>
+      %fragment = vector.fragment<result> %values shape [%c16, %c16] : vector<8xf32>
+      vector.fragment.store<result> %fragment, %stage_view[%row, %column] shape [%c16, %c16] : vector<8xf32>, view<128x132xbf16>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+    %span_word = view.load %header[1] : view<3xi32> -> i32
+    %span_value = index.cast %span_word : i32 to index
+    %span_count = index.assume %span_value [range(%span_value, 1, 16), le(%span_value, %span_capacity)] : index
+    %descriptor_origin = index.constant 12 : offset
+    %descriptors = buffer.view %epoch[%descriptor_origin] : buffer -> view<16x5xi32>
+    %tile_end = index.add %first, %tile : index
+    %local_channel = index.mul %lane, %c4 : index
+    %channel = index.add %channel_base, %local_channel : index
+    %weights = buffer.view %conv[%origin] : buffer -> view<10240x4xf32>
+    %loaded_weights = vector.load %weights[%channel, %c0] : view<10240x4xf32> -> vector<4x4xf32>
+    %taps = vector.transpose<[1, 0]> %loaded_weights : vector<4x4xf32> -> vector<4x4xf32>
+    %segment_bytes = index.constant 122880 : offset
+    scf.for %span = [%c0 to %span_count step %c1] {
+      %length_word = view.load %descriptors[%span, 0] : view<16x5xi32> -> i32
+      %begin_word = view.load %descriptors[%span, 2] : view<16x5xi32> -> i32
+      %length_value = index.cast %length_word : i32 to index
+      %begin_value = index.cast %begin_word : i32 to index
+      %length = index.assume %length_value [ge(%length_value, 1), le(%length_value, %capacity)] : index
+      %begin = index.assume %begin_value [ge(%begin_value, 0), lt(%begin_value, %capacity)] : index
+      %span_end_value = index.add %begin, %length : index
+      %span_end = index.assume %span_end_value [le(%span_end_value, %capacity)] : index
+      %starts_here = index.cmp ugt, %begin, %first : index
+      %ends_here = index.cmp ult, %span_end, %tile_end : index
+      %segment_begin = scf.select %starts_here, %begin, %first : index
+      %segment_end = scf.select %ends_here, %span_end, %tile_end : index
+      %intersects = index.cmp ult, %segment_begin, %segment_end : index
+      scf.if %intersects {
+        %segment_length_value = index.sub %segment_end, %segment_begin : index
+        %segment_length = index.assume %segment_length_value [range(%segment_length_value, 1, 128)] : index
+        // Clipping makes this a nonempty interval wholly inside the LDS tile.
+        %local_begin_value = index.sub %segment_begin, %first : index
+        %local_end_value = index.sub %segment_end, %first : index
+        %local_begin = index.assume %local_begin_value [range(%local_begin_value, 0, 127)] : index
+        %local_end = index.assume %local_end_value [range(%local_end_value, 1, 128)] : index
+        %segment_index = index.add %tile_index, %span : index
+        %segment_origin = index.scale %segment_index, %segment_bytes : index, offset -> offset
+        %boundary = buffer.view %halo[%segment_origin] : buffer -> view<6x10240xbf16>
+        %prefix_wave = index.cmp ult, %wave, %c3 : index
+        %prefix_live = index.cmp ult, %wave, %segment_length : index
+        %prefix = scalar.andi %prefix_wave, %prefix_live : i1
+        scf.if %prefix {
+          %row_value = index.add %local_begin, %wave : index
+          %row = index.assume %row_value [range(%row_value, 0, 127)] : index
+          %values = vector.load %stage_view[%row, %local_channel] : view<128x132xbf16> -> vector<4xbf16>
+          vector.store %values, %boundary[%wave, %channel] : vector<4xbf16>, view<6x10240xbf16>
+        }
+        %after_prefix = index.cmp uge, %wave, %c3 : index
+        %before_suffix_end = index.cmp ult, %wave, %c6 : index
+        %has_suffix = index.cmp uge, %segment_length, %c3 : index
+        %suffix_wave = scalar.andi %after_prefix, %before_suffix_end : i1
+        %suffix = scalar.andi %suffix_wave, %has_suffix : i1
+        scf.if %suffix {
+          %tail_begin = index.sub %local_end, %c3 : index
+          %tail_row = index.sub %wave, %c3 : index
+          %row_value = index.add %tail_begin, %tail_row : index
+          %row = index.assume %row_value [range(%row_value, 0, 127)] : index
+          %values = vector.load %stage_view[%row, %local_channel] : view<128x132xbf16> -> vector<4xbf16>
+          vector.store %values, %boundary[%wave, %channel] : vector<4xbf16>, view<6x10240xbf16>
+        }
+        %captures = index.cmp ugt, %verification, %c0 : index
+        scf.if %captures {
+          %known = func.call @flash_next_span_publishes(%verification, %epoch, %span) : (index, buffer, index) -> (i1)
+          %no = scalar.constant false : i1
+          %speculative = scalar.cmpi eq, %known, %no : i1
+          %selected = scalar.andi %speculative, %prefix_live : i1
+          scf.if %selected {
+            %row_value = index.add %local_begin, %wave : index
+            %row = index.assume %row_value [range(%row_value, 0, 127)] : index
+            %token = index.add %segment_begin, %wave : index
+            %relative_value = index.sub %token, %begin : index
+            %relative = index.assume %relative_value [ge(%relative_value, 0), lt(%relative_value, %verification)] : index
+            %slot = index.madd %span, %verification, %relative : index
+            %capture_rows = index.mul %span_capacity, %verification : index
+            %destination = buffer.view %capture[%capture_origin] : buffer -> view<[%capture_rows]x10240xbf16>
+            %values = vector.load %stage_view[%row, %local_channel] : view<128x132xbf16> -> vector<4xbf16>
+            vector.store %values, %destination[%slot, %channel] : vector<4xbf16>, view<[%capture_rows]x10240xbf16>
+          }
+        }
+        %interior_begin = index.add %local_begin, %c3 : index
+        %wave_begin = index.add %interior_begin, %wave : index
+        scf.for %row3 = [%wave_begin to %local_end step %c8] {
+          %token = index.add %first, %row3 : index
+          %row2 = index.sub %row3, %c1 : index
+          %row1 = index.sub %row3, %c2 : index
+          %row0 = index.sub %row3, %c3 : index
+          %stored0 = vector.load %stage_view[%row0, %local_channel] : view<128x132xbf16> -> vector<4xbf16>
+          %stored1 = vector.load %stage_view[%row1, %local_channel] : view<128x132xbf16> -> vector<4xbf16>
+          %stored2 = vector.load %stage_view[%row2, %local_channel] : view<128x132xbf16> -> vector<4xbf16>
+          %stored3 = vector.load %stage_view[%row3, %local_channel] : view<128x132xbf16> -> vector<4xbf16>
+          %history0 = vector.extf %stored0 : vector<4xbf16> to vector<4xf32>
+          %history1 = vector.extf %stored1 : vector<4xbf16> to vector<4xf32>
+          %history2 = vector.extf %stored2 : vector<4xbf16> to vector<4xf32>
+          %current = vector.extf %stored3 : vector<4xbf16> to vector<4xf32>
+          %packed = func.call @gdn_fused_activate(%history0, %history1, %history2, %current, %taps) : (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4x4xf32>) -> (vector<4xbf16>)
+          func.call @gdn_fused_publish(%capacity, %token, %head, %packed, %output, %norm) : (index, index, index, vector<4xbf16>, buffer, buffer)
+        }
+      }
+    }
+  }
+  kernel.return
+}
+
+// A head/session owner consumes every boundary before publishing its history.
+// This ordering is necessary when the readable and writable arena rows alias.
+kernel.def target(@gdn_fused_wave32) @gdn_fused_boundary() {
+  %groups = index.constant 20 : index
+  %spans = config.get @flash_next.span_capacity : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %spans, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch_arg: buffer, %rows_arg: buffer, %history_origin: offset, %halo_arg: buffer, %weight_arg: buffer, %arena_arg: buffer, %output_arg: buffer, %norm_arg: buffer) {
+  %epoch, %rows, %halo, %weight, %arena, %output, %norm = buffer.assume.noalias %epoch_arg, %rows_arg, %halo_arg, %weight_arg, %arena_arg, %output_arg, %norm_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %verification = config.get @flash_next.verification_width : index
+  %span = kernel.workgroup.id<y> : index
+  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %begin, %end, %fresh, %reader, %writer = func.call @flash_next_span_state(%epoch, %rows, %span, %history_origin, %capacity) : (buffer, buffer, index, offset, index) -> (index, index, i1, offset, offset)
+    %origin = index.constant 0 : offset
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c2 = index.constant 2 : index
+    %c3 = index.constant 3 : index
+    %c4 = index.constant 4 : index
+    %c5 = index.constant 5 : index
+    %rounding = index.constant 127 : index
+    %tile = index.constant 128 : index
+    %group = kernel.workgroup.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %head = index.madd %group, %c4, %wave : index
+    %local_channel = index.mul %lane, %c4 : index
+    %channel = index.madd %head, %tile, %local_channel : index
+    %history = buffer.view %arena[%reader] : buffer -> view<3x10240xbf16>
+    %destination = buffer.view %arena[%writer] : buffer -> view<3x10240xbf16>
+    %weights = buffer.view %weight[%origin] : buffer -> view<10240x4xf32>
+    %loaded_weights = vector.load %weights[%channel, %c0] : view<10240x4xf32> -> vector<4x4xf32>
+    %taps = vector.transpose<[1, 0]> %loaded_weights : vector<4x4xf32> -> vector<4x4xf32>
+    %initial0, %initial1, %initial2 = scf.if %fresh -> (vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+      %empty = vector.constant 0.0 : vector<4xf32>
+      scf.yield %empty, %empty, %empty : vector<4xf32>, vector<4xf32>, vector<4xf32>
+    } else {
+      %stored0 = vector.load %history[%c0, %channel] : view<3x10240xbf16> -> vector<4xbf16>
+      %stored1 = vector.load %history[%c1, %channel] : view<3x10240xbf16> -> vector<4xbf16>
+      %stored2 = vector.load %history[%c2, %channel] : view<3x10240xbf16> -> vector<4xbf16>
+      %value0 = vector.extf %stored0 : vector<4xbf16> to vector<4xf32>
+      %value1 = vector.extf %stored1 : vector<4xbf16> to vector<4xf32>
+      %value2 = vector.extf %stored2 : vector<4xbf16> to vector<4xf32>
+      scf.yield %value0, %value1, %value2 : vector<4xf32>, vector<4xf32>, vector<4xf32>
+    }
+    %first_tile = index.div %begin, %tile : index
+    %padded_end = index.add %end, %rounding : index
+    %tile_end = index.div %padded_end, %tile : index
+    %segment_bytes = index.constant 122880 : offset
+    %final0, %final1, %final2 = scf.for %tile_index = [%first_tile to %tile_end step %c1](%history0 = %initial0 : vector<4xf32>, %history1 = %initial1 : vector<4xf32>, %history2 = %initial2 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+      %tile_begin = index.mul %tile_index, %tile : index
+      %tile_limit = index.add %tile_begin, %tile : index
+      %starts_here = index.cmp ugt, %begin, %tile_begin : index
+      %ends_here = index.cmp ult, %end, %tile_limit : index
+      %segment_begin = scf.select %starts_here, %begin, %tile_begin : index
+      %segment_end = scf.select %ends_here, %end, %tile_limit : index
+      %length_value = index.sub %segment_end, %segment_begin : index
+      %length = index.assume %length_value [range(%length_value, 1, 128)] : index
+      %short = index.cmp ult, %length, %c3 : index
+      %prefix_length = scf.select %short, %length, %c3 : index
+      %segment = index.add %tile_index, %span : index
+      %segment_origin = index.scale %segment, %segment_bytes : index, offset -> offset
+      %boundary = buffer.view %halo[%segment_origin] : buffer -> view<6x10240xbf16>
+      %prefix0, %prefix1, %prefix2 = scf.for %row = [%c0 to %prefix_length step %c1](%prior0 = %history0 : vector<4xf32>, %prior1 = %history1 : vector<4xf32>, %prior2 = %history2 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+        %stored = vector.load %boundary[%row, %channel] : view<6x10240xbf16> -> vector<4xbf16>
+        %current = vector.extf %stored : vector<4xbf16> to vector<4xf32>
+        %packed = func.call @gdn_fused_activate(%prior0, %prior1, %prior2, %current, %taps) : (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4x4xf32>) -> (vector<4xbf16>)
+        %token = index.add %segment_begin, %row : index
+        func.call @gdn_fused_publish(%capacity, %token, %head, %packed, %output, %norm) : (index, index, index, vector<4xbf16>, buffer, buffer)
+        scf.yield %prior1, %prior2, %current : vector<4xf32>, vector<4xf32>, vector<4xf32>
+      }
+      %next0, %next1, %next2 = scf.if %short -> (vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+        scf.yield %prefix0, %prefix1, %prefix2 : vector<4xf32>, vector<4xf32>, vector<4xf32>
+      } else {
+        %stored0 = vector.load %boundary[%c3, %channel] : view<6x10240xbf16> -> vector<4xbf16>
+        %stored1 = vector.load %boundary[%c4, %channel] : view<6x10240xbf16> -> vector<4xbf16>
+        %stored2 = vector.load %boundary[%c5, %channel] : view<6x10240xbf16> -> vector<4xbf16>
+        %value0 = vector.extf %stored0 : vector<4xbf16> to vector<4xf32>
+        %value1 = vector.extf %stored1 : vector<4xbf16> to vector<4xf32>
+        %value2 = vector.extf %stored2 : vector<4xbf16> to vector<4xf32>
+        scf.yield %value0, %value1, %value2 : vector<4xf32>, vector<4xf32>, vector<4xf32>
+      }
+      scf.yield %next0, %next1, %next2 : vector<4xf32>, vector<4xf32>, vector<4xf32>
+    }
+    %publish = func.call @flash_next_span_publishes(%verification, %epoch, %span) : (index, buffer, index) -> (i1)
+    scf.if %publish {
+      %packed0 = vector.fptrunc %final0 : vector<4xf32> to vector<4xbf16>
+      %packed1 = vector.fptrunc %final1 : vector<4xf32> to vector<4xbf16>
+      %packed2 = vector.fptrunc %final2 : vector<4xf32> to vector<4xbf16>
+      vector.store %packed0, %destination[%c0, %channel] : vector<4xbf16>, view<3x10240xbf16>
+      vector.store %packed1, %destination[%c1, %channel] : vector<4xbf16>, view<3x10240xbf16>
+      vector.store %packed2, %destination[%c2, %channel] : vector<4xbf16>, view<3x10240xbf16>
+    }
+  }
+  kernel.return
+}
+
+// Each head/session owner resolves its prefix against retained history before
+// publishing the next history. The complete raw projection plane stays in LDS;
+// six rows per tile/span intersection are sufficient for boundary resolution.
+command.program.def public @flash_next_gdn_fused_state(%layer: index, %state_origin: offset) launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %input: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer, %capture: buffer) where [range(%layer, 0, 47)] {
+  %tokens = config.get @flash_next.token_count : index
+  %spans = config.get @flash_next.span_capacity : index
+  %verification = config.get @flash_next.verification_width : index
+  %layer_group_size = index.constant 4 : index
+  %prior_qsa = index.div %layer, %layer_group_size : index
+  %ordinal = index.sub %layer, %prior_qsa : index
+  %transition_bytes = index.constant 20864 : offset
+  %prefix = index.scale %ordinal, %transition_bytes : index, offset -> offset
+  %capture_capacity = index.mul %spans, %verification : index
+  %capture_origin = index.scale %capture_capacity, %prefix : index, offset -> offset
+  %qkv_row_bytes = index.constant 20480 : offset
+  %gate_extent = index.constant 192 : offset
+  %alpha_prefix = index.add %prefix, %qkv_row_bytes : offset
+  %beta_prefix = index.add %alpha_prefix, %gate_extent : offset
+  command.program.launch @flash_next_capture_inputs[%alpha_prefix, %gate_extent](%epoch, %alpha, %capture) : [offset, offset](buffer, buffer, buffer)
+  command.program.launch @flash_next_capture_inputs[%beta_prefix, %gate_extent](%epoch, %beta, %capture) : [offset, offset](buffer, buffer, buffer)
+  %tile = index.constant 128 : index
+  %rounding = index.constant 127 : index
+  %c1 = index.constant 1 : index
+  %padded = index.add %tokens, %rounding : index
+  %tiles = index.div %padded, %tile : index
+  %slots_with_tail = index.add %tiles, %spans : index
+  %slots = index.sub %slots_with_tail, %c1 : index
+  %halo_stride = index.constant 122880 : offset
+  %halo_bytes = index.scale %slots, %halo_stride : index, offset -> offset
+  %qkv_bytes = index.scale %tokens, %qkv_row_bytes : index, offset -> offset
+  %norm_row_bytes = index.constant 128 : offset
+  %norm_bytes = index.scale %tokens, %norm_row_bytes : index, offset -> offset
+  %state_bytes = index.constant 3145728 : offset
+  %history_origin = index.add %state_origin, %state_bytes : offset
+  %halo = buffer.alloca<global> align(256) %halo_bytes : buffer
+  %convolved = buffer.alloca<global> align(256) %qkv_bytes : buffer
+  %inverse_norm = buffer.alloca<global> align(256) %norm_bytes : buffer
+  %weight = command.parameter %parameters, "blk.{}.attn_qkv.weight"[%layer] : view<10240x80x34xi8>
+  %conv_weight = command.parameter %parameters, "blk.{}.ssm_conv1d.weight"[%layer] : view<10240x4xf32>
+  kernel.launch @gdn_fused_projection(%epoch, %input, %weight, %conv_weight, %halo, %convolved, %inverse_norm, %capture, %capture_origin) : (buffer, buffer, view<10240x80x34xi8>, view<10240x4xf32>, buffer, buffer, buffer, buffer, offset)
+  kernel.launch @gdn_fused_boundary(%epoch, %rows, %history_origin, %halo, %conv_weight, %arena, %convolved, %inverse_norm) : (buffer, buffer, offset, buffer, view<10240x4xf32>, buffer, buffer, buffer)
+  command.program.launch @flash_next_gdn_finish[%layer, %state_origin](%parameters, %epoch, %rows, %convolved, %inverse_norm, %z, %alpha, %beta, %arena, %output) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

@@ -358,6 +358,29 @@ kernel.def target(@flash_next_gdn_wave32) @gdn_gate() {
 
 kernel.decl @gdn_recur_window() launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer)
 
+// Recurrence and gating consume the same rounded convolution publications,
+// regardless of whether projection and convolution shared an LDS tile.
+command.program.def public @flash_next_gdn_finish(%layer: index, %state_origin: offset) launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %convolved: buffer, %inverse_norm: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %value_row_bytes = index.constant 12288 : offset
+  %value_bytes = index.scale %tokens, %value_row_bytes : index, offset -> offset
+  %raw = buffer.alloca<global> align(256) %value_bytes : buffer
+  %a = command.parameter %parameters, "blk.{}.ssm_a"[%layer] : view<48xf32>
+  %bias = command.parameter %parameters, "blk.{}.ssm_dt.bias"[%layer] : view<48xf32>
+  %norm_weight = command.parameter %parameters, "blk.{}.ssm_norm.weight"[%layer] : view<128xf32>
+  // Epoch capacity selects cooperative staging or the small wave body,
+  // independently of individual span lengths. Replay keeps the small body.
+  %window_threshold = index.constant 32 : index
+  %use_windows = index.cmp uge, %tokens, %window_threshold : index
+  scf.if %use_windows {
+    kernel.launch @gdn_recur_window(%epoch, %rows, %state_origin, %convolved, %inverse_norm, %alpha, %beta, %a, %bias, %arena, %raw) : (buffer, buffer, offset, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, buffer, buffer)
+  } else {
+    kernel.launch @gdn_recur(%epoch, %rows, %state_origin, %convolved, %inverse_norm, %alpha, %beta, %a, %bias, %arena, %raw) : (buffer, buffer, offset, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, buffer, buffer)
+  }
+  kernel.launch @gdn_gate(%epoch, %raw, %z, %norm_weight, %output) : (buffer, buffer, buffer, view<128xf32>, buffer)
+  command.return
+}
+
 // A layer stores its F32 recurrence followed by three BF16 convolution rows.
 // Rows publish into a private writer selected by the retained-state pool. A
 // fresh conversation synthesizes zeros in registers without clearing storage.
@@ -377,29 +400,14 @@ command.program.def public @flash_next_gdn_state(%layer: index, %state_origin: o
   command.program.launch @flash_next_capture_inputs[%beta_prefix, %gate_extent](%epoch, %beta, %capture) : [offset, offset](buffer, buffer, buffer)
   %qkv_row_bytes = index.constant 20480 : offset
   %norm_row_bytes = index.constant 128 : offset
-  %value_row_bytes = index.constant 12288 : offset
   %state_bytes = index.constant 3145728 : offset
   %history_origin = index.add %state_origin, %state_bytes : offset
   %qkv_bytes = index.scale %tokens, %qkv_row_bytes : index, offset -> offset
   %norm_bytes = index.scale %tokens, %norm_row_bytes : index, offset -> offset
-  %value_bytes = index.scale %tokens, %value_row_bytes : index, offset -> offset
   %convolved = buffer.alloca<global> align(256) %qkv_bytes : buffer
   %inverse_norm = buffer.alloca<global> align(256) %norm_bytes : buffer
-  %raw = buffer.alloca<global> align(256) %value_bytes : buffer
   %conv_weight = command.parameter %parameters, "blk.{}.ssm_conv1d.weight"[%layer] : view<10240x4xf32>
-  %a = command.parameter %parameters, "blk.{}.ssm_a"[%layer] : view<48xf32>
-  %bias = command.parameter %parameters, "blk.{}.ssm_dt.bias"[%layer] : view<48xf32>
-  %norm_weight = command.parameter %parameters, "blk.{}.ssm_norm.weight"[%layer] : view<128xf32>
   kernel.launch @gdn_convolve(%epoch, %rows, %history_origin, %qkv, %conv_weight, %arena, %convolved, %inverse_norm) : (buffer, buffer, offset, buffer, view<10240x4xf32>, buffer, buffer, buffer)
-  // Epoch capacity selects cooperative staging or the small wave body,
-  // independently of individual span lengths. Replay keeps the small body.
-  %window_threshold = index.constant 32 : index
-  %use_windows = index.cmp uge, %tokens, %window_threshold : index
-  scf.if %use_windows {
-    kernel.launch @gdn_recur_window(%epoch, %rows, %state_origin, %convolved, %inverse_norm, %alpha, %beta, %a, %bias, %arena, %raw) : (buffer, buffer, offset, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, buffer, buffer)
-  } else {
-    kernel.launch @gdn_recur(%epoch, %rows, %state_origin, %convolved, %inverse_norm, %alpha, %beta, %a, %bias, %arena, %raw) : (buffer, buffer, offset, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, buffer, buffer)
-  }
-  kernel.launch @gdn_gate(%epoch, %raw, %z, %norm_weight, %output) : (buffer, buffer, buffer, view<128xf32>, buffer)
+  command.program.launch @flash_next_gdn_finish[%layer, %state_origin](%parameters, %epoch, %rows, %convolved, %inverse_norm, %z, %alpha, %beta, %arena, %output) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
