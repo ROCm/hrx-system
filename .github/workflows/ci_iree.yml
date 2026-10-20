@@ -792,7 +792,9 @@ jobs:
     concurrency:
       group: iree-bazel-windows-${{ matrix.kind }}-${{ matrix.host_toolchain }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
-    runs-on: ${{ matrix.runner }}
+    runs-on:
+      group: windows-runner-group
+      labels: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.kind == 'amd_client' && 45 || 60 }}
     env:
       BAZEL_LLVM: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\rocm-root\lib\llvm
