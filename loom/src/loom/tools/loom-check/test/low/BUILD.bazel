@@ -24,6 +24,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
         "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:allocation_materialization",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/codegen/low:function_model",
@@ -32,8 +33,10 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:packet_progress",
         "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/codegen/low:storage_transport",
+        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/codegen/low/schedule:dependencies",
+        "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",

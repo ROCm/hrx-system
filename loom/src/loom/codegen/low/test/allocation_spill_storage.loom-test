@@ -1,0 +1,421 @@
+// Disjoint blocks reuse a spill reservation without aliasing authored storage.
+// RUN: emit low-allocation-query @sequential spill-count materialize-spills test.i32=2
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @sequential() -> (reg<test.i32>) asm {
+  %output = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %a = test.const.i32 1
+  %b = test.const.i32 2
+  %c = test.const.i32 3
+  %ab = test.add.i32 %a, %b
+  %abc = test.add.i32 %ab, %c
+  low.spill %abc, %output : reg<test.i32>, low.storage<private>
+  low.br ^next
+^next:
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %f = test.const.i32 6
+  %de = test.add.i32 %d, %e
+  %def = test.add.i32 %de, %f
+  %previous = low.reload %output : low.storage<private> -> reg<test.i32>
+  %sum = test.add.i32 %previous, %def
+  return %sum
+}
+
+// ----
+spills: 2
+storage: 1 reservations, 4 bytes
+traffic: 2 stores, 2 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @sequential() -> (reg<test.i32>) asm {
+  %output = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %sequential_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %a = test.const.i32 1
+  %b = test.const.i32 2
+  %c = test.const.i32 3
+  low.spill %c, %sequential_spill_storage_1 : reg<test.i32>, low.storage<private>
+  %ab = test.add.i32 %a, %b
+  %15 = low.reload %sequential_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %abc = test.add.i32 %ab, %15
+  low.spill %abc, %output : reg<test.i32>, low.storage<private>
+  low.br ^next
+^next:
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %f = test.const.i32 6
+  low.spill %f, %sequential_spill_storage_1 : reg<test.i32>, low.storage<private>
+  %de = test.add.i32 %d, %e
+  %16 = low.reload %sequential_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %def = test.add.i32 %de, %16
+  %previous = low.reload %output : low.storage<private> -> reg<test.i32>
+  %sum = test.add.i32 %previous, %def
+  return %sum
+}
+
+// ====
+
+// Reordering within one block must not make two disjoint instruction ranges
+// share storage. A second block keeps this off the single-block fast path.
+// RUN: emit low-allocation-query @same_block spill-count materialize-spills test.i32=2
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @same_block() -> (reg<test.i32>) asm {
+  %output = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %a = test.const.i32 1
+  %b = test.const.i32 2
+  %c = test.const.i32 3
+  %ab = test.add.i32 %a, %b
+  %abc = test.add.i32 %ab, %c
+  low.spill %abc, %output : reg<test.i32>, low.storage<private>
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %f = test.const.i32 6
+  %de = test.add.i32 %d, %e
+  %def = test.add.i32 %de, %f
+  %previous = low.reload %output : low.storage<private> -> reg<test.i32>
+  %sum = test.add.i32 %previous, %def
+  low.br ^exit
+^exit:
+  return %sum
+}
+
+// ----
+spills: 2
+storage: 2 reservations, 8 bytes
+traffic: 2 stores, 2 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @same_block() -> (reg<test.i32>) asm {
+  %output = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %same_block_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %same_block_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %a = test.const.i32 1
+  %b = test.const.i32 2
+  %c = test.const.i32 3
+  low.spill %c, %same_block_spill_storage_1 : reg<test.i32>, low.storage<private>
+  %ab = test.add.i32 %a, %b
+  %16 = low.reload %same_block_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %abc = test.add.i32 %ab, %16
+  low.spill %abc, %output : reg<test.i32>, low.storage<private>
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %f = test.const.i32 6
+  low.spill %f, %same_block_spill_storage_2 : reg<test.i32>, low.storage<private>
+  %de = test.add.i32 %d, %e
+  %17 = low.reload %same_block_spill_storage_2 : low.storage<private> -> reg<test.i32>
+  %def = test.add.i32 %de, %17
+  %previous = low.reload %output : low.storage<private> -> reg<test.i32>
+  %sum = test.add.i32 %previous, %def
+  low.br ^exit
+^exit:
+  return %sum
+}
+
+// ====
+
+// Entry arguments and call results retain exclusive cells, preserving direct
+// callable storage transport even when their block lifetimes are disjoint.
+// RUN: emit low-allocation-query @callable_cells spill-count materialize-spills test.i32=2
+
+test.target<low_core> @target
+
+low.func.decl target<test.low.core>(@target) @produce() -> (reg<test.i32>)
+
+low.func.def target<test.low.core>(@target) @callable_cells(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %output = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %ab = test.add.i32 %a, %b
+  %abc = test.add.i32 %ab, %c
+  low.spill %abc, %output : reg<test.i32>, low.storage<private>
+  low.br ^call
+^call:
+  %result = low.func.call @produce() : () -> (reg<test.i32>)
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %de = test.add.i32 %d, %e
+  %combined = test.add.i32 %de, %result
+  low.spill %combined, %output : reg<test.i32>, low.storage<private>
+  low.br ^last
+^last:
+  %f = test.const.i32 6
+  %g = test.const.i32 7
+  %h = test.const.i32 8
+  %fg = test.add.i32 %f, %g
+  %fgh = test.add.i32 %fg, %h
+  %previous = low.reload %output : low.storage<private> -> reg<test.i32>
+  %sum = test.add.i32 %previous, %fgh
+  return %sum
+}
+
+// ----
+spills: 3
+storage: 3 reservations, 12 bytes
+traffic: 3 stores, 3 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.decl target<test.low.core>(@target) @produce() -> (reg<test.i32>)
+
+low.func.def target<test.low.core>(@target) @callable_cells(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %output = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %callable_cells_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %callable_cells_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %callable_cells_spill_storage_3 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.spill %c, %callable_cells_spill_storage_1 : reg<test.i32>, low.storage<private>
+  %ab = test.add.i32 %a, %b
+  %23 = low.reload %callable_cells_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %abc = test.add.i32 %ab, %23
+  low.spill %abc, %output : reg<test.i32>, low.storage<private>
+  low.br ^call
+^call:
+  %result = low.func.call @produce() : () -> (reg<test.i32>)
+  low.spill %result, %callable_cells_spill_storage_2 : reg<test.i32>, low.storage<private>
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %de = test.add.i32 %d, %e
+  %24 = low.reload %callable_cells_spill_storage_2 : low.storage<private> -> reg<test.i32>
+  %combined = test.add.i32 %de, %24
+  low.spill %combined, %output : reg<test.i32>, low.storage<private>
+  low.br ^last
+^last:
+  %f = test.const.i32 6
+  %g = test.const.i32 7
+  %h = test.const.i32 8
+  low.spill %h, %callable_cells_spill_storage_3 : reg<test.i32>, low.storage<private>
+  %fg = test.add.i32 %f, %g
+  %25 = low.reload %callable_cells_spill_storage_3 : low.storage<private> -> reg<test.i32>
+  %fgh = test.add.i32 %fg, %25
+  %previous = low.reload %output : low.storage<private> -> reg<test.i32>
+  %sum = test.add.i32 %previous, %fgh
+  return %sum
+}
+
+// ====
+
+// A spilled loop argument occupies its incoming-store blocks, including the
+// backedge, even when its register lifetime ends in the header.
+// RUN: emit low-allocation-query @loop_edges spill-count materialize-spills test.i32=2
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_edges(%condition: reg<test.i32>) -> (reg<test.i32>) asm {
+  %seed = test.const.i32 0
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%state: reg<test.i32>):
+  %a = test.const.i32 1
+  %b = test.const.i32 2
+  %c = test.const.i32 3
+  %ab = test.add.i32 %a, %b
+  %abc = test.add.i32 %ab, %c
+  %next = test.add.i32 %abc, %state
+  low.cond_br %condition, ^backedge, ^exit : reg<test.i32>
+^backedge:
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %f = test.const.i32 6
+  %de = test.add.i32 %d, %e
+  %def = test.add.i32 %de, %f
+  %updated = test.add.i32 %def, %next
+  low.br ^loop(%updated: reg<test.i32>)
+^exit:
+  return %next
+}
+
+// ----
+spills: 5
+storage: 4 reservations, 16 bytes
+traffic: 6 stores, 6 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_edges(%condition: reg<test.i32>) -> (reg<test.i32>) asm {
+  %loop_edges_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %loop_edges_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %loop_edges_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %loop_edges_spill_storage_3 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.spill %condition, %loop_edges_spill_storage_0 : reg<test.i32>, low.storage<private>
+  %seed = test.const.i32 0
+  low.spill %seed, %loop_edges_spill_storage_1 : reg<test.i32>, low.storage<private>
+  low.br ^loop
+^loop:
+  %a = test.const.i32 1
+  %b = test.const.i32 2
+  %c = test.const.i32 3
+  low.spill %c, %loop_edges_spill_storage_2 : reg<test.i32>, low.storage<private>
+  %ab = test.add.i32 %a, %b
+  %22 = low.reload %loop_edges_spill_storage_2 : low.storage<private> -> reg<test.i32>
+  %abc = test.add.i32 %ab, %22
+  %21 = low.reload %loop_edges_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %next = test.add.i32 %abc, %21
+  low.spill %next, %loop_edges_spill_storage_3 : reg<test.i32>, low.storage<private>
+  %20 = low.reload %loop_edges_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  low.cond_br %20, ^backedge, ^exit : reg<test.i32>
+^backedge:
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %f = test.const.i32 6
+  low.spill %f, %loop_edges_spill_storage_2 : reg<test.i32>, low.storage<private>
+  %de = test.add.i32 %d, %e
+  %25 = low.reload %loop_edges_spill_storage_2 : low.storage<private> -> reg<test.i32>
+  %def = test.add.i32 %de, %25
+  %23 = low.reload %loop_edges_spill_storage_3 : low.storage<private> -> reg<test.i32>
+  %updated = test.add.i32 %def, %23
+  low.spill %updated, %loop_edges_spill_storage_1 : reg<test.i32>, low.storage<private>
+  low.br ^loop
+^exit:
+  %24 = low.reload %loop_edges_spill_storage_3 : low.storage<private> -> reg<test.i32>
+  return %24
+}
+
+// ====
+
+// Private scalar and vector spills use distinct size/alignment groups. The
+// same-sized explicit-register spill belongs to stack storage, not private.
+// RUN: emit low-allocation-query @layouts spill-count materialize-spills test.i32=8 test.f32=2 test.spillable.explicit32=2
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @layouts(%pointer: reg<test.ptr>) -> (reg<test.i32>) asm {
+  %output = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %a = test.load.v4i32 %pointer
+  %b = test.load.v4i32 %pointer
+  %c = test.load.v4i32 %pointer
+  %ab = test.add.v4i32 %a, %b
+  %abc = test.add.v4i32 %ab, %c
+  low.spill %abc, %output : reg<test.i32 x4>, low.storage<private>
+  low.br ^scalar
+^scalar:
+  %one = test.const.i32 1
+  %d = copy %one : reg<test.i32> -> reg<test.f32>
+  %e = copy %one : reg<test.i32> -> reg<test.f32>
+  %f = copy %one : reg<test.i32> -> reg<test.f32>
+  %de = test.add.f32 %d, %e
+  %def = test.add.f32 %de, %f
+  low.spill %def, %output : reg<test.f32>, low.storage<private>
+  low.br ^stack
+^stack:
+  %seed = test.const.i32 2
+  %g = test.rematerialize.spillable.explicit32 %seed
+  %h = test.rematerialize.spillable.explicit32 %seed
+  %i = test.rematerialize.spillable.explicit32 %seed
+  %gi = copy %g : reg<test.spillable.explicit32> -> reg<test.i32>
+  %hi = copy %h : reg<test.spillable.explicit32> -> reg<test.i32>
+  %ii = copy %i : reg<test.spillable.explicit32> -> reg<test.i32>
+  %gh = test.add.i32 %gi, %hi
+  %sum = test.add.i32 %gh, %ii
+  return %sum
+}
+
+// ----
+spills: 3
+storage: 3 reservations, 24 bytes
+traffic: 3 stores, 3 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @layouts(%pointer: reg<test.ptr>) -> (reg<test.i32>) asm {
+  %output = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %layouts_spill_storage_1 = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %layouts_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %layouts_spill_storage_3 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %a = test.load.v4i32 %pointer
+  %b = test.load.v4i32 %pointer
+  %c = test.load.v4i32 %pointer
+  low.spill %c, %layouts_spill_storage_1 : reg<test.i32 x4>, low.storage<private>
+  %ab = test.add.v4i32 %a, %b
+  %26 = low.reload %layouts_spill_storage_1 : low.storage<private> -> reg<test.i32 x4>
+  %abc = test.add.v4i32 %ab, %26
+  low.spill %abc, %output : reg<test.i32 x4>, low.storage<private>
+  low.br ^scalar
+^scalar:
+  %one = test.const.i32 1
+  %d = copy %one : reg<test.i32> -> reg<test.f32>
+  %e = copy %one : reg<test.i32> -> reg<test.f32>
+  %f = copy %one : reg<test.i32> -> reg<test.f32>
+  low.spill %f, %layouts_spill_storage_2 : reg<test.f32>, low.storage<private>
+  %de = test.add.f32 %d, %e
+  %27 = low.reload %layouts_spill_storage_2 : low.storage<private> -> reg<test.f32>
+  %def = test.add.f32 %de, %27
+  low.spill %def, %output : reg<test.f32>, low.storage<private>
+  low.br ^stack
+^stack:
+  %seed = test.const.i32 2
+  %g = test.rematerialize.spillable.explicit32 %seed
+  %h = test.rematerialize.spillable.explicit32 %seed
+  %i = test.rematerialize.spillable.explicit32 %seed
+  low.spill %i, %layouts_spill_storage_3 : reg<test.spillable.explicit32>, low.storage<stack>
+  %gi = copy %g : reg<test.spillable.explicit32> -> reg<test.i32>
+  %hi = copy %h : reg<test.spillable.explicit32> -> reg<test.i32>
+  %28 = low.reload %layouts_spill_storage_3 : low.storage<stack> -> reg<test.spillable.explicit32>
+  %ii = copy %28 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %gh = test.add.i32 %gi, %hi
+  %sum = test.add.i32 %gh, %ii
+  return %sum
+}
+
+// ====
+
+// A sparse register range still owns spill contents across its entire block
+// interval. An intervening path must not overwrite inactive-lane contents.
+// RUN: emit low-allocation-query @sparse_path spill-count materialize-spills test.i32=2
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @sparse_path(%condition: reg<test.i32>) -> (reg<test.i32>) asm {
+  %retained = test.const.i32 41
+  low.cond_br %condition, ^other, ^read : reg<test.i32>
+^other:
+  %a = test.const.i32 1
+  %b = test.const.i32 2
+  %c = test.const.i32 3
+  %ab = test.add.i32 %a, %b
+  %abc = test.add.i32 %ab, %c
+  return %abc
+^read:
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %de = test.add.i32 %d, %e
+  %sum = test.add.i32 %de, %retained
+  return %sum
+}
+
+// ----
+spills: 2
+storage: 2 reservations, 8 bytes
+traffic: 2 stores, 2 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @sparse_path(%condition: reg<test.i32>) -> (reg<test.i32>) asm {
+  %sparse_path_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %sparse_path_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %retained = test.const.i32 41
+  low.spill %retained, %sparse_path_spill_storage_1 : reg<test.i32>, low.storage<private>
+  low.cond_br %condition, ^other, ^read : reg<test.i32>
+^other:
+  %a = test.const.i32 1
+  %b = test.const.i32 2
+  %c = test.const.i32 3
+  low.spill %c, %sparse_path_spill_storage_0 : reg<test.i32>, low.storage<private>
+  %ab = test.add.i32 %a, %b
+  %14 = low.reload %sparse_path_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %abc = test.add.i32 %ab, %14
+  return %abc
+^read:
+  %d = test.const.i32 4
+  %e = test.const.i32 5
+  %de = test.add.i32 %d, %e
+  %15 = low.reload %sparse_path_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %sum = test.add.i32 %de, %15
+  return %sum
+}

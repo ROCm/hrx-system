@@ -7,7 +7,10 @@
 #include <inttypes.h>
 
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/allocation_materialization.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/text_asm.h"
+#include "loom/format/text/printer.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/low_emit.h"
 #include "loom/tools/loom-check/test/low/providers.h"
@@ -21,6 +24,7 @@ enum loom_check_test_low_allocation_option_flag_bits_e {
   LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_FAILURE = 1u << 5,
   LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_EDGE_MOVES = 1u << 6,
   LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_REVERSE_BLOCKS = 1u << 7,
+  LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_MATERIALIZE_SPILLS = 1u << 8,
 };
 typedef uint32_t loom_check_test_low_allocation_option_flags_t;
 
@@ -167,6 +171,17 @@ static iree_status_t loom_check_test_low_allocation_parse_option(
           "duplicate low-allocation-query option 'reverse-blocks'");
     }
     options->flags |= LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_REVERSE_BLOCKS;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(token, IREE_SV("materialize-spills"))) {
+    if (iree_any_bit_set(
+            options->flags,
+            LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_MATERIALIZE_SPILLS)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "duplicate low-allocation-query option 'materialize-spills'");
+    }
+    options->flags |= LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_MATERIALIZE_SPILLS;
     return iree_ok_status();
   }
 
@@ -661,26 +676,53 @@ static iree_status_t loom_check_test_low_allocation_execute(
       !iree_string_view_is_empty(options.value_selectors) ||
       !iree_string_view_is_empty(options.copy_result_selectors) ||
       !iree_string_view_is_empty(options.spill_plan_selectors);
-  if (!has_value_queries) {
+  if (has_value_queries) {
+    loom_low_allocation_value_scratch_t value_scratch = {0};
+    iree_status_t status =
+        loom_low_allocation_acquire_value_scratch(allocation, &value_scratch);
+    if (iree_status_is_ok(status)) {
+      status = loom_check_test_low_allocation_append_selected_values(
+          allocation, options.value_selectors, output);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_check_test_low_allocation_append_selected_copies(
+          allocation, options.copy_result_selectors, output);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_check_test_low_allocation_append_selected_spill_plans(
+          allocation, options.spill_plan_selectors, output);
+    }
+    loom_low_allocation_release_value_scratch(&value_scratch);
+    IREE_RETURN_IF_ERROR(status);
+  }
+  if (!iree_any_bit_set(
+          options.flags,
+          LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_MATERIALIZE_SPILLS)) {
     return iree_ok_status();
   }
-  loom_low_allocation_value_scratch_t value_scratch = {0};
-  iree_status_t status =
-      loom_low_allocation_acquire_value_scratch(allocation, &value_scratch);
-  if (iree_status_is_ok(status)) {
-    status = loom_check_test_low_allocation_append_selected_values(
-        allocation, options.value_selectors, output);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_check_test_low_allocation_append_selected_copies(
-        allocation, options.copy_result_selectors, output);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_check_test_low_allocation_append_selected_spill_plans(
-        allocation, options.spill_plan_selectors, output);
-  }
-  loom_low_allocation_release_value_scratch(&value_scratch);
-  return status;
+
+  // Exercise one complete immutable allocation batch, as native frame repair
+  // does, before another scheduling/allocation round changes its liveness.
+  loom_low_allocation_materialization_result_t materialized = {0};
+  IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_spills(
+      allocation, allocation->spill_plans, allocation->spill_plan_count, NULL,
+      request->case_arena, &materialized));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_format(
+          output,
+          "storage: %" PRIu32 " reservations, %" PRIu64 " bytes\n"
+          "traffic: %" PRIu32 " stores, %" PRIu32 " reloads\n"
+          "errors: %" PRIu32 "\n\n",
+          materialized.storage_count, materialized.storage_bytes,
+          materialized.spill_count, materialized.reload_count,
+          materialized.error_count));
+  loom_text_print_options_t print_options = {
+      .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM,
+  };
+  loom_low_descriptor_text_asm_environment_initialize(
+      &request->low_registry->registry, &print_options.low_asm_environment);
+  return loom_text_print_module_to_builder_with_options(native_module->module,
+                                                        output, &print_options);
 }
 
 static iree_status_t loom_check_test_low_allocation_append_names(

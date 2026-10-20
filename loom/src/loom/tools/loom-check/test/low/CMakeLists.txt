@@ -21,6 +21,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::codegen::low::allocation
+    loom::codegen::low::allocation_materialization
     loom::codegen::low::descriptors
     loom::codegen::low::function
     loom::codegen::low::function_model
@@ -31,6 +32,8 @@ loom_cc_library(
     loom::codegen::low::schedule::dependencies
     loom::codegen::low::storage_layout
     loom::codegen::low::storage_transport
+    loom::codegen::low::text_asm
+    loom::format::text::printer
     loom::ir
     loom::tools::loom-check::execute
   TESTONLY

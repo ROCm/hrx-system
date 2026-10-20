@@ -45,7 +45,7 @@ typedef struct loom_low_allocation_materialized_spill_t {
   loom_low_allocation_materialized_spill_flags_t flags;
   // Allocation assignment index associated with |value_id|.
   uint32_t assignment_index;
-  // Spill slot ordinal assigned to the interval.
+  // Logical spill slot ordinal assigned before physical reservation reuse.
   uint32_t slot_index;
   // Spill storage space used for the materialized storage.
   loom_low_spill_slot_space_t slot_space;
@@ -124,13 +124,14 @@ typedef struct loom_low_allocation_materialization_result_t {
   // Single-consumer low.reload results private to their consumer setup chain
   // while the generated reloads survive.
   loom_low_allocation_materialized_value_list_t per_user_placement_values;
-  // Number of low.storage.reserve ops created from spill plans.
+  // Number of distinct low.storage.reserve ops created after lifetime reuse.
   uint32_t storage_count;
   // Number of low.spill stores inserted.
   uint32_t spill_count;
   // Number of low.reload ops inserted.
   uint32_t reload_count;
-  // Byte size of low.storage.reserve ops created from spill plans.
+  // Byte size of the distinct reservations, excluding inter-reservation
+  // padding.
   uint64_t storage_bytes;
   // Strongest byte alignment required by the created spill storage.
   uint64_t storage_minimum_alignment;

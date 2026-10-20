@@ -447,6 +447,22 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "spill_storage",
+    srcs = ["spill_storage.c"],
+    hdrs = ["spill_storage.h"],
+    deps = [
+        ":table",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:cfg_graph",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "spill_traffic",
     srcs = ["spill_traffic.c"],
     hdrs = ["spill_traffic.h"],

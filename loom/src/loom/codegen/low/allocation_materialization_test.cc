@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/liveness.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/parser.h"
@@ -18,6 +19,7 @@
 #include "loom/ops/test/ops.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/testing/module_ptr.h"
+#include "loom/util/cfg_graph.h"
 
 namespace loom {
 namespace {
@@ -184,6 +186,11 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
   };
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
+  const loom_region_t* body = loom_low_func_def_body(function_op);
+  IREE_ASSERT_OK(
+      loom_cfg_graph_build(module.get(), body, &arena, &table.cfg_graph));
+  IREE_ASSERT_OK(loom_liveness_analyze_region(module.get(), body, &arena,
+                                              &table.liveness));
   loom_low_allocation_materialization_result_t result = {};
   loom_low_allocation_materialization_options_t options = {};
   iree_host_size_t diagnostic_count = 0;

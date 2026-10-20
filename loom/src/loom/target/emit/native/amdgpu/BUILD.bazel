@@ -162,6 +162,7 @@ loom_check_test_suite(
         "test/assembly_integer_subtract.loom-test",
         "test/assembly_packed_broadcast.loom-test",
         "test/assembly_q8.loom-test",
+        "test/assembly_spill_storage.loom-test",
         "test/assembly_vopd.loom-test",
         "test/assembly_vopd_cache.loom-test",
         "test/assembly_vopd_profiles.loom-test",

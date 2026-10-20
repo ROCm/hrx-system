@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation/spill_plan.h"
+#include "loom/codegen/low/allocation/spill_storage.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
@@ -407,7 +408,11 @@ static iree_status_t loom_low_allocation_insert_storage_reserves(
     loom_low_allocation_storage_prefix_t* storage_prefix,
     const loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t spill_plan_count, iree_arena_allocator_t* arena,
-    loom_low_materialized_spill_slot_t* slots) {
+    loom_low_materialized_spill_slot_t* slots,
+    loom_low_allocation_materialization_result_t* result) {
+  const uint32_t* representatives = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_storage_plan(
+      table, spill_plans, spill_plan_count, arena, &representatives));
   const iree_string_view_t function_name =
       loom_low_diagnostic_function_name(module, table->function_op);
   const iree_host_size_t storage_name_start =
@@ -417,6 +422,10 @@ static iree_status_t loom_low_allocation_insert_storage_reserves(
   loom_low_allocation_set_storage_insertion_point(
       &builder, (loom_op_t*)table->function_op, storage_prefix);
   for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
+    if (representatives && representatives[i] != i) {
+      slots[i] = slots[representatives[i]];
+      continue;
+    }
     const loom_low_allocation_spill_plan_t* plan = &spill_plans[i];
     const loom_storage_space_t storage_space =
         loom_low_allocation_storage_space_for_spill_slot(plan->slot_space);
@@ -431,13 +440,18 @@ static iree_status_t loom_low_allocation_insert_storage_reserves(
     if (storage_prefix->generated_storage_extends_entry_prefix) {
       storage_prefix->entry_traffic_insertion_anchor = reserve_op;
     }
-    const iree_host_size_t storage_name_index = storage_name_start + i;
+    const iree_host_size_t storage_name_index =
+        storage_name_start + result->storage_count;
     IREE_RETURN_IF_ERROR(loom_low_allocation_set_storage_value_name(
         module, function_name, storage_name_index, storage_value_id, arena));
     loom_builder_set_after(&builder, reserve_op);
     slots[i] = (loom_low_materialized_spill_slot_t){
         .storage_value_id = storage_value_id,
     };
+    ++result->storage_count;
+    result->storage_bytes += plan->byte_size;
+    result->storage_minimum_alignment =
+        iree_max(result->storage_minimum_alignment, plan->byte_alignment);
   }
 
   return iree_ok_status();
@@ -996,8 +1010,7 @@ iree_status_t loom_low_allocation_materialize_spills(
 
   IREE_RETURN_IF_ERROR(loom_low_allocation_insert_storage_reserves(
       module, table, &storage_prefix, spill_plans, spill_plan_count, arena,
-      slots));
-  result.storage_count = (uint32_t)spill_plan_count;
+      slots, &result));
 
   for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
     const uint32_t prior_spill_count = result.spill_count;
@@ -1017,10 +1030,6 @@ iree_status_t loom_low_allocation_materialize_spills(
         .count = result.reload_count - prior_reload_count,
         .bytes = result.reload_bytes - prior_reload_bytes,
     };
-    const uint64_t byte_size = spill_plans[i].byte_size;
-    result.storage_bytes += byte_size;
-    result.storage_minimum_alignment = iree_max(
-        result.storage_minimum_alignment, spill_plans[i].byte_alignment);
     if (record_materialized_spills) {
       loom_low_allocation_record_materialized_spill(
           table, &spill_plans[i], materialized_store_traffic,

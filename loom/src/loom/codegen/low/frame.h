@@ -139,9 +139,11 @@ typedef struct loom_low_emission_frame_t {
   loom_low_schedule_table_t schedule;
   // Allocation table for the prepared function.
   loom_low_allocation_table_t allocation;
-  // Cumulative spill storage materialized while reaching this frame.
+  // Distinct spill reservations created across repairs while reaching this
+  // frame.
   uint64_t materialized_spill_storage_count;
-  // Cumulative materialized spill storage byte size.
+  // Total reserved spill bytes after reuse, excluding inter-reservation
+  // padding.
   uint64_t materialized_spill_storage_bytes;
   // Strongest byte alignment required by materialized spill storage.
   uint64_t materialized_spill_storage_minimum_alignment;

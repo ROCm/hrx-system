@@ -1,0 +1,79 @@
+// Both pressure peaks share scratch storage. Waits must finish the first
+// reload before the next block overwrites the same cell.
+// RUN: emit amdgpu-assembly @sequential_spills strategy=source amdgpu.vgpr=3
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @sequential_spills(%input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
+  %address = v_mov_b32 0
+  %a = global_load_b32_saddr %address, %input
+  %b = global_load_b32_saddr %address, %input {offset = 4}
+  %c = global_load_b32_saddr %address, %input {offset = 8}
+  %d = global_load_b32_saddr %address, %input {offset = 12}
+  %ab = v_add_u32 %a, %b
+  %cd = v_add_u32 %c, %d
+  %first = v_add_u32 %ab, %cd
+  global_store_b32_saddr %address, %first, %output
+  low.br ^next
+^next:
+  %e = global_load_b32_saddr %address, %input {offset = 16}
+  %f = global_load_b32_saddr %address, %input {offset = 20}
+  %g = global_load_b32_saddr %address, %input {offset = 24}
+  %h = global_load_b32_saddr %address, %input {offset = 28}
+  %ef = v_add_u32 %e, %f
+  %gh = v_add_u32 %g, %h
+  %second = v_add_u32 %ef, %gh
+  global_store_b32_saddr %address, %second, %output {offset = 4}
+  return
+}
+
+// ----
+  v_mov_b32 v0, 0
+  global_load_b32 v1, v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  scratch_store_b32 off, v1, off offset:0
+  global_load_b32 v1, v0, s[0:1] offset:4
+  global_load_b32 v2, v0, s[0:1] offset:8
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  scratch_store_b32 off, v2, off offset:4
+  global_load_b32 v2, v0, s[0:1] offset:12
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  scratch_store_b32 off, v2, off offset:8
+  scratch_load_b32 v2, off, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v1, v2, v1
+  scratch_store_b32 off, v1, off offset:12
+  scratch_load_b32 v1, off, off offset:4
+  scratch_load_b32 v2, off, off offset:8
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v1, v1, v2
+  scratch_load_b32 v2, off, off offset:12
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v1, v2, v1
+  global_store_b32 v0, v1, s[2:3] offset:0
+.Lbb1:
+  s_waitcnt_vscnt vscnt(0)
+  global_load_b32 v1, v0, s[0:1] offset:16
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  scratch_store_b32 off, v1, off offset:0
+  global_load_b32 v1, v0, s[0:1] offset:20
+  global_load_b32 v2, v0, s[0:1] offset:24
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  scratch_store_b32 off, v2, off offset:4
+  global_load_b32 v2, v0, s[0:1] offset:28
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  scratch_store_b32 off, v2, off offset:8
+  scratch_load_b32 v2, off, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v1, v2, v1
+  scratch_store_b32 off, v1, off offset:12
+  scratch_load_b32 v1, off, off offset:4
+  scratch_load_b32 v2, off, off offset:8
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v1, v1, v2
+  scratch_load_b32 v2, off, off offset:12
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v1, v2, v1
+  global_store_b32 v0, v1, s[2:3] offset:4
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
