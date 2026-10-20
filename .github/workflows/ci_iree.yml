@@ -173,6 +173,165 @@ jobs:
               records = $records
           } | ConvertTo-Json -Depth 8
 
+      - name: Read WDDM adapter initialization capabilities
+        shell: powershell
+        run: |
+          $source = @'
+          """One adapter-only WDDM snapshot; no execution resources or private escapes.
+
+          Layouts and query IDs: Microsoft win32metadata c16762d41f1bd641ff8c4389ebf16ee50747129f,
+          shared/d3dkmthk.h and shared/d3dkmdt.h. This diagnostic is not production code.
+          """
+
+          import ctypes
+          import datetime
+          import json
+          import platform
+          import sys
+
+
+          class AdapterInfo(ctypes.Structure):
+              _fields_ = [
+                  # Open adapter handle returned by enumeration; closed below.
+                  ("handle", ctypes.c_uint32),
+                  # LUID low word.
+                  ("luid_low", ctypes.c_uint32),
+                  # LUID high word, preserved as an unsigned bit pattern.
+                  ("luid_high", ctypes.c_uint32),
+                  # Number of video present sources.
+                  ("source_count", ctypes.c_uint32),
+                  # Native BOOL, four bytes.
+                  ("precise_regions", ctypes.c_int32),
+              ]
+
+
+          class EnumAdapters(ctypes.Structure):
+              _fields_ = [
+                  # Input capacity / returned adapter count.
+                  ("count", ctypes.c_uint32),
+                  # Caller-owned output array; NULL queries the required count.
+                  ("adapters", ctypes.POINTER(AdapterInfo)),
+              ]
+
+
+          class QueryAdapter(ctypes.Structure):
+              _fields_ = [
+                  # Open adapter handle, never an execution device handle.
+                  ("handle", ctypes.c_uint32),
+                  # KMTQUERYADAPTERINFOTYPE from the pinned SDK header.
+                  ("kind", ctypes.c_uint32),
+                  # Caller-owned, fixed-layout in/out record.
+                  ("data", ctypes.c_void_p),
+                  # Record size in bytes.
+                  ("size", ctypes.c_uint32),
+              ]
+
+
+          def main():
+              if sys.platform != "win32" or ctypes.sizeof(ctypes.c_void_p) != 8:
+                  raise RuntimeError("This snapshot requires 64-bit Windows Python")
+              assert ctypes.sizeof(AdapterInfo) == 20
+              assert ctypes.sizeof(EnumAdapters) == 16
+              assert ctypes.sizeof(QueryAdapter) == 24
+              assert QueryAdapter.data.offset == 8
+              library = ctypes.WinDLL("gdi32.dll")
+              enumerate_adapters = library.D3DKMTEnumAdapters2
+              enumerate_adapters.argtypes = [ctypes.POINTER(EnumAdapters)]
+              enumerate_adapters.restype = ctypes.c_int32
+              query_adapter = library.D3DKMTQueryAdapterInfo
+              query_adapter.argtypes = [ctypes.POINTER(QueryAdapter)]
+              query_adapter.restype = ctypes.c_int32
+              close_adapter = library.D3DKMTCloseAdapter
+              close_adapter.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+              close_adapter.restype = ctypes.c_int32
+              result = {
+                  "machine": platform.node(),
+                  "os_version": platform.version(),
+                  "observed_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                  "adapters": [],
+                  "close_results": [],
+              }
+              adapters = []
+              failure = None
+
+              def checked_call(function, record):
+                  status = function(ctypes.byref(record)) & 0xFFFFFFFF
+                  if status != 0:
+                      raise RuntimeError(f"{function.__name__}: NTSTATUS 0x{status:08x}")
+
+              def query(handle, kind, word_count, first_word=0):
+                  data = (ctypes.c_uint32 * word_count)()
+                  data[0] = first_word
+                  request = QueryAdapter(handle, kind, ctypes.addressof(data), ctypes.sizeof(data))
+                  checked_call(query_adapter, request)
+                  return list(data)
+
+              try:
+                  enumeration = EnumAdapters()
+                  checked_call(enumerate_adapters, enumeration)
+                  if not 0 < enumeration.count <= 64:
+                      raise RuntimeError(f"Adapter count outside snapshot bound: {enumeration.count}")
+                  adapters = (AdapterInfo * enumeration.count)()
+                  enumeration.adapters = adapters
+                  checked_call(enumerate_adapters, enumeration)
+                  for adapter in adapters[: enumeration.count]:
+                      record = {
+                          "handle": adapter.handle,
+                          "luid": f"{adapter.luid_high:08x}:{adapter.luid_low:08x}",
+                          "physical_adapters": [],
+                      }
+                      result["adapters"].append(record)
+                      physical_count = query(adapter.handle, 30, 1)[0]
+                      if not 0 < physical_count <= 16:
+                          raise RuntimeError(f"Physical count outside snapshot bound: {physical_count}")
+                      for index in range(physical_count):
+                          identity = query(adapter.handle, 31, 7, index)
+                          physical = {
+                              "index": index,
+                              "vendor_id": identity[1],
+                              "device_id": identity[2],
+                              "subvendor_id": identity[3],
+                              "subsystem_id": identity[4],
+                              "revision_id": identity[5],
+                              "bus_type": identity[6],
+                          }
+                          record["physical_adapters"].append(physical)
+                          if identity[1] == 0x1002:
+                              if "wddm_2_0" not in record:
+                                  caps = query(adapter.handle, 24, 1)[0]
+                                  record["wddm_2_0"] = {
+                                      "raw": caps,
+                                      "support_64_bit_atomics": bool(caps & 1),
+                                      "gpu_mmu_supported": bool(caps & 2),
+                                      "io_mmu_supported": bool(caps & 4),
+                                  }
+                              mmu = query(adapter.handle, 34, 3, index)
+                              physical["gpu_mmu"] = {
+                                  "raw": mmu[1],
+                                  "cache_coherent_memory_supported": bool(mmu[1] & 4),
+                                  "virtual_address_bit_count": mmu[2],
+                              }
+              except Exception as error:
+                  failure = str(error)
+              finally:
+                  for adapter in adapters:
+                      if adapter.handle:
+                          handle = ctypes.c_uint32(adapter.handle)
+                          status = close_adapter(ctypes.byref(handle)) & 0xFFFFFFFF
+                          result["close_results"].append({"handle": adapter.handle, "status": status})
+                          if status != 0:
+                              failure = f"Adapter close failed: NTSTATUS 0x{status:08x}; prior={failure}"
+                  result["error"] = failure
+                  print(json.dumps(result, indent=2))
+              return 1 if failure else 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          '@
+          $source | python -B -
+          if ($LASTEXITCODE -ne 0) { throw "Adapter snapshot failed: $LASTEXITCODE" }
+
   bazel_linux:
     if: ${{ false }}
     name: Bazel / Linux x86-64 / ${{ matrix.name }}
