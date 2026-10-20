@@ -88,19 +88,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    signal
-  HDRS
-    "signal.h"
-  SRCS
-    "signal.c"
-  DEPS
-    iree::base
-    iree::base::internal
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     transfer
   HDRS
     "transfer.h"
@@ -738,8 +725,6 @@ iree_cc_library(
     ::barrier
     ::command_buffer
     ::dispatch
-    ::semaphore
-    ::signal
     ::transfer
     iree::base
     iree::base::internal
@@ -750,27 +735,11 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::publisher
+    iree::hal::drivers::amd::gpu::queue::semaphore
+    iree::hal::drivers::amd::gpu::queue::signal
   PUBLIC
 )
 endif()
-
-iree_cc_library(
-  NAME
-    semaphore
-  HDRS
-    "semaphore.h"
-  SRCS
-    "semaphore.c"
-  DEPS
-    ::signal
-    iree::async
-    iree::base
-    iree::base::internal
-    iree::base::threading
-    iree::hal
-    iree::hal::utils::host_semaphore
-  PUBLIC
-)
 
 if(AMDF_BUILD)
 iree_cc_test(
@@ -784,7 +753,6 @@ iree_cc_test(
     ::command_buffer
     ::growth
     ::program
-    ::signal
     ::submission
     amdf::headers
     iree::base
@@ -797,6 +765,7 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::publisher
+    iree::hal::drivers::amd::gpu::queue::signal
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -811,8 +780,6 @@ iree_cc_test(
   DEPS
     ::barrier
     ::dispatch
-    ::semaphore
-    ::signal
     ::submission
     iree::async
     iree::async::platform
@@ -822,6 +789,8 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::image::metadata
     iree::hal::drivers::amd::gpu::kernarg
     iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::semaphore
+    iree::hal::drivers::amd::gpu::queue::signal
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -851,65 +820,6 @@ iree_cc_binary_benchmark(
     ::barrier
     iree::base
     iree::hal
-    iree::testing::benchmark_main
-    iree::third_party::google_benchmark
-  TESTONLY
-)
-
-iree_cc_test(
-  NAME
-    semaphore_test
-  SRCS
-    "semaphore_test.cc"
-  DEPS
-    ::semaphore
-    ::signal
-    iree::async
-    iree::async::platform
-    iree::async::util::semaphore_wait
-    iree::base
-    iree::base::threading
-    iree::hal
-    iree::hal::drivers::amd::gpu::queue::host_wait
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-iree_cc_binary_benchmark(
-  NAME
-    semaphore_benchmark
-  SRCS
-    "semaphore_benchmark.cc"
-  DEPS
-    ::semaphore
-    ::signal
-    iree::async
-    iree::async::platform
-    iree::base
-    iree::hal
-    iree::testing::benchmark_main
-    iree::third_party::google_benchmark
-  TESTONLY
-)
-
-iree_cc_test(
-  NAME
-    signal_test
-  SRCS
-    "signal_test.cc"
-  DEPS
-    ::signal
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-iree_cc_binary_benchmark(
-  NAME
-    signal_benchmark
-  SRCS
-    "signal_benchmark.cc"
-  DEPS
-    ::signal
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
   TESTONLY
@@ -1009,11 +919,11 @@ iree_cc_library(
   SRCS
     "backing.c"
   DEPS
-    ::signal
     iree::base
     iree::hal
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::queue::signal
     iree::hal::drivers::amd::status
   PUBLIC
 )
@@ -1039,8 +949,6 @@ iree_cc_library(
     ::retirement
     ::ring
     ::scratch
-    ::semaphore
-    ::signal
     ::submission
     ::transfer
     amdf::headers
@@ -1068,6 +976,8 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::pm4::kmq::storage
     iree::hal::drivers::amd::gpu::queue::pm4::umq::ring
     iree::hal::drivers::amd::gpu::queue::publisher
+    iree::hal::drivers::amd::gpu::queue::semaphore
+    iree::hal::drivers::amd::gpu::queue::signal
     iree::hal::drivers::amd::status
   PUBLIC
 )

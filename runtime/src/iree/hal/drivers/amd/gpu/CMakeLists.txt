@@ -73,8 +73,8 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::pm4::program
     iree::hal::drivers::amd::gpu::queue::pm4::queue
     iree::hal::drivers::amd::gpu::queue::pm4::scratch
-    iree::hal::drivers::amd::gpu::queue::pm4::semaphore
     iree::hal::drivers::amd::gpu::queue::sdma::queue
+    iree::hal::drivers::amd::gpu::queue::semaphore
     iree::hal::drivers::amd::gpu::target::identity
     iree::hal::drivers::amd::status
     iree::hal::utils::device_spec_builder

@@ -14,9 +14,9 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/transfer.h"
 #include "iree/hal/drivers/amd/gpu/queue/publisher.h"
+#include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,7 +32,7 @@ typedef struct iree_hal_amd_gpu_pm4_submission_wait_t {
   // Requested timeline value.
   uint64_t value;
   // Owned eligible native reader, or NULL for a completed/host dependency.
-  iree_hal_amd_gpu_pm4_signal_t* signal;
+  iree_hal_amd_gpu_signal_t* signal;
 } iree_hal_amd_gpu_pm4_submission_wait_t;
 
 // Borrowed dispatch inputs consumed by one publication attempt. Native
@@ -105,7 +105,7 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   // Prepared terminal execution/cache boundary.
   iree_hal_amd_gpu_pm4_barrier_t after;
   // Owned native producer point, if any signal can use native acceleration.
-  iree_hal_amd_gpu_pm4_signal_t* signal;
+  iree_hal_amd_gpu_signal_t* signal;
   // Optional profile operation occupies the bytes immediately after this
   // header.
   bool profiled;

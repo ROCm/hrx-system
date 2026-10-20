@@ -9,7 +9,7 @@
 
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/signal.h"
+#include "iree/hal/drivers/amd/gpu/queue/signal.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,13 +43,13 @@ typedef struct iree_hal_amd_gpu_pm4_signal_storage_t {
   // Native cells and coherent CPU mapping.
   iree_hal_amd_fabric_memory_t memory;
   // Finite extent attached to the queue's available signal pool.
-  iree_hal_amd_gpu_pm4_signal_block_t block;
+  iree_hal_amd_gpu_signal_block_t block;
   // Number of native cells and corresponding host signal records.
   uint32_t capacity;
   // Native-domain frontier width for each signal record.
   uint32_t queue_count;
   // Prepared inline metadata, initialized after native backing arrives.
-  iree_hal_amd_gpu_pm4_signal_t* signals;
+  iree_hal_amd_gpu_signal_t* signals;
   // Prepared inline frontier vectors, one per signal record.
   uint64_t* frontiers;
   // Release descriptor acquired with this storage, never at retirement.
@@ -102,8 +102,7 @@ iree_status_t iree_hal_amd_gpu_pm4_signal_storage_prepare(
     uint32_t capacity, uint32_t queue_count, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_signal_storage_t** out_storage);
 iree_status_t iree_hal_amd_gpu_pm4_signal_storage_initialize(
-    iree_hal_amd_gpu_context_t* context,
-    iree_hal_amd_gpu_pm4_signal_pool_t* pool,
+    iree_hal_amd_gpu_context_t* context, iree_hal_amd_gpu_signal_pool_t* pool,
     iree_hal_amd_gpu_pm4_signal_storage_t* storage);
 
 // Allocates coherent native cells, inline host reference metadata, and a dense
@@ -111,8 +110,7 @@ iree_status_t iree_hal_amd_gpu_pm4_signal_storage_initialize(
 // device/queue construction. No cell is initially acquired.
 // Success returns the unique owner; failure leaves out_storage NULL.
 iree_status_t iree_hal_amd_gpu_pm4_signal_storage_allocate(
-    iree_hal_amd_gpu_context_t* context,
-    iree_hal_amd_gpu_pm4_signal_pool_t* pool,
+    iree_hal_amd_gpu_context_t* context, iree_hal_amd_gpu_signal_pool_t* pool,
     const iree_hal_amd_fabric_memory_options_t* options, uint32_t capacity,
     uint32_t queue_count, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_signal_storage_t** out_storage);

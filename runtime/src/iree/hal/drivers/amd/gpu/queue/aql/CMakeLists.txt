@@ -73,4 +73,37 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+iree_cc_library(
+  NAME
+    signal
+  HDRS
+    "signal.h"
+  SRCS
+    "signal.c"
+  DEPS
+    ::packet
+    amdf::headers
+    iree::hal::drivers::amd::gpu::queue::signal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    signal_test
+  SRCS
+    "signal_test.cc"
+  DEPS
+    ::packet
+    ::signal
+    amdf::headers
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::queue::semaphore
+    iree::hal::drivers::amd::gpu::queue::signal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

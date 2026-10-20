@@ -20,8 +20,8 @@
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/signal.h"
+#include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
+#include "iree/hal/drivers/amd/gpu/queue/signal.h"
 #include "iree/hal/drivers/amd/registration/driver_module.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/memory/fixed_block_pool.h"
@@ -1062,11 +1062,11 @@ TEST_F(GpuNativeTest, NativeConsumerPreservesProducerRetirementFailure) {
                                         0));
   // A published native consumer proves the dependency was admitted without
   // waiting on the producer's host timeline, which is still held above.
-  iree_hal_amd_gpu_pm4_semaphore_wait_t published = {};
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
+  iree_hal_amd_gpu_semaphore_wait_t published = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
       consumer, one, native_domain, &published));
-  EXPECT_EQ(published.state, IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_NATIVE);
-  iree_hal_amd_gpu_pm4_signal_release(published.signal);
+  EXPECT_EQ(published.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+  iree_hal_amd_gpu_signal_release(published.signal);
   iree_hal_semaphore_fail(
       producer, iree_make_status(IREE_STATUS_ABORTED, "producer failed"));
   pause.Join();

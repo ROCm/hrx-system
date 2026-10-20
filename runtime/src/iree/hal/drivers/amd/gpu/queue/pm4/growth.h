@@ -45,7 +45,7 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   // Number of cells in each acquired signal generation.
   uint32_t signal_capacity;
   // Available cells from every acquired block, independent of pending growth.
-  iree_hal_amd_gpu_pm4_signal_pool_t* signal_pool;
+  iree_hal_amd_gpu_signal_pool_t* signal_pool;
   // Coalesced returned-capacity publication with explicit wake enrollment.
   struct {
     // Stable typed record; initialized to ENTRY_REUSE_SIGNALS by the owner.

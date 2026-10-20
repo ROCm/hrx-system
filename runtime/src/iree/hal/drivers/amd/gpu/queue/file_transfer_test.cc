@@ -12,7 +12,7 @@
 #include <thread>
 
 #include "iree/async/proactor_platform.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
+#include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 #include "iree/hal/testing/mapped_transfer_buffer.h"
 #include "iree/hal/utils/host_semaphore.h"
 #include "iree/hal/utils/memory_file.h"
@@ -148,7 +148,7 @@ class FileTransferTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_));
-    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_semaphore_create(
+    IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
         proactor_, 0, 1, iree_allocator_system(), &completion_));
     iree_async_semaphore_wait_context_initialize(&waits_);
     iree_hal_amd_gpu_capture_pool_initialize(4096, iree_allocator_system(),

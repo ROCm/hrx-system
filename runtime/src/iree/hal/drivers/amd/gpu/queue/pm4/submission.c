@@ -450,11 +450,10 @@ bool iree_hal_amd_gpu_pm4_submission_retirement_ready(
   *out_status_code = IREE_STATUS_OK;
   if (submission->native_wait_count) {
     for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
-      const iree_hal_amd_gpu_pm4_signal_t* signal = submission->waits[i].signal;
+      const iree_hal_amd_gpu_signal_t* signal = submission->waits[i].signal;
       if (signal) {
         iree_status_code_t status_code;
-        if (!iree_hal_amd_gpu_pm4_signal_query_retirement(signal,
-                                                          &status_code)) {
+        if (!iree_hal_amd_gpu_signal_query_retirement(signal, &status_code)) {
           return false;
         }
         if (*out_status_code == IREE_STATUS_OK) {
@@ -499,13 +498,13 @@ static void iree_hal_amd_gpu_pm4_submission_destroy(
                                  iree_status_from_code(failure_code));
   }
   for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
-    iree_hal_amd_gpu_pm4_signal_release(submission->waits[i].signal);
+    iree_hal_amd_gpu_signal_release(submission->waits[i].signal);
     iree_hal_semaphore_release(submission->waits[i].semaphore);
   }
   for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
     iree_hal_semaphore_release(submission->signals.semaphores[i]);
   }
-  iree_hal_amd_gpu_pm4_signal_release(submission->signal);
+  iree_hal_amd_gpu_signal_release(submission->signal);
   if (pool) {
     iree_hal_amd_gpu_capture_pool_release(
         pool, iree_make_byte_span(submission, submission->allocation_size));

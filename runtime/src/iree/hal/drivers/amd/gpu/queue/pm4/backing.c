@@ -107,8 +107,7 @@ iree_status_t iree_hal_amd_gpu_pm4_signal_storage_prepare(
   iree_host_size_t total_size = 0, signals_offset = 0, frontiers_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(*storage), &total_size,
-      IREE_STRUCT_FIELD(capacity, iree_hal_amd_gpu_pm4_signal_t,
-                        &signals_offset),
+      IREE_STRUCT_FIELD(capacity, iree_hal_amd_gpu_signal_t, &signals_offset),
       IREE_STRUCT_FIELD((iree_host_size_t)capacity * queue_count, uint64_t,
                         &frontiers_offset)));
   IREE_RETURN_IF_ERROR(
@@ -123,22 +122,20 @@ iree_status_t iree_hal_amd_gpu_pm4_signal_storage_prepare(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_signal_storage_initialize(
-    iree_hal_amd_gpu_context_t* context,
-    iree_hal_amd_gpu_pm4_signal_pool_t* pool,
+    iree_hal_amd_gpu_context_t* context, iree_hal_amd_gpu_signal_pool_t* pool,
     iree_hal_amd_gpu_pm4_signal_storage_t* storage) {
   uint64_t address = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_backing_query_address(
       context, &storage->memory, &address));
-  iree_hal_amd_gpu_pm4_signal_block_initialize(
-      pool, context, (uint64_t*)storage->memory.contents.data, address,
+  iree_hal_amd_gpu_signal_block_initialize(
+      pool, context, (uint64_t*)storage->memory.contents.data, address, 8, 0,
       storage->signals, storage->capacity, storage->queue_count,
       storage->frontiers, &storage->block);
   return iree_ok_status();
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_signal_storage_allocate(
-    iree_hal_amd_gpu_context_t* context,
-    iree_hal_amd_gpu_pm4_signal_pool_t* pool,
+    iree_hal_amd_gpu_context_t* context, iree_hal_amd_gpu_signal_pool_t* pool,
     const iree_hal_amd_fabric_memory_options_t* options, uint32_t capacity,
     uint32_t queue_count, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_signal_storage_t** out_storage) {
@@ -170,7 +167,7 @@ void iree_hal_amd_gpu_pm4_signal_storage_free(
     iree_hal_amd_gpu_context_t* context,
     iree_hal_amd_gpu_pm4_signal_storage_t* storage) {
   if (storage->block.pool) {
-    iree_hal_amd_gpu_pm4_signal_block_deinitialize(&storage->block);
+    iree_hal_amd_gpu_signal_block_deinitialize(&storage->block);
   }
   iree_hal_amd_gpu_context_release_memory(
       context, 1, &storage->memory,

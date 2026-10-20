@@ -127,7 +127,7 @@ static void iree_hal_amd_gpu_pm4_growth_await_signals(
   iree_atomic_store(&context->reuse.waiting, 1, iree_memory_order_release);
   // Either last release observes enrollment, or this recheck observes cells
   // returned between the acquisition miss and enrollment.
-  if (iree_hal_amd_gpu_pm4_signal_pool_has_available(context->signal_pool)) {
+  if (iree_hal_amd_gpu_signal_pool_has_available(context->signal_pool)) {
     iree_hal_amd_gpu_pm4_growth_signals_available(context);
   }
 }
@@ -317,7 +317,7 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_end(
 void iree_hal_amd_gpu_pm4_growth_reuse_signals(
     iree_hal_amd_gpu_pm4_growth_context_t* context) {
   iree_atomic_store(&context->reuse.pending, 0, iree_memory_order_release);
-  if (iree_hal_amd_gpu_pm4_signal_pool_has_available(context->signal_pool)) {
+  if (iree_hal_amd_gpu_signal_pool_has_available(context->signal_pool)) {
     iree_atomic_store(&context->reuse.waiting, 0, iree_memory_order_release);
     if (!context->signals) {
       return;

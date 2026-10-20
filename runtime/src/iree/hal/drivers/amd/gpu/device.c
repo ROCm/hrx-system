@@ -24,8 +24,8 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/scratch.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
 #include "iree/hal/drivers/amd/gpu/queue/sdma/queue.h"
+#include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/hal/utils/file_registry.h"
@@ -1116,7 +1116,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_semaphore(
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_hal_semaphore_t** out_semaphore) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
-  return iree_hal_amd_gpu_pm4_semaphore_create(
+  return iree_hal_amd_gpu_semaphore_create(
       iree_async_proactor_pool_entry_proactor(device->proactor_entry),
       initial_value, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
       device->host_allocator, out_semaphore);
@@ -1126,7 +1126,7 @@ static iree_hal_semaphore_compatibility_t
 iree_hal_amd_gpu_device_query_semaphore_compatibility(
     iree_hal_device_t* base, iree_hal_semaphore_t* semaphore) {
   // Concrete admission qualifies each producer's actual native signal domain.
-  return iree_hal_amd_gpu_pm4_semaphore_isa(semaphore)
+  return iree_hal_amd_gpu_semaphore_isa(semaphore)
              ? IREE_HAL_SEMAPHORE_COMPATIBILITY_ALL
              : IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_ONLY;
 }

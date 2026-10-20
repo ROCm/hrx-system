@@ -125,7 +125,7 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   // Typed native acquisition and coalesced waiting captures.
   iree_hal_amd_gpu_pm4_growth_context_t growth;
   // Constant-time available cells from every completed native signal block.
-  iree_hal_amd_gpu_pm4_signal_pool_t signals;
+  iree_hal_amd_gpu_signal_pool_t signals;
   // Coalesced explicit trim request, consumed under publication ownership.
   struct {
     // Stable typed record; only the first requester links it into the FIFO.
@@ -350,7 +350,7 @@ static void iree_hal_amd_gpu_pm4_trim_storage(
     // Keep one provisioned block. Detachment joins the last reader and removes
     // unused capacity from acquisition before its native release is submitted.
     if (storage != queue->producer.signal_storage &&
-        iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(&storage->block)) {
+        iree_hal_amd_gpu_signal_block_try_deinitialize(&storage->block)) {
       *link = storage->next;
       iree_hal_amd_gpu_pm4_signal_storage_free(queue->context, storage);
     } else {
@@ -394,7 +394,7 @@ iree_hal_amd_gpu_pm4_publish_accepted(
     invocation->published = true;
   }
   if (submission->signal) {
-    iree_hal_amd_gpu_pm4_signal_publish_frontier(
+    iree_hal_amd_gpu_signal_publish_frontier(
         submission->signal, queue->producer.frontier.published);
   }
   if (submission->profiled) {
@@ -414,8 +414,8 @@ iree_hal_amd_gpu_pm4_publish_accepted(
        terminal && submission->signal && i < submission->signals.count &&
        iree_status_is_ok(status);
        ++i) {
-    if (iree_hal_amd_gpu_pm4_semaphore_isa(submission->signals.semaphores[i])) {
-      status = iree_hal_amd_gpu_pm4_semaphore_publish_signal(
+    if (iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i])) {
+      status = iree_hal_amd_gpu_semaphore_publish_signal(
           submission->signals.semaphores[i],
           submission->signals.payload_values[i], submission->signal);
     }
@@ -610,7 +610,7 @@ iree_hal_amd_gpu_pm4_publish_transfer(
        i < submission->signals.count;
        ++i) {
     native_signal |=
-        iree_hal_amd_gpu_pm4_semaphore_isa(submission->signals.semaphores[i]);
+        iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i]);
   }
   const uint32_t body_words =
       wait_words + chunk.word_count +
@@ -628,7 +628,7 @@ iree_hal_amd_gpu_pm4_publish_transfer(
   }
   if (native_signal) {
     submission->signal =
-        iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&queue->signals);
+        iree_hal_amd_gpu_signal_pool_try_acquire(&queue->signals, 0);
     if (!submission->signal) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
     }
@@ -710,7 +710,7 @@ iree_hal_amd_gpu_pm4_publish_execute(
   bool native_signal = false;
   for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
     native_signal |=
-        iree_hal_amd_gpu_pm4_semaphore_isa(submission->signals.semaphores[i]);
+        iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i]);
   }
   const iree_hal_amd_gpu_pm4_barrier_t after = {
       .cache_control = sample_length ? queue->options.barriers.release : 0,
@@ -740,7 +740,7 @@ iree_hal_amd_gpu_pm4_publish_execute(
   }
   if (native_signal) {
     submission->signal =
-        iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&queue->signals);
+        iree_hal_amd_gpu_signal_pool_try_acquire(&queue->signals, 0);
     if (!submission->signal) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
     }
@@ -822,8 +822,8 @@ static void iree_hal_amd_gpu_pm4_prepare_wait_frontier(
            queue->producer.frontier.count * sizeof(uint64_t));
     for (iree_host_size_t i = 0; i < wait_count; ++i) {
       if (waits[i].signal) {
-        iree_hal_amd_gpu_pm4_signal_join_frontier(
-            waits[i].signal, queue->producer.frontier.pending);
+        iree_hal_amd_gpu_signal_join_frontier(waits[i].signal,
+                                              queue->producer.frontier.pending);
       }
     }
   }
@@ -962,7 +962,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
   bool native_signal = false;
   for (iree_host_size_t i = 0; i < request->signals.count; ++i) {
     native_signal |=
-        iree_hal_amd_gpu_pm4_semaphore_isa(request->signals.semaphores[i]);
+        iree_hal_amd_gpu_semaphore_isa(request->signals.semaphores[i]);
   }
   const uint32_t scratch_words = iree_hal_amd_gpu_pm4_scratch_word_count(
       &queue->producer.scratch, scratch_required, queue->kernel != NULL);
@@ -1017,9 +1017,9 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
     *out_status = status;
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
   }
-  iree_hal_amd_gpu_pm4_signal_t* signal = NULL;
+  iree_hal_amd_gpu_signal_t* signal = NULL;
   if (native_signal) {
-    signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&queue->signals);
+    signal = iree_hal_amd_gpu_signal_pool_try_acquire(&queue->signals, 0);
     if (!signal) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
     }
@@ -1035,7 +1035,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
         request->native_wait_count, request->signals, request->before,
         request->after, profile, &submission);
     if (!iree_status_is_ok(status)) {
-      iree_hal_amd_gpu_pm4_signal_release(signal);
+      iree_hal_amd_gpu_signal_release(signal);
       *out_status = status;
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
     }
@@ -1227,19 +1227,17 @@ static iree_status_t iree_hal_amd_gpu_pm4_admit_waits(
        iree_status_is_ok(status);
        ++i) {
     iree_hal_amd_gpu_pm4_submission_wait_t* wait = &waits[i];
-    if (native_eligible &&
-        iree_hal_amd_gpu_pm4_semaphore_isa(wait->semaphore)) {
-      iree_hal_amd_gpu_pm4_semaphore_wait_t acquired;
-      status = iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
+    if (native_eligible && iree_hal_amd_gpu_semaphore_isa(wait->semaphore)) {
+      iree_hal_amd_gpu_semaphore_wait_t acquired;
+      status = iree_hal_amd_gpu_semaphore_acquire_wait(
           wait->semaphore, wait->value, queue->context, &acquired);
       if (iree_status_is_ok(status)) {
-        if (acquired.state == IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_DEFERRED) {
+        if (acquired.state == IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_DEFERRED) {
           *out_kind = IREE_HAL_AMD_GPU_PM4_WAIT_SUBMISSION;
-        } else if (acquired.state ==
-                   IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_NATIVE) {
+        } else if (acquired.state == IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE) {
           wait->signal = acquired.signal;
           ++native_wait_count;
-        } else if (acquired.state == IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_HOST) {
+        } else if (acquired.state == IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST) {
           *out_kind = IREE_HAL_AMD_GPU_PM4_WAIT_COMPLETION;
         }
       }
@@ -1257,7 +1255,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_admit_waits(
   if (*out_kind != IREE_HAL_AMD_GPU_PM4_WAIT_READY ||
       !iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < wait_count; ++i) {
-      iree_hal_amd_gpu_pm4_signal_release(waits[i].signal);
+      iree_hal_amd_gpu_signal_release(waits[i].signal);
       waits[i].signal = NULL;
     }
   } else {
@@ -1351,7 +1349,7 @@ static void iree_hal_amd_gpu_pm4_pending_begin(
   iree_status_t status = iree_hal_amd_gpu_pm4_check_failure(queue);
   if (iree_status_is_ok(status)) {
     if (pending->kind == IREE_HAL_AMD_GPU_PM4_WAIT_SUBMISSION) {
-      status = iree_hal_amd_gpu_pm4_semaphore_acquire_submission_semaphore(
+      status = iree_hal_amd_gpu_semaphore_acquire_submission_semaphore(
           source, &pending->semaphore);
     } else {
       pending->semaphore = source;
@@ -1837,8 +1835,8 @@ static bool iree_hal_amd_gpu_pm4_retire(
          ++i) {
       iree_hal_semaphore_t* semaphore = submission->signals.semaphores[i];
       const uint64_t value = submission->signals.payload_values[i];
-      status = iree_hal_amd_gpu_pm4_semaphore_isa(semaphore)
-                   ? iree_hal_amd_gpu_pm4_semaphore_publish_completed(
+      status = iree_hal_amd_gpu_semaphore_isa(semaphore)
+                   ? iree_hal_amd_gpu_semaphore_publish_completed(
                          semaphore, value, frontier)
                    : iree_hal_semaphore_signal(semaphore, value, frontier);
     }
@@ -1847,7 +1845,7 @@ static bool iree_hal_amd_gpu_pm4_retire(
       iree_hal_amd_gpu_pm4_fail_submission(queue, submission, status);
     }
     if (action->terminal) {
-      iree_hal_amd_gpu_pm4_signal_retire(submission->signal, completion_code);
+      iree_hal_amd_gpu_signal_retire(submission->signal, completion_code);
       iree_hal_amd_gpu_pm4_submission_set_frontier(
           submission, frontier ? &completed_frontier : NULL);
     }
@@ -2107,7 +2105,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_submit_dispatch(
       }
       if (!submission) {
         for (iree_host_size_t i = 0; i < waits.count; ++i) {
-          iree_hal_amd_gpu_pm4_signal_release(admitted[i].signal);
+          iree_hal_amd_gpu_signal_release(admitted[i].signal);
         }
       }
     }
@@ -2363,7 +2361,7 @@ static void iree_hal_amd_gpu_pm4_queue_destroy(iree_hal_queue_t* base) {
   IREE_ASSERT(!queue->storage.queue && !queue->kernel && !queue->control.handle,
               "parent must join native ownership before final queue release");
   iree_hal_amd_gpu_publisher_deinitialize(&queue->publisher);
-  iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&queue->signals);
+  iree_hal_amd_gpu_signal_pool_deinitialize(&queue->signals);
   iree_hal_amd_gpu_host_wait_set_deinitialize(&queue->pending.waits);
   iree_slim_mutex_deinitialize(&queue->pending.completion_mutex);
   iree_async_semaphore_wait_context_deinitialize(&queue->wait_context);
@@ -2478,8 +2476,8 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
   queue->producer.scratch.profile = options->scratch_profile;
   queue->pending_size = pending_size;
   queue->trim.entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRIM;
-  iree_hal_amd_gpu_pm4_signal_pool_initialize(
-      (iree_hal_amd_gpu_pm4_signal_pool_notification_t){
+  iree_hal_amd_gpu_signal_pool_initialize(
+      (iree_hal_amd_gpu_signal_pool_notification_t){
           .fn = iree_hal_amd_gpu_pm4_growth_signals_available,
           .user_data = &queue->growth},
       &queue->signals);
