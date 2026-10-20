@@ -111,7 +111,7 @@ static void iree_hal_amd_gpu_executable_release_metadata(
   for (iree_host_size_t i = 0; i < executable->image.metadata.kernel_count;
        ++i) {
     iree_hal_amd_gpu_kernarg_layout_free(
-        executable->variants[0].functions[i].kernarg);
+        executable->variants[0].functions[i].base.kernarg);
   }
   iree_hal_amd_gpu_image_deinitialize(&executable->image);
   IREE_TRACE_ZONE_END(z0);
@@ -658,12 +658,14 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
   for (iree_host_size_t i = 0;
        i < image->metadata.kernel_count && iree_status_is_ok(status); ++i) {
     iree_hal_amd_gpu_pm4_function_t* function = &variant->functions[i];
-    function->metadata = &image->metadata.kernels[i];
+    function->base.metadata = &image->metadata.kernels[i];
     if (!variant_ordinal) {
       status = iree_hal_amd_gpu_kernarg_layout_allocate(
-          function->metadata, executable->host_allocator, &function->kernarg);
+          function->base.metadata, executable->host_allocator,
+          &function->base.kernarg);
     } else {
-      function->kernarg = executable->variants[0].functions[i].kernarg;
+      function->base.kernarg =
+          executable->variants[0].functions[i].base.kernarg;
     }
     if (iree_status_is_ok(status)) {
       status = iree_hal_amd_gpu_pm4_launch_initialize(
@@ -951,7 +953,7 @@ static iree_status_t iree_hal_amd_gpu_executable_function_info(
   const iree_hal_amd_gpu_pm4_function_t* function = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_executable_lookup_pm4(executable, token, &function));
-  const iree_hal_amd_gpu_metadata_kernel_t* metadata = function->metadata;
+  const iree_hal_amd_gpu_metadata_kernel_t* metadata = function->base.metadata;
   *out_info = (iree_hal_executable_function_info_t){
       .name = metadata->reflection_name,
       .flags =
@@ -961,9 +963,9 @@ static iree_status_t iree_hal_amd_gpu_executable_function_info(
           (metadata->uniform_workgroup_size
                ? IREE_HAL_EXECUTABLE_FUNCTION_FLAG_REQUIRES_UNIFORM_WORKGROUPS
                : 0),
-      .constant_byte_length = function->kernarg->constant_byte_length,
-      .binding_count = function->kernarg->binding_count,
-      .parameter_count = function->kernarg->parameter_count,
+      .constant_byte_length = function->base.kernarg->constant_byte_length,
+      .binding_count = function->base.kernarg->binding_count,
+      .parameter_count = function->base.kernarg->parameter_count,
       .maximum_workgroup_invocations = metadata->max_flat_workgroup_size,
       .workgroup_size = {1, 1, 1},
       .resource_usage =
@@ -989,13 +991,13 @@ static iree_status_t iree_hal_amd_gpu_executable_function_parameters(
   const iree_hal_amd_gpu_pm4_function_t* function = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_executable_lookup_pm4(executable, token, &function));
-  if (capacity < function->kernarg->parameter_count) {
+  if (capacity < function->base.kernarg->parameter_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE);
   }
-  if (function->kernarg->parameter_count) {
+  if (function->base.kernarg->parameter_count) {
     memcpy(out_parameters,
-           iree_hal_amd_gpu_kernarg_layout_parameters(function->kernarg),
-           function->kernarg->parameter_count * sizeof(*out_parameters));
+           iree_hal_amd_gpu_kernarg_layout_parameters(function->base.kernarg),
+           function->base.kernarg->parameter_count * sizeof(*out_parameters));
   }
   return iree_ok_status();
 }

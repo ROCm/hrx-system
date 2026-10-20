@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "iree/async/proactor_platform.h"
+#include "iree/hal/drivers/amd/gpu/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/signal.h"
 #include "iree/testing/gtest.h"
@@ -23,8 +24,8 @@ namespace {
 class SubmissionTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
-    function_.metadata = &metadata_;
-    function_.kernarg = &layout_;
+    function_.base.metadata = &metadata_;
+    function_.base.kernarg = &layout_;
     iree_hal_amd_gpu_capture_pool_initialize(1024, iree_allocator_system(),
                                              &pool_);
     IREE_ASSERT_OK(
@@ -666,7 +667,7 @@ TEST_P(SubmissionTest, PreparedAddressChecksDomainUsageAndCommitment) {
   reference.offset = 60;
   layout_.binding_count = 1;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
+                        iree_hal_amd_gpu_dispatch_validate_direct_bindings(
                             &layout_, {}, {1, &reference}, 0));
   iree_hal_memory_contract_release(contract);
 }

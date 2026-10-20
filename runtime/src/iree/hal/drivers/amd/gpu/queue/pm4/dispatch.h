@@ -8,7 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_DISPATCH_H_
 
 #include "iree/hal/command_buffer.h"
-#include "iree/hal/drivers/amd/gpu/kernarg.h"
+#include "iree/hal/drivers/amd/gpu/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/launch.h"
 
 #ifdef __cplusplus
@@ -26,10 +26,8 @@ typedef struct iree_hal_amd_gpu_pm4_dispatch_packet_info_t {
 // One placed PM4 function. The executable dominates every borrowed pointer;
 // captured dispatches keep that executable alive through native completion.
 typedef struct iree_hal_amd_gpu_pm4_function_t {
-  // Complete cold reflection and resource constraints owned by the image.
-  const iree_hal_amd_gpu_metadata_kernel_t* metadata;
-  // Immutable argument packing and public parameter reflection.
-  iree_hal_amd_gpu_kernarg_layout_t* kernarg;
+  // Executable-owned reflection and shared argument representation.
+  iree_hal_amd_gpu_function_t base;
   // Placed register/SGPR state prepared once for this exact family.
   iree_hal_amd_gpu_pm4_launch_t launch;
   // Borrowed executable-owned packet inputs, or NULL when unused by the ABI.
@@ -101,14 +99,8 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_program_query(
 
 // Admitted dispatch geometry, independent of packet publication mode.
 typedef struct iree_hal_amd_gpu_pm4_dispatch_t {
-  // Work-items in each complete workgroup.
-  uint32_t workgroup_size[3];
-  // Number of dispatched workgroups, including a possible partial group.
-  uint32_t workgroup_count[3];
-  // Final group dimensions, all zero when every group is complete.
-  uint32_t partial_size[3];
-  // Fixed and dynamic LDS allocation in bytes.
-  uint32_t group_segment_byte_length;
+  // Shared launch geometry admitted at the public boundary.
+  iree_hal_amd_gpu_dispatch_geometry_t geometry;
   // Admitted private storage per hardware wave slot, rounded to 256 bytes.
   uint32_t scratch_wave_byte_length;
 } iree_hal_amd_gpu_pm4_dispatch_t;
@@ -141,15 +133,6 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
     iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_host_size_t binding_count, iree_hal_dispatch_flags_t flags,
     iree_hal_amd_gpu_pm4_dispatch_t* out_dispatch);
-
-// Validates direct API buffer ranges after argument representation is admitted.
-// Indirect native arguments additionally cover the complete native ABI extent.
-// This does not require queue-ordered backing to have committed. Recording uses
-// its own accumulated binding requirements instead of this direct-only check.
-iree_status_t iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
-    const iree_hal_amd_gpu_kernarg_layout_t* layout,
-    iree_hal_buffer_ref_t parameters, iree_hal_buffer_ref_list_t bindings,
-    iree_hal_dispatch_flags_t flags);
 
 // Writes admitted native kernargs from captured or recording-time inputs. Dense
 // arguments consume one resolved address per binding; custom direct arguments

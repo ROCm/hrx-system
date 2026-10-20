@@ -96,13 +96,11 @@ static void BM_EmplaceDispatchArguments(benchmark::State& state) {
       .kernel_object = UINT64_C(0x1234000040),
   };
   iree_hal_amd_gpu_pm4_function_t function = {
-      .metadata = &metadata,
-      .kernarg = &layout,
+      .base = {.metadata = &metadata, .kernarg = &layout},
       .packet = state.range(0) ? &packet : nullptr,
   };
   iree_hal_amd_gpu_pm4_dispatch_t dispatch = {
-      .workgroup_size = {32, 1, 1},
-      .workgroup_count = {64, 1, 1},
+      .geometry = {.workgroup_size = {32, 1, 1}, .workgroup_count = {64, 1, 1}},
   };
   iree_hal_dispatch_flags_t flags =
       (state.range(1) ? IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS

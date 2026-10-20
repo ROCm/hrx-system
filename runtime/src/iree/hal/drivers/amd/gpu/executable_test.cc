@@ -438,14 +438,15 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_executable_lookup_pm4(executable_, token, &function));
     EXPECT_EQ(reinterpret_cast<uintptr_t>(function) & 63u, 0u);
-    EXPECT_EQ(function->kernarg->native_byte_length,
+    EXPECT_EQ(function->base.kernarg->native_byte_length,
               count_producer ? 16u : 12u);
     if (geometry_consumer) {
-      EXPECT_GT(function->kernarg->byte_length,
-                function->kernarg->native_byte_length);
-      EXPECT_EQ(function->kernarg->indirect_copy_count, 1u);
+      EXPECT_GT(function->base.kernarg->byte_length,
+                function->base.kernarg->native_byte_length);
+      EXPECT_EQ(function->base.kernarg->indirect_copy_count, 1u);
     } else {
-      EXPECT_EQ(function->kernarg->byte_length, count_producer ? 16u : 12u);
+      EXPECT_EQ(function->base.kernarg->byte_length,
+                count_producer ? 16u : 12u);
     }
     EXPECT_EQ(function->launch.requirements,
               packet_consumer

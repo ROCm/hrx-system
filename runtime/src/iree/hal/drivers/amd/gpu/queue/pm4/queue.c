@@ -9,6 +9,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/base/cpu_data.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/hal/drivers/amd/gpu/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/file_transfer.h"
@@ -872,10 +873,10 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
       function &&
       iree_hal_dispatch_uses_indirect_parameters(dispatch_request->flags);
   const bool dispatch =
-      function &&
-      (indirect_parameters || (dispatch_request->geometry.workgroup_count[0] &&
-                               dispatch_request->geometry.workgroup_count[1] &&
-                               dispatch_request->geometry.workgroup_count[2]));
+      function && (indirect_parameters ||
+                   (dispatch_request->launch.geometry.workgroup_count[0] &&
+                    dispatch_request->launch.geometry.workgroup_count[1] &&
+                    dispatch_request->launch.geometry.workgroup_count[2]));
   const bool indirect =
       iree_hal_dispatch_uses_indirect_arguments(dispatch_request->flags);
   const iree_hal_amd_gpu_pm4_dispatch_storage_t argument_storage =
@@ -944,7 +945,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
   }
   const uint16_t indirect_copy_count =
       dispatch && indirect_parameters && !indirect
-          ? function->kernarg->indirect_copy_count
+          ? function->base.kernarg->indirect_copy_count
           : 0;
   const bool prepare_packet =
       dispatch && function->packet && indirect_parameters;
@@ -1008,7 +1009,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
   }
   if (dispatch && indirect && iree_status_is_ok(status)) {
     argument_address = addresses[0];
-    if (argument_address & (function->kernarg->alignment - 1)) {
+    if (argument_address & (function->base.kernarg->alignment - 1)) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "indirect kernarg address is misaligned");
     }
@@ -1048,7 +1049,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
   queue->producer.ring.reserved_words = candidate.reserved_words;
   if (argument_storage.length) {
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
-        function, &dispatch_request->geometry, dispatch_request->constants,
+        function, &dispatch_request->launch, dispatch_request->constants,
         addresses, dispatch_request->flags,
         arguments->memory.contents.data + argument_offset);
   }
@@ -1088,14 +1089,16 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
         .kernarg_pointer = argument_address,
         .dispatch_id = queue->producer.dispatch_count++,
         .private_segment_size =
-            (function->metadata->private_segment_fixed_size + 3u) & ~3u};
+            (function->base.metadata->private_segment_fixed_size + 3u) & ~3u};
     words = iree_hal_amd_gpu_pm4_launch_emit(
-        words, &function->launch, dispatch_request->geometry.workgroup_size,
-        dispatch_request->geometry.partial_size,
-        dispatch_request->geometry.group_segment_byte_length, &inputs);
+        words, &function->launch,
+        dispatch_request->launch.geometry.workgroup_size,
+        dispatch_request->launch.geometry.partial_size,
+        dispatch_request->launch.geometry.group_segment_byte_length, &inputs);
     const uint32_t initiator =
         function->launch.dispatch_initiator |
-        (dispatch_request->geometry.partial_size[0] ? UINT32_C(1) << 6 : 0);
+        (dispatch_request->launch.geometry.partial_size[0] ? UINT32_C(1) << 6
+                                                           : 0);
     const uint64_t sample_address =
         arguments->address + argument_offset + sample_offset;
     if (sample_length) {
@@ -1106,15 +1109,15 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
     }
     if (indirect_parameters) {
       words = iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
-          words, function->kernarg, indirect_copy_count, parameters_address,
-          argument_address,
+          words, function->base.kernarg, indirect_copy_count,
+          parameters_address, argument_address,
           queue->options.barriers.command_processor_bypasses_l2
               ? queue->options.barriers.acquire
               : queue->options.barriers.shader,
           initiator);
     } else {
       words = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
-          words, dispatch_request->geometry.workgroup_count, initiator);
+          words, dispatch_request->launch.geometry.workgroup_count, initiator);
     }
     if (sample_length) {
       words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
@@ -1180,7 +1183,7 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
   const iree_hal_amd_gpu_pm4_dispatch_request_t dispatch = {
       .executable = submission->dispatch.executable,
       .function = submission->dispatch.function,
-      .geometry = submission->dispatch.geometry,
+      .launch = submission->dispatch.launch,
       .parameters = indirect_parameters
                         ? submission->dispatch.bindings.values[binding_count]
                         : (iree_hal_buffer_ref_t){0},
@@ -2034,11 +2037,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_submit_dispatch(
     const bool executes =
         dispatch->function &&
         (iree_hal_dispatch_uses_indirect_parameters(dispatch->flags) ||
-         (dispatch->geometry.workgroup_count[0] &&
-          dispatch->geometry.workgroup_count[1] &&
-          dispatch->geometry.workgroup_count[2]));
+         (dispatch->launch.geometry.workgroup_count[0] &&
+          dispatch->launch.geometry.workgroup_count[1] &&
+          dispatch->launch.geometry.workgroup_count[2]));
     const uint32_t scratch_required =
-        executes ? dispatch->geometry.scratch_wave_byte_length : 0;
+        executes ? dispatch->launch.scratch_wave_byte_length : 0;
     if (position - completed < queue->options.retirement_capacity &&
         (!scratch_required ||
          (queue->producer.scratch.current &&
@@ -2114,7 +2117,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_submit_dispatch(
       result != IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED) {
     status = iree_hal_amd_gpu_pm4_submission_create(
         &queue->captures, profile != NULL, waits, signals, dispatch->executable,
-        dispatch->function, dispatch->geometry, dispatch->parameters,
+        dispatch->function, dispatch->launch, dispatch->parameters,
         dispatch->constants, dispatch->bindings, &queue->options.barriers,
         barriers, dispatch->flags, &submission);
     if (iree_status_is_ok(status)) {
@@ -2170,13 +2173,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
           queue->context->target_info.compute.local_data_share_byte_length,
       queue->options.scratch_profile.maximum_wave_byte_length, config,
       constants, bindings.count, flags, &dispatch));
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
-      function->kernarg, config.workgroup_count_ref, bindings, flags));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_dispatch_validate_direct_bindings(
+      function->base.kernarg, config.workgroup_count_ref, bindings, flags));
   iree_hal_amd_gpu_profile_executable_t* metadata = NULL;
   if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile) &&
       (iree_hal_dispatch_uses_indirect_parameters(flags) ||
-       (dispatch.workgroup_count[0] && dispatch.workgroup_count[1] &&
-        dispatch.workgroup_count[2]))) {
+       (dispatch.geometry.workgroup_count[0] &&
+        dispatch.geometry.workgroup_count[1] &&
+        dispatch.geometry.workgroup_count[2]))) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amd_gpu_executable_profile_metadata(executable, &metadata));
   }
@@ -2198,9 +2202,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
           iree_hal_dispatch_uses_indirect_parameters(flags)
               ? IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_INDIRECT_PARAMETERS
               : 0;
-      memcpy(event->workgroup_count, dispatch.workgroup_count,
+      memcpy(event->workgroup_count, dispatch.geometry.workgroup_count,
              sizeof(event->workgroup_count));
-      memcpy(event->workgroup_size, dispatch.workgroup_size,
+      memcpy(event->workgroup_size, dispatch.geometry.workgroup_size,
              sizeof(event->workgroup_size));
       operation->sample_count =
           iree_hal_amd_gpu_profile_timestamps_dispatches(queue->profile) ? 1
@@ -2210,7 +2214,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
   const iree_hal_amd_gpu_pm4_dispatch_request_t request = {
       .executable = executable,
       .function = function,
-      .geometry = dispatch,
+      .launch = dispatch,
       .parameters = config.workgroup_count_ref,
       .constants = constants,
       .bindings = bindings,

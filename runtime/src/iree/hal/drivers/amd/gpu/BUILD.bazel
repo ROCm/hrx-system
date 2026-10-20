@@ -424,3 +424,29 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+iree_runtime_cc_library(
+    name = "dispatch",
+    srcs = ["dispatch.c"],
+    hdrs = ["dispatch.h"],
+    deps = [
+        ":kernarg",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:metadata",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "dispatch_test",
+    srcs = ["dispatch_test.cc"],
+    deps = [
+        ":dispatch",
+        ":kernarg",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:metadata",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

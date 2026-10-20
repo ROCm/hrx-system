@@ -826,9 +826,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   const bool indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(flags);
   const bool indirect = iree_hal_dispatch_uses_indirect_arguments(flags);
-  if (!indirect_parameters &&
-      (!dispatch.workgroup_count[0] || !dispatch.workgroup_count[1] ||
-       !dispatch.workgroup_count[2])) {
+  if (!indirect_parameters && (!dispatch.geometry.workgroup_count[0] ||
+                               !dispatch.geometry.workgroup_count[1] ||
+                               !dispatch.geometry.workgroup_count[2])) {
     return iree_ok_status();
   }
   if (buffer->resources) {
@@ -867,7 +867,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
                                     ? 24 + function->launch.user_data_count
                                     : 22;
   const uint16_t copy_count = indirect_parameters && !indirect
-                                  ? function->kernarg->indirect_copy_count
+                                  ? function->base.kernarg->indirect_copy_count
                                   : 0;
   const uint32_t dispatch_words =
       indirect_parameters
@@ -888,12 +888,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   const uint32_t launch_offset = command_offset + prepare_words * 4;
   const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
       .private_segment_size =
-          (function->metadata->private_segment_fixed_size + 3u) & ~3u};
+          (function->base.metadata->private_segment_fixed_size + 3u) & ~3u};
   cursor = iree_hal_amd_gpu_pm4_launch_emit(
-      cursor, &function->launch, dispatch.workgroup_size, dispatch.partial_size,
-      dispatch.group_segment_byte_length, &inputs);
-  const uint32_t initiator = function->launch.dispatch_initiator |
-                             (dispatch.partial_size[0] ? UINT32_C(1) << 6 : 0);
+      cursor, &function->launch, dispatch.geometry.workgroup_size,
+      dispatch.geometry.partial_size,
+      dispatch.geometry.group_segment_byte_length, &inputs);
+  const uint32_t initiator =
+      function->launch.dispatch_initiator |
+      (dispatch.geometry.partial_size[0] ? UINT32_C(1) << 6 : 0);
   const uint32_t profile_begin_offset =
       command_offset + (uint32_t)(cursor - words) * 4;
   if (buffer->program->profile) {
@@ -902,13 +904,13 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   }
   if (indirect_parameters) {
     iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
-        cursor, function->kernarg, copy_count, 0, 0,
+        cursor, function->base.kernarg, copy_count, 0, 0,
         buffer->profile.command_processor_bypasses_l2 ? buffer->profile.acquire
                                                       : buffer->profile.shader,
         initiator);
   } else {
-    iree_hal_amd_gpu_pm4_emit_dispatch_direct(cursor, dispatch.workgroup_count,
-                                              initiator);
+    iree_hal_amd_gpu_pm4_emit_dispatch_direct(
+        cursor, dispatch.geometry.workgroup_count, initiator);
   }
   if (buffer->program->profile) {
     const uint32_t profile_end_offset = command_offset + (word_count - 8) * 4;
@@ -946,9 +948,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     capture.event.executable_id =
         iree_hal_amd_gpu_profile_executable_id(metadata);
     capture.event.function_ordinal = (uint32_t)token.value;
-    memcpy(capture.event.workgroup_count, dispatch.workgroup_count,
+    memcpy(capture.event.workgroup_count, dispatch.geometry.workgroup_count,
            sizeof(capture.event.workgroup_count));
-    memcpy(capture.event.workgroup_size, dispatch.workgroup_size,
+    memcpy(capture.event.workgroup_size, dispatch.geometry.workgroup_size,
            sizeof(capture.event.workgroup_size));
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_commands_append(
         buffer->program->profile, capture));
@@ -962,12 +964,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   if (indirect && (kernarg_word != UINT16_MAX || function->packet)) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_binding(
         buffer, bindings.values[0], IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM,
-        function->kernarg->byte_length, function->kernarg->alignment, false,
-        &kernarg_value));
+        function->base.kernarg->byte_length, function->base.kernarg->alignment,
+        false, &kernarg_value));
     kernarg_displacement = bindings.values[0].offset;
   } else if (!indirect) {
     const uint16_t* offsets =
-        iree_hal_amd_gpu_kernarg_layout_binding_offsets(function->kernarg);
+        iree_hal_amd_gpu_kernarg_layout_binding_offsets(function->base.kernarg);
     iree_status_t status = iree_ok_status();
     for (iree_host_size_t i = 0;
          i < bindings.count && iree_status_is_ok(status); ++i) {

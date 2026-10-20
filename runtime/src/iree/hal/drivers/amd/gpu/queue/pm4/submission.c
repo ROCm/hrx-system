@@ -142,7 +142,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
                                     : IREE_HAL_AMD_GPU_PM4_ENTRY_BARRIER;
   submission->dispatch.executable = executable;
   submission->dispatch.function = function;
-  submission->dispatch.geometry = dispatch;
+  submission->dispatch.launch = dispatch;
   submission->dispatch.flags = flags;
   iree_hal_buffer_ref_t* references = payload;
   submission->dispatch.bindings =
@@ -205,7 +205,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_retirement(
   }
   submission->dispatch.executable = request->executable;
   submission->dispatch.function = request->function;
-  submission->dispatch.geometry = request->geometry;
+  submission->dispatch.launch = request->launch;
   submission->dispatch.flags = request->flags;
   iree_hal_buffer_ref_t* references = payload;
   submission->dispatch.bindings =

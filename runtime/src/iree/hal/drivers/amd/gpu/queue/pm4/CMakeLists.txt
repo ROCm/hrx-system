@@ -113,6 +113,7 @@ iree_cc_library(
     ::launch
     iree::base
     iree::hal
+    iree::hal::drivers::amd::gpu::dispatch
     iree::hal::drivers::amd::gpu::image
     iree::hal::drivers::amd::gpu::kernarg
     iree::hal::drivers::amd::gpu::target::identity
@@ -785,6 +786,7 @@ iree_cc_test(
     iree::async::platform
     iree::base
     iree::hal
+    iree::hal::drivers::amd::gpu::dispatch
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::image::metadata
     iree::hal::drivers::amd::gpu::kernarg
@@ -962,6 +964,7 @@ iree_cc_library(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::dispatch
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::feedback
     iree::hal::drivers::amd::gpu::profile

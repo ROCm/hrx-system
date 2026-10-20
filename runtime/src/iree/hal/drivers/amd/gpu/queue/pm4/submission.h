@@ -43,8 +43,8 @@ typedef struct iree_hal_amd_gpu_pm4_dispatch_request_t {
   iree_hal_executable_t* executable;
   // Prepared immutable launch and argument representation.
   const iree_hal_amd_gpu_pm4_function_t* function;
-  // Already admitted launch geometry.
-  iree_hal_amd_gpu_pm4_dispatch_t geometry;
+  // Admitted geometry and private-storage requirements.
+  iree_hal_amd_gpu_pm4_dispatch_t launch;
   // Borrowed device-time geometry, when flags select indirect parameters.
   iree_hal_buffer_ref_t parameters;
   // Borrowed dense or native argument bytes, copied directly to native storage.
@@ -136,8 +136,8 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
       iree_const_byte_span_t constants;
       // Admitted interpretation of constants, bindings, and launch geometry.
       iree_hal_dispatch_flags_t flags;
-      // Admitted direct geometry.
-      iree_hal_amd_gpu_pm4_dispatch_t geometry;
+      // Admitted geometry and private-storage requirements.
+      iree_hal_amd_gpu_pm4_dispatch_t launch;
     } dispatch;
     // Captured transfer descriptors and the exclusively owned publish cursor.
     iree_hal_amd_gpu_pm4_transfer_t transfer;
@@ -156,13 +156,13 @@ static inline uint32_t iree_hal_amd_gpu_pm4_submission_scratch_required(
   if (submission->entry.kind != IREE_HAL_AMD_GPU_PM4_ENTRY_DISPATCH) {
     return 0;
   }
-  const iree_hal_amd_gpu_pm4_dispatch_t* geometry =
-      &submission->dispatch.geometry;
+  const iree_hal_amd_gpu_pm4_dispatch_t* launch = &submission->dispatch.launch;
   return iree_hal_dispatch_uses_indirect_parameters(
              submission->dispatch.flags) ||
-                 (geometry->workgroup_count[0] &&
-                  geometry->workgroup_count[1] && geometry->workgroup_count[2])
-             ? geometry->scratch_wave_byte_length
+                 (launch->geometry.workgroup_count[0] &&
+                  launch->geometry.workgroup_count[1] &&
+                  launch->geometry.workgroup_count[2])
+             ? launch->scratch_wave_byte_length
              : 0;
 }
 

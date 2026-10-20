@@ -106,4 +106,34 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_library(
+  NAME
+    dispatch
+  HDRS
+    "dispatch.h"
+  SRCS
+    "dispatch.c"
+  DEPS
+    ::packet
+    iree::hal::drivers::amd::gpu::dispatch
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    dispatch_test
+  SRCS
+    "dispatch_test.cc"
+  DEPS
+    ::dispatch
+    ::packet
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::dispatch
+    iree::hal::drivers::amd::gpu::image::metadata
+    iree::hal::drivers::amd::gpu::kernarg
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
