@@ -131,6 +131,11 @@ amdf_status_t amdf_gpu_umd_user_queue_resume_scratch(
 amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
     amdf_gpu_umd_user_queue_t* queue);
 
+// Selects timestamp writes on a caller-quiesced AQL queue. Native failure is
+// terminal and preserves borrowed resources through successful destruction.
+amdf_status_t amdf_gpu_umd_user_queue_set_dispatch_timestamps(
+    amdf_gpu_umd_user_queue_t* queue, bool enabled);
+
 // Waits for one already-published format index under `deadline`.
 amdf_status_t amdf_gpu_umd_user_queue_wait_consumed(
     amdf_gpu_umd_user_queue_t* queue, uint64_t published_index,

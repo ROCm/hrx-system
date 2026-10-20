@@ -90,7 +90,8 @@ static const amdf_gpu_api_t amdf_gpu_api_v3 = {
 };
 
 static const amdf_gpu_api_t amdf_gpu_api_v4 = {
-    .structure_size = sizeof(amdf_gpu_api_t),
+    .structure_size =
+        offsetof(amdf_gpu_api_t, user_queue_set_dispatch_timestamps),
     .extension_version = AMDF_GPU_EXTENSION_VERSION_4,
     .endpoint_query_info = amdf_gpu_endpoint_query_info,
     .device_create = amdf_gpu_device_create,
@@ -108,6 +109,29 @@ static const amdf_gpu_api_t amdf_gpu_api_v4 = {
     .user_queue_query_scratch = amdf_gpu_user_queue_query_scratch,
     .user_queue_resume_scratch = amdf_gpu_user_queue_resume_scratch,
     .user_queue_trim_scratch = amdf_gpu_user_queue_trim_scratch,
+};
+
+static const amdf_gpu_api_t amdf_gpu_api_v5 = {
+    .structure_size = sizeof(amdf_gpu_api_t),
+    .extension_version = AMDF_GPU_EXTENSION_VERSION_5,
+    .endpoint_query_info = amdf_gpu_endpoint_query_info,
+    .device_create = amdf_gpu_device_create,
+    .device_query_info = amdf_gpu_device_query_info,
+    .kernel_queue_create = amdf_gpu_kernel_queue_create,
+    .kernel_queue_submit = amdf_gpu_kernel_queue_submit,
+    .user_queue_create = amdf_gpu_user_queue_create,
+    .device_query_queue_clock_info = amdf_gpu_device_query_queue_clock_info,
+    .device_query_clock_sample = amdf_gpu_device_query_clock_sample,
+    .event_create = amdf_gpu_event_create,
+    .event_query_info = amdf_gpu_event_query_info,
+    .event_signal = amdf_gpu_event_signal,
+    .event_wait = amdf_gpu_event_wait,
+    .event_destroy = amdf_gpu_event_destroy,
+    .user_queue_query_scratch = amdf_gpu_user_queue_query_scratch,
+    .user_queue_resume_scratch = amdf_gpu_user_queue_resume_scratch,
+    .user_queue_trim_scratch = amdf_gpu_user_queue_trim_scratch,
+    .user_queue_set_dispatch_timestamps =
+        amdf_gpu_user_queue_set_dispatch_timestamps,
 };
 
 void amdf_gpu_extension_initialize_endpoint(amdf_endpoint_t* endpoint) {
@@ -146,6 +170,11 @@ uint32_t amdf_gpu_extension_query_endpoint_queue_families(
 amdf_status_t amdf_gpu_extension_query(uint32_t minimum_version,
                                        uint32_t maximum_version,
                                        const void** out_extension_api) {
+  if (minimum_version <= AMDF_GPU_EXTENSION_VERSION_5 &&
+      maximum_version >= AMDF_GPU_EXTENSION_VERSION_5) {
+    *out_extension_api = &amdf_gpu_api_v5;
+    return AMDF_STATUS_OK;
+  }
   if (minimum_version <= AMDF_GPU_EXTENSION_VERSION_4 &&
       maximum_version >= AMDF_GPU_EXTENSION_VERSION_4) {
     *out_extension_api = &amdf_gpu_api_v4;

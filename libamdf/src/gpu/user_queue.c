@@ -446,3 +446,18 @@ amdf_gpu_user_queue_trim_scratch(amdf_user_queue_t* base_queue) {
   return amdf_gpu_umd_user_queue_trim_scratch(
       ((amdf_gpu_user_queue_t*)base_queue)->umd);
 }
+
+amdf_status_t AMDF_CALL amdf_gpu_user_queue_set_dispatch_timestamps(
+    amdf_user_queue_t* base_queue, uint32_t enabled) {
+  if (base_queue == NULL || enabled > 1) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if (base_queue->vtable != &amdf_gpu_user_queue_vtable ||
+      base_queue->info.command_type != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ||
+      (base_queue->info.format_features &
+       AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS) == 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return amdf_gpu_umd_user_queue_set_dispatch_timestamps(
+      ((amdf_gpu_user_queue_t*)base_queue)->umd, enabled != 0);
+}

@@ -671,6 +671,26 @@ amdf_status_t amdf_gpu_umd_user_queue_resume_scratch(
   return AMDF_STATUS_OK;
 }
 
+// The caller has joined execution and excludes publication and service.
+// Disconnect/reconnect reloads descriptor fields cached by CP. A failed
+// native update cannot establish whether CP still reaches borrowed backing.
+static amdf_status_t amdf_gpu_kfd_user_queue_set_active(
+    amdf_gpu_umd_user_queue_t* queue, bool active) {
+  const struct kfd_ioctl_update_queue_args update = {
+      .ring_base_address = queue->ring.device_address,
+      .queue_id = queue->queue_identifier,
+      .ring_size = (uint32_t)queue->plan.ring.primary_byte_length,
+      .queue_percentage = active ? KFD_MAX_QUEUE_PERCENTAGE : 0,
+      .queue_priority = 7,
+  };
+  const amdf_status_t status = queue->native_api->queue_update(
+      queue->native_api->user_data, queue->device, &update);
+  if (!amdf_status_is_ok(status)) {
+    amdf_gpu_kfd_user_queue_record_failure(queue, status);
+  }
+  return status;
+}
+
 amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
     amdf_gpu_umd_user_queue_t* queue) {
   if (!queue->scratch_service) {
@@ -685,18 +705,7 @@ amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
   if (descriptor->scratch_wave64_lane_byte_length == 0) {
     return AMDF_STATUS_OK;
   }
-  // The caller has joined execution, not just consumption, and excludes all
-  // publication. Disconnect forces CP to discard its cached scratch fields;
-  // reconnect observes the cleared descriptor before accepting future work.
-  struct kfd_ioctl_update_queue_args update = {
-      .ring_base_address = queue->ring.device_address,
-      .queue_id = queue->queue_identifier,
-      .ring_size = (uint32_t)queue->plan.ring.primary_byte_length,
-      .queue_percentage = 0,
-      .queue_priority = 7,
-  };
-  status = queue->native_api->queue_update(queue->native_api->user_data,
-                                           queue->device, &update);
+  status = amdf_gpu_kfd_user_queue_set_active(queue, false);
   if (amdf_status_is_ok(status)) {
     descriptor->compute_temporary_ring_size = 0;
     memcpy(descriptor->scratch_resource_descriptor,
@@ -705,12 +714,36 @@ amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
     descriptor->scratch_backing_address = 0;
     descriptor->scratch_wave64_lane_byte_length = 0;
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
-    update.queue_percentage = KFD_MAX_QUEUE_PERCENTAGE;
-    status = queue->native_api->queue_update(queue->native_api->user_data,
-                                             queue->device, &update);
+    status = amdf_gpu_kfd_user_queue_set_active(queue, true);
   }
+  return status;
+}
+
+amdf_status_t amdf_gpu_umd_user_queue_set_dispatch_timestamps(
+    amdf_gpu_umd_user_queue_t* queue, bool enabled) {
+  amdf_status_t status =
+      amdf_atomic_uint64_load_acquire(&queue->terminal_status);
   if (!amdf_status_is_ok(status)) {
-    amdf_gpu_kfd_user_queue_record_failure(queue, status);
+    return status;
+  }
+  amdf_gpu_kfd_aql_descriptor_t* descriptor = queue->control.host_pointer;
+  const uint32_t properties =
+      (descriptor->queue_properties & ~(1u << 3)) | (enabled ? (1u << 3) : 0);
+  if (properties == descriptor->queue_properties) {
+    return AMDF_STATUS_OK;
+  }
+  // Before the first publication CP has not cached the packet-processing
+  // properties. A previously used queue must reload them even when idle.
+  const bool reload = descriptor->write_dispatch_id != 0;
+  if (reload) {
+    status = amdf_gpu_kfd_user_queue_set_active(queue, false);
+  }
+  if (amdf_status_is_ok(status)) {
+    descriptor->queue_properties = properties;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    if (reload) {
+      status = amdf_gpu_kfd_user_queue_set_active(queue, true);
+    }
   }
   return status;
 }

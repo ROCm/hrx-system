@@ -31,8 +31,11 @@ typedef struct amdf_gpu_event_t amdf_gpu_event_t;
 /// Adds caller-serviced AQL scratch requests.
 #define AMDF_GPU_EXTENSION_VERSION_4 4u
 
+/// Adds caller-quiesced control of native AQL dispatch timestamps.
+#define AMDF_GPU_EXTENSION_VERSION_5 5u
+
 /// The most recent GPU extension version described by this header.
-#define AMDF_GPU_EXTENSION_VERSION_LATEST AMDF_GPU_EXTENSION_VERSION_4
+#define AMDF_GPU_EXTENSION_VERSION_LATEST AMDF_GPU_EXTENSION_VERSION_5
 
 /// An `amdf_gpu_endpoint_info_t` output structure.
 #define AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO \
@@ -585,10 +588,11 @@ typedef struct amdf_gpu_aql_scratch_request_t {
   uint32_t reserved;
 } amdf_gpu_aql_scratch_request_t;
 
-/// Immutable options selected when a directly published GPU queue is created.
+/// Initial options selected when a directly published GPU queue is created.
 typedef uint32_t amdf_gpu_user_queue_flags_t;
 enum amdf_gpu_user_queue_flag_bits_e {
-  /// Enables AQL firmware dispatch timestamps for the queue's lifetime.
+  /// Initially enables AQL firmware dispatch timestamps. Version 5 allows
+  /// changing this selection with user_queue_set_dispatch_timestamps.
   /// Requires the AQL DISPATCH_TIMESTAMPS format feature. PM4 and SDMA use
   /// explicit timestamp commands and reject this option.
   ///
@@ -624,7 +628,7 @@ typedef struct amdf_gpu_user_queue_create_info_t {
   amdf_queue_priority_t priority;
   /// Required producer reservation protocol.
   amdf_queue_producer_mode_t producer_mode;
-  /// Immutable queue options. Unknown bits are invalid.
+  /// Initial queue options. Unknown bits are invalid.
   amdf_gpu_user_queue_flags_t flags;
   /// Direct producer capabilities that creation must achieve.
   /// Optional device publication must be requested here; mapping does not
@@ -1003,6 +1007,30 @@ typedef struct amdf_gpu_api_t {
   /// Native failure makes the queue terminal and grants no permission to free
   /// its borrowed resources; successful queue destruction still joins them.
   amdf_status_t(AMDF_CALL* user_queue_trim_scratch)(amdf_user_queue_t* queue);
+
+  /// Enables (1) or disables (0) native AQL dispatch timestamps on an idle
+  /// queue. Requires GPU extension version 5 and the queue family's AQL
+  /// DISPATCH_TIMESTAMPS format feature. Other values are INVALID_ARGUMENT;
+  /// other command formats or unavailable native support are UNSUPPORTED.
+  ///
+  /// The caller must have joined every accepted dispatch and packet, and
+  /// must exclude publication, scratch service, configuration, and teardown
+  /// until this call returns. Consumption alone does not establish execution
+  /// completion. The library does not prove these lifetimes or wait for work.
+  ///
+  /// This cold operation may enter the kernel to disconnect and reconnect the
+  /// same queue, preserving its identity, mappings, indices, and scratch.
+  /// It allocates no backing and creates no worker. Repeating the current
+  /// selection succeeds without native calls. Success affects subsequent
+  /// dispatches; each enabled dispatch still needs its own initialized signal
+  /// as described by AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS.
+  ///
+  /// Native reconfiguration failure makes the queue terminal and grants no
+  /// permission to free borrowed resources; successful queue destruction
+  /// still joins them. Invalid input or unsupported selection does not alter
+  /// the queue.
+  amdf_status_t(AMDF_CALL* user_queue_set_dispatch_timestamps)(
+      amdf_user_queue_t* queue, uint32_t enabled);
 } amdf_gpu_api_t;
 
 #ifdef __cplusplus

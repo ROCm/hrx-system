@@ -150,9 +150,9 @@ barrier-value packet. A caller using that packet additionally requires
 An AQL family advertising
 `AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS` accepts
 `AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS` in its queue creation `flags`.
-The option enables native firmware capture for the queue lifetime. Zero flags
-leave capture disabled; the feature bit alone does not turn it on. PM4 and
-SDMA use explicit timestamp commands and reject this queue option.
+The option initially enables native firmware capture. Zero flags leave capture
+disabled; the feature bit alone does not turn it on. PM4 and SDMA use explicit
+timestamp commands and reject this queue option.
 
 Each observed dispatch receives an exclusive caller-owned 64-byte native
 signal, with its start/end fields initialized to zero. Firmware writes the
@@ -166,8 +166,21 @@ Capture selection adds no libamdf call to submission or collection. The caller
 can cycle a bounded set of signals throughout execution, with completion and
 consumption preceding each reuse. A runtime can enable the queue property at
 creation and independently select which dispatches receive observation signals.
-Changing the native property on an already-used queue requires firmware state
-reload; queue creation establishes it before activation instead.
+GPU extension version 5 also exposes
+`user_queue_set_dispatch_timestamps(queue, enabled)`, with `enabled` equal to
+zero or one. This changes capture on the same queue after the caller joins
+every accepted packet's execution and excludes publication, scratch service,
+configuration, and teardown. Queue consumption alone is insufficient.
+Changing the property on a previously used queue reloads firmware state
+through native driver calls, preserving its identity, mappings, indices, and
+scratch. Repeating the current selection makes no native call. Native reload
+failure makes the queue terminal; borrowed resources remain live until native
+destruction establishes their safe release.
+
+A runtime can therefore enable timestamps at profiling begin and disable them
+at profiling end, with no library call or property change in its ordinary
+dispatch path. Both boundaries use the application's existing idle-queue
+synchronization. libamdf creates no collector, worker, or timing storage.
 
 The interval describes firmware packet processing, not exact first/last shader
 instructions. Resident programs produce one outer interval. The nominal queue

@@ -1844,6 +1844,97 @@ TEST_F(KfdUserQueueTest, ScratchTrimNativeFailureIsTerminal) {
   }
 }
 
+TEST_F(KfdUserQueueTest, DispatchTimestampSelectionPreservesQueueAndScratch) {
+  SelectAqlTopology();
+  auto create_info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+  ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                           &queue_result_),
+            AMDF_STATUS_OK);
+  auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+      native_state_.buffers[1].storage.data());
+  auto expected = *descriptor;
+  for (bool enabled : {true, true, false, false}) {
+    ASSERT_EQ(amdf_gpu_umd_user_queue_set_dispatch_timestamps(queue_, enabled),
+              AMDF_STATUS_OK);
+    expected.queue_properties =
+        (expected.queue_properties & ~(1u << 3)) | (enabled ? 1u << 3 : 0);
+    EXPECT_EQ(std::memcmp(descriptor, &expected, sizeof(expected)), 0);
+    EXPECT_TRUE(native_state_.queue_update.arguments.empty());
+  }
+  // Execution, including all scratch uses, has completed on this queue.
+  descriptor->read_dispatch_id = descriptor->write_dispatch_id = 37;
+  descriptor->scratch_backing_address = 0x123456789000;
+  descriptor->scratch_wave64_lane_byte_length = 32;
+  expected = *descriptor;
+  for (bool enabled : {true, false, true}) {
+    const size_t before = native_state_.queue_update.arguments.size();
+    ASSERT_EQ(amdf_gpu_umd_user_queue_set_dispatch_timestamps(queue_, enabled),
+              AMDF_STATUS_OK);
+    const auto& updates = native_state_.queue_update;
+    ASSERT_EQ(updates.arguments.size(), before + 2);
+    EXPECT_EQ(updates.arguments[before].queue_percentage, 0u);
+    EXPECT_EQ(updates.arguments[before + 1].queue_percentage,
+              KFD_MAX_QUEUE_PERCENTAGE);
+    EXPECT_EQ(
+        std::memcmp(&updates.descriptors[before], &expected, sizeof(expected)),
+        0);
+    expected.queue_properties =
+        (expected.queue_properties & ~(1u << 3)) | (enabled ? 1u << 3 : 0);
+    EXPECT_EQ(std::memcmp(&updates.descriptors[before + 1], &expected,
+                          sizeof(expected)),
+              0);
+    EXPECT_EQ(std::memcmp(descriptor, &expected, sizeof(expected)), 0);
+    ASSERT_EQ(amdf_gpu_umd_user_queue_set_dispatch_timestamps(queue_, enabled),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(updates.arguments.size(), before + 2);
+  }
+  for (const auto& update : native_state_.queue_update.arguments) {
+    EXPECT_EQ(update.queue_id, native_state_.created_queue_identifier);
+    EXPECT_EQ(update.ring_base_address,
+              native_state_.observed_create.ring_base_address);
+    EXPECT_EQ(update.ring_size, native_state_.observed_create.ring_size);
+    EXPECT_EQ(update.queue_priority,
+              native_state_.observed_create.queue_priority);
+  }
+  EXPECT_EQ(native_state_.queue_create_count, 1);
+  EXPECT_EQ(native_state_.queue_destroy_count, 0);
+  EXPECT_EQ(native_state_.buffer_destroy_count, 0);
+}
+
+TEST_F(KfdUserQueueTest, DispatchTimestampNativeFailureRemainsTerminal) {
+  for (size_t fail_call : {1u, 2u}) {
+    ASSERT_NO_FATAL_FAILURE(SetUp());
+    SelectAqlTopology();
+    auto create_info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+    ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                             &queue_result_),
+              AMDF_STATUS_OK);
+    auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+        native_state_.buffers[1].storage.data());
+    descriptor->read_dispatch_id = descriptor->write_dispatch_id = 37;
+    native_state_.queue_update.fail_call = fail_call;
+    const amdf_status_t failure =
+        amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO);
+    EXPECT_EQ(amdf_gpu_umd_user_queue_set_dispatch_timestamps(queue_, true),
+              failure);
+    EXPECT_EQ(descriptor->queue_properties, fail_call == 1 ? 2u : 10u);
+    // Neither a same-state selection nor a retry can hide native failure.
+    for (bool enabled : {false, true}) {
+      EXPECT_EQ(
+          amdf_gpu_umd_user_queue_set_dispatch_timestamps(queue_, enabled),
+          failure);
+    }
+    EXPECT_EQ(native_state_.queue_update.arguments.size(), fail_call);
+    amdf_user_queue_status_t status;
+    ASSERT_EQ(amdf_gpu_umd_user_queue_query_status(queue_, &status),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(status.state, AMDF_QUEUE_STATE_FAILED);
+    EXPECT_EQ(status.terminal_status, failure);
+    EXPECT_EQ(native_state_.buffer_destroy_count, 0);
+    ASSERT_NO_FATAL_FAILURE(TearDown());
+  }
+}
+
 TEST_F(KfdUserQueueTest, ComputeFamilyCannotSilentlyIgnoreRequestedScratch) {
   auto create_info = MakeCreateInfo();
   create_info.scratch = {

@@ -9,11 +9,20 @@
 namespace {
 
 TEST_F(AqlDispatchTimingTest, DisabledQueueLeavesTimestampFieldsUntouched) {
-  Exercise(false, 17);
+  Exercise({false}, 17);
 }
 
 TEST_F(AqlDispatchTimingTest, FiniteDispatchesPublishOwnSignalTimestamps) {
-  Exercise(true, 17);
+  Exercise({true}, 17);
+}
+
+TEST_F(AqlDispatchTimingTest, EnablesAndDisablesCaptureOnTheSameUsedQueue) {
+  Exercise({false, true, true, false, false, true, false}, 17);
+}
+
+TEST_F(AqlDispatchTimingTest,
+       SelectsCaptureBeforeFirstPublicationAndChangesIt) {
+  Exercise({true, false, false, true}, 17);
 }
 
 }  // namespace

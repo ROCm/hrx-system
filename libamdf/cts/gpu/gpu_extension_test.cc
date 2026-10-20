@@ -57,6 +57,7 @@ TEST(GpuExtensionTest, ReportsCompiledAvailabilityBeforeCreatingInstance) {
   EXPECT_NE(gpu_api->user_queue_query_scratch, nullptr);
   EXPECT_NE(gpu_api->user_queue_resume_scratch, nullptr);
   EXPECT_NE(gpu_api->user_queue_trim_scratch, nullptr);
+  EXPECT_NE(gpu_api->user_queue_set_dispatch_timestamps, nullptr);
 }
 
 TEST(GpuExtensionTest, NegotiatesOriginalTableExtent) {
@@ -104,6 +105,22 @@ TEST(GpuExtensionTest, PreservesVersionThreeTableBoundary) {
   EXPECT_EQ(gpu->structure_size,
             offsetof(amdf_gpu_api_t, user_queue_query_scratch));
   EXPECT_NE(gpu->event_destroy, nullptr);
+}
+
+TEST(GpuExtensionTest, PreservesVersionFourTableBoundary) {
+  const amdf_api_t* api = QueryApi();
+  ASSERT_NE(api, nullptr);
+  const void* extension = nullptr;
+  ASSERT_EQ(
+      api->query_extension(AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_4,
+                           AMDF_GPU_EXTENSION_VERSION_4, &extension),
+      AMDF_STATUS_OK);
+  const auto* gpu = static_cast<const amdf_gpu_api_t*>(extension);
+  ASSERT_NE(gpu, nullptr);
+  EXPECT_EQ(gpu->extension_version, AMDF_GPU_EXTENSION_VERSION_4);
+  EXPECT_EQ(gpu->structure_size,
+            offsetof(amdf_gpu_api_t, user_queue_set_dispatch_timestamps));
+  EXPECT_NE(gpu->user_queue_trim_scratch, nullptr);
 }
 
 TEST(GpuExtensionTest, RejectsNullClockDeviceWithoutPublishingOutput) {

@@ -30,6 +30,10 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_resume_scratch(
 amdf_status_t AMDF_CALL
 amdf_gpu_user_queue_trim_scratch(amdf_user_queue_t* queue);
 
+// Selects native dispatch timestamps after the caller joins all accepted uses.
+amdf_status_t AMDF_CALL amdf_gpu_user_queue_set_dispatch_timestamps(
+    amdf_user_queue_t* queue, uint32_t enabled);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

@@ -57,6 +57,10 @@ struct FakeNativeState {
   uint64_t waited_index = 0;
   // Last caller backing resolved before native resume.
   amdf_gpu_umd_queue_scratch_t resumed_scratch = {};
+  // Timestamp selections that reached the native dependency.
+  uint32_t timestamp_call_count = 0;
+  // Last validated timestamp selection passed to the native dependency.
+  bool timestamps_enabled = false;
 };
 
 namespace {
@@ -364,6 +368,44 @@ TEST_F(GpuUserQueueTest, RejectsUnavailableDispatchTimestampsBeforeCreation) {
   EXPECT_EQ(amdf_child_tracker_count(&consumer_.base.children), 0u);
 }
 
+TEST_F(GpuUserQueueTest, TimestampSelectionValidatesBeforeNativeMutation) {
+  EXPECT_EQ(amdf_gpu_user_queue_set_dispatch_timestamps(nullptr, 1),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  for (auto command_type :
+       {AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+        AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA}) {
+    for (auto features :
+         {amdf_queue_format_features_t{0},
+          amdf_queue_format_features_t{
+              AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS}}) {
+      current_family.command_type = command_type;
+      current_family.format_features = features;
+      auto create_info = MakeCreateInfo();
+      ASSERT_EQ(
+          amdf_gpu_user_queue_create(&consumer_.base, &create_info, &queue_),
+          AMDF_STATUS_OK);
+      const uint32_t before = consumer_state_.timestamp_call_count;
+      EXPECT_EQ(amdf_gpu_user_queue_set_dispatch_timestamps(queue_, 2),
+                amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+      const bool supported =
+          command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL && features;
+      for (uint32_t enabled : {0u, 1u}) {
+        EXPECT_EQ(amdf_gpu_user_queue_set_dispatch_timestamps(queue_, enabled),
+                  supported
+                      ? AMDF_STATUS_OK
+                      : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+        if (supported) {
+          EXPECT_EQ(consumer_state_.timestamps_enabled, enabled != 0);
+        }
+      }
+      EXPECT_EQ(consumer_state_.timestamp_call_count,
+                before + (supported ? 2u : 0u));
+      ASSERT_EQ(amdf_user_queue_destroy(queue_), AMDF_STATUS_OK);
+      queue_ = nullptr;
+    }
+  }
+}
+
 TEST_F(GpuUserQueueTest, ScratchServiceValidatesExactEventAndBacking) {
   current_family.command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
   current_family.format_features = AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE;
@@ -669,6 +711,13 @@ amdf_status_t amdf_gpu_umd_user_queue_query_scratch(
 
 amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
     amdf_gpu_umd_user_queue_t* queue) {
+  return queue->state->query_status;
+}
+
+amdf_status_t amdf_gpu_umd_user_queue_set_dispatch_timestamps(
+    amdf_gpu_umd_user_queue_t* queue, bool enabled) {
+  ++queue->state->timestamp_call_count;
+  queue->state->timestamps_enabled = enabled;
   return queue->state->query_status;
 }
 

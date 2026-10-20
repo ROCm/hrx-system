@@ -9,7 +9,7 @@
 namespace {
 
 TEST_F(AqlDispatchTimingTest, StreamingCollectionReusesFourSignals) {
-  Exercise(true, 16387);
+  Exercise({true}, 16387);
 }
 
 }  // namespace
