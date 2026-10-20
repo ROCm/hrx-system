@@ -1049,6 +1049,10 @@ jobs:
 
           required = ["Pm4DispatchTest.CoherentSystemReleaseCompletesShaderAcrossEpochs"]
           required += [
+              "Width/Pm4AtomicStoreTest.StoresObserveCpuHandoffsAcrossEpochs/" + width
+              for width in ("Dword", "Qword")
+          ]
+          required += [
               "Batches/Pm4RetirementTest.PublishesShaderResultsBeforeReusingCompletionSlots/"
               + f"Slots{count}{generation}"
               for count in (1, 4, 16)
@@ -1057,6 +1061,17 @@ jobs:
           options = ci_config.AMDGPU_WINDOWS_BAZEL_OPTIONS
           steps = [
               ci.bazel_configure_step(extra_options=options),
+              ci.bazel_test_step(
+                  "Verify native update-width policy and release encodings",
+                  (
+                      "//libamdf/src/gpu/umd/wddm:device_test",
+                      "//libamdf/src/gpu/umd/wddm:memory_test",
+                      "//libamdf/cts/gpu/pm4/encoding:commands_test",
+                  ),
+                  config="asan",
+                  available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
+                  bazel_options=options + ("--test_output=all",),
+              ),
               ci.bazel_test_step(
                   "Prove finite coherent PM4 publication",
                   ("//libamdf/cts/gpu/pm4:pm4_dynamic",),
