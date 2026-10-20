@@ -24,6 +24,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/retirement.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/submission.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
+#include "iree/hal/drivers/amd/gpu/queue/transfer.h"
 #include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
 #include "iree/hal/drivers/amd/status.h"
 
@@ -69,7 +70,7 @@ typedef struct iree_hal_amd_gpu_pm4_retirement_t {
   // Exclusive argument/staging prefix reusable after this host action.
   uint64_t consumed_arguments;
   // Optional bounded host copy, completed before returning staging credit.
-  iree_hal_amd_gpu_pm4_download_t download;
+  iree_hal_amd_gpu_download_t download;
   // Replaced scratch generations dominated by this FIFO completion.
   iree_hal_amd_gpu_pm4_scratch_storage_t* scratch;
   // This publication completes the entire captured operation.
@@ -493,7 +494,7 @@ iree_hal_amd_gpu_pm4_publish_commit(
     const iree_hal_amd_gpu_pm4_ring_reservation_t* reservation,
     uint32_t body_words, uint32_t entry_word_count, uint32_t* words,
     iree_hal_amd_gpu_pm4_barrier_t after, uint64_t argument_end,
-    iree_hal_amd_gpu_pm4_download_t download, bool terminal) {
+    iree_hal_amd_gpu_download_t download, bool terminal) {
   iree_hal_amd_gpu_pm4_retirement_t* action =
       &queue->issued[position & queue->retirement.capacity_mask].action;
   *action = (iree_hal_amd_gpu_pm4_retirement_t){
@@ -545,7 +546,7 @@ static iree_hal_amd_gpu_pm4_publication_result_t
 iree_hal_amd_gpu_pm4_publish_transfer(
     iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
-  iree_hal_amd_gpu_pm4_transfer_t* transfer = &submission->transfer;
+  iree_hal_amd_gpu_transfer_t* transfer = &submission->transfer;
   const bool first = !transfer->cursor.index && !transfer->cursor.offset;
   iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   if (arguments->capacity < transfer->staging_capacity) {
@@ -783,7 +784,7 @@ iree_hal_amd_gpu_pm4_publish_execute(
       arguments->address + offset, (void*)upload, root_padding, words);
   return iree_hal_amd_gpu_pm4_publish_commit(
       queue, submission, position, &reservation, body_words, entry_words, words,
-      after, arguments->end, (iree_hal_amd_gpu_pm4_download_t){0}, true);
+      after, arguments->end, (iree_hal_amd_gpu_download_t){0}, true);
 }
 
 static iree_status_code_t iree_hal_amd_gpu_pm4_feedback_failure(
@@ -1123,7 +1124,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
   }
   return iree_hal_amd_gpu_pm4_publish_commit(
       queue, submission, position, &reservation, body_words, 0, words, after,
-      argument_end, (iree_hal_amd_gpu_pm4_download_t){0}, true);
+      argument_end, (iree_hal_amd_gpu_download_t){0}, true);
 }
 
 // Publishes an owned capture. Immediate retirement may free it before return.

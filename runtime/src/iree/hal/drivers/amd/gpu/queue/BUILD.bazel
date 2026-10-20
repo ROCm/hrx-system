@@ -18,6 +18,16 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "transfer",
+    srcs = ["transfer.c"],
+    hdrs = ["transfer.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "allocation",
     srcs = ["allocation.c"],
     hdrs = ["allocation.h"],

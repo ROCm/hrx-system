@@ -79,6 +79,7 @@ iree_cc_library(
     ::commands
     iree::base
     iree::hal
+    iree::hal::drivers::amd::gpu::queue::transfer
   PUBLIC
 )
 
@@ -112,6 +113,7 @@ iree_cc_test(
     ::transfer
     iree::base
     iree::hal
+    iree::hal::drivers::amd::gpu::queue::transfer
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -469,6 +471,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::gpu::queue::semaphore
     iree::hal::drivers::amd::gpu::queue::signal
+    iree::hal::drivers::amd::gpu::queue::transfer
   PUBLIC
 )
 endif()
@@ -714,6 +717,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::gpu::queue::semaphore
     iree::hal::drivers::amd::gpu::queue::signal
+    iree::hal::drivers::amd::gpu::queue::transfer
     iree::hal::drivers::amd::gpu::queue::user_queue
     iree::hal::drivers::amd::status
   PUBLIC

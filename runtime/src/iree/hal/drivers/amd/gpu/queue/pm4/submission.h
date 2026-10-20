@@ -17,6 +17,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/transfer.h"
 #include "iree/hal/drivers/amd/gpu/queue/publisher.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
+#include "iree/hal/drivers/amd/gpu/queue/transfer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -140,7 +141,7 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
       iree_hal_amd_gpu_pm4_dispatch_t launch;
     } dispatch;
     // Captured transfer descriptors and the exclusively owned publish cursor.
-    iree_hal_amd_gpu_pm4_transfer_t transfer;
+    iree_hal_amd_gpu_transfer_t transfer;
     // Immutable recording and private table/cursor, owned through completion.
     iree_hal_amd_gpu_pm4_command_invocation_t execute;
   };

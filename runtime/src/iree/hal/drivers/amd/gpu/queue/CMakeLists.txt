@@ -9,6 +9,19 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    transfer
+  HDRS
+    "transfer.h"
+  SRCS
+    "transfer.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
 if(AMDF_BUILD)
 iree_cc_library(
   NAME

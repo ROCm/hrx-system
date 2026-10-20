@@ -238,9 +238,9 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_pm4_submission_t** out_submission) {
   *out_submission = NULL;
-  iree_hal_amd_gpu_pm4_transfer_layout_t layout;
+  iree_hal_amd_gpu_transfer_layout_t layout;
   IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_pm4_transfer_measure(count, operations, &layout));
+      iree_hal_amd_gpu_transfer_measure(count, operations, &layout));
   if (!layout.count) {
     return iree_hal_amd_gpu_pm4_submission_create(
         pool, profiled, waits, signals, NULL, NULL,
@@ -254,8 +254,10 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
       pool, profiled, waits, signals, layout.byte_length, profile, barriers,
       &submission, &payload));
   submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
-  iree_status_t status = iree_hal_amd_gpu_pm4_transfer_initialize(
-      family, count, operations, layout, payload, &submission->transfer);
+  iree_status_t status = iree_hal_amd_gpu_transfer_initialize(
+      family, IREE_HAL_MEMORY_SITE_QUEUE,
+      IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH, count, operations,
+      layout, payload, &submission->transfer);
   if (iree_status_is_ok(status)) {
     *out_submission = submission;
   } else {
@@ -275,10 +277,10 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
   *out_submission = NULL;
   // File copies borrow their captured host span instead of copying UPDATE
   // bytes. One UPLOAD/DOWNLOAD descriptor has a fixed capture size.
-  const iree_hal_amd_gpu_pm4_transfer_layout_t layout = {
+  const iree_hal_amd_gpu_transfer_layout_t layout = {
       .count = operation ? 1 : 0,
       .byte_length =
-          operation ? sizeof(iree_hal_amd_gpu_pm4_transfer_operation_t) : 0,
+          operation ? sizeof(iree_hal_amd_gpu_transfer_operation_t) : 0,
   };
   const iree_host_size_t payload_size =
       iree_host_align(
@@ -303,8 +305,10 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
   iree_status_t status = iree_ok_status();
   if (layout.count) {
     submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
-    status = iree_hal_amd_gpu_pm4_transfer_initialize(
-        family, 1, operation, layout, payload, &submission->transfer);
+    status = iree_hal_amd_gpu_transfer_initialize(
+        family, IREE_HAL_MEMORY_SITE_QUEUE,
+        IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH, 1, operation, layout,
+        payload, &submission->transfer);
   }
   if (iree_status_is_ok(status)) {
     *iree_hal_amd_gpu_pm4_submission_retirement(submission) =
@@ -480,7 +484,7 @@ void iree_hal_amd_gpu_pm4_submission_release_payload(
       iree_hal_executable_release(submission->dispatch.executable);
     }
   } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER) {
-    iree_hal_amd_gpu_pm4_transfer_deinitialize(&submission->transfer);
+    iree_hal_amd_gpu_transfer_deinitialize(&submission->transfer);
   } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
     iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&submission->execute);
   }

@@ -11,6 +11,7 @@
 #include <initializer_list>
 #include <vector>
 
+#include "iree/hal/drivers/amd/gpu/queue/transfer.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -169,7 +170,7 @@ TEST(TransferBatchTest, HostTransfersFillOneWindowAcrossPacketBoundaries) {
     SCOPED_TRACE(type);
     std::fill(staging.begin(), staging.end(), 0xCC);
     const bool download = type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
-    iree_hal_amd_gpu_pm4_transfer_operation_t operation = {
+    iree_hal_amd_gpu_transfer_operation_t operation = {
         .type = type,
         .length = host.size(),
     };
@@ -180,7 +181,7 @@ TEST(TransferBatchTest, HostTransfersFillOneWindowAcrossPacketBoundaries) {
         .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
     };
     (download ? operation.target.host : operation.source.host) = host.data();
-    const iree_hal_amd_gpu_pm4_transfer_t transfer = {
+    const iree_hal_amd_gpu_transfer_t transfer = {
         .count = 1,
         .operations = &operation,
     };
@@ -234,7 +235,7 @@ TEST(TransferBatchTest, DownloadRetirementStopsAtTheHostDestinationBoundary) {
   const iree_hal_buffer_native_binding_t binding = {.device_address = 0x10000};
   iree_hal_buffer_t buffer = {};
   buffer.memory.bindings = &binding;
-  std::array<iree_hal_amd_gpu_pm4_transfer_operation_t, 2> operations = {};
+  std::array<iree_hal_amd_gpu_transfer_operation_t, 2> operations = {};
   for (auto& operation : operations) {
     operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     operation.source.device.buffer = &buffer;
@@ -245,7 +246,7 @@ TEST(TransferBatchTest, DownloadRetirementStopsAtTheHostDestinationBoundary) {
     operation.target.host = host.data();
     operation.length = host.size();
   }
-  const iree_hal_amd_gpu_pm4_transfer_t transfer = {
+  const iree_hal_amd_gpu_transfer_t transfer = {
       .count = operations.size(),
       .operations = operations.data(),
   };

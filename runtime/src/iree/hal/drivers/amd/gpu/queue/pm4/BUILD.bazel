@@ -76,6 +76,7 @@ iree_runtime_cc_library(
         ":commands",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
     ],
 )
 
@@ -103,6 +104,7 @@ iree_runtime_cc_test(
         ":transfer",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -329,6 +331,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:signal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
     ],
 )
 
@@ -544,6 +547,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:signal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/kmq:storage",
     ],
