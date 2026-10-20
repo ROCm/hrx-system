@@ -19,7 +19,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/kmq/storage.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/launch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/umq/ring.h"
+#include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/testing/status_matchers.h"
 
@@ -88,8 +88,12 @@ class GpuProgramTest : public GpuNativeTest {
             .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
             .ring_byte_length = 65536,
         };
-        IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_ring_storage_initialize(
-            context_, &request, &queue.user, &queue.ring, &queue.mapping));
+        IREE_ASSERT_OK(iree_hal_amd_gpu_user_queue_initialize(
+            context_, &request, &queue.user, &queue.mapping, nullptr));
+        iree_hal_amd_gpu_pm4_ring_initialize(
+            reinterpret_cast<uint32_t*>(queue.mapping.ring_address),
+            static_cast<uint32_t>(queue.mapping.ring_byte_length / 4),
+            &queue.ring);
       }
     }
   }
@@ -111,7 +115,7 @@ class GpuProgramTest : public GpuNativeTest {
               "join KERNEL commands"));
         } else if (queue.user.context) {
           IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
-              iree_hal_amd_gpu_pm4_ring_storage_deinitialize(
+              iree_hal_amd_gpu_user_queue_deinitialize(
                   &queue.user, queue.ring.reserved_words),
               "join USER commands"));
         }
@@ -341,7 +345,7 @@ class GpuProgramTest : public GpuNativeTest {
 
   struct Queue {
     // Native USER ownership and its mapped publication operands.
-    iree_hal_amd_gpu_pm4_ring_storage_t user = {};
+    iree_hal_amd_gpu_user_queue_t user = {};
     // Native KERNEL ownership, when selected by family capability.
     iree_hal_amd_gpu_pm4_kmq_storage_t* kernel = nullptr;
     // Executable root/continuation storage with a monotonic host cursor.

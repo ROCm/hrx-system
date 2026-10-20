@@ -640,8 +640,8 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:signal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/kmq:storage",
-        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/umq:ring",
     ],
 )
 

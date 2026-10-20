@@ -611,7 +611,7 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::queue::pm4::program
     iree::hal::drivers::amd::gpu::queue::pm4::queue
     iree::hal::drivers::amd::gpu::queue::pm4::ring
-    iree::hal::drivers::amd::gpu::queue::pm4::umq::ring
+    iree::hal::drivers::amd::gpu::queue::user_queue
     iree::hal::drivers::amd::gpu::target::identity
     iree::hal::drivers::amd::status
     iree::testing::gtest

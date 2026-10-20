@@ -411,4 +411,34 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    user_queue
+  HDRS
+    "user_queue.h"
+  SRCS
+    "user_queue.c"
+  DEPS
+    amdf::headers
+    iree::base
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    user_queue_test
+  SRCS
+    "user_queue_test.cc"
+  DEPS
+    ::user_queue
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

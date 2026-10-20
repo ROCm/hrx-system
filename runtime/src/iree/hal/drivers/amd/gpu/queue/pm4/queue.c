@@ -23,7 +23,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/kmq/storage.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/retirement.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/submission.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/umq/ring.h"
+#include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
 #include "iree/hal/drivers/amd/status.h"
 
 typedef struct iree_hal_amd_gpu_pm4_queue_t iree_hal_amd_gpu_pm4_queue_t;
@@ -160,7 +160,7 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   // Completion-owned delivery of logical failure while native retirement runs.
   bool feedback_failure_delivered;
   // Native queue and mapping, joined after the final notification tail.
-  iree_hal_amd_gpu_pm4_ring_storage_t storage;
+  iree_hal_amd_gpu_user_queue_t storage;
   // Finite command owner, present only for KERNEL publication.
   iree_hal_amd_gpu_pm4_kmq_storage_t* kernel;
   // Exclusive native publication state and MMIO operands.
@@ -2247,9 +2247,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_prepare_native(
         .ring_byte_length = queue->options.command_byte_capacity,
     };
     amdf_user_queue_mapping_info_t mapping;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_ring_storage_initialize(
-        queue->context, &native, &queue->storage, &queue->producer.ring,
-        &mapping));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_user_queue_initialize(
+        queue->context, &native, &queue->storage, &mapping, NULL));
+    iree_hal_amd_gpu_pm4_ring_initialize(
+        (uint32_t*)(uintptr_t)mapping.ring_address,
+        (uint32_t)(mapping.ring_byte_length / sizeof(uint32_t)),
+        &queue->producer.ring);
     if (mapping.index_bits != 64 || mapping.doorbell_bits != 64 ||
         !mapping.write_index_address || !mapping.doorbell_address) {
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -2318,7 +2321,7 @@ static amdf_status_t iree_hal_amd_gpu_pm4_cleanup(
     iree_hal_amd_gpu_pm4_queue_t* queue) {
   const amdf_status_t status =
       queue->kernel ? iree_hal_amd_gpu_pm4_kmq_storage_free(queue->kernel)
-                    : iree_hal_amd_gpu_pm4_ring_storage_deinitialize(
+                    : iree_hal_amd_gpu_user_queue_deinitialize(
                           &queue->storage, queue->producer.ring.reserved_words);
   if (!amdf_status_is_ok(status)) {
     queue->context->cleanup_blocked = true;

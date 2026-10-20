@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amd/gpu/queue/pm4/umq/ring.h"
+#include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
 
 #include <array>
 #include <cstdint>
@@ -16,9 +16,15 @@
 
 namespace {
 
-// Native allocation and mapping dependency; reservation and ownership cleanup
-// use the real ring implementation. This fake never executes PM4 commands.
+// Native allocation and mapping dependency. Ownership and cleanup run through
+// the real shared owner; packet publication is exercised by each protocol.
 struct NativeRing {
+  struct Mapping {
+    // Native dependency containing the borrowed producer operands.
+    NativeRing* owner;
+    // True for the exact-device view, false for the host view.
+    bool device;
+  };
   // Emulated native primary-ring storage returned by the mapping query.
   std::array<uint32_t, 1024> words = {};
   // Host publication operand returned with the primary-ring view.
@@ -38,6 +44,12 @@ struct NativeRing {
   bool queue_live = false;
   // Whether the host producer mapping is still live.
   bool mapping_live = false;
+  // Whether the exact-device producer mapping is still live.
+  bool device_mapping_live = false;
+  // Host mapping handle, distinct from the exact-device handle.
+  Mapping host_mapping{this, false};
+  // Exact-device mapping handle.
+  Mapping device_mapping{this, true};
   // Final published index joined during destruction.
   uint64_t consumed_target = 0;
 
@@ -65,12 +77,15 @@ struct NativeRing {
                                      amdf_user_queue_mapping_t** out_mapping) {
     auto* self = reinterpret_cast<NativeRing*>(queue);
     EXPECT_TRUE(self->queue_live);
-    EXPECT_FALSE(self->mapping_live);
-    EXPECT_EQ(producer, nullptr);
-    amdf_status_t status = self->Call("map");
+    EXPECT_TRUE(!producer ||
+                producer == reinterpret_cast<amdf_device_t*>(self));
+    bool& live = producer ? self->device_mapping_live : self->mapping_live;
+    EXPECT_FALSE(live);
+    amdf_status_t status = self->Call(producer ? "device_map" : "map");
     if (amdf_status_is_ok(status)) {
-      self->mapping_live = true;
-      *out_mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(self);
+      live = true;
+      *out_mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(
+          producer ? &self->device_mapping : &self->host_mapping);
     }
     return status;
   }
@@ -78,15 +93,18 @@ struct NativeRing {
   static amdf_status_t AMDF_CALL
   Query(amdf_user_queue_mapping_t* mapping,
         amdf_user_queue_mapping_info_t* out_info) {
-    auto* self = reinterpret_cast<NativeRing*>(mapping);
-    EXPECT_TRUE(self->mapping_live);
+    auto* view = reinterpret_cast<Mapping*>(mapping);
+    auto* self = view->owner;
+    EXPECT_TRUE(view->device ? self->device_mapping_live : self->mapping_live);
     EXPECT_EQ(out_info->type, AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO);
     EXPECT_EQ(out_info->structure_size, sizeof(*out_info));
-    amdf_status_t status = self->Call("query");
+    amdf_status_t status = self->Call(view->device ? "device_query" : "query");
     if (amdf_status_is_ok(status)) {
       out_info->command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
       out_info->format_version = AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1;
-      out_info->ring_address = reinterpret_cast<uintptr_t>(self->words.data());
+      out_info->ring_address =
+          view->device ? UINT64_C(0x12340000)
+                       : reinterpret_cast<uintptr_t>(self->words.data());
       out_info->ring_byte_length = sizeof(self->words);
       out_info->write_index_address =
           reinterpret_cast<uintptr_t>(&self->write_index);
@@ -110,12 +128,14 @@ struct NativeRing {
   }
 
   static amdf_status_t AMDF_CALL Unmap(amdf_user_queue_mapping_t* mapping) {
-    auto* self = reinterpret_cast<NativeRing*>(mapping);
+    auto* view = reinterpret_cast<Mapping*>(mapping);
+    auto* self = view->owner;
     EXPECT_TRUE(self->queue_live);
-    EXPECT_TRUE(self->mapping_live);
-    amdf_status_t status = self->Call("unmap");
+    bool& live = view->device ? self->device_mapping_live : self->mapping_live;
+    EXPECT_TRUE(live);
+    amdf_status_t status = self->Call(view->device ? "device_unmap" : "unmap");
     if (amdf_status_is_ok(status)) {
-      self->mapping_live = false;
+      live = false;
     }
     return status;
   }
@@ -124,6 +144,7 @@ struct NativeRing {
     auto* self = reinterpret_cast<NativeRing*>(queue);
     EXPECT_TRUE(self->queue_live);
     EXPECT_FALSE(self->mapping_live);
+    EXPECT_FALSE(self->device_mapping_live);
     amdf_status_t status = self->Call("destroy");
     if (status != amdf_make_api_status(AMDF_STATUS_CODE_BUSY)) {
       self->queue_live = false;
@@ -132,7 +153,7 @@ struct NativeRing {
   }
 };
 
-class RingStorageTest : public ::testing::Test {
+class UserQueueTest : public ::testing::Test {
  protected:
   void SetUp() override {
     api_.user_queue_map = NativeRing::Map;
@@ -147,18 +168,22 @@ class RingStorageTest : public ::testing::Test {
     native_.create_info = &create_info_;
   }
 
-  iree_status_t Initialize() {
-    return iree_hal_amd_gpu_pm4_ring_storage_initialize(
-        &context_, &create_info_, &storage_, &ring_, &mapping_info_);
+  iree_status_t Initialize(amdf_user_queue_mapping_info_t* device = nullptr) {
+    if (device) {
+      create_info_.required_capabilities |=
+          AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER;
+    }
+    return iree_hal_amd_gpu_user_queue_initialize(
+        &context_, &create_info_, &storage_, &mapping_info_, device);
   }
 
   amdf_status_t Deinitialize(uint64_t published_words = 0) {
-    return iree_hal_amd_gpu_pm4_ring_storage_deinitialize(&storage_,
-                                                          published_words);
+    return iree_hal_amd_gpu_user_queue_deinitialize(&storage_, published_words);
   }
 
   void TearDown() override {
     EXPECT_FALSE(native_.mapping_live);
+    EXPECT_FALSE(native_.device_mapping_live);
     EXPECT_FALSE(native_.queue_live);
   }
 
@@ -181,19 +206,17 @@ class RingStorageTest : public ::testing::Test {
       .ring_byte_length = 4096,
   };
   // Embedded real native owner under test.
-  iree_hal_amd_gpu_pm4_ring_storage_t storage_ = {};
-  // Independently stored hot reservation state.
-  iree_hal_amd_gpu_pm4_ring_t ring_ = {};
+  iree_hal_amd_gpu_user_queue_t storage_ = {};
   // Immutable publication addresses returned on successful initialization.
   amdf_user_queue_mapping_info_t mapping_info_ = {};
 };
 
-TEST_F(RingStorageTest, CapturesMappedStorageWithoutPublication) {
+TEST_F(UserQueueTest, CapturesMappedStorageWithoutPublication) {
   IREE_ASSERT_OK(Initialize());
   EXPECT_EQ(storage_.context, &context_);
-  EXPECT_EQ(ring_.words, native_.words.data());
-  EXPECT_EQ(ring_.capacity, native_.words.size());
-  EXPECT_EQ(ring_.reserved_words, 0u);
+  EXPECT_EQ(mapping_info_.ring_address,
+            reinterpret_cast<uintptr_t>(native_.words.data()));
+  EXPECT_EQ(mapping_info_.ring_byte_length, sizeof(native_.words));
   EXPECT_EQ(mapping_info_.write_index_address,
             reinterpret_cast<uintptr_t>(&native_.write_index));
   EXPECT_EQ(mapping_info_.doorbell_address,
@@ -207,14 +230,12 @@ TEST_F(RingStorageTest, CapturesMappedStorageWithoutPublication) {
   EXPECT_EQ(native_.calls.size(), 5u);
 }
 
-TEST_F(RingStorageTest, ConstructionFailurePreservesPartialOwnerForCleanup) {
+TEST_F(UserQueueTest, ConstructionFailurePreservesPartialOwnerForCleanup) {
   for (const char* operation : {"create", "map", "query"}) {
     SCOPED_TRACE(operation);
     native_.fail_operation = operation;
-    ring_.reserved_words = 713;
     mapping_info_.format_version = 57;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Initialize());
-    EXPECT_EQ(ring_.reserved_words, 713u);
     EXPECT_EQ(mapping_info_.format_version, 57u);
     EXPECT_EQ(native_.queue_live, native_.fail_operation != "create");
     EXPECT_EQ(native_.mapping_live, native_.fail_operation == "query");
@@ -224,23 +245,67 @@ TEST_F(RingStorageTest, ConstructionFailurePreservesPartialOwnerForCleanup) {
   }
 }
 
-TEST_F(RingStorageTest, JoinsThePublishedTailBeforeRemovingProducerView) {
+TEST_F(UserQueueTest, DeviceViewSharesQueueAndJoinsBeforeHostView) {
+  create_info_.required_capabilities |=
+      AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER;
+  amdf_user_queue_mapping_info_t device = {};
+  IREE_ASSERT_OK(Initialize(&device));
+  EXPECT_NE(storage_.device_mapping, nullptr);
+  EXPECT_EQ(device.ring_address, UINT64_C(0x12340000));
+  EXPECT_NE(device.ring_address, mapping_info_.ring_address);
+  EXPECT_EQ(device.ring_byte_length, mapping_info_.ring_byte_length);
+  EXPECT_EQ(Deinitialize(113), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.consumed_target, 113u);
+  EXPECT_EQ(native_.calls,
+            (std::vector<std::string>{"create", "map", "query", "device_map",
+                                      "device_query", "wait", "device_unmap",
+                                      "unmap", "destroy"}));
+}
+
+TEST_F(UserQueueTest, DeviceMappingFailurePreservesBothOutputTransactions) {
+  for (const char* operation : {"device_map", "device_query"}) {
+    SCOPED_TRACE(operation);
+    native_.fail_operation = operation;
+    mapping_info_.ring_address = 17;
+    amdf_user_queue_mapping_info_t device = {.ring_address = 23};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Initialize(&device));
+    EXPECT_EQ(mapping_info_.ring_address, 17u);
+    EXPECT_EQ(device.ring_address, 23u);
+    EXPECT_TRUE(native_.queue_live);
+    EXPECT_TRUE(native_.mapping_live);
+    EXPECT_EQ(native_.device_mapping_live,
+              native_.fail_operation == "device_query");
+    native_.fail_operation.clear();
+    EXPECT_EQ(Deinitialize(), AMDF_STATUS_OK);
+  }
+}
+
+TEST_F(UserQueueTest, DeviceUnmapFailureRetainsBothViewsAndQueue) {
+  amdf_user_queue_mapping_info_t device = {};
+  IREE_ASSERT_OK(Initialize(&device));
+  native_.fail_operation = "device_unmap";
+  EXPECT_EQ(Deinitialize(113), native_.failure);
+  EXPECT_TRUE(native_.queue_live);
+  EXPECT_TRUE(native_.mapping_live);
+  EXPECT_TRUE(native_.device_mapping_live);
+  EXPECT_NE(storage_.mapping, nullptr);
+  EXPECT_NE(storage_.device_mapping, nullptr);
+  native_.fail_operation.clear();
+  EXPECT_EQ(Deinitialize(113), AMDF_STATUS_OK);
+}
+
+TEST_F(UserQueueTest, JoinsThePublishedTailBeforeRemovingProducerView) {
   IREE_ASSERT_OK(Initialize());
-  iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
-  ASSERT_TRUE(
-      iree_hal_amd_gpu_pm4_ring_try_reserve(&ring_, 0, 71, &reservation));
-  // A release at body end minus the eight-DWORD notification proves only 63
-  // DWORDs consumed. Destruction must join all 80, including nine-DWORD
-  // padding.
-  EXPECT_EQ(ring_.reserved_words, 80u);
-  EXPECT_EQ(Deinitialize(ring_.reserved_words), AMDF_STATUS_OK);
+  // The protocol's final index includes any trailing notifications or padding.
+  // The owner forwards that exact index without interpreting its unit.
+  EXPECT_EQ(Deinitialize(80), AMDF_STATUS_OK);
   EXPECT_EQ(native_.consumed_target, 80u);
   EXPECT_EQ(native_.calls,
             (std::vector<std::string>{"create", "map", "query", "wait", "unmap",
                                       "destroy"}));
 }
 
-TEST_F(RingStorageTest, FailedConsumptionPreservesQueueAndMapping) {
+TEST_F(UserQueueTest, FailedConsumptionPreservesQueueAndMapping) {
   IREE_ASSERT_OK(Initialize());
   native_.fail_operation = "wait";
   native_.failure = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
@@ -254,7 +319,7 @@ TEST_F(RingStorageTest, FailedConsumptionPreservesQueueAndMapping) {
   EXPECT_EQ(Deinitialize(80), AMDF_STATUS_OK);
 }
 
-TEST_F(RingStorageTest, FailedUnmapPreservesQueueAndMapping) {
+TEST_F(UserQueueTest, FailedUnmapPreservesQueueAndMapping) {
   IREE_ASSERT_OK(Initialize());
   native_.fail_operation = "unmap";
   EXPECT_EQ(Deinitialize(), native_.failure);
@@ -264,7 +329,7 @@ TEST_F(RingStorageTest, FailedUnmapPreservesQueueAndMapping) {
   EXPECT_EQ(Deinitialize(), AMDF_STATUS_OK);
 }
 
-TEST_F(RingStorageTest, ApiBusyPreservesQueueWithoutRepeatingSuccessfulUnmap) {
+TEST_F(UserQueueTest, ApiBusyPreservesQueueWithoutRepeatingSuccessfulUnmap) {
   IREE_ASSERT_OK(Initialize());
   native_.fail_operation = "destroy";
   native_.failure = amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
@@ -280,7 +345,7 @@ TEST_F(RingStorageTest, ApiBusyPreservesQueueWithoutRepeatingSuccessfulUnmap) {
                                       "destroy", "destroy"}));
 }
 
-TEST_F(RingStorageTest, NativeRemovalFailureCannotBecomeSuccessfulReclamation) {
+TEST_F(UserQueueTest, NativeRemovalFailureCannotBecomeSuccessfulReclamation) {
   IREE_ASSERT_OK(Initialize());
   native_.fail_operation = "destroy";
   // An error with the same numeric code in a native domain is not API BUSY.
@@ -299,7 +364,7 @@ TEST_F(RingStorageTest, NativeRemovalFailureCannotBecomeSuccessfulReclamation) {
   EXPECT_EQ(native_.calls.size(), call_count);
 }
 
-TEST_F(RingStorageTest, FailedRollbackKeepsItsNativeOwner) {
+TEST_F(UserQueueTest, FailedRollbackKeepsItsNativeOwner) {
   native_.fail_operation = "query";
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Initialize());
   native_.fail_operation = "unmap";

@@ -378,3 +378,33 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/testing:benchmark_main",
     ],
 )
+
+iree_runtime_cc_library(
+    name = "user_queue",
+    srcs = ["user_queue.c"],
+    hdrs = ["user_queue.h"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/gpu:context",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "user_queue_test",
+    srcs = ["user_queue_test.cc"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":user_queue",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
