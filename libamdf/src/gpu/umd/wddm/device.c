@@ -7,6 +7,7 @@
 #include "libamdf/src/gpu/umd/device.h"
 
 #include <stddef.h>
+#include <stdio.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/wddm/device.h"
@@ -107,6 +108,15 @@ amdf_status_t amdf_gpu_umd_device_create(
   D3DKMT_CREATEDEVICE create_device = {0};
   create_device.hAdapter = endpoint->adapter;
   if (amdf_status_is_ok(status)) {
+    fprintf(stderr,
+            "PM4_STORE_EVIDENCE phase=before_create_device adapter=0x%x "
+            "physical=%u gfx=%u.%u.%u platform_atomics=%u\n",
+            (unsigned)endpoint->adapter,
+            (unsigned)endpoint->physical_adapter_index,
+            (unsigned)device->properties.gfx_ip_major,
+            (unsigned)device->properties.gfx_ip_minor,
+            (unsigned)device->properties.gfx_ip_stepping,
+            (unsigned)device->properties.supports_platform_atomics);
     status = amdf_kmt_make_status(device->kmt->create_device(&create_device));
   }
   if (amdf_status_is_ok(status)) {

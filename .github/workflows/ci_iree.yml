@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: Windows passive adapter metadata
+name: Windows gfx12 ordered publication evidence
 
 on:
   workflow_dispatch:
@@ -61,6 +61,7 @@ permissions:
 
 jobs:
   passive_metadata:
+    if: ${{ false }}
     name: Windows gfx1201 passive metadata
     runs-on: windows-gfx1201-gpu-rocm
     timeout-minutes: 5
@@ -777,27 +778,11 @@ jobs:
           retention-days: 45
 
   bazel_windows:
-    if: ${{ false }}
     name: Bazel / Windows x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Clang CL / Fastbuild
-            kind: repository
-            host_toolchain: clang-cl
-            platform_coverage: true
-            runner: azure-windows-scale-rocm
-          - name: MSVC / Fastbuild
-            kind: repository
-            host_toolchain: msvc
-            runner: azure-windows-scale-rocm
-          - name: Clang CL / Fastbuild / AMD gfx1151 NPU5
-            kind: amd_client
-            command: iree-bazel-amd-client
-            host_toolchain: clang-cl
-            runner: windows-gfx1151-gpu-rocm
-            xdna: true
           - name: Clang CL / ASAN / AMD gfx1201
             kind: amdgpu
             command: iree-bazel-amdgpu-native-asan
@@ -1055,13 +1040,43 @@ jobs:
           $env:CXX = $env:CC
           $env:AR = Join-Path $env:BAZEL_LLVM 'bin\llvm-lib.exe'
           $nativeResultsDir = Join-Path $env:RUNNER_TEMP "native-test-results-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          $targetArgs = @()
-          if ("${{ matrix.target_selector }}") {
-            $targetArgs += @('--amdgpu-target', '${{ matrix.target_selector }}')
-          }
-          python build_tools/devtools/ci.py '${{ matrix.command }}' @targetArgs `
-            --bazel-profile-dir "$env:RUNNER_TEMP\bazel-profiles" `
-            --bazel-test-results-dir $nativeResultsDir
+          $source = @'
+          import os
+          from pathlib import Path
+          from build_tools.devtools import ci, ci_config
+
+          required = ["Pm4DispatchTest.CoherentSystemReleaseCompletesShaderAcrossEpochs"]
+          required += [
+              "Batches/Pm4RetirementTest.PublishesShaderResultsBeforeReusingCompletionSlots/"
+              + f"Slots{count}{generation}"
+              for count in (1, 4, 16)
+              for generation in ("Initial", "GenerationWrap")
+          ]
+          options = ci_config.AMDGPU_WINDOWS_BAZEL_OPTIONS
+          steps = [
+              ci.bazel_configure_step(extra_options=options),
+              ci.bazel_test_step(
+                  "Prove finite coherent PM4 publication",
+                  ("//libamdf/cts/gpu/pm4:pm4_dynamic",),
+                  config="asan",
+                  available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
+                  bazel_options=options + (
+                      "--test_arg=--amdf_gpu_target=gfx1201",
+                      "--test_arg=--gtest_fail_fast=1",
+                      "--test_filter=" + ":".join(required),
+                      "--test_output=all",
+                  ) + tuple("--test_arg=--amdf_require_test=" + name for name in required),
+              ),
+          ]
+          result_dir = Path(os.environ["RUNNER_TEMP"]) / (
+              "native-test-results-" + os.environ["GITHUB_RUN_ID"]
+              + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
+          )
+          steps = ci.add_bazel_test_results(steps, result_dir)
+          raise SystemExit(ci.run_steps(steps, dry_run=False, keep_going=False, verbose=True))
+          '@
+          $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+          $source | python -B -
           exit $LASTEXITCODE
 
       - name: Report Windows build storage
