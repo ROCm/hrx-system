@@ -312,10 +312,10 @@ class NativeQueue {
     return status;
   }
 
-  iree_status_t CompleteChain() {
+  iree_status_t CompleteChain(
+      iree_async_wait_flags_t wait_flags = IREE_ASYNC_WAIT_FLAG_NONE) {
     return iree_hal_semaphore_wait(completion_, completion_value_,
-                                   iree_infinite_timeout(),
-                                   IREE_ASYNC_WAIT_FLAG_NONE);
+                                   iree_infinite_timeout(), wait_flags);
   }
 
   iree_status_t Submit(size_t producer, Arguments arguments,
@@ -637,8 +637,8 @@ class NativeQueue {
     return Wait(producer, wait_flags);
   }
 
-  // Recorded programs carry their own outgoing visibility boundary. Waiting
-  // on their signal does not require another submission or doorbell store.
+  // Default dispatches and recorded programs carry their own outgoing
+  // visibility boundary. Their signals need no extra submission or doorbell.
   iree_status_t Wait(size_t producer, iree_async_wait_flags_t wait_flags) {
     const auto& lane = lanes_[producer];
     return iree_hal_semaphore_wait(lane.timeline, lane.epoch,
@@ -749,16 +749,22 @@ class NativeQueue {
 static void BM_Dispatch(
     benchmark::State& state, Arguments arguments, Barriers barriers,
     Timing timing,
-    amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {
+    amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+    Completion completion = Completion::kBarrier,
+    iree_async_wait_flags_t wait_flags = IREE_ASYNC_WAIT_FLAG_NONE) {
   NativeQueue dispatch(command_type);
   if (!dispatch.Initialize(state)) {
     return;
   }
   const size_t count = state.range(0);
+  const auto complete = [&] {
+    return completion == Completion::kBarrier ? dispatch.Complete(0, wait_flags)
+                                              : dispatch.Wait(0, wait_flags);
+  };
   for (size_t i = 0; i < count * 2; ++i) {
     IREE_CHECK_OK(dispatch.Submit(0, arguments, barriers));
   }
-  IREE_CHECK_OK(dispatch.Complete(0));
+  IREE_CHECK_OK(complete());
   IREE_CHECK_OK(dispatch.CheckOutput(0));
   const uint64_t allocations_before = dispatch.allocation_count();
   std::vector<iree_duration_t> samples;
@@ -778,7 +784,7 @@ static void BM_Dispatch(
     if (timing != Timing::kCompletion) {
       state.PauseTiming();
     }
-    IREE_CHECK_OK(dispatch.Complete(0));
+    IREE_CHECK_OK(complete());
     if (timing == Timing::kCompletion) {
       state.PauseTiming();
     }
@@ -842,21 +848,43 @@ BENCHMARK_CAPTURE(BM_Dispatch, AqlBindingsDefaultCompletion,
     ->Iterations(200)
     ->UseRealTime();
 
-static void BM_AqlChain(benchmark::State& state, bool empty, Timing timing) {
+// Own-submission waits isolate the dispatch's completion boundary; active
+// variants distinguish caller wake latency from execution and retirement.
+#define AQL_DISPATCH_COMPLETION_CASE(name, completion, wait_flags)           \
+  BENCHMARK_CAPTURE(BM_Dispatch, name, Arguments::kBindings,                 \
+                    Barriers::kDefault, Timing::kCompletion,                 \
+                    AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, Completion::completion, \
+                    wait_flags)                                              \
+      ->Arg(1)                                                               \
+      ->Arg(32)                                                              \
+      ->Arg(1000)                                                            \
+      ->Iterations(200)                                                      \
+      ->UseRealTime()
+AQL_DISPATCH_COMPLETION_CASE(AqlBindingsDefaultCompletionActive, kBarrier,
+                             IREE_ASYNC_WAIT_FLAG_ACTIVE);
+AQL_DISPATCH_COMPLETION_CASE(AqlBindingsDefaultSubmissionCompletion,
+                             kSubmission, IREE_ASYNC_WAIT_FLAG_NONE);
+AQL_DISPATCH_COMPLETION_CASE(AqlBindingsDefaultSubmissionCompletionActive,
+                             kSubmission, IREE_ASYNC_WAIT_FLAG_ACTIVE);
+#undef AQL_DISPATCH_COMPLETION_CASE
+
+static void BM_AqlChain(
+    benchmark::State& state, bool empty, Timing timing,
+    iree_async_wait_flags_t wait_flags = IREE_ASYNC_WAIT_FLAG_NONE) {
   NativeQueue queue(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true);
   if (!queue.Initialize(state)) {
     return;
   }
   const uint32_t count = state.range(0);
   IREE_CHECK_OK(queue.SubmitChain(count, empty));
-  IREE_CHECK_OK(queue.CompleteChain());
+  IREE_CHECK_OK(queue.CompleteChain(wait_flags));
   const uint64_t allocations_before = queue.allocation_count();
   for (auto _ : state) {
     IREE_CHECK_OK(queue.SubmitChain(count, empty));
     if (timing == Timing::kSubmit) {
       state.PauseTiming();
     }
-    IREE_CHECK_OK(queue.CompleteChain());
+    IREE_CHECK_OK(queue.CompleteChain(wait_flags));
     if (timing == Timing::kCompletion) {
       state.PauseTiming();
     }
@@ -888,6 +916,13 @@ BENCHMARK_CAPTURE(BM_AqlChain, DispatchSubmit, false, Timing::kSubmit)
     ->Iterations(200)
     ->UseRealTime();
 BENCHMARK_CAPTURE(BM_AqlChain, DispatchCompletion, false, Timing::kCompletion)
+    ->Arg(1)
+    ->Arg(20)
+    ->Arg(1000)
+    ->Iterations(200)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_AqlChain, DispatchCompletionActive, false,
+                  Timing::kCompletion, IREE_ASYNC_WAIT_FLAG_ACTIVE)
     ->Arg(1)
     ->Arg(20)
     ->Arg(1000)
