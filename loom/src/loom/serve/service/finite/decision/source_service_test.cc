@@ -18,6 +18,7 @@
 #include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/decision/protocol.h"
@@ -93,6 +94,10 @@ class SourceDecisionServiceTest : public ::testing::Test {
     if (http_.joinable()) {
       loom_serve_http_server_request_stop(server_);
       IREE_EXPECT_OK(http_.Join());
+    }
+    loom_serve_execution_permit_deinitialize(&peer_);
+    if (services_[0]) {
+      Drain();
     }
     for (size_t i = 0; i < 2; ++i) {
       if (services_[i]) {
@@ -181,6 +186,26 @@ class SourceDecisionServiceTest : public ::testing::Test {
     while (Step()) {
     }
   }
+  void RequestVoice() {
+    loom_serve_execution_permit_initialize(loom_serve_device_scheduler(device_),
+                                           LOOM_SERVE_EXECUTION_RESOURCE_HOST,
+                                           &peer_);
+    loom_serve_execution_permit_request(&peer_,
+                                        LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  }
+  void Disconnect(int client, loom_serve_http_connection_t* connection) {
+    const linger reset = {1, 0};
+    ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+              0);
+    ASSERT_EQ(close(client), 0);
+    iree_notification_await(
+        loom_serve_http_server_notification(server_),
+        [](void* value) {
+          return loom_serve_http_connection_failed(
+              static_cast<loom_serve_http_connection_t*>(value));
+        },
+        connection, iree_infinite_timeout());
+  }
   void StartRouter() {
     ASSERT_NO_FATAL_FAILURE(
         CreateModel(embedding_source_.c_str(), &models_[1]));
@@ -230,6 +255,8 @@ class SourceDecisionServiceTest : public ::testing::Test {
   iree_notification_t notification_;
   // Completion/release generation for direct scheduling turns.
   std::atomic<uint64_t> wakes_{0};
+  // Conflicting host operation, retired before draining the service.
+  loom_serve_execution_permit_t peer_ = {};
   // HTTP readiness and optional outer owner, joined before model destruction.
   loom_serve::testing::HttpHarness http_;
 };
@@ -253,6 +280,61 @@ void CheckSingleNoulResponse(const std::string& response) {
   // Vulkan F32 division permits 2.5 ULP error for normal divisors. At 2/3,
   // one ULP is 2^-24. Exact dyadic cohort probabilities remain wire-checked.
   EXPECT_NEAR(probability, 2.0 / 3.0, 2.5 * 0x1p-24);
+}
+
+TEST_F(SourceDecisionServiceTest, UnacceptedPreparationCanCancelUnderVoice) {
+  RequestVoice();
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  loom_serve::testing::HttpClient client(Send(kNoul));
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection));
+  bool progress = false;
+  IREE_ASSERT_OK(interfaces_[0].advance(interfaces_[0].self, 0, &progress));
+  EXPECT_TRUE(progress);
+  EXPECT_STREQ(interfaces_[0].snapshot(interfaces_[0].self).phase,
+               "waiting_cpu");
+  IREE_ASSERT_OK(interfaces_[0].advance(interfaces_[0].self, 0, &progress));
+  EXPECT_FALSE(progress);
+  EXPECT_EQ(interfaces_[0].telemetry.counters->batches, 0u);
+  ASSERT_NO_FATAL_FAILURE(Disconnect(client.release(), connection));
+  Drain();
+  EXPECT_EQ(interfaces_[0].telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(peer_.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+
+  loom_serve_execution_permit_complete(&peer_);
+  const int next = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(next));
+  Drain();
+  CheckSingleNoulResponse(Read(next));
+}
+
+TEST_F(SourceDecisionServiceTest, AbandonedEncodingReleasesSnapshotUnderVoice) {
+  loom_serve::testing::HttpClient client(Send(kNoul));
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection));
+  while (std::string(interfaces_[0].snapshot(interfaces_[0].self).phase) !=
+         "running") {
+    ASSERT_TRUE(Step());
+  }
+  RequestVoice();
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  while (std::string(interfaces_[0].snapshot(interfaces_[0].self).phase) !=
+         "waiting_cpu") {
+    ASSERT_TRUE(Step());
+  }
+  // Native output has retired. The host snapshot remains owned while its
+  // encoding waits, without retaining the device or borrowing a worker.
+  EXPECT_EQ(interfaces_[0].telemetry.counters->batches, 1u);
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  ASSERT_NO_FATAL_FAILURE(Disconnect(client.release(), connection));
+  Drain();
+  EXPECT_EQ(interfaces_[0].telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(peer_.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+  loom_serve_execution_permit_complete(&peer_);
+  const int next = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(next));
+  Drain();
+  CheckSingleNoulResponse(Read(next));
 }
 
 TEST_F(SourceDecisionServiceTest, PacksQuestionsAndRetainsResultsAcrossReset) {

@@ -51,6 +51,7 @@ typedef struct loom_serve_finite_job_t {
 
 typedef enum loom_serve_finite_phase_e {
   FINITE_IDLE = 0,
+  FINITE_WAITING_CPU,
   FINITE_PREPARING,
   FINITE_BATCHING,
   FINITE_SPECIALIZING,
@@ -62,8 +63,8 @@ typedef enum loom_serve_finite_phase_e {
 } loom_serve_finite_phase_t;
 
 static const char finite_phases[][16] = {
-    "idle",  "preparing", "batching",  "specializing", "waiting",
-    "ready", "running",   "releasing", "encoding"};
+    "idle",    "waiting_cpu", "preparing", "batching",  "specializing",
+    "waiting", "ready",       "running",   "releasing", "encoding"};
 
 struct loom_serve_finite_service_t {
   // Allocator owning the queue, jobs and encoded results.
@@ -115,8 +116,15 @@ struct loom_serve_finite_service_t {
     // Owned terminal result, consumed once after publication.
     iree_status_t status;
   } event;
-  // Exclusive finite CPU process, recycled only after release.
-  iree_task_process_t process;
+  // Source declaration and encoding share one finite host borrower.
+  struct {
+    // Actual host claim, retained through task release publication.
+    loom_serve_execution_permit_t permit;
+    // Queued finite operation, immutable while its process is accepted.
+    loom_serve_finite_phase_t phase;
+    // Exclusive finite CPU process, recycled only after release.
+    iree_task_process_t process;
+  } cpu;
   // Stable asynchronous ALL wait and its borrowed model frontier.
   struct {
     // Intrusive wait owned until its callback finishes.
@@ -296,6 +304,7 @@ static void loom_serve_finite_job_destroy(loom_serve_finite_service_t* service,
 
 static void loom_serve_finite_finish(loom_serve_finite_service_t* service,
                                      const iree_status_t terminal_status) {
+  loom_serve_execution_permit_cancel(&service->cpu.permit);
   loom_serve_finite_snapshot_release(service->snapshot);
   service->snapshot = NULL;
   loom_serve_admission_cancel(loom_serve_finite_model_residency(service->model),
@@ -392,15 +401,42 @@ static void loom_serve_finite_cpu_released(iree_task_process_t* process) {
   iree_slim_mutex_unlock(&service->event.mutex);
 }
 
+static bool loom_serve_finite_submit_cpu(loom_serve_finite_service_t* service) {
+  if (service->phase != FINITE_WAITING_CPU) {
+    return false;
+  }
+  bool has_peer = false;
+  for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
+    has_peer |= service->cohort[i]->connection != NULL;
+  }
+  if (service->stopping || !has_peer) {
+    // None of this operation's source or response storage has been borrowed.
+    // Completed native output already belongs to an independent snapshot.
+    loom_serve_finite_finish(service, iree_ok_status());
+    return true;
+  }
+  if (service->cpu.permit.phase == LOOM_SERVE_EXECUTION_PERMIT_IDLE) {
+    loom_serve_execution_permit_request(&service->cpu.permit,
+                                        LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+  }
+  if (!loom_serve_execution_permit_try_acquire(&service->cpu.permit)) {
+    return false;
+  }
+  service->phase = service->cpu.phase;
+  iree_task_process_initialize(loom_serve_finite_cpu_run, 0, 1,
+                               &service->cpu.process);
+  service->cpu.process.user_data = service;
+  service->cpu.process.completion_fn = loom_serve_finite_cpu_completed;
+  service->cpu.process.release_fn = loom_serve_finite_cpu_released;
+  iree_task_executor_schedule_process(service->executor, &service->cpu.process);
+  return true;
+}
+
 static void loom_serve_finite_schedule_cpu(loom_serve_finite_service_t* service,
                                            loom_serve_finite_phase_t phase) {
-  service->phase = phase;
-  iree_task_process_initialize(loom_serve_finite_cpu_run, 0, 1,
-                               &service->process);
-  service->process.user_data = service;
-  service->process.completion_fn = loom_serve_finite_cpu_completed;
-  service->process.release_fn = loom_serve_finite_cpu_released;
-  iree_task_executor_schedule_process(service->executor, &service->process);
+  service->phase = FINITE_WAITING_CPU;
+  service->cpu.phase = phase;
+  loom_serve_finite_submit_cpu(service);
 }
 
 static void loom_serve_finite_device_completed(
@@ -660,6 +696,10 @@ static iree_status_t loom_serve_finite_collect(
   if (!ready) {
     return iree_ok_status();
   }
+  if (service->phase == FINITE_PREPARING || service->phase == FINITE_BATCHING ||
+      service->phase == FINITE_ENCODING) {
+    loom_serve_execution_permit_complete(&service->cpu.permit);
+  }
   *progress = true;
   IREE_TRACE_SECTION_LEAVE(service->device.section);
   IREE_TRACE(service->device.section = 0);
@@ -714,6 +754,9 @@ static iree_status_t loom_serve_finite_advance(void* self,
   }
   loom_serve_finite_cancel_peers(service);
   iree_status_t status = loom_serve_finite_collect(service, out_progress);
+  if (iree_status_is_ok(status)) {
+    *out_progress |= loom_serve_finite_submit_cpu(service);
+  }
   status = iree_status_join(
       status, loom_serve_finite_model_query_status(service->model));
   *out_progress |= loom_serve_execution_reconfiguration_advance(
@@ -949,6 +992,7 @@ void loom_serve_finite_service_free(loom_serve_finite_service_t* service) {
     return;
   }
   IREE_ASSERT(!loom_serve_finite_is_pending(service));
+  loom_serve_execution_permit_deinitialize(&service->cpu.permit);
   loom_serve_execution_permit_cancel(service->permit);
   loom_serve_finite_model_set_observer(service->model,
                                        (loom_serve_wake_callback_t){0});
@@ -993,6 +1037,9 @@ iree_status_t loom_serve_finite_service_allocate(
   service->host_allocator = host_allocator;
   service->model = model;
   service->permit = loom_serve_finite_model_permit(model);
+  loom_serve_execution_permit_initialize(service->permit->scheduler,
+                                         LOOM_SERVE_EXECUTION_RESOURCE_HOST,
+                                         &service->cpu.permit);
   service->protocol = protocol;
   service->name = name;
   service->capacity = capacity;

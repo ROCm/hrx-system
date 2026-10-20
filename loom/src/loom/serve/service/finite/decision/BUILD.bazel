@@ -41,6 +41,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
         "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution:scheduler",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/server:resources",

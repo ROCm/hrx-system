@@ -42,6 +42,7 @@ loom_cc_library(
     iree::base::threading
     iree::testing::gtest
     loom::serve::runtime::device
+    loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
     loom::serve::server::registry
     loom::serve::server::resources
