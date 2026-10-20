@@ -1,0 +1,34 @@
+// Deliberately report the sampling key as an accepted byte count. The native
+// source boundary must reject counts outside its window or inside a scalar.
+global.rodata.def @work = bytes("00000000")
+
+func.def public @prepare_request(%model: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (i64, buffer) {
+  %work = global.load @work : buffer
+  func.return %seed, %work : i64, buffer
+}
+
+func.def public @prepare_input(%model: buffer, %count: i64, %text: buffer, %offset: i64, %complete: i32) -> (i64, i64) {
+  func.return %count, %count : i64, i64
+}
+
+func.def public @prepare_work(%model: buffer, %count: i64) -> (i32, buffer, i64, i64) {
+  %work = global.load @work : buffer
+  %kind = scalar.constant 0 : i32
+  %unit = scalar.constant 1 : i64
+  %tag = scalar.constant 0 : i64
+  func.return %kind, %work, %unit, %tag : i32, buffer, i64, i64
+}
+
+func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  func.return %packed, %packed : buffer, buffer
+}
+
+func.def public @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) {
+  func.return
+}
+
+func.def public @complete(%model: buffer, %count: i64, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, i64, i64, i64, i32) {
+  %c0 = scalar.constant 0 : i64
+  %done = scalar.constant 1 : i32
+  func.return %count, %c0, %c0, %c0, %done : i64, i64, i64, i64, i32
+}
