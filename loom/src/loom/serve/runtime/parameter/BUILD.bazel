@@ -45,12 +45,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "admission",
+    srcs = ["admission.c"],
+    hdrs = ["admission.h"],
+    deps = [
+        ":residency",
+        "//loom/src/loom/serve/runtime/execution:scheduler",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "activation",
     srcs = ["activation.c"],
     hdrs = ["activation.h"],
     deps = [
+        ":admission",
         ":residency",
         "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:scheduler",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",

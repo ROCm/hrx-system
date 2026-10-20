@@ -186,6 +186,11 @@ iree_status_t loom_serve_image_model_deactivate(loom_serve_image_model_t* model,
 loom_serve_residency_t* loom_serve_image_model_residency(
     const loom_serve_image_model_t* model);
 
+// Borrowed explicit warmup claim, retained by the model through native
+// retirement independently of service and warmup storage.
+loom_serve_execution_permit_t* loom_serve_image_model_admission_permit(
+    loom_serve_image_model_t* model);
+
 // Model-wide checkpoint accounting and policy, including idle cached banks.
 loom_serve_residency_snapshot_t loom_serve_image_model_parameters(
     const loom_serve_image_model_t* model);

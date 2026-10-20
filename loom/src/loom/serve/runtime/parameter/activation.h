@@ -7,6 +7,7 @@
 #define LOOM_SERVE_RUNTIME_PARAMETER_ACTIVATION_H_
 
 #include "iree/async/util/proactor_pool.h"
+#include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/parameter/residency.h"
 
 #ifdef __cplusplus
@@ -37,12 +38,14 @@ typedef enum loom_serve_activation_flag_bits_e {
 typedef uint32_t loom_serve_activation_flags_t;
 
 // Allocates unstarted warmup storage and retains a shared proactor. Does not
-// load or pin parameters. Wake only schedules the owner, never consumes model
-// state inline. Failure returns no operation.
+// load or pin parameters. The model-owned permit outlives this operation even
+// on failed readiness; warmup uses background QoS. Wake only schedules the
+// owner, never consumes model state inline. Failure returns no operation.
 iree_status_t loom_serve_activation_allocate(
-    loom_serve_residency_t* residency, iree_async_proactor_pool_t* pool,
-    void (*wake)(void* user_data), void* user_data,
-    iree_allocator_t host_allocator, loom_serve_activation_t** out_activation);
+    loom_serve_residency_t* residency, loom_serve_execution_permit_t* permit,
+    iree_async_proactor_pool_t* pool, void (*wake)(void* user_data),
+    void* user_data, iree_allocator_t host_allocator,
+    loom_serve_activation_t** out_activation);
 
 // Attempts FIFO admission or consumes readiness without waiting for device
 // completion. Accepted backing work runs on the native cold-memory executor;

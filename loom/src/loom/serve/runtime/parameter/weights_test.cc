@@ -728,7 +728,7 @@ TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
   loom_serve_test_weight_activation_wake_t wake;
   loom_serve_activation_t* activation = nullptr;
   IREE_ASSERT_OK(loom_serve_activation_allocate(
-      residencies_[0],
+      residencies_[0], &permits_[0],
       loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
       loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
       &activation));
@@ -776,7 +776,7 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
   loom_serve_test_weight_activation_wake_t wake;
   loom_serve_activation_t* activation = nullptr;
   IREE_ASSERT_OK(loom_serve_activation_allocate(
-      residencies_[1],
+      residencies_[1], &permits_[1],
       loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
       loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
       &activation));
@@ -800,7 +800,7 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
   loom_serve_memory_pool_set_observer(
       pool_, loom_serve_test_weight_activation_wake_t::Notify, &wake);
   IREE_ASSERT_OK(loom_serve_activation_allocate(
-      residencies_[1],
+      residencies_[1], &permits_[1],
       loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
       loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
       &activation));
@@ -816,6 +816,53 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
   loom_serve_residency_release(residencies_[1]);
 }
 
+TEST_P(WeightsTest, MemoryDeniedRealtimeLetsResidentBackgroundFinish) {
+  if (!GetParam()) {
+    GTEST_SKIP() << "Requires a physical residency budget";
+  }
+  for (uint32_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(Compile(i, "raw"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  }
+  IREE_ASSERT_OK(Register(0, 0, 2));
+  IREE_ASSERT_OK(Register(1, 2, 1));
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_admission_try_acquire(
+      residencies_[0], &permits_[0], LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+      &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  IREE_ASSERT_OK(loom_serve_residency_await(residencies_[0]));
+  loom_serve_execution_permit_complete(&permits_[0]);
+
+  // The resident background request holds the entire physical allowance.
+  // Denied voice activation cannot retain urgency that prevents its completion.
+  IREE_ASSERT_OK(loom_serve_admission_try_acquire(
+      residencies_[1], &permits_[1], LOOM_SERVE_EXECUTION_QOS_REALTIME,
+      &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(permits_[1].phase, LOOM_SERVE_EXECUTION_PERMIT_IDLE);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[2]).activations, 0u);
+  loom_serve_execution_permit_request(&permits_[0],
+                                      LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&permits_[0]));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 90));
+  loom_serve_execution_permit_complete(&permits_[0]);
+  loom_serve_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
+  ASSERT_NO_FATAL_FAILURE(DrainNativeReturns());
+
+  // Retired background storage now admits the original realtime request.
+  IREE_ASSERT_OK(loom_serve_admission_try_acquire(
+      residencies_[1], &permits_[1], LOOM_SERVE_EXECUTION_QOS_REALTIME,
+      &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_serve_residency_cancel_admission(residencies_[1]);
+  ASSERT_NO_FATAL_FAILURE(Run(2, 90));
+  loom_serve_execution_permit_complete(&permits_[1]);
+  loom_serve_residency_release(residencies_[1]);
+}
+
 TEST_P(WeightsTest, RejectedWarmupKeepsAcceptedLoadsProtectedUntilRetirement) {
   IREE_ASSERT_OK(Compile(0, "partial"));
   const auto root = Root(0, 0);
@@ -824,7 +871,7 @@ TEST_P(WeightsTest, RejectedWarmupKeepsAcceptedLoadsProtectedUntilRetirement) {
   loom_serve_test_weight_activation_wake_t wake;
   loom_serve_activation_t* activation = nullptr;
   IREE_ASSERT_OK(loom_serve_activation_allocate(
-      residencies_[0],
+      residencies_[0], &permits_[0],
       loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
       loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
       &activation));

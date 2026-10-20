@@ -27,6 +27,8 @@ typedef struct loom_serve_test_application_options_t {
   iree_device_size_t slab_size;
   // Maximum committed virtual-pool bytes; zero imposes no serving limit.
   uint64_t memory_limit;
+  // Accepted native units per actual device; zero adds no count limit.
+  uint32_t max_active;
 } loom_serve_test_application_options_t;
 
 // Process-owned source-service test application.
@@ -40,9 +42,9 @@ loom_serve_test_application_options_default(void);
 // configuration. The returned application is borrowed until global test
 // environment teardown. A later mismatched request fails instead of creating a
 // second host or device group.
-// Devices bound numerical submissions to two outstanding units. Manual service
-// owners grant work after each complete pass and consume granted progress
-// before parking, using the same resource scheduling boundary as the router.
+// The default allows two accepted units per device. Manual service owners
+// check resource readiness after each complete pass before parking, using the
+// same current-demand boundary as the router.
 iree_status_t loom_serve_test_application_acquire(
     const loom_serve_test_application_options_t* options,
     iree_allocator_t host_allocator,

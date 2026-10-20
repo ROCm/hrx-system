@@ -17,6 +17,7 @@
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/parameter/admission.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/jit.h"
 #include "loom/serve/runtime/program/module.h"
@@ -55,6 +56,8 @@ struct loom_serve_text_model_t {
   loom_serve_device_t* device_owner;
   // Numerical claim retained until successful completion or native retirement.
   loom_serve_execution_permit_t permit;
+  // Activation and row-upload claim retained through actual native retirement.
+  loom_serve_execution_permit_t admission_permit;
   // GPU device and allocation domain borrowed from device_owner.
   iree_hal_device_t* device;
   // Semaphore namespace borrowed from device_owner.
@@ -440,6 +443,10 @@ iree_status_t loom_serve_text_load_allocate(
     loom_serve_execution_permit_initialize(
         loom_serve_device_scheduler(device),
         loom_serve_device_execution_resources(device), &model->permit);
+    loom_serve_execution_permit_initialize(
+        loom_serve_device_scheduler(device),
+        loom_serve_device_execution_resources(device),
+        &model->admission_permit);
     model->device = loom_serve_device_handle(device);
     model->group = loom_serve_device_group(device);
     model->dispatch = loom_serve_device_dispatch_queue(device);
@@ -676,6 +683,7 @@ iree_status_t loom_serve_text_model_free_retired(
   }
   IREE_ASSERT(loom_serve_text_model_is_retired(model));
   loom_serve_execution_permit_deinitialize(&model->permit);
+  loom_serve_execution_permit_deinitialize(&model->admission_permit);
   loom_serve_residency_free(model->residency);
   model->residency = NULL;
   loom_serve_residency_group_free(model->parameter_group);
@@ -778,6 +786,11 @@ loom_serve_weight_activity_t loom_serve_text_model_weight_activity(
 loom_serve_residency_t* loom_serve_text_model_residency(
     const loom_serve_text_model_t* model) {
   return model->residency;
+}
+
+loom_serve_execution_permit_t* loom_serve_text_model_admission_permit(
+    loom_serve_text_model_t* model) {
+  return &model->admission_permit;
 }
 
 iree_status_t loom_serve_text_model_activate(loom_serve_text_model_t* model) {
@@ -1037,6 +1050,7 @@ iree_status_t loom_serve_text_row_try_restore(
 iree_status_t loom_serve_text_row_submit_reserve(
     loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
     const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
+    loom_serve_execution_qos_t qos,
     loom_serve_residency_admission_t* out_admission,
     loom_serve_execution_frontier_t* out_frontier) {
   *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY;
@@ -1062,8 +1076,9 @@ iree_status_t loom_serve_text_row_submit_reserve(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "reservation requires an idle resident frontier");
   }
-  IREE_RETURN_IF_ERROR(
-      loom_serve_residency_try_admit(row->model->residency, out_admission));
+  IREE_RETURN_IF_ERROR(loom_serve_admission_try_acquire(
+      row->model->residency, &row->model->admission_permit, qos,
+      out_admission));
   if (*out_admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     return iree_ok_status();
   }
@@ -1093,6 +1108,7 @@ iree_status_t loom_serve_text_row_submit_reserve(
 }
 
 bool loom_serve_text_row_complete_reserve(loom_serve_text_row_t* row) {
+  loom_serve_execution_permit_complete(&row->model->admission_permit);
   const bool admitted = loom_serve_text_state_row_complete_reserve(row->state);
   if (admitted) {
     loom_serve_residency_cancel_admission(row->model->residency);
@@ -1113,8 +1129,10 @@ iree_status_t loom_serve_text_row_try_reserve(
   loom_serve_residency_admission_t admission;
   loom_serve_execution_frontier_t frontier;
   iree_status_t status = loom_serve_text_row_submit_reserve(
-      row, mode, checkpoint, extent, &admission, &frontier);
-  loom_serve_residency_cancel_admission(row->model->residency);
+      row, mode, checkpoint, extent, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+      &admission, &frontier);
+  loom_serve_admission_cancel(row->model->residency,
+                              &row->model->admission_permit);
   status = iree_status_join(status,
                             loom_serve_execution_drain(row->model->execution));
   if (iree_status_is_ok(status) &&

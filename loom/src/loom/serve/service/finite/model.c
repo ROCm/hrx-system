@@ -47,6 +47,8 @@ struct loom_serve_finite_model_t {
   loom_serve_device_t* owner;
   // Numerical claim retained until successful completion or native retirement.
   loom_serve_execution_permit_t permit;
+  // Explicit warmup claim retained through actual native retirement.
+  loom_serve_execution_permit_t admission_permit;
   // Owned model work and feedback timelines, independent of other models.
   loom_serve_execution_t* execution;
   // Owned checkpoint roots and plans, outliving borrowing invocation
@@ -166,6 +168,7 @@ static iree_status_t loom_serve_finite_model_destroy_resources(
   loom_serve_parameter_bank_retire(model->parameters, NULL, NULL);
   IREE_ASSERT(loom_serve_finite_model_is_retired(model));
   loom_serve_execution_permit_deinitialize(&model->permit);
+  loom_serve_execution_permit_deinitialize(&model->admission_permit);
   IREE_RETURN_IF_ERROR(loom_serve_executables_free(model->executables));
   model->executables = NULL;
   loom_serve_residency_free(model->residency);
@@ -655,6 +658,10 @@ iree_status_t loom_serve_finite_load_allocate(
     loom_serve_execution_permit_initialize(
         loom_serve_device_scheduler(device),
         loom_serve_device_execution_resources(device), &load->model->permit);
+    loom_serve_execution_permit_initialize(
+        loom_serve_device_scheduler(device),
+        loom_serve_device_execution_resources(device),
+        &load->model->admission_permit);
     *out_load = load;
   } else {
     iree_slim_mutex_deinitialize(&load->event.mutex);
@@ -851,6 +858,11 @@ const iree_tokenizer_t* loom_serve_finite_model_tokenizer(
 loom_serve_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model) {
   return loom_serve_executables_residency(model->executables);
+}
+
+loom_serve_execution_permit_t* loom_serve_finite_model_admission_permit(
+    loom_serve_finite_model_t* model) {
+  return &model->admission_permit;
 }
 
 loom_serve_residency_snapshot_t loom_serve_finite_model_parameters(

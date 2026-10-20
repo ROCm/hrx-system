@@ -695,8 +695,7 @@ static void loom_serve_image_prepared(loom_serve_image_service_t* service,
       service->cohort.jobs[i]->work.admission_ns = admission_ns;
     }
     service->telemetry.totals.work.admission_ns += admission_ns;
-    loom_serve_execution_permit_request(service->generator.permit,
-                                        LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+    // Parameter activation and the first part share one accepted native unit.
     service->phase = IMAGE_PHASE_READY;
   }
   *progress = true;
@@ -772,8 +771,8 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
       }
     }
     service->telemetry.totals.work.execution_ns += execution_ns;
+    loom_serve_execution_permit_complete(service->generator.permit);
     if (!service->device.cancelled) {
-      loom_serve_execution_permit_complete(service->generator.permit);
       ++service->telemetry.counters.batches;
     }
     if (!service->device.complete) {
@@ -1102,6 +1101,9 @@ static iree_status_t loom_serve_image_advance(void* self,
   }
   if (service->phase == IMAGE_PHASE_READY &&
       (service->stopping || !loom_serve_image_has_peer(service) ||
+       (service->generator.permit &&
+        service->generator.permit->phase ==
+            LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED) ||
        loom_serve_execution_permit_try_acquire(service->generator.permit))) {
     service->status = loom_serve_image_service_submit(service);
     *out_progress = true;

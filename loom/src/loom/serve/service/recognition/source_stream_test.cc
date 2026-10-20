@@ -442,11 +442,12 @@ TEST_F(SourceRecognitionStreamTest,
 
 TEST_F(SourceRecognitionStreamTest,
        PreparedCancellationReturnsPermissionWithoutSubmittingOrConsumingPcm) {
-  ASSERT_NO_FATAL_FAILURE(HoldExecution());
   loom_serve_recognition_stream_t* cancelled = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&cancelled,
                                LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
                                LOOM_SERVE_EXECUTION_QOS_REALTIME));
+  ASSERT_NO_FATAL_FAILURE(Settle());
+  ASSERT_NO_FATAL_FAILURE(HoldExecution());
   ASSERT_NO_FATAL_FAILURE(Write(cancelled, {5}, 1));
   loom_serve_recognition_stream_finish(cancelled);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
@@ -1020,12 +1021,13 @@ TEST_F(SourceRecognitionStreamTest,
   if (!FLAG_test_elastic) {
     GTEST_SKIP() << "Requires asynchronous elastic backing";
   }
-  ASSERT_NO_FATAL_FAILURE(HoldExecution());
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_NONE, &failed_readiness_));
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
+  ASSERT_NO_FATAL_FAILURE(Settle());
+  ASSERT_NO_FATAL_FAILURE(HoldExecution());
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
     return actual_.permit->phase == LOOM_SERVE_EXECUTION_PERMIT_WAITING;

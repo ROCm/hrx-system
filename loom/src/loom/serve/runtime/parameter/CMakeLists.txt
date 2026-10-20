@@ -32,18 +32,36 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    admission
+  HDRS
+    "admission.h"
+  SRCS
+    "admission.c"
+  DEPS
+    ::residency
+    iree::base
+    loom::serve::runtime::execution::scheduler
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     activation
   HDRS
     "activation.h"
   SRCS
     "activation.c"
   DEPS
+    ::admission
     ::residency
     iree::async
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::scheduler
   PUBLIC
 )
 endif()

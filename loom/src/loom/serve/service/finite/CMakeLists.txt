@@ -95,6 +95,7 @@ loom_cc_library(
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake
+    loom::serve::runtime::parameter::admission
     loom::serve::runtime::parameter::residency
     loom::serve::service
     loom::serve::service::execution_reconfiguration

@@ -581,6 +581,7 @@ loom_cc_library(
     loom::serve::runtime::execution
     loom::serve::runtime::execution::retirement
     loom::serve::runtime::execution::scheduler
+    loom::serve::runtime::parameter::admission
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program
@@ -1106,6 +1107,7 @@ loom_cc_library(
     loom::serve::media::image_request
     loom::serve::runtime::execution
     loom::serve::runtime::execution::scheduler
+    loom::serve::runtime::parameter::admission
     loom::serve::runtime::parameter::residency
     loom::serve::service
     loom::serve::service::finite::model
@@ -1161,6 +1163,7 @@ loom_cc_library(
     ::session_cache
     ::telemetry
     iree::base
+    loom::serve::runtime::parameter::admission
     loom::serve::runtime::parameter::residency
     loom::serve::telemetry::stream
   PUBLIC
@@ -1238,6 +1241,7 @@ loom_cc_library(
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake
+    loom::serve::runtime::parameter::admission
     loom::serve::service
     loom::serve::service::execution_reconfiguration
     loom::serve::service::finite::component

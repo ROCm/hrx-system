@@ -55,8 +55,9 @@ class SourceDecisionServiceTest : public ::testing::Test {
     model_source_ = model_source;
     embedding_source_ = embedding_source;
     iree_notification_initialize(&notification_);
-    const auto application_options =
-        loom_serve_test_application_options_default();
+    auto application_options = loom_serve_test_application_options_default();
+    // Activation and the first numerical part must share this single slot.
+    application_options.max_active = 1;
     loom_serve_test_application_t* application = nullptr;
     IREE_ASSERT_OK(loom_serve_test_application_acquire(
         &application_options, host_allocator_, &application));

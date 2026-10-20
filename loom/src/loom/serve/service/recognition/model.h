@@ -166,6 +166,11 @@ iree_status_t loom_serve_recognition_model_free(
 // retirement. The generator preserves request ownership on terminal failure.
 loom_serve_residency_t* loom_serve_recognition_model_residency(
     const loom_serve_recognition_model_t* model);
+
+// Borrowed claim for explicit activation and row admission, retained by the
+// model through native retirement independently of service and warmup storage.
+loom_serve_execution_permit_t* loom_serve_recognition_model_admission_permit(
+    loom_serve_recognition_model_t* model);
 loom_serve_recognition_generator_t loom_serve_recognition_model_generator(
     loom_serve_recognition_model_t* model);
 

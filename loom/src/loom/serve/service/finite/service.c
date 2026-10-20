@@ -13,6 +13,7 @@
 #include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/runtime/parameter/admission.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/finite/result.h"
 #include "loom/serve/service/kind.h"
@@ -297,8 +298,8 @@ static void loom_serve_finite_finish(loom_serve_finite_service_t* service,
                                      const iree_status_t terminal_status) {
   loom_serve_finite_snapshot_release(service->snapshot);
   service->snapshot = NULL;
-  loom_serve_residency_cancel_admission(
-      loom_serve_finite_model_residency(service->model));
+  loom_serve_admission_cancel(loom_serve_finite_model_residency(service->model),
+                              service->permit);
   for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
     loom_serve_finite_job_destroy(service, service->cohort[i], terminal_status);
   }
@@ -680,6 +681,7 @@ static iree_status_t loom_serve_finite_collect(
     loom_serve_execution_permit_complete(service->permit);
     loom_serve_finite_complete_execution(service);
   } else if (service->phase == FINITE_RELEASING) {
+    loom_serve_execution_permit_complete(service->permit);
     loom_serve_finite_model_complete(service->model);
     loom_serve_finite_finish(service, iree_ok_status());
   } else {
@@ -753,14 +755,14 @@ static iree_status_t loom_serve_finite_advance(void* self,
       *out_progress = true;
     } else {
       loom_serve_residency_admission_t admission;
-      status = loom_serve_residency_try_admit(
-          loom_serve_finite_model_residency(service->model), &admission);
+      status = loom_serve_admission_try_acquire(
+          loom_serve_finite_model_residency(service->model), service->permit,
+          LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &admission);
       if (iree_status_is_ok(status) &&
           admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
         loom_serve_residency_cancel_admission(
             loom_serve_finite_model_residency(service->model));
-        loom_serve_execution_permit_request(
-            service->permit, LOOM_SERVE_EXECUTION_QOS_BACKGROUND);
+        // Activation and the dependent finite batch share one accepted unit.
         service->phase = FINITE_READY;
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
@@ -802,7 +804,7 @@ static iree_status_t loom_serve_finite_advance(void* self,
       service->device.frontier = loom_serve_residency_frontier(residency);
       status = loom_serve_finite_await(service, FINITE_RELEASING);
       *out_progress = true;
-    } else if (loom_serve_execution_permit_try_acquire(service->permit)) {
+    } else {
       status = loom_serve_finite_submit(service);
       *out_progress = true;
     }

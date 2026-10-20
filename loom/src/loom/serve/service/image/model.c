@@ -12,6 +12,7 @@
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/retirement.h"
 #include "loom/serve/runtime/execution/scheduler.h"
+#include "loom/serve/runtime/parameter/admission.h"
 #include "loom/serve/runtime/parameter/bank.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/input.h"
@@ -43,6 +44,8 @@ struct loom_serve_image_model_t {
   loom_serve_device_t* owner;
   // Numerical claim retained until successful completion or native retirement.
   loom_serve_execution_permit_t permit;
+  // Explicit warmup claim retained through actual native retirement.
+  loom_serve_execution_permit_t admission_permit;
   // Owned model work and feedback timelines, independent of other models.
   loom_serve_execution_t* execution;
   // Final input/output view ownership before host payload release.
@@ -176,6 +179,7 @@ static iree_status_t loom_serve_image_model_destroy_resources(
   loom_serve_parameter_bank_retire(model->parameters, NULL, NULL);
   IREE_ASSERT(loom_serve_image_model_is_retired(model));
   loom_serve_execution_permit_deinitialize(&model->permit);
+  loom_serve_execution_permit_deinitialize(&model->admission_permit);
   IREE_RETURN_IF_ERROR(loom_serve_executables_free(model->executables));
   model->executables = NULL;
   loom_serve_residency_free(model->residency);
@@ -700,6 +704,10 @@ iree_status_t loom_serve_image_load_allocate(
     loom_serve_execution_permit_initialize(
         loom_serve_device_scheduler(device),
         loom_serve_device_execution_resources(device), &load->model->permit);
+    loom_serve_execution_permit_initialize(
+        loom_serve_device_scheduler(device),
+        loom_serve_device_execution_resources(device),
+        &load->model->admission_permit);
     load->model->command_quantum = options->command_quantum;
     load->model->specialization_cache = options->specialization_cache;
     *out_load = load;
@@ -1055,6 +1063,11 @@ loom_serve_residency_t* loom_serve_image_model_residency(
   return loom_serve_executables_residency(model->executables);
 }
 
+loom_serve_execution_permit_t* loom_serve_image_model_admission_permit(
+    loom_serve_image_model_t* model) {
+  return &model->admission_permit;
+}
+
 loom_serve_residency_snapshot_t loom_serve_image_model_parameters(
     const loom_serve_image_model_t* model) {
   return loom_serve_executables_parameters(model->executables);
@@ -1304,9 +1317,11 @@ iree_status_t loom_serve_image_model_generate(
 
 static iree_status_t loom_serve_image_generator_admit(
     void* self, loom_serve_residency_admission_t* out_admission) {
-  loom_serve_residency_t* residency = loom_serve_image_model_residency(self);
-  IREE_RETURN_IF_ERROR(
-      loom_serve_residency_try_admit(residency, out_admission));
+  loom_serve_image_model_t* model = self;
+  loom_serve_residency_t* residency = loom_serve_image_model_residency(model);
+  IREE_RETURN_IF_ERROR(loom_serve_admission_try_acquire(
+      residency, &model->permit, LOOM_SERVE_EXECUTION_QOS_BACKGROUND,
+      out_admission));
   if (*out_admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     loom_serve_residency_cancel_admission(residency);
   }
@@ -1345,8 +1360,10 @@ static iree_status_t loom_serve_image_generator_submit(
 }
 
 static void loom_serve_image_generator_discard(void* self) {
-  loom_serve_residency_cancel_admission(loom_serve_image_model_residency(self));
-  loom_serve_image_model_discard_batch(self);
+  loom_serve_image_model_t* model = self;
+  loom_serve_admission_cancel(loom_serve_image_model_residency(model),
+                              &model->permit);
+  loom_serve_image_model_discard_batch(model);
 }
 
 static iree_const_byte_span_t loom_serve_image_generator_complete(void* self) {

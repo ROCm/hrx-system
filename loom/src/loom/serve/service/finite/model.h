@@ -165,6 +165,11 @@ const iree_tokenizer_t* loom_serve_finite_model_tokenizer(
     const loom_serve_finite_model_t* model);
 loom_serve_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model);
+
+// Borrowed explicit warmup claim, retained by the model through native
+// retirement independently of service and warmup storage.
+loom_serve_execution_permit_t* loom_serve_finite_model_admission_permit(
+    loom_serve_finite_model_t* model);
 // Borrowed logical device owning this model's queues and numerical policy.
 loom_serve_device_t* loom_serve_finite_model_device(
     const loom_serve_finite_model_t* model);

@@ -249,18 +249,20 @@ typedef enum loom_serve_text_reserve_mode_e {
 // reservation may own a row.
 //
 // CAPACITY/DEFERRED mean parameter admission is pending without a pin or state
-// change; abandoning the request cancels its residency admission interest.
-// ACQUIRED owns a parameter pin through successful ALL
-// readiness on the borrowed frontier and complete_reserve, even if subsequent
-// state admission was denied. The owner excludes model mutation until then;
-// request cancellation defers storage release until completion. Submission or
-// readiness failure is terminal and retains ownership for outer destruction.
-// Checkpoint semantic inputs are copied before return. Physical backing is
-// committed at this cold boundary, not per epoch; extent is not a context-size
-// allocation.
+// change; abandoning the request withdraws both admission interests. QoS
+// controls execution eligibility independently of physical residency.
+// ACQUIRED owns the model admission claim and a parameter pin through
+// successful ALL readiness on the borrowed frontier and complete_reserve, even
+// if subsequent state admission was denied. The owner excludes model mutation
+// until then; request cancellation defers storage release until completion.
+// Submission or readiness failure is terminal and retains ownership for outer
+// destruction. Checkpoint semantic inputs are copied before return. Physical
+// backing is committed at this cold boundary, not per epoch; extent is not a
+// context-size allocation.
 iree_status_t loom_serve_text_row_submit_reserve(
     loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
     const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
+    loom_serve_execution_qos_t qos,
     loom_serve_residency_admission_t* out_admission,
     loom_serve_execution_frontier_t* out_frontier);
 
@@ -426,6 +428,11 @@ iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model,
 // capacity backpressure leaves all model state unchanged.
 loom_serve_residency_t* loom_serve_text_model_residency(
     const loom_serve_text_model_t* model);
+
+// Borrowed claim for explicit activation and row admission, retained by the
+// model through native retirement independently of service and warmup storage.
+loom_serve_execution_permit_t* loom_serve_text_model_admission_permit(
+    loom_serve_text_model_t* model);
 
 // Parameter-only virtual/physical statistics, excluding mutable state.
 loom_serve_memory_usage_t loom_serve_text_model_weight_statistics(

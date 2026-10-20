@@ -73,7 +73,8 @@ typedef struct loom_serve_image_generator_t {
   // interest. Runs on the owner, never concurrently with other services.
   void (*discard_batch)(void* self);
   // New-work admission on the shared owner; policy deferral differs from
-  // physical denial. ACQUIRED pins and enqueues parameter activation.
+  // physical denial. ACQUIRED pins and enqueues parameter activation, retaining
+  // the numerical permit through the first part and its successful readiness.
   iree_status_t (*try_admit)(void* self,
                              loom_serve_residency_admission_t* out_admission);
   // Enqueues one source-controlled part, returning borrowed completion handles.

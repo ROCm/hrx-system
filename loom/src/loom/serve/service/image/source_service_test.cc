@@ -44,8 +44,10 @@
 
 namespace {
 
-struct ImageRequest {
-  ~ImageRequest() { loom_serve_image_request_deinitialize(&value); }
+struct loom_serve_test_image_request_t {
+  ~loom_serve_test_image_request_t() {
+    loom_serve_image_request_deinitialize(&value);
+  }
 
   iree_status_t Initialize(iree_string_view_t body, uint32_t width,
                            uint32_t height) {
@@ -67,8 +69,9 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
   void SetUp() override {
     const char* source_path = std::getenv("LOOM_SERVE_TEST_MODEL_SOURCE");
     ASSERT_NE(source_path, nullptr);
-    const auto application_options =
-        loom_serve_test_application_options_default();
+    auto application_options = loom_serve_test_application_options_default();
+    // Activation and the first numerical part must share this single slot.
+    application_options.max_active = 1;
     loom_serve_test_application_t* application = nullptr;
     IREE_ASSERT_OK(loom_serve_test_application_acquire(
         &application_options, host_allocator_, &application));
@@ -181,7 +184,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
   iree_status_t PrepareSingle(iree_string_view_t body, uint32_t width,
                               uint32_t height,
                               loom_serve_image_prepared_t* out_prepared) {
-    ImageRequest input;
+    loom_serve_test_image_request_t input;
     IREE_RETURN_IF_ERROR(input.Initialize(body, width, height));
     loom_serve_prepared_request_t request = {};
     IREE_RETURN_IF_ERROR(
@@ -949,7 +952,7 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   for (uint64_t seed : {0u, 1u}) {
     const std::string body =
         R"({"prompt":"aba","seed":)" + std::to_string(seed) + "}";
-    ImageRequest input;
+    loom_serve_test_image_request_t input;
     IREE_ASSERT_OK(input.Initialize(
         iree_make_string_view(body.data(), body.size()), kWidth, kHeight));
     iree_const_byte_span_t rgb;
@@ -1592,7 +1595,7 @@ class ImageSpecializationTest : public SourceImageServiceTest {
     const auto before = compiler_allocations_.load();
     loom_serve_image_prepared_t prepared;
     iree_const_byte_span_t rgb;
-    ImageRequest input;
+    loom_serve_test_image_request_t input;
     IREE_ASSERT_OK(input.Initialize(IREE_SV(R"({"prompt":"aba","seed":1})"),
                                     width, height));
     IREE_ASSERT_OK(
@@ -1612,7 +1615,7 @@ class ImageSpecializationTest : public SourceImageServiceTest {
         R"({"prompt":"ab","loras":[{"id":"red","scale":)" +
         std::to_string(first_strength - 1.0f) +
         R"(},{"id":"green","scale":-0.5}]})";
-    std::array<ImageRequest, 2> inputs;
+    std::array<loom_serve_test_image_request_t, 2> inputs;
     IREE_ASSERT_OK(inputs[0].Initialize(
         iree_make_string_view(first_body.data(), first_body.size()), kWidth,
         kHeight));
@@ -1639,7 +1642,7 @@ class ImageSpecializationTest : public SourceImageServiceTest {
             R"({"prompt":"ab","loras":[{"id":"red","scale":0},{"id":"\u0072ed"}]})",
         }) {
       SCOPED_TRACE(body);
-      ImageRequest input;
+      loom_serve_test_image_request_t input;
       IREE_ASSERT_OK(
           input.Initialize(iree_make_cstring_view(body), kWidth, kHeight));
       loom_serve_prepared_request_t rejected = {};

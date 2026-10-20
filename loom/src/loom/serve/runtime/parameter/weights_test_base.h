@@ -25,6 +25,7 @@
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/parameter/activation.h"
+#include "loom/serve/runtime/parameter/admission.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/testing/compiler.h"
@@ -356,6 +357,11 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   void SetUp() override {
     group_ = groups_[GetParam() ? 1 : 0];
     device_owner_ = loom_serve_device_group_at(group_, 0);
+    for (auto& permit : permits_) {
+      loom_serve_execution_permit_initialize(
+          loom_serve_device_group_scheduler(group_),
+          loom_serve_device_execution_resources(device_owner_), &permit);
+    }
     device_ = loom_serve_device_handle(device_owner_);
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
     transfer_ = loom_serve_device_transfer_queue(device_owner_);
@@ -408,6 +414,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     }
     for (auto* plan : plans_) {
       loom_serve_weights_await_retirement(plan);
+    }
+    for (auto& permit : permits_) {
+      loom_serve_execution_permit_deinitialize(&permit);
     }
     for (auto* residency : residencies_) {
       loom_serve_residency_free(residency);
@@ -726,6 +735,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   std::array<loom_serve_residency_group_t*, 3> parameter_groups_ = {};
   // Invocation working sets borrowing groups until final queue retirement.
   std::array<loom_serve_residency_t*, 3> residencies_ = {};
+  // Stable model claims survive activation callbacks through native retirement.
+  std::array<loom_serve_execution_permit_t, 3> permits_ = {};
   // Independent live-state allocation sharing the parameter pressure policy.
   loom_serve_virtual_buffer_t* state_ = nullptr;
   // Mutable-state accounting retained through virtual storage destruction.

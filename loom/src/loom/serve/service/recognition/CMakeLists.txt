@@ -284,6 +284,7 @@ loom_cc_library(
     loom::serve::runtime::execution::retirement
     loom::serve::runtime::execution::scheduler
     loom::serve::runtime::host
+    loom::serve::runtime::parameter::admission
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program

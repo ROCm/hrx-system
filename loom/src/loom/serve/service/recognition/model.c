@@ -16,6 +16,7 @@
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/retirement.h"
 #include "loom/serve/runtime/execution/scheduler.h"
+#include "loom/serve/runtime/parameter/admission.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/input.h"
 #include "loom/serve/runtime/program/json.h"
@@ -49,6 +50,8 @@ typedef struct loom_serve_recognition_invocation_t {
   iree_vm_buffer_t* payload;
   // Stable resident row, independent of its ordinal in any numerical batch.
   iree_host_size_t row_index;
+  // Immutable request class retained for owner-side native admission.
+  loom_serve_execution_qos_t qos;
   // Successful state commitment retained through request release.
   bool reserved;
   // Source next-work bytes, refreshed at each retired model selection cut.
@@ -102,6 +105,8 @@ struct loom_serve_recognition_model_t {
   loom_serve_device_t* owner;
   // Numerical claim retained until successful completion or native retirement.
   loom_serve_execution_permit_t permit;
+  // Activation and row-upload claim retained through actual native retirement.
+  loom_serve_execution_permit_t admission_permit;
   // Independent model work and feedback timelines on shared queues.
   loom_serve_execution_t* execution;
   // Stable source-addressed input/history and reusable conditioning ownership.
@@ -242,6 +247,7 @@ static iree_status_t loom_serve_recognition_model_destroy_resources(
   loom_serve_rows_retire(&model->state, NULL, NULL);
   IREE_ASSERT(loom_serve_recognition_model_is_retired(model));
   loom_serve_execution_permit_deinitialize(&model->permit);
+  loom_serve_execution_permit_deinitialize(&model->admission_permit);
   loom_serve_residency_free(model->residency);
   model->residency = NULL;
   loom_serve_residency_group_free(model->parameter_group);
@@ -960,6 +966,10 @@ iree_status_t loom_serve_recognition_load_allocate(
     loom_serve_execution_permit_initialize(
         loom_serve_device_scheduler(device),
         loom_serve_device_execution_resources(device), &load->model->permit);
+    loom_serve_execution_permit_initialize(
+        loom_serve_device_scheduler(device),
+        loom_serve_device_execution_resources(device),
+        &load->model->admission_permit);
     *out_load = load;
   } else {
     iree_slim_mutex_deinitialize(&load->event.mutex);
@@ -1144,6 +1154,11 @@ loom_serve_residency_t* loom_serve_recognition_model_residency(
   return model->residency;
 }
 
+loom_serve_execution_permit_t* loom_serve_recognition_model_admission_permit(
+    loom_serve_recognition_model_t* model) {
+  return &model->admission_permit;
+}
+
 static void loom_serve_recognition_invocation_free(
     loom_serve_recognition_model_t* model,
     loom_serve_recognition_invocation_t* invocation) {
@@ -1218,6 +1233,7 @@ static iree_status_t loom_serve_recognition_generator_prepare(
     invocation->state = state;
     invocation->payload = payload;
     invocation->row_index = row_index;
+    invocation->qos = request->qos;
     invocation->outputs = request->outputs;
     invocation->next = model->invocations;
     invocation->previous_next = &model->invocations;
@@ -1235,7 +1251,7 @@ static iree_status_t loom_serve_recognition_generator_prepare(
 static void loom_serve_recognition_generator_discard(void* self,
                                                      void* invocation) {
   loom_serve_recognition_model_t* model = self;
-  loom_serve_residency_cancel_admission(model->residency);
+  loom_serve_admission_cancel(model->residency, &model->admission_permit);
   loom_serve_recognition_invocation_free(model, invocation);
 }
 
@@ -1246,8 +1262,9 @@ static iree_status_t loom_serve_recognition_generator_admit(
   *out_frontier = (loom_serve_execution_frontier_t){0};
   loom_serve_recognition_model_t* model = self;
   loom_serve_recognition_invocation_t* invocation = opaque_invocation;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_residency_try_admit(model->residency, out_admission));
+  IREE_RETURN_IF_ERROR(loom_serve_admission_try_acquire(
+      model->residency, &model->admission_permit, invocation->qos,
+      out_admission));
   if (*out_admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     return iree_ok_status();
   }
@@ -1304,6 +1321,7 @@ static bool loom_serve_recognition_generator_complete_admit(
     void* self, void* opaque_invocation) {
   loom_serve_recognition_model_t* model = self;
   loom_serve_recognition_invocation_t* invocation = opaque_invocation;
+  loom_serve_execution_permit_complete(&model->admission_permit);
   loom_serve_rows_complete_backing(&model->state);
   if (invocation->reserved) {
     loom_serve_residency_cancel_admission(model->residency);

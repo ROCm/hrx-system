@@ -26,16 +26,16 @@
 // operation. Neither the registry nor its management connection borrows either.
 static iree_status_t loom_serve_registration_activate(
     loom_serve_activation_t** operation, loom_serve_residency_t* residency,
-    loom_serve_host_t* host, loom_serve_wake_callback_t observer,
-    loom_serve_activation_flags_t flags, iree_allocator_t host_allocator,
-    loom_serve_activation_phase_t* out_phase) {
+    loom_serve_execution_permit_t* permit, loom_serve_host_t* host,
+    loom_serve_wake_callback_t observer, loom_serve_activation_flags_t flags,
+    iree_allocator_t host_allocator, loom_serve_activation_phase_t* out_phase) {
   *out_phase = LOOM_SERVE_ACTIVATION_COMPLETE;
   if (!*operation) {
     if (iree_any_bit_set(flags, LOOM_SERVE_ACTIVATION_FLAG_CANCEL)) {
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_serve_activation_allocate(
-        residency, loom_serve_host_proactor_pool(host), observer.wake,
+        residency, permit, loom_serve_host_proactor_pool(host), observer.wake,
         observer.user_data, host_allocator, operation));
   }
   iree_status_t status =
@@ -182,6 +182,7 @@ static iree_status_t loom_serve_finite_registration_activate(
   return loom_serve_registration_activate(
       &registration->activation,
       loom_serve_finite_model_residency(registration->model),
+      loom_serve_finite_model_admission_permit(registration->model),
       loom_serve_device_host(registration->device), registration->observer,
       flags, registration->host_allocator, out_phase);
 }
@@ -354,6 +355,7 @@ static iree_status_t loom_serve_image_registration_activate(
   return loom_serve_registration_activate(
       &registration->activation,
       loom_serve_image_model_residency(registration->model),
+      loom_serve_image_model_admission_permit(registration->model),
       loom_serve_device_host(registration->device), registration->observer,
       flags, registration->host_allocator, out_phase);
 }
@@ -531,6 +533,7 @@ static iree_status_t loom_serve_speech_registration_activate(
   return loom_serve_registration_activate(
       &registration->activation,
       loom_serve_speech_model_residency(registration->model),
+      loom_serve_speech_model_admission_permit(registration->model),
       loom_serve_device_host(registration->device), registration->observer,
       flags, registration->host_allocator, out_phase);
 }
@@ -707,6 +710,7 @@ static iree_status_t loom_serve_recognition_registration_activate(
   return loom_serve_registration_activate(
       &registration->activation,
       loom_serve_recognition_model_residency(registration->model),
+      loom_serve_recognition_model_admission_permit(registration->model),
       loom_serve_device_host(registration->device), registration->observer,
       flags, registration->host_allocator, out_phase);
 }
@@ -913,6 +917,7 @@ static iree_status_t loom_serve_text_registration_activate(
   *out_component_status = iree_ok_status();
   *out_phase = LOOM_SERVE_ACTIVATION_COMPLETE;
   loom_serve_residency_t* residency = NULL;
+  loom_serve_execution_permit_t* permit = NULL;
   if (component == LOOM_SERVE_MODEL_COMPONENT_IMAGE &&
       !registration->activation) {
     if (iree_any_bit_set(flags, LOOM_SERVE_ACTIVATION_FLAG_CANCEL)) {
@@ -929,13 +934,15 @@ static iree_status_t loom_serve_text_registration_activate(
       return iree_ok_status();
     }
     residency = loom_serve_finite_model_residency(model);
+    permit = loom_serve_finite_model_admission_permit(model);
   } else if (component == LOOM_SERVE_MODEL_COMPONENT_PRIMARY) {
     residency = loom_serve_text_model_residency(registration->model);
+    permit = loom_serve_text_model_admission_permit(registration->model);
   }
   // An accepted image activation already owns its residency borrow. Joining
   // cancellation must not reenter component preparation during removal.
   return loom_serve_registration_activate(
-      &registration->activation, residency,
+      &registration->activation, residency, permit,
       loom_serve_device_host(registration->device), registration->observer,
       flags, registration->host_allocator, out_phase);
 }

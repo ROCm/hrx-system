@@ -41,6 +41,10 @@ class ActivationTest : public ::testing::TestWithParam<uint32_t> {
     IREE_ASSERT_OK(loom_serve_device_group_allocate(
         host_, 1, &options, nullptr, iree_allocator_system(), &group_));
     auto* device = loom_serve_device_group_at(group_, 0);
+    auto* scheduler = loom_serve_device_group_scheduler(group_);
+    const auto resources = loom_serve_device_execution_resources(device);
+    loom_serve_execution_permit_initialize(scheduler, resources, &permit_);
+    loom_serve_execution_permit_initialize(scheduler, resources, &peer_);
     IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution_));
     IREE_ASSERT_OK(loom_serve_residency_allocate(
         loom_serve_device_residency_cache(device), execution_, 0, nullptr,
@@ -52,7 +56,7 @@ class ActivationTest : public ::testing::TestWithParam<uint32_t> {
     IREE_ASSERT_OK(
         loom_serve_execution_barrier(execution_, {1, &gate_, &value}));
     IREE_ASSERT_OK(loom_serve_activation_allocate(
-        residency_, loom_serve_host_proactor_pool(host_), Wake, this,
+        residency_, &permit_, loom_serve_host_proactor_pool(host_), Wake, this,
         iree_allocator_system(), &activation_));
   }
 
@@ -79,6 +83,8 @@ class ActivationTest : public ::testing::TestWithParam<uint32_t> {
     loom_serve_residency_free(residency_);
     loom_serve_execution_release(execution_);
     iree_hal_semaphore_release(gate_);
+    loom_serve_execution_permit_deinitialize(&permit_);
+    loom_serve_execution_permit_deinitialize(&peer_);
     IREE_EXPECT_OK(loom_serve_device_group_free(group_));
     loom_serve_host_release(host_);
   }
@@ -87,6 +93,10 @@ class ActivationTest : public ::testing::TestWithParam<uint32_t> {
   loom_serve_host_t* host_ = nullptr;
   // Native device and shared residency cache owner.
   loom_serve_device_group_t* group_ = nullptr;
+  // Model-owned claim retained independently of the warmup operation.
+  loom_serve_execution_permit_t permit_ = {};
+  // Independent realtime work competing on the same bound resources.
+  loom_serve_execution_permit_t peer_ = {};
   // Model timeline containing an explicit unresolved predecessor.
   loom_serve_execution_t* execution_ = nullptr;
   // Parameter-free native group used by the real activation owner.
@@ -116,6 +126,27 @@ TEST_P(ActivationTest, UnstartedCancellationHasNoCallbackOrActivation) {
   EXPECT_FALSE(ready_);
 }
 
+TEST_P(ActivationTest, RealtimeDemandDefersWarmupBeforeNativeActivation) {
+  loom_serve_execution_permit_request(&peer_,
+                                      LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  IREE_ASSERT_OK(loom_serve_activation_advance(activation_, 0, &phase_));
+  EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_WAITING);
+  EXPECT_FALSE(loom_serve_residency_snapshot(residency_).active);
+  EXPECT_EQ(permit_.phase, LOOM_SERVE_EXECUTION_PERMIT_IDLE);
+  EXPECT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
+  IREE_ASSERT_OK(loom_serve_activation_advance(activation_, 0, &phase_));
+  EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_WAITING);
+  loom_serve_execution_permit_complete(&peer_);
+  IREE_ASSERT_OK(loom_serve_activation_advance(activation_, 0, &phase_));
+  EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_LOADING);
+  EXPECT_EQ(permit_.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
+  AwaitWake();
+  IREE_ASSERT_OK(loom_serve_activation_advance(activation_, 0, &phase_));
+  EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
+  EXPECT_EQ(permit_.phase, LOOM_SERVE_EXECUTION_PERMIT_IDLE);
+}
+
 TEST_P(ActivationTest, SubmittedCancellationJoinsRealReadinessPublication) {
   IREE_ASSERT_OK(loom_serve_activation_advance(activation_, 0, &phase_));
   EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_LOADING);
@@ -123,6 +154,9 @@ TEST_P(ActivationTest, SubmittedCancellationJoinsRealReadinessPublication) {
       activation_, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase_));
   EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_LOADING);
   EXPECT_TRUE(loom_serve_residency_snapshot(residency_).active);
+  loom_serve_execution_permit_request(&peer_,
+                                      LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
   {
     std::lock_guard<std::mutex> lock(mutex_);
     EXPECT_FALSE(ready_);
@@ -132,6 +166,7 @@ TEST_P(ActivationTest, SubmittedCancellationJoinsRealReadinessPublication) {
   IREE_ASSERT_OK(loom_serve_activation_advance(
       activation_, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase_));
   EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
+  EXPECT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
 }
 
 TEST_P(ActivationTest, FailedReadinessJoinsTheCallbackAndPreservesFailure) {
@@ -144,10 +179,16 @@ TEST_P(ActivationTest, FailedReadinessJoinsTheCallbackAndPreservesFailure) {
   IREE_EXPECT_STATUS_IS(expected_code_,
                         loom_serve_activation_advance(activation_, 0, &phase_));
   EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
-  // Final advance joins the proactor publication before storage is released;
-  // the failed native execution remains owned until ordinary owner draining.
+  // Final callback retirement does not imply native retirement. Destroying
+  // warmup storage cannot grant conflicting realtime work permission.
   loom_serve_activation_free(activation_);
   activation_ = nullptr;
+  loom_serve_execution_permit_request(&peer_,
+                                      LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  EXPECT_FALSE(loom_serve_execution_permit_try_acquire(&peer_));
+  IREE_EXPECT_STATUS_IS(expected_code_, loom_serve_execution_drain(execution_));
+  loom_serve_execution_permit_deinitialize(&permit_);
+  EXPECT_TRUE(loom_serve_execution_permit_try_acquire(&peer_));
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, ActivationTest, ::testing::Values(1u, 4u));

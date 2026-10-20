@@ -16,6 +16,7 @@
 #include "loom/serve/runtime/execution/scheduler.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/runtime/parameter/admission.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/text/admission.h"
@@ -500,7 +501,8 @@ static iree_status_t loom_serve_text_reclaim_idle(
     loom_serve_residency_admission_t admission;
     loom_serve_execution_frontier_t frontier;
     status = loom_serve_text_row_submit_reserve(
-        selected->row, mode, checkpoint, reservation, &admission, &frontier);
+        selected->row, mode, checkpoint, reservation,
+        service->pending.prepared.request->consumer.qos, &admission, &frontier);
     if (iree_status_is_ok(status) &&
         admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
       // Parameter admission owns shared pressure and idle-cache reclamation.
@@ -925,8 +927,9 @@ static iree_status_t loom_serve_text_admit_pending(
         const bool probe = loom_serve_text_admission_blocked(
             &service->pending.admission, service->pending.count);
         if (previous != service->pending.admission.cursor) {
-          loom_serve_residency_cancel_admission(
-              loom_serve_text_model_residency(service->model));
+          loom_serve_admission_cancel(
+              loom_serve_text_model_residency(service->model),
+              loom_serve_text_model_admission_permit(service->model));
           memset(&service->pending.prepared, 0,
                  sizeof(service->pending.prepared));
         }
@@ -1644,8 +1647,9 @@ static iree_status_t loom_serve_text_service_initialize(
 static void loom_serve_text_stop(loom_serve_text_service_t* service,
                                  iree_status_code_t terminal_code) {
   service->stopping = true;
-  loom_serve_residency_cancel_admission(
-      loom_serve_text_model_residency(service->model));
+  loom_serve_admission_cancel(
+      loom_serve_text_model_residency(service->model),
+      loom_serve_text_model_admission_permit(service->model));
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     loom_serve_text_session_t* session = &service->sessions[i];
     if (session->request.consumer.self) {

@@ -37,7 +37,9 @@ bool OptionsEqual(const loom_serve_test_application_options_t& lhs,
                   const loom_serve_test_application_options_t& rhs) {
   return lhs.worker_count == rhs.worker_count &&
          lhs.device_count == rhs.device_count && lhs.backing == rhs.backing &&
-         lhs.slab_size == rhs.slab_size && lhs.memory_limit == rhs.memory_limit;
+         lhs.slab_size == rhs.slab_size &&
+         lhs.memory_limit == rhs.memory_limit &&
+         lhs.max_active == rhs.max_active;
 }
 
 class ServiceTestEnvironment : public ::testing::Environment {
@@ -66,6 +68,7 @@ loom_serve_test_application_options_default(void) {
       .device_count = 1,
       .backing = loom_serve_test_device()->service_backing,
       .slab_size = 2 * 1024 * 1024,
+      .max_active = 2,
   };
 }
 
@@ -120,8 +123,9 @@ iree_status_t loom_serve_test_application_acquire(
           .memory_limit = options->memory_limit,
       };
     }
-    // Each actual device admits two units; the host has no added count limit.
-    std::vector<uint32_t> max_active(options->device_count + 1, 2);
+    // Device limits are independent of the shared host and exclusion scope.
+    std::vector<uint32_t> max_active(options->device_count + 1,
+                                     options->max_active);
     max_active[0] = 0;
     const loom_serve_execution_scope_t scope = {
         .resources = (UINT64_C(1) << (options->device_count + 1)) - 1,

@@ -1200,6 +1200,7 @@ loom_cc_test(
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::parameter::activation
+    loom::serve::runtime::parameter::admission
     loom::serve::runtime::parameter::bank
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::parameter::weights

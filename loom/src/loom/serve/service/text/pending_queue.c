@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/serve/runtime/parameter/admission.h"
+
 iree_status_t loom_serve_text_pending_queue_initialize(
     loom_serve_text_model_t* model, loom_serve_text_telemetry_t* telemetry,
     iree_host_size_t capacity, iree_host_size_t overtake_budget,
@@ -278,8 +280,9 @@ void loom_serve_text_pending_queue_remove(
     loom_serve_text_pending_queue_t* queue, iree_host_size_t index) {
   loom_serve_text_pending_request_t* request = queue->values[index];
   if (request == queue->prepared.request) {
-    loom_serve_residency_cancel_admission(
-        loom_serve_text_model_residency(queue->model));
+    loom_serve_admission_cancel(
+        loom_serve_text_model_residency(queue->model),
+        loom_serve_text_model_admission_permit(queue->model));
     memset(&queue->prepared, 0, sizeof(queue->prepared));
   } else if (queue->prepared.request && index < queue->prepared.index) {
     --queue->prepared.index;

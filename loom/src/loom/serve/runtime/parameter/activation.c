@@ -7,12 +7,15 @@
 
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/parameter/admission.h"
 
 struct loom_serve_activation_t {
   // Allocator owning this cold operation, released after callback retirement.
   iree_allocator_t host_allocator;
   // Borrowed parameter group outliving this operation and any failed load.
   loom_serve_residency_t* residency;
+  // Borrowed model claim, surviving failed readiness and warmup destruction.
+  loom_serve_execution_permit_t* permit;
   // Retained proactor progress ownership, shared with model and network I/O.
   iree_async_proactor_pool_entry_t* entry;
   // Owner-only phase; callback publication cannot alter admission or pins.
@@ -52,15 +55,17 @@ static void loom_serve_activation_ready(void* user_data,
 }
 
 iree_status_t loom_serve_activation_allocate(
-    loom_serve_residency_t* residency, iree_async_proactor_pool_t* pool,
-    void (*wake)(void* user_data), void* user_data,
-    iree_allocator_t host_allocator, loom_serve_activation_t** out_activation) {
+    loom_serve_residency_t* residency, loom_serve_execution_permit_t* permit,
+    iree_async_proactor_pool_t* pool, void (*wake)(void* user_data),
+    void* user_data, iree_allocator_t host_allocator,
+    loom_serve_activation_t** out_activation) {
   *out_activation = NULL;
   loom_serve_activation_t* activation = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, sizeof(*activation), (void**)&activation));
   activation->host_allocator = host_allocator;
   activation->residency = residency;
+  activation->permit = permit;
   activation->event.wake = wake;
   activation->event.user_data = user_data;
   iree_status_t status =
@@ -88,19 +93,22 @@ iree_status_t loom_serve_activation_advance(
     iree_slim_mutex_unlock(&activation->event.mutex);
     if (ready) {
       if (iree_status_is_ok(status)) {
+        loom_serve_execution_permit_complete(activation->permit);
         loom_serve_residency_release(activation->residency);
       }
       activation->phase = LOOM_SERVE_ACTIVATION_COMPLETE;
     }
   } else if (iree_any_bit_set(flags, LOOM_SERVE_ACTIVATION_FLAG_CANCEL)) {
-    loom_serve_residency_cancel_admission(activation->residency);
+    loom_serve_admission_cancel(activation->residency, activation->permit);
     activation->phase = LOOM_SERVE_ACTIVATION_COMPLETE;
   } else {
     loom_serve_residency_admission_t admission;
-    status = loom_serve_residency_try_admit(activation->residency, &admission);
+    status = loom_serve_admission_try_acquire(
+        activation->residency, activation->permit,
+        LOOM_SERVE_EXECUTION_QOS_BACKGROUND, &admission);
     if (iree_status_is_ok(status) &&
         admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
-      loom_serve_residency_cancel_admission(activation->residency);
+      loom_serve_admission_cancel(activation->residency, activation->permit);
       activation->frontier =
           loom_serve_residency_frontier(activation->residency);
       iree_async_semaphore_wait_operation_t* wait = &activation->wait;

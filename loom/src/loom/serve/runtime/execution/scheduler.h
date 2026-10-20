@@ -153,8 +153,8 @@ bool loom_serve_execution_is_preempted(
 bool loom_serve_execution_permit_try_acquire(
     loom_serve_execution_permit_t* permit);
 
-// Releases ACCEPTED permission after successful numerical readiness, before CPU
-// interpretation/publication. Failure notification alone cannot release it.
+// Releases ACCEPTED permission after successful native readiness, before
+// subsequent CPU publication. Failure notification alone cannot release it.
 void loom_serve_execution_permit_complete(
     loom_serve_execution_permit_t* permit);
 
