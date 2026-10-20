@@ -221,6 +221,141 @@ iree_c_embed_data(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "materialize_program_gfx90a"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:materialize_program_gfx90a"
+  TARGET
+    "::program_profile_gfx90a"
+  OUTPUT
+    "materialize_program_gfx90a.hsaco"
+  SRCS
+    "materialize.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "materialize_program_gfx9-4-generic"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:materialize_program_gfx9-4-generic"
+  TARGET
+    "::program_profile_gfx9-4-generic"
+  OUTPUT
+    "materialize_program_gfx9-4-generic.hsaco"
+  SRCS
+    "materialize.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "materialize_program_gfx11-generic"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:materialize_program_gfx11-generic"
+  TARGET
+    "::program_profile_gfx11-generic"
+  OUTPUT
+    "materialize_program_gfx11-generic.hsaco"
+  SRCS
+    "materialize.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "materialize_program_gfx1151"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:materialize_program_gfx1151"
+  TARGET
+    "::program_profile_gfx1151"
+  OUTPUT
+    "materialize_program_gfx1151.hsaco"
+  SRCS
+    "materialize.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "materialize_program_gfx1170"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:materialize_program_gfx1170"
+  TARGET
+    "::program_profile_gfx1170"
+  OUTPUT
+    "materialize_program_gfx1170.hsaco"
+  SRCS
+    "materialize.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "materialize_program_gfx12-generic"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:materialize_program_gfx12-generic"
+  TARGET
+    "::program_profile_gfx12-generic"
+  OUTPUT
+    "materialize_program_gfx12-generic.hsaco"
+  SRCS
+    "materialize.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "materialize_program_gfx12-5-generic"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:materialize_program_gfx12-5-generic"
+  TARGET
+    "::program_profile_gfx12-5-generic"
+  OUTPUT
+    "materialize_program_gfx12-5-generic.hsaco"
+  SRCS
+    "materialize.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+iree_c_embed_data(
+  NAME
+    materialize_programs
+  SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/materialize_program_gfx11-generic.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/materialize_program_gfx1151.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/materialize_program_gfx1170.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/materialize_program_gfx12-5-generic.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/materialize_program_gfx12-generic.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/materialize_program_gfx9-4-generic.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/materialize_program_gfx90a.hsaco"
+  C_FILE_OUTPUT
+    "materialize_programs.c"
+  H_FILE_OUTPUT
+    "materialize_programs.h"
+  IDENTIFIER
+    "iree_hal_amd_gpu_aql_materialize_programs"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
 iree_cc_library(
   NAME
     packet
@@ -346,10 +481,8 @@ iree_cc_library(
     "indirect.c"
   DEPS
     ::dispatch
-    iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::image
     iree::hal::drivers::amd::gpu::target::identity
-    iree::hal::drivers::amd::status
   PUBLIC
 )
 endif()
@@ -498,7 +631,7 @@ iree_cc_library(
     "queue.c"
   DEPS
     ::growth
-    ::indirect
+    ::program
     ::ring
     ::scratch
     iree::async
@@ -513,6 +646,56 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::host_wait
     iree::hal::drivers::amd::gpu::queue::memory_mapping
     iree::hal::drivers::amd::gpu::queue::user_queue
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+iree_cc_library(
+  NAME
+    materialize
+  HDRS
+    "materialize.h"
+  SRCS
+    "materialize.c"
+  DEPS
+    ::packet
+    iree::base
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::target::identity
+  PUBLIC
+)
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+iree_cc_test(
+  NAME
+    materialize_test
+  SRCS
+    "materialize_test.cc"
+  DEPS
+    ::materialize
+    ::materialize_programs
+    iree::base
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::image::hsaco
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    program
+  HDRS
+    "program.h"
+  SRCS
+    "program.c"
+  DEPS
+    ::indirect
+    ::materialize
+    iree::hal::drivers::amd::gpu::queue::blit
+    iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::status
   PUBLIC
 )

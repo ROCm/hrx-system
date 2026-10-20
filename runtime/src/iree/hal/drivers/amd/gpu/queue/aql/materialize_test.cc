@@ -4,20 +4,20 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amd/gpu/queue/pm4/blit.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/materialize.h"
 
 #include <cstring>
 #include <vector>
 
 #include "iree/base/byte_sequence.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/blit_programs.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/materialize_programs.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
 
-class BlitTest : public ::testing::TestWithParam<size_t> {
+class MaterializeProgramTest : public ::testing::TestWithParam<size_t> {
  protected:
   void TearDown() override { iree_hal_amd_gpu_image_deinitialize(&image_); }
 
@@ -25,8 +25,9 @@ class BlitTest : public ::testing::TestWithParam<size_t> {
   iree_hal_amd_gpu_image_t image_ = {};
 };
 
-TEST_P(BlitTest, EmbeddedInstructionsAndDescriptorMatchSource) {
-  const auto& file = iree_hal_amd_gpu_pm4_blit_programs_create()[GetParam()];
+TEST_P(MaterializeProgramTest, EmbeddedInstructionsAndDescriptorMatchSource) {
+  const auto& file =
+      iree_hal_amd_gpu_aql_materialize_programs_create()[GetParam()];
   SCOPED_TRACE(file.name);
   iree_byte_span_t source = {nullptr, file.size};
   IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(), file.size,
@@ -46,22 +47,23 @@ TEST_P(BlitTest, EmbeddedInstructionsAndDescriptorMatchSource) {
   ASSERT_EQ(image_.relocation_count, 0u);
   ASSERT_EQ(image_.import_count, 0u);
   const auto& metadata = image_.metadata.kernels[0];
-  EXPECT_EQ(metadata.kernarg_segment_size, 32u);
+  EXPECT_EQ(metadata.kernarg_segment_size,
+            sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t));
   EXPECT_EQ(metadata.private_segment_fixed_size, 0u);
   EXPECT_EQ(metadata.group_segment_fixed_size, 0u);
-  ASSERT_EQ(metadata.argument_count, 5u);
-  for (size_t i = 0; i < 3; ++i) {
+  ASSERT_EQ(metadata.argument_count, 7u);
+  for (size_t i = 0; i < 4; ++i) {
     EXPECT_EQ(metadata.arguments[i].offset, i * 8);
     EXPECT_EQ(metadata.arguments[i].size, 8u);
   }
-  EXPECT_EQ(metadata.arguments[3].offset, 24u);
-  EXPECT_EQ(metadata.arguments[3].size, 4u);
-  EXPECT_EQ(metadata.arguments[4].offset, 28u);
-  EXPECT_EQ(metadata.arguments[4].size, 4u);
+  for (size_t i = 4; i < 7; ++i) {
+    EXPECT_EQ(metadata.arguments[i].offset, 32 + (i - 4) * 4);
+    EXPECT_EQ(metadata.arguments[i].size, 4u);
+  }
   iree_const_byte_span_t code;
   iree_hal_amd_gpu_image_kernel_t descriptor;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_blit_program_query(image_.target.version,
-                                                         &code, &descriptor));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_aql_materialize_program_query(
+      image_.target.version, &code, &descriptor));
   const auto& kernel = image_.kernels[0];
   EXPECT_EQ(kernel.compute_pgm_rsrc1, descriptor.compute_pgm_rsrc1);
   EXPECT_EQ(kernel.compute_pgm_rsrc2, descriptor.compute_pgm_rsrc2);
@@ -69,7 +71,7 @@ TEST_P(BlitTest, EmbeddedInstructionsAndDescriptorMatchSource) {
   EXPECT_EQ(kernel.code_properties, descriptor.code_properties);
   EXPECT_EQ(kernel.kernarg_preload, descriptor.kernarg_preload);
   const auto* symbol =
-      iree_hal_amd_gpu_image_find_symbol(&image_, IREE_SV("blit"));
+      iree_hal_amd_gpu_image_find_symbol(&image_, IREE_SV("materialize"));
   ASSERT_NE(symbol, nullptr);
   ASSERT_EQ(symbol->length, code.data_length);
   EXPECT_EQ(symbol->address.offset, kernel.entry_offset);
@@ -88,7 +90,8 @@ TEST_P(BlitTest, EmbeddedInstructionsAndDescriptorMatchSource) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Targets, BlitTest,
-    ::testing::Range(size_t{0}, iree_hal_amd_gpu_pm4_blit_programs_size()));
+    Targets, MaterializeProgramTest,
+    ::testing::Range(size_t{0},
+                     iree_hal_amd_gpu_aql_materialize_programs_size()));
 
 }  // namespace

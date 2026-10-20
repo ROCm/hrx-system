@@ -25,7 +25,7 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_fixup_program_query(gfxip, &fixup_code, &fixup_kernel));
   IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_pm4_blit_program_query(gfxip, &blit_code, &blit_kernel));
+      iree_hal_amd_gpu_blit_program_query(gfxip, &blit_code, &blit_kernel));
   const uint64_t blit_offset = iree_align_uint64(fixup_code.data_length, 256);
   const uint64_t byte_length =
       blit_offset + iree_align_uint64(blit_code.data_length, 256) + 256;
@@ -73,6 +73,21 @@ uint32_t* iree_hal_amd_gpu_pm4_fixup_emit(
   const uint32_t groups[3] = {(entry_count - 1) / 64 + 1, 1, 1};
   const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {.kernarg_pointer =
                                                            arguments_address};
+  words = iree_hal_amd_gpu_pm4_launch_emit(words, launch, size, partial, 0,
+                                           &inputs);
+  return iree_hal_amd_gpu_pm4_emit_dispatch_direct(words, groups,
+                                                   launch->dispatch_initiator);
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_blit_emit(
+    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
+    uint64_t argument_address) {
+  const uint32_t size[3] = {64, 1, 1};
+  const uint32_t partial[3] = {0, 0, 0};
+  const uint32_t groups[3] = {256, 1, 1};
+  const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
+      .kernarg_pointer = argument_address,
+  };
   words = iree_hal_amd_gpu_pm4_launch_emit(words, launch, size, partial, 0,
                                            &inputs);
   return iree_hal_amd_gpu_pm4_emit_dispatch_direct(words, groups,
@@ -139,7 +154,7 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
     const uint64_t length =
         iree_hal_amd_gpu_pm4_program_copy_length(program, instance);
     if (length > UINT64_C(0x03ffffff)) {
-      arguments->copy = (iree_hal_amd_gpu_pm4_blit_arguments_t){
+      arguments->copy = (iree_hal_amd_gpu_blit_arguments_t){
           .source = source.address,
           .target = instance->address,
           .length = length,

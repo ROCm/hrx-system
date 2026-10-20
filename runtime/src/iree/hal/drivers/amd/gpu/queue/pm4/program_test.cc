@@ -35,8 +35,7 @@ TEST_P(ProgramTest, NativeEntryPublishesItsActualProducers) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_fixup_program_query(version, &code, &kernel));
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(version, 0, &kernel,
                                                         0x100000, &pool.fixup));
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_pm4_blit_program_query(version, &code, &kernel));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_blit_program_query(version, &code, &kernel));
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(version, 0, &kernel,
                                                         0x200000, &pool.blit));
 

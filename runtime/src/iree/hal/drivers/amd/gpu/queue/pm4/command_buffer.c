@@ -704,11 +704,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
     buffer->pending_dma = true;
   } else {
     uint32_t argument_offset = 0;
-    iree_hal_amd_gpu_pm4_blit_arguments_t* arguments = NULL;
+    iree_hal_amd_gpu_blit_arguments_t* arguments = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_data(
         &buffer->recording, sizeof(*arguments), 8, &argument_offset,
         (void**)&arguments));
-    *arguments = (iree_hal_amd_gpu_pm4_blit_arguments_t){
+    *arguments = (iree_hal_amd_gpu_blit_arguments_t){
         .length = length == IREE_HAL_WHOLE_BUFFER ? 0 : length,
         .pattern = pattern,
         .fill = !copy,

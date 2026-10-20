@@ -570,7 +570,7 @@ static iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
         counts_address, argument_address, payload.words[0],
         (void*)(arguments->memory.contents.data + patch_offset));
     patch = iree_hal_amd_gpu_aql_indirect_packet(
-        queue->options.indirect, arguments->address + patch_offset);
+        queue->options.programs->indirect, arguments->address + patch_offset);
   }
   uint64_t packet_position = 0;
   const bool reserved = iree_hal_amd_gpu_aql_ring_try_reserve(

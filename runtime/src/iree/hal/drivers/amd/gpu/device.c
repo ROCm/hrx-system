@@ -18,7 +18,7 @@
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
-#include "iree/hal/drivers/amd/gpu/queue/aql/indirect.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
@@ -98,19 +98,13 @@ typedef struct iree_hal_amd_gpu_device_t {
   amdf_queue_command_type_t command_type;
   // Selected ownership contract, shared by every queue in this family.
   const iree_hal_amd_gpu_queue_lifecycle_t* queue_lifecycle;
-  // Native AQL instruction/storage policies, without PM4 builtin allocation.
-  struct {
-    // Stable read/write/execute requirements borrowed by both policies.
-    amdf_memory_device_access_t access;
-    // Host upload and immutable instruction placement.
-    iree_hal_amd_fabric_memory_options_t upload;
-    // Preferred physical-local packet/program storage.
-    iree_hal_amd_fabric_memory_options_t resident;
-    // Shared immutable device-time dispatch geometry publisher.
-    iree_hal_amd_gpu_aql_indirect_t indirect;
-  } aql;
-  // Resident command programs, shared builtins, and idle-instance trimming.
-  iree_hal_amd_gpu_pm4_program_pool_t programs;
+  // Resident placement and builtins for the selected native packet protocol.
+  union {
+    // Native descriptor kernels and write-only ring materialization.
+    iree_hal_amd_gpu_aql_program_pool_t aql;
+    // Register launches and native indirect-buffer execution.
+    iree_hal_amd_gpu_pm4_program_pool_t pm4;
+  } programs;
   // Lazy queue-local private storage shares immutable placement/geometry facts.
   struct {
     // Native scratch slot capacity and register layout.
@@ -514,9 +508,11 @@ static bool iree_hal_amd_gpu_device_release_children(
     iree_hal_queue_release(device->queues[i]);
     device->queues[i] = NULL;
   }
-  iree_hal_amd_gpu_pm4_program_pool_deinitialize(&device->programs);
-  iree_hal_amd_gpu_aql_indirect_deinitialize(device->context,
-                                             &device->aql.indirect);
+  if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+    iree_hal_amd_gpu_aql_program_pool_deinitialize(&device->programs.aql);
+  } else {
+    iree_hal_amd_gpu_pm4_program_pool_deinitialize(&device->programs.pm4);
+  }
   iree_hal_amd_gpu_allocation_context_deinitialize(&device->memory.allocations);
   iree_hal_amd_gpu_memory_mapping_context_deinitialize(
       &device->memory.mappings);
@@ -908,25 +904,14 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   }
   if (iree_status_is_ok(status)) {
     if (aql) {
-      device->aql.access = (amdf_memory_device_access_t){
-          .device = context->device,
-          .requirements = {
-              .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
-                        AMDF_MEMORY_ACCESS_EXECUTE,
-              .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
-              .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU}};
-      status = iree_hal_amd_gpu_context_query_program_memory(
-          context, family_ordinal, &device->aql.access, &device->aql.upload,
-          &device->aql.resident);
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_aql_indirect_initialize(
-            context, &device->aql.upload, &device->aql.indirect);
-      }
+      status = iree_hal_amd_gpu_aql_program_pool_initialize(
+          context, family_ordinal, options->queue_count, host_allocator,
+          &device->programs.aql);
     } else {
       status = iree_hal_amd_gpu_pm4_program_pool_initialize(
           device->context, family_ordinal, options->queue_count,
           publication_mode == AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
-          host_allocator, &device->programs);
+          host_allocator, &device->programs.pm4);
     }
   }
   if (iree_status_is_ok(status) && feedback_enabled) {
@@ -948,12 +933,12 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
           context->families[family_ordinal].format_features,
           &device->scratch.profile);
     }
-    device->scratch.access =
-        aql ? device->aql.access : device->programs.storage.access;
+    device->scratch.access = aql ? device->programs.aql.storage.access
+                                 : device->programs.pm4.storage.access;
     device->scratch.access.requirements.access =
         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
-    device->scratch.memory =
-        aql ? device->aql.resident : device->programs.storage.resident;
+    device->scratch.memory = aql ? device->programs.aql.storage.resident
+                                 : device->programs.pm4.storage.resident;
     device->scratch.memory.accesses = &device->scratch.access;
     device->scratch.memory.required_flags &= ~AMDF_MEMORY_FLAG_HOST_VISIBLE;
     device->scratch.memory.host_access = 0;
@@ -997,7 +982,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
           .command_byte_capacity = queue_options.command_byte_capacity,
           .memory = queue_options.memory,
           .scratch_memory = queue_options.scratch_memory,
-          .indirect = &device->aql.indirect,
+          .programs = &device->programs.aql,
           .publication = queue_options.publication,
           .allocations = queue_options.allocations,
           .mappings = queue_options.mappings,
@@ -1084,11 +1069,12 @@ iree_status_t iree_hal_amd_gpu_device_create(
     return status;
   }
   iree_hal_amd_gpu_device_t* device = (void*)base;
-  if (device->programs.code_upload) {
+  if (device->command_type != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
+      device->programs.pm4.code_upload) {
     status = iree_hal_amd_gpu_code_publish(
         context, device->transfers.queue, device->transfers.family_ordinal,
-        device->memory.family.queue_family_ordinal, &device->programs.code,
-        &device->programs.code_upload);
+        device->memory.family.queue_family_ordinal, &device->programs.pm4.code,
+        &device->programs.pm4.code_upload);
   }
   if (iree_status_is_ok(status)) {
     *out_device = base;
@@ -1115,9 +1101,10 @@ static void iree_hal_amd_gpu_device_trim_caches(void* user_data) {
   iree_hal_amd_gpu_device_t* device = user_data;
   iree_hal_amd_gpu_file_staging_trim(device->transfers.file_staging);
   iree_arena_block_pool_trim(&device->memory.allocations.blocks);
-  if (device->programs.storage.context) {
-    iree_hal_amd_gpu_program_pool_trim(&device->programs.storage);
-  }
+  iree_hal_amd_gpu_program_pool_trim(device->command_type ==
+                                             AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                                         ? &device->programs.aql.storage
+                                         : &device->programs.pm4.storage);
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     device->queue_lifecycle->trim(device->queues[i]);
   }
@@ -1208,8 +1195,8 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
   // queues establish instruction-cache visibility before dispatch.
   iree_hal_amd_fabric_memory_options_t memory =
       device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
-          ? device->aql.resident
-          : device->programs.storage.resident;
+          ? device->programs.aql.storage.resident
+          : device->programs.pm4.storage.resident;
   if (memory.host_access) {
     memory.host_access =
         memory.profile.host_mapping.supported_access &
@@ -1220,8 +1207,8 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .native_family_ordinal = device->memory.family.queue_family_ordinal,
       .memory = &memory,
       .upload = {.memory = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
-                               ? &device->aql.upload
-                               : &device->programs.storage.upload,
+                               ? &device->programs.aql.storage.upload
+                               : &device->programs.pm4.storage.upload,
                  .queue = device->transfers.queue,
                  .family_ordinal = device->transfers.family_ordinal},
       .notification = device->memory.notification,
@@ -1303,7 +1290,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_command_buffer(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_barrier_profile_initialize(
       device->target.version, &profile));
   return iree_hal_amd_gpu_pm4_command_buffer_create(
-      family, &device->programs, mode, categories, binding_capacity,
+      family, &device->programs.pm4, mode, categories, binding_capacity,
       (uint32_t)
           device->context->target_info.compute.local_data_share_byte_length,
       device->scratch.profile.maximum_wave_byte_length, &profile,

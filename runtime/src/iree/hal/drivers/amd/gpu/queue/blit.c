@@ -4,13 +4,87 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amd/gpu/queue/pm4/blit.h"
-
-#include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
+#include "iree/hal/drivers/amd/gpu/queue/blit.h"
 
 // Relocation-free instructions from blit.loom, checked with their complete
 // descriptors against source compilation for every supported ISA family.
-static const uint32_t iree_hal_amd_gpu_pm4_blit_gfx11[] = {
+static const uint32_t iree_hal_amd_gpu_blit_gfx90a[] = {
+    0xc0060080u, 0x00000018u, 0xc0060180u, 0x00000010u, 0xc00a0200u,
+    0x00000000u, 0xbe800080u, 0xb7840040u, 0xbe810090u, 0x68000004u,
+    0x7e020201u, 0xbf8cc07fu, 0xbf000003u, 0xbe810081u, 0x85010001u,
+    0xd2850002u, 0x00020300u, 0xd2860000u, 0x00020300u, 0xbe8300ffu,
+    0x00040000u, 0xbe84017eu, 0xd0c9000cu, 0x00000d02u, 0xd0c2000eu,
+    0x00000f00u, 0x868c0c0eu, 0xd0c1000eu, 0x00000f00u, 0x878c0c0eu,
+    0xbe8c200cu, 0xbf840079u, 0x7e020206u, 0xd11a0c01u, 0x00020501u,
+    0x7e060207u, 0xd11d0c03u, 0x00320103u, 0xd0ce000cu, 0x00012101u,
+    0xd0c2000eu, 0x00010103u, 0x868c0c0eu, 0xd0c4000eu, 0x00010103u,
+    0x878c0c0eu, 0xbe8c200cu, 0xbf84006cu, 0xbf018001u, 0xbf840027u,
+    0xd1190e04u, 0x00020408u, 0x7e060209u, 0xd11c0e05u, 0x003a0103u,
+    0xbf8c0f70u, 0xdc508000u, 0x037f0004u, 0xdc508004u, 0x067f0004u,
+    0xdc508008u, 0x077f0004u, 0xbf800000u, 0xdc50800cu, 0x047f0004u,
+    0xd1190e08u, 0x0002040au, 0x7e0a020bu, 0xd11c0e09u, 0x003a0105u,
+    0x7e140308u, 0x7e160309u, 0x7e180308u, 0x7e1a0309u, 0x7e1c0308u,
+    0x7e1e0309u, 0xbf8c0073u, 0xdc708000u, 0x007f0308u, 0xbf8c0f72u,
+    0xdc708004u, 0x007f060au, 0xbf8c0f71u, 0xdc708008u, 0x007f070cu,
+    0xbf8c0f70u, 0xdc70800cu, 0x007f040eu, 0xbf820043u, 0xd1190e04u,
+    0x0002040au, 0x7e06020bu, 0xd11c0e05u, 0x003a0103u, 0x7e060202u,
+    0xbf8cc07fu, 0xdc708000u, 0x007f0304u, 0x7e0c0304u, 0x7e0e0305u,
+    0x7e100304u, 0x7e120305u, 0xdc708004u, 0x007f0304u, 0xdc708008u,
+    0x007f0306u, 0xdc70800cu, 0x007f0308u, 0xbf82002fu, 0x7e060200u,
+    0xbe8e017eu, 0xd0c10010u, 0x00020303u, 0xbe902010u, 0xbf840033u,
+    0x7e080280u, 0xbf018001u, 0xd1191005u, 0x00020702u, 0xd11c1004u,
+    0x00420900u, 0xbf840011u, 0xd1191006u, 0x00020a08u, 0x7e0e0209u,
+    0xd11c1007u, 0x00420907u, 0xbf8c0f70u, 0xdc448000u, 0x067f0006u,
+    0xd1191008u, 0x00020a0au, 0x7e0a020bu, 0xd11c1009u, 0x00420905u,
+    0xbf8c0070u, 0xdc608000u, 0x007f0608u, 0xbf82000cu, 0x260c0683u,
+    0x240c0c83u, 0xd1191008u, 0x00020a0au, 0x7e0a020bu, 0x7e0e0202u,
+    0xd11c1009u, 0x00420905u, 0x20080f06u, 0xbf8cc07fu, 0xdc608000u,
+    0x007f0408u, 0x68060681u, 0xbf82ffd6u, 0xbefe0104u, 0xbf8c0f70u,
+    0xbf810000u, 0x88fe7e0cu, 0xbf85ffcfu, 0xbefe010cu, 0x7e020203u,
+    0xd1190c02u, 0x00020302u, 0x7e020280u, 0xd11c0c00u, 0x00320300u,
+    0xbf82ff70u, 0xbefe010eu, 0xbf82fff6u,
+};
+
+static const uint32_t iree_hal_amd_gpu_blit_gfx94[] = {
+    0xc0060100u, 0x00000018u, 0xc0060180u, 0x00000010u, 0xc00a0200u,
+    0x00000000u, 0xbe800080u, 0xb7820040u, 0xbe810090u, 0x68000002u,
+    0x7e020201u, 0xbf8cc07fu, 0xbf000005u, 0xbe810081u, 0x85010001u,
+    0xd2850002u, 0x00020300u, 0xd2860000u, 0x00020300u, 0xbe8200ffu,
+    0x00040000u, 0xbe8c017eu, 0xd0c9000eu, 0x00000d02u, 0xd0c20010u,
+    0x00000f00u, 0x868e0e10u, 0xd0c10010u, 0x00000f00u, 0x878e0e10u,
+    0xbe8e200eu, 0xbf840080u, 0x7e020206u, 0xd11a0e01u, 0x00020501u,
+    0x7e060207u, 0xbf800000u, 0xd11d0e03u, 0x003a0103u, 0xd0ce000eu,
+    0x00012101u, 0xd0c20010u, 0x00010103u, 0x868e0e10u, 0xd0c40010u,
+    0x00010103u, 0x878e0e10u, 0xbe8e200eu, 0xbf840072u, 0xbf018001u,
+    0xbf840029u, 0xd1191004u, 0x00020408u, 0x7e060209u, 0xbf800000u,
+    0xd11c1005u, 0x00420103u, 0xbf8c0f70u, 0xdc508000u, 0x037f0004u,
+    0xdc508004u, 0x067f0004u, 0xdc508008u, 0x077f0004u, 0xbf800000u,
+    0xdc50800cu, 0x047f0004u, 0xd1191008u, 0x0002040au, 0x7e0a020bu,
+    0xbf800000u, 0xd11c1009u, 0x00420105u, 0x7e140308u, 0x7e160309u,
+    0x7e180308u, 0x7e1a0309u, 0x7e1c0308u, 0x7e1e0309u, 0xbf8c0073u,
+    0xdc708000u, 0x007f0308u, 0xbf8c0f72u, 0xdc708004u, 0x007f060au,
+    0xbf8c0f71u, 0xdc708008u, 0x007f070cu, 0xbf8c0f70u, 0xdc70800cu,
+    0x007f040eu, 0xbf820047u, 0xd1191004u, 0x0002040au, 0x7e06020bu,
+    0xbf800000u, 0xd11c1005u, 0x00420103u, 0x7e060204u, 0xbf8cc07fu,
+    0xdc708000u, 0x007f0304u, 0x7e0c0304u, 0x7e0e0305u, 0x7e100304u,
+    0x7e120305u, 0xdc708004u, 0x007f0304u, 0xdc708008u, 0x007f0306u,
+    0xdc70800cu, 0x007f0308u, 0xbf820032u, 0x7e060200u, 0xbe90017eu,
+    0xd0c10012u, 0x00020303u, 0xbe922012u, 0xbf840037u, 0x7e080280u,
+    0xbf018001u, 0xd1191205u, 0x00020702u, 0xbf800001u, 0xd11c1204u,
+    0x004a0900u, 0xbf840013u, 0xd1191206u, 0x00020a08u, 0x7e0e0209u,
+    0xbf800000u, 0xd11c1207u, 0x004a0907u, 0xbf8c0f70u, 0xdc448000u,
+    0x067f0006u, 0xd1191208u, 0x00020a0au, 0x7e0a020bu, 0xbf800000u,
+    0xd11c1209u, 0x004a0905u, 0xbf8c0070u, 0xdc608000u, 0x007f0608u,
+    0xbf82000cu, 0x260c0683u, 0x240c0c83u, 0xd1191208u, 0x00020a0au,
+    0x7e0a020bu, 0x7e0e0204u, 0xd11c1209u, 0x004a0905u, 0x20080f06u,
+    0xbf8cc07fu, 0xdc608000u, 0x007f0408u, 0x68060681u, 0xbf82ffd3u,
+    0xbefe010cu, 0xbf8c0f70u, 0xbf810000u, 0x88fe7e0eu, 0xbf85ffccu,
+    0xbefe010eu, 0x7e020202u, 0xd1190e02u, 0x00020302u, 0x7e020280u,
+    0xbf800000u, 0xd11c0e00u, 0x003a0300u, 0xbf82ff68u, 0xbefe0110u,
+    0xbf82fff5u,
+};
+
+static const uint32_t iree_hal_amd_gpu_blit_gfx11[] = {
     0xb8020040u, 0xbe830090u, 0xf4040100u, 0xf8000018u, 0x4a000002u,
     0x7e020203u, 0xf4040080u, 0xf8000010u, 0xf4080200u, 0xf8000000u,
     0xbe800080u, 0xbe810081u, 0xbf870101u, 0xd72c0002u, 0x02020300u,
@@ -53,7 +127,7 @@ static const uint32_t iree_hal_amd_gpu_pm4_blit_gfx11[] = {
     0xbfa0ff53u, 0xbefe010eu, 0xbfa0fff4u,
 };
 
-static const uint32_t iree_hal_amd_gpu_pm4_blit_gfx12[] = {
+static const uint32_t iree_hal_amd_gpu_blit_gfx12[] = {
     0xb8750040u, 0xbe820090u, 0xf4002100u, 0xf8000018u, 0x4a000075u,
     0x7e020202u, 0xf4002080u, 0xf8000010u, 0xf4004200u, 0xf8000000u,
     0xbe800080u, 0xbe810081u, 0xbf870101u, 0xd72c0002u, 0x02020300u,
@@ -102,7 +176,7 @@ static const uint32_t iree_hal_amd_gpu_pm4_blit_gfx12[] = {
     0xbf88fffeu, 0xbefe010eu, 0xbfa0fff2u,
 };
 
-static const uint32_t iree_hal_amd_gpu_pm4_blit_gfx125[] = {
+static const uint32_t iree_hal_amd_gpu_blit_gfx125[] = {
     0xee174000u, 0x00040000u, 0x00000000u, 0x7e000000u, 0xb9800641u,
     0x00000001u, 0xb8750040u, 0xbe820090u, 0xf4002100u, 0xf8000018u,
     0x4a000075u, 0x7e020202u, 0xf4002080u, 0xf8000010u, 0xf4004200u,
@@ -150,52 +224,58 @@ static const uint32_t iree_hal_amd_gpu_pm4_blit_gfx125[] = {
     0xbfa0fff4u,
 };
 
-iree_status_t iree_hal_amd_gpu_pm4_blit_program_query(
+iree_status_t iree_hal_amd_gpu_blit_program_query(
     iree_hal_amd_gpu_gfxip_version_t gfxip, iree_const_byte_span_t* out_code,
     iree_hal_amd_gpu_image_kernel_t* out_kernel) {
   *out_code = iree_const_byte_span_empty();
   *out_kernel = (iree_hal_amd_gpu_image_kernel_t){0};
-  if (gfxip.major == 11 &&
-      (gfxip.minor == 0 || gfxip.minor == 5 || gfxip.minor == 7)) {
-    *out_code =
-        iree_make_const_byte_span(iree_hal_amd_gpu_pm4_blit_gfx11,
-                                  sizeof(iree_hal_amd_gpu_pm4_blit_gfx11));
-    out_kernel->compute_pgm_rsrc1 = 0xe0af0002u;
-    out_kernel->compute_pgm_rsrc2 = 0x84u;
-    out_kernel->code_properties = 0x408u;
+  if (gfxip.major == 9 && gfxip.minor == 0 && gfxip.stepping == 10) {
+    *out_code = iree_make_const_byte_span(iree_hal_amd_gpu_blit_gfx90a,
+                                          sizeof(iree_hal_amd_gpu_blit_gfx90a));
+    *out_kernel = (iree_hal_amd_gpu_image_kernel_t){
+        .compute_pgm_rsrc3 = 0x3u,
+        .compute_pgm_rsrc1 = 0xaf0081u,
+        .compute_pgm_rsrc2 = 0x88u,
+        .code_properties = 0x8u,
+    };
+  } else if (gfxip.major == 9 && (gfxip.minor == 4 || gfxip.minor == 5)) {
+    *out_code = iree_make_const_byte_span(iree_hal_amd_gpu_blit_gfx94,
+                                          sizeof(iree_hal_amd_gpu_blit_gfx94));
+    *out_kernel = (iree_hal_amd_gpu_image_kernel_t){
+        .compute_pgm_rsrc3 = 0x3u,
+        .compute_pgm_rsrc1 = 0xaf00c1u,
+        .compute_pgm_rsrc2 = 0x84u,
+        .code_properties = 0x8u,
+    };
+  } else if (gfxip.major == 11 &&
+             (gfxip.minor == 0 || gfxip.minor == 5 || gfxip.minor == 7)) {
+    *out_code = iree_make_const_byte_span(iree_hal_amd_gpu_blit_gfx11,
+                                          sizeof(iree_hal_amd_gpu_blit_gfx11));
+    *out_kernel = (iree_hal_amd_gpu_image_kernel_t){
+        .compute_pgm_rsrc1 = 0xe0af0002u,
+        .compute_pgm_rsrc2 = 0x84u,
+        .code_properties = 0x408u,
+    };
   } else if (gfxip.major == 12 && gfxip.minor == 0) {
-    *out_code =
-        iree_make_const_byte_span(iree_hal_amd_gpu_pm4_blit_gfx12,
-                                  sizeof(iree_hal_amd_gpu_pm4_blit_gfx12));
-    out_kernel->compute_pgm_rsrc1 = 0xe00f0002u;
-    out_kernel->compute_pgm_rsrc2 = 0x84u;
-    out_kernel->code_properties = 0x408u;
+    *out_code = iree_make_const_byte_span(iree_hal_amd_gpu_blit_gfx12,
+                                          sizeof(iree_hal_amd_gpu_blit_gfx12));
+    *out_kernel = (iree_hal_amd_gpu_image_kernel_t){
+        .compute_pgm_rsrc1 = 0xe00f0002u,
+        .compute_pgm_rsrc2 = 0x84u,
+        .code_properties = 0x408u,
+    };
   } else if (gfxip.major == 12 && gfxip.minor == 5) {
-    *out_code =
-        iree_make_const_byte_span(iree_hal_amd_gpu_pm4_blit_gfx125,
-                                  sizeof(iree_hal_amd_gpu_pm4_blit_gfx125));
-    out_kernel->compute_pgm_rsrc1 = 0xc00f0001u;
-    out_kernel->compute_pgm_rsrc2 = 0x84u;
-    out_kernel->code_properties = 0x408u;
+    *out_code = iree_make_const_byte_span(iree_hal_amd_gpu_blit_gfx125,
+                                          sizeof(iree_hal_amd_gpu_blit_gfx125));
+    *out_kernel = (iree_hal_amd_gpu_image_kernel_t){
+        .compute_pgm_rsrc1 = 0xc00f0001u,
+        .compute_pgm_rsrc2 = 0x84u,
+        .code_properties = 0x408u,
+    };
   } else {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "resident blits are unavailable for gfx%u.%u.%u",
+                            "blit builtin is unavailable for gfx%u.%u.%u",
                             gfxip.major, gfxip.minor, gfxip.stepping);
   }
   return iree_ok_status();
-}
-
-uint32_t* iree_hal_amd_gpu_pm4_blit_emit(
-    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
-    uint64_t argument_address) {
-  const uint32_t size[3] = {64, 1, 1};
-  const uint32_t partial[3] = {0, 0, 0};
-  const uint32_t groups[3] = {256, 1, 1};
-  const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
-      .kernarg_pointer = argument_address,
-  };
-  words = iree_hal_amd_gpu_pm4_launch_emit(words, launch, size, partial, 0,
-                                           &inputs);
-  return iree_hal_amd_gpu_pm4_emit_dispatch_direct(words, groups,
-                                                   launch->dispatch_initiator);
 }

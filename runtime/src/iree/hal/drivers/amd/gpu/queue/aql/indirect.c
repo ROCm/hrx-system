@@ -6,8 +6,6 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/aql/indirect.h"
 
-#include "iree/hal/drivers/amd/status.h"
-
 // Relocation-free instructions from indirect.loom. The source comparison covers
 // every instruction and the complete native descriptor for each target family.
 static const uint32_t iree_hal_amd_gpu_aql_indirect_gfx90a[] = {
@@ -145,58 +143,6 @@ iree_status_t iree_hal_amd_gpu_aql_indirect_program_query(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_gpu_aql_indirect_initialize(
-    iree_hal_amd_gpu_context_t* context,
-    const iree_hal_amd_fabric_memory_options_t* memory,
-    iree_hal_amd_gpu_aql_indirect_t* out_indirect) {
-  *out_indirect = (iree_hal_amd_gpu_aql_indirect_t){0};
-  const iree_hal_amd_gpu_gfxip_version_t gfxip = {
-      context->target_info.gfx_ip.major, context->target_info.gfx_ip.minor,
-      context->target_info.gfx_ip.stepping};
-  iree_const_byte_span_t code;
-  iree_hal_amd_gpu_image_kernel_t kernel;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_aql_indirect_program_query(gfxip, &code, &kernel));
-  const uint64_t length =
-      kernel.entry_offset + iree_align_uint64(code.data_length, 256) + 256;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_allocate(
-      context->api, memory, length, 256, context->event_sink,
-      &out_indirect->memory, NULL));
-  uint8_t* contents = out_indirect->memory.contents.data;
-  memset(contents, 0, length);
-  // AMDHSA descriptor: fixed LDS/private storage are zero, entry is relative
-  // to this descriptor, and reserved bytes remain zero.
-  iree_unaligned_store_le_u32(
-      contents + 8, sizeof(iree_hal_amd_gpu_aql_indirect_arguments_t));
-  iree_unaligned_store_le_u64(contents + 16, kernel.entry_offset);
-  iree_unaligned_store_le_u32(contents + 44, kernel.compute_pgm_rsrc3);
-  iree_unaligned_store_le_u32(contents + 48, kernel.compute_pgm_rsrc1);
-  iree_unaligned_store_le_u32(contents + 52, kernel.compute_pgm_rsrc2);
-  iree_unaligned_store_le_u16(contents + 56, kernel.code_properties);
-  iree_unaligned_store_le_u16(contents + 58, kernel.kernarg_preload);
-  memcpy(contents + kernel.entry_offset, code.data, code.data_length);
-  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
-      context->api->host_mapping_cache_control(out_indirect->memory.mapping,
-                                               AMDF_HOST_CACHE_OPERATION_FLUSH,
-                                               0, length),
-      "publish AQL indirect builtin"));
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(
-      context->api->memory_query_address(out_indirect->memory.handle, 0,
-                                         AMDF_MEMORY_ADDRESS_GPU,
-                                         &out_indirect->kernel_object),
-      "query AQL indirect builtin address");
-}
-
-void iree_hal_amd_gpu_aql_indirect_deinitialize(
-    iree_hal_amd_gpu_context_t* context,
-    iree_hal_amd_gpu_aql_indirect_t* indirect) {
-  if (indirect->memory.handle) {
-    iree_hal_amd_fabric_memory_deinitialize(context->api, context->event_sink,
-                                             &indirect->memory);
-  }
-  indirect->kernel_object = 0;
-}
-
 void iree_hal_amd_gpu_aql_indirect_prepare(
     const iree_hal_amd_gpu_kernarg_layout_t* layout,
     const iree_hal_amd_gpu_dispatch_geometry_t* geometry,
@@ -226,14 +172,14 @@ void iree_hal_amd_gpu_aql_indirect_prepare(
 }
 
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_indirect_packet(
-    const iree_hal_amd_gpu_aql_indirect_t* indirect, uint64_t arguments) {
+    uint64_t kernel_object, uint64_t arguments) {
   const iree_hal_amd_gpu_aql_dispatch_t dispatch = {
       .header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
                 IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
                 IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM | (1u << 16),
       .workgroup_size = {1, 1, 1},
       .grid_size = {1, 1, 1},
-      .kernel_object = indirect->kernel_object,
+      .kernel_object = kernel_object,
       .kernarg_address = arguments,
   };
   return iree_hal_amd_gpu_aql_packet_dispatch(&dispatch);

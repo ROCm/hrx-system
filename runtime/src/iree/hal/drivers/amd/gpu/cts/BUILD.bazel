@@ -324,6 +324,7 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "native_test",
     srcs = [
+        "aql_program_test.cc",
         "dispatch_test.cc",
         "native_test.cc",
     ],
@@ -337,6 +338,7 @@ iree_runtime_cc_test(
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amd:status",
@@ -348,6 +350,9 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:signal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:program",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:ring",
         "//runtime/src/iree/hal/memory:fixed_block_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

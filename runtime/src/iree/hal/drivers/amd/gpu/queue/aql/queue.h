@@ -10,7 +10,7 @@
 #include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
-#include "iree/hal/drivers/amd/gpu/queue/aql/indirect.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
 
 #ifdef __cplusplus
@@ -29,8 +29,8 @@ typedef struct iree_hal_amd_gpu_aql_queue_options_t {
   const iree_hal_amd_fabric_memory_options_t* memory;
   // Borrowed local private-storage policy with no host mapping.
   const iree_hal_amd_fabric_memory_options_t* scratch_memory;
-  // Borrowed immutable device-time geometry publisher shared by peer queues.
-  const iree_hal_amd_gpu_aql_indirect_t* indirect;
+  // Borrowed resident placement and native builtins shared by peer queues.
+  iree_hal_amd_gpu_aql_program_pool_t* programs;
   // Existing device deferred publisher.
   iree_hal_amd_gpu_publication_t* publication;
   // Shared queue-ordered allocation owner.

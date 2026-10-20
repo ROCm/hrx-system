@@ -71,6 +71,28 @@ iree_c_embed_data(
     target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
 )
 
+[
+    loom_kernel_binary(
+        name = "materialize_program_" + target,
+        testonly = True,
+        srcs = ["materialize.loom"],
+        out = "materialize_program_" + target + ".hsaco",
+        target = ":program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+iree_c_embed_data(
+    name = "materialize_programs",
+    testonly = True,
+    srcs = [":materialize_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "materialize_programs.c",
+    h_file_output = "materialize_programs.h",
+    identifier = "iree_hal_amd_gpu_aql_materialize_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+)
+
 iree_runtime_cc_library(
     name = "packet",
     srcs = ["packet.c"],
@@ -180,8 +202,6 @@ iree_runtime_cc_library(
     }),
     deps = [
         ":dispatch",
-        "//runtime/src/iree/hal/drivers/amd:status",
-        "//runtime/src/iree/hal/drivers/amd/gpu:context",
         "//runtime/src/iree/hal/drivers/amd/gpu/image",
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
     ],
@@ -323,7 +343,7 @@ iree_runtime_cc_library(
     }),
     deps = [
         ":growth",
-        ":indirect",
+        ":program",
         ":ring",
         ":scratch",
         "//runtime/src/iree/async",
@@ -339,5 +359,49 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:host_wait",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:memory_mapping",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "materialize",
+    srcs = ["materialize.c"],
+    hdrs = ["materialize.h"],
+    deps = [
+        ":packet",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "materialize_test",
+    srcs = ["materialize_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    deps = [
+        ":materialize",
+        ":materialize_programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "program",
+    srcs = ["program.c"],
+    hdrs = ["program.h"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":indirect",
+        ":materialize",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
     ],
 )

@@ -579,6 +579,7 @@ iree_cc_test(
   NAME
     native_test
   SRCS
+    "aql_program_test.cc"
     "dispatch_test.cc"
     "native_test.cc"
   DEPS
@@ -587,6 +588,7 @@ iree_cc_test(
     amdf::headers
     iree::async
     iree::base
+    iree::base::internal
     iree::hal
     iree::hal::cts::util::test_base
     iree::hal::drivers::amd::fabric
@@ -595,8 +597,11 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::image::hip_images
     iree::hal::drivers::amd::gpu::image::hsaco
     iree::hal::drivers::amd::gpu::kernarg
+    iree::hal::drivers::amd::gpu::queue::aql::program
+    iree::hal::drivers::amd::gpu::queue::aql::ring
     iree::hal::drivers::amd::gpu::queue::semaphore
     iree::hal::drivers::amd::gpu::queue::signal
+    iree::hal::drivers::amd::gpu::queue::user_queue
     iree::hal::drivers::amd::status
     iree::hal::memory::fixed_block_pool
     iree::testing::gtest

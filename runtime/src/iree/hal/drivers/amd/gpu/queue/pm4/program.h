@@ -8,8 +8,9 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_PROGRAM_H_
 
 #include "iree/hal/drivers/amd/gpu/code.h"
+#include "iree/hal/drivers/amd/gpu/queue/blit.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/blit.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/launch.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 
 #ifdef __cplusplus
@@ -59,7 +60,7 @@ typedef struct iree_hal_amd_gpu_pm4_program_arguments_t {
   // Independent full-word replacements for this instance.
   iree_hal_amd_gpu_fixup_arguments_t fixup;
   // Cold initialization or overlap clone, used only for a large native copy.
-  iree_hal_amd_gpu_pm4_blit_arguments_t copy;
+  iree_hal_amd_gpu_blit_arguments_t copy;
 } iree_hal_amd_gpu_pm4_program_arguments_t;
 
 // Native invocation extent, excluding caller-owned waits, optional padding,
@@ -89,6 +90,13 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
 uint32_t* iree_hal_amd_gpu_pm4_fixup_emit(
     uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
     uint64_t arguments_address, uint32_t entry_count);
+
+// Emits a fixed 256-group copy/fill launch covering an admitted byte extent.
+// Address fixups target the kernarg SGPR pair at DWORD 24. The caller owns
+// visibility and lifetime, as for any recorded shader dispatch.
+uint32_t* iree_hal_amd_gpu_pm4_blit_emit(
+    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
+    uint64_t argument_address);
 
 #ifdef __cplusplus
 }  // extern "C"
