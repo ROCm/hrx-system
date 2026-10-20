@@ -1,0 +1,56 @@
+// Required expansion exposes each cell in a fixed private array before target
+// legalization while the authored loops retain their generic indexing.
+kernel.def @unrolled_private_array() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 16 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %last = index.constant 3 : index
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %source = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %local = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<4xi32>
+  scf.for %position = [%begin to %end step %step] unroll {
+    %value = view.load %source[%position] : view<4xi32> -> i32
+    view.store %value, %local[%position] : i32, view<4xi32>
+  }
+  scf.for %position = [%begin to %end step %step] unroll {
+    %value = view.load %local[%position] : view<4xi32> -> i32
+    %reversed = index.sub %last, %position : index
+    view.store %value, %destination[%reversed] : i32, view<4xi32>
+  }
+  kernel.return
+}
+
+func.def @unrolled_private_array_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %last = index.constant 3 : index
+  %source = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<4xi32>
+  scf.for %position = [%begin to %end step %step] {
+    %reversed = index.sub %last, %position : index
+    %value = view.load %source[%reversed] : view<4xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<4xi32>
+  }
+  func.return
+}
+
+check.scenario @unrolled_private_array_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-13) step(17) : tensor<4xi32>
+    %storage = check.generate.fill value(91) : tensor<6xi32>
+    %output = check.tensor.view %storage offset(4) : tensor<6xi32> -> tensor<4xi32>
+    check.compare<@unrolled_private_array, @unrolled_private_array_oracle>(%input, %output) : (tensor<4xi32>, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<4xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<6xi32>
+    }
+  }
+  check.return
+}

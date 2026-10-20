@@ -64,6 +64,7 @@ MEMORY_CORPUS = loom_corpus_manifest(
         "storage/load_snapshot.loom",
         "storage/natural_alignment.loom",
         "storage/private.loom",
+        "storage/private_expansion.loom",
         "storage/stability/cfg.loom",
         "storage/stability/selection.loom",
         "storage/stability/switch.loom",

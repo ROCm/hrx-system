@@ -89,6 +89,7 @@ _KERNEL_SOURCES = [
     "memory/storage/load_snapshot.loom",
     "memory/storage/natural_alignment.loom",
     "memory/storage/private.loom",
+    "memory/storage/private_expansion.loom",
     "memory/storage/stability/cfg.loom",
     "memory/storage/stability/selection.loom",
     "memory/storage/stability/switch.loom",

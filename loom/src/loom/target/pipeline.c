@@ -432,6 +432,15 @@ static iree_status_t loom_target_pipeline_build_source_loop_unrolling(
   return loom_target_pipeline_build_cleanup_if_changed(builder);
 }
 
+static iree_status_t
+loom_target_pipeline_build_post_expansion_private_storage_promotion(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("promote-private-fragments")));
+  return loom_target_pipeline_build_cleanup_if_changed(builder);
+}
+
 // Motion consumes structured loop entry and effect facts before CFG conversion
 // erases those boundaries, including when lexical workers are still inline.
 static iree_status_t loom_target_pipeline_build_source_cfg_lowering(
@@ -457,9 +466,6 @@ loom_target_pipeline_build_cfg_source_finalization_after_bank_sroa(
   (void)user_data;
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("sink-single-use-reads")));
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup_if_changed(builder));
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
-      builder, IREE_SV("promote-private-fragments")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup_if_changed(builder));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_view_root_selection_decomposition(builder,
@@ -767,6 +773,13 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
       builder, loom_target_pipeline_build_cleanup_target_functions, NULL,
       &bank_sroa_changed_op));
+  // Source expansion can turn dynamically indexed private fragments into
+  // static cells. Promote them for every control-flow representation before
+  // complete legalization requires target-native memory spaces.
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+      builder, IREE_SV("source"),
+      loom_target_pipeline_build_post_expansion_private_storage_promotion, NULL,
+      &for_op));
   // Finish reference rewrites after source expansion exposes static lanes and
   // before CFG finalization. Source-to-low owns the final legality check.
   IREE_RETURN_IF_ERROR(
