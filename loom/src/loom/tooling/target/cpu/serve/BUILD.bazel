@@ -17,6 +17,63 @@ load("//loom/src/loom/serve/service/finite:testdata/component/sources.bzl", COMP
 
 package(default_visibility = ["//visibility:private"])
 
+loom_cc_test(
+    name = "activity_test",
+    srcs = ["activity_test_main.c"],
+    args = [
+        "--fixture=true",
+        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",
+        "--device=task",
+        "--pool_backing=fixed",
+        "--workers=1",
+    ],
+    data = RECOGNITION_SOURCES,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/binding/c/target/cpu:iree_hal",
+        "//loom/binding/c/target/x86",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/tools/loom-serve:activity_tests",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "activity_parallel_test",
+    srcs = ["activity_test_main.c"],
+    args = [
+        "--fixture=true",
+        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",
+        "--device=task",
+        "--pool_backing=fixed",
+        "--workers=8",
+        "--stream_count=8",
+    ],
+    data = RECOGNITION_SOURCES,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/binding/c/target/cpu:iree_hal",
+        "//loom/binding/c/target/x86",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/tools/loom-serve:activity_tests",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_cc_library(
     name = "test_compiler",
     testonly = True,

@@ -30,6 +30,46 @@ _ROCR_TEST_TAGS = [
     "notsan",
 ]
 
+loom_cc_test(
+    name = "activity_test",
+    srcs = ["activity_test_main.c"],
+    args = [
+        "--fixture=true",
+        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",
+        "--device=task",
+        "--pool_backing=fixed",
+        "--workers=8",
+        "--stream_count=8",
+        "--device=amdgpu",
+        "--fixture_transcription_device=1",
+    ],
+    data = RECOGNITION_SOURCES,
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _ROCR_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//loom/config/target:amdgpu_artifacts",
+        "//runtime/config/hal:driver_amdgpu",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/target/amdgpu:iree_hal",
+        "//loom/binding/c/target/cpu:iree_hal",
+        "//loom/binding/c/target/x86",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/tools/loom-serve:activity_tests",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/registration",
+    ],
+)
+
 loom_cc_library(
     name = "test_compiler",
     testonly = True,
