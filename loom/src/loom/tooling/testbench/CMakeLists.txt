@@ -227,8 +227,10 @@ loom_cc_library(
     ::api
     ::testbench
     iree::base
+    iree::base::internal::arena
     loom::ir
     loom::ops::check
+    loom::util::json
   PUBLIC
 )
 

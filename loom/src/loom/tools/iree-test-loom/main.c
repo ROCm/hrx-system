@@ -434,7 +434,7 @@ static bool iree_test_loom_case_has_kernel_launch(
 static iree_status_t iree_test_loom_evaluate_requirements(
     const iree_test_loom_configuration_t* configuration,
     loom_run_hal_testbench_context_t* hal_context, const loom_module_t* module,
-    const loom_region_t* body,
+    const loom_region_t* body, iree_arena_allocator_t* arena,
     loom_testbench_requirement_result_t* out_result) {
   loom_testbench_requirement_provider_t
       requirement_providers[IREE_TEST_LOOM_MAX_REQUIREMENT_PROVIDERS] = {0};
@@ -454,7 +454,7 @@ static iree_status_t iree_test_loom_evaluate_requirements(
   loom_testbench_requirement_provider_registry_initialize(
       requirement_providers, requirement_provider_count, &requirement_registry);
   return loom_testbench_evaluate_requirements(
-      module, body, &requirement_registry, out_result);
+      module, body, &requirement_registry, arena, out_result);
 }
 
 static iree_status_t iree_test_loom_append_skipped_record(
@@ -467,19 +467,8 @@ static iree_status_t iree_test_loom_append_skipped_record(
       loom_json_object_begin(skipped_records->stream, &object));
   IREE_RETURN_IF_ERROR(
       loom_json_object_write_string_field(&object, kind, name));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &object, IREE_SV("provider"), requirement_result->provider));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &object, IREE_SV("op"),
-      loom_testbench_requirement_op_kind_name(requirement_result->op_kind)));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &object, IREE_SV("code"),
-      loom_testbench_requirement_skip_code_name(requirement_result->code)));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
-      &object, IREE_SV("provider_code"), requirement_result->provider_code));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
-      &object, IREE_SV("display_message"),
-      requirement_result->display_message));
+  IREE_RETURN_IF_ERROR(loom_testbench_requirement_result_write_json_fields(
+      requirement_result, &object));
   return loom_json_object_end(&object);
 }
 
@@ -1301,7 +1290,8 @@ int iree_test_loom_main(int argc, char** argv,
           if (case_plan->issue_count == 0) {
             status = iree_test_loom_evaluate_requirements(
                 configuration, &hal_context, module_plan.module,
-                loom_check_case_body(case_plan->op), &requirement_results[i]);
+                loom_check_case_body(case_plan->op), &plan_arena,
+                &requirement_results[i]);
           }
         }
       }
@@ -1319,7 +1309,7 @@ int iree_test_loom_main(int argc, char** argv,
               &requirement_results[module_plan.case_count + i];
           status = iree_test_loom_evaluate_requirements(
               configuration, &hal_context, module_plan.module,
-              loom_check_scenario_body(scenario->op), result);
+              loom_check_scenario_body(scenario->op), &plan_arena, result);
           if (iree_status_is_ok(status) && !result->skipped) {
             ++runnable_scenario_count;
           }

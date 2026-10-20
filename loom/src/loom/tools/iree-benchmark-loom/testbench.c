@@ -125,14 +125,20 @@ iree_status_t iree_benchmark_loom_evaluate_requirements(
   loom_testbench_requirement_provider_registry_t requirement_registry = {0};
   loom_testbench_requirement_provider_registry_initialize(
       requirement_providers, requirement_provider_count, &requirement_registry);
-  enum { UNCHECKED = 0, RUNNABLE = 1, SKIPPED = 2 };
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(arena->block_pool, &scratch_arena);
   const iree_host_size_t record_count =
       module_plan->case_count + module_plan->scenario_count;
-  uint8_t* record_states = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, record_count, sizeof(*record_states), (void**)&record_states));
-  memset(record_states, UNCHECKED, record_count * sizeof(*record_states));
-  for (iree_host_size_t i = 0; i < work_plan->selected_benchmark_count; ++i) {
+  const iree_benchmark_loom_selected_benchmark_t** first_selections = NULL;
+  iree_status_t status = iree_arena_allocate_array(&scratch_arena, record_count,
+                                                   sizeof(*first_selections),
+                                                   (void**)&first_selections);
+  if (iree_status_is_ok(status)) {
+    memset(first_selections, 0, record_count * sizeof(*first_selections));
+  }
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < work_plan->selected_benchmark_count;
+       ++i) {
     iree_benchmark_loom_selected_benchmark_t* selection =
         &work_plan->selected_benchmarks[i];
     const iree_host_size_t record_index =
@@ -140,19 +146,30 @@ iree_status_t iree_benchmark_loom_evaluate_requirements(
             ? selection->case_plan - module_plan->cases
             : module_plan->case_count +
                   (selection->scenario_plan - module_plan->scenarios);
-    if (record_states[record_index] == UNCHECKED) {
+    if (first_selections[record_index] != NULL) {
+      selection->skip_reason = first_selections[record_index]->skip_reason;
+    } else {
       const loom_region_t* body =
           selection->case_plan != NULL
               ? loom_check_case_body(selection->case_plan->op)
               : loom_check_scenario_body(selection->scenario_plan->op);
       loom_testbench_requirement_result_t result = {0};
-      IREE_RETURN_IF_ERROR(loom_testbench_evaluate_requirements(
-          module_plan->module, body, &requirement_registry, &result));
-      record_states[record_index] = result.skipped ? SKIPPED : RUNNABLE;
+      status = loom_testbench_evaluate_requirements(
+          module_plan->module, body, &requirement_registry, arena, &result);
+      if (iree_status_is_ok(status) && result.skipped) {
+        loom_testbench_requirement_result_t* retained_result = NULL;
+        status = iree_arena_allocate(arena, sizeof(*retained_result),
+                                     (void**)&retained_result);
+        if (iree_status_is_ok(status)) {
+          *retained_result = result;
+          selection->skip_reason = retained_result;
+        }
+      }
+      first_selections[record_index] = selection;
     }
-    selection->skipped = record_states[record_index] == SKIPPED;
   }
-  return iree_ok_status();
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }
 
 void iree_benchmark_loom_configure_reference_oracles(

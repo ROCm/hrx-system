@@ -263,9 +263,23 @@ static iree_status_t loom_testbench_requirement_evaluate_op(
   return iree_ok_status();
 }
 
+static iree_status_t loom_testbench_requirement_retain_text(
+    iree_arena_allocator_t* arena, iree_string_view_t* text) {
+  if (iree_string_view_is_empty(*text)) {
+    return iree_ok_status();
+  }
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, text->size, (void**)&storage));
+  memcpy(storage, text->data, text->size);
+  text->data = storage;
+  return iree_ok_status();
+}
+
 iree_status_t loom_testbench_evaluate_requirements(
     const loom_module_t* module, const loom_region_t* body,
     const loom_testbench_requirement_provider_registry_t* registry,
+    iree_arena_allocator_t* arena,
     loom_testbench_requirement_result_t* out_result) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(body);
@@ -280,9 +294,29 @@ iree_status_t loom_testbench_evaluate_requirements(
       IREE_RETURN_IF_ERROR(loom_testbench_requirement_evaluate_op(
           module, registry, op, out_result));
       if (out_result->skipped) {
-        return iree_ok_status();
+        IREE_RETURN_IF_ERROR(loom_testbench_requirement_retain_text(
+            arena, &out_result->provider_code));
+        return loom_testbench_requirement_retain_text(
+            arena, &out_result->display_message);
       }
     }
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_testbench_requirement_result_write_json_fields(
+    const loom_testbench_requirement_result_t* result,
+    loom_json_object_writer_t* object) {
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      object, IREE_SV("provider"), result->provider));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      object, IREE_SV("op"),
+      loom_testbench_requirement_op_kind_name(result->op_kind)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      object, IREE_SV("code"),
+      loom_testbench_requirement_skip_code_name(result->code)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      object, IREE_SV("provider_code"), result->provider_code));
+  return loom_json_object_write_string_field_if_nonempty(
+      object, IREE_SV("display_message"), result->display_message);
 }

@@ -206,7 +206,9 @@ loom_cc_library(
         ":testbench",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/check",
+        "//loom/src/loom/util:json",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

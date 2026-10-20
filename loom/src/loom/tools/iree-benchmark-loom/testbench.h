@@ -44,8 +44,9 @@ iree_status_t iree_benchmark_loom_add_runtime_requirements(
     iree_arena_block_pool_t* block_pool);
 
 // Evaluates each selected case or scenario's requirements once and retains the
-// skip decision in every selected benchmark referencing that record. Call
-// before binding generator invocations or preparing any execution resources.
+// skip evidence in |arena|, shared by every benchmark referencing that record.
+// |arena| remains live through execution and result emission. Call before
+// binding generator invocations or preparing any execution resources.
 iree_status_t iree_benchmark_loom_evaluate_requirements(
     const iree_benchmark_loom_configuration_t* configuration,
     loom_run_hal_testbench_context_t* hal_context,

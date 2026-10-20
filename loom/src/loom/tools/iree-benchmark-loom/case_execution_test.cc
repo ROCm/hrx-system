@@ -6,6 +6,7 @@
 
 #include "loom/tools/iree-benchmark-loom/case_execution.h"
 
+#include <cstdio>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -15,7 +16,10 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/check/ops.h"
+#include "loom/tools/iree-benchmark-loom/hal_setup.h"
 #include "loom/tools/iree-benchmark-loom/options.h"
+#include "loom/tools/iree-benchmark-loom/testbench.h"
+#include "loom/tools/iree-benchmark-loom/work_execution.h"
 
 namespace loom {
 namespace {
@@ -227,6 +231,212 @@ class BenchmarkCaseExecutionTest : public ::testing::Test {
   loom_context_t context_;
   std::vector<loom_module_t*> owned_modules_;
 };
+
+struct RequirementQueries {
+  // Number of actual provider queries, excluding benchmark aliases.
+  size_t count = 0;
+  // Mutable provider text overwritten on every query.
+  char code[32] = {};
+};
+
+static iree_status_t PopulateRequirements(
+    void* user_data, loom_run_hal_testbench_context_t* context,
+    iree_host_size_t capacity, loom_testbench_requirement_provider_t* providers,
+    iree_host_size_t* out_count) {
+  *out_count = 1;
+  providers[0] = {
+      .name = IREE_SV("test.requirement"),
+      .user_data = user_data,
+      .query =
+          [](void* user_data, const loom_module_t* module,
+             loom_named_attr_slice_t attrs,
+             loom_testbench_requirement_provider_result_t* result) {
+            auto* queries = static_cast<RequirementQueries*>(user_data);
+            ++queries->count;
+            std::snprintf(queries->code, sizeof(queries->code), "query_%zu",
+                          queries->count);
+            bool present = false;
+            int64_t enabled = 0;
+            IREE_RETURN_IF_ERROR(
+                loom_testbench_requirement_read_optional_i64_attr(
+                    module, attrs, IREE_SV("enabled"), &present, &enabled));
+            *result = {
+                .state =
+                    present && enabled != 0
+                        ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
+                        : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED,
+                .provider_code = iree_make_cstring_view(queries->code),
+            };
+            return iree_ok_status();
+          },
+  };
+  return iree_ok_status();
+}
+
+TEST_F(BenchmarkCaseExecutionTest, RetainsOneSkipReasonPerRecord) {
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("requirements"),
+                                      &block_pool_, nullptr,
+                                      iree_allocator_system(), &module));
+  owned_modules_.push_back(module);
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+  loom_string_id_t provider_name;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("test.requirement"),
+                                           &provider_name));
+  loom_string_id_t enabled_name;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("enabled"), &enabled_name));
+  // Each record needs only its requirement and return. The third record is
+  // admitted; all three have nonadjacent logical benchmark aliases below.
+  const char* names[] = {"first", "second", "admitted"};
+  loom_testbench_case_plan_t cases[3] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(cases); ++i) {
+    loom_string_id_t name;
+    loom_symbol_id_t symbol;
+    IREE_ASSERT_OK(loom_module_intern_string(
+        module, iree_make_cstring_view(names[i]), &name));
+    IREE_ASSERT_OK(loom_module_add_symbol(module, name, &symbol));
+    loom_op_t* case_op = nullptr;
+    IREE_ASSERT_OK(loom_check_case_build(&builder, 0, 0,
+                                         {.module_id = 0, .symbol_id = symbol},
+                                         LOOM_LOCATION_UNKNOWN, &case_op));
+    auto saved = loom_builder_enter_region(&builder, case_op,
+                                           loom_check_case_body(case_op));
+    loom_op_t* op = nullptr;
+    const loom_named_attr_t enabled = {
+        .name_id = enabled_name,
+        .value = loom_attr_i64(i == 2),
+    };
+    loom_attribute_t attrs;
+    IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
+        module, loom_make_named_attr_slice(&enabled, 1), &attrs));
+    IREE_ASSERT_OK(loom_check_requires_build(&builder, provider_name,
+                                             loom_attr_as_dict(attrs),
+                                             LOOM_LOCATION_UNKNOWN, &op));
+    IREE_ASSERT_OK(
+        loom_check_return_build(&builder, LOOM_LOCATION_UNKNOWN, &op));
+    loom_builder_restore(&builder, saved);
+    cases[i] = {.op = case_op, .sample_count = 1};
+  }
+  const size_t record_indices[] = {0, 1, 0, 2, 1, 2};
+  iree_benchmark_loom_selected_benchmark_t selections[6] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(selections); ++i) {
+    selections[i].case_plan = &cases[record_indices[i]];
+  }
+  const loom_testbench_module_plan_t module_plan = {
+      .module = module,
+      .cases = cases,
+      .case_count = IREE_ARRAYSIZE(cases),
+  };
+  iree_benchmark_loom_work_plan_t work_plan = {
+      .selected_benchmarks = selections,
+      .selected_benchmark_count = IREE_ARRAYSIZE(selections),
+  };
+  RequirementQueries queries;
+  const iree_benchmark_loom_configuration_t configuration = {
+      .populate_requirement_providers =
+          {
+              .fn = PopulateRequirements,
+              .user_data = &queries,
+          },
+  };
+  IREE_ASSERT_OK(iree_benchmark_loom_evaluate_requirements(
+      &configuration, nullptr, &module_plan, &plan_arena_, &work_plan));
+  EXPECT_EQ(queries.count, 3u);
+  ASSERT_NE(selections[0].skip_reason, nullptr);
+  ASSERT_NE(selections[1].skip_reason, nullptr);
+  EXPECT_NE(selections[0].skip_reason, selections[1].skip_reason);
+  EXPECT_EQ(selections[0].skip_reason, selections[2].skip_reason);
+  EXPECT_EQ(selections[1].skip_reason, selections[4].skip_reason);
+  EXPECT_EQ(selections[3].skip_reason, nullptr);
+  EXPECT_EQ(selections[5].skip_reason, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(selections[0].skip_reason->provider_code,
+                                     IREE_SV("query_1")));
+  EXPECT_TRUE(iree_string_view_equal(selections[1].skip_reason->provider_code,
+                                     IREE_SV("query_2")));
+  EXPECT_EQ(plan_arena_.allocation_head, nullptr);
+  EXPECT_EQ(plan_arena_.used_allocation_size,
+            2 * (iree_host_align(sizeof(loom_testbench_requirement_result_t),
+                                 iree_max_align_t) +
+                 iree_host_align(7, iree_max_align_t)));
+}
+
+TEST(BenchmarkResultAliasesTest, SkippedWorkNeverPreparesExecution) {
+  const loom_testbench_requirement_result_t reason = {
+      .skipped = true,
+      .code = LOOM_TESTBENCH_REQUIREMENT_SKIP_CODE_PROVIDER_UNAVAILABLE,
+      .provider = IREE_SV("test.requirement"),
+  };
+  const loom_testbench_case_plan_t case_plan = {.sample_count = 1};
+  const loom_testbench_benchmark_plan_t benchmark = {.sample_count = 1};
+  iree_benchmark_loom_selected_benchmark_t selection = {
+      .benchmark_plan = &benchmark,
+      .case_plan = &case_plan,
+      .skip_reason = &reason,
+  };
+  iree_benchmark_loom_logical_sample_t logical = {
+      .end_benchmark_sample = 1,
+      .next_alias_index = IREE_BENCHMARK_LOOM_WORK_PLAN_INDEX_INVALID,
+  };
+  iree_benchmark_loom_hal_compile_item_t compile_item = {};
+  iree_benchmark_loom_work_item_t work_item = {
+      .kind = IREE_BENCHMARK_LOOM_WORK_ITEM_DISPATCH_SAMPLE,
+      .end_benchmark_sample = 1,
+  };
+  const iree_benchmark_loom_work_plan_t plan = {
+      .selected_benchmarks = &selection,
+      .selected_benchmark_count = 1,
+      .logical_samples = &logical,
+      .logical_sample_count = 1,
+      .hal_compile_items = &compile_item,
+      .hal_compile_item_count = 1,
+      .work_items = &work_item,
+      .work_item_count = 1,
+  };
+  const loom_module_t module = {};
+  const loom_testbench_module_plan_t module_plan = {.module = &module};
+  const iree_benchmark_loom_run_identity_t run = {};
+  event_collector_t collector = {};
+  const iree_benchmark_loom_event_sink_t sink = {
+      .emit = collect_event,
+      .user_data = &collector,
+  };
+  iree_host_size_t samples = 0;
+  iree_host_size_t failed_samples = 0;
+  iree_host_size_t failed_benchmarks = 0;
+  const iree_benchmark_loom_work_plan_execution_options_t options = {
+      .run = &run,
+      .module_plan = &module_plan,
+      .work_plan = &plan,
+      .host_allocator = iree_allocator_system(),
+      .event_sink = &sink,
+  };
+  IREE_ASSERT_OK(iree_benchmark_loom_run_work_plan(
+      &options, &samples, &failed_samples, &failed_benchmarks));
+  const iree_benchmark_loom_hal_setup_options_t hal_options = {
+      .run = &run,
+      .module_plan = &module_plan,
+      .work_plan = &plan,
+      .event_sink = &sink,
+  };
+  iree_benchmark_loom_hal_work_item_state_t state = {};
+  IREE_ASSERT_OK(iree_benchmark_loom_prepare_hal_work_item(
+      &hal_options, &work_item, nullptr, &samples, &failed_samples,
+      &failed_benchmarks, &state));
+  EXPECT_FALSE(state.runnable);
+  EXPECT_EQ(samples, 0u);
+  EXPECT_EQ(failed_samples, 0u);
+  EXPECT_EQ(failed_benchmarks, 0u);
+  ASSERT_EQ(collector.event_count, 4u);
+  for (size_t i = 0; i < collector.event_count; ++i) {
+    EXPECT_EQ(collector.results[i].skip_reason, &reason);
+    EXPECT_TRUE(
+        iree_string_view_equal(collector.results[i].state, IREE_SV("skipped")));
+    EXPECT_FALSE(collector.results[i].executed);
+  }
+}
 
 TEST_F(BenchmarkCaseExecutionTest, RunsCaseEndToEndWorkItemThroughEventSink) {
   const loom_testbench_module_plan_t module_plan = PlanModule(R"(

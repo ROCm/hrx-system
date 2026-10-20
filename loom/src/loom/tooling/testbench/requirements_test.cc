@@ -6,6 +6,8 @@
 
 #include "loom/tooling/testbench/requirements.h"
 
+#include <cstring>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -70,24 +72,38 @@ class RequirementsTest : public ::testing::Test {
   loom_context_t context_;
 };
 
+struct ProviderText {
+  // Provider scratch storage reused by the next query.
+  char code[32] = {};
+  // Human-facing provider scratch storage reused by the next query.
+  char message[64] = {};
+};
+
 static iree_status_t QueryEnabled(
     void* user_data, const loom_module_t* module, loom_named_attr_slice_t attrs,
     loom_testbench_requirement_provider_result_t* out_result) {
-  (void)user_data;
+  auto* text = static_cast<ProviderText*>(user_data);
+  std::memset(text->code, '?', sizeof(text->code));
+  std::memset(text->message, '?', sizeof(text->message));
   bool present = false;
   int64_t enabled = 0;
   IREE_RETURN_IF_ERROR(loom_testbench_requirement_read_optional_i64_attr(
       module, attrs, IREE_SV("enabled"), &present, &enabled));
   const bool enabled_predicate = present && enabled != 0;
+  if (!enabled_predicate) {
+    std::memcpy(text->code, "fake_disabled", sizeof("fake_disabled"));
+    std::memcpy(text->message, "fake requirement was disabled",
+                sizeof("fake requirement was disabled"));
+  }
   *out_result = loom_testbench_requirement_provider_result_t{
       .state = enabled_predicate
                    ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
                    : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED,
       .provider_code = enabled_predicate ? iree_string_view_empty()
-                                         : IREE_SV("fake_disabled"),
+                                         : iree_make_cstring_view(text->code),
       .display_message = enabled_predicate
                              ? iree_string_view_empty()
-                             : IREE_SV("fake requirement was disabled"),
+                             : iree_make_cstring_view(text->message),
   };
   return iree_ok_status();
 }
@@ -132,10 +148,11 @@ check.case @unavailable_requirement {
   loom_testbench_module_plan_t plan = PlanModule(module.get());
   ASSERT_EQ(plan.issue_count, 0u);
 
+  ProviderText provider_text;
   const loom_testbench_requirement_provider_t providers[] = {
       {
           .name = IREE_SV("fake.enabled"),
-          .user_data = nullptr,
+          .user_data = &provider_text,
           .query = QueryEnabled,
       },
       {
@@ -149,14 +166,16 @@ check.case @unavailable_requirement {
       providers, IREE_ARRAYSIZE(providers), &registry);
 
   loom_testbench_requirement_result_t result = {};
+  const size_t allocated_before = plan_arena_.used_allocation_size;
   IREE_ASSERT_OK(loom_testbench_evaluate_requirements(
       module.get(), loom_check_case_body(plan.cases[0].op), &registry,
-      &result));
+      &plan_arena_, &result));
   EXPECT_FALSE(result.skipped);
+  EXPECT_EQ(plan_arena_.used_allocation_size, allocated_before);
 
   IREE_ASSERT_OK(loom_testbench_evaluate_requirements(
       module.get(), loom_check_case_body(plan.cases[1].op), &registry,
-      &result));
+      &plan_arena_, &result));
   EXPECT_TRUE(result.skipped);
   EXPECT_EQ(result.op_kind, LOOM_TESTBENCH_REQUIREMENT_OP_KIND_REQUIRES);
   EXPECT_EQ(result.code,
@@ -166,10 +185,11 @@ check.case @unavailable_requirement {
       iree_string_view_equal(result.provider_code, IREE_SV("fake_disabled")));
   EXPECT_TRUE(iree_string_view_equal(result.display_message,
                                      IREE_SV("fake requirement was disabled")));
+  const auto retained = result;
 
   IREE_ASSERT_OK(loom_testbench_evaluate_requirements(
       module.get(), loom_check_case_body(plan.cases[2].op), &registry,
-      &result));
+      &plan_arena_, &result));
   EXPECT_TRUE(result.skipped);
   EXPECT_EQ(result.op_kind, LOOM_TESTBENCH_REQUIREMENT_OP_KIND_SKIP_IF);
   EXPECT_EQ(result.code,
@@ -177,10 +197,16 @@ check.case @unavailable_requirement {
   EXPECT_TRUE(iree_string_view_is_empty(result.provider_code));
   EXPECT_TRUE(iree_string_view_equal(result.display_message,
                                      IREE_SV("case is intentionally skipped")));
+  EXPECT_TRUE(
+      iree_string_view_equal(retained.provider_code, IREE_SV("fake_disabled")));
+  EXPECT_TRUE(iree_string_view_equal(retained.display_message,
+                                     IREE_SV("fake requirement was disabled")));
+  EXPECT_NE(retained.provider_code.data, provider_text.code);
+  EXPECT_NE(retained.display_message.data, provider_text.message);
 
   IREE_ASSERT_OK(loom_testbench_evaluate_requirements(
       module.get(), loom_check_case_body(plan.cases[3].op), &registry,
-      &result));
+      &plan_arena_, &result));
   EXPECT_TRUE(result.skipped);
   EXPECT_EQ(result.op_kind, LOOM_TESTBENCH_REQUIREMENT_OP_KIND_REQUIRES);
   EXPECT_EQ(result.code,
@@ -189,6 +215,22 @@ check.case @unavailable_requirement {
       iree_string_view_equal(result.provider, IREE_SV("fake.unavailable")));
   EXPECT_TRUE(iree_string_view_equal(result.provider_code,
                                      IREE_SV("fake_runtime_unavailable")));
+
+  iree_arena_block_pool_t failing_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_null(), &failing_pool);
+  iree_arena_allocator_t failing_arena;
+  iree_arena_initialize(&failing_pool, &failing_arena);
+  // Admitted records never allocate reason storage, even with a null allocator.
+  IREE_ASSERT_OK(loom_testbench_evaluate_requirements(
+      module.get(), loom_check_case_body(plan.cases[0].op), &registry,
+      &failing_arena, &result));
+  EXPECT_FALSE(result.skipped);
+  iree::Status failure = loom_testbench_evaluate_requirements(
+      module.get(), loom_check_case_body(plan.cases[1].op), &registry,
+      &failing_arena, &result);
+  EXPECT_FALSE(failure.ok());
+  iree_arena_deinitialize(&failing_arena);
+  iree_arena_block_pool_deinitialize(&failing_pool);
 }
 
 TEST_F(RequirementsTest, ReportsUnknownProvidersAsSkippedEvidence) {
@@ -213,7 +255,7 @@ check.case @unknown_skip_if {
   loom_testbench_requirement_result_t result = {};
   IREE_ASSERT_OK(loom_testbench_evaluate_requirements(
       module.get(), loom_check_case_body(plan.cases[0].op), &registry,
-      &result));
+      &plan_arena_, &result));
   EXPECT_TRUE(result.skipped);
   EXPECT_EQ(result.op_kind, LOOM_TESTBENCH_REQUIREMENT_OP_KIND_REQUIRES);
   EXPECT_EQ(result.code,
@@ -225,7 +267,7 @@ check.case @unknown_skip_if {
 
   IREE_ASSERT_OK(loom_testbench_evaluate_requirements(
       module.get(), loom_check_case_body(plan.cases[1].op), &registry,
-      &result));
+      &plan_arena_, &result));
   EXPECT_TRUE(result.skipped);
   EXPECT_EQ(result.op_kind, LOOM_TESTBENCH_REQUIREMENT_OP_KIND_SKIP_IF);
   EXPECT_EQ(result.code,

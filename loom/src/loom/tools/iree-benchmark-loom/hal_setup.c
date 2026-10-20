@@ -274,9 +274,10 @@ iree_status_t iree_benchmark_loom_prepare_hal_work_item(
   const iree_benchmark_loom_selected_benchmark_t* selection =
       &work_plan
            ->selected_benchmarks[compile_item->representative_selection_index];
-  if (selection->skipped) {
+  if (selection->skip_reason != NULL) {
     iree_benchmark_loom_benchmark_result_t benchmark_result = {
         .state = IREE_SV("skipped"),
+        .skip_reason = selection->skip_reason,
     };
     return iree_benchmark_loom_emit_work_item_result_aliases(
         options->run, options->module_plan, work_plan, work_item,

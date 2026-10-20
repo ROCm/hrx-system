@@ -13,7 +13,9 @@
 #define LOOM_TOOLING_TESTBENCH_REQUIREMENTS_H_
 
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
 #include "loom/tooling/testbench/testbench.h"
+#include "loom/util/json.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,8 +71,10 @@ typedef struct loom_testbench_requirement_provider_result_t {
 // Evaluates one provider predicate.
 //
 // |attrs| is the check.requires/check.skip_if attribute dictionary. Providers
-// return a stable predicate |out_result|. Returning a non-OK status is reserved
-// for malformed attributes or provider infrastructure failures.
+// return a stable predicate |out_result|. Its string views remain valid until
+// the next query on this provider or destruction of its state. Returning a
+// non-OK status is reserved for malformed attributes or provider infrastructure
+// failures.
 typedef iree_status_t (*loom_testbench_requirement_query_fn_t)(
     void* user_data, const loom_module_t* module, loom_named_attr_slice_t attrs,
     loom_testbench_requirement_provider_result_t* out_result);
@@ -102,9 +106,9 @@ typedef struct loom_testbench_requirement_result_t {
   loom_testbench_requirement_skip_code_t code;
   // Provider name that caused the skip.
   iree_string_view_t provider;
-  // Stable provider-specific predicate code, or empty if generic.
+  // Arena-owned provider-specific predicate code, or empty if generic.
   iree_string_view_t provider_code;
-  // Optional human-facing text for terminal display or manual inspection.
+  // Arena-owned human-facing text for terminal display or manual inspection.
   iree_string_view_t display_message;
 } loom_testbench_requirement_result_t;
 
@@ -143,10 +147,21 @@ iree_status_t loom_testbench_requirement_read_optional_i64_attr(
     iree_string_view_t name, bool* out_present, int64_t* out_value);
 
 // Evaluates requirement ops in source order in a case or scenario |body|.
+// Retains skipped-result text in |arena| before another provider query can
+// invalidate it. Admitted records allocate nothing. The result borrows its
+// operation and provider spelling from |module|; both |module| and |arena|
+// remain live while the result is used.
 iree_status_t loom_testbench_evaluate_requirements(
     const loom_module_t* module, const loom_region_t* body,
     const loom_testbench_requirement_provider_registry_t* registry,
+    iree_arena_allocator_t* arena,
     loom_testbench_requirement_result_t* out_result);
+
+// Writes provider, op, code, and optional provider_code/display_message fields
+// for a skipped result into an open report object.
+iree_status_t loom_testbench_requirement_result_write_json_fields(
+    const loom_testbench_requirement_result_t* result,
+    loom_json_object_writer_t* object);
 
 #ifdef __cplusplus
 }  // extern "C"

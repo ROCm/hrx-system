@@ -681,7 +681,7 @@ iree_status_t iree_benchmark_loom_run_file(
       iree_host_size_t function_call_capacity = 0;
       for (iree_host_size_t i = 0; i < work_plan.selected_benchmark_count;
            ++i) {
-        if (work_plan.selected_benchmarks[i].skipped) {
+        if (work_plan.selected_benchmarks[i].skip_reason != NULL) {
           continue;
         }
         const loom_testbench_case_plan_t* case_plan =
@@ -709,7 +709,7 @@ iree_status_t iree_benchmark_loom_run_file(
       for (iree_host_size_t i = 0;
            iree_status_is_ok(status) && i < work_plan.selected_benchmark_count;
            ++i) {
-        if (work_plan.selected_benchmarks[i].skipped) {
+        if (work_plan.selected_benchmarks[i].skip_reason != NULL) {
           continue;
         }
         const loom_testbench_case_plan_t* case_plan =

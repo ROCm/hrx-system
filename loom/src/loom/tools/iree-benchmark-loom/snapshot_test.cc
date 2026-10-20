@@ -6,6 +6,7 @@
 
 #include "loom/tools/iree-benchmark-loom/snapshot.h"
 
+#include <cstring>
 #include <memory>
 
 #include "iree/base/internal/json.h"
@@ -13,6 +14,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/tools/iree-benchmark-loom/hal_actual.h"
 #include "loom/tools/iree-benchmark-loom/launch_evidence.h"
+#include "loom/tools/iree-benchmark-loom/report.h"
 #include "loomc/compile_report.h"
 #include "loomc/iree.h"
 
@@ -82,6 +84,103 @@ static bool JsonArrayContainsString(iree_string_view_t array,
     }
   }
   return false;
+}
+
+TEST(BenchmarkSnapshotSinkTest, OwnsSkippedEvidenceAndMatchesJsonl) {
+  for (bool scenario : {false, true}) {
+    SCOPED_TRACE(scenario);
+    char message[] = "provider is unavailable";
+    loom_testbench_requirement_result_t reason = {
+        .skipped = true,
+        .op_kind = LOOM_TESTBENCH_REQUIREMENT_OP_KIND_REQUIRES,
+        .code = LOOM_TESTBENCH_REQUIREMENT_SKIP_CODE_PROVIDER_UNAVAILABLE,
+        .provider = IREE_SV("test.provider"),
+        .provider_code = IREE_SV("unavailable"),
+        .display_message = iree_make_cstring_view(message),
+    };
+    const iree_benchmark_loom_benchmark_result_t result = {
+        .state = IREE_SV("skipped"),
+        .skip_reason = &reason,
+    };
+    const iree_benchmark_loom_benchmark_policy_t policy = {
+        .measure = IREE_SV("dispatch_complete"),
+    };
+    const iree_benchmark_loom_work_item_t work = {};
+    const loom_module_t module = {};
+    const loom_testbench_case_plan_t case_plan = {.name = IREE_SV("case")};
+    const loom_testbench_scenario_plan_t scenario_plan = {
+        .name = IREE_SV("scenario"),
+    };
+    const loom_testbench_benchmark_plan_t benchmark = {
+        .name = IREE_SV("bench"),
+    };
+    const iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run")};
+    iree_benchmark_loom_candidate_identity_t candidate = {
+        .candidate_id = IREE_SV("c0"),
+    };
+    iree_benchmark_loom_snapshot_sink_t snapshot = {};
+    IREE_ASSERT_OK(iree_benchmark_loom_snapshot_sink_initialize(
+        iree_allocator_system(), &snapshot));
+    iree_benchmark_loom_event_sink_t sink = {};
+    iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &sink);
+    IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(&sink, &run, false,
+                                                           &kNoSanitizer));
+    for (size_t i = 0; i < 2; ++i) {
+      candidate.candidate_index = i;
+      IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_benchmark_result(
+          &sink, &run, &candidate, &work, &module, &benchmark,
+          scenario ? nullptr : &case_plan, scenario ? &scenario_plan : nullptr,
+          &policy, &result, 0, 0));
+    }
+    iree_string_builder_t jsonl;
+    iree_string_builder_initialize(iree_allocator_system(), &jsonl);
+    IREE_ASSERT_OK(iree_benchmark_loom_append_benchmark_result(
+        &run, &candidate, 0, &module, &benchmark,
+        scenario ? nullptr : &case_plan, scenario ? &scenario_plan : nullptr,
+        &policy, &result, 0, 0, &jsonl));
+    // Neither the deferred snapshot nor rendered JSONL borrows provider text.
+    std::memset(message, '?', sizeof(message));
+    reason = {};
+    const iree_benchmark_loom_artifact_bundle_t bundle = {};
+    IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_summary(
+        &sink, &run, &bundle, /*planned_case_count=*/scenario ? 0 : 1,
+        /*planned_benchmark_count=*/2, /*selected_benchmark_count=*/2,
+        /*logical_sample_count=*/2, /*work_item_count=*/1,
+        /*failure_count=*/0, /*failed_benchmark_count=*/0,
+        /*correctness_sample_count=*/0, /*correctness_failed_sample_count=*/0,
+        /*dry_run=*/false));
+    iree_string_builder_t output;
+    iree_string_builder_initialize(iree_allocator_system(), &output);
+    auto root = ParseJsonDocument(SnapshotJson(&snapshot, &output));
+    auto work_items = LookupObject(root, IREE_SV("work_items"));
+    iree_host_size_t count = 0;
+    IREE_ASSERT_OK(iree_json_array_length(work_items, &count));
+    EXPECT_EQ(count, 1u);
+    auto evidence = FirstArrayElement(work_items);
+    EXPECT_TRUE(iree_string_view_equal(LookupObject(evidence, IREE_SV("state")),
+                                       IREE_SV("skipped")));
+    auto skip = LookupObject(evidence, IREE_SV("skip_reason"));
+    EXPECT_TRUE(iree_string_view_equal(
+        skip, IREE_SV("{\"provider\":\"test.provider\",\"op\":\"requires\","
+                      "\"code\":\"provider_unavailable\",\"provider_code\":"
+                      "\"unavailable\","
+                      "\"display_message\":\"provider is unavailable\"}")));
+    auto row = ParseJsonDocument(iree_string_builder_view(&jsonl));
+    EXPECT_TRUE(iree_string_view_equal(
+        LookupObject(LookupObject(row, IREE_SV("benchmark_result")),
+                     IREE_SV("skip_reason")),
+        skip));
+    IREE_ASSERT_OK(iree_json_array_length(
+        LookupObject(root, IREE_SV("benchmarks")), &count));
+    EXPECT_EQ(count, 2u);
+    EXPECT_TRUE(iree_string_view_is_empty(
+        TryLookupObject(evidence, IREE_SV("measurement"))));
+    EXPECT_TRUE(iree_string_view_is_empty(
+        TryLookupObject(evidence, IREE_SV("failure"))));
+    iree_string_builder_deinitialize(&jsonl);
+    iree_string_builder_deinitialize(&output);
+    iree_benchmark_loom_snapshot_sink_deinitialize(&snapshot);
+  }
 }
 
 TEST(BenchmarkSnapshotSinkTest, PreservesInterleavedProfileSuppression) {

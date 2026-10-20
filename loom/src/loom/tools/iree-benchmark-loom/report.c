@@ -2148,6 +2148,15 @@ iree_status_t iree_benchmark_loom_write_benchmark_evidence_fields_json(
     iree_host_size_t correctness_sample_count,
     iree_host_size_t correctness_failed_sample_count,
     loom_json_object_writer_t* object) {
+  if (benchmark_result->skip_reason != NULL) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(object, IREE_SV("skip_reason")));
+    loom_json_object_writer_t reason;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(object->stream, &reason));
+    IREE_RETURN_IF_ERROR(loom_testbench_requirement_result_write_json_fields(
+        benchmark_result->skip_reason, &reason));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&reason));
+  }
   IREE_RETURN_IF_ERROR(loom_json_object_begin_field(object, IREE_SV("policy")));
   IREE_RETURN_IF_ERROR(
       iree_benchmark_loom_write_benchmark_policy_json(policy, object->stream));

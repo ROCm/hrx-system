@@ -96,6 +96,24 @@ A `compile` row with `state != "ok"` is a candidate rejection represented as
 data. Parse, verification, selection, and planning failures use `failure` rows
 because they prevent the candidate lifecycle from beginning.
 
+An unmet `check.requires` or matched `check.skip_if` produces `state: "skipped"`
+without a timing measurement or failed-benchmark count. The physical result
+retains `skip_reason`, shared by its logical aliases. JSONL includes the same
+object in each `benchmark_result`:
+
+```shell
+jq '.work_items[] | select(.skip_reason) |
+    {work_item_index, case, scenario, skip_reason}' results.json
+```
+
+`skip_reason.provider` identifies the predicate provider, and `op` is `requires`
+or `skip_if`. Its stable `code` is `provider_not_registered`,
+`provider_unavailable`, `requirement_not_satisfied`, or `skip_predicate_matched`.
+Optional `provider_code` gives a provider-defined reason; `display_message` is
+human-facing text, with an authored `skip_if` reason taking precedence over
+provider text. Dry runs and compile-only runs do not evaluate requirements and
+therefore do not claim a skip reason.
+
 Executed HAL results retain launches in case-sample and source order. Each
 launch separates the ordered, typed `workload` supplied to the launch function
 from the resolved `launch_config` used for submission:

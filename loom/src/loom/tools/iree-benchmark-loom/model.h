@@ -14,6 +14,7 @@
 #include "loom/tooling/execution/hal/benchmark.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
 #include "loom/tooling/testbench/executor.h"
+#include "loom/tooling/testbench/requirements.h"
 #include "loom/tools/iree-benchmark-loom/configuration.h"
 #include "loom/tools/iree-benchmark-loom/output.h"
 #include "loom/util/json.h"
@@ -94,9 +95,9 @@ typedef struct iree_benchmark_loom_selected_benchmark_t {
   iree_host_size_t begin_benchmark_sample;
   // One-past-end selected benchmark-local sample ordinal.
   iree_host_size_t end_benchmark_sample;
-  // True when the subject's requirements exclude execution. Populated once
-  // before invocation binding; dry-run planning leaves this false.
-  bool skipped;
+  // Run-arena-owned reason shared by all selections of a skipped record.
+  // NULL for admitted records and unevaluated dry-run/compile-only plans.
+  const loom_testbench_requirement_result_t* skip_reason;
   // Effective benchmark policy after command-line overrides.
   iree_benchmark_loom_benchmark_policy_t policy;
 } iree_benchmark_loom_selected_benchmark_t;
@@ -168,6 +169,8 @@ typedef struct iree_benchmark_loom_data_cache_summary_t {
 typedef struct iree_benchmark_loom_benchmark_result_t {
   // Stable benchmark state string when it differs from the default.
   iree_string_view_t state;
+  // Borrowed requirement evidence when execution was skipped, otherwise NULL.
+  const loom_testbench_requirement_result_t* skip_reason;
   // True when failure fields below describe why the benchmark did not run.
   bool has_failure;
   // Kernel entry whose candidate failed, when the failure is entry-specific.
