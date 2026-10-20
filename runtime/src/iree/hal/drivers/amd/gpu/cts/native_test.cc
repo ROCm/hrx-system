@@ -266,6 +266,74 @@ TEST_P(GpuNativeRecordedTransferTest,
   EXPECT_EQ(downloaded, expected);
 }
 
+TEST_P(GpuNativeRecordedTransferTest,
+       InterleavedDirectAndResidentTransfersPreserveEveryResult) {
+  constexpr uint32_t kCount = 128;
+  iree_hal_command_buffer_t* recording = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, GetParam().second ? 3 : 0,
+      &recording));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  const iree_hal_barrier_t acquire = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &acquire));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      recording, Reference(0, 0, 4), Reference(1, 0, 4), 0));
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  std::array<iree_hal_buffer_binding_t, 3> bindings = {};
+  bindings[1] = {buffers_[0], 0, IREE_HAL_WHOLE_BUFFER};
+  bindings[2] = {buffers_[1], 0, IREE_HAL_WHOLE_BUFFER};
+  // One caller publishes ahead without a host wait. Small native capacities
+  // force wrap and retirement reuse while direct and GPU-produced packets
+  // share the FIFO. Each direct copy preserves its preceding resident result.
+  for (uint32_t i = 0; i < kCount; ++i) {
+    const uint32_t pattern = 0xCAFE0000u + i;
+    uint64_t before = i * 3, filled = before + 1, executed = before + 2,
+             copied = before + 3;
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        queues_[0], {i ? 1u : 0u, &timeline_, &before},
+        {1, &timeline_, &filled}, buffers_[0], 0, 4, &pattern, 4, nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queues_[0], {1, &timeline_, &filled}, {1, &timeline_, &executed},
+        recording, {GetParam().second ? bindings.size() : 0, bindings.data()},
+        0));
+    IREE_ASSERT_OK(iree_hal_queue_copy(
+        queues_[0], {1, &timeline_, &executed}, {1, &timeline_, &copied},
+        buffers_[1], 0, buffers_[1], (i + 1) * 4, 4, nullptr, 0));
+  }
+  iree_hal_command_buffer_release(recording);
+  std::array<uint32_t, kCount> output = {};
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = buffers_[1],
+              .source_offset = 4,
+              .target = output.data(),
+              .length = sizeof(output),
+          },
+  };
+  uint64_t before = kCount * 3, downloaded = before + 1;
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &timeline_, &before},
+                                         {1, &timeline_, &downloaded}, 1,
+                                         &download, nullptr));
+  ReleaseBuffers();
+  Wait(downloaded);
+  for (uint32_t i = 0; i < kCount; ++i) {
+    EXPECT_EQ(output[i], 0xCAFE0000u + i) << i;
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(
     BindingMode, GpuNativeRecordedTransferTest,
     ::testing::Values(std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, false),
