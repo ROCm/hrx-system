@@ -272,7 +272,9 @@ loom_cc_library(
     hdrs = ["fact_ordinal_map.h"],
     deps = [
         ":fact_table_api",
+        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

@@ -315,7 +315,9 @@ loom_cc_library(
   DEPS
     ::fact_table_api
     iree::base
+    iree::base::internal
     iree::base::internal::arena
+    loom::ir
   PUBLIC
 )
 

@@ -14,7 +14,7 @@
 
 #define LOOM_VALUE_FACT_RELATION_INITIAL_CAPACITY 8
 #define LOOM_VALUE_FACT_RELATION_STACK_CAPACITY 16
-#define LOOM_VALUE_FACT_RELATION_DIRECT_PREDICATE_COUNT 4
+#define LOOM_VALUE_FACT_RELATION_INDEX_PREDICATE_COUNT 4
 #define LOOM_VALUE_FACT_RELATION_ATOM_INITIAL_CAPACITY 8
 #define LOOM_VALUE_FACT_RELATION_ATOM_LINEAR_SCAN_LIMIT 8
 #define LOOM_VALUE_FACT_RELATION_ROOT_SINGLETON_BIT UINT32_C(0x80000000)
@@ -800,10 +800,15 @@ static iree_status_t loom_value_fact_integer_relations_ensure_scratch(
 }
 
 typedef struct loom_value_fact_relation_plan_t {
+  // Incoming canonical identities, borrowed from caller or table scratch.
   loom_value_id_t* identities;
+  // Planned relation roots, using scratch parallel to identities.
   loom_value_fact_relation_roots_t* plans;
+  // Newly inferred local roots, using scratch parallel to identities.
   loom_value_fact_relation_roots_t* locals;
+  // Ordinal lookup borrowing identities and leasing the table's map scratch.
   loom_value_fact_ordinal_map_t identity_map;
+  // Whether lazy initialization succeeded before relation publication.
   bool initialized;
 } loom_value_fact_relation_plan_t;
 
@@ -828,12 +833,11 @@ static iree_status_t loom_value_fact_relation_plan_initialize(
     plan->plans[i] = loom_value_fact_relation_lookup_roots(table, operands[i]);
     plan->locals[i] = (loom_value_fact_relation_roots_t){0};
   }
-  const bool use_direct_map =
+  const bool use_index =
       pair_count > LOOM_VALUE_FACT_RELATION_STACK_CAPACITY &&
-      predicate_count > LOOM_VALUE_FACT_RELATION_DIRECT_PREDICATE_COUNT;
+      predicate_count > LOOM_VALUE_FACT_RELATION_INDEX_PREDICATE_COUNT;
   IREE_RETURN_IF_ERROR(loom_value_fact_ordinal_map_initialize(
-      table, plan->identities, pair_count, use_direct_map,
-      &plan->identity_map));
+      table, plan->identities, pair_count, use_index, &plan->identity_map));
   plan->initialized = true;
   return iree_ok_status();
 }

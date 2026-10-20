@@ -131,7 +131,7 @@ TEST_F(PredicateFactsTest, SmallListStaysAllocationFree) {
 
   EXPECT_EQ(facts.range_lo, 0);
   EXPECT_EQ(facts.range_hi, 255);
-  EXPECT_EQ(table.scratch.alias_ordinals.values, nullptr);
+  EXPECT_EQ(table.scratch.alias_ordinals.buckets, nullptr);
   EXPECT_EQ(table.scratch.alias_ordinals.capacity, 0u);
 }
 
@@ -263,7 +263,7 @@ TEST_F(PredicateFactsTest, RangeRejectsFloatEndpointIntervals) {
   EXPECT_EQ(target_facts.range_hi, INT64_MAX);
 }
 
-TEST_F(PredicateFactsTest, LargeDisorderedListUsesReusableDirectOrdinalMap) {
+TEST_F(PredicateFactsTest, LargeDisorderedListUsesReusableOrdinalIndex) {
   constexpr uint16_t kAliasCount = 257;
   constexpr loom_value_id_t kExternalBound = 600;
   loom_value_fact_table_t table = {0};
@@ -306,9 +306,9 @@ TEST_F(PredicateFactsTest, LargeDisorderedListUsesReusableDirectOrdinalMap) {
     EXPECT_EQ(facts[kTargetOrdinal - i].range_lo, i == 0 ? 0 : INT64_MIN);
     EXPECT_EQ(facts[kTargetOrdinal - i].range_hi, 65535);
   }
-  ASSERT_NE(table.scratch.alias_ordinals.values, nullptr);
-  for (loom_value_id_t value_id : values) {
-    EXPECT_EQ(table.scratch.alias_ordinals.values[value_id], 0);
+  ASSERT_NE(table.scratch.alias_ordinals.buckets, nullptr);
+  for (iree_host_size_t i = 0; i < table.scratch.alias_ordinals.capacity; ++i) {
+    EXPECT_EQ(table.scratch.alias_ordinals.buckets[i], 0);
   }
 
   const iree_host_size_t used_size = arena_.used_allocation_size;
@@ -319,6 +319,46 @@ TEST_F(PredicateFactsTest, LargeDisorderedListUsesReusableDirectOrdinalMap) {
   EXPECT_EQ(arena_.used_allocation_size, used_size);
   for (uint16_t i = 0; i < IREE_ARRAYSIZE(predicates); ++i) {
     EXPECT_EQ(facts[kTargetOrdinal - i].range_hi, 65535);
+  }
+}
+
+TEST_F(PredicateFactsTest, SparseAliasBatchesReusePopulationSizedStorage) {
+  constexpr uint16_t kAliasCounts[] = {17, 257, 17, 129, 257, 17, 33, 17};
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+  const iree_host_size_t initial_size = arena_.used_allocation_size;
+  uint16_t maximum_alias_count = 0;
+  for (uint16_t batch = 0; batch < IREE_ARRAYSIZE(kAliasCounts); ++batch) {
+    const uint16_t alias_count = kAliasCounts[batch];
+    std::vector<loom_value_id_t> values(alias_count);
+    std::vector<loom_value_facts_t> facts(alias_count,
+                                          loom_value_facts_unknown());
+    std::vector<loom_predicate_t> predicates(alias_count);
+    for (uint16_t i = 0; i < alias_count; ++i) {
+      values[i] = (batch + 1) * 65536u + ((i * 7) % alias_count) * 193u;
+      predicates[i].kind = LOOM_PREDICATE_RANGE;
+      predicates[i].arg_count = 3;
+      predicates[i].arg_tags[0] = LOOM_PRED_ARG_VALUE;
+      predicates[i].arg_tags[1] = LOOM_PRED_ARG_CONST;
+      predicates[i].arg_tags[2] = LOOM_PRED_ARG_CONST;
+      predicates[i].args[0] = values[i];
+      predicates[i].args[1] = batch + i;
+      predicates[i].args[2] = batch + i + 1;
+    }
+    const iree_host_size_t previous_size = arena_.used_allocation_size;
+    IREE_ASSERT_OK(loom_value_fact_table_apply_alias_predicates(
+        &table, values.data(), alias_count, predicates.data(), alias_count,
+        facts.data()));
+    for (uint16_t i = 0; i < alias_count; ++i) {
+      EXPECT_EQ(facts[i].range_lo, batch + i);
+      EXPECT_EQ(facts[i].range_hi, batch + i + 1);
+    }
+    if (alias_count <= maximum_alias_count) {
+      EXPECT_EQ(arena_.used_allocation_size, previous_size);
+    }
+    maximum_alias_count = iree_max(maximum_alias_count, alias_count);
+    EXPECT_LE(arena_.used_allocation_size - initial_size,
+              maximum_alias_count * 16u);
   }
 }
 

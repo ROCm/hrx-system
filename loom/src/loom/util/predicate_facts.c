@@ -581,12 +581,12 @@ iree_status_t loom_value_fact_table_apply_alias_predicates(
     loom_value_fact_table_t* table, const loom_value_id_t* values,
     uint16_t value_count, const loom_predicate_t* predicates,
     uint16_t predicate_count, loom_value_facts_t* inout_facts) {
-  const bool use_direct_map =
+  const bool use_index =
       value_count > LOOM_VALUE_FACT_ALIAS_LINEAR_SCAN_LIMIT &&
       predicate_count > LOOM_VALUE_FACT_PREDICATE_LINEAR_SCAN_LIMIT;
   loom_value_fact_ordinal_map_t alias_map = {0};
   IREE_RETURN_IF_ERROR(loom_value_fact_ordinal_map_initialize(
-      table, values, value_count, use_direct_map, &alias_map));
+      table, values, value_count, use_index, &alias_map));
 
   loom_value_fact_table_apply_alias_predicates_with_map(
       table, &alias_map, predicates, predicate_count, inout_facts);

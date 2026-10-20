@@ -452,11 +452,11 @@ struct loom_value_fact_table_t {
       // Allocated component scratch entry count.
       iree_host_size_t capacity;
     } vector_partition_components;
-    // Direct alias-ordinal map used while applying predicate facts.
+    // Reusable alias-ordinal index used by predicate and relation publication.
     struct {
-      // One-based alias ordinals keyed by SSA value ID; zero means absent.
-      uint16_t* values;
-      // Allocated ordinal entry count.
+      // Hash buckets of one-based alias ordinals; all zero outside a map lease.
+      uint16_t* buckets;
+      // Allocated bucket count, grown geometrically with alias cardinality.
       iree_host_size_t capacity;
     } alias_ordinals;
     // Lazily allocated query scratch for condition-loop edge projections.

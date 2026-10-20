@@ -15,8 +15,10 @@ extern "C" {
 
 // Scope-local mapping from SSA value IDs to their first ordinal in a borrowed
 // sequence. Small sequences may use bounded linear lookup without storage.
-// Direct maps lease the fact table's reusable ordinal scratch until reset; at
-// most one direct map may be live on a table at a time.
+// Indexed maps lease the fact table's reusable ordinal scratch until reset; at
+// most one indexed map may be live on a table at a time. Storage is
+// proportional to the sequence length, independent of the magnitude or span of
+// its IDs.
 typedef struct loom_value_fact_ordinal_map_t {
   // Borrowed value IDs in ordinal order.
   const loom_value_id_t* values;
@@ -24,22 +26,23 @@ typedef struct loom_value_fact_ordinal_map_t {
   // Number of value IDs in values.
   uint16_t value_count;
 
-  // Optional one-based ordinals keyed by SSA value ID.
-  uint16_t* ordinals;
+  // Optional hash buckets containing one-based ordinals into values; zero is
+  // empty. The borrowed sequence supplies each occupied bucket's key.
+  uint16_t* buckets;
 
-  // Number of addressable entries in ordinals.
-  iree_host_size_t ordinal_capacity;
+  // Active power-of-two bucket count, at least twice value_count when indexed.
+  uint32_t bucket_count;
 } loom_value_fact_ordinal_map_t;
 
-// Initializes a map over |values|. Direct lookup grows and populates the
+// Initializes a map over |values|. Indexed lookup grows and populates the
 // table-owned scratch map; linear lookup borrows the sequence alone. Duplicate
 // value IDs resolve to their first ordinal.
 iree_status_t loom_value_fact_ordinal_map_initialize(
     loom_value_fact_table_t* table, const loom_value_id_t* values,
-    uint16_t value_count, bool use_direct,
+    uint16_t value_count, bool use_index,
     loom_value_fact_ordinal_map_t* out_map);
 
-// Releases a direct-map scratch lease by clearing only the current values.
+// Releases an indexed scratch lease by clearing only its active bucket prefix.
 // Linear maps require no work. The borrowed sequence must remain valid until
 // reset completes.
 void loom_value_fact_ordinal_map_reset(loom_value_fact_ordinal_map_t* map);
