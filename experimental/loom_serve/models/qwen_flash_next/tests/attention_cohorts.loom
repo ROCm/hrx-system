@@ -1,0 +1,247 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl pure @qsa_cohort_capacity() -> (index)
+
+kernel.decl @qsa_merge_cohorts() launch(%epoch: buffer, %selected: buffer, %cohorts: buffer)
+
+// Independent host oracle: accumulate membership by logical block ID, then
+// enumerate that table. The GPU instead partitions and merges sorted lists.
+func.def @merge_fixture(%trial: index, %epoch: buffer, %selected: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<83xi32>
+  %ids = buffer.view %selected[%origin] : buffer -> view<8x512xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c6 = index.constant 6 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %budget = index.constant 512 : index
+  %empty = index.cmp eq, %trial, %c0 : index
+  %mixed = index.cmp eq, %trial, %c2 : index
+  %last_block = index.cmp eq, %trial, %c3 : index
+  %singles = index.cmp eq, %trial, %c4 : index
+  %disjoint = index.cmp eq, %trial, %c5 : index
+  %partial = index.cmp eq, %trial, %c6 : index
+  %spans0 = scf.select %singles, %c8, %c1 : index
+  %spans1 = scf.select %mixed, %c3, %spans0 : index
+  %spans = scf.select %empty, %c0, %spans1 : index
+  %span_word = index.cast %spans : index to i32
+  view.store %span_word, %header[1] : i32, view<83xi32>
+  %total = scf.for %span = [%c0 to %spans step %c1](%begin = %c0 : index) -> (index) {
+    %first = index.cmp eq, %span, %c0 : index
+    %second = index.cmp eq, %span, %c1 : index
+    %mixed_length0 = scf.select %second, %c4, %c1 : index
+    %mixed_length = scf.select %first, %c3, %mixed_length0 : index
+    %ordinary_length = scf.select %partial, %c5, %c8 : index
+    %length0 = scf.select %mixed, %mixed_length, %ordinary_length : index
+    %length = scf.select %singles, %c1, %length0 : index
+    %p2045 = index.constant 2045 : index
+    %p2057 = index.constant 2057 : index
+    %p8192 = index.constant 8192 : index
+    %p262136 = index.constant 262136 : index
+    %p262143 = index.constant 262143 : index
+    %mixed_position0 = scf.select %second, %p2057, %p262143 : index
+    %mixed_position = scf.select %first, %p2045, %mixed_position0 : index
+    %sparse_position = index.madd %span, %c7, %p8192 : index
+    %sparse = scalar.ori %singles, %disjoint : i1
+    %ordinary_position0 = scf.select %sparse, %sparse_position, %c0 : index
+    %ordinary_position1 = scf.select %partial, %p2045, %ordinary_position0 : index
+    %ordinary_position = scf.select %last_block, %p262136, %ordinary_position1 : index
+    %position = scf.select %mixed, %mixed_position, %ordinary_position : index
+    %base = index.madd %span, %c5, %c3 : index
+    %position_slot = index.add %base, %c1 : index
+    %begin_slot = index.add %base, %c2 : index
+    %row_slot = index.add %base, %c3 : index
+    %length_word = index.cast %length : index to i32
+    %position_word = index.cast %position : index to i32
+    %begin_word = index.cast %begin : index to i32
+    %row_word = index.cast %span : index to i32
+    view.store %length_word, %header[%base] : i32, view<83xi32>
+    view.store %position_word, %header[%position_slot] : i32, view<83xi32>
+    view.store %begin_word, %header[%begin_slot] : i32, view<83xi32>
+    view.store %row_word, %header[%row_slot] : i32, view<83xi32>
+    scf.for %relative = [%c0 to %length step %c1] {
+      %token_value = index.add %begin, %relative : index
+      %token = index.assume %token_value [range(%token_value, 0, 7)] : index
+      %query_position = index.add %position, %relative : index
+      %visible = index.add %query_position, %c1 : index
+      %complete = index.div %visible, %c4 : index
+      %is_sparse = index.cmp ugt, %complete, %budget : index
+      %chosen = scf.select %is_sparse, %budget, %complete : index
+      scf.for %slot = [%c0 to %chosen step %c1] {
+        %block = scf.if %is_sparse -> (index) {
+          %suffix = index.sub %complete, %budget : index
+          %last = index.add %suffix, %slot : index
+          %parity = index.rem %token, %c2 : index
+          %shift = index.mul %suffix, %parity : index
+          %mixed_id = index.add %shift, %slot : index
+          %normal_id = scf.select %last_block, %last, %mixed_id : index
+          %member = index.rem %token, %c4 : index
+          %interleaved_id = index.madd %slot, %c4, %member : index
+          %selected_id = scf.select %disjoint, %interleaved_id, %normal_id : index
+          scf.yield %selected_id : index
+        } else {
+          scf.yield %slot : index
+        }
+        %word = index.cast %block : index to i32
+        view.store %word, %ids[%token, %slot] : i32, view<8x512xi32>
+      }
+    }
+    %next = index.add %begin, %length : index
+    scf.yield %next : index
+  }
+  %total_word = index.cast %total : index to i32
+  view.store %total_word, %header[0] : i32, view<83xi32>
+  func.return
+}
+
+func.def @merge_reference(%epoch: buffer, %selected: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %epoch_view = buffer.view %epoch[%origin] : buffer -> view<83xi32>
+  %ids = buffer.view %selected[%origin] : buffer -> view<8x512xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<17x2056xi32>
+  %scratch_bytes = index.constant 262144 : offset
+  %scratch = buffer.alloca<private> align(16) %scratch_bytes : buffer
+  %membership = buffer.view %scratch[%origin] : buffer -> view<65536xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c17 = index.constant 17 : index
+  %budget = index.constant 512 : index
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %all_members = scalar.constant 15 : i32
+  %shift16 = scalar.constant 16 : i32
+  %spans_word = view.load %epoch_view[1] : view<83xi32> -> i32
+  %spans_value = index.cast %spans_word : i32 to index
+  %spans = index.assume %spans_value [range(%spans_value, 0, 16)] : index
+  %groups = scf.for %span = [%c0 to %spans step %c1](%group_base = %c0 : index) -> (index) {
+    %base = index.madd %span, %c5, %c3 : index
+    %position_slot = index.add %base, %c1 : index
+    %begin_slot = index.add %base, %c2 : index
+    %row_slot = index.add %base, %c3 : index
+    %length_word = view.load %epoch_view[%base] : view<83xi32> -> i32
+    %position_word = view.load %epoch_view[%position_slot] : view<83xi32> -> i32
+    %begin_word = view.load %epoch_view[%begin_slot] : view<83xi32> -> i32
+    %row_word = view.load %epoch_view[%row_slot] : view<83xi32> -> i32
+    %length_value = index.cast %length_word : i32 to index
+    %length = index.assume %length_value [range(%length_value, 1, 8)] : index
+    %first_position_value = index.cast %position_word : i32 to index
+    %first_position = index.assume %first_position_value [range(%first_position_value, 0, 262143)] : index
+    %span_begin_value = index.cast %begin_word : i32 to index
+    %span_begin = index.assume %span_begin_value [range(%span_begin_value, 0, 7)] : index
+    %end_group = scf.for %relative = [%c0 to %length step %c4](%group_value = %group_base : index) -> (index) {
+      %group = index.assume %group_value [range(%group_value, 0, 16)] : index
+      %begin = index.add %span_begin, %relative : index
+      %remaining = index.sub %length, %relative : index
+      %partial = index.cmp ult, %remaining, %c4 : index
+      %count = scf.select %partial, %remaining, %c4 : index
+      %position = index.add %first_position, %relative : index
+      %final_visible = index.add %position, %count : index
+      %rounded = index.add %final_visible, %c3 : index
+      %blocks_value = index.div %rounded, %c4 : index
+      %blocks = index.assume %blocks_value [range(%blocks_value, 0, 65536)] : index
+      scf.for %block = [%c0 to %blocks step %c1] {
+        view.store %zero, %membership[%block] : i32, view<65536xi32>
+      }
+      scf.for %query = [%c0 to %count step %c1] {
+        %token_value = index.add %begin, %query : index
+        %token = index.assume %token_value [range(%token_value, 0, 7)] : index
+        %query_position = index.add %position, %query : index
+        %visible = index.add %query_position, %c1 : index
+        %complete = index.div %visible, %c4 : index
+        %sparse = index.cmp ugt, %complete, %budget : index
+        %chosen_value = scf.select %sparse, %budget, %complete : index
+        %chosen = index.assume %chosen_value [range(%chosen_value, 0, 512)] : index
+        %shift_index = index.mul %query, %c4 : index
+        %shift = index.cast %shift_index : index to i32
+        %mask = scalar.shli %all_members, %shift : i32
+        scf.for %slot = [%c0 to %chosen step %c1] {
+          %id_word = view.load %ids[%token, %slot] : view<8x512xi32> -> i32
+          %block_value = index.cast %id_word : i32 to index
+          %block = index.assume %block_value [range(%block_value, 0, 65535)] : index
+          %previous = view.load %membership[%block] : view<65536xi32> -> i32
+          %combined = scalar.ori %previous, %mask : i32
+          view.store %combined, %membership[%block] : i32, view<65536xi32>
+        }
+        %tail = index.rem %visible, %c4 : index
+        scf.for %member = [%c0 to %tail step %c1] {
+          %tail_block = index.assume %complete [range(%complete, 0, 65535)] : index
+          %bit_index = index.add %shift_index, %member : index
+          %bit = index.cast %bit_index : index to i32
+          %flag = scalar.shli %one, %bit : i32
+          %previous = view.load %membership[%tail_block] : view<65536xi32> -> i32
+          %combined = scalar.ori %previous, %flag : i32
+          view.store %combined, %membership[%tail_block] : i32, view<65536xi32>
+        }
+      }
+      %union_count = scf.for %block = [%c0 to %blocks step %c1](%written = %c0 : index) -> (index) {
+        %mask = view.load %membership[%block] : view<65536xi32> -> i32
+        %present = scalar.cmpi ne, %mask, %zero : i32
+        %next = scf.if %present -> (index) {
+          %bits = scalar.shli %mask, %shift16 : i32
+          %id = index.cast %block : index to i32
+          %record = scalar.ori %id, %bits : i32
+          %slot_value = index.add %written, %c4 : index
+          %slot = index.assume %slot_value [range(%slot_value, 4, 2055)] : index
+          view.store %record, %destination[%group, %slot] : i32, view<17x2056xi32>
+          %next = index.add %written, %c1 : index
+          scf.yield %next : index
+        } else {
+          scf.yield %written : index
+        }
+        scf.yield %next : index
+      }
+      %rounded_count = index.add %union_count, %c3 : index
+      %chunks = index.div %rounded_count, %c4 : index
+      %padded = index.mul %chunks, %c4 : index
+      scf.for %slot = [%union_count to %padded step %c1] {
+        %destination_slot_value = index.add %slot, %c4 : index
+        %destination_slot = index.assume %destination_slot_value [range(%destination_slot_value, 4, 2055)] : index
+        view.store %zero, %destination[%group, %destination_slot] : i32, view<17x2056xi32>
+      }
+      %begin_word = index.cast %begin : index to i32
+      %count_word = index.cast %count : index to i32
+      %padded_word = index.cast %padded : index to i32
+      view.store %begin_word, %destination[%group, 0] : i32, view<17x2056xi32>
+      view.store %count_word, %destination[%group, 1] : i32, view<17x2056xi32>
+      view.store %row_word, %destination[%group, 2] : i32, view<17x2056xi32>
+      view.store %padded_word, %destination[%group, 3] : i32, view<17x2056xi32>
+      %next = index.add %group, %c1 : index
+      scf.yield %next : index
+    }
+    scf.yield %end_group : index
+  }
+  %live_groups = index.assume %groups [range(%groups, 0, 17)] : index
+  scf.for %group = [%live_groups to %c17 step %c1] {
+    scf.for %word = [%c0 to %c4 step %c1] {
+      view.store %zero, %destination[%group, %word] : i32, view<17x2056xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @cohort_union_membership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[7](%trial: index, %entropy: check.entropy) {
+    %epoch = check.generate.fill value(0) : tensor<83xi32>
+    %selected = check.generate.fill value(999999) : tensor<8x512xi32>
+    %output = check.generate.fill value(123456789) : tensor<17x2056xi32>
+    check.generate<@merge_fixture>(%trial, %epoch, %selected) : (index, tensor<83xi32>, tensor<8x512xi32>) -> ()
+    check.compare<@qsa_merge_cohorts, @merge_reference>(%epoch, %selected, %output) : (tensor<83xi32>, tensor<8x512xi32>, tensor<17x2056xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<17x2056xi32>
+    }
+  }
+  check.return
+}

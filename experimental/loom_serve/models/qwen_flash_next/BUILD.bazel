@@ -57,22 +57,45 @@ loom_library(
         configs = {
             "flash_next.context_capacity": "2112",
             "flash_next.pool_capacity": "2112",
+            "flash_next.span_capacity": "16",
             "flash_next.token_count": "8",
             "qsa.query_tile": "4",
         },
         execution_profiles = [
             AMDGPU_HARDWARE_PROFILE,
             AMDGPU_ACCESS_PROFILE,
-        ] + ([AMDGPU_TSAN_PROFILE] if name == "attention" else []),
+        ] + ([AMDGPU_TSAN_PROFILE] if name in [
+            "attention",
+            "attention_cache",
+        ] else []),
         deps = [":residual_programs"],
     )
     for name in [
         "attention",
+        "attention_cache",
         "iq4",
         "retained",
         "selection",
     ]
 ]
+
+loom_test(
+    name = "attention_cohorts_test",
+    srcs = ["tests/attention_cohorts.loom"],
+    benchmark_smoke = False,
+    configs = {
+        "flash_next.context_capacity": "262144",
+        "flash_next.pool_capacity": "262144",
+        "flash_next.span_capacity": "16",
+        "flash_next.token_count": "8",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        AMDGPU_TSAN_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
 
 loom_test(
     name = "scoring_test",
