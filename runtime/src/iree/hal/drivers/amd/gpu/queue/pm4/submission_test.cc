@@ -812,7 +812,7 @@ TEST_P(SubmissionTest, RejectedDownloadSuffixJoinsBeforeFailingPublicSignals) {
       iree_async_proactor_create_platform(iree_async_proactor_options_default(),
                                           iree_allocator_system(), &proactor));
   iree_hal_semaphore_t* semaphore = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_semaphore_create(
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
       proactor, 0, 4, iree_allocator_system(), &semaphore));
   const uint16_t types[] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS};
   const iree_hal_buffer_binding_layout_t binding_layout = {
