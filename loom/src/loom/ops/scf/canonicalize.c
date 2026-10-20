@@ -694,11 +694,14 @@ static bool loom_scf_region_branch_tail_op_can_factor(
     const loom_module_t* module, const loom_op_t* op) {
   // Common-tail factoring is not speculation: exactly one matching tail already
   // executed on every branch path, and branch-local work remains before the new
-  // yield. Result-producing side-effecting tails are therefore legal here.
-  // Pending source expansion still needs each branch's applicability facts.
+  // yield. Result-producing side-effecting tails are therefore legal here, but
+  // convergent tails must retain the dynamic participant set of their source
+  // region. Pending source expansion also needs each branch's applicability
+  // facts.
   return op && !iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD) &&
          op->result_count == 1 && op->region_count == 0 &&
          op->tied_result_count == 0 &&
+         !loom_traits_are_convergent(op->traits) &&
          !loom_op_requires_source_context(module, op);
 }
 
@@ -768,6 +771,8 @@ static bool loom_scf_region_branch_tail_ops_match(
       loom_op_const_operands(reference_tail);
   const loom_value_id_t* candidate_operands =
       loom_op_const_operands(candidate_tail);
+  const bool has_access_path = iree_any_bit_set(
+      tail_vtable->operand_role_mask, LOOM_OPERAND_ROLE_MASK_ACCESS_PATH);
   for (uint16_t i = 0; i < reference_tail->operand_count; ++i) {
     if (reference_operands[i] == LOOM_VALUE_ID_INVALID ||
         reference_operands[i] >= rewriter->module->values.count ||
@@ -782,12 +787,17 @@ static bool loom_scf_region_branch_tail_ops_match(
             loom_module_value_type(rewriter->module, candidate_operands[i]))) {
       return false;
     }
-    // Selecting between distinct storage roots/projections erases the
-    // single-root facts needed by later memory lowering. Keep those accesses
-    // branch-local unless the storage operand is already common to every
-    // branch.
+    // Selecting between distinct storage roots erases the single-root facts
+    // needed by later memory lowering. Selecting an aggregate/root or
+    // coordinate on an access path similarly hides the branch-local relation
+    // that can make a projection static after specialization or unrolling.
+    // Keep both forms branch-local unless the relevant operand is already
+    // common to every branch.
     if (reference_operands[i] != candidate_operands[i] &&
-        loom_scf_type_is_storage_root_or_projection(reference_type)) {
+        (loom_scf_type_is_storage_root_or_projection(reference_type) ||
+         (has_access_path &&
+          loom_op_operand_role_at(tail_vtable, reference_tail, i) ==
+              LOOM_OPERAND_ROLE_ACCESS_PATH))) {
       return false;
     }
   }

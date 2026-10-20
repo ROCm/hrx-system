@@ -455,6 +455,9 @@ enum loom_operand_role_e {
   LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT = 5,
   // Operand is widened by a floating-point precision extension.
   LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE = 6,
+  // Operand contributes to the logical path selecting a subvalue, resource, or
+  // storage range observed or updated by the operation.
+  LOOM_OPERAND_ROLE_ACCESS_PATH = 7,
 };
 typedef uint8_t loom_operand_role_t;
 
@@ -471,6 +474,7 @@ enum loom_operand_role_mask_bits_e {
       1u << LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT,
   LOOM_OPERAND_ROLE_MASK_FLOAT_EXTENSION_SOURCE =
       1u << LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE,
+  LOOM_OPERAND_ROLE_MASK_ACCESS_PATH = 1u << LOOM_OPERAND_ROLE_ACCESS_PATH,
 };
 typedef uint8_t loom_operand_role_mask_t;
 

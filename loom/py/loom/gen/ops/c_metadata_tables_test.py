@@ -34,6 +34,7 @@ from loom.dsl import (
     Op,
     OpCategory,
     Operand,
+    OperandRole,
     Reads,
     ReadWrites,
     RegionDef,
@@ -88,6 +89,24 @@ def test_generate_tables_emits_execution_condition() -> None:
     assert ".eager_execution_cost = 1," in source
 
 
+def test_generate_tables_emits_operand_role_and_summary_mask() -> None:
+    op = Op(
+        "test.project",
+        group=Dialect("test"),
+        operands=[
+            Operand("source", ANY, role=OperandRole.ACCESS_PATH),
+            Operand("indices", INTEGER, variadic=True, role=OperandRole.ACCESS_PATH),
+        ],
+        results=[Result("result", ANY)],
+        traits=[PURE],
+    )
+
+    source = generate_tables_c("test", 0, [op])
+
+    assert source.count("LOOM_OPERAND_ROLE_ACCESS_PATH") == 2
+    assert ".operand_role_mask = LOOM_OPERAND_ROLE_MASK_ACCESS_PATH," in source
+
+
 def test_generate_tables_requires_authored_eager_execution_policy() -> None:
     op = Op(
         "test.safe",
@@ -99,7 +118,7 @@ def test_generate_tables_requires_authored_eager_execution_policy() -> None:
         generate_tables_c("test", 0, [op])
 
 
-def test_generate_tables_rejects_eager_cost_without_static_safety() -> None:
+def test_generate_tables_emits_dynamic_speculation_cost() -> None:
     op = Op(
         "test.dynamic",
         group=Dialect("test"),
@@ -107,8 +126,10 @@ def test_generate_tables_rejects_eager_cost_without_static_safety() -> None:
         eager_execution_cost=1,
     )
 
-    with pytest.raises(ValueError, match="positive eager_execution_cost"):
-        generate_tables_c("test", 0, [op])
+    source = generate_tables_c("test", 0, [op])
+
+    assert ".effective_traits = loom_test_dynamic_effective_traits," in source
+    assert ".eager_execution_cost = 1," in source
 
 
 @pytest.mark.parametrize("execution", [None, *RegionExecution])

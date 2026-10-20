@@ -809,10 +809,10 @@ func.def @if_factors_common_pure_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
 // dominates the conditional and remains available to the factored tail.
 func.def @if_factors_tail_with_shared_dependent_type(%cond: i1, %extent: index, %a: vector<[%extent]xf32>, %b: vector<[%extent]xf32>) -> (vector<[%extent]xf32>) {
   %result = scf.if %cond -> (vector<[%extent]xf32>) {
-    %then = test.convergent %a : vector<[%extent]xf32>
+    %then = test.convert %a : vector<[%extent]xf32> -> vector<[%extent]xf32>
     scf.yield %then : vector<[%extent]xf32>
   } else {
-    %else = test.convergent %b : vector<[%extent]xf32>
+    %else = test.convert %b : vector<[%extent]xf32> -> vector<[%extent]xf32>
     scf.yield %else : vector<[%extent]xf32>
   }
   func.return %result : vector<[%extent]xf32>
@@ -821,8 +821,35 @@ func.def @if_factors_tail_with_shared_dependent_type(%cond: i1, %extent: index, 
 // ----
 func.def @if_factors_tail_with_shared_dependent_type(%cond: i1, %extent: index, %a: vector<[%extent]xf32>, %b: vector<[%extent]xf32>) -> (vector<[%extent]xf32>) {
   %10 = scf.select %cond, %a, %b : vector<[%extent]xf32>
-  %result = test.convergent %10 : vector<[%extent]xf32>
+  %result = test.convert %10 : vector<[%extent]xf32> -> vector<[%extent]xf32>
   func.return %result : vector<[%extent]xf32>
+}
+
+// ====
+
+// Convergent operations retain their original dynamic participant sets. Even
+// exhaustive branches may be divergent across invocations.
+func.def @if_preserves_convergent_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = test.convergent %a : i32
+    scf.yield %then : i32
+  } else {
+    %else = test.convergent %b : i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @if_preserves_convergent_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = test.convergent %a : i32
+    scf.yield %then : i32
+  } else {
+    %else = test.convergent %b : i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
 }
 
 // ====
@@ -945,6 +972,266 @@ func.def @if_preserves_distinct_storage_tail_roots(%cond: i1, %lhs_buffer: buffe
   } else {
     %rhs = view.load %rhs_view[0] : view<4xf32> -> f32
     scf.yield %rhs : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// Pool identity is an access root even though it is not a buffer, view, or
+// storage projection type.
+func.def @if_preserves_distinct_pool_load_roots(%cond: i1, %lhs_pool: pool, %rhs_pool: pool, %page: i32, %page_bytes: offset) -> (tile<4xf32>) {
+  %result = scf.if %cond -> (tile<4xf32>) {
+    %then = pool.load %lhs_pool, %page, %page_bytes : pool, i32, offset -> tile<4xf32>
+    scf.yield %then : tile<4xf32>
+  } else {
+    %else = pool.load %rhs_pool, %page, %page_bytes : pool, i32, offset -> tile<4xf32>
+    scf.yield %else : tile<4xf32>
+  }
+  func.return %result : tile<4xf32>
+}
+
+// ----
+func.def @if_preserves_distinct_pool_load_roots(%cond: i1, %lhs_pool: pool, %rhs_pool: pool, %page: i32, %page_bytes: offset) -> (tile<4xf32>) {
+  %result = scf.if %cond -> (tile<4xf32>) {
+    %then = pool.load %lhs_pool, %page, %page_bytes : pool, i32, offset -> tile<4xf32>
+    scf.yield %then : tile<4xf32>
+  } else {
+    %else = pool.load %rhs_pool, %page, %page_bytes : pool, i32, offset -> tile<4xf32>
+    scf.yield %else : tile<4xf32>
+  }
+  func.return %result : tile<4xf32>
+}
+
+// ====
+
+// Page coordinates remain correlated with the pool access rather than becoming
+// a selected dynamic page before one shared load.
+func.def @if_preserves_distinct_pool_load_pages(%cond: i1, %pool: pool, %lhs_page: i32, %rhs_page: i32, %page_bytes: offset) -> (tile<4xf32>) {
+  %result = scf.if %cond -> (tile<4xf32>) {
+    %then = pool.load %pool, %lhs_page, %page_bytes : pool, i32, offset -> tile<4xf32>
+    scf.yield %then : tile<4xf32>
+  } else {
+    %else = pool.load %pool, %rhs_page, %page_bytes : pool, i32, offset -> tile<4xf32>
+    scf.yield %else : tile<4xf32>
+  }
+  func.return %result : tile<4xf32>
+}
+
+// ----
+func.def @if_preserves_distinct_pool_load_pages(%cond: i1, %pool: pool, %lhs_page: i32, %rhs_page: i32, %page_bytes: offset) -> (tile<4xf32>) {
+  %result = scf.if %cond -> (tile<4xf32>) {
+    %then = pool.load %pool, %lhs_page, %page_bytes : pool, i32, offset -> tile<4xf32>
+    scf.yield %then : tile<4xf32>
+  } else {
+    %else = pool.load %pool, %rhs_page, %page_bytes : pool, i32, offset -> tile<4xf32>
+    scf.yield %else : tile<4xf32>
+  }
+  func.return %result : tile<4xf32>
+}
+
+// ====
+
+// Aggregate and coordinate operands jointly identify a vector element. Keep
+// the correlated paths in their original branches instead of selecting a wide
+// aggregate and dynamic coordinate before extracting one scalar.
+func.def @if_preserves_distinct_vector_extract_paths(%cond: i1, %lhs: vector<8xi32>, %rhs: vector<8xi32>, %lhs_index: index, %rhs_index: index) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = vector.extract %lhs[%lhs_index] : vector<8xi32> -> i32
+    scf.yield %then : i32
+  } else {
+    %else = vector.extract %rhs[%rhs_index] : vector<8xi32> -> i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @if_preserves_distinct_vector_extract_paths(%cond: i1, %lhs: vector<8xi32>, %rhs: vector<8xi32>, %lhs_index: index, %rhs_index: index) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = vector.extract %lhs[%lhs_index] : vector<8xi32> -> i32
+    scf.yield %then : i32
+  } else {
+    %else = vector.extract %rhs[%rhs_index] : vector<8xi32> -> i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Once every coordinate is static and in bounds, scalar extraction is cheap
+// and total. Speculate the fixed extracts and select their scalar results.
+func.def @if_selectifies_static_vector_extract_paths(%cond: i1, %lhs: vector<8xi32>, %rhs: vector<8xi32>) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = vector.extract %lhs[2] : vector<8xi32> -> i32
+    scf.yield %then : i32
+  } else {
+    %else = vector.extract %rhs[5] : vector<8xi32> -> i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @if_selectifies_static_vector_extract_paths(%cond: i1, %lhs: vector<8xi32>, %rhs: vector<8xi32>) -> (i32) {
+  %then = vector.extract %lhs[2] : vector<8xi32> -> i32
+  %else = vector.extract %rhs[5] : vector<8xi32> -> i32
+  %result = scf.select %cond, %then, %else : i32
+  func.return %result : i32
+}
+
+// ====
+
+// A static coordinate into a dynamic axis is not known in bounds and therefore
+// remains conditional.
+func.def @if_preserves_static_extract_from_dynamic_extent(%cond: i1, %extent: index, %lhs: vector<[%extent]xi32>, %rhs: vector<[%extent]xi32>) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = vector.extract %lhs[2] : vector<[%extent]xi32> -> i32
+    scf.yield %then : i32
+  } else {
+    %else = vector.extract %rhs[5] : vector<[%extent]xi32> -> i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @if_preserves_static_extract_from_dynamic_extent(%cond: i1, %extent: index, %lhs: vector<[%extent]xi32>, %rhs: vector<[%extent]xi32>) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = vector.extract %lhs[2] : vector<[%extent]xi32> -> i32
+    scf.yield %then : i32
+  } else {
+    %else = vector.extract %rhs[5] : vector<[%extent]xi32> -> i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Extracting a subvector may copy a wide value and is not assigned the scalar
+// extraction cost.
+func.def @if_preserves_static_subvector_extract(%cond: i1, %lhs: vector<2x4xi32>, %rhs: vector<2x4xi32>) -> (vector<4xi32>) {
+  %result = scf.if %cond -> (vector<4xi32>) {
+    %then = vector.extract %lhs[0] : vector<2x4xi32> -> vector<4xi32>
+    scf.yield %then : vector<4xi32>
+  } else {
+    %else = vector.extract %rhs[1] : vector<2x4xi32> -> vector<4xi32>
+    scf.yield %else : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ----
+func.def @if_preserves_static_subvector_extract(%cond: i1, %lhs: vector<2x4xi32>, %rhs: vector<2x4xi32>) -> (vector<4xi32>) {
+  %result = scf.if %cond -> (vector<4xi32>) {
+    %then = vector.extract %lhs[0] : vector<2x4xi32> -> vector<4xi32>
+    scf.yield %then : vector<4xi32>
+  } else {
+    %else = vector.extract %rhs[1] : vector<2x4xi32> -> vector<4xi32>
+    scf.yield %else : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ====
+
+// Payload selection remains profitable when the destination and insertion
+// coordinate are already common to both branches.
+func.def @if_factors_vector_insert_payload(%cond: i1, %a: i32, %b: i32, %dest: vector<8xi32>, %index: index) -> (vector<8xi32>) {
+  %result = scf.if %cond -> (vector<8xi32>) {
+    %then = vector.insert %a into %dest[%index] : i32, vector<8xi32>
+    scf.yield %then : vector<8xi32>
+  } else {
+    %else = vector.insert %b into %dest[%index] : i32, vector<8xi32>
+    scf.yield %else : vector<8xi32>
+  }
+  func.return %result : vector<8xi32>
+}
+
+// ----
+func.def @if_factors_vector_insert_payload(%cond: i1, %a: i32, %b: i32, %dest: vector<8xi32>, %index: index) -> (vector<8xi32>) {
+  %14 = scf.select %cond, %a, %b : i32
+  %result = vector.insert %14 into %dest[%index] : i32, vector<8xi32>
+  func.return %result : vector<8xi32>
+}
+
+// ====
+
+// Distinct insertion coordinates remain branch-local even when the payload and
+// destination are common.
+func.def @if_preserves_distinct_vector_insert_paths(%cond: i1, %value: i32, %dest: vector<8xi32>, %lhs_index: index, %rhs_index: index) -> (vector<8xi32>) {
+  %result = scf.if %cond -> (vector<8xi32>) {
+    %then = vector.insert %value into %dest[%lhs_index] : i32, vector<8xi32>
+    scf.yield %then : vector<8xi32>
+  } else {
+    %else = vector.insert %value into %dest[%rhs_index] : i32, vector<8xi32>
+    scf.yield %else : vector<8xi32>
+  }
+  func.return %result : vector<8xi32>
+}
+
+// ----
+func.def @if_preserves_distinct_vector_insert_paths(%cond: i1, %value: i32, %dest: vector<8xi32>, %lhs_index: index, %rhs_index: index) -> (vector<8xi32>) {
+  %result = scf.if %cond -> (vector<8xi32>) {
+    %then = vector.insert %value into %dest[%lhs_index] : i32, vector<8xi32>
+    scf.yield %then : vector<8xi32>
+  } else {
+    %else = vector.insert %value into %dest[%rhs_index] : i32, vector<8xi32>
+    scf.yield %else : vector<8xi32>
+  }
+  func.return %result : vector<8xi32>
+}
+
+// ====
+
+// Distinct slice origins retain the relation between each source and offset.
+func.def @if_preserves_distinct_vector_slice_paths(%cond: i1, %lhs: vector<8xi32>, %rhs: vector<8xi32>, %lhs_offset: index, %rhs_offset: index) -> (vector<4xi32>) {
+  %result = scf.if %cond -> (vector<4xi32>) {
+    %then = vector.slice %lhs[%lhs_offset] : vector<8xi32> -> vector<4xi32>
+    scf.yield %then : vector<4xi32>
+  } else {
+    %else = vector.slice %rhs[%rhs_offset] : vector<8xi32> -> vector<4xi32>
+    scf.yield %else : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ----
+func.def @if_preserves_distinct_vector_slice_paths(%cond: i1, %lhs: vector<8xi32>, %rhs: vector<8xi32>, %lhs_offset: index, %rhs_offset: index) -> (vector<4xi32>) {
+  %result = scf.if %cond -> (vector<4xi32>) {
+    %then = vector.slice %lhs[%lhs_offset] : vector<8xi32> -> vector<4xi32>
+    scf.yield %then : vector<4xi32>
+  } else {
+    %else = vector.slice %rhs[%rhs_offset] : vector<8xi32> -> vector<4xi32>
+    scf.yield %else : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ====
+
+// A shared storage root does not make distinct element coordinates common.
+func.def @if_preserves_distinct_view_load_indices(%cond: i1, %source: view<8xf32>, %lhs_index: index, %rhs_index: index) -> (f32) {
+  %result = scf.if %cond -> (f32) {
+    %then = view.load %source[%lhs_index] : view<8xf32> -> f32
+    scf.yield %then : f32
+  } else {
+    %else = view.load %source[%rhs_index] : view<8xf32> -> f32
+    scf.yield %else : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.def @if_preserves_distinct_view_load_indices(%cond: i1, %source: view<8xf32>, %lhs_index: index, %rhs_index: index) -> (f32) {
+  %result = scf.if %cond -> (f32) {
+    %then = view.load %source[%lhs_index] : view<8xf32> -> f32
+    scf.yield %then : f32
+  } else {
+    %else = view.load %source[%rhs_index] : view<8xf32> -> f32
+    scf.yield %else : f32
   }
   func.return %result : f32
 }
@@ -1734,6 +2021,47 @@ func.def @switch_factors_common_pure_tail_to_lookup(%variant: index, %a0: i32, %
     1 = (%a1, %b1)
   } default(%af, %bf) : i32, i32
   %result = test.addi %15, %16 : i32
+  func.return %result : i32
+}
+
+// ====
+
+// Every switch arm retains its aggregate-coordinate relation when the common
+// tail is an indexed projection.
+func.def @switch_preserves_distinct_vector_extract_paths(%variant: index, %values: vector<8xi32>, %index0: index, %index1: index, %fallback_index: index) -> (i32) {
+  %result = scf.switch %variant -> (i32) {
+    case 0 {
+      %case0 = vector.extract %values[%index0] : vector<8xi32> -> i32
+      scf.yield %case0 : i32
+    }
+    case 1 {
+      %case1 = vector.extract %values[%index1] : vector<8xi32> -> i32
+      scf.yield %case1 : i32
+    }
+    default {
+      %fallback = vector.extract %values[%fallback_index] : vector<8xi32> -> i32
+      scf.yield %fallback : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @switch_preserves_distinct_vector_extract_paths(%variant: index, %values: vector<8xi32>, %index0: index, %index1: index, %fallback_index: index) -> (i32) {
+  %result = scf.switch %variant -> (i32) {
+    case 0 {
+      %case0 = vector.extract %values[%index0] : vector<8xi32> -> i32
+      scf.yield %case0 : i32
+    }
+    case 1 {
+      %case1 = vector.extract %values[%index1] : vector<8xi32> -> i32
+      scf.yield %case1 : i32
+    }
+    default {
+      %fallback = vector.extract %values[%fallback_index] : vector<8xi32> -> i32
+      scf.yield %fallback : i32
+    }
+  }
   func.return %result : i32
 }
 

@@ -115,8 +115,14 @@ func.def @refines_common_region_layout_with_external_dimension(%cond: i1, %size:
 
 // ----
 func.def @refines_common_region_layout_with_external_dimension(%cond: i1, %size: index, %buffer: buffer, %then_offset: offset, %else_offset: offset) {
-  %16 = scf.select %cond, %then_offset, %else_offset : offset
-  %view = buffer.view %buffer[%16] : buffer -> view<[%size]xf32>
+  cfg.cond_br %cond, ^_bb1, ^_bb2
+^_bb1:
+  %then_view = buffer.view %buffer[%then_offset] : buffer -> view<[%size]xf32>
+  cfg.br ^_bb3(%then_view: view<[%size]xf32>)
+^_bb2:
+  %else_view = buffer.view %buffer[%else_offset] : buffer -> view<[%size]xf32>
+  cfg.br ^_bb3(%else_view: view<[%size]xf32>)
+^_bb3(%view: view<[%size]xf32>):
   test.use %view : view<[%size]xf32>
   func.return
 }

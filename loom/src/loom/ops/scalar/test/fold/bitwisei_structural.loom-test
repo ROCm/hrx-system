@@ -73,6 +73,100 @@ func.def @xori_cancels_duplicate_exact_constants(%x: i32) -> (i32) {
 
 // ====
 
+func.def @andi_pushes_through_constant_xori(%x: i32) -> (i32) {
+  %xor_constant = scalar.constant 5 : i32
+  %mask = scalar.constant 6 : i32
+  %xored = scalar.xori %x, %xor_constant : i32
+  %masked = scalar.andi %xored, %mask : i32
+  func.return %masked : i32
+}
+
+// ----
+func.def @andi_pushes_through_constant_xori(%x: i32) -> (i32) {
+  %mask = scalar.constant 6 : i32
+  %6 = scalar.andi %x, %mask : i32
+  %7 = scalar.constant 4 : i32
+  %masked = scalar.xori %6, %7 : i32
+  func.return %masked : i32
+}
+
+// ====
+
+func.def @andi_pushes_through_reversed_constant_xori(%x: i32) -> (i32) {
+  %xor_constant = scalar.constant 5 : i32
+  %mask = scalar.constant 6 : i32
+  %xored = scalar.xori %xor_constant, %x : i32
+  %masked = scalar.andi %mask, %xored : i32
+  func.return %masked : i32
+}
+
+// ----
+func.def @andi_pushes_through_reversed_constant_xori(%x: i32) -> (i32) {
+  %mask = scalar.constant 6 : i32
+  %6 = scalar.andi %x, %mask : i32
+  %7 = scalar.constant 4 : i32
+  %masked = scalar.xori %6, %7 : i32
+  func.return %masked : i32
+}
+
+// ====
+
+func.def @andi_drops_xori_bits_outside_mask(%x: i32) -> (i32) {
+  %xor_constant = scalar.constant 2 : i32
+  %mask = scalar.constant 1 : i32
+  %xored = scalar.xori %x, %xor_constant : i32
+  %masked = scalar.andi %xored, %mask : i32
+  func.return %masked : i32
+}
+
+// ----
+func.def @andi_drops_xori_bits_outside_mask(%x: i32) -> (i32) {
+  %mask = scalar.constant 1 : i32
+  %masked = scalar.andi %x, %mask : i32
+  func.return %masked : i32
+}
+
+// ====
+
+func.def @andi_pushes_through_negative_i8_xori(%x: i8) -> (i8) {
+  %xor_constant = scalar.constant -1 : i8
+  %mask = scalar.constant -128 : i8
+  %xored = scalar.xori %x, %xor_constant : i8
+  %masked = scalar.andi %xored, %mask : i8
+  func.return %masked : i8
+}
+
+// ----
+func.def @andi_pushes_through_negative_i8_xori(%x: i8) -> (i8) {
+  %mask = scalar.constant -128 : i8
+  %6 = scalar.andi %x, %mask : i8
+  %masked = scalar.xori %6, %mask : i8
+  func.return %masked : i8
+}
+
+// ====
+
+func.def @andi_keeps_dynamic_xori_and_mask(%x: i32, %y: i32, %mask: i32) -> (i32, i32) {
+  %xor_constant = scalar.constant 5 : i32
+  %dynamic_xor = scalar.xori %x, %y : i32
+  %dynamic_xor_masked = scalar.andi %dynamic_xor, %xor_constant : i32
+  %constant_xor = scalar.xori %x, %xor_constant : i32
+  %dynamic_masked = scalar.andi %constant_xor, %mask : i32
+  func.return %dynamic_xor_masked, %dynamic_masked : i32, i32
+}
+
+// ----
+func.def @andi_keeps_dynamic_xori_and_mask(%x: i32, %y: i32, %mask: i32) -> (i32, i32) {
+  %xor_constant = scalar.constant 5 : i32
+  %dynamic_xor = scalar.xori %x, %y : i32
+  %dynamic_xor_masked = scalar.andi %dynamic_xor, %xor_constant : i32
+  %constant_xor = scalar.xori %x, %xor_constant : i32
+  %dynamic_masked = scalar.andi %constant_xor, %mask : i32
+  func.return %dynamic_xor_masked, %dynamic_masked : i32, i32
+}
+
+// ====
+
 func.def @shift_identities_and_reassociation(%x: i32) -> (i32, i32, i32, i32, i32, i32) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32

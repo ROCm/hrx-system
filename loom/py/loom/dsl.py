@@ -471,6 +471,7 @@ class OperandRole(Enum):
     BROADCAST_SOURCE = "broadcast_source"
     COMPOSITE_ELEMENT = "composite_element"
     FLOAT_EXTENSION_SOURCE = "float_extension_source"
+    ACCESS_PATH = "access_path"
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,6 +484,9 @@ class Operand:
     variadic: If True, this is zero-or-more values (list[Value]).
     optional: If True, this operand may be absent.
     role: Semantic role consumed by generic analyses.
+        ACCESS_PATH marks aggregate/root and coordinate operands that jointly
+        identify the logical subvalue, resource, or storage range observed or
+        updated by the operation.
     observes_reference: Observes buffer/view metadata without accessing payload
         or exposing a usable reference/address through a result or side effect.
     """

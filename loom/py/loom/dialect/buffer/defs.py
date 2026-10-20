@@ -56,6 +56,7 @@ from loom.dsl import (
     MemoryAccessInterface,
     Op,
     Operand,
+    OperandRole,
     OpPhase,
     Reads,
     Result,
@@ -388,8 +389,13 @@ buffer_view = Op(
     group=buffer_ops,
     doc=("Form a typed non-owning view from an opaque buffer root and base byte offset. The result view type carries the address layout."),
     operands=[
-        Operand("buffer", BUFFER, doc="Opaque storage root."),
-        Operand("byte_offset", OFFSET, doc="Base byte offset from the buffer root."),
+        Operand("buffer", BUFFER, doc="Opaque storage root.", role=OperandRole.ACCESS_PATH),
+        Operand(
+            "byte_offset",
+            OFFSET,
+            doc="Base byte offset from the buffer root.",
+            role=OperandRole.ACCESS_PATH,
+        ),
     ],
     results=[Result("result", VIEW, doc="Typed logical view over the buffer.", reference_source="buffer")],
     traits=[PURE, REFINABLE_RESULT_TYPE_REFS],
@@ -446,8 +452,18 @@ buffer_load_i8_u = Op(
     builder_name="load_i8_u",
     doc=("Load one unsigned byte from a buffer root and zero-extend it to the canonical i32 carrier. The byte offset must identify an accessible byte in the buffer."),
     operands=[
-        Operand("source", BUFFER, doc="Buffer root read by the load."),
-        Operand("byte_offset", OFFSET, doc="Byte offset into the source buffer."),
+        Operand(
+            "source",
+            BUFFER,
+            doc="Buffer root read by the load.",
+            role=OperandRole.ACCESS_PATH,
+        ),
+        Operand(
+            "byte_offset",
+            OFFSET,
+            doc="Byte offset into the source buffer.",
+            role=OperandRole.ACCESS_PATH,
+        ),
     ],
     results=[
         Result("result", I32, doc="Loaded unsigned byte zero-extended to i32."),
@@ -474,8 +490,18 @@ buffer_store_i8 = Op(
     doc=("Store the low eight bits of an i32 carrier to one byte in a buffer root. The byte offset must identify an accessible byte in the buffer."),
     operands=[
         Operand("value", I32, doc="i32 carrier whose low eight bits are stored."),
-        Operand("target", BUFFER, doc="Buffer root written by the store."),
-        Operand("byte_offset", OFFSET, doc="Byte offset into the target buffer."),
+        Operand(
+            "target",
+            BUFFER,
+            doc="Buffer root written by the store.",
+            role=OperandRole.ACCESS_PATH,
+        ),
+        Operand(
+            "byte_offset",
+            OFFSET,
+            doc="Byte offset into the target buffer.",
+            role=OperandRole.ACCESS_PATH,
+        ),
     ],
     effects=[Writes("target")],
     interfaces=[CachePolicyInterface(None, None), MemoryAccessInterface(view="target")],
@@ -507,11 +533,11 @@ buffer_copy = Op(
         "performs no byte access."
     ),
     operands=[
-        Operand("source", BUFFER, doc="Buffer root read by the copy."),
-        Operand("source_offset", OFFSET, doc="Source byte offset."),
-        Operand("target", BUFFER, doc="Buffer root written by the copy."),
-        Operand("target_offset", OFFSET, doc="Target byte offset."),
-        Operand("byte_length", OFFSET, doc="Number of bytes to copy."),
+        Operand("source", BUFFER, doc="Buffer root read by the copy.", role=OperandRole.ACCESS_PATH),
+        Operand("source_offset", OFFSET, doc="Source byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("target", BUFFER, doc="Buffer root written by the copy.", role=OperandRole.ACCESS_PATH),
+        Operand("target_offset", OFFSET, doc="Target byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("byte_length", OFFSET, doc="Number of bytes to copy.", role=OperandRole.ACCESS_PATH),
     ],
     effects=[Reads("source"), Writes("target")],
     format=[
@@ -553,9 +579,9 @@ buffer_fill = Op(
             BYTE_PATTERN_SCALAR,
             doc="Raw scalar bit pattern to repeat.",
         ),
-        Operand("target", BUFFER, doc="Buffer root receiving the pattern."),
-        Operand("target_offset", OFFSET, doc="Target byte offset."),
-        Operand("byte_length", OFFSET, doc="Number of bytes to fill."),
+        Operand("target", BUFFER, doc="Buffer root receiving the pattern.", role=OperandRole.ACCESS_PATH),
+        Operand("target_offset", OFFSET, doc="Target byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("byte_length", OFFSET, doc="Number of bytes to fill.", role=OperandRole.ACCESS_PATH),
     ],
     effects=[Writes("target")],
     format=[
@@ -585,11 +611,11 @@ buffer_compare = Op(
     group=buffer_ops,
     doc=("Lexicographically compare equal-length ranges as unsigned bytes and return canonical i32 -1, 0, or +1. A zero byte length returns zero and performs no byte access."),
     operands=[
-        Operand("lhs", BUFFER, doc="Left buffer root."),
-        Operand("lhs_offset", OFFSET, doc="Left byte offset."),
-        Operand("rhs", BUFFER, doc="Right buffer root."),
-        Operand("rhs_offset", OFFSET, doc="Right byte offset."),
-        Operand("byte_length", OFFSET, doc="Number of bytes to compare."),
+        Operand("lhs", BUFFER, doc="Left buffer root.", role=OperandRole.ACCESS_PATH),
+        Operand("lhs_offset", OFFSET, doc="Left byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("rhs", BUFFER, doc="Right buffer root.", role=OperandRole.ACCESS_PATH),
+        Operand("rhs_offset", OFFSET, doc="Right byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("byte_length", OFFSET, doc="Number of bytes to compare.", role=OperandRole.ACCESS_PATH),
     ],
     results=[
         Result("order", I32, doc="Canonical signed ordering result."),

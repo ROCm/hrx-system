@@ -117,8 +117,6 @@ def _validate_eager_execution_cost(op: Op) -> None:
         return
     if isinstance(cost, bool) or not isinstance(cost, int) or not 0 <= cost <= 255:
         raise ValueError(f"Op '{op.name}': eager_execution_cost must be an integer in [0, 255]")
-    if cost > 0 and not (has_unconditional_safety or has_conditional_safety):
-        raise ValueError(f"Op '{op.name}': positive eager_execution_cost requires static or fact-dependent speculation safety")
 
 
 def _op_semantics_row(op: Op, condition_refinement_index: int = 0) -> list[str]:

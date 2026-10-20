@@ -38,6 +38,7 @@ loom_generated_cc_library(
     "scalarization.c"
     "storage.c"
     "table.c"
+    "traits.c"
     "transpose.c"
     "type_transfer.c"
     "verify.c"

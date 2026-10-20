@@ -44,6 +44,7 @@ from loom.dsl import (
     MemoryAccessInterface,
     Op,
     Operand,
+    OperandRole,
     OpPhase,
     RanksMatch,
     Reads,
@@ -161,8 +162,14 @@ view_subview = Op(
         "Form a logical subview from an existing view. Offsets select the logical origin; result type dimensions provide the subview extents. The element-access alignment requirement is preserved; forming a subview makes no memory access or address-alignment promise."
     ),
     operands=[
-        Operand("source", VIEW, doc="Source view."),
-        Operand("offsets", INDEX, doc="Dynamic logical offsets.", variadic=True),
+        Operand("source", VIEW, doc="Source view.", role=OperandRole.ACCESS_PATH),
+        Operand(
+            "offsets",
+            INDEX,
+            doc="Dynamic logical offsets.",
+            variadic=True,
+            role=OperandRole.ACCESS_PATH,
+        ),
     ],
     results=[Result("result", VIEW, doc="Subview over the same storage root.", reference_source="source")],
     attrs=[
@@ -238,8 +245,8 @@ view_load = Op(
     group=view_ops,
     doc=("Load one scalar element from a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis."),
     operands=[
-        Operand("view", VIEW, doc="Typed source view."),
-        Operand("indices", INDEX, doc="Dynamic logical element indices.", variadic=True),
+        Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed source view."),
+        Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
     results=[Result("result", SCALAR, doc="Loaded scalar element.")],
     attrs=[
@@ -280,8 +287,8 @@ view_store = Op(
     doc=("Store one scalar element into a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis."),
     operands=[
         Operand("value", SCALAR, doc="Scalar element to store."),
-        Operand("view", VIEW, doc="Typed destination view."),
-        Operand("indices", INDEX, doc="Dynamic logical element indices.", variadic=True),
+        Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed destination view."),
+        Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
     attrs=[
         AttrDef(
@@ -386,8 +393,8 @@ view_atomic_reduce = Op(
     ),
     operands=[
         Operand("value", BYTE_PATTERN_SCALAR, doc="Fixed-width byte-addressable scalar contribution."),
-        Operand("view", VIEW, doc="Typed destination view."),
-        Operand("indices", INDEX, doc="Dynamic logical element indices.", variadic=True),
+        Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed destination view."),
+        Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
     attrs=_atomic_memory_attrs(),
     constraints=[SameElementType("value", "view")],
@@ -418,8 +425,8 @@ view_atomic_rmw = Op(
     doc=("Atomically read one scalar view element, combine it with a scalar update value, write the combined value back, and return the old value observed by that atomic operation."),
     operands=[
         Operand("value", BYTE_PATTERN_SCALAR, doc="Fixed-width byte-addressable scalar update value."),
-        Operand("view", VIEW, doc="Typed destination view."),
-        Operand("indices", INDEX, doc="Dynamic logical element indices.", variadic=True),
+        Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed destination view."),
+        Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
     results=[Result("result", SCALAR, doc="Old memory value read by the atomic operation.")],
     attrs=_atomic_memory_attrs(),
@@ -463,8 +470,8 @@ view_atomic_cmpxchg = Op(
     operands=[
         Operand("expected", BYTE_PATTERN_SCALAR, doc="Fixed-width byte-addressable scalar compared against memory."),
         Operand("replacement", SCALAR, doc="Matching scalar value written on success."),
-        Operand("view", VIEW, doc="Typed destination view."),
-        Operand("indices", INDEX, doc="Dynamic logical element indices.", variadic=True),
+        Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed destination view."),
+        Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
     results=[Result("old", SCALAR, doc="Old memory value observed by the atomic operation.")],
     attrs=_atomic_cmpxchg_memory_attrs(),
@@ -520,8 +527,8 @@ view_prefetch = Op(
         "explicit hint-stripping pass removes it."
     ),
     operands=[
-        Operand("view", VIEW, doc="Typed view whose address should be prefetched.", observes_reference=True),
-        Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
+        Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed view whose address should be prefetched.", observes_reference=True),
+        Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical origin indices.", variadic=True),
     ],
     attrs=[
         AttrDef("intent", ATTR_TYPE_ENUM, enum_def=PrefetchIntent, doc="Required expected future access kind."),
@@ -570,8 +577,8 @@ view_atomic_load = Op(
         "width and atomicity at the requested scope without a read-modify-write."
     ),
     operands=[
-        Operand("view", VIEW, doc="Typed source view."),
-        Operand("indices", INDEX, doc="Dynamic logical element indices.", variadic=True),
+        Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed source view."),
+        Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
     results=[Result("result", BYTE_PATTERN_SCALAR, doc="Fixed-width byte-addressable scalar observed by the atomic load.")],
     attrs=_atomic_load_store_attrs(AtomicLoadOrdering),
@@ -601,8 +608,8 @@ view_atomic_store = Op(
     ),
     operands=[
         Operand("value", BYTE_PATTERN_SCALAR, doc="Fixed-width byte-addressable scalar to publish."),
-        Operand("view", VIEW, doc="Typed destination view."),
-        Operand("indices", INDEX, doc="Dynamic logical element indices.", variadic=True),
+        Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed destination view."),
+        Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
     attrs=_atomic_load_store_attrs(AtomicStoreOrdering),
     constraints=[SameElementType("value", "view")],

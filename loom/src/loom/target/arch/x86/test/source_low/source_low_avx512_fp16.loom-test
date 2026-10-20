@@ -53,29 +53,25 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
   %sub = vsubsh.xmm %add, %rhs
   %mul = vmulsh.xmm %sub, %lhs
   %div = vdivsh.xmm %mul, %rhs
-  %54 = copy %acc : reg<x86.xmm> -> reg<x86.xmm>
-  %fma = vfmadd231sh.xmm %54, %lhs, %rhs
-  %56 = vcmpsh.xmm %fma, %div, 17
-  %57 = avx512.kmovq.gpr64.k %56
-  %cmp = mov.trunc.gpr32.gpr64 %57
-  %59 = vmovd.xmm.gpr32 %condition
-  %60 = vpsllq.xmm %59, 63
-  %selected = vblendvpd.xmm %div, %fma, %60
+  %55 = copy %acc : reg<x86.xmm> -> reg<x86.xmm>
+  %fma = vfmadd231sh.xmm %55, %lhs, %rhs
+  %57 = vcmpsh.xmm %fma, %div, 17
+  %58 = avx512.kmovq.gpr64.k %57
+  %cmp = mov.trunc.gpr32.gpr64 %58
+  %60 = vmovd.xmm.gpr32 %condition
+  %61 = vpsllq.xmm %60, 63
+  %selected = vblendvpd.xmm %div, %fma, %61
   %extended = vcvtsh2ss.xmm %selected, %selected
   %truncated = vcvtss2sh.xmm %wide, %wide
-  %64 = vmovd.gpr32.xmm %selected
-  %65 = copy %64 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %66 = and.imm.gpr32 %65 {imm32 = 32767}
-  %67 = copy %66 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %68 = xor.imm.gpr32 %67 {imm32 = -32768}
-  %69 = vmovd.gpr32.xmm %rhs
-  %70 = copy %68 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %71 = and.imm.gpr32 %70 {imm32 = 32767}
-  %72 = copy %69 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %73 = and.imm.gpr32 %72 {imm32 = -32768}
-  %74 = copy %71 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %75 = or.gpr32 %74, %73
-  %copied = vmovd.xmm.gpr32 %75
+  %65 = vmovd.gpr32.xmm %selected
+  %66 = copy %65 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %67 = and.imm.gpr32 %66 {imm32 = 32767}
+  %68 = vmovd.gpr32.xmm %rhs
+  %69 = copy %68 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %70 = and.imm.gpr32 %69 {imm32 = -32768}
+  %71 = copy %67 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %72 = or.gpr32 %71, %70
+  %copied = vmovd.xmm.gpr32 %72
   return %selected, %extended, %truncated, %cmp, %copied
 }
 
