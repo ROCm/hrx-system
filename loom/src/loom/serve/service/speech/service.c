@@ -13,6 +13,7 @@
 #include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/runtime/parameter/telemetry.h"
 #include "loom/serve/service/kind.h"
+#include "loom/serve/service/qos.h"
 #include "loom/serve/service/speech/http.h"
 #include "loom/serve/service/speech/stream.h"
 #include "loom/serve/telemetry/latency.h"
@@ -997,9 +998,13 @@ static iree_status_t loom_serve_speech_accept(
         service, connection, &pending.job, "415 Unsupported Media Type",
         IREE_SV("Content-Type must be application/json"));
   }
-  iree_status_t status = loom_serve_speech_request_initialize(
-      request->body, service->options.name, service->host_allocator,
-      &pending.job.request);
+  loom_serve_execution_qos_t qos;
+  iree_status_t status = loom_serve_qos_parse(request, &qos);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_speech_request_initialize(
+        request->body, service->options.name, service->host_allocator,
+        &pending.job.request);
+  }
   if (!iree_status_is_ok(status)) {
     iree_string_view_t message = iree_status_message(status);
     if (!message.size) {
@@ -1015,6 +1020,7 @@ static iree_status_t loom_serve_speech_accept(
     iree_status_free(status);
     return response_status;
   }
+  pending.job.request.qos = qos;
   loom_serve_speech_fill_rows(service);
   loom_serve_speech_row_t* row = loom_serve_speech_free_row(service);
   if (!row && service->pending_count == service->options.pending_capacity) {

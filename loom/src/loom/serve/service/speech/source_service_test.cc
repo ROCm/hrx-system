@@ -247,11 +247,12 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   }
 
   int Send(const std::string& method, const std::string& target,
-           const std::string& body = "") {
+           const std::string& body = "", const std::string& headers = "") {
     const std::string request = method + " " + target +
                                 " HTTP/1.1\r\nHost: local\r\nContent-Type: "
                                 "application/json\r\nContent-Length: " +
-                                std::to_string(body.size()) + "\r\n\r\n" + body;
+                                std::to_string(body.size()) + "\r\n" + headers +
+                                "\r\n" + body;
     int client = -1;
     [&] { IREE_ASSERT_OK(http_.Send(request, &client)); }();
     return client;
@@ -1168,6 +1169,53 @@ TEST_P(SourceSpeechServiceTest,
       [&] { return interface_.telemetry.counters->completed == 2; }));
   CheckAudio(Read(clients[0].release()), 65, 1, 11);
   EXPECT_EQ(generator_.permit->phase, LOOM_SERVE_EXECUTION_PERMIT_IDLE);
+}
+
+TEST_P(SourceSpeechServiceTest, HttpQosSelectsVoiceBeforeHostPreparation) {
+  ASSERT_NO_FATAL_FAILURE(StartManual());
+  auto& peer = blockers_[0];
+  loom_serve_execution_permit_initialize(
+      scheduler_, LOOM_SERVE_EXECUTION_RESOURCE_HOST, &peer);
+  loom_serve_execution_permit_request(&peer, LOOM_SERVE_EXECUTION_QOS_REALTIME);
+  ASSERT_TRUE(loom_serve_execution_permit_try_acquire(&peer));
+  loom_serve::testing::HttpClient background(
+      Send("POST", "/v1/audio/speech", Request()));
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(background.get(), &connection));
+  bool progress = false;
+  IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "waiting_cpu");
+
+  loom_serve::testing::HttpClient realtime(Send("POST", "/v1/audio/speech",
+                                                Request("negative"),
+                                                "X-Loom-QoS: realtime\r\n"));
+  ASSERT_NO_FATAL_FAILURE(Accept(realtime.get(), &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 1; }));
+  CheckAudio(Read(realtime.release()), 17, -1);
+  const auto snapshot = interface_.snapshot(interface_.self);
+  EXPECT_EQ(snapshot.queued_requests + snapshot.active_requests, 1u);
+  loom_serve_http_request_snapshot_t deferred;
+  ASSERT_TRUE(interface_.inspection.request_at(interface_.self, 0, &deferred));
+  EXPECT_EQ(deferred.id, 1u);
+  EXPECT_EQ(deferred.counters.batches, 0u);
+  IREE_EXPECT_OK(http_.CheckPending(background.get()));
+  EXPECT_EQ(peer.phase, LOOM_SERVE_EXECUTION_PERMIT_ACCEPTED);
+  ReleaseExecution();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 2; }));
+  CheckAudio(Read(background.release()), 17);
+}
+
+TEST_P(SourceSpeechServiceTest, HttpRejectsUnknownQosBeforePreparation) {
+  ASSERT_NO_FATAL_FAILURE(StartManual());
+  loom_serve::testing::HttpClient client(
+      Send("POST", "/v1/audio/speech", Request(), "X-Loom-QoS: urgent\r\n"));
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection));
+  EXPECT_EQ(Read(client.release()).find("HTTP/1.1 400 Bad Request\r\n"), 0u);
+  EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
+  EXPECT_FALSE(interface_.is_pending(interface_.self));
 }
 
 TEST_P(SourceSpeechServiceTest,
