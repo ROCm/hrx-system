@@ -273,8 +273,21 @@ loom_cc_library(
     srcs = ["input.c"],
     hdrs = ["input.h"],
     deps = [
+        ":input_codec",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/vocab",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "input_codec",
+    srcs = ["input_codec.c"],
+    hdrs = ["input_codec.h"],
+    deps = [
+        "//runtime/src/iree/base",
         "//runtime/src/iree/tokenizer",
         "//runtime/src/iree/tokenizer/vocab",
         "//runtime/src/iree/vm",
