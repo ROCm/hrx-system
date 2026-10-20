@@ -13,6 +13,8 @@
 iree_host_size_t iree_async_operation_complete(
     iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, operation->type);
   const bool is_final =
       !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
   iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
@@ -48,5 +50,6 @@ iree_host_size_t iree_async_operation_complete(
   if (pool) {
     iree_async_operation_pool_release(pool, operation);
   }
+  IREE_TRACE_ZONE_END(z0);
   return callback_count;
 }

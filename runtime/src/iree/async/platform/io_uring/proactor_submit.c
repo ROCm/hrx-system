@@ -574,7 +574,7 @@ static void iree_async_proactor_io_uring_fill_file_open(
 // Fills an SQE for a FILE_READ operation.
 // Uses READ_FIXED when a registered span fits within one fixed buffer and READ
 // otherwise. Fixed I/O consumes the pinned pages without importing CPU PTEs.
-// Returns true for buffered I/O that may copy inline during submission.
+// Returns true for buffered I/O, preserving paced completion delivery.
 //
 // SQE layout (io_uring READ[_FIXED]):
 //   fd   = file descriptor
@@ -592,6 +592,9 @@ static bool iree_async_proactor_io_uring_fill_file_read(
       iree_async_span_query_fixed_buffer(read_op->buffer, &sqe->buf_index)
           ? IREE_IORING_OP_READ_FIXED
           : IREE_IORING_OP_READ;
+  // Buffered payload copies may otherwise run inside io_uring_enter. Keep
+  // them off the poll owner servicing sockets and completion notifications.
+  sqe->flags = IREE_IOSQE_ASYNC;
   sqe->fd = read_op->file->primitive.value.fd;
   sqe->off = read_op->offset;
   sqe->addr = (uint64_t)(uintptr_t)iree_async_span_ptr(read_op->buffer);
@@ -603,7 +606,7 @@ static bool iree_async_proactor_io_uring_fill_file_read(
 // Fills an SQE for a FILE_WRITE operation.
 // Uses WRITE_FIXED when a registered span fits within one fixed buffer and
 // WRITE otherwise, preserving positioned file I/O (pwrite semantics).
-// Returns true for buffered I/O that may copy inline during submission.
+// Returns true for buffered I/O, preserving paced completion delivery.
 //
 // SQE layout (io_uring WRITE[_FIXED]):
 //   fd   = file descriptor
@@ -621,6 +624,8 @@ static bool iree_async_proactor_io_uring_fill_file_write(
       iree_async_span_query_fixed_buffer(write_op->buffer, &sqe->buf_index)
           ? IREE_IORING_OP_WRITE_FIXED
           : IREE_IORING_OP_WRITE;
+  // Keep file payload work off the poll owner, as for reads above.
+  sqe->flags = IREE_IOSQE_ASYNC;
   sqe->fd = write_op->file->primitive.value.fd;
   sqe->off = write_op->offset;
   sqe->addr = (uint64_t)(uintptr_t)iree_async_span_ptr(write_op->buffer);

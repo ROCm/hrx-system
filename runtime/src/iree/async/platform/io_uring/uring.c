@@ -27,6 +27,20 @@ static inline int iree_io_uring_setup(uint32_t entries,
 static inline int iree_io_uring_enter(int ring_fd, uint32_t to_submit,
                                       uint32_t min_complete, uint32_t flags,
                                       void* arg, size_t argsz) {
+#if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION
+  // Attribute submission and deferred completion work without placing the
+  // sleeping poll interval inside an active CPU zone.
+  if (min_complete == 0) {
+    IREE_TRACE_ZONE_BEGIN(z0);
+    IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, to_submit);
+    int result = (int)syscall(IREE_IO_URING_SYSCALL_ENTER, ring_fd, to_submit,
+                              min_complete, flags, arg, argsz);
+    int error_number = errno;
+    IREE_TRACE_ZONE_END(z0);
+    errno = error_number;
+    return result;
+  }
+#endif  // IREE_TRACING_FEATURE_INSTRUMENTATION
   return (int)syscall(IREE_IO_URING_SYSCALL_ENTER, ring_fd, to_submit,
                       min_complete, flags, arg, argsz);
 }
