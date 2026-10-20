@@ -108,6 +108,26 @@ loom_test(
     ],
 )
 
+[
+    loom_test(
+        name = "indexer_projection_{}_test".format(capacity),
+        srcs = ["tests/indexer_projection.loom"],
+        benchmark_smoke = False,
+        configs = {"flash_next.token_count": str(capacity)},
+        execution_profiles = [
+            AMDGPU_HARDWARE_PROFILE,
+            AMDGPU_ACCESS_PROFILE,
+            AMDGPU_TSAN_PROFILE,
+        ],
+        deps = [":residual_programs"],
+    )
+    for capacity in [
+        1,
+        5,
+        257,
+    ]
+]
+
 loom_library(
     name = "q8_reference",
     srcs = ["tests/q8_reference.loom"],
@@ -115,7 +135,10 @@ loom_library(
 
 loom_library(
     name = "q8_matrix",
-    srcs = ["kernels/q8_matrix.loom"],
+    srcs = [
+        "kernels/matrix.loom",
+        "kernels/q8_matrix.loom",
+    ],
 )
 
 [

@@ -6,7 +6,7 @@ func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
 template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
 
-template.decl @flash_next.q8_store_fragment(%remaining_rows: index, %outputs: index, %fragment_row: index, %result_column: index, %result: vector<8xf32>, %output_view: view<[%remaining_rows]x[%outputs]xbf16>)
+template.decl @flash_next.matrix_store_fragment(%remaining_rows: index, %outputs: index, %fragment_row: index, %result_column: index, %result: vector<8xf32>, %output_view: view<[%remaining_rows]x[%outputs]xbf16>)
 
 // A 4x2 wave grid contracts 128 token rows and 128 physical weight rows.
 // Down publishes quarter-scaled SiLU. Up assigns all four stream fragments
@@ -95,7 +95,7 @@ func.def inline @hc_matrix_body(%up_mix: i1, %span_arg: buffer, %normalized: buf
           scf.yield %next : vector<8xf32>
         }
         %result = vector.mulf %sum, %quarter : vector<8xf32>
-        template.apply<@flash_next.q8_store_fragment>(%remaining_rows, %outputs, %fragment_row, %result_column, %result, %output_view) : (index, index, index, index, vector<8xf32>, view<[%remaining_rows]x[%outputs]xbf16>)
+        template.apply<@flash_next.matrix_store_fragment>(%remaining_rows, %outputs, %fragment_row, %result_column, %result, %output_view) : (index, index, index, index, vector<8xf32>, view<[%remaining_rows]x[%outputs]xbf16>)
       }
     } else {
       scf.for %ordinal = [%c0 to %fragment_count step %c1] unroll schedule(linear) {
@@ -110,7 +110,7 @@ func.def inline @hc_matrix_body(%up_mix: i1, %span_arg: buffer, %normalized: buf
         %exponential = vector.expf<afn> %negative : vector<8xf32>
         %denominator = vector.addf %c1_f32, %exponential : vector<8xf32>
         %result = vector.divf %scaled, %denominator : vector<8xf32>
-        template.apply<@flash_next.q8_store_fragment>(%remaining_rows, %outputs, %fragment_row, %result_column, %result, %output_view) : (index, index, index, index, vector<8xf32>, view<[%remaining_rows]x[%outputs]xbf16>)
+        template.apply<@flash_next.matrix_store_fragment>(%remaining_rows, %outputs, %fragment_row, %result_column, %result, %output_view) : (index, index, index, index, vector<8xf32>, view<[%remaining_rows]x[%outputs]xbf16>)
       }
     }
   }

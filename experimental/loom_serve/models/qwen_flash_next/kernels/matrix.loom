@@ -1,0 +1,49 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Publish one wave32 F32 fragment to BF16. Full 16x16 fragments use the
+// native fragment store; ragged rows/columns leave inactive storage untouched.
+// Output view rows are relative to the caller's full-width byte tile origin.
+template.decl @flash_next.matrix_store_fragment(%remaining_rows: index, %outputs: index, %fragment_row: index, %result_column: index, %result: vector<8xf32>, %output_view: view<[%remaining_rows]x[%outputs]xbf16>)
+
+template.def<@flash_next.matrix_store_fragment> device @flash_next_matrix_store_fragment(%remaining_rows: index, %outputs: index, %fragment_row: index, %result_column: index, %result: vector<8xf32>, %output_view: view<[%remaining_rows]x[%outputs]xbf16>) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %lane_column = index.rem %lane, %c16 : index
+  %lane_row = index.div %lane, %c16 : index
+  %row_limit = index.add %fragment_row, %c16 : index
+  %column_limit = index.add %result_column, %c16 : index
+  %full_rows = index.cmp ule, %row_limit, %remaining_rows : index
+  %full_columns = index.cmp ule, %column_limit, %outputs : index
+  %full_fragment = scalar.andi %full_rows, %full_columns : i1
+  scf.if %full_fragment {
+    %maximum_row = index.sub %remaining_rows, %c16 : index
+    %maximum_column = index.sub %outputs, %c16 : index
+    %checked_row = index.assume %fragment_row [ge(%fragment_row, 0), le(%fragment_row, %maximum_row)] : index
+    %checked_column = index.assume %result_column [ge(%result_column, 0), le(%result_column, %maximum_column)] : index
+    %fragment = vector.fragment<result> %result shape [%c16, %c16] : vector<8xf32>
+    vector.fragment.store<result> %fragment, %output_view[%checked_row, %checked_column] shape [%c16, %c16] : vector<8xf32>, view<[%remaining_rows]x[%outputs]xbf16>
+  } else {
+    %column = index.add %result_column, %lane_column : index
+    %live_column = index.cmp ult, %column, %outputs : index
+    %packed = vector.fptrunc %result : vector<8xf32> to vector<8xbf16>
+    scf.for %element = [%c0 to %c8 step %c1] unroll schedule(linear) {
+      %within_row = index.madd %element, %c2, %lane_row : index
+      %token = index.add %fragment_row, %within_row : index
+      %live_row = index.cmp ult, %token, %remaining_rows : index
+      %live = scalar.andi %live_row, %live_column : i1
+      scf.if %live {
+        %value = vector.extract %packed[%element] : vector<8xbf16> -> bf16
+        view.store %value, %output_view[%token, %column] : bf16, view<[%remaining_rows]x[%outputs]xbf16>
+      }
+    }
+  }
+  template.return
+}
