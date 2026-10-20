@@ -21,48 +21,9 @@ enum {
   IREE_HAL_AMD_GPU_PM4_VALUE_FIRST_INPUT = 3,
   IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_ADDRESS = 3,
   IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_HEADER = 4,
-  IREE_HAL_AMD_GPU_PM4_INPUT_DIRECT = 0,
-  IREE_HAL_AMD_GPU_PM4_INPUT_BINDING = 1,
-  IREE_HAL_AMD_GPU_PM4_INPUT_IMAGE = 2,
-  IREE_HAL_AMD_GPU_PM4_INPUT_LENGTH = 3,
   IREE_HAL_AMD_GPU_PM4_SITE_QUEUE = 0,
   IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM = 1,
-  IREE_HAL_AMD_GPU_PM4_BINDING_LENGTH = 1u << 2,
 };
-
-// A deduplicated invocation input. Recording aggregates alignment and overflow
-// requirements; publication reads each source exactly once. Byte offsets belong
-// to immutable GPU fixups, not to a per-command host relocation list.
-typedef struct iree_hal_amd_gpu_pm4_command_input_t {
-  // Buffer/image pointer, or binding ordinal, selected by kind.
-  uintptr_t key;
-  // Largest displacement used by any fixup consuming this address.
-  uint64_t maximum_offset;
-  // Smallest whole-range displacement, or UINT64_MAX for a required address.
-  uint64_t minimum_offset;
-  // Direct, binding, image-base, or binding-length input.
-  uint16_t kind;
-  // Queue/program native site, ignored for image and length inputs.
-  uint16_t site;
-  // Prepared direct-buffer native slot, unused for other kinds.
-  iree_hal_buffer_native_binding_slot_t slot;
-  // Strongest power-of-two alignment required of this base plus a displacement.
-  uint32_t alignment;
-  // Required low bits of the base address under alignment - 1.
-  uint32_t residue;
-} iree_hal_amd_gpu_pm4_command_input_t;
-
-typedef struct iree_hal_amd_gpu_pm4_binding_requirement_t {
-  // Minimum captured extent across all uses, including private native ABIs.
-  uint64_t minimum_length;
-  // Length minus the root binding's length, modulo 2^64.
-  uint64_t difference;
-  // Union root for whole-range copy equalities. Slot zero is constant zero;
-  // public bindings occupy indices one through binding_capacity.
-  uint32_t parent;
-  // Required native sites and whether the logical length is consumed.
-  uint32_t sites;
-} iree_hal_amd_gpu_pm4_binding_requirement_t;
 
 typedef struct iree_hal_amd_gpu_pm4_command_buffer_t {
   // Public resource identity and optional external recording validation.
@@ -75,18 +36,8 @@ typedef struct iree_hal_amd_gpu_pm4_command_buffer_t {
   iree_hal_amd_gpu_pm4_command_program_t* program;
   // Temporary native bytes and fixups, released after sealing.
   iree_hal_amd_gpu_pm4_recording_t recording;
-  // Dense unique inputs, retained after sealing for direct publication.
-  iree_hal_amd_gpu_pm4_command_input_t* inputs;
-  // Number of initialized input descriptors.
-  uint32_t input_count;
-  // Allocated descriptor capacity.
-  uint32_t input_capacity;
-  // Recording-only open-addressed index, with input ordinal plus one in slots.
-  uint32_t* input_index;
-  // Power-of-two slot count, zero before the first input.
-  uint32_t input_index_capacity;
-  // Inline native binding and length-equality requirements.
-  iree_hal_amd_gpu_pm4_binding_requirement_t* requirements;
+  // Deduplicated external values and aggregate binding requirements.
+  iree_hal_amd_gpu_command_inputs_t inputs;
   // Device-local LDS capacity for public dispatch admission.
   uint32_t maximum_group_segment_byte_length;
   // Native per-wave private capacity; zero when the service is unavailable.
@@ -151,8 +102,7 @@ static void iree_hal_amd_gpu_pm4_command_buffer_destroy(
   iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
   iree_hal_resource_set_free(buffer->resources);
   iree_arena_block_pool_deinitialize(&buffer->resource_blocks);
-  iree_allocator_free(host_allocator, buffer->inputs);
-  iree_allocator_free(host_allocator, buffer->input_index);
+  iree_hal_amd_gpu_command_inputs_deinitialize(&buffer->inputs);
   iree_allocator_free(host_allocator, buffer);
   iree_hal_amd_gpu_pm4_command_program_release(program);
   IREE_TRACE_ZONE_END(z0);
@@ -176,7 +126,7 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_gpu_pm4_command_buffer_t), &size,
       IREE_STRUCT_FIELD(binding_capacity + 1,
-                        iree_hal_amd_gpu_pm4_binding_requirement_t,
+                        iree_hal_amd_gpu_binding_requirement_t,
                         &requirements_offset),
       IREE_STRUCT_FIELD(
           iree_hal_command_buffer_validation_state_size(mode, binding_capacity),
@@ -193,10 +143,9 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
   buffer->maximum_group_segment_byte_length = maximum_group_segment_byte_length;
   buffer->maximum_scratch_wave_byte_length = maximum_scratch_wave_byte_length;
   buffer->profile = *profile;
-  buffer->requirements = (void*)((uint8_t*)buffer + requirements_offset);
-  for (uint32_t i = 0; i <= binding_capacity; ++i) {
-    buffer->requirements[i].parent = i;
-  }
+  iree_hal_amd_gpu_command_inputs_initialize(
+      &buffer->base, 0, NULL, (void*)((uint8_t*)buffer + requirements_offset),
+      host_allocator, &buffer->inputs);
   iree_hal_amd_gpu_pm4_recording_initialize(
       host_allocator, IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, &buffer->recording);
   iree_arena_block_pool_initialize(4096, host_allocator,
@@ -231,6 +180,9 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
                                             &buffer->resources);
   }
   if (iree_status_is_ok(status)) {
+    buffer->inputs.value_base =
+        iree_hal_amd_gpu_pm4_command_first_input(buffer);
+    buffer->inputs.resources = buffer->resources;
     *out_buffer = &buffer->base;
   } else {
     iree_hal_command_buffer_release(&buffer->base);
@@ -242,212 +194,6 @@ iree_host_size_t iree_hal_amd_gpu_pm4_command_buffer_operation_count(
     iree_hal_command_buffer_t* base) {
   return ((iree_hal_amd_gpu_pm4_command_buffer_t*)base)
       ->program->operation_count;
-}
-
-static iree_status_t iree_hal_amd_gpu_pm4_command_qualify_binding(
-    const iree_hal_queue_family_t* family, iree_hal_buffer_t* buffer,
-    uint32_t site, iree_hal_buffer_native_binding_slot_t* out_slot) {
-  const iree_hal_memory_contract_t* contract = buffer->memory.contract;
-  const uint64_t scope_id = (uint64_t)family->memory.queue_scope_id + site;
-  if (!contract || !family->memory.domain ||
-      contract->domain != family->memory.domain ||
-      scope_id >= contract->scope_count) {
-    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
-                            "recorded buffer has no native site contract");
-  }
-  const uint16_t index =
-      contract->scopes[scope_id]
-          .bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS];
-  if (index == IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {
-    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
-                            "recorded buffer has no prepared GPU address slot");
-  }
-  *out_slot = (iree_hal_buffer_native_binding_slot_t){
-      .index = index, .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS};
-  return iree_ok_status();
-}
-
-static uint32_t iree_hal_amd_gpu_pm4_command_input_hash(uintptr_t key,
-                                                        uint16_t kind,
-                                                        uint16_t site) {
-  uint64_t value =
-      (uint64_t)key ^ ((uint64_t)kind << 48) ^ ((uint64_t)site << 56);
-  value ^= value >> 30;
-  value *= UINT64_C(0xbf58476d1ce4e5b9);
-  value ^= value >> 27;
-  value *= UINT64_C(0x94d049bb133111eb);
-  return (uint32_t)(value ^ (value >> 31));
-}
-
-static iree_status_t iree_hal_amd_gpu_pm4_command_input(
-    iree_hal_amd_gpu_pm4_command_buffer_t* buffer,
-    iree_hal_amd_gpu_pm4_command_input_t input, uint32_t* out_value) {
-  if ((buffer->input_count + 1) * 2 >= buffer->input_index_capacity) {
-    const uint32_t capacity = iree_max(buffer->input_index_capacity * 2, 32u);
-    uint32_t* index = NULL;
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        buffer->host_allocator, capacity * sizeof(*index), (void**)&index));
-    for (uint32_t i = 0; i < buffer->input_count; ++i) {
-      const iree_hal_amd_gpu_pm4_command_input_t* value = &buffer->inputs[i];
-      uint32_t position = iree_hal_amd_gpu_pm4_command_input_hash(
-                              value->key, value->kind, value->site) &
-                          (capacity - 1);
-      while (index[position]) {
-        position = (position + 1) & (capacity - 1);
-      }
-      index[position] = i + 1;
-    }
-    iree_allocator_free(buffer->host_allocator, buffer->input_index);
-    buffer->input_index = index;
-    buffer->input_index_capacity = capacity;
-  }
-  uint32_t position = iree_hal_amd_gpu_pm4_command_input_hash(
-                          input.key, input.kind, input.site) &
-                      (buffer->input_index_capacity - 1);
-  uint32_t ordinal = buffer->input_count;
-  while (buffer->input_index[position]) {
-    const uint32_t candidate = buffer->input_index[position] - 1;
-    const iree_hal_amd_gpu_pm4_command_input_t* previous =
-        &buffer->inputs[candidate];
-    if (previous->key == input.key && previous->kind == input.kind &&
-        previous->site == input.site) {
-      ordinal = candidate;
-      break;
-    }
-    position = (position + 1) & (buffer->input_index_capacity - 1);
-  }
-  if (ordinal == buffer->input_count) {
-    if (ordinal >=
-        0x1000000u - iree_hal_amd_gpu_pm4_command_first_input(buffer)) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "resident program has too many distinct inputs");
-    }
-    if (ordinal == buffer->input_capacity) {
-      const uint32_t capacity = iree_max(buffer->input_capacity * 2, 16u);
-      IREE_RETURN_IF_ERROR(iree_allocator_realloc(
-          buffer->host_allocator, capacity * sizeof(*buffer->inputs),
-          (void**)&buffer->inputs));
-      buffer->input_capacity = capacity;
-    }
-    buffer->inputs[ordinal] = input;
-    buffer->input_index[position] = ordinal + 1;
-    ++buffer->input_count;
-  } else {
-    iree_hal_amd_gpu_pm4_command_input_t* previous = &buffer->inputs[ordinal];
-    if (((previous->residue ^ input.residue) &
-         (iree_min(previous->alignment, input.alignment) - 1)) != 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "recorded input has incompatible address alignment");
-    }
-    if (input.alignment > previous->alignment) {
-      previous->alignment = input.alignment;
-      previous->residue = input.residue;
-    }
-    previous->maximum_offset =
-        iree_max(previous->maximum_offset, input.maximum_offset);
-    previous->minimum_offset =
-        previous->minimum_offset == UINT64_MAX ||
-                input.minimum_offset == UINT64_MAX
-            ? UINT64_MAX
-            : iree_min(previous->minimum_offset, input.minimum_offset);
-  }
-  *out_value = iree_hal_amd_gpu_pm4_command_first_input(buffer) + ordinal;
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amd_gpu_pm4_command_binding(
-    iree_hal_amd_gpu_pm4_command_buffer_t* buffer,
-    iree_hal_buffer_ref_t reference, uint32_t site, uint32_t minimum_length,
-    uint32_t alignment, bool whole_transfer, uint32_t* out_value) {
-  if (minimum_length && reference.length != IREE_HAL_WHOLE_BUFFER &&
-      reference.length < minimum_length) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "recorded arguments do not cover the native ABI");
-  }
-  iree_hal_amd_gpu_pm4_command_input_t input = {
-      .key = reference.buffer ? (uintptr_t)reference.buffer
-                              : reference.buffer_slot,
-      .maximum_offset = reference.offset,
-      .minimum_offset = whole_transfer ? reference.offset : UINT64_MAX,
-      .kind = reference.buffer ? IREE_HAL_AMD_GPU_PM4_INPUT_DIRECT
-                               : IREE_HAL_AMD_GPU_PM4_INPUT_BINDING,
-      .site = (uint16_t)site,
-      .alignment = alignment,
-      .residue = (uint32_t)(0 - reference.offset) & (alignment - 1),
-  };
-  if (reference.buffer) {
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_qualify_binding(
-        buffer->base.queue_family, reference.buffer, site, &input.slot));
-    if (minimum_length &&
-        iree_hal_buffer_byte_length(reference.buffer) - reference.offset <
-            minimum_length) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "recorded argument buffer is too short");
-    }
-    if (buffer->resources) {
-      IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert(buffer->resources, 1,
-                                                        &reference.buffer));
-    }
-  } else {
-    iree_hal_amd_gpu_pm4_binding_requirement_t* requirement =
-        &buffer->requirements[reference.buffer_slot + 1];
-    requirement->sites |= 1u << site;
-    uint64_t length = 0;
-    if (!iree_checked_add_u64(reference.offset, minimum_length, &length)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "recorded argument extent overflows");
-    }
-    requirement->minimum_length = iree_max(requirement->minimum_length, length);
-    buffer->base.binding_count =
-        iree_max(buffer->base.binding_count, reference.buffer_slot + 1);
-  }
-  return iree_hal_amd_gpu_pm4_command_input(buffer, input, out_value);
-}
-
-// A weighted union forest collapses arbitrarily many whole-copy constraints to
-// one root/difference per binding. Sealing flattens it; invocation validation
-// is linear in the table size, independent of the number of recorded copies.
-static uint32_t iree_hal_amd_gpu_pm4_command_length_root(
-    iree_hal_amd_gpu_pm4_command_buffer_t* buffer, uint32_t index,
-    uint64_t* out_difference) {
-  uint64_t difference = 0;
-  uint32_t root = index;
-  while (buffer->requirements[root].parent != root) {
-    difference += buffer->requirements[root].difference;
-    root = buffer->requirements[root].parent;
-  }
-  *out_difference = difference;
-  return root;
-}
-
-static iree_status_t iree_hal_amd_gpu_pm4_command_equal_lengths(
-    iree_hal_amd_gpu_pm4_command_buffer_t* buffer, iree_hal_buffer_ref_t source,
-    iree_hal_buffer_ref_t target) {
-  uint64_t source_difference = 0, target_difference = 0;
-  const uint32_t source_root = iree_hal_amd_gpu_pm4_command_length_root(
-      buffer, source.buffer ? 0 : source.buffer_slot + 1, &source_difference);
-  const uint32_t target_root = iree_hal_amd_gpu_pm4_command_length_root(
-      buffer, target.buffer ? 0 : target.buffer_slot + 1, &target_difference);
-  source_difference +=
-      source.buffer ? iree_hal_buffer_byte_length(source.buffer) : 0;
-  target_difference +=
-      target.buffer ? iree_hal_buffer_byte_length(target.buffer) : 0;
-  const uint64_t difference =
-      source.offset - target.offset - source_difference + target_difference;
-  if (source_root == target_root) {
-    if (difference) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "recorded whole-copy extents cannot agree");
-    }
-  } else if (!source_root) {
-    buffer->requirements[target_root].parent = source_root;
-    buffer->requirements[target_root].difference = 0 - difference;
-  } else {
-    buffer->requirements[source_root].parent = target_root;
-    buffer->requirements[source_root].difference = difference;
-  }
-  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_command_flush_barrier(
@@ -536,17 +282,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
                             "resident command/data placement exceeds 4 GiB");
   }
   buffer->program->value_count =
-      buffer->input_count + iree_hal_amd_gpu_pm4_command_first_input(buffer);
+      buffer->inputs.count + iree_hal_amd_gpu_pm4_command_first_input(buffer);
   buffer->program->argument_length =
       sizeof(iree_hal_amd_gpu_pm4_program_arguments_t) +
       buffer->program->value_count * 8;
-  for (uint32_t i = 1; i <= base->binding_count; ++i) {
-    uint64_t difference = 0;
-    const uint32_t root =
-        iree_hal_amd_gpu_pm4_command_length_root(buffer, i, &difference);
-    buffer->requirements[i].parent = root;
-    buffer->requirements[i].difference = difference;
-  }
+  iree_hal_amd_gpu_command_inputs_seal(&buffer->inputs);
   iree_status_t status =
       iree_hal_amd_gpu_pm4_command_seal(buffer, (uint32_t)length);
   if (iree_status_is_ok(status)) {
@@ -554,8 +294,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
       iree_hal_resource_set_freeze(buffer->resources);
     }
     iree_hal_amd_gpu_recording_deinitialize(&buffer->recording.storage);
-    iree_allocator_free(buffer->host_allocator, buffer->input_index);
-    buffer->input_index = NULL;
   }
   return status;
 }
@@ -641,8 +379,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
   const bool update = type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
   const bool whole = target.length == IREE_HAL_WHOLE_BUFFER;
   if (copy && whole) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amd_gpu_pm4_command_equal_lengths(buffer, source, target));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_equal_lengths(
+        &buffer->inputs, source, target));
   }
   uint64_t length = target.length;
   if (whole && target.buffer) {
@@ -662,11 +400,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
   const uint32_t site = native_dma ? IREE_HAL_AMD_GPU_PM4_SITE_QUEUE
                                    : IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM;
   uint32_t source_value = IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, target_value = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_binding(
-      buffer, target, site, 0, 1, whole, &target_value));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
+      &buffer->inputs, target, site, 0, 1, whole, &target_value));
   if (copy) {
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_binding(
-        buffer, source, site, 0, 1, whole, &source_value));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
+        &buffer->inputs, source, site, 0, 1, whole, &source_value));
   }
   uint32_t update_offset = 0;
   if (update) {
@@ -725,17 +463,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
         buffer, true, argument_offset + 8, target_value, target.offset, false));
     if (length == IREE_HAL_WHOLE_BUFFER) {
-      buffer->requirements[target.buffer_slot + 1].sites |=
-          IREE_HAL_AMD_GPU_PM4_BINDING_LENGTH;
-      const iree_hal_amd_gpu_pm4_command_input_t input = {
-          .key = target.buffer_slot,
-          .kind = IREE_HAL_AMD_GPU_PM4_INPUT_LENGTH,
-          .alignment = 1,
-          .minimum_offset = UINT64_MAX,
-      };
       uint32_t length_value = 0;
-      IREE_RETURN_IF_ERROR(
-          iree_hal_amd_gpu_pm4_command_input(buffer, input, &length_value));
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_length(
+          &buffer->inputs, target.buffer_slot, &length_value));
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
           buffer, true, argument_offset + 16, length_value, 0 - target.offset,
           false));
@@ -801,15 +531,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_copy_buffer(
 static iree_status_t iree_hal_amd_gpu_pm4_command_image(
     iree_hal_amd_gpu_pm4_command_buffer_t* buffer, const uint64_t* addresses,
     bool data, uint32_t offset, uint64_t address, uint32_t shift) {
-  const iree_hal_amd_gpu_pm4_command_input_t input = {
-      .key = (uintptr_t)addresses,
-      .kind = IREE_HAL_AMD_GPU_PM4_INPUT_IMAGE,
-      .alignment = 1,
-      .minimum_offset = UINT64_MAX,
-  };
   uint32_t value = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_pm4_command_input(buffer, input, &value));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_image(
+      &buffer->inputs, addresses, &value));
   return iree_hal_amd_gpu_recording_fixup(
       &buffer->recording.storage, offset, value, address - addresses[0], shift,
       (data ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA : 0) |
@@ -969,8 +693,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   uint32_t kernarg_value = IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE;
   uint64_t kernarg_displacement = argument_offset;
   if (indirect && (kernarg_word != UINT16_MAX || function->packet)) {
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_binding(
-        buffer, bindings.values[0], IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM,
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
+        &buffer->inputs, bindings.values[0], IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM,
         function->base.kernarg->byte_length, function->base.kernarg->alignment,
         false, &kernarg_value));
     kernarg_displacement = bindings.values[0].offset;
@@ -981,9 +705,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     for (iree_host_size_t i = 0;
          i < bindings.count && iree_status_is_ok(status); ++i) {
       uint32_t value = 0;
-      status = iree_hal_amd_gpu_pm4_command_binding(
-          buffer, bindings.values[i], IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM, 0, 1,
-          false, &value);
+      status = iree_hal_amd_gpu_command_inputs_add_binding(
+          &buffer->inputs, bindings.values[i],
+          IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM, 0, 1, false, &value);
       if (iree_status_is_ok(status)) {
         status = iree_hal_amd_gpu_pm4_command_pointer(
             buffer, true, argument_offset + offsets[i], value,
@@ -1021,9 +745,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   }
   if (indirect_parameters) {
     uint32_t parameters = 0;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_binding(
-        buffer, config.workgroup_count_ref, IREE_HAL_AMD_GPU_PM4_SITE_QUEUE, 12,
-        4, false, &parameters));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
+        &buffer->inputs, config.workgroup_count_ref,
+        IREE_HAL_AMD_GPU_PM4_SITE_QUEUE, 12, 4, false, &parameters));
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
         buffer, false, command_offset + (word_count - profile_words - 3) * 4,
         parameters, config.workgroup_count_ref.offset, false));
@@ -1116,65 +840,15 @@ iree_status_t iree_hal_amd_gpu_pm4_command_invocation_initialize(
           flags, IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME),
   };
   iree_hal_command_buffer_retain(base);
-  if (base->binding_count) {
-    memset(storage, 0, base->binding_count * sizeof(*out_invocation->bindings));
+  if (!iree_status_is_ok(buffer->recording_status)) {
+    if (base->binding_count) {
+      memset(storage, 0,
+             base->binding_count * sizeof(*out_invocation->bindings));
+    }
+    return iree_status_clone(buffer->recording_status);
   }
-  IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
-  iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < base->binding_count && iree_status_is_ok(status);
-       ++i) {
-    const iree_hal_amd_gpu_pm4_binding_requirement_t* requirement =
-        &buffer->requirements[i + 1];
-    if (!requirement->sites) {
-      continue;
-    }
-    const iree_hal_buffer_binding_t binding = bindings.bindings[i];
-    const uint64_t length =
-        binding.length == IREE_HAL_WHOLE_BUFFER
-            ? iree_hal_buffer_byte_length(binding.buffer) - binding.offset
-            : binding.length;
-    if (length < requirement->minimum_length || length > INT64_MAX - 262144) {
-      status = iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "binding %u cannot cover native argument/transfer extents", i);
-    } else {
-      iree_hal_amd_gpu_pm4_command_binding_t* captured =
-          &out_invocation->bindings[i];
-      for (uint32_t site = 0; site < 2 && iree_status_is_ok(status); ++site) {
-        if (requirement->sites & (1u << site)) {
-          status = iree_hal_amd_gpu_pm4_command_qualify_binding(
-              base->queue_family, binding.buffer, site, &captured->slots[site]);
-        }
-      }
-      if (iree_status_is_ok(status)) {
-        captured->buffer = binding.buffer;
-        captured->offset = binding.offset;
-        captured->length = length;
-        if (!out_invocation->borrow_bindings) {
-          iree_hal_buffer_retain(binding.buffer);
-        }
-      }
-    }
-  }
-  for (uint32_t i = 0; i < base->binding_count && iree_status_is_ok(status);
-       ++i) {
-    const iree_hal_amd_gpu_pm4_binding_requirement_t* requirement =
-        &buffer->requirements[i + 1];
-    if (!requirement->sites) {
-      continue;
-    }
-    const uint64_t root_length =
-        requirement->parent
-            ? out_invocation->bindings[requirement->parent - 1].length
-            : 0;
-    if (out_invocation->bindings[i].length - root_length !=
-        requirement->difference) {
-      status = iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "recorded whole-copy remaining ranges differ at binding %u", i);
-    }
-  }
-  return status;
+  return iree_hal_amd_gpu_command_inputs_capture(
+      &buffer->inputs, bindings, flags, out_invocation->bindings);
 }
 
 void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
@@ -1213,49 +887,11 @@ iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     values[IREE_HAL_AMD_GPU_PM4_VALUE_PROFILE_HEADER] =
         profile_address ? UINT32_C(0xc0004600) : UINT32_C(0xc0061000);
   }
-  iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < buffer->input_count && iree_status_is_ok(status);
-       ++i) {
-    const iree_hal_amd_gpu_pm4_command_input_t* input = &buffer->inputs[i];
-    uint64_t value = 0;
-    if (input->kind == IREE_HAL_AMD_GPU_PM4_INPUT_IMAGE) {
-      value = ((const uint64_t*)input->key)[queue_ordinal];
-    } else if (input->kind == IREE_HAL_AMD_GPU_PM4_INPUT_LENGTH) {
-      value = invocation->bindings[input->key].length;
-    } else {
-      iree_hal_buffer_t* source = (void*)input->key;
-      iree_hal_buffer_native_binding_slot_t slot = input->slot;
-      uint64_t offset = 0, length = 0;
-      if (input->kind == IREE_HAL_AMD_GPU_PM4_INPUT_BINDING) {
-        const iree_hal_amd_gpu_pm4_command_binding_t* binding =
-            &invocation->bindings[input->key];
-        source = binding->buffer;
-        slot = binding->slots[input->site];
-        offset = binding->offset;
-        length = binding->length;
-      } else {
-        length = iree_hal_buffer_byte_length(source);
-      }
-      value = iree_hal_buffer_native_binding(source, slot).device_address;
-      const bool empty = input->minimum_offset != UINT64_MAX &&
-                         input->minimum_offset == input->maximum_offset &&
-                         input->maximum_offset == length;
-      if (!value && !empty) {
-        status =
-            iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                             "recorded input has no committed GPU address");
-      } else if (!iree_checked_add_u64(value, offset, &value) ||
-                 input->maximum_offset > UINT64_MAX - value ||
-                 ((value & (input->alignment - 1)) != input->residue)) {
-        status =
-            iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                             "recorded GPU input overflows or is misaligned");
-      }
-    }
-    values[iree_hal_amd_gpu_pm4_command_first_input(buffer) + i] = value;
-  }
-  return status;
+  return iree_hal_amd_gpu_command_inputs_write(
+      &buffer->inputs, invocation->bindings, queue_ordinal,
+      values + iree_hal_amd_gpu_pm4_command_first_input(buffer));
 }
+
 static const iree_hal_command_buffer_vtable_t
     iree_hal_amd_gpu_pm4_command_buffer_vtable = {
         .destroy = iree_hal_amd_gpu_pm4_command_buffer_destroy,

@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_COMMAND_BUFFER_H_
 
 #include "iree/hal/drivers/amd/gpu/profile.h"
+#include "iree/hal/drivers/amd/gpu/queue/inputs.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/program.h"
 
@@ -69,26 +70,13 @@ void iree_hal_amd_gpu_pm4_command_program_release(
 iree_host_size_t iree_hal_amd_gpu_pm4_command_buffer_operation_count(
     iree_hal_command_buffer_t* command_buffer);
 
-// Captured, qualified binding. Address commitment waits for queue dependencies;
-// repeated uses in recorded commands share one dense native input.
-typedef struct iree_hal_amd_gpu_pm4_command_binding_t {
-  // Owned buffer unless the caller explicitly borrowed invocation lifetime.
-  iree_hal_buffer_t* buffer;
-  // Byte offset from the logical beginning of buffer.
-  iree_device_size_t offset;
-  // Logical extent after resolving WHOLE_BUFFER.
-  iree_device_size_t length;
-  // Prepared native slots for the queue (0) and shader program (1) sites.
-  iree_hal_buffer_native_binding_slot_t slots[2];
-} iree_hal_amd_gpu_pm4_command_binding_t;
-
 typedef struct iree_hal_amd_gpu_pm4_command_invocation_t {
   // Retained recording dominating its native program and direct resources.
   iree_hal_command_buffer_t* command_buffer;
   // Borrowed sealed facts retained by command_buffer.
   iree_hal_amd_gpu_pm4_command_program_t* program;
   // Captured table in submission-owned storage.
-  iree_hal_amd_gpu_pm4_command_binding_t* bindings;
+  iree_hal_amd_gpu_command_binding_t* bindings;
   // Reserved or published native placement, returned on rejection/retirement.
   iree_hal_amd_gpu_program_instance_t* instance;
   // Native acceptance transferred the reservation to a causal lease.

@@ -368,7 +368,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_execute(
   iree_host_size_t payload_size = 0;
   if (!iree_host_size_checked_mul_add(
           0, command_buffer->binding_count,
-          sizeof(iree_hal_amd_gpu_pm4_command_binding_t), &payload_size)) {
+          sizeof(iree_hal_amd_gpu_command_binding_t), &payload_size)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "recorded invocation binding table overflows");
   }

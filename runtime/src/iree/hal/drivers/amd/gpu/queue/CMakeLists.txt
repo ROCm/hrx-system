@@ -923,4 +923,18 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    inputs
+  HDRS
+    "inputs.h"
+  SRCS
+    "inputs.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::hal::utils::resource_set
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

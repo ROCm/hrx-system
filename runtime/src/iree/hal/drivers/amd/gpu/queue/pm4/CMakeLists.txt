@@ -332,6 +332,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::kernarg
     iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::queue::blit
+    iree::hal::drivers::amd::gpu::queue::inputs
     iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::gpu::queue::recording
     iree::hal::utils::resource_set
