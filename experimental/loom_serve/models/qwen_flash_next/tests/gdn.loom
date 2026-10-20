@@ -2,6 +2,8 @@ kernel.decl @gdn_convolve() launch(%span: buffer, %origins: buffer, %layer_origi
 
 kernel.decl @gdn_recur() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
 
+kernel.decl @gdn_recur_window() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
+
 kernel.decl @gdn_gate() launch(%span: buffer, %raw: buffer, %z: buffer, %weight: buffer, %output: buffer)
 
 // Scalar channel traversal publishes every tap shift. The production wave
@@ -286,6 +288,21 @@ check.case public @gdn_state_continuation {
   kernel.launch @gdn_recur(%whole, %rows, %layer_origin, %convolved, %norm, %alpha, %beta, %a, %bias, %state, %raw) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
   check.expect.close actual(%raw) expected(%raw_ref) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<5x6144xbf16>
   check.expect.close actual(%state) expected(%state_ref) atol(1.9999999999999999e-06) rtol(2.0000000000000002e-05) nan(different) : tensor<48x128x128xf32>
+
+  // Five tokens cross a shared window boundary and leave three tail slots.
+  // The split begins its second window at an unaligned packed-token offset.
+  %state_window = check.generate.random.uniform seed(%seed4) range(-0.02 to 0.02) : tensor<48x128x128xf32>
+  %state_window_split = check.generate.random.uniform seed(%seed4) range(-0.02 to 0.02) : tensor<48x128x128xf32>
+  %raw_window = check.generate.fill value(-17.0) : tensor<5x6144xbf16>
+  %raw_window_split = check.generate.fill value(23.0) : tensor<5x6144xbf16>
+  kernel.launch @gdn_recur_window(%whole, %rows, %layer_origin, %convolved, %norm, %alpha, %beta, %a, %bias, %state_window, %raw_window) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
+  check.expect.close actual(%raw_window) expected(%raw_ref) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<5x6144xbf16>
+  check.expect.close actual(%state_window) expected(%state_ref) atol(1.9999999999999999e-06) rtol(2.0000000000000002e-05) nan(different) : tensor<48x128x128xf32>
+  kernel.launch @gdn_recur_window(%first, %rows, %layer_origin, %convolved, %norm, %alpha, %beta, %a, %bias, %state_window_split, %raw_window_split) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
+  kernel.launch @gdn_recur_window(%second, %rows, %layer_origin, %convolved, %norm, %alpha, %beta, %a, %bias, %state_window_split, %raw_window_split) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
+  kernel.launch @gdn_recur_window(%decode, %rows, %layer_origin, %convolved, %norm, %alpha, %beta, %a, %bias, %state_window_split, %raw_window_split) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
+  check.expect.bitwise actual(%raw_window_split) expected(%raw_window) : tensor<5x6144xbf16>
+  check.expect.bitwise actual(%state_window_split) expected(%state_window) : tensor<48x128x128xf32>
 
   %z = check.generate.random.uniform seed(%seed3) range(-3.0 to 3.0) : tensor<5x6144xbf16>
   %gamma = check.generate.random.uniform seed(%seed4) range(0.5 to 1.5) : tensor<128xf32>

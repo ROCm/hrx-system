@@ -161,7 +161,7 @@ synthesize empty state instead of depending on cleared recurrent storage.
 | `epoch.loom` | Four residual streams through 48 layers, including PLE at layer 1 and QSA every fourth layer. |
 | `propose.loom`, `verify.loom`, `programs/mtp.loom` | Recursive proposals, target verification, and accepted-prefix predictor catch-up. |
 | `programs/` | Hyperconnection, recurrent attention, sparse attention, routed/shared experts, and output-head composition. |
-| `kernels/gdn.loom`, `kernels/work.loom` | Recurrent updates and immutable span ownership. |
+| `kernels/gdn.loom`, `kernels/gdn_window.loom`, `kernels/work.loom` | Recurrent updates and immutable span ownership. |
 | `kernels/speculation.loom`, `kernels/mtp_state.loom` | Compact target transition capture, accepted-prefix replay, and predictor carry ownership. |
 | `kernels/qsa_*.loom`, `kernels/pages.loom` | Paged K/V, four-token compression, exact top-512 block selection, and causal attention. |
 | `kernels/ple_*.loom`, `kernels/iq4.loom` | EOS-aware bigram/trigram hashes, IQ4_NL reads, and dilated convolution history. |
@@ -175,6 +175,20 @@ experts and ten selected experts plus a shared expert in each layer. Dense
 projections and embeddings use Q8_0; index projections use BF16. Accumulation is
 F32, with explicit BF16 activation publication boundaries. The output head
 projects only rows that require token selection.
+
+Recurrent spans keep the full F32 state in registers until publishing their
+private writer. At epoch capacities of 32 or more, two workgroups per head
+share four-token Q/K/V windows through 10,304 bytes of double-buffered LDS.
+Four lanes cooperate on a value row, and each lane retains two rows. Three
+raw-input windows remain in flight so global loads overlap the state updates;
+normalization and gates run at LDS publication, after those loads have matured.
+The LDS key layout interleaves four contiguous key segments across banks.
+
+Small epochs and speculative replay use the wave recurrence. Both bodies use
+the same accurate near-one decay: small exponential errors would otherwise
+compound across long-lived state and make transitions between bodies drift.
+The physical state layout, immutable anchor, private writer, and publication
+permission are identical. The window path adds no global workspace or dispatch.
 
 Sparse index scoring shares four queries and 64 pooled keys per workgroup.
 The four heads of each query form the rows of a BF16 matrix product, followed

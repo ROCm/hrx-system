@@ -1,0 +1,273 @@
+// Two workgroups own the 128 value rows of each head. Four lanes reduce one
+// value row over 128 keys; each lane retains two 32-element F32 state rows.
+// All four waves share four-token Q/K/V windows through bank-interleaved LDS.
+// The private writer and immutable anchor use the same layout as the small
+// recurrence, so spans and speculative replay can switch bodies freely.
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+amdgpu.target<gfx11-generic> @flash_next_gdn_wave32 {subgroup_size = 32}
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_span_state(%epoch: buffer, %rows: buffer, %span: index, %layer_origin: offset, %capacity: index) -> (index, index, i1, offset, offset)
+
+func.decl @flash_next_span_publishes(%verification: index, %epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_gdn_decay(%log_decay: f32) -> (f32)
+
+// Ordinary SSA queue entries own one four-token window until it reaches LDS.
+template.decl @flash_next.gdn_window.fetch(%capacity: index, %window: index, %end: index, %head: index, %key_head: index, %key_norm_index: index, %query_channel: index, %key_channel: index, %load_value_token0: index, %load_value_token1: index, %load_value_channel: index, %qkv: buffer, %norm: buffer, %alpha: buffer, %beta: buffer) -> (vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32)
+
+template.def<@flash_next.gdn_window.fetch> device @gdn_window_fetch(%capacity: index, %window: index, %end: index, %head: index, %key_head: index, %key_norm_index: index, %query_channel: index, %key_channel: index, %load_value_token0: index, %load_value_token1: index, %load_value_channel: index, %qkv: buffer, %norm: buffer, %alpha: buffer, %beta: buffer) -> (vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32) {
+  %origin = index.constant 0 : offset
+  %c1_index = index.constant 1 : index
+  %wave = kernel.subgroup.id : index
+  %last = index.sub %end, %c1_index : index
+  %qkv_view = buffer.view %qkv[%origin] : buffer -> view<[%capacity]x10240xbf16>
+  %norm_view = buffer.view %norm[%origin] : buffer -> view<[%capacity]x32xf32>
+  %alpha_view = buffer.view %alpha[%origin] : buffer -> view<[%capacity]x48xf32>
+  %beta_view = buffer.view %beta[%origin] : buffer -> view<[%capacity]x48xf32>
+  %query_token = index.add %window, %wave : index
+  %query_live = index.cmp ult, %query_token, %end : index
+  %safe_query_token = scf.select %query_live, %query_token, %last : index
+  %packed_query = vector.load %qkv_view[%safe_query_token, %query_channel] : view<[%capacity]x10240xbf16> -> vector<4xbf16>
+  %packed_key = vector.load %qkv_view[%safe_query_token, %key_channel] : view<[%capacity]x10240xbf16> -> vector<4xbf16>
+  %query_inverse = view.load %norm_view[%safe_query_token, %key_head] : view<[%capacity]x32xf32> -> f32
+  %key_inverse = view.load %norm_view[%safe_query_token, %key_norm_index] : view<[%capacity]x32xf32> -> f32
+  %value_token0 = index.add %window, %load_value_token0 : index
+  %value_token1 = index.add %window, %load_value_token1 : index
+  %value_live0 = index.cmp ult, %value_token0, %end : index
+  %value_live1 = index.cmp ult, %value_token1, %end : index
+  %safe_value_token0 = scf.select %value_live0, %value_token0, %last : index
+  %safe_value_token1 = scf.select %value_live1, %value_token1, %last : index
+  %packed_value0 = view.load %qkv_view[%safe_value_token0, %load_value_channel] : view<[%capacity]x10240xbf16> -> bf16
+  %packed_value1 = view.load %qkv_view[%safe_value_token1, %load_value_channel] : view<[%capacity]x10240xbf16> -> bf16
+  %alpha_value = view.load %alpha_view[%safe_query_token, %head] : view<[%capacity]x48xf32> -> f32
+  %beta_value = view.load %beta_view[%safe_query_token, %head] : view<[%capacity]x48xf32> -> f32
+  template.return %packed_query, %packed_key, %packed_value0, %packed_value1, %query_inverse, %key_inverse, %alpha_value, %beta_value : vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32
+}
+
+template.decl @flash_next.gdn_window.body(%capacity: index, %verification: index, %span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer)
+
+template.def<@flash_next.gdn_window.body> device @gdn_window_body(%capacity: index, %verification: index, %span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer) {
+  %span, %origins, %qkv, %norm, %alpha, %beta, %a, %bias, %state, %output = buffer.assume.noalias %span_arg, %origins_arg, %qkv_arg, %norm_arg, %alpha_arg, %beta_arg, %a_arg, %bias_arg, %state_arg, %output_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %span_index = kernel.workgroup.id<z> : index
+  %active = func.call @flash_next_span_active(%span, %span_index) : (buffer, index) -> (i1)
+  scf.if %active {
+    %begin, %end, %fresh, %reader, %writer = func.call @flash_next_span_state(%span, %origins, %span_index, %layer_origin, %capacity) : (buffer, buffer, index, offset, index) -> (index, index, i1, offset, offset)
+    %c0_index = index.constant 0 : index
+    %c1_index = index.constant 1 : index
+    %c2_index = index.constant 2 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %c16 = index.constant 16 : index
+    %c32 = index.constant 32 : index
+    %c64 = index.constant 64 : index
+    %width = index.constant 128 : index
+    %key_origin = index.constant 2048 : index
+    %value_origin = index.constant 4096 : index
+    %origin = index.constant 0 : offset
+    %a_view = buffer.view %a[%origin] : buffer -> view<48xf32>
+    %bias_view = buffer.view %bias[%origin] : buffer -> view<48xf32>
+    %state_view = buffer.view %state[%reader] : buffer -> view<786432xf32>
+    %write_state = buffer.view %state[%writer] : buffer -> view<786432xf32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x6144xbf16>
+    %head = kernel.workgroup.id<x> : index
+    %tile = kernel.workgroup.id<y> : index
+    %workitem = kernel.workitem.id<x> : index
+    %lane = kernel.subgroup.lane.id : index
+    %wave = kernel.subgroup.id : index
+    %key_head = index.rem %head, %c16 : index
+    %key_norm_index = index.add %key_head, %c16 : index
+    %key_segment = index.rem %lane, %c4 : index
+    %row_group = index.div %lane, %c4 : index
+    %key_begin = index.mul %key_segment, %c32 : index
+    %local_row0 = index.madd %wave, %c16, %row_group : index
+    %local_row1 = index.add %local_row0, %c8 : index
+    %tile_row = index.mul %tile, %c64 : index
+    %head_row = index.mul %head, %width : index
+    %value_base = index.add %head_row, %tile_row : index
+    %value_column0 = index.add %value_base, %local_row0 : index
+    %value_column1 = index.add %value_base, %local_row1 : index
+    %state_index0 = index.madd %value_column0, %width, %key_begin : index
+    %state_index1 = index.madd %value_column1, %width, %key_begin : index
+    %initial0, %initial1 = scf.if %fresh -> (vector<8x4xf32>, vector<8x4xf32>) {
+      %zero_state = vector.constant 0.0 : vector<8x4xf32>
+      scf.yield %zero_state, %zero_state : vector<8x4xf32>, vector<8x4xf32>
+    } else {
+      %stored0 = vector.load %state_view[%state_index0] : view<786432xf32> -> vector<32xf32>
+      %stored1 = vector.load %state_view[%state_index1] : view<786432xf32> -> vector<32xf32>
+      %shaped0 = vector.bitcast %stored0 : vector<32xf32> to vector<8x4xf32>
+      %shaped1 = vector.bitcast %stored1 : vector<32xf32> to vector<8x4xf32>
+      scf.yield %shaped0, %shaped1 : vector<8x4xf32>, vector<8x4xf32>
+    }
+    %stored_a = view.load %a_view[%head] : view<48xf32> -> f32
+    %stored_bias = view.load %bias_view[%head] : view<48xf32> -> f32
+    %query_factor = scalar.constant 0.088388347648318447 : f32
+    %c1_f32 = scalar.constant 1.0 : f32
+    %c0_f32 = scalar.constant 0.0 : f32
+    %shuffle2 = scalar.constant 2 : i32
+    %shuffle1 = scalar.constant 1 : i32
+    %shuffle_width = scalar.constant 4 : i32
+    %leader = index.cmp eq, %key_segment, %c0_index : index
+
+    // The four key segments occupy adjacent 16-byte chunks in each LDS row.
+    // Eight value-row groups broadcast those same chunks within each wave.
+    %qk_bytes = index.constant 4096 : offset
+    %value_bytes = index.constant 2048 : offset
+    %gate_bytes = index.constant 64 : offset
+    %query_stage = buffer.alloca<workgroup> align(16) %qk_bytes : buffer
+    %key_stage = buffer.alloca<workgroup> align(16) %qk_bytes : buffer
+    %value_stage = buffer.alloca<workgroup> align(16) %value_bytes : buffer
+    %gate_stage = buffer.alloca<workgroup> align(16) %gate_bytes : buffer
+    %query_stage_view = buffer.view %query_stage[%origin] : buffer -> view<2x4x8x16xf32>
+    %key_stage_view = buffer.view %key_stage[%origin] : buffer -> view<2x4x8x16xf32>
+    %value_stage_view = buffer.view %value_stage[%origin] : buffer -> view<2x4x64xf32>
+    %gate_stage_view = buffer.view %gate_stage[%origin] : buffer -> view<2x4x2xf32>
+    %load_component = index.mul %lane, %c4 : index
+    %query_channel = index.madd %key_head, %width, %load_component : index
+    %key_channel = index.add %query_channel, %key_origin : index
+    %load_chunk = index.rem %lane, %c8 : index
+    %load_segment = index.div %lane, %c8 : index
+    %store_component = index.mul %load_segment, %c4 : index
+    %read_component = index.mul %key_segment, %c4 : index
+    %load_value_row = index.rem %workitem, %c64 : index
+    %load_value_token0 = index.div %workitem, %c64 : index
+    %load_value_token1 = index.add %load_value_token0, %c2_index : index
+    %load_value_column = index.add %value_base, %load_value_row : index
+    %load_value_channel = index.add %value_origin, %load_value_column : index
+    %prepares_gate = index.cmp eq, %lane, %c0_index : index
+
+    // Retain three raw windows. Arithmetic waits until LDS publication so
+    // global loads can overlap the current window's state update.
+    %c12 = index.constant 12 : index
+    %window1 = index.add %begin, %c4 : index
+    %window2 = index.add %begin, %c8 : index
+    %initial0_q, %initial0_k, %initial0_v0, %initial0_v1, %initial0_qi, %initial0_ki, %initial0_a, %initial0_b = template.apply<@flash_next.gdn_window.fetch>(%capacity, %begin, %end, %head, %key_head, %key_norm_index, %query_channel, %key_channel, %load_value_token0, %load_value_token1, %load_value_channel, %qkv, %norm, %alpha, %beta) : (index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer) -> (vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32)
+    %initial1_q, %initial1_k, %initial1_v0, %initial1_v1, %initial1_qi, %initial1_ki, %initial1_a, %initial1_b = template.apply<@flash_next.gdn_window.fetch>(%capacity, %window1, %end, %head, %key_head, %key_norm_index, %query_channel, %key_channel, %load_value_token0, %load_value_token1, %load_value_channel, %qkv, %norm, %alpha, %beta) : (index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer) -> (vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32)
+    %initial2_q, %initial2_k, %initial2_v0, %initial2_v1, %initial2_qi, %initial2_ki, %initial2_a, %initial2_b = template.apply<@flash_next.gdn_window.fetch>(%capacity, %window2, %end, %head, %key_head, %key_norm_index, %query_channel, %key_channel, %load_value_token0, %load_value_token1, %load_value_channel, %qkv, %norm, %alpha, %beta) : (index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer) -> (vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32)
+    %final0, %final1, %retired0_q, %retired0_k, %retired0_v0, %retired0_v1, %retired0_qi, %retired0_ki, %retired0_a, %retired0_b, %retired1_q, %retired1_k, %retired1_v0, %retired1_v1, %retired1_qi, %retired1_ki, %retired1_a, %retired1_b, %retired2_q, %retired2_k, %retired2_v0, %retired2_v1, %retired2_qi, %retired2_ki, %retired2_a, %retired2_b = scf.for %window = [%begin to %end step %c4](%old0 = %initial0 : vector<8x4xf32>, %old1 = %initial1 : vector<8x4xf32>, %queue0_q = %initial0_q : vector<4xbf16>, %queue0_k = %initial0_k : vector<4xbf16>, %queue0_v0 = %initial0_v0 : bf16, %queue0_v1 = %initial0_v1 : bf16, %queue0_qi = %initial0_qi : f32, %queue0_ki = %initial0_ki : f32, %queue0_a = %initial0_a : f32, %queue0_b = %initial0_b : f32, %queue1_q = %initial1_q : vector<4xbf16>, %queue1_k = %initial1_k : vector<4xbf16>, %queue1_v0 = %initial1_v0 : bf16, %queue1_v1 = %initial1_v1 : bf16, %queue1_qi = %initial1_qi : f32, %queue1_ki = %initial1_ki : f32, %queue1_a = %initial1_a : f32, %queue1_b = %initial1_b : f32, %queue2_q = %initial2_q : vector<4xbf16>, %queue2_k = %initial2_k : vector<4xbf16>, %queue2_v0 = %initial2_v0 : bf16, %queue2_v1 = %initial2_v1 : bf16, %queue2_qi = %initial2_qi : f32, %queue2_ki = %initial2_ki : f32, %queue2_a = %initial2_a : f32, %queue2_b = %initial2_b : f32) -> (vector<8x4xf32>, vector<8x4xf32>, vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32, vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32, vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32) {
+      %relative = index.sub %window, %begin : index
+      %ordinal = index.div %relative, %c4 : index
+      %slot = index.rem %ordinal, %c2_index : index
+      %query_values = vector.extf %queue0_q : vector<4xbf16> to vector<4xf32>
+      %key_values = vector.extf %queue0_k : vector<4xbf16> to vector<4xf32>
+      %query_scale = scalar.mulf %queue0_qi, %query_factor : f32
+      %query_scales = vector.splat %query_scale : vector<4xf32>
+      %key_scales = vector.splat %queue0_ki : vector<4xf32>
+      %normalized_query = vector.mulf %query_values, %query_scales : vector<4xf32>
+      %normalized_key = vector.mulf %key_values, %key_scales : vector<4xf32>
+      %value0 = scalar.extf %queue0_v0 : bf16 to f32
+      %value1 = scalar.extf %queue0_v1 : bf16 to f32
+      scf.if %prepares_gate {
+        %biased = scalar.addf %queue0_a, %stored_bias : f32
+        %positive = scalar.softplusf<afn> %biased : f32
+        %log_decay = scalar.mulf %positive, %stored_a : f32
+        %decay = func.call @flash_next_gdn_decay(%log_decay) : (f32) -> (f32)
+        %negative_beta = scalar.negf %queue0_b : f32
+        %beta_exp = scalar.expf<afn> %negative_beta : f32
+        %denominator = scalar.addf %c1_f32, %beta_exp : f32
+        %gate = scalar.divf %c1_f32, %denominator : f32
+        view.store %decay, %gate_stage_view[%slot, %wave, %c0_index] : f32, view<2x4x2xf32>
+        view.store %gate, %gate_stage_view[%slot, %wave, %c1_index] : f32, view<2x4x2xf32>
+      }
+      vector.store %normalized_query, %query_stage_view[%slot, %wave, %load_chunk, %store_component] : vector<4xf32>, view<2x4x8x16xf32>
+      vector.store %normalized_key, %key_stage_view[%slot, %wave, %load_chunk, %store_component] : vector<4xf32>, view<2x4x8x16xf32>
+      view.store %value0, %value_stage_view[%slot, %load_value_token0, %load_value_row] : f32, view<2x4x64xf32>
+      view.store %value1, %value_stage_view[%slot, %load_value_token1, %load_value_row] : f32, view<2x4x64xf32>
+      // Double buffering makes the previous window's barrier retire all
+      // readers of this slot; this barrier publishes its replacement.
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %future_window = index.add %window, %c12 : index
+      %has_future = index.cmp ult, %future_window, %end : index
+      %future_q, %future_k, %future_v0, %future_v1, %future_qi, %future_ki, %future_a, %future_b = scf.if %has_future -> (vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32) {
+        %loaded_q, %loaded_k, %loaded_v0, %loaded_v1, %loaded_qi, %loaded_ki, %loaded_a, %loaded_b = template.apply<@flash_next.gdn_window.fetch>(%capacity, %future_window, %end, %head, %key_head, %key_norm_index, %query_channel, %key_channel, %load_value_token0, %load_value_token1, %load_value_channel, %qkv, %norm, %alpha, %beta) : (index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer) -> (vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32)
+        scf.yield %loaded_q, %loaded_k, %loaded_v0, %loaded_v1, %loaded_qi, %loaded_ki, %loaded_a, %loaded_b : vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32
+      } else {
+        %empty = vector.constant 0.0 : vector<4xbf16>
+        %empty_scalar = scalar.constant 0.0 : bf16
+        scf.yield %empty, %empty, %empty_scalar, %empty_scalar, %c0_f32, %c0_f32, %c0_f32, %c0_f32 : vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32
+      }
+      %remaining = index.sub %end, %window : index
+      %window_count = index.min %remaining, %c4 : index
+      %window_state0, %window_state1 = scf.for %local_token = [%c0_index to %window_count step %c1_index](%state0 = %old0 : vector<8x4xf32>, %state1 = %old1 : vector<8x4xf32>) -> (vector<8x4xf32>, vector<8x4xf32>) {
+        %absolute_token = index.add %window, %local_token : index
+        // local_token < min(end - window, 4) proves this strict upper bound.
+        %token = index.assume %absolute_token [lt(%absolute_token, %end)] : index
+        %query_rows = vector.load %query_stage_view[%slot, %local_token, %c0_index, %read_component] : view<2x4x8x16xf32> -> vector<8x4xf32>
+        %key_rows = vector.load %key_stage_view[%slot, %local_token, %c0_index, %read_component] : view<2x4x8x16xf32> -> vector<8x4xf32>
+        %decay = view.load %gate_stage_view[%slot, %local_token, %c0_index] : view<2x4x2xf32> -> f32
+        %gate = view.load %gate_stage_view[%slot, %local_token, %c1_index] : view<2x4x2xf32> -> f32
+        %decays = vector.splat %decay : vector<8x4xf32>
+        %decayed0 = vector.mulf %state0, %decays : vector<8x4xf32>
+        %prediction_rows0 = vector.mulf %decayed0, %key_rows : vector<8x4xf32>
+        %prediction_partial0 = vector.reduce<addf, reassoc|nnan|nsz> %prediction_rows0, %c0_f32 : vector<8x4xf32>, f32
+        %prediction_peer2_0, %prediction_valid2_0 = kernel.subgroup.shuffle<xor> %prediction_partial0, %shuffle2, %shuffle_width : f32, i32, i32
+        %prediction2_0 = scalar.addf %prediction_partial0, %prediction_peer2_0 : f32
+        %prediction_peer1_0, %prediction_valid1_0 = kernel.subgroup.shuffle<xor> %prediction2_0, %shuffle1, %shuffle_width : f32, i32, i32
+        %prediction0 = scalar.addf %prediction2_0, %prediction_peer1_0 : f32
+        %value0 = view.load %value_stage_view[%slot, %local_token, %local_row0] : view<2x4x64xf32> -> f32
+        %residual0 = scalar.subf %value0, %prediction0 : f32
+        %delta0 = scalar.mulf %residual0, %gate : f32
+        %deltas0 = vector.splat %delta0 : vector<8x4xf32>
+        %updated0 = vector.fmaf %key_rows, %deltas0, %decayed0 : vector<8x4xf32>
+        %output_rows0 = vector.mulf %updated0, %query_rows : vector<8x4xf32>
+        %output_partial0 = vector.reduce<addf, reassoc|nnan|nsz> %output_rows0, %c0_f32 : vector<8x4xf32>, f32
+        %output_peer2_0, %output_valid2_0 = kernel.subgroup.shuffle<xor> %output_partial0, %shuffle2, %shuffle_width : f32, i32, i32
+        %output2_0 = scalar.addf %output_partial0, %output_peer2_0 : f32
+        %output_peer1_0, %output_valid1_0 = kernel.subgroup.shuffle<xor> %output2_0, %shuffle1, %shuffle_width : f32, i32, i32
+        %result0 = scalar.addf %output2_0, %output_peer1_0 : f32
+        %decayed1 = vector.mulf %state1, %decays : vector<8x4xf32>
+        %prediction_rows1 = vector.mulf %decayed1, %key_rows : vector<8x4xf32>
+        %prediction_partial1 = vector.reduce<addf, reassoc|nnan|nsz> %prediction_rows1, %c0_f32 : vector<8x4xf32>, f32
+        %prediction_peer2_1, %prediction_valid2_1 = kernel.subgroup.shuffle<xor> %prediction_partial1, %shuffle2, %shuffle_width : f32, i32, i32
+        %prediction2_1 = scalar.addf %prediction_partial1, %prediction_peer2_1 : f32
+        %prediction_peer1_1, %prediction_valid1_1 = kernel.subgroup.shuffle<xor> %prediction2_1, %shuffle1, %shuffle_width : f32, i32, i32
+        %prediction1 = scalar.addf %prediction2_1, %prediction_peer1_1 : f32
+        %value1 = view.load %value_stage_view[%slot, %local_token, %local_row1] : view<2x4x64xf32> -> f32
+        %residual1 = scalar.subf %value1, %prediction1 : f32
+        %delta1 = scalar.mulf %residual1, %gate : f32
+        %deltas1 = vector.splat %delta1 : vector<8x4xf32>
+        %updated1 = vector.fmaf %key_rows, %deltas1, %decayed1 : vector<8x4xf32>
+        %output_rows1 = vector.mulf %updated1, %query_rows : vector<8x4xf32>
+        %output_partial1 = vector.reduce<addf, reassoc|nnan|nsz> %output_rows1, %c0_f32 : vector<8x4xf32>, f32
+        %output_peer2_1, %output_valid2_1 = kernel.subgroup.shuffle<xor> %output_partial1, %shuffle2, %shuffle_width : f32, i32, i32
+        %output2_1 = scalar.addf %output_partial1, %output_peer2_1 : f32
+        %output_peer1_1, %output_valid1_1 = kernel.subgroup.shuffle<xor> %output2_1, %shuffle1, %shuffle_width : f32, i32, i32
+        %result1 = scalar.addf %output2_1, %output_peer1_1 : f32
+        scf.if %leader {
+          %packed0 = scalar.fptrunc %result0 : f32 to bf16
+          view.store %packed0, %output_view[%token, %value_column0] : bf16, view<[%capacity]x6144xbf16>
+          %packed1 = scalar.fptrunc %result1 : f32 to bf16
+          view.store %packed1, %output_view[%token, %value_column1] : bf16, view<[%capacity]x6144xbf16>
+        }
+        scf.yield %updated0, %updated1 : vector<8x4xf32>, vector<8x4xf32>
+      }
+      scf.yield %window_state0, %window_state1, %queue1_q, %queue1_k, %queue1_v0, %queue1_v1, %queue1_qi, %queue1_ki, %queue1_a, %queue1_b, %queue2_q, %queue2_k, %queue2_v0, %queue2_v1, %queue2_qi, %queue2_ki, %queue2_a, %queue2_b, %future_q, %future_k, %future_v0, %future_v1, %future_qi, %future_ki, %future_a, %future_b : vector<8x4xf32>, vector<8x4xf32>, vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32, vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32, vector<4xbf16>, vector<4xbf16>, bf16, bf16, f32, f32, f32, f32
+    }
+    %publish = func.call @flash_next_span_publishes(%verification, %span, %span_index) : (index, buffer, index) -> (i1)
+    scf.if %publish {
+      %flat0 = vector.bitcast %final0 : vector<8x4xf32> to vector<32xf32>
+      %flat1 = vector.bitcast %final1 : vector<8x4xf32> to vector<32xf32>
+      vector.store %flat0, %write_state[%state_index0] : vector<32xf32>, view<786432xf32>
+      vector.store %flat1, %write_state[%state_index1] : vector<32xf32>, view<786432xf32>
+    }
+  }
+  template.return
+}
+
+kernel.def target(@flash_next_gdn_wave32) @gdn_recur_window() {
+  %heads = index.constant 48 : index
+  %columns = index.constant 2 : index
+  %lanes = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  %spans = index.constant 16 : index
+  kernel.launch.config workgroups(%heads, %columns, %spans) workgroup_size(%lanes, %c1, %c1) : index
+} launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %verification = config.get @flash_next.verification_width : index
+  template.apply<@flash_next.gdn_window.body>(%capacity, %verification, %span_arg, %origins_arg, %layer_origin, %qkv_arg, %norm_arg, %alpha_arg, %beta_arg, %a_arg, %bias_arg, %state_arg, %output_arg) : (index, index, buffer, buffer, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}

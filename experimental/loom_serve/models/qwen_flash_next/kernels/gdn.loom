@@ -131,6 +131,32 @@ kernel.def target(@flash_next_gdn_wave32) @gdn_convolve_commit() {
   kernel.return
 }
 
+// A persistent state repeatedly multiplies by decay. Native approximate
+// exp loses the retained-state envelope near one; the five-FMA
+// polynomial has truncation error below 9e-11 for |x| <= 1/16.
+func.def public inline @flash_next_gdn_decay(%log_decay: f32) -> (f32) {
+  %c1_f32 = scalar.constant 1.0 : f32
+  %magnitude = scalar.absf %log_decay : f32
+  %radius = scalar.constant 0.0625 : f32
+  %near_zero = scalar.cmpf ole, %magnitude, %radius : f32
+  %decay = scf.if %near_zero -> (f32) {
+    %half = scalar.constant 0.5 : f32
+    %sixth = scalar.constant 0.16666666666666666 : f32
+    %twenty_fourth = scalar.constant 0.041666666666666664 : f32
+    %one_hundred_twentieth = scalar.constant 0.0083333333333333332 : f32
+    %p4 = scalar.fmaf %log_decay, %one_hundred_twentieth, %twenty_fourth : f32
+    %p3 = scalar.fmaf %log_decay, %p4, %sixth : f32
+    %p2 = scalar.fmaf %log_decay, %p3, %half : f32
+    %p1 = scalar.fmaf %log_decay, %p2, %c1_f32 : f32
+    %value = scalar.fmaf %log_decay, %p1, %c1_f32 : f32
+    scf.yield %value : f32
+  } else {
+    %value = scalar.expf<afn> %log_decay : f32
+    scf.yield %value : f32
+  }
+  func.return %decay : f32
+}
+
 // GGUF tiles V heads over K heads. Persistent state is [head, value, key]; a
 // wave retains four value columns as one 4x4 F32 tile per lane across the span.
 // The stored ssm_a is already -exp(A_log), not the original logarithm.
@@ -212,7 +238,7 @@ template.def<@flash_next.gdn_recur.body> device @gdn_recur_body(%capacity: index
       %biased = scalar.addf %alpha_value, %stored_bias : f32
       %positive = scalar.softplusf<afn> %biased : f32
       %log_decay = scalar.mulf %positive, %stored_a : f32
-      %decay = scalar.expf<afn> %log_decay : f32
+      %decay = func.call @flash_next_gdn_decay(%log_decay) : (f32) -> (f32)
       %decay_tile = vector.splat %decay : vector<4x4xf32>
       %decayed = vector.mulf %old, %decay_tile : vector<4x4xf32>
       %prediction_tile = vector.mulf %decayed, %key_tile : vector<4x4xf32>
@@ -330,6 +356,8 @@ kernel.def target(@flash_next_gdn_wave32) @gdn_gate() {
   kernel.return
 }
 
+kernel.decl @gdn_recur_window() launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer)
+
 // A layer stores its F32 recurrence followed by three BF16 convolution rows.
 // Rows publish into a private writer selected by the retained-state pool. A
 // fresh conversation synthesizes zeros in registers without clearing storage.
@@ -363,7 +391,15 @@ command.program.def public @flash_next_gdn_state(%layer: index, %state_origin: o
   %bias = command.parameter %parameters, "blk.{}.ssm_dt.bias"[%layer] : view<48xf32>
   %norm_weight = command.parameter %parameters, "blk.{}.ssm_norm.weight"[%layer] : view<128xf32>
   kernel.launch @gdn_convolve(%epoch, %rows, %history_origin, %qkv, %conv_weight, %arena, %convolved, %inverse_norm) : (buffer, buffer, offset, buffer, view<10240x4xf32>, buffer, buffer, buffer)
-  kernel.launch @gdn_recur(%epoch, %rows, %state_origin, %convolved, %inverse_norm, %alpha, %beta, %a, %bias, %arena, %raw) : (buffer, buffer, offset, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, buffer, buffer)
+  // Epoch capacity selects cooperative staging or the small wave body,
+  // independently of individual span lengths. Replay keeps the small body.
+  %window_threshold = index.constant 32 : index
+  %use_windows = index.cmp uge, %tokens, %window_threshold : index
+  scf.if %use_windows {
+    kernel.launch @gdn_recur_window(%epoch, %rows, %state_origin, %convolved, %inverse_norm, %alpha, %beta, %a, %bias, %arena, %raw) : (buffer, buffer, offset, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, buffer, buffer)
+  } else {
+    kernel.launch @gdn_recur(%epoch, %rows, %state_origin, %convolved, %inverse_norm, %alpha, %beta, %a, %bias, %arena, %raw) : (buffer, buffer, offset, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, buffer, buffer)
+  }
   kernel.launch @gdn_gate(%epoch, %raw, %z, %norm_weight, %output) : (buffer, buffer, buffer, view<128xf32>, buffer)
   command.return
 }
