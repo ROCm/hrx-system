@@ -1,0 +1,32 @@
+// Completion omits the scalar state value it is required to replace.
+func.def public @prepare_request(%model: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer, i64, buffer) {
+  func.return %model, %seed, %voice : buffer, i64, buffer
+}
+
+func.def public @prepare_input(%model: buffer, %state: buffer, %position: i64, %text: buffer, %offset: i64, %complete: i32) -> (buffer, i64, i64) {
+  %length = buffer.length %text
+  %length64 = index.cast %length : offset to i64
+  %remaining = scalar.subi %length64, %offset : i64
+  func.return %state, %position, %remaining : buffer, i64, i64
+}
+
+func.def public @prepare_work(%model: buffer, %state: buffer, %position: i64) -> (i32, buffer, i64, i64) {
+  %kind = scalar.constant 0 : i32
+  %unit = scalar.constant 1 : i64
+  %tag = scalar.constant 0 : i64
+  func.return %kind, %state, %unit, %tag : i32, buffer, i64, i64
+}
+
+func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  func.return %packed, %packed : buffer, buffer
+}
+
+func.def public @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) {
+  func.return
+}
+
+func.def public @complete(%model: buffer, %state: buffer, %position: i64, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (buffer, i64, i64, i64, i32) {
+  %c0 = scalar.constant 0 : i64
+  %done = scalar.constant 1 : i32
+  func.return %state, %c0, %c0, %c0, %done : buffer, i64, i64, i64, i32
+}

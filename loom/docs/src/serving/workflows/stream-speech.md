@@ -127,6 +127,24 @@ Disconnecting a client cancels its future work; an already accepted batch keeps
 its original members and storage until execution and output borrowers retire.
 The freed request slot can then serve another client safely.
 
+## Feed text as it arrives
+
+Applications embedding the native serving interface can connect a text model's
+content stream directly to a speech request. The speech model can begin producing
+audio before the text model finishes its answer, as soon as its own text
+preparation policy has enough input. Each request retains its voice, tokenizer,
+and numerical state while more text arrives.
+
+The caller appends UTF-8 text up to the speech stream's available input credit
+and marks end-of-input after the final text. Input and output have independent
+credit: a stalled audio consumer eventually backpressures its text producer,
+while other requests keep advancing. Reasoning spans remain separate from the
+content sent to speech. The [native speech interface](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/speech/README.md#native-consumers)
+describes admission, partial writes, completion, and cancellation.
+
+`POST /v1/audio/speech` continues to accept complete JSON requests. Its audio
+response is incremental; continuing text input uses the native interface.
+
 ## Play a learned model's output
 
 For a registered learned package named `speaker` that supports voice `alba` and

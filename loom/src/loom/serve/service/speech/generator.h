@@ -10,6 +10,7 @@
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/parameter/residency.h"
+#include "loom/serve/service/speech/input.h"
 #include "loom/serve/service/speech/request.h"
 
 #ifdef __cplusplus
@@ -38,14 +39,35 @@ typedef struct loom_serve_speech_block_t {
   bool complete;
 } loom_serve_speech_block_t;
 
-// Source-established compatibility of one request's next numerical operation.
-// Different progress is permitted within a tag; phase and geometry are source
-// facts. These facts belong to one retired model cut, not to request lifetime.
+// Source-selected next operation after one bounded CPU input step.
+typedef enum loom_serve_speech_work_kind_e {
+  LOOM_SERVE_SPEECH_WORK_NUMERICAL = 0,
+  LOOM_SERVE_SPEECH_WORK_CPU = 1,
+  LOOM_SERVE_SPEECH_WORK_INPUT = 2,
+  LOOM_SERVE_SPEECH_WORK_COMPLETE = 3,
+} loom_serve_speech_work_kind_t;
+
+// Source-established input acceptance and next operation at a retired cut.
+// Different progress is permitted within a numerical tag; phase and geometry
+// are source facts. Input acceptance is independent of numerical selection.
 typedef struct loom_serve_speech_work_t {
-  // Positive additive cost within the model's batch-unit capacity.
-  uint64_t units;
-  // Equal tags permit one source batch when the sum of units fits.
-  uint64_t tag;
+  // Numerical work, another bounded CPU step, input waiting, or final output.
+  loom_serve_speech_work_kind_t kind;
+  // Complete-scalar input prefix accepted by this CPU call, even if a later
+  // operation fails. The owner returns this credit only after task retirement.
+  iree_host_size_t consumed_bytes;
+  // Metadata for the selected operation; CPU and INPUT carry no extra data.
+  union {
+    // Compatible next numerical work, independently of request progress.
+    struct {
+      // Positive additive cost within the model's batch-unit capacity.
+      uint64_t units;
+      // Equal tags permit one source batch when the sum of units fits.
+      uint64_t tag;
+    } numerical;
+    // Validated playback position of an empty final waveform block.
+    uint64_t frame_position;
+  } data;
 } loom_serve_speech_work_t;
 
 // Independently resident requests sharing one source CPU owner and one accepted
@@ -63,6 +85,10 @@ typedef struct loom_serve_speech_generator_t {
   iree_host_size_t request_capacity;
   // Maximum sum of source work units in one compatible numerical batch.
   uint64_t batch_units;
+  // Maximum complete-scalar text window and native input ring size, >= 4 bytes.
+  iree_host_size_t text_capacity;
+  // Maximum raw UTF-8 bytes accepted over the complete request lifetime.
+  uint64_t text_limit;
   // CPU preparation returns an owned request handle, with no device submission
   // or shared admission mutation. INVALID_ARGUMENT rejects a client request;
   // other failures are terminal. Failure retains no request and returns NULL.
@@ -83,10 +109,15 @@ typedef struct loom_serve_speech_generator_t {
   // Consumes successful admission readiness. True retains the row and pin;
   // false releases the activation pin and leaves an unadmitted request.
   bool (*complete_admit)(void* self, void* invocation);
-  // CPU-only next-work preparation at a retired model cut. Does not advance
-  // the request or submit work. Retained source bytes belong to the handle.
-  // Requery after another batch completes; conditioning facts may have changed.
+  // CPU-only input acceptance and next-work preparation at a retired cut.
+  // Snapshot bytes are borrowed only through this call; retained source text
+  // belongs to the handle. INPUT requires the offered source window drained
+  // without EOF; COMPLETE requires final input accepted and all output drained.
+  // INVALID_ARGUMENT rejects this request; other failures are terminal. The
+  // accepted count remains meaningful on failure. Requery numerical offers
+  // after another batch completes; shared conditioning facts may have changed.
   iree_status_t (*prepare_work)(void* self, void* invocation,
+                                const loom_serve_speech_input_block_t* input,
                                 loom_serve_speech_work_t* out_work);
   // CPU-only packing of distinct admitted handles with freshly queried,
   // compatible work. The source owns numerical packing and phase/shape choice.

@@ -322,6 +322,33 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    registry_text_speech_tests
+  SRCS
+    "registry_text_speech_test.cc"
+  DEPS
+    ::configuration
+    ::model_registration
+    ::registry
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::testing::gtest
+    iree::testing::temp_file
+    loom::serve::service
+    loom::serve::service::speech::output
+    loom::serve::service::speech::request
+    loom::serve::service::speech::stream
+    loom::serve::service::text::stream
+    loom::serve::testing::service_application
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_library(
   NAME

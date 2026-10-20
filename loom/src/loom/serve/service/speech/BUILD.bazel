@@ -13,6 +13,24 @@ package(
 )
 
 loom_cc_library(
+    name = "input",
+    srcs = ["input.c"],
+    hdrs = ["input.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "input_test",
+    srcs = ["input_test.cc"],
+    deps = [
+        ":input",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "request",
     srcs = ["request.c"],
     hdrs = ["request.h"],
@@ -38,6 +56,7 @@ loom_cc_library(
     name = "generator",
     hdrs = ["generator.h"],
     deps = [
+        ":input",
         ":request",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/parameter:residency",
@@ -63,6 +82,8 @@ loom_cc_library(
     deps = [
         ":consumer",
         ":generator",
+        ":input",
+        ":request",
         "//loom/src/loom/serve/telemetry:record",
         "//runtime/src/iree/base",
     ],
@@ -74,6 +95,7 @@ loom_cc_library(
     hdrs = ["model.h"],
     deps = [
         ":generator",
+        ":input",
         "//loom/binding/c:loomc",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
@@ -103,6 +125,21 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "stream_test",
+    srcs = ["stream_test.cc"],
+    deps = [
+        ":consumer",
+        ":input",
+        ":request",
+        ":stream",
+        "//loom/src/loom/serve/telemetry:record",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 # Compiled suite shared by physical target registrations; helpers stay private.
 loom_cc_library(
     name = "source_service_tests",
@@ -120,6 +157,7 @@ loom_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":generator",
+        ":input",
         ":model",
         ":request",
         ":service",
@@ -194,6 +232,7 @@ loom_cc_library(
         ":consumer",
         ":generator",
         ":http",
+        ":input",
         ":request",
         ":stream",
         "//loom/src/loom/serve/runtime/execution",

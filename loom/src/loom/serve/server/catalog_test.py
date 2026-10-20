@@ -973,12 +973,12 @@ def check_control_contracts(server_command, directory, catalog):
             "speech",
             [
                 (
-                    "@prepare_work(%model: buffer, %state: buffer)",
-                    "@prepare_work(%model: buffer, %state: buffer, %extra: i32)",
+                    "@prepare_work(%model: buffer, %state: buffer, %position: i64)",
+                    "@prepare_work(%model: buffer, %state: buffer, %position: i64, %extra: i32)",
                 )
             ],
             "model export 'prepare_work' argument count mismatch: "
-            "host expects 2, source declares 3",
+            "host expects 3, source declares 4",
         ),
     ]
     with running_server(server_command, directory, catalog_path, 1) as (client, _):

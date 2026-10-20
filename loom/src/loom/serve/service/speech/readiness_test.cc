@@ -51,6 +51,8 @@ class SpeechReadinessTest : public ::testing::Test {
     uint64_t block = 0;
     // Text-derived output length, independent of neighboring requests.
     uint64_t blocks = 0;
+    // EOF has been accepted by a retired input-preparation turn.
+    bool input_complete = false;
     // Immutable voice waveform borrowed by real upload operations.
     std::vector<uint8_t> input;
     // Per-request feedback borrowed through accepted queue retirement.
@@ -92,6 +94,8 @@ class SpeechReadinessTest : public ::testing::Test {
         .block_capacity = frames_,
         .request_capacity = capacity,
         .batch_units = capacity,
+        .text_capacity = 64,
+        .text_limit = 1024,
         .prepare =
             [](void* self, iree_host_size_t row,
                const loom_serve_speech_request_t* request, void** out) {
@@ -99,7 +103,6 @@ class SpeechReadinessTest : public ::testing::Test {
               auto invocation =
                   std::make_unique<loom_serve_test_speech_invocation_t>();
               invocation->row = row;
-              invocation->blocks = iree_string_builder_size(&request->input);
               invocation->input.resize(test->frames_ * test->format_.channels *
                                        4);
               invocation->output.resize(invocation->input.size());
@@ -138,8 +141,26 @@ class SpeechReadinessTest : public ::testing::Test {
             },
         .complete_admit = [](void*, void*) { return true; },
         .prepare_work =
-            [](void*, void*, loom_serve_speech_work_t* out) {
-              *out = {.units = 1, .tag = 0};
+            [](void* self, void* opaque,
+               const loom_serve_speech_input_block_t* input,
+               loom_serve_speech_work_t* out) {
+              auto* test = static_cast<SpeechReadinessTest*>(self);
+              auto* invocation =
+                  static_cast<loom_serve_test_speech_invocation_t*>(opaque);
+              invocation->blocks += input->byte_count;
+              invocation->input_complete |= input->complete;
+              *out = {.consumed_bytes = input->byte_count};
+              if (invocation->block < invocation->blocks) {
+                out->kind = LOOM_SERVE_SPEECH_WORK_NUMERICAL;
+                out->data.numerical = {.units = 1, .tag = 0};
+              } else if (invocation->input_complete) {
+                out->kind = LOOM_SERVE_SPEECH_WORK_COMPLETE;
+                out->data.frame_position =
+                    invocation->block *
+                    (test->empty_output_ ? 0 : test->frames_);
+              } else {
+                out->kind = LOOM_SERVE_SPEECH_WORK_INPUT;
+              }
               return iree_ok_status();
             },
         .prepare_batch =
@@ -182,7 +203,8 @@ class SpeechReadinessTest : public ::testing::Test {
                   .samples = iree_make_const_byte_span(
                       invocation.output.data(),
                       frames * test->format_.channels * sizeof(float)),
-                  .complete = invocation.block + 1 == invocation.blocks,
+                  .complete = invocation.input_complete &&
+                              invocation.block + 1 == invocation.blocks,
               };
               ++invocation.block;
               return iree_ok_status();
@@ -714,6 +736,39 @@ TEST_F(SpeechReadinessTest, NativeCancellationRetainsOriginalDeviceCohort) {
   EXPECT_EQ(released_.load(), 2u);
   EXPECT_EQ(actual_.telemetry.counters->cancelled, 1u);
   EXPECT_EQ(actual_.telemetry.counters->completed, 1u);
+}
+
+TEST_F(SpeechReadinessTest, CpuAcceptanceReturnsCreditBeforeDeviceRetirement) {
+  ASSERT_NO_FATAL_FAILURE(Initialize(3, 3, 0, 1, 1, false));
+  loom_serve_speech_request_t request;
+  IREE_ASSERT_OK(loom_serve_speech_request_initialize_stream(
+      IREE_SV("positive"), {}, 0, 1.0f, allocator_, &request));
+  loom_serve_speech_stream_t* raw = nullptr;
+  IREE_ASSERT_OK(loom_serve_speech_service_try_open(service_, &request, &raw));
+  loom_serve_speech_request_deinitialize(&request);
+  SpeechStream stream(raw, loom_serve_speech_stream_close);
+  ASSERT_NE(stream, nullptr);
+  size_t accepted = 0;
+  IREE_ASSERT_OK(loom_serve_speech_stream_write(
+      stream.get(), iree_make_const_byte_span("abc", 3), &accepted));
+  EXPECT_EQ(accepted, 3u);
+  EXPECT_EQ(loom_serve_speech_stream_write_credit(stream.get()), 61u);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return held_.load(); }));
+  EXPECT_EQ(loom_serve_speech_stream_peek(stream.get()), nullptr);
+  EXPECT_EQ(loom_serve_speech_stream_write_credit(stream.get()), 64u);
+  EXPECT_EQ(actual_.telemetry.counters->batches, 0u);
+  IREE_ASSERT_OK(loom_serve_speech_stream_write(
+      stream.get(), iree_make_const_byte_span("d", 1), &accepted));
+  EXPECT_EQ(accepted, 1u);
+  EXPECT_EQ(loom_serve_speech_stream_write_credit(stream.get()), 63u);
+  stream.reset();
+  bool progress = false;
+  IREE_ASSERT_OK(actual_.advance(actual_.self, 0, &progress));
+  EXPECT_EQ(released_.load(), 0u);
+  ReleaseDependency();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return released_.load() == 1; }));
+  EXPECT_EQ(actual_.telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(submitted_.load(), 1u);
 }
 
 TEST_F(SpeechReadinessTest, ClosedNativeHandleRetainsAcceptedEncodingStorage) {

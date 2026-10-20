@@ -42,9 +42,51 @@ extern "C" {
 // excluding encode's padding. lookup returns -1 for missing vocabulary tokens.
 // require propagates INVALID_ARGUMENT with the source diagnostic when condition
 // is zero. The environment and optional tokenizer are borrowed for the module
-// lifetime. A NULL tokenizer supports cold input validation only;
-// encode/decode/lookup then fail with FAILED_PRECONDITION. No request bytes are
-// retained after a call. On failure *out_module is NULL.
+// lifetime. With a NULL tokenizer, encode/decode/lookup and codec creation fail
+// with FAILED_PRECONDITION. Input validation and operations on existing codec
+// objects remain available. No request bytes are retained by finite calls.
+// On failure *out_module is NULL.
+//
+// Streaming capabilities use managed input.encoder/input.decoder references:
+//   encoder_create(i32 flags, i64 transform_capacity, i64 token_capacity)
+//       -> input.encoder
+//   decoder_create(i32 flags, i64 token_capacity) -> input.decoder
+//   encoder_reset(input.encoder state, i32 flags)
+//   decoder_reset(input.decoder state, i32 flags)
+//   encoder_feed(input.encoder state, buffer input, i64 input_offset,
+//                i64 input_length, buffer output, i64 output_offset,
+//                i64 output_capacity) -> (i64 consumed, i64 written)
+//   decoder_feed(input.decoder state, buffer input, i64 input_offset,
+//                i64 input_length, buffer output, i64 output_offset,
+//                i64 output_capacity) -> (i64 consumed, i64 written)
+//   encoder_finalize(input.encoder state, buffer output, i64 output_offset,
+//                    i64 output_capacity) -> (i64 written, i32 complete)
+//   decoder_finalize(input.decoder state, buffer output, i64 output_offset,
+//                    i64 output_capacity) -> (i64 written, i32 complete)
+//
+// Offsets and transform_capacity are bytes. Encoder input/consumed units are
+// bytes and output/written units are I32 IDs; decoder units are the reverse.
+// Source buffers need no alignment. Only the written prefix changes. Each call
+// handles at most token_capacity IDs; this positive creation-time capacity owns
+// reusable native staging and does not limit total stream length. Transform
+// capacity follows the runtime tokenizer's power-of-two storage contract.
+// Source chooses input windows, output credit, normalization, and packet
+// policy. Streaming encoding follows the runtime's partial-input byte contract;
+// callers retain unconsumed input and supply complete UTF-8 through their
+// ingress policy. Flags match finite calls, and reset restores independent
+// first-input behavior. A call can accept input without producing output,
+// including with zero output credit; the returned consumed count always
+// advances the caller's input cursor.
+//
+// Finalize begins only after all input is accepted. Output exhaustion retains
+// pending work; repeated calls drain it until complete is true. Zero output
+// credit is valid. Feed requires reset after finalization starts. A decoder may
+// require more than one output byte to emit a UTF-8 scalar or vocabulary piece.
+// Codec state owns its storage and may outlive the module/program; its borrowed
+// immutable tokenizer must outlive every codec. Calls on one object are
+// serialized by the source owner. Creating this module installs the static
+// input type family in the environment before source compilation, including
+// cold preparation.
 iree_status_t loom_serve_input_module_create(iree_vm_environment_t* environment,
                                              const iree_tokenizer_t* tokenizer,
                                              iree_allocator_t host_allocator,

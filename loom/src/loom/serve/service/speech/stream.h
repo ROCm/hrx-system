@@ -21,10 +21,31 @@ typedef struct loom_serve_speech_stream_t loom_serve_speech_stream_t;
 // handle independently. No asynchronous work is accepted by construction.
 // Geometry and capacity are the validated generator contract supplied by the
 // service; caller-facing admission is loom_serve_speech_service_try_open.
+// Success transfers finite request text and returns a separate service-owned
+// input reference. Failure leaves the request unchanged and all outputs empty.
 iree_status_t loom_serve_speech_stream_allocate(
     loom_serve_speech_format_t format, iree_host_size_t block_capacity,
-    iree_allocator_t host_allocator, loom_serve_speech_stream_t** out_stream,
+    iree_host_size_t text_capacity, uint64_t text_limit,
+    loom_serve_speech_request_t* request, iree_allocator_t host_allocator,
+    loom_serve_speech_stream_t** out_stream,
+    loom_serve_speech_input_t** out_input,
     loom_serve_speech_consumer_t* out_consumer);
+
+// Appends at most current byte credit to a continuing request. Arbitrary UTF-8
+// byte partitions are accepted; only complete scalars reach source. Invalid
+// accepted prefixes, model text-limit overflow, or closed input fail without
+// accepting bytes. A zero count is ordinary backpressure. All operations are
+// serialized on the serving owner and never wait for CPU or device work.
+iree_status_t loom_serve_speech_stream_write(loom_serve_speech_stream_t* stream,
+                                             iree_const_byte_span_t text,
+                                             iree_host_size_t* out_byte_count);
+iree_host_size_t loom_serve_speech_stream_write_credit(
+    const loom_serve_speech_stream_t* stream);
+
+// Publishes end-of-input. Incomplete UTF-8 fails without publishing EOF;
+// otherwise repeated finish is harmless while the service remains attached.
+iree_status_t loom_serve_speech_stream_finish(
+    loom_serve_speech_stream_t* stream);
 
 // Immutable output geometry, retained independently of registration lifetime.
 loom_serve_speech_format_t loom_serve_speech_stream_format(

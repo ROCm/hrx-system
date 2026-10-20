@@ -38,13 +38,15 @@ iree_status_t loom_serve_speech_service_allocate(
     loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_speech_service_t** out_service);
 
-// Opens a native output stream in the same bounded queue and compatible cohorts
-// as HTTP requests. request must be initialized; successful acceptance moves it
-// into the service and clears the caller's value. Success with NULL is normal
-// queue pressure and leaves request unchanged. Failure leaves request
+// Opens a native text/waveform stream in the same bounded queue and compatible
+// cohorts as HTTP requests. request must be initialized; successful acceptance
+// moves it into the service and clears the caller's value. Success with NULL is
+// normal queue pressure and leaves request unchanged. Failure leaves request
 // unchanged. Calls are serialized on the serving owner. The caller closes the
 // returned handle independently of model retirement, including after terminal
 // failure.
+// A request initialized with initialize_stream accepts continuing text through
+// the returned handle; initialize_text supplies finite text at admission.
 iree_status_t loom_serve_speech_service_try_open(
     loom_serve_speech_service_t* service, loom_serve_speech_request_t* request,
     loom_serve_speech_stream_t** out_stream);
@@ -54,8 +56,9 @@ iree_status_t loom_serve_speech_service_try_open(
 // eligibility for compatible source work. Original cohort membership survives
 // cancellation through collection; all copies finish before feedback reuse.
 // EOF, reset peers and shutdown release rows only at retired model cuts;
-// failed readiness leaves accepted ownership with model teardown. Validation
-// precedes the first audio response byte.
+// failed readiness leaves accepted ownership with model teardown. Request and
+// waveform geometry validation precede the first audio response byte. A later
+// source text rejection closes the audio response without appending JSON.
 loom_serve_service_t loom_serve_speech_service_interface(
     loom_serve_speech_service_t* service);
 
