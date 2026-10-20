@@ -107,6 +107,7 @@ static const amdf_gpu_api_t amdf_gpu_api_v4 = {
     .event_destroy = amdf_gpu_event_destroy,
     .user_queue_query_scratch = amdf_gpu_user_queue_query_scratch,
     .user_queue_resume_scratch = amdf_gpu_user_queue_resume_scratch,
+    .user_queue_trim_scratch = amdf_gpu_user_queue_trim_scratch,
 };
 
 void amdf_gpu_extension_initialize_endpoint(amdf_endpoint_t* endpoint) {

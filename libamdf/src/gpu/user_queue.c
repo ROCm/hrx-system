@@ -434,3 +434,15 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_resume_scratch(
   return amdf_gpu_umd_user_queue_resume_scratch(
       ((amdf_gpu_user_queue_t*)base_queue)->umd, &umd_scratch);
 }
+
+amdf_status_t AMDF_CALL
+amdf_gpu_user_queue_trim_scratch(amdf_user_queue_t* base_queue) {
+  if (base_queue == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if (base_queue->vtable != &amdf_gpu_user_queue_vtable) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return amdf_gpu_umd_user_queue_trim_scratch(
+      ((amdf_gpu_user_queue_t*)base_queue)->umd);
+}

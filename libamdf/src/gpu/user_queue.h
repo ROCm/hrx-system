@@ -26,6 +26,10 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_query_scratch(
 amdf_status_t AMDF_CALL amdf_gpu_user_queue_resume_scratch(
     amdf_user_queue_t* queue, const amdf_gpu_queue_scratch_t* scratch);
 
+// Detaches idle scratch after the caller joins all accepted native uses.
+amdf_status_t AMDF_CALL
+amdf_gpu_user_queue_trim_scratch(amdf_user_queue_t* queue);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

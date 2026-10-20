@@ -138,6 +138,19 @@ struct FakeNativeState {
     return self->queue_destroy_status;
   }
 
+  static amdf_status_t QueueUpdate(
+      void* user_data, amdf_gpu_umd_device_t*,
+      const struct kfd_ioctl_update_queue_args* arguments) {
+    auto* self = static_cast<FakeNativeState*>(user_data);
+    self->queue_update.arguments.push_back(*arguments);
+    self->queue_update.descriptors.push_back(
+        *reinterpret_cast<const amdf_gpu_kfd_aql_descriptor_t*>(
+            self->buffers[1].storage.data()));
+    return self->queue_update.arguments.size() == self->queue_update.fail_call
+               ? amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO)
+               : AMDF_STATUS_OK;
+  }
+
   static amdf_status_t DoorbellMap(void* user_data, amdf_gpu_umd_device_t*,
                                    uint64_t native_byte_offset,
                                    size_t byte_length, void** out_mapping) {
@@ -226,6 +239,7 @@ struct FakeNativeState {
     queue_create_count = 0;
     queue_destroy_count = 0;
     queue_destroy_status = AMDF_STATUS_OK;
+    queue_update = {};
     destroyed_queue_identifiers.clear();
     doorbell_map_count = 0;
     doorbell_unmap_count = 0;
@@ -264,6 +278,15 @@ struct FakeNativeState {
   int queue_create_count = 0;
   int queue_destroy_count = 0;
   amdf_status_t queue_destroy_status = AMDF_STATUS_OK;
+  // Native detach/reconnect observations and dependency failure selection.
+  struct {
+    // Exact ring identity and activation percentage passed to each call.
+    std::vector<kfd_ioctl_update_queue_args> arguments;
+    // Firmware descriptor as each native operation observes it.
+    std::vector<amdf_gpu_kfd_aql_descriptor_t> descriptors;
+    // One-based failed native operation, or zero for success.
+    size_t fail_call = 0;
+  } queue_update;
   std::vector<uint32_t> destroyed_queue_identifiers;
   int doorbell_map_count = 0;
   int doorbell_unmap_count = 0;
@@ -444,6 +467,7 @@ class KfdUserQueueTest : public ::testing::Test {
       .buffer_destroy = FakeNativeState::BufferDestroy,
       .buffer_abandon = FakeNativeState::BufferAbandon,
       .queue_create = FakeNativeState::QueueCreate,
+      .queue_update = FakeNativeState::QueueUpdate,
       .queue_destroy = FakeNativeState::QueueDestroy,
       .doorbell_map = FakeNativeState::DoorbellMap,
       .doorbell_unmap = FakeNativeState::DoorbellUnmap,
@@ -1736,6 +1760,88 @@ TEST_F(KfdUserQueueTest, ScratchServiceDoesNotHideOtherFirmwareErrors) {
   ASSERT_EQ(amdf_gpu_umd_user_queue_query_status(queue_, &status),
             AMDF_STATUS_OK);
   EXPECT_EQ(status.state, AMDF_QUEUE_STATE_FAILED);
+}
+
+TEST_F(KfdUserQueueTest, IdleScratchTrimRebindsOnlyTheScratchDescriptor) {
+  SelectAqlTopology();
+  auto create_info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+  create_info.scratch_service = true;
+  ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                           &queue_result_),
+            AMDF_STATUS_OK);
+  auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+      native_state_.buffers[1].storage.data());
+  // Model the state left by a previously serviced and completed dispatch.
+  descriptor->read_dispatch_id = descriptor->write_dispatch_id = 37;
+  descriptor->scratch_backing_address = 0x123456789000;
+  descriptor->scratch_wave64_lane_byte_length = 32;
+  descriptor->compute_temporary_ring_size = 0x20040;
+  descriptor->scratch_resource_descriptor[0] = 0x56789000;
+  descriptor->scratch_resource_descriptor[1] |= 0x1234;
+  descriptor->scratch_resource_descriptor[2] = 0x80000;
+  const auto original = *descriptor;
+  ASSERT_EQ(amdf_gpu_umd_user_queue_trim_scratch(queue_), AMDF_STATUS_OK);
+  const auto& updates = native_state_.queue_update;
+  ASSERT_EQ(updates.arguments.size(), 2u);
+  EXPECT_EQ(updates.arguments[0].queue_percentage, 0u);
+  EXPECT_EQ(updates.arguments[1].queue_percentage, KFD_MAX_QUEUE_PERCENTAGE);
+  for (const auto& arguments : updates.arguments) {
+    EXPECT_EQ(arguments.queue_id, native_state_.created_queue_identifier);
+    EXPECT_EQ(arguments.ring_base_address,
+              native_state_.observed_create.ring_base_address);
+    EXPECT_EQ(arguments.ring_size, native_state_.observed_create.ring_size);
+    EXPECT_EQ(arguments.queue_priority,
+              native_state_.observed_create.queue_priority);
+  }
+  EXPECT_EQ(std::memcmp(&updates.descriptors[0], &original, sizeof(original)),
+            0);
+  auto expected = original;
+  expected.compute_temporary_ring_size = 0;
+  std::memcpy(expected.scratch_resource_descriptor,
+              native_state_.observed_aql_descriptor.scratch_resource_descriptor,
+              sizeof(expected.scratch_resource_descriptor));
+  expected.scratch_backing_address = 0;
+  expected.scratch_wave64_lane_byte_length = 0;
+  EXPECT_EQ(std::memcmp(&updates.descriptors[1], &expected, sizeof(expected)),
+            0);
+  EXPECT_EQ(std::memcmp(descriptor, &expected, sizeof(expected)), 0);
+  EXPECT_EQ(amdf_gpu_umd_user_queue_trim_scratch(queue_), AMDF_STATUS_OK);
+  EXPECT_EQ(updates.arguments.size(), 2u);
+  EXPECT_EQ(native_state_.queue_create_count, 1);
+  EXPECT_EQ(native_state_.queue_destroy_count, 0);
+  EXPECT_EQ(native_state_.buffer_destroy_count, 0);
+}
+
+TEST_F(KfdUserQueueTest, ScratchTrimNativeFailureIsTerminal) {
+  for (size_t fail_call : {1u, 2u}) {
+    ASSERT_NO_FATAL_FAILURE(SetUp());
+    SelectAqlTopology();
+    auto create_info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+    create_info.scratch_service = true;
+    ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                             &queue_result_),
+              AMDF_STATUS_OK);
+    auto* descriptor = reinterpret_cast<amdf_gpu_kfd_aql_descriptor_t*>(
+        native_state_.buffers[1].storage.data());
+    descriptor->scratch_wave64_lane_byte_length = 32;
+    native_state_.queue_update.fail_call = fail_call;
+    const amdf_status_t failure =
+        amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO);
+    EXPECT_EQ(amdf_gpu_umd_user_queue_trim_scratch(queue_), failure);
+    EXPECT_EQ(native_state_.queue_update.arguments.size(), fail_call);
+    EXPECT_EQ(descriptor->scratch_wave64_lane_byte_length,
+              fail_call == 1 ? 32u : 0u);
+    // A retry cannot turn cleared host fields into a false surrender proof.
+    EXPECT_EQ(amdf_gpu_umd_user_queue_trim_scratch(queue_), failure);
+    EXPECT_EQ(native_state_.queue_update.arguments.size(), fail_call);
+    amdf_user_queue_status_t status;
+    ASSERT_EQ(amdf_gpu_umd_user_queue_query_status(queue_, &status),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(status.state, AMDF_QUEUE_STATE_FAILED);
+    EXPECT_EQ(status.terminal_status, failure);
+    EXPECT_EQ(native_state_.buffer_destroy_count, 0);
+    ASSERT_NO_FATAL_FAILURE(TearDown());
+  }
 }
 
 TEST_F(KfdUserQueueTest, ComputeFamilyCannotSilentlyIgnoreRequestedScratch) {

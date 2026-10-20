@@ -14,12 +14,40 @@
 namespace {
 
 class AqlScratchServiceTest : public GpuEventTest<AqlDispatchTest>,
-                              public ::testing::WithParamInterface<bool> {};
+                              public ::testing::WithParamInterface<bool> {
+ protected:
+  void CreateScratch(uint64_t byte_length, GpuMemory** out_memory) {
+    const amdf_memory_device_access_t attachment = {
+        device_,
+        {
+            .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+            .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+        }};
+    const uint32_t profile = FindGpuMemoryProfileOrdinal(
+        api_, local_scope_, device_, AMDF_MEMORY_PROFILE_ROLE_CREATE,
+        AMDF_MEMORY_FLAG_DEVICE_LOCAL, attachment.requirements);
+    ASSERT_NE(profile, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
+    const amdf_memory_create_info_t creation = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(creation),
+        .memory_profile_ordinal = profile,
+        .access_count = 1,
+        .required_flags = AMDF_MEMORY_FLAG_DEVICE_LOCAL,
+        .byte_length = byte_length,
+        .minimum_alignment = 4096,
+        .accesses = &attachment,
+    };
+    ASSERT_NO_FATAL_FAILURE(CreateMemory(local_scope_, creation, out_memory));
+  }
+};
 
 TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
   if ((family_.format_features & AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE) ==
       0) {
     GTEST_SKIP() << "queue family has no caller-serviced scratch";
+  }
+  if (local_scope_ == nullptr) {
+    GTEST_SKIP() << "GPU has no local-memory scope";
   }
   const auto* kernel =
       kernels::private_roundtrip::kKernels.Find(gpu_endpoint_info_);
@@ -58,9 +86,7 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
         ((compute.compute_unit_count + engines - 1) / engines) * engines *
         compute.maximum_scratch_wave_count_per_compute_unit;
     const uint64_t bytes = uint64_t{slots} * 1024;
-    ASSERT_NO_FATAL_FAILURE(
-        CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, bytes,
-                     &scratch_memory));
+    ASSERT_NO_FATAL_FAILURE(CreateScratch(bytes, &scratch_memory));
     initial = {
         .memory = scratch_memory->memory,
         .byte_length = bytes,
@@ -89,7 +115,7 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
   ASSERT_EQ(gpu_api_->user_queue_query_scratch(queue->queue, &request),
             AMDF_STATUS_OK);
   ASSERT_EQ(request.byte_length, 0u);
-  for (uint32_t round = 0; round < 3; ++round) {
+  for (uint32_t round = 0; round < 5; ++round) {
     SCOPED_TRACE(round);
     const uint32_t seed = 0x13579bdf + round;
     const uint32_t rotation = 1 + round;
@@ -136,8 +162,7 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
         ASSERT_TRUE(scratch_memory->Release(api_));
       }
       ASSERT_NO_FATAL_FAILURE(
-          CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                       request.byte_length, &scratch_memory));
+          CreateScratch(request.byte_length, &scratch_memory));
       const amdf_gpu_queue_scratch_t scratch = {
           .memory = scratch_memory->memory,
           .byte_length = request.byte_length,
@@ -149,7 +174,7 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
     } while (GpuLoadAcquire<int64_t>(
                  reinterpret_cast<uintptr_t>(&signal.value)) != 0);
 
-    EXPECT_EQ(requests, round < 2 ? 1u : 0u);
+    EXPECT_EQ(requests, round < 2 || round == 3 ? 1u : 0u);
     for (uint32_t workitem = 0; workitem < kGridSize; ++workitem) {
       const auto expected =
           kernels::private_roundtrip::ExpectedRecord(workitem, seed, rotation);
@@ -165,10 +190,21 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
     if (HasFailure()) {
       return;
     }
+    if (round == 2) {
+      // Completion and consumption are both joined, and this fixture excludes
+      // publication. Detach firmware's cached binding before freeing it.
+      ASSERT_EQ(gpu_api_->user_queue_trim_scratch(queue->queue),
+                AMDF_STATUS_OK);
+      ASSERT_TRUE(scratch_memory->Release(api_));
+      scratch_memory = nullptr;
+      ASSERT_EQ(gpu_api_->user_queue_trim_scratch(queue->queue),
+                AMDF_STATUS_OK);
+    }
   }
   RecordProperty("scratch_kernel_target", kernel->target);
   RecordProperty("scratch_wavefront_size", kernel->wavefront_size);
-  RecordProperty("scratch_growth_count", 2);
+  RecordProperty("scratch_growth_count", 3);
+  RecordProperty("scratch_trim_count", 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(InitialBacking, AqlScratchServiceTest,

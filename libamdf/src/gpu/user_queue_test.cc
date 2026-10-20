@@ -402,12 +402,15 @@ TEST_F(GpuUserQueueTest, ScratchServiceValidatesExactEventAndBacking) {
   };
   ASSERT_EQ(amdf_gpu_user_queue_query_scratch(queue_, &request),
             AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_user_queue_trim_scratch(queue_), AMDF_STATUS_OK);
   EXPECT_EQ(request.byte_length, 4096u);
   EXPECT_EQ(request.structure_size, sizeof(request));
   const auto saved = request;
   consumer_state_.query_status =
       amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
   EXPECT_EQ(amdf_gpu_user_queue_query_scratch(queue_, &request),
+            consumer_state_.query_status);
+  EXPECT_EQ(amdf_gpu_user_queue_trim_scratch(queue_),
             consumer_state_.query_status);
   EXPECT_EQ(std::memcmp(&saved, &request, sizeof(request)), 0);
 }
@@ -661,6 +664,11 @@ amdf_status_t amdf_gpu_umd_user_queue_query_scratch(
     amdf_gpu_umd_user_queue_t* queue,
     amdf_gpu_aql_scratch_request_t* out_request) {
   out_request->byte_length = 4096;
+  return queue->state->query_status;
+}
+
+amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
+    amdf_gpu_umd_user_queue_t* queue) {
   return queue->state->query_status;
 }
 

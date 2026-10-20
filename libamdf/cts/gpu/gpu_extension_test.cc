@@ -56,6 +56,7 @@ TEST(GpuExtensionTest, ReportsCompiledAvailabilityBeforeCreatingInstance) {
   EXPECT_NE(gpu_api->event_destroy, nullptr);
   EXPECT_NE(gpu_api->user_queue_query_scratch, nullptr);
   EXPECT_NE(gpu_api->user_queue_resume_scratch, nullptr);
+  EXPECT_NE(gpu_api->user_queue_trim_scratch, nullptr);
 }
 
 TEST(GpuExtensionTest, NegotiatesOriginalTableExtent) {

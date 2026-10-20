@@ -41,6 +41,11 @@ typedef struct amdf_gpu_kfd_user_queue_native_api_t {
   amdf_status_t (*queue_create)(
       void* user_data, amdf_gpu_umd_device_t* device,
       struct kfd_ioctl_create_queue_args* inout_arguments);
+  // Disconnects or reconnects an existing queue. Failure does not prove its
+  // native mapping state; the owner preserves all backing until destruction.
+  amdf_status_t (*queue_update)(
+      void* user_data, amdf_gpu_umd_device_t* device,
+      const struct kfd_ioctl_update_queue_args* arguments);
   // Attempts to destroy one KFD queue. Failure retains the native error domain
   // and establishes no quiescence, regardless of identifier consumption.
   amdf_status_t (*queue_destroy)(void* user_data, amdf_gpu_umd_device_t* device,

@@ -671,6 +671,50 @@ amdf_status_t amdf_gpu_umd_user_queue_resume_scratch(
   return AMDF_STATUS_OK;
 }
 
+amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
+    amdf_gpu_umd_user_queue_t* queue) {
+  if (!queue->scratch_service) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  amdf_status_t status =
+      amdf_atomic_uint64_load_acquire(&queue->terminal_status);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  amdf_gpu_kfd_aql_descriptor_t* descriptor = queue->control.host_pointer;
+  if (descriptor->scratch_wave64_lane_byte_length == 0) {
+    return AMDF_STATUS_OK;
+  }
+  // The caller has joined execution, not just consumption, and excludes all
+  // publication. Disconnect forces CP to discard its cached scratch fields;
+  // reconnect observes the cleared descriptor before accepting future work.
+  struct kfd_ioctl_update_queue_args update = {
+      .ring_base_address = queue->ring.device_address,
+      .queue_id = queue->queue_identifier,
+      .ring_size = (uint32_t)queue->plan.ring.primary_byte_length,
+      .queue_percentage = 0,
+      .queue_priority = 7,
+  };
+  status = queue->native_api->queue_update(queue->native_api->user_data,
+                                           queue->device, &update);
+  if (amdf_status_is_ok(status)) {
+    descriptor->compute_temporary_ring_size = 0;
+    memcpy(descriptor->scratch_resource_descriptor,
+           queue->plan.aql.scratch.resource_descriptor,
+           sizeof(descriptor->scratch_resource_descriptor));
+    descriptor->scratch_backing_address = 0;
+    descriptor->scratch_wave64_lane_byte_length = 0;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    update.queue_percentage = KFD_MAX_QUEUE_PERCENTAGE;
+    status = queue->native_api->queue_update(queue->native_api->user_data,
+                                             queue->device, &update);
+  }
+  if (!amdf_status_is_ok(status)) {
+    amdf_gpu_kfd_user_queue_record_failure(queue, status);
+  }
+  return status;
+}
+
 amdf_status_t amdf_gpu_umd_user_queue_query_status(
     amdf_gpu_umd_user_queue_t* queue, amdf_user_queue_status_t* out_status) {
   if (queue == NULL || out_status == NULL) {

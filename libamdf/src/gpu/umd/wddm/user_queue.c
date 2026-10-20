@@ -22,6 +22,12 @@ amdf_status_t amdf_gpu_umd_user_queue_resume_scratch(
   return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
 }
 
+amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
+    amdf_gpu_umd_user_queue_t* queue) {
+  (void)queue;
+  return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+}
+
 // This leaf exposes no user queue family while every operation is unsupported.
 amdf_status_t amdf_gpu_umd_user_queue_create(
     amdf_gpu_umd_device_t* device,

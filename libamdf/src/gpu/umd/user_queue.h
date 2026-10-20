@@ -126,6 +126,11 @@ amdf_status_t amdf_gpu_umd_user_queue_resume_scratch(
     amdf_gpu_umd_user_queue_t* queue,
     const amdf_gpu_umd_queue_scratch_t* scratch);
 
+// Detaches scratch from a caller-quiesced service queue. Native failure is
+// terminal and preserves the caller's backing obligation through destruction.
+amdf_status_t amdf_gpu_umd_user_queue_trim_scratch(
+    amdf_gpu_umd_user_queue_t* queue);
+
 // Waits for one already-published format index under `deadline`.
 amdf_status_t amdf_gpu_umd_user_queue_wait_consumed(
     amdf_gpu_umd_user_queue_t* queue, uint64_t published_index,

@@ -489,7 +489,8 @@ enum amdf_gpu_aql_format_feature_bits_e {
   /// Queue creation accepts AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS.
   /// Availability does not enable capture; the caller selects it at creation.
   AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS = UINT64_C(1) << 5,
-  /// Supports optional caller servicing of firmware scratch-growth requests.
+  /// Supports caller servicing of scratch-growth requests and explicit idle
+  /// scratch detachment.
   AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE = UINT64_C(1) << 6,
 };
 
@@ -498,12 +499,12 @@ enum amdf_gpu_aql_format_feature_bits_e {
 /// An all-zero value disables queue-owned scratch provisioning. AQL then
 /// accepts only commands whose private segment is empty unless scratch service
 /// is enabled. PM4 command-owned scratch uses DISPATCH_SCRATCH with this value
-/// zero. Otherwise the selected
-/// access must belong to the queue's device and provide read/write permission
-/// and a stable GPU address. The queue borrows the memory without lifetime
-/// tracking. The caller keeps the backing live until queue destruction
-/// succeeds or a scratch-service request
-/// explicitly surrenders it.
+/// zero. Otherwise the selected access must belong to the queue's device and
+/// provide read/write permission and a stable GPU address. The queue borrows
+/// the memory without lifetime tracking. The caller keeps it live until
+/// queue destruction
+/// succeeds or scratch service explicitly surrenders it through a nonempty
+/// request or successful idle trim.
 ///
 /// Without scratch service, AQL format 1 retains fixed scratch across
 /// dispatches. Let C be compute_unit_count, E be xcc_count times
@@ -515,8 +516,8 @@ enum amdf_gpu_aql_format_feature_bits_e {
 /// Each slot receives the requested per-workitem private byte length
 /// times 64, rounded up to 1024 bytes. Backing must cover every wave; excess
 /// backing does not change the configured capacity. Every submitted dispatch
-/// fits the configured per-workitem private limit. Scratch is exclusive to the
-/// queue until its final execution completion and successful destruction.
+/// fits the configured per-workitem private limit. Without scratch service,
+/// scratch remains exclusive to the queue until successful destruction.
 typedef struct amdf_gpu_queue_scratch_t {
   /// Memory resource borrowed until surrender/destruction, or NULL if disabled.
   amdf_memory_t* memory;
@@ -980,13 +981,28 @@ typedef struct amdf_gpu_api_t {
   ///
   /// Validates and writes the native descriptor, then releases firmware's
   /// pause. No allocation, kernel entry, waiting, or lifetime tracking occurs.
-  /// Success borrows scratch through the next nonempty request or successful
-  /// queue destruction. Failure leaves firmware paused and does not borrow
-  /// the supplied backing. Calling without a pending request returns
-  /// FAILED_PRECONDITION. An idle queue's backing is still borrowed: ordinary
-  /// execution completion alone does not authorize its release.
+  /// Success borrows scratch through the next nonempty request, successful
+  /// scratch trim, or successful queue destruction. Failure leaves firmware
+  /// paused and does not borrow the supplied backing. Calling without a
+  /// pending request returns FAILED_PRECONDITION. Ordinary execution
+  /// completion alone does not authorize releasing bound scratch.
   amdf_status_t(AMDF_CALL* user_queue_resume_scratch)(
       amdf_user_queue_t* queue, const amdf_gpu_queue_scratch_t* scratch);
+
+  /// Detaches scratch from an idle scratch-service queue. Requires GPU
+  /// extension version 4. The caller must have joined every accepted dispatch
+  /// and packet, and must exclude publication, scratch service, and teardown
+  /// until this call returns. The library does not prove these lifetimes.
+  ///
+  /// This cold operation may enter the kernel to disconnect and reconnect the
+  /// same queue; it allocates no backing and creates no worker. Success
+  /// surrenders the previous scratch allocation while preserving the queue,
+  /// mappings, indices, and event. A later private dispatch requests backing
+  /// normally. Repeating trim without intervening scratch growth is a no-op.
+  ///
+  /// Native failure makes the queue terminal and grants no permission to free
+  /// its borrowed resources; successful queue destruction still joins them.
+  amdf_status_t(AMDF_CALL* user_queue_trim_scratch)(amdf_user_queue_t* queue);
 } amdf_gpu_api_t;
 
 #ifdef __cplusplus
