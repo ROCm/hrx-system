@@ -250,50 +250,22 @@ TEST(Pm4EncodingTest, OrderedDataAcquirePreservesTargetCachePolicy) {
   }
 }
 
-TEST(Pm4EncodingTest, AtomicStoresSelectScopeAndPreserveOperands) {
-  const struct {
-    // Compiler target family selecting the native compute representation.
-    std::array<uint32_t, 2> target;
-    // Complete word 1 for a single-pass system-visible DWORD swap.
-    uint32_t control32;
-    // Complete word 1 for a single-pass system-visible QWORD swap.
-    uint32_t control64;
-  } cases[] = {
-      {{11, 0}, 0x00000007, 0x00000027}, {{11, 5}, 0x00000007, 0x00000027},
-      {{11, 7}, 0x00000007, 0x00000027}, {{12, 0}, 0x00000007, 0x00000027},
-      {{12, 5}, 0x01800007, 0x01800027},
-  };
-  for (const auto& test : cases) {
-    SCOPED_TRACE(::testing::Message()
-                 << test.target[0] << '.' << test.target[1]);
-    std::array<uint32_t, 20> words;
+TEST(Pm4EncodingTest, ReleaseStoresPreserveWidthsAndOperands) {
+  for (const auto target :
+       {std::array<uint32_t, 2>{11, 0}, {11, 5}, {11, 7}, {12, 0}, {12, 5}}) {
+    SCOPED_TRACE(::testing::Message() << target[0] << '.' << target[1]);
+    std::array<uint32_t, 18> words;
     words.fill(0x24681357);
-    Pm4CommandWriter commands(words.data() + 1,
-                              Profile(test.target[0], test.target[1]));
-    commands.AtomicStore32(UINT64_C(0x000012345678903c), 0xfedcba98);
-    commands.AtomicStore64(UINT64_C(0x00003456789abff0),
-                           UINT64_C(0x13579bdf2468ace0));
-    // Native GC12.1 defines SYSTEM=3 at bits 24:23; earlier layouts reserve
-    // those bits. Both forms retain the operation, operands and zero padding.
-    const std::array<uint32_t, 18> expected = {
-        0xc0071e00,
-        test.control32,
-        0x5678903c,
-        0x1234,
-        0xfedcba98,
-        0,
-        0,
-        0,
-        0,
-        0xc0071e00,
-        test.control64,
-        0x789abff0,
-        0x3456,
-        0x2468ace0,
-        0x13579bdf,
-        0,
-        0,
-        0,
+    Pm4CommandWriter commands(words.data() + 1, Profile(target[0], target[1]));
+    commands.Release32(UINT64_C(0x000012345678903c), 0xfedcba98);
+    commands.Release64(UINT64_C(0x00003456789abff0),
+                       UINT64_C(0x13579bdf2468ace0));
+    // Both widths use ordinary RELEASE_MEM writes, without ATOMIC_MEM RMW,
+    // interrupt, cache action, or a reserved scope field.
+    const std::array<uint32_t, 16> expected = {
+        0xc0064900, 0x00000528, 0x23010000, 0x5678903c, 0x1234,     0xfedcba98,
+        0,          0,          0xc0064900, 0x00000528, 0x43010000, 0x789abff0,
+        0x3456,     0x2468ace0, 0x13579bdf, 0,
     };
     ASSERT_EQ(commands.word_count(), expected.size());
     ExpectWords(words.data() + 1, expected);

@@ -25,12 +25,21 @@ amdf_status_t amdf_windows_gpu_query_memory_capabilities(
     return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
   }
 
+  D3DKMT_WDDM_2_0_CAPS scheduling = {0};
+  const amdf_status_t scheduling_status = amdf_kmt_query_adapter_info(
+      &endpoint->instance->kmt, endpoint->adapter, KMTQAITYPE_WDDM_2_0_CAPS,
+      &scheduling, sizeof(scheduling));
+  if (!amdf_status_is_ok(scheduling_status)) {
+    return scheduling_status;
+  }
+
   const amdf_windows_gpu_memory_capabilities_t capabilities = {
       .virtual_address_bit_count = query.Caps.VirtualAddressBitCount,
       .read_only_memory_supported = query.Caps.Flags.ReadOnlyMemorySupported,
       .no_execute_memory_supported = query.Caps.Flags.NoExecuteMemorySupported,
       .cache_coherent_memory_supported =
           query.Caps.Flags.CacheCoherentMemorySupported,
+      .atomic_update_64_supported = scheduling.Support64BitAtomics,
   };
   *out_capabilities = capabilities;
   return AMDF_STATUS_OK;
@@ -67,7 +76,6 @@ static uint64_t amdf_windows_gpu_maximum_alignment(
 
 amdf_status_t amdf_gpu_wddm_query_memory_profile(
     const amdf_windows_gpu_memory_capabilities_t* capabilities,
-    const amdf_wkmi_bridge_gpu_properties_t* properties,
     uint32_t memory_profile_ordinal,
     amdf_memory_native_profile_t* out_profile) {
   if (memory_profile_ordinal > 3) {
@@ -131,15 +139,13 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
                               AMDF_MEMORY_FLAG_MAPPING_SOURCE;
     if (capabilities->cache_coherent_memory_supported) {
       profile.supported_flags |= AMDF_MEMORY_FLAG_HOST_COHERENT;
-      // GFX11 fine-grained SYSTEM mappings support native atomic stores and
-      // wait loads. Integrated processors have an internal CPU route;
-      // discrete processors additionally require native platform AtomicOps
-      // support. Wait comparisons remain an independent queue capability.
-      if (properties->gfx_ip_major == 11 &&
-          (properties->is_discrete == 0 ||
-           properties->supports_platform_atomics != 0)) {
-        profile.atomic_operations_32 =
-            AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE;
+      // WDDM's CPU-visible updates are at least 32 bits; the adapter reports
+      // whether 64-bit updates are also atomic. These ordinary coherent
+      // loads/stores do not require PCIe read-modify-write transactions.
+      // Queue encoding and pair reach independently qualify their use.
+      profile.atomic_operations_32 =
+          AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE;
+      if (capabilities->atomic_update_64_supported) {
         profile.atomic_operations_64 =
             AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE;
       }

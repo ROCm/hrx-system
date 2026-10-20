@@ -122,6 +122,19 @@ returned-value address. The larger TC enum also contains floating-point and
 other operations; their presence is not a complete command-processor caller
 or mapping contract.
 
+SWAP still issues a read-modify-write transaction. Support for an ordinary
+aligned store does not establish that stronger route. A confirmed
+[`RELEASE_MEM`](release.md) immediate update supplies a write without an RMW;
+its target mapping separately determines atomic width and observer reach.
+WDDM makes this distinction explicit for CPU-visible fence updates:
+`DXGK_VIDSCHCAPS::No64BitAtomics` distinguishes 32-bit updates from atomic
+64-bit updates to coherent memory. The adapter's
+`D3DKMT_WDDM_2_0_CAPS::Support64BitAtomics` reports the native width capability.
+Neither fact grants PCIe AtomicOps support for SWAP, ADD, or compare-swap.
+[CPU-visible update width][wddm-update-width]
+[Monitored-fence mapping][wddm-monitored-fence]
+[Native adapter capabilities][wddm-native-capabilities]
+
 ## Command modes and comparison
 
 | Command value | Defined name | Source-backed use |
@@ -479,3 +492,7 @@ header enumeration alone supplies no portable arithmetic recipe.
 [pal-reuse]: https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/cmdAllocator.cpp#L703-L739
 [pal12-postamble]: https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/hw/gfxip/gfx12/gfx12ComputeCmdBuffer.cpp#L946-L980
 [linux12-layout]: https://github.com/torvalds/linux/blob/50d05c7c76c96b90462f24debacca971d2e86713/drivers/gpu/drm/amd/amdgpu/gfx_v12_1_pkt.h#L60-L83
+
+[wddm-update-width]: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/d3dkmddi/ns-d3dkmddi-_dxgk_vidschcaps
+[wddm-monitored-fence]: https://learn.microsoft.com/en-us/windows-hardware/drivers/display/context-monitoring
+[wddm-native-capabilities]: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/d3dkmdt/ns-d3dkmdt-_d3dkmt_wddm_2_0_caps

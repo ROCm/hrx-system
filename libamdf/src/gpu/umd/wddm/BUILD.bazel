@@ -242,6 +242,7 @@ amdf_cc_test(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":device",
+        ":memory_profile",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:device",
         "//libamdf/src/platform/windows:endpoint",

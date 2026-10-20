@@ -85,9 +85,11 @@ class Pm4CommandWriter {
   // Samples the GPU clock at bottom-of-pipe with a confirmed TC/L2 write.
   // This cacheless release requires an explicit visibility/ownership join.
   void ReleaseGpuClock64(uint64_t target_address);
-  // Writes a confirmed known DWORD at bottom-of-pipe without cache actions.
-  // The marker alone does not publish other addresses to the host.
+  // Writes a confirmed known value at bottom-of-pipe without cache actions or
+  // read-modify-write. The marker alone does not publish other addresses to
+  // the host. Atomicity and reach require the target mapping's STORE contract.
   void Release32(uint64_t target_address, uint32_t value);
+  void Release64(uint64_t target_address, uint64_t value);
   // Joins bottom-of-pipe through a private known-value fence and PAL's compute
   // equality wait, then writes back GL2. The caller owns the fence through a
   // subsequent completion; this fixed recipe performs no invalidation.
@@ -143,12 +145,6 @@ class Pm4CommandWriter {
   // source retains readable trailing backing for native reads beyond its DWORD.
   void CopyData32(uint64_t source_address, uint64_t target_address);
   void CopyData64(uint64_t source_address, uint64_t target_address);
-  // Atomic STORE via a single-pass ATOMIC_MEM swap, without a prior value.
-  // Selects SYSTEM scope on targets with an explicit packet scope field.
-  // Target operation support and pair reach are separate from queue encoding;
-  // a subsequent barrier and completion establish visibility and retirement.
-  void AtomicStore32(uint64_t target_address, uint32_t value);
-  void AtomicStore64(uint64_t target_address, uint64_t value);
   // MEC incrementing copy through the native TC_L2 selectors, with RAW_WAIT
   // and write confirmation. Those selectors route through MALL on GFX12.
   // The caller supplies a nonzero byte count within the native 26-bit field

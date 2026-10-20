@@ -305,6 +305,7 @@ iree_cc_test(
     "libamdf::src::gpu::umd::wddm::wkmi::fake_wkmi_bridge_test"
   DEPS
     ::device
+    ::memory_profile
     amdf::headers
     iree::third_party::google_test
     iree::third_party::google_test_main

@@ -128,7 +128,8 @@ typedef uint64_t amdf_atomic_operations_t;
 enum amdf_atomic_operation_bits_e {
   /// Waits until an atomic value satisfies a supported condition.
   AMDF_ATOMIC_OPERATION_WAIT = UINT64_C(1) << 0,
-  /// Atomic store.
+  /// Naturally aligned atomic store, without read-modify-write. Support does
+  /// not authorize implementing a store with a stronger atomic transaction.
   AMDF_ATOMIC_OPERATION_STORE = UINT64_C(1) << 1,
   /// No-result atomic addition.
   AMDF_ATOMIC_OPERATION_ADD = UINT64_C(1) << 2,

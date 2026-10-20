@@ -243,10 +243,10 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
       for (size_t cell = 0; cell < kCellCount; ++cell) {
         const uint64_t address = target->device_address + kOffsets[cell];
         if constexpr (sizeof(T) == 4) {
-          commands.AtomicStore32(address,
-                                 static_cast<uint32_t>(values[epoch][cell]));
+          commands.Release32(address,
+                             static_cast<uint32_t>(values[epoch][cell]));
         } else {
-          commands.AtomicStore64(address, values[epoch][cell]);
+          commands.Release64(address, values[epoch][cell]);
         }
       }
       commands.SystemBarrier();

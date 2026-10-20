@@ -24,20 +24,19 @@ enum class CopyDataPolicy : uint32_t {
   kStreaming = 1,
 };
 
-// TC operation selection for a CP atomic store implemented as a swap.
-enum class AtomicStoreWidth : uint32_t {
-  k32Bit = 0x07,
-  k64Bit = 0x27,
+// RELEASE_MEM immediate-data selection for one naturally aligned update.
+enum class ReleaseDataWidth : uint32_t {
+  k32Bit = 1,
+  k64Bit = 2,
 };
 
-// Encodes a single-pass ATOMIC_MEM swap with default locality into nine
-// caller-owned DWORDs and returns nine. The target profile supplies
-// scope_control in its word 1 position, or zero where that field is reserved.
+// Encodes a confirmed bottom-of-pipe RELEASE_MEM write into eight caller-owned
+// DWORDs and returns eight. It performs no cache action or read-modify-write.
 // The address is naturally aligned for width; k32Bit consumes a zero-extended
-// uint32_t value. This does not expose the prior value. Queue encoding, target
-// support, pair reach and completion are caller obligations.
-size_t AtomicStore(uint32_t* words, uint64_t target_address, uint64_t value,
-                   AtomicStoreWidth width, uint32_t scope_control);
+// uint32_t value. Atomicity and participant reach belong to the target mapping,
+// independently of this packet's width. Other payload visibility is explicit.
+size_t ReleaseImmediate(uint32_t* words, uint64_t target_address,
+                        uint64_t value, ReleaseDataWidth width);
 
 // Encodes one confirmed TC/L2-to-TC/L2 copy into six caller-owned DWORDs and
 // returns six. Both addresses are aligned to four bytes for k32Bit and eight
