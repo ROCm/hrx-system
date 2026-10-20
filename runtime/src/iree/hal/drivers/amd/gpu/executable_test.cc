@@ -11,6 +11,7 @@
 #include <semaphore>
 #include <set>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include "iree/base/alignment.h"
@@ -269,12 +270,17 @@ struct FailingAllocator {
   }
 };
 
-class ExecutableTest : public ::testing::TestWithParam<size_t> {
+class ExecutableTest : public ::testing::TestWithParam<
+                           std::tuple<size_t, amdf_queue_command_type_t>> {
  protected:
+  bool UsesAql() const {
+    return std::get<1>(GetParam()) == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
+  }
   void SetUp() override {
     iree_hal_amd_gpu_source_context_registry_initialize(iree_allocator_system(),
                                                         &feedback_.sources);
-    const auto& file = iree_hal_amd_gpu_hip_images_create()[GetParam()];
+    const auto& file =
+        iree_hal_amd_gpu_hip_images_create()[std::get<0>(GetParam())];
     bytes_.assign(file.data, file.data + file.size);
     RecordProperty("target", file.name);
     auto* source = testing::ByteSequence::Create(
@@ -283,17 +289,24 @@ class ExecutableTest : public ::testing::TestWithParam<size_t> {
         source, iree_allocator_system(), &image_));
     iree_byte_sequence_release(source);
     target_ = image_.target;
-    if (target_.version.major < 11) {
+    if (!UsesAql() && target_.version.major < 11) {
       GTEST_SKIP() << "The PM4 launch encoder does not yet admit this ISA";
     }
     if (target_.kind == IREE_HAL_AMD_GPU_TARGET_KIND_GENERIC) {
-      const auto physical = target_.version.major == 11  ? IREE_SV("gfx1100")
-                            : target_.version.minor == 5 ? IREE_SV("gfx1250")
-                                                         : IREE_SV("gfx1201");
+      const auto physical =
+          target_.version.major == 9
+              ? (target_.version.minor == 4 ? IREE_SV("gfx942")
+                                            : IREE_SV("gfx900"))
+          : target_.version.major == 10
+              ? (target_.version.minor == 1 ? IREE_SV("gfx1010")
+                                            : IREE_SV("gfx1030"))
+          : target_.version.major == 11 ? IREE_SV("gfx1100")
+          : target_.version.minor == 5  ? IREE_SV("gfx1250")
+                                        : IREE_SV("gfx1201");
       IREE_ASSERT_OK(iree_hal_amd_gpu_target_identity_parse_artifact_key(
           physical, &target_));
     }
-    native_families_[1].command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
+    native_families_[1].command_type = std::get<1>(GetParam());
     context_.api = &native_.api;
     context_.families = native_families_;
     // Only identity is borrowed from the parent. These tests never invoke a
@@ -387,7 +400,7 @@ class ExecutableTest : public ::testing::TestWithParam<size_t> {
   NativeMemory native_;
   // Parent native owner, borrowed without executable ownership cycles.
   iree_hal_amd_gpu_context_t context_ = {};
-  // Native PM4 family differs from the HAL family ordinal.
+  // Selected native protocol family differs from the HAL family ordinal.
   amdf_queue_family_info_t native_families_[2] = {};
   // Sealed-group identity and exact family selected by the parent.
   iree_hal_queue_family_t family_ = {};
@@ -407,6 +420,11 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
   IREE_ASSERT_OK(Load());
   EXPECT_EQ(native_.flushes, 1u);
   EXPECT_EQ(native_.allocation_thread, std::this_thread::get_id());
+  std::vector<uint64_t> descriptors;
+  for (size_t i = 0; i < image_.metadata.kernel_count; ++i) {
+    descriptors.push_back(UINT64_C(0x1200000000) +
+                          image_.kernels[i].descriptor_offset);
+  }
   std::fill(bytes_.begin(), bytes_.end(), 0xa5);
   iree_hal_amd_gpu_image_deinitialize(&image_);
   EXPECT_EQ(iree_hal_executable_queue_family(executable_), &family_);
@@ -434,37 +452,66 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
                                                            2, parameters));
     EXPECT_EQ(parameters[0].native_abi_offset, 0u);
     EXPECT_EQ(parameters[1].native_abi_offset, 8u);
-    const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
-    IREE_ASSERT_OK(
-        iree_hal_amd_gpu_executable_lookup_pm4(executable_, token, &function));
-    EXPECT_EQ(reinterpret_cast<uintptr_t>(function) & 63u, 0u);
-    EXPECT_EQ(function->base.kernarg->native_byte_length,
-              count_producer ? 16u : 12u);
-    if (geometry_consumer) {
-      EXPECT_GT(function->base.kernarg->byte_length,
-                function->base.kernarg->native_byte_length);
-      EXPECT_EQ(function->base.kernarg->indirect_copy_count, 1u);
+    const iree_hal_amd_gpu_function_t* base = nullptr;
+    if (UsesAql()) {
+      const iree_hal_amd_gpu_aql_function_t* function = nullptr;
+      IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_aql_for_queue(
+          executable_, token, 0, &function));
+      EXPECT_EQ(reinterpret_cast<uintptr_t>(function) & 31u, 0u);
+      EXPECT_EQ(function->kernel_object, descriptors[token.value]);
+      base = &function->base;
     } else {
-      EXPECT_EQ(function->base.kernarg->byte_length,
-                count_producer ? 16u : 12u);
+      const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
+      IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_pm4(executable_, token,
+                                                            &function));
+      EXPECT_EQ(reinterpret_cast<uintptr_t>(function) & 63u, 0u);
+      EXPECT_EQ(function->launch.requirements,
+                packet_consumer
+                    ? IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_DISPATCH_POINTER
+                    : 0u);
+      EXPECT_EQ(function->packet != nullptr, packet_consumer);
+      if (packet_consumer) {
+        EXPECT_NE(function->packet->kernel_object, 0u);
+        EXPECT_EQ(function->packet->kernel_object & 63u, 0u);
+        ASSERT_NE(function->packet->prepare, nullptr);
+        EXPECT_EQ(function->packet->prepare->requirements, 0u);
+        EXPECT_EQ(function->packet->prepare->user_data_count, 2u);
+      }
+      base = &function->base;
     }
-    EXPECT_EQ(function->launch.requirements,
-              packet_consumer
-                  ? IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_DISPATCH_POINTER
-                  : 0u);
-    EXPECT_EQ(function->packet != nullptr, packet_consumer);
-    if (packet_consumer) {
-      EXPECT_NE(function->packet->kernel_object, 0u);
-      EXPECT_EQ(function->packet->kernel_object & 63u, 0u);
-      ASSERT_NE(function->packet->prepare, nullptr);
-      EXPECT_EQ(function->packet->prepare->requirements, 0u);
-      EXPECT_EQ(function->packet->prepare->user_data_count, 2u);
+    EXPECT_EQ(base->kernarg->native_byte_length, count_producer ? 16u : 12u);
+    if (geometry_consumer) {
+      EXPECT_GT(base->kernarg->byte_length, base->kernarg->native_byte_length);
+      EXPECT_EQ(base->kernarg->indirect_copy_count, 1u);
+    } else {
+      EXPECT_EQ(base->kernarg->byte_length, count_producer ? 16u : 12u);
     }
   }
 }
 
-TEST_P(ExecutableTest, PreparationProgramSharesPlacedImageAndFetchBacking) {
+TEST_P(ExecutableTest, NativePacketAbiUsesProtocolSpecificImageBacking) {
   IREE_ASSERT_OK(Load());
+  if (UsesAql()) {
+    // The descriptor operand points into the image actually uploaded. AQL
+    // functions keep their native property bits and a compact 32-byte stride.
+    const iree_hal_amd_gpu_aql_function_t* first = nullptr;
+    for (uint32_t i = 0; i < image_.metadata.kernel_count; ++i) {
+      const iree_hal_amd_gpu_aql_function_t* function = nullptr;
+      IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_aql_for_queue(
+          executable_, iree_hal_executable_function_from_index(i), 0,
+          &function));
+      if (!i) {
+        first = function;
+      }
+      EXPECT_EQ(function, first + i);
+      const uint64_t offset = image_.kernels[i].descriptor_offset;
+      EXPECT_EQ(function->kernel_object, UINT64_C(0x1200000000) + offset);
+      EXPECT_EQ(function->code_properties,
+                iree_unaligned_load_le_u16(native_.bytes.data() + offset + 56));
+    }
+    EXPECT_EQ(native_.allocations, 1u);
+    return;
+  }
   iree_hal_executable_function_t token;
   IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
       executable_, IREE_SV("image_dispatch_packet"), &token));
@@ -617,13 +664,20 @@ TEST_P(ExecutableTest, CapturesExportClassesAndPreservesGlobalRange) {
 
 TEST_P(ExecutableTest, InvalidTokensCannotSelectImageStorage) {
   IREE_ASSERT_OK(Load());
-  const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_amd_gpu_executable_lookup_pm4(
-          executable_, iree_hal_executable_function_from_value(UINT64_MAX),
-          &function));
-  EXPECT_EQ(function, nullptr);
+  const auto invalid = iree_hal_executable_function_from_value(UINT64_MAX);
+  if (UsesAql()) {
+    const iree_hal_amd_gpu_aql_function_t* function = nullptr;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                          iree_hal_amd_gpu_executable_lookup_aql_for_queue(
+                              executable_, invalid, 0, &function));
+    EXPECT_EQ(function, nullptr);
+  } else {
+    const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                          iree_hal_amd_gpu_executable_lookup_pm4(
+                              executable_, invalid, &function));
+    EXPECT_EQ(function, nullptr);
+  }
   iree_hal_executable_global_info_t info;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
@@ -669,8 +723,10 @@ TEST_P(ExecutableTest, WriteBackHostMappingDoesNotInventCoherence) {
 }
 
 TEST_P(ExecutableTest, RejectsWrongTargetBeforeAllocatingNativeStorage) {
+  const auto wrong_target =
+      target_.version.major == 9 ? IREE_SV("gfx1100") : IREE_SV("gfx942");
   IREE_ASSERT_OK(iree_hal_amd_gpu_target_identity_parse_artifact_key(
-      IREE_SV("gfx942"), &target_));
+      wrong_target, &target_));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE, Load());
   EXPECT_EQ(executable_, nullptr);
   EXPECT_EQ(native_.calls, 0u);
@@ -700,12 +756,22 @@ TEST_P(ExecutableTest, TsanProvisioningDoesNotSerializeOrdinaryFunctions) {
   iree_hal_executable_function_t token;
   IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
       executable_, IREE_SV("image_transform"), &token));
-  const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_pm4_for_queue(
-      executable_, token, 1, &function));
-  EXPECT_EQ(function->launch.requirements &
-                IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN,
-            0u);
+  if (UsesAql()) {
+    const iree_hal_amd_gpu_aql_function_t* first = nullptr;
+    const iree_hal_amd_gpu_aql_function_t* second = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_aql_for_queue(
+        executable_, token, 0, &first));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_aql_for_queue(
+        executable_, token, 1, &second));
+    EXPECT_EQ(first, second);
+  } else {
+    const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_pm4_for_queue(
+        executable_, token, 1, &function));
+    EXPECT_EQ(function->launch.requirements &
+                  IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN,
+              0u);
+  }
 }
 
 TEST_P(ExecutableTest,
@@ -854,9 +920,13 @@ TEST_P(ExecutableTest, FinalReleaseDoesNotWaitForNativeCleanup) {
   EXPECT_EQ(native_.allocations, 0u);
 }
 
-INSTANTIATE_TEST_SUITE_P(HipImages, ExecutableTest,
-                         ::testing::Range(size_t{0},
-                                          iree_hal_amd_gpu_hip_images_size()));
+INSTANTIATE_TEST_SUITE_P(
+    HipImages, ExecutableTest,
+    ::testing::Combine(
+        ::testing::Range(size_t{0}, iree_hal_amd_gpu_hip_images_size()),
+        ::testing::Values(
+            amdf_queue_command_type_t{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4},
+            amdf_queue_command_type_t{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL})));
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(ExecutableTest);
 
 }  // namespace

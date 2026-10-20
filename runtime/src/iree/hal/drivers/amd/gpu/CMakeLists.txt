@@ -138,6 +138,7 @@ iree_cc_library(
   DEPS
     ::code
     ::context
+    ::dispatch
     ::feedback
     ::kernarg
     ::profile
@@ -156,6 +157,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::image
     iree::hal::drivers::amd::gpu::image::hsaco
     iree::hal::drivers::amd::gpu::image::metadata
+    iree::hal::drivers::amd::gpu::queue::aql::dispatch
     iree::hal::drivers::amd::gpu::queue::pm4::dispatch
     iree::hal::drivers::amd::gpu::queue::pm4::launch
     iree::hal::drivers::amd::gpu::target::identity

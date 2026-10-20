@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/amd/gpu/feedback.h"
 #include "iree/hal/drivers/amd/gpu/kernarg.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/tsan.h"
 
@@ -57,12 +58,13 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
 } iree_hal_amd_gpu_executable_options_t;
 
 // Copies the public artifact, admits its image, and loads native backing for
-// one PM4 family. The family belongs to a sealed device group; context and
-// family remain borrowed through final native cleanup. Other option storage is
-// consumed during construction. Success returns one owning HAL resource
-// reference; failure leaves out_executable NULL after joining rollback. Final
-// release retires host metadata inline and submits the native backing batch
-// using embedded release storage. The context joins that batch before teardown.
+// one native compute family. The family belongs to a sealed device group;
+// context and family remain borrowed through final native cleanup. Other option
+// storage is consumed during construction. Success returns one owning HAL
+// resource reference; failure leaves out_executable NULL after joining
+// rollback. Final release retires host metadata inline and submits the native
+// backing batch using embedded release storage. The context joins that batch
+// before teardown.
 //
 // Native services named by launch/argument metadata remain requirements for
 // dispatch admission. Code upload flushes host writes; each queue establishes
@@ -90,6 +92,14 @@ iree_status_t iree_hal_amd_gpu_executable_lookup_pm4_for_queue(
     iree_hal_executable_t* executable, iree_hal_executable_function_t token,
     uint32_t queue_ordinal,
     const iree_hal_amd_gpu_pm4_function_t** out_function);
+
+// Selects a placed AMDHSA descriptor for an AQL queue. Exact-family protocol
+// compatibility is established at the public dispatch boundary; this validates
+// only the caller's function token. No PM4 register state is allocated or read.
+iree_status_t iree_hal_amd_gpu_executable_lookup_aql_for_queue(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t token,
+    uint32_t queue_ordinal,
+    const iree_hal_amd_gpu_aql_function_t** out_function);
 
 // Borrows queue-indexed image bases for recording native address relocations.
 // NULL means the image is shared. The recording retains the executable through
