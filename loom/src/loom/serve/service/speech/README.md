@@ -32,9 +32,8 @@ The [model ABI](model.h) separates cold preparation, CPU request preparation,
 continuing input acceptance, next-work selection, batch packing, numerical
 execution, and retired-feedback interpretation. Source preparation chooses
 checkpoint domains, stages, capacities, waveform geometry and initial
-conditioning. The native model does
-not encode a particular vocoder, speaker vector, latent width, number of
-diffusion steps or waveform block size.
+conditioning. The native model does not encode a particular vocoder, speaker
+vector, latent width, number of diffusion steps or waveform block size.
 
 Each stage binds its own checkpoint roots. Voice encoding, text prefill and
 waveform decoding can share a backbone while loading different phase weights.
@@ -57,9 +56,8 @@ values remain owned by that request. Every consuming entry declares the exact
 same types. `prepare_input` and `complete` return replacement state before their
 acceptance or waveform fields, so source can grow a text buffer while retaining
 independent tokenizer or decoder objects. Binding checks those signatures before
-service publication. State never
-passes through the packed numerical upload or moves when batch membership
-changes.
+service publication. State never passes through the packed numerical upload or
+moves when batch membership changes.
 
 The synchronous [`input` capability](../../runtime/program/input.h) supplies
 managed `input.encoder` and `input.decoder` objects for source-owned text
@@ -119,6 +117,24 @@ caller can complete it. The model declares both a bounded input window and a
 total text limit. Input credit returns after the CPU accepts text, independently
 of numerical completion and waveform consumption. HTTP still supplies a complete
 JSON request; continuing text uses the native serving interface.
+
+The [native text-to-speech caller](../../server/registry_text_speech_test.cc)
+composes two registered models through this interface:
+
+1. Open a text stream and an empty continuing speech stream in the same registry.
+2. Forward content spans to speech, retaining the borrowed text block until all
+   its bytes have been accepted. Keep reasoning separate.
+3. Consume audio independently, returning output credit after copying each block
+   into the playback queue. Continue advancing the registry while either stream
+   waits.
+4. Publish speech end-of-input after consuming the final text block, then drain
+   the remaining audio and check both terminal statuses.
+5. Close both handles. Cancellation withdraws future work; model removal waits
+   for accepted work to retire.
+
+The caller compares complete and continuing input for identical text and PCM,
+then holds both streams' output while an independent text request completes.
+CPU, AMDGPU, and Vulkan providers run the same caller and ownership checks.
 
 The returned stream exposes copied F32 waveform blocks with the source's
 sample rate, channel count, and absolute frame position. `peek` borrows the

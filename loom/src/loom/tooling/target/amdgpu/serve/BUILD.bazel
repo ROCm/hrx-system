@@ -629,6 +629,30 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "registry_text_speech_test",
+    args = [
+        "--text_model=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
+        "--speech_model=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
+        "--text_fixture=true",
+    ],
+    data = TEXT_SOURCES + SPEECH_SOURCES,
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _ROCR_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/server:registry_text_speech_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "registry_recognition_test",
     args = [
         "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",

@@ -862,6 +862,41 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
+    registry_text_speech_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/advance.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/tokenizer.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/weights.loom"
+  DEPS
+    ::test_compiler
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::server::registry_text_speech_tests
+  ARGS
+    "--text_model={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json}}"
+    "--speech_model={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json}}"
+    "--text_fixture=true"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "notsan"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
     registry_recognition_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
