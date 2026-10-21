@@ -39,12 +39,12 @@ func.def inline @qsa_cohort_physical_blocks(%records: vector<4xi32>, %fallback: 
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
   %shift = scalar.constant 16 : i32
-  %zero = scalar.constant 0 : i32
+  %c0_i32 = scalar.constant 0 : i32
   %initial = vector.constant 0 : vector<4xi32>
   %blocks = scf.for %slot = [%c0 to %c4 step %c1](%running = %initial : vector<4xi32>) -> (vector<4xi32>) unroll {
     %record = vector.extract %records[%slot] : vector<4xi32> -> i32
     %members = scalar.shrui %record, %shift : i32
-    %active = scalar.cmpi ne, %members, %zero : i32
+    %active = scalar.cmpi ne, %members, %c0_i32 : i32
     %address_record = scf.select %active, %record, %fallback : i32
     %block = func.call @qsa_cohort_physical_block(%address_record, %rows, %row) : (i32, buffer, index) -> (index)
     %word = index.cast %block : index to i32
@@ -72,8 +72,8 @@ func.def inline @qsa_cohort_stream_keys(%records: vector<4xi32>, %physical: vect
   %shifted = scalar.shrui %record, %shift : i32
   %member_mask = scalar.constant 4369 : i32
   %visible = scalar.andi %shifted, %member_mask : i32
-  %zero = scalar.constant 0 : i32
-  %active = scalar.cmpi ne, %visible, %zero : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %active = scalar.cmpi ne, %visible, %c0_i32 : i32
   %address_member = scf.select %active, %member, %c0 : index
   %block_word = vector.extract %physical[%slot] : vector<4xi32> -> i32
   %block_value = index.cast %block_word : i32 to index
@@ -106,16 +106,16 @@ func.def inline @qsa_cohort_mask_values(%bits: vector<4xi16>, %record: i32) -> (
   %shift16 = scalar.constant 16 : i32
   %members = scalar.shrui %record, %shift16 : i32
   %membership = vector.splat %members : vector<4xi32>
-  %zero = scalar.constant 0 : i32
+  %c0_i32 = scalar.constant 0 : i32
   %unit = scalar.constant 1 : i32
-  %shifts = vector.iota %zero step %unit : vector<4xi32>
+  %shifts = vector.iota %c0_i32 step %unit : vector<4xi32>
   %flags = vector.constant 4369 : vector<4xi32>
   %zero_flags = vector.constant 0 : vector<4xi32>
   %shifted = vector.shrui %membership, %shifts : vector<4xi32>
   %selected = vector.andi %shifted, %flags : vector<4xi32>
   %valid = vector.cmpi ne, %selected, %zero_flags : vector<4xi32> -> vector<4xi1>
-  %zeros = vector.constant 0 : vector<4xi16>
-  %masked = vector.select %valid, %bits, %zeros : vector<4xi16>
+  %c0_v4i16 = vector.constant 0 : vector<4xi16>
+  %masked = vector.select %valid, %bits, %c0_v4i16 : vector<4xi16>
   %values = vector.bitcast %masked : vector<4xi16> to vector<4xbf16>
   func.return %values : vector<4xbf16>
 }
@@ -131,19 +131,19 @@ func.def inline @qsa_cohort_softmax(%raw: vector<8xf32>, %records: vector<4xi32>
   %record_shift = index.add %member_shift, %c16 : index
   %shift_word = index.cast %record_shift : index to i32
   %shift_base = vector.splat %shift_word : vector<8xi32>
-  %zero_word = scalar.constant 0 : i32
-  %one_word = scalar.constant 1 : i32
-  %components = vector.iota %zero_word step %one_word : vector<8xi32>
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %components = vector.iota %c0_i32 step %c1_i32 : vector<8xi32>
   %component_mask = vector.constant 1 : vector<8xi32>
   %component_parity = vector.andi %components, %component_mask : vector<8xi32>
   %member_offsets = vector.shli %component_parity, %component_mask : vector<8xi32>
   %shifts = vector.addi %shift_base, %member_offsets : vector<8xi32>
   %descriptors = vector.interleave<0> %records, %records : vector<4xi32>, vector<4xi32> -> vector<8xi32>
   %shifted = vector.shrui %descriptors, %shifts : vector<8xi32>
-  %ones = vector.constant 1 : vector<8xi32>
-  %zeros = vector.constant 0 : vector<8xi32>
-  %flags = vector.andi %shifted, %ones : vector<8xi32>
-  %valid = vector.cmpi ne, %flags, %zeros : vector<8xi32> -> vector<8xi1>
+  %c1_v8i32 = vector.constant 1 : vector<8xi32>
+  %c0_v8i32 = vector.constant 0 : vector<8xi32>
+  %flags = vector.andi %shifted, %c1_v8i32 : vector<8xi32>
+  %valid = vector.cmpi ne, %flags, %c0_v8i32 : vector<8xi32> -> vector<8xi1>
   %lowest = scalar.constant -1e+30 : f32
   %lowest_vector = vector.splat %lowest : vector<8xf32>
   %scores = vector.select %valid, %raw, %lowest_vector : vector<8xf32>
@@ -194,8 +194,8 @@ func.def inline @qsa_cohort_output(%query: index, %head: index, %channel: index,
   %gate_values = vector.extf %gate_packet : vector<4xbf16> to vector<4xf32>
   %negative = vector.negf %gate_values : vector<4xf32>
   %exponential = vector.expf<afn> %negative : vector<4xf32>
-  %one = vector.constant 1.0 : vector<4xf32>
-  %divisor = vector.addf %one, %exponential : vector<4xf32>
+  %c1_v4f32 = vector.constant 1.0 : vector<4xf32>
+  %divisor = vector.addf %c1_v4f32, %exponential : vector<4xf32>
   %rounded = vector.fptrunc %values : vector<4xf32> to vector<4xbf16>
   %attended = vector.extf %rounded : vector<4xbf16> to vector<4xf32>
   %gated = vector.divf %attended, %divisor : vector<4xf32>
@@ -244,8 +244,8 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
   %header = buffer.view %cohorts[%record_origin] : buffer -> view<4xi32>
   %descriptors = buffer.view %cohorts[%descriptor_origin] : buffer -> view<2052xi32>
   %count_word = view.load %header[3] : view<4xi32> -> i32
-  %zero_word = scalar.constant 0 : i32
-  %active = scalar.cmpi ne, %count_word, %zero_word : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %active = scalar.cmpi ne, %count_word, %c0_i32 : i32
   scf.if %active {
     %count_value = index.cast %count_word : i32 to index
     %count = index.assume %count_value [range(%count_value, 4, 2052), multiple_of(%count_value, 4)] : index
@@ -278,12 +278,12 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
     %alphas = buffer.view %shared[%alpha_offset] : buffer -> view<3x16xf32>
     %sums = buffer.view %shared[%sum_offset] : buffer -> view<3x16xf32>
     %query_view = buffer.view %queries[%origin] : buffer -> view<[%tokens]x24x256xbf16>
-    %zeros = vector.constant 0.0 : vector<16xbf16>
+    %c0_v16bf16 = vector.constant 0.0 : vector<16xbf16>
     %zero_accumulator = vector.constant 0.0 : vector<8xf32>
     %initial = vector.fragment<init> %zero_accumulator shape [%tile, %tile] : vector<8xf32>
     %lowest = scalar.constant -1e+30 : f32
-    %zero = scalar.constant 0.0 : f32
-    %one = scalar.constant 1.0 : f32
+    %c0_f32 = scalar.constant 0.0 : f32
+    %c1_f32 = scalar.constant 1.0 : f32
 
     %fragment0 = index.constant 0 : index
     %fragment_base0 = index.constant 0 : index
@@ -301,7 +301,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
       %packet = vector.load %query_view[%token, %query_head0, %query_channel0_0] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
       scf.yield %packet : vector<16xbf16>
     } else {
-      scf.yield %zeros : vector<16xbf16>
+      scf.yield %c0_v16bf16 : vector<16xbf16>
     }
     %query0_0 = vector.fragment<rhs> %query_values0_0 shape [%tile, %tile] : vector<16xbf16>
 
@@ -313,7 +313,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
       %packet = vector.load %query_view[%token, %query_head0, %query_channel0_1] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
       scf.yield %packet : vector<16xbf16>
     } else {
-      scf.yield %zeros : vector<16xbf16>
+      scf.yield %c0_v16bf16 : vector<16xbf16>
     }
     %query0_1 = vector.fragment<rhs> %query_values0_1 shape [%tile, %tile] : vector<16xbf16>
 
@@ -333,7 +333,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
       %packet = vector.load %query_view[%token, %query_head1, %query_channel1_0] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
       scf.yield %packet : vector<16xbf16>
     } else {
-      scf.yield %zeros : vector<16xbf16>
+      scf.yield %c0_v16bf16 : vector<16xbf16>
     }
     %query1_0 = vector.fragment<rhs> %query_values1_0 shape [%tile, %tile] : vector<16xbf16>
 
@@ -345,7 +345,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
       %packet = vector.load %query_view[%token, %query_head1, %query_channel1_1] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
       scf.yield %packet : vector<16xbf16>
     } else {
-      scf.yield %zeros : vector<16xbf16>
+      scf.yield %c0_v16bf16 : vector<16xbf16>
     }
     %query1_1 = vector.fragment<rhs> %query_values1_1 shape [%tile, %tile] : vector<16xbf16>
 
@@ -365,7 +365,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
       %packet = vector.load %query_view[%token, %query_head2, %query_channel2_0] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
       scf.yield %packet : vector<16xbf16>
     } else {
-      scf.yield %zeros : vector<16xbf16>
+      scf.yield %c0_v16bf16 : vector<16xbf16>
     }
     %query2_0 = vector.fragment<rhs> %query_values2_0 shape [%tile, %tile] : vector<16xbf16>
 
@@ -377,7 +377,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
       %packet = vector.load %query_view[%token, %query_head2, %query_channel2_1] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
       scf.yield %packet : vector<16xbf16>
     } else {
-      scf.yield %zeros : vector<16xbf16>
+      scf.yield %c0_v16bf16 : vector<16xbf16>
     }
     %query2_1 = vector.fragment<rhs> %query_values2_1 shape [%tile, %tile] : vector<16xbf16>
 
@@ -386,7 +386,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
     %first_physical = func.call @qsa_cohort_physical_blocks(%first_descriptors, %fallback_record, %rows, %row) : (vector<4xi32>, i32, buffer, index) -> (vector<4xi32>)
     %first_key0, %first_key1 = func.call @qsa_cohort_stream_keys(%first_descriptors, %first_physical, %arena, %key_base, %head, %wave, %lane) : (vector<4xi32>, vector<4xi32>, buffer, offset, index, index, index) -> (vector<16xbf16>, vector<16xbf16>)
     %last_chunk = index.sub %count, %c4 : index
-    %final_max, %final_sum, %last_descriptors, %last_physical, %last_key0, %last_key1, %final0_0, %final0_1, %final1_0, %final1_1, %final2_0, %final2_1 = scf.for %chunk = [%c0 to %count step %c4](%maximum = %lowest : f32, %sum = %zero : f32, %records = %first_descriptors : vector<4xi32>, %physical = %first_physical : vector<4xi32>, %key_values0 = %first_key0 : vector<16xbf16>, %key_values1 = %first_key1 : vector<16xbf16>, %accumulator0_0 = %initial : vector<8xf32>, %accumulator0_1 = %initial : vector<8xf32>, %accumulator1_0 = %initial : vector<8xf32>, %accumulator1_1 = %initial : vector<8xf32>, %accumulator2_0 = %initial : vector<8xf32>, %accumulator2_1 = %initial : vector<8xf32>) -> (f32, f32, vector<4xi32>, vector<4xi32>, vector<16xbf16>, vector<16xbf16>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %final_max, %final_sum, %last_descriptors, %last_physical, %last_key0, %last_key1, %final0_0, %final0_1, %final1_0, %final1_1, %final2_0, %final2_1 = scf.for %chunk = [%c0 to %count step %c4](%maximum = %lowest : f32, %sum = %c0_f32 : f32, %records = %first_descriptors : vector<4xi32>, %physical = %first_physical : vector<4xi32>, %key_values0 = %first_key0 : vector<16xbf16>, %key_values1 = %first_key1 : vector<16xbf16>, %accumulator0_0 = %initial : vector<8xf32>, %accumulator0_1 = %initial : vector<8xf32>, %accumulator1_0 = %initial : vector<8xf32>, %accumulator1_1 = %initial : vector<8xf32>, %accumulator2_0 = %initial : vector<8xf32>, %accumulator2_1 = %initial : vector<8xf32>) -> (f32, f32, vector<4xi32>, vector<4xi32>, vector<16xbf16>, vector<16xbf16>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       %key0 = vector.fragment<lhs> %key_values0 shape [%tile, %tile] : vector<16xbf16>
       %key1 = vector.fragment<lhs> %key_values1 shape [%tile, %tile] : vector<16xbf16>
 
@@ -567,8 +567,8 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
     %stage_channel = index.mul %stage_packet, %c4 : index
 
     %sum0 = view.load %sums[%fragment0, %r] : view<3x16xf32> -> f32
-    %nonzero0 = scalar.cmpf ogt, %sum0, %zero : f32
-    %divisor0 = scf.select %nonzero0, %sum0, %one : f32
+    %nonzero0 = scalar.cmpf ogt, %sum0, %c0_f32 : f32
+    %divisor0 = scf.select %nonzero0, %sum0, %c1_f32 : f32
     %denominator0 = vector.splat %divisor0 : vector<8xf32>
 
     %normalized0_0 = vector.divf %final0_0, %denominator0 : vector<8xf32>
@@ -598,8 +598,8 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
     %sum1 = view.load %sums[%fragment1, %r] : view<3x16xf32> -> f32
-    %nonzero1 = scalar.cmpf ogt, %sum1, %zero : f32
-    %divisor1 = scf.select %nonzero1, %sum1, %one : f32
+    %nonzero1 = scalar.cmpf ogt, %sum1, %c0_f32 : f32
+    %divisor1 = scf.select %nonzero1, %sum1, %c1_f32 : f32
     %denominator1 = vector.splat %divisor1 : vector<8xf32>
 
     %normalized1_0 = vector.divf %final1_0, %denominator1 : vector<8xf32>
@@ -629,8 +629,8 @@ kernel.def target(@qsa_matrix_wave32) @qsa_cohort_attention() {
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
     %sum2 = view.load %sums[%fragment2, %r] : view<3x16xf32> -> f32
-    %nonzero2 = scalar.cmpf ogt, %sum2, %zero : f32
-    %divisor2 = scf.select %nonzero2, %sum2, %one : f32
+    %nonzero2 = scalar.cmpf ogt, %sum2, %c0_f32 : f32
+    %divisor2 = scf.select %nonzero2, %sum2, %c1_f32 : f32
     %denominator2 = vector.splat %divisor2 : vector<8xf32>
 
     %normalized2_0 = vector.divf %final2_0, %denominator2 : vector<8xf32>
