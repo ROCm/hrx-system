@@ -11,9 +11,18 @@
 
 enum {
   IREE_HAL_AMD_GPU_COMPLETION_RUNNING = 0,
-  IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED = 1,
-  IREE_HAL_AMD_GPU_COMPLETION_STOPPED = 2,
+  IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED = 1 << 0,
+  IREE_HAL_AMD_GPU_COMPLETION_STOPPED = 1 << 1,
+  IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES = 1 << 2,
 };
+
+static bool iree_hal_amd_gpu_completion_stop_requested(
+    iree_hal_amd_gpu_completion_t* completion) {
+  return iree_any_bit_set(
+      iree_atomic_load(&completion->state, iree_memory_order_acquire),
+      IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED |
+          IREE_HAL_AMD_GPU_COMPLETION_STOPPED);
+}
 
 static bool iree_hal_amd_gpu_completion_drain(
     iree_hal_amd_gpu_completion_t* completion, amdf_status_t status) {
@@ -71,11 +80,9 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
   iree_hal_amd_gpu_completion_t* completion = user_data;
   const iree_hal_amd_gpu_context_t* context = completion->context;
   iree_time_t spin_deadline = IREE_TIME_INFINITE_PAST;
-  while (iree_atomic_load(&completion->state, iree_memory_order_acquire) ==
-         IREE_HAL_AMD_GPU_COMPLETION_RUNNING) {
+  while (!iree_hal_amd_gpu_completion_stop_requested(completion)) {
     iree_slim_mutex_lock(&completion->drain_mutex);
-    if (iree_atomic_load(&completion->state, iree_memory_order_acquire) !=
-        IREE_HAL_AMD_GPU_COMPLETION_RUNNING) {
+    if (iree_hal_amd_gpu_completion_stop_requested(completion)) {
       iree_slim_mutex_unlock(&completion->drain_mutex);
       break;
     }
@@ -96,8 +103,7 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
       continue;
     }
     iree_slim_mutex_unlock(&completion->drain_mutex);
-    if (iree_atomic_load(&completion->state, iree_memory_order_acquire) !=
-        IREE_HAL_AMD_GPU_COMPLETION_RUNNING) {
+    if (iree_hal_amd_gpu_completion_stop_requested(completion)) {
       break;
     }
 
@@ -117,9 +123,9 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
     if (!amdf_status_is_ok(status)) {
       // Exclude new helper drains before reporting failure. An already active
       // source round joins before the terminal notification reaches sources.
-      iree_atomic_store(&completion->state,
-                        IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED,
-                        iree_memory_order_release);
+      iree_atomic_fetch_or(&completion->state,
+                           IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED,
+                           iree_memory_order_release);
       if (context->event) {
         iree_hal_amd_gpu_context_report(context, status, "gpu.event_wait");
       } else {
@@ -135,8 +141,8 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
   // Join an active helper before returning to the destruction owner; stopped
   // helpers cannot enter another source round.
   iree_slim_mutex_lock(&completion->drain_mutex);
-  iree_atomic_store(&completion->state, IREE_HAL_AMD_GPU_COMPLETION_STOPPED,
-                    iree_memory_order_release);
+  iree_atomic_fetch_or(&completion->state, IREE_HAL_AMD_GPU_COMPLETION_STOPPED,
+                       iree_memory_order_release);
   iree_slim_mutex_unlock(&completion->drain_mutex);
   return 0;
 }
@@ -149,10 +155,10 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
   IREE_TRACE_ZONE_BEGIN(z0);
   memset(out_completion, 0, sizeof(*out_completion));
   out_completion->context = context;
-  out_completion->source_count = source_count;
-  out_completion->sources = sources;
   out_completion->spin_ns = spin_ns;
   iree_slim_mutex_initialize(&out_completion->drain_mutex);
+  iree_hal_amd_gpu_completion_set_sources(out_completion, source_count,
+                                          sources);
   const iree_thread_create_params_t params = {
       .name = IREE_SV("amd-gpu-retire"),
       .create_suspended = true,
@@ -172,16 +178,32 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
   return iree_ok_status();
 }
 
+void iree_hal_amd_gpu_completion_set_sources(
+    iree_hal_amd_gpu_completion_t* completion, iree_host_size_t source_count,
+    iree_hal_amd_gpu_completion_source_t* sources) {
+  // The existing observation-state load also carries this cold handoff. A
+  // setter can acquire the drain even when its owner observes indefinitely.
+  iree_atomic_fetch_or(&completion->state,
+                       IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES,
+                       iree_memory_order_release);
+  iree_slim_mutex_lock(&completion->drain_mutex);
+  completion->sources = sources;
+  completion->source_count = source_count;
+  iree_atomic_fetch_and(&completion->state,
+                        ~IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES,
+                        iree_memory_order_release);
+  iree_slim_mutex_unlock(&completion->drain_mutex);
+}
+
 amdf_status_t iree_hal_amd_gpu_completion_request_stop(
     iree_hal_amd_gpu_completion_t* completion) {
   if (!completion->thread) {
     return AMDF_STATUS_OK;
   }
-  int32_t expected = IREE_HAL_AMD_GPU_COMPLETION_RUNNING;
-  iree_atomic_compare_exchange_strong(
-      &completion->state, &expected, IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED,
-      iree_memory_order_acq_rel, iree_memory_order_acquire);
-  if (expected != IREE_HAL_AMD_GPU_COMPLETION_STOPPED) {
+  const int32_t previous = iree_atomic_fetch_or(
+      &completion->state, IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED,
+      iree_memory_order_acq_rel);
+  if (!iree_any_bit_set(previous, IREE_HAL_AMD_GPU_COMPLETION_STOPPED)) {
     // A failed wake preserves the join obligation. Retrying must signal again
     // even when a previous call has already published STOP_REQUESTED.
     const iree_hal_amd_gpu_context_t* context = completion->context;

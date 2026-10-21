@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <barrier>
+#include <memory>
 #include <semaphore>
 #include <thread>
 
@@ -115,6 +116,88 @@ TEST(PublicationTest, NotificationDuringFinalObservationIsRetained) {
   queue.completed.acquire();
   iree_hal_amd_gpu_publication_deinitialize(&publication);
   EXPECT_EQ(queue.count, 2u);
+}
+
+TEST(PublicationTest, ReplacementJoinsLastSourceAccess) {
+  struct Source {
+    // Separately owned handoff gates outlive source reclamation.
+    std::binary_semaphore* entered;
+    // Authorizes the callback's final access to this source.
+    std::binary_semaphore* resume;
+    // Used once after the controller begins removing this source.
+    uint32_t count = 0;
+  };
+  std::binary_semaphore entered{0};
+  std::binary_semaphore resume{0};
+  std::binary_semaphore replacing{0};
+  auto queue = std::make_unique<Source>(Source{&entered, &resume});
+  auto source = std::make_unique<iree_hal_amd_gpu_publication_source_t>(
+      iree_hal_amd_gpu_publication_source_t{
+          .publish =
+              [](void* user_data) {
+                auto* source = static_cast<Source*>(user_data);
+                source->entered->release();
+                source->resume->acquire();
+                ++source->count;
+                return false;
+              },
+          .user_data = queue.get(),
+      });
+  iree_hal_amd_gpu_publication_t publication;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_publication_initialize(
+      1, source.get(), {}, iree_allocator_system(), &publication));
+  iree_hal_amd_gpu_publication_notify(&publication, 0);
+  entered.acquire();
+  std::atomic<bool> replaced = false;
+  std::thread owner([&] {
+    replacing.release();
+    iree_hal_amd_gpu_publication_set_sources(&publication, 0, nullptr);
+    EXPECT_EQ(queue->count, 1u);
+    queue.reset();
+    source.reset();
+    replaced.store(true, std::memory_order_release);
+  });
+  replacing.acquire();
+  EXPECT_FALSE(replaced.load(std::memory_order_acquire));
+  resume.release();
+  owner.join();
+  iree_hal_amd_gpu_publication_deinitialize(&publication);
+  EXPECT_TRUE(replaced.load());
+}
+
+TEST(PublicationTest, ReplacementSupportsVacantSlotsAndGrowingReadyExtent) {
+  std::counting_semaphore<2> first_completed{0};
+  std::counting_semaphore<2> second_completed{0};
+  const iree_hal_amd_gpu_publication_source_t source = {
+      .publish =
+          [](void* user_data) {
+            static_cast<std::counting_semaphore<2>*>(user_data)->release();
+            return false;
+          },
+      .user_data = &first_completed,
+  };
+  iree_hal_amd_gpu_publication_t publication;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_publication_initialize(
+      0, nullptr, {}, iree_allocator_system(), &publication));
+  std::array<iree_hal_amd_gpu_publication_source_t, 65> first = {};
+  first[64] = source;
+  iree_hal_amd_gpu_publication_set_sources(&publication, first.size(),
+                                           first.data());
+  iree_hal_amd_gpu_publication_notify(&publication, 64);
+  first_completed.acquire();
+
+  // A removed ordinal can leave a coalesced hint. Its vacant slot has no
+  // callback, while its neighbor continues to publish normally.
+  std::array<iree_hal_amd_gpu_publication_source_t, 129> second = {};
+  second[128] = source;
+  second[128].user_data = &second_completed;
+  iree_hal_amd_gpu_publication_notify(&publication, 64);
+  iree_hal_amd_gpu_publication_set_sources(&publication, second.size(),
+                                           second.data());
+  iree_hal_amd_gpu_publication_notify(&publication, 128);
+  second_completed.acquire();
+  iree_hal_amd_gpu_publication_set_sources(&publication, 0, nullptr);
+  iree_hal_amd_gpu_publication_deinitialize(&publication);
 }
 
 TEST(PublicationTest, ReadySuffixYieldsToAnotherQueue) {
