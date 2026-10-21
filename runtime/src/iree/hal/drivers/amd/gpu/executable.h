@@ -104,6 +104,18 @@ iree_status_t iree_hal_amd_gpu_executable_lookup_aql_for_queue(
     uint32_t queue_ordinal,
     const iree_hal_amd_gpu_aql_function_t** out_function);
 
+// Queries a loaded function's architectural residency on a full-endpoint
+// queue. The public queue boundary establishes exact-family compatibility and
+// nonzero dimensions; this validates the function token and its geometry. Uses
+// retained image/native facts without touching device memory or queue state.
+// scalar_register_reservation is the native trap reserve or UINT32_MAX if
+// unknown.
+iree_status_t iree_hal_amd_gpu_executable_query_dispatch_concurrency(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    uint32_t scalar_register_reservation,
+    iree_hal_queue_dispatch_concurrency_params_t params,
+    iree_hal_queue_dispatch_concurrency_t* out_concurrency);
+
 // Borrows queue-indexed image bases for recording native address relocations.
 // NULL means the image is shared. The recording retains the executable through
 // every invocation, so no per-dispatch copy of this table is necessary.

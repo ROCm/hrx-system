@@ -439,8 +439,10 @@ iree_runtime_cc_library(
     hdrs = ["dispatch.h"],
     deps = [
         ":kernarg",
+        "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:metadata",
     ],
 )
@@ -456,5 +458,19 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/gpu/image:metadata",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "dispatch_benchmark",
+    srcs = ["dispatch_benchmark.cc"],
+    deps = [
+        ":dispatch",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:metadata",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )

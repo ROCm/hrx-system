@@ -480,8 +480,10 @@ iree_cc_library(
     "dispatch.c"
   DEPS
     ::kernarg
+    amdf::headers
     iree::base
     iree::hal
+    iree::hal::drivers::amd::gpu::image
     iree::hal::drivers::amd::gpu::image::metadata
   PUBLIC
 )
@@ -499,6 +501,23 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::image::metadata
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    dispatch_benchmark
+  SRCS
+    "dispatch_benchmark.cc"
+  DEPS
+    ::dispatch
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::image::metadata
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

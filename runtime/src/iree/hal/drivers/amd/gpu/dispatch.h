@@ -7,7 +7,9 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_DISPATCH_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_DISPATCH_H_
 
+#include "amdf/gpu.h"
 #include "iree/hal/command_buffer.h"
+#include "iree/hal/drivers/amd/gpu/image/image.h"
 #include "iree/hal/drivers/amd/gpu/kernarg.h"
 
 #ifdef __cplusplus
@@ -34,6 +36,23 @@ typedef struct iree_hal_amd_gpu_dispatch_geometry_t {
   // Fixed and dynamic LDS allocation in bytes.
   uint32_t group_segment_byte_length;
 } iree_hal_amd_gpu_dispatch_geometry_t;
+
+// Computes architectural residency for a full-endpoint queue using the loaded
+// descriptor and native device limits. Public HAL admission has established
+// nonzero dimensions; function-specific geometry is checked here. Metadata and
+// native facts are borrowed and immutable. No allocation, native call, queue
+// load, or dynamically backed scratch state participates. Failure leaves the
+// output unchanged; valid configurations that cannot reside return zero groups.
+// scalar_register_reservation is the native per-wave trap allocation (0 or 16),
+// or UINT32_MAX when unavailable. An unknown reserve only prevents an answer
+// when it changes the final residency; the descriptor cannot supply this fact.
+iree_status_t iree_hal_amd_gpu_dispatch_query_concurrency(
+    const amdf_gpu_endpoint_info_t* target,
+    const iree_hal_amd_gpu_image_kernel_t* kernel,
+    const iree_hal_amd_gpu_metadata_kernel_t* metadata,
+    uint32_t scalar_register_reservation,
+    iree_hal_queue_dispatch_concurrency_params_t params,
+    iree_hal_queue_dispatch_concurrency_t* out_concurrency);
 
 // Admits external geometry and argument representation against trusted image
 // facts. workitem_grid requires the product of group size and count to fit the

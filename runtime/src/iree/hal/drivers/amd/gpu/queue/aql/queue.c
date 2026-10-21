@@ -2042,9 +2042,16 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_query_dispatch_concurrency(
     iree_hal_queue_dispatch_concurrency_params_t params,
     iree_hal_queue_dispatch_concurrency_flags_t flags,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "AQL dispatch residency calculation is not implemented");
+  const iree_hal_amd_gpu_aql_queue_t* aql_queue = (void*)queue;
+  const amdf_queue_format_features_t features =
+      aql_queue->context->families[aql_queue->options.family_ordinal]
+          .format_features;
+  const uint32_t scalar_reservation =
+      features & AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16  ? 16
+      : features & AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0 ? 0
+                                                                   : UINT32_MAX;
+  return iree_hal_amd_gpu_executable_query_dispatch_concurrency(
+      executable, function, scalar_reservation, params, out_concurrency);
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_queue_atomic_wait(

@@ -982,6 +982,21 @@ const uint64_t* iree_hal_amd_gpu_executable_queue_image_addresses(
   return ((iree_hal_amd_gpu_executable_t*)executable)->queue_image_addresses;
 }
 
+iree_status_t iree_hal_amd_gpu_executable_query_dispatch_concurrency(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t token, uint32_t scalar_register_reservation,
+    iree_hal_queue_dispatch_concurrency_params_t params,
+    iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
+  iree_hal_amd_gpu_executable_t* executable = (void*)base_executable;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_executable_validate_function(executable, token));
+  return iree_hal_amd_gpu_dispatch_query_concurrency(
+      &executable->context->target_info,
+      &executable->image.kernels[token.value],
+      &executable->image.metadata.kernels[token.value],
+      scalar_register_reservation, params, out_concurrency);
+}
+
 static iree_status_t iree_hal_amd_gpu_executable_profile_metadata(
     iree_hal_executable_t* base,
     iree_hal_amd_gpu_profile_executable_t** out_metadata) {

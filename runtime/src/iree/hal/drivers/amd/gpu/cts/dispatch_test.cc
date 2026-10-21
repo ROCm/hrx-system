@@ -119,6 +119,16 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
   auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
   config.workgroup_size[0] = 32;
   config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  iree_hal_queue_dispatch_concurrency_params_t concurrency_params = {
+      .workgroup_size = {32, 1, 1},
+  };
+  iree_hal_queue_dispatch_concurrency_t expected_concurrency;
+  IREE_ASSERT_OK(iree_hal_queue_query_dispatch_concurrency(
+      queues_[0], executable, function, concurrency_params,
+      IREE_HAL_QUEUE_DISPATCH_CONCURRENCY_FLAG_NONE, &expected_concurrency));
+  EXPECT_GT(expected_concurrency.scheduling_domain_count, 0u);
+  EXPECT_GT(expected_concurrency.maximum_concurrent_workgroup_count_per_domain,
+            0u);
   const auto binding = iree_hal_make_buffer_ref(global, 0, sizeof(uint32_t));
   const uint32_t increment = 9;
   EXPECT_NE(
@@ -185,7 +195,34 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
                                              IREE_ASYNC_WAIT_FLAG_NONE));
     }
     EXPECT_EQ(observed, values[i] + increment);
+    iree_hal_queue_dispatch_concurrency_t concurrency;
+    IREE_ASSERT_OK(iree_hal_queue_query_dispatch_concurrency(
+        queue, executable, function, concurrency_params,
+        IREE_HAL_QUEUE_DISPATCH_CONCURRENCY_FLAG_NONE, &concurrency));
+    EXPECT_EQ(concurrency.scheduling_domain_count,
+              expected_concurrency.scheduling_domain_count);
+    EXPECT_EQ(
+        concurrency.maximum_concurrent_workgroup_count_per_domain,
+        expected_concurrency.maximum_concurrent_workgroup_count_per_domain);
   }
+  concurrency_params.dynamic_workgroup_local_memory = UINT32_MAX;
+  iree_hal_queue_dispatch_concurrency_t concurrency;
+  IREE_ASSERT_OK(iree_hal_queue_query_dispatch_concurrency(
+      queues_[0], executable, function, concurrency_params,
+      IREE_HAL_QUEUE_DISPATCH_CONCURRENCY_FLAG_NONE, &concurrency));
+  EXPECT_EQ(concurrency.scheduling_domain_count,
+            expected_concurrency.scheduling_domain_count);
+  EXPECT_EQ(concurrency.maximum_concurrent_workgroup_count_per_domain, 0u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_queue_query_dispatch_concurrency(
+          queues_[0], executable,
+          iree_hal_executable_function_from_index(UINT32_MAX),
+          concurrency_params, IREE_HAL_QUEUE_DISPATCH_CONCURRENCY_FLAG_NONE,
+          &concurrency));
+  EXPECT_EQ(concurrency.scheduling_domain_count,
+            expected_concurrency.scheduling_domain_count);
+  EXPECT_EQ(concurrency.maximum_concurrent_workgroup_count_per_domain, 0u);
 }
 
 TEST_P(GpuNativeDispatchTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
