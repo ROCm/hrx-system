@@ -523,7 +523,7 @@ loom_cc_test(
             "//runtime/src/iree/testing:gtest_main",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 [
@@ -600,7 +600,7 @@ loom_cc_test(
             "//runtime/src/iree/testing:gtest_main",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 loom_cc_test(
