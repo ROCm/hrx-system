@@ -263,8 +263,9 @@ language, prompting, decoding, segment boundaries and any speaker/alignment
 evidence.
 
 The [transcription profile](http-profiles.md#audio-transcription) accepts uploaded
-WAV, MP3, or FLAC when enabled, and always accepts PCM16LE with matching sample
-geometry. It returns final JSON or text. The underlying continuing-input service
+WAV, MP3, or FLAC when enabled, and always accepts PCM16LE with an explicit
+sample rate and matching channel count. Raw rate conversion works without audio
+codecs. It returns final JSON or text. The underlying continuing-input service
 also accepts bounded PCM with explicit end-of-input, independently of HTTP.
 The normal pin/unpin, activation, drain and removal controls apply to both roles.
 Neither recognition nor activity accepts `variant_capacity`; changing its

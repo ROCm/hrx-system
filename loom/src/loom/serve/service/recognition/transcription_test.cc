@@ -75,7 +75,8 @@ TEST_F(TranscriptionTest, BorrowsAudioAndSourceOptionsIndependentOfPartOrder) {
                         Field(IREE_SV("stream"), IREE_SV("false"))}));
   EXPECT_EQ(request_.audio.data, reinterpret_cast<const uint8_t*>(audio));
   EXPECT_EQ(request_.audio.data_length, sizeof(audio));
-  EXPECT_TRUE(request_.pcm);
+  EXPECT_EQ(request_.pcm_sample_rate, 16000u);
+  EXPECT_EQ(request_.normalized_frame_count, 2u);
   EXPECT_TRUE(request_.text_response);
   EXPECT_EQ(request_.request.outputs, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT);
   EXPECT_FLOAT_EQ(request_.request.temperature, 0.75f);
@@ -93,7 +94,7 @@ TEST_F(TranscriptionTest, BorrowsAudioAndSourceOptionsIndependentOfPartOrder) {
 }
 
 TEST_F(TranscriptionTest,
-       RawPcmRequiresExplicitMatchingGeometryAndWholeFrames) {
+       RawPcmRequiresExplicitRateMatchingChannelsAndWholeFrames) {
   const char audio[] = {'\0', '\x20', '\0', '\xe0'};
   auto file = Field(IREE_SV("file"), {audio, sizeof(audio)});
   const auto model = Field(IREE_SV("model"), IREE_SV("recognition"));
@@ -106,13 +107,13 @@ TEST_F(TranscriptionTest,
     IREE_ASSERT_OK(Parse({file, model}));
     EXPECT_EQ(request_.audio.data,
               reinterpret_cast<const uint8_t*>(file.contents.data));
-    EXPECT_TRUE(request_.pcm);
+    EXPECT_EQ(request_.pcm_sample_rate, 16000u);
+    EXPECT_EQ(request_.normalized_frame_count, 2u);
   }
   for (const auto content_type : {
            IREE_SV("audio/pcm"),
            IREE_SV("audio/pcm;rate=16000"),
            IREE_SV("audio/pcm;channels=1"),
-           IREE_SV("audio/pcm;rate=24000;channels=1"),
            IREE_SV("audio/pcm;rate=16000;channels=2"),
            IREE_SV("audio/pcm;rate=0;channels=1"),
            IREE_SV("audio/pcm;rate=16000;channels=-1"),
@@ -142,6 +143,26 @@ TEST_F(TranscriptionTest,
                                      {16000, 2}, &request_));
 }
 
+TEST_F(TranscriptionTest, RawPcmRetainsExactNormalizedDuration) {
+  const auto model = Field(IREE_SV("model"), IREE_SV("recognition"));
+  for (uint32_t rate : {8000u, 16000u, 16001u, 22050u, 24000u, 44100u, 48000u,
+                        96000u, 192000u, UINT32_MAX}) {
+    const std::string content_type =
+        "audio/pcm;rate=" + std::to_string(rate) + ";channels=1";
+    for (size_t frames : {1, 2, 3, 27, 997}) {
+      SCOPED_TRACE(::testing::Message()
+                   << rate << " Hz, " << frames << " frames");
+      const std::string audio(frames * sizeof(int16_t), '\0');
+      auto file = Field(IREE_SV("file"), {audio.data(), audio.size()});
+      file.content_type = {content_type.data(), content_type.size()};
+      IREE_ASSERT_OK(Parse({file, model}));
+      EXPECT_EQ(request_.pcm_sample_rate, rate);
+      EXPECT_EQ(request_.normalized_frame_count,
+                (uint64_t{frames} * 16000 + rate - 1) / rate);
+    }
+  }
+}
+
 TEST_F(TranscriptionTest, EncodedAudioDefersFormatSelectionToContainerBytes) {
   auto file = Field(IREE_SV("file"), IREE_SV("opaque container bytes"));
   file.filename = IREE_SV("../../not-a-format.pcm");
@@ -155,7 +176,8 @@ TEST_F(TranscriptionTest, EncodedAudioDefersFormatSelectionToContainerBytes) {
        }) {
     file.content_type = content_type;
     IREE_ASSERT_OK(Parse({file, model}));
-    EXPECT_FALSE(request_.pcm);
+    EXPECT_EQ(request_.pcm_sample_rate, 0u);
+    EXPECT_EQ(request_.normalized_frame_count, 0u);
     EXPECT_EQ(request_.audio.data,
               reinterpret_cast<const uint8_t*>(file.contents.data));
     EXPECT_EQ(request_.audio.data_length, file.contents.size);

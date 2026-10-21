@@ -29,8 +29,10 @@ typedef struct loom_serve_recognition_service_options_t {
   iree_host_size_t request_limit;
   // Maximum retained transcript document per stream.
   iree_host_size_t document_limit;
-  // Decoded frames staged per upload, independent of its total duration.
+  // Input and output frames processed per CPU turn, independent of duration.
   iree_host_size_t decode_frames;
+  // Per-upload bytes for rate-conversion coefficients, history, and scratch.
+  iree_host_size_t conversion_limit;
 } loom_serve_recognition_service_options_t;
 
 // Common native/HTTP owner over continuing-input stream execution. Its bounded

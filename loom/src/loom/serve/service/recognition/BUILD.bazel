@@ -43,6 +43,7 @@ loom_cc_library(
         ":stream",
         ":transcription",
         "//loom/src/loom/serve/media:audio_decoder",
+        "//loom/src/loom/serve/media:audio_resampler",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/runtime/parameter:telemetry",

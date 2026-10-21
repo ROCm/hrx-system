@@ -29,6 +29,10 @@
 
 IREE_FLAG(string, model, "", "Recognition model document for qualification.");
 IREE_FLAG(string, input, "", "Optional 16-kHz mono PCM16LE recording.");
+IREE_FLAG(string, http_input, "",
+          "Optional same-duration PCM16LE recording for the HTTP peer.");
+IREE_FLAG(int32_t, http_input_rate, 24000,
+          "Sample rate of the optional HTTP peer recording.");
 IREE_FLAG(string, expected_text, "E", "Expected final recognition text.");
 IREE_FLAG(int32_t, test_workers, 1, "Shared application worker count.");
 
@@ -56,13 +60,41 @@ class RegistryRecognitionTest : public ::testing::Test {
                   contents->buffer.data_length);
       iree_io_file_contents_free(contents);
     } else {
-      pcm_.resize(19 * sizeof(int16_t));
-      for (size_t i = 0; i < 19; ++i) {
+      pcm_.resize(18 * sizeof(int16_t));
+      for (size_t i = 0; i < 18; ++i) {
         iree_unaligned_store_le_u16(pcm_.data() + i * sizeof(int16_t), 8192);
       }
     }
     ASSERT_FALSE(pcm_.empty());
     ASSERT_EQ(pcm_.size() % sizeof(int16_t), 0u);
+    if (FLAG_http_input[0]) {
+      ASSERT_GT(FLAG_http_input_rate, 0);
+      iree_io_file_contents_t* contents = nullptr;
+      IREE_ASSERT_OK(iree_io_file_contents_read(
+          iree_make_cstring_view(FLAG_http_input), allocator_, &contents));
+      http_pcm_.assign(reinterpret_cast<const char*>(contents->buffer.data),
+                       contents->buffer.data_length);
+      iree_io_file_contents_free(contents);
+      http_input_rate_ = FLAG_http_input_rate;
+    } else if (FLAG_input[0]) {
+      http_pcm_ = pcm_;
+      http_input_rate_ = 16000;
+    } else {
+      // Independently authored 24-kHz samples cover the same duration as the
+      // native fixture. HTTP must convert them before the source sees frames.
+      http_pcm_.resize(27 * sizeof(int16_t));
+      for (size_t i = 0; i < 27; ++i) {
+        iree_unaligned_store_le_u16(http_pcm_.data() + i * sizeof(int16_t),
+                                    8192);
+      }
+      http_input_rate_ = 24000;
+    }
+    ASSERT_FALSE(http_pcm_.empty());
+    ASSERT_EQ(http_pcm_.size() % sizeof(int16_t), 0u);
+    ASSERT_EQ(
+        (http_pcm_.size() / sizeof(int16_t) * 16000ull + http_input_rate_ - 1) /
+            http_input_rate_,
+        pcm_.size() / sizeof(int16_t));
     samples_.resize(pcm_.size() / sizeof(int16_t) * sizeof(float));
     for (size_t i = 0; i < pcm_.size() / sizeof(int16_t); ++i) {
       const int16_t sample =
@@ -259,8 +291,9 @@ class RegistryRecognitionTest : public ::testing::Test {
         "name=\"response_format\"\r\n\r\ntext\r\n--voice\r\n"
         "Content-Disposition: form-data; name=\"file\"; "
         "filename=\"voice.pcm\"\r\n"
-        "Content-Type: audio/pcm;rate=16000;channels=1\r\n\r\n" +
-        pcm_ + "\r\n--voice--\r\n";
+        "Content-Type: audio/pcm;rate=" +
+        std::to_string(http_input_rate_) + ";channels=1\r\n\r\n" + http_pcm_ +
+        "\r\n--voice--\r\n";
     loom_serve::testing::HttpClient client;
     IREE_ASSERT_OK(
         http_.Send("POST /v1/audio/transcriptions HTTP/1.1\r\nHost: local\r\n"
@@ -290,10 +323,14 @@ class RegistryRecognitionTest : public ::testing::Test {
   iree_host_size_t index_ = 0;
   // Copied model name, retained across removal and reuse.
   std::string name_;
-  // Original PCM16LE recording sent to the finite HTTP peer.
+  // Original 16-kHz PCM16LE recording for the native reference.
   std::string pcm_;
   // Exact F32LE conversion of that same recording for native input.
   std::vector<uint8_t> samples_;
+  // Independent PCM16LE recording sent through the finite upload converter.
+  std::string http_pcm_;
+  // Declared sample clock of the HTTP recording, independent of model geometry.
+  uint32_t http_input_rate_ = 0;
   // Shared network proactor owner, outliving the registry and HTTP peer.
   loom_serve_http_server_t* server_ = nullptr;
   // Ephemeral loopback endpoint for the real transport peer.

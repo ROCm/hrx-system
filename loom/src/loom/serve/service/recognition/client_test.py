@@ -235,11 +235,13 @@ class TranscriptionClientTest(unittest.TestCase):
                                 expected if index % 2 else {"text": expected},
                             )
 
-                    # A mixed cohort exercises independent codec histories and
-                    # unchanged PCM admission. FLAC metadata is larger than the
+                    # A mixed cohort exercises independent codec and rate
+                    # conversion histories. FLAC metadata is larger than the
                     # model's raw PCM capacity, but its decoded frames fit.
                     uploads = [
                         (pcm(19), PCM_TYPE, True, "E"),
+                        (pcm(27), "audio/pcm;rate=24000;channels=1", True, "E"),
+                        (pcm(9), "audio/pcm;rate=8000;channels=1", True, "E"),
                         (wave(1607), "audio/wav", options.wav, "L"),
                         (wave(19, channels=2), "audio/wav", options.wav, "E"),
                         (wave(1607), "application/octet-stream", options.wav, "L"),
@@ -293,6 +295,12 @@ class TranscriptionClientTest(unittest.TestCase):
                         self.assertIn(
                             "error", self.request(address, audio, expected=400)
                         )
+                    self.request(
+                        address,
+                        pcm(1025),
+                        audio_type="audio/pcm;rate=8000;channels=1",
+                        expected=400,
+                    )
                     # Rejections release both host and model capacity.
                     self.assertEqual(
                         self.request(address, pcm(19), [("stream", "false")]),
@@ -300,7 +308,7 @@ class TranscriptionClientTest(unittest.TestCase):
                     )
                     for audio_type in (
                         "audio/pcm",
-                        "audio/pcm;rate=24000;channels=1",
+                        "audio/pcm;rate=0;channels=1",
                         "audio/pcm;rate=16000;channels=2",
                         "audio/pcm;rate=16000;channels=1;format=f32le",
                     ):

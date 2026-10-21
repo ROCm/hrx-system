@@ -430,10 +430,14 @@ revisable hypothesis into an append-only text delta.
 
 The [finite HTTP adapter](http-profiles.md#audio-transcription) decodes enabled
 WAV, MP3, and FLAC containers into the same bounded F32 input used by raw PCM.
-It performs channel conversion and filtered resampling on shared CPU workers;
+Encoded input supports channel conversion and filtered resampling on shared CPU
+workers. Raw PCM also supports filtered resampling without an audio codec
+dependency, with matching channel counts and an exact rational sample clock;
 model feature extraction, numerical stages, and transcript policy remain source
 responsibilities. Each upload owns its codec history independently of source
 batch membership, and accepted decode work retains that state until retirement.
+Packet and worker boundaries preserve filter history. Explicit input EOF flushes
+lookahead without extending the recording's duration.
 
 The adapter selects transcript output, consumes revisions, and returns the
 completed document. Typed consumers can apply revisions as they arrive and

@@ -98,6 +98,14 @@ HTTP upload decoding and PCM conversion run as bounded tasks on the shared
 executor. Encoded WAV, MP3, and FLAC support follows the optional audio codec
 configuration; declared PCM16 uploads and native F32 input use the core path.
 Each upload retains its own decoder and resampling history through cancellation.
+Raw PCM declares its input rate and matching channel count. The core
+[resampler](../../media/audio_resampler.h) retains a rational sample clock and
+bounded history across worker chunks, independently of source batch membership.
+Input and output frames are bounded separately on each CPU turn. Immutable
+coefficients can be shared by independent streams; mutable history belongs to
+each input. Explicit EOF produces `ceil(N * output_rate / input_rate)` frames,
+flushing lookahead without adding filter-tail duration. Matching-rate PCM uses
+direct conversion. Neither raw path requires miniaudio.
 
 The [stream service](stream.h) captures an immutable input-ring prefix for each
 source CPU offer. Source preparation owns any PCM needed beyond that call.

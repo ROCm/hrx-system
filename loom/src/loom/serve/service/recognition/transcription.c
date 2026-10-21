@@ -39,8 +39,10 @@ static bool loom_serve_transcription_decimal(iree_string_view_t value,
 
 static iree_status_t loom_serve_transcription_audio(
     iree_string_view_t content_type, iree_const_byte_span_t audio,
-    loom_serve_recognition_format_t format, bool* out_pcm) {
-  *out_pcm = false;
+    loom_serve_recognition_format_t format, uint32_t* out_sample_rate,
+    uint64_t* out_frame_count) {
+  *out_sample_rate = 0;
+  *out_frame_count = 0;
   iree_string_view_t media_type;
   iree_string_view_t parameters;
   iree_string_view_split(content_type, ';', &media_type, &parameters);
@@ -71,17 +73,30 @@ static iree_status_t loom_serve_transcription_audio(
           "audio/pcm requires unique positive decimal rate and channels");
     }
   }
-  if (!rate || !channels || rate != format.sample_rate ||
-      channels != format.channels) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "audio/pcm requires rate=%u and channels=%u",
-                            format.sample_rate, format.channels);
+  if (!rate || !channels || channels != format.channels) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "audio/pcm requires a positive rate and channels=%u", format.channels);
   }
   if (audio.data_length % ((uint64_t)channels * sizeof(int16_t))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "audio/pcm requires complete PCM16LE frames");
   }
-  *out_pcm = true;
+  const uint64_t input_frames =
+      audio.data_length / ((uint64_t)channels * sizeof(int16_t));
+  // Separate whole seconds before scaling so large uploads cannot overflow
+  // input_frames * output_rate. Both rates are U32, bounding the remainder.
+  const uint64_t remainder =
+      ((input_frames % rate) * format.sample_rate + rate - 1) / rate;
+  uint64_t frame_count = 0;
+  if (!iree_checked_mul_u64(input_frames / rate, format.sample_rate,
+                            &frame_count) ||
+      !iree_checked_add_u64(frame_count, remainder, &frame_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "PCM duration exceeds the normalized sample clock");
+  }
+  *out_sample_rate = rate;
+  *out_frame_count = frame_count;
   return iree_ok_status();
 }
 
@@ -152,16 +167,18 @@ iree_status_t loom_serve_transcription_parse(
   }
   const iree_const_byte_span_t audio =
       iree_make_const_byte_span(values[1].data, values[1].size);
-  bool pcm = false;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_transcription_audio(content_type, audio, format, &pcm));
+  uint32_t pcm_sample_rate = 0;
+  uint64_t normalized_frame_count = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_transcription_audio(
+      content_type, audio, format, &pcm_sample_rate, &normalized_frame_count));
   *out_request = (loom_serve_transcription_t){
       .request = {.language = values[2],
                   .prompt = values[3],
                   .temperature = temperature,
                   .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT},
       .audio = audio,
-      .pcm = pcm,
+      .pcm_sample_rate = pcm_sample_rate,
+      .normalized_frame_count = normalized_frame_count,
       .text_response = text_response};
   return iree_ok_status();
 }

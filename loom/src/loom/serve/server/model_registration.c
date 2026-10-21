@@ -640,7 +640,8 @@ static iree_status_t loom_serve_recognition_registration_prepare(
         .pending_capacity = configuration->pending_requests,
         .request_limit = 64 * 1024,
         .document_limit = 1024 * 1024,
-        .decode_frames = 4096};
+        .decode_frames = 4096,
+        .conversion_limit = 8 * 1024 * 1024};
     status = loom_serve_recognition_service_allocate(
         loom_serve_device_host(registration->device),
         loom_serve_recognition_model_generator(registration->model),

@@ -10,6 +10,7 @@
 
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/media/audio_decoder.h"
+#include "loom/serve/media/audio_resampler.h"
 #include "loom/serve/runtime/parameter/telemetry.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/recognition/transcription.h"
@@ -33,8 +34,15 @@ typedef struct loom_serve_recognition_job_t {
   union {
     // Independent codec/resampler state borrowing this upload's file bytes.
     loom_serve_audio_decoder_t* decoder;
-    // PCM bytes converted by retired or currently accepted CPU work.
-    iree_host_size_t pcm_offset;
+    // PCM conversion retained independently of the model's encoder history.
+    struct {
+      // Upload bytes converted by retired or currently accepted CPU work.
+      iree_host_size_t offset;
+      // Immutable rate conversion, initialized only for a rate mismatch.
+      loom_serve_audio_resampler_filter_t filter;
+      // Independent history borrowing the stable filter in this request slot.
+      loom_serve_audio_resampler_t resampler;
+    } pcm;
   } input;
   // Owned bounded F32LE staging, written only by a captured CPU task.
   float* samples;
@@ -189,7 +197,10 @@ static void loom_serve_transcription_release(
   if (row->stream) {
     loom_serve_recognition_stream_close(row->stream);
   }
-  if (!row->request.pcm) {
+  if (row->request.pcm_sample_rate) {
+    loom_serve_audio_resampler_deinitialize(&row->input.pcm.resampler);
+    loom_serve_audio_resampler_filter_deinitialize(&row->input.pcm.filter);
+  } else {
     loom_serve_audio_decoder_free(row->input.decoder);
   }
   iree_allocator_free(service->host_allocator, row->samples);
@@ -280,6 +291,75 @@ static iree_status_t loom_serve_transcription_fail(
                                          message);
 }
 
+static void loom_serve_transcription_decode_pcm(const uint8_t* input,
+                                                iree_host_size_t sample_count,
+                                                float* output) {
+  for (iree_host_size_t i = 0; i < sample_count; ++i) {
+    const int16_t sample =
+        (int16_t)iree_unaligned_load_le_u16(input + i * sizeof(int16_t));
+    output[i] = (float)sample / 32768.0f;
+  }
+}
+
+static iree_status_t loom_serve_transcription_read_pcm(
+    loom_serve_recognition_service_t* service,
+    loom_serve_recognition_job_t* row) {
+  const loom_serve_recognition_format_t format = service->generator.format;
+  const iree_host_size_t frame_bytes = format.channels * sizeof(int16_t);
+  if (row->request.pcm_sample_rate == format.sample_rate) {
+    const iree_host_size_t remaining =
+        row->request.audio.data_length - row->input.pcm.offset;
+    row->frame_count =
+        iree_min(service->options.decode_frames, remaining / frame_bytes);
+    loom_serve_transcription_decode_pcm(
+        row->request.audio.data + row->input.pcm.offset,
+        row->frame_count * format.channels, row->samples);
+    row->input.pcm.offset += row->frame_count * frame_bytes;
+    row->decoded = row->input.pcm.offset == row->request.audio.data_length;
+    return iree_ok_status();
+  }
+  loom_serve_audio_resampler_t* resampler = &row->input.pcm.resampler;
+  if (!resampler->samples) {
+    IREE_RETURN_IF_ERROR(loom_serve_audio_resampler_filter_initialize(
+        row->request.pcm_sample_rate, format.sample_rate,
+        service->options.conversion_limit, service->host_allocator,
+        &row->input.pcm.filter));
+    IREE_RETURN_IF_ERROR(loom_serve_audio_resampler_initialize(
+        &row->input.pcm.filter, format.channels, service->options.decode_frames,
+        service->options.conversion_limit - row->input.pcm.filter.storage_size,
+        service->host_allocator, resampler));
+  }
+  iree_host_size_t received = 0;
+  row->frame_count = 0;
+  while (row->frame_count < service->options.decode_frames) {
+    row->frame_count += loom_serve_audio_resampler_read(
+        resampler, service->options.decode_frames - row->frame_count,
+        row->samples + row->frame_count * format.channels);
+    row->decoded = loom_serve_audio_resampler_is_complete(resampler);
+    if (row->decoded || row->frame_count == service->options.decode_frames ||
+        received == service->options.decode_frames) {
+      break;
+    }
+    iree_host_size_t capacity = 0;
+    float* input = loom_serve_audio_resampler_reserve(resampler, &capacity);
+    const iree_host_size_t remaining =
+        (row->request.audio.data_length - row->input.pcm.offset) / frame_bytes;
+    const iree_host_size_t count =
+        iree_min(remaining,
+                 iree_min(capacity, service->options.decode_frames - received));
+    loom_serve_transcription_decode_pcm(
+        row->request.audio.data + row->input.pcm.offset,
+        count * format.channels, input);
+    loom_serve_audio_resampler_commit(resampler, count);
+    row->input.pcm.offset += count * frame_bytes;
+    received += count;
+    if (row->input.pcm.offset == row->request.audio.data_length) {
+      loom_serve_audio_resampler_finish(resampler);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_serve_transcription_cpu_run(
     iree_task_process_t* process, const iree_task_worker_context_t* context,
     iree_task_process_drain_result_t* result) {
@@ -287,34 +367,20 @@ static iree_status_t loom_serve_transcription_cpu_run(
   loom_serve_recognition_job_t* row = service->cpu.row;
   result->completed = true;
   result->did_work = true;
-  if (row->request.pcm) {
-    const iree_host_size_t frame_bytes =
-        service->generator.format.channels * sizeof(int16_t);
-    const iree_host_size_t remaining =
-        row->request.audio.data_length - row->input.pcm_offset;
-    row->frame_count =
-        iree_min(service->options.decode_frames, remaining / frame_bytes);
-    const uint8_t* samples = row->request.audio.data + row->input.pcm_offset;
-    for (iree_host_size_t i = 0;
-         i < row->frame_count * service->generator.format.channels; ++i) {
-      const int16_t sample =
-          (int16_t)iree_unaligned_load_le_u16(samples + i * sizeof(int16_t));
-      iree_unaligned_store_le_f32(row->samples + i, (float)sample / 32768.0f);
+  if (row->request.pcm_sample_rate) {
+    IREE_RETURN_IF_ERROR(loom_serve_transcription_read_pcm(service, row));
+  } else {
+    if (!row->input.decoder) {
+      IREE_RETURN_IF_ERROR(loom_serve_audio_decoder_allocate(
+          row->request.audio, service->generator.format.sample_rate,
+          service->generator.format.channels, service->host_allocator,
+          &row->input.decoder));
     }
-    row->input.pcm_offset += row->frame_count * frame_bytes;
-    row->decoded = row->input.pcm_offset == row->request.audio.data_length;
-    return iree_ok_status();
+    IREE_RETURN_IF_ERROR(loom_serve_audio_decoder_read(
+        row->input.decoder, service->options.decode_frames, row->samples,
+        &row->frame_count, &row->decoded));
   }
-  if (!row->input.decoder) {
-    IREE_RETURN_IF_ERROR(loom_serve_audio_decoder_allocate(
-        row->request.audio, service->generator.format.sample_rate,
-        service->generator.format.channels, service->host_allocator,
-        &row->input.decoder));
-  }
-  IREE_RETURN_IF_ERROR(loom_serve_audio_decoder_read(
-      row->input.decoder, service->options.decode_frames, row->samples,
-      &row->frame_count, &row->decoded));
-  // The codec's native F32 representation becomes the source ABI's F32LE at
+  // Decoded native F32 representation becomes the source ABI's F32LE at
   // this producer boundary. Little-endian targets eliminate these stores.
   for (iree_host_size_t i = 0;
        i < row->frame_count * service->generator.format.channels; ++i) {
@@ -389,10 +455,8 @@ static iree_status_t loom_serve_transcription_accept(
   iree_status_t status = loom_serve_transcription_parse(
       loom_serve_http_multipart_parts(request->multipart),
       service->options.name, service->generator.format, &pending.request);
-  if (iree_status_is_ok(status) && pending.request.pcm &&
-      pending.request.audio.data_length /
-              (service->generator.format.channels * sizeof(int16_t)) >
-          service->generator.frame_limit) {
+  if (iree_status_is_ok(status) &&
+      pending.request.normalized_frame_count > service->generator.frame_limit) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "PCM upload exceeds the model input frame limit");
   }
@@ -717,7 +781,8 @@ iree_status_t loom_serve_recognition_service_allocate(
                             loom_serve_model_kind_name(options->kind));
   }
   if (!options->name.size || !options->pending_capacity ||
-      !options->decode_frames || !generator.format.channels ||
+      !options->decode_frames || !options->conversion_limit ||
+      !generator.format.channels ||
       options->decode_frames >
           SIZE_MAX / sizeof(float) / generator.format.channels ||
       generator.request_capacity >
@@ -727,7 +792,8 @@ iree_status_t loom_serve_recognition_service_allocate(
               generator.request_capacity) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "recognition requires a name and bounded request/decode capacity");
+        "recognition requires a name and bounded request/decode capacity and "
+        "conversion storage");
   }
   loom_serve_recognition_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
