@@ -114,8 +114,15 @@ struct NativeInstance {
     });
     endpoints[5].gpu.gfx_ip = {9, 4, 2};
     endpoints[5].families.push_back({
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(amdf_queue_family_info_t),
         .command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
         .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_USER,
+        .format_version = AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1,
+        .format_features = AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE,
+        .roles = AMDF_QUEUE_ROLE_COMPUTE,
+        .user_queue_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                                   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
     });
   }
 
@@ -362,10 +369,11 @@ TEST_F(DriverTest, EnumerationQualifiesComputeBeforeAdvertisingEndpoints) {
   EXPECT_EQ(NativeInstance::current->activation_count, 0u);
   EXPECT_EQ(NativeInstance::current->open_count, 0u);
   EXPECT_EQ(Enumerate(IREE_SV("amdgpu2")),
-            (std::vector<iree_hal_device_id_t>{2, 4}));
+            (std::vector<iree_hal_device_id_t>{2, 4, 6}));
   EXPECT_EQ(Enumerate(IREE_SV("xdna")), (std::vector<iree_hal_device_id_t>{5}));
   EXPECT_EQ(Enumerate(IREE_SV("")),
-            (std::vector<iree_hal_device_id_t>{2, 4, 5}));
+            (std::vector<iree_hal_device_id_t>{2, 4, 5, 6}));
+  EXPECT_EQ(Enumerate(IREE_SV("cdna")), (std::vector<iree_hal_device_id_t>{6}));
   EXPECT_EQ(native_.query_count, query_count);
   EXPECT_EQ(native_.extension_query_count, 1u);
 }
@@ -413,35 +421,19 @@ TEST_F(DriverTest, NumericIdsCannotBypassPassiveQualification) {
 TEST_F(DriverTest, CdnaQualifiesNativeProtocolsIndependentlyOfArchitecture) {
   auto& endpoints = NativeInstance::current->endpoints;
   for (auto& endpoint : endpoints) {
-    endpoint.gpu.gfx_ip = {9, 4, 2};
+    if (endpoint.summary.engine_kind == AMDF_ENGINE_KIND_GPU) {
+      endpoint.gpu.gfx_ip = {9, 4, 2};
+    }
   }
-  const amdf_queue_family_info_t aql = {
-      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
-      .structure_size = sizeof(amdf_queue_family_info_t),
-      .command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
-      .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_USER,
-      .format_version = AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1,
-      .format_features = AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE,
-      .roles = AMDF_QUEUE_ROLE_COMPUTE,
-      .user_queue_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                                 AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
-  };
+  const amdf_queue_family_info_t aql = endpoints[5].families[0];
   endpoints[0].families = {aql};
   endpoints[0].families[0].user_queue_capabilities =
       AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER;
   endpoints[1].families = {aql};
   IREE_ASSERT_OK(CreateDriver());
 
-  iree_host_size_t count = 0;
-  iree_hal_device_info_t* infos = nullptr;
-  IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
-      driver_, IREE_SV("cdna"), iree_allocator_system(), &count, &infos));
-  EXPECT_EQ(count, 2u);
-  if (count == 2) {
-    EXPECT_EQ(infos[0].device_id, 2u);
-    EXPECT_EQ(infos[1].device_id, 4u);
-  }
-  iree_allocator_free(iree_allocator_system(), infos);
+  EXPECT_EQ(Enumerate(IREE_SV("cdna")),
+            (std::vector<iree_hal_device_id_t>{2, 4, 6}));
   EXPECT_EQ(NativeInstance::current->activation_count, 0u);
   EXPECT_EQ(NativeInstance::current->open_count, 0u);
   CreatePath(IREE_SV(""), IREE_STATUS_RESOURCE_EXHAUSTED, 2, IREE_SV("cdna"));
@@ -472,7 +464,7 @@ TEST_F(DriverTest, SchemeViewsReorderTheirOwnUnmaskedOrdinalsIndependently) {
             (std::vector<iree_hal_device_id_t>{2}));
   EXPECT_EQ(Enumerate(IREE_SV("xdna")), (std::vector<iree_hal_device_id_t>{5}));
   EXPECT_EQ(Enumerate(IREE_SV("")),
-            (std::vector<iree_hal_device_id_t>{2, 4, 5}));
+            (std::vector<iree_hal_device_id_t>{2, 4, 5, 6}));
   CreatePath(IREE_SV(""), IREE_STATUS_RESOURCE_EXHAUSTED, 4);
   CreatePath(IREE_SV("1"), IREE_STATUS_RESOURCE_EXHAUSTED, 2);
   CreatePath(IREE_SV("0"), IREE_STATUS_RESOURCE_EXHAUSTED, 2,
@@ -494,6 +486,26 @@ TEST_F(DriverTest, VisibilityIsCapturedOnceAndIdentityPathsRespectIt) {
              IREE_STATUS_RESOURCE_EXHAUSTED, 2, IREE_SV("amdgpu2"));
 }
 
+TEST_F(DriverTest, UnifiedGpuSelectionIncludesCdnaIndependently) {
+  gpu_visibility_.Set("2,1");
+  rdna_visibility_.Set("0");
+  cdna_visibility_.Set(" \t");
+  IREE_ASSERT_OK(CreateDriver());
+  EXPECT_EQ(Enumerate(IREE_SV("amdgpu2")),
+            (std::vector<iree_hal_device_id_t>{6, 4}));
+  EXPECT_EQ(Enumerate(IREE_SV("rdna")), (std::vector<iree_hal_device_id_t>{2}));
+  EXPECT_TRUE(Enumerate(IREE_SV("cdna")).empty());
+  EXPECT_EQ(Enumerate(IREE_SV("xdna")), (std::vector<iree_hal_device_id_t>{5}));
+  CreatePath(IREE_SV("0"), IREE_STATUS_RESOURCE_EXHAUSTED, 6,
+             IREE_SV("amdgpu2"));
+  CreatePath(IREE_SV("1"), IREE_STATUS_RESOURCE_EXHAUSTED, 4,
+             IREE_SV("amdgpu2"));
+  CreatePath(IREE_SV("id/00000000000000060000000000000000"),
+             IREE_STATUS_UNAVAILABLE, 0, IREE_SV("cdna"));
+  CreatePath(IREE_SV("id/00000000000000060000000000000000"),
+             IREE_STATUS_RESOURCE_EXHAUSTED, 6, IREE_SV("amdgpu2"));
+}
+
 TEST_F(DriverTest, EmptyVisibilityHidesOnlyItsScheme) {
   rdna_visibility_.Set(" \t");
   xdna_visibility_.Set(" \t");
@@ -501,8 +513,8 @@ TEST_F(DriverTest, EmptyVisibilityHidesOnlyItsScheme) {
   EXPECT_TRUE(Enumerate(IREE_SV("rdna")).empty());
   EXPECT_TRUE(Enumerate(IREE_SV("xdna")).empty());
   EXPECT_EQ(Enumerate(IREE_SV("amdgpu2")),
-            (std::vector<iree_hal_device_id_t>{2, 4}));
-  EXPECT_EQ(Enumerate(IREE_SV("")), (std::vector<iree_hal_device_id_t>{2, 4}));
+            (std::vector<iree_hal_device_id_t>{2, 4, 6}));
+  EXPECT_EQ(Enumerate(IREE_SV("")), (std::vector<iree_hal_device_id_t>{2, 4, 6}));
   CreatePath(IREE_SV(""), IREE_STATUS_NOT_FOUND, 0);
   CreatePath(IREE_SV(""), IREE_STATUS_NOT_FOUND, 0, IREE_SV("xdna"));
   CreatePath(IREE_SV("id/00000000000000040000000000000000"),
@@ -581,10 +593,15 @@ TEST_F(DriverTest, RegistryAliasesShareOneNativeOwner) {
   iree_hal_driver_t* xdna = nullptr;
   IREE_ASSERT_OK(iree_hal_driver_registry_acquire_driver(
       registry, IREE_SV("xdna"), &xdna));
+  iree_hal_driver_t* cdna = nullptr;
+  IREE_ASSERT_OK(iree_hal_driver_registry_acquire_driver(
+      registry, IREE_SV("cdna"), &cdna));
   EXPECT_EQ(driver_, gpu);
   EXPECT_EQ(driver_, xdna);
+  EXPECT_EQ(driver_, cdna);
   EXPECT_EQ(native_.instance_count, 1u);
   iree_hal_driver_registry_free(registry);
+  iree_hal_driver_release(cdna);
   iree_hal_driver_release(xdna);
   iree_hal_driver_release(gpu);
   CreatePath(IREE_SV("0"), IREE_STATUS_RESOURCE_EXHAUSTED, 2,
