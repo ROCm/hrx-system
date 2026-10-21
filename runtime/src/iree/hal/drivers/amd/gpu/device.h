@@ -41,7 +41,8 @@ typedef struct iree_hal_amd_gpu_device_options_t {
   uint32_t completion_spin_ns;
   // Initial per-queue storage. Native growth uses the fabric allocation owner.
   struct {
-    // Native command storage capacity in bytes.
+    // Native command storage capacity in bytes, or zero for the protocol's
+    // default: 64 KiB for PM4 and 256 KiB for AQL.
     uint64_t ring_byte_length;
     // Power-of-two number of live native completion records.
     uint32_t retirement_capacity;
@@ -71,8 +72,9 @@ typedef struct iree_hal_amd_gpu_device_options_t {
   } tsan;
 } iree_hal_amd_gpu_device_options_t;
 
-// Initializes ordinary provisioning sizes and automatic PM4 family selection.
-// The caller may select an exact native family or explicit host NUMA placement.
+// Initializes ordinary provisioning sizes and automatic native family
+// selection. The caller may select an exact native family or explicit host NUMA
+// placement.
 void iree_hal_amd_gpu_device_options_initialize(
     iree_hal_amd_gpu_device_options_t* out_options);
 

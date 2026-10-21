@@ -196,7 +196,7 @@ void iree_hal_amd_gpu_device_options_initialize(
       .queue_count = 1,
       .host_numa_node = UINT32_MAX,
       .completion_spin_ns = 100000,
-      .queue = {.ring_byte_length = 65536,
+      .queue = {.ring_byte_length = 0,
                 .retirement_capacity = 256,
                 .argument_capacity = 65536,
                 .capture_block_size = 1024,
@@ -1130,7 +1130,10 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
       .queue_count = options->queue_count,
       .family_ordinal = family_ordinal,
       .publication_mode = publication_mode,
-      .command_byte_capacity = options->queue.ring_byte_length,
+      .command_byte_capacity = options->queue.ring_byte_length
+                                   ? options->queue.ring_byte_length
+                               : aql ? 256 * 1024
+                                     : 64 * 1024,
       .memory = &device->memory.control,
       .scratch_memory = &device->scratch.memory,
       .scratch_profile = device->scratch.profile,

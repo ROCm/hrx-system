@@ -31,6 +31,10 @@ class AqlProgramTest : public GpuNativeTest,
     return AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
   }
 
+  uint32_t output_count() const {
+    return std::max(97u, GetParam() * 3 / 4 + 1);
+  }
+
   void SetUp() override {
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
@@ -55,7 +59,8 @@ class AqlProgramTest : public GpuNativeTest,
         iree_allocator_system(), &code_));
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_code_publish(code_, &pool_.code));
     IREE_ASSERT_OK(iree_hal_amd_fabric_memory_allocate(
-        context_->api, &control_policy_, 8192, 256, context_->event_sink,
+        context_->api, &control_policy_,
+        4096 + output_count() * sizeof(uint32_t), 256, context_->event_sink,
         &control_, nullptr));
     IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
         context_->api->memory_query_address(
@@ -172,7 +177,7 @@ class AqlProgramTest : public GpuNativeTest,
 };
 
 TEST_P(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
-  const uint32_t output_count = ring_.capacity == 64 ? 97 : 769;
+  const uint32_t output_count = this->output_count();
   const uint32_t packet_count = 1 + output_count + output_count / 3;
   const uint32_t data_offset = packet_count * 64;
   std::vector<iree_hal_amd_gpu_aql_packet_t> packets;
@@ -465,6 +470,6 @@ TEST_P(AqlProgramTest, TaggedCompletionsCaptureAndElideAcrossRingWrap) {
 }
 
 INSTANTIATE_TEST_SUITE_P(NativeRings, AqlProgramTest,
-                         ::testing::Values(64u, 1024u));
+                         ::testing::Values(64u, 1024u, 4096u));
 
 }  // namespace
