@@ -150,7 +150,7 @@ class GpuProtocolInteropTest : public GpuNativeTest {
 
   // Pending native ownership transfers only after complete peer construction.
   iree_hal_amd_gpu_context_t* peer_context_ = nullptr;
-  // Allocator outlives the peer's asynchronous final release.
+  // Allocator outlives all peer resources and their synchronous teardown.
   DeviceAllocator peer_allocator_;
   // Independent PM4 device sharing the fixture's process fabric.
   iree_hal_device_t* peer_ = nullptr;

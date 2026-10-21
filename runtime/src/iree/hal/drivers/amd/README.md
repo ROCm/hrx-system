@@ -37,8 +37,9 @@ construction with INSTANCE bounds native reclamation to the fabric at the cost
 of services unsupported by secondary KFD contexts, including host registration.
 
 The `xdna`, `rdna`, `cdna`, and `amdgpu2` schemes share that driver identity. `xdna`
-selects NPUs, `rdna` selects RDNA GPUs, `cdna` selects CDNA GPUs, and `amdgpu2` selects all GPUs supported
-by this build. Both `rdna:0` and `rdna://0` select the first visible RDNA device;
+selects NPUs, `rdna` selects RDNA GPUs, `cdna` selects CDNA GPUs, and `amdgpu2`
+selects all GPUs supported by this build. Both `rdna:0` and `rdna://0` select the
+first visible RDNA device;
 `xdna:0?columns=4` configures an NPU context. The legacy `amdgpu` driver remains
 independent.
 
@@ -109,6 +110,55 @@ policy, add a thread, or change submission and retirement ordering.
 Each materialized device retains the fabric independently. Releasing the
 registry and driver leaves those devices operational. The fabric owns the native
 instance and its discovery snapshot; engine contexts own their native children.
+
+## Native GPU execution
+
+PM4 and AQL own their packet encodings and publication rules under `gpu/queue/`.
+They share dependency admission, captured input ownership, resident program
+instances, transfers, and semaphore frontiers. A native FIFO provides the
+execution order used to prove reuse; HAL submissions still express their
+dependencies with semaphores. Unresolved host dependencies park their captured
+operation without blocking independent ready work.
+
+Direct AQL dispatches write complete packet bodies and publish the header last.
+Device-written indirect counts use the same rule: the target packet remains
+INVALID until the patch dispatch publishes it. Neither producer reads or
+performs read-modify-write operations on the native ring. The firmware read
+index returns packet credit; separate native completion signals establish when
+arguments, bindings, executable references, and other payload ownership can be
+retired.
+
+Large recordings keep packet templates, fixups, and private data in device-local
+storage. Submission uploads invocation inputs, reserves bounded ring ranges,
+and issues GPU fixup and materialization kernels. Materialization copies packets
+into the reserved slots and publishes the first header after all packet writes
+are visible. Host work scales with the number of chunks and supplied inputs,
+not a replay of each recorded dispatch. The AQL default ring is 256 KiB, with at
+most 2048 payload packets per chunk; explicit ring sizes are preserved. PM4
+retains its 64 KiB default and executes resident indirect buffers.
+
+The host may publish multiple AQL chunks ahead while ring credit permits.
+Each chunk's ordered terminal packet joins its payload before the next chunk's
+materializer runs. This bounds storage and retirement without a device-wide
+idle. A recording containing exactly one direct dispatch, at most 512 bytes of
+packet/private data, and at most sixteen fixups instead uses a sealed host
+template. Submission copies and patches that bounded template directly, avoiding
+the two preparation kernels required by the resident path.
+
+Resident instances use vector-clock frontiers to prove safe reuse across queues.
+Same-FIFO reuse can pipeline behind the previous invocation; overlapping work
+without that proof acquires a separate instance. Scratch growth uses libamdf's
+firmware request and caller-owned backing contract, with cold allocation on the
+fabric allocation service. Explicit trim releases idle scratch and cached
+storage. Synchronous executable and command-buffer construction allocate on the
+calling thread.
+
+The existing device workers own deferred admission, native completion, host
+actions, and feedback. Dynamic queues join those owners and receive their own
+native publication resources. A failed public semaphore is not a native
+retirement proof: already-published work retains its resources until the native
+completion or teardown boundary. Queue and device destruction join their native
+users before returning.
 
 ## Shader diagnostics and sanitizers
 
@@ -187,8 +237,12 @@ and completion locks. End releases the session even when the sink fails.
 
 Disabled sessions allocate no event storage or per-operation profile metadata.
 Enabled captures place metadata in the existing submission allocation and use
-bounded stream storage. Hardware counters and capture filters are rejected
-explicitly by this producer.
+bounded stream storage. Capture filters select dispatch records by physical
+device ordinal, queue ordinal, command-buffer identity, command-index range,
+and executable function pattern. The session retains its own pattern bytes.
+Whole-invocation exclusions avoid dispatch capture; per-command exclusions are
+applied during retirement without a submission-time walk of the recording.
+Hardware counters require a native counter service and are rejected explicitly.
 
 ### Dispatch timing
 
@@ -199,24 +253,30 @@ submission. Recorded command buffers must retain it at recording time with
 `IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA` or
 `IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA`.
 
-Each active dispatch uses two native timestamp words in invocation-owned
-argument storage. The normal GPU fixup pass patches their addresses into the
-resident program, so concurrent and pipelined invocations have independent
-samples without a host walk over recorded commands. Retirement copies completed
-samples into the bounded host stream before returning the argument storage.
-Export retains host reflection metadata without retaining executable code or
-model buffers until a later sink flush.
+PM4 records two native timestamp words per dispatch in invocation-owned argument
+storage. Sample packets join prior compute before the start and the dispatch's
+compute before the end. They measure isolated dispatch completion, including
+native issue and join costs; enabling them changes dispatch overlap. The normal
+GPU fixup pass supplies the sample addresses. Profile-capable recordings retain
+optional sample packets and fixups; the packets become NOPs for an unprofiled
+invocation.
 
-Intervals join prior compute before the start sample and the dispatch's compute
-before the end sample. They measure isolated dispatch completion, including
-native issue and join costs; enabling them changes dispatch overlap. Raw ticks
-use the exact native family's timestamp frequency. They have no inferred host
-epoch and cannot establish host-request-to-first-workgroup latency.
+AQL enables the native queue's firmware timestamp mode for dispatch capture.
+Each sampled dispatch receives an invocation-owned 64-byte native completion
+signal containing its start/end timestamps. The materializer initializes and
+patches these signals for resident chunks; the direct path prepares them on the
+host. Resident recordings with inactive capture leave dispatch completion fields
+zero and use the ordinary chunk completion signal for retirement. Recorded
+per-command filters select exported samples without changing the packet layout.
 
-Profile-capable recordings retain optional sample packets and fixups even when
-capture is inactive; those packets become NOPs for an unprofiled invocation.
-Ordinary recordings retain neither the sample packets nor their fixups. Queue
-events remain the lighter option when device intervals are unnecessary.
+Concurrent and pipelined invocations have independent samples on both protocols.
+Each retiring chunk owns its sample range and copies completed timestamps into
+the bounded host stream before returning argument storage. Export retains host
+reflection metadata without retaining executable code or model buffers until a
+later sink flush. Raw ticks use the exact native family's timestamp frequency;
+they have no inferred host epoch and cannot establish
+host-request-to-first-workgroup latency. Queue events remain the lighter option
+when device intervals are unnecessary.
 
 ## Memory construction
 
