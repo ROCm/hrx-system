@@ -726,6 +726,7 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::cts::util::profile_test_util
+    iree::hal::cts::util::test_base
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

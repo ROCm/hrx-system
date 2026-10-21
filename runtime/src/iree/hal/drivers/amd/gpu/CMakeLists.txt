@@ -187,6 +187,7 @@ iree_cc_library(
     ::context
     amdf::headers
     iree::base
+    iree::base::threading
     iree::hal
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::status

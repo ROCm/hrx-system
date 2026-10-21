@@ -195,6 +195,73 @@ TEST_P(TsanPlacementTest, QualifiesPublicationBeforeAllocatingShadow) {
   EXPECT_EQ(tsan_.config.shadow_size, 256u);
 }
 
+TEST_P(TsanPlacementTest, FailedImagePreparationRollsBackOnlyNewMembership) {
+  if (!GetParam()) {
+    local_.publication_status =
+        amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  const iree_hal_amd_gpu_tsan_options_t options = {.shadow_size = 256};
+  iree_hal_amd_gpu_tsan_registry_t registry;
+  iree_hal_amd_gpu_tsan_registry_initialize(&context_, 5, 0, &options,
+                                            iree_allocator_system(), &registry);
+  struct Image {
+    // Dependency whose native placement can fail independently of shadow setup.
+    bool fail = false;
+    // Current placement ownership, removed during either rollback or release.
+    bool placed = false;
+    // Embedded registration follows the same ownership as a native executable.
+    iree_hal_amd_gpu_tsan_client_t client = {};
+    Image() {
+      client.user_data = this;
+      client.prepare = [](void* user_data, uint32_t ordinal,
+                          const iree_hal_amd_gpu_tsan_config_t* config) {
+        auto& image = *static_cast<Image*>(user_data);
+        EXPECT_EQ(ordinal, 3u);
+        EXPECT_EQ(config->shadow_base, 0x10000u);
+        image.placed = true;
+        return image.fail
+                   ? iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED)
+                   : iree_ok_status();
+      };
+      client.release = [](void* user_data, uint32_t ordinal) {
+        if (ordinal == 3) {
+          static_cast<Image*>(user_data)->placed = false;
+        }
+      };
+    }
+  } first, second, rejected;
+  IREE_EXPECT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry, &first.client));
+  IREE_EXPECT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry, &second.client));
+  first.fail = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_amd_gpu_tsan_registry_add_queue(&registry, 3));
+  EXPECT_FALSE(first.placed);
+  EXPECT_FALSE(second.placed);
+  EXPECT_EQ(registry.queues[3], nullptr);
+  EXPECT_TRUE(local_.bytes.empty());
+  EXPECT_TRUE(system_.bytes.empty());
+  first.fail = false;
+  IREE_EXPECT_OK(iree_hal_amd_gpu_tsan_registry_add_queue(&registry, 3));
+  EXPECT_TRUE(first.placed);
+  EXPECT_TRUE(second.placed);
+  rejected.fail = true;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_amd_gpu_tsan_registry_register(&registry, &rejected.client));
+  EXPECT_EQ(rejected.client.registry, nullptr);
+  EXPECT_FALSE(rejected.placed);
+  EXPECT_TRUE(first.placed);
+  EXPECT_TRUE(second.placed);
+  iree_hal_amd_gpu_tsan_registry_remove_queue(&registry, 3);
+  EXPECT_FALSE(first.placed);
+  EXPECT_FALSE(second.placed);
+  iree_hal_amd_gpu_tsan_registry_unregister(&first.client);
+  iree_hal_amd_gpu_tsan_registry_unregister(&second.client);
+  iree_hal_amd_gpu_tsan_registry_deinitialize(&registry);
+}
+
 INSTANTIATE_TEST_SUITE_P(LocalPublication, TsanPlacementTest,
                          ::testing::Bool());
 

@@ -734,6 +734,57 @@ TEST_F(GpuProfileTest, CompletedSamplesAndMetadataOutliveTheirOriginalOwners) {
   EXPECT_TRUE(sink_.events.empty());
 }
 
+TEST_F(GpuProfileTest, PlacementHistoryGrowsDuringFlushWithoutRepeatingImages) {
+  options_.data_families = IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA;
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  ReflectionExecutable executable;
+  iree_hal_amd_gpu_profile_executable_t* metadata = nullptr;
+  IREE_ASSERT_OK(executable.Capture(&metadata));
+  iree_hal_amd_gpu_profile_operation_t operation;
+  iree_hal_amd_gpu_profile_operation_initialize(
+      profile_, 0, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH, 0, 1, 1,
+      &operation);
+  operation.dispatch = {metadata, iree_hal_profile_dispatch_event_default()};
+  operation.completion.count = 1;
+  std::barrier<> start(2);
+  std::thread placements([&] {
+    start.arrive_and_wait();
+    for (uint64_t i = 0; i < 64; ++i) {
+      IREE_EXPECT_OK(iree_hal_amd_gpu_profile_executable_add_load(
+          metadata, executable.image.virtual_base, executable.image.byte_length,
+          0x300000000ull + i * 0x1000));
+    }
+  });
+  start.arrive_and_wait();
+  for (uint32_t i = 0; i < 64; ++i) {
+    iree_hal_amd_gpu_profile_operation_complete(profile_, &operation,
+                                                &operation.completion);
+    IREE_EXPECT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  }
+  placements.join();
+  iree_hal_amd_gpu_profile_operation_complete(profile_, &operation,
+                                              &operation.completion);
+  sink_.fail_content_type =
+      IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_CODE_OBJECT_LOADS;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_executable_add_load(
+      metadata, executable.image.virtual_base, executable.image.byte_length,
+      0x400000000ull));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        iree_hal_amd_gpu_profile_flush(profile_));
+  sink_.fail_content_type = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  EXPECT_EQ(sink_.code_objects.size(), 1u);
+  ASSERT_EQ(sink_.loads.size(), 67u);
+  for (uint64_t i = 0; i < 64; ++i) {
+    EXPECT_EQ(sink_.loads[i + 2].load_delta,
+              0x300000000ull + i * 0x1000 - executable.image.virtual_base);
+  }
+  EXPECT_EQ(sink_.loads.back().load_delta,
+            0x400000000ull - executable.image.virtual_base);
+  iree_hal_amd_gpu_profile_executable_release(metadata);
+  iree_hal_executable_release(&executable.base);
+}
+
 TEST_F(GpuProfileTest, DispatchDropsAndConcurrentFlushKeepOwnershipBounded) {
   options_.data_families = IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;
   ASSERT_NO_FATAL_FAILURE(Begin(100000000));

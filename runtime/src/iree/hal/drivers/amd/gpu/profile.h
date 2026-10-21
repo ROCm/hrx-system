@@ -36,6 +36,14 @@ iree_status_t iree_hal_amd_gpu_profile_executable_create(
     uint32_t load_count, const uint64_t* load_addresses,
     iree_allocator_t host_allocator,
     iree_hal_amd_gpu_profile_executable_t** out_metadata);
+
+// Appends a newly placed queue variant to the retained host history. Flush
+// serializes the resulting load records independently of native image lifetime.
+// NULL metadata requires no work; failure leaves the prior history unchanged.
+iree_status_t iree_hal_amd_gpu_profile_executable_add_load(
+    iree_hal_amd_gpu_profile_executable_t* metadata, uint64_t virtual_base,
+    uint64_t byte_length, uint64_t address);
+
 void iree_hal_amd_gpu_profile_executable_retain(
     iree_hal_amd_gpu_profile_executable_t* metadata);
 void iree_hal_amd_gpu_profile_executable_release(

@@ -25,7 +25,7 @@ extern "C" {
 // Captured construction facts for one exact executable family. Selection is
 // cold device/family work, independent of the image's serialized frontend.
 typedef struct iree_hal_amd_gpu_executable_options_t {
-  // Qualified physical compiler identity, including active feature modes.
+  // Borrowed device-owned compiler identity, including active feature modes.
   const iree_hal_amd_gpu_target_identity_t* target;
   // Native family ordinal; its command protocol is independent of target ISA.
   uint32_t native_family_ordinal;
@@ -35,7 +35,7 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   const iree_hal_amd_fabric_memory_options_t* memory;
   // Device-owned instruction publication used by AQL, absent for PM4.
   iree_hal_amd_gpu_aql_code_t* aql_code;
-  // Upload resources borrowed through image construction only.
+  // Device-owned upload resources for initial and later queue placements.
   struct {
     // Host-visible initialization backing, used only without a local host view.
     const iree_hal_amd_fabric_memory_options_t* memory;
@@ -54,17 +54,16 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   iree_hal_amd_gpu_feedback_t* feedback;
   // Optional shadow namespace used by code-object globals and data ranges.
   iree_hal_amd_fabric_asan_t* asan;
-  // Number of provisioned queue shadow records; zero when TSAN is disabled.
-  uint32_t tsan_count;
-  // Borrowed device-owned queue records, consumed during image placement.
-  const iree_hal_amd_gpu_tsan_t* tsan;
+  // Optional cold registry preparing placements for current and future queues.
+  iree_hal_amd_gpu_tsan_registry_t* tsan;
 } iree_hal_amd_gpu_executable_options_t;
 
 // Copies the public artifact, admits its image, and loads native backing for
 // one native compute family. The family belongs to a sealed device group;
-// context and family remain borrowed through final native cleanup. Other option
-// storage is consumed during construction. Success returns one owning HAL
-// resource reference; failure leaves out_executable NULL after joining
+// context, family, and option services remain borrowed through final native
+// cleanup. Instrumented images copy placement policy to prepare later queues;
+// ordinary images consume it during construction. Success returns one owning
+// HAL resource reference; failure leaves out_executable NULL after joining
 // rollback. Final release retires host metadata inline and submits the native
 // backing batch using embedded release storage. The context joins that batch
 // before teardown.
@@ -88,7 +87,7 @@ iree_status_t iree_hal_amd_gpu_executable_lookup_pm4(
     iree_hal_executable_t* executable, iree_hal_executable_function_t token,
     const iree_hal_amd_gpu_pm4_function_t** out_function);
 
-// Selects the prepared placement for a provisioned queue in this exact family.
+// Selects the prepared placement for a live queue in this exact family.
 // The owning queue supplies its construction ordinal; only the external
 // function token requires validation. Ordinary images share one placement.
 iree_status_t iree_hal_amd_gpu_executable_lookup_pm4_for_queue(

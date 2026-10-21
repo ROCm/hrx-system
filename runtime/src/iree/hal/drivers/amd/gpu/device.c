@@ -169,10 +169,8 @@ typedef struct iree_hal_amd_gpu_device_t {
     iree_hal_amd_fabric_memory_backend_t backend;
     // Optional ASAN namespace; absent devices allocate no sanitizer metadata.
     iree_hal_amd_fabric_asan_t* asan;
-    // Device-owned shadow records indexed by provisioned queue ordinal.
-    iree_hal_amd_gpu_tsan_t* tsan;
-    // Initialized or zeroed records requiring native cleanup.
-    uint32_t tsan_count;
+    // Optional cold membership of queue shadows and instrumented images.
+    iree_hal_amd_gpu_tsan_registry_t* tsan;
     // Persistent native access set used by internal control/image allocations.
     amdf_memory_device_access_t access;
     // Qualified coherent system backing for native control and placed images.
@@ -612,10 +610,7 @@ static bool iree_hal_amd_gpu_device_release_children(
   }
   // All executable payloads and their sanitizer registrations have retired.
   // Native backing release joins before the final address domain is removed.
-  for (uint32_t i = 0; i < device->memory.tsan_count; ++i) {
-    iree_hal_amd_gpu_tsan_deinitialize(device->context,
-                                       &device->memory.tsan[i]);
-  }
+  iree_hal_amd_gpu_tsan_registry_deinitialize(device->memory.tsan);
   iree_allocator_free(device->host_allocator, device->memory.tsan);
   if (device->memory.asan) {
     if (!iree_hal_amd_fabric_asan_deinitialize(device->memory.asan)) {
@@ -793,19 +788,20 @@ static void iree_hal_amd_gpu_device_prepare_feedback(void* user_data) {
     }
   }
   if (iree_status_is_ok(prepare->status) && prepare->tsan_enabled) {
-    prepare->status = iree_allocator_malloc_array(
-        device->host_allocator, options->queue_count,
-        sizeof(*device->memory.tsan), (void**)&device->memory.tsan);
+    prepare->status = iree_allocator_malloc(device->host_allocator,
+                                            sizeof(*device->memory.tsan),
+                                            (void**)&device->memory.tsan);
     if (iree_status_is_ok(prepare->status)) {
-      device->memory.tsan_count = options->queue_count;
+      iree_hal_amd_gpu_tsan_registry_initialize(
+          device->context, prepare->queue_family_ordinal, options->queue_count,
+          &options->tsan.memory, device->host_allocator, device->memory.tsan);
+      device->membership.tsan = device->memory.tsan;
       device->feedback.tsan_report_policy = options->tsan.report_policy;
     }
     for (uint32_t i = 0;
-         i < device->memory.tsan_count && iree_status_is_ok(prepare->status);
-         ++i) {
-      prepare->status = iree_hal_amd_gpu_tsan_initialize(
-          device->context, prepare->queue_family_ordinal, &options->tsan.memory,
-          &device->memory.tsan[i]);
+         i < options->queue_count && iree_status_is_ok(prepare->status); ++i) {
+      prepare->status =
+          iree_hal_amd_gpu_tsan_registry_add_queue(device->memory.tsan, i);
     }
   }
 }
@@ -1369,7 +1365,6 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .frontier_tracker = device->topology.frontier.tracker,
       .feedback = device->feedback.context ? &device->feedback : NULL,
       .asan = device->memory.asan,
-      .tsan_count = device->memory.tsan_count,
       .tsan = device->memory.tsan,
   };
   return iree_hal_amd_gpu_executable_create(family, device->context, &options,

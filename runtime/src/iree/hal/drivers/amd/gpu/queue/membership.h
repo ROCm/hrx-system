@@ -11,6 +11,7 @@
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/backing.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
+#include "iree/hal/drivers/amd/gpu/tsan.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -111,6 +112,8 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   iree_hal_amd_gpu_queue_sources_t* sources;
   // Borrowed active capture, installed on new queues before they are exposed.
   iree_hal_amd_gpu_profile_t* profile;
+  // Optional queue-local shader state, borrowed from the parent device.
+  iree_hal_amd_gpu_tsan_registry_t* tsan;
   // Immutable non-compute publisher sources at provisioned_count + [0, 3).
   iree_hal_amd_gpu_publication_source_t publication_tail[3];
   // Number of non-compute completion callbacks following all queue callbacks.

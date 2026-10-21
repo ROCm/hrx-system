@@ -186,6 +186,7 @@ iree_runtime_cc_library(
         ":context",
         "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/drivers/amd/fabric:memory",

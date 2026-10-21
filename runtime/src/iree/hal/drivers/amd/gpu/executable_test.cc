@@ -746,9 +746,8 @@ TEST_P(ExecutableTest, RuntimeConfigurationRequiresProvisionedServices) {
 }
 
 TEST_P(ExecutableTest, TsanProvisioningDoesNotSerializeOrdinaryFunctions) {
-  iree_hal_amd_gpu_tsan_t shadows[2] = {};
-  options_.tsan_count = IREE_ARRAYSIZE(shadows);
-  options_.tsan = shadows;
+  iree_hal_amd_gpu_tsan_registry_t registry = {.provisioned_count = 2};
+  options_.tsan = &registry;
   IREE_ASSERT_OK(Load());
   EXPECT_EQ(native_.allocations, 1u);
   EXPECT_EQ(iree_hal_amd_gpu_executable_queue_image_addresses(executable_),
@@ -781,9 +780,8 @@ TEST_P(ExecutableTest,
   ASSERT_NE(symbol, nullptr);
   ASSERT_GT(symbol->length, sizeof(iree_hal_amd_gpu_tsan_config_t));
   RenameConfiguration("iree_tsan_config");
-  iree_hal_amd_gpu_tsan_t shadow = {};
-  options_.tsan_count = 1;
-  options_.tsan = &shadow;
+  iree_hal_amd_gpu_tsan_registry_t registry = {.provisioned_count = 1};
+  options_.tsan = &registry;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Load());
   EXPECT_EQ(executable_, nullptr);
   EXPECT_EQ(native_.calls, 0u);

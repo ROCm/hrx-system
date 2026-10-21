@@ -224,6 +224,8 @@ static bool iree_hal_amd_gpu_queue_membership_release(void* user_data,
   }
   if (amdf_status_is_ok(status)) {
     slot->epoch = membership->lifecycle->completed_epoch(queue);
+    iree_hal_amd_gpu_tsan_registry_remove_queue(membership->tsan,
+                                                slot->ordinal);
     iree_slim_mutex_lock(&membership->slots_mutex);
     slot->queue = NULL;
     iree_slim_mutex_unlock(&membership->slots_mutex);
@@ -342,6 +344,10 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
         queue, iree_hal_amd_gpu_queue_membership_release, slot);
     if (iree_status_is_ok(status) && membership->profile) {
       status = membership->lifecycle->set_profile(queue, membership->profile);
+    }
+    if (iree_status_is_ok(status)) {
+      status =
+          iree_hal_amd_gpu_tsan_registry_add_queue(membership->tsan, ordinal);
     }
   }
   iree_slim_mutex_unlock(&membership->mutex);

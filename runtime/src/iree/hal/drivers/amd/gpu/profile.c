@@ -30,11 +30,66 @@ struct iree_hal_amd_gpu_profile_executable_t {
   iree_hal_profile_executable_code_object_record_t code_object;
   // Contiguous original bytes, kept alive by source without a payload copy.
   iree_const_byte_span_t image;
-  // Packed load records, owned by this allocation, including queue variants.
-  iree_const_byte_span_t loads;
+  // Serializes cold placement additions and explicit load-record emission.
+  iree_slim_mutex_t loads_mutex;
+  // Packed retained placement history, extended only on queue acquisition.
+  iree_byte_span_t loads;
+  // Initial inline records; a grown loads array owns its separate allocation.
+  uint8_t* initial_loads;
+  // Capacity of loads in records, including unused trailing storage.
+  iree_host_size_t load_capacity;
+  // Records already emitted in emitted_session; reset when a new session emits.
+  iree_host_size_t emitted_load_count;
   // Last emitted device-local session, accessed only by serialized flush/end.
   uint64_t emitted_session;
 };
+
+iree_status_t iree_hal_amd_gpu_profile_executable_add_load(
+    iree_hal_amd_gpu_profile_executable_t* metadata, uint64_t virtual_base,
+    uint64_t byte_length, uint64_t address) {
+  if (!metadata) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t record_size =
+      sizeof(iree_hal_profile_executable_code_object_load_record_t);
+  iree_slim_mutex_lock(&metadata->loads_mutex);
+  const iree_host_size_t count = metadata->loads.data_length / record_size;
+  iree_status_t status = iree_ok_status();
+  if (count == metadata->load_capacity) {
+    iree_host_size_t capacity = 0;
+    if (!iree_host_size_checked_mul_add(4, count, 2, &capacity)) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "GPU profile placement history overflows");
+    }
+    uint8_t* records = NULL;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc_array(metadata->host_allocator, capacity,
+                                           record_size, (void**)&records);
+    }
+    if (iree_status_is_ok(status)) {
+      memcpy(records, metadata->loads.data, metadata->loads.data_length);
+      if (metadata->loads.data != metadata->initial_loads) {
+        iree_allocator_free(metadata->host_allocator, metadata->loads.data);
+      }
+      metadata->loads.data = records;
+      metadata->load_capacity = capacity;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_profile_executable_code_object_load_record_t load =
+        iree_hal_profile_executable_code_object_load_record_default();
+    load.physical_device_ordinal = 0;
+    load.executable_id = metadata->record.executable_id;
+    load.code_object_id = metadata->code_object.code_object_id;
+    load.load_delta = (int64_t)(address - virtual_base);
+    load.load_size = byte_length;
+    memcpy(metadata->loads.data + metadata->loads.data_length, &load,
+           sizeof(load));
+    metadata->loads.data_length += record_size;
+  }
+  iree_slim_mutex_unlock(&metadata->loads_mutex);
+  return status;
+}
 
 struct iree_hal_amd_gpu_profile_commands_t {
   // Independent host metadata resource, without resident IB ownership.
@@ -59,6 +114,10 @@ static iree_atomic_int64_t iree_hal_amd_gpu_profile_next_executable_id =
 static void iree_hal_amd_gpu_profile_executable_destroy(
     iree_hal_resource_t* resource) {
   iree_hal_amd_gpu_profile_executable_t* metadata = (void*)resource;
+  if (metadata->loads.data != metadata->initial_loads) {
+    iree_allocator_free(metadata->host_allocator, metadata->loads.data);
+  }
+  iree_slim_mutex_deinitialize(&metadata->loads_mutex);
   iree_byte_sequence_release(metadata->source);
   iree_allocator_free(metadata->host_allocator, metadata);
 }
@@ -120,6 +179,7 @@ iree_status_t iree_hal_amd_gpu_profile_executable_create(
     };
     iree_hal_resource_initialize(&vtable, &metadata->resource);
     metadata->host_allocator = host_allocator;
+    iree_slim_mutex_initialize(&metadata->loads_mutex);
     metadata->record = iree_hal_profile_executable_record_default();
     metadata->record.executable_id = (uint64_t)iree_atomic_fetch_add(
         &iree_hal_amd_gpu_profile_next_executable_id, 1,
@@ -134,10 +194,12 @@ iree_status_t iree_hal_amd_gpu_profile_executable_create(
     metadata->code_object.executable_id = metadata->record.executable_id;
     metadata->code_object.code_object_id = metadata->record.executable_id;
     metadata->code_object.data_length = image_bytes.data_length;
-    metadata->loads = iree_make_const_byte_span(
+    metadata->loads = iree_make_byte_span(
         (uint8_t*)metadata + loads_offset,
         load_count *
             sizeof(iree_hal_profile_executable_code_object_load_record_t));
+    metadata->initial_loads = metadata->loads.data;
+    metadata->load_capacity = load_count;
     uint8_t* cursor = (uint8_t*)metadata + loads_offset;
     for (uint32_t i = 0; i < load_count; ++i) {
       iree_hal_profile_executable_code_object_load_record_t load =
@@ -350,7 +412,7 @@ static iree_status_t iree_hal_amd_gpu_profile_write(
   return iree_hal_profile_sink_write(profile->sink, &metadata, 1, &bytes);
 }
 
-static iree_status_t iree_hal_amd_gpu_profile_write_executable(
+static iree_status_t iree_hal_amd_gpu_profile_write_executable_metadata(
     iree_hal_amd_gpu_profile_t* profile,
     iree_hal_amd_gpu_profile_executable_t* executable) {
   if (executable->emitted_session == profile->metadata.session_id) {
@@ -372,11 +434,34 @@ static iree_status_t iree_hal_amd_gpu_profile_write_executable(
   };
   IREE_RETURN_IF_ERROR(iree_hal_profile_sink_write(
       profile->sink, &metadata, IREE_ARRAYSIZE(image_spans), image_spans));
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_write(
-      profile, IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_CODE_OBJECT_LOADS,
-      UINT32_MAX, executable->loads));
   executable->emitted_session = profile->metadata.session_id;
+  executable->emitted_load_count = 0;
   return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amd_gpu_profile_write_executable(
+    iree_hal_amd_gpu_profile_t* profile,
+    iree_hal_amd_gpu_profile_executable_t* executable) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_profile_write_executable_metadata(profile, executable));
+  iree_slim_mutex_lock(&executable->loads_mutex);
+  const iree_host_size_t record_size =
+      sizeof(iree_hal_profile_executable_code_object_load_record_t);
+  const iree_host_size_t offset = executable->emitted_load_count * record_size;
+  iree_status_t status = iree_ok_status();
+  if (offset != executable->loads.data_length) {
+    status = iree_hal_amd_gpu_profile_write(
+        profile, IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_CODE_OBJECT_LOADS,
+        UINT32_MAX,
+        iree_make_const_byte_span(executable->loads.data + offset,
+                                  executable->loads.data_length - offset));
+    if (iree_status_is_ok(status)) {
+      executable->emitted_load_count =
+          executable->loads.data_length / record_size;
+    }
+  }
+  iree_slim_mutex_unlock(&executable->loads_mutex);
+  return status;
 }
 
 static iree_status_t iree_hal_amd_gpu_profile_flush_dispatches(
