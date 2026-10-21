@@ -391,10 +391,14 @@ loom_test(
         "tests/mtp_projection_reference.loom",
     ],
     benchmark_smoke = False,
-    configs = {"flash_next.token_count": "2"},
+    configs = {
+        "flash_next.context_capacity": "64",
+        "flash_next.token_count": "2",
+    },
     execution_profiles = [
         RDNA_HARDWARE_PROFILE,
         RDNA_ACCESS_PROFILE,
+        RDNA_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -454,6 +458,7 @@ loom_test(
     execution_profiles = [
         RDNA_HARDWARE_PROFILE,
         RDNA_ACCESS_PROFILE,
+        RDNA_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )

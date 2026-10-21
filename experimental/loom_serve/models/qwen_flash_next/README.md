@@ -304,6 +304,13 @@ hidden streams. Each projection rounds independently to BF16 before their final
 addition. Small speculative cohorts retain the original wave reduction, which
 avoids a temporary embedding result and underfilled matrix dispatches.
 
+Catch-up normalization reads accepted target rows through the existing token
+map and a resident-row origins table. First-row inputs come from committed
+carry restored into the residual buffer; normalization finishes before the
+projection overwrites that buffer. Later inputs stay in the immutable target
+plane, eliminating the full hidden-state copy. Recursive proposals retain
+their private hidden inputs and share the same normalization and projection.
+
 Expert projections group routes by their selected expert. One GPU workgroup
 builds a histogram, scans record offsets, and scatters original
 `token * 10 + slot` identities into records. Each record carries its expert,
