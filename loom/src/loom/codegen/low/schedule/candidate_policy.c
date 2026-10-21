@@ -432,16 +432,6 @@ static bool loom_low_schedule_candidate_score_less(
       return lhs_completion_capacity < rhs_completion_capacity;
     }
   }
-  // A pinned aggregate completion remains active when pressure recovery
-  // changes modes. Its retained identity keeps later packing transactions
-  // from taking storage needed to finish the current one.
-  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
-      compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
-      lhs->active_register_packing_completion_capacity !=
-          rhs->active_register_packing_completion_capacity) {
-    return lhs->active_register_packing_completion_capacity <
-           rhs->active_register_packing_completion_capacity;
-  }
   const bool lhs_advances_constrained_completion = iree_any_bit_set(
       lhs->flags,
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION);

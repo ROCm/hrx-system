@@ -133,6 +133,42 @@ low.func.def target<test.low.core>(@test_target) @register_packing_retains_activ
 
 // ====
 
+// An exact aggregate completion remains protected while its configuration is
+// unavailable. Both branches advance constrained work in the same full wide
+// bank, so complete the ready peer instead of idling until the exact branch's
+// cycle-eight dependency becomes available.
+// RUN: emit low-schedule-query @register_packing_schedules_ready_peer_during_exact_stall strategy=resource-stall test.packed.wide=2 order=* issue=*
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @register_packing_schedules_ready_peer_during_exact_stall(%held: reg<test.packed.wide x2>, %exact_source: reg<test.i32>, %peer_source: reg<test.i32>, %config_lhs: reg<test.i32>, %config_rhs: reg<test.i32>) -> (reg<test.packed.wide x2>, reg<test.i32>, reg<test.i32>) asm {
+  %exact_narrow = test.packing.create %exact_source
+  low.schedule.fence
+  %config = test.event.fast.i32 %config_lhs, %config_rhs
+  low.schedule.fence
+  %exact_wide0, %exact_wide1 = test.packing.configured.expand %exact_narrow, %config
+  %peer_narrow = test.packing.create %peer_source
+  %peer_wide = test.packing.expand %peer_narrow
+  %exact_result = test.packing.retire %exact_wide0, %exact_wide1
+  %peer_result = test.packing.retire %peer_wide, %peer_wide
+  return %held, %exact_result, %peer_result
+}
+
+// ----
+block 0 order: 0, 1, 2, 3, 5, 6, 8, 4, 7, 9
+node 0 issue-cycle: 0
+node 1 issue-cycle: 1
+node 2 issue-cycle: 1
+node 3 issue-cycle: 2
+node 4 issue-cycle: 8
+node 5 issue-cycle: 2
+node 6 issue-cycle: 3
+node 7 issue-cycle: 10
+node 8 issue-cycle: 5
+node 9 issue-cycle: 12
+
+// ====
+
 // Keep a shared producer live while preparing the peer needed to retire each
 // expanded branch. Opening more branches cannot replace their shared source.
 // The source, branch, and peer necessarily exceed the two-slot bank. This
