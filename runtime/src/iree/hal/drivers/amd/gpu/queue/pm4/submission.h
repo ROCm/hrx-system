@@ -10,8 +10,8 @@
 #include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
-#include "iree/hal/drivers/amd/gpu/queue/buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
+#include "iree/hal/drivers/amd/gpu/queue/control.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
@@ -61,7 +61,7 @@ typedef enum iree_hal_amd_gpu_pm4_entry_kind_e {
   IREE_HAL_AMD_GPU_PM4_ENTRY_BARRIER,
   IREE_HAL_AMD_GPU_PM4_ENTRY_DISPATCH,
   IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER,
-  IREE_HAL_AMD_GPU_PM4_ENTRY_TIMESTAMP,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_CONTROL,
   IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE,
   IREE_HAL_AMD_GPU_PM4_ENTRY_TRIM,
   IREE_HAL_AMD_GPU_PM4_ENTRY_REUSE_SIGNALS,
@@ -123,8 +123,13 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   // Exact initialized extent, computed once by the capture constructor.
   iree_host_size_t capture_size;
   union {
-    // Retained timestamp target with a prequalified native address slot.
-    iree_hal_amd_gpu_buffer_reference_t timestamp;
+    // Scalar operation and target retained through terminal native retirement.
+    struct {
+      // Prepared address slot, resolved only after allocation dependencies.
+      iree_hal_amd_gpu_buffer_reference_t target;
+      // Immutable validated scalar operation.
+      iree_hal_amd_gpu_control_t command;
+    } control;
     // Admitted dispatch with privately captured arguments and resources.
     struct {
       // Executable dominating function, retained unless flags borrow lifetime.
@@ -220,14 +225,14 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_retirement(
     const iree_hal_amd_gpu_profile_operation_t* profile,
     iree_hal_amd_gpu_pm4_submission_t** out_submission);
 
-// Captures a validated timestamp target and its dependency edges. Native
+// Captures a qualified scalar control target and its dependency edges. Native
 // address resolution waits for admission; the buffer is retained through
 // terminal retirement. Failure retains nothing.
-iree_status_t iree_hal_amd_gpu_pm4_submission_create_timestamp(
+iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
     iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
     const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
-    iree_device_size_t offset,
+    iree_device_size_t offset, iree_hal_amd_gpu_control_t command,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_pm4_submission_t** out_submission);

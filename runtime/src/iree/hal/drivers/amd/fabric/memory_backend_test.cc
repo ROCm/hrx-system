@@ -1630,7 +1630,8 @@ TEST_F(MemoryBackendTest, CoherentCpuTransitionsHaveNoCacheRecipe) {
 }
 
 TEST_F(MemoryBackendTest, RejectsAtomicPromisesAbsentFromNativeBuffers) {
-  native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
+  native_.access_flags[0] =
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
   for (auto cell :
        {&iree_hal_atomic_operation_capabilities_t::device_scope_32,
         &iree_hal_atomic_operation_capabilities_t::device_scope_64,
@@ -1655,7 +1656,8 @@ TEST_F(MemoryBackendTest, RejectsAtomicPromisesAbsentFromNativeBuffers) {
 TEST_F(MemoryBackendTest, AtomicGuaranteesFollowSitesAndEveryBackingRoute) {
   native_.registration_enabled = true;
   native_.host_mapping_features |= AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS;
-  native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
+  native_.access_flags[0] =
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
   native_.atomics[0] = {
       AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
           AMDF_ATOMIC_OPERATION_ADD,
@@ -1797,7 +1799,8 @@ TEST_F(MemoryBackendTest, AtomicGuaranteesFollowSitesAndEveryBackingRoute) {
 
 TEST_F(MemoryBackendTest, AtomicReachIsQualifiedIndependentlyForEachWidth) {
   native_.required_flags = 0;
-  native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
+  native_.access_flags[0] =
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
   native_.atomics[0] = {AMDF_ATOMIC_OPERATION_WAIT,
                         AMDF_ATOMIC_OPERATION_STORE};
   native_.atomic_reach[0] = {AMDF_ATOMIC_SCOPE_DEVICE,
@@ -1826,9 +1829,54 @@ TEST_F(MemoryBackendTest, AtomicReachIsQualifiedIndependentlyForEachWidth) {
   iree_hal_pool_release(pool);
 }
 
+TEST_F(MemoryBackendTest, ModularSubtractUsesNativeAddOnControlStorage) {
+  native_.required_flags = 0;
+  native_.access_flags[0] =
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
+  native_.atomics[0] = {AMDF_ATOMIC_OPERATION_ADD, AMDF_ATOMIC_OPERATION_ADD};
+  native_.atomic_reach[0] = {AMDF_ATOMIC_SCOPE_SYSTEM,
+                             AMDF_ATOMIC_SCOPE_SYSTEM};
+  const iree_hal_atomic_operation_capabilities_t required = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT,
+      .device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT,
+      .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT,
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT,
+  };
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
+                            IREE_HAL_MEMORY_ACCESS_NONE, 0, required));
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(64, 64),
+      iree_infinite_timeout(), &buffer));
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+      iree_hal_buffer_query_atomic_operations(
+          buffer, ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0])),
+      required));
+  ASSERT_EQ(native_.created_accesses.size(), 2u);
+  EXPECT_EQ(native_.created_accesses[0].device, native_.devices[0]);
+  EXPECT_EQ(native_.created_accesses[0].requirements.flags,
+            AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_HOST_COHERENT |
+                AMDF_MEMORY_FLAG_QUEUE_STORAGE);
+  EXPECT_EQ(native_.created_accesses[1].requirements.flags,
+            AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
+  iree_hal_buffer_release(buffer);
+  iree_hal_pool_release(pool);
+  native_.AwaitEmpty();
+
+  // A raw subtract instruction does not qualify our add-based implementation.
+  native_.atomics[0] = {AMDF_ATOMIC_OPERATION_SUBTRACT,
+                        AMDF_ATOMIC_OPERATION_SUBTRACT};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
+                                   IREE_HAL_MEMORY_ACCESS_NONE, 0, required));
+  EXPECT_EQ(pool, nullptr);
+}
+
 TEST_F(MemoryBackendTest, AtomicWaitAndStoreAcceptOneWayUsage) {
   native_.required_flags = 0;
-  native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
+  native_.access_flags[0] =
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
   native_.atomics[0] = {
       AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE, 0};
   native_.atomic_reach[0] = {AMDF_ATOMIC_SCOPE_SYSTEM, AMDF_ATOMIC_SCOPE_NONE};

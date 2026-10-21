@@ -64,6 +64,8 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   uint32_t dispatch_count;
   // Public encoded operations, independent of native packet count or folding.
   uint32_t operation_count;
+  // Native IBs need 48-bit addresses and system publication of GPU fixups.
+  bool has_control;
   // Optional bounded native template, owned instead of resident storage.
   iree_hal_amd_gpu_aql_host_template_t* host_template;
 } iree_hal_amd_gpu_aql_command_program_t;

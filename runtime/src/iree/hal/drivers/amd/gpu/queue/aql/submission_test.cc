@@ -39,6 +39,55 @@ class AqlSubmissionTest : public ::testing::TestWithParam<bool> {
   iree_hal_amd_gpu_capture_pool_t pool_;
 };
 
+TEST_P(AqlSubmissionTest, AtomicTargetRetainsDeferredBackingUntilRetirement) {
+  std::array<uint8_t, 16> bytes = {};
+  bool destroyed = false;
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      {}, IREE_HAL_MEMORY_TYPE_HOST_LOCAL, IREE_HAL_MEMORY_ACCESS_ALL,
+      IREE_HAL_BUFFER_USAGE_STORAGE, bytes.size(),
+      iree_make_byte_span(bytes.data(), bytes.size()),
+      {[](void* data, iree_hal_buffer_t*) { *static_cast<bool*>(data) = true; },
+       &destroyed},
+      iree_allocator_system(), &buffer));
+  std::array<iree_hal_memory_scope_access_t, 2> scopes = {};
+  scopes[1].bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
+  iree_hal_memory_contract_t contract = {.scopes = scopes.data()};
+  iree_hal_buffer_native_binding_t binding = {};
+  buffer->memory = {.contract = &contract, .bindings = &binding};
+  const iree_hal_queue_family_t family = {.memory = {.queue_scope_id = 1}};
+  const auto command = iree_hal_amd_gpu_control_store({
+      .value = 123,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
+      .target_error_mode = static_cast<iree_hal_atomic_target_error_mode_t>(
+          GetParam() ? IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE
+                     : IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT),
+  });
+  iree_hal_amd_gpu_aql_submission_t* capture = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      GetParam() ? IREE_STATUS_INCOMPATIBLE : IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_amd_gpu_aql_submission_control(&pool_, nullptr, &family, {}, {},
+                                              buffer, 8, command, 0, 0,
+                                              &capture));
+  EXPECT_EQ(capture, nullptr);
+  EXPECT_EQ(iree_atomic_ref_count_load(&buffer->resource.ref_count), 1);
+  scopes[1].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE << 8;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_control(
+      &pool_, nullptr, &family, {}, {}, buffer, 8, command, 0, 0, &capture));
+  uint64_t address = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_amd_gpu_control_resolve(
+                            &capture->control.target, command, &address));
+  binding.device_address = 0x1000;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_control_resolve(&capture->control.target,
+                                                  command, &address));
+  EXPECT_EQ(address, 0x1008u);
+  iree_hal_buffer_release(buffer);
+  EXPECT_FALSE(destroyed);
+  iree_hal_amd_gpu_aql_submission_release(capture);
+  EXPECT_TRUE(destroyed);
+}
+
 TEST_P(AqlSubmissionTest, CapturesInputsAndReleasesPayloadBeforeCompletion) {
   iree_async_proactor_t* proactor = nullptr;
   IREE_ASSERT_OK(

@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_INPUTS_H_
 
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amd/gpu/queue/control.h"
 #include "iree/hal/utils/resource_set.h"
 
 #ifdef __cplusplus
@@ -24,6 +25,10 @@ typedef struct iree_hal_amd_gpu_binding_requirement_t {
   uint32_t parent;
   // Required native sites and whether the logical length is consumed.
   uint32_t sites;
+  // Packed queue-site atomic requirements with default target-error handling.
+  uint32_t atomic_operations;
+  // Packed requirements whose missing target support reports INCOMPATIBLE.
+  uint32_t incompatible_atomic_operations;
 } iree_hal_amd_gpu_binding_requirement_t;
 
 // Captured, qualified binding. Address commitment waits for queue dependencies;
@@ -88,6 +93,12 @@ iree_status_t iree_hal_amd_gpu_command_inputs_add_binding(
     iree_hal_amd_gpu_command_inputs_t* inputs, iree_hal_buffer_ref_t reference,
     uint32_t site, uint32_t minimum_length, uint32_t alignment,
     bool whole_transfer, uint32_t* out_value);
+
+// Accumulates scalar atomic target requirements on the same dense queue input.
+// Direct targets qualify now; indirect targets qualify once at table capture.
+iree_status_t iree_hal_amd_gpu_command_inputs_add_atomic(
+    iree_hal_amd_gpu_command_inputs_t* inputs, iree_hal_buffer_ref_t reference,
+    iree_hal_amd_gpu_control_t command, uint32_t* out_value);
 iree_status_t iree_hal_amd_gpu_command_inputs_equal_lengths(
     iree_hal_amd_gpu_command_inputs_t* inputs, iree_hal_buffer_ref_t source,
     iree_hal_buffer_ref_t target);

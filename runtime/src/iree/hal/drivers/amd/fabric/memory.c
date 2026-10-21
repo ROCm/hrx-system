@@ -22,7 +22,9 @@ iree_hal_amd_fabric_memory_translate_atomic_flags(
          ((operations & AMDF_ATOMIC_OPERATION_ADD)
               ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD
               : 0) |
-         ((operations & AMDF_ATOMIC_OPERATION_SUBTRACT)
+         // HAL modular subtraction uses ADD of a negated operand. Native
+         // raw SUB support alone does not qualify that implementation.
+         ((operations & AMDF_ATOMIC_OPERATION_ADD)
               ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT
               : 0) |
          ((operations & AMDF_ATOMIC_OPERATION_AND)

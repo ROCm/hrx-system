@@ -229,11 +229,11 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_retirement(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_gpu_pm4_submission_create_timestamp(
+iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
     iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
     const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
-    iree_device_size_t offset,
+    iree_device_size_t offset, iree_hal_amd_gpu_control_t command,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_pm4_submission_t** out_submission) {
@@ -241,13 +241,28 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_timestamp(
   iree_hal_amd_gpu_buffer_reference_t reference;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_initialize(
       family, IREE_HAL_MEMORY_SITE_QUEUE, target, offset, &reference));
+  const uint32_t required = iree_hal_amd_gpu_control_requirement(command);
+  if (required) {
+    const bool incompatible = command.target_error_mode ==
+                              IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_control_validate_target(
+        family, target, incompatible ? 0 : required,
+        incompatible ? required : 0));
+  }
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
       pool, profiled, waits, signals, 0, profile, barriers, &submission,
       &payload));
-  submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TIMESTAMP;
-  submission->timestamp = reference;
+  submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_CONTROL;
+  submission->control.target = reference;
+  submission->control.command = command;
+  iree_hal_amd_gpu_pm4_barrier_atomic(
+      profile, command.flags,
+      (command.flags & IREE_HAL_ATOMIC_FLAG_RELEASE)
+          ? IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE
+          : 0,
+      &submission->before, &submission->after);
   iree_hal_buffer_retain(target);
   *out_submission = submission;
   return iree_ok_status();
@@ -492,8 +507,8 @@ void iree_hal_amd_gpu_pm4_submission_release_payload(
     }
   } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER) {
     iree_hal_amd_gpu_transfer_deinitialize(&submission->transfer);
-  } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TIMESTAMP) {
-    iree_hal_buffer_release(submission->timestamp.buffer);
+  } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_CONTROL) {
+    iree_hal_buffer_release(submission->control.target.buffer);
   } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
     iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&submission->execute);
   }

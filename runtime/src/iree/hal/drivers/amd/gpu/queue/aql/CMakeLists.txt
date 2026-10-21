@@ -608,6 +608,7 @@ iree_cc_library(
     iree::base::internal::arena
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::profile
+    iree::hal::drivers::amd::gpu::queue::control
     iree::hal::drivers::amd::gpu::queue::inputs
     iree::hal::drivers::amd::gpu::queue::recording
     iree::hal::drivers::amd::gpu::queue::transfer
@@ -631,6 +632,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::queue::buffer
     iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::control
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::gpu::queue::semaphore
     iree::hal::drivers::amd::gpu::queue::transfer
@@ -734,6 +736,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::gpu::queue::allocation
     iree::hal::drivers::amd::gpu::queue::buffer
+    iree::hal::drivers::amd::gpu::queue::control
     iree::hal::drivers::amd::gpu::queue::file_staging
     iree::hal::drivers::amd::gpu::queue::file_transfer
     iree::hal::drivers::amd::gpu::queue::host_call

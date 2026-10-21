@@ -226,25 +226,44 @@ iree_status_t iree_hal_amd_gpu_aql_submission_execute(
   return status;
 }
 
-iree_status_t iree_hal_amd_gpu_aql_submission_timestamp(
+iree_status_t iree_hal_amd_gpu_aql_submission_control(
     iree_hal_amd_gpu_capture_pool_t* pool,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
-    iree_device_size_t offset, uint32_t before, uint32_t after,
+    iree_device_size_t offset, iree_hal_amd_gpu_control_t command,
+    uint32_t before, uint32_t after,
     iree_hal_amd_gpu_aql_submission_t** out_submission) {
   *out_submission = NULL;
   iree_hal_amd_gpu_buffer_reference_t reference;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_initialize(
       family, IREE_HAL_MEMORY_SITE_QUEUE, target, offset, &reference));
+  const uint32_t required = iree_hal_amd_gpu_control_requirement(command);
+  if (required) {
+    const bool incompatible = command.target_error_mode ==
+                              IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_control_validate_target(
+        family, target, incompatible ? 0 : required,
+        incompatible ? required : 0));
+  }
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
-      pool, profile, IREE_HAL_AMD_GPU_AQL_ENTRY_TIMESTAMP, waits, signals, 0,
+      pool, profile, IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL, waits, signals, 0,
       &submission, &payload));
+  iree_hal_amd_gpu_aql_barrier_atomic(
+      command.flags,
+      (command.flags & IREE_HAL_ATOMIC_FLAG_RELEASE)
+          ? IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE
+          : 0,
+      (command.flags & IREE_HAL_ATOMIC_FLAG_ACQUIRE)
+          ? IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE
+          : 0,
+      &before, &after);
   submission->before = before;
   submission->after = after;
-  submission->timestamp = reference;
+  submission->control.target = reference;
+  submission->control.command = command;
   iree_hal_buffer_retain(target);
   *out_submission = submission;
   return iree_ok_status();
@@ -341,9 +360,9 @@ void iree_hal_amd_gpu_aql_submission_release_payload(
     submission->transfer.capture.count = 0;
     return;
   }
-  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TIMESTAMP) {
-    iree_hal_buffer_release(submission->timestamp.buffer);
-    submission->timestamp.buffer = NULL;
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL) {
+    iree_hal_buffer_release(submission->control.target.buffer);
+    submission->control.target.buffer = NULL;
     return;
   }
   iree_hal_amd_gpu_aql_dispatch_request_t* request = &submission->dispatch;

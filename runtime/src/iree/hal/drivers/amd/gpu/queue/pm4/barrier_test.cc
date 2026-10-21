@@ -79,6 +79,32 @@ TEST_P(BarrierTest, DefaultsAndExplicitEmptyAreDistinct) {
   EXPECT_EQ(storage[0], 0x12345678u);
 }
 
+TEST_P(BarrierTest, AtomicOrderingRetainsBothBoundaries) {
+  for (uint32_t flags = 0; flags < 8; ++flags) {
+    SCOPED_TRACE(flags);
+    iree_hal_amd_gpu_pm4_barrier_t before = {}, after = {};
+    iree_hal_amd_gpu_pm4_barrier_atomic(
+        &profile_, flags, IREE_HAL_EXECUTION_STAGE_DISPATCH, &before, &after);
+    const bool system = (flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) ||
+                        profile_.command_processor_bypasses_l2;
+    EXPECT_EQ(before.execution, 1u);
+    EXPECT_EQ(after.execution, 0u);
+    EXPECT_EQ(before.cache_control,
+              (flags & IREE_HAL_ATOMIC_FLAG_RELEASE)
+                  ? (system ? profile_.release : profile_.shader)
+                  : 0);
+    EXPECT_EQ(after.cache_control,
+              (flags & IREE_HAL_ATOMIC_FLAG_ACQUIRE)
+                  ? (system ? profile_.acquire : profile_.shader)
+                  : 0);
+  }
+  iree_hal_amd_gpu_pm4_barrier_t before = {}, after = {};
+  iree_hal_amd_gpu_pm4_barrier_atomic(
+      &profile_, 0, IREE_HAL_EXECUTION_STAGE_ATOMIC, &before, &after);
+  EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_word_count(before), 0u);
+  EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_word_count(after), 0u);
+}
+
 TEST_P(BarrierTest, DirectionComesFromActionNotBoundaryPosition) {
   const auto release = Prepare({
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,

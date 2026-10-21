@@ -121,6 +121,18 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_wait64(
     uint32_t* words, uint64_t address, uint64_t reference, uint64_t mask,
     iree_hal_amd_gpu_pm4_comparison_t comparison);
 
+// Emits six DWORDs of immediate COPY_DATA with write confirmation. Target
+// atomicity is independently qualified for the selected width; this is a
+// store, not an exchange or other read-modify-write operation.
+uint32_t* iree_hal_amd_gpu_pm4_emit_store(uint32_t* words, uint64_t address,
+                                          uint64_t value, bool wide);
+
+// Emits nine DWORDs of single-pass ATOMIC_MEM. opcode is an admitted returning
+// TC atomic operation, retaining completion ordering even though its result is
+// discarded. Target backing must support that exact operation and width.
+uint32_t* iree_hal_amd_gpu_pm4_emit_atomic(uint32_t* words, uint64_t address,
+                                           uint64_t operand, uint32_t opcode);
+
 // Emits eight DWORDs of RELEASE_MEM after preceding compute execution. Applies
 // the prepared, unshifted release GCR field and writes a confirmed DWORD to the
 // aligned destination through TC/L2. Zero cache_control requests no cache

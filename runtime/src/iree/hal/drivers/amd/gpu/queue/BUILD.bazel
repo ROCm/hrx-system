@@ -28,6 +28,30 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "control",
+    srcs = ["control.c"],
+    hdrs = ["control.h"],
+    deps = [
+        ":buffer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:commands",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "control_test",
+    srcs = ["control_test.cc"],
+    deps = [
+        ":control",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "transfer",
     srcs = ["transfer.c"],
     hdrs = ["transfer.h"],
@@ -635,8 +659,22 @@ iree_runtime_cc_library(
     srcs = ["inputs.c"],
     hdrs = ["inputs.h"],
     deps = [
+        ":control",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/utils:resource_set",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "inputs_test",
+    srcs = ["inputs_test.cc"],
+    deps = [
+        ":control",
+        ":inputs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

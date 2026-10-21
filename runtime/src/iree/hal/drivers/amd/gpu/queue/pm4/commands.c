@@ -14,6 +14,31 @@ static inline uint32_t iree_hal_amd_gpu_pm4_header(uint32_t opcode,
   return UINT32_C(0xc0000000) | ((word_count - 2) << 16) | (opcode << 8);
 }
 
+uint32_t* iree_hal_amd_gpu_pm4_emit_store(uint32_t* words, uint64_t address,
+                                          uint64_t value, bool wide) {
+  words[0] = UINT32_C(0xc0044000);
+  words[1] = 5u | (2u << 8) | ((uint32_t)wide << 16) | (1u << 20);
+  words[2] = (uint32_t)value;
+  words[3] = (uint32_t)(value >> 32);
+  words[4] = (uint32_t)address;
+  words[5] = (uint32_t)(address >> 32);
+  return words + 6;
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_emit_atomic(uint32_t* words, uint64_t address,
+                                           uint64_t operand, uint32_t opcode) {
+  words[0] = UINT32_C(0xc0071e00);
+  words[1] = opcode;
+  words[2] = (uint32_t)address;
+  words[3] = (uint32_t)(address >> 32);
+  words[4] = (uint32_t)operand;
+  words[5] = (uint32_t)(operand >> 32);
+  words[6] = 0;
+  words[7] = 0;
+  words[8] = 0;
+  return words + 9;
+}
+
 uint32_t* iree_hal_amd_gpu_pm4_emit_registers(uint32_t* words,
                                               uint32_t first_register,
                                               uint32_t value_count,

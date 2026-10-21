@@ -43,6 +43,23 @@ TEST(AqlBarrierTest, ExecutionOrderingDoesNotRequireCacheEffects) {
             0u);
 }
 
+TEST(AqlBarrierTest, AtomicReleasePrecedesAndAcquireFollowsTheCarrier) {
+  for (uint32_t flags = 0; flags < 8; ++flags) {
+    SCOPED_TRACE(flags);
+    uint32_t before = 0, after = 0;
+    iree_hal_amd_gpu_aql_barrier_atomic(
+        flags, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        IREE_HAL_EXECUTION_STAGE_DISPATCH, &before, &after);
+    const uint32_t scope = flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE ? 2 : 1;
+    EXPECT_EQ(before,
+              IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                  ((flags & IREE_HAL_ATOMIC_FLAG_RELEASE) ? scope << 11 : 0));
+    EXPECT_EQ(after,
+              IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                  ((flags & IREE_HAL_ATOMIC_FLAG_ACQUIRE) ? scope << 9 : 0));
+  }
+}
+
 TEST(AqlBarrierTest, LocalDependenciesStayAtAgentScope) {
   const iree_hal_access_scope_t scopes[] = {
       IREE_HAL_ACCESS_SCOPE_INDIRECT_COMMAND_READ,

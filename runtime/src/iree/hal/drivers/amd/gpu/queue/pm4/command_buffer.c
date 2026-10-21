@@ -328,30 +328,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_barrier(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_atomic_wait(
-    iree_hal_command_buffer_t* base, iree_hal_execution_stage_t source_stage,
-    iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
-    iree_hal_atomic_wait_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 recorded atomic waits are not admitted");
-}
-
-static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_atomic_store(
-    iree_hal_command_buffer_t* base, iree_hal_execution_stage_t source_stage,
-    iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
-    iree_hal_atomic_store_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 recorded atomic stores are not admitted");
-}
-
-static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_atomic_rmw(
-    iree_hal_command_buffer_t* base, iree_hal_execution_stage_t source_stage,
-    iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
-    iree_hal_atomic_rmw_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 recorded atomic RMWs are not admitted");
-}
-
 static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_advise_buffer(
     iree_hal_command_buffer_t* base, iree_hal_buffer_ref_t reference,
     iree_hal_memory_advise_flags_t flags, uint64_t arg0, uint64_t arg1) {
@@ -369,6 +345,70 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_pointer(
       (data ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA : 0) |
           (private_data ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA : 0) |
           IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE);
+}
+
+static iree_status_t iree_hal_amd_gpu_pm4_command_atomic(
+    iree_hal_amd_gpu_pm4_command_buffer_t* buffer,
+    iree_hal_execution_stage_t source_stage,
+    iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
+    iree_hal_amd_gpu_control_t command) {
+  uint32_t value = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_atomic(
+      &buffer->inputs, target, command, &value));
+  iree_hal_amd_gpu_pm4_barrier_t after = {0};
+  iree_hal_amd_gpu_pm4_barrier_atomic(&buffer->profile, command.flags,
+                                      source_stage, &buffer->pending_barrier,
+                                      &after);
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
+  uint32_t offset = 0;
+  uint32_t* words = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(
+      &buffer->recording, iree_hal_amd_gpu_control_word_count(command), &offset,
+      &words));
+  iree_hal_amd_gpu_control_emit(words, 0, command);
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+      buffer, false,
+      offset + 4 * iree_hal_amd_gpu_control_address_word(command), value,
+      target.offset, false));
+  buffer->pending_barrier = after;
+  ++buffer->program->operation_count;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_atomic_wait(
+    iree_hal_command_buffer_t* base, iree_hal_execution_stage_t source_stage,
+    iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
+    iree_hal_atomic_wait_params_t params) {
+  iree_hal_amd_gpu_pm4_command_buffer_t* buffer = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
+  return iree_hal_amd_gpu_pm4_command_record_status(
+      buffer, iree_hal_amd_gpu_pm4_command_atomic(
+                  buffer, source_stage, target_stage, target,
+                  iree_hal_amd_gpu_control_wait(params)));
+}
+
+static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* base, iree_hal_execution_stage_t source_stage,
+    iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
+    iree_hal_atomic_store_params_t params) {
+  iree_hal_amd_gpu_pm4_command_buffer_t* buffer = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
+  return iree_hal_amd_gpu_pm4_command_record_status(
+      buffer, iree_hal_amd_gpu_pm4_command_atomic(
+                  buffer, source_stage, target_stage, target,
+                  iree_hal_amd_gpu_control_store(params)));
+}
+
+static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* base, iree_hal_execution_stage_t source_stage,
+    iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
+    iree_hal_atomic_rmw_params_t params) {
+  iree_hal_amd_gpu_pm4_command_buffer_t* buffer = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
+  return iree_hal_amd_gpu_pm4_command_record_status(
+      buffer, iree_hal_amd_gpu_pm4_command_atomic(
+                  buffer, source_stage, target_stage, target,
+                  iree_hal_amd_gpu_control_rmw(params)));
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(

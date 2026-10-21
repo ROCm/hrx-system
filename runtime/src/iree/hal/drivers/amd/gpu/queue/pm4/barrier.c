@@ -73,6 +73,22 @@ static uint32_t iree_hal_amd_gpu_pm4_barrier_execution(
              : 0;
 }
 
+void iree_hal_amd_gpu_pm4_barrier_atomic(
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    iree_hal_atomic_flags_t flags, iree_hal_execution_stage_t source_stage,
+    iree_hal_amd_gpu_pm4_barrier_t* before,
+    iree_hal_amd_gpu_pm4_barrier_t* after) {
+  before->execution |= iree_hal_amd_gpu_pm4_barrier_execution(source_stage);
+  const bool system = (flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) ||
+                      profile->command_processor_bypasses_l2;
+  if (flags & IREE_HAL_ATOMIC_FLAG_RELEASE) {
+    before->cache_control |= system ? profile->release : profile->shader;
+  }
+  if (flags & IREE_HAL_ATOMIC_FLAG_ACQUIRE) {
+    after->cache_control |= system ? profile->acquire : profile->shader;
+  }
+}
+
 iree_hal_amd_gpu_pm4_barrier_t iree_hal_amd_gpu_pm4_barrier_prepare(
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_barrier_list_t* barriers) {

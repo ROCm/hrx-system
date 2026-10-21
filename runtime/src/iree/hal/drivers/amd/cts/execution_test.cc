@@ -36,7 +36,15 @@ enum class SubmissionMode {
   kRecordedIndirect,
   kRemappedDefaults,
   kPooledDefaults,
+  kAtomicDefaults,
 };
+
+static bool UsesDefaultBarriers(SubmissionMode mode) {
+  return mode == SubmissionMode::kDefaults ||
+         mode == SubmissionMode::kRemappedDefaults ||
+         mode == SubmissionMode::kPooledDefaults ||
+         mode == SubmissionMode::kAtomicDefaults;
+}
 
 struct Boundary {
   // Combined queue-local execution and visibility actions.
@@ -200,6 +208,12 @@ class ExecutionTest
           IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
       families_[i].interfaces = UINT64_C(1) << interfaces[i];
     }
+    if (std::get<1>(GetParam()) == SubmissionMode::kAtomicDefaults) {
+      for (Engine engine : {kCpu, kGpu}) {
+        families_[engine].atomics.queue.system_scope_32 =
+            IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
+      }
+    }
     iree_hal_pool_scope_t scope = {
         .family_count = families_.size(),
         .families = families_.data(),
@@ -208,6 +222,23 @@ class ExecutionTest
     iree_hal_slab_pool_options_initialize(&options);
     IREE_ASSERT_OK(iree_hal_slab_pool_create(
         group_, scope, &options, iree_allocator_system(), pool_.out()));
+    if (std::get<1>(GetParam()) == SubmissionMode::kAtomicDefaults) {
+      for (Engine engine : {kCpu, kGpu, kNpu}) {
+        iree_hal_memory_scope_t memory_scope;
+        IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+            group_, {IREE_HAL_MEMORY_SITE_QUEUE, families_[engine].family},
+            &memory_scope));
+        const auto atomics =
+            iree_hal_pool_query_atomic_operations(pool_, memory_scope);
+        if (engine == kNpu) {
+          EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(atomics));
+        } else {
+          EXPECT_NE(
+              atomics.system_scope_32 & IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD,
+              0u);
+        }
+      }
+    }
   }
 
   void CreateVirtualStorage(iree_hal_buffer_t** out_root,
@@ -400,11 +431,7 @@ class ExecutionTest
         participant.queue, {1, &wait, &wait_value}, {1, &signal, &signal_value},
         participant.executable, participant.function, Config(engine), constants,
         bindings,
-        (std::get<1>(GetParam()) == SubmissionMode::kDefaults ||
-         std::get<1>(GetParam()) == SubmissionMode::kRemappedDefaults ||
-         std::get<1>(GetParam()) == SubmissionMode::kPooledDefaults)
-            ? nullptr
-            : &barriers,
+        UsesDefaultBarriers(std::get<1>(GetParam())) ? nullptr : &barriers,
         IREE_HAL_DISPATCH_FLAG_NONE));
   }
 
@@ -440,7 +467,8 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
   const bool remapped = mode == SubmissionMode::kRemappedDefaults;
   const bool pooled = mode == SubmissionMode::kPooledDefaults;
   const bool recorded = mode == SubmissionMode::kRecordedIndirect;
-  const bool defaults = mode == SubmissionMode::kDefaults || remapped || pooled;
+  const bool atomic = mode == SubmissionMode::kAtomicDefaults;
+  const bool defaults = UsesDefaultBarriers(mode);
   Ref<iree_hal_semaphore_t> memory_ready;
   IREE_ASSERT_OK(iree_hal_semaphore_create(participants_[kCpu].device,
                                            IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
@@ -578,11 +606,12 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
     ASSERT_NO_FATAL_FAILURE(Record(kCpu, {1, &references[2]}, 100, &consumer));
   }
   auto* cpu_timeline = participants_[kCpu].timeline.get();
-  for (uint32_t replay = 0; replay < 3; ++replay) {
+  for (uint32_t replay = 0; replay < (atomic ? 32u : 3u); ++replay) {
     SCOPED_TRACE(replay);
     uint64_t gate = replay + 1;
     uint64_t initialized = replay * 4 + 1, produced = initialized + 1,
              consumed = initialized + 2, downloaded = initialized + 3;
+    uint64_t gpu_added = replay * 2 + 1, cpu_added = gpu_added + 1;
     Payload initial;
     initial.fill(0xA5A5A5A5u);
     for (size_t i = 0; i < kElementCount; ++i) {
@@ -616,11 +645,31 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
             : iree_hal_buffer_ref_list_t{1, gpu_binding},
         29, native_second, binding_table));
     ASSERT_NO_FATAL_FAILURE(Dispatch(
-        first, cpu_timeline, produced, gate,
+        first, atomic ? memory_timeline : cpu_timeline,
+        atomic ? cpu_added : produced, gate,
         first == kNpu
             ? iree_hal_buffer_ref_list_t{bindings.size(), bindings.data()}
             : iree_hal_buffer_ref_list_t{1, gpu_binding},
         29, native_first, binding_table));
+    if (atomic) {
+      // CPU and GPU atomically update the first LHS element in the same
+      // backing the NPU reads normally. Queue dependencies order both updates
+      // before the native kernels, without granting NPU atomic capabilities.
+      iree_hal_atomic_rmw_params_t params = {
+          .operand = 3,
+          .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+                   IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
+          .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+      };
+      IREE_ASSERT_OK(iree_hal_queue_atomic_rmw(
+          participants_[kCpu].queue, {1, &memory_timeline, &gpu_added},
+          {1, &memory_timeline, &cpu_added}, views[0], 0, params, nullptr));
+      params.operand = 5;
+      IREE_ASSERT_OK(iree_hal_queue_atomic_rmw(
+          participants_[kGpu].queue, {1, &cpu_timeline, &produced},
+          {1, &memory_timeline, &gpu_added}, views[0], 0, params, nullptr));
+    }
     ASSERT_NO_FATAL_FAILURE(Dispatch(kCpu, cpu_timeline, initialized, produced,
                                      {1, &bindings[0]}, 7, producer,
                                      binding_table));
@@ -707,6 +756,9 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
     Payload expected = initial;
     for (size_t i = 0; i < kElementCount; ++i) {
       uint32_t lhs = initial[kElementCount + i] + 7;
+      if (atomic && i == 0) {
+        lhs += 8;
+      }
       if (first == kGpu) {
         lhs = lhs * 3 + 29;
       }
@@ -717,7 +769,9 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
       }
       expected[3 * kElementCount + i] = value + 100;
     }
-    EXPECT_EQ(result, expected);
+    for (size_t i = 0; i < expected.size(); ++i) {
+      EXPECT_EQ(result[i], expected[i]) << "element=" << i;
+    }
     if (remapped) {
       expected_backings[replay % backings.size()] = expected;
       for (size_t i = 0; i < iree_min(replay + 1, backings.size()); ++i) {
@@ -758,7 +812,8 @@ INSTANTIATE_TEST_SUITE_P(
                                          SubmissionMode::kExplicit,
                                          SubmissionMode::kRecordedIndirect,
                                          SubmissionMode::kRemappedDefaults,
-                                         SubmissionMode::kPooledDefaults)),
+                                         SubmissionMode::kPooledDefaults,
+                                         SubmissionMode::kAtomicDefaults)),
     [](const ::testing::TestParamInfo<ExecutionTest::ParamType>& info) {
       std::string name =
           std::get<0>(info.param) ? "CpuNpuGpuCpu" : "CpuGpuNpuCpu";
@@ -773,6 +828,8 @@ INSTANTIATE_TEST_SUITE_P(
           return name + "RemappedDefaults";
         case SubmissionMode::kPooledDefaults:
           return name + "PooledDefaults";
+        case SubmissionMode::kAtomicDefaults:
+          return name + "AtomicDefaults";
       }
       return name;
     });

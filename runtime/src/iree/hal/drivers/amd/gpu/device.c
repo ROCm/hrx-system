@@ -291,6 +291,20 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
     }
   }
   const iree_hal_queue_priority_t priority = IREE_HAL_QUEUE_PRIORITY_NORMAL;
+  const amdf_atomic_capabilities_t* native_atomics =
+      &device->context->families[family_ordinal].atomic_capabilities;
+  const iree_hal_atomic_operation_capabilities_t atomic_operations =
+      iree_hal_amd_fabric_memory_translate_atomics(
+          native_atomics->operations_without_dispatch_32,
+          native_atomics->operations_without_dispatch_64,
+          (amdf_atomic_reach_t){AMDF_ATOMIC_SCOPE_SYSTEM,
+                                AMDF_ATOMIC_SCOPE_SYSTEM});
+  // Both APIs assign one bit per predicate in the same order. Unknown native
+  // bits remain excluded from the HAL execution contract.
+  const uint32_t wait_conditions_32 = native_atomics->wait_conditions_32 &
+                                      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
+  const uint32_t wait_conditions_64 = native_atomics->wait_conditions_64 &
+                                      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
   const iree_hal_queue_family_spec_t family = {
       .name = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                   ? IREE_SV("aql")
@@ -303,8 +317,18 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .priority_count = 1,
       .priorities = &priority,
       .physical_device_affinity = 1,
-      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+      .role_flags =
+          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+          (iree_hal_atomic_operation_capabilities_is_empty(atomic_operations)
+               ? 0
+               : IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC),
+      .atomic_capabilities =
+          {.operations = atomic_operations,
+           .wait_conditions = {.device_scope_32 = wait_conditions_32,
+                               .device_scope_64 = wait_conditions_64,
+                               .system_scope_32 = wait_conditions_32,
+                               .system_scope_64 = wait_conditions_64}},
   };
   const iree_hal_device_queue_spec_t queues = {
       .family_count = 1,

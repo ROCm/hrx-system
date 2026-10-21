@@ -1485,10 +1485,16 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
         requirements->access |= AMDF_MEMORY_ACCESS_WRITE;
       }
       if (iree_any_bit_set(requested->requirements,
-                           IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST) ||
-          !iree_hal_atomic_operation_capabilities_is_empty(
-              requested->atomics.queue)) {
+                           IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST)) {
         requirements->flags |= AMDF_MEMORY_FLAG_HOST_COHERENT;
+      }
+      if (!iree_hal_atomic_operation_capabilities_is_empty(
+              requested->atomics.queue)) {
+        // Native queue control storage selects the uncached GPU mapping that
+        // qualifies CP atomics. Ordinary host-coherent payload storage may
+        // remain GPU-cached and cannot supply the same control-word contract.
+        requirements->flags |=
+            AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
       }
       for (uint32_t i = 0; i < family->binding_count; ++i) {
         const iree_hal_amd_fabric_memory_binding_t binding =

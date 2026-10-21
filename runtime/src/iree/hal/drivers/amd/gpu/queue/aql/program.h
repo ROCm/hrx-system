@@ -68,6 +68,8 @@ enum iree_hal_amd_gpu_aql_program_flag_bits_e {
   IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST = 1u << 0,
   IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE = 1u << 1,
   IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE = 1u << 2,
+  // GPU-patched private command bytes are consumed by the command processor.
+  IREE_HAL_AMD_GPU_AQL_PROGRAM_CONTROL = 1u << 3,
 };
 typedef uint32_t iree_hal_amd_gpu_aql_program_flags_t;
 

@@ -24,6 +24,34 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    control
+  HDRS
+    "control.h"
+  SRCS
+    "control.c"
+  DEPS
+    ::buffer
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::queue::pm4::commands
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    control_test
+  SRCS
+    "control_test.cc"
+  DEPS
+    ::control
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     transfer
   HDRS
     "transfer.h"
@@ -958,10 +986,25 @@ iree_cc_library(
   SRCS
     "inputs.c"
   DEPS
+    ::control
     iree::base
     iree::hal
     iree::hal::utils::resource_set
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    inputs_test
+  SRCS
+    "inputs_test.cc"
+  DEPS
+    ::control
+    ::inputs
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -63,6 +63,14 @@ iree_hal_amd_gpu_pm4_barrier_t iree_hal_amd_gpu_pm4_barrier_prepare(
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_barrier_list_t* barriers);
 
+// Adds an atomic operation's producer join, release before modification, and
+// acquire after observation. Inapplicable flags have already been removed.
+void iree_hal_amd_gpu_pm4_barrier_atomic(
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    iree_hal_atomic_flags_t flags, iree_hal_execution_stage_t source_stage,
+    iree_hal_amd_gpu_pm4_barrier_t* before,
+    iree_hal_amd_gpu_pm4_barrier_t* after);
+
 // DWORD count for ordinary emission, including independent execution joins.
 static inline uint32_t iree_hal_amd_gpu_pm4_barrier_word_count(
     iree_hal_amd_gpu_pm4_barrier_t barrier) {

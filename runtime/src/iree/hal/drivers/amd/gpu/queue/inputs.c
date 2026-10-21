@@ -25,7 +25,10 @@ typedef struct iree_hal_amd_gpu_command_input_t {
   // Smallest whole-range displacement, or UINT64_MAX for a required address.
   uint64_t minimum_offset;
   // Direct, binding, image-base, or binding-length input.
-  uint16_t kind;
+  uint8_t kind;
+  // Atomic base alignment masks: default mode low nibble, INCOMPATIBLE high.
+  // Public atomic offsets are naturally aligned, so both require residue zero.
+  uint8_t atomic_alignment;
   // Queue/program native site, ignored for image and length inputs.
   uint16_t site;
   // Prepared direct-buffer native slot, unused for other kinds.
@@ -168,6 +171,32 @@ static iree_status_t iree_hal_amd_gpu_command_input(
             : iree_min(previous->minimum_offset, input.minimum_offset);
   }
   *out_value = buffer->value_base + ordinal;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_command_inputs_add_atomic(
+    iree_hal_amd_gpu_command_inputs_t* inputs, iree_hal_buffer_ref_t reference,
+    iree_hal_amd_gpu_control_t command, uint32_t* out_value) {
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
+      inputs, reference, 0, command.width / 8, 1, false, out_value));
+  const uint32_t operations = iree_hal_amd_gpu_control_requirement(command);
+  const bool incompatible = command.target_error_mode ==
+                            IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
+  if (reference.buffer) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_control_validate_target(
+        inputs->command_buffer->queue_family, reference.buffer,
+        incompatible ? 0 : operations, incompatible ? operations : 0));
+  } else {
+    iree_hal_amd_gpu_binding_requirement_t* requirement =
+        &inputs->requirements[reference.buffer_slot + 1];
+    if (incompatible) {
+      requirement->incompatible_atomic_operations |= operations;
+    } else {
+      requirement->atomic_operations |= operations;
+    }
+  }
+  inputs->entries[*out_value - inputs->value_base].atomic_alignment |=
+      (command.width / 8u - 1) << (incompatible ? 4 : 0);
   return iree_ok_status();
 }
 
@@ -340,6 +369,13 @@ iree_status_t iree_hal_amd_gpu_command_inputs_capture(
               base->queue_family, binding.buffer, site, &captured->slots[site]);
         }
       }
+      if (iree_status_is_ok(status) &&
+          (requirement->atomic_operations |
+           requirement->incompatible_atomic_operations)) {
+        status = iree_hal_amd_gpu_control_validate_target(
+            base->queue_family, binding.buffer, requirement->atomic_operations,
+            requirement->incompatible_atomic_operations);
+      }
       if (iree_status_is_ok(status)) {
         captured->buffer = binding.buffer;
         captured->offset = binding.offset;
@@ -409,6 +445,12 @@ iree_status_t iree_hal_amd_gpu_command_inputs_write(
         status =
             iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                              "recorded GPU input overflows or is misaligned");
+      } else if (value & ((input->atomic_alignment & 15u) |
+                          (input->atomic_alignment >> 4))) {
+        status = iree_make_status((value & (input->atomic_alignment & 15u))
+                                      ? IREE_STATUS_INVALID_ARGUMENT
+                                      : IREE_STATUS_INCOMPATIBLE,
+                                  "recorded atomic GPU address is misaligned");
       }
     }
     values[i] = value;

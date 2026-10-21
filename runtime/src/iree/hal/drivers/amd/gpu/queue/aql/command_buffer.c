@@ -671,6 +671,12 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_command_program_t* program = invocation->program;
+  if (IREE_UNLIKELY(program->has_control) &&
+      invocation->instance->address >
+          (UINT64_C(1) << 48) - program->resident.byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AQL control program exceeds 48-bit addressing");
+  }
   const uint64_t values_offset =
       program->host_template
           ? program->host_template->fixup_offset
@@ -707,28 +713,88 @@ static iree_status_t iree_hal_amd_gpu_aql_command_buffer_end_debug_group(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_amd_gpu_aql_command_atomic(
+    iree_hal_amd_gpu_aql_command_buffer_t* buffer,
+    iree_hal_execution_stage_t source_stage,
+    iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
+    iree_hal_amd_gpu_control_t command) {
+  uint32_t value = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_atomic(
+      &buffer->inputs, target, command, &value));
+  uint32_t after = 0;
+  iree_hal_amd_gpu_aql_barrier_atomic(command.flags, source_stage, target_stage,
+                                      &buffer->pending_barrier, &after);
+  uint32_t header = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_header(buffer, &header));
+  const uint32_t xcc_count =
+      buffer->pool->storage.context->target_info.topology.xcc_count;
+  const uint32_t predicate_words = xcc_count > 1 ? 2 : 0;
+  const uint32_t body_words = iree_hal_amd_gpu_control_word_count(command);
+  uint32_t data_offset = 0;
+  uint32_t* words = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+      &buffer->recording, (predicate_words + body_words) * 4, 4, &data_offset,
+      (void**)&words));
+  uint32_t* cursor =
+      iree_hal_amd_gpu_aql_emit_single_executor(words, xcc_count, body_words);
+  iree_hal_amd_gpu_control_emit(cursor, 0, command);
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+      buffer,
+      data_offset + 4 * (predicate_words +
+                         iree_hal_amd_gpu_control_address_word(command)),
+      value, target.offset, IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
+  uint32_t packet_offset = 0;
+  iree_hal_amd_gpu_aql_packet_t* packet = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_aql_command_packets(buffer, 1, &packet_offset, &packet));
+  *packet = iree_hal_amd_gpu_aql_packet_indirect_buffer(
+      header | IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED, 0,
+      predicate_words + body_words, 0);
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+      buffer, packet_offset + 8, 0, data_offset,
+      IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+  buffer->last_header = &packet->words[0];
+  buffer->last_ordered = true;
+  buffer->pending_barrier = after;
+  buffer->program->has_control = true;
+  ++buffer->program->operation_count;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_atomic_wait(
     iree_hal_command_buffer_t* base, iree_hal_execution_stage_t source_stage,
     iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
     iree_hal_atomic_wait_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "AQL recorded atomic waits are not admitted");
+  iree_hal_amd_gpu_aql_command_buffer_t* buffer = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
+  return iree_hal_amd_gpu_aql_command_record_status(
+      buffer, iree_hal_amd_gpu_aql_command_atomic(
+                  buffer, source_stage, target_stage, target,
+                  iree_hal_amd_gpu_control_wait(params)));
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_atomic_store(
     iree_hal_command_buffer_t* base, iree_hal_execution_stage_t source_stage,
     iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
     iree_hal_atomic_store_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "AQL recorded atomic stores are not admitted");
+  iree_hal_amd_gpu_aql_command_buffer_t* buffer = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
+  return iree_hal_amd_gpu_aql_command_record_status(
+      buffer, iree_hal_amd_gpu_aql_command_atomic(
+                  buffer, source_stage, target_stage, target,
+                  iree_hal_amd_gpu_control_store(params)));
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_atomic_rmw(
     iree_hal_command_buffer_t* base, iree_hal_execution_stage_t source_stage,
     iree_hal_execution_stage_t target_stage, iree_hal_buffer_ref_t target,
     iree_hal_atomic_rmw_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "AQL recorded atomic RMWs are not admitted");
+  iree_hal_amd_gpu_aql_command_buffer_t* buffer = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
+  return iree_hal_amd_gpu_aql_command_record_status(
+      buffer, iree_hal_amd_gpu_aql_command_atomic(
+                  buffer, source_stage, target_stage, target,
+                  iree_hal_amd_gpu_control_rmw(params)));
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_advise_buffer(

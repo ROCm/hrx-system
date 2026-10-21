@@ -791,11 +791,11 @@ static iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
 }
 
-// The six-DWORD clock copy plus optional two-DWORD virtual-XCC predicate.
-enum { IREE_HAL_AMD_GPU_AQL_TIMESTAMP_BYTE_LENGTH = 32 };
+// At most nine scalar DWORDs plus the two-DWORD virtual-XCC predicate.
+enum { IREE_HAL_AMD_GPU_AQL_CONTROL_BYTE_LENGTH = 48 };
 
 static iree_hal_amd_gpu_aql_publish_result_t
-iree_hal_amd_gpu_aql_publish_timestamp(
+iree_hal_amd_gpu_aql_publish_control(
     iree_hal_amd_gpu_aql_queue_t* queue,
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t* out_status) {
   const uint64_t position = (uint64_t)iree_atomic_load(
@@ -808,7 +808,7 @@ iree_hal_amd_gpu_aql_publish_timestamp(
   uint64_t offset = 0, end = 0;
   const iree_hal_amd_gpu_aql_publish_result_t argument_result =
       iree_hal_amd_gpu_aql_arguments(
-          queue, IREE_HAL_AMD_GPU_AQL_TIMESTAMP_BYTE_LENGTH, 4, &offset, &end);
+          queue, IREE_HAL_AMD_GPU_AQL_CONTROL_BYTE_LENGTH, 4, &offset, &end);
   if (argument_result != IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE) {
     return argument_result;
   }
@@ -825,17 +825,13 @@ iree_hal_amd_gpu_aql_publish_timestamp(
     }
   }
   uint64_t target = 0;
-  iree_status_t status = iree_hal_amd_gpu_buffer_reference_resolve(
-      &submission->timestamp, &target);
-  if (iree_status_is_ok(status) && (target & 7u)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "timestamp GPU address must be 8-byte aligned");
-  }
+  iree_status_t status = iree_hal_amd_gpu_control_resolve(
+      &submission->control.target, submission->control.command, &target);
   iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   const uint64_t address = arguments->address + offset;
   if (iree_status_is_ok(status) &&
       address >
-          (UINT64_C(1) << 48) - IREE_HAL_AMD_GPU_AQL_TIMESTAMP_BYTE_LENGTH) {
+          (UINT64_C(1) << 48) - IREE_HAL_AMD_GPU_AQL_CONTROL_BYTE_LENGTH) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "AQL indirect buffer exceeds 48-bit addressing");
   }
@@ -850,8 +846,10 @@ iree_hal_amd_gpu_aql_publish_timestamp(
   }
   uint32_t* words = (void*)(arguments->memory.contents.data + offset);
   uint32_t* cursor = iree_hal_amd_gpu_aql_emit_single_executor(
-      words, queue->context->target_info.topology.xcc_count, 6);
-  cursor = iree_hal_amd_gpu_pm4_emit_clock(cursor, target);
+      words, queue->context->target_info.topology.xcc_count,
+      iree_hal_amd_gpu_control_word_count(submission->control.command));
+  cursor = iree_hal_amd_gpu_control_emit(cursor, target,
+                                         submission->control.command);
   const iree_hal_amd_gpu_aql_packet_t packet =
       iree_hal_amd_gpu_aql_packet_indirect_buffer(
           IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
@@ -872,7 +870,7 @@ iree_hal_amd_gpu_aql_publish_timestamp(
     }
   }
   // Prepare every byte before exposing the valid header. The native signal
-  // joins all XCCs, even when only XCC0 writes the tick.
+  // joins all XCCs, even when only XCC0 performs the scalar operation.
   iree_hal_amd_gpu_aql_accept(queue, submission, signal, position, end, true,
                               true);
   packet_position = iree_hal_amd_gpu_aql_emit_waits(
@@ -1057,6 +1055,8 @@ iree_hal_amd_gpu_aql_publish_execute(
   const iree_hal_amd_gpu_aql_program_flags_t program_flags =
       (first ? IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST : 0) |
       (initialize ? IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE : 0) |
+      (invocation->program->has_control ? IREE_HAL_AMD_GPU_AQL_PROGRAM_CONTROL
+                                        : 0) |
       (invocation->program->profile ? IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE : 0);
   ++invocation->block_ordinal;
   iree_hal_amd_gpu_aql_accept(queue, submission, signal, position, argument_end,
@@ -1293,8 +1293,8 @@ static void iree_hal_amd_gpu_aql_process_submission(
   iree_hal_amd_gpu_aql_publish_result_t result;
   if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
     result = iree_hal_amd_gpu_aql_publish_transfer(queue, submission, &status);
-  } else if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TIMESTAMP) {
-    result = iree_hal_amd_gpu_aql_publish_timestamp(queue, submission, &status);
+  } else if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL) {
+    result = iree_hal_amd_gpu_aql_publish_control(queue, submission, &status);
   } else if (execute) {
     result = iree_hal_amd_gpu_aql_publish_execute(queue, submission, &status);
   } else {
@@ -1327,8 +1327,8 @@ static void iree_hal_amd_gpu_aql_process_submission(
           submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER
               ? iree_hal_amd_gpu_aql_transfer_argument_length(
                     &submission->transfer.capture)
-          : submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TIMESTAMP
-              ? IREE_HAL_AMD_GPU_AQL_TIMESTAMP_BYTE_LENGTH
+          : submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL
+              ? IREE_HAL_AMD_GPU_AQL_CONTROL_BYTE_LENGTH
           : execute
               ? iree_hal_amd_gpu_aql_execute_argument_length(
                     &submission->execute, sampled)
@@ -1449,7 +1449,7 @@ static void iree_hal_amd_gpu_aql_process_entry(
       iree_containerof(entry, iree_hal_amd_gpu_aql_entry_t, publication);
   switch (typed->kind) {
     case IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER:
-    case IREE_HAL_AMD_GPU_AQL_ENTRY_TIMESTAMP:
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_SUBMISSION:
       iree_hal_amd_gpu_aql_process_submission(
@@ -1557,7 +1557,7 @@ static bool iree_hal_amd_gpu_aql_progress(void* user_data) {
           (typed->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_SUBMISSION ||
            typed->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE ||
            typed->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER ||
-           typed->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TIMESTAMP)) {
+           typed->kind == IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL)) {
         iree_hal_amd_gpu_profile_operation_defer(
             iree_hal_amd_gpu_aql_submission_profile(iree_containerof(
                 typed, iree_hal_amd_gpu_aql_submission_t, entry)));
@@ -2056,55 +2056,29 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_query_dispatch_concurrency(
       executable, function, scalar_reservation, params, out_concurrency);
 }
 
-static iree_status_t iree_hal_amd_gpu_aql_queue_atomic_wait(
-    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
-    iree_device_size_t offset, iree_hal_atomic_wait_params_t params,
-    const iree_hal_queue_barriers_t* barriers) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "AQL public atomic wait is not admitted");
-}
-
-static iree_status_t iree_hal_amd_gpu_aql_queue_atomic_store(
-    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
-    iree_device_size_t offset, iree_hal_atomic_store_params_t params,
-    const iree_hal_queue_barriers_t* barriers) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "AQL public atomic store is not admitted");
-}
-
-static iree_status_t iree_hal_amd_gpu_aql_queue_atomic_rmw(
-    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
-    iree_device_size_t offset, iree_hal_atomic_rmw_params_t params,
-    const iree_hal_queue_barriers_t* barriers) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "AQL public atomic RMW is not admitted");
-}
-
-static iree_status_t iree_hal_amd_gpu_aql_queue_timestamp(
+static iree_status_t iree_hal_amd_gpu_aql_queue_control(
     iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
-    iree_device_size_t offset, const iree_hal_queue_barriers_t* barriers,
-    iree_hal_timestamp_flags_t flags) {
+    iree_device_size_t offset, iree_hal_amd_gpu_control_t command,
+    const iree_hal_queue_barriers_t* barriers,
+    iree_hal_profile_queue_event_type_t event_type) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_check_acceptance(queue));
-  if (!base->queue_family->spec->timestamp_frequency_hz) {
+  if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP &&
+      !base->queue_family->spec->timestamp_frequency_hz) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "queue family has no timestamp clock rate");
   }
   iree_hal_amd_gpu_profile_operation_t operation;
   if (queue->profile) {
     iree_hal_amd_gpu_profile_operation_initialize(
-        queue->profile, queue->options.queue_ordinal,
-        IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TIMESTAMP, waits.count, signals.count,
-        1, &operation);
+        queue->profile, queue->options.queue_ordinal, event_type, waits.count,
+        signals.count, 1, &operation);
   }
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_timestamp(
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_control(
       &queue->captures, queue->profile ? &operation : NULL, base->queue_family,
-      waits, signals, target, offset,
+      waits, signals, target, offset, command,
       iree_hal_amd_gpu_aql_barrier_prepare(barriers ? barriers->before : NULL),
       iree_hal_amd_gpu_aql_barrier_prepare(barriers ? barriers->after : NULL),
       &submission));
@@ -2113,6 +2087,50 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_timestamp(
                         iree_memory_order_relaxed);
   iree_hal_amd_gpu_aql_enqueue(queue, submission);
   return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amd_gpu_aql_queue_atomic_wait(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
+    iree_device_size_t offset, iree_hal_atomic_wait_params_t params,
+    const iree_hal_queue_barriers_t* barriers) {
+  return iree_hal_amd_gpu_aql_queue_control(
+      queue, waits, signals, target, offset,
+      iree_hal_amd_gpu_control_wait(params), barriers,
+      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_WAIT);
+}
+
+static iree_status_t iree_hal_amd_gpu_aql_queue_atomic_store(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
+    iree_device_size_t offset, iree_hal_atomic_store_params_t params,
+    const iree_hal_queue_barriers_t* barriers) {
+  return iree_hal_amd_gpu_aql_queue_control(
+      queue, waits, signals, target, offset,
+      iree_hal_amd_gpu_control_store(params), barriers,
+      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_STORE);
+}
+
+static iree_status_t iree_hal_amd_gpu_aql_queue_atomic_rmw(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
+    iree_device_size_t offset, iree_hal_atomic_rmw_params_t params,
+    const iree_hal_queue_barriers_t* barriers) {
+  return iree_hal_amd_gpu_aql_queue_control(
+      queue, waits, signals, target, offset,
+      iree_hal_amd_gpu_control_rmw(params), barriers,
+      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW);
+}
+
+static iree_status_t iree_hal_amd_gpu_aql_queue_timestamp(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
+    iree_device_size_t offset, const iree_hal_queue_barriers_t* barriers,
+    iree_hal_timestamp_flags_t flags) {
+  return iree_hal_amd_gpu_aql_queue_control(
+      queue, waits, signals, target, offset,
+      iree_hal_amd_gpu_control_timestamp(), barriers,
+      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TIMESTAMP);
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_queue_flush(iree_hal_queue_t* base) {

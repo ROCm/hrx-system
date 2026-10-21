@@ -99,9 +99,9 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
     code_offset += iree_align_uint64(builtin->code.data_length, 256);
   }
   return out_pool->code_upload ? iree_ok_status()
-                          : iree_hal_amd_gpu_code_publish(
-                                context, NULL, 0, native_family_ordinal,
-                                &out_pool->code, &out_pool->code_upload);
+                               : iree_hal_amd_gpu_code_publish(
+                                     context, NULL, 0, native_family_ordinal,
+                                     &out_pool->code, &out_pool->code_upload);
 }
 
 void iree_hal_amd_gpu_aql_program_pool_deinitialize(
@@ -110,8 +110,9 @@ void iree_hal_amd_gpu_aql_program_pool_deinitialize(
     return;
   }
   iree_hal_amd_gpu_code_upload_free(pool->storage.context, pool->code_upload);
-  iree_hal_amd_fabric_memory_deinitialize(
-      pool->storage.context->api, pool->storage.context->event_sink, &pool->code);
+  iree_hal_amd_fabric_memory_deinitialize(pool->storage.context->api,
+                                          pool->storage.context->event_sink,
+                                          &pool->code);
   iree_hal_amd_gpu_program_pool_deinitialize(&pool->storage);
 }
 
@@ -184,6 +185,14 @@ void iree_hal_amd_gpu_aql_program_emit(
           argument_address +
               offsetof(iree_hal_amd_gpu_aql_program_arguments_t, fixup),
           (program->fixup_count + 63) / 64);
+      if (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_CONTROL) {
+        // Publish private IB fixups once for the entire resident program.
+        // These are local packet bytes before ring publication, never a
+        // read-modify-write of device-resident ring storage.
+        prefix[count - 1].words[0] =
+            (prefix[count - 1].words[0] & ~(3u << 11)) |
+            IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
+      }
     }
     materialize = &arguments->materialize;
     materialize_address +=

@@ -35,15 +35,16 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
       iree_hal_atomic_width_t width,
       iree_hal_atomic_operation_flags_t operation_flags,
       iree_hal_atomic_wait_condition_flags_t wait_condition_flags,
-      AtomicTestConfiguration* out_configuration) {
+      AtomicTestConfiguration* out_configuration,
+      iree_hal_atomic_flags_t scope_flags = IREE_HAL_ATOMIC_FLAG_NONE) {
     const AtomicTestRequirements requirements = {
         .operation_flags = operation_flags,
         .wait_condition_flags = wait_condition_flags,
         .buffer_usage =
             IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
         .width = width,
-        .atomic_flags =
-            IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE,
+        .atomic_flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+                        IREE_HAL_ATOMIC_FLAG_RELEASE | scope_flags,
     };
     if (!SelectAtomicTestConfiguration(device_, requirements,
                                        out_configuration)) {
@@ -292,18 +293,22 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
   }
 
   template <typename ValueType>
-  void RunReusableStoreAndRmwTest(iree_hal_atomic_width_t width) {
-    const iree_hal_atomic_operation_flags_t operation_flags =
+  void RunReusableStoreAndRmwTest(
+      iree_hal_atomic_width_t width, bool include_bitwise = true,
+      iree_hal_atomic_flags_t scope_flags = IREE_HAL_ATOMIC_FLAG_NONE) {
+    iree_hal_atomic_operation_flags_t operation_flags =
         IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD |
-        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT |
-        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_AND |
-        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR |
-        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR;
+        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT;
+    if (include_bitwise) {
+      operation_flags |= IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_AND |
+                         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR |
+                         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR;
+    }
     AtomicTestConfiguration configuration;
     if (!SelectConfiguration(width, operation_flags,
                              IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE,
-                             &configuration)) {
+                             &configuration, scope_flags)) {
       GTEST_SKIP() << "Device does not advertise the tested "
                       "queue/memory atomic operation set";
     }
@@ -327,8 +332,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
                        /*binding=*/0, kTargetOffset, target_length)
                  : iree_hal_make_buffer_ref(first_buffer, kTargetOffset,
                                             target_length);
-    const iree_hal_atomic_flags_t atomic_flags =
-        IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE;
+    const iree_hal_atomic_flags_t atomic_flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+                                                 IREE_HAL_ATOMIC_FLAG_RELEASE |
+                                                 scope_flags;
 
     // Command recording order does not establish atomic execution dependencies.
     const iree_hal_atomic_store_params_t store_params = {
@@ -354,31 +360,35 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT;
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
         command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
-        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, rmw_params));
+        include_bitwise ? IREE_HAL_EXECUTION_STAGE_ATOMIC
+                        : IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        target_ref, rmw_params));
 
-    rmw_params.operand = 10;
-    rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_AND;
-    IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
-        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
-        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, rmw_params));
+    if (include_bitwise) {
+      rmw_params.operand = 10;
+      rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_AND;
+      IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
+          command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+          IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, rmw_params));
 
-    rmw_params.operand = 3;
-    rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_OR;
-    IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
-        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
-        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, rmw_params));
+      rmw_params.operand = 3;
+      rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_OR;
+      IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
+          command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+          IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, rmw_params));
 
-    rmw_params.operand = 15;
-    rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR;
-    IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
-        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
-        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref, rmw_params));
+      rmw_params.operand = 15;
+      rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR;
+      IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
+          command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+          IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref, rmw_params));
+    }
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
+    const ValueType expected = include_bitwise ? 4 : 12;
     IREE_ASSERT_OK(SubmitAtomicCommandBuffer(
         command_buffer, indirect ? first_buffer.get() : nullptr));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(first_buffer),
-              static_cast<ValueType>(4));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(first_buffer), expected);
 
     iree_hal_buffer_t* second_target =
         indirect ? second_buffer.get() : first_buffer.get();
@@ -387,23 +397,23 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     IREE_ASSERT_OK(SubmitAtomicCommandBuffer(
         command_buffer, indirect ? second_buffer.get() : nullptr));
     if (indirect) {
-      EXPECT_EQ(ReadAtomicValue<ValueType>(second_buffer),
-                static_cast<ValueType>(4));
+      EXPECT_EQ(ReadAtomicValue<ValueType>(second_buffer), expected);
     } else {
-      EXPECT_EQ(ReadAtomicValue<ValueType>(first_buffer),
-                static_cast<ValueType>(4));
+      EXPECT_EQ(ReadAtomicValue<ValueType>(first_buffer), expected);
     }
   }
 
   template <typename ValueType>
-  void RunReusableWaitTest(iree_hal_atomic_width_t width) {
+  void RunReusableWaitTest(
+      iree_hal_atomic_width_t width,
+      iree_hal_atomic_flags_t scope_flags = IREE_HAL_ATOMIC_FLAG_NONE) {
     const iree_hal_atomic_operation_flags_t operation_flags =
         IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
         IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
     AtomicTestConfiguration configuration;
     if (!SelectConfiguration(width, operation_flags,
                              IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL,
-                             &configuration)) {
+                             &configuration, scope_flags)) {
       GTEST_SKIP() << "Device does not advertise the tested "
                       "queue/memory atomic wait set";
     }
@@ -428,8 +438,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
                        /*binding=*/0, kTargetOffset, target_length)
                  : iree_hal_make_buffer_ref(first_buffer, kTargetOffset,
                                             target_length);
-    const iree_hal_atomic_flags_t atomic_flags =
-        IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE;
+    const iree_hal_atomic_flags_t atomic_flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+                                                 IREE_HAL_ATOMIC_FLAG_RELEASE |
+                                                 scope_flags;
 
     // Command recording order does not establish atomic execution dependencies.
     const iree_hal_atomic_store_params_t store_params = {
@@ -500,12 +511,41 @@ TEST_P(CommandBufferAtomicTest, ReusableStoreAndRmw64) {
   RunReusableStoreAndRmwTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64);
 }
 
+// PCIe control storage may support fetch-add without bitwise RMW operations.
+TEST_P(CommandBufferAtomicTest, ReusableStoreAndAddSubtract32) {
+  RunReusableStoreAndRmwTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32, false);
+}
+
+TEST_P(CommandBufferAtomicTest, ReusableStoreAndAddSubtract64) {
+  RunReusableStoreAndRmwTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64, false);
+}
+
 TEST_P(CommandBufferAtomicTest, ReusableWait32) {
   RunReusableWaitTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32);
 }
 
 TEST_P(CommandBufferAtomicTest, ReusableWait64) {
   RunReusableWaitTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64);
+}
+
+TEST_P(CommandBufferAtomicTest, SystemReusableStoreAndAddSubtract32) {
+  RunReusableStoreAndRmwTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32, false,
+                                       IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(CommandBufferAtomicTest, SystemReusableStoreAndAddSubtract64) {
+  RunReusableStoreAndRmwTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64, false,
+                                       IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(CommandBufferAtomicTest, SystemReusableWait32) {
+  RunReusableWaitTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32,
+                                IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(CommandBufferAtomicTest, SystemReusableWait64) {
+  RunReusableWaitTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64,
+                                IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
 }
 
 TEST_P(CommandBufferAtomicTest, ResolvedMisalignmentFails64) {

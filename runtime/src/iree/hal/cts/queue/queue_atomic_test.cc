@@ -36,15 +36,16 @@ class QueueAtomicTest : public CtsTestBase<> {
       iree_hal_atomic_width_t width,
       iree_hal_atomic_operation_flags_t operation_flags,
       iree_hal_atomic_wait_condition_flags_t wait_condition_flags,
-      AtomicTestConfiguration* out_configuration) {
+      AtomicTestConfiguration* out_configuration,
+      iree_hal_atomic_flags_t scope_flags = IREE_HAL_ATOMIC_FLAG_NONE) {
     const AtomicTestRequirements requirements = {
         .operation_flags = operation_flags,
         .wait_condition_flags = wait_condition_flags,
         .buffer_usage =
             IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
         .width = width,
-        .atomic_flags =
-            IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE,
+        .atomic_flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+                        IREE_HAL_ATOMIC_FLAG_RELEASE | scope_flags,
     };
     if (!SelectAtomicTestConfiguration(device_, requirements,
                                        out_configuration)) {
@@ -259,18 +260,22 @@ class QueueAtomicTest : public CtsTestBase<> {
   }
 
   template <typename ValueType>
-  void RunStoreAndRmwTest(iree_hal_atomic_width_t width) {
-    const iree_hal_atomic_operation_flags_t operation_flags =
+  void RunStoreAndRmwTest(
+      iree_hal_atomic_width_t width, bool include_bitwise = true,
+      iree_hal_atomic_flags_t scope_flags = IREE_HAL_ATOMIC_FLAG_NONE) {
+    iree_hal_atomic_operation_flags_t operation_flags =
         IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD |
-        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT |
-        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_AND |
-        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR |
-        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR;
+        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT;
+    if (include_bitwise) {
+      operation_flags |= IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_AND |
+                         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR |
+                         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR;
+    }
     AtomicTestConfiguration configuration;
     if (!SelectConfiguration(width, operation_flags,
                              IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE,
-                             &configuration)) {
+                             &configuration, scope_flags)) {
       GTEST_SKIP() << "Device does not advertise the tested "
                       "queue/memory atomic operation set";
     }
@@ -278,8 +283,9 @@ class QueueAtomicTest : public CtsTestBase<> {
     Ref<iree_hal_buffer_t> buffer;
     IREE_ASSERT_OK(AllocateAtomicBuffer(configuration, buffer.out()));
 
-    const iree_hal_atomic_flags_t atomic_flags =
-        IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE;
+    const iree_hal_atomic_flags_t atomic_flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+                                                 IREE_HAL_ATOMIC_FLAG_RELEASE |
+                                                 scope_flags;
     const iree_hal_atomic_store_params_t store_params = {
         .value = 10,
         .flags = atomic_flags,
@@ -301,6 +307,9 @@ class QueueAtomicTest : public CtsTestBase<> {
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT;
     IREE_ASSERT_OK(QueueRmwAndWait(buffer, rmw_params));
     EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(12));
+    if (!include_bitwise) {
+      return;
+    }
 
     rmw_params.operand = 10;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_AND;
@@ -319,13 +328,15 @@ class QueueAtomicTest : public CtsTestBase<> {
   }
 
   template <typename ValueType>
-  void RunWaitConditionsTest(iree_hal_atomic_width_t width) {
+  void RunWaitConditionsTest(
+      iree_hal_atomic_width_t width,
+      iree_hal_atomic_flags_t scope_flags = IREE_HAL_ATOMIC_FLAG_NONE) {
     AtomicTestConfiguration configuration;
     if (!SelectConfiguration(width,
                              IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
                                  IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
                              IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL,
-                             &configuration)) {
+                             &configuration, scope_flags)) {
       GTEST_SKIP() << "Device does not advertise the tested "
                       "queue/memory atomic wait conditions";
     }
@@ -335,7 +346,7 @@ class QueueAtomicTest : public CtsTestBase<> {
 
     const iree_hal_atomic_store_params_t store_params = {
         .value = 0x12,
-        .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
+        .flags = IREE_HAL_ATOMIC_FLAG_RELEASE | scope_flags,
         .width = width,
     };
     IREE_ASSERT_OK(QueueStoreAndWait(buffer, store_params));
@@ -343,7 +354,7 @@ class QueueAtomicTest : public CtsTestBase<> {
     iree_hal_atomic_wait_params_t wait_params = {
         .value = 0x2,
         .mask = 0xF,
-        .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+        .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | scope_flags,
         .width = width,
         .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
     };
@@ -374,12 +385,41 @@ TEST_P(QueueAtomicTest, StoreAndRmw64) {
   RunStoreAndRmwTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64);
 }
 
+// PCIe control storage may support fetch-add without bitwise RMW operations.
+TEST_P(QueueAtomicTest, StoreAndAddSubtract32) {
+  RunStoreAndRmwTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32, false);
+}
+
+TEST_P(QueueAtomicTest, StoreAndAddSubtract64) {
+  RunStoreAndRmwTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64, false);
+}
+
 TEST_P(QueueAtomicTest, WaitConditions32) {
   RunWaitConditionsTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32);
 }
 
 TEST_P(QueueAtomicTest, WaitConditions64) {
   RunWaitConditionsTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64);
+}
+
+TEST_P(QueueAtomicTest, SystemStoreAndAddSubtract32) {
+  RunStoreAndRmwTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32, false,
+                               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(QueueAtomicTest, SystemStoreAndAddSubtract64) {
+  RunStoreAndRmwTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64, false,
+                               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(QueueAtomicTest, SystemWaitConditions32) {
+  RunWaitConditionsTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32,
+                                  IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(QueueAtomicTest, SystemWaitConditions64) {
+  RunWaitConditionsTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64,
+                                  IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
 }
 
 TEST_P(QueueAtomicTest, ResolvedMisalignmentFails64) {
