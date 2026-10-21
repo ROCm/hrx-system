@@ -1,3 +1,5 @@
+template.decl @qwen38.dense_q5k_f16_wmma.c64t32.body(%weight_channels: index, %complete_channels: i1, %output_size0: index, %input: buffer, %weight: buffer, %output: buffer)
+
 // CDNA reuses the same decoded panels, weight order, and publication path as
 // the wave64 WMMA schedule. The shared matrix provider selects MFMA operands.
 template.decl @qwen38.dense_q5k_f16_wmma.x64.body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %channel_tile: index, %token_tile: index, %input: buffer, %weight: buffer, %output: buffer)
@@ -55,5 +57,68 @@ kernel.def target(@qwen38_dense_cdna_wave64) @qwen38_linear_q5k_f16_mfma_channel
   %channel_tile = kernel.workgroup.id<x> : index
   %token_tile = kernel.workgroup.id<y> : index
   template.apply<@qwen38.dense_q5k_f16_wmma.x64.body>(%weight_channels, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qwen38_dense_cdna_wave64) @qwen38_linear_q5k_f16_mfma_c64t32_f32acc(%token_count0: index, %input_size0: index, %output_size0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 32), multiple_of(%token_count0, 32)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 5120, 5120)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 48, 17408), multiple_of(%output_size0, 16)] : index
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %c256 = index.constant 256 : index
+  %padded_output_size = index.add %output_size, %c63 : index
+  %output_tiles = index.div %padded_output_size, %c64 : index
+  %token_tiles = index.div %token_count, %c32 : index
+  kernel.launch.config workgroups(%output_tiles, %token_tiles, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%token_count_data: buffer, %input_size0: index, %output_size0: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 1 : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %channel_tile_end = index.add %channel_tile, %c1 : index
+  %channel_end = index.mul %channel_tile_end, %c64 : index
+  %complete = index.cmp ule, %channel_end, %output_size0 : index
+  %yes = scalar.constant true : i1
+  %no = scalar.constant false : i1
+  scf.if %complete {
+    template.apply<@qwen38.dense_q5k_f16_wmma.c64t32.body>(%weight_channels, %yes, %output_size0, %input, %weight, %output) : (index, i1, index, buffer, buffer, buffer)
+  } else {
+    template.apply<@qwen38.dense_q5k_f16_wmma.c64t32.body>(%weight_channels, %no, %output_size0, %input, %weight, %output) : (index, i1, index, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
+// Eight-channel block order; arithmetic and local staging match canonical Q5.
+kernel.def target(@qwen38_dense_cdna_wave64) @qwen38_linear_q5k_f16_mfma_c64t32_f32acc_channel8(%token_count0: index, %input_size0: index, %output_size0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 32), multiple_of(%token_count0, 32)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 5120, 5120)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 48, 17408), multiple_of(%output_size0, 16)] : index
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %c256 = index.constant 256 : index
+  %padded_output_size = index.add %output_size, %c63 : index
+  %output_tiles = index.div %padded_output_size, %c64 : index
+  %token_tiles = index.div %token_count, %c32 : index
+  kernel.launch.config workgroups(%output_tiles, %token_tiles, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%token_count_data: buffer, %input_size0: index, %output_size0: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 8 : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %channel_tile_end = index.add %channel_tile, %c1 : index
+  %channel_end = index.mul %channel_tile_end, %c64 : index
+  %complete = index.cmp ule, %channel_end, %output_size0 : index
+  %yes = scalar.constant true : i1
+  %no = scalar.constant false : i1
+  scf.if %complete {
+    template.apply<@qwen38.dense_q5k_f16_wmma.c64t32.body>(%weight_channels, %yes, %output_size0, %input, %weight, %output) : (index, i1, index, buffer, buffer, buffer)
+  } else {
+    template.apply<@qwen38.dense_q5k_f16_wmma.c64t32.body>(%weight_channels, %no, %output_size0, %input, %weight, %output) : (index, i1, index, buffer, buffer, buffer)
+  }
   kernel.return
 }

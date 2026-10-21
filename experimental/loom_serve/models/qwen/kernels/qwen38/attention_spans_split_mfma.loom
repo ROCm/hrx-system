@@ -1,0 +1,56 @@
+template.decl @qwen38.attention.spans_split.matrix(%token_capacity: index, %group_tokens: index, %split_count: index, %logical_capacity: index, %pool_capacity: index, %control: buffer, %control_origin: offset, %token_begin: index, %query: buffer, %state: buffer, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %partials: buffer)
+
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen38.attention.pool_capacity : %value: index where [range(%value, 0, 4194304)]
+
+func.decl @qwen38_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, index)
+
+func.decl @qwen38_row_kv_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset)
+
+func.decl @qwen38_row_kv_map_origin(%logical_capacity: index, %row: index) -> (offset)
+
+amdgpu.target<gfx9-4-generic> @qwen38_attention_spans_split_cdna_wave64 {subgroup_size = 64}
+
+kernel.def target(@qwen38_attention_spans_split_cdna_wave64) @qwen38_attention_spans_split_mfma_partial(%token_capacity: index, %span_capacity: index) {
+  %group_tokens = index.constant 2 : index
+  %split_count = index.constant 5 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %padding = index.sub %group_tokens, %one : index
+  %padded = index.add %token_capacity, %padding : index
+  %groups = index.div %padded, %group_tokens : index
+  %splits = index.mul %four, %split_count : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%splits, %groups, %span_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%token_capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %state: buffer, %partials: buffer) {
+  %group_tokens = index.constant 2 : index
+  %split_count = index.constant 5 : index
+  %span = kernel.workgroup.id<z> : index
+  %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %control_origin, %token_begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+    %control = buffer.view %epoch[%control_origin] : buffer -> view<1xi32>
+    %count_word = view.load %control[0] : view<1xi32> -> i32
+    %count = index.cast %count_word : i32 to index
+    %group = kernel.workgroup.id<y> : index
+    %group_begin = index.mul %group, %group_tokens : index
+    %group_active = index.cmp ult, %group_begin, %count : index
+    scf.if %group_active {
+      %key_origin = func.call @qwen38_row_kv_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
+      %logical_capacity = config.get @qwen38.attention.cache_capacity : index
+      %pool_capacity = config.get @qwen38.attention.pool_capacity : index
+      %zero = index.constant 0 : index
+      %paged = index.cmp ne, %pool_capacity, %zero : index
+      %cache_capacity = scf.select %paged, %pool_capacity, %logical_capacity : index
+      %map_origin = func.call @qwen38_row_kv_map_origin(%logical_capacity, %row) : (index, index) -> (offset)
+      %row_bytes = index.constant 2048 : offset
+      %cache_bytes = index.scale %cache_capacity, %row_bytes : index, offset -> offset
+      %value_origin = index.add %key_origin, %cache_bytes : offset
+      template.apply<@qwen38.attention.spans_split.matrix>(%token_capacity, %group_tokens, %split_count, %logical_capacity, %pool_capacity, %epoch, %control_origin, %token_begin, %query, %state, %key_origin, %value_origin, %rows, %map_origin, %partials) : (index, index, index, index, index, buffer, offset, index, buffer, buffer, offset, offset, buffer, offset, buffer)
+    }
+  }
+  kernel.return
+}

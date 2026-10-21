@@ -1,3 +1,7 @@
+template.decl @tensor.matrix.f16_16x16x16.operand_elements() -> (index)
+
+template.decl @qwen38.attention.spans_split.matrix(%token_capacity: index, %group_tokens: index, %split_count: index, %logical_capacity: index, %pool_capacity: index, %control: buffer, %control_origin: offset, %token_begin: index, %query: buffer, %state: buffer, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %partials: buffer)
+
 // Paired-query GQA attention over pooled or contiguous KV storage.
 // Each workgroup shares one 64-key tile across two tokens and six heads.
 // Five history partitions publish F32 online-softmax state; the reduction
@@ -71,7 +75,8 @@ func.def public inline @qwen38_attention_spans_split_merge(%token_capacity: inde
 // Native P*V fragments remain resident across history tiles. The 264-half
 // K/V stride avoids LDS bank conflicts; the final transpose reuses K/V
 // staging only after its last readers have completed.
-func.def public inline @qwen38_attention_spans_split_body(%token_capacity: index, %group_tokens: index, %split_count: index, %logical_capacity: index, %pool_capacity: index, %control: buffer, %control_origin: offset, %token_begin: index, %query: buffer, %state: buffer, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %partials: buffer) {
+template.def<@qwen38.attention.spans_split.matrix> device @qwen38_attention_spans_split_matrix(%token_capacity: index, %group_tokens: index, %split_count: index, %logical_capacity: index, %pool_capacity: index, %control: buffer, %control_origin: offset, %token_begin: index, %query: buffer, %state: buffer, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %partials: buffer) {
+  %operand_elements = template.apply<@tensor.matrix.f16_16x16x16.operand_elements>() : () -> (index)
   %workgroup0 = kernel.workgroup.id<x> : index
   %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 255)] : index
   %workitem = kernel.workitem.id<x> : index
@@ -264,9 +269,9 @@ func.def public inline @qwen38_attention_spans_split_body(%token_capacity: index
     %score_init_values = vector.constant 0.0 : vector<4xf32>
     %score_init = vector.fragment<init> %score_init_values shape [%m, %n] : vector<4xf32>
     %score_fragment = scf.for %head_tile = [%c0 to %c256 step %c16](%score_accumulator = %score_init : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
-      %key_fragment = vector.fragment.load<lhs> %key_value_stage_view[%subgroup_score_row, %head_tile] shape [%m, %k] : view<64x264xf16> -> vector<16xf16>
-      %query_fragment = vector.fragment.load<rhs> %query_transposed_view[%head_tile, %c0] shape [%k, %n] : view<256x16xf16, %query_transposed_layout> -> vector<16xf16>
-      %next_score_accumulator = vector.mma %key_fragment, %query_fragment, %score_accumulator : vector<16xf16>, vector<16xf16>, vector<4xf32>
+      %key_fragment = vector.fragment.load<lhs> %key_value_stage_view[%subgroup_score_row, %head_tile] shape [%m, %k] : view<64x264xf16> -> vector<[%operand_elements]xf16>
+      %query_fragment = vector.fragment.load<rhs> %query_transposed_view[%head_tile, %c0] shape [%k, %n] : view<256x16xf16, %query_transposed_layout> -> vector<[%operand_elements]xf16>
+      %next_score_accumulator = vector.mma %key_fragment, %query_fragment, %score_accumulator : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
       scf.yield %next_score_accumulator : vector<4xf32>
     }
     vector.fragment.store<result> %score_fragment, %score_stage_view[%subgroup_score_row, %c0] shape [%m, %n] : vector<4xf32>, view<64x24xf32>
@@ -360,27 +365,27 @@ func.def public inline @qwen38_attention_spans_split_body(%token_capacity: index
     %product_column3 = index.add %subgroup_product_channel, %column_offset3 : index
     %scaled_output3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_output3, %fragment_scale : vector<4xf32>
     %next_output0 = scf.for %key_tile = [%c0 to %c64 step %c16](%accumulator0 = %scaled_output0 : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
-      %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
-      %value_fragment0 = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %product_column0] shape [%k, %n] : view<64x264xf16> -> vector<16xf16>
-      %product0 = vector.mma %probability_fragment, %value_fragment0, %accumulator0 : vector<16xf16>, vector<16xf16>, vector<4xf32>
+      %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<[%operand_elements]xf16>
+      %value_fragment0 = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %product_column0] shape [%k, %n] : view<64x264xf16> -> vector<[%operand_elements]xf16>
+      %product0 = vector.mma %probability_fragment, %value_fragment0, %accumulator0 : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
       scf.yield %product0 : vector<4xf32>
     }
     %next_output1 = scf.for %key_tile = [%c0 to %c64 step %c16](%accumulator1 = %scaled_output1 : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
-      %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
-      %value_fragment1 = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %product_column1] shape [%k, %n] : view<64x264xf16> -> vector<16xf16>
-      %product1 = vector.mma %probability_fragment, %value_fragment1, %accumulator1 : vector<16xf16>, vector<16xf16>, vector<4xf32>
+      %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<[%operand_elements]xf16>
+      %value_fragment1 = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %product_column1] shape [%k, %n] : view<64x264xf16> -> vector<[%operand_elements]xf16>
+      %product1 = vector.mma %probability_fragment, %value_fragment1, %accumulator1 : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
       scf.yield %product1 : vector<4xf32>
     }
     %next_output2 = scf.for %key_tile = [%c0 to %c64 step %c16](%accumulator2 = %scaled_output2 : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
-      %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
-      %value_fragment2 = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %product_column2] shape [%k, %n] : view<64x264xf16> -> vector<16xf16>
-      %product2 = vector.mma %probability_fragment, %value_fragment2, %accumulator2 : vector<16xf16>, vector<16xf16>, vector<4xf32>
+      %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<[%operand_elements]xf16>
+      %value_fragment2 = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %product_column2] shape [%k, %n] : view<64x264xf16> -> vector<[%operand_elements]xf16>
+      %product2 = vector.mma %probability_fragment, %value_fragment2, %accumulator2 : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
       scf.yield %product2 : vector<4xf32>
     }
     %next_output3 = scf.for %key_tile = [%c0 to %c64 step %c16](%accumulator3 = %scaled_output3 : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
-      %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
-      %value_fragment3 = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %product_column3] shape [%k, %n] : view<64x264xf16> -> vector<16xf16>
-      %product3 = vector.mma %probability_fragment, %value_fragment3, %accumulator3 : vector<16xf16>, vector<16xf16>, vector<4xf32>
+      %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<[%operand_elements]xf16>
+      %value_fragment3 = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %product_column3] shape [%k, %n] : view<64x264xf16> -> vector<[%operand_elements]xf16>
+      %product3 = vector.mma %probability_fragment, %value_fragment3, %accumulator3 : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
       scf.yield %product3 : vector<4xf32>
     }
     // All V fragment reads complete before the next tile replaces K/V LDS.
@@ -454,7 +459,7 @@ func.def public inline @qwen38_attention_spans_split_body(%token_capacity: index
       view.store %sum3, %partial_view[%packed_token3, %key_head, %split, %query_head3, %c257] : f32, view<[%token_capacity]x4x[%split_count]x6x258xf32>
     }
   }
-  func.return
+  template.return
 }
 
 kernel.def target(@qwen38_attention_spans_split_wave64) export("qwen38_attention_spans_split_partial") @qwen38_attention_spans_split_partial(%token_capacity: index, %span_capacity: index) {
@@ -492,7 +497,7 @@ kernel.def target(@qwen38_attention_spans_split_wave64) export("qwen38_attention
       %row_bytes = index.constant 2048 : offset
       %cache_bytes = index.scale %cache_capacity, %row_bytes : index, offset -> offset
       %value_origin = index.add %key_origin, %cache_bytes : offset
-      func.call @qwen38_attention_spans_split_body(%token_capacity, %group_tokens, %split_count, %logical_capacity, %pool_capacity, %epoch, %control_origin, %token_begin, %query, %state, %key_origin, %value_origin, %rows, %map_origin, %partials) : (index, index, index, index, index, buffer, offset, index, buffer, buffer, offset, offset, buffer, offset, buffer)
+      template.apply<@qwen38.attention.spans_split.matrix>(%token_capacity, %group_tokens, %split_count, %logical_capacity, %pool_capacity, %epoch, %control_origin, %token_begin, %query, %state, %key_origin, %value_origin, %rows, %map_origin, %partials) : (index, index, index, index, index, buffer, offset, index, buffer, buffer, offset, offset, buffer, offset, buffer)
     }
   }
   kernel.return

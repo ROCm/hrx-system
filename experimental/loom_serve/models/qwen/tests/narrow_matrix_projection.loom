@@ -1,0 +1,35 @@
+kernel.decl @qwen38_linear_q5k_f16_mfma(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_c64t32_f32acc(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_c64t32_f32acc_channel8(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_alpha_split_k(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %partials: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_wmma_alpha_split_k_reduce(%tokens: index) launch(%control: buffer, %partials: buffer, %output: buffer)
+
+// All three schedules retain the same decoded Q5 values and F32 boundary.
+// Forty-eight outputs exercise the final incomplete 64-channel tile.
+check.case public @qwen38_q5_narrow_mfma_case {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %tokens = check.literal value(32) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(48) : index
+  %control = check.generate.fill value(32) : tensor<1xi32>
+  %input = check.generate.iota offset(-0.75) step(0.0078125) period(256) : tensor<32x5120xf32>
+  %weight = check.generate.fill value(1) : tensor<48x20x176xi8>
+  %expected = check.generate.fill value(0.0) : tensor<32x48xf32>
+  %canonical = check.generate.fill value(-99.0) : tensor<32x48xf32>
+  %channel8 = check.generate.fill value(-99.0) : tensor<32x48xf32>
+  %split = check.generate.fill value(-99.0) : tensor<32x48xf32>
+  %partials = check.generate.fill value(-99.0) : tensor<7x32x48xf32>
+  kernel.launch @qwen38_linear_q5k_f16_mfma[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<48x20x176xi8>, tensor<32x48xf32>)
+  kernel.launch @qwen38_linear_q5k_f16_mfma_c64t32_f32acc[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %canonical) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<48x20x176xi8>, tensor<32x48xf32>)
+  kernel.launch @qwen38_linear_q5k_f16_mfma_c64t32_f32acc_channel8[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %channel8) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<48x20x176xi8>, tensor<32x48xf32>)
+  kernel.launch @qwen38_linear_q5k_f16_mfma_alpha_split_k[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %partials) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<48x20x176xi8>, tensor<7x32x48xf32>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_alpha_split_k_reduce[%tokens](%control, %partials, %split) : [index](tensor<1xi32>, tensor<7x32x48xf32>, tensor<32x48xf32>)
+  check.expect.close actual(%canonical) expected(%expected) atol(0.001) rtol(0.002) nan(different) : tensor<32x48xf32>
+  check.expect.close actual(%channel8) expected(%expected) atol(0.001) rtol(0.002) nan(different) : tensor<32x48xf32>
+  check.expect.close actual(%split) expected(%expected) atol(0.001) rtol(0.002) nan(different) : tensor<32x48xf32>
+  check.return
+}
