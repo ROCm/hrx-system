@@ -16,3 +16,55 @@ template.def<@tensor.matrix.f16_16x16x16.operand_elements> target(@tensor_matrix
   %elements = index.constant 4 : index
   template.return %elements : index
 }
+
+// Contracts one 16-row panel into a 16-column output tile. The reduction spans
+// complete 16-element tiles; callers stage or mask tails before invoking it.
+// Native accumulation precision is target-dependent. Publication always rounds
+// to F16 directly, without a separate intermediate buffer or conversion pass.
+template.decl @tensor.matrix.f16_16x16.product_to_f16(%reduction_size: index, %left_columns: index, %left_layout: encoding<layout>, %left: buffer, %right_rows: index, %right_columns: index, %right: buffer, %right_origin: offset, %right_row: index, %right_column: index, %output_columns: index, %output: buffer, %output_column: index)
+
+template.def<@tensor.matrix.f16_16x16.product_to_f16> target(@tensor_matrix_rdna3) requires [#target.subgroup.size<64>] @tensor_matrix_f16_product_rdna3(%reduction_size: index, %left_columns: index, %left_layout: encoding<layout>, %left: buffer, %right_rows: index, %right_columns: index, %right: buffer, %right_origin: offset, %right_row: index, %right_column: index, %output_columns: index, %output: buffer, %output_column: index) {
+  %origin = index.constant 0 : offset
+  %left_view = buffer.view %left[%origin] : buffer -> view<16x[%left_columns]xf16, %left_layout>
+  %right_view = buffer.view %right[%right_origin] : buffer -> view<[%right_rows]x[%right_columns]xf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16x[%output_columns]xf16>
+  %zero = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %padding = index.constant 15 : index
+  %last_tile_start = index.sub %right_rows, %padding : index
+  %initial_values = vector.constant 0.0 : vector<8xf16>
+  %initial = vector.fragment<init> %initial_values shape [%tile, %tile] : vector<8xf16>
+  %product = scf.for %reduction = [%zero to %reduction_size step %tile](%accumulator = %initial : vector<8xf16>) -> (vector<8xf16>) unroll schedule(recurrence) {
+    %row_value = index.add %right_row, %reduction : index
+    %row = index.assume %row_value [lt(%row_value, %last_tile_start)] : index
+    %left_fragment = vector.fragment.load<lhs> %left_view[%zero, %reduction] shape [%tile, %tile] : view<16x[%left_columns]xf16, %left_layout> -> vector<16xf16>
+    %right_fragment = vector.fragment.load<rhs> %right_view[%row, %right_column] shape [%tile, %tile] : view<[%right_rows]x[%right_columns]xf16> -> vector<16xf16>
+    %next = vector.mma %left_fragment, %right_fragment, %accumulator : vector<16xf16>, vector<16xf16>, vector<8xf16>
+    scf.yield %next : vector<8xf16>
+  }
+  vector.fragment.store<result> %product, %output_view[%zero, %output_column] shape [%tile, %tile] : vector<8xf16>, view<16x[%output_columns]xf16>
+  template.return
+}
+
+template.def<@tensor.matrix.f16_16x16.product_to_f16> target(@tensor_matrix_cdna3) requires [#target.subgroup.size<64>] @tensor_matrix_f16_product_cdna3(%reduction_size: index, %left_columns: index, %left_layout: encoding<layout>, %left: buffer, %right_rows: index, %right_columns: index, %right: buffer, %right_origin: offset, %right_row: index, %right_column: index, %output_columns: index, %output: buffer, %output_column: index) {
+  %origin = index.constant 0 : offset
+  %left_view = buffer.view %left[%origin] : buffer -> view<16x[%left_columns]xf16, %left_layout>
+  %right_view = buffer.view %right[%right_origin] : buffer -> view<[%right_rows]x[%right_columns]xf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16x[%output_columns]xf16>
+  %zero = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %padding = index.constant 15 : index
+  %last_tile_start = index.sub %right_rows, %padding : index
+  %initial_values = vector.constant 0.0 : vector<4xf32>
+  %initial = vector.fragment<init> %initial_values shape [%tile, %tile] : vector<4xf32>
+  %product = scf.for %reduction = [%zero to %reduction_size step %tile](%accumulator = %initial : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
+    %row_value = index.add %right_row, %reduction : index
+    %row = index.assume %row_value [lt(%row_value, %last_tile_start)] : index
+    %left_fragment = vector.fragment.load<lhs> %left_view[%zero, %reduction] shape [%tile, %tile] : view<16x[%left_columns]xf16, %left_layout> -> vector<4xf16>
+    %right_fragment = vector.fragment.load<rhs> %right_view[%row, %right_column] shape [%tile, %tile] : view<[%right_rows]x[%right_columns]xf16> -> vector<4xf16>
+    %next = vector.mma %left_fragment, %right_fragment, %accumulator : vector<4xf16>, vector<4xf16>, vector<4xf32>
+    scf.yield %next : vector<4xf32>
+  }
+  vector.fragment.store<result> %product, %output_view[%zero, %output_column] shape [%tile, %tile] : vector<4xf32>, view<16x[%output_columns]xf16>
+  template.return
+}

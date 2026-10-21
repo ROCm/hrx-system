@@ -514,6 +514,33 @@ loom_test(
     deps = [":input_records"],
 )
 
+loom_library(
+    name = "attention_matrix_kernels",
+    srcs = [
+        "kernels/qwen38/attention_common.loom",
+        "kernels/qwen38/attention_prefill.loom",
+        "kernels/qwen38/attention_prefill_mfma.loom",
+        "kernels/qwen38/attention_prefill_wmma.loom",
+        "kernels/qwen38/spans.loom",
+    ],
+    deps = [
+        ":input_records",
+        "//experimental/loom_serve/motifs/tensor:matrix_fragments",
+    ],
+)
+
+loom_test(
+    name = "attention_matrix_test",
+    srcs = ["tests/attention_matrix.loom"],
+    benchmark_smoke = False,
+    configs = {"qwen38.attention.cache_capacity": "81"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":attention_matrix_kernels"],
+)
+
 loom_test(
     name = "attention_state_test",
     srcs = [
@@ -554,7 +581,10 @@ loom_test(
             },
         },
     },
-    deps = [":input_records"],
+    deps = [
+        ":input_records",
+        "//experimental/loom_serve/motifs/tensor:matrix_fragments",
+    ],
 )
 
 loom_test(
