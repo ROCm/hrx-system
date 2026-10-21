@@ -1,0 +1,84 @@
+// The signed matrix leaves share their decoder and contraction schedule.
+// These comparisons cover tile boundaries and the fused residual epilogue.
+kernel.decl @qwen38_linear_q8_0_f16_mfma_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_q6k_fix_differential_headers() launch(%weight: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_mfma_x64(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_mfma_c64t32_f32acc(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_residual_add_f32_prefill(%tokens: index) launch(%tokens: index, %lhs: buffer, %rhs: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_mfma_c64t32_f32acc_residual(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_mfma_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_mfma_c128_t128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+check.case public @qwen38_linear_q8_0_f16_mfma_x128_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %token_count = check.literal value(129) : index
+  %input_size = check.literal value(256) : index
+  %output_size = check.literal value(65) : index
+  %token_count_data = check.generate.fill value(129) : tensor<1xi32>
+  %input = check.generate.fill value(1.0) : tensor<129x256xf32>
+  %weight = check.generate.fill value(60) : tensor<65x8x34xi8>
+  %expected = check.generate.fill value(16256.0) : tensor<129x65xf32>
+  %actual = check.generate.fill value(0.0) : tensor<129x65xf32>
+  kernel.launch @qwen38_linear_q8_0_f16_mfma_x128[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<129x256xf32>, tensor<65x8x34xi8>, tensor<129x65xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<129x65xf32>
+  check.return
+}
+
+check.case public @qwen38_linear_q6k_f16_mfma_c64t32_f32acc_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %token_count = check.literal value(32) : index
+  %input_size = check.literal value(256) : index
+  %output_size = check.literal value(64) : index
+  %token_count_data = check.generate.fill value(32) : tensor<1xi32>
+  %input = check.generate.iota offset(-0.75) step(0.0078125) : tensor<32x256xf32>
+  %weight = check.generate.fill value(1) : tensor<65x210xi8>
+  %expected = check.generate.fill value(0.0) : tensor<32x64xf32>
+  %actual = check.generate.fill value(0.0) : tensor<32x64xf32>
+  kernel.launch @qwen38_q6k_fix_differential_headers(%weight) : (tensor<65x210xi8>)
+  kernel.launch @qwen38_linear_q6k_f16_mfma_x64[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<32x256xf32>, tensor<65x210xi8>, tensor<32x64xf32>)
+  kernel.launch @qwen38_linear_q6k_f16_mfma_c64t32_f32acc[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x256xf32>, tensor<65x210xi8>, tensor<32x64xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.5) rtol(0.02) nan(same) : tensor<32x64xf32>
+  check.return
+}
+
+check.case public @qwen38_linear_q6k_f16_mfma_c64t32_f32acc_residual_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %token_count = check.literal value(32) : index
+  %input_size = check.literal value(256) : index
+  %output_size = check.literal value(5120) : index
+  %token_count_data = check.generate.fill value(32) : tensor<1xi32>
+  %input = check.generate.iota offset(-0.75) step(0.0078125) : tensor<32x256xf32>
+  %weight = check.generate.fill value(1) : tensor<5120x210xi8>
+  %projection = check.generate.fill value(0.0) : tensor<32x5120xf32>
+  %expected = check.generate.fill value(0.5) : tensor<32x5120xf32>
+  %actual = check.generate.fill value(0.5) : tensor<32x5120xf32>
+  kernel.launch @qwen38_q6k_fix_differential_headers(%weight) : (tensor<5120x210xi8>)
+  kernel.launch @qwen38_linear_q6k_f16_mfma_c64t32_f32acc[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %projection) : [index, index, index](tensor<1xi32>, index, index, tensor<32x256xf32>, tensor<5120x210xi8>, tensor<32x5120xf32>)
+  kernel.launch @qwen38_residual_add_f32_prefill[%token_count](%token_count, %expected, %projection, %expected) : [index](index, tensor<32x5120xf32>, tensor<32x5120xf32>, tensor<32x5120xf32>)
+  kernel.launch @qwen38_linear_q6k_f16_mfma_c64t32_f32acc_residual[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x256xf32>, tensor<5120x210xi8>, tensor<32x5120xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x5120xf32>
+  check.return
+}
+
+check.case public @qwen38_linear_q6k_f16_mfma_c128_t128_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %token_count = check.literal value(129) : index
+  %input_size = check.literal value(256) : index
+  %output_size = check.literal value(129) : index
+  %token_count_data = check.generate.fill value(129) : tensor<1xi32>
+  %input = check.generate.iota offset(-0.75) step(0.0078125) : tensor<129x256xf32>
+  %weight = check.generate.fill value(1) : tensor<129x210xi8>
+  %expected = check.generate.fill value(0.0) : tensor<129x129xf32>
+  %actual = check.generate.fill value(0.0) : tensor<129x129xf32>
+  kernel.launch @qwen38_linear_q6k_f16_mfma_x128[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<129x256xf32>, tensor<129x210xi8>, tensor<129x129xf32>)
+  kernel.launch @qwen38_linear_q6k_f16_mfma_c128_t128[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<129x256xf32>, tensor<129x210xi8>, tensor<129x129xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<129x129xf32>
+  check.return
+}

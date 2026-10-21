@@ -139,6 +139,7 @@ loom_library(
         "kernels/qwen38/linear_q5k_f16_mfma.loom",
         "kernels/qwen38/linear_q5k_f16_wmma.loom",
         "kernels/qwen38/linear_q5k_f16_wmma_wave32.loom",
+        "kernels/qwen38/linear_q6k_f16_mfma.loom",
         "kernels/qwen38/linear_q6k_f16_wmma.loom",
         "kernels/qwen38/linear_q6k_f16_wmma_metadata.loom",
         "//experimental/loom_serve/motifs/ggml:library",
@@ -157,6 +158,7 @@ loom_test(
     srcs = [
         "tests/linear_cohort_oracle.loom",
         "tests/matrix_projection.loom",
+        "tests/signed_matrix_projection.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [
