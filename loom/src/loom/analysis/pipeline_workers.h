@@ -136,7 +136,8 @@ typedef struct loom_pipeline_worker_t {
   loom_local_value_domain_t value_domain;
   // Communication membership and actions established in this occurrence.
   loom_channel_plan_t channels;
-  // Aggregate FIFO credit deltas, or the record-aware realization requirement.
+  // FIFO credit deltas and borrowed-payload record correspondence, or the
+  // record-aware realization requirement.
   loom_channel_completion_t completion;
   // Borrowed asynchronous movement and its admitted group completion edges.
   loom_kernel_synchronization_legality_result_t asynchronous;

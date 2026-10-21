@@ -10,6 +10,8 @@
 #include "loom/analysis/channel_plan.h"
 #include "loom/util/cfg_graph.h"
 
+typedef struct loom_view_region_table_t loom_view_region_table_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -38,11 +40,26 @@ typedef struct loom_channel_completion_action_t {
   uint32_t maximum_admissions;
 } loom_channel_completion_action_t;
 
+// Record currently owning one borrowed channel payload view.
+typedef struct loom_channel_payload_record_t {
+  // Read/write SSA value carrying the record's physical slot.
+  loom_value_id_t value_id;
+  // Conservative admission bound for the record's channel endpoint.
+  uint32_t maximum_admissions;
+} loom_channel_payload_record_t;
+
 // Completion of a contiguous FIFO prefix, in owned-record coordinates.
 // This is a realization proof, not a restriction on valid channel programs.
 typedef struct loom_channel_completion_t {
   // Indexed exactly like channel_plan.actions; valid when requirement is NONE.
   const loom_channel_completion_action_t* actions;
+  // Borrowed payload records, including derived views, indexed by value domain;
+  // NULL for no-action workers and invalid when requirement is not NONE.
+  const loom_channel_payload_record_t* payload_records;
+  // Value-domain prefix covered by payload_records.
+  loom_value_ordinal_t payload_record_count;
+  // Borrowed value domain indexing payload_records.
+  const loom_local_value_domain_t* value_domain;
   // Capability required when aggregate prefix credits cannot implement source.
   loom_channel_completion_requirement_t requirement;
   // Action or control edge exposing that requirement, or NULL on success.
@@ -73,12 +90,26 @@ typedef struct loom_channel_completion_t {
 // another realization. No target diagnostics or source mutations occur here.
 // No-action workers allocate nothing. Other state lives in arena through the
 // consuming rewrite; emission uses the direct action-indexed result table.
+// When borrowed payload correspondence is needed, |view_regions| is the
+// complete analyzed canonical view table for the same value domain; CFG
+// projection uses it to retain channel ownership through derived views. NULL
+// avoids its table and dataflow cost when the worker has no payload consumer.
 // Optional block_execution_counts contains exact counts from the shared CFG
 // recurrence analysis; NULL retains conservative cyclic admission bounds.
 iree_status_t loom_channel_completion_analyze(
     const loom_channel_plan_t* plan, const loom_cfg_graph_t* graph,
+    const loom_view_region_table_t* view_regions,
     const uint64_t* block_execution_counts, iree_arena_allocator_t* arena,
     loom_channel_completion_t* out_completion);
+
+// Looks up the current owned record for one borrowed payload view.
+//
+// Returns false when the value is not a channel payload or when control flow
+// does not carry the correlated record needed by a physical realization. The
+// completion's retained local value domain must be active during the query.
+bool loom_channel_completion_try_lookup_payload_record(
+    const loom_channel_completion_t* completion, loom_value_id_t payload,
+    loom_channel_payload_record_t* out_record);
 
 #ifdef __cplusplus
 }  // extern "C"

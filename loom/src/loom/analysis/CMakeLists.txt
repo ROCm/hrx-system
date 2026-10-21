@@ -886,9 +886,12 @@ loom_cc_library(
     "channel_completion.c"
   DEPS
     ::channel_plan
+    ::view_regions
     iree::base
     iree::base::internal::arena
+    loom::ir
     loom::ops::channel
+    loom::util::cfg_dataflow
     loom::util::cfg_graph
   PUBLIC
 )
@@ -919,6 +922,8 @@ loom_cc_test(
   DEPS
     ::channel_completion
     ::channel_plan
+    ::symbolic_expr
+    ::view_regions
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -927,7 +932,9 @@ loom_cc_test(
     loom::ops::channel
     loom::ops::func
     loom::ops::type_registry
+    loom::ops::view
     loom::util::cfg_graph
+    loom::util::fact_table
     loom::verify
 )
 

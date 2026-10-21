@@ -447,12 +447,6 @@ static iree_status_t loom_pipeline_worker_build(
   }
   if (iree_status_is_ok(status) &&
       rejection.kind == LOOM_CHANNEL_PLAN_REJECTION_NONE) {
-    status = loom_channel_completion_analyze(&worker->channels, worker->graph,
-                                             worker->block_execution_counts,
-                                             arena, &worker->completion);
-  }
-  if (iree_status_is_ok(status) &&
-      rejection.kind == LOOM_CHANNEL_PLAN_REJECTION_NONE) {
     const loom_kernel_synchronization_legality_options_t options = {
         .value_domain = &worker->value_domain,
         .fact_table = &worker->facts,
@@ -461,9 +455,22 @@ static iree_status_t loom_pipeline_worker_build(
     };
     status = loom_kernel_synchronization_legality_analyze_function(
         module, worker->function, &options, arena, &worker->asynchronous);
-    if (iree_status_is_ok(status) && worker->asynchronous.error_count == 0) {
-      status = loom_pipeline_worker_transport(module, arena, structure, worker);
-    }
+  }
+  if (iree_status_is_ok(status) &&
+      rejection.kind == LOOM_CHANNEL_PLAN_REJECTION_NONE &&
+      worker->asynchronous.error_count == 0) {
+    const loom_view_region_table_t* view_regions =
+        worker->asynchronous.streams
+            ? &worker->asynchronous.movement.view_regions
+            : NULL;
+    status = loom_channel_completion_analyze(
+        &worker->channels, worker->graph, view_regions,
+        worker->block_execution_counts, arena, &worker->completion);
+  }
+  if (iree_status_is_ok(status) &&
+      rejection.kind == LOOM_CHANNEL_PLAN_REJECTION_NONE &&
+      worker->asynchronous.error_count == 0) {
+    status = loom_pipeline_worker_transport(module, arena, structure, worker);
   }
   loom_local_value_domain_release(&worker->value_domain);
   if (!iree_status_is_ok(status)) {

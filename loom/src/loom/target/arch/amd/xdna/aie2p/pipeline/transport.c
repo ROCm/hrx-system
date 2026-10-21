@@ -25,15 +25,6 @@ typedef struct loom_aie2p_native_queue_t {
   const loom_block_t* block;
 } loom_aie2p_native_queue_t;
 
-typedef struct loom_aie2p_native_borrow_t {
-  // Protocol instance associated with the acquired view.
-  const loom_aie2p_native_channel_t* channel;
-  // Owned read/write that becomes the slot's physical pointer.
-  loom_value_id_t record;
-  // The direction's invocation can advance beyond the initial physical slot.
-  bool record_dynamic;
-} loom_aie2p_native_borrow_t;
-
 // SRAM channels of equal parity share one of two 24-descriptor banks.
 // Compute and shim channels share a single bank of all descriptors.
 static uint16_t* loom_aie2p_native_descriptor_bank(
@@ -220,37 +211,12 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
   const bool autonomous = worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_DMA;
   loom_aie2p_native_queue_t* queues;
   uint8_t* controls;
-  loom_aie2p_native_borrow_t* borrows;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count * 2, sizeof(*queues), (void**)&queues));
   memset(queues, 0, tile_count * 2 * sizeof(*queues));
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena, tile_count, (void**)&controls));
   memset(controls, 0xff, tile_count);
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, source->value_domain.value_count,
-                                sizeof(*borrows), (void**)&borrows));
-  memset(borrows, 0, source->value_domain.value_count * sizeof(*borrows));
-  for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
-    const loom_channel_plan_action_t* action = &source->channels.actions[j];
-    if (!loom_channel_acquire_isa(action->op) &&
-        !loom_channel_reserve_isa(action->op) &&
-        !loom_channel_wait_isa(action->op)) {
-      continue;
-    }
-    const loom_pipeline_resource_channel_t* bound =
-        loom_pipeline_resources_lookup_channel(&realization->resources,
-                                               action->channel->value_id);
-    const loom_value_id_t* results = loom_op_const_results(action->op);
-    const bool wait = loom_channel_wait_isa(action->op);
-    const loom_value_ordinal_t ordinal = loom_local_value_domain_ordinal(
-        &source->value_domain, results[wait ? 0 : 1]);
-    borrows[ordinal] = (loom_aie2p_native_borrow_t){
-        .channel = &context->channels[bound - realization->resources.channels],
-        .record = wait ? loom_channel_wait_read(action->op) : results[0],
-        .record_dynamic = bound->capacity > 1 &&
-                          source->completion.actions[j].maximum_admissions > 1};
-  }
   uint8_t next_control = 0;
   bool has_egress = false;
   iree_host_size_t transport_step = 0;
@@ -291,12 +257,30 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       loom_view_region_table_try_lookup(
           &source->asynchronous.movement.view_regions, local->value_id,
           &local_view);
-      const loom_aie2p_native_borrow_t borrow =
-          borrows[loom_local_value_domain_ordinal(
-              &source->value_domain, local_view->base_view_value_id)];
+      loom_channel_payload_record_t payload_record = {
+          .value_id = LOOM_VALUE_ID_INVALID,
+      };
+      const bool has_payload_record =
+          local_view &&
+          loom_channel_completion_try_lookup_payload_record(
+              &source->completion, local->value_id, &payload_record);
+      const loom_channel_identity_t* payload_channel =
+          has_payload_record ? loom_channel_plan_channel(
+                                   &source->channels, payload_record.value_id)
+                             : NULL;
+      const loom_pipeline_resource_channel_t* bound =
+          payload_channel
+              ? loom_pipeline_resources_lookup_channel(
+                    &realization->resources, payload_channel->value_id)
+              : NULL;
+      const loom_aie2p_native_channel_t* local_channel =
+          bound ? &context->channels[bound - realization->resources.channels]
+                : NULL;
+      const bool record_dynamic =
+          bound && bound->capacity > 1 && payload_record.maximum_admissions > 1;
       const loom_value_t* root =
           loom_module_value(module, external->root_value_id);
-      if (!borrow.channel || !loom_value_is_block_arg(root) ||
+      if (!local_channel || !loom_value_is_block_arg(root) ||
           loom_value_def_block(root) != entry ||
           !loom_symbolic_expr_is_linear(&external_view->begin_byte_offset) ||
           !loom_symbolic_expr_is_linear(&local_view->projection_byte_offset) ||
@@ -310,7 +294,7 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
                     "bounded native offsets"));
       }
       loom_aie2p_native_tile_t* local_tile =
-          context->pool_tiles[borrow.channel->pool_index];
+          context->pool_tiles[local_channel->pool_index];
       const loom_aie2p_native_memory_layout_t* layout =
           local_tile->memory_layout;
       loom_aie2p_native_tile_t* shim =
@@ -436,9 +420,9 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
           .binding = loom_value_def_index(root),
           .external_view = external_view,
           .local_view = local_view,
-          .local_channel = borrow.channel,
-          .local_record = borrow.record,
-          .record_dynamic = borrow.record_dynamic};
+          .local_channel = local_channel,
+          .local_record = payload_record.value_id,
+          .record_dynamic = record_dynamic};
       *tail = selected;
       tail = &selected->next;
       uint32_t local_words[1][8] = {{0}};
@@ -447,9 +431,9 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
           {.path = queue->path,
            .sequence = {.descriptor_count = 1, .words = local_words},
            .address_dynamic =
-               !autonomous && (borrow.record_dynamic ||
-                               !loom_symbolic_expr_is_constant(
-                                   &local_view->projection_byte_offset))},
+               !autonomous &&
+               (record_dynamic || !loom_symbolic_expr_is_constant(
+                                      &local_view->projection_byte_offset))},
           {.path = queue->path,
            .sequence = {.descriptor_count = 1, .words = shim_words},
            .shim = true,
@@ -473,10 +457,10 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       }
       // A fixed slot and projection need no per-issue address patch. Reuse
       // preserves that address in the immutable descriptor template.
-      if (!autonomous && !borrow.record_dynamic &&
+      if (!autonomous && !record_dynamic &&
           loom_symbolic_expr_is_constant(&local_view->projection_byte_offset)) {
         const uint32_t address =
-            borrow.channel->byte_offset +
+            local_channel->byte_offset +
             (uint32_t)local_view->projection_byte_offset.constant;
         local_words[0][layout->address_word] |=
             loom_xdna_register_field_encode_admitted(
@@ -488,14 +472,14 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
         local_words[0][layout->lock_word] |=
             loom_xdna_register_field_encode_admitted(
                 layout->locks.acquire_id,
-                layout->local_lock_base + borrow.channel->free_lock) |
+                layout->local_lock_base + local_channel->free_lock) |
             loom_xdna_register_field_encode_admitted(
                 layout->locks.acquire_value, -1) |
             loom_xdna_register_field_encode_admitted(
                 layout->locks.acquire_enable, 1) |
             loom_xdna_register_field_encode_admitted(
                 layout->locks.release_id,
-                layout->local_lock_base + borrow.channel->ready_lock) |
+                layout->local_lock_base + local_channel->ready_lock) |
             loom_xdna_register_field_encode_admitted(
                 layout->locks.release_value, 1);
       }
@@ -509,12 +493,12 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
         if (!ingress && preceding && loom_channel_acquire_isa(preceding) &&
             transport_step + 1 < source->transport.count &&
             source->transport.steps[transport_step + 1].op == completion &&
-            loom_op_const_results(preceding)[0] == borrow.record) {
+            loom_op_const_results(preceding)[0] == payload_record.value_id) {
           selected->admission = preceding;
           local_words[0][layout->lock_word] |=
               loom_xdna_register_field_encode_admitted(
                   layout->locks.acquire_id,
-                  layout->local_lock_base + borrow.channel->ready_lock) |
+                  layout->local_lock_base + local_channel->ready_lock) |
               loom_xdna_register_field_encode_admitted(
                   layout->locks.acquire_value, -1) |
               loom_xdna_register_field_encode_admitted(
@@ -542,10 +526,10 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
               IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
                   context, local_tile, queue->path->local_engine,
                   LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-                  worker->repetition.count, borrow.channel->source->capacity,
-                  borrow.channel->byte_offset +
+                  worker->repetition.count, local_channel->source->capacity,
+                  local_channel->byte_offset +
                       (uint32_t)local_view->projection_byte_offset.constant,
-                  borrow.channel->byte_stride, local_words[0],
+                  local_channel->byte_stride, local_words[0],
                   &descriptor->sequence, &reason, &valid));
             }
             if (!valid) {
@@ -586,7 +570,7 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
                   .tile = local_tile, .lock = local_tile->next_lock++};
               if (!configuration) {
                 const uint32_t channel_index =
-                    (uint32_t)(borrow.channel - context->channels);
+                    (uint32_t)(local_channel - context->channels);
                 const loom_aie2p_native_channel_access_t* access =
                     &worker->channels
                          .accesses[worker->channels.indices[channel_index]];

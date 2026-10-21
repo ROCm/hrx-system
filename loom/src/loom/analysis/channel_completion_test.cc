@@ -10,11 +10,14 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/view_regions.h"
 #include "loom/ir/context.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/type_registry.h"
+#include "loom/ops/view/ops.h"
+#include "loom/util/fact_table.h"
 #include "loom/verify/verify.h"
 
 namespace loom {
@@ -29,6 +32,7 @@ class ChannelCompletionTest : public ::testing::Test {
     Register(LOOM_DIALECT_CFG, loom_cfg_dialect_vtables);
     Register(LOOM_DIALECT_CHANNEL, loom_channel_dialect_vtables);
     Register(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    Register(LOOM_DIALECT_VIEW, loom_view_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("completion"),
                                         &pool_, nullptr,
@@ -104,6 +108,14 @@ class ChannelCompletionTest : public ::testing::Test {
                                      LOOM_LOCATION_UNKNOWN, &op));
   }
 
+  void Branch(loom_block_t* destination,
+              std::initializer_list<loom_value_id_t> arguments) {
+    loom_op_t* op;
+    IREE_ASSERT_OK(loom_cfg_br_build(&builder_, destination, arguments.begin(),
+                                     arguments.size(), LOOM_LOCATION_UNKNOWN,
+                                     &op));
+  }
+
   void Choose(loom_block_t* yes, loom_block_t* no) {
     loom_op_t* op;
     IREE_ASSERT_OK(loom_cfg_cond_br_build(&builder_, condition_, yes, no,
@@ -116,11 +128,22 @@ class ChannelCompletionTest : public ::testing::Test {
                                           LOOM_LOCATION_UNKNOWN, &op));
   }
 
-  loom_value_id_t Reserve(loom_value_id_t channel) {
+  loom_value_id_t BlockArgument(loom_block_t* block, loom_type_t type) {
+    loom_value_id_t argument = LOOM_VALUE_ID_INVALID;
+    IREE_CHECK_OK(
+        loom_builder_define_block_arg(&builder_, block, type, &argument));
+    return argument;
+  }
+
+  loom_value_id_t Reserve(loom_value_id_t channel,
+                          loom_value_id_t* out_payload = nullptr) {
     loom_op_t* op;
     IREE_CHECK_OK(loom_channel_reserve_build(&builder_, channel, write_type_,
                                              view_type_, LOOM_LOCATION_UNKNOWN,
                                              &op));
+    if (out_payload) {
+      *out_payload = loom_channel_reserve_view(op);
+    }
     return loom_channel_reserve_write(op);
   }
 
@@ -130,18 +153,32 @@ class ChannelCompletionTest : public ::testing::Test {
                                               LOOM_LOCATION_UNKNOWN, &op));
   }
 
-  loom_value_id_t Acquire(loom_value_id_t channel) {
+  loom_value_id_t Acquire(loom_value_id_t channel,
+                          loom_value_id_t* out_payload = nullptr) {
     loom_op_t* op;
     IREE_CHECK_OK(loom_channel_acquire_build(&builder_, 0, 0, channel,
                                              read_type_, view_type_,
                                              LOOM_LOCATION_UNKNOWN, &op));
+    if (out_payload) {
+      *out_payload = loom_channel_acquire_view(op);
+    }
     return loom_channel_acquire_read(op);
   }
 
-  void Wait(loom_value_id_t read) {
+  loom_value_id_t Wait(loom_value_id_t read) {
     loom_op_t* op;
-    IREE_ASSERT_OK(loom_channel_wait_build(&builder_, read, view_type_,
-                                           LOOM_LOCATION_UNKNOWN, &op));
+    IREE_CHECK_OK(loom_channel_wait_build(&builder_, read, view_type_,
+                                          LOOM_LOCATION_UNKNOWN, &op));
+    return loom_channel_wait_view(op);
+  }
+
+  loom_value_id_t Project(loom_value_id_t source) {
+    const int64_t zero[] = {0};
+    loom_op_t* op;
+    IREE_CHECK_OK(loom_view_subview_build(&builder_, source, nullptr, 0, zero,
+                                          IREE_ARRAYSIZE(zero), view_type_,
+                                          LOOM_LOCATION_UNKNOWN, &op));
+    return loom_view_subview_result(op);
   }
 
   void Release(loom_value_id_t read) {
@@ -157,6 +194,10 @@ class ChannelCompletionTest : public ::testing::Test {
     loom_verify_result_t verified;
     IREE_ASSERT_OK(loom_verify_module(module_, &options, &verified));
     ASSERT_EQ(verified.error_count, 0u);
+    IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts_, &arena_, 0));
+    loom_type_registry_configure_fact_context(&facts_.context);
+    IREE_ASSERT_OK(loom_value_fact_table_compute(
+        &facts_, module_, loom_func_like_cast(module_, function_)));
     IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
         module_, region_, &arena_, &domain_));
     const loom_channel_identity_t identities[] = {{first_}, {second_}};
@@ -168,24 +209,45 @@ class ChannelCompletionTest : public ::testing::Test {
                                            IREE_ARRAYSIZE(bindings), nullptr,
                                            &arena_, &plan, &rejection));
     ASSERT_EQ(rejection.kind, LOOM_CHANNEL_PLAN_REJECTION_NONE);
+    loom_symbolic_expr_context_initialize(module_, &domain_, &facts_, &arena_,
+                                          &expression_context_);
+    IREE_ASSERT_OK(loom_view_region_table_initialize(
+        &domain_, &expression_context_, &view_regions_));
+    IREE_ASSERT_OK(loom_view_region_table_analyze(&view_regions_));
     loom_cfg_graph_t graph;
     IREE_ASSERT_OK(loom_cfg_graph_build(module_, region_, &arena_, &graph));
-    loom_channel_completion_t completion;
-    IREE_ASSERT_OK(loom_channel_completion_analyze(&plan, &graph, nullptr,
-                                                   &arena_, &completion));
-    ASSERT_EQ(completion.requirement, LOOM_CHANNEL_COMPLETION_REQUIREMENT_NONE);
+    IREE_ASSERT_OK(loom_channel_completion_analyze(
+        &plan, &graph, &view_regions_, nullptr, &arena_, &completion_));
+    ASSERT_EQ(completion_.requirement,
+              LOOM_CHANNEL_COMPLETION_REQUIREMENT_NONE);
     ASSERT_EQ(plan.action_count, expected.size());
     if (expected.size() == 0) {
-      EXPECT_EQ(completion.actions, nullptr);
+      EXPECT_EQ(completion_.actions, nullptr);
+      EXPECT_EQ(completion_.payload_records, nullptr);
     }
     size_t index = 0;
     for (const auto& action : expected) {
       SCOPED_TRACE(index);
-      EXPECT_EQ(completion.actions[index].credits, action.credits);
-      EXPECT_EQ(completion.actions[index].maximum_admissions,
+      EXPECT_EQ(completion_.actions[index].credits, action.credits);
+      EXPECT_EQ(completion_.actions[index].maximum_admissions,
                 action.maximum_admissions);
       ++index;
     }
+  }
+
+  void ExpectPayloadRecord(loom_value_id_t payload, loom_value_id_t record,
+                           uint32_t maximum_admissions) {
+    loom_channel_payload_record_t actual;
+    ASSERT_TRUE(loom_channel_completion_try_lookup_payload_record(
+        &completion_, payload, &actual));
+    EXPECT_EQ(actual.value_id, record);
+    EXPECT_EQ(actual.maximum_admissions, maximum_admissions);
+  }
+
+  void ExpectNoPayloadRecord(loom_value_id_t payload) {
+    loom_channel_payload_record_t actual;
+    EXPECT_FALSE(loom_channel_completion_try_lookup_payload_record(
+        &completion_, payload, &actual));
   }
 
   // Shared backing for source and analysis allocations.
@@ -204,6 +266,14 @@ class ChannelCompletionTest : public ::testing::Test {
   loom_builder_t builder_ = {};
   // Acquired worker-local value correspondence.
   loom_local_value_domain_t domain_ = {};
+  // Facts supplying the production view-region analysis.
+  loom_value_fact_table_t facts_ = {};
+  // Symbolic expressions shared by view-region analysis.
+  loom_symbolic_expr_context_t expression_context_ = {};
+  // Canonical view bases used during CFG payload projection.
+  loom_view_region_table_t view_regions_ = {};
+  // Retained result of the most recent analysis.
+  loom_channel_completion_t completion_ = {};
   // First independently bound channel.
   loom_value_id_t first_;
   // Second independently bound channel.
@@ -221,6 +291,85 @@ class ChannelCompletionTest : public ::testing::Test {
 TEST_F(ChannelCompletionTest, NoActionsHaveNoResultTable) {
   Return();
   ExpectActions({});
+}
+
+TEST_F(ChannelCompletionTest, DirectPayloadsRetainTheirOwnedRecords) {
+  loom_value_id_t reserved_payload;
+  const auto write = Reserve(first_, &reserved_payload);
+  loom_value_id_t acquired_payload;
+  const auto read = Acquire(second_, &acquired_payload);
+  const auto waited_payload = Wait(read);
+  Publish(write);
+  Release(read);
+  Return();
+  ExpectActions({{0, 1}, {0, 1}, {0, 1}, {1, 1}, {1, 1}});
+  ExpectPayloadRecord(reserved_payload, write, 1);
+  ExpectPayloadRecord(acquired_payload, read, 1);
+  ExpectPayloadRecord(waited_payload, read, 1);
+}
+
+TEST_F(ChannelCompletionTest, LoopCarriesPayloadWithCurrentOwnedRecord) {
+  loom_value_id_t first_payload;
+  const auto first_read = Acquire(first_, &first_payload);
+  const auto first_projection = Project(first_payload);
+  auto* header = Block();
+  const auto current_read = BlockArgument(header, read_type_);
+  const auto current_payload = BlockArgument(header, view_type_);
+  auto* body = Block();
+  auto* finish = Block();
+  Branch(header, {first_read, first_projection});
+  At(header);
+  Choose(body, finish);
+  At(body);
+  const auto current_projection = Project(current_payload);
+  Release(current_read);
+  loom_value_id_t next_payload;
+  const auto next_read = Acquire(first_, &next_payload);
+  const auto next_projection = Project(next_payload);
+  Branch(header, {next_read, next_projection});
+  At(finish);
+  Release(current_read);
+  Return();
+  ExpectActions(
+      {{0, UINT32_MAX}, {1, UINT32_MAX}, {0, UINT32_MAX}, {1, UINT32_MAX}});
+  ExpectPayloadRecord(first_payload, first_read, UINT32_MAX);
+  ExpectPayloadRecord(first_projection, first_read, UINT32_MAX);
+  ExpectPayloadRecord(current_payload, current_read, UINT32_MAX);
+  ExpectPayloadRecord(current_projection, current_read, UINT32_MAX);
+  ExpectPayloadRecord(next_payload, next_read, UINT32_MAX);
+  ExpectPayloadRecord(next_projection, next_read, UINT32_MAX);
+}
+
+TEST_F(ChannelCompletionTest, AmbiguousJoinInvalidatesForwardedPayload) {
+  loom_value_id_t first_payload;
+  const auto first_read = Acquire(first_, &first_payload);
+  loom_value_id_t second_payload;
+  const auto second_read = Acquire(first_, &second_payload);
+  auto* left = Block();
+  auto* delay = Block();
+  auto* right = Block();
+  auto* join = Block();
+  const auto selected_payload = BlockArgument(join, view_type_);
+  auto* finish = Block();
+  const auto forwarded_payload = BlockArgument(finish, view_type_);
+  Choose(left, delay);
+  At(left);
+  Branch(join, {first_payload});
+  At(delay);
+  Branch(right);
+  At(right);
+  Branch(join, {second_payload});
+  At(join);
+  Branch(finish, {selected_payload});
+  At(finish);
+  Release(first_read);
+  Release(second_read);
+  Return();
+  ExpectActions({{0, 2}, {0, 2}, {1, 2}, {1, 2}});
+  ExpectPayloadRecord(first_payload, first_read, 2);
+  ExpectPayloadRecord(second_payload, second_read, 2);
+  ExpectNoPayloadRecord(selected_payload);
+  ExpectNoPayloadRecord(forwarded_payload);
 }
 
 TEST_F(ChannelCompletionTest, SingleAdmissionsRemainFixedAcrossControlEdges) {

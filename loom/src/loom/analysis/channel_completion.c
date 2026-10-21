@@ -8,7 +8,10 @@
 
 #include <string.h>
 
+#include "loom/analysis/view_regions.h"
+#include "loom/ir/types.h"
 #include "loom/ops/channel/ops.h"
+#include "loom/util/cfg_dataflow.h"
 
 typedef struct loom_channel_completion_endpoint_t {
   // Protocol identity, independent of payload addresses.
@@ -52,6 +55,220 @@ static void loom_channel_completion_require(
     loom_channel_completion_requirement_t requirement, const loom_op_t* op) {
   completion->requirement = requirement;
   completion->op = op;
+}
+
+static const loom_channel_payload_record_t
+    loom_channel_payload_record_unavailable = {
+        .value_id = LOOM_VALUE_ID_INVALID,
+        .maximum_admissions = UINT32_MAX,
+};
+
+// Joins one path's payload/record correlation into a finite-height lattice:
+// unknown becomes one exact pair, and absence or disagreement becomes
+// permanently unavailable.
+static bool loom_channel_completion_observe_payload_record(
+    const loom_local_value_domain_t* value_domain,
+    loom_channel_payload_record_t* payload_records, loom_value_id_t payload,
+    loom_channel_payload_record_t record) {
+  const loom_value_ordinal_t ordinal =
+      loom_local_value_domain_ordinal(value_domain, payload);
+  loom_channel_payload_record_t* current = &payload_records[ordinal];
+  const bool unobserved = current->value_id == LOOM_VALUE_ID_INVALID &&
+                          current->maximum_admissions == 0;
+  if (unobserved) {
+    *current = record;
+    return true;
+  } else if (current->value_id != record.value_id ||
+             current->maximum_admissions != record.maximum_admissions) {
+    if (current->value_id != LOOM_VALUE_ID_INVALID) {
+      *current = loom_channel_payload_record_unavailable;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool loom_channel_completion_try_lookup_payload_record(
+    const loom_channel_completion_t* completion, loom_value_id_t payload,
+    loom_channel_payload_record_t* out_record) {
+  if (!completion->value_domain || !completion->payload_records) {
+    return false;
+  }
+  const loom_value_ordinal_t ordinal =
+      loom_local_value_domain_try_ordinal(completion->value_domain, payload);
+  if (ordinal == LOOM_VALUE_ORDINAL_INVALID ||
+      ordinal >= completion->payload_record_count ||
+      completion->payload_records[ordinal].value_id == LOOM_VALUE_ID_INVALID) {
+    return false;
+  }
+  *out_record = completion->payload_records[ordinal];
+  return true;
+}
+
+typedef struct loom_channel_payload_dataflow_t {
+  // Source channel plan and its local value domain.
+  const loom_channel_plan_t* plan;
+  // CFG whose edge arguments project correlated payload/record pairs.
+  const loom_cfg_graph_t* graph;
+  // Canonical view bases used to inherit associations through projections.
+  const loom_view_region_table_t* view_regions;
+  // Mutable value-indexed facts joined by the solver.
+  loom_channel_payload_record_t* payload_records;
+} loom_channel_payload_dataflow_t;
+
+// Returns the fact for a payload's canonical base. NULL means the base has not
+// received a fact yet; an invalid returned record is known to be unavailable.
+static const loom_channel_payload_record_t*
+loom_channel_completion_payload_record_fact(
+    const loom_channel_payload_dataflow_t* dataflow, loom_value_id_t payload) {
+  const loom_view_region_t* region = NULL;
+  const bool has_region = loom_view_region_table_try_lookup(
+      dataflow->view_regions, payload, &region);
+  IREE_ASSERT(has_region && region);
+  const loom_value_ordinal_t ordinal = loom_local_value_domain_try_ordinal(
+      dataflow->plan->value_domain, region->base_view_value_id);
+  // View analysis can extend the shared domain with captured backing roots
+  // after the channel plan snapshots its prefix. Such roots cannot be payload
+  // producers in this plan.
+  if (ordinal == LOOM_VALUE_ORDINAL_INVALID ||
+      ordinal >= dataflow->plan->value_count) {
+    return &loom_channel_payload_record_unavailable;
+  }
+  const loom_channel_payload_record_t* record =
+      &dataflow->payload_records[ordinal];
+  if (record->value_id != LOOM_VALUE_ID_INVALID ||
+      record->maximum_admissions != 0) {
+    return record;
+  }
+  const loom_value_t* base = loom_module_value(
+      dataflow->plan->value_domain->module, region->base_view_value_id);
+  return loom_value_is_block_arg(base) &&
+                 loom_value_def_block(base) !=
+                     loom_region_const_entry_block(dataflow->graph->region)
+             ? NULL
+             : &loom_channel_payload_record_unavailable;
+}
+
+static iree_status_t loom_channel_completion_transfer_payload_records(
+    void* user_data, uint16_t source_block_index, uint16_t target_block_index,
+    bool* out_changed) {
+  loom_channel_payload_dataflow_t* dataflow =
+      (loom_channel_payload_dataflow_t*)user_data;
+  *out_changed = false;
+  const loom_block_t* destination =
+      dataflow->graph->blocks[target_block_index].block;
+  if (!destination->arg_count) {
+    return iree_ok_status();
+  }
+  const loom_cfg_edge_index_span_t successors =
+      loom_cfg_graph_successor_edges(dataflow->graph, source_block_index);
+  for (iree_host_size_t i = 0; i < successors.count; ++i) {
+    const loom_cfg_edge_info_t* edge =
+        &dataflow->graph->edges[successors.values[i]];
+    if (edge->target_block_index != target_block_index) {
+      continue;
+    }
+    const loom_value_id_t* arguments = NULL;
+    uint16_t argument_count = 0;
+    const bool has_payload = loom_cfg_terminator_payload_for_successor(
+        edge->terminator, destination, &arguments, &argument_count);
+    IREE_ASSERT(has_payload);
+    for (uint16_t a = 0; a < argument_count; ++a) {
+      const loom_value_id_t destination_value = destination->arg_ids[a];
+      if (!loom_type_is_view(loom_module_value_type(
+              dataflow->plan->value_domain->module, destination_value))) {
+        continue;
+      }
+      const loom_channel_payload_record_t* source_record =
+          loom_channel_completion_payload_record_fact(dataflow, arguments[a]);
+      if (!source_record) {
+        continue;
+      }
+      loom_channel_payload_record_t destination_record = *source_record;
+      if (destination_record.value_id != LOOM_VALUE_ID_INVALID) {
+        for (uint16_t r = 0; r < argument_count; ++r) {
+          if (arguments[r] == destination_record.value_id) {
+            destination_record.value_id = destination->arg_ids[r];
+            break;
+          }
+        }
+      }
+      *out_changed |= loom_channel_completion_observe_payload_record(
+          dataflow->plan->value_domain, dataflow->payload_records,
+          destination_value, destination_record);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_channel_completion_analyze_payload_records(
+    const loom_channel_plan_t* plan, const loom_cfg_graph_t* graph,
+    const loom_view_region_table_t* view_regions,
+    const uint32_t* action_endpoints,
+    const loom_channel_completion_endpoint_t* endpoints,
+    loom_channel_payload_record_t* payload_records,
+    iree_arena_allocator_t* arena) {
+  // Each direct producer establishes the initial payload/owned-record pair.
+  for (iree_host_size_t i = 0; i < plan->action_count; ++i) {
+    const loom_op_t* op = plan->actions[i].op;
+    loom_value_id_t payload = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t record = LOOM_VALUE_ID_INVALID;
+    if (loom_channel_reserve_isa(op)) {
+      payload = loom_channel_reserve_view(op);
+      record = loom_channel_reserve_write(op);
+    } else if (loom_channel_acquire_isa(op)) {
+      payload = loom_channel_acquire_view(op);
+      record = loom_channel_acquire_read(op);
+    } else if (loom_channel_wait_isa(op)) {
+      payload = loom_channel_wait_view(op);
+      record = loom_channel_wait_read(op);
+    }
+    if (payload != LOOM_VALUE_ID_INVALID) {
+      const loom_value_ordinal_t ordinal =
+          loom_local_value_domain_ordinal(plan->value_domain, payload);
+      payload_records[ordinal] = (loom_channel_payload_record_t){
+          .value_id = record,
+          .maximum_admissions =
+              endpoints[action_endpoints[i]].maximum_admissions,
+      };
+    }
+  }
+
+  loom_channel_payload_dataflow_t dataflow = {
+      .plan = plan,
+      .graph = graph,
+      .view_regions = view_regions,
+      .payload_records = payload_records,
+  };
+  IREE_RETURN_IF_ERROR(loom_cfg_dataflow_solve(
+      graph, loom_channel_completion_transfer_payload_records, &dataflow,
+      arena));
+
+  // Publish a direct fact for every derived view so consumers need only one
+  // value-domain lookup and never repeat canonical-base resolution.
+  for (loom_value_ordinal_t i = 0; i < plan->value_count; ++i) {
+    const loom_value_id_t value = plan->value_domain->value_ids[i];
+    if (!loom_type_is_view(
+            loom_module_value_type(plan->value_domain->module, value))) {
+      continue;
+    }
+    const loom_view_region_t* region = NULL;
+    const bool has_region =
+        loom_view_region_table_try_lookup(view_regions, value, &region);
+    IREE_ASSERT(has_region && region);
+    if (region->base_view_value_id == value) {
+      continue;
+    }
+    const loom_value_ordinal_t base_ordinal =
+        loom_local_value_domain_try_ordinal(plan->value_domain,
+                                            region->base_view_value_id);
+    if (base_ordinal == LOOM_VALUE_ORDINAL_INVALID ||
+        base_ordinal >= plan->value_count) {
+      continue;
+    }
+    payload_records[i] = payload_records[base_ordinal];
+  }
+  return iree_ok_status();
 }
 
 static bool loom_channel_completion_apply(
@@ -114,12 +331,17 @@ static bool loom_channel_completion_apply(
 
 iree_status_t loom_channel_completion_analyze(
     const loom_channel_plan_t* plan, const loom_cfg_graph_t* graph,
+    const loom_view_region_table_t* view_regions,
     const uint64_t* block_execution_counts, iree_arena_allocator_t* arena,
     loom_channel_completion_t* out_completion) {
-  *out_completion = (loom_channel_completion_t){0};
+  *out_completion = (loom_channel_completion_t){
+      .value_domain = plan->value_domain,
+  };
   if (!plan->action_count) {
     return iree_ok_status();
   }
+  IREE_ASSERT(!view_regions ||
+              view_regions->value_domain == plan->value_domain);
   loom_channel_completion_action_t* actions = NULL;
   uint32_t* action_endpoints = NULL;
   loom_channel_completion_endpoint_t* endpoints = NULL;
@@ -285,6 +507,22 @@ iree_status_t loom_channel_completion_analyze(
   for (iree_host_size_t i = 0; i < plan->action_count; ++i) {
     actions[i].maximum_admissions =
         endpoints[action_endpoints[i]].maximum_admissions;
+  }
+  if (view_regions) {
+    loom_channel_payload_record_t* payload_records = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, plan->value_count,
+                                                   sizeof(*payload_records),
+                                                   (void**)&payload_records));
+    for (loom_value_ordinal_t i = 0; i < plan->value_count; ++i) {
+      payload_records[i] = (loom_channel_payload_record_t){
+          .value_id = LOOM_VALUE_ID_INVALID,
+      };
+    }
+    IREE_RETURN_IF_ERROR(loom_channel_completion_analyze_payload_records(
+        plan, graph, view_regions, action_endpoints, endpoints, payload_records,
+        arena));
+    out_completion->payload_records = payload_records;
+    out_completion->payload_record_count = plan->value_count;
   }
   out_completion->actions = actions;
   return iree_ok_status();

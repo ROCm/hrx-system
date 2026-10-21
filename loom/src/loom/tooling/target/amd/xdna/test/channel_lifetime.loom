@@ -254,9 +254,9 @@ pipeline.def<kernel> public retain target(@npu) @reordered_retirement() run(%out
   }
 }
 
-// A held read rotates through ordinary loop arguments. Wait borrows its ready
-// payload without another admission. Each iteration retires the later read
-// first, then completes DMA from the older record and returns both credits.
+// A held read and its borrowed payload rotate through ordinary loop arguments.
+// Each iteration retires the later read first, then completes DMA from the
+// older record and returns both credits.
 pipeline.def<kernel> public retain target(@npu) @rotating_retirement() run(%output_arg: buffer) {
   %output = buffer.assume.alignment %output_arg {minimum_alignment = 4} : buffer
   %memory = pipeline.memory<workgroup>[0, 3] : pool
@@ -285,8 +285,7 @@ pipeline.def<kernel> public retain target(@npu) @rotating_retirement() run(%outp
     %pairs = index.constant 2 : index
     %step = index.constant 1 : index
     %word_bytes = index.constant 4 : index
-    %last = scf.for %pair = [%begin to %pairs step %step](%current = %first : read<tile<1xi32>>) -> (read<tile<1xi32>>) {
-      %payload = channel.wait %current : read<tile<1xi32>> -> view<1xi32>
+    %last, %last_payload = scf.for %pair = [%begin to %pairs step %step](%current = %first : read<tile<1xi32>>, %payload = %first_payload : view<1xi32>) -> (read<tile<1xi32>>, view<1xi32>) {
       %second, %second_payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
       channel.release %second : read<tile<1xi32>>
       %byte_index = index.mul %pair, %word_bytes : index
@@ -297,9 +296,8 @@ pipeline.def<kernel> public retain target(@npu) @rotating_retirement() run(%outp
       kernel.async.wait %group {newer_groups = 0} : kernel.async.group
       channel.release %current : read<tile<1xi32>>
       %next, %next_payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
-      scf.yield %next : read<tile<1xi32>>
+      scf.yield %next, %next_payload : read<tile<1xi32>>, view<1xi32>
     }
-    %last_payload = channel.wait %last : read<tile<1xi32>> -> view<1xi32>
     %last_offset = index.constant 8 : offset
     %last_destination = buffer.view %output[%last_offset] : buffer -> view<1xi32>
     %copy = kernel.async.copy %last_payload to %last_destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<1xi32> to view<1xi32> -> kernel.async.token
