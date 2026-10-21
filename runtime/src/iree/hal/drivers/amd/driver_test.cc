@@ -328,6 +328,8 @@ class DriverTest : public ::testing::Test {
 
   // Scheme selections are independent even when they name the same endpoints.
   ScopedEnvironment rdna_visibility_{"HAL_VISIBLE_RDNA_DEVICES"};
+  // CDNA visibility is independent of RDNA and the combined GPU view.
+  ScopedEnvironment cdna_visibility_{"HAL_VISIBLE_CDNA_DEVICES"};
   // Unified GPU selection shares the driver, not RDNA's visibility policy.
   ScopedEnvironment gpu_visibility_{"HAL_VISIBLE_AMDGPU2_DEVICES"};
   // NPU ordinals are independent of every GPU namespace.
@@ -406,6 +408,49 @@ TEST_F(DriverTest, NumericIdsCannotBypassPassiveQualification) {
     }
     EXPECT_EQ(NativeInstance::current->open_count, 0u);
   }
+}
+
+TEST_F(DriverTest, CdnaQualifiesNativeProtocolsIndependentlyOfArchitecture) {
+  auto& endpoints = NativeInstance::current->endpoints;
+  for (auto& endpoint : endpoints) {
+    endpoint.gpu.gfx_ip = {9, 4, 2};
+  }
+  const amdf_queue_family_info_t aql = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+      .structure_size = sizeof(amdf_queue_family_info_t),
+      .command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+      .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_USER,
+      .format_version = AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1,
+      .format_features = AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE,
+      .roles = AMDF_QUEUE_ROLE_COMPUTE,
+      .user_queue_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                                 AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+  };
+  endpoints[0].families = {aql};
+  endpoints[0].families[0].user_queue_capabilities =
+      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER;
+  endpoints[1].families = {aql};
+  IREE_ASSERT_OK(CreateDriver());
+
+  iree_host_size_t count = 0;
+  iree_hal_device_info_t* infos = nullptr;
+  IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
+      driver_, IREE_SV("cdna"), iree_allocator_system(), &count, &infos));
+  EXPECT_EQ(count, 2u);
+  if (count == 2) {
+    EXPECT_EQ(infos[0].device_id, 2u);
+    EXPECT_EQ(infos[1].device_id, 4u);
+  }
+  iree_allocator_free(iree_allocator_system(), infos);
+  EXPECT_EQ(NativeInstance::current->activation_count, 0u);
+  EXPECT_EQ(NativeInstance::current->open_count, 0u);
+  CreatePath(IREE_SV(""), IREE_STATUS_RESOURCE_EXHAUSTED, 2, IREE_SV("cdna"));
+  CreatePath(IREE_SV("1"), IREE_STATUS_RESOURCE_EXHAUSTED, 4, IREE_SV("cdna"));
+  CreatePath(IREE_SV("id/00000000000000010000000000000000"),
+             IREE_STATUS_UNAVAILABLE, 0, IREE_SV("cdna"));
+  CreatePath(IREE_SV("id/00000000000000020000000000000000"),
+             IREE_STATUS_RESOURCE_EXHAUSTED, 2, IREE_SV("cdna"));
+  CreatePath(IREE_SV("0"), IREE_STATUS_NOT_FOUND, 0);
 }
 
 TEST_F(DriverTest, NativeQueryFailureIsNotAnUnsupportedEndpoint) {

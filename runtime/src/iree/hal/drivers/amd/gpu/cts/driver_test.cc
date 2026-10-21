@@ -32,24 +32,31 @@ class DriverTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_hal_driver_registry_acquire_driver(
         registry_, IREE_SV("rdna"), &driver_));
     ASSERT_NO_FATAL_FAILURE(ResolveSelectedGpu());
-    IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
-        driver_, IREE_SV("rdna"), iree_allocator_system(), &count_, &infos_));
-    bool selected_visible = false;
-    for (iree_host_size_t i = 0; i < count_; ++i) {
-      if (!selected_path_[0] ||
-          iree_string_view_equal(infos_[i].path,
-                                 iree_make_cstring_view(selected_path_))) {
-        ordinal_ = i;
-        selected_visible = true;
+    for (auto scheme : {IREE_SV("rdna"), IREE_SV("cdna")}) {
+      IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
+          driver_, scheme, iree_allocator_system(), &count_, &infos_));
+      for (iree_host_size_t i = 0; i < count_; ++i) {
+        if (!selected_path_[0] ||
+            iree_string_view_equal(infos_[i].path,
+                                   iree_make_cstring_view(selected_path_))) {
+          scheme_ = scheme;
+          ordinal_ = i;
+          break;
+        }
+      }
+      if (!iree_string_view_is_empty(scheme_)) {
         break;
       }
+      iree_allocator_free(iree_allocator_system(), infos_);
+      infos_ = nullptr;
     }
-    if (!selected_visible) {
+    if (iree_string_view_is_empty(scheme_)) {
       if (selected_path_[0] &&
-          selected_architecture_ == AMDF_GPU_ARCHITECTURE_RDNA) {
-        FAIL() << "Runner-selected RDNA GPU is unavailable through rdna";
+          (selected_architecture_ == AMDF_GPU_ARCHITECTURE_RDNA ||
+           selected_architecture_ == AMDF_GPU_ARCHITECTURE_CDNA)) {
+        FAIL() << "Runner-selected GPU is unavailable through its scheme";
       }
-      GTEST_SKIP() << "Selected GPU is unavailable through rdna";
+      GTEST_SKIP() << "No selected RDNA or CDNA endpoint";
     }
     IREE_ASSERT_OK(iree_async_proactor_pool_create(
         1, nullptr, iree_async_proactor_pool_options_default(),
@@ -141,7 +148,10 @@ class DriverTest : public ::testing::Test {
   }
 
   void Create(size_t index, iree_string_view_t path,
-              iree_string_view_t scheme = IREE_SV("rdna")) {
+              iree_string_view_t scheme = iree_string_view_empty()) {
+    if (iree_string_view_is_empty(scheme)) {
+      scheme = scheme_;
+    }
     auto params = iree_hal_device_create_params_default();
     params.proactor_pool = proactors_;
     const iree_string_pair_t options[] = {
@@ -151,7 +161,7 @@ class DriverTest : public ::testing::Test {
         allocators_[index].allocator(), &devices_[index]);
     IREE_ASSERT_OK(status);
     EXPECT_TRUE(iree_string_view_equal(iree_hal_device_id(devices_[index]),
-                                       IREE_SV("rdna")));
+                                       scheme_));
     ASSERT_NE(iree_hal_device_queue(devices_[index], 0, 0), nullptr);
     ASSERT_NE(iree_hal_device_queue(devices_[index], 0, 1), nullptr);
   }
@@ -185,6 +195,8 @@ class DriverTest : public ::testing::Test {
   // Architecture of the selected endpoint, established by passive discovery.
   amdf_gpu_architecture_t selected_architecture_ =
       AMDF_GPU_ARCHITECTURE_UNKNOWN;
+  // Architecture-local namespace containing the selected physical endpoint.
+  iree_string_view_t scheme_ = {};
   // Dense position of the selected endpoint in its scheme-local view.
   iree_host_size_t ordinal_ = 0;
   // Public discovery rows, independent of native execution resources.
@@ -193,7 +205,7 @@ class DriverTest : public ::testing::Test {
   iree_host_size_t count_ = 0;
   // Process progress service supplied to public device construction.
   iree_async_proactor_pool_t* proactors_ = nullptr;
-  // Device ownership includes asynchronous final worker cleanup.
+  // Tracks allocations through synchronous final device destruction.
   std::array<DeviceAllocator, 2> allocators_;
   // Independently provisioned devices sharing one native fabric.
   std::array<iree_hal_device_t*, 2> devices_ = {};
@@ -202,16 +214,14 @@ class DriverTest : public ::testing::Test {
 };
 
 TEST_F(DriverTest, DefaultAndNativeIdentityRetainOneOwner) {
-  iree_hal_driver_t* xdna_driver = nullptr;
-  IREE_ASSERT_OK(iree_hal_driver_registry_acquire_driver(
-      registry_, IREE_SV("xdna"), &xdna_driver));
-  EXPECT_EQ(driver_, xdna_driver);
-  iree_hal_driver_release(xdna_driver);
-  iree_hal_driver_t* gpu_driver = nullptr;
-  IREE_ASSERT_OK(iree_hal_driver_registry_acquire_driver(
-      registry_, IREE_SV("amdgpu2"), &gpu_driver));
-  EXPECT_EQ(driver_, gpu_driver);
-  iree_hal_driver_release(gpu_driver);
+  for (auto scheme : {IREE_SV("xdna"), IREE_SV("rdna"), IREE_SV("cdna"),
+                      IREE_SV("amdgpu2")}) {
+    iree_hal_driver_t* alias = nullptr;
+    IREE_ASSERT_OK(
+        iree_hal_driver_registry_acquire_driver(registry_, scheme, &alias));
+    EXPECT_EQ(driver_, alias);
+    iree_hal_driver_release(alias);
+  }
 
   iree_host_size_t gpu_count = 0;
   iree_hal_device_info_t* gpu_infos = nullptr;
@@ -231,7 +241,7 @@ TEST_F(DriverTest, DefaultAndNativeIdentityRetainOneOwner) {
   }
   iree_allocator_free(iree_allocator_system(), gpu_infos);
   ASSERT_FALSE(gpu_path_storage.empty())
-      << "Selected RDNA GPU is unavailable through amdgpu2";
+      << "Selected GPU is unavailable through amdgpu2";
 
   auto params = iree_hal_device_create_params_default();
   params.proactor_pool = proactors_;

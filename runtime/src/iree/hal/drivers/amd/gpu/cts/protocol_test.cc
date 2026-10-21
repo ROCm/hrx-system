@@ -18,6 +18,7 @@ namespace {
 
 using iree::hal::amd::gpu::cts::DeviceAllocator;
 using iree::hal::amd::gpu::cts::GpuNativeTest;
+using iree::hal::amd::gpu::cts::MatchesNativeIdentity;
 using iree::hal::cts::Ref;
 
 // Both protocol owners remain alive through every direction and recording

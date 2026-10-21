@@ -865,9 +865,12 @@ iree_cc_test(
     "driver_test.cc"
   DEPS
     ::test_device
+    amdf::amdf_static
+    amdf::headers
     iree::async::util::proactor_pool
     iree::base
     iree::hal
+    iree::hal::drivers::amd::fabric
     iree::hal::drivers::amd::registration
     iree::hal::drivers::amd::status
     iree::testing::gtest
@@ -950,6 +953,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::device
     iree::hal::drivers::amd::gpu::publication
+    iree::hal::drivers::amd::gpu::queue::aql::queue
     iree::hal::drivers::amd::gpu::queue::pm4::queue
     iree::hal::drivers::amd::gpu::queue::sdma::queue
     iree::hal::drivers::amd::status

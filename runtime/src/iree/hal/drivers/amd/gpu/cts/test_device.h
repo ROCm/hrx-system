@@ -23,6 +23,12 @@
 
 namespace iree::hal::amd::gpu::cts {
 
+// Matches the runner's portable identity using passive discovery. NULL admits
+// every endpoint; opening the query handle activates no device.
+iree_status_t MatchesNativeIdentity(iree_hal_amd_fabric_t* fabric,
+                                    const amdf_endpoint_id_t* id,
+                                    const char* selected, bool* out_matches);
+
 // Observe complete resource reclamation at synchronous final device release.
 struct DeviceAllocator {
   // Live allocations made by the concrete device and its children.
@@ -162,13 +168,6 @@ class GpuNativeTest : public ::testing::Test {
   void PublishCode(uint32_t compute_family_ordinal,
                    iree_hal_amd_fabric_memory_t* memory,
                    iree_hal_amd_gpu_code_upload_t** upload);
-
-  // Matches the runner's portable identity string using passive discovery.
-  // NULL admits every endpoint; opening the query handle activates no device.
-  static iree_status_t MatchesNativeIdentity(iree_hal_amd_fabric_t* fabric,
-                                             const amdf_endpoint_id_t* id,
-                                             const char* selected,
-                                             bool* out_matches);
 
   // Independent native discovery ownership, released after device cleanup.
   iree_hal_amd_fabric_t* fabric_ = nullptr;

@@ -19,6 +19,9 @@ static iree_status_t iree_hal_amd_driver_factory_enumerate(
        .driver_name = IREE_SVL("rdna"),
        .full_name = IREE_SVL("AMD RDNA execution using libamdf")},
       {.driver_id = 0,
+       .driver_name = IREE_SVL("cdna"),
+       .full_name = IREE_SVL("AMD CDNA execution using libamdf")},
+      {.driver_id = 0,
        .driver_name = IREE_SVL("amdgpu2"),
        .full_name = IREE_SVL("AMD GPU execution using libamdf")},
   };

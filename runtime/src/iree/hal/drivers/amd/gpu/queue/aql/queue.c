@@ -2175,6 +2175,21 @@ static const iree_hal_queue_vtable_t iree_hal_amd_gpu_aql_queue_vtable = {
     .write = iree_hal_amd_gpu_aql_queue_write,
 };
 
+amdf_queue_publication_modes_t iree_hal_amd_gpu_aql_queue_publication_modes(
+    const amdf_queue_family_info_t* family) {
+  if (family->command_type != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ||
+      family->format_version != AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1 ||
+      !iree_any_bit_set(family->roles, AMDF_QUEUE_ROLE_COMPUTE) ||
+      !iree_any_bit_set(family->format_features,
+                        AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE) ||
+      !iree_all_bits_set(family->user_queue_capabilities,
+                         AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                             AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER)) {
+    return 0;
+  }
+  return family->publication_modes & AMDF_QUEUE_PUBLICATION_MODE_USER;
+}
+
 iree_status_t iree_hal_amd_gpu_aql_queue_create(
     const iree_hal_queue_family_t* family, iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_gpu_aql_queue_options_t* options,
@@ -2193,14 +2208,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
   }
   const amdf_queue_family_info_t* native_family =
       &context->families[options->family_ordinal];
-  if (native_family->command_type != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ||
-      !(native_family->publication_modes & AMDF_QUEUE_PUBLICATION_MODE_USER) ||
-      native_family->format_version != AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1 ||
-      !(native_family->format_features &
-        AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE) ||
-      !iree_all_bits_set(native_family->user_queue_capabilities,
-                         AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                             AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER) ||
+  if (!iree_hal_amd_gpu_aql_queue_publication_modes(native_family) ||
       context->event_info.format != AMDF_GPU_EVENT_FORMAT_KFD_SIGNAL ||
       context->event_info.format_version != 1) {
     return iree_make_status(

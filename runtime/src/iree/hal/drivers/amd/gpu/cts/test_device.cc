@@ -10,6 +10,7 @@
 #include <optional>
 
 #include "iree/hal/device_group.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/drivers/amd/status.h"
@@ -375,9 +376,9 @@ void NativeMemoryGate::Hold::ReleaseAndHoldNext() {
 
 // Runner selection uses the same stable native identity as libamdf CTS. Query
 // before activation so an exclusive hardware lease never touches another GPU.
-iree_status_t GpuNativeTest::MatchesNativeIdentity(
-    iree_hal_amd_fabric_t* fabric, const amdf_endpoint_id_t* id,
-    const char* selected, bool* out_matches) {
+iree_status_t MatchesNativeIdentity(iree_hal_amd_fabric_t* fabric,
+                                    const amdf_endpoint_id_t* id,
+                                    const char* selected, bool* out_matches) {
   *out_matches = true;
   if (!selected) {
     return iree_ok_status();
@@ -477,11 +478,7 @@ void GpuNativeTest::SetUp() {
           if (iree_status_is_ok(status)) {
             supported =
                 command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
-                    ? native.command_type == command_type() &&
-                          (native.format_features &
-                           AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE) &&
-                          (native.user_queue_capabilities &
-                           AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER)
+                    ? iree_hal_amd_gpu_aql_queue_publication_modes(&native) != 0
                     : iree_hal_amd_gpu_pm4_queue_publication_modes(&native) != 0;
           }
         }
@@ -528,7 +525,8 @@ void GpuNativeTest::SetUp() {
   options_.queue_count = 2;
   if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
     for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
-      if (context_->families[i].command_type == command_type()) {
+      if (iree_hal_amd_gpu_aql_queue_publication_modes(
+              &context_->families[i])) {
         options_.queue_family_ordinal = i;
         break;
       }

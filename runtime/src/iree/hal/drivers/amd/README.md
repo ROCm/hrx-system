@@ -14,7 +14,7 @@ fabric/
   memory_backend.{c,h}           Complete pool qualification and captured facts.
   memory_transition.{c,h}        Native visibility recipes translated to HAL.
 xdna/                           Native NPU contexts, programs, and execution.
-gpu/                            Native GPU images, PM4 execution, and retirement.
+gpu/                            Native GPU images, PM4/AQL execution, and retirement.
 ```
 
 `fabric/` depends on libamdf core and HAL memory interfaces. It has no execution
@@ -36,8 +36,8 @@ registry/driver for devices using that native process context. Direct driver
 construction with INSTANCE bounds native reclamation to the fabric at the cost
 of services unsupported by secondary KFD contexts, including host registration.
 
-The `xdna`, `rdna`, and `amdgpu2` schemes share that driver identity. `xdna`
-selects NPUs, `rdna` selects RDNA GPUs, and `amdgpu2` selects all GPUs supported
+The `xdna`, `rdna`, `cdna`, and `amdgpu2` schemes share that driver identity. `xdna`
+selects NPUs, `rdna` selects RDNA GPUs, `cdna` selects CDNA GPUs, and `amdgpu2` selects all GPUs supported
 by this build. Both `rdna:0` and `rdna://0` select the first visible RDNA device;
 `xdna:0?columns=4` configures an NPU context. The legacy `amdgpu` driver remains
 independent.
@@ -49,6 +49,7 @@ optional environment variables:
 | --- | --- |
 | `xdna` | `HAL_VISIBLE_XDNA_DEVICES` |
 | `rdna` | `HAL_VISIBLE_RDNA_DEVICES` |
+| `cdna` | `HAL_VISIBLE_CDNA_DEVICES` |
 | `amdgpu2` | `HAL_VISIBLE_AMDGPU2_DEVICES` |
 
 A list indexes that scheme's unmasked supported devices in native enumeration
@@ -79,16 +80,22 @@ combined GPU numbering.
 GPU discovery captures architecture and usable compute families through query-only
 endpoints; it creates no device, address space, queue, or event. Enumeration and
 selection then use immutable endpoint-index lists. Queue admission selects an
-advertised native protocol and publication mode. RDNA supports PM4 USER
-host-producer and KERNEL submission
-families with GFX11/GFX12 launch and cache encodings. Both use the same bounded
-command recording, dependency, and retirement paths. Other native services fail
-explicitly at construction or operation admission.
+advertised native protocol and publication mode. The default prefers PM4 on RDNA
+and AQL on CDNA among supported families; explicit family selection is independent
+of architecture. PM4 supports USER host-producer and KERNEL submission families.
+AQL requires USER publication with both host and device producers and native
+scratch service. Recorded AQL programs remain device-local: GPU materialization
+writes reserved native ring slots and publishes the first header only after the
+packet bodies are visible. Both protocols share memory, dependency admission,
+and device progress owners. Other native services fail explicitly at construction
+or operation admission.
 
 `rdna://0?queue_count=2` provisions two queues sharing the device's execution
 workers. `queue_family` selects an exact native family ordinal instead of the
-first supported family. `host_numa_node` selects CPU placement for the workers
-and shared proactor; GPU-local memory node IDs are not CPU NUMA node IDs.
+architecture preference. `cdna://0?queue_count=2` provisions the same HAL queue
+interface on the first CDNA endpoint. `host_numa_node` selects CPU placement
+for the workers and shared proactor; GPU-local memory node IDs are not CPU
+NUMA node IDs.
 
 `completion_spin_ns` bounds active completion observation after actual progress
 (default 100,000 ns). While actively waiting, the existing retirement worker

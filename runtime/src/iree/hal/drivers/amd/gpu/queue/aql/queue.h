@@ -54,10 +54,16 @@ typedef struct iree_hal_amd_gpu_aql_queue_options_t {
   iree_host_size_t capture_block_count;
 } iree_hal_amd_gpu_aql_queue_options_t;
 
+// Returns supported publication modes from the passive native family contract.
+// AQL requires host publication, device-produced resident packets, and native
+// scratch service. Shader architecture does not determine packet support.
+amdf_queue_publication_modes_t iree_hal_amd_gpu_aql_queue_publication_modes(
+    const amdf_queue_family_info_t* family);
+
 // Creates a refcounted queue borrowing its family, context, and service owners.
 // The parent registers publication/completion sources before exposing it and
-// joins accepted work before removing those sources. Cold construction waits
-// only for its typed backing acquisitions. Failure leaves out_queue NULL.
+// joins accepted work before removing those sources. Cold construction acquires
+// backing on the calling thread. Failure leaves out_queue NULL.
 iree_status_t iree_hal_amd_gpu_aql_queue_create(
     const iree_hal_queue_family_t* family, iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_gpu_aql_queue_options_t* options,

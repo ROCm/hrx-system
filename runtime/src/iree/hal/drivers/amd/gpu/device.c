@@ -214,6 +214,21 @@ static iree_string_view_t iree_hal_amd_gpu_device_id(iree_hal_device_t* base) {
   }
 }
 
+// Queue protocol and publication are native family properties, independent of
+// the executable target.
+static amdf_queue_publication_modes_t
+iree_hal_amd_gpu_device_compute_publication_modes(
+    const amdf_queue_family_info_t* family) {
+  switch (family->command_type) {
+    case AMDF_QUEUE_COMMAND_TYPE_GPU_PM4:
+      return iree_hal_amd_gpu_pm4_queue_publication_modes(family);
+    case AMDF_QUEUE_COMMAND_TYPE_GPU_AQL:
+      return iree_hal_amd_gpu_aql_queue_publication_modes(family);
+    default:
+      return 0;
+  }
+}
+
 iree_status_t iree_hal_amd_gpu_device_query_support(const amdf_api_t* api,
                                                     amdf_endpoint_t* endpoint,
                                                     bool* out_supported) {
@@ -240,7 +255,7 @@ iree_status_t iree_hal_amd_gpu_device_query_support(const amdf_api_t* api,
         "endpoint_query_queue_family_info");
     if (iree_status_is_ok(status)) {
       *out_supported =
-          iree_hal_amd_gpu_pm4_queue_publication_modes(&family) != 0;
+          iree_hal_amd_gpu_device_compute_publication_modes(&family) != 0;
     }
   }
   return status;
@@ -639,8 +654,7 @@ static void iree_hal_amd_gpu_device_try_retire(void* user_data) {
   iree_hal_amd_gpu_completion_try_drain(user_data);
 }
 
-// Queue protocol and publication are native family properties, independent of
-// the executable target. Prefer direct publication when this family exposes it.
+// Prefer direct publication when the selected family exposes it.
 static amdf_queue_publication_modes_t
 iree_hal_amd_gpu_device_select_publication(
     amdf_queue_publication_modes_t modes) {
@@ -770,15 +784,27 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                        IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK);
   uint32_t family_ordinal = options->queue_family_ordinal;
   if (family_ordinal == UINT32_MAX) {
+    const amdf_queue_command_type_t preferred =
+        amdf_gpu_endpoint_architecture(&context->target_info) ==
+                AMDF_GPU_ARCHITECTURE_CDNA
+            ? AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+            : AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
     for (uint32_t i = 0; i < context->endpoint_info.queue_family_count; ++i) {
-      if (iree_hal_amd_gpu_pm4_queue_publication_modes(&context->families[i])) {
+      if (!iree_hal_amd_gpu_device_compute_publication_modes(
+              &context->families[i])) {
+        continue;
+      }
+      if (family_ordinal == UINT32_MAX ||
+          context->families[i].command_type == preferred) {
         family_ordinal = i;
+      }
+      if (context->families[i].command_type == preferred) {
         break;
       }
     }
     if (family_ordinal == UINT32_MAX) {
       return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "GPU has no supported PM4 family");
+                              "GPU has no supported compute family");
     }
   }
   if (family_ordinal >= context->endpoint_info.queue_family_count ||
@@ -790,13 +816,12 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   const bool aql = context->families[family_ordinal].command_type ==
                    AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
   const amdf_queue_publication_modes_t publication_mode =
-      aql ? AMDF_QUEUE_PUBLICATION_MODE_USER
-          : iree_hal_amd_gpu_device_select_publication(
-                iree_hal_amd_gpu_pm4_queue_publication_modes(
-                    &context->families[family_ordinal]));
+      iree_hal_amd_gpu_device_select_publication(
+          iree_hal_amd_gpu_device_compute_publication_modes(
+              &context->families[family_ordinal]));
   if (!publication_mode) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "GPU family has no supported PM4 publication");
+                            "GPU family has no supported compute publication");
   }
   uint32_t transfer_family = UINT32_MAX;
   amdf_queue_publication_modes_t transfer_publication_mode = 0;

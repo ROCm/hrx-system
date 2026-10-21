@@ -458,6 +458,21 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
+    name = "queue_test",
+    srcs = ["queue_test.cc"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":queue",
+        "//libamdf:headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "materialize_test",
     srcs = ["materialize_test.cc"],
     target_compatible_with = _PROGRAM_COMPATIBLE_WITH,

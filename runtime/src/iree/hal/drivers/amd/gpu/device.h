@@ -27,8 +27,8 @@ typedef enum iree_hal_amd_gpu_asan_shadow_backing_e {
 // Cold provisioning of a native packet family. Protocol and publication
 // capability determine admission, independently of RDNA/CDNA.
 typedef struct iree_hal_amd_gpu_device_options_t {
-  // Exact native family ordinal, or UINT32_MAX to select the first supported
-  // PM4 family. File transfers separately select a native SDMA family.
+  // Exact native family ordinal, or UINT32_MAX to prefer AQL on CDNA and PM4
+  // on RDNA among supported families. File transfers independently select SDMA.
   uint32_t queue_family_ordinal;
   // Number of provisioned queues in this family, between 1 and 256.
   uint32_t queue_count;
