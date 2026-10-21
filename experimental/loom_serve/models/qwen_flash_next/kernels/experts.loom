@@ -304,7 +304,7 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   // Compact matrix tiles limit padded work for sparse expert populations.
   // Larger epochs amortize each packed weight panel across wider records.
   %matrix_threshold = index.constant 256 : index
-  %wide_threshold = index.constant 4096 : index
+  %wide_threshold = index.constant 2048 : index
   %compact_rows = index.constant 64 : index
   %wide_rows = index.constant 128 : index
   %wide = index.cmp uge, %tokens, %wide_threshold : index
