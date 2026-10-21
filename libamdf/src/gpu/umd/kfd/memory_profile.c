@@ -254,6 +254,7 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
     profile.device_address = page_address;
     profile.allocation = allocation;
     profile.host_mapping = host_mapping;
+    profile.host_mapping.features |= AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS;
     profile.external_memory_support_count = 2;
     profile.external_memory_support[0] = (amdf_external_memory_support_t){
         .type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
@@ -316,6 +317,10 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
     profile.allocation = allocation;
     if ((profile.roles & AMDF_MEMORY_PROFILE_ROLE_HOST_MAP) != 0) {
       profile.host_mapping = host_mapping;
+      if (topology->integrated) {
+        profile.host_mapping.features |=
+            AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS;
+      }
     }
     if (amdf_gpu_kfd_supports_legacy_sdma_visibility(topology)) {
       profile.visibility.describe_site = amdf_gpu_kfd_sdma_local_describe_site;
@@ -338,6 +343,7 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
     profile.device_address.minimum_alignment = 1;
     profile.registration = registration;
     profile.host_mapping = host_mapping;
+    profile.host_mapping.features |= AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS;
   } else if (memory_profile_ordinal == ordinal &&
              topology->sdma.engine_count != 0) {
     // Owned host pools provide a fresh DMA-BUF for each attachment. Public

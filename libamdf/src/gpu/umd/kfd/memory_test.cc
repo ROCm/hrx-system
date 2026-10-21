@@ -60,6 +60,9 @@ TEST(LinuxGpuMemoryProfileTest, InstanceLifetimeExposesOwnedSystemMemory) {
   EXPECT_EQ(profile.device_address.maximum_address, (UINT64_C(1) << 48) - 1);
   EXPECT_EQ(profile.host_mapping.byte_offset_granularity, 1u);
   EXPECT_EQ(profile.host_mapping.byte_length_granularity, 1u);
+  EXPECT_NE(
+      profile.host_mapping.features & AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS,
+      0u);
   EXPECT_EQ(profile.host_mapping.supported_access,
             AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE);
   ASSERT_EQ(profile.external_memory_support_count, 2u);
@@ -234,6 +237,9 @@ TEST(LinuxGpuMemoryProfileTest, ProcessLifetimeUsesDenseOptionalProfiles) {
   EXPECT_EQ(local_profile.allocation.minimum_alignment, 4096u);
   EXPECT_EQ(local_profile.host_mapping.supported_access,
             AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE);
+  EXPECT_EQ(local_profile.host_mapping.features &
+                AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS,
+            0u);
 
   const amdf_memory_native_profile_t registered_profile =
       QueryProfile(&device, 3);

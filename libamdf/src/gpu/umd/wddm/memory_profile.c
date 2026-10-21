@@ -126,6 +126,7 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
       .byte_length_granularity = 1,
       .supported_access =
           AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+      .features = AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS,
   };
   if (memory_profile_ordinal == 0) {
     profile.memory_class = AMDF_MEMORY_CLASS_SYSTEM;
@@ -156,7 +157,7 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
         AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
     profile.allocation = allocation;
     profile.host_mapping = host_mapping;
-    profile.host_mapping.features = AMDF_HOST_MAPPING_FEATURE_FILE_IO;
+    profile.host_mapping.features |= AMDF_HOST_MAPPING_FEATURE_FILE_IO;
   } else if (memory_profile_ordinal == 1) {
     profile.memory_class = AMDF_MEMORY_CLASS_LOCAL;
     profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;

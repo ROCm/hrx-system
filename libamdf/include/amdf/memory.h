@@ -480,6 +480,12 @@ enum amdf_host_mapping_feature_bits_e {
   /// device-side visibility operations. The caller retains the mapping and
   /// backing until every accepted I/O and final reader has completed.
   AMDF_HOST_MAPPING_FEATURE_FILE_IO = UINT32_C(1) << 0,
+  /// Ordinary CPU atomic accesses are supported through this mapping, subject
+  /// to its read/write permissions and the CPU's instruction widths and
+  /// alignment requirements. This excludes device apertures that cannot
+  /// accept CPU atomic transactions. It does not establish atomicity with any
+  /// device; exact pair reach and device operation support remain independent.
+  AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS = UINT32_C(1) << 1,
 };
 
 /// Range and access capabilities of explicit host mappings.

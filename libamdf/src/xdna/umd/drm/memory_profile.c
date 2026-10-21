@@ -47,6 +47,7 @@ amdf_status_t amdf_linux_xdna_query_memory_profile(
               .byte_length_granularity = 1,
               .supported_access =
                   AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+              .features = AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS,
           },
   };
   if (memory_profile_ordinal == 0) {

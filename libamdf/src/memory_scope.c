@@ -318,6 +318,7 @@ static amdf_memory_native_profile_t amdf_memory_host_profile(
               .byte_length_granularity = 1,
               .supported_access =
                   AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+              .features = AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS,
           },
   };
   if (ordinal == 0) {
@@ -326,7 +327,7 @@ static amdf_memory_native_profile_t amdf_memory_host_profile(
     profile.supported_flags |= AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
     profile.guaranteed_flags |= AMDF_MEMORY_FLAG_HOST_FILE_IO;
     profile.supported_flags |= AMDF_MEMORY_FLAG_HOST_FILE_IO;
-    profile.host_mapping.features = AMDF_HOST_MAPPING_FEATURE_FILE_IO;
+    profile.host_mapping.features |= AMDF_HOST_MAPPING_FEATURE_FILE_IO;
     profile.allocation = (amdf_memory_construction_capabilities_t){
         .maximum_byte_length = maximum_byte_length,
         .byte_length_granularity = 1,

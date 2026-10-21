@@ -4,8 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <new>
 #include <vector>
 
 #include "amdf/amdf.h"
@@ -176,7 +178,8 @@ TEST_F(HostMemoryTest, AllocatesOneBackingWithoutAnAccelerator) {
   ASSERT_NO_FATAL_FAILURE(Map(memory, 0, info.byte_length, &first));
   amdf_host_mapping_info_t interior = {};
   ASSERT_NO_FATAL_FAILURE(Map(memory, 17, info.byte_length - 17, &interior));
-  EXPECT_EQ(first.features, AMDF_HOST_MAPPING_FEATURE_FILE_IO);
+  EXPECT_EQ(first.features, AMDF_HOST_MAPPING_FEATURE_FILE_IO |
+                                AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS);
   EXPECT_EQ(interior.features, first.features);
   EXPECT_EQ(interior.pointer, static_cast<uint8_t*>(first.pointer) + 17);
   std::memset(first.pointer, 0x53, info.byte_length);
@@ -248,7 +251,7 @@ TEST_F(HostMemoryTest, BorrowsCallerStorageWithoutTakingOwnership) {
   memories_.push_back(memory);
   amdf_host_mapping_info_t info = {};
   ASSERT_NO_FATAL_FAILURE(Map(memory, 0, create_info.byte_length, &info));
-  EXPECT_EQ(info.features, 0u);
+  EXPECT_EQ(info.features, AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS);
   EXPECT_EQ(info.pointer, storage_.data() + 1);
   std::memset(info.pointer, 0x19, info.byte_length);
   ASSERT_EQ(api_->host_mapping_destroy(mappings_.back()), AMDF_STATUS_OK);
@@ -260,6 +263,42 @@ TEST_F(HostMemoryTest, BorrowsCallerStorageWithoutTakingOwnership) {
   for (size_t i = 1; i + 1 < storage_.size(); ++i) {
     ASSERT_EQ(storage_[i], 0x19);
   }
+}
+
+TEST_F(HostMemoryTest, AtomicAccessThroughAliasedMappings) {
+  amdf_memory_profile_t profile = {};
+  ASSERT_NO_FATAL_FAILURE(
+      FindProfile(AMDF_MEMORY_PROFILE_ROLE_CREATE, &profile));
+  ASSERT_NE(
+      profile.host_mapping.features & AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS,
+      0u);
+  const amdf_memory_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+      .memory_profile_ordinal = profile.ordinal,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .byte_length = 128,
+  };
+  amdf_memory_t* memory = nullptr;
+  ASSERT_EQ(api_->memory_create(scope_, &create_info, &memory, nullptr),
+            AMDF_STATUS_OK);
+  memories_.push_back(memory);
+  amdf_host_mapping_info_t first = {};
+  ASSERT_NO_FATAL_FAILURE(Map(memory, 0, 128, &first));
+  amdf_host_mapping_info_t second = {};
+  ASSERT_NO_FATAL_FAILURE(Map(memory, 64, 64, &second));
+  ASSERT_NE(first.features & AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS, 0u);
+  ASSERT_NE(second.features & AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS, 0u);
+  const auto check = [&]<typename T>() {
+    auto* word = new (static_cast<uint8_t*>(first.pointer) + 64) T{0};
+    std::atomic_ref<T> producer(*word);
+    std::atomic_ref<T> consumer(*static_cast<T*>(second.pointer));
+    producer.store(T{0xFFFF}, std::memory_order_release);
+    EXPECT_EQ(consumer.fetch_add(T{1}, std::memory_order_acq_rel), T{0xFFFF});
+    EXPECT_EQ(producer.load(std::memory_order_acquire), T{0x10000});
+  };
+  check.operator()<uint32_t>();
+  check.operator()<uint64_t>();
 }
 
 TEST_F(HostMemoryTest, QualifiesCpuPairsAndRejectsUnestablishedRegistration) {

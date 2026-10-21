@@ -293,6 +293,7 @@ void amdf_xdna_umd_context_query_memory_profile(
               .byte_length_granularity = 1,
               .supported_access =
                   AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+              .features = AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS,
           },
       .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE,
   };
