@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -386,6 +387,72 @@ TEST_F(GpuProfileTest, FailedSnapshotRetriesWithoutBlockingProducer) {
   ASSERT_EQ(sink_.events.size(), 2u);
   EXPECT_EQ(sink_.events[0].event_id + 1, sink_.events[1].event_id);
   EXPECT_EQ(sink_.events[0].submission_id + 1, sink_.events[1].submission_id);
+}
+
+TEST_F(GpuProfileTest, AddedCoordinatePreservesPriorRecordsAndIdentity) {
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  Append(0);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_register_queue(profile_, 255));
+  Append(255);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_register_queue(profile_, 255));
+  Append(255);
+  Append(0);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  ASSERT_EQ(sink_.queues.size(), 3u);
+  EXPECT_EQ(sink_.queues.back().queue_ordinal, 255u);
+  EXPECT_EQ(sink_.devices.back().queue_count, 3u);
+  ASSERT_EQ(sink_.events.size(), 4u);
+  EXPECT_EQ(sink_.events[0].queue_ordinal, 0u);
+  EXPECT_EQ(sink_.events[1].submission_id, 2u);
+  EXPECT_EQ(sink_.events[2].queue_ordinal, 255u);
+  EXPECT_EQ(sink_.events[2].submission_id, 1u);
+  EXPECT_EQ(sink_.events[3].submission_id, 2u);
+}
+
+TEST_F(GpuProfileTest, FailedRegistrationLeavesPriorStreamsUsable) {
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  sink_.fail_content_type = IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        iree_hal_amd_gpu_profile_register_queue(profile_, 2));
+  Append(0);
+  sink_.fail_content_type = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_register_queue(profile_, 2));
+  Append(2);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  ASSERT_EQ(sink_.events.size(), 2u);
+  EXPECT_EQ(sink_.events[0].queue_ordinal, 0u);
+  EXPECT_EQ(sink_.events[1].queue_ordinal, 2u);
+  EXPECT_EQ(sink_.devices.back().queue_count, 3u);
+}
+
+TEST_F(GpuProfileTest, RegistrationOverlapsFlushAndExistingProducer) {
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  std::barrier<> start(3);
+  std::thread producer([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 0; i < 512; ++i) {
+      Append(0);
+    }
+  });
+  std::thread registrar([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 2; i < 10; ++i) {
+      IREE_ASSERT_OK(iree_hal_amd_gpu_profile_register_queue(profile_, i));
+      for (uint32_t j = 0; j < 32; ++j) {
+        Append(i);
+      }
+    }
+  });
+  start.arrive_and_wait();
+  for (uint32_t i = 0; i < 64; ++i) {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  }
+  producer.join();
+  registrar.join();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  EXPECT_EQ(sink_.events.size(), 512u + 8u * 32u);
+  EXPECT_EQ(sink_.dropped, 0u);
+  EXPECT_EQ(sink_.queues.size(), 10u);
 }
 
 TEST_F(GpuProfileTest,

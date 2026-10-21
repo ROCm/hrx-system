@@ -107,7 +107,7 @@ void iree_hal_amd_gpu_pm4_queue_assign_frontier(
     iree_async_axis_t axis);
 
 // Borrows a device-owned profiling session until idle end detaches it.
-void iree_hal_amd_gpu_pm4_queue_set_profile(
+iree_status_t iree_hal_amd_gpu_pm4_queue_set_profile(
     iree_hal_queue_t* queue, iree_hal_amd_gpu_profile_t* profile);
 
 // Borrows the queue's bounded deferred publication source. The parent joins

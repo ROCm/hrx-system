@@ -1386,6 +1386,8 @@ static void iree_hal_amd_gpu_aql_fail_queue(iree_hal_amd_gpu_aql_queue_t* queue,
 iree_status_t iree_hal_amd_gpu_aql_queue_set_profile(
     iree_hal_queue_t* base, iree_hal_amd_gpu_profile_t* profile) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_register_queue(
+      profile, queue->options.queue_ordinal));
   const bool previous =
       iree_hal_amd_gpu_profile_timestamps_dispatches(queue->profile);
   const bool enabled = iree_hal_amd_gpu_profile_timestamps_dispatches(profile);

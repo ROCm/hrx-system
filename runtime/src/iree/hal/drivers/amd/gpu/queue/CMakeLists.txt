@@ -514,6 +514,7 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::status
   PUBLIC

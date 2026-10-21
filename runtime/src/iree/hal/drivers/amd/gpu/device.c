@@ -43,6 +43,7 @@ static const iree_hal_amd_gpu_queue_lifecycle_t
         .is_idle = iree_hal_amd_gpu_pm4_queue_is_idle,
         .shutdown = iree_hal_amd_gpu_pm4_queue_shutdown,
         .trim = iree_hal_amd_gpu_pm4_queue_trim,
+        .set_profile = iree_hal_amd_gpu_pm4_queue_set_profile,
         .notify_failure = iree_hal_amd_gpu_pm4_queue_notify_failure,
         .assign_frontier = iree_hal_amd_gpu_pm4_queue_assign_frontier,
         .reserve_frontiers = iree_hal_amd_gpu_pm4_queue_reserve_frontiers,
@@ -58,6 +59,7 @@ static const iree_hal_amd_gpu_queue_lifecycle_t
         .shutdown = iree_hal_amd_gpu_aql_queue_shutdown,
         .trim = iree_hal_amd_gpu_aql_queue_trim,
         .trim_scratch = iree_hal_amd_gpu_aql_queue_trim_scratch,
+        .set_profile = iree_hal_amd_gpu_aql_queue_set_profile,
         .notify_failure = iree_hal_amd_gpu_aql_queue_notify_failure,
         .assign_frontier = iree_hal_amd_gpu_aql_queue_assign_frontier,
         .reserve_frontiers = iree_hal_amd_gpu_aql_queue_reserve_frontiers,
@@ -1505,29 +1507,14 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_begin(
       options, ++device->next_profile_session_id, device->queue_count,
       clock.frequency_hz, device->host_allocator, &profile));
-  iree_status_t status = iree_ok_status();
-  uint32_t configured_count = 0;
-  for (; configured_count < device->queue_count && iree_status_is_ok(status);
-       ++configured_count) {
-    if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
-      status = iree_hal_amd_gpu_aql_queue_set_profile(
-          device->queues[configured_count], profile);
-    } else {
-      iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[configured_count],
-                                             profile);
-    }
-  }
+  iree_status_t status = iree_hal_amd_gpu_queue_membership_set_profile(
+      &device->membership, profile);
   if (iree_status_is_ok(status)) {
     device->profile = profile;
     device->memory.allocations.profile = profile;
     device->memory.mappings.profile = profile;
   } else {
-    // Native configuration can fail after the sink begins. Drop all queue
-    // borrows and join rollback errors before ending that same sink session.
-    for (uint32_t i = 0; i < configured_count; ++i) {
-      status = iree_status_join(status, iree_hal_amd_gpu_aql_queue_set_profile(
-                                            device->queues[i], NULL));
-    }
+    // Membership has already cleared all queue borrows after a failed begin.
     status = iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
   }
   return status;
@@ -1546,15 +1533,8 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_end(
   device->profile = NULL;
   device->memory.allocations.profile = NULL;
   device->memory.mappings.profile = NULL;
-  iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < device->queue_count; ++i) {
-    if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
-      status = iree_status_join(status, iree_hal_amd_gpu_aql_queue_set_profile(
-                                            device->queues[i], NULL));
-    } else {
-      iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[i], NULL);
-    }
-  }
+  iree_status_t status =
+      iree_hal_amd_gpu_queue_membership_set_profile(&device->membership, NULL);
   return iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
 }
 

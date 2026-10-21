@@ -556,6 +556,16 @@ void GpuNativeTest::Create(
   ASSERT_NE(queues_[1], nullptr);
 }
 
+iree_status_t GpuNativeTest::AcquireQueue(iree_hal_queue_t** out_queue) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  const auto* resource = reinterpret_cast<const iree_hal_resource_t*>(device_);
+  const auto* vtable =
+      static_cast<const iree_hal_device_vtable_t*>(resource->vtable);
+  return vtable->acquire_queue(device_, iree_hal_queue_family(queues_[0]),
+                               &params, out_queue);
+}
+
 void GpuNativeTest::CreateSemaphore(iree_hal_semaphore_t** out_semaphore) {
   IREE_ASSERT_OK(
       iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,

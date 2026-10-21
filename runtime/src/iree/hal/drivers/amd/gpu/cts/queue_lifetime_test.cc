@@ -59,19 +59,6 @@ class GpuNativeQueueLifetimeTest
     GpuNativeTest::TearDown();
   }
 
-  iree_status_t Acquire(iree_hal_queue_t** out_queue) {
-    iree_hal_queue_params_t params;
-    iree_hal_queue_params_initialize(&params);
-    // Native lifecycle coverage enters the concrete device interface with
-    // canonical family parameters; the shared CTS owns capability validation.
-    const auto* resource =
-        reinterpret_cast<const iree_hal_resource_t*>(device_);
-    const auto* vtable =
-        static_cast<const iree_hal_device_vtable_t*>(resource->vtable);
-    return vtable->acquire_queue(device_, iree_hal_queue_family(queues_[0]),
-                                 &params, out_queue);
-  }
-
   // Native dependency gate, joined by base teardown before its table expires.
   NativeMemoryGate memory_gate_;
   // Explicit physical backing for recording and independent allocation work.
@@ -84,7 +71,7 @@ TEST_P(GpuNativeQueueLifetimeTest, FinalReleaseContinuesEpochsAcrossSlotReuse) {
   iree_async_single_frontier_t previous = {};
   for (uint32_t iteration = 0; iteration < 4; ++iteration) {
     iree_hal_queue_t* queue = nullptr;
-    IREE_ASSERT_OK(Acquire(&queue));
+    IREE_ASSERT_OK(AcquireQueue(&queue));
     Ref<iree_hal_semaphore_t> done;
     CreateSemaphore(done.out());
     uint64_t one = 1;
@@ -114,7 +101,7 @@ TEST_P(GpuNativeQueueLifetimeTest, FinalReleaseContinuesEpochsAcrossSlotReuse) {
 
 TEST_P(GpuNativeQueueLifetimeTest, NativeSignalReaderSurvivesProducerRelease) {
   Ref<iree_hal_queue_t> producer;
-  IREE_ASSERT_OK(Acquire(producer.out()));
+  IREE_ASSERT_OK(AcquireQueue(producer.out()));
   Ref<iree_hal_semaphore_t> paused, done;
   CreateSemaphore(paused.out());
   CreateSemaphore(done.out());
@@ -140,7 +127,7 @@ TEST_P(GpuNativeQueueLifetimeTest, NativeSignalReaderSurvivesProducerRelease) {
   pause.Join();
   producer.reset();
   Ref<iree_hal_queue_t> replacement;
-  IREE_ASSERT_OK(Acquire(replacement.out()));
+  IREE_ASSERT_OK(AcquireQueue(replacement.out()));
   EXPECT_EQ(retained.signal->device_address, address);
   iree_status_code_t code = IREE_STATUS_UNKNOWN;
   EXPECT_TRUE(iree_hal_amd_gpu_signal_query_retirement(retained.signal, &code));
@@ -172,7 +159,7 @@ TEST_P(GpuNativeQueueLifetimeTest, RecordedOutputSurvivesMembershipGrowth) {
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
   std::array<Ref<iree_hal_queue_t>, 3> acquired;
   for (auto& queue : acquired) {
-    IREE_ASSERT_OK(Acquire(queue.out()));
+    IREE_ASSERT_OK(AcquireQueue(queue.out()));
   }
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
   Ref<iree_hal_semaphore_t> done;
@@ -205,7 +192,7 @@ TEST_P(GpuNativeQueueLifetimeTest, RecordedOutputSurvivesMembershipGrowth) {
 
 TEST_P(GpuNativeQueueLifetimeTest, QueueReleaseDoesNotDrainHeldAllocation) {
   Ref<iree_hal_queue_t> acquired;
-  IREE_ASSERT_OK(Acquire(acquired.out()));
+  IREE_ASSERT_OK(AcquireQueue(acquired.out()));
   Ref<iree_hal_buffer_t> pending;
   Ref<iree_hal_semaphore_t> allocated, completed;
   CreateSemaphore(allocated.out());

@@ -278,7 +278,7 @@ typedef struct iree_hal_amd_gpu_profile_stream_t {
   iree_slim_mutex_t mutex;
   // Queue-local acceptance identity, independent of native chunk epochs.
   iree_atomic_int64_t next_submission_id;
-  // Bounded records stored in the session's trailing allocation.
+  // Bounded records stored beside the owning stream allocation.
   iree_hal_profile_event_ring_t events;
   // Completed device events, never pointers to still-live native samples.
   iree_hal_profile_event_ring_t dispatches;
@@ -287,20 +287,27 @@ typedef struct iree_hal_amd_gpu_profile_stream_t {
 } iree_hal_amd_gpu_profile_stream_t;
 
 struct iree_hal_amd_gpu_profile_t {
-  // Allocator owning this session and all inline stream storage.
+  // Allocator owning this session, initial streams, and later stream additions.
   iree_allocator_t host_allocator;
   // Retained output sink; only explicit lifecycle calls may invoke it.
   iree_hal_profile_sink_t* sink;
   // Immutable session metadata shared by every chunk.
   iree_hal_profile_chunk_metadata_t metadata;
-  // Number of provisioned queues and initialized stream mutexes.
+  // Highest installed queue coordinate plus one; protected by sink_mutex.
   uint32_t queue_count;
+  // Initial streams share the session allocation; later streams own theirs.
+  uint32_t initial_queue_count;
+  // Serializes cold stream registration and flush, never producer appends.
+  iree_slim_mutex_t sink_mutex;
+  // Current device metadata, re-emitted when an acquired stream is added.
+  iree_hal_profile_device_record_t device;
   // Admitted immutable families; controls capture and stream emission.
   iree_hal_device_profiling_data_families_t families;
   // Immutable predicates; the optional pattern lives in trailing storage.
   iree_hal_profile_capture_filter_t filter;
-  // Inline queue streams, indexed directly by physical queue ordinal.
-  iree_hal_amd_gpu_profile_stream_t* streams;
+  // Stable directory for the device's bounded native coordinates. Only actual
+  // participants allocate rings; ordinary devices allocate no profiling state.
+  iree_hal_amd_gpu_profile_stream_t* streams[256];
 };
 
 static void iree_hal_amd_gpu_profile_metadata_release(
@@ -314,14 +321,21 @@ static void iree_hal_amd_gpu_profile_metadata_release(
 
 static void iree_hal_amd_gpu_profile_free(iree_hal_amd_gpu_profile_t* profile) {
   for (uint32_t i = 0; i < profile->queue_count; ++i) {
-    iree_hal_amd_gpu_profile_stream_t* stream = &profile->streams[i];
+    iree_hal_amd_gpu_profile_stream_t* stream = profile->streams[i];
+    if (!stream) {
+      continue;
+    }
     for (uint64_t j = stream->dispatches.read_position;
          j != stream->dispatches.write_position; ++j) {
       iree_hal_amd_gpu_profile_metadata_release(
           stream->metadata[j & stream->dispatches.mask]);
     }
     iree_slim_mutex_deinitialize(&stream->mutex);
+    if (i >= profile->initial_queue_count) {
+      iree_allocator_free(profile->host_allocator, stream);
+    }
   }
+  iree_slim_mutex_deinitialize(&profile->sink_mutex);
   iree_hal_profile_sink_release(profile->sink);
   iree_allocator_free(profile->host_allocator, profile);
 }
@@ -367,7 +381,7 @@ static iree_status_t iree_hal_amd_gpu_profile_write_executable(
 
 static iree_status_t iree_hal_amd_gpu_profile_flush_dispatches(
     iree_hal_amd_gpu_profile_t* profile, uint32_t ordinal) {
-  iree_hal_amd_gpu_profile_stream_t* stream = &profile->streams[ordinal];
+  iree_hal_amd_gpu_profile_stream_t* stream = profile->streams[ordinal];
   iree_hal_profile_event_ring_snapshot_t snapshot;
   iree_slim_mutex_lock(&stream->mutex);
   iree_status_t status =
@@ -429,6 +443,86 @@ static iree_status_t iree_hal_amd_gpu_profile_flush_dispatches(
     iree_hal_profile_event_ring_commit_snapshot(&stream->dispatches, &snapshot);
     iree_slim_mutex_unlock(&stream->mutex);
   }
+  return status;
+}
+
+static void iree_hal_amd_gpu_profile_stream_initialize(
+    iree_hal_amd_gpu_profile_stream_t* stream,
+    iree_hal_profile_queue_event_t* records,
+    iree_hal_profile_dispatch_event_t* dispatches,
+    iree_hal_amd_gpu_profile_metadata_t* metadata) {
+  iree_slim_mutex_initialize(&stream->mutex);
+  iree_atomic_store(&stream->next_submission_id, 1, iree_memory_order_relaxed);
+  iree_hal_profile_event_ring_initialize(records, sizeof(*records),
+                                         IREE_HAL_AMD_GPU_PROFILE_CAPACITY,
+                                         &stream->events);
+  iree_hal_profile_event_ring_initialize(
+      dispatches, sizeof(*dispatches),
+      dispatches ? IREE_HAL_AMD_GPU_PROFILE_CAPACITY : 0, &stream->dispatches);
+  stream->metadata = metadata;
+}
+
+iree_status_t iree_hal_amd_gpu_profile_register_queue(
+    iree_hal_amd_gpu_profile_t* profile, uint32_t queue_ordinal) {
+  if (!profile) {
+    return iree_ok_status();
+  }
+  iree_slim_mutex_lock(&profile->sink_mutex);
+  if (profile->streams[queue_ordinal]) {
+    iree_slim_mutex_unlock(&profile->sink_mutex);
+    return iree_ok_status();
+  }
+  const uint32_t dispatch_count =
+      iree_hal_amd_gpu_profile_captures_dispatches(profile)
+          ? IREE_HAL_AMD_GPU_PROFILE_CAPACITY
+          : 0;
+  iree_host_size_t size = 0, records_offset = 0, dispatches_offset = 0;
+  iree_host_size_t metadata_offset = 0;
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_amd_gpu_profile_stream_t), &size,
+      IREE_STRUCT_FIELD(IREE_HAL_AMD_GPU_PROFILE_CAPACITY,
+                        iree_hal_profile_queue_event_t, &records_offset),
+      IREE_STRUCT_FIELD(dispatch_count, iree_hal_profile_dispatch_event_t,
+                        &dispatches_offset),
+      IREE_STRUCT_FIELD(dispatch_count, iree_hal_amd_gpu_profile_metadata_t,
+                        &metadata_offset));
+  iree_hal_amd_gpu_profile_stream_t* stream = NULL;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc(profile->host_allocator, size, (void**)&stream);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_profile_stream_initialize(
+        stream, (void*)((uint8_t*)stream + records_offset),
+        dispatch_count ? (void*)((uint8_t*)stream + dispatches_offset) : NULL,
+        dispatch_count ? (void*)((uint8_t*)stream + metadata_offset) : NULL);
+    iree_hal_profile_queue_record_t record =
+        iree_hal_profile_queue_record_default();
+    record.physical_device_ordinal = 0;
+    record.queue_ordinal = queue_ordinal;
+    record.stream_id = queue_ordinal + 1ull;
+    status = iree_hal_amd_gpu_profile_write(
+        profile, IREE_HAL_PROFILE_CONTENT_TYPE_QUEUES, queue_ordinal,
+        iree_make_const_byte_span(&record, sizeof(record)));
+  }
+  iree_hal_profile_device_record_t device = profile->device;
+  ++device.queue_count;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_profile_write(
+        profile, IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES, UINT32_MAX,
+        iree_make_const_byte_span(&device, sizeof(device)));
+  }
+  if (iree_status_is_ok(status)) {
+    profile->device = device;
+    profile->streams[queue_ordinal] = stream;
+    profile->queue_count = iree_max(profile->queue_count, queue_ordinal + 1);
+  } else {
+    if (stream) {
+      iree_slim_mutex_deinitialize(&stream->mutex);
+    }
+    iree_allocator_free(profile->host_allocator, stream);
+  }
+  iree_slim_mutex_unlock(&profile->sink_mutex);
   return status;
 }
 
@@ -504,6 +598,8 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
   profile->sink = options->sink;
   iree_hal_profile_sink_retain(profile->sink);
   profile->queue_count = queue_count;
+  profile->initial_queue_count = queue_count;
+  iree_slim_mutex_initialize(&profile->sink_mutex);
   profile->families = families;
   profile->filter = options->capture_filter;
   profile->filter.executable_function_pattern = iree_string_view_empty();
@@ -513,7 +609,8 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
     profile->filter.executable_function_pattern =
         iree_make_string_view(target, pattern.size);
   }
-  profile->streams = (void*)((uint8_t*)profile + streams_offset);
+  iree_hal_amd_gpu_profile_stream_t* streams =
+      (void*)((uint8_t*)profile + streams_offset);
   profile->metadata = iree_hal_profile_chunk_metadata_default();
   profile->metadata.name = IREE_SV("amd-gpu");
   profile->metadata.content_type = IREE_HAL_PROFILE_CONTENT_TYPE_SESSION;
@@ -522,29 +619,17 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
   iree_hal_profile_queue_event_t* records =
       (void*)((uint8_t*)profile + records_offset);
   for (uint32_t i = 0; i < queue_count; ++i) {
-    iree_hal_amd_gpu_profile_stream_t* stream = &profile->streams[i];
-    iree_slim_mutex_initialize(&stream->mutex);
-    iree_atomic_store(&stream->next_submission_id, 1,
-                      iree_memory_order_relaxed);
-    iree_hal_profile_event_ring_initialize(
-        records + (iree_host_size_t)i * IREE_HAL_AMD_GPU_PROFILE_CAPACITY,
-        sizeof(*records), IREE_HAL_AMD_GPU_PROFILE_CAPACITY, &stream->events);
+    profile->streams[i] = &streams[i];
     iree_hal_profile_dispatch_event_t* dispatch_records =
         (void*)((uint8_t*)profile + dispatches_offset);
-    iree_hal_profile_event_ring_initialize(
-        dispatch_count
-            ? dispatch_records +
-                  (iree_host_size_t)i * IREE_HAL_AMD_GPU_PROFILE_CAPACITY
-            : NULL,
-        sizeof(*dispatch_records),
-        dispatch_count ? IREE_HAL_AMD_GPU_PROFILE_CAPACITY : 0,
-        &stream->dispatches);
     iree_hal_amd_gpu_profile_metadata_t* metadata =
         (void*)((uint8_t*)profile + metadata_offset);
-    stream->metadata =
-        dispatch_count
-            ? metadata + (iree_host_size_t)i * IREE_HAL_AMD_GPU_PROFILE_CAPACITY
-            : NULL;
+    const iree_host_size_t offset =
+        (iree_host_size_t)i * IREE_HAL_AMD_GPU_PROFILE_CAPACITY;
+    iree_hal_amd_gpu_profile_stream_initialize(
+        &streams[i], records + offset,
+        dispatch_count ? dispatch_records + offset : NULL,
+        dispatch_count ? metadata + offset : NULL);
   }
   iree_status_t status =
       iree_hal_profile_sink_begin_session(profile->sink, &profile->metadata);
@@ -558,6 +643,7 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
       record.flags |= IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY;
       record.timestamp_frequency_hz = timestamp_frequency_hz;
     }
+    profile->device = record;
     status = iree_hal_amd_gpu_profile_write(
         profile, IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES, UINT32_MAX,
         iree_make_const_byte_span(&record, sizeof(record)));
@@ -591,14 +677,18 @@ iree_status_t iree_hal_amd_gpu_profile_flush(
   if (!profile) {
     return iree_ok_status();
   }
+  iree_slim_mutex_lock(&profile->sink_mutex);
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < profile->queue_count && iree_status_is_ok(status);
        ++i) {
+    if (!profile->streams[i]) {
+      continue;
+    }
     status = iree_hal_amd_gpu_profile_flush_dispatches(profile, i);
     if (!iree_status_is_ok(status)) {
       continue;
     }
-    iree_hal_amd_gpu_profile_stream_t* stream = &profile->streams[i];
+    iree_hal_amd_gpu_profile_stream_t* stream = profile->streams[i];
     iree_hal_profile_event_ring_snapshot_t snapshot;
     iree_slim_mutex_lock(&stream->mutex);
     status = iree_hal_profile_event_ring_snapshot(&stream->events, &snapshot);
@@ -624,6 +714,7 @@ iree_status_t iree_hal_amd_gpu_profile_flush(
       iree_slim_mutex_unlock(&stream->mutex);
     }
   }
+  iree_slim_mutex_unlock(&profile->sink_mutex);
   return status;
 }
 
@@ -651,9 +742,9 @@ void iree_hal_amd_gpu_profile_operation_initialize(
   iree_hal_profile_queue_event_t* event = &operation->event;
   event->type = type;
   event->host_time_ns = iree_time_now();
-  event->submission_id =
-      iree_atomic_fetch_add(&profile->streams[queue_ordinal].next_submission_id,
-                            1, iree_memory_order_relaxed);
+  event->submission_id = iree_atomic_fetch_add(
+      &profile->streams[queue_ordinal]->next_submission_id, 1,
+      iree_memory_order_relaxed);
   event->physical_device_ordinal = 0;
   event->queue_ordinal = queue_ordinal;
   event->stream_id = queue_ordinal + 1ull;
@@ -686,7 +777,7 @@ void iree_hal_amd_gpu_profile_operation_record(
     return;
   }
   iree_hal_amd_gpu_profile_stream_t* stream =
-      &profile->streams[event->queue_ordinal];
+      profile->streams[event->queue_ordinal];
   uint64_t position = 0, event_id = 0;
   iree_slim_mutex_lock(&stream->mutex);
   if (iree_hal_profile_event_ring_try_append(&stream->events, &position,
@@ -753,7 +844,7 @@ void iree_hal_amd_gpu_profile_operation_complete(
     return;
   }
   iree_hal_amd_gpu_profile_stream_t* stream =
-      &profile->streams[operation->event.queue_ordinal];
+      profile->streams[operation->event.queue_ordinal];
   // Only completed native owners reach this boundary. Each retained record
   // copies its sample before invocation storage can return to the producer.
   iree_slim_mutex_lock(&stream->mutex);

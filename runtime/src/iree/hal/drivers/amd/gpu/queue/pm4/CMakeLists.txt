@@ -701,6 +701,7 @@ iree_cc_library(
     iree::base::cpu_data
     iree::base::internal
     iree::base::threading
+    iree::base::threading::thread
     iree::hal
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::completion

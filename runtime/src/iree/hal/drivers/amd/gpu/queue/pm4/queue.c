@@ -9,6 +9,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/base/cpu_data.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/base/threading/thread.h"
 #include "iree/hal/drivers/amd/gpu/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/buffer.h"
@@ -260,13 +261,6 @@ static void iree_hal_amd_gpu_pm4_file_add_effects(
                       IREE_HAL_MEMORY_EFFECT_RANGE_ACQUIRE_FROM_SYSTEM)) {
     barrier->cache_control |= queue->options.barriers.acquire;
   }
-}
-
-void iree_hal_amd_gpu_pm4_queue_set_profile(
-    iree_hal_queue_t* base, iree_hal_amd_gpu_profile_t* profile) {
-  iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
-  queue->profile = profile;
-  queue->file_executor.profile = profile;
 }
 
 static void iree_hal_amd_gpu_pm4_wake_shutdown(
@@ -804,6 +798,26 @@ static iree_status_t iree_hal_amd_gpu_pm4_check_failure(
   return code == IREE_STATUS_OK
              ? iree_ok_status()
              : iree_make_status(code, "GPU sanitizer failure");
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_queue_set_profile(
+    iree_hal_queue_t* base, iree_hal_amd_gpu_profile_t* profile) {
+  iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_register_queue(
+      profile, queue->options.queue_ordinal));
+  // Public completion may precede the final host retirement access. Begin/end
+  // already join user work; only this cold session change joins that tail.
+  iree_status_t status = iree_ok_status();
+  while (!iree_hal_amd_gpu_pm4_queue_is_idle(base) &&
+         iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_pm4_check_failure(queue);
+    if (iree_status_is_ok(status)) {
+      iree_thread_yield();
+    }
+  }
+  queue->profile = iree_status_is_ok(status) ? profile : NULL;
+  queue->file_executor.profile = queue->profile;
+  return status;
 }
 
 // A candidate contains only waits emitted in this native piece. It becomes

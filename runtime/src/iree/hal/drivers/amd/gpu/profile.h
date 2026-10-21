@@ -16,8 +16,8 @@ extern "C" {
 
 // Device-owned session with bounded, independently synchronized queue streams.
 // Begin/end require idle queues and external serialization with submission.
-// Appending never allocates or calls a sink; only begin/flush/end call the
-// sink.
+// Appending never allocates or calls a sink. Begin, flush, end, and cold queue
+// registration own sink calls; new queues emit metadata before accepting work.
 typedef struct iree_hal_amd_gpu_profile_t iree_hal_amd_gpu_profile_t;
 
 // Host-only reflection and original artifact bytes, independent of native
@@ -121,6 +121,14 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
     const iree_hal_device_profiling_options_t* options, uint64_t session_id,
     uint32_t queue_count, uint64_t timestamp_frequency_hz,
     iree_allocator_t host_allocator, iree_hal_amd_gpu_profile_t** out_profile);
+
+// Prepares one device-assigned coordinate before the queue accepts work.
+// Existing streams and their completed records remain stable through queue
+// replacement. Serializes native stream metadata with explicit flush, without
+// stopping other producers. NULL is a no-op; failure leaves the coordinate
+// unregistered.
+iree_status_t iree_hal_amd_gpu_profile_register_queue(
+    iree_hal_amd_gpu_profile_t* profile, uint32_t queue_ordinal);
 
 // These session queries consume immutable captured options and do no work.
 bool iree_hal_amd_gpu_profile_captures_dispatches(

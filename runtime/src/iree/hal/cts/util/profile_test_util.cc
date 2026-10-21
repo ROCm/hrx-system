@@ -94,7 +94,8 @@ static iree_status_t TestProfileSinkWrite(
 
   if (iree_string_view_equal(metadata->content_type,
                              IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES)) {
-    EXPECT_FALSE(test_sink->saw_queue_metadata);
+    // Device records can be refreshed as queues join an active session. Queue
+    // records still require their device metadata to have been announced.
     EXPECT_EQ(0u,
               iovecs[0].data_length % sizeof(iree_hal_profile_device_record_t));
     const auto* records =

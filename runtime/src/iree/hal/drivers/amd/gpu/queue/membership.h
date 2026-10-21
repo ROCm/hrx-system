@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_MEMBERSHIP_H_
 
 #include "iree/hal/drivers/amd/gpu/completion.h"
+#include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/backing.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 
@@ -28,6 +29,9 @@ typedef struct iree_hal_amd_gpu_queue_lifecycle_t {
   void (*trim)(iree_hal_queue_t* queue);
   // Cold native scratch detachment, or NULL without firmware-managed scratch.
   amdf_status_t (*trim_scratch)(iree_hal_queue_t* queue);
+  // Configures optional capture after joining the queue's retirement tail.
+  iree_status_t (*set_profile)(iree_hal_queue_t* queue,
+                               iree_hal_amd_gpu_profile_t* profile);
   // Wakes admission after the device latches a shader failure.
   void (*notify_failure)(iree_hal_queue_t* queue);
   // Borrows a device-registered axis until queue destruction.
@@ -105,6 +109,8 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   iree_notification_t notification;
   // Prepared active/spare tables; spare storage makes release allocation-free.
   iree_hal_amd_gpu_queue_sources_t* sources;
+  // Borrowed active capture, installed on new queues before they are exposed.
+  iree_hal_amd_gpu_profile_t* profile;
   // Immutable non-compute publisher sources at provisioned_count + [0, 3).
   iree_hal_amd_gpu_publication_source_t publication_tail[3];
   // Number of non-compute completion callbacks following all queue callbacks.
@@ -161,6 +167,13 @@ void iree_hal_amd_gpu_queue_membership_notify_failure(
 // detachment runs on the calling thread; ready publication remains independent.
 amdf_status_t iree_hal_amd_gpu_queue_membership_trim(
     iree_hal_amd_gpu_queue_membership_t* membership);
+
+// Begins/ends capture across all live queues. The public profiling contract
+// joins submissions and externally serializes this call with acquisition and
+// release. Failure clears every session borrow before returning.
+iree_status_t iree_hal_amd_gpu_queue_membership_set_profile(
+    iree_hal_amd_gpu_queue_membership_t* membership,
+    iree_hal_amd_gpu_profile_t* profile);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -340,6 +340,9 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
         "GPU acquired queue source wake");
     membership->lifecycle->set_release(
         queue, iree_hal_amd_gpu_queue_membership_release, slot);
+    if (iree_status_is_ok(status) && membership->profile) {
+      status = membership->lifecycle->set_profile(queue, membership->profile);
+    }
   }
   iree_slim_mutex_unlock(&membership->mutex);
   if (iree_status_is_ok(status)) {
@@ -347,6 +350,44 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
   } else {
     iree_hal_queue_release(queue);
   }
+  return status;
+}
+
+static iree_status_t iree_hal_amd_gpu_queue_membership_configure_profile(
+    iree_hal_amd_gpu_queue_membership_t* membership,
+    iree_hal_amd_gpu_profile_t* profile) {
+  iree_status_t status = iree_ok_status();
+  // Disabling visits every live queue even after an error: session destruction
+  // must never leave a queue borrowing freed host capture storage.
+  for (uint32_t i = 0; i < membership->provisioned_count &&
+                       (!profile || iree_status_is_ok(status));
+       ++i) {
+    status = iree_status_join(status, membership->lifecycle->set_profile(
+                                          membership->provisioned[i], profile));
+  }
+  for (iree_hal_amd_gpu_queue_slot_t* slot = membership->slots;
+       slot && (!profile || iree_status_is_ok(status)); slot = slot->next) {
+    if (slot->queue) {
+      status = iree_status_join(
+          status, membership->lifecycle->set_profile(slot->queue, profile));
+    }
+  }
+  return status;
+}
+
+iree_status_t iree_hal_amd_gpu_queue_membership_set_profile(
+    iree_hal_amd_gpu_queue_membership_t* membership,
+    iree_hal_amd_gpu_profile_t* profile) {
+  iree_slim_mutex_lock(&membership->mutex);
+  iree_status_t status =
+      iree_hal_amd_gpu_queue_membership_configure_profile(membership, profile);
+  if (!iree_status_is_ok(status) && profile) {
+    status = iree_status_join(
+        status,
+        iree_hal_amd_gpu_queue_membership_configure_profile(membership, NULL));
+  }
+  membership->profile = iree_status_is_ok(status) ? profile : NULL;
+  iree_slim_mutex_unlock(&membership->mutex);
   return status;
 }
 
