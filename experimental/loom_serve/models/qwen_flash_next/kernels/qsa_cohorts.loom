@@ -127,8 +127,8 @@ func.def inline @qsa_cohort_head(%lists: view<4x516xi32>, %query: index, %cursor
     scf.yield %key, %members : i32, i32
   } else {
     %sentinel = scalar.constant 65536 : i32
-    %zero = scalar.constant 0 : i32
-    scf.yield %sentinel, %zero : i32, i32
+    %c0_i32 = scalar.constant 0 : i32
+    scf.yield %sentinel, %c0_i32 : i32, i32
   }
   func.return %key, %members : i32, i32
 }
@@ -138,7 +138,7 @@ func.def inline @qsa_cohort_walk(%publish: i1, %lists: view<4x516xi32>, %p0: ind
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
-  %zero = scalar.constant 0 : i32
+  %c0_i32 = scalar.constant 0 : i32
   %shift0 = scalar.constant 16 : i32
   %shift1 = scalar.constant 20 : i32
   %shift2 = scalar.constant 24 : i32
@@ -168,10 +168,10 @@ func.def inline @qsa_cohort_walk(%publish: i1, %lists: view<4x516xi32>, %p0: ind
     %next2 = index.add %cursor2, %step2 : index
     %next3 = index.add %cursor3, %step3 : index
     scf.if %publish {
-      %selected0 = scf.select %match0, %members0, %zero : i32
-      %selected1 = scf.select %match1, %members1, %zero : i32
-      %selected2 = scf.select %match2, %members2, %zero : i32
-      %selected3 = scf.select %match3, %members3, %zero : i32
+      %selected0 = scf.select %match0, %members0, %c0_i32 : i32
+      %selected1 = scf.select %match1, %members1, %c0_i32 : i32
+      %selected2 = scf.select %match2, %members2, %c0_i32 : i32
+      %selected3 = scf.select %match3, %members3, %c0_i32 : i32
       %bits0 = scalar.shli %selected0, %shift0 : i32
       %bits1 = scalar.shli %selected1, %shift1 : i32
       %bits2 = scalar.shli %selected2, %shift2 : i32
@@ -242,8 +242,8 @@ kernel.def target(@qsa_cohort_wave32) @qsa_merge_cohorts() {
     %shared = buffer.alloca<workgroup> align(16) %shared_bytes : buffer
     %lists = buffer.view %shared[%origin] : buffer -> view<4x516xi32>
     %lengths = buffer.view %shared[%count_origin] : buffer -> view<4xi32>
-    %zero = scalar.constant 0 : i32
-    %one = scalar.constant 1 : i32
+    %c0_i32 = scalar.constant 0 : i32
+    %c1_i32 = scalar.constant 1 : i32
     %full_members = scalar.constant 15 : i32
     %record_shift = scalar.constant 16 : i32
     scf.for %query = [%c0 to %c4 step %c1] unroll {
@@ -271,8 +271,8 @@ kernel.def target(@qsa_cohort_wave32) @qsa_merge_cohorts() {
           } else {
             %id = index.cast %complete : index to i32
             %tail_shift = index.cast %tail : index to i32
-            %power = scalar.shli %one, %tail_shift : i32
-            %mask = scalar.subi %power, %one : i32
+            %power = scalar.shli %c1_i32, %tail_shift : i32
+            %mask = scalar.subi %power, %c1_i32 : i32
             scf.yield %id, %mask : i32, i32
           }
           %bits = scalar.shli %members, %record_shift : i32
@@ -295,7 +295,7 @@ kernel.def target(@qsa_cohort_wave32) @qsa_merge_cohorts() {
     %reference_length = index.assume %reference_value [range(%reference_value, 1, 513)] : index
     %key_mask = scalar.constant 65535 : i32
     %lo = scf.if %leader -> (i32) {
-      scf.yield %zero : i32
+      scf.yield %c0_i32 : i32
     } else {
       %product = index.mul %reference_length, %thread : index
       %quantile_value = index.div %product, %threads : index
@@ -349,15 +349,15 @@ kernel.def target(@qsa_cohort_wave32) @qsa_merge_cohorts() {
       %padded = index.mul %chunks, %c4 : index
       scf.for %slot_value = [%total to %padded step %c1] {
         %slot = index.assume %slot_value [range(%slot_value, 0, 2051)] : index
-        view.store %zero, %output[%slot] : i32, view<2052xi32>
+        view.store %c0_i32, %output[%slot] : i32, view<2052xi32>
       }
       %padded_word = index.cast %padded : index to i32
       view.store %padded_word, %header[3] : i32, view<4xi32>
     }
   } else {
     scf.if %leader {
-      %zero = scalar.constant 0 : i32
-      view.store %zero, %header[3] : i32, view<4xi32>
+      %c0_i32 = scalar.constant 0 : i32
+      view.store %c0_i32, %header[3] : i32, view<4xi32>
     }
   }
   kernel.return
