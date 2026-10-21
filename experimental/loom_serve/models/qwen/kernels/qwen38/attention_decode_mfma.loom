@@ -1,0 +1,23 @@
+template.decl @qwen38.attention.decode_split.matrix(%cache_capacity: index, %split_count: index, %token_count_data: index, %token_ordinal_data: index, %control_position_index_data: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer)
+
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen38.attention.decode_split_count : %value: index where [range(%value, 1, 64)]
+
+amdgpu.target<gfx9-4-generic> @qwen38_attention_decode_cdna_wave64 {subgroup_size = 64}
+
+kernel.def target(@qwen38_attention_decode_cdna_wave64) @qwen38_attention_decode_split_mfma_partial() {
+  %unit = index.constant 1 : index
+  %key_head_count = index.constant 4 : index
+  %split_count = config.get @qwen38.attention.decode_split_count : index
+  %workgroup_count = index.mul %key_head_count, %split_count : index
+  %waves = index.constant 4 : index
+  %width = target.subgroup.size : index
+  %workgroup_size = index.mul %waves, %width : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count_data: index, %token_ordinal_data: index, %control_position_index_data: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer) {
+  %cache_capacity = config.get @qwen38.attention.cache_capacity : index
+  %split_count = config.get @qwen38.attention.decode_split_count : index
+  template.apply<@qwen38.attention.decode_split.matrix>(%cache_capacity, %split_count, %token_count_data, %token_ordinal_data, %control_position_index_data, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}

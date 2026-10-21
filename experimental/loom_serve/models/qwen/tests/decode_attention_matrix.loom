@@ -1,0 +1,67 @@
+kernel.decl @qwen38_attention_decode() launch(%control: buffer, %query: buffer, %gate: buffer, %key: buffer, %value: buffer, %output: buffer)
+
+kernel.decl @qwen38_attention_prefill_reference(%tokens: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key: buffer, %value: buffer, %output: buffer)
+
+kernel.decl @qwen38_attention_decode_split_partial() launch(%control: buffer, %query: buffer, %key: buffer, %value: buffer, %partials: buffer)
+
+kernel.decl @qwen38_attention_decode_split_reduce() launch(%tokens: index, %ordinal: index, %gate: buffer, %partials: buffer, %output: buffer)
+
+kernel.decl @qwen38_attention_decode_split_mfma_partial() launch(%tokens: index, %ordinal: index, %position_index: index, %control: buffer, %query: buffer, %key: buffer, %value: buffer, %partials: buffer)
+
+check.case public @qwen38_attention_decode_split_mfma_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %token_count = check.literal value(1) : index
+  %token_ordinal = check.literal value(0) : index
+  %control_position_index = check.literal value(0) : index
+  %control = check.generate.fill value(9) : tensor<2xi32>
+  %query = check.generate.iota offset(-0.5) step(0.000244140625) period(4096) : tensor<6144xf32>
+  %gate = check.generate.iota offset(0.125) step(0.0001220703125) period(2048) : tensor<6144xf32>
+  %key_cache = check.generate.iota offset(-0.5) step(0.0001220703125) period(8192) : tensor<10240xf16>
+  %value_cache = check.generate.iota offset(0.25) step(-6.103515625e-05) period(8192) : tensor<10240xf16>
+  %partials = check.generate.fill value(0.0) : tensor<61920xf32>
+  %mfma_partials = check.generate.fill value(0.0) : tensor<61920xf32>
+  %expected = check.generate.fill value(0.0) : tensor<6144xf32>
+  %actual = check.generate.fill value(0.0) : tensor<6144xf32>
+  %mfma_actual = check.generate.fill value(0.0) : tensor<6144xf32>
+  kernel.launch @qwen38_attention_decode(%control, %query, %gate, %key_cache, %value_cache, %expected) : (tensor<2xi32>, tensor<6144xf32>, tensor<6144xf32>, tensor<10240xf16>, tensor<10240xf16>, tensor<6144xf32>)
+  kernel.launch @qwen38_attention_decode_split_partial(%control, %query, %key_cache, %value_cache, %partials) : (tensor<2xi32>, tensor<6144xf32>, tensor<10240xf16>, tensor<10240xf16>, tensor<61920xf32>)
+  kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal, %gate, %partials, %actual) : (index, index, tensor<6144xf32>, tensor<61920xf32>, tensor<6144xf32>)
+  kernel.launch @qwen38_attention_decode_split_mfma_partial(%token_count, %token_ordinal, %control_position_index, %control, %query, %key_cache, %value_cache, %mfma_partials) : (index, index, index, tensor<2xi32>, tensor<6144xf32>, tensor<10240xf16>, tensor<10240xf16>, tensor<61920xf32>)
+  kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal, %gate, %mfma_partials, %mfma_actual) : (index, index, tensor<6144xf32>, tensor<61920xf32>, tensor<6144xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(1.0000000000000001e-05) rtol(0.0001) nan(same) : tensor<6144xf32>
+  check.expect.close actual(%mfma_actual) expected(%expected) atol(0.002) rtol(0.002) nan(same) : tensor<6144xf32>
+  check.return
+}
+
+check.case public @qwen38_attention_decode_split_m4_mfma_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %token_count = check.literal value(4) : index
+  %token_ordinal0 = check.literal value(0) : index
+  %token_ordinal1 = check.literal value(1) : index
+  %token_ordinal2 = check.literal value(2) : index
+  %token_ordinal3 = check.literal value(3) : index
+  %control_position_index = check.literal value(1) : index
+  %control = check.generate.iota offset(4) step(5) : tensor<2xi32>
+  %query = check.generate.iota offset(-0.5) step(0.000244140625) period(4096) : tensor<4x6144xf32>
+  %gate = check.generate.iota offset(0.125) step(0.0001220703125) period(2048) : tensor<4x6144xf32>
+  %key_cache = check.generate.iota offset(-0.5) step(0.0001220703125) period(8192) : tensor<13312xf16>
+  %value_cache = check.generate.iota offset(0.25) step(-6.103515625e-05) period(8192) : tensor<13312xf16>
+  %partials = check.generate.fill value(0.0) : tensor<247680xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4x6144xf32>
+  %actual = check.generate.fill value(0.0) : tensor<4x6144xf32>
+  kernel.launch @qwen38_attention_prefill_reference[%token_count](%control, %query, %gate, %key_cache, %value_cache, %expected) : [index](tensor<2xi32>, tensor<4x6144xf32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<4x6144xf32>)
+  kernel.launch.concurrent {
+    kernel.launch @qwen38_attention_decode_split_mfma_partial(%token_count, %token_ordinal0, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, tensor<2xi32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<247680xf32>)
+    kernel.launch @qwen38_attention_decode_split_mfma_partial(%token_count, %token_ordinal1, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, tensor<2xi32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<247680xf32>)
+    kernel.launch @qwen38_attention_decode_split_mfma_partial(%token_count, %token_ordinal2, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, tensor<2xi32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<247680xf32>)
+    kernel.launch @qwen38_attention_decode_split_mfma_partial(%token_count, %token_ordinal3, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, tensor<2xi32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<247680xf32>)
+  }
+  kernel.launch.concurrent {
+    kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal0, %gate, %partials, %actual) : (index, index, tensor<4x6144xf32>, tensor<247680xf32>, tensor<4x6144xf32>)
+    kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal1, %gate, %partials, %actual) : (index, index, tensor<4x6144xf32>, tensor<247680xf32>, tensor<4x6144xf32>)
+    kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal2, %gate, %partials, %actual) : (index, index, tensor<4x6144xf32>, tensor<247680xf32>, tensor<4x6144xf32>)
+    kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal3, %gate, %partials, %actual) : (index, index, tensor<4x6144xf32>, tensor<247680xf32>, tensor<4x6144xf32>)
+  }
+  check.expect.close actual(%actual) expected(%expected) atol(0.002) rtol(0.002) nan(same) : tensor<4x6144xf32>
+  check.return
+}

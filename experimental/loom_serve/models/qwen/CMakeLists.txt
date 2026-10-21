@@ -2365,6 +2365,132 @@ endif()
 
 loom_test_module(
   NAME
+    decode_attention_matrix_test_module
+  SRCS
+    "kernels/qwen38/attention_common.loom"
+    "kernels/qwen38/attention_decode.loom"
+    "kernels/qwen38/attention_decode_mfma.loom"
+    "kernels/qwen38/attention_decode_split.loom"
+    "kernels/qwen38/attention_prefill.loom"
+    "tests/decode_attention_matrix.loom"
+  LIBRARIES
+    "iree::experimental::loom_serve::motifs::tensor::matrix_fragments"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    decode_attention_matrix_test_mfma_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::decode_attention_matrix_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.attention.cache_capacity=13"
+    "--config=qwen38.attention.decode_split_count=10"
+    "--case=@qwen38_attention_decode_split_mfma_differential_case"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    decode_attention_matrix_test_mfma_m4_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::decode_attention_matrix_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.attention.cache_capacity=13"
+    "--config=qwen38.attention.decode_split_count=10"
+    "--case=@qwen38_attention_decode_split_m4_mfma_differential_case"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    decode_attention_matrix_test_wmma_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::decode_attention_matrix_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.attention.cache_capacity=13"
+    "--config=qwen38.attention.decode_split_count=10"
+    "--case=@qwen38_attention_decode_split_differential_case"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    decode_attention_matrix_test_wmma_m4_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::decode_attention_matrix_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.attention.cache_capacity=13"
+    "--config=qwen38.attention.decode_split_count=10"
+    "--case=@qwen38_attention_decode_split_m4_differential_case"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
     attention_split_test_module
   SRCS
     "kernels/qwen38/attention_common.loom"

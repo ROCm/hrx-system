@@ -599,6 +599,31 @@ loom_test(
 )
 
 loom_test(
+    name = "decode_attention_matrix_test",
+    srcs = [
+        "kernels/qwen38/attention_common.loom",
+        "kernels/qwen38/attention_decode.loom",
+        "kernels/qwen38/attention_decode_mfma.loom",
+        "kernels/qwen38/attention_decode_split.loom",
+        "kernels/qwen38/attention_prefill.loom",
+        "tests/decode_attention_matrix.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "qwen38.attention.cache_capacity": "13",
+        "qwen38.attention.decode_split_count": "10",
+    },
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    variants = {
+        "mfma": {"case": "@qwen38_attention_decode_split_mfma_differential_case"},
+        "mfma_m4": {"case": "@qwen38_attention_decode_split_m4_mfma_differential_case"},
+        "wmma": {"case": "@qwen38_attention_decode_split_differential_case"},
+        "wmma_m4": {"case": "@qwen38_attention_decode_split_m4_differential_case"},
+    },
+    deps = ["//experimental/loom_serve/motifs/tensor:matrix_fragments"],
+)
+
+loom_test(
     name = "attention_split_test",
     srcs = [
         "kernels/qwen38/attention_common.loom",

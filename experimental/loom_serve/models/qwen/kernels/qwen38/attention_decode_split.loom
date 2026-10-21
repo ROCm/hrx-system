@@ -1,3 +1,9 @@
+template.decl @tensor.matrix.f16_16x16x16.operand_elements() -> (index)
+
+template.decl @tensor.matrix.f16_16x16.product_to_f16(%reduction_size: index, %left_columns: index, %left_layout: encoding<layout>, %left: buffer, %right_rows: index, %right_columns: index, %right: buffer, %right_origin: offset, %right_row: index, %right_column: index, %output_columns: index, %output: buffer, %output_column: index)
+
+template.decl @qwen38.attention.decode_split.matrix(%cache_capacity: index, %split_count: index, %token_count_data: index, %token_ordinal_data: index, %control_position_index_data: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer)
+
 // Qwen3.8-27B split-context grouped-query decode attention.
 //
 // Six query heads share each key/value head. The partial kernel keeps those
@@ -216,6 +222,12 @@ kernel.def target(@qwen38_attention_decode_split_gfx11_wave64) export("qwen38_at
 } launch(%token_count_data: index, %token_ordinal_data: index, %control_position_index_data: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer) {
   %cache_capacity = config.get @qwen38.attention.cache_capacity : index
   %split_count = config.get @qwen38.attention.decode_split_count : index
+  template.apply<@qwen38.attention.decode_split.matrix>(%cache_capacity, %split_count, %token_count_data, %token_ordinal_data, %control_position_index_data, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.def<@qwen38.attention.decode_split.matrix> device @qwen38_attention_decode_split_matrix(%cache_capacity: index, %split_count: index, %token_count_data: index, %token_ordinal_data: index, %control_position_index_data: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer) {
+  %operand_elements = template.apply<@tensor.matrix.f16_16x16x16.operand_elements>() : () -> (index)
   %workgroup0 = kernel.workgroup.id<x> : index
   %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 255)] : index
   %workitem = kernel.workitem.id<x> : index
@@ -367,9 +379,9 @@ kernel.def target(@qwen38_attention_decode_split_gfx11_wave64) export("qwen38_at
     %score_init_values = vector.constant 0.0 : vector<4xf32>
     %score_init = vector.fragment<init> %score_init_values shape [%m, %n] : vector<4xf32>
     %score_fragment = scf.for %head_tile = [%c0 to %c256 step %c16](%score_accumulator = %score_init : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
-      %key_fragment = vector.fragment.load<lhs> %key_value_stage_view[%subgroup_score_row, %head_tile] shape [%m, %k] : view<64x256xf16> -> vector<16xf16>
-      %query_fragment = vector.fragment.load<rhs> %query_transposed_view[%head_tile, %c0] shape [%k, %n] : view<256x16xf16, %query_transposed_layout> -> vector<16xf16>
-      %next_score_accumulator = vector.mma %key_fragment, %query_fragment, %score_accumulator : vector<16xf16>, vector<16xf16>, vector<4xf32>
+      %key_fragment = vector.fragment.load<lhs> %key_value_stage_view[%subgroup_score_row, %head_tile] shape [%m, %k] : view<64x256xf16> -> vector<[%operand_elements]xf16>
+      %query_fragment = vector.fragment.load<rhs> %query_transposed_view[%head_tile, %c0] shape [%k, %n] : view<256x16xf16, %query_transposed_layout> -> vector<[%operand_elements]xf16>
+      %next_score_accumulator = vector.mma %key_fragment, %query_fragment, %score_accumulator : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
       scf.yield %next_score_accumulator : vector<4xf32>
     }
     vector.fragment.store<result> %score_fragment, %score_stage_view[%subgroup_score_row, %c0] shape [%m, %n] : vector<4xf32>, view<64x24xf32>
@@ -445,14 +457,7 @@ kernel.def target(@qwen38_attention_decode_split_gfx11_wave64) export("qwen38_at
     %next_output0, %next_output1, %next_output2, %next_output3 = scf.for %output_tile = [%c0 to %c4 step %c1](%tile_output0 = %scaled_current_output0 : vector<4xf16>, %tile_output1 = %scaled_current_output1 : vector<4xf16>, %tile_output2 = %scaled_current_output2 : vector<4xf16>, %tile_output3 = %scaled_current_output3 : vector<4xf16>) -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) unroll {
       %output_tile_channel = index.mul %output_tile, %c64 : index
       %value_channel = index.add %output_tile_channel, %subgroup_product_channel : index
-      %product_init = vector.fragment<init> %c0_f16x8 shape [%m, %n] : vector<8xf16>
-      %product_fragment = scf.for %key_tile = [%c0 to %c64 step %c16](%product_accumulator = %product_init : vector<8xf16>) -> (vector<8xf16>) unroll schedule(recurrence) {
-        %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
-        %value_fragment = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %value_channel] shape [%k, %n] : view<64x256xf16> -> vector<16xf16>
-        %next_product_accumulator = vector.mma %probability_fragment, %value_fragment, %product_accumulator : vector<16xf16>, vector<16xf16>, vector<8xf16>
-        scf.yield %next_product_accumulator : vector<8xf16>
-      }
-      vector.fragment.store<result> %product_fragment, %product_stage_view[%c0, %subgroup_product_channel] shape [%m, %n] : vector<8xf16>, view<16x64xf16>
+      template.apply<@tensor.matrix.f16_16x16.product_to_f16>(%c64, %c64, %probability_transposed_layout, %probability_stage, %c64, %c256, %key_value_stage, %c0_offset, %c0, %value_channel, %c64, %product_stage, %subgroup_product_channel) : (index, index, encoding<layout>, buffer, index, index, buffer, offset, index, index, index, buffer, index)
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
       %owns_output_tile = index.cmp eq, %lane_output_tile, %output_tile : index
       %updated_output0, %updated_output1, %updated_output2, %updated_output3 = scf.if %owns_output_tile -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
@@ -518,7 +523,7 @@ kernel.def target(@qwen38_attention_decode_split_gfx11_wave64) export("qwen38_at
       view.store %sum3, %partial_view[%token_ordinal, %key_head, %split, %query_row3, %c257] : f32, view<[%token_count]x4x[%split_count]x6x258xf32>
     }
   }
-  kernel.return
+  template.return
 }
 
 // Combines split online-softmax states and applies the per-query sigmoid gate.
