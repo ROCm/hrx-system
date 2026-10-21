@@ -31,7 +31,7 @@ typedef struct iree_hal_amd_gpu_program_pool_t {
   iree_allocator_t host_allocator;
   // Persistent access requirements borrowed by both native policies.
   amdf_memory_device_access_t access;
-  // Cached host-visible upload and immutable builtin instruction placement.
+  // Cached host-visible initialization storage.
   iree_hal_amd_fabric_memory_options_t upload;
   // Device-local storage, including qualified shared DRAM on unified devices.
   iree_hal_amd_fabric_memory_options_t resident;

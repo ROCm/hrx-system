@@ -31,8 +31,9 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
       blit_offset + iree_align_uint64(blit_code.data_length, 256) + 256;
   iree_byte_span_t contents;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_code_allocate(
-      context, &out_pool->storage.resident, &out_pool->storage.upload, byte_length, 256,
-      host_allocator, &out_pool->code, &out_pool->code_upload, &contents));
+      context, &out_pool->storage.resident, &out_pool->storage.upload,
+      byte_length, 256, host_allocator, &out_pool->code, &out_pool->code_upload,
+      &contents));
   memset(contents.data, 0, byte_length);
   memcpy(contents.data, fixup_code.data, fixup_code.data_length);
   memcpy(contents.data + blit_offset, blit_code.data, blit_code.data_length);
@@ -60,8 +61,9 @@ void iree_hal_amd_gpu_pm4_program_pool_deinitialize(
     return;
   }
   iree_hal_amd_gpu_code_upload_free(pool->storage.context, pool->code_upload);
-  iree_hal_amd_fabric_memory_deinitialize(
-      pool->storage.context->api, pool->storage.context->event_sink, &pool->code);
+  iree_hal_amd_fabric_memory_deinitialize(pool->storage.context->api,
+                                          pool->storage.context->event_sink,
+                                          &pool->code);
   iree_hal_amd_gpu_program_pool_deinitialize(&pool->storage);
 }
 

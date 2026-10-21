@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstring>
 #include <semaphore>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -1315,7 +1316,11 @@ TEST_F(GpuNativeTest, NonfinalReleaseFromFailedDependencyCallback) {
 class GpuNativeMemoryProgressTest : public GpuNativeAllocationTest {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
+    IREE_ASSERT_OK(memory_gate_.CreateFabric(
+        &fabric_, UINT64_MAX,
+        command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+            ? AMDF_NATIVE_LIFETIME_PROCESS
+            : AMDF_NATIVE_LIFETIME_INSTANCE));
     GpuNativeAllocationTest::SetUp();
   }
 
@@ -1325,10 +1330,15 @@ class GpuNativeMemoryProgressTest : public GpuNativeAllocationTest {
 
 class GpuNativeRecordingProgressTest
     : public GpuNativeMemoryProgressTest,
-      public ::testing::WithParamInterface<bool> {
+      public ::testing::WithParamInterface<
+          std::pair<amdf_queue_command_type_t, bool>> {
  protected:
+  amdf_queue_command_type_t command_type() const override {
+    return GetParam().first;
+  }
+
   void SetUp() override {
-    if (GetParam()) {
+    if (GetParam().second) {
       memory_gate_.RequireCodeUpload();
     }
     GpuNativeMemoryProgressTest::SetUp();
@@ -1399,8 +1409,18 @@ TEST_P(GpuNativeRecordingProgressTest,
   Wait(semaphores_[2], two);
 }
 
-INSTANTIATE_TEST_SUITE_P(LocalPublication, GpuNativeRecordingProgressTest,
-                         ::testing::Bool());
+INSTANTIATE_TEST_SUITE_P(
+    LocalPublication, GpuNativeRecordingProgressTest,
+    ::testing::Values(std::pair{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, false},
+                      std::pair{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, true},
+                      std::pair{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, false},
+                      std::pair{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true}),
+    [](const auto& info) {
+      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                             ? "Aql"
+                             : "Pm4") +
+             (info.param.second ? "Staged" : "Mapped");
+    });
 
 TEST_F(GpuNativeMemoryProgressTest,
        HostCallbacksCompleteWhileAllocationIsHeld) {
