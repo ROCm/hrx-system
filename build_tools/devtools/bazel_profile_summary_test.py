@@ -68,6 +68,14 @@ class BazelProfileSummaryTest(unittest.TestCase):
                         "tid": 7,
                     },
                     {
+                        "cat": "remote action execution",
+                        "name": "fabric result wait",
+                        "ph": "X",
+                        "ts": 12_300_000,
+                        "dur": 500_000,
+                        "tid": 7,
+                    },
+                    {
                         "cat": "critical path component",
                         "name": "action 'Testing //example:slow_test'",
                         "ph": "X",
@@ -111,19 +119,22 @@ class BazelProfileSummaryTest(unittest.TestCase):
             self.assertEqual(summary.action_seconds, 29.5)
             self.assertEqual(summary.test_action_count, 1)
             self.assertEqual(summary.test_action_seconds, 12.5)
+            self.assertEqual(summary.test_execution_seconds, 10.25)
             self.assertEqual(summary.test_process_count, 1)
             self.assertEqual(summary.test_process_seconds, 10.25)
+            self.assertEqual(summary.test_remote_result_count, 0)
+            self.assertEqual(summary.test_action_fallback_count, 0)
+            self.assertEqual(summary.test_admission_count, 0)
             self.assertEqual(summary.slow_test_count, 1)
-            self.assertEqual(summary.slow_test_process_count, 1)
             self.assertEqual(summary.slow_test_action_count, 1)
             self.assertEqual(
                 summary.slow_tests[0],
                 bazel_profile_summary.TestTiming(
                     label="//example:slow_test",
                     action_seconds=12.5,
-                    process_seconds=10.25,
-                    overhead_seconds=2.25,
-                    process_event_count=1,
+                    execution_seconds=10.25,
+                    execution_source=bazel_profile_summary.EXECUTION_SOURCE_PROCESS,
+                    admission_seconds=None,
                     critical_path=True,
                 ),
             )
@@ -139,7 +150,8 @@ class BazelProfileSummaryTest(unittest.TestCase):
             self.assertEqual(len(summary.critical_path), 2)
 
             markdown = bazel_profile_summary.render_markdown(summary, "Test example")
-            self.assertIn("Aggregate test-process work | 10.250 s", markdown)
+            self.assertIn("Observed test execution | 10.250 s", markdown)
+            self.assertIn("Process observations | 1 / 10.250 s", markdown)
             self.assertIn("`//example:slow_test` **critical path**", markdown)
             self.assertIn("&lt;unnamed IreeGenerate action&gt;", markdown)
             console = bazel_profile_summary.render_console(summary, "Test example")
@@ -202,7 +214,89 @@ class BazelProfileSummaryTest(unittest.TestCase):
             ):
                 bazel_profile_summary.summarize(profile_path)
 
-    def test_retains_slow_action_when_process_timing_is_unavailable(self):
+    def test_uses_remote_result_instead_of_resource_admission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile_path = Path(directory) / "test-example.profile.gz"
+            self.write_profile(
+                profile_path,
+                [
+                    {
+                        "cat": "action processing",
+                        "name": "Testing //example:queued_test",
+                        "ph": "X",
+                        "ts": 1_000_000,
+                        "dur": 12_500_000,
+                        "tid": 1,
+                        "args": {"mnemonic": "TestRunner"},
+                    },
+                    {
+                        "cat": "remote action execution",
+                        "name": "fabric request and admission",
+                        "ph": "X",
+                        "ts": 1_100_000,
+                        "dur": 10_000_000,
+                        "tid": 1,
+                    },
+                    {
+                        "cat": "remote action execution",
+                        "name": "fabric result wait",
+                        "ph": "X",
+                        "ts": 11_200_000,
+                        "dur": 1_800_000,
+                        "tid": 1,
+                    },
+                    {
+                        "cat": "action processing",
+                        "name": "Generating queued data",
+                        "ph": "X",
+                        "ts": 14_000_000,
+                        "dur": 15_000_000,
+                        "tid": 2,
+                        "args": {"mnemonic": "IreeGenerate"},
+                    },
+                    {
+                        "cat": "remote action execution",
+                        "name": "fabric request and admission",
+                        "ph": "X",
+                        "ts": 14_100_000,
+                        "dur": 13_000_000,
+                        "tid": 2,
+                    },
+                    {
+                        "cat": "remote action execution",
+                        "name": "fabric result wait",
+                        "ph": "X",
+                        "ts": 27_200_000,
+                        "dur": 1_000_000,
+                        "tid": 2,
+                    },
+                ],
+            )
+
+            summary = bazel_profile_summary.summarize(profile_path)
+
+            self.assertEqual(summary.test_action_seconds, 12.5)
+            self.assertEqual(summary.test_execution_seconds, 1.8)
+            self.assertEqual(summary.test_process_count, 0)
+            self.assertEqual(summary.test_remote_result_count, 1)
+            self.assertEqual(summary.test_remote_result_seconds, 1.8)
+            self.assertEqual(summary.test_action_fallback_count, 0)
+            self.assertEqual(summary.test_admission_count, 1)
+            self.assertEqual(summary.test_admission_seconds, 10.0)
+            self.assertEqual(summary.slow_test_count, 0)
+            self.assertEqual(summary.slow_test_action_count, 1)
+            self.assertEqual(summary.slow_non_test_action_count, 0)
+            self.assertEqual(summary.slow_non_test_raw_action_count, 1)
+
+            markdown = bazel_profile_summary.render_markdown(summary, "Queued")
+            self.assertIn("Remote-result observations | 1 / 1.800 s", markdown)
+            self.assertIn("Test resource admission | 1 / 10.000 s", markdown)
+            self.assertIn("No observed test execution reached 10 s", markdown)
+            console = bazel_profile_summary.render_console(summary, "Queued")
+            self.assertIn("0 test execution suspect(s)", console)
+            self.assertIn("1 slow test action(s)", console)
+
+    def test_falls_back_to_action_when_execution_timing_is_unavailable(self):
         with tempfile.TemporaryDirectory() as directory:
             profile_path = Path(directory) / "test-example.profile.gz"
             self.write_profile(
@@ -224,12 +318,17 @@ class BazelProfileSummaryTest(unittest.TestCase):
 
             self.assertEqual(summary.test_process_count, 0)
             self.assertEqual(summary.test_process_seconds, 0.0)
-            self.assertEqual(summary.slow_test_process_count, 0)
+            self.assertEqual(summary.test_action_fallback_count, 1)
+            self.assertEqual(summary.test_action_fallback_seconds, 11.0)
             self.assertEqual(summary.slow_test_action_count, 1)
-            self.assertIsNone(summary.slow_tests[0].process_seconds)
-            self.assertIsNone(summary.slow_tests[0].overhead_seconds)
+            self.assertEqual(summary.slow_test_count, 1)
+            self.assertEqual(
+                summary.slow_tests[0].execution_source,
+                bazel_profile_summary.EXECUTION_SOURCE_ACTION_FALLBACK,
+            )
+            self.assertIsNone(summary.slow_tests[0].admission_seconds)
             self.assertIn(
-                "process timing unavailable",
+                "11.000s action fallback, 11.000s action",
                 bazel_profile_summary.render_console(summary, "Test example"),
             )
 

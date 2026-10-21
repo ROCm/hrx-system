@@ -15,10 +15,17 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "hrx.bazel-profile-summary.v1"
+SCHEMA = "hrx.bazel-profile-summary.v2"
 SLOW_DURATION_SECONDS = 10.0
 MAX_RECORDED_SUSPECTS = 50
 MAX_RENDERED_SUSPECTS = 20
+
+EXECUTION_SOURCE_PROCESS = "process"
+EXECUTION_SOURCE_REMOTE_RESULT = "remote_result"
+EXECUTION_SOURCE_ACTION_FALLBACK = "action_fallback"
+
+REMOTE_ADMISSION_EVENT_NAME = "fabric request and admission"
+REMOTE_RESULT_EVENT_NAME = "fabric result wait"
 
 
 class BazelProfileSummaryError(RuntimeError):
@@ -50,19 +57,37 @@ class ActionTiming:
 
 
 @dataclasses.dataclass(frozen=True)
+class ActionExecutionTiming:
+    """Observed execution cost for one non-test Bazel action."""
+
+    # Human-readable action description from the profile.
+    name: str
+    # Bazel action mnemonic.
+    mnemonic: str
+    # Full action duration, including scheduling and resource admission.
+    action_seconds: float
+    # Best directly observed execution duration for this action.
+    execution_seconds: float
+    # Event source selected for execution_seconds.
+    execution_source: str
+    # Explicit resource-admission duration, or None when not recorded.
+    admission_seconds: float | None
+
+
+@dataclasses.dataclass(frozen=True)
 class TestTiming:
     """Execution cost attributed to one Bazel TestRunner action."""
 
     # Bazel test label named by the TestRunner action.
     label: str
-    # Full TestRunner action duration, including setup and scheduling overhead.
+    # Full TestRunner action duration, including scheduling and resource admission.
     action_seconds: float
-    # Nested test-process duration, or None when the profile did not record it.
-    process_seconds: float | None
-    # Action time outside recorded test processes, or None without process timing.
-    overhead_seconds: float | None
-    # Number of nested process events contributing to process_seconds.
-    process_event_count: int
+    # Best directly observed execution duration for this test.
+    execution_seconds: float
+    # Event source selected for execution_seconds.
+    execution_source: str
+    # Explicit resource-admission duration, or None when not recorded.
+    admission_seconds: float | None
     # Whether this TestRunner action appears on Bazel's reported critical path.
     critical_path: bool
 
@@ -93,22 +118,36 @@ class BazelProfileSummary:
     test_action_count: int
     # Sum of TestRunner action durations.
     test_action_seconds: float
-    # Number of TestRunner actions with nested process timing.
+    # Sum of selected test execution observations.
+    test_execution_seconds: float
+    # Number of tests measured by nested process timing.
     test_process_count: int
-    # Sum of nested test-process durations.
+    # Sum of test execution measured by nested process timing.
     test_process_seconds: float
-    # Number of tests whose process or action duration meets the suspect threshold.
+    # Number of tests measured by remote result timing.
+    test_remote_result_count: int
+    # Sum of test execution measured by remote result timing.
+    test_remote_result_seconds: float
+    # Number of tests using full action duration because no execution event exists.
+    test_action_fallback_count: int
+    # Sum of full action durations used as execution fallbacks.
+    test_action_fallback_seconds: float
+    # Number of tests with explicit resource-admission timing.
+    test_admission_count: int
+    # Sum of explicit test resource-admission timing.
+    test_admission_seconds: float
+    # Number of tests whose selected execution duration meets the threshold.
     slow_test_count: int
-    # Number of tests whose nested process duration meets the suspect threshold.
-    slow_test_process_count: int
     # Number of tests whose full action duration meets the suspect threshold.
     slow_test_action_count: int
-    # Longest tests meeting either suspect threshold, capped for artifact size.
+    # Longest tests meeting the execution threshold, capped for artifact size.
     slow_tests: tuple[TestTiming, ...]
-    # Number of non-test actions meeting the suspect threshold.
+    # Number of non-test actions whose selected execution meets the threshold.
     slow_non_test_action_count: int
-    # Longest non-test actions meeting the suspect threshold, capped for artifact size.
-    slow_non_test_actions: tuple[ActionTiming, ...]
+    # Number of non-test actions whose full action duration meets the threshold.
+    slow_non_test_raw_action_count: int
+    # Longest non-test execution suspects, capped for artifact size.
+    slow_non_test_actions: tuple[ActionExecutionTiming, ...]
     # Bazel-reported critical-path components in dependency order.
     critical_path: tuple[ActionTiming, ...]
 
@@ -157,6 +196,73 @@ def _is_process_event(event: dict[str, Any]) -> bool:
     category = event.get("cat", "")
     return event.get("name") == "subprocess.run" or (
         isinstance(category, str) and "process wall time" in category.lower()
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class _ExecutionObservation:
+    execution_microseconds: float
+    execution_source: str
+    admission_microseconds: float | None
+
+
+def _execution_observation(
+    action_event: dict[str, Any],
+    execution_events_by_thread: dict[Any, list[dict[str, Any]]],
+) -> _ExecutionObservation:
+    """Selects execution evidence nested within one action profile event."""
+    start = _event_number(action_event, "ts")
+    duration = _event_number(action_event, "dur")
+    end = start + duration
+    nested_events = [
+        event
+        for event in execution_events_by_thread[action_event.get("tid")]
+        if _event_number(event, "ts") >= start
+        and _event_number(event, "ts") + _event_number(event, "dur") <= end
+    ]
+    process_events = [event for event in nested_events if _is_process_event(event)]
+    remote_result_events = [
+        event
+        for event in nested_events
+        if event.get("name") == REMOTE_RESULT_EVENT_NAME
+    ]
+    admission_events = [
+        event
+        for event in nested_events
+        if event.get("name") == REMOTE_ADMISSION_EVENT_NAME
+    ]
+
+    if process_events:
+        execution_events = process_events
+        execution_source = EXECUTION_SOURCE_PROCESS
+    elif remote_result_events:
+        execution_events = remote_result_events
+        execution_source = EXECUTION_SOURCE_REMOTE_RESULT
+    else:
+        execution_events = [action_event]
+        execution_source = EXECUTION_SOURCE_ACTION_FALLBACK
+    execution_microseconds = sum(
+        _event_number(event, "dur") for event in execution_events
+    )
+    if execution_microseconds > duration:
+        name = _event_name(action_event, "<unnamed action>")
+        raise BazelProfileSummaryError(
+            f"nested execution time exceeds action time: {name}"
+        )
+    admission_microseconds = (
+        sum(_event_number(event, "dur") for event in admission_events)
+        if admission_events
+        else None
+    )
+    if admission_microseconds is not None and admission_microseconds > duration:
+        name = _event_name(action_event, "<unnamed action>")
+        raise BazelProfileSummaryError(
+            f"nested admission time exceeds action time: {name}"
+        )
+    return _ExecutionObservation(
+        execution_microseconds=execution_microseconds,
+        execution_source=execution_source,
+        admission_microseconds=admission_microseconds,
     )
 
 
@@ -219,10 +325,15 @@ def summarize(profile_path: Path) -> BazelProfileSummary:
         for event in events
         if event.get("cat") == "action processing" and _is_complete_event(event)
     ]
-    process_events_by_thread: dict[Any, list[dict[str, Any]]] = defaultdict(list)
+    execution_events_by_thread: dict[Any, list[dict[str, Any]]] = defaultdict(list)
     for event in events:
-        if _is_complete_event(event) and _is_process_event(event):
-            process_events_by_thread[event.get("tid")].append(event)
+        if not _is_complete_event(event):
+            continue
+        if _is_process_event(event) or event.get("name") in (
+            REMOTE_ADMISSION_EVENT_NAME,
+            REMOTE_RESULT_EVENT_NAME,
+        ):
+            execution_events_by_thread[event.get("tid")].append(event)
 
     aggregate_counts: dict[str, int] = defaultdict(int)
     aggregate_durations: dict[str, float] = defaultdict(float)
@@ -238,47 +349,33 @@ def summarize(profile_path: Path) -> BazelProfileSummary:
         aggregate_counts[mnemonic] += 1
         aggregate_durations[mnemonic] += duration_microseconds
         action_seconds += duration_microseconds
+        observation = _execution_observation(event, execution_events_by_thread)
+        admission_seconds = (
+            _seconds(observation.admission_microseconds)
+            if observation.admission_microseconds is not None
+            else None
+        )
         if mnemonic != "TestRunner":
             non_test_actions.append(
-                ActionTiming(
+                ActionExecutionTiming(
                     name=name,
-                    duration_seconds=duration_seconds,
                     mnemonic=mnemonic,
+                    action_seconds=duration_seconds,
+                    execution_seconds=_seconds(observation.execution_microseconds),
+                    execution_source=observation.execution_source,
+                    admission_seconds=admission_seconds,
                 )
             )
             continue
 
-        start = _event_number(event, "ts")
-        end = start + duration_microseconds
-        nested_process_events = [
-            nested
-            for nested in process_events_by_thread[event.get("tid")]
-            if _event_number(nested, "ts") >= start
-            and _event_number(nested, "ts") + _event_number(nested, "dur") <= end
-        ]
-        process_microseconds = sum(
-            _event_number(nested, "dur") for nested in nested_process_events
-        )
-        if process_microseconds > duration_microseconds:
-            raise BazelProfileSummaryError(
-                f"nested process time exceeds TestRunner action time: {name}"
-            )
-        process_seconds = (
-            _seconds(process_microseconds) if nested_process_events else None
-        )
-        overhead_seconds = (
-            _seconds(duration_microseconds - process_microseconds)
-            if nested_process_events
-            else None
-        )
         display = name.removeprefix("Testing ")
         test_timings.append(
             TestTiming(
                 label=display,
                 action_seconds=duration_seconds,
-                process_seconds=process_seconds,
-                overhead_seconds=overhead_seconds,
-                process_event_count=len(nested_process_events),
+                execution_seconds=_seconds(observation.execution_microseconds),
+                execution_source=observation.execution_source,
+                admission_seconds=admission_seconds,
                 critical_path=name in critical_action_names,
             )
         )
@@ -297,25 +394,16 @@ def summarize(profile_path: Path) -> BazelProfileSummary:
     slow_tests = [
         timing
         for timing in test_timings
-        if timing.action_seconds >= SLOW_DURATION_SECONDS
-        or (
-            timing.process_seconds is not None
-            and timing.process_seconds >= SLOW_DURATION_SECONDS
-        )
+        if timing.execution_seconds >= SLOW_DURATION_SECONDS
     ]
-    slow_tests.sort(
-        key=lambda timing: (
-            -max(timing.action_seconds, timing.process_seconds or 0.0),
-            timing.label,
-        )
-    )
+    slow_tests.sort(key=lambda timing: (-timing.execution_seconds, timing.label))
     slow_non_test_actions = [
         timing
         for timing in non_test_actions
-        if timing.duration_seconds >= SLOW_DURATION_SECONDS
+        if timing.execution_seconds >= SLOW_DURATION_SECONDS
     ]
     slow_non_test_actions.sort(
-        key=lambda timing: (-timing.duration_seconds, timing.name)
+        key=lambda timing: (-timing.execution_seconds, timing.name)
     )
 
     critical_path = []
@@ -350,7 +438,22 @@ def summarize(profile_path: Path) -> BazelProfileSummary:
             )
 
     process_timings = [
-        timing for timing in test_timings if timing.process_seconds is not None
+        timing
+        for timing in test_timings
+        if timing.execution_source == EXECUTION_SOURCE_PROCESS
+    ]
+    remote_result_timings = [
+        timing
+        for timing in test_timings
+        if timing.execution_source == EXECUTION_SOURCE_REMOTE_RESULT
+    ]
+    action_fallback_timings = [
+        timing
+        for timing in test_timings
+        if timing.execution_source == EXECUTION_SOURCE_ACTION_FALLBACK
+    ]
+    admission_timings = [
+        timing for timing in test_timings if timing.admission_seconds is not None
     ]
     return BazelProfileSummary(
         schema=SCHEMA,
@@ -368,21 +471,36 @@ def summarize(profile_path: Path) -> BazelProfileSummary:
         test_action_seconds=round(
             sum(timing.action_seconds for timing in test_timings), 6
         ),
+        test_execution_seconds=round(
+            sum(timing.execution_seconds for timing in test_timings), 6
+        ),
         test_process_count=len(process_timings),
         test_process_seconds=round(
-            sum(timing.process_seconds or 0.0 for timing in process_timings), 6
+            sum(timing.execution_seconds for timing in process_timings), 6
+        ),
+        test_remote_result_count=len(remote_result_timings),
+        test_remote_result_seconds=round(
+            sum(timing.execution_seconds for timing in remote_result_timings), 6
+        ),
+        test_action_fallback_count=len(action_fallback_timings),
+        test_action_fallback_seconds=round(
+            sum(timing.execution_seconds for timing in action_fallback_timings), 6
+        ),
+        test_admission_count=len(admission_timings),
+        test_admission_seconds=round(
+            sum(timing.admission_seconds or 0.0 for timing in admission_timings),
+            6,
         ),
         slow_test_count=len(slow_tests),
-        slow_test_process_count=sum(
-            timing.process_seconds is not None
-            and timing.process_seconds >= SLOW_DURATION_SECONDS
-            for timing in test_timings
-        ),
         slow_test_action_count=sum(
             timing.action_seconds >= SLOW_DURATION_SECONDS for timing in test_timings
         ),
         slow_tests=tuple(slow_tests[:MAX_RECORDED_SUSPECTS]),
         slow_non_test_action_count=len(slow_non_test_actions),
+        slow_non_test_raw_action_count=sum(
+            timing.action_seconds >= SLOW_DURATION_SECONDS
+            for timing in non_test_actions
+        ),
         slow_non_test_actions=tuple(slow_non_test_actions[:MAX_RECORDED_SUSPECTS]),
         critical_path=tuple(timing for _, timing in critical_path),
     )
@@ -419,6 +537,14 @@ def _seconds_cell(value: float | None) -> str:
     return "—" if value is None else f"{value:.3f} s"
 
 
+def _execution_source_text(source: str) -> str:
+    return {
+        EXECUTION_SOURCE_PROCESS: "process",
+        EXECUTION_SOURCE_REMOTE_RESULT: "remote result",
+        EXECUTION_SOURCE_ACTION_FALLBACK: "action fallback",
+    }[source]
+
+
 def render_markdown(summary: BazelProfileSummary, title: str) -> str:
     """Renders one concise GitHub job-summary section."""
     lines = [
@@ -429,13 +555,24 @@ def render_markdown(summary: BazelProfileSummary, title: str) -> str:
         f"| Phase span | {summary.elapsed_seconds:.3f} s |",
         f"| Actions | {summary.action_count:,} |",
         f"| TestRunner actions | {summary.test_action_count:,} |",
-        f"| Aggregate test-process work | {summary.test_process_seconds:.3f} s |",
-        f"| Test processes at or above {SLOW_DURATION_SECONDS:g} s | "
-        f"{summary.slow_test_process_count:,} |",
+        f"| Aggregate test-action span | {summary.test_action_seconds:.3f} s |",
+        f"| Observed test execution | {summary.test_execution_seconds:.3f} s |",
+        f"| Process observations | {summary.test_process_count:,} / "
+        f"{summary.test_process_seconds:.3f} s |",
+        f"| Remote-result observations | {summary.test_remote_result_count:,} / "
+        f"{summary.test_remote_result_seconds:.3f} s |",
+        f"| Action fallbacks | {summary.test_action_fallback_count:,} / "
+        f"{summary.test_action_fallback_seconds:.3f} s |",
+        f"| Test resource admission | {summary.test_admission_count:,} / "
+        f"{summary.test_admission_seconds:.3f} s |",
+        f"| Test executions at or above {SLOW_DURATION_SECONDS:g} s | "
+        f"{summary.slow_test_count:,} |",
         f"| Test actions at or above {SLOW_DURATION_SECONDS:g} s | "
         f"{summary.slow_test_action_count:,} |",
-        f"| Non-test actions at or above {SLOW_DURATION_SECONDS:g} s | "
+        f"| Non-test executions at or above {SLOW_DURATION_SECONDS:g} s | "
         f"{summary.slow_non_test_action_count:,} |",
+        f"| Non-test actions at or above {SLOW_DURATION_SECONDS:g} s | "
+        f"{summary.slow_non_test_raw_action_count:,} |",
         "",
     ]
     if summary.slow_tests:
@@ -443,20 +580,23 @@ def render_markdown(summary: BazelProfileSummary, title: str) -> str:
             [
                 f"#### Test suspects (at or above {SLOW_DURATION_SECONDS:g} s)",
                 "",
-                "| Process | Action | Target |",
-                "| ---: | ---: | --- |",
+                "| Execution | Source | Admission | Action | Target |",
+                "| ---: | --- | ---: | ---: | --- |",
             ]
         )
         for timing in summary.slow_tests[:MAX_RENDERED_SUSPECTS]:
             critical = " **critical path**" if timing.critical_path else ""
             lines.append(
-                f"| {_seconds_cell(timing.process_seconds)} | "
+                f"| {_seconds_cell(timing.execution_seconds)} | "
+                f"{_execution_source_text(timing.execution_source)} | "
+                f"{_seconds_cell(timing.admission_seconds)} | "
                 f"{_seconds_cell(timing.action_seconds)} | "
                 f"`{_markdown_text(timing.label)}`{critical} |"
             )
         if summary.slow_test_count > MAX_RENDERED_SUSPECTS:
             lines.append(
-                f"|  |  | {summary.slow_test_count - MAX_RENDERED_SUSPECTS:,} "
+                f"|  |  |  |  | "
+                f"{summary.slow_test_count - MAX_RENDERED_SUSPECTS:,} "
                 f"additional suspects; JSON retains the longest "
                 f"{len(summary.slow_tests):,} and the total count |"
             )
@@ -464,7 +604,7 @@ def render_markdown(summary: BazelProfileSummary, title: str) -> str:
     else:
         lines.extend(
             [
-                f"No test process or action reached {SLOW_DURATION_SECONDS:g} s.",
+                f"No observed test execution reached {SLOW_DURATION_SECONDS:g} s.",
                 "",
             ]
         )
@@ -472,21 +612,26 @@ def render_markdown(summary: BazelProfileSummary, title: str) -> str:
     if summary.slow_non_test_actions:
         lines.extend(
             [
-                f"#### Non-test action suspects (at or above {SLOW_DURATION_SECONDS:g} s)",
+                "#### Non-test action suspects "
+                f"(at or above {SLOW_DURATION_SECONDS:g} s)",
                 "",
-                "| Duration | Mnemonic | Action |",
-                "| ---: | --- | --- |",
+                "| Execution | Source | Admission | Action | Mnemonic | Description |",
+                "| ---: | --- | ---: | ---: | --- | --- |",
             ]
         )
         for timing in summary.slow_non_test_actions[:MAX_RENDERED_SUSPECTS]:
             lines.append(
-                f"| {_seconds_cell(timing.duration_seconds)} | "
-                f"`{_markdown_text(timing.mnemonic or '<unknown>')}` | "
+                f"| {_seconds_cell(timing.execution_seconds)} | "
+                f"{_execution_source_text(timing.execution_source)} | "
+                f"{_seconds_cell(timing.admission_seconds)} | "
+                f"{_seconds_cell(timing.action_seconds)} | "
+                f"`{_markdown_text(timing.mnemonic)}` | "
                 f"{_markdown_text(timing.name)} |"
             )
         if summary.slow_non_test_action_count > MAX_RENDERED_SUSPECTS:
             lines.append(
-                f"|  |  | {summary.slow_non_test_action_count - MAX_RENDERED_SUSPECTS:,} "
+                f"|  |  |  |  |  | "
+                f"{summary.slow_non_test_action_count - MAX_RENDERED_SUSPECTS:,} "
                 f"additional suspects; JSON retains the longest "
                 f"{len(summary.slow_non_test_actions):,} and the total count |"
             )
@@ -518,22 +663,32 @@ def render_console(summary: BazelProfileSummary, title: str) -> str:
     lines = [
         f"[profile] {title}: {summary.elapsed_seconds:.3f}s phase, "
         f"{summary.test_action_count} test actions, "
-        f"{summary.test_process_seconds:.3f}s process work, "
-        f"{summary.slow_test_count} test suspect(s), "
-        f"{summary.slow_non_test_action_count} non-test action suspect(s)"
+        f"{summary.test_execution_seconds:.3f}s observed execution, "
+        f"{summary.test_admission_seconds:.3f}s admission, "
+        f"{summary.slow_test_count} test execution suspect(s), "
+        f"{summary.slow_test_action_count} slow test action(s), "
+        f"{summary.slow_non_test_action_count} non-test execution suspect(s)"
     ]
     for timing in summary.slow_tests[:MAX_RENDERED_SUSPECTS]:
-        process = (
-            f"{timing.process_seconds:.3f}s process"
-            if timing.process_seconds is not None
-            else "process timing unavailable"
+        source = _execution_source_text(timing.execution_source)
+        admission = (
+            f", {timing.admission_seconds:.3f}s admission"
+            if timing.admission_seconds is not None
+            else ""
         )
         lines.append(
-            f"  [test] {process}, {timing.action_seconds:.3f}s action {timing.label}"
+            f"  [test] {timing.execution_seconds:.3f}s {source}{admission}, "
+            f"{timing.action_seconds:.3f}s action {timing.label}"
         )
     for timing in summary.slow_non_test_actions[:MAX_RENDERED_SUSPECTS]:
+        source = _execution_source_text(timing.execution_source)
+        admission = (
+            f", {timing.admission_seconds:.3f}s admission"
+            if timing.admission_seconds is not None
+            else ""
+        )
         lines.append(
-            f"  [action] {timing.duration_seconds:.3f}s "
-            f"{timing.mnemonic or '<unknown>'} {timing.name}"
+            f"  [action] {timing.execution_seconds:.3f}s {source}{admission}, "
+            f"{timing.action_seconds:.3f}s action {timing.mnemonic} {timing.name}"
         )
     return "\n".join(lines)
