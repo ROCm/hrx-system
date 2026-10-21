@@ -18,7 +18,7 @@ mechanisms on a particular platform.
 
 | Area | Contents |
 | --- | --- |
-| [GPU](gpu/README.md) | Command processors, transfer engines, and their memory and signaling protocols. |
+| [GPU](gpu/README.md) | Command processors, transfer and media engines, and their memory and signaling protocols. |
 | [XDNA](xdna/README.md) | AI Engine array execution, DMA, interconnects, firmware commands, and observation. |
 | [CPU, GPU and NPU interop](interop/README.md) | Every directed memory handoff, external API sharing, resident credits, composed pipelines and final reuse. |
 | [Sources](sources.md) | Architecture specifications, immutable implementation revisions, and the role of each source. |
@@ -58,6 +58,7 @@ provide exact search terms within the tree.
 | Retain repeatedly used GPU data in cache | [Temporal hints, persisting-size requests, native admission and HIP access windows](gpu/cache-residency.md). |
 | Consume inbound RDMA writes | [Host visibility, `hipDeviceFlushGPUDirectRDMAWrites`, HDP mapping and independent GPU acquisition](interop/rdma.md). |
 | Copy or fill memory and wait for completion | [SDMA packet index](gpu/sdma/README.md), [PM4 `DMA_DATA`](gpu/pm4/dma.md), [SDMA upload → AQL dispatch → SDMA download](gpu/recipes/README.md#sdma-upload-aql-dispatch-and-sdma-download). |
+| Decode images/video into model input or encode generated frames | [Media engines and compute handoff](gpu/media.md), [JPEG packets](gpu/media/jpeg.md), [video decode](gpu/media/video-decode.md), [video encode](gpu/media/video-encode.md), and [Windows media](gpu/media/windows.md). |
 | Reuse host input after an upload | [Source consumption, `hipMemcpySrcAccessOrder`, staging lifetime and destination completion](gpu/recipes/host-device.md#source-consumption-and-copy-completion). |
 | Replace or reuse commands and executable storage | [PM4 indirect buffers](gpu/pm4/command-buffers.md), [AQL command carriers](gpu/aql/transfers.md), [AQL executable lifetime](gpu/aql/dispatch.md#executable-publication-and-final-use), [SDMA command buffers](gpu/sdma/command-buffers.md). |
 | Configure an NPU transfer or split/join flow | [Tile DMA descriptors and task tokens](xdna/dma.md), [stream switches and multicast](xdna/interconnects.md), [pipeline ownership](interop/pipelines.md). |

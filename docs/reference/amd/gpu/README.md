@@ -1,6 +1,6 @@
 # GPU programming
 
-AMD GPUs expose command-processing and transfer engines with distinct packet
+AMD GPUs expose command-processing, transfer, and media engines with distinct packet
 representations, execution boundaries, and cache responsibilities. A command
 stream combines these mechanisms with the native queue's publication and
 resource-lifetime protocol.
@@ -22,6 +22,7 @@ resource-lifetime protocol.
 | [PM4](pm4/README.md) | Compute dispatch, memory commands, cache control, and command-buffer execution. |
 | [AQL](aql/README.md) | Packet publication, dispatch, dependencies, vendor command carriers, and profiling. |
 | [SDMA](sdma/README.md) | Transfer-engine operations and signaling protocols. |
+| [Media engines](media.md) | [JPEG `PACKETJ`](media/jpeg.md), [VCN decode](media/video-decode.md), [VCN encode](media/video-encode.md), and [Windows video](media/windows.md); shared surfaces, reference lifetimes, dependencies, and memory/traffic accounting. |
 | [Programming recipes](recipes/README.md) | Host/device, cross-engine, and local-memory producer/consumer flows. |
 | [CPU, GPU and NPU interop](../interop/README.md) | External sharing, directed device handoffs, resident pipelines and storage reuse. |
 | [Timing and counters](observability.md) | Shader cycles (`SHADER_CYCLES`, `S_MEMTIME`), fixed-frequency `REALTIME`, timestamp conversion, counter ownership, and profiling interference. |
