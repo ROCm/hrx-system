@@ -16,10 +16,10 @@ extern "C" {
 #endif  // __cplusplus
 
 // Creates a recorder whose end operation seals device-resident native blocks.
-// The command buffer retains its device; the device-owned program pool provides
-// placement and trim; native sealing allocations run on the caller. UNRETAINED
-// controls only the caller's direct buffers/executables, not native program
-// ownership.
+// Its independently retainable program holds the device for the recording; the
+// device-owned program pool provides placement and trim; native sealing
+// allocations run on the caller. UNRETAINED controls only the caller's direct
+// buffers/executables, not native program ownership.
 iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     const iree_hal_queue_family_t* family,
     iree_hal_amd_gpu_pm4_program_pool_t* pool,
@@ -30,9 +30,17 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     iree_allocator_t host_allocator, iree_hal_command_buffer_t** out_buffer);
 
-// Cold recording facts read directly by publication; no command walk or
-// operation-dependent callback survives sealing.
+// Separately retained cold recording facts read directly by publication. The
+// public recording owns user resources; this object contains sealed execution
+// facts but no caller resource set, and may outlive the final invocation during
+// cold growth.
 typedef struct iree_hal_amd_gpu_pm4_command_program_t {
+  // Internal owners spanning native growth independently of the recording.
+  iree_atomic_ref_count_t ref_count;
+  // Device retaining the program pool through final native growth completion.
+  iree_hal_device_t* device;
+  // Allocator owning this separately retained program record.
+  iree_allocator_t host_allocator;
   // Owned native instances and shared immutable fixup table.
   iree_hal_amd_gpu_pm4_program_t resident;
   // Entry block; native successors and exits are encoded in resident commands.
@@ -51,6 +59,14 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   // sink.
   iree_hal_amd_gpu_profile_commands_t* profile;
 } iree_hal_amd_gpu_pm4_command_program_t;
+
+// Retains/releases sealed native program state independently of the recording
+// and its user resources. The recording owns one reference; cold native growth
+// may hold another after every invocation has retired.
+void iree_hal_amd_gpu_pm4_command_program_retain(
+    iree_hal_amd_gpu_pm4_command_program_t* program);
+void iree_hal_amd_gpu_pm4_command_program_release(
+    iree_hal_amd_gpu_pm4_command_program_t* program);
 
 iree_host_size_t iree_hal_amd_gpu_pm4_command_buffer_operation_count(
     iree_hal_command_buffer_t* command_buffer);
@@ -71,7 +87,7 @@ typedef struct iree_hal_amd_gpu_pm4_command_binding_t {
 typedef struct iree_hal_amd_gpu_pm4_command_invocation_t {
   // Retained recording dominating its native program and direct resources.
   iree_hal_command_buffer_t* command_buffer;
-  // Borrowed sealed facts inside command_buffer.
+  // Borrowed sealed facts retained by command_buffer.
   iree_hal_amd_gpu_pm4_command_program_t* program;
   // Captured table in submission-owned storage.
   iree_hal_amd_gpu_pm4_command_binding_t* bindings;

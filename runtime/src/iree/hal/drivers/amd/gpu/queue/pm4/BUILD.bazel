@@ -401,6 +401,7 @@ iree_runtime_cc_library(
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":backing",
+        ":command_buffer",
         ":program",
         ":scratch",
         ":submission",

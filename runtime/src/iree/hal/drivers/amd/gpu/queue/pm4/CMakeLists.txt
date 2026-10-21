@@ -710,6 +710,7 @@ iree_cc_library(
     "growth.c"
   DEPS
     ::backing
+    ::command_buffer
     ::program
     ::scratch
     ::submission

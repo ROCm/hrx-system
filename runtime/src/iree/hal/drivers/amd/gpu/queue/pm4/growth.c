@@ -6,6 +6,8 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/pm4/growth.h"
 
+#include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
+
 struct iree_hal_amd_gpu_pm4_growth_t {
   // Native completion and an enrolled program reuse hint own separate borrows.
   iree_atomic_ref_count_t ref_count;
@@ -17,8 +19,8 @@ struct iree_hal_amd_gpu_pm4_growth_t {
   iree_hal_amd_gpu_pm4_entry_t reuse_entry;
   // One while reuse_entry is linked or awaiting consumption.
   iree_atomic_int32_t reuse_pending;
-  // Owned independently of the waiting cohort through final clone/hint release.
-  iree_hal_command_buffer_t* command_buffer;
+  // Resident state owned through final native clone/hint release.
+  iree_hal_amd_gpu_pm4_command_program_t* command_program;
   // Borrowed exact publication owner, live through the native callback join.
   iree_hal_amd_gpu_pm4_growth_context_t* context;
   // Complete reusable capture extent, independent of the waiting cohort size.
@@ -54,7 +56,7 @@ static void iree_hal_amd_gpu_pm4_growth_join(
     iree_hal_amd_gpu_pm4_growth_t* growth) {
   if (iree_atomic_ref_count_dec(&growth->ref_count) == 1) {
     iree_hal_amd_gpu_pm4_growth_context_t* context = growth->context;
-    iree_hal_command_buffer_release(growth->command_buffer);
+    iree_hal_amd_gpu_pm4_command_program_release(growth->command_program);
     iree_hal_amd_gpu_capture_pool_release(
         context->captures,
         iree_make_byte_span(growth, growth->allocation_size));
@@ -186,8 +188,8 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_begin(
       .fn = iree_hal_amd_gpu_pm4_growth_completed, .user_data = growth};
   iree_status_t status = iree_ok_status();
   if (program) {
-    growth->command_buffer = submission->execute.command_buffer;
-    iree_hal_command_buffer_retain(growth->command_buffer);
+    growth->command_program = submission->execute.program;
+    iree_hal_amd_gpu_pm4_command_program_retain(growth->command_program);
     status = iree_hal_amd_gpu_pm4_program_grow_begin(
         program, context->queue_ordinal, completion, &growth->program);
   } else {

@@ -434,6 +434,13 @@ class ProgramGrowthTest : public GrowthTest {
     bool destroyed = false;
   };
 
+  struct ObservedBuffer {
+    // HAL identity retained by the recording's direct-resource set.
+    iree_hal_buffer_t base;
+    // Set when the recording releases its final resource reference.
+    bool destroyed = false;
+  };
+
   void SetUp() override {
     GrowthTest::SetUp();
     if (HasFatalFailure()) {
@@ -492,14 +499,59 @@ class ProgramGrowthTest : public GrowthTest {
     iree_hal_amd_gpu_context_join_memory(&context_);
     JoinPublication();
     iree_hal_command_buffer_release(command_buffer_);
+    if (observed_buffer_caller_owned_) {
+      iree_hal_buffer_release(&observed_buffer_.base);
+    }
+    iree_hal_memory_contract_release(observed_buffer_contract_);
     iree_hal_amd_gpu_pm4_program_pool_deinitialize(&programs_);
     iree_hal_device_release(reinterpret_cast<iree_hal_device_t*>(&device_));
     EXPECT_TRUE(device_.destroyed);
     GrowthTest::TearDown();
   }
 
+  void RecordObservedResource() {
+    const uint16_t types[] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS};
+    const iree_hal_buffer_binding_layout_t binding_layout = {
+        sizeof(iree_hal_buffer_native_binding_t), 1, 0, types};
+    IREE_ASSERT_OK(iree_hal_memory_contract_create(this, 2, &binding_layout,
+                                                   iree_allocator_system(),
+                                                   &observed_buffer_contract_));
+    for (uint32_t scope = 0; scope < 2; ++scope) {
+      observed_buffer_contract_->scopes[scope].interfaces =
+          UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+      observed_buffer_contract_->scopes[scope]
+          .bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
+      observed_buffer_contract_->scopes[scope].usage =
+          IREE_HAL_BUFFER_USAGE_TRANSFER;
+    }
+    family_.memory.domain = this;
+    family_.memory.queue_scope_id = 0;
+    static const iree_hal_buffer_vtable_t vtable = {
+        .destroy =
+            [](iree_hal_buffer_t* buffer) {
+              reinterpret_cast<ObservedBuffer*>(buffer)->destroyed = true;
+            },
+    };
+    iree_hal_buffer_initialize(
+        {}, &observed_buffer_.base, 4, 0, 4, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+        IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_TRANSFER, &vtable,
+        &observed_buffer_.base);
+    observed_buffer_.base.memory = {
+        .contract = observed_buffer_contract_,
+        .bindings = &observed_buffer_binding_,
+    };
+    observed_buffer_caller_owned_ = true;
+    const uint32_t pattern = 0;
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+        command_buffer_, iree_hal_make_buffer_ref(&observed_buffer_.base, 0, 4),
+        &pattern, sizeof(pattern), 0));
+    iree_hal_buffer_release(&observed_buffer_.base);
+    observed_buffer_caller_owned_ = false;
+  }
+
   void ReuseDuringClone(bool fail_growth, bool before_handoff,
-                        bool race_completion = false) {
+                        bool race_completion = false,
+                        bool observe_recorded_resource = false) {
     const uint32_t completed = completed_ + 1;
     iree_hal_amd_gpu_pm4_barrier_profile_t profile;
     IREE_ASSERT_OK(
@@ -508,6 +560,9 @@ class ProgramGrowthTest : public GrowthTest {
         &family_, &programs_, 0, IREE_HAL_COMMAND_CATEGORY_ANY, 0, 0, 0,
         &profile, iree_allocator_system(), &command_buffer_));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer_));
+    if (observe_recorded_resource) {
+      ASSERT_NO_FATAL_FAILURE(RecordObservedResource());
+    }
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer_));
     iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_execute(
@@ -568,6 +623,9 @@ class ProgramGrowthTest : public GrowthTest {
       EXPECT_EQ(
           iree_atomic_load(&growth_.pending_count, iree_memory_order_acquire),
           1);
+      if (observe_recorded_resource) {
+        EXPECT_TRUE(observed_buffer_.destroyed);
+      }
       // The capture is gone, but the actual recorded program remains retained
       // while the clone allocation has not returned. A late failure is harmless
       // to that already-completed invocation.
@@ -597,6 +655,16 @@ class ProgramGrowthTest : public GrowthTest {
   iree_hal_amd_gpu_pm4_program_pool_t programs_ = {};
   // Caller-owned recording reference, released while native growth is held.
   iree_hal_command_buffer_t* command_buffer_ = nullptr;
+  // Contract borrowed by the observed direct resource until recording release.
+  iree_hal_memory_contract_t* observed_buffer_contract_ = nullptr;
+  // Prepared program-site address retained only by the recording.
+  iree_hal_buffer_native_binding_t observed_buffer_binding_ = {
+      .device_address = 0x100000,
+  };
+  // Direct resource whose destruction establishes recording retirement.
+  ObservedBuffer observed_buffer_ = {};
+  // Whether fixture cleanup still owns the observed buffer's initial reference.
+  bool observed_buffer_caller_owned_ = false;
 };
 
 TEST_F(ProgramGrowthTest, RecordedOwnerSurvivesEarlyReuseAndNativeSuccess) {
@@ -613,6 +681,10 @@ TEST_F(ProgramGrowthTest, ReturnDuringPublicationHandoffKeepsReuseReady) {
 
 TEST_F(ProgramGrowthTest, ReturnDuringHandoffSurvivesLaterNativeFailure) {
   ReuseDuringClone(true, true);
+}
+
+TEST_F(ProgramGrowthTest, RecordedResourcesRetireBeforeUnusedCloneCompletes) {
+  ReuseDuringClone(false, false, false, true);
 }
 
 TEST_F(ProgramGrowthTest,

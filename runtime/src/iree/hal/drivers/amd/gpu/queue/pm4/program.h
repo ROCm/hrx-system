@@ -119,10 +119,11 @@ typedef struct iree_hal_amd_gpu_pm4_program_queue_t {
   uint64_t observed_epoch;
 } iree_hal_amd_gpu_pm4_program_queue_t;
 
-// Resident program storage embedded in its owning HAL command buffer. The
-// owner retains the device and all native operands; leases retain that owner.
-// Metadata selection/release is hot. Native backing acquisition and release
-// run outside the metadata mutex; last invocation release never calls a driver.
+// Resident program storage embedded in an independently retained sealed
+// command program. That owner retains the device while recordings separately
+// own their caller resources. Metadata selection/release is hot. Native backing
+// acquisition and release run outside the metadata mutex; last invocation
+// release never calls a driver.
 struct iree_hal_amd_gpu_pm4_program_t {
   // Borrowed device-owned placement and builtin programs.
   iree_hal_amd_gpu_pm4_program_pool_t* pool;
