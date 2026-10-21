@@ -1,0 +1,112 @@
+aie2p.target<array> @array_target
+
+// The compute strand owns each output record for the full inner reduction. It
+// initializes the record once, returns input credit after every panel, and
+// publishes only the completed value. Three frames and depth-two rings exercise
+// both input and output wrap without coupling progress between the three roles.
+pipeline.def<kernel> public retain target(@array_target) @source_owned_accumulation() run(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 64} : buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %ring_bytes = index.constant 128 : offset
+  %capacity = index.constant 2 : index
+  %input_storage = buffer.alloca<workgroup> pool(%memory) align(64) %ring_bytes : buffer
+  %input_slots = buffer.view %input_storage[%origin] : buffer -> view<2x16xf32>
+  %input_records = channel.bind<fifo> %input_slots, %capacity : view<2x16xf32>, index -> channel<tile<16xf32>>
+  %output_storage = buffer.alloca<workgroup> pool(%memory) align(64) %ring_bytes : buffer
+  %output_slots = buffer.view %output_storage[%origin] : buffer -> view<2x16xf32>
+  %output_records = channel.bind<fifo> %output_slots, %capacity : view<2x16xf32>, index -> channel<tile<16xf32>>
+  %begin = index.constant 0 : index
+  %frame_count = index.constant 3 : index
+  %panel_count = index.constant 3 : index
+  %input_record_count = index.constant 9 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 64 : index
+
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %input_record_count step %step] {
+      %byte_index = index.mul %record, %record_bytes : index
+      %byte_offset = index.cast %byte_index : index to offset
+      %external = buffer.view %input[%byte_offset] : buffer -> view<16xf32>
+      %write, %destination = channel.reserve %input_records : channel<tile<16xf32>> -> (write<tile<16xf32>>, view<16xf32>)
+      %copy = kernel.async.copy %external to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xf32> to view<16xf32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xf32>>
+    }
+  }
+
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    scf.for %frame = [%begin to %frame_count step %step] {
+      %read, %source = channel.acquire %output_records : channel<tile<16xf32>> -> (read<tile<16xf32>>, view<16xf32>)
+      %byte_index = index.mul %frame, %record_bytes : index
+      %byte_offset = index.cast %byte_index : index to offset
+      %external = buffer.view %output[%byte_offset] : buffer -> view<16xf32>
+      %copy = kernel.async.copy %source to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xf32> to view<16xf32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<16xf32>>
+    }
+  }
+
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %initial = vector.constant 0.0 : vector<16xf32>
+    scf.for %frame = [%begin to %frame_count step %step] {
+      %write, %accumulator = channel.reserve %output_records : channel<tile<16xf32>> -> (write<tile<16xf32>>, view<16xf32>)
+      vector.store %initial, %accumulator[0] : vector<16xf32>, view<16xf32>
+      scf.for %panel = [%begin to %panel_count step %step] {
+        %read, %input_panel = channel.acquire %input_records : channel<tile<16xf32>> -> (read<tile<16xf32>>, view<16xf32>)
+        %values = vector.load %input_panel[0] : view<16xf32> -> vector<16xf32>
+        %prior = vector.load %accumulator[0] : view<16xf32> -> vector<16xf32>
+        %next = vector.addf %prior, %values : vector<16xf32>
+        vector.store %next, %accumulator[0] : vector<16xf32>, view<16xf32>
+        channel.release %read : read<tile<16xf32>>
+      }
+      channel.publish %write : write<tile<16xf32>>
+    }
+  }
+}
+
+func.def @source_owned_accumulation_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<144xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<48xf32>
+  %begin = index.constant 0 : index
+  %frame_count = index.constant 3 : index
+  %panel_count = index.constant 3 : index
+  %step = index.constant 1 : index
+  %width = index.constant 16 : index
+  %initial = vector.constant 0.0 : vector<16xf32>
+  scf.for %frame = [%begin to %frame_count step %step] {
+    %frame_base = index.mul %frame, %panel_count : index
+    %sum = scf.for %panel = [%begin to %panel_count step %step](%accumulator = %initial : vector<16xf32>) -> (vector<16xf32>) {
+      %record = index.add %frame_base, %panel : index
+      %input_index = index.mul %record, %width : index
+      %values = vector.load %input_view[%input_index] : view<144xf32> -> vector<16xf32>
+      %next = vector.addf %accumulator, %values : vector<16xf32>
+      scf.yield %next : vector<16xf32>
+    }
+    %output_index = index.mul %frame, %width : index
+    vector.store %sum, %output_view[%output_index] : vector<16xf32>, view<48xf32>
+  }
+  func.return
+}
+
+check.scenario public @source_owned_accumulation_replay {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-256.0 to 256.0) : tensor<176xf32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<176xf32> -> tensor<144xf32>
+    %output_storage = check.generate.fill value(-8192.0) : tensor<80xf32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<80xf32> -> tensor<48xf32>
+    %output_prefix = check.tensor.view %output_storage offset(0) : tensor<80xf32> -> tensor<16xf32>
+    %output_suffix = check.tensor.view %output_storage offset(256) : tensor<80xf32> -> tensor<16xf32>
+    check.compare<@source_owned_accumulation, @source_owned_accumulation_reference>(%input, %output) : (tensor<144xf32>, tensor<48xf32>) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<176xf32>
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<48xf32>
+      check.expect.bitwise actual(%output_prefix) expected(%output_prefix) : tensor<16xf32>
+      check.expect.bitwise actual(%output_suffix) expected(%output_suffix) : tensor<16xf32>
+    }
+  }
+  check.return
+}

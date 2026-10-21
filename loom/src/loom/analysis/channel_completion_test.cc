@@ -445,6 +445,31 @@ TEST_F(ChannelCompletionTest, CyclicWriterDoesNotMakeReaderUnbounded) {
   ExpectActions({{0, 1}, {0, UINT32_MAX}, {1, UINT32_MAX}, {1, 1}});
 }
 
+TEST_F(ChannelCompletionTest, HeldWriterSurvivesRepeatedReaderAdmissions) {
+  loom_value_id_t accumulator;
+  const auto write = Reserve(first_, &accumulator);
+  auto* body = Block();
+  auto* finish = Block();
+  Branch(body);
+  At(body);
+  const auto current_accumulator = Project(accumulator);
+  loom_value_id_t input;
+  const auto read = Acquire(second_, &input);
+  const auto current_input = Project(input);
+  Release(read);
+  Choose(body, finish);
+  At(finish);
+  const auto final_accumulator = Project(accumulator);
+  Publish(write);
+  Return();
+  ExpectActions({{0, 1}, {0, UINT32_MAX}, {1, UINT32_MAX}, {1, 1}});
+  ExpectPayloadRecord(accumulator, write, 1);
+  ExpectPayloadRecord(current_accumulator, write, 1);
+  ExpectPayloadRecord(final_accumulator, write, 1);
+  ExpectPayloadRecord(input, read, UINT32_MAX);
+  ExpectPayloadRecord(current_input, read, UINT32_MAX);
+}
+
 TEST_F(ChannelCompletionTest, DeferredPrefixPreservesTotalAdmissions) {
   const auto earlier = Reserve(first_);
   const auto later = Reserve(first_);
