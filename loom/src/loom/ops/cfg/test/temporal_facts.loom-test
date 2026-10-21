@@ -1,7 +1,8 @@
 // RUN: pass canonicalize
 
-// Reads and allocation identities may be observed at different loop exits.
-// An observation before the cycle and pure invariant expressions stay uniform.
+// Reads may be observed at different loop exits; private allocation identity
+// varies by lane even with uniform control. Pre-cycle reads and pure invariant
+// expressions retain their distribution.
 target.generic<reference> @device {abi = hal_kernel, subgroup_size = 64}
 
 kernel.def target(@device) @temporal_lane() {
@@ -103,8 +104,9 @@ kernel.def target(@device) @temporal_lane() {
 
 // RUN: pass canonicalize
 
-// Reads and allocation identities may be observed at different loop exits.
-// An observation before the cycle and pure invariant expressions stay uniform.
+// Reads may be observed at different loop exits; private allocation identity
+// varies by lane even with uniform control. Pre-cycle reads and pure invariant
+// expressions retain their distribution.
 target.generic<reference> @device {abi = hal_kernel, subgroup_size = 64}
 
 kernel.def target(@device) @temporal_unknown() {
@@ -189,7 +191,7 @@ kernel.def target(@device) @temporal_unknown() {
   %allocation_subgroup_uniform = scalar.constant false : i1
   %allocation_workgroup_uniform = scalar.constant false : i1
   %allocation_cluster_uniform = scalar.constant false : i1
-  %allocation_lane_varying = scalar.constant false : i1
+  %allocation_lane_varying = scalar.constant true : i1
   %observed_subgroup_uniform = scalar.constant false : i1
   %observed_workgroup_uniform = scalar.constant false : i1
   %observed_cluster_uniform = scalar.constant false : i1
@@ -206,8 +208,9 @@ kernel.def target(@device) @temporal_unknown() {
 
 // RUN: pass canonicalize
 
-// Reads and allocation identities may be observed at different loop exits.
-// An observation before the cycle and pure invariant expressions stay uniform.
+// Reads may be observed at different loop exits; private allocation identity
+// varies by lane even with uniform control. Pre-cycle reads and pure invariant
+// expressions retain their distribution.
 target.generic<reference> @device {abi = hal_kernel, subgroup_size = 64}
 
 kernel.def target(@device) @temporal_subgroup() {
@@ -289,10 +292,10 @@ kernel.def target(@device) @temporal_subgroup() {
   %read_workgroup_uniform = scalar.constant false : i1
   %read_cluster_uniform = scalar.constant false : i1
   %read_lane_varying = scalar.constant false : i1
-  %allocation_subgroup_uniform = scalar.constant true : i1
+  %allocation_subgroup_uniform = scalar.constant false : i1
   %allocation_workgroup_uniform = scalar.constant false : i1
   %allocation_cluster_uniform = scalar.constant false : i1
-  %allocation_lane_varying = scalar.constant false : i1
+  %allocation_lane_varying = scalar.constant true : i1
   %observed_subgroup_uniform = scalar.constant true : i1
   %observed_workgroup_uniform = scalar.constant false : i1
   %observed_cluster_uniform = scalar.constant false : i1
@@ -309,8 +312,9 @@ kernel.def target(@device) @temporal_subgroup() {
 
 // RUN: pass canonicalize
 
-// Reads and allocation identities may be observed at different loop exits.
-// An observation before the cycle and pure invariant expressions stay uniform.
+// Reads may be observed at different loop exits; private allocation identity
+// varies by lane even with uniform control. Pre-cycle reads and pure invariant
+// expressions retain their distribution.
 target.generic<reference> @device {abi = hal_kernel, subgroup_size = 64}
 
 kernel.def target(@device) @temporal_workgroup() {
@@ -392,10 +396,10 @@ kernel.def target(@device) @temporal_workgroup() {
   %read_workgroup_uniform = scalar.constant true : i1
   %read_cluster_uniform = scalar.constant false : i1
   %read_lane_varying = scalar.constant false : i1
-  %allocation_subgroup_uniform = scalar.constant true : i1
-  %allocation_workgroup_uniform = scalar.constant true : i1
+  %allocation_subgroup_uniform = scalar.constant false : i1
+  %allocation_workgroup_uniform = scalar.constant false : i1
   %allocation_cluster_uniform = scalar.constant false : i1
-  %allocation_lane_varying = scalar.constant false : i1
+  %allocation_lane_varying = scalar.constant true : i1
   %observed_subgroup_uniform = scalar.constant true : i1
   %observed_workgroup_uniform = scalar.constant false : i1
   %observed_cluster_uniform = scalar.constant false : i1
@@ -412,8 +416,9 @@ kernel.def target(@device) @temporal_workgroup() {
 
 // RUN: pass canonicalize
 
-// Reads and allocation identities may be observed at different loop exits.
-// An observation before the cycle and pure invariant expressions stay uniform.
+// Reads may be observed at different loop exits; private allocation identity
+// varies by lane even with uniform control. Pre-cycle reads and pure invariant
+// expressions retain their distribution.
 target.generic<reference> @device {abi = hal_kernel, subgroup_size = 64}
 
 kernel.def target(@device) @temporal_cluster() {
@@ -495,10 +500,10 @@ kernel.def target(@device) @temporal_cluster() {
   %read_workgroup_uniform = scalar.constant true : i1
   %read_cluster_uniform = scalar.constant true : i1
   %read_lane_varying = scalar.constant false : i1
-  %allocation_subgroup_uniform = scalar.constant true : i1
-  %allocation_workgroup_uniform = scalar.constant true : i1
-  %allocation_cluster_uniform = scalar.constant true : i1
-  %allocation_lane_varying = scalar.constant false : i1
+  %allocation_subgroup_uniform = scalar.constant false : i1
+  %allocation_workgroup_uniform = scalar.constant false : i1
+  %allocation_cluster_uniform = scalar.constant false : i1
+  %allocation_lane_varying = scalar.constant true : i1
   %observed_subgroup_uniform = scalar.constant true : i1
   %observed_workgroup_uniform = scalar.constant false : i1
   %observed_cluster_uniform = scalar.constant false : i1

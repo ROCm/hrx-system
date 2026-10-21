@@ -786,3 +786,85 @@ func.def public target(@carrier_target) @structured_view_identity(%input_root: b
   }
   func.return %input_root, %input_offset : buffer, offset
 }
+
+// ====
+// RUN: pass specialize-target-callgraph,project-loop-boundary-representations
+
+// A uniform offset into private storage still observes each lane's own value.
+// The predicate derived from that observation needs a per-lane loop carrier.
+test.target<low_core> @carrier_target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@carrier_target) @private_observation_predicate() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  %bytes = index.constant 16 : offset
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %disabled = scalar.constant false : i1
+  %threshold = scalar.constant 0 : i32
+  %lane = kernel.workitem.id<x> : index
+  %lane_word = index.cast %lane : index to i32
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  buffer.fill %lane_word, %storage[%base], %bytes : i32
+  %view = buffer.view %storage[%base] : buffer -> view<4xi32>
+  %terminal, %last = scf.while(%i = %c0 : index, %flag = %disabled : i1) -> (index, i1) {
+    %continue = index.cmp ult, %i, %c4 : index
+    scf.condition %continue, %i, %flag : i1, index, i1
+  } do(%body_i: index, %body_flag: i1) {
+    %loaded = view.load %view[%body_i] : view<4xi32> -> i32
+    %predicate = scalar.cmpi ne, %loaded, %threshold : i32
+    %next = index.add %body_i, %c1 : index
+    scf.yield %next, %predicate : index, i1
+  }
+  test.use %terminal, %last : index, i1
+  kernel.return
+}
+
+// ----
+test.target<low_core> @carrier_target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@carrier_target) @private_observation_predicate() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  %bytes = index.constant 16 : offset
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %disabled = scalar.constant false : i1
+  %threshold = scalar.constant 0 : i32
+  %lane = kernel.workitem.id<x> : index
+  %lane_word = index.cast %lane : index to i32
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  buffer.fill %lane_word, %storage[%base], %bytes : i32
+  %view = buffer.view %storage[%base] : buffer -> view<4xi32>
+  %23 = scalar.constant 1 : i32
+  %24 = scalar.constant 0 : i32
+  %25 = scf.select %disabled, %23, %24 : i32
+  %terminal, %last_word = scf.while(%i = %c0 : index, %flag_word = %25 : i32) -> (index, i32) {
+    %32 = scalar.constant 0 : i32
+    %flag = scalar.cmpi ne, %flag_word, %32 : i32
+    %continue = index.cmp ult, %i, %c4 : index
+    scf.condition %continue, %i, %flag_word : i1, index, i32
+  } do(%body_i: index, %body_flag_word: i32) {
+    %34 = scalar.constant 0 : i32
+    %body_flag = scalar.cmpi ne, %body_flag_word, %34 : i32
+    %loaded = view.load %view[%body_i] : view<4xi32> -> i32
+    %predicate = scalar.cmpi ne, %loaded, %threshold : i32
+    %next = index.add %body_i, %c1 : index
+    %38 = scalar.constant 1 : i32
+    %39 = scalar.constant 0 : i32
+    %40 = scf.select %predicate, %38, %39 : i32
+    scf.yield %next, %40 : index, i32
+  }
+  %36 = scalar.constant 0 : i32
+  %last = scalar.cmpi ne, %last_word, %36 : i32
+  test.use %terminal, %last : index, i1
+  kernel.return
+}

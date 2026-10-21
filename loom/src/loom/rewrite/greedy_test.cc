@@ -1045,6 +1045,8 @@ class TemporalFactsRewriteTest : public GreedyRewriteTest,
                                  public ::testing::WithParamInterface<bool> {};
 
 TEST_P(TemporalFactsRewriteTest, TracksSelectorsAndMovedObservers) {
+  // Shared storage has uniform identity only within its workgroup. Divergent
+  // cycle observations can lose that proof even when the byte count is fixed.
   const bool has_carried_argument = GetParam();
   const loom_type_t i1 = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
   const loom_type_t offset = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
@@ -1081,7 +1083,7 @@ TEST_P(TemporalFactsRewriteTest, TracksSelectorsAndMovedObservers) {
   loom_builder_set_block(&builder_, header);
   loom_op_t* allocation = nullptr;
   IREE_ASSERT_OK(loom_buffer_alloca_build(
-      &builder_, /*build_flags=*/0, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+      &builder_, /*build_flags=*/0, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
       LOOM_VALUE_ID_INVALID, 16, length_id, buffer, LOOM_LOCATION_UNKNOWN,
       &allocation));
   const loom_value_id_t allocation_id = loom_buffer_alloca_result(allocation);
@@ -1098,7 +1100,7 @@ TEST_P(TemporalFactsRewriteTest, TracksSelectorsAndMovedObservers) {
       &builder_, nested_owner, loom_test_block_args_body(nested_owner));
   loom_op_t* nested_allocation = nullptr;
   IREE_ASSERT_OK(loom_buffer_alloca_build(
-      &builder_, /*build_flags=*/0, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+      &builder_, /*build_flags=*/0, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
       LOOM_VALUE_ID_INVALID, 16, length_id, buffer, LOOM_LOCATION_UNKNOWN,
       &nested_allocation));
   const loom_value_id_t nested_id =
@@ -1146,7 +1148,7 @@ TEST_P(TemporalFactsRewriteTest, TracksSelectorsAndMovedObservers) {
           fresh, loom_value_fact_table_lookup(fresh, compared)))
           << "value " << compared;
     }
-    EXPECT_EQ(loom_value_facts_is_cluster_uniform(
+    EXPECT_EQ(loom_value_facts_is_workgroup_uniform(
                   loom_value_fact_table_lookup(facts, value)),
               expected_uniform);
     loom_pass_value_fact_owner_deinitialize(&fresh_owner);
@@ -1208,11 +1210,11 @@ TEST_P(TemporalFactsRewriteTest, TracksSelectorsAndMovedObservers) {
   loom_op_t* created_allocation = nullptr;
   IREE_ASSERT_OK(loom_buffer_alloca_build(
       &rewriter.builder, /*build_flags=*/0,
-      LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_VALUE_ID_INVALID, 16,
+      LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP, LOOM_VALUE_ID_INVALID, 16,
       length_id, buffer, LOOM_LOCATION_UNKNOWN, &created_allocation));
   const loom_value_id_t created_id =
       loom_buffer_alloca_result(created_allocation);
-  EXPECT_TRUE(loom_value_facts_is_cluster_uniform(
+  EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(
       loom_value_fact_table_lookup(facts, created_id)));
   IREE_ASSERT_OK(loom_test_use_build(&rewriter.builder, &created_id, 1,
                                      LOOM_LOCATION_UNKNOWN, &use));

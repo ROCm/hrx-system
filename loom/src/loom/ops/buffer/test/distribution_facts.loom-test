@@ -1,0 +1,192 @@
+// RUN: pass canonicalize
+
+kernel.def @private_allocation_distribution() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  %bytes = index.constant 4 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<1xi32>
+  %lane = kernel.workitem.id<x> : index
+  %lane_word = index.cast %lane : index to i32
+  view.store %lane_word, %view[0] : i32, view<1xi32>
+  %loaded = view.load %view[0] : view<1xi32> -> i32
+  %root_uniform = test.fact_cluster_uniform %storage : buffer -> i1
+  %root_varying = test.fact_lane_varying %storage : buffer -> i1
+  %view_varying = test.fact_lane_varying %view : view<1xi32> -> i1
+  %load_uniform = test.fact_subgroup_uniform %loaded : i32 -> i1
+  %load_varying = test.fact_lane_varying %loaded : i32 -> i1
+  test.use %root_uniform, %root_varying, %view_varying, %load_uniform, %load_varying : i1, i1, i1, i1, i1
+  kernel.return
+}
+
+
+// ----
+kernel.def @private_allocation_distribution() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  %bytes = index.constant 4 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<1xi32>
+  %lane = kernel.workitem.id<x> : index
+  %lane_word = index.cast %lane : index to i32
+  view.store %lane_word, %view[0] : i32, view<1xi32>
+  %root_uniform = scalar.constant false : i1
+  %root_varying = scalar.constant true : i1
+  %view_varying = scalar.constant true : i1
+  %load_uniform = scalar.constant false : i1
+  %load_varying = scalar.constant true : i1
+  test.use %root_uniform, %root_varying, %view_varying, %load_uniform, %load_varying : i1, i1, i1, i1, i1
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize
+
+func.def @allocation_scopes(%pool: pool, %bytes: offset) {
+  %private = buffer.alloca<private> pool(%pool) align(16) %bytes : buffer
+  %private_cluster = test.fact_cluster_uniform %private : buffer -> i1
+  %private_workgroup = test.fact_workgroup_uniform %private : buffer -> i1
+  %private_varying = test.fact_lane_varying %private : buffer -> i1
+  test.use %private_cluster, %private_workgroup, %private_varying : i1, i1, i1
+  %workgroup = buffer.alloca<workgroup> pool(%pool) align(16) %bytes : buffer
+  %workgroup_cluster = test.fact_cluster_uniform %workgroup : buffer -> i1
+  %workgroup_workgroup = test.fact_workgroup_uniform %workgroup : buffer -> i1
+  %workgroup_varying = test.fact_lane_varying %workgroup : buffer -> i1
+  test.use %workgroup_cluster, %workgroup_workgroup, %workgroup_varying : i1, i1, i1
+  %global = buffer.alloca<global> pool(%pool) align(16) %bytes : buffer
+  %global_cluster = test.fact_cluster_uniform %global : buffer -> i1
+  %global_workgroup = test.fact_workgroup_uniform %global : buffer -> i1
+  %global_varying = test.fact_lane_varying %global : buffer -> i1
+  test.use %global_cluster, %global_workgroup, %global_varying : i1, i1, i1
+  %host = buffer.alloca<host> pool(%pool) align(16) %bytes : buffer
+  %host_cluster = test.fact_cluster_uniform %host : buffer -> i1
+  %host_workgroup = test.fact_workgroup_uniform %host : buffer -> i1
+  %host_varying = test.fact_lane_varying %host : buffer -> i1
+  test.use %host_cluster, %host_workgroup, %host_varying : i1, i1, i1
+  %generic = buffer.alloca<generic> pool(%pool) align(16) %bytes : buffer
+  %generic_cluster = test.fact_cluster_uniform %generic : buffer -> i1
+  %generic_workgroup = test.fact_workgroup_uniform %generic : buffer -> i1
+  %generic_varying = test.fact_lane_varying %generic : buffer -> i1
+  test.use %generic_cluster, %generic_workgroup, %generic_varying : i1, i1, i1
+  func.return
+}
+
+// ----
+func.def @allocation_scopes(%pool: pool, %bytes: offset) {
+  %private_cluster = scalar.constant false : i1
+  %private_workgroup = scalar.constant false : i1
+  %private_varying = scalar.constant true : i1
+  test.use %private_cluster, %private_workgroup, %private_varying : i1, i1, i1
+  %workgroup_cluster = scalar.constant false : i1
+  %workgroup_workgroup = scalar.constant true : i1
+  %workgroup_varying = scalar.constant false : i1
+  test.use %workgroup_cluster, %workgroup_workgroup, %workgroup_varying : i1, i1, i1
+  %global_cluster = scalar.constant false : i1
+  %global_workgroup = scalar.constant false : i1
+  %global_varying = scalar.constant true : i1
+  test.use %global_cluster, %global_workgroup, %global_varying : i1, i1, i1
+  %host_cluster = scalar.constant false : i1
+  %host_workgroup = scalar.constant false : i1
+  %host_varying = scalar.constant true : i1
+  test.use %host_cluster, %host_workgroup, %host_varying : i1, i1, i1
+  %generic_cluster = scalar.constant false : i1
+  %generic_workgroup = scalar.constant false : i1
+  %generic_varying = scalar.constant true : i1
+  test.use %generic_cluster, %generic_workgroup, %generic_varying : i1, i1, i1
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Size is independent of the storage identity.
+kernel.def @private_dynamic_size() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%byte_count: offset) {
+  %storage = buffer.alloca<private> align(4) %byte_count : buffer
+  %length = buffer.length %storage
+  %length_uniform = test.fact_cluster_uniform %length : offset -> i1
+  %length_varying = test.fact_lane_varying %length : offset -> i1
+  test.use %length_uniform, %length_varying : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @private_dynamic_size() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%byte_count: offset) {
+  %length_uniform = scalar.constant true : i1
+  %length_varying = scalar.constant false : i1
+  test.use %length_uniform, %length_varying : i1, i1
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Shared storage is uniform within its workgroup, not across workgroups.
+kernel.def @workgroup_storage_distribution() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  %groups = index.constant 2 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  %bytes = index.constant 4 : offset
+  %base = index.constant 0 : offset
+  %leader_lane = index.constant 0 : index
+  %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<1xi32>
+  %lane = kernel.workitem.id<x> : index
+  %group = kernel.workgroup.id<x> : index
+  %group_word = index.cast %group : index to i32
+  %leader = index.cmp eq, %lane, %leader_lane : index
+  scf.if %leader {
+    view.store %group_word, %view[0] : i32, view<1xi32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %view[0] : view<1xi32> -> i32
+  %view_cluster = test.fact_cluster_uniform %view : view<1xi32> -> i1
+  %view_workgroup = test.fact_workgroup_uniform %view : view<1xi32> -> i1
+  %load_cluster = test.fact_cluster_uniform %loaded : i32 -> i1
+  %load_workgroup = test.fact_workgroup_uniform %loaded : i32 -> i1
+  test.use %view_cluster, %view_workgroup, %load_cluster, %load_workgroup : i1, i1, i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @workgroup_storage_distribution() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  %groups = index.constant 2 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  %bytes = index.constant 4 : offset
+  %base = index.constant 0 : offset
+  %leader_lane = index.constant 0 : index
+  %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<1xi32>
+  %lane = kernel.workitem.id<x> : index
+  %group = kernel.workgroup.id<x> : index
+  %group_word = index.cast %group : index to i32
+  %leader = index.cmp eq, %lane, %leader_lane : index
+  scf.if %leader {
+    view.store %group_word, %view[0] : i32, view<1xi32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %view_cluster = scalar.constant false : i1
+  %view_workgroup = scalar.constant true : i1
+  %load_cluster = scalar.constant false : i1
+  %load_workgroup = scalar.constant true : i1
+  test.use %view_cluster, %view_workgroup, %load_cluster, %load_workgroup : i1, i1, i1, i1
+  kernel.return
+}

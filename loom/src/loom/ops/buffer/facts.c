@@ -27,7 +27,10 @@ static loom_value_facts_t loom_buffer_clamp_nonnegative(
   int64_t lower_bound = facts.range_lo < 0 ? 0 : facts.range_lo;
   int64_t upper_bound = facts.range_hi < 0 ? 0 : facts.range_hi;
   int64_t divisor = facts.known_divisor > 0 ? facts.known_divisor : 1;
-  return loom_value_facts_make(lower_bound, upper_bound, divisor);
+  loom_value_facts_t result =
+      loom_value_facts_make(lower_bound, upper_bound, divisor);
+  loom_value_facts_propagate_unary_distribution(facts, &result);
+  return result;
 }
 
 static loom_value_fact_buffer_reference_t loom_buffer_default_reference(
@@ -141,8 +144,16 @@ iree_status_t loom_buffer_alloca_facts(loom_fact_context_t* context,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
       .origin = origin,
   };
-  return loom_value_facts_make_buffer_reference(context, reference,
-                                                &result_facts[0]);
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_buffer_reference(
+      context, reference, &result_facts[0]));
+  // Allocation identity follows its sharing scope, independently of the
+  // requested size or backing pool. Equal sizes do not identify equal storage.
+  if (reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
+    loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  } else {
+    loom_value_facts_mark_lane_varying(&result_facts[0]);
+  }
+  return iree_ok_status();
 }
 
 static bool loom_buffer_pack_align_exact(int64_t value, int64_t alignment,
