@@ -757,6 +757,42 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_test(
   NAME
+    buffer_test
+  DEPS
+    ::backends
+    iree::hal::cts::buffer::all_tests
+    iree::hal::cts::util::test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    command_buffer_test
+  DEPS
+    ::backends
+    iree::hal::cts::command_buffer::all_tests
+    iree::hal::cts::util::test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
     file_test
   DEPS
     ::backends
@@ -807,10 +843,29 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_test(
   NAME
-    host_call_test
+    queue_test
   DEPS
     ::backends
-    iree::hal::cts::queue::queue_host_call_test
+    iree::hal::cts::queue::all_tests
+    iree::hal::cts::util::test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    semaphore_test
+  DEPS
+    ::backends
+    iree::hal::cts::core::semaphore_test
+    iree::hal::cts::core::semaphore_thread_test
     iree::hal::cts::util::test_main
   LABELS
     "iree-build-requirement=libamdf"

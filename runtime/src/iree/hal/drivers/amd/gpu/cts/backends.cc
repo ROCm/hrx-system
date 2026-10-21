@@ -46,8 +46,11 @@ static iree_status_t CreateGpuDevice(
   iree_hal_driver_t* driver = nullptr;
   IREE_RETURN_IF_ERROR(process_driver.Acquire(&driver));
   iree_hal_device_t* device = nullptr;
-  iree_status_t status = iree_hal_driver_create_device_by_uri(
-      driver, scheme, create_params, iree_allocator_system(), &device);
+  const iree_string_pair_t options[] = {
+      {.key = IREE_SV("queue_count"), .value = IREE_SV("2")}};
+  iree_status_t status = iree_hal_driver_create_device_by_path(
+      driver, scheme, iree_string_view_empty(), IREE_ARRAYSIZE(options),
+      options, create_params, iree_allocator_system(), &device);
   if (iree_status_is_ok(status)) {
     *out_driver = driver;
     *out_device = device;
@@ -81,7 +84,7 @@ static bool registered_ = []() {
                                          create_params, out_driver, out_device);
                 },
         },
-        {"async_queue", "file_io"},
+        {"async_queue", "file_io", "indirect"},
     });
   }
   return true;

@@ -301,6 +301,24 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
+    name = "buffer_test",
+    deps = [
+        ":backends",
+        "//runtime/src/iree/hal/cts/buffer:all_tests",
+        "//runtime/src/iree/hal/cts/util:test_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "command_buffer_test",
+    deps = [
+        ":backends",
+        "//runtime/src/iree/hal/cts/command_buffer:all_tests",
+        "//runtime/src/iree/hal/cts/util:test_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "file_test",
     deps = [
         ":backends",
@@ -332,10 +350,20 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "host_call_test",
+    name = "queue_test",
     deps = [
         ":backends",
-        "//runtime/src/iree/hal/cts/queue:queue_host_call_test",
+        "//runtime/src/iree/hal/cts/queue:all_tests",
+        "//runtime/src/iree/hal/cts/util:test_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "semaphore_test",
+    deps = [
+        ":backends",
+        "//runtime/src/iree/hal/cts/core:semaphore_test",
+        "//runtime/src/iree/hal/cts/core:semaphore_thread_test",
         "//runtime/src/iree/hal/cts/util:test_main",
     ],
 )
