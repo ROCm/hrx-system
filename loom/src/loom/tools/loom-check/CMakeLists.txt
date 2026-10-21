@@ -544,6 +544,9 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
   list(APPEND _loom_check_test_platform_deps loom::target::arch::amd::xdna::aie2p::check_provider)
 endif()
+if(LOOM_TARGET_ARCH_XDNA)
+  list(APPEND _loom_check_test_platform_deps loom::target::arch::amd::xdna::aie2p::check_test_provider)
+endif()
 loomc_cc_binary(
   RUNTIME_ONLY
   NAME

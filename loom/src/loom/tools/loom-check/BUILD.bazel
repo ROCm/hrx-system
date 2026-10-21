@@ -123,6 +123,13 @@ _TARGET_XDNA_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
+_TARGET_XDNA_CHECK_TEST_DEPS = iree_select({
+    "//loom/config/target/arch:xdna": [
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:check_test_provider",
+    ],
+    "//conditions:default": [],
+})
+
 _LOOM_CHECK_PROVIDER_COPTS = (
     _EMIT_AMDGPU_CHECK_COPTS +
     _TARGET_SPIRV_CHECK_COPTS +
@@ -558,7 +565,7 @@ loomc_cc_binary(
         "//loom/src/loom/tooling/input:configured",
         "//loom/src/loom/tooling/input:loomc_configured",
         "//runtime/src/iree/base",
-    ] + _LOOM_CHECK_PROVIDER_DEPS,
+    ] + _LOOM_CHECK_PROVIDER_DEPS + _TARGET_XDNA_CHECK_TEST_DEPS,
 )
 
 loom_cc_test(

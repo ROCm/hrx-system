@@ -731,20 +731,17 @@ loom_cc_library(
   HDRS
     "check/array_plan.h"
     "check/artifact.h"
-    "check/configuration.h"
     "check/leaf.h"
     "check/provider.h"
   SRCS
     "check/array_plan.c"
     "check/artifact.c"
-    "check/configuration.c"
     "check/leaf.c"
     "check/provider.c"
   DEPS
     ::array_plan
     ::array_program
     ::array_resident
-    ::artifact
     ::bundle_encoding
     ::core_descriptors
     ::descriptor_encoding
@@ -752,7 +749,6 @@ loom_cc_library(
     ::leaf_compile
     ::machine
     ::provider
-    ::target_facts
     iree::base
     iree::schemas::xdna_executable
     loom::analysis::symbol_facts
@@ -766,9 +762,6 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::ops::op_defs
-    loom::pass::report
-    loom::target::function_version
-    loom::target::pass_environment
     loom::target::provider
     loom::target::reporting::report
     loom::tools::loom-check::execute
@@ -778,18 +771,26 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_XDNA)
-loom_cc_binary(
+loom_cc_library(
   NAME
-    loom-check
+    check_test_provider
+  HDRS
+    "check/configuration.h"
   SRCS
-    "check/loom-check.c"
+    "check/configuration.c"
   DEPS
     ::artifact
-    ::check_provider
+    ::leaf_compile
+    ::target_facts
     iree::base
+    loom::analysis::symbol_facts
+    loom::codegen::low::target_binding
+    loom::ops::low
+    loom::pass::report
+    loom::target::pass_environment
     loom::tools::loom-check::provider
-    loom::tools::loom-check::test_provider
   TESTONLY
+  PUBLIC
 )
 endif()
 
@@ -802,9 +803,9 @@ iree_py_test(
   SRCS
     "test/vector_construct_family_test.py"
   ARGS
-    "{{$<TARGET_FILE:loom::target::arch::amd::xdna::aie2p::loom-check>}}"
+    "{{$<TARGET_FILE:loom::tools::loom-check::loom-check-test>}}"
   DATA
-    "loom::target::arch::amd::xdna::aie2p::loom-check"
+    "loom::tools::loom-check::loom-check-test"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
@@ -823,10 +824,10 @@ iree_py_test(
   SRCS
     "test/vector_construct_family_test.py"
   ARGS
-    "{{$<TARGET_FILE:loom::target::arch::amd::xdna::aie2p::loom-check>}}"
+    "{{$<TARGET_FILE:loom::tools::loom-check::loom-check-test>}}"
     "--exhaustive"
   DATA
-    "loom::target::arch::amd::xdna::aie2p::loom-check"
+    "loom::tools::loom-check::loom-check-test"
   LABELS
     "manual"
     "stress"
@@ -848,9 +849,9 @@ iree_py_test(
   SRCS
     "test/interleave_family_test.py"
   ARGS
-    "{{$<TARGET_FILE:loom::target::arch::amd::xdna::aie2p::loom-check>}}"
+    "{{$<TARGET_FILE:loom::tools::loom-check::loom-check-test>}}"
   DATA
-    "loom::target::arch::amd::xdna::aie2p::loom-check"
+    "loom::tools::loom-check::loom-check-test"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
@@ -869,10 +870,10 @@ iree_py_test(
   SRCS
     "test/interleave_family_test.py"
   ARGS
-    "{{$<TARGET_FILE:loom::target::arch::amd::xdna::aie2p::loom-check>}}"
+    "{{$<TARGET_FILE:loom::tools::loom-check::loom-check-test>}}"
     "--exhaustive"
   DATA
-    "loom::target::arch::amd::xdna::aie2p::loom-check"
+    "loom::tools::loom-check::loom-check-test"
   LABELS
     "manual"
     "stress"
@@ -894,9 +895,9 @@ iree_py_test(
   SRCS
     "test/transpose_family_test.py"
   ARGS
-    "{{$<TARGET_FILE:loom::target::arch::amd::xdna::aie2p::loom-check>}}"
+    "{{$<TARGET_FILE:loom::tools::loom-check::loom-check-test>}}"
   DATA
-    "loom::target::arch::amd::xdna::aie2p::loom-check"
+    "loom::tools::loom-check::loom-check-test"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
@@ -915,10 +916,10 @@ iree_py_test(
   SRCS
     "test/transpose_family_test.py"
   ARGS
-    "{{$<TARGET_FILE:loom::target::arch::amd::xdna::aie2p::loom-check>}}"
+    "{{$<TARGET_FILE:loom::tools::loom-check::loom-check-test>}}"
     "--exhaustive"
   DATA
-    "loom::target::arch::amd::xdna::aie2p::loom-check"
+    "loom::tools::loom-check::loom-check-test"
   LABELS
     "manual"
     "stress"
@@ -1194,8 +1195,6 @@ loom_check_test_suite(
     "test/vector_insert_packetization.loom-test"
     "test/vector_memory_packetization.loom-test"
     "test/vector_reduce_axes.loom-test"
-  RUNNER
-    ::loom-check
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )

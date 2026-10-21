@@ -9,7 +9,6 @@ load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//libamdf/requirements:defs.bzl", "LIBAMDF")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
-    "loom_cc_binary",
     "loom_cc_library",
     "loom_cc_test",
     "loom_config_compatible_with",
@@ -627,14 +626,12 @@ loom_cc_library(
     srcs = [
         "check/array_plan.c",
         "check/artifact.c",
-        "check/configuration.c",
         "check/leaf.c",
         "check/provider.c",
     ],
     hdrs = [
         "check/array_plan.h",
         "check/artifact.h",
-        "check/configuration.h",
         "check/leaf.h",
         "check/provider.h",
     ],
@@ -643,7 +640,6 @@ loom_cc_library(
         ":array_plan",
         ":array_program",
         ":array_resident",
-        ":artifact",
         ":bundle_encoding",
         ":core_descriptors",
         ":descriptor_encoding",
@@ -651,7 +647,6 @@ loom_cc_library(
         ":leaf_compile",
         ":machine",
         ":provider",
-        ":target_facts",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function_requirements",
@@ -663,9 +658,6 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
-        "//loom/src/loom/pass:report",
-        "//loom/src/loom/target:function_version",
-        "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/tools/loom-check:execute",
@@ -675,15 +667,22 @@ loom_cc_library(
     ],
 )
 
-loom_cc_binary(
-    name = "loom-check",
+loom_cc_library(
+    name = "check_test_provider",
     testonly = True,
-    srcs = ["check/loom-check.c"],
+    srcs = ["check/configuration.c"],
+    hdrs = ["check/configuration.h"],
+    visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
         ":artifact",
-        ":check_provider",
+        ":leaf_compile",
+        ":target_facts",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:report",
+        "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/tools/loom-check:provider",
-        "//loom/src/loom/tools/loom-check:test_provider",
         "//runtime/src/iree/base",
     ],
 )
@@ -692,8 +691,8 @@ iree_py_test(
     name = "vector_construct_family_test",
     size = "small",
     srcs = ["test/vector_construct_family_test.py"],
-    args = ["$(location :loom-check)"],
-    data = [":loom-check"],
+    args = ["$(location //loom/src/loom/tools/loom-check:loom-check-test)"],
+    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
     main = "test/vector_construct_family_test.py",
     target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
 )
@@ -703,10 +702,10 @@ iree_py_test(
     size = "small",
     srcs = ["test/vector_construct_family_test.py"],
     args = [
-        "$(location :loom-check)",
+        "$(location //loom/src/loom/tools/loom-check:loom-check-test)",
         "--exhaustive",
     ],
-    data = [":loom-check"],
+    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
     main = "test/vector_construct_family_test.py",
     tags = [
         "manual",
@@ -719,8 +718,8 @@ iree_py_test(
     name = "interleave_family_test",
     size = "small",
     srcs = ["test/interleave_family_test.py"],
-    args = ["$(location :loom-check)"],
-    data = [":loom-check"],
+    args = ["$(location //loom/src/loom/tools/loom-check:loom-check-test)"],
+    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
     main = "test/interleave_family_test.py",
     target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
 )
@@ -730,10 +729,10 @@ iree_py_test(
     size = "small",
     srcs = ["test/interleave_family_test.py"],
     args = [
-        "$(location :loom-check)",
+        "$(location //loom/src/loom/tools/loom-check:loom-check-test)",
         "--exhaustive",
     ],
-    data = [":loom-check"],
+    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
     main = "test/interleave_family_test.py",
     tags = [
         "manual",
@@ -746,8 +745,8 @@ iree_py_test(
     name = "transpose_family_test",
     size = "small",
     srcs = ["test/transpose_family_test.py"],
-    args = ["$(location :loom-check)"],
-    data = [":loom-check"],
+    args = ["$(location //loom/src/loom/tools/loom-check:loom-check-test)"],
+    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
     main = "test/transpose_family_test.py",
     target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
 )
@@ -757,10 +756,10 @@ iree_py_test(
     size = "medium",
     srcs = ["test/transpose_family_test.py"],
     args = [
-        "$(location :loom-check)",
+        "$(location //loom/src/loom/tools/loom-check:loom-check-test)",
         "--exhaustive",
     ],
-    data = [":loom-check"],
+    data = ["//loom/src/loom/tools/loom-check:loom-check-test"],
     main = "test/transpose_family_test.py",
     tags = [
         "manual",
@@ -1026,7 +1025,6 @@ loom_check_test_suite(
         "test/vector_memory_packetization.loom-test",
         "test/vector_reduce_axes.loom-test",
     ],
-    runner = ":loom-check",
     test_name_prefix_to_strip = "test/source_low/",
 )
 

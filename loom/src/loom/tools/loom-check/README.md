@@ -37,7 +37,8 @@ for API boundary cases, paired with `.loom-test` coverage of the real producer.
 Each fixture is listed in its owning `test/BUILD.bazel` using
 `loom_check_test_suite`. The default runner, `loom-check-test`, includes the
 target-neutral test dialect and `test.low.core` descriptor package. Optional
-target-specific cases live with that target's tooling tests and runner. The
+target providers extend this shared runner; their fixtures and check-only
+implementations remain beside the target they test. The
 [test-file contract](../../testing/test_file.h) describes modes, annotations,
 case separators, and expected output.
 
