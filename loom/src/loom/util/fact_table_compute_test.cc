@@ -111,7 +111,18 @@ class FactTableScratchTest : public FactTableComputeTest {
                               "injected fact scratch allocation failure");
     }
     const auto allocator = iree_allocator_system();
-    return allocator.ctl(allocator.self, command, parameters, pointer);
+    const bool had_allocation =
+        command == IREE_ALLOCATOR_COMMAND_REALLOC && *pointer != nullptr;
+    iree_status_t status =
+        allocator.ctl(allocator.self, command, parameters, pointer);
+    if (iree_status_is_ok(status)) {
+      if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+        --test->live_allocation_count_;
+      } else if (!had_allocation) {
+        ++test->live_allocation_count_;
+      }
+    }
+    return status;
   }
 
   void SetUp() override {
@@ -182,6 +193,8 @@ class FactTableScratchTest : public FactTableComputeTest {
   iree_arena_allocator_t transient_arena_ = {};
   // Number of attempted transient backing allocations.
   iree_host_size_t allocation_count_ = 0;
+  // Backing allocations still owned by a transient arena or its block pool.
+  iree_host_size_t live_allocation_count_ = 0;
   // Backing allocation to fail, or SIZE_MAX for unrestricted allocation.
   iree_host_size_t failure_index_ = SIZE_MAX;
   // Live continuations when the selected allocation failed.
@@ -292,6 +305,146 @@ TEST_F(FactTableScratchTest, FailedTraversalReleasesActiveReservations) {
   }
   EXPECT_TRUE(failed_during_descent);
 }
+
+class FactTableLoopScratchTest : public FactTableScratchTest,
+                                 public ::testing::WithParamInterface<bool> {
+ protected:
+  void SetUp() override {
+    FactTableScratchTest::SetUp();
+    for (auto& value : carried_) {
+      value = DefineValue(vector_type_);
+    }
+    SeedCarriedFacts();
+  }
+
+  void SeedCarriedFacts() {
+    for (unsigned i = 0; i < IREE_ARRAYSIZE(carried_); ++i) {
+      const loom_value_facts_t lanes[] = {
+          loom_value_facts_exact_i64(4 * i + 1),
+          loom_value_facts_exact_i64(4 * i + 3),
+      };
+      loom_value_facts_t facts;
+      IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(
+          &table_.context, {lanes, IREE_ARRAYSIZE(lanes)}, &facts));
+      IREE_ASSERT_OK(loom_value_fact_table_define(&table_, carried_[i], facts));
+    }
+  }
+
+  // Opposite loop kinds nest while the outer solve still needs its tuple.
+  loom_op_t* BuildLoop(bool condition_loop, const loom_value_id_t* initial,
+                       bool nested) {
+    const loom_type_t types[] = {vector_type_, vector_type_};
+    loom_op_t* loop = nullptr;
+    if (condition_loop) {
+      IREE_CHECK_OK(loom_scf_while_build(&builder_, initial, 2, nullptr, types,
+                                         2, nullptr, 0, LOOM_LOCATION_UNKNOWN,
+                                         &loop));
+      auto* before = loom_scf_while_before(loop);
+      const auto saved = loom_builder_enter_region(&builder_, loop, before);
+      const loom_value_id_t forwarded[] = {
+          loom_region_entry_arg_id(before, 0),
+          loom_region_entry_arg_id(before, 1),
+      };
+      loom_op_t* condition = nullptr;
+      IREE_CHECK_OK(loom_scf_condition_build(&builder_, condition_, forwarded,
+                                             2, LOOM_LOCATION_UNKNOWN,
+                                             &condition));
+      loom_builder_restore(&builder_, saved);
+    } else {
+      IREE_CHECK_OK(loom_scf_for_build(
+          &builder_, 0, inputs_[0], inputs_[1], inputs_[0], initial, 2, nullptr,
+          nullptr, 0, LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, 0, 0,
+          LOOM_LOCATION_UNKNOWN, &loop));
+    }
+    auto* body =
+        condition_loop ? loom_scf_while_after(loop) : loom_scf_for_body(loop);
+    const auto saved = loom_builder_enter_region(&builder_, loop, body);
+    const uint16_t offset = condition_loop ? 0 : 1;
+    const loom_value_id_t arguments[] = {
+        loom_region_entry_arg_id(body, offset),
+        loom_region_entry_arg_id(body, offset + 1),
+    };
+    const auto* yielded =
+        nested ? loom_op_const_results(BuildLoop(!condition_loop, arguments,
+                                                 /*nested=*/false))
+               : arguments;
+    loom_op_t* yield = nullptr;
+    IREE_CHECK_OK(loom_scf_yield_build(&builder_, yielded, 2,
+                                       LOOM_LOCATION_UNKNOWN, &yield));
+    loom_builder_restore(&builder_, saved);
+    return loop;
+  }
+
+  void ExpectCarriedFacts(loom_op_t* loop) {
+    for (unsigned i = 0; i < IREE_ARRAYSIZE(carried_); ++i) {
+      const auto facts =
+          loom_value_fact_table_lookup(&table_, loom_op_const_results(loop)[i]);
+      loom_value_fact_small_static_lanes_t lanes;
+      ASSERT_TRUE(loom_value_facts_query_small_static_lanes(&table_.context,
+                                                            facts, &lanes));
+      ASSERT_EQ(lanes.count, 2u);
+      EXPECT_EQ(lanes.lanes[0].range_lo, 4 * i + 1);
+      EXPECT_EQ(lanes.lanes[1].range_lo, 4 * i + 3);
+    }
+  }
+
+  // Nonuniform lane facts require retained, table-owned extension payloads.
+  const loom_type_t vector_type_ = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, loom_dim_pack_static(2), 0);
+  // Independent inputs forwarded through both nested loop tuples.
+  loom_value_id_t carried_[2];
+};
+
+TEST_P(FactTableLoopScratchTest, RepeatedSolvesReleaseWorkingTuples) {
+  loom_op_t* loop = BuildLoop(GetParam(), carried_, /*nested=*/true);
+  for (unsigned scope = 0; scope < 2; ++scope) {
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
+    const auto used_bytes = transient_arena_.used_allocation_size;
+    for (unsigned query = 0; query < 16; ++query) {
+      IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
+      ExpectCarriedFacts(loop);
+      EXPECT_EQ(transient_arena_.used_allocation_size, used_bytes);
+    }
+    loom_value_fact_table_clear_scope(&table_);
+    iree_arena_reset(&transient_arena_);
+    SeedInputs();
+    SeedCarriedFacts();
+  }
+}
+
+TEST_P(FactTableLoopScratchTest, FailedSolvesReleaseWorkingTuples) {
+  loom_op_t* loop = BuildLoop(GetParam(), carried_, /*nested=*/true);
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
+  const auto used_bytes = transient_arena_.used_allocation_size;
+  iree_arena_block_pool_trim(&transient_pool_);
+  const auto live_allocations = live_allocation_count_;
+  for (iree_host_size_t failure = 0;; ++failure) {
+    allocation_count_ = 0;
+    failure_index_ = failure;
+    iree_status_t status =
+        loom_value_fact_table_compute_op(&table_, module_, loop);
+    // Returning scratch to the pool is sufficient; trimming exposes any
+    // backing still stranded in a failed solve's arena.
+    iree_arena_block_pool_trim(&transient_pool_);
+    EXPECT_EQ(live_allocation_count_, live_allocations);
+    EXPECT_EQ(transient_arena_.used_allocation_size, used_bytes);
+    if (iree_status_is_ok(status)) {
+      EXPECT_GT(failure, 0u);
+      ExpectCarriedFacts(loop);
+      break;
+    }
+    IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    failure_index_ = SIZE_MAX;
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
+    ExpectCarriedFacts(loop);
+    iree_arena_block_pool_trim(&transient_pool_);
+    EXPECT_EQ(live_allocation_count_, live_allocations);
+    EXPECT_EQ(transient_arena_.used_allocation_size, used_bytes);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(LoopKinds, FactTableLoopScratchTest,
+                         ::testing::Bool());
 
 TEST_F(FactTableComputeTest, InductionStepReadsCurrentFactsAndLiteralBits) {
   loom_value_fact_induction_t induction = {};
