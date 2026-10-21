@@ -330,28 +330,15 @@ void Pm4CommandWriter::Noop(size_t word_count) {
 void Pm4CommandWriter::WaitMemory32(uint64_t address, uint32_t value,
                                     Pm4MemoryComparison comparison,
                                     uint32_t mask) {
-  // MEC WAIT_REG_MEM: memory space, ordinary wait, default cache policy.
-  words_[word_count_++] = MakeHeader(0x3c, 7);
-  words_[word_count_++] = static_cast<uint32_t>(comparison) | (1 << 4);
-  words_[word_count_++] = static_cast<uint32_t>(address);
-  words_[word_count_++] = static_cast<uint32_t>(address >> 32);
-  words_[word_count_++] = value;
-  words_[word_count_++] = mask;
-  words_[word_count_++] = 4;
+  word_count_ +=
+      pm4::WaitMemory32(words_ + word_count_, address, value, comparison, mask);
 }
 
 void Pm4CommandWriter::WaitMemory64(uint64_t address, uint64_t value,
                                     Pm4MemoryComparison comparison,
                                     uint64_t mask) {
-  words_[word_count_++] = MakeHeader(0x93, 9);
-  words_[word_count_++] = static_cast<uint32_t>(comparison) | (1 << 4);
-  words_[word_count_++] = static_cast<uint32_t>(address);
-  words_[word_count_++] = static_cast<uint32_t>(address >> 32);
-  words_[word_count_++] = static_cast<uint32_t>(value);
-  words_[word_count_++] = static_cast<uint32_t>(value >> 32);
-  words_[word_count_++] = static_cast<uint32_t>(mask);
-  words_[word_count_++] = static_cast<uint32_t>(mask >> 32);
-  words_[word_count_++] = 4;
+  word_count_ +=
+      pm4::WaitMemory64(words_ + word_count_, address, value, comparison, mask);
 }
 
 void Pm4CommandWriter::CopyGpuClock64(uint64_t target_address) {

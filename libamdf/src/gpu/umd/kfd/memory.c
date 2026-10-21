@@ -89,6 +89,13 @@ static void amdf_gpu_kfd_memory_plan(
         (profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0) {
       plan->native_flags |= KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
     }
+    if (profile->ordinal == AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL) {
+      // On GMC9, COHERENT alone may still select cached memory on an APU or
+      // GC9.5. This backing can also be attached to another GPU: every control
+      // allocation requests UC, regardless of which GPU allocates it. CPU
+      // snooping remains enabled without GPU-cached copies of control words.
+      plan->native_flags |= KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED;
+    }
     if ((profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0) {
       const uintptr_t pointer = (uintptr_t)create_info->registered_host_pointer;
       plan->host_byte_offset = pointer & (device->page_size - 1);

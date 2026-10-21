@@ -90,7 +90,8 @@ amdf_status_t amdf_gpu_umd_memory_describe_system_store_site(
           AMDF_MEMORY_FLAG_HOST_COHERENT &&
       (query->access & (AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE)) ==
           (AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE) &&
-      family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
+      (family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 ||
+       family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) &&
       (family->roles & AMDF_QUEUE_ROLE_ATOMIC) != 0) {
     if ((query->atomic_operations_32 &
          family->atomic_capabilities.operations_32 &

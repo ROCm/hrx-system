@@ -1339,7 +1339,13 @@ TEST(LinuxGpuMemoryProfileTest, SystemSignalsRequireNativeMappingAndCpuRoutes) {
     // Whether owned coherent SYSTEM backing supports CP stores and wait loads.
     bool supports_signals;
   } cases[] = {
-      {{.major = 9, .minor = 4, .revision = 3, .exact = true}, false},
+      {{.major = 9, .minor = 0, .revision = 10, .exact = true}, true},
+      {{.major = 9, .minor = 4, .revision = 1, .exact = true}, true},
+      {{.major = 9, .minor = 4, .revision = 2, .exact = true}, true},
+      {{.major = 9, .minor = 4, .revision = 3, .exact = true}, true},
+      {{.major = 9, .minor = 4, .revision = 4, .exact = true}, true},
+      {{.major = 9, .minor = 5, .revision = 0, .exact = true}, true},
+      {{.major = 9, .minor = 4, .revision = 3, .exact = false}, false},
       {{.major = 11, .minor = 0, .revision = 0, .exact = true}, true},
       {{.major = 11, .minor = 5, .revision = 0, .exact = true}, true},
       {{.major = 11, .minor = 5, .revision = 1, .exact = true}, true},

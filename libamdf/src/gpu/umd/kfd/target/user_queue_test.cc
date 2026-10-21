@@ -141,6 +141,46 @@ TEST(KfdTargetUserQueueTest, CdnaDoesNotAdvertisePm4) {
   }
 }
 
+TEST(KfdTargetUserQueueTest, AqlCarrierExposesMecAtomicEncodings) {
+  constexpr amdf_atomic_operations_t kOperations =
+      AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+      AMDF_ATOMIC_OPERATION_ADD | AMDF_ATOMIC_OPERATION_SUBTRACT |
+      AMDF_ATOMIC_OPERATION_AND | AMDF_ATOMIC_OPERATION_OR |
+      AMDF_ATOMIC_OPERATION_XOR;
+  constexpr amdf_atomic_wait_conditions_t kConditions =
+      AMDF_ATOMIC_WAIT_CONDITION_EQUAL | AMDF_ATOMIC_WAIT_CONDITION_NOT_EQUAL |
+      AMDF_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL;
+  for (uint32_t target : {90010u, 90400u, 90401u, 90402u, 90500u, 110000u,
+                          110501u, 120000u, 120500u}) {
+    SCOPED_TRACE(target);
+    auto topology = MakeTopology();
+    topology.properties.gfx_ip = {target / 10000, (target / 100) % 100,
+                                  target % 100};
+    topology.gc_ip = {target / 10000, target == 120500u ? 1u : 0u, 0, true};
+    topology.properties.compute.wavefront_size = target < 100000u ? 64 : 32;
+    amdf_gpu_kfd_user_queue_plans_t plans;
+    amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64,
+                                                    &plans);
+    uint32_t aql_count = 0;
+    for (uint32_t i = 0; i < plans.count; ++i) {
+      const auto& family = plans.values[i].family;
+      if (family.command_type != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+        continue;
+      }
+      ++aql_count;
+      EXPECT_NE(family.roles & AMDF_QUEUE_ROLE_ATOMIC, 0u);
+      const auto& atomics = family.atomic_capabilities;
+      EXPECT_EQ(atomics.operations_32, kOperations);
+      EXPECT_EQ(atomics.operations_64, kOperations);
+      EXPECT_EQ(atomics.operations_without_dispatch_32, kOperations);
+      EXPECT_EQ(atomics.operations_without_dispatch_64, kOperations);
+      EXPECT_EQ(atomics.wait_conditions_32, kConditions);
+      EXPECT_EQ(atomics.wait_conditions_64, kConditions);
+    }
+    EXPECT_EQ(aql_count, 1u);
+  }
+}
+
 TEST(KfdTargetUserQueueTest, AqlPreservesQualifiedScalarReservations) {
   const amdf_queue_format_features_t cases[] = {
       0, AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16,
@@ -530,9 +570,9 @@ TEST(KfdTargetUserQueueTest, MultiXccAqlFamiliesRetainTransferRole) {
               AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE |
                   AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
                   AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE);
-    const amdf_queue_roles_t expected_roles = AMDF_QUEUE_ROLE_COMPUTE |
-                                              AMDF_QUEUE_ROLE_CACHE_CONTROL |
-                                              AMDF_QUEUE_ROLE_TRANSFER;
+    const amdf_queue_roles_t expected_roles =
+        AMDF_QUEUE_ROLE_COMPUTE | AMDF_QUEUE_ROLE_CACHE_CONTROL |
+        AMDF_QUEUE_ROLE_TRANSFER | AMDF_QUEUE_ROLE_ATOMIC;
     EXPECT_EQ(family.roles, expected_roles);
     EXPECT_EQ(plans.values[0].compute.context_count, 8u);
     EXPECT_EQ(plans.values[1].family.command_type,

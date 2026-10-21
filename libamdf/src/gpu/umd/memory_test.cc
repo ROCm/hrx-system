@@ -219,36 +219,41 @@ TEST(GpuMemoryPairTest, SystemStoreReachRequiresBothMemoryAndQueueWidths) {
       .flags = AMDF_MEMORY_FLAG_HOST_COHERENT,
       .queue_family_info = &family,
   };
-  for (uint32_t memory_widths = 0; memory_widths < 4; ++memory_widths) {
-    query.atomic_operations_32 =
-        (memory_widths & 1) ? AMDF_ATOMIC_OPERATION_STORE : 0;
-    query.atomic_operations_64 =
-        (memory_widths & 2) ? AMDF_ATOMIC_OPERATION_STORE : 0;
-    for (uint32_t queue_widths = 0; queue_widths < 4; ++queue_widths) {
-      SCOPED_TRACE(::testing::Message()
-                   << "memory=" << memory_widths << " queue=" << queue_widths);
-      family.atomic_capabilities.operations_32 =
-          (queue_widths & 1) ? AMDF_ATOMIC_OPERATION_STORE : 0;
-      family.atomic_capabilities.operations_64 =
-          (queue_widths & 2) ? AMDF_ATOMIC_OPERATION_STORE : 0;
-      amdf_memory_site_description_t description = {};
-      ASSERT_EQ(
-          amdf_gpu_umd_memory_describe_system_store_site(&query, &description),
-          AMDF_STATUS_OK);
-      const uint32_t shared_widths = memory_widths & queue_widths;
-      EXPECT_EQ(description.atomic_reach.scope_32,
-                (shared_widths & 1) ? AMDF_ATOMIC_SCOPE_SYSTEM
-                                    : AMDF_ATOMIC_SCOPE_NONE);
-      EXPECT_EQ(description.atomic_reach.scope_64,
-                (shared_widths & 2) ? AMDF_ATOMIC_SCOPE_SYSTEM
-                                    : AMDF_ATOMIC_SCOPE_NONE);
-      EXPECT_EQ(
-          amdf_memory_compatibility_domain_is_valid(&description.atomic_domain),
-          shared_widths != 0);
-      EXPECT_EQ(description.release.operation,
-                AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM);
-      EXPECT_EQ(description.acquire.operation,
-                AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM);
+  for (const auto command :
+       {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL}) {
+    SCOPED_TRACE(command);
+    family.command_type = command;
+    for (uint32_t memory_widths = 0; memory_widths < 4; ++memory_widths) {
+      query.atomic_operations_32 =
+          (memory_widths & 1) ? AMDF_ATOMIC_OPERATION_STORE : 0;
+      query.atomic_operations_64 =
+          (memory_widths & 2) ? AMDF_ATOMIC_OPERATION_STORE : 0;
+      for (uint32_t queue_widths = 0; queue_widths < 4; ++queue_widths) {
+        SCOPED_TRACE(::testing::Message() << "memory=" << memory_widths
+                                          << " queue=" << queue_widths);
+        family.atomic_capabilities.operations_32 =
+            (queue_widths & 1) ? AMDF_ATOMIC_OPERATION_STORE : 0;
+        family.atomic_capabilities.operations_64 =
+            (queue_widths & 2) ? AMDF_ATOMIC_OPERATION_STORE : 0;
+        amdf_memory_site_description_t description = {};
+        ASSERT_EQ(amdf_gpu_umd_memory_describe_system_store_site(&query,
+                                                                 &description),
+                  AMDF_STATUS_OK);
+        const uint32_t shared_widths = memory_widths & queue_widths;
+        EXPECT_EQ(description.atomic_reach.scope_32,
+                  (shared_widths & 1) ? AMDF_ATOMIC_SCOPE_SYSTEM
+                                      : AMDF_ATOMIC_SCOPE_NONE);
+        EXPECT_EQ(description.atomic_reach.scope_64,
+                  (shared_widths & 2) ? AMDF_ATOMIC_SCOPE_SYSTEM
+                                      : AMDF_ATOMIC_SCOPE_NONE);
+        EXPECT_EQ(amdf_memory_compatibility_domain_is_valid(
+                      &description.atomic_domain),
+                  shared_widths != 0);
+        EXPECT_EQ(description.release.operation,
+                  AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM);
+        EXPECT_EQ(description.acquire.operation,
+                  AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM);
+      }
     }
   }
 }
@@ -301,12 +306,9 @@ TEST(GpuMemoryPairTest, SystemStoresDoNotGrantOtherAccessOrQueueContracts) {
   family.roles = AMDF_QUEUE_ROLE_CACHE_CONTROL;
   expect_no_reach();
   family.roles |= AMDF_QUEUE_ROLE_ATOMIC;
-  for (const auto command :
-       {AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA}) {
-    family.command_type = command;
-    family.format_features = AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR;
-    expect_no_reach();
-  }
+  family.command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA;
+  family.format_features = AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR;
+  expect_no_reach();
   family.command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
   query.atomic_operations_32 = AMDF_ATOMIC_OPERATION_ADD;
   query.atomic_operations_64 = AMDF_ATOMIC_OPERATION_ADD;

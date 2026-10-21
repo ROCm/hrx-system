@@ -105,6 +105,7 @@ iree_cc_library(
     aql_cases
   SRCS
     "argument_payloads_test.cc"
+    "atomic_test.cc"
     "barrier_test.cc"
     "byte_copy_test.cc"
     "device_publication_test.cc"

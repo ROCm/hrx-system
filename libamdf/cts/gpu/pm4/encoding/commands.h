@@ -10,20 +10,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "libamdf/cts/gpu/pm4/encoding/memory_commands.h"
 #include "libamdf/cts/gpu/pm4/encoding/profile.h"
-
-// Ordinary memory comparisons used by the CTS. These are the MEC
-// WAIT_REG_MEM/WAIT_REG_MEM64 and COND_INDIRECT_BUFFER function values, not
-// host comparison opcodes.
-enum class Pm4MemoryComparison : uint32_t {
-  kAlways = 0,
-  kLess = 1,
-  kLessOrEqual = 2,
-  kEqual = 3,
-  kNotEqual = 4,
-  kGreaterOrEqual = 5,
-  kGreater = 6,
-};
 
 // Compiled PM4 compute program with no hidden runtime inputs. The caller
 // supplies a kernarg pointer and any required scratch; hardware supplies IDs.

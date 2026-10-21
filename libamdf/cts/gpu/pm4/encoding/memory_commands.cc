@@ -10,6 +10,32 @@
 
 namespace pm4 {
 
+size_t WaitMemory32(uint32_t* words, uint64_t address, uint32_t value,
+                    Pm4MemoryComparison comparison, uint32_t mask) {
+  words[0] = 0xc0053c00u;
+  words[1] = static_cast<uint32_t>(comparison) | (1u << 4);
+  words[2] = static_cast<uint32_t>(address);
+  words[3] = static_cast<uint32_t>(address >> 32);
+  words[4] = value;
+  words[5] = mask;
+  words[6] = 4;
+  return 7;
+}
+
+size_t WaitMemory64(uint32_t* words, uint64_t address, uint64_t value,
+                    Pm4MemoryComparison comparison, uint64_t mask) {
+  words[0] = 0xc0079300u;
+  words[1] = static_cast<uint32_t>(comparison) | (1u << 4);
+  words[2] = static_cast<uint32_t>(address);
+  words[3] = static_cast<uint32_t>(address >> 32);
+  words[4] = static_cast<uint32_t>(value);
+  words[5] = static_cast<uint32_t>(value >> 32);
+  words[6] = static_cast<uint32_t>(mask);
+  words[7] = static_cast<uint32_t>(mask >> 32);
+  words[8] = 4;
+  return 9;
+}
+
 size_t StoreImmediate(uint32_t* words, uint64_t target_address, uint64_t value,
                       CopyDataWidth width) {
   words[0] = (3u << 30) | (4u << 16) | (0x40u << 8);
