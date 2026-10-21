@@ -493,21 +493,10 @@ void GpuNativeTest::SetUp() {
       if (!is_selected || !supported) {
         continue;
       }
-      iree::Status context_status =
-          iree_hal_amd_gpu_context_allocate(fabric_, &fabric_->endpoints[i].id,
-                                            iree_hal_device_event_sink_stderr(),
-                                            iree_allocator_system(), &context_);
-      if (context_status.code() == iree::StatusCode::kUnimplemented ||
-          context_status.code() == iree::StatusCode::kUnavailable) {
-        if (selected_identity) {
-          GTEST_SKIP()
-              << "Selected native AMD GPU does not support the requested "
-                 "packet family: "
-              << context_status.ToString();
-        }
-        continue;
-      }
-      IREE_ASSERT_OK(context_status);
+      IREE_ASSERT_OK(iree_hal_amd_gpu_context_allocate(
+          fabric_, &fabric_->endpoints[i].id,
+          iree_hal_device_event_sink_stderr(), iree_allocator_system(),
+          &context_));
     }
   }
   if (!context_) {
