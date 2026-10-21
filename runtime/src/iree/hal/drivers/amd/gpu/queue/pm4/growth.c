@@ -294,6 +294,11 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_end(
             growth->backing.signals);
       }
       if (iree_status_is_ok(status)) {
+        status = iree_hal_amd_gpu_signal_block_reserve_frontiers(
+            &growth->backing.signals->block, context->queue_count,
+            growth->backing.signals->host_allocator);
+      }
+      if (iree_status_is_ok(status)) {
         out_result->signals = growth->backing.signals;
       } else {
         iree_hal_amd_gpu_signal_storage_free(context->context,

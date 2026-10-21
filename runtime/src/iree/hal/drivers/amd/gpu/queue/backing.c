@@ -12,6 +12,39 @@ static_assert(sizeof(iree_hal_amd_gpu_signal_cache_t) <=
                   3 * iree_hardware_destructive_interference_size,
               "signal capacity and stable wake ownership fit in three lines");
 
+iree_status_t iree_hal_amd_gpu_signal_cache_reserve_frontiers(
+    iree_hal_amd_gpu_signal_cache_t* cache, uint32_t queue_count,
+    iree_allocator_t host_allocator) {
+  iree_status_t status = iree_ok_status();
+  for (iree_hal_amd_gpu_signal_storage_t* storage = cache->storage;
+       storage && iree_status_is_ok(status); storage = storage->next) {
+    status = iree_hal_amd_gpu_signal_block_reserve_frontiers(
+        &storage->block, queue_count, host_allocator);
+  }
+  return status;
+}
+
+void iree_hal_amd_gpu_frontier_request_complete(
+    iree_hal_amd_gpu_frontier_request_t* request, iree_status_t status) {
+  iree_notification_t* notification = request->notification;
+  request->status = status;
+  iree_atomic_store(&request->completed, 1, iree_memory_order_release);
+  iree_notification_post(notification, 1);
+}
+
+static bool iree_hal_amd_gpu_frontier_request_completed(void* user_data) {
+  iree_hal_amd_gpu_frontier_request_t* request = user_data;
+  return iree_atomic_load(&request->completed, iree_memory_order_acquire);
+}
+
+iree_status_t iree_hal_amd_gpu_frontier_request_await(
+    iree_hal_amd_gpu_frontier_request_t* request) {
+  iree_notification_await(request->notification,
+                          iree_hal_amd_gpu_frontier_request_completed, request,
+                          iree_infinite_timeout());
+  return request->status;
+}
+
 iree_status_t iree_hal_amd_gpu_backing_query_address(
     const iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_fabric_memory_t* memory, uint64_t* out_address) {

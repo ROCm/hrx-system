@@ -271,7 +271,7 @@ class GrowthTest : public ::testing::Test {
             EXPECT_EQ(
                 iree_hal_amd_gpu_signal_block_frontiers(&result.signals->block)
                     ->queue_count,
-                3u);
+                growth_.queue_count);
             auto* signal =
                 iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
             EXPECT_NE(signal, nullptr);
@@ -753,6 +753,24 @@ TEST_F(GrowthTest, CoalescedSignalsAreInitializedOnlyAfterNativeCompletion) {
     consumed_.acquire();
   }
   EXPECT_EQ(completed_, 64u);
+  EXPECT_EQ(failed_, 0u);
+}
+
+TEST_F(GrowthTest, PendingSignalBackingAdoptsExpandedPublisherFrontiers) {
+  hold_ = true;
+  Park(IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS);
+  entered_.acquire();
+  JoinPublication();
+  // The native request owns the old three-coordinate host allocation. Its
+  // result must reconcile the publisher's current width before exposing cells.
+  EXPECT_TRUE(iree_hal_amd_gpu_publisher_try_acquire(&publisher_));
+  growth_.queue_count = 8;
+  Handoff();
+  resume_.release();
+  consumed_.acquire();
+  JoinQueue();
+  EXPECT_EQ(allocations_, 1u);
+  EXPECT_EQ(completed_, 1u);
   EXPECT_EQ(failed_, 0u);
 }
 

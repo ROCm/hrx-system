@@ -224,6 +224,14 @@ static_assert(
         iree_hardware_destructive_interference_size,
     "completion credit and enrollment occupy one observer cache line");
 
+// Stack-owned cold request; the queue only borrows it until completion.
+typedef struct iree_hal_amd_gpu_pm4_frontier_request_t {
+  // Exact protocol tag and publication link.
+  iree_hal_amd_gpu_pm4_entry_t entry;
+  // Device-owned notification and caller-owned result.
+  iree_hal_amd_gpu_frontier_request_t request;
+} iree_hal_amd_gpu_pm4_frontier_request_t;
+
 static const iree_hal_queue_vtable_t iree_hal_amd_gpu_pm4_queue_vtable;
 
 static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
@@ -1494,6 +1502,33 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_process(
   return result;
 }
 
+static iree_status_t iree_hal_amd_gpu_pm4_expand_frontiers(
+    iree_hal_amd_gpu_pm4_queue_t* queue, uint32_t queue_count) {
+  if (queue_count > queue->producer.frontier.count) {
+    uint64_t* frontier = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_malloc_array(queue->host_allocator, queue_count,
+                                    2 * sizeof(uint64_t), (void**)&frontier));
+    memcpy(frontier, queue->producer.frontier.published,
+           queue->producer.frontier.count * sizeof(uint64_t));
+    uint64_t* previous = iree_min(queue->producer.frontier.published,
+                                  queue->producer.frontier.scratch);
+    queue->producer.frontier.published = frontier;
+    queue->producer.frontier.pending = frontier;
+    queue->producer.frontier.scratch = frontier + queue_count;
+    queue->producer.frontier.count = queue_count;
+    if (previous !=
+        (void*)(queue->issued + queue->options.retirement_capacity)) {
+      iree_allocator_free(queue->host_allocator, previous);
+    }
+  }
+  queue->growth.queue_count = queue->producer.frontier.count;
+  // Wider publisher state remains valid after partial table growth failure.
+  // No work can use the new coordinate until every peer has installed it.
+  return iree_hal_amd_gpu_signal_cache_reserve_frontiers(
+      queue->options.signals, queue->growth.queue_count, queue->host_allocator);
+}
+
 // The exact publisher installs acquired backing and requeues the waiting
 // cohort. Native callbacks never enter this function or visit its captures.
 static iree_hal_amd_gpu_pm4_publication_result_t
@@ -1502,6 +1537,15 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
   IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_pm4_publish");
   iree_hal_amd_gpu_pm4_entry_t* entry =
       iree_containerof(link, iree_hal_amd_gpu_pm4_entry_t, publication);
+  if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_FRONTIERS) {
+    iree_hal_amd_gpu_pm4_frontier_request_t* request =
+        iree_containerof(entry, iree_hal_amd_gpu_pm4_frontier_request_t, entry);
+    iree_status_t status = iree_hal_amd_gpu_pm4_expand_frontiers(
+        queue, request->request.queue_count);
+    iree_hal_amd_gpu_frontier_request_complete(&request->request, status);
+    IREE_TRACE_ZONE_END(z0);
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
+  }
   if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRIM) {
     iree_hal_amd_gpu_pm4_trim_storage(queue);
     iree_atomic_store(&queue->trim.pending, 0, iree_memory_order_release);
@@ -1961,6 +2005,20 @@ iree_hal_amd_gpu_pm4_queue_completion_source(iree_hal_queue_t* base) {
                                                 base};
 }
 
+iree_status_t iree_hal_amd_gpu_pm4_queue_reserve_frontiers(
+    iree_hal_queue_t* base, uint32_t queue_count,
+    iree_notification_t* notification) {
+  iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
+  iree_hal_amd_gpu_pm4_frontier_request_t request = {
+      .entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_FRONTIERS,
+      .request = {.queue_count = queue_count, .notification = notification},
+  };
+  iree_hal_amd_gpu_publication_enqueue(
+      queue->options.publication, queue->options.queue_ordinal,
+      &queue->publisher, &request.entry.publication);
+  return iree_hal_amd_gpu_frontier_request_await(&request.request);
+}
+
 void iree_hal_amd_gpu_pm4_queue_close(iree_hal_queue_t* base) {
   iree_atomic_store(&((iree_hal_amd_gpu_pm4_queue_t*)base)->closed, 1,
                     iree_memory_order_release);
@@ -2409,6 +2467,11 @@ static void iree_hal_amd_gpu_pm4_queue_destroy(iree_hal_queue_t* base) {
   iree_async_semaphore_wait_context_deinitialize(&queue->wait_context);
   iree_hal_amd_gpu_capture_pool_deinitialize(&queue->captures);
   iree_hal_amd_gpu_pm4_clear_frontier(queue);
+  uint64_t* frontier = iree_min(queue->producer.frontier.published,
+                                queue->producer.frontier.scratch);
+  if (frontier != (void*)(queue->issued + queue->options.retirement_capacity)) {
+    iree_allocator_free(queue->host_allocator, frontier);
+  }
   iree_allocator_free_aligned(queue->host_allocator, queue);
 }
 
@@ -2495,7 +2558,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
                             minimum_capture_size);
   }
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_pm4_queue_t);
-  const uint32_t queue_count = family->spec->provisioned_queue_count;
+  const uint32_t queue_count = options->queue_count;
   if (!iree_host_size_checked_mul_add(
           total_size, options->retirement_capacity,
           sizeof(iree_hal_amd_gpu_pm4_retirement_slot_t), &total_size) ||

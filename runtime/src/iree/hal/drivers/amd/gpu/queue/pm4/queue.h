@@ -31,6 +31,8 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   uint32_t family_ordinal;
   // Stable ordinal in the parent's provisioned queue array.
   uint32_t queue_ordinal;
+  // Installed native coordinate extent, including previously used slots.
+  uint32_t queue_count;
   // Device-owned native cells and return wake target, live beyond this queue.
   iree_hal_amd_gpu_signal_cache_t* signals;
   // One admitted USER or KERNEL publication mode.
@@ -123,6 +125,14 @@ void iree_hal_amd_gpu_pm4_queue_notify_failure(iree_hal_queue_t* queue);
 // complete inline; live readers keep their storage. This never waits for native
 // execution or backing release. The parent remains live through publication.
 void iree_hal_amd_gpu_pm4_queue_trim(iree_hal_queue_t* queue);
+
+// Extends host dependency metadata under exact publication ownership. The cold
+// caller waits only for this typed metadata operation; native work and backing
+// acquisition can remain outstanding. notification belongs to the device and
+// stays live through callback tails. Failure leaves existing queues usable.
+iree_status_t iree_hal_amd_gpu_pm4_queue_reserve_frontiers(
+    iree_hal_queue_t* queue, uint32_t queue_count,
+    iree_notification_t* notification);
 
 // Rejects subsequent public submissions after the parent has joined external
 // API callers. Already accepted work retains its normal dependency semantics.

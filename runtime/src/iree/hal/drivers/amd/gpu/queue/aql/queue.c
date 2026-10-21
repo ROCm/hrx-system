@@ -181,6 +181,14 @@ struct iree_hal_amd_gpu_aql_queue_t {
   iree_hal_amd_gpu_aql_retirement_t* issued;
 };
 
+// Stack-owned cold request; the queue only borrows it until completion.
+typedef struct iree_hal_amd_gpu_aql_frontier_request_t {
+  // Exact protocol tag and publication link.
+  iree_hal_amd_gpu_aql_entry_t entry;
+  // Device-owned notification and caller-owned result.
+  iree_hal_amd_gpu_frontier_request_t request;
+} iree_hal_amd_gpu_aql_frontier_request_t;
+
 static const iree_hal_queue_vtable_t iree_hal_amd_gpu_aql_queue_vtable;
 
 static iree_status_code_t iree_hal_amd_gpu_aql_feedback_failure(
@@ -1431,6 +1439,30 @@ static void iree_hal_amd_gpu_aql_trim_storage(
   iree_hal_amd_gpu_capture_pool_trim(&queue->captures);
 }
 
+static iree_status_t iree_hal_amd_gpu_aql_expand_frontiers(
+    iree_hal_amd_gpu_aql_queue_t* queue, uint32_t queue_count) {
+  if (queue_count > queue->producer.queue_count) {
+    uint64_t* frontier = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_malloc_array(queue->host_allocator, queue_count,
+                                    2 * sizeof(uint64_t), (void**)&frontier));
+    memcpy(frontier, queue->producer.frontier,
+           queue->producer.queue_count * sizeof(uint64_t));
+    uint64_t* previous = queue->producer.frontier;
+    queue->producer.frontier = frontier;
+    queue->producer.queue_count = queue_count;
+    if (previous !=
+        (void*)(queue->issued + queue->options.retirement_capacity)) {
+      iree_allocator_free(queue->host_allocator, previous);
+    }
+  }
+  queue->growth.queue_count = queue->producer.queue_count;
+  // Wider publisher state remains valid after partial table growth failure.
+  // No work can use the new coordinate until every peer has installed it.
+  return iree_hal_amd_gpu_signal_cache_reserve_frontiers(
+      queue->options.signals, queue->growth.queue_count, queue->host_allocator);
+}
+
 static void iree_hal_amd_gpu_aql_process_entry(
     iree_hal_amd_gpu_aql_queue_t* queue,
     iree_hal_amd_gpu_publication_entry_t* entry) {
@@ -1503,6 +1535,14 @@ static void iree_hal_amd_gpu_aql_process_entry(
       if (!iree_status_is_ok(status)) {
         iree_hal_amd_gpu_aql_fail_queue(queue, status);
       }
+      break;
+    }
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_FRONTIERS: {
+      iree_hal_amd_gpu_aql_frontier_request_t* request = iree_containerof(
+          typed, iree_hal_amd_gpu_aql_frontier_request_t, entry);
+      iree_status_t status = iree_hal_amd_gpu_aql_expand_frontiers(
+          queue, request->request.queue_count);
+      iree_hal_amd_gpu_frontier_request_complete(&request->request, status);
       break;
     }
     case IREE_HAL_AMD_GPU_AQL_ENTRY_TRIM:
@@ -1897,6 +1937,20 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_dispatch(
       queue->profile ? &operation : NULL);
 }
 
+iree_status_t iree_hal_amd_gpu_aql_queue_reserve_frontiers(
+    iree_hal_queue_t* base, uint32_t queue_count,
+    iree_notification_t* notification) {
+  iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
+  iree_hal_amd_gpu_aql_frontier_request_t request = {
+      .entry.kind = IREE_HAL_AMD_GPU_AQL_ENTRY_FRONTIERS,
+      .request = {.queue_count = queue_count, .notification = notification},
+  };
+  iree_hal_amd_gpu_publication_enqueue(
+      queue->options.publication, queue->options.queue_ordinal,
+      &queue->publisher, &request.entry.publication);
+  return iree_hal_amd_gpu_frontier_request_await(&request.request);
+}
+
 void iree_hal_amd_gpu_aql_queue_close(iree_hal_queue_t* base) {
   iree_atomic_store(&((iree_hal_amd_gpu_aql_queue_t*)base)->closed, 1,
                     iree_memory_order_release);
@@ -2026,6 +2080,10 @@ static void iree_hal_amd_gpu_aql_queue_destroy(iree_hal_queue_t* base) {
   iree_async_semaphore_wait_context_deinitialize(&queue->wait_context);
   iree_hal_amd_gpu_capture_pool_deinitialize(&queue->captures);
   iree_hal_amd_gpu_aql_clear_frontier(queue);
+  uint64_t* frontier = queue->producer.frontier;
+  if (frontier != (void*)(queue->issued + queue->options.retirement_capacity)) {
+    iree_allocator_free(queue->host_allocator, frontier);
+  }
   iree_allocator_free_aligned(queue->host_allocator, queue);
 }
 
@@ -2405,7 +2463,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
                             "AQL capture block cannot hold wait ownership");
   }
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_aql_queue_t);
-  const uint32_t queue_count = family->spec->provisioned_queue_count;
+  const uint32_t queue_count = options->queue_count;
   if (!iree_host_size_checked_mul_add(total_size, options->retirement_capacity,
                                       sizeof(iree_hal_amd_gpu_aql_retirement_t),
                                       &total_size) ||

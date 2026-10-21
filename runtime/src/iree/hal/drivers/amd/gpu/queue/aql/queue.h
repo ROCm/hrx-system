@@ -27,6 +27,8 @@ typedef struct iree_hal_amd_gpu_aql_queue_options_t {
   uint32_t family_ordinal;
   // Source index in the device's immutable queue array.
   uint32_t queue_ordinal;
+  // Installed native coordinate extent, including previously used slots.
+  uint32_t queue_count;
   // Device-owned native cells and return wake target, live beyond this queue.
   iree_hal_amd_gpu_signal_cache_t* signals;
   // Power-of-two native packet storage extent in bytes.
@@ -107,6 +109,14 @@ void iree_hal_amd_gpu_aql_queue_trim(iree_hal_queue_t* queue);
 // binding. Native release is asynchronous; acquisition may resume after
 // publication handoff. Failure is terminal and preserves unproven backing.
 amdf_status_t iree_hal_amd_gpu_aql_queue_trim_scratch(iree_hal_queue_t* queue);
+
+// Extends host dependency metadata under exact publication ownership. The cold
+// caller waits only for this typed metadata operation; native work and backing
+// acquisition can remain outstanding. notification belongs to the device and
+// stays live through callback tails. Failure leaves existing queues usable.
+iree_status_t iree_hal_amd_gpu_aql_queue_reserve_frontiers(
+    iree_hal_queue_t* queue, uint32_t queue_count,
+    iree_notification_t* notification);
 
 // Closes public acceptance; accepted dependencies keep their normal meaning.
 void iree_hal_amd_gpu_aql_queue_close(iree_hal_queue_t* queue);

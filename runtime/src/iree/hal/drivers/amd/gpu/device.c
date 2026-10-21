@@ -1066,6 +1066,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     device->scratch.memory.host_access = 0;
   }
   iree_hal_amd_gpu_pm4_queue_options_t queue_options = {
+      .queue_count = options->queue_count,
       .family_ordinal = family_ordinal,
       .publication_mode = publication_mode,
       .command_byte_capacity = options->queue.ring_byte_length,
@@ -1100,6 +1101,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     queue_options.signals = &device->signals.values[i];
     if (aql) {
       const iree_hal_amd_gpu_aql_queue_options_t aql_options = {
+          .queue_count = options->queue_count,
           .family_ordinal = family_ordinal,
           .queue_ordinal = i,
           .signals = queue_options.signals,

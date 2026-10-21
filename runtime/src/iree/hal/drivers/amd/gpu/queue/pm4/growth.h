@@ -40,7 +40,7 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   iree_hal_amd_gpu_publication_t* publication;
   // Exact source index in publication, also the native queue ordinal.
   uint32_t queue_ordinal;
-  // Immutable width of native signal frontiers.
+  // Installed native frontier width, updated only by the exact publisher.
   uint32_t queue_count;
   // Number of cells in each acquired signal generation.
   uint32_t signal_capacity;

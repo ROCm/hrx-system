@@ -32,7 +32,7 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
   iree_hal_amd_gpu_publication_t* publication;
   // Queue's provisioned service source index.
   uint32_t queue_ordinal;
-  // Immutable native-domain frontier width.
+  // Installed native frontier width, updated only by the exact publisher.
   uint32_t queue_count;
   // Number of native descriptors in each acquired block.
   uint32_t signal_capacity;

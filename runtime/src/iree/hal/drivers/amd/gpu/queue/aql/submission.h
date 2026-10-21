@@ -61,6 +61,7 @@ typedef enum iree_hal_amd_gpu_aql_entry_kind_e {
   IREE_HAL_AMD_GPU_AQL_ENTRY_CAPACITY,
   IREE_HAL_AMD_GPU_AQL_ENTRY_SCRATCH,
   IREE_HAL_AMD_GPU_AQL_ENTRY_TRIM,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_FRONTIERS,
 } iree_hal_amd_gpu_aql_entry_kind_t;
 
 typedef struct iree_hal_amd_gpu_aql_entry_t {

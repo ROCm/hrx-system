@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_BACKING_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_BACKING_H_
 
+#include "iree/base/threading/notification.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
@@ -84,6 +85,34 @@ typedef struct iree_hal_amd_gpu_signal_cache_t {
 void iree_hal_amd_gpu_signal_cache_initialize(
     iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal,
     iree_hal_amd_gpu_signal_cache_t* out_cache);
+
+// Expands every attached block under exclusive publication ownership. The
+// publisher vector must already cover queue_count; a partial failure can leave
+// wider zero-filled tables while the cold owner rejects the new queue. Native
+// addresses and retained readers are unchanged.
+iree_status_t iree_hal_amd_gpu_signal_cache_reserve_frontiers(
+    iree_hal_amd_gpu_signal_cache_t* cache, uint32_t queue_count,
+    iree_allocator_t host_allocator);
+
+// Cold queue-membership request embedded in a protocol's typed FIFO entry.
+// The caller owns this stack storage through await. Its notification belongs
+// to the device and outlives the callback tail after completed is published.
+typedef struct iree_hal_amd_gpu_frontier_request_t {
+  // Requested native coordinate extent; never shrinks installed metadata.
+  uint32_t queue_count;
+  // Borrowed device-owned notification, shared by serialized cold requests.
+  iree_notification_t* notification;
+  // Set after status and all metadata writes; the callback then stops using
+  // this request and only posts the captured device notification.
+  iree_atomic_int32_t completed;
+  // Owned allocation result transferred to the awaiting cold caller.
+  iree_status_t status;
+} iree_hal_amd_gpu_frontier_request_t;
+
+void iree_hal_amd_gpu_frontier_request_complete(
+    iree_hal_amd_gpu_frontier_request_t* request, iree_status_t status);
+iree_status_t iree_hal_amd_gpu_frontier_request_await(
+    iree_hal_amd_gpu_frontier_request_t* request);
 
 // Consumes an actual capacity-return hint before reserving publication. An
 // enrolled but still empty cache does not request another worker turn.
