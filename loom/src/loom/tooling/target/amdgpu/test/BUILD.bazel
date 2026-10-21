@@ -30,10 +30,10 @@ load(
     "AMDGPU_HARDWARE_PROFILE",
     "AMDGPU_TSAN_CAPACITY_PROFILE",
     "AMDGPU_TSAN_PROFILE",
-    "RDNA_ASAN_PROFILE",
-    "RDNA_HARDWARE_PROFILE",
-    "RDNA_TSAN_CAPACITY_PROFILE",
-    "RDNA_TSAN_PROFILE",
+    "AMD_GPU_ASAN_PROFILE",
+    "AMD_GPU_HARDWARE_PROFILE",
+    "AMD_GPU_TSAN_CAPACITY_PROFILE",
+    "AMD_GPU_TSAN_PROFILE",
 )
 
 package(
@@ -215,12 +215,12 @@ loom_test(
 )
 
 loom_test(
-    name = "rdna_hal_tests",
+    name = "amd_gpu_hal_tests",
     srcs = [
         "amdgpu_hal_actual.loom",
         "generated_tensor_cases.loom",
     ],
-    execution_profiles = [RDNA_HARDWARE_PROFILE],
+    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
 )
 
 loom_test(
@@ -320,7 +320,7 @@ loom_test(
     configs = {"asan_launch_bound.tile_capacity": "1"},
     execution_profiles = [
         AMDGPU_ASAN_PROFILE,
-        RDNA_ASAN_PROFILE,
+        AMD_GPU_ASAN_PROFILE,
     ],
 )
 
@@ -330,7 +330,7 @@ loom_test(
     # Authored assertions must provision feedback without insertion options.
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
-        RDNA_HARDWARE_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
     ],
 )
 
@@ -410,7 +410,7 @@ loom_test(
     srcs = ["//loom/src/loom/test/corpus/sanitizer:race_workgroup.loom"],
     execution_profiles = [
         AMDGPU_TSAN_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
 )
 
@@ -419,7 +419,7 @@ loom_test(
     srcs = ["//loom/src/loom/test/corpus/kernel:workgroup/publication.loom"],
     execution_profiles = [
         AMDGPU_TSAN_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
 )
 
@@ -428,7 +428,7 @@ loom_test(
     srcs = ["//loom/src/loom/tooling/target/amdgpu/test/corpus:gfx11/fragment_repack_bf16.loom"],
     execution_profiles = [
         AMDGPU_TSAN_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
     target_compatible_with = _GFX11_EXECUTION_COMPATIBLE_WITH,
 )
@@ -439,7 +439,7 @@ loom_test(
     compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
     execution_profiles = [
         AMDGPU_TSAN_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
 )
 
@@ -448,7 +448,7 @@ loom_test(
     srcs = ["//loom/src/loom/test/corpus/sanitizer:race_capacity.loom"],
     execution_profiles = [
         AMDGPU_TSAN_CAPACITY_PROFILE,
-        RDNA_TSAN_CAPACITY_PROFILE,
+        AMD_GPU_TSAN_CAPACITY_PROFILE,
     ],
 )
 

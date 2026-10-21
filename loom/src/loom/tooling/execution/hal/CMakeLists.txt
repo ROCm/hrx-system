@@ -100,11 +100,11 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
-    hardware_test_execute_rdna_hardware_test
+    hardware_test_execute_amd_gpu_hardware_test
   MODULE
     "::hardware_test_module"
   RUNNER_ARGS
-    "--device=rdna"
+    "--device=amdgpu2"
   LABELS
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
@@ -114,7 +114,7 @@ loom_execution_test(
     "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.amd_gpu"
     "runtime-resource=amd-gpu"
-    "loom-execution-profile=rdna_hardware"
+    "loom-execution-profile=amd_gpu_hardware"
     "loom-target-family=amdgpu"
     "loom-target-class=gpu"
     "loom-executor=hardware"
@@ -182,11 +182,11 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
-    scenario_compare_test_execute_rdna_hardware_test
+    scenario_compare_test_execute_amd_gpu_hardware_test
   MODULE
     "::scenario_compare_test_module"
   RUNNER_ARGS
-    "--device=rdna"
+    "--device=amdgpu2"
   LABELS
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
@@ -196,7 +196,7 @@ loom_execution_test(
     "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.amd_gpu"
     "runtime-resource=amd-gpu"
-    "loom-execution-profile=rdna_hardware"
+    "loom-execution-profile=amd_gpu_hardware"
     "loom-target-family=amdgpu"
     "loom-target-class=gpu"
     "loom-executor=hardware"

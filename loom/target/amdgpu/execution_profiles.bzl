@@ -57,7 +57,7 @@ AMDGPU_HARDWARE_PROFILE = amdgpu_execution_profile(
     name = "amdgpu_hardware",
 )
 
-def rdna_execution_profile(name, runner_args = [], tags = [], device = "rdna"):
+def amd_gpu_execution_profile(name, runner_args = [], tags = [], device = "amdgpu2"):
     """Defines native AMD GPU execution with libamdf hardware requirements."""
     return loom_execution_profile(
         name = name,
@@ -78,23 +78,23 @@ def rdna_execution_profile(name, runner_args = [], tags = [], device = "rdna"):
         target_family = "amdgpu",
     )
 
-RDNA_HARDWARE_PROFILE = rdna_execution_profile(name = "rdna_hardware")
+AMD_GPU_HARDWARE_PROFILE = amd_gpu_execution_profile(name = "amd_gpu_hardware")
 
-RDNA_ASAN_PROFILE = rdna_execution_profile(
-    name = "rdna_asan",
+AMD_GPU_ASAN_PROFILE = amd_gpu_execution_profile(
+    name = "amd_gpu_asan",
     runner_args = ["--sanitizer=asan", "--sanitizer-reporting=report-only"],
     tags = ["notsan"],
 )
 
-RDNA_TSAN_PROFILE = rdna_execution_profile(
-    name = "rdna_tsan",
-    device = "rdna://?tsan_report_policy=report-only",
+AMD_GPU_TSAN_PROFILE = amd_gpu_execution_profile(
+    name = "amd_gpu_tsan",
+    device = "amdgpu2://?tsan_report_policy=report-only",
     runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )
 
-RDNA_TSAN_CAPACITY_PROFILE = rdna_execution_profile(
-    name = "rdna_tsan_capacity",
-    device = "rdna://?tsan_report_policy=report-only&tsan_shadow_size=1440",
+AMD_GPU_TSAN_CAPACITY_PROFILE = amd_gpu_execution_profile(
+    name = "amd_gpu_tsan_capacity",
+    device = "amdgpu2://?tsan_report_policy=report-only&tsan_shadow_size=1440",
     runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )
 
