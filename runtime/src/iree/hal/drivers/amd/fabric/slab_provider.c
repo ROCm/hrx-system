@@ -153,6 +153,7 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
   iree_host_size_t total_size = 0;
   iree_host_size_t accesses_offset = 0;
   iree_host_size_t import_accesses_offset = 0;
+  iree_host_size_t atomic_accesses_offset = 0;
   iree_host_size_t bindings_offset = 0;
   iree_host_size_t io_proactors_offset = 0;
   iree_host_size_t io_binding_count = 0;
@@ -181,6 +182,9 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
           options->import_accesses ? options->memory.access_count : 0,
           amdf_memory_device_access_t,
           iree_alignof(amdf_memory_device_access_t), &import_accesses_offset),
+      IREE_STRUCT_FIELD(options->memory.atomic_access_count,
+                        iree_hal_amd_fabric_memory_atomic_access_t,
+                        &atomic_accesses_offset),
       IREE_STRUCT_FIELD_ALIGNED(
           options->binding_count, iree_hal_amd_fabric_binding_request_t,
           iree_alignof(iree_hal_amd_fabric_binding_request_t),
@@ -213,6 +217,13 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
            options->memory.access_count * sizeof(*accesses));
   }
   provider->options.memory.accesses = accesses;
+  iree_hal_amd_fabric_memory_atomic_access_t* atomic_accesses =
+      (void*)((uint8_t*)provider + atomic_accesses_offset);
+  if (options->memory.atomic_access_count) {
+    memcpy(atomic_accesses, options->memory.atomic_accesses,
+           options->memory.atomic_access_count * sizeof(*atomic_accesses));
+  }
+  provider->options.memory.atomic_accesses = atomic_accesses;
   if (options->import_accesses) {
     amdf_memory_device_access_t* import_accesses =
         (void*)((uint8_t*)provider + import_accesses_offset);

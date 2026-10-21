@@ -82,6 +82,16 @@ typedef struct iree_hal_amd_fabric_mapping_source_t {
   const iree_hal_amd_fabric_io_binding_table_t* io_bindings;
 } iree_hal_amd_fabric_mapping_source_t;
 
+// One queue site's immutable promise, checked before an attachment is exposed.
+typedef struct iree_hal_amd_fabric_memory_atomic_access_t {
+  // Index in the native device access array.
+  uint32_t access_ordinal;
+  // Native queue family supplying the promised atomic operations.
+  uint32_t queue_family_ordinal;
+  // Qualified backing operations and reach after execution-site filtering.
+  iree_hal_atomic_operation_capabilities_t operations;
+} iree_hal_amd_fabric_memory_atomic_access_t;
+
 // Qualified construction facts copied by a provider. Accesses and scope are
 // borrowed; native construction establishes all accesses before publication.
 typedef struct iree_hal_amd_fabric_memory_options_t {
@@ -99,6 +109,12 @@ typedef struct iree_hal_amd_fabric_memory_options_t {
   amdf_memory_flags_t required_flags;
   // Persistent host access, or zero to omit the mapping entirely.
   amdf_memory_map_flags_t host_access;
+  // The persistent CPU view must permit ordinary CPU atomic accesses.
+  bool host_atomic_access;
+  // Number of exact queue sites requiring atomic attachment admission.
+  uint32_t atomic_access_count;
+  // Borrowed immutable promises, live through allocation/import preparation.
+  const iree_hal_amd_fabric_memory_atomic_access_t* atomic_accesses;
   // Qualified exports; class storage outlives the native memory owner.
   iree_hal_pool_export_classes_t exports;
   // Owned allocation prepares detached I/O pins against its persistent host
@@ -110,6 +126,13 @@ typedef struct iree_hal_amd_fabric_memory_options_t {
     iree_async_proactor_t* const* proactors;
   } io;
 } iree_hal_amd_fabric_memory_options_t;
+
+// Converts independent native operation and reach facts. Unknown operation bits
+// confer no HAL support; narrower reach never establishes system scope.
+iree_hal_atomic_operation_capabilities_t
+iree_hal_amd_fabric_memory_translate_atomics(
+    amdf_atomic_operations_t operations_32,
+    amdf_atomic_operations_t operations_64, amdf_atomic_reach_t reach);
 
 // Maps transport vocabulary only. NONE means libamdf has no representation;
 // native profile qualification establishes actual support and provenance.

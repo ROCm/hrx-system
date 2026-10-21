@@ -77,6 +77,8 @@ struct FakeNative {
     api.memory_scope_query_pair_info = MemoryScopeQueryPairInfo;
     api.memory_create = MemoryCreate;
     api.memory_query_info = MemoryQueryInfo;
+    api.memory_query_access_info = MemoryQueryAccessInfo;
+    api.memory_query_pair_info = MemoryQueryPairInfo;
     api.memory_destroy = MemoryDestroy;
     api.memory_query_address = MemoryQueryAddress;
     api.memory_map = MemoryMap;
@@ -120,6 +122,7 @@ struct FakeNative {
         EXPECT_EQ(
             accesses[i].requirements.flags,
             AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                self->access_flags[device->ordinal] |
                 (self->mapping_enabled ? AMDF_MEMORY_FLAG_MAPPING_SOURCE : 0));
       } else {
         // A private allocation owner does not request an execution binding.
@@ -175,8 +178,14 @@ struct FakeNative {
       out_capabilities[i].guaranteed_flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
       out_capabilities[i].supported_flags =
           AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+          self->access_flags[device->ordinal] |
           (self->mapping_enabled ? AMDF_MEMORY_FLAG_MAPPING_SOURCE : 0);
       out_capabilities[i].address_kinds = self->address_kinds[device->ordinal];
+      const auto& atomics = profile_ordinal == 1 && self->registration_enabled
+                                ? self->registration_atomics[device->ordinal]
+                                : self->atomics[device->ordinal];
+      out_capabilities[i].atomic_operations_32 = atomics[0];
+      out_capabilities[i].atomic_operations_64 = atomics[1];
     }
     ++self->profile_query_count;
     out_profile->ordinal = profile_ordinal;
@@ -295,6 +304,14 @@ struct FakeNative {
     }
 
     out_info->flags = AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE;
+    if (query->producer.kind == AMDF_MEMORY_SITE_KIND_DEVICE &&
+        query->consumer.kind == AMDF_MEMORY_SITE_KIND_DEVICE &&
+        query->producer.value.device.access_ordinal ==
+            query->consumer.value.device.access_ordinal) {
+      const auto* device = reinterpret_cast<const Device*>(
+          query->accesses[query->producer.value.device.access_ordinal].device);
+      out_info->atomic_reach = self->atomic_reach[device->ordinal];
+    }
     out_info->release.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
     out_info->acquire.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
     if (self->host_coherent && !registered &&
@@ -475,6 +492,39 @@ struct FakeNative {
     if (!memory->registered) {
       out_info->physical_backing_id = {{0xA, memory->identity}};
     }
+    return AMDF_STATUS_OK;
+  }
+
+  static amdf_status_t AMDF_CALL
+  MemoryQueryAccessInfo(amdf_memory_t* handle, uint32_t access_ordinal,
+                        amdf_memory_access_info_t* out_info) {
+    auto* memory = reinterpret_cast<Memory*>(handle);
+    const auto* device = reinterpret_cast<const Device*>(
+        memory->accesses[access_ordinal].device);
+    const auto& operations =
+        memory->registered
+            ? memory->owner->registration_atomics[device->ordinal]
+            : memory->owner->atomics[device->ordinal];
+    if (memory->owner->attachment_atomics_supported) {
+      out_info->atomic_operations_32 = operations[0];
+      out_info->atomic_operations_64 = operations[1];
+    }
+    return AMDF_STATUS_OK;
+  }
+
+  static amdf_status_t AMDF_CALL MemoryQueryPairInfo(
+      const amdf_memory_site_t* producer, const amdf_memory_site_t* consumer,
+      amdf_memory_pair_info_t* out_info) {
+    EXPECT_EQ(producer->kind, AMDF_MEMORY_SITE_KIND_DEVICE);
+    EXPECT_EQ(consumer->kind, AMDF_MEMORY_SITE_KIND_DEVICE);
+    EXPECT_EQ(producer->value.device.memory, consumer->value.device.memory);
+    const auto* memory =
+        reinterpret_cast<const Memory*>(producer->value.device.memory);
+    const auto* device = reinterpret_cast<const Device*>(
+        memory->accesses[producer->value.device.access_ordinal].device);
+    EXPECT_EQ(producer->value.device.queue_family_ordinal,
+              memory->owner->queue_family_ordinals[device->ordinal]);
+    out_info->atomic_reach = memory->owner->atomic_reach[device->ordinal];
     return AMDF_STATUS_OK;
   }
 
@@ -726,6 +776,17 @@ struct FakeNative {
   amdf_api_t api = {};
   // Canonical native device order expected in every joint query.
   std::array<amdf_device_t*, 2> devices = {};
+  // Extra native access flags required by each consumer's requested contract.
+  std::array<amdf_memory_flags_t, 2> access_flags = {};
+  // Owned backing operation masks indexed by device and 32/64-bit width.
+  std::array<std::array<amdf_atomic_operations_t, 2>, 2> atomics = {};
+  // Registered backing operation masks in the same native device order.
+  std::array<std::array<amdf_atomic_operations_t, 2>, 2> registration_atomics =
+      {};
+  // Exact self-site reach, independent of operation encoding support.
+  std::array<amdf_atomic_reach_t, 2> atomic_reach = {};
+  // Actual attachment support may be weaker than its prospective profile.
+  bool attachment_atomics_supported = true;
   // Exact native family ordinal for each canonical device.
   std::array<uint32_t, 2> queue_family_ordinals = {11, 22};
   // Exact interface required by each engine for the shared backing.
@@ -790,8 +851,54 @@ class MemoryBackendTest : public ::testing::Test {
       options.identifier = i == 0 ? IREE_SV("xdna-a") : IREE_SV("xdna-b");
       options.executable_loading_enabled = true;
       options.memory_backend = &backends_[i].base;
+      const iree_hal_physical_device_spec_t physical = {
+          .partition_count = 1,
+          .physical_device_affinity = 1,
+      };
+      const iree_hal_device_identity_spec_t identity = {
+          .logical_device_id = options.identifier,
+          .physical_device_count = 1,
+          .physical_devices = &physical,
+      };
+      const iree_hal_queue_priority_t priority = IREE_HAL_QUEUE_PRIORITY_NORMAL;
+      const iree_hal_atomic_wait_condition_flags_t conditions =
+          i == 0 ? IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL : 0;
+      const iree_hal_queue_family_spec_t family = {
+          .name = IREE_SV("compute"),
+          .priority_count = 1,
+          .priorities = &priority,
+          .physical_device_affinity = 1,
+          .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                        IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+                        (i == 0 ? IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC : 0u),
+          .atomic_capabilities =
+              {
+                  .operations =
+                      i == 0 ? iree_hal_atomic_operation_capabilities_for_host(
+                                   IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL)
+                             : iree_hal_atomic_operation_capabilities_t{},
+                  .wait_conditions =
+                      {
+                          .device_scope_32 = conditions,
+                          .device_scope_64 = conditions,
+                          .system_scope_32 = conditions,
+                          .system_scope_64 = conditions,
+                      },
+              },
+      };
+      const iree_hal_device_queue_spec_t queues = {
+          .family_count = 1,
+          .families = &family,
+      };
+      const iree_hal_device_spec_params_t spec_params = {
+          .identity = &identity,
+          .queues = &queues,
+      };
+      IREE_ASSERT_OK(iree_hal_device_spec_create(&spec_params, allocator_,
+                                                 &options.device_spec));
       IREE_ASSERT_OK(
           iree_hal_mock_device_create(&options, allocator_, &devices_[i]));
+      iree_hal_device_spec_release(options.device_spec);
       binding_descriptions_[i] = {IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
                                   AMDF_MEMORY_ADDRESS_XDNA_DMA};
       native_families_[i].queue_family_ordinal =

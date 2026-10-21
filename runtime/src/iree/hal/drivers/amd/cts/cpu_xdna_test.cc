@@ -185,6 +185,8 @@ class CpuXdnaNativeTest : public ::testing::TestWithParam<CpuHandoffMode> {
     families[0].usage =
         IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
     families[0].interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_HOST;
+    families[0].atomics.queue.system_scope_32 =
+        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
     families[1].family = iree_hal_queue_family(queue_);
     families[1].usage = families[0].usage;
     families[1].interfaces = UINT64_C(1)
@@ -385,6 +387,12 @@ TEST_P(CpuXdnaNativeTest, CpuNpuCpuKernelsShareOneBacking) {
   ASSERT_NO_FATAL_FAILURE(CreateSharedPool(public_mapping
                                                ? IREE_HAL_MEMORY_ACCESS_READ
                                                : IREE_HAL_MEMORY_ACCESS_NONE));
+  EXPECT_TRUE(iree_all_bits_set(iree_hal_pool_query_atomic_operations(
+                                    memory_pool_, QueueScope(cpu_queue_))
+                                    .system_scope_32,
+                                IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD));
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_pool_query_atomic_operations(memory_pool_, QueueScope(queue_))));
   ASSERT_NO_FATAL_FAILURE(LoadMultiply());
   iree_hal_semaphore_t *start = nullptr, *progress = nullptr;
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&start));
@@ -450,9 +458,9 @@ TEST_P(CpuXdnaNativeTest, CpuNpuCpuKernelsShareOneBacking) {
   uint64_t previous = allocated;
   for (uint32_t replay = 0; replay < 3; ++replay) {
     SCOPED_TRACE(replay);
-    uint64_t initialized = previous + 1, produced = previous + 2,
-             computed = previous + 3, consumed = previous + 4,
-             downloaded = previous + 5;
+    uint64_t initialized = previous + 1, updated = previous + 2,
+             produced = previous + 3, computed = previous + 4,
+             consumed = previous + 5, downloaded = previous + 6;
     std::array<uint32_t, 80> initial;
     initial.fill(0xA5A5A5A5u);
     for (size_t i = 0; i < 16; ++i) {
@@ -491,18 +499,27 @@ TEST_P(CpuXdnaNativeTest, CpuNpuCpuKernelsShareOneBacking) {
         IREE_HAL_DISPATCH_FLAG_NONE));
     if (producer) {
       IREE_ASSERT_OK(iree_hal_queue_execute(
-          cpu_queue_, {1, &progress, &initialized}, {1, &progress, &produced},
+          cpu_queue_, {1, &progress, &updated}, {1, &progress, &produced},
           producer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     } else {
       const uint32_t addend = 7;
       IREE_ASSERT_OK(iree_hal_queue_dispatch(
-          cpu_queue_, {1, &progress, &initialized}, {1, &progress, &produced},
+          cpu_queue_, {1, &progress, &updated}, {1, &progress, &produced},
           cpu_executable_, iree_hal_executable_function_from_index(0),
           iree_hal_make_static_dispatch_config(16, 1, 1),
           iree_make_const_byte_span(&addend, sizeof(addend)),
           {1, &npu_bindings[0]},
           /*barriers=*/nullptr, IREE_HAL_DISPATCH_FLAG_NONE));
     }
+    const iree_hal_atomic_rmw_params_t atomic_update = {
+        .operand = 5,
+        .flags = IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+        .width = IREE_HAL_ATOMIC_WIDTH_32,
+        .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+    };
+    IREE_ASSERT_OK(iree_hal_queue_atomic_rmw(
+        cpu_queue_, {1, &progress, &initialized}, {1, &progress, &updated},
+        root, kBytes, atomic_update, &no_payload_barriers));
     iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
     };
@@ -519,11 +536,11 @@ TEST_P(CpuXdnaNativeTest, CpuNpuCpuKernelsShareOneBacking) {
                                            iree_infinite_timeout(),
                                            IREE_ASYNC_WAIT_FLAG_NONE));
     for (size_t i = 0; i < 16; ++i) {
+      const uint32_t input = initial[16 + i] + (i == 0 ? 5 : 0) + 7;
       EXPECT_EQ(result[i], initial[i]) << i;
-      EXPECT_EQ(result[16 + i], initial[16 + i] + 7) << i;
+      EXPECT_EQ(result[16 + i], input) << i;
       EXPECT_EQ(result[32 + i], initial[32 + i]) << i;
-      EXPECT_EQ(result[48 + i], (initial[16 + i] + 7) * initial[32 + i] + 100)
-          << i;
+      EXPECT_EQ(result[48 + i], input * initial[32 + i] + 100) << i;
       EXPECT_EQ(result[64 + i], initial[64 + i]) << i;
     }
     if (public_mapping) {

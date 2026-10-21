@@ -10,6 +10,52 @@
 #include "iree/base/internal/math.h"
 #include "iree/hal/drivers/amd/status.h"
 
+static iree_hal_atomic_operation_flags_t
+iree_hal_amd_fabric_memory_translate_atomic_flags(
+    amdf_atomic_operations_t operations) {
+  return ((operations & AMDF_ATOMIC_OPERATION_WAIT)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT
+              : 0) |
+         ((operations & AMDF_ATOMIC_OPERATION_STORE)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_STORE
+              : 0) |
+         ((operations & AMDF_ATOMIC_OPERATION_ADD)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD
+              : 0) |
+         ((operations & AMDF_ATOMIC_OPERATION_SUBTRACT)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT
+              : 0) |
+         ((operations & AMDF_ATOMIC_OPERATION_AND)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_AND
+              : 0) |
+         ((operations & AMDF_ATOMIC_OPERATION_OR)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR
+              : 0) |
+         ((operations & AMDF_ATOMIC_OPERATION_XOR)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR
+              : 0);
+}
+
+iree_hal_atomic_operation_capabilities_t
+iree_hal_amd_fabric_memory_translate_atomics(
+    amdf_atomic_operations_t operations_32,
+    amdf_atomic_operations_t operations_64, amdf_atomic_reach_t reach) {
+  const iree_hal_atomic_operation_flags_t flags_32 =
+      iree_hal_amd_fabric_memory_translate_atomic_flags(operations_32);
+  const iree_hal_atomic_operation_flags_t flags_64 =
+      iree_hal_amd_fabric_memory_translate_atomic_flags(operations_64);
+  return (iree_hal_atomic_operation_capabilities_t){
+      .device_scope_32 =
+          reach.scope_32 >= AMDF_ATOMIC_SCOPE_DEVICE ? flags_32 : 0,
+      .device_scope_64 =
+          reach.scope_64 >= AMDF_ATOMIC_SCOPE_DEVICE ? flags_64 : 0,
+      .system_scope_32 =
+          reach.scope_32 == AMDF_ATOMIC_SCOPE_SYSTEM ? flags_32 : 0,
+      .system_scope_64 =
+          reach.scope_64 == AMDF_ATOMIC_SCOPE_SYSTEM ? flags_64 : 0,
+  };
+}
+
 amdf_external_memory_type_t iree_hal_amd_fabric_memory_external_type(
     iree_hal_external_storage_type_t type) {
   switch (type) {
@@ -164,6 +210,45 @@ amdf_memory_release_info_t iree_hal_amd_fabric_memory_deinitialize(
   return release_info;
 }
 
+static iree_status_t iree_hal_amd_fabric_memory_validate_atomic_access(
+    const amdf_api_t* api, amdf_memory_t* memory,
+    const iree_hal_amd_fabric_memory_atomic_access_t* required) {
+  amdf_memory_access_info_t access = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+      .structure_size = sizeof(access),
+  };
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      api->memory_query_access_info(memory, required->access_ordinal, &access),
+      "memory_query_access_info"));
+  const amdf_memory_site_t site = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(site),
+      .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
+      .value.device =
+          {
+              .memory = memory,
+              .access_ordinal = required->access_ordinal,
+              .queue_family_ordinal = required->queue_family_ordinal,
+          },
+  };
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      api->memory_query_pair_info(&site, &site, &pair),
+      "memory_query_pair_info"));
+  if (!iree_hal_atomic_operation_capabilities_support(
+          iree_hal_amd_fabric_memory_translate_atomics(
+              access.atomic_operations_32, access.atomic_operations_64,
+              pair.atomic_reach),
+          required->operations)) {
+    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
+                            "native attachment cannot supply pool atomics");
+  }
+  return iree_ok_status();
+}
+
 // Completes an attached owner before it can be published. All failures leave
 // cleanup with the constructing caller; external transport ownership is absent.
 static iree_status_t iree_hal_amd_fabric_memory_prepare(
@@ -198,6 +283,13 @@ static iree_status_t iree_hal_amd_fabric_memory_prepare(
   memory->exports = options->exports;
   memory->maintenance_range =
       iree_hal_make_buffer_range(0, memory->info.byte_length);
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0;
+       i < options->atomic_access_count && iree_status_is_ok(status); ++i) {
+    status = iree_hal_amd_fabric_memory_validate_atomic_access(
+        api, memory->handle, &options->atomic_accesses[i]);
+  }
+  IREE_RETURN_IF_ERROR(status);
   if (!options->host_access) {
     return iree_ok_status();
   }
@@ -229,6 +321,13 @@ static iree_status_t iree_hal_amd_fabric_memory_prepare(
       iree_make_byte_span(mapping_info.pointer, memory->info.byte_length);
   memory->host_access = map_info.flags;
   memory->host_features = mapping_info.features;
+  if (options->host_atomic_access &&
+      !iree_any_bit_set(mapping_info.features,
+                        AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
+                            "native host mapping cannot supply pool atomics");
+  }
   switch (mapping_info.cacheability) {
     case AMDF_HOST_CACHEABILITY_WRITE_BACK:
       memory->host_cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK;

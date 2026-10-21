@@ -1630,6 +1630,7 @@ TEST_F(MemoryBackendTest, CoherentCpuTransitionsHaveNoCacheRecipe) {
 }
 
 TEST_F(MemoryBackendTest, RejectsAtomicPromisesAbsentFromNativeBuffers) {
+  native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
   for (auto cell :
        {&iree_hal_atomic_operation_capabilities_t::device_scope_32,
         &iree_hal_atomic_operation_capabilities_t::device_scope_64,
@@ -1648,7 +1649,206 @@ TEST_F(MemoryBackendTest, RejectsAtomicPromisesAbsentFromNativeBuffers) {
       EXPECT_EQ(pool, nullptr);
     }
   }
-  EXPECT_EQ(native_.profile_query_count, 0);
+  EXPECT_GT(native_.profile_query_count, 0);
+}
+
+TEST_F(MemoryBackendTest, AtomicGuaranteesFollowSitesAndEveryBackingRoute) {
+  native_.registration_enabled = true;
+  native_.host_mapping_features |= AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS;
+  native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
+  native_.atomics[0] = {
+      AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+          AMDF_ATOMIC_OPERATION_ADD,
+      AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE};
+  native_.registration_atomics[0] = {
+      AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE,
+      AMDF_ATOMIC_OPERATION_STORE};
+  native_.atomic_reach[0] = {AMDF_ATOMIC_SCOPE_SYSTEM,
+                             AMDF_ATOMIC_SCOPE_SYSTEM};
+  const auto* cpu_family = iree_hal_device_queue_family(cpu_device_, 0);
+  const iree_hal_pool_family_access_t families[] = {
+      {
+          .family = families_[0],
+          .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+          .atomics =
+              {
+                  .queue =
+                      {
+                          .system_scope_32 =
+                              IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
+                          .system_scope_64 =
+                              IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+                      },
+              },
+      },
+      {
+          .family = families_[1],
+          .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      },
+      {
+          .family = cpu_family,
+          .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+          .atomics =
+              {
+                  .program =
+                      {
+                          .system_scope_32 =
+                              IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD,
+                      },
+              },
+      },
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = IREE_ARRAYSIZE(families),
+      .families = families,
+      .host =
+          {
+              .access = IREE_HAL_MEMORY_ACCESS_ALL,
+              .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+              .atomics =
+                  {
+                      .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+                  },
+          },
+  };
+  const iree_hal_pool_import_class_t import_class = {
+      .storage_class = iree_hal_make_external_storage_class(
+          IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER),
+  };
+  pool_options_.imports = {1, &import_class};
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options_,
+                                           allocator_, &pool));
+  const auto gpu = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
+  const auto npu = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[1]);
+  const auto program = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
+  const auto cpu = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, cpu_family);
+  const auto host = ResolveScope(IREE_HAL_MEMORY_SITE_HOST, nullptr);
+  const auto operations = iree_hal_pool_query_atomic_operations(pool, gpu);
+  EXPECT_EQ(operations.system_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+                IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_EQ(operations.system_scope_64, IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_pool_query_atomic_operations(pool, npu)));
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_pool_query_atomic_operations(pool, program)));
+  EXPECT_EQ(iree_hal_pool_query_atomic_operations(pool, cpu).system_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(iree_hal_pool_query_atomic_operations(pool, host).system_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_pool_query_atomic_operations(
+          pool, {gpu.domain, IREE_HAL_MEMORY_SCOPE_ANY})));
+
+  iree_hal_buffer_t* owned = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(256, 64),
+      iree_infinite_timeout(), &owned));
+  alignas(4096) uint8_t bytes[4096] = {};
+  const iree_hal_external_storage_t source = {
+      .storage_class = import_class.storage_class,
+      .payload = {.host_pointer = bytes},
+      .byte_length = sizeof(bytes),
+      .host_cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK,
+      .maintenance_range = {0, sizeof(bytes)},
+  };
+  auto storage = source;
+  iree_hal_buffer_t* imported = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_import_buffer(
+      pool, &storage, iree_hal_make_buffer_range(128, 256), &imported));
+  const int query_count = native_.pair_query_count;
+  for (auto* buffer : {owned, imported}) {
+    iree_hal_buffer_t* view = nullptr;
+    IREE_ASSERT_OK(iree_hal_buffer_subspan(buffer, 64, 64, allocator_, &view));
+    EXPECT_EQ(
+        iree_hal_buffer_query_atomic_operations(view, gpu).system_scope_64,
+        operations.system_scope_64);
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+        iree_hal_buffer_query_atomic_operations(view, npu)));
+    iree_hal_buffer_release(view);
+    iree_hal_buffer_release(buffer);
+  }
+  EXPECT_EQ(native_.pair_query_count, query_count);
+  native_.AwaitEmpty();
+  native_.attachment_atomics_supported = false;
+  storage = source;
+  imported = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_pool_import_buffer(
+          pool, &storage, iree_hal_make_buffer_range(0, 64), &imported));
+  EXPECT_EQ(imported, nullptr);
+  EXPECT_EQ(storage.payload.host_pointer, bytes);
+  native_.attachment_atomics_supported = true;
+  native_.host_mapping_features &= ~AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS;
+  storage = source;
+  const int map_count = native_.map_count;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_pool_import_buffer(
+          pool, &storage, iree_hal_make_buffer_range(0, 64), &imported));
+  EXPECT_EQ(imported, nullptr);
+  EXPECT_EQ(storage.payload.host_pointer, bytes);
+  EXPECT_EQ(native_.map_count, map_count + 1);
+  iree_hal_pool_release(pool);
+  native_.AwaitEmpty();
+}
+
+TEST_F(MemoryBackendTest, AtomicReachIsQualifiedIndependentlyForEachWidth) {
+  native_.required_flags = 0;
+  native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
+  native_.atomics[0] = {AMDF_ATOMIC_OPERATION_WAIT,
+                        AMDF_ATOMIC_OPERATION_STORE};
+  native_.atomic_reach[0] = {AMDF_ATOMIC_SCOPE_DEVICE,
+                             AMDF_ATOMIC_SCOPE_SYSTEM};
+  iree_hal_pool_t* pool = nullptr;
+  const iree_hal_atomic_operation_capabilities_t unsupported = {
+      .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
+                 IREE_HAL_MEMORY_ACCESS_NONE, 0, unsupported));
+  EXPECT_EQ(pool, nullptr);
+  const iree_hal_atomic_operation_capabilities_t supported = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+  };
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
+                            IREE_HAL_MEMORY_ACCESS_NONE, 0, supported));
+  const auto operations = iree_hal_pool_query_atomic_operations(
+      pool, ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]));
+  EXPECT_EQ(operations.device_scope_32, IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT);
+  EXPECT_EQ(operations.system_scope_32, 0u);
+  EXPECT_EQ(operations.device_scope_64, IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_EQ(operations.system_scope_64, IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  iree_hal_pool_release(pool);
+}
+
+TEST_F(MemoryBackendTest, AtomicWaitAndStoreAcceptOneWayUsage) {
+  native_.required_flags = 0;
+  native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
+  native_.atomics[0] = {
+      AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE, 0};
+  native_.atomic_reach[0] = {AMDF_ATOMIC_SCOPE_SYSTEM, AMDF_ATOMIC_SCOPE_NONE};
+  for (const auto usage : {IREE_HAL_BUFFER_USAGE_STORAGE_READ,
+                           IREE_HAL_BUFFER_USAGE_STORAGE_WRITE}) {
+    SCOPED_TRACE(usage);
+    const iree_hal_atomic_operation_capabilities_t required = {
+        .system_scope_32 = usage == IREE_HAL_BUFFER_USAGE_STORAGE_READ
+                               ? IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT
+                               : IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+    };
+    iree_hal_pool_t* pool = nullptr;
+    IREE_ASSERT_OK(
+        CreatePool(usage, &pool, 0, IREE_HAL_MEMORY_ACCESS_NONE, 0, required));
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+        iree_hal_pool_query_atomic_operations(
+            pool, ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0])),
+        required));
+    iree_hal_pool_release(pool);
+  }
 }
 
 TEST_F(MemoryBackendTest, PreparesOneHostSourceForCpuAndPublicHostScopes) {
