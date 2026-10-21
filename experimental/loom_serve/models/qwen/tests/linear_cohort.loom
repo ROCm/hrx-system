@@ -17,7 +17,7 @@ func.def @q5k_q8_1_cohort_oracle(%inputs: index, %outputs: index, %input: buffer
 }
 
 check.scenario public @q5k_q8_1_cohort_check {
-  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.requires<hal.amdgpu.target> {targets = ["gfx9-4-generic", "gfx11-generic"]}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
     %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
@@ -44,7 +44,7 @@ func.def @q5k_q8_1_channel8_cohort_oracle(%inputs: index, %outputs: index, %inpu
 }
 
 check.scenario public @q5k_q8_1_channel8_cohort_check {
-  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.requires<hal.amdgpu.target> {targets = ["gfx9-4-generic", "gfx11-generic"]}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
     %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
@@ -71,7 +71,7 @@ func.def @q6k_q8_1_cohort_oracle(%inputs: index, %outputs: index, %input: buffer
 }
 
 check.scenario public @q6k_q8_1_cohort_check {
-  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.requires<hal.amdgpu.target> {targets = ["gfx9-4-generic", "gfx11-generic"]}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
     %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
@@ -98,7 +98,7 @@ func.def @q6k_f32_cohort_oracle(%inputs: index, %outputs: index, %input: buffer,
 }
 
 check.scenario public @q6k_f32_cohort_check {
-  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.requires<hal.amdgpu.target> {targets = ["gfx9-4-generic", "gfx11-generic"]}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
     %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
