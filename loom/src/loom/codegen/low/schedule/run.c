@@ -1612,8 +1612,8 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
             loom_low_schedule_dependency_index_group_at(
                 &state->dependency_index, group_index);
         const uint32_t consumer_node = group->consumer_node;
-        IREE_ASSERT_LE(group->dependency_count, indegrees[consumer_node]);
-        indegrees[consumer_node] -= group->dependency_count;
+        IREE_ASSERT_GT(indegrees[consumer_node], 0);
+        --indegrees[consumer_node];
         if (loom_low_schedule_strategy_uses_pressure(
                 state->options->strategy)) {
           const uint32_t remaining_group =

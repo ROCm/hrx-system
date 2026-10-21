@@ -47,19 +47,19 @@ static_assert((1u << LOOM_LOW_SCHEDULE_DEPENDENCY_DETAIL_SEGMENT_SHIFT) ==
                   LOOM_LOW_SCHEDULE_DEPENDENCY_DETAIL_SEGMENT_CAPACITY,
               "detail segment capacity must match its index shift");
 
-// One distinct producer-to-consumer relation. Multiple dependency rows between
-// the same nodes contribute to dependency_count instead of duplicating dynamic
-// scheduler work.
+// One distinct producer-to-consumer relation. Scheduling the producer satisfies
+// every raw dependency between these nodes, so readiness counts the group once.
 typedef struct loom_low_schedule_dependency_group_t {
   // Consumer node index.
   uint32_t consumer_node;
-  // Number of raw dependency rows represented by this group.
-  uint32_t dependency_count;
   // Strongest signed issue-separation requirement in this relation.
   int32_t minimum_issue_separation_cycles;
   // Producer node index retained for incoming frontier queries.
   uint32_t producer_node;
 } loom_low_schedule_dependency_group_t;
+
+static_assert(sizeof(loom_low_schedule_dependency_group_t) == 12,
+              "dependency groups retain node identities and timing only");
 
 static_assert(LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_SEGMENT_CAPACITY *
                       sizeof(loom_low_schedule_dependency_group_t) <=
@@ -111,9 +111,9 @@ typedef struct loom_low_schedule_dependency_frontier_t {
   uint64_t consumed_group_count;
 } loom_low_schedule_dependency_frontier_t;
 
-// Builds an exact grouped index and initial raw indegrees. Retained index
-// storage is allocated from |arena|. Temporary raw detail and construction
-// storage are allocated from |scratch_arena|.
+// Builds an exact grouped index and initial distinct-producer indegrees.
+// Retained index storage is allocated from |arena|. Temporary raw detail and
+// construction storage are allocated from |scratch_arena|.
 iree_status_t loom_low_schedule_dependency_index_initialize(
     const loom_low_schedule_dependency_graph_t* graph, uint32_t node_count,
     iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* arena,

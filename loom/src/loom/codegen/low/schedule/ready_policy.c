@@ -25,7 +25,7 @@ static void loom_low_schedule_ready_policy_update_setup_dependencies(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_ready_policy_t* policy, uint32_t node_index,
     loom_low_schedule_ready_membership_change_t change) {
-  if (policy->setup_dependency_counts == NULL ||
+  if (policy->setup_producer_counts == NULL ||
       !loom_low_schedule_ready_policy_node_is_storage_setup(
           &state->nodes[node_index])) {
     return;
@@ -46,13 +46,12 @@ static void loom_low_schedule_ready_policy_update_setup_dependencies(
             LOOM_LOW_SCHEDULE_NODE_NONE) {
       continue;
     }
-    uint32_t* count = &policy->setup_dependency_counts[consumer_node];
+    uint32_t* count = &policy->setup_producer_counts[consumer_node];
     if (change == LOOM_LOW_SCHEDULE_READY_MEMBERSHIP_INSERT) {
-      IREE_ASSERT_LE(group->dependency_count, UINT32_MAX - *count);
-      *count += group->dependency_count;
+      ++*count;
     } else {
-      IREE_ASSERT_LE(group->dependency_count, *count);
-      *count -= group->dependency_count;
+      IREE_ASSERT_GT(*count, 0);
+      --*count;
     }
   }
 }
@@ -75,10 +74,10 @@ iree_status_t loom_low_schedule_ready_policy_initialize(
   }
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(state->scratch_arena, node_count,
-                                sizeof(*out_policy->setup_dependency_counts),
-                                (void**)&out_policy->setup_dependency_counts));
-  memset(out_policy->setup_dependency_counts, 0,
-         node_count * sizeof(*out_policy->setup_dependency_counts));
+                                sizeof(*out_policy->setup_producer_counts),
+                                (void**)&out_policy->setup_producer_counts));
+  memset(out_policy->setup_producer_counts, 0,
+         node_count * sizeof(*out_policy->setup_producer_counts));
   return iree_ok_status();
 }
 
@@ -391,7 +390,7 @@ uint16_t loom_low_schedule_ready_policy_score_setup_unlocks(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_ready_policy_t* policy, const uint32_t* indegrees,
     uint32_t node_index) {
-  if (policy->setup_dependency_counts == NULL ||
+  if (policy->setup_producer_counts == NULL ||
       !loom_low_schedule_ready_policy_node_can_unlock_pair(
           state, &state->nodes[node_index])) {
     return 0;
@@ -412,7 +411,7 @@ uint16_t loom_low_schedule_ready_policy_score_setup_unlocks(
     const uint32_t consumer_descriptor_ordinal =
         state->nodes[consumer_node].source_descriptor_ordinal;
     if (consumer_descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE ||
-        policy->setup_dependency_counts[consumer_node] !=
+        policy->setup_producer_counts[consumer_node] !=
             indegrees[consumer_node]) {
       continue;
     }

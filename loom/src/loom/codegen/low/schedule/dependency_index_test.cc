@@ -81,7 +81,7 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
   EXPECT_EQ(index.node_count, static_cast<uint32_t>(indegrees.size()));
   EXPECT_EQ(index.group_count, 4u);
   EXPECT_EQ(detail_index.dependency_count, 7u);
-  EXPECT_EQ(indegrees, (std::array<uint32_t, 5>{0, 0, 0, 6, 1}));
+  EXPECT_EQ(indegrees, (std::array<uint32_t, 5>{0, 0, 0, 3, 1}));
   EXPECT_EQ(loom_low_schedule_dependency_index_group_begin(&index, 0), 0u);
   EXPECT_EQ(loom_low_schedule_dependency_index_group_end(&index, 0), 2u);
   const loom_low_schedule_dependency_group_t* group0 =
@@ -94,13 +94,11 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
       loom_low_schedule_dependency_index_group_at(&index, 3);
   EXPECT_EQ(group0->producer_node, 0u);
   EXPECT_EQ(group0->consumer_node, 3u);
-  EXPECT_EQ(group0->dependency_count, 3u);
   EXPECT_EQ(group0->minimum_issue_separation_cycles, -2);
   EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_ssa(&index, 0));
   EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_effect(&index, 0));
   EXPECT_EQ(group1->producer_node, 0u);
   EXPECT_EQ(group1->consumer_node, 4u);
-  EXPECT_EQ(group1->dependency_count, 1u);
   EXPECT_FALSE(loom_low_schedule_dependency_index_group_has_ssa(&index, 1));
   EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_effect(&index, 1));
   EXPECT_EQ(loom_low_schedule_dependency_index_group_begin(&index, 1), 2u);
@@ -113,15 +111,14 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
   EXPECT_FALSE(loom_low_schedule_dependency_index_group_has_effect(&index, 3));
   EXPECT_EQ(group2->producer_node, 1u);
   EXPECT_EQ(group2->consumer_node, 3u);
-  EXPECT_EQ(group2->dependency_count, 2u);
   EXPECT_EQ(group2->minimum_issue_separation_cycles, 3);
   EXPECT_EQ(group3->producer_node, 2u);
   EXPECT_EQ(group3->consumer_node, 3u);
-  EXPECT_EQ(group3->dependency_count, 1u);
 
   // Leave SSA, non-SSA, and mixed group zero as the final relation in turn.
   for (const auto& producer_order :
        {std::array<uint32_t, 3>{0, 1, 2}, {2, 0, 1}, {1, 2, 0}}) {
+    auto remaining_producers = indegrees;
     loom_low_schedule_dependency_frontier_t frontier;
     IREE_ASSERT_OK(loom_low_schedule_dependency_frontier_initialize(
         &index, &arena_, &frontier));
@@ -146,9 +143,13 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
            ++group_index) {
         const loom_low_schedule_dependency_group_t* group =
             loom_low_schedule_dependency_index_group_at(&index, group_index);
+        ASSERT_GT(remaining_producers[group->consumer_node], 0u);
+        --remaining_producers[group->consumer_node];
         const uint32_t remaining_group =
             loom_low_schedule_dependency_frontier_consume_group(
                 &frontier, group_index, group);
+        EXPECT_EQ(frontier.remaining_producer_counts[group->consumer_node],
+                  remaining_producers[group->consumer_node]);
         if (group->consumer_node == 3 &&
             frontier.remaining_producer_counts[3] == 1) {
           EXPECT_EQ(remaining_group, last_group);
@@ -161,6 +162,7 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
         }
       }
     }
+    EXPECT_EQ(remaining_producers, (std::array<uint32_t, 5>{0, 0, 0, 0, 0}));
     EXPECT_EQ(publication_count, 2u);
     EXPECT_EQ(frontier.consumed_group_count, index.group_count);
     EXPECT_EQ(
@@ -184,7 +186,10 @@ TEST_F(ScheduleDependencyIndexTest, FanoutAccountingIsLinear) {
     loom_low_schedule_dependency_graph_t graph;
     loom_low_schedule_dependency_graph_initialize(&graph);
     for (uint32_t i = 0; i < fanout; ++i) {
-      Append(&graph, 0, i + 1, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 0);
+      Append(&graph, 0, i + 1, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 0, -1);
+      Append(&graph, 0, i + 1, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 1, 3);
+      Append(&graph, 0, i + 1, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT16_MAX,
+             2);
     }
 
     std::vector<uint32_t> indegrees(fanout + 1);
@@ -194,11 +199,14 @@ TEST_F(ScheduleDependencyIndexTest, FanoutAccountingIsLinear) {
         &graph, static_cast<uint32_t>(indegrees.size()), &scratch_arena_,
         &arena_, indegrees.data(), &index, &detail_index));
     EXPECT_EQ(index.group_count, fanout);
+    EXPECT_EQ(detail_index.dependency_count, 3u * fanout);
+    EXPECT_EQ(indegrees[0], 0u);
 
     loom_low_schedule_dependency_frontier_t frontier;
     IREE_ASSERT_OK(loom_low_schedule_dependency_frontier_initialize(
         &index, &arena_, &frontier));
     for (uint32_t consumer_node = 1; consumer_node <= fanout; ++consumer_node) {
+      EXPECT_EQ(indegrees[consumer_node], 1u);
       EXPECT_EQ(loom_low_schedule_dependency_frontier_remaining_group(
                     &frontier, consumer_node),
                 consumer_node - 1);
@@ -209,6 +217,7 @@ TEST_F(ScheduleDependencyIndexTest, FanoutAccountingIsLinear) {
           loom_low_schedule_dependency_index_group_at(&index, group_index);
       EXPECT_EQ(group->producer_node, 0u);
       EXPECT_EQ(group->consumer_node, group_index + 1);
+      EXPECT_EQ(group->minimum_issue_separation_cycles, 3);
       EXPECT_EQ(loom_low_schedule_dependency_frontier_consume_group(
                     &frontier, group_index, group),
                 LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_NONE);

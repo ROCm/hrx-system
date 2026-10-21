@@ -47,7 +47,7 @@ loom_low_schedule_dependency_index_mutable_group_at(
 
 static void loom_low_schedule_dependency_index_count_raw_dependencies(
     const loom_low_schedule_dependency_graph_t* graph, uint32_t node_count,
-    uint32_t* producer_dependency_starts, uint32_t* out_indegrees) {
+    uint32_t* producer_dependency_starts) {
   for (uint32_t dependency_index = 0; dependency_index < graph->count;
        ++dependency_index) {
     const loom_low_schedule_dependency_t* dependency =
@@ -56,9 +56,7 @@ static void loom_low_schedule_dependency_index_count_raw_dependencies(
     IREE_ASSERT_LT(dependency->consumer_node, node_count);
     IREE_ASSERT_NE(producer_dependency_starts[dependency->producer_node + 1],
                    UINT32_MAX);
-    IREE_ASSERT_NE(out_indegrees[dependency->consumer_node], UINT32_MAX);
     ++producer_dependency_starts[dependency->producer_node + 1];
-    ++out_indegrees[dependency->consumer_node];
   }
   for (uint32_t producer_node = 0; producer_node < node_count;
        ++producer_node) {
@@ -89,7 +87,8 @@ static uint32_t loom_low_schedule_dependency_index_count_groups(
     const loom_low_schedule_dependency_graph_t* graph, uint32_t node_count,
     const uint32_t* producer_dependency_starts,
     const loom_low_schedule_dependency_detail_index_t* detail_index,
-    uint32_t* last_producer_nodes, uint32_t* producer_group_starts) {
+    uint32_t* last_producer_nodes, uint32_t* producer_group_starts,
+    uint32_t* out_indegrees) {
   if (node_count != 0) {
     memset(last_producer_nodes, 0xFF,
            node_count * sizeof(*last_producer_nodes));
@@ -113,6 +112,7 @@ static uint32_t loom_low_schedule_dependency_index_count_groups(
       last_producer_nodes[consumer_node] = producer_node;
       IREE_ASSERT_NE(group_count, UINT32_MAX);
       ++group_count;
+      ++out_indegrees[consumer_node];
     }
     producer_group_starts[producer_node + 1] = group_count;
   }
@@ -153,8 +153,6 @@ static void loom_low_schedule_dependency_index_fill_groups(
       loom_low_schedule_dependency_group_t* group =
           loom_low_schedule_dependency_index_mutable_group_at(index,
                                                               group_index);
-      IREE_ASSERT_NE(group->dependency_count, UINT32_MAX);
-      ++group->dependency_count;
       group->minimum_issue_separation_cycles =
           iree_max(group->minimum_issue_separation_cycles,
                    dependency->minimum_issue_separation_cycles);
@@ -207,8 +205,7 @@ iree_status_t loom_low_schedule_dependency_index_initialize(
   }
 
   loom_low_schedule_dependency_index_count_raw_dependencies(
-      graph, node_count, out_detail_index->producer_dependency_starts,
-      out_indegrees);
+      graph, node_count, out_detail_index->producer_dependency_starts);
   const uint32_t dependency_count = (uint32_t)graph->count;
   // These indexes have complete domains before allocation. A short domain
   // occupies one short segment without changing the fixed index mapping.
@@ -238,7 +235,8 @@ iree_status_t loom_low_schedule_dependency_index_initialize(
 
   out_index->group_count = loom_low_schedule_dependency_index_count_groups(
       graph, node_count, out_detail_index->producer_dependency_starts,
-      out_detail_index, last_producer_nodes, out_index->producer_group_starts);
+      out_detail_index, last_producer_nodes, out_index->producer_group_starts,
+      out_indegrees);
   loom_segmented_storage_initialize(
       iree_min(iree_max(out_index->group_count, 1u),
                LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_SEGMENT_CAPACITY) *

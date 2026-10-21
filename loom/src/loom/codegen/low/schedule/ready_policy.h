@@ -20,8 +20,8 @@ extern "C" {
 typedef struct loom_low_schedule_ready_policy_t {
   // Shared ready membership and nomination heaps.
   loom_low_schedule_ready_frontier_t frontier;
-  // Dependencies from ready structural setup nodes, indexed by consumer node.
-  uint32_t* setup_dependency_counts;
+  // Number of ready structural setup producers, indexed by consumer node.
+  uint32_t* setup_producer_counts;
 } loom_low_schedule_ready_policy_t;
 
 // Initializes an empty policy with |view_count| indexed ready views.
