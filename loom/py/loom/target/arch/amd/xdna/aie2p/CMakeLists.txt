@@ -26,6 +26,7 @@ iree_py_library(
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::package_init
     loom::py::loom::core
+    loom::py::loom::dialect::func::func
     loom::py::loom::dialect::target::target
 )
 

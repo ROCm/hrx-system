@@ -223,9 +223,20 @@ def _load_amdgpu_generation() -> DialectGeneration:
 
 
 def _load_aie2p_generation() -> DialectGeneration:
-    from loom.target.arch.amd.xdna.aie2p.dialect import ALL_AIE2P_OPS, aie2p_ops
+    from loom.dialect.func import func_def
+    from loom.target.arch.amd.xdna.aie2p.dialect import (
+        ALL_AIE2P_OPS,
+        ALL_AIE2P_TYPES,
+        aie2p_ops,
+    )
 
-    return DialectGeneration(aie2p_ops, list(ALL_AIE2P_OPS), None)
+    return DialectGeneration(
+        aie2p_ops,
+        list(ALL_AIE2P_OPS),
+        None,
+        types=ALL_AIE2P_TYPES,
+        referenced_ops=(func_def,),
+    )
 
 
 def _load_x86_generation() -> DialectGeneration:

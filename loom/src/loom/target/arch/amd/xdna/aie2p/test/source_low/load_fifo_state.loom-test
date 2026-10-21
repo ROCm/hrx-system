@@ -1,0 +1,72 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+low.func.def inline target<amd.xdna.aie2p.core>(@target) @advance_fifo_states(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>, %fifo0: reg<aie2p.eldfiforeg>, %fifo1: reg<aie2p.eldfiforeg>) -> (reg<aie2p.eldfiforeg>, reg<aie2p.eldfiforeg>) asm {
+  %fifo0_pointer = copy %input : reg<aie2p.ep> -> reg<aie2p.eps>
+  %fifo0_position = mova.fifo.position 0
+  %fifo0_filled_pointer, %fifo0_filled, %fifo0_filled_position = vlda.fill.512 %fifo0_pointer, %fifo0, %fifo0_position
+  %fifo0_data, %fifo0_final_pointer, %next_fifo0, %fifo0_final_position = vlda.pop.512.i32x16 %fifo0_filled_pointer, %fifo0_filled, %fifo0_filled_position
+  %fifo1_pointer = copy %input : reg<aie2p.ep> -> reg<aie2p.eps>
+  %fifo1_position = mova.fifo.position 0
+  %fifo1_filled_pointer, %fifo1_filled, %fifo1_filled_position = vldb.fill.512 %fifo1_pointer, %fifo1, %fifo1_position
+  %fifo1_data, %fifo1_final_pointer, %next_fifo1, %fifo1_final_position = vldb.pop.512.i32x16 %fifo1_filled_pointer, %fifo1_filled, %fifo1_filled_position
+  %sum = vadd.32 %fifo0_data, %fifo1_data
+  vst.512.i32x16 %sum, %output, 0
+  return %next_fifo0, %next_fifo1
+}
+
+func.def target(@target) @carry_fifo_states(%input: buffer, %output: buffer) {
+  %fifo0, %fifo1 = aie2p.load_fifo.state : aie2p.load_fifo, aie2p.load_fifo
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %final_fifo0, %final_fifo1 = scf.for %i = [%begin to %end step %step](%current_fifo0 = %fifo0 : aie2p.load_fifo, %current_fifo1 = %fifo1 : aie2p.load_fifo) -> (aie2p.load_fifo, aie2p.load_fifo) {
+    %next_fifo0, %next_fifo1 = low.invoke @advance_fifo_states(%input, %output, %current_fifo0, %current_fifo1) : (buffer, buffer, aie2p.load_fifo, aie2p.load_fifo) -> (aie2p.load_fifo, aie2p.load_fifo)
+    scf.yield %next_fifo0, %next_fifo1 : aie2p.load_fifo, aie2p.load_fifo
+  }
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @carry_fifo_states() asm {
+  %fifo0 = live_in<amd.xdna.aie2p.load_fifo.0> : reg<aie2p.eldfiforeg>
+  %fifo1 = live_in<amd.xdna.aie2p.load_fifo.1> : reg<aie2p.eldfiforeg>
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %begin = mov.short 0
+  %end = mov.short 4
+  %step = mov.short 1
+  low.br ^_bb1(%begin: reg<aie2p.er>, %fifo0: reg<aie2p.eldfiforeg>, %fifo1: reg<aie2p.eldfiforeg>)
+^_bb1(%i: reg<aie2p.er>, %current_fifo0: reg<aie2p.eldfiforeg>, %current_fifo1: reg<aie2p.eldfiforeg>):
+  %57 = lt %i, %end
+  low.cond_br %57, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %61 = copy %current_fifo0 : reg<aie2p.eldfiforeg> -> reg<aie2p.eldfiforeg>
+  %62 = copy %current_fifo1 : reg<aie2p.eldfiforeg> -> reg<aie2p.eldfiforeg>
+  %fifo0_pointer = copy %input : reg<aie2p.ep> -> reg<aie2p.eps>
+  %fifo0_position = mova.fifo.position 0
+  %fifo0_filled_pointer, %fifo0_filled, %fifo0_filled_position = vlda.fill.512 %fifo0_pointer, %61, %fifo0_position
+  %fifo0_data, %fifo0_final_pointer, %next_fifo0, %fifo0_final_position = vlda.pop.512.i32x16 %fifo0_filled_pointer, %fifo0_filled, %fifo0_filled_position
+  %fifo1_pointer = copy %input : reg<aie2p.ep> -> reg<aie2p.eps>
+  %fifo1_position = mova.fifo.position 0
+  %fifo1_filled_pointer, %fifo1_filled, %fifo1_filled_position = vldb.fill.512 %fifo1_pointer, %62, %fifo1_position
+  %fifo1_data, %fifo1_final_pointer, %next_fifo1, %fifo1_final_position = vldb.pop.512.i32x16 %fifo1_filled_pointer, %fifo1_filled, %fifo1_filled_position
+  %sum = vadd.32 %fifo0_data, %fifo1_data
+  vst.512.i32x16 %sum, %output, 0
+  %60 = add.nc %i, %step
+  low.br ^_bb1(%60: reg<aie2p.er>, %next_fifo0: reg<aie2p.eldfiforeg>, %next_fifo1: reg<aie2p.eldfiforeg>)
+^_bb3:
+  return
+}
+
+// ====
+// RUN: verify
+
+func.def @reject_non_fifo_state_results() {
+  // ERROR@+1: TYPE/004 {result_name="fifo0", actual_type="i32", expected_constraint="aie2p.load_fifo"}
+  %bad_fifo0, %valid_fifo1 = aie2p.load_fifo.state : i32, aie2p.load_fifo
+  // ERROR@+1: TYPE/004 {result_name="fifo1", actual_type="i32", expected_constraint="aie2p.load_fifo"}
+  %valid_fifo0, %bad_fifo1 = aie2p.load_fifo.state : aie2p.load_fifo, i32
+  func.return
+}

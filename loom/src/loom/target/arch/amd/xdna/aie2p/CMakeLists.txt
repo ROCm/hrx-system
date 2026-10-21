@@ -478,6 +478,7 @@ loom_cc_library(
     lower
   HDRS
     "lower/f32_representation.h"
+    "lower/fifo_state.h"
     "lower/gather.h"
     "lower/interleave.h"
     "lower/lower.h"
@@ -491,6 +492,7 @@ loom_cc_library(
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/contracts/core_index.inl"
   SRCS
     "lower/f32_representation.c"
+    "lower/fifo_state.c"
     "lower/gather.c"
     "lower/interleave.c"
     "lower/matrix.c"
@@ -518,6 +520,7 @@ loom_cc_library(
     loom::ops::vector
     loom::target::arch::amd::xdna::aie2p::contracts::core
     loom::target::arch::amd::xdna::aie2p::contracts::core_lower_rules
+    loom::target::arch::amd::xdna::aie2p::ops
     loom::target::arch::amd::xdna::error_defs
     loom::target::contract
     loom::target::registers
@@ -1060,6 +1063,7 @@ loom_check_test_suite(
     "test/source_low/integer_float_conversion.loom-test"
     "test/source_low/integer_narrowing.loom-test"
     "test/source_low/licm_index_arithmetic.loom-test"
+    "test/source_low/load_fifo_state.loom-test"
     "test/source_low/lookup_table.loom-test"
     "test/source_low/lookup_table_vector.loom-test"
     "test/source_low/loop_counter_offset.loom-test"

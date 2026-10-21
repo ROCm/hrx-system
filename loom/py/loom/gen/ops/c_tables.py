@@ -222,6 +222,7 @@ def _main_build_output_mode(parser: argparse.ArgumentParser, args: argparse.Name
 
         outputs: dict[str, Path] = {}
         _set_output(parser, outputs, "ops.h", args.ops_header)
+        _set_output(parser, outputs, "types.h", args.types_header)
         _set_output(parser, outputs, "ops.inc", args.ops_include)
         _set_output(parser, outputs, "builders.c", args.builders)
         _set_output(parser, outputs, "tables.c", args.tables)
@@ -266,6 +267,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Generate selected cross-dialect registry outputs.",
     )
     parser.add_argument("--ops-header", type=Path, help="Generated dialect ops.h path.")
+    parser.add_argument("--types-header", type=Path, help="Generated dialect types.h path.")
     parser.add_argument("--ops-include", type=Path, help="Generated dialect ops.inc path.")
     parser.add_argument("--builders", type=Path, help="Generated dialect builders.c path.")
     parser.add_argument("--tables", type=Path, help="Generated dialect tables.c path.")

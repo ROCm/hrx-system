@@ -16,6 +16,7 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_aie2p_generator
   SRCS
+    "fifo.c"
     "registry.c"
     "target.c"
   TEXTUAL_HDRS
@@ -23,16 +24,21 @@ loom_generated_cc_library(
   GENERATED_SRC_FLAGS
     "--builders"
     "--tables"
+    "--types"
   GENERATED_SRCS
     "builders.c"
     "tables.c"
+    "types.c"
   HDRS
+    "fifo.h"
     "registry.h"
     "target.h"
   GENERATED_HDR_FLAGS
     "--ops-header"
+    "--types-header"
   GENERATED_HDRS
     "ops.h"
+    "types.h"
   ARGS
     "--dialect=aie2p"
   EXTRA_OUTPUT_FLAGS
@@ -41,11 +47,14 @@ loom_generated_cc_library(
     "ops.inc"
   DEPS
     iree::base
+    loom::error::emitter
     loom::error::error_defs
     loom::error::parameter
     loom::ir
+    loom::ops::func
     loom::ops::op_defs
     loom::ops::target
+    loom::ops::type_registry
     loom::target::arch::amd::xdna::aie2p::target_facts
     loom::target::arch::amd::xdna::aie2p::target_records
     loom::target::arch::amd::xdna::device_profile

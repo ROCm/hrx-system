@@ -13,6 +13,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/gather.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/f32_representation.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/fifo_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/gather.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/interleave.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
@@ -21,6 +22,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/lower/shuffle.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/transpose.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/vector_construct.h"
+#include "loom/target/arch/amd/xdna/aie2p/ops/fifo.h"
 #include "loom/target/arch/amd/xdna/aie2p/vector_carrier.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/contract.h"
@@ -30,6 +32,11 @@ static iree_status_t loom_aie2p_query_op_contract(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op,
     loom_target_contract_query_result_t* out_result) {
+  IREE_RETURN_IF_ERROR(loom_aie2p_query_fifo_state_contract(
+      user_data, environment, source_op, out_result));
+  if (out_result->outcome != LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_query_vector_construct_contract(
       user_data, environment, source_op, out_result));
   if (out_result->outcome != LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
@@ -53,7 +60,9 @@ static bool loom_aie2p_source_type_supported(void* user_data,
                                              const loom_module_t* module,
                                              loom_type_t source_type) {
   (void)user_data;
-  (void)module;
+  if (loom_aie2p_load_fifo_type_isa(module, source_type)) {
+    return true;
+  }
   if (!loom_type_is_scalar(source_type)) {
     return false;
   }
@@ -81,6 +90,11 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
                                          loom_type_t source_type,
                                          loom_type_t* out_low_type) {
   (void)user_data;
+  if (loom_aie2p_load_fifo_type_isa(loom_low_lower_context_module(context),
+                                    source_type)) {
+    return loom_low_lower_make_register_type(
+        context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ELDFIFOREG, 1, out_low_type);
+  }
   if (loom_type_is_buffer(source_type)) {
     return loom_low_lower_make_register_type(
         context, AIE2P_CORE_REG_CLASS_ID_AIE2P_EP, 1, out_low_type);
@@ -244,6 +258,11 @@ static iree_status_t loom_aie2p_preselect_op(void* user_data,
                                              loom_low_lower_plan_t* out_plan) {
   (void)user_data;
   IREE_RETURN_IF_ERROR(
+      loom_aie2p_select_fifo_state_plan(context, source_op, out_plan));
+  if (!loom_low_lower_plan_is_empty(*out_plan)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
       loom_aie2p_select_vector_construct_plan(context, source_op, out_plan));
   if (!loom_low_lower_plan_is_empty(*out_plan)) {
     return iree_ok_status();
@@ -280,7 +299,9 @@ static void loom_aie2p_mark_plan_storage_demands(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_low_lower_plan_t plan) {
   (void)user_data;
-  if (loom_aie2p_vector_construct_plan_isa(plan)) {
+  if (loom_aie2p_fifo_state_plan_isa(plan)) {
+    return;
+  } else if (loom_aie2p_vector_construct_plan_isa(plan)) {
     loom_low_lower_require_source_operands_storage(context, source_op);
   } else if (loom_aie2p_matrix_plan_isa(plan)) {
     loom_aie2p_mark_matrix_plan_demands(context, source_op, plan);
@@ -307,7 +328,9 @@ static iree_status_t loom_aie2p_describe_plan(
   (void)user_data;
   (void)is_elided;
   (void)execution_count_plus_one;
-  if (loom_aie2p_vector_construct_plan_isa(plan)) {
+  if (loom_aie2p_fifo_state_plan_isa(plan)) {
+    loom_aie2p_describe_fifo_state_plan(out_report);
+  } else if (loom_aie2p_vector_construct_plan_isa(plan)) {
     loom_aie2p_describe_vector_construct_plan(out_report);
   } else if (loom_aie2p_matrix_plan_isa(plan)) {
     loom_aie2p_describe_matrix_plan(context, source_op, plan, out_report);
@@ -346,6 +369,9 @@ static iree_status_t loom_aie2p_emit_op(void* user_data,
                                         const loom_op_t* source_op,
                                         loom_low_lower_plan_t plan) {
   (void)user_data;
+  if (loom_aie2p_fifo_state_plan_isa(plan)) {
+    return loom_aie2p_emit_fifo_state_plan(context, source_op, plan);
+  }
   if (loom_aie2p_vector_construct_plan_isa(plan)) {
     return loom_aie2p_emit_vector_construct_plan(context, source_op, plan);
   }
@@ -442,6 +468,8 @@ static const loom_low_lower_policy_t kAie2pCoreLowLowerPolicy = {
     .map_type = {.fn = loom_aie2p_map_type, .user_data = NULL},
     .map_value = {.fn = loom_aie2p_map_value, .user_data = NULL},
     .map_argument = {.fn = loom_aie2p_map_argument, .user_data = NULL},
+    .emit_preamble = {.fn = loom_aie2p_emit_fifo_state_preamble,
+                      .user_data = NULL},
     .contract = LOOM_AIE2P_CORE_CONTRACT,
     .query_op_contract =
         {

@@ -25,6 +25,7 @@ iree_py_library(
     deps = [
         ":package_init",
         "//loom/py/loom:core",
+        "//loom/py/loom/dialect/func",
         "//loom/py/loom/dialect/target",
     ],
 )

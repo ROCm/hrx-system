@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/ops/registry.h"
 
 #include "loom/target/arch/amd/xdna/aie2p/ops/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/ops/types.h"
 
 iree_status_t loom_aie2p_ops_register_dialect(loom_context_t* context) {
   iree_host_size_t vtable_count = 0;
@@ -17,6 +18,9 @@ iree_status_t loom_aie2p_ops_register_dialect(loom_context_t* context) {
       loom_aie2p_dialect_op_semantics(&semantic_count);
   IREE_RETURN_IF_ERROR(loom_context_register_dialect(
       context, LOOM_DIALECT_AIE2P, vtables, (uint16_t)vtable_count));
-  return loom_context_register_dialect_semantics(
-      context, LOOM_DIALECT_AIE2P, semantics, (uint16_t)semantic_count);
+  IREE_RETURN_IF_ERROR(loom_context_register_dialect_semantics(
+      context, LOOM_DIALECT_AIE2P, semantics, (uint16_t)semantic_count));
+  return loom_type_registry_register_types(
+      context, loom_aie2p_type_registry_entries,
+      loom_aie2p_type_registry_entry_count);
 }
