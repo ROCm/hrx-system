@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/amd/gpu/feedback.h"
 #include "iree/hal/drivers/amd/gpu/kernarg.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/code.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/tsan.h"
@@ -32,6 +33,8 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   // at native access ordinal zero. Host visibility is optional; placement is
   // always device-local. The loader never substitutes host backing.
   const iree_hal_amd_fabric_memory_options_t* memory;
+  // Device-owned instruction publication used by AQL, absent for PM4.
+  iree_hal_amd_gpu_aql_code_t* aql_code;
   // Upload resources borrowed through image construction only.
   struct {
     // Host-visible initialization backing, used only without a local host view.
@@ -67,12 +70,12 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
 // before teardown.
 //
 // Native services named by launch/argument metadata remain requirements for
-// dispatch admission. Code upload flushes host writes; each queue establishes
-// instruction-cache visibility before shader use. Module lifecycle kernels,
-// required external linkage, and unprovisioned runtime configuration globals
-// are rejected because loading alone cannot provide their required services.
-// Global buffers follow HAL's executable-owned borrow contract and never extend
-// the executable's lifetime implicitly.
+// dispatch admission. Code upload flushes host writes. AQL loading completes
+// instruction-cache invalidation; PM4 establishes it before shader use.
+// Module lifecycle kernels, required external linkage, and unprovisioned
+// runtime configuration globals are rejected because loading alone cannot
+// provide their required services. Global buffers follow HAL's executable-owned
+// borrow contract and never extend the executable's lifetime implicitly.
 iree_status_t iree_hal_amd_gpu_executable_create(
     const iree_hal_queue_family_t* family, iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_gpu_executable_options_t* options,

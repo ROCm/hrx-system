@@ -178,7 +178,8 @@ static iree_status_t iree_hal_amd_gpu_code_prepare_copy(
       iree_hal_amd_fabric_memory_translate_pair(&native, &pair));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_code_queue_effect(
       &pair.release, true, &upload->copy.effects));
-  // PM4/AQL already acquire code and arguments at each execution boundary.
+  // Execution boundaries acquire uploaded data. AQL loading separately
+  // invalidates instruction caches before exposing the executable.
   iree_hal_memory_effects_t compute = {0};
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_code_queue_effect(&pair.acquire, false, &compute));

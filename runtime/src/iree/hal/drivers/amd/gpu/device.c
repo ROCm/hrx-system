@@ -18,6 +18,7 @@
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/code.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
@@ -110,6 +111,8 @@ typedef struct iree_hal_amd_gpu_device_t {
     // Register launches and native indirect-buffer execution.
     iree_hal_amd_gpu_pm4_program_pool_t pm4;
   } programs;
+  // AQL's cold instruction-cache publication owner; PM4 publishes at use.
+  iree_hal_amd_gpu_aql_code_t* aql_code;
   // Lazy queue-local private storage shares immutable placement/geometry facts.
   struct {
     // Native scratch slot capacity and register layout.
@@ -500,6 +503,14 @@ static bool iree_hal_amd_gpu_device_release_children(
     return false;
   }
   device->transfers.queue = NULL;
+  const amdf_status_t code_status =
+      iree_hal_amd_gpu_aql_code_free(device->aql_code);
+  if (!amdf_status_is_ok(code_status)) {
+    iree_hal_amd_gpu_context_report(device->context, code_status,
+                                    "AQL code publication ownership join");
+    return false;
+  }
+  device->aql_code = NULL;
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     if (!device->queues[i]) {
       continue;
@@ -877,6 +888,11 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_device_prepare_control(device);
   }
+  if (iree_status_is_ok(status) && aql) {
+    status = iree_hal_amd_gpu_aql_code_allocate(
+        context, family_ordinal, &device->memory.control, host_allocator,
+        &device->aql_code);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_async_proactor_pool_acquire_for_node(
         create_params->proactor_pool, options->host_numa_node,
@@ -1089,11 +1105,15 @@ iree_status_t iree_hal_amd_gpu_device_create(
   iree_hal_amd_fabric_memory_t* code =
       aql ? &device->programs.aql.code : &device->programs.pm4.code;
   iree_hal_amd_gpu_code_upload_t** upload =
-      aql ? &device->programs.aql.code_upload : &device->programs.pm4.code_upload;
+      aql ? &device->programs.aql.code_upload
+          : &device->programs.pm4.code_upload;
   if (*upload) {
     status = iree_hal_amd_gpu_code_publish(
         context, device->transfers.queue, device->transfers.family_ordinal,
         device->memory.family.queue_family_ordinal, code, upload);
+  }
+  if (iree_status_is_ok(status) && aql) {
+    status = iree_hal_amd_gpu_aql_code_publish(device->aql_code, code);
   }
   if (iree_status_is_ok(status)) {
     *out_device = base;
@@ -1223,6 +1243,7 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .target = &device->target,
       .native_family_ordinal = device->memory.family.queue_family_ordinal,
       .memory = &memory,
+      .aql_code = device->aql_code,
       .upload = {.memory = &storage->upload,
                  .queue = device->transfers.queue,
                  .family_ordinal = device->transfers.family_ordinal},

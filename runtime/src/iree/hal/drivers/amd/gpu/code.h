@@ -33,8 +33,9 @@ iree_status_t iree_hal_amd_gpu_code_allocate(
 
 // Flushes mapped code, or copies staging through the device's existing SDMA
 // owner and waits for native retirement. Queue sources must already be live.
-// No queue or worker is created here. Large images use bounded native copies;
-// each dispatch family establishes its usual instruction/data acquire.
+// No queue or worker is created here. Large images use bounded native copies.
+// This establishes data visibility only. AQL loading separately completes
+// instruction-cache invalidation; PM4 emits it before shader use.
 //
 // Consumes upload on every outcome. Successful copies submit staging release
 // without waiting for the native allocator. An accepted-but-unretired failure

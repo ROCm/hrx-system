@@ -70,6 +70,12 @@ iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_packet_barrier(
     uint32_t header, uint32_t dependency_count, const uint64_t* dependencies,
     uint64_t completion_signal);
 
+// AMD vendor-format-1 carrier for an admitted PM4 IB. Its dword-aligned extent
+// fits the 48-bit address and positive 20-bit word count. The completion signal
+// joins every participating XCC before the caller reuses the immutable IB.
+iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_packet_indirect_buffer(
+    uint64_t address, uint32_t word_count, uint64_t completion_signal);
+
 // Native AMD USER signal. The descriptor, not its value field, is named by
 // dispatch completions and barrier dependencies. Host ownership lives
 // elsewhere.

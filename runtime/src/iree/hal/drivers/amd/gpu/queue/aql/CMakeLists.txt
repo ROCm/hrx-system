@@ -374,6 +374,29 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    code
+  HDRS
+    "code.h"
+  SRCS
+    "code.c"
+  DEPS
+    ::packet
+    ::ring
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::queue::pm4::barrier
+    iree::hal::drivers::amd::gpu::queue::user_queue
+    iree::hal::drivers::amd::gpu::target::identity
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     packet
   HDRS
     "packet.h"

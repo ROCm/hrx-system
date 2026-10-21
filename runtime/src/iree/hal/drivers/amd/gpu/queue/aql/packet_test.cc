@@ -75,4 +75,15 @@ TEST(PacketTest, SignalMatchesFirmwareAbiWithoutHostPayload) {
   EXPECT_EQ(offsetof(iree_hal_amd_gpu_aql_signal_t, reserved1), 56u);
 }
 
+TEST(PacketTest, VendorIndirectBufferCarriesNativeCompletion) {
+  const auto packet = iree_hal_amd_gpu_aql_packet_indirect_buffer(
+      UINT64_C(0x123456789a40), 7, UINT64_C(0x456789abc000));
+  const std::array<uint32_t, 16> expected = {
+      0x00010000, 0xc0023f00, 0x56789a40, 0x00001234, 0x00800007, 0x0000000a,
+      0,          0,          0,          0,          0,          0,
+      0,          0,          0x89abc000, 0x00004567,
+  };
+  EXPECT_EQ(std::memcmp(packet.words, expected.data(), sizeof(packet)), 0);
+}
+
 }  // namespace

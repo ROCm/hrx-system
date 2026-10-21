@@ -66,6 +66,7 @@ iree_cc_library(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::fabric::memory_backend
     iree::hal::drivers::amd::gpu::queue::allocation
+    iree::hal::drivers::amd::gpu::queue::aql::code
     iree::hal::drivers::amd::gpu::queue::aql::command_buffer
     iree::hal::drivers::amd::gpu::queue::aql::program
     iree::hal::drivers::amd::gpu::queue::aql::queue
@@ -161,6 +162,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::image
     iree::hal::drivers::amd::gpu::image::hsaco
     iree::hal::drivers::amd::gpu::image::metadata
+    iree::hal::drivers::amd::gpu::queue::aql::code
     iree::hal::drivers::amd::gpu::queue::aql::dispatch
     iree::hal::drivers::amd::gpu::queue::pm4::dispatch
     iree::hal::drivers::amd::gpu::queue::pm4::launch

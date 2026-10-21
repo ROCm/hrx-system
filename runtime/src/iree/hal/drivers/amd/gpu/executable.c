@@ -741,6 +741,10 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
         options->upload.family_ordinal, options->native_family_ordinal,
         variant->memory, &variant->upload);
   }
+  if (iree_status_is_ok(status) && options->aql_code) {
+    status =
+        iree_hal_amd_gpu_aql_code_publish(options->aql_code, variant->memory);
+  }
   return status;
 }
 

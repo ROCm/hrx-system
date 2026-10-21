@@ -78,6 +78,65 @@ iree_runtime_cc_test(
     ],
 )
 
+# The two exported native CTS programs share an ABI and differ only in their
+# arithmetic. Reuse the source inputs; publication is exercised by HAL code.
+[
+    loom_kernel_binary(
+        name = "code_" + variant + "_" + target,
+        testonly = True,
+        srcs = ["//libamdf/cts/gpu/kernels:" + variant + ".loom"],
+        out = "code_" + variant + "_" + target + ".hsaco",
+        target = ":feedback_profile_" + target,
+        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    )
+    for variant in [
+        "transform",
+        "transform_alternate",
+    ]
+    for target in _FEEDBACK_TARGETS
+]
+
+iree_c_embed_data(
+    name = "code_images",
+    testonly = True,
+    srcs = [
+        ":code_" + variant + "_" + target
+        for variant in [
+            "transform",
+            "transform_alternate",
+        ]
+        for target in _FEEDBACK_TARGETS
+    ],
+    c_file_output = "code_images.c",
+    h_file_output = "code_images.h",
+    identifier = "iree_hal_amd_gpu_code_images",
+    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_test(
+    name = "code_test",
+    srcs = ["code_test.cc"],
+    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    deps = [
+        ":code_images",
+        ":test_device",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/fabric:memory",
+        "//runtime/src/iree/hal/drivers/amd/gpu:code",
+        "//runtime/src/iree/hal/drivers/amd/gpu:context",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:code",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:packet",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:ring",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 _SCRATCH_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target:amdgpu_artifacts",
     "//loom/config/target/amdgpu:descriptor_set_cdna2_core",
@@ -356,6 +415,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:signal",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:code",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:command_buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:program",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:ring",
