@@ -11,6 +11,7 @@
 #include "iree/schemas/xdna_executable.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/encoding.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/bundle_encoding.h"
 #include "loom/target/arch/amd/xdna/aie2p/encoding/encoding.h"
 #include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
 #include "loom/tools/loom-check/compile.h"
@@ -184,12 +185,27 @@ static iree_status_t loom_aie2p_artifact_check_bundle_has_control(
   return iree_ok_status();
 }
 
+static bool loom_aie2p_artifact_check_bundle_is_nop(
+    const loom_aie2p_decoded_bundle_t* bundle) {
+  for (uint8_t i = 0; i < bundle->slot_count; ++i) {
+    const loom_aie2p_encoded_slot_t* slot = &bundle->slots[i];
+    const loom_aie2p_encoded_slot_t nop =
+        loom_aie2p_bundle_encoding_encode_slot_nop(slot->slot);
+    if (slot->value != nop.value) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_aie2p_artifact_check_loop_body_facts(
     iree_const_byte_span_t section, uint64_t section_address,
     const loom_aie2p_artifact_loop_setup_t* setup, bool* out_end_on_bundle,
-    bool* out_end_group_full_width, uint32_t* out_control_count) {
+    bool* out_end_group_full_width, uint32_t* out_trailing_nop_bundle_count,
+    uint32_t* out_control_count) {
   *out_end_on_bundle = false;
   *out_end_group_full_width = false;
+  *out_trailing_nop_bundle_count = 0;
   *out_control_count = 0;
   iree_host_size_t offset = 0;
   while (offset < section.data_length) {
@@ -207,6 +223,11 @@ static iree_status_t loom_aie2p_artifact_check_loop_body_facts(
         address == setup->end_address &&
         bundle_length == LOOM_AIE2P_ENCODING_MAX_PACKET_SIZE;
     if (address >= setup->start_address && address <= setup->end_address) {
+      if (loom_aie2p_artifact_check_bundle_is_nop(&bundle)) {
+        ++*out_trailing_nop_bundle_count;
+      } else {
+        *out_trailing_nop_bundle_count = 0;
+      }
       bool has_control = false;
       IREE_RETURN_IF_ERROR(
           loom_aie2p_artifact_check_bundle_has_control(&bundle, &has_control));
@@ -244,10 +265,12 @@ static iree_status_t loom_aie2p_artifact_check_print_hardware_loops_in_section(
         } else {
           bool end_on_bundle = false;
           bool end_group_full_width = false;
+          uint32_t trailing_nop_bundle_count = 0;
           uint32_t body_control_count = 0;
           IREE_RETURN_IF_ERROR(loom_aie2p_artifact_check_loop_body_facts(
               section, section_address, &setup, &end_on_bundle,
-              &end_group_full_width, &body_control_count));
+              &end_group_full_width, &trailing_nop_bundle_count,
+              &body_control_count));
           const uint64_t end_setup_address =
               section_address + setup.end_setup_bundle_offset;
           IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -256,7 +279,8 @@ static iree_status_t loom_aie2p_artifact_check_print_hardware_loops_in_section(
               " count_start_coissued=%s end_setup_next=%s"
               " start_aligned=%s start_after_setup=%s end_aligned=%s"
               " end_on_bundle=%s end_group_full_width=%s"
-              " setup_distance_valid=%s body_control=%u\n",
+              " setup_distance_valid=%s trailing_nop_bundles=%u"
+              " body_control=%u\n",
               loop_ordinal++, setup.iteration_count,
               setup.count_bundle_offset == setup.start_bundle_offset ? "true"
                                                                      : "false",
@@ -277,7 +301,7 @@ static iree_status_t loom_aie2p_artifact_check_print_hardware_loops_in_section(
                           LOOM_AIE2P_ARTIFACT_CHECK_MINIMUM_LOOP_SETUP_DISTANCE
                   ? "true"
                   : "false",
-              body_control_count));
+              trailing_nop_bundle_count, body_control_count));
         }
         setup = (loom_aie2p_artifact_loop_setup_t){0};
       }

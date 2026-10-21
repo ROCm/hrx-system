@@ -53,8 +53,10 @@ typedef struct loom_aie2p_bundle_plan_options_t {
 // without an unrelated native high-water floor. Source-order boundaries close
 // the window on both sides, including zero-width declarations without fake
 // instructions. Gaps occupy code bytes without allocating per-cycle bundle or
-// slot records. Every control-flow edge reaches a quiescent event/resource
-// boundary before successor entry, including fallthrough and backedges.
+// slot records. Ordinary control-flow edges reach a quiescent event/resource
+// boundary before successor entry. Selected hardware loops instead honor the
+// scheduler-owned cross-iteration source deadline and prove their realized
+// register/resource recurrence at the fixed native period.
 // Structural control's source deadline constrains retirement; native condition
 // and LR reads retain concrete register-event issue admission. Native
 // branch-delay cycles contribute to this boundary. Prebound live-ins and

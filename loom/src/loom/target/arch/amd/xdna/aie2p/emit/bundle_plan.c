@@ -49,6 +49,17 @@ typedef struct loom_aie2p_pending_bundle_t {
   uint8_t slot_count;
 } loom_aie2p_pending_bundle_t;
 
+// One realized instruction retained in semantic publication order while a
+// hardware-loop body is being planned.
+typedef struct loom_aie2p_recurrence_instruction_t {
+  // Planned instruction and source-packet identity.
+  loom_aie2p_planned_slot_t slot;
+  // Concrete descriptor or move binding selected during native realization.
+  loom_aie2p_slot_realization_t realization;
+  // Physical cycle selected in the first loop-body iteration.
+  uint32_t issue_cycle;
+} loom_aie2p_recurrence_instruction_t;
+
 typedef struct loom_aie2p_bundle_plan_builder_t {
   // Emission frame being converted into physical bundles.
   const loom_low_emission_frame_t* frame;
@@ -131,6 +142,14 @@ typedef struct loom_aie2p_bundle_plan_builder_t {
     // Native issue floor established by block entry and source-order fences.
     uint32_t minimum_issue_cycle;
   } pending;
+  // Semantic-order native instructions captured for cyclic admission.
+  loom_aie2p_recurrence_instruction_t* recurrence_instructions;
+  // Number of records available in |recurrence_instructions|.
+  iree_host_size_t recurrence_instruction_capacity;
+  // Number of records captured for the current hardware-loop candidate.
+  iree_host_size_t recurrence_instruction_count;
+  // Whether native commits belong to the current hardware-loop body.
+  bool capture_recurrence_instructions;
   // Shared physical event and resource admission state.
   loom_low_physical_issue_t issue;
   // Scratch native bindings per slot. Not retained by the final plan.
@@ -143,6 +162,22 @@ typedef struct loom_aie2p_bundle_plan_builder_t {
   // Accumulated native writes, copied into the final plan.
   loom_aie2p_register_unit_set_t register_writes;
 } loom_aie2p_bundle_plan_builder_t;
+
+static void loom_aie2p_bundle_plan_record_recurrence_instruction(
+    loom_aie2p_bundle_plan_builder_t* builder, loom_aie2p_planned_slot_t slot,
+    loom_aie2p_slot_realization_t realization, uint32_t issue_cycle) {
+  if (!builder->capture_recurrence_instructions) {
+    return;
+  }
+  IREE_ASSERT_LT(builder->recurrence_instruction_count,
+                 builder->recurrence_instruction_capacity);
+  builder->recurrence_instructions[builder->recurrence_instruction_count++] =
+      (loom_aie2p_recurrence_instruction_t){
+          .slot = slot,
+          .realization = realization,
+          .issue_cycle = issue_cycle,
+      };
+}
 
 static iree_host_size_t loom_aie2p_bundle_plan_append_slot(
     loom_aie2p_bundle_plan_builder_t* builder, loom_aie2p_planned_slot_t slot,
@@ -425,6 +460,9 @@ static iree_status_t loom_aie2p_bundle_plan_append_single_slot(
           &builder->issue, builder->instructions, 1, builder->next_issue_cycle);
   IREE_RETURN_IF_ERROR(loom_low_physical_issue_commit(
       &builder->issue, builder->instructions, 1, issue_cycle));
+  loom_aie2p_bundle_plan_record_recurrence_instruction(
+      builder, builder->slots[slot_start],
+      builder->slot_realizations[slot_start], issue_cycle);
   const uint32_t packet_index =
       builder->slots[slot_start].scheduled_packet_index;
   if (packet_index != LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE) {
@@ -505,6 +543,8 @@ static iree_status_t loom_aie2p_bundle_plan_admit_instruction(
   } while (format == LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID);
   IREE_RETURN_IF_ERROR(loom_low_physical_issue_commit(
       &builder->issue, builder->instructions, 1, cycle));
+  loom_aie2p_bundle_plan_record_recurrence_instruction(builder, slot,
+                                                       realization, cycle);
   if (slot.scheduled_packet_index != LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE) {
     loom_low_physical_issue_commit_source(&builder->issue,
                                           slot.scheduled_packet_index, cycle);
@@ -679,6 +719,8 @@ static iree_status_t loom_aie2p_bundle_plan_try_place_control(
       builder->encoded_byte_length - old_byte_length + new_byte_length;
   candidate_bundle->format = format;
   candidate_bundle->slot_count = (uint8_t)candidate_slot_count;
+  IREE_ASSERT(!builder->capture_recurrence_instructions &&
+              "hardware-loop bodies cannot contain structural control");
   IREE_RETURN_IF_ERROR(loom_low_physical_issue_commit(
       &builder->issue, &builder->instructions[retained_slot_count], 1,
       candidate_cycle));
@@ -1500,6 +1542,91 @@ static iree_status_t loom_aie2p_bundle_plan_append_loop_setup_instruction(
                                           descriptor_ordinal});
 }
 
+// Proves that the fixed native body can repeat at its encoded issue period.
+// Source scheduling has already placed every required cross-iteration effect
+// deadline on the body terminator. This check owns only the concrete register
+// events and resource reservations introduced by native realization.
+static iree_status_t loom_aie2p_bundle_plan_check_hardware_loop_recurrence(
+    loom_aie2p_bundle_plan_builder_t* builder, uint32_t body_issue_cycle,
+    uint16_t trip_count, bool* out_admitted) {
+  *out_admitted = false;
+  IREE_ASSERT_NE(builder->recurrence_instruction_count, 0u);
+  IREE_ASSERT_LT(body_issue_cycle, builder->next_issue_cycle);
+
+  const uint32_t period = builder->next_issue_cycle - body_issue_cycle;
+  const uint64_t native_quiescent_cycle =
+      iree_max(builder->issue.resources.quiescent_cycle,
+               (uint64_t)builder->issue.events.quiescent_cycle);
+  if (native_quiescent_cycle <= builder->next_issue_cycle || trip_count <= 1) {
+    *out_admitted = true;
+    return iree_ok_status();
+  }
+
+  // Copy only the physical histories mutated by instruction admission. Node
+  // readiness is immutable here because replay has no semantic source commit.
+  loom_low_physical_issue_t replay = builder->issue;
+  const iree_host_size_t event_deadline_count =
+      (iree_host_size_t)builder->descriptor_set->physical_register_unit_count *
+      builder->schedule_model->timing_event_count;
+  if (event_deadline_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->scratch_arena, event_deadline_count,
+        sizeof(*replay.events.deadlines), (void**)&replay.events.deadlines));
+    memcpy(replay.events.deadlines, builder->issue.events.deadlines,
+           event_deadline_count * sizeof(*replay.events.deadlines));
+  }
+  const iree_host_size_t resource_slot_count =
+      builder->schedule_model->resource_calendar_slot_count;
+  if (resource_slot_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->scratch_arena, resource_slot_count,
+        sizeof(*replay.resources.slots), (void**)&replay.resources.slots));
+    memcpy(replay.resources.slots, builder->issue.resources.slots,
+           resource_slot_count * sizeof(*replay.resources.slots));
+  }
+
+  const uint64_t retained_tail =
+      native_quiescent_cycle - builder->next_issue_cycle;
+  uint64_t replay_count = retained_tail / period;
+  replay_count += retained_tail % period != 0;
+  replay_count = iree_min(replay_count, (uint64_t)trip_count - 1u);
+  for (uint64_t repetition = 1; repetition <= replay_count; ++repetition) {
+    const uint64_t cycle_shift = repetition * period;
+    const uint64_t prior_native_quiescent_cycle =
+        iree_max(replay.resources.quiescent_cycle,
+                 (uint64_t)replay.events.quiescent_cycle);
+    for (iree_host_size_t i = 0; i < builder->recurrence_instruction_count;
+         ++i) {
+      const loom_aie2p_recurrence_instruction_t* instruction =
+          &builder->recurrence_instructions[i];
+      const uint64_t proposed_cycle = instruction->issue_cycle + cycle_shift;
+      if (proposed_cycle > UINT32_MAX) {
+        return iree_ok_status();
+      }
+      // Intermediate repetitions must be complete to construct every live
+      // overlap in the final repetition. There, only instructions issued
+      // before prior native state quiesces can invalidate the fixed pattern.
+      // Publication order is not chronological, so filter each record.
+      if (repetition == replay_count &&
+          proposed_cycle >= prior_native_quiescent_cycle) {
+        continue;
+      }
+      loom_aie2p_bundle_plan_instruction(builder, &instruction->slot,
+                                         instruction->realization, 0);
+      const uint32_t admitted_cycle =
+          loom_low_physical_issue_find_earliest_issue_cycle(
+              &replay, builder->instructions, 1, (uint32_t)proposed_cycle);
+      if (admitted_cycle != proposed_cycle) {
+        return iree_ok_status();
+      }
+      IREE_RETURN_IF_ERROR(loom_low_physical_issue_commit(
+          &replay, builder->instructions, 1, admitted_cycle));
+    }
+  }
+  *out_admitted = true;
+  return iree_ok_status();
+}
+
 static bool loom_aie2p_bundle_plan_bundle_has_loop_setup_descriptor(
     const loom_aie2p_bundle_plan_builder_t* builder,
     iree_host_size_t bundle_index, uint32_t descriptor_ordinal) {
@@ -1599,7 +1726,10 @@ static iree_status_t loom_aie2p_bundle_plan_try_append_hardware_loop_impl(
   builder->block_byte_offsets[loop->header_block_index] = body_byte_offset;
   loom_aie2p_bundle_plan_begin_block(builder, loop->body_block_index,
                                      body_byte_offset);
+  const uint32_t body_issue_cycle = builder->next_issue_cycle;
   const iree_host_size_t body_bundle_start = builder->bundle_count;
+  builder->recurrence_instruction_count = 0;
+  builder->capture_recurrence_instructions = true;
   loom_aie2p_block_analysis_t* body_analysis =
       &analysis->blocks[loop->body_block_index];
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_block_packets(
@@ -1610,15 +1740,28 @@ static iree_status_t loom_aie2p_bundle_plan_try_append_hardware_loop_impl(
       loom_aie2p_bundle_plan_append_edge_moves(builder, &terminator_packet));
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_flush_pending(
       builder, builder->pending.end_cycle));
-  const uint64_t quiescent_cycle = loom_aie2p_bundle_plan_quiescent_cycle(
-      builder, body_analysis->terminator_packet_index);
-  while (builder->next_issue_cycle < quiescent_cycle) {
+  const uint32_t semantic_ready_cycle =
+      loom_low_physical_issue_source_ready_cycle(
+          &builder->issue, body_analysis->terminator_packet_index);
+  while (builder->next_issue_cycle < semantic_ready_cycle) {
     IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_nop_bundle(
         builder, body_analysis->terminator_issue_cycle));
   }
+  builder->capture_recurrence_instructions = false;
   if (builder->bundle_count == body_bundle_start) {
     loom_aie2p_bundle_plan_restore_hardware_loop(builder, snapshot, loop);
     return iree_ok_status();
+  }
+  bool recurrence_admitted = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_check_hardware_loop_recurrence(
+      builder, body_issue_cycle, loop->trip_count, &recurrence_admitted));
+  if (!recurrence_admitted) {
+    const uint64_t quiescent_cycle =
+        loom_low_physical_issue_quiescent_cycle(&builder->issue);
+    while (builder->next_issue_cycle < quiescent_cycle) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_nop_bundle(
+          builder, body_analysis->terminator_issue_cycle));
+    }
   }
   const iree_host_size_t loop_end_bundle_index = builder->bundle_count - 1u;
   bool loop_end_aligned = false;
@@ -1800,6 +1943,8 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
       .bundle_capacity = bundle_capacity,
       .slot_capacity = slot_capacity,
       .block_count = frame->schedule.block_count,
+      .recurrence_instruction_capacity =
+          analysis.hardware_loop_candidate_count != 0 ? slot_capacity : 0,
       .code_address_fixup_capacity =
           analysis.hardware_loop_candidate_count * 2u,
       .pending.capacity = frame->schedule.target.schedule_model
@@ -1816,6 +1961,12 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       scratch_arena, slot_capacity, sizeof(*builder.slot_realizations),
       (void**)&builder.slot_realizations));
+  if (builder.recurrence_instruction_capacity != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, builder.recurrence_instruction_capacity,
+        sizeof(*builder.recurrence_instructions),
+        (void**)&builder.recurrence_instructions));
+  }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       scratch_arena,
       LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT *

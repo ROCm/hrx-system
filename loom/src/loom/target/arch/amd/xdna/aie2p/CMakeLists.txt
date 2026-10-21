@@ -745,6 +745,7 @@ loom_cc_library(
     ::array_program
     ::array_resident
     ::artifact
+    ::bundle_encoding
     ::core_descriptors
     ::descriptor_encoding
     ::encoding

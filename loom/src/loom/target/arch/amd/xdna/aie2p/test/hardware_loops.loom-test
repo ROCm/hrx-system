@@ -64,4 +64,92 @@ func.def target(@core_target) @hardware_loop_worker(%lhs: buffer, %rhs: buffer, 
 
 // ----
 .text.hardware_loop_pipeline$worker$0: hardware_loops=1
-  loop 0: iterations=4 count_start_coissued=true end_setup_next=true start_aligned=true start_after_setup=true end_aligned=true end_on_bundle=true end_group_full_width=true setup_distance_valid=true body_control=0
+  loop 0: iterations=4 count_start_coissued=true end_setup_next=true start_aligned=true start_after_setup=true end_aligned=true end_on_bundle=true end_group_full_width=true setup_distance_valid=true trailing_nop_bundles=3 body_control=0
+
+// ====
+
+// RUN: emit aie2p-xdna input=source-low output=hardware-loops
+
+// Each iteration advances to a disjoint 128-byte panel. The final store remains
+// in flight past the body boundary, but the next panel can start without NOP
+// tail bundles once the realized native recurrence has been admitted.
+
+aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+func.def inline @loop_worker(%storage: buffer) {
+  %step_bytes = scalar.constant 128 : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %final = scf.for %index = [%c0 to %c8 step %c1](%cursor = %storage : buffer) -> (buffer) {
+    %next = low.invoke @copy_and_advance(%cursor, %step_bytes) : (buffer, i32) -> (buffer)
+    scf.yield %next : buffer
+  }
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @hardware_loop_recurrence() run(%external_arg: buffer) {
+  %external_unique = buffer.assume.noalias %external_arg : buffer
+  %external = buffer.assume.alignment %external_unique {minimum_alignment = 64} : buffer
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %bytes = index.constant 1024 : offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x256xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<1x256xi32>, index -> channel<tile<256xi32>>
+
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %external_view = buffer.view %external[%origin] : buffer -> view<256xi32>
+    %write, %destination = channel.reserve %records : channel<tile<256xi32>> -> (write<tile<256xi32>>, view<256xi32>)
+    %ingress = kernel.async.copy %external_view to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<256xi32> to view<256xi32> -> kernel.async.token
+    %incoming = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %incoming {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<256xi32>>
+  }
+
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %read, %payload = channel.acquire<mutable> %records : channel<tile<256xi32>> -> (read<tile<256xi32>, mutable>, view<256xi32>)
+    func.call @loop_worker(%storage) : (buffer)
+    %external_view = buffer.view %external[%origin] : buffer -> view<256xi32>
+    %egress = kernel.async.copy %payload to %external_view {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<256xi32> to view<256xi32> -> kernel.async.token
+    %outgoing = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %outgoing {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<256xi32>, mutable>
+  }
+}
+
+low.func.def inline target<amd.xdna.aie2p.core>(@core_target) @copy_and_advance(%cursor: reg<aie2p.ep>, %step_bytes: reg<aie2p.er>) -> (reg<aie2p.ep>) asm {
+  %left = vlda.512.i32x16 %cursor, 0
+  %right = vldb.512.i32x16 %cursor, 64
+  %sum0 = vadd.32 %left, %right
+  %sum1 = vadd.32 %sum0, %right
+  %sum2 = vadd.32 %sum1, %right
+  %sum3 = vadd.32 %sum2, %right
+  %sum4 = vadd.32 %sum3, %right
+  %sum5 = vadd.32 %sum4, %right
+  %sum6 = vadd.32 %sum5, %right
+  %sum7 = vadd.32 %sum6, %right
+  %sum8 = vadd.32 %sum7, %right
+  %sum9 = vadd.32 %sum8, %right
+  %sum10 = vadd.32 %sum9, %right
+  %sum11 = vadd.32 %sum10, %right
+  %sum12 = vadd.32 %sum11, %right
+  %sum13 = vadd.32 %sum12, %right
+  %sum14 = vadd.32 %sum13, %right
+  %sum15 = vadd.32 %sum14, %right
+  %sum16 = vadd.32 %sum15, %right
+  %sum17 = vadd.32 %sum16, %right
+  %sum18 = vadd.32 %sum17, %right
+  %sum19 = vadd.32 %sum18, %right
+  vst.512.i32x16 %sum19, %cursor, 0
+  %modifier = mov.modifier %step_bytes
+  %next = padda.modifier %cursor, %modifier
+  return %next
+}
+
+// ----
+.text.__pipeline_worker_1: hardware_loops=1
+  loop 0: iterations=8 count_start_coissued=true end_setup_next=true start_aligned=true start_after_setup=true end_aligned=true end_on_bundle=true end_group_full_width=true setup_distance_valid=true trailing_nop_bundles=0 body_control=0
