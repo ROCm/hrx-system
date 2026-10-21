@@ -339,6 +339,7 @@ loom_module(
     "kernels/qwen38/linear_q5k_f16_mfma.loom"
     "kernels/qwen38/linear_q5k_f16_wmma.loom"
     "kernels/qwen38/linear_q5k_f16_wmma_wave32.loom"
+    "kernels/qwen38/linear_q6k_f16_mfma.loom"
     "kernels/qwen38/linear_q6k_f16_wmma.loom"
     "kernels/qwen38/linear_q6k_f16_wmma_metadata.loom"
     "iree::experimental::loom_serve::motifs::ggml::library"
@@ -367,6 +368,7 @@ loom_test_module(
   SRCS
     "tests/linear_cohort_oracle.loom"
     "tests/matrix_projection.loom"
+    "tests/signed_matrix_projection.loom"
   LIBRARIES
     "::projection_kernels"
 )

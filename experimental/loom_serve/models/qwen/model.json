@@ -68,6 +68,7 @@
       "kernels/qwen38/linear_q5k_f16_mfma.loom",
       "kernels/qwen38/linear_q5k_f16_wmma_split_k.loom",
       "kernels/qwen38/linear_q5k_f16_wmma_wave32.loom",
+      "kernels/qwen38/linear_q6k_f16_mfma.loom",
       "kernels/qwen38/linear_q6k_f16_wmma.loom",
       "kernels/qwen38/linear_q6k_f16_wmma_metadata.loom",
       "kernels/qwen38/accept.loom",
