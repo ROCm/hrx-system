@@ -59,9 +59,7 @@ class DriverTest : public ::testing::Test {
   void TearDown() override {
     for (size_t i = 0; i < devices_.size(); ++i) {
       iree_hal_semaphore_release(semaphores_[i]);
-      if (devices_[i]) {
-        iree_hal_device_release(devices_[i]);
-      }
+      iree_hal_device_release(devices_[i]);
       EXPECT_EQ(allocators_[i].live_count.load(), 0u);
     }
     iree_async_proactor_pool_release(proactors_);
@@ -116,9 +114,10 @@ class DriverTest : public ::testing::Test {
           .structure_size = sizeof(gpu_info),
       };
       if (matches) {
-        status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-            gpu->endpoint_query_info(endpoint, &gpu_info),
-            "gpu.endpoint_query_info");
+        status = iree_status_join(
+            status, IREE_HAL_AMD_STATUS_FROM_AMDF(
+                        gpu->endpoint_query_info(endpoint, &gpu_info),
+                        "gpu.endpoint_query_info"));
       }
       const amdf_status_t close_status = api->endpoint_close(endpoint);
       if (!amdf_status_is_ok(close_status)) {
