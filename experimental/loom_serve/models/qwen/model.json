@@ -40,6 +40,7 @@
       "kernels/qwen38/attention_decode_split.loom",
       "kernels/qwen38/attention_prefill.loom",
       "kernels/qwen38/attention_prefill_wmma.loom",
+      "kernels/qwen38/attention_prefill_mfma.loom",
       "kernels/qwen38/attention_spans.loom",
       "kernels/qwen38/attention_spans_split.loom",
       "kernels/qwen38/decode_control.loom",

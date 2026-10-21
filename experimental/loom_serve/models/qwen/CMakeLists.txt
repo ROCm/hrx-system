@@ -2030,6 +2030,86 @@ loom_execution_test(
 )
 endif()
 
+loom_module(
+  NAME
+    attention_matrix_kernels
+  SRCS
+    "kernels/qwen38/attention_common.loom"
+    "kernels/qwen38/attention_prefill.loom"
+    "kernels/qwen38/attention_prefill_mfma.loom"
+    "kernels/qwen38/attention_prefill_wmma.loom"
+    "kernels/qwen38/spans.loom"
+  LIBRARIES
+    "::input_records"
+    "iree::experimental::loom_serve::motifs::tensor::matrix_fragments"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
+loom_test_module(
+  NAME
+    attention_matrix_test_module
+  SRCS
+    "tests/attention_matrix.loom"
+  LIBRARIES
+    "::attention_matrix_kernels"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    attention_matrix_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::attention_matrix_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.attention.cache_capacity=81"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    attention_matrix_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::attention_matrix_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=qwen38.attention.cache_capacity=81"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
 loom_test_module(
   NAME
     attention_state_test_module
@@ -2044,6 +2124,7 @@ loom_test_module(
     "tests/attention_spans.loom"
   LIBRARIES
     "::input_records"
+    "iree::experimental::loom_serve::motifs::tensor::matrix_fragments"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)

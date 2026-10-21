@@ -1,0 +1,35 @@
+// CDNA attention keeps the shared causal traversal and persistent KV layout.
+// The matrix providers select MFMA fragments and native F32 accumulation.
+amdgpu.target<gfx9-4-generic> @qwen38_attention_cdna_wave64 {subgroup_size = 64}
+
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+
+template.decl @qwen38.attention.wmma(%logical_capacity: index, %query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+
+kernel.def target(@qwen38_attention_cdna_wave64) export("qwen38_attention_prefill_f16_mfma") @qwen38_attention_prefill_f16_mfma(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %c1 = index.constant 1 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %c24 = index.constant 24 : index
+  %waves = index.constant 4 : index
+  %width = target.subgroup.size : index
+  %threads = index.mul %waves, %width : index
+  %padded_token_count = index.add %token_count, %c15 : index
+  %query_tile_count = index.div %padded_token_count, %c16 : index
+  kernel.launch.config workgroups(%query_tile_count, %c24, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
+  %query_tile = kernel.workgroup.id<x> : index
+  %query_head0 = kernel.workgroup.id<y> : index
+  %query_head = index.assume %query_head0 [range(%query_head0, 0, 23)] : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %origin = index.constant 0 : offset
+  %token_begin = index.constant 0 : index
+  %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %gate, %key_cache, %value_cache, %output : buffer, buffer, buffer, buffer, buffer
+  %logical_capacity = config.get @qwen38.attention.cache_capacity : index
+  template.apply<@qwen38.attention.wmma>(%logical_capacity, %query_tile, %query_head, %workitem, %subgroup, %lane, %control, %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias, %origin, %token_begin, %origin, %origin, %control, %origin, %token_begin) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  kernel.return
+}

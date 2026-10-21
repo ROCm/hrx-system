@@ -1,0 +1,41 @@
+// Full and partial cache blocks, causal tails, GQA, and all four output tiles
+// use the same random inputs on both matrix targets. The scalar F32 kernel
+// supplies an independent attention algorithm rather than matrix operations.
+kernel.decl @qwen38_attention_prefill_reference(%tokens: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key: buffer, %value: buffer, %output: buffer)
+kernel.decl @qwen38_attention_prefill_f16_wmma(%tokens: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key: buffer, %value: buffer, %output: buffer)
+
+kernel.decl @qwen38_attention_prefill_f16_mfma(%tokens: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key: buffer, %value: buffer, %output: buffer)
+
+check.case public @attention_mfma_random {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %tokens = check.literal value(17) : index
+  %seed = check.param.seed base(320300) count(2) : i64
+  %control = check.generate.iota offset(17) step(47) : tensor<2xi32>
+  %query = check.generate.random.uniform seed(%seed) range(-0.25 to 0.25) : tensor<17x6144xf32>
+  %gate = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<17x6144xf32>
+  %key = check.generate.random.uniform seed(%seed) range(-0.25 to 0.25) : tensor<81x1024xf16>
+  %value = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<81x1024xf16>
+  %reference = check.generate.fill value(-99.0) : tensor<17x6144xf32>
+  %actual = check.generate.fill value(-99.0) : tensor<17x6144xf32>
+  kernel.launch @qwen38_attention_prefill_reference[%tokens](%control, %query, %gate, %key, %value, %reference) : [index](tensor<2xi32>, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<81x1024xf16>, tensor<81x1024xf16>, tensor<17x6144xf32>)
+  kernel.launch @qwen38_attention_prefill_f16_mfma[%tokens](%control, %query, %gate, %key, %value, %actual) : [index](tensor<2xi32>, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<81x1024xf16>, tensor<81x1024xf16>, tensor<17x6144xf32>)
+  check.expect.close actual(%actual) expected(%reference) atol(0.0005) rtol(0.005) nan(different) : tensor<17x6144xf32>
+  check.return
+}
+
+check.case public @attention_wmma_random {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %tokens = check.literal value(17) : index
+  %seed = check.param.seed base(320300) count(2) : i64
+  %control = check.generate.iota offset(17) step(47) : tensor<2xi32>
+  %query = check.generate.random.uniform seed(%seed) range(-0.25 to 0.25) : tensor<17x6144xf32>
+  %gate = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<17x6144xf32>
+  %key = check.generate.random.uniform seed(%seed) range(-0.25 to 0.25) : tensor<81x1024xf16>
+  %value = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<81x1024xf16>
+  %reference = check.generate.fill value(-99.0) : tensor<17x6144xf32>
+  %actual = check.generate.fill value(-99.0) : tensor<17x6144xf32>
+  kernel.launch @qwen38_attention_prefill_reference[%tokens](%control, %query, %gate, %key, %value, %reference) : [index](tensor<2xi32>, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<81x1024xf16>, tensor<81x1024xf16>, tensor<17x6144xf32>)
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%tokens](%control, %query, %gate, %key, %value, %actual) : [index](tensor<2xi32>, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<81x1024xf16>, tensor<81x1024xf16>, tensor<17x6144xf32>)
+  check.expect.close actual(%actual) expected(%reference) atol(0.0005) rtol(0.005) nan(different) : tensor<17x6144xf32>
+  check.return
+}
