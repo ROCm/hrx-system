@@ -21,7 +21,7 @@ TEST(AqlSignalTest, InitializesNativeAbiAndRecyclesOnlyAfterReadersRetire) {
   std::array<iree_hal_amd_gpu_aql_signal_t, 2> native;
   std::memset(native.data(), 0xa5, sizeof(native));
   std::array<iree_hal_amd_gpu_signal_t, 2> metadata;
-  std::array<uint64_t, 4> frontiers;
+  std::array<uint64_t, 2 + 4> frontiers;
   iree_hal_amd_gpu_signal_pool_t pool;
   iree_hal_amd_gpu_signal_block_t block;
   iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
@@ -59,7 +59,7 @@ TEST(AqlSignalTest, InitializesNativeAbiAndRecyclesOnlyAfterReadersRetire) {
   EXPECT_EQ(iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1), nullptr);
   EXPECT_FALSE(iree_hal_amd_gpu_signal_block_try_deinitialize(&block));
   std::array<uint64_t, 2> joined = {9, 8};
-  iree_hal_amd_gpu_signal_join_frontier(first, joined.data());
+  iree_hal_amd_gpu_signal_join_frontier(first, joined.size(), joined.data());
   EXPECT_EQ(joined, (std::array<uint64_t, 2>{17, 8}));
   iree_status_code_t code = IREE_STATUS_UNKNOWN;
   EXPECT_TRUE(iree_hal_amd_gpu_signal_query_retirement(first, &code));
@@ -87,14 +87,13 @@ TEST(AqlSignalTest, SemaphoreCacheDoesNotOwnTheLastDependentReader) {
       proactor, nullptr, 0, 2, iree_allocator_system(), &semaphore));
   iree_hal_amd_gpu_aql_signal_t native;
   iree_hal_amd_gpu_signal_t metadata;
-  uint64_t frontier;
+  uint64_t frontier[2 + 1];
   iree_hal_amd_gpu_signal_pool_t pool;
   iree_hal_amd_gpu_signal_block_t block;
   iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
   const amdf_gpu_event_info_t event = {};
-  iree_hal_amd_gpu_aql_signal_block_initialize(&pool, &pool, &event, &native,
-                                               0x4000, &metadata, 1, 1,
-                                               &frontier, &block);
+  iree_hal_amd_gpu_aql_signal_block_initialize(
+      &pool, &pool, &event, &native, 0x4000, &metadata, 1, 1, frontier, &block);
   auto* producer = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1);
   const uint64_t epoch = 7;
   iree_hal_amd_gpu_signal_publish_frontier(producer, &epoch);
@@ -129,7 +128,7 @@ TEST(AqlSignalTest, AttachesAcquiredBackingWithExactDescriptorOperands) {
   std::array<iree_hal_amd_gpu_aql_signal_t, 2> native;
   std::memset(native.data(), 0xa5, sizeof(native));
   std::array<iree_hal_amd_gpu_signal_t, 2> signals;
-  std::array<uint64_t, 4> frontiers;
+  std::array<uint64_t, 2 + 4> frontiers;
   const amdf_api_t api = {
       .memory_query_address =
           [](amdf_memory_t* memory, uint32_t ordinal,
@@ -155,7 +154,8 @@ TEST(AqlSignalTest, AttachesAcquiredBackingWithExactDescriptorOperands) {
       .capacity = 2,
       .queue_count = 2,
       .signals = signals.data(),
-      .frontiers = frontiers.data(),
+      .frontiers = reinterpret_cast<iree_hal_amd_gpu_signal_frontiers_t*>(
+          frontiers.data()),
   };
   iree_hal_amd_gpu_signal_pool_t pool;
   iree_hal_amd_gpu_signal_pool_initialize({}, &pool);

@@ -144,14 +144,14 @@ TEST_P(SubmissionTest, PayloadRetiresBeforePublicCompletion) {
       iree_make_const_byte_span(&constant, sizeof(constant)), {1, &reference},
       &profile_, nullptr, 0, &capture));
   uint64_t native_value = 0;
-  uint64_t native_frontier = 0;
+  uint64_t frontier_storage[2 + 1];
   iree_hal_amd_gpu_signal_t native_signal = {};
   iree_hal_amd_gpu_signal_pool_t signal_pool;
   iree_hal_amd_gpu_signal_block_t signal_block;
   iree_hal_amd_gpu_signal_pool_initialize({}, &signal_pool);
   iree_hal_amd_gpu_signal_block_initialize(&signal_pool, this, &native_value,
                                            0x1000, 8, 0, &native_signal, 1, 1,
-                                           &native_frontier, &signal_block);
+                                           frontier_storage, &signal_block);
   capture->signal = iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool, 0);
   iree_hal_amd_gpu_pm4_submission_t* consumer = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
@@ -236,13 +236,14 @@ TEST_P(SubmissionTest, RetirementOwnsNativeReadersWithoutCallerInputs) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
       proactor, nullptr, 0, 4, iree_allocator_system(), &semaphore));
   uint64_t native_value = 0, native_frontier = 1;
+  uint64_t frontier_storage[2 + 1];
   iree_hal_amd_gpu_signal_t native_signal = {};
   iree_hal_amd_gpu_signal_pool_t signal_pool;
   iree_hal_amd_gpu_signal_block_t signal_block;
   iree_hal_amd_gpu_signal_pool_initialize({}, &signal_pool);
   iree_hal_amd_gpu_signal_block_initialize(&signal_pool, this, &native_value,
                                            0x1000, 8, 0, &native_signal, 1, 1,
-                                           &native_frontier, &signal_block);
+                                           frontier_storage, &signal_block);
   auto* producer = iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool, 0);
   iree_hal_amd_gpu_signal_publish_frontier(producer, &native_frontier);
   IREE_ASSERT_OK(
@@ -459,7 +460,7 @@ TEST_P(SubmissionTest, FailedDependencyStillJoinsOtherProducers) {
   }
   std::array<uint64_t, 2> values = {1, 1};
   std::array<uint64_t, 2> native_values = {};
-  std::array<uint64_t, 2> native_frontiers = {};
+  std::array<uint64_t, 2 + 2> native_frontiers = {};
   std::array<iree_hal_amd_gpu_signal_t, 2> native_signals = {};
   iree_hal_amd_gpu_signal_pool_t signal_pool;
   iree_hal_amd_gpu_signal_block_t signal_block;

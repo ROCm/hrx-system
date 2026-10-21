@@ -51,8 +51,9 @@ typedef struct iree_hal_amd_gpu_signal_storage_t {
   uint32_t queue_count;
   // Prepared inline metadata, initialized after native backing arrives.
   iree_hal_amd_gpu_signal_t* signals;
-  // Prepared inline frontier vectors, one per signal record.
-  uint64_t* frontiers;
+  // Initial inline frontier table header and rows. Expanded tables stay linked
+  // to this initial allocation until all block readers have joined.
+  iree_hal_amd_gpu_signal_frontiers_t* frontiers;
   // Release descriptor acquired with this storage, never at retirement.
   iree_hal_amd_gpu_memory_release_t release;
   // Host allocator owning this metadata through native release completion.

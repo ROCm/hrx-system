@@ -750,6 +750,7 @@ static iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   for (iree_host_size_t i = 0; i < wait_count; ++i) {
     if (waits[i].signal) {
       iree_hal_amd_gpu_signal_join_frontier(waits[i].signal,
+                                            queue->producer.queue_count,
                                             queue->producer.frontier);
     }
   }
@@ -862,6 +863,7 @@ iree_hal_amd_gpu_aql_publish_control(
   for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
     if (submission->waits[i].signal) {
       iree_hal_amd_gpu_signal_join_frontier(submission->waits[i].signal,
+                                            queue->producer.queue_count,
                                             queue->producer.frontier);
     }
   }
@@ -960,8 +962,8 @@ iree_hal_amd_gpu_aql_publish_execute(
            queue->producer.queue_count * sizeof(uint64_t));
     for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
       if (submission->waits[i].signal) {
-        iree_hal_amd_gpu_signal_join_frontier(submission->waits[i].signal,
-                                              frontier);
+        iree_hal_amd_gpu_signal_join_frontier(
+            submission->waits[i].signal, queue->producer.queue_count, frontier);
       }
     }
   }
@@ -1183,6 +1185,7 @@ iree_hal_amd_gpu_aql_publish_transfer(
     for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
       if (submission->waits[i].signal) {
         iree_hal_amd_gpu_signal_join_frontier(submission->waits[i].signal,
+                                              queue->producer.queue_count,
                                               queue->producer.frontier);
       }
     }

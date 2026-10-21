@@ -17,6 +17,28 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_signal_pool_t iree_hal_amd_gpu_signal_pool_t;
 typedef struct iree_hal_amd_gpu_signal_block_t iree_hal_amd_gpu_signal_block_t;
 
+// A host table of signal-major native publication epochs. The capacity *
+// queue_count uint64_t values immediately follow this header. Each published
+// row is immutable until its last signal reader returns. Cold expansion copies
+// rows under publisher ownership and retains previous tables for readers that
+// already borrowed them; native signal addresses never change.
+typedef struct iree_alignas(8) iree_hal_amd_gpu_signal_frontiers_t {
+  // Previous narrower table, retained until all block readers have joined.
+  struct iree_hal_amd_gpu_signal_frontiers_t* previous;
+  // Number of signal rows, equal to the native block's capacity.
+  uint32_t capacity;
+  // Immutable coordinate extent of each row in this table.
+  uint32_t queue_count;
+} iree_hal_amd_gpu_signal_frontiers_t;
+
+// Frees expanded tables preceding initial after every block reader has joined.
+// The initial table belongs to the enclosing metadata allocation and remains
+// untouched. NULL initial releases an entirely separately allocated chain.
+void iree_hal_amd_gpu_signal_frontiers_free(
+    iree_hal_amd_gpu_signal_frontiers_t* frontiers,
+    iree_hal_amd_gpu_signal_frontiers_t* initial,
+    iree_allocator_t host_allocator);
+
 // One native binary signal, independently retained by its publisher,
 // producer, caches, and dependent executions. A producer completing does not
 // retire the native readers. This metadata stays in ordinary host memory;
@@ -86,8 +108,6 @@ typedef struct iree_hal_amd_gpu_signal_block_t {
   iree_hal_amd_gpu_signal_pool_t* pool;
   // Checked-out or pending-return cells; modified only by the publisher.
   uint32_t live_count;
-  // Complete immutable native-domain queue count, including inactive queues.
-  uint32_t queue_count;
   // Available metadata slots, owned by the publisher.
   iree_hal_amd_gpu_signal_t* free_head;
   // Previous available block, or NULL at the list head or while exhausted.
@@ -100,9 +120,9 @@ typedef struct iree_hal_amd_gpu_signal_block_t {
   const void* domain;
   // Borrowed metadata base for constant-time signal-to-frontier indexing.
   iree_hal_amd_gpu_signal_t* signals;
-  // Signal-major publication epochs, capacity * queue_count host entries.
-  // Each retained signal's vector is immutable after native acceptance.
-  uint64_t* frontiers;
+  // Current host table, release-published by cold expansion under exclusive
+  // publication ownership. Independent readers acquire this pointer once.
+  iree_atomic_intptr_t frontiers;
 } iree_hal_amd_gpu_signal_block_t;
 
 // Initializes an empty owner. Native blocks are attached only after their
@@ -118,16 +138,37 @@ void iree_hal_amd_gpu_signal_pool_deinitialize(
 // locates its naturally aligned value. Construction has qualified the complete
 // extents, host/device visibility, atomicity, and native protocol. All other
 // native fields are initialized by the protocol owner before publication.
-// Metadata, storage, and frontiers do not overlap. Frontiers has
-// capacity * queue_count entries; publication initializes a complete vector
-// before exposing a signal. A zero capacity attaches an empty block.
+// Metadata, storage, and frontier_storage do not overlap. Frontier storage is
+// aligned to eight bytes and holds two uint64_t header words followed by
+// capacity * queue_count values. This initializes the header and zeroes the
+// rows; publication fills a complete vector before exposing a signal. The
+// initial table may share the block's enclosing host allocation. A zero
+// capacity attaches an empty block.
 // The exclusive publisher attaches the block and already owns its waiting
 // work; attachment does not invoke the notification.
 void iree_hal_amd_gpu_signal_block_initialize(
     iree_hal_amd_gpu_signal_pool_t* pool, const void* domain, void* storage,
     uint64_t device_address, uint32_t stride, uint32_t value_offset,
     iree_hal_amd_gpu_signal_t* signals, uint32_t capacity, uint32_t queue_count,
-    uint64_t* frontiers, iree_hal_amd_gpu_signal_block_t* out_block);
+    void* frontier_storage, iree_hal_amd_gpu_signal_block_t* out_block);
+
+// Returns one table borrow covered by an existing signal reference, or by the
+// block owner's exclusive publication/lifecycle ownership.
+static inline iree_hal_amd_gpu_signal_frontiers_t*
+iree_hal_amd_gpu_signal_block_frontiers(
+    const iree_hal_amd_gpu_signal_block_t* block) {
+  return (iree_hal_amd_gpu_signal_frontiers_t*)iree_atomic_load(
+      &block->frontiers, iree_memory_order_acquire);
+}
+
+// Expands host proof metadata without replacing native cells or waiting for
+// readers. Called only under exclusive publication ownership. New coordinates
+// start at zero. Failure leaves the current table and every reader unchanged.
+// The cold membership owner grows widths geometrically and finishes expanding
+// all participating queues before publishing work on a new coordinate.
+iree_status_t iree_hal_amd_gpu_signal_block_reserve_frontiers(
+    iree_hal_amd_gpu_signal_block_t* block, uint32_t queue_count,
+    iree_allocator_t host_allocator);
 
 // Reconciles pending returns, then detaches an entirely unused block. False
 // leaves it attached with live readers. True joins the last release's block
@@ -159,19 +200,22 @@ iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire(
     iree_hal_amd_gpu_signal_pool_t* pool, uint64_t initial_value);
 
 // Captures an accepted producer's complete native-domain frontier before the
-// signal is exposed to readers or completion. The vector has block->queue_count
-// entries and includes the producer's own accepted publication epoch. Exactly
-// one publisher writes it; every subsequent retained reader sees that immutable
-// snapshot, even after the producer queue advances or disappears.
+// signal is exposed to readers or completion. The vector covers the current
+// table width and includes the producer's own accepted publication epoch.
+// Exactly one publisher writes it; every subsequent retained reader sees that
+// immutable snapshot, even after the producer queue advances or disappears.
 void iree_hal_amd_gpu_signal_publish_frontier(iree_hal_amd_gpu_signal_t* signal,
                                               const uint64_t* frontier);
 
 // Joins the retained producer's immutable snapshot into an invocation's
-// candidate frontier. Domain compatibility and equal queue counts are proven
-// at admission. This does not change the accepted FIFO frontier; rejection
-// discards the candidate without claiming that its native waits executed.
+// candidate frontier of queue_count entries. Cold membership expansion can
+// temporarily expose a wider table with zeroes in coordinates the consumer has
+// not installed yet. The merge bounds that zero suffix to its current extent;
+// new coordinates become usable only after every peer has installed them.
+// Rejection discards the candidate without claiming its native waits executed.
 void iree_hal_amd_gpu_signal_join_frontier(
-    const iree_hal_amd_gpu_signal_t* signal, uint64_t* frontier);
+    const iree_hal_amd_gpu_signal_t* signal, uint32_t queue_count,
+    uint64_t* frontier);
 
 // Adds a use from an existing live reference. A cache must pin the reference
 // under the same lock that protects removal; raw pointer loads cannot retain a

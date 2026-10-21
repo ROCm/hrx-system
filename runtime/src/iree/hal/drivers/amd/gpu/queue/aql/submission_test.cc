@@ -166,11 +166,11 @@ TEST_P(AqlSubmissionTest, DependencyReadersJoinProducerHostRetirement) {
   iree_hal_amd_gpu_signal_pool_initialize({}, &signals);
   iree_hal_amd_gpu_aql_signal_t native;
   iree_hal_amd_gpu_signal_t owner;
-  uint64_t frontier;
+  uint64_t frontier[2 + 1];
   iree_hal_amd_gpu_signal_block_t block;
   const amdf_gpu_event_info_t event = {};
   iree_hal_amd_gpu_aql_signal_block_initialize(
-      &signals, this, &event, &native, 0x1000, &owner, 1, 1, &frontier, &block);
+      &signals, this, &event, &native, 0x1000, &owner, 1, 1, frontier, &block);
   auto* producer = iree_hal_amd_gpu_signal_pool_try_acquire(&signals, 1);
   iree_hal_amd_gpu_signal_retain(producer);
   const iree_hal_amd_gpu_aql_wait_t dependency = {.signal = producer};

@@ -111,8 +111,9 @@ iree_status_t iree_hal_amd_gpu_signal_storage_prepare(
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(*storage), &total_size,
       IREE_STRUCT_FIELD(capacity, iree_hal_amd_gpu_signal_t, &signals_offset),
-      IREE_STRUCT_FIELD((iree_host_size_t)capacity * queue_count, uint64_t,
-                        &frontiers_offset)));
+      IREE_STRUCT_FIELD(1, iree_hal_amd_gpu_signal_frontiers_t,
+                        &frontiers_offset),
+      IREE_STRUCT_ARRAY_FIELD(capacity, queue_count, uint64_t, NULL)));
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, total_size, (void**)&storage));
   storage->host_allocator = host_allocator;
@@ -126,6 +127,12 @@ iree_status_t iree_hal_amd_gpu_signal_storage_prepare(
 
 static void iree_hal_amd_gpu_signal_storage_released(void* user_data) {
   iree_hal_amd_gpu_signal_storage_t* storage = user_data;
+  iree_hal_amd_gpu_signal_frontiers_t* frontiers =
+      iree_hal_amd_gpu_signal_block_frontiers(&storage->block);
+  if (frontiers) {
+    iree_hal_amd_gpu_signal_frontiers_free(frontiers, storage->frontiers,
+                                           storage->host_allocator);
+  }
   iree_allocator_free(storage->host_allocator, storage);
 }
 

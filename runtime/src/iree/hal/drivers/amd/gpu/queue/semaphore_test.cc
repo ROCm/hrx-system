@@ -153,7 +153,7 @@ class SemaphoreTest : public ::testing::Test {
   // Independently retained native signal metadata.
   std::array<Signal, 8> signals_ = {};
   // Three-queue causal snapshots retained by their native signals.
-  std::array<uint64_t, 8 * 3> frontiers_;
+  std::array<uint64_t, 2 + 8 * 3> frontiers_;
   // Finite producer storage, reclaimed only after all uses join.
   iree_hal_amd_gpu_signal_pool_t pool_;
   // Native extent retained until every semaphore reader releases it.
@@ -398,7 +398,8 @@ TEST_F(SemaphoreTest, SubmittedProducerDoesNotBecomeCompletedHistory) {
   auto wait = AcquireWait(semaphore, 2);
   EXPECT_EQ(wait.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
   uint64_t consumer_frontier[3] = {};
-  iree_hal_amd_gpu_signal_join_frontier(wait.signal, consumer_frontier);
+  iree_hal_amd_gpu_signal_join_frontier(
+      wait.signal, IREE_ARRAYSIZE(consumer_frontier), consumer_frontier);
   EXPECT_EQ(consumer_frontier[0], 2u);
   EXPECT_EQ(consumer_frontier[1], 0u);
   EXPECT_EQ(consumer_frontier[2], 0u);
@@ -489,8 +490,10 @@ TEST_F(SemaphoreTest, ReplacingProducerPreservesRetainedCausalSnapshot) {
   auto later_wait = AcquireWait(semaphore, 2);
   uint64_t earlier_consumer[3] = {};
   uint64_t later_consumer[3] = {};
-  iree_hal_amd_gpu_signal_join_frontier(earlier_wait.signal, earlier_consumer);
-  iree_hal_amd_gpu_signal_join_frontier(later_wait.signal, later_consumer);
+  iree_hal_amd_gpu_signal_join_frontier(
+      earlier_wait.signal, IREE_ARRAYSIZE(earlier_consumer), earlier_consumer);
+  iree_hal_amd_gpu_signal_join_frontier(
+      later_wait.signal, IREE_ARRAYSIZE(later_consumer), later_consumer);
   for (size_t i = 0; i < 3; ++i) {
     EXPECT_EQ(earlier_consumer[i], earlier[i]);
     EXPECT_EQ(later_consumer[i], later[i]);
@@ -528,7 +531,8 @@ TEST_F(SemaphoreTest, NativeDependencyWithoutCausalHistory) {
   EXPECT_EQ(wait.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
   EXPECT_EQ(wait.signal, signal);
   uint64_t consumer_frontier[3] = {4, 2, 1};
-  iree_hal_amd_gpu_signal_join_frontier(wait.signal, consumer_frontier);
+  iree_hal_amd_gpu_signal_join_frontier(
+      wait.signal, IREE_ARRAYSIZE(consumer_frontier), consumer_frontier);
   EXPECT_EQ(consumer_frontier[0], 4u);
   EXPECT_EQ(consumer_frontier[1], 2u);
   EXPECT_EQ(consumer_frontier[2], 1u);
@@ -808,7 +812,8 @@ TEST_F(SemaphoreTest, PublicationCompletionAndReaderAcquisitionRace) {
     if (wait.signal) {
       EXPECT_EQ(wait.signal, signal);
       uint64_t consumer_frontier[3] = {};
-      iree_hal_amd_gpu_signal_join_frontier(wait.signal, consumer_frontier);
+      iree_hal_amd_gpu_signal_join_frontier(
+          wait.signal, IREE_ARRAYSIZE(consumer_frontier), consumer_frontier);
       EXPECT_EQ(consumer_frontier[0], value);
       EXPECT_EQ(consumer_frontier[1], 0u);
       EXPECT_EQ(consumer_frontier[2], 0u);

@@ -11,7 +11,7 @@ void iree_hal_amd_gpu_aql_signal_block_initialize(
     const amdf_gpu_event_info_t* event,
     iree_hal_amd_gpu_aql_signal_t* native_signals, uint64_t device_address,
     iree_hal_amd_gpu_signal_t* signals, uint32_t capacity, uint32_t queue_count,
-    uint64_t* frontiers, iree_hal_amd_gpu_signal_block_t* out_block) {
+    void* frontier_storage, iree_hal_amd_gpu_signal_block_t* out_block) {
   for (uint32_t i = 0; i < capacity; ++i) {
     native_signals[i] = (iree_hal_amd_gpu_aql_signal_t){
         .kind = 1,
@@ -23,7 +23,7 @@ void iree_hal_amd_gpu_aql_signal_block_initialize(
       pool, domain, native_signals, device_address,
       sizeof(iree_hal_amd_gpu_aql_signal_t),
       offsetof(iree_hal_amd_gpu_aql_signal_t, value), signals, capacity,
-      queue_count, frontiers, out_block);
+      queue_count, frontier_storage, out_block);
 }
 
 iree_status_t iree_hal_amd_gpu_aql_signal_storage_initialize(

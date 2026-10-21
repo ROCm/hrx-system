@@ -268,7 +268,10 @@ class GrowthTest : public ::testing::Test {
             iree_hal_amd_gpu_argument_storage_free(&context_, result.arguments);
           }
           if (result.signals) {
-            EXPECT_EQ(result.signals->block.queue_count, 3u);
+            EXPECT_EQ(
+                iree_hal_amd_gpu_signal_block_frontiers(&result.signals->block)
+                    ->queue_count,
+                3u);
             auto* signal =
                 iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
             EXPECT_NE(signal, nullptr);
@@ -334,7 +337,7 @@ class GrowthTest : public ::testing::Test {
 
   void ReuseDuringGrowth(bool fail_growth, bool return_before_enrollment) {
     uint64_t value = 0;
-    uint64_t frontier[3] = {};
+    uint64_t frontier[2 + 3] = {};
     iree_hal_amd_gpu_signal_t metadata = {};
     iree_hal_amd_gpu_signal_block_t block;
     iree_hal_amd_gpu_signal_block_initialize(&signals_.pool, this, &value,
@@ -820,7 +823,8 @@ TEST_F(GrowthTest, SignalBackingSurvivesProducerAndSourceRemoval) {
   EXPECT_EQ(signals_.pool.block_count, 1u);
   EXPECT_EQ(*signal->host_value, 1u);
   uint64_t consumer_frontier[3] = {};
-  iree_hal_amd_gpu_signal_join_frontier(signal, consumer_frontier);
+  iree_hal_amd_gpu_signal_join_frontier(
+      signal, IREE_ARRAYSIZE(consumer_frontier), consumer_frontier);
   EXPECT_EQ(consumer_frontier[0], 7u);
   EXPECT_EQ(consumer_frontier[1], 11u);
   EXPECT_EQ(consumer_frontier[2], 13u);
@@ -885,7 +889,7 @@ TEST_F(GrowthTest, EarlyReuseRetainsGrowthThroughLaterAllocationFailure) {
 
 TEST_F(GrowthTest, CapacityReturnRacesNativeCompletionWithoutDuplicatingWork) {
   uint64_t value = 0;
-  uint64_t frontier[3] = {};
+  uint64_t frontier[2 + 3] = {};
   iree_hal_amd_gpu_signal_t metadata = {};
   iree_hal_amd_gpu_signal_block_t block;
   iree_hal_amd_gpu_signal_block_initialize(&signals_.pool, this, &value, 0x1000,

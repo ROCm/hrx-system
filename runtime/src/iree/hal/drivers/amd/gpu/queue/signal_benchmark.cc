@@ -33,7 +33,7 @@ struct Storage {
   // Attached native extent and its signal metadata.
   iree_hal_amd_gpu_signal_block_t block;
   // One-queue causal vector per native signal.
-  std::array<uint64_t, 64> frontiers;
+  std::array<uint64_t, 2 + 64> frontiers;
 };
 
 void BM_Pool(benchmark::State& state) {
@@ -71,7 +71,7 @@ void BM_Frontier(benchmark::State& state) {
   const uint32_t queue_count = static_cast<uint32_t>(state.range(0));
   std::vector<uint64_t> source(queue_count, 1);
   std::vector<uint64_t> target(queue_count, 0);
-  std::vector<uint64_t> snapshot(queue_count);
+  std::vector<uint64_t> snapshot(2 + queue_count);
   uint64_t value = 0;
   iree_hal_amd_gpu_signal_t metadata = {};
   iree_hal_amd_gpu_signal_pool_t pool;
@@ -85,7 +85,7 @@ void BM_Frontier(benchmark::State& state) {
   for (auto _ : state) {
     ++source[0];
     iree_hal_amd_gpu_signal_publish_frontier(signal, source.data());
-    iree_hal_amd_gpu_signal_join_frontier(signal, target.data());
+    iree_hal_amd_gpu_signal_join_frontier(signal, target.size(), target.data());
     benchmark::DoNotOptimize(target.data());
     benchmark::ClobberMemory();
   }

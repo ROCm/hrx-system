@@ -43,7 +43,7 @@ struct Storage {
   // Attached native extent and its signal metadata.
   iree_hal_amd_gpu_signal_block_t block;
   // One-queue causal vector per native signal.
-  std::array<uint64_t, 4> frontiers;
+  std::array<uint64_t, 2 + 4> frontiers;
 };
 
 void BM_CompletedWait(benchmark::State& state) {

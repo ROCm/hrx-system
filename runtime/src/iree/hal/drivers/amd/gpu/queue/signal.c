@@ -15,6 +15,31 @@ static_assert(sizeof(iree_hal_amd_gpu_signal_pool_t) == 128,
 static_assert(sizeof(iree_hal_amd_gpu_signal_block_t) <= 64,
               "signal block bookkeeping fits in one cache line");
 
+static_assert(sizeof(iree_hal_amd_gpu_signal_frontiers_t) == 16,
+              "frontier storage has two eight-byte header words");
+
+static void iree_hal_amd_gpu_signal_frontiers_initialize(
+    uint32_t capacity, uint32_t queue_count,
+    iree_hal_amd_gpu_signal_frontiers_t* out_frontiers) {
+  *out_frontiers = (iree_hal_amd_gpu_signal_frontiers_t){
+      .capacity = capacity,
+      .queue_count = queue_count,
+  };
+  memset(out_frontiers + 1, 0,
+         (iree_host_size_t)capacity * queue_count * sizeof(uint64_t));
+}
+
+void iree_hal_amd_gpu_signal_frontiers_free(
+    iree_hal_amd_gpu_signal_frontiers_t* frontiers,
+    iree_hal_amd_gpu_signal_frontiers_t* initial,
+    iree_allocator_t host_allocator) {
+  while (frontiers != initial) {
+    iree_hal_amd_gpu_signal_frontiers_t* previous = frontiers->previous;
+    iree_allocator_free(host_allocator, frontiers);
+    frontiers = previous;
+  }
+}
+
 void iree_hal_amd_gpu_signal_pool_initialize(
     iree_hal_amd_gpu_signal_pool_notification_t notification,
     iree_hal_amd_gpu_signal_pool_t* out_pool) {
@@ -79,15 +104,18 @@ void iree_hal_amd_gpu_signal_block_initialize(
     iree_hal_amd_gpu_signal_pool_t* pool, const void* domain, void* storage,
     uint64_t device_address, uint32_t stride, uint32_t value_offset,
     iree_hal_amd_gpu_signal_t* signals, uint32_t capacity, uint32_t queue_count,
-    uint64_t* frontiers, iree_hal_amd_gpu_signal_block_t* out_block) {
+    void* frontier_storage, iree_hal_amd_gpu_signal_block_t* out_block) {
+  iree_hal_amd_gpu_signal_frontiers_t* frontiers = frontier_storage;
+  iree_hal_amd_gpu_signal_frontiers_initialize(capacity, queue_count,
+                                               frontiers);
   *out_block = (iree_hal_amd_gpu_signal_block_t){
       .pool = pool,
-      .queue_count = queue_count,
       .free_head = capacity ? signals : NULL,
       .domain = domain,
       .signals = signals,
-      .frontiers = frontiers,
   };
+  iree_atomic_store(&out_block->frontiers, (intptr_t)frontiers,
+                    iree_memory_order_relaxed);
   for (uint32_t i = 0; i < capacity; ++i) {
     const uint64_t offset = (uint64_t)i * stride;
     uint64_t* value = (uint64_t*)((uint8_t*)storage + offset + value_offset);
@@ -103,6 +131,39 @@ void iree_hal_amd_gpu_signal_block_initialize(
   if (capacity) {
     iree_hal_amd_gpu_signal_block_link(out_block);
   }
+}
+
+iree_status_t iree_hal_amd_gpu_signal_block_reserve_frontiers(
+    iree_hal_amd_gpu_signal_block_t* block, uint32_t queue_count,
+    iree_allocator_t host_allocator) {
+  iree_hal_amd_gpu_signal_frontiers_t* previous =
+      iree_hal_amd_gpu_signal_block_frontiers(block);
+  if (queue_count <= previous->queue_count) {
+    return iree_ok_status();
+  }
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(
+      IREE_STRUCT_LAYOUT(sizeof(*previous), &total_size,
+                         IREE_STRUCT_ARRAY_FIELD(previous->capacity,
+                                                 queue_count, uint64_t, NULL)));
+  iree_hal_amd_gpu_signal_frontiers_t* frontiers = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, total_size, (void**)&frontiers));
+  *frontiers = (iree_hal_amd_gpu_signal_frontiers_t){
+      .previous = previous,
+      .capacity = previous->capacity,
+      .queue_count = queue_count,
+  };
+  const uint64_t* source = (const uint64_t*)(previous + 1);
+  uint64_t* target = (uint64_t*)(frontiers + 1);
+  for (uint32_t i = 0; i < previous->capacity; ++i) {
+    memcpy(target + (iree_host_size_t)i * queue_count,
+           source + (iree_host_size_t)i * previous->queue_count,
+           previous->queue_count * sizeof(uint64_t));
+  }
+  iree_atomic_store(&block->frontiers, (intptr_t)frontiers,
+                    iree_memory_order_release);
+  return iree_ok_status();
 }
 
 bool iree_hal_amd_gpu_signal_block_try_deinitialize(
@@ -175,17 +236,23 @@ iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire(
 void iree_hal_amd_gpu_signal_publish_frontier(iree_hal_amd_gpu_signal_t* signal,
                                               const uint64_t* frontier) {
   const iree_hal_amd_gpu_signal_block_t* block = signal->block;
-  uint64_t* target =
-      block->frontiers + (signal - block->signals) * block->queue_count;
-  memcpy(target, frontier, block->queue_count * sizeof(*target));
+  const iree_hal_amd_gpu_signal_frontiers_t* frontiers =
+      iree_hal_amd_gpu_signal_block_frontiers(block);
+  uint64_t* target = (uint64_t*)(frontiers + 1) +
+                     (signal - block->signals) * frontiers->queue_count;
+  memcpy(target, frontier, frontiers->queue_count * sizeof(*target));
 }
 
 void iree_hal_amd_gpu_signal_join_frontier(
-    const iree_hal_amd_gpu_signal_t* signal, uint64_t* frontier) {
+    const iree_hal_amd_gpu_signal_t* signal, uint32_t queue_count,
+    uint64_t* frontier) {
   const iree_hal_amd_gpu_signal_block_t* block = signal->block;
-  const uint64_t* source =
-      block->frontiers + (signal - block->signals) * block->queue_count;
-  for (uint32_t i = 0; i < block->queue_count; ++i) {
+  const iree_hal_amd_gpu_signal_frontiers_t* frontiers =
+      iree_hal_amd_gpu_signal_block_frontiers(block);
+  const uint64_t* source = (const uint64_t*)(frontiers + 1) +
+                           (signal - block->signals) * frontiers->queue_count;
+  const uint32_t count = iree_min(queue_count, frontiers->queue_count);
+  for (uint32_t i = 0; i < count; ++i) {
     frontier[i] = iree_max(frontier[i], source[i]);
   }
 }

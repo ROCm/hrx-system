@@ -807,6 +807,7 @@ static void iree_hal_amd_gpu_pm4_prepare_wait_frontier(
     for (iree_host_size_t i = 0; i < wait_count; ++i) {
       if (waits[i].signal) {
         iree_hal_amd_gpu_signal_join_frontier(waits[i].signal,
+                                              queue->producer.frontier.count,
                                               queue->producer.frontier.pending);
       }
     }
