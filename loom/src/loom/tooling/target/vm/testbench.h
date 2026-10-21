@@ -26,8 +26,9 @@ extern "C" {
 // the same subject share that product. The authored functions need no target
 // binding.
 // Buffer arguments and results share storage with testbench HAL bindings.
-// Arguments require coherent persistent host mappings; results retain the VM
-// storage until the final binding or alias is released.
+// Arguments require persistent host mappings; noncoherent accesses invalidate
+// before execution and flush afterward. Returned aliases preserve the original
+// HAL backing; VM-owned results retain their storage until the final release.
 typedef struct loom_vm_testbench_t {
   // Borrowed public compiler inputs, live through the final invocation.
   loom_testbench_compilation_t compilation;

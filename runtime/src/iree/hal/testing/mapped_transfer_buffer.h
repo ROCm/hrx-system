@@ -43,7 +43,9 @@ struct MappedTransferBuffer : iree_hal_buffer_t {
   // Injected native publication result, without owning a status allocation.
   iree_status_code_t flush_code = IREE_STATUS_OK;
 
-  explicit MappedTransferBuffer(iree_hal_memory_type_t coherence) {
+  explicit MappedTransferBuffer(
+      iree_hal_memory_type_t coherence,
+      iree_hal_buffer_usage_t usage = IREE_HAL_BUFFER_USAGE_MAPPING) {
     static const iree_hal_buffer_vtable_t vtable = {
         .destroy =
             [](iree_hal_buffer_t* base) {
@@ -51,12 +53,14 @@ struct MappedTransferBuffer : iree_hal_buffer_t {
             },
         .export_range = nullptr,
         .map_range =
-            [](iree_hal_buffer_t* base, iree_hal_mapping_mode_t,
+            [](iree_hal_buffer_t* base, iree_hal_mapping_mode_t mode,
                iree_hal_memory_access_t, iree_hal_buffer_map_flags_t,
                iree_device_size_t offset, iree_device_size_t length,
                iree_hal_buffer_mapping_t* mapping) {
               auto* buffer = static_cast<MappedTransferBuffer*>(base);
-              ++buffer->mapping_count;
+              if (mode == IREE_HAL_MAPPING_MODE_SCOPED) {
+                ++buffer->mapping_count;
+              }
               auto& contents =
                   iree_all_bits_set(iree_hal_buffer_memory_type(base),
                                     IREE_HAL_MEMORY_TYPE_HOST_COHERENT)
@@ -68,8 +72,10 @@ struct MappedTransferBuffer : iree_hal_buffer_t {
             },
         .unmap_range =
             [](iree_hal_buffer_t* base, iree_device_size_t, iree_device_size_t,
-               iree_hal_buffer_mapping_t*) {
-              --static_cast<MappedTransferBuffer*>(base)->mapping_count;
+               iree_hal_buffer_mapping_t* mapping) {
+              if (!mapping->impl.is_persistent) {
+                --static_cast<MappedTransferBuffer*>(base)->mapping_count;
+              }
               return iree_ok_status();
             },
         .invalidate_range =
@@ -107,8 +113,7 @@ struct MappedTransferBuffer : iree_hal_buffer_t {
     iree_hal_buffer_initialize(
         iree_hal_buffer_placement_undefined(), this, device_contents.size(), 0,
         device_contents.size(), IREE_HAL_MEMORY_TYPE_HOST_LOCAL | coherence,
-        IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_MAPPING, &vtable,
-        this);
+        IREE_HAL_MEMORY_ACCESS_ALL, usage, &vtable, this);
     host_binding.host_pointer =
         iree_all_bits_set(coherence, IREE_HAL_MEMORY_TYPE_HOST_COHERENT)
             ? device_contents.data()
@@ -122,8 +127,9 @@ using MappedTransferBufferPtr =
     std::unique_ptr<MappedTransferBuffer, decltype(&iree_hal_buffer_release)>;
 
 inline MappedTransferBufferPtr MakeMappedTransferBuffer(
-    iree_hal_memory_type_t coherence = 0) {
-  return MappedTransferBufferPtr(new MappedTransferBuffer(coherence),
+    iree_hal_memory_type_t coherence = 0,
+    iree_hal_buffer_usage_t usage = IREE_HAL_BUFFER_USAGE_MAPPING) {
+  return MappedTransferBufferPtr(new MappedTransferBuffer(coherence, usage),
                                  iree_hal_buffer_release);
 }
 

@@ -14,6 +14,7 @@ load(
 )
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
 load("//loom/target:execution_profiles.bzl", "GPU_HARDWARE_PROFILES")
+load("//loom/target/amdgpu:execution_profiles.bzl", "RDNA_HARDWARE_PROFILE")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -84,13 +85,13 @@ loom_test(
         "testdata/launch_schedule_hal_actual.loom",
         "testdata/scenario_batch_hal_actual.loom",
     ],
-    execution_profiles = GPU_HARDWARE_PROFILES,
+    execution_profiles = GPU_HARDWARE_PROFILES + [RDNA_HARDWARE_PROFILE],
 )
 
 loom_test(
     name = "scenario_compare_test",
     srcs = ["testdata/scenario_compare_hal_vm.loom"],
-    execution_profiles = GPU_HARDWARE_PROFILES,
+    execution_profiles = GPU_HARDWARE_PROFILES + [RDNA_HARDWARE_PROFILE],
 )
 
 iree_executable_test(

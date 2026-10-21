@@ -12,6 +12,41 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    buffer
+  HDRS
+    "buffer.h"
+  SRCS
+    "buffer.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::vm
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    buffer_test
+  SRCS
+    "buffer_test.cc"
+  DEPS
+    ::buffer
+    iree::base
+    iree::hal
+    iree::hal::testing::mapped_transfer_buffer
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     loom_check
   HDRS
     "check/loom_check.h"
@@ -50,6 +85,7 @@ loom_cc_library(
   SRCS
     "testbench.c"
   DEPS
+    ::buffer
     iree::base
     iree::hal
     iree::vm

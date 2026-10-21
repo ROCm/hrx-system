@@ -10,6 +10,7 @@
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/execution.h"
 #include "iree/vm/sync.h"
+#include "loom/tooling/target/vm/buffer.h"
 #include "loomc/artifact.h"
 #include "loomc/iree.h"
 #include "loomc/target/vm.h"
@@ -316,52 +317,26 @@ static iree_status_t loom_vm_testbench_prepare(
   return status;
 }
 
-static void loom_vm_testbench_release_hal_buffer(void* user_data,
-                                                 iree_byte_span_t storage) {
-  iree_hal_buffer_release(user_data);
-}
-
-// A persistent mapping borrows the HAL buffer's lifetime. The VM wrapper owns
-// that lifetime, including when a returned alias outlives the invocation.
+// Imported mappings retain their native cache and lifetime contracts through
+// VM execution and returned aliases.
 static iree_status_t loom_vm_testbench_import_buffer(
     loom_vm_testbench_t* testbench,
     const iree_tooling_buffer_binding_t* binding,
     iree_vm_variant_t* out_argument) {
   iree_vm_buffer_t* buffer = NULL;
   if (binding->buffer) {
-    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_memory_type(
-        iree_hal_buffer_memory_type(binding->buffer),
-        IREE_HAL_MEMORY_TYPE_HOST_COHERENT));
-    const iree_hal_memory_access_t access =
-        iree_hal_buffer_allowed_access(binding->buffer);
-    iree_hal_buffer_mapping_t mapping = {0};
-    IREE_RETURN_IF_ERROR(iree_hal_buffer_map_range(
-        binding->buffer, IREE_HAL_MAPPING_MODE_PERSISTENT, access,
-        IREE_HAL_BUFFER_MAP_FLAG_MAY_ALIAS, binding->byte_offset,
-        binding->byte_length, &mapping));
-    iree_vm_buffer_access_flags_t vm_access = 0;
-    if (iree_any_bit_set(access, IREE_HAL_MEMORY_ACCESS_READ)) {
-      vm_access |= IREE_VM_BUFFER_ACCESS_FLAG_READ;
-    }
-    if (iree_any_bit_set(access, IREE_HAL_MEMORY_ACCESS_WRITE)) {
-      vm_access |= IREE_VM_BUFFER_ACCESS_FLAG_WRITE;
-    }
-    IREE_RETURN_IF_ERROR(iree_vm_buffer_wrap(
-        vm_access, mapping.contents,
-        (iree_vm_buffer_release_callback_t){
-            .function = loom_vm_testbench_release_hal_buffer,
-            .user_data = binding->buffer},
+    IREE_RETURN_IF_ERROR(loom_vm_buffer_import(
+        binding->buffer, binding->byte_offset, binding->byte_length,
         testbench->host_allocator, &buffer));
-    iree_hal_buffer_retain(binding->buffer);
+    iree_status_t status = loom_vm_buffer_invalidate(buffer);
+    if (!iree_status_is_ok(status)) {
+      iree_vm_buffer_release(buffer);
+      return status;
+    }
   }
   *out_argument =
       iree_vm_buffer_variant_from_ptr_move(&testbench->ref_types, &buffer);
   return iree_ok_status();
-}
-
-static void loom_vm_testbench_release_vm_buffer(void* user_data,
-                                                iree_hal_buffer_t* buffer) {
-  iree_vm_buffer_release(user_data);
 }
 
 static const uint8_t* loom_vm_testbench_buffer_data(iree_vm_buffer_t* buffer) {
@@ -448,28 +423,8 @@ static iree_status_t loom_vm_testbench_export_buffer(
 
   iree_hal_buffer_t* buffer = NULL;
   const iree_host_size_t length = iree_vm_buffer_length(source);
-  const iree_vm_buffer_access_flags_t vm_access = iree_vm_buffer_access(source);
-  iree_hal_memory_access_t access = IREE_HAL_MEMORY_ACCESS_NONE;
-  if (iree_any_bit_set(vm_access, IREE_VM_BUFFER_ACCESS_FLAG_READ)) {
-    access |= IREE_HAL_MEMORY_ACCESS_READ;
-  }
-  if (iree_any_bit_set(vm_access, IREE_VM_BUFFER_ACCESS_FLAG_WRITE)) {
-    access |= IREE_HAL_MEMORY_ACCESS_WRITE;
-  }
-  void* data = iree_any_bit_set(vm_access, IREE_VM_BUFFER_ACCESS_FLAG_WRITE)
-                   ? iree_vm_buffer_data(source)
-                   : (void*)iree_vm_buffer_const_data(source);
-  IREE_RETURN_IF_ERROR(iree_hal_heap_buffer_wrap(
-      iree_hal_buffer_placement_undefined(),
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
-      access,
-      IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
-          IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT,
-      length, iree_make_byte_span(data, length),
-      (iree_hal_buffer_release_callback_t){
-          .fn = loom_vm_testbench_release_vm_buffer, .user_data = source},
-      testbench->host_allocator, &buffer));
-  iree_vm_buffer_retain(source);
+  IREE_RETURN_IF_ERROR(
+      loom_vm_buffer_export(source, testbench->host_allocator, &buffer));
   *out_value = (loom_testbench_value_t){
       .kind = LOOM_TESTBENCH_VALUE_KIND_BUFFER,
       .buffer = {.kind = IREE_TOOLING_BUFFER_BINDING_KIND_STORAGE_BUFFER,
@@ -583,6 +538,12 @@ static iree_status_t loom_vm_testbench_invoke_prepared(
         iree_vm_invoke(testbench->invocation, callee,
                        iree_vm_variant_span_from_ptr(arguments, input_count),
                        iree_vm_variant_span_from_ptr(results, result_count));
+    // A failed invocation may have completed writes. Publish them while the
+    // retained arguments still own their persistent mappings.
+    for (iree_host_size_t i = 0; i < input_count; ++i) {
+      status =
+          iree_status_join(status, loom_vm_buffer_flush(argument_buffers[i]));
+    }
   } else {
     iree_vm_variant_span_reset(
         iree_vm_variant_span_from_ptr(arguments, input_count));
