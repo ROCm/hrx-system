@@ -546,8 +546,10 @@ loom_test(
     srcs = [
         "kernels/qwen38/attention_common.loom",
         "kernels/qwen38/attention_prefill.loom",
+        "kernels/qwen38/attention_prefill_mfma.loom",
         "kernels/qwen38/attention_prefill_wmma.loom",
         "kernels/qwen38/attention_spans.loom",
+        "kernels/qwen38/attention_spans_mfma.loom",
         "kernels/qwen38/spans.loom",
         "tests/attention_media.loom",
         "tests/attention_pages.loom",
@@ -575,6 +577,13 @@ loom_test(
         },
         "paged": {
             "case": "@scattered_attention_pages",
+            "configs": {
+                "qwen38.attention.cache_capacity": "192",
+                "qwen38.attention.pool_capacity": "256",
+            },
+        },
+        "paged_mfma": {
+            "case": "@scattered_attention_pages_mfma",
             "configs": {
                 "qwen38.attention.cache_capacity": "192",
                 "qwen38.attention.pool_capacity": "256",
