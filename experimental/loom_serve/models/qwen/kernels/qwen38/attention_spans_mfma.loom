@@ -1,0 +1,35 @@
+amdgpu.target<gfx9-4-generic> @qwen38_attention_spans_cdna_wave64 {subgroup_size = 64}
+
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen38.attention.pool_capacity : %value: index where [range(%value, 0, 4194304)]
+
+template.decl @qwen38.attention.spans(%logical_capacity: index, %pool_capacity: index, %span: index, %query_tile: index, %head: index, %workitem: index, %subgroup: index, %lane: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer)
+
+kernel.def target(@qwen38_attention_spans_cdna_wave64) export("qwen38_attention_spans_f16_mfma") @qwen38_attention_spans_f16_mfma(%token_capacity: index, %span_capacity: index) {
+  %tokens = index.assume %token_capacity [range(%token_capacity, 1, 512)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 64)] : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %padded_tokens = index.add %tokens, %c15 : index
+  %tiles = index.div %padded_tokens, %c16 : index
+  %heads = index.constant 24 : index
+  %waves = index.constant 4 : index
+  %width = target.subgroup.size : index
+  %threads = index.mul %waves, %width : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %heads, %spans) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer) {
+  %span = kernel.workgroup.id<z> : index
+  %query_tile = kernel.workgroup.id<x> : index
+  %head_value = kernel.workgroup.id<y> : index
+  %head = index.assume %head_value [range(%head_value, 0, 23)] : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup_value = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup_value [range(%subgroup_value, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %logical_capacity = config.get @qwen38.attention.cache_capacity : index
+  %pool_capacity = config.get @qwen38.attention.pool_capacity : index
+  template.apply<@qwen38.attention.spans>(%logical_capacity, %pool_capacity, %span, %query_tile, %head, %workitem, %subgroup, %lane, %epoch, %rows, %layer_origin, %query, %gate, %state, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, offset, buffer, buffer, buffer, buffer)
+  kernel.return
+}
