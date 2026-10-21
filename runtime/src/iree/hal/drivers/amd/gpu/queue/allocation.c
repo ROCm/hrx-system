@@ -78,8 +78,8 @@ typedef struct iree_hal_amd_gpu_allocation_t {
     } acquire;
     // Captured logical deallocation epochs.
     struct {
-      // Borrowed source per root, allowing one transaction across pools.
-      iree_hal_pool_t** pools;
+      // Borrowed common source, live through every captured allocation root.
+      iree_hal_pool_t* pool;
       // Prefix of exclusive deallocation marks to abort on failure.
       iree_host_size_t marked_count;
     } release;
@@ -237,22 +237,14 @@ static void iree_hal_amd_gpu_allocation_release(
     iree_hal_buffer_allocation_decommit(operation->buffers[i]);
   }
   operation->release.marked_count = 0;
-  for (iree_host_size_t i = 0; i < operation->count;) {
-    iree_hal_pool_t* pool = operation->release.pools[i];
-    iree_host_size_t end = i + 1;
-    while (end < operation->count && operation->release.pools[end] == pool) {
-      ++end;
-    }
-    iree_hal_pool_advise_asan_reservations(
-        pool, end - i, operation->reservations + i,
-        IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED);
-    iree_hal_pool_release_reservations(
-        pool, end - i, operation->reservations + i,
-        operation->frontier_exact
-            ? iree_async_fixed_frontier_as_const_frontier(&operation->frontier)
-            : NULL);
-    i = end;
-  }
+  iree_hal_pool_advise_asan_reservations(
+      operation->release.pool, operation->count, operation->reservations,
+      IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED);
+  iree_hal_pool_release_reservations(
+      operation->release.pool, operation->count, operation->reservations,
+      operation->frontier_exact
+          ? iree_async_fixed_frontier_as_const_frontier(&operation->frontier)
+          : NULL);
 }
 
 static void iree_hal_amd_gpu_allocation_acquire(
@@ -642,16 +634,22 @@ iree_status_t iree_hal_amd_gpu_queue_dealloca(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_allocation_allocate(
       context, waits, signals, IREE_HAL_AMD_GPU_ALLOCATION_RELEASE, count,
       &operation));
-  iree_status_t status = iree_allocator_malloc_array_uninitialized(
-      iree_arena_allocator(&operation->arena), count,
-      sizeof(*operation->release.pools), (void**)&operation->release.pools);
+  iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    status = iree_hal_buffer_allocation_begin_dealloca(
-        buffers[i], &operation->release.pools[i]);
+    iree_hal_pool_t* source_pool = NULL;
+    status =
+        iree_hal_buffer_allocation_begin_dealloca(buffers[i], &source_pool);
     if (iree_status_is_ok(status)) {
       operation->buffers[i] = buffers[i];
       iree_hal_buffer_retain(buffers[i]);
       ++operation->release.marked_count;
+      if (i == 0) {
+        operation->release.pool = source_pool;
+      } else if (source_pool != operation->release.pool) {
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "GPU deallocation spans multiple source pools");
+      }
     }
   }
   if (iree_status_is_ok(status)) {

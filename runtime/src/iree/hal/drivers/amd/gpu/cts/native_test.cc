@@ -916,7 +916,7 @@ TEST_F(GpuNativeAllocationTest, RecycledBatchJoinsIndependentOwnerFrontiers) {
   }
 }
 
-TEST_F(GpuNativeAllocationTest, ReleaseTransactionSpansIndependentPools) {
+TEST_F(GpuNativeAllocationTest, RejectedReleasePreservesIndependentPools) {
   std::array<iree_hal_pool_t*, 2> pools = {};
   for (auto& pool : pools) {
     CreateFinitePool(&pool);
@@ -927,25 +927,38 @@ TEST_F(GpuNativeAllocationTest, ReleaseTransactionSpansIndependentPools) {
   const auto request = iree_hal_make_pool_reservation_request(4096, 4);
   std::array<iree_hal_buffer_t*, 2> roots = {};
   std::array<uint64_t, 2> values = {1, 1};
+  uint64_t one = 1;
   for (size_t i = 0; i < roots.size(); ++i) {
-    IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[i], {},
+    IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[i], {1, &semaphores_[3], &one},
                                          {1, &semaphores_[i], &values[i]},
                                          pools[i], 1, &request, &roots[i]));
   }
-  uint64_t one = 1;
-  IREE_ASSERT_OK(iree_hal_queue_dealloca(
-      queues_[0], {2, semaphores_.data(), values.data()},
-      {1, &semaphores_[2], &one}, roots.size(), roots.data()));
-  for (auto* root : roots) {
-    iree_hal_buffer_release(root);
-  }
-  Wait(semaphores_[2]);
-  for (auto* pool : pools) {
+  const iree_hal_semaphore_list_t rejected_signal = {1, &semaphores_[2], &one};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_queue_dealloca(
+                            queues_[0], {2, semaphores_.data(), values.data()},
+                            rejected_signal, roots.size(), roots.data()));
+  EXPECT_FALSE(iree_hal_semaphore_list_poll(rejected_signal));
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores_[3], one, nullptr));
+  uint64_t two = 2;
+  for (size_t i = 0; i < roots.size(); ++i) {
+    Wait(semaphores_[i]);
     iree_hal_pool_stats_t stats;
-    iree_hal_pool_query_stats(pool, &stats);
+    iree_hal_pool_query_stats(pools[i], &stats);
+    EXPECT_EQ(stats.reservation_count, 1u);
+    EXPECT_NE(iree_hal_buffer_native_binding(roots[i], slot_).device_address,
+              0u);
+    IREE_ASSERT_OK(
+        iree_hal_queue_dealloca(queues_[i], {1, &semaphores_[i], &one},
+                                {1, &semaphores_[i], &two}, 1, &roots[i]));
+    iree_hal_buffer_release(roots[i]);
+    Wait(semaphores_[i], two);
+    iree_hal_pool_query_stats(pools[i], &stats);
     EXPECT_EQ(stats.reservation_count, 0u);
-    iree_hal_pool_release(pool);
+    iree_hal_pool_release(pools[i]);
   }
+  EXPECT_FALSE(iree_hal_semaphore_list_poll(rejected_signal));
 }
 
 TEST_F(GpuNativeAllocationTest, RejectedBatchLeavesOutputsAndPoolUntouched) {
