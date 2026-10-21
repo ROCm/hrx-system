@@ -405,7 +405,8 @@ iree_status_t MatchesNativeIdentity(iree_hal_amd_fabric_t* fabric,
   IREE_RETURN_IF_ERROR(iree_status_join(
       IREE_HAL_AMD_STATUS_FROM_AMDF(status, "endpoint_query_info"),
       IREE_HAL_AMD_STATUS_FROM_AMDF(close_status, "endpoint_close")));
-  *out_matches = amdf::cts::NativeIdentityIsEqual(info.native_identity, identity);
+  *out_matches =
+      amdf::cts::NativeIdentityIsEqual(info.native_identity, identity);
   return iree_ok_status();
 }
 
@@ -479,7 +480,8 @@ void GpuNativeTest::SetUp() {
             supported =
                 command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                     ? iree_hal_amd_gpu_aql_queue_publication_modes(&native) != 0
-                    : iree_hal_amd_gpu_pm4_queue_publication_modes(&native) != 0;
+                    : iree_hal_amd_gpu_pm4_queue_publication_modes(&native) !=
+                          0;
           }
         }
       }
@@ -505,10 +507,12 @@ void GpuNativeTest::SetUp() {
           << "AMDF_CTS_GPU_NATIVE_IDENTITY does not identify an enumerated "
              "GPU: "
           << selected_identity_text;
-      GTEST_SKIP() << "Selected native AMD GPU has no supported requested packet family: "
+      GTEST_SKIP() << "Selected native AMD GPU has no supported requested "
+                      "packet family: "
                    << selected_identity_text;
     }
-    GTEST_SKIP() << "No native AMD GPU endpoint with the requested packet family";
+    GTEST_SKIP()
+        << "No native AMD GPU endpoint with the requested packet family";
   }
   iree_hal_amd_gpu_device_options_initialize(&options_);
   options_.queue_count = 2;

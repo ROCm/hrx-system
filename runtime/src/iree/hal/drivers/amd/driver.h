@@ -27,8 +27,8 @@ extern "C" {
 // native services fail explicitly. It does not promise isolated GPU addresses.
 //
 // The execution schemes are `xdna`, `rdna`, `cdna`, and `amdgpu2`. Each has an
-// independent ordinal namespace: NPUs, RDNA GPUs, CDNA GPUs, and all supported GPUs,
-// respectively. GPU discovery requires a usable native compute family;
+// independent ordinal namespace: NPUs, RDNA GPUs, CDNA GPUs, and all supported
+// GPUs, respectively. GPU discovery requires a usable native compute family;
 // architecture alone is insufficient. A bare scheme selects visible ordinal
 // zero; `rdna:N` and `rdna://N` index the same visible list.
 //

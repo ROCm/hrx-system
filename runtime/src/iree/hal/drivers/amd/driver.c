@@ -459,7 +459,8 @@ static iree_status_t iree_hal_amd_driver_initialize_views(
 
   iree_status_t status = iree_ok_status();
   const amdf_gpu_api_t* gpu = NULL;
-  for (uint32_t i = 0; i < endpoint_count && !gpu; ++i) {
+  for (uint32_t i = 0; i < endpoint_count && !gpu && iree_status_is_ok(status);
+       ++i) {
     if (driver->fabric->endpoints[i].engine_kind != AMDF_ENGINE_KIND_GPU) {
       continue;
     }

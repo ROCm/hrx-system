@@ -138,6 +138,8 @@ struct NativeInstance {
   uint32_t query_count = 0;
   // Number of GPU extension negotiations during passive discovery.
   uint32_t extension_query_count = 0;
+  // Native extension error propagated before querying any GPU endpoint.
+  amdf_status_t extension_status = AMDF_STATUS_OK;
   // Number of instance creations through this fake dependency.
   uint32_t instance_count = 0;
   // Number of explicit device activation attempts.
@@ -256,6 +258,9 @@ amdf_status_t AMDF_CALL QueryExtension(amdf_extension_id_t extension,
   EXPECT_EQ(extension, AMDF_EXTENSION_GPU);
   EXPECT_LE(minimum, AMDF_GPU_EXTENSION_VERSION_LATEST);
   EXPECT_GE(maximum, AMDF_GPU_EXTENSION_VERSION_LATEST);
+  if (!amdf_status_is_ok(NativeInstance::current->extension_status)) {
+    return NativeInstance::current->extension_status;
+  }
   static const amdf_gpu_api_t api = {
       .structure_size = sizeof(amdf_gpu_api_t),
       .extension_version = AMDF_GPU_EXTENSION_VERSION_LATEST,
@@ -454,6 +459,17 @@ TEST_F(DriverTest, NativeQueryFailureIsNotAnUnsupportedEndpoint) {
   EXPECT_EQ(native_.activation_count, 0u);
 }
 
+TEST_F(DriverTest, NativeExtensionFailureEndsDiscovery) {
+  native_.extension_status =
+      amdf_make_api_status(AMDF_STATUS_CODE_PERMISSION_DENIED);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED, CreateDriver());
+  EXPECT_EQ(driver_, nullptr);
+  EXPECT_EQ(native_.extension_query_count, 1u);
+  EXPECT_EQ(native_.query_count, 0u);
+  EXPECT_EQ(native_.open_count, 0u);
+  EXPECT_EQ(native_.activation_count, 0u);
+}
+
 TEST_F(DriverTest, SchemeViewsReorderTheirOwnUnmaskedOrdinalsIndependently) {
   rdna_visibility_.Set("1, 0");
   gpu_visibility_.Set("0");
@@ -514,7 +530,8 @@ TEST_F(DriverTest, EmptyVisibilityHidesOnlyItsScheme) {
   EXPECT_TRUE(Enumerate(IREE_SV("xdna")).empty());
   EXPECT_EQ(Enumerate(IREE_SV("amdgpu2")),
             (std::vector<iree_hal_device_id_t>{2, 4, 6}));
-  EXPECT_EQ(Enumerate(IREE_SV("")), (std::vector<iree_hal_device_id_t>{2, 4, 6}));
+  EXPECT_EQ(Enumerate(IREE_SV("")),
+            (std::vector<iree_hal_device_id_t>{2, 4, 6}));
   CreatePath(IREE_SV(""), IREE_STATUS_NOT_FOUND, 0);
   CreatePath(IREE_SV(""), IREE_STATUS_NOT_FOUND, 0, IREE_SV("xdna"));
   CreatePath(IREE_SV("id/00000000000000040000000000000000"),
