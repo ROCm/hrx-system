@@ -257,7 +257,7 @@ class NativeQueue {
     load.executable_data = artifact;
     for (auto& lane : lanes_) {
       IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
-          pool_, iree_hal_make_pool_reservation_request(buffer_length, 4),
+          pool_, iree_hal_make_pool_reservation_request(buffer_length, 8),
           iree_infinite_timeout(), &lane.output));
       lane.address = iree_hal_buffer_native_binding(lane.output, address_slot)
                          .device_address;
@@ -608,6 +608,41 @@ class NativeQueue {
                                     bytes.data_length);
   }
 
+  iree_status_t Timestamp(size_t index) {
+    auto& lane = lanes_[0];
+    uint64_t before = lane.epoch, after = before + 1;
+    IREE_RETURN_IF_ERROR(iree_hal_queue_timestamp(
+        queue_, {before ? 1u : 0u, &lane.timeline, &before},
+        {1, &lane.timeline, &after}, lane.output, index * sizeof(uint64_t),
+        nullptr, IREE_HAL_TIMESTAMP_FLAG_NONE));
+    lane.epoch = after;
+    return iree_ok_status();
+  }
+
+  // Readback and numerical checks run after the measured completion boundary.
+  iree_status_t CheckTimestamps(std::vector<uint64_t>& ticks,
+                                uint64_t* last_tick) {
+    IREE_RETURN_IF_ERROR(ReadBytes(
+        iree_make_byte_span(ticks.data(), ticks.size() * sizeof(ticks[0]))));
+    const uint32_t bits =
+        iree_hal_queue_family(queue_)->spec->timestamp_valid_bits;
+    const uint64_t mask = bits == 64 ? UINT64_MAX : (UINT64_C(1) << bits) - 1;
+    uint64_t previous = *last_tick;
+    for (uint64_t tick : ticks) {
+      if (previous && ((tick - previous) & mask) > (mask >> 1)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "queue timestamps are not ordered");
+      }
+      previous = tick;
+    }
+    if (previous == *last_tick) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "queue timestamp did not advance");
+    }
+    *last_tick = previous;
+    return iree_ok_status();
+  }
+
   // The concrete queue advances its causal epoch once per native publication.
   // Query only after completion; this counts real retirement units without
   // adding counters or instrumentation to the production submission path.
@@ -867,6 +902,67 @@ AQL_DISPATCH_COMPLETION_CASE(AqlBindingsDefaultSubmissionCompletion,
 AQL_DISPATCH_COMPLETION_CASE(AqlBindingsDefaultSubmissionCompletionActive,
                              kSubmission, IREE_ASYNC_WAIT_FLAG_ACTIVE);
 #undef AQL_DISPATCH_COMPLETION_CASE
+
+// Each event records the native queue clock and signals its own completion.
+// No extra queue operation is appended to either measured interval.
+static void BM_Timestamp(benchmark::State& state,
+                         amdf_queue_command_type_t command_type, Timing timing,
+                         iree_async_wait_flags_t wait_flags) {
+  const size_t count = state.range(0);
+  NativeQueue queue(command_type);
+  if (!queue.Initialize(state, 1, count * sizeof(uint64_t))) {
+    return;
+  }
+  std::vector<uint64_t> ticks(count);
+  uint64_t last_tick = 0;
+  for (int warmup = 0; warmup < 2; ++warmup) {
+    for (size_t i = 0; i < count; ++i) {
+      IREE_CHECK_OK(queue.Timestamp(i));
+    }
+    IREE_CHECK_OK(queue.Wait(0, wait_flags));
+    IREE_CHECK_OK(queue.CheckTimestamps(ticks, &last_tick));
+  }
+  const uint64_t allocations_before = queue.allocation_count();
+  for (auto _ : state) {
+    for (size_t i = 0; i < count; ++i) {
+      IREE_CHECK_OK(queue.Timestamp(i));
+    }
+    if (timing == Timing::kSubmit) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.Wait(0, wait_flags));
+    if (timing == Timing::kCompletion) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.CheckTimestamps(ticks, &last_tick));
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations() * count);
+  state.counters["host_allocations"] =
+      queue.allocation_count() - allocations_before;
+}
+
+#define TIMESTAMP_CASE(name, command_type, timing, wait_flags)        \
+  BENCHMARK_CAPTURE(BM_Timestamp, name, command_type, Timing::timing, \
+                    wait_flags)                                       \
+      ->Arg(1)                                                        \
+      ->Arg(32)                                                       \
+      ->Arg(1000)                                                     \
+      ->Iterations(200)                                               \
+      ->UseRealTime()
+TIMESTAMP_CASE(Pm4Submit, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, kSubmit,
+               IREE_ASYNC_WAIT_FLAG_NONE);
+TIMESTAMP_CASE(Pm4Completion, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, kCompletion,
+               IREE_ASYNC_WAIT_FLAG_NONE);
+TIMESTAMP_CASE(Pm4ActiveCompletion, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+               kCompletion, IREE_ASYNC_WAIT_FLAG_ACTIVE);
+TIMESTAMP_CASE(AqlSubmit, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, kSubmit,
+               IREE_ASYNC_WAIT_FLAG_NONE);
+TIMESTAMP_CASE(AqlCompletion, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, kCompletion,
+               IREE_ASYNC_WAIT_FLAG_NONE);
+TIMESTAMP_CASE(AqlActiveCompletion, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+               kCompletion, IREE_ASYNC_WAIT_FLAG_ACTIVE);
+#undef TIMESTAMP_CASE
 
 static void BM_AqlChain(
     benchmark::State& state, bool empty, Timing timing,
