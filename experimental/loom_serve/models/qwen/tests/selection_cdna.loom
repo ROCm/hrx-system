@@ -1,4 +1,4 @@
-kernel.decl @qwen38_rmsnorm_f32_decode_cdna() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qwen38_greedy_argmax_rows_f32_cdna(%rows: index, %outputs: index) launch(%rows: index, %outputs: index, %logits: buffer, %token_ids: buffer)
 
@@ -15,7 +15,7 @@ check.case public @qwen38_rmsnorm_f32_decode_known_case_cdna {
   %weight = check.generate.fill value(0.5) : tensor<5120xf32>
   %output = check.generate.fill value(0.0) : tensor<5120xf32>
   %expected = check.generate.fill value(0.49999993999999998) : tensor<5120xf32>
-  kernel.launch @qwen38_rmsnorm_f32_decode_cdna(%epsilon, %input, %weight, %output) : (f32, tensor<5120xf32>, tensor<5120xf32>, tensor<5120xf32>)
+  kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %input, %weight, %output) : (f32, tensor<5120xf32>, tensor<5120xf32>, tensor<5120xf32>)
   check.expect.close actual(%output) expected(%expected) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<5120xf32>
   check.return
 }

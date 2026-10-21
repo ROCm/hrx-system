@@ -63,7 +63,6 @@
       "kernels/qwen38/greedy_argmax_cdna.loom",
       "kernels/qwen38/sampling.loom",
       "kernels/qwen38/layer_decode.loom",
-      "kernels/qwen38/layer_decode_cdna.loom",
       "kernels/qwen38/layer_prefill.loom",
       "kernels/qwen38/linear_cohort.loom",
       "kernels/qwen38/linear_q4k_f16_wmma.loom",

@@ -3,7 +3,6 @@ template.decl @qwen38.rmsnorm_f32.row(%input_row_count: index, %input_row: index
 // Elementwise and normalization primitives shared by Qwen3.8 decode layers.
 // Quantized projections and attention/GDN state transitions remain in their
 // own files so command programs can select and compose them independently.
-amdgpu.target<gfx11-generic> @qwen38_layer_gfx11_wave32 {subgroup_size = 32}
 
 // Normalizes one row from a row-major 5120-wide input. Decode provides its
 // single row while prefill selects the final active row from its full slab.
@@ -42,7 +41,7 @@ template.def<@qwen38.rmsnorm_f32.row> device @qwen38_rmsnorm_f32_row(%input_row_
 // Computes one exact 5120-wide F32 RMSNorm row. Each lane owns 20 strided
 // values so adjacent lanes issue coalesced accesses while preserving the
 // contribution order shared with prefill and speculative verification.
-kernel.def target(@qwen38_layer_gfx11_wave32) export("qwen38_rmsnorm_f32_decode") @qwen38_rmsnorm_f32_decode() {
+kernel.def export("qwen38_rmsnorm_f32_decode") @qwen38_rmsnorm_f32_decode() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -56,7 +55,7 @@ kernel.def target(@qwen38_layer_gfx11_wave32) export("qwen38_rmsnorm_f32_decode"
 
 // Selects the final active prefill row from control[0] without baking a
 // prompt-specific residual offset into the reusable command buffer.
-kernel.def target(@qwen38_layer_gfx11_wave32) export("qwen38_rmsnorm_f32_prefill_last") @qwen38_rmsnorm_f32_prefill_last() {
+kernel.def export("qwen38_rmsnorm_f32_prefill_last") @qwen38_rmsnorm_f32_prefill_last() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index

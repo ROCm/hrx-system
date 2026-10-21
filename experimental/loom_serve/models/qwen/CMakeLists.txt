@@ -336,7 +336,6 @@ loom_test_module(
     "kernels/qwen38/greedy_argmax.loom"
     "kernels/qwen38/greedy_argmax_cdna.loom"
     "kernels/qwen38/layer_decode.loom"
-    "kernels/qwen38/layer_decode_cdna.loom"
     "tests/selection_cdna.loom"
 )
 
