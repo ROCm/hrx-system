@@ -2,19 +2,18 @@
 // receive SSA geometry and retain all checkpoint bits and scale metadata.
 config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%value, 1, 512)]
 
-amdgpu.target<gfx11-generic> @qwen38_cohort_wave32 {subgroup_size = 32}
-
 func.decl @ggml_linear_q5k_q8_1_cohort(%rows: index, %weight_channels: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 
 func.decl @ggml_linear_q6k_q8_1_cohort(%rows: index, %block_lanes: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 
 func.decl @ggml_linear_q6k_f32_cohort(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q5k_q8_1_cohort(%inputs: index, %outputs: index) {
+kernel.def @qwen38_linear_q5k_q8_1_cohort(%inputs: index, %outputs: index) {
   %c1 = index.constant 1 : index
-  %channels = index.constant 8 : index
-  %padding = index.constant 7 : index
   %threads = index.constant 256 : index
+  %width = target.subgroup.size : index
+  %channels = index.div %threads, %width : index
+  %padding = index.sub %channels, %c1 : index
   %padded = index.add %outputs, %padding : index
   %groups = index.div %padded, %channels : index
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
@@ -26,11 +25,12 @@ kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q5k_q8_1_cohort(%inputs:
   kernel.return
 }
 
-kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q5k_q8_1_channel8_cohort(%inputs: index, %outputs: index) {
+kernel.def @qwen38_linear_q5k_q8_1_channel8_cohort(%inputs: index, %outputs: index) {
   %c1 = index.constant 1 : index
-  %channels = index.constant 8 : index
-  %padding = index.constant 7 : index
   %threads = index.constant 256 : index
+  %width = target.subgroup.size : index
+  %channels = index.div %threads, %width : index
+  %padding = index.sub %channels, %c1 : index
   %padded = index.add %outputs, %padding : index
   %groups = index.div %padded, %channels : index
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
@@ -42,11 +42,12 @@ kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q5k_q8_1_channel8_cohort
   kernel.return
 }
 
-kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q6k_q8_1_cohort(%inputs: index, %outputs: index) {
+kernel.def @qwen38_linear_q6k_q8_1_cohort(%inputs: index, %outputs: index) {
   %c1 = index.constant 1 : index
-  %channels = index.constant 8 : index
-  %padding = index.constant 7 : index
   %threads = index.constant 256 : index
+  %width = target.subgroup.size : index
+  %channels = index.div %threads, %width : index
+  %padding = index.sub %channels, %c1 : index
   %padded = index.add %outputs, %padding : index
   %groups = index.div %padded, %channels : index
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
@@ -58,11 +59,11 @@ kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q6k_q8_1_cohort(%inputs:
   kernel.return
 }
 
-kernel.def target(@qwen38_cohort_wave32) @qwen38_linear_q6k_f32_cohort(%inputs: index, %outputs: index) {
+kernel.def @qwen38_linear_q6k_f32_cohort(%inputs: index, %outputs: index) {
   %c1 = index.constant 1 : index
   %channels = index.constant 2 : index
   %padding = index.constant 1 : index
-  %threads = index.constant 32 : index
+  %threads = target.subgroup.size : index
   %padded = index.add %outputs, %padding : index
   %groups = index.div %padded, %channels : index
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
