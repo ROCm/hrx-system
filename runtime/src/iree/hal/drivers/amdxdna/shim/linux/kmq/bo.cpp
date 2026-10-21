@@ -614,9 +614,8 @@ int bo::bind_at(size_t pos, const bo& boh, size_t offset, size_t size) {
   if (offset > boh.m_aligned_size || size > boh.m_aligned_size - offset)
     return EINVAL;
 
-  // AIE2P reuses exec BOs and treats pos==0 as "new arg table". Keep keys at
-  // or above kExecBoInstructionArgKey so AIE4's instruction-BO reservation
-  // survives the first data-arg bind_at(0).
+  // Exec BOs are reused and pos==0 means "new data-argument table". Keep
+  // reserved instruction-BO dependency keys so they survive that reset.
   if (!pos) {
     for (auto it = m_args_map.begin(); it != m_args_map.end();) {
       if (it->first < kExecBoInstructionArgKey) {
@@ -627,11 +626,10 @@ int bo::bind_at(size_t pos, const bo& boh, size_t offset, size_t size) {
     }
   }
 
-  // AIE2P CMD binds (control code, chain children) contribute only their
-  // nested arg handles. Pinning the CMD BO itself changes that exec arg
-  // list. AIE4 instruction BOs are also CMD, but they are reserved at
-  // kExecBoInstructionArgKey; XRT returns {self} for those, and leaving
-  // them out of EXEC_CMD drops HMM residency across a reused hwctx.
+  // CMD binds (control code, chain children) normally contribute only their
+  // nested arg handles. Instruction BOs are reserved at
+  // kExecBoInstructionArgKey and must pin themselves: leaving them out of
+  // EXEC_CMD drops HMM residency across a reused hwctx.
   auto h = boh.get_drm_bo_handle();
   const bool pin_self = boh.get_type() != AMDXDNA_BO_CMD ||
                         pos >= kExecBoInstructionArgKey;

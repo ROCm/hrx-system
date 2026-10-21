@@ -12,8 +12,8 @@
 
 #include "amdxdna_accel.h"
 #include "bo.h"
-#include "host_queue.h"
 #include "device.h"
+#include "host_queue.h"
 
 #define MAX_EXEC_BO_SIZE 4096
 
@@ -48,6 +48,17 @@ void initialize_npu_elf_data(ert_npu_preempt_data* data,
   std::memset(data, 0, sizeof(*data));
   data->instruction_buffer = instruction_buffer;
   data->instruction_buffer_size = instruction_buffer_size;
+}
+
+bool kernel_opcode_requires_instruction_bo_dependency(uint32_t opcode) {
+  switch (opcode) {
+    case ERT_START_NPU:
+    case ERT_START_NPU_PREEMPT_ELF:
+    case ERT_START_DPU:
+      return true;
+    default:
+      return false;
+  }
 }
 
 kernel::kernel(const pdev& p, uint32_t op) : m_op(op) {
@@ -110,7 +121,7 @@ int kernel::add_ctrl_bo(bo& bo_ctrl, size_t instruction_size) {
       npu_data->instruction_buffer = bo_ctrl.get_paddr();
       npu_data->instruction_buffer_size = instr_bytes;
       npu_data->instruction_prop_count = 0;
-      return 0;
+      break;
     }
     case ERT_START_NPU_PREEMPT_ELF: {
       int err = inc_pkt_count(sizeof(ert_npu_preempt_data));
@@ -118,7 +129,7 @@ int kernel::add_ctrl_bo(bo& bo_ctrl, size_t instruction_size) {
       ert_npu_preempt_data* elf_data = get_ert_npu_elf_data(cmd_packet);
       if (!elf_data) return EINVAL;
       initialize_npu_elf_data(elf_data, bo_ctrl.get_paddr(), instr_bytes);
-      return 0;
+      break;
     }
     case ERT_START_DPU: {
       // One column (or a caller that has not split columns): KMD
@@ -133,19 +144,20 @@ int kernel::add_ctrl_bo(bo& bo_ctrl, size_t instruction_size) {
       dpu->uc_index = 0;
       dpu->chained = 0;
       m_dpu_count = 1;
-      return m_exec_buf_bo->bind_at(kExecBoInstructionArgKey, bo_ctrl, 0,
-                                    instr_bytes);
+      break;
     }
     default:
       return EINVAL;
   }
+  if (!kernel_opcode_requires_instruction_bo_dependency(m_op)) return 0;
+  return m_exec_buf_bo->bind_at(kExecBoInstructionArgKey, bo_ctrl, 0,
+                                instruction_size);
 }
 
 int kernel::add_dpu_columns(bo& bo_ctrl, size_t instruction_size,
                             const uint16_t* uc_index,
                             const uint32_t* byte_offset,
-                            const uint32_t* byte_size,
-                            uint32_t column_count) {
+                            const uint32_t* byte_size, uint32_t column_count) {
   if (m_op != ERT_START_DPU) return EINVAL;
   if (column_count == 0 || column_count > HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
     return EINVAL;
@@ -164,8 +176,7 @@ int kernel::add_dpu_columns(bo& bo_ctrl, size_t instruction_size,
       cmd_packet->data + cmd_packet->extra_cu_masks);
   for (uint32_t i = 0; i < column_count; ++i) {
     if (uc_index[i] >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) return EINVAL;
-    const uint64_t end =
-        (uint64_t)byte_offset[i] + (uint64_t)byte_size[i];
+    const uint64_t end = (uint64_t)byte_offset[i] + (uint64_t)byte_size[i];
     if (byte_size[i] == 0 || (byte_size[i] % sizeof(uint32_t)) != 0 ||
         end > instruction_size) {
       return EINVAL;

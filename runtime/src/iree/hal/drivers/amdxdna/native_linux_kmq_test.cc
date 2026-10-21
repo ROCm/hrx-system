@@ -45,6 +45,19 @@ TEST(NativeLinuxKmqTest, FullElfPacketPayloadMatchesFirmwareAbi) {
   EXPECT_EQ(data.instruction_prop_count, 0u);
 }
 
+TEST(NativeLinuxKmqTest, InstructionOpcodesRetainControlBoDependency) {
+  EXPECT_TRUE(shim_xdna::kernel_opcode_requires_instruction_bo_dependency(
+      ERT_START_NPU));
+  EXPECT_TRUE(shim_xdna::kernel_opcode_requires_instruction_bo_dependency(
+      ERT_START_NPU_PREEMPT_ELF));
+  EXPECT_TRUE(shim_xdna::kernel_opcode_requires_instruction_bo_dependency(
+      ERT_START_DPU));
+  EXPECT_FALSE(shim_xdna::kernel_opcode_requires_instruction_bo_dependency(
+      ERT_START_CU));
+  EXPECT_FALSE(shim_xdna::kernel_opcode_requires_instruction_bo_dependency(
+      ERT_CMD_CHAIN));
+}
+
 TEST(NativeLinuxKmqTest, FullElfCapabilityRejectsPreProtocolFirmware) {
   EXPECT_FALSE(iree_hal_amdxdna_native_linux_firmware_supports_full_elf(
       false, 0, 0, 0, 0));
