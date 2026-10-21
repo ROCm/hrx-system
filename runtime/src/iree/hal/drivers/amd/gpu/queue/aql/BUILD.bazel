@@ -388,6 +388,7 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":command_buffer",
         ":signal",
         ":submission",
         "//runtime/src/iree/hal/drivers/amd/gpu:publication",

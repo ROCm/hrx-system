@@ -77,7 +77,6 @@ class GpuProtocolInteropTest : public GpuNativeTest {
     IREE_ASSERT_OK(iree_hal_amd_gpu_device_create(
         context, IREE_SV("AQL interoperability"), &options_, &params,
         allocator_.allocator(), &device_));
-    allocator_.armed.store(true);
     auto peer_options = options_;
     peer_options.queue_family_ordinal = pm4_family;
     context = peer_context_;
@@ -85,7 +84,6 @@ class GpuProtocolInteropTest : public GpuNativeTest {
     IREE_ASSERT_OK(iree_hal_amd_gpu_device_create(
         context, IREE_SV("PM4 interoperability"), &peer_options, &params,
         peer_allocator_.allocator(), &peer_));
-    peer_allocator_.armed.store(true);
 
     iree_hal_device_group_builder_t builder;
     iree_hal_device_group_builder_initialize(&builder, tracker_);
@@ -110,10 +108,7 @@ class GpuProtocolInteropTest : public GpuNativeTest {
   void TearDown() override {
     iree_hal_device_group_release(group_);
     group_ = nullptr;
-    if (peer_) {
-      iree_hal_device_release(peer_);
-      peer_allocator_.reclaimed.acquire();
-    }
+    iree_hal_device_release(peer_);
     EXPECT_EQ(peer_allocator_.live_count.load(), 0u);
     iree_hal_amd_gpu_context_free(peer_context_);
     GpuNativeTest::TearDown();

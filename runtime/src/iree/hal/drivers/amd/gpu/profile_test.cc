@@ -430,7 +430,9 @@ TEST_F(GpuProfileTest, FailedEndStillClosesSessionAndReleasesSink) {
   operation.dispatch = {metadata, iree_hal_profile_dispatch_event_default()};
   operation.dispatch.event.executable_id =
       iree_hal_amd_gpu_profile_executable_id(metadata);
-  iree_hal_amd_gpu_profile_operation_complete(profile_, &operation);
+  operation.completion.count = 1;
+  iree_hal_amd_gpu_profile_operation_complete(profile_, &operation,
+                                              &operation.completion);
   iree_hal_amd_gpu_profile_executable_release(metadata);
   EXPECT_FALSE(*executable.image_destroyed);
   sink_.fail_write = true;
@@ -591,8 +593,7 @@ TEST_F(GpuProfileTest,
   ASSERT_NO_FATAL_FAILURE(Begin(100000000));
   ReflectionExecutable executable;
   iree_hal_amd_gpu_profile_executable_t* metadata = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_executable_create(
-      &executable.base, iree_allocator_system(), &metadata));
+  IREE_ASSERT_OK(executable.Capture(&metadata));
   auto record = iree_hal_profile_command_buffer_record_default();
   record.command_buffer_id = 72;
   iree_hal_amd_gpu_profile_commands_t* commands = nullptr;

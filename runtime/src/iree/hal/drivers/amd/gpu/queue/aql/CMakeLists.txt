@@ -682,6 +682,7 @@ iree_cc_library(
   SRCS
     "growth.c"
   DEPS
+    ::command_buffer
     ::signal
     ::submission
     iree::hal::drivers::amd::gpu::publication

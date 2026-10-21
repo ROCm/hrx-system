@@ -338,6 +338,18 @@ static void iree_hal_amd_gpu_aql_pending_end(
   iree_slim_mutex_unlock(&queue->pending.completion_mutex);
 }
 
+// File I/O and host calls may finish on an external progress owner. Their
+// callback tails participate in the same idle proof as ready publication.
+static void iree_hal_amd_gpu_aql_host_begin(iree_hal_queue_t* base) {
+  iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
+  iree_atomic_fetch_add(&queue->pending.host_owners, 1,
+                        iree_memory_order_relaxed);
+}
+
+static void iree_hal_amd_gpu_aql_host_end(iree_hal_queue_t* base) {
+  iree_hal_amd_gpu_aql_pending_end((iree_hal_amd_gpu_aql_queue_t*)base);
+}
+
 // Wait completion reenters the publication owner only after registration and
 // every cancellation borrower have relinquished the captured sidecar.
 static void iree_hal_amd_gpu_aql_enqueue(
@@ -2302,11 +2314,15 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       .queue = &queue->base,
       .context = context,
       .captures = &queue->captures,
+      .begin = iree_hal_amd_gpu_aql_host_begin,
+      .end = iree_hal_amd_gpu_aql_host_end,
       .barrier = iree_hal_amd_gpu_aql_host_barrier};
   queue->file_executor = (iree_hal_amd_gpu_file_executor_t){
       .queue = &queue->base,
       .context = context,
       .captures = &queue->captures,
+      .begin = iree_hal_amd_gpu_aql_host_begin,
+      .end = iree_hal_amd_gpu_aql_host_end,
       .staging = options->file_staging,
       .waits = &queue->wait_context,
       .queue_ordinal = options->queue_ordinal,

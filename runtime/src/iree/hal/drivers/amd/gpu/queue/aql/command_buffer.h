@@ -46,9 +46,13 @@ typedef struct iree_hal_amd_gpu_aql_host_template_t {
 } iree_hal_amd_gpu_aql_host_template_t;
 
 typedef struct iree_hal_amd_gpu_aql_command_program_t {
+  // Native growth owns these facts independently of the recording's resources.
+  iree_atomic_ref_count_t ref_count;
+  // Allocator owning this program and its immutable block/template metadata.
+  iree_allocator_t host_allocator;
   // Native ownership for resident recordings; zero for bounded host templates.
   iree_hal_amd_gpu_program_t resident;
-  // Immutable indexed native blocks, owned by the command buffer.
+  // Immutable indexed native blocks, owned by this program.
   iree_hal_amd_gpu_aql_program_block_t* blocks;
   // Optional host-only attribution; its presence selects tagged templates.
   iree_hal_amd_gpu_profile_commands_t* profile;
@@ -66,8 +70,9 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
 
 // Seals native templates and private arguments. maximum_packet_count is
 // derived from the family's provisioned ring geometry, leaving publication
-// space for waits, initialization, and a terminal point. The recording retains
-// the device; UNRETAINED applies only to caller payload resources.
+// space for waits, initialization, and a terminal point. The recording and its
+// independently retained program borrow the device; UNRETAINED applies only to
+// caller payload resources.
 iree_status_t iree_hal_amd_gpu_aql_command_buffer_create(
     const iree_hal_queue_family_t* family,
     iree_hal_amd_gpu_aql_program_pool_t* pool,
@@ -76,7 +81,14 @@ iree_status_t iree_hal_amd_gpu_aql_command_buffer_create(
     uint32_t maximum_group_segment_byte_length, iree_allocator_t host_allocator,
     iree_hal_command_buffer_t** out_buffer);
 
-// Returns immutable sealed execution facts; the caller retains command_buffer.
+// Retains/releases native program facts independently of caller resources.
+// The recording owns one reference; cold clone growth may outlive invocations.
+void iree_hal_amd_gpu_aql_command_program_retain(
+    iree_hal_amd_gpu_aql_command_program_t* program);
+void iree_hal_amd_gpu_aql_command_program_release(
+    iree_hal_amd_gpu_aql_command_program_t* program);
+
+// Returns borrowed sealed execution facts; the caller retains command_buffer.
 iree_hal_amd_gpu_aql_command_program_t*
 iree_hal_amd_gpu_aql_command_buffer_program(
     iree_hal_command_buffer_t* command_buffer);
@@ -86,7 +98,7 @@ typedef struct iree_hal_amd_gpu_aql_command_invocation_t {
   iree_atomic_ref_count_t ref_count;
   // Retained recording dominating its resident program and direct resources.
   iree_hal_command_buffer_t* command_buffer;
-  // Borrowed sealed facts in command_buffer.
+  // Borrowed sealed facts retained by command_buffer.
   iree_hal_amd_gpu_aql_command_program_t* program;
   // Copied/qualified public table in submission-owned storage.
   iree_hal_amd_gpu_command_binding_t* bindings;

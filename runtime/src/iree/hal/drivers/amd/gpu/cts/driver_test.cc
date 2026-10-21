@@ -160,8 +160,8 @@ class DriverTest : public ::testing::Test {
         driver_, scheme, path, IREE_ARRAYSIZE(options), options, &params,
         allocators_[index].allocator(), &devices_[index]);
     IREE_ASSERT_OK(status);
-    EXPECT_TRUE(iree_string_view_equal(iree_hal_device_id(devices_[index]),
-                                       scheme_));
+    EXPECT_TRUE(
+        iree_string_view_equal(iree_hal_device_id(devices_[index]), scheme_));
     ASSERT_NE(iree_hal_device_queue(devices_[index], 0, 0), nullptr);
     ASSERT_NE(iree_hal_device_queue(devices_[index], 0, 1), nullptr);
   }

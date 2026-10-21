@@ -20,8 +20,8 @@ typedef struct iree_hal_amd_gpu_aql_command_buffer_t {
   iree_allocator_t host_allocator;
   // Device-owned placement and immutable descriptor kernels.
   iree_hal_amd_gpu_aql_program_pool_t* pool;
-  // Immutable native execution facts after sealing.
-  iree_hal_amd_gpu_aql_command_program_t program;
+  // Independently retained native execution facts after sealing.
+  iree_hal_amd_gpu_aql_command_program_t* program;
   // Append-only native bytes/private data/fixups, released after sealing.
   iree_hal_amd_gpu_recording_t recording;
   // Dense unique invocation values and aggregated binding requirements.
@@ -51,21 +51,43 @@ typedef struct iree_hal_amd_gpu_aql_command_buffer_t {
 static const iree_hal_command_buffer_vtable_t
     iree_hal_amd_gpu_aql_command_buffer_vtable;
 
+void iree_hal_amd_gpu_aql_command_program_retain(
+    iree_hal_amd_gpu_aql_command_program_t* program) {
+  if (program) {
+    iree_atomic_ref_count_inc(&program->ref_count);
+  }
+}
+
+void iree_hal_amd_gpu_aql_command_program_release(
+    iree_hal_amd_gpu_aql_command_program_t* program) {
+  if (!program) {
+    return;
+  }
+  if (iree_atomic_ref_count_dec(&program->ref_count) != 1) {
+    return;
+  }
+  const iree_allocator_t host_allocator = program->host_allocator;
+  iree_hal_amd_gpu_profile_commands_release(program->profile);
+  iree_hal_amd_gpu_program_deinitialize(&program->resident);
+  iree_allocator_free(host_allocator, program->blocks);
+  iree_allocator_free(host_allocator, program->host_template);
+  iree_allocator_free(host_allocator, program);
+}
+
 static void iree_hal_amd_gpu_aql_command_buffer_destroy(
     iree_hal_command_buffer_t* base) {
   iree_hal_amd_gpu_aql_command_buffer_t* buffer = (void*)base;
-  iree_hal_device_t* device = base->queue_family->device;
+  const iree_allocator_t host_allocator = buffer->host_allocator;
+  iree_hal_amd_gpu_aql_command_program_t* program = buffer->program;
+  // Cold clone growth retains only native program facts. Public invocation
+  // retirement releases direct resources independently of that allocation.
   iree_status_free(buffer->recording_status);
   iree_hal_amd_gpu_recording_deinitialize(&buffer->recording);
-  iree_hal_amd_gpu_profile_commands_release(buffer->program.profile);
   iree_hal_amd_gpu_command_inputs_deinitialize(&buffer->inputs);
   iree_hal_resource_set_free(buffer->resources);
   iree_arena_block_pool_deinitialize(&buffer->resource_blocks);
-  iree_hal_amd_gpu_program_deinitialize(&buffer->program.resident);
-  iree_allocator_free(buffer->host_allocator, buffer->program.blocks);
-  iree_allocator_free(buffer->host_allocator, buffer->program.host_template);
-  iree_allocator_free(buffer->host_allocator, buffer);
-  iree_hal_device_release(device);
+  iree_allocator_free(host_allocator, buffer);
+  iree_hal_amd_gpu_aql_command_program_release(program);
 }
 
 iree_status_t iree_hal_amd_gpu_aql_command_buffer_create(
@@ -96,7 +118,6 @@ iree_status_t iree_hal_amd_gpu_aql_command_buffer_create(
       family, mode, categories, binding_capacity,
       (uint8_t*)buffer + validation_offset,
       &iree_hal_amd_gpu_aql_command_buffer_vtable, &buffer->base);
-  iree_hal_device_retain(family->device);
   buffer->host_allocator = host_allocator;
   buffer->pool = pool;
   buffer->maximum_packet_count = maximum_packet_count;
@@ -107,8 +128,14 @@ iree_status_t iree_hal_amd_gpu_aql_command_buffer_create(
       host_allocator, &buffer->inputs);
   iree_arena_block_pool_initialize(4096, host_allocator,
                                    &buffer->resource_blocks);
-  iree_status_t status = iree_ok_status();
-  if (iree_any_bit_set(
+  iree_status_t status = iree_allocator_malloc(
+      host_allocator, sizeof(*buffer->program), (void**)&buffer->program);
+  if (iree_status_is_ok(status)) {
+    buffer->program->host_allocator = host_allocator;
+    iree_atomic_ref_count_init(&buffer->program->ref_count);
+  }
+  if (iree_status_is_ok(status) &&
+      iree_any_bit_set(
           mode, IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
                     IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA)) {
     iree_hal_profile_command_buffer_record_t record =
@@ -119,8 +146,8 @@ iree_status_t iree_hal_amd_gpu_aql_command_buffer_create(
     record.command_categories = categories;
     record.queue_family_ordinal = family->ordinal;
     record.physical_device_ordinal = 0;
-    status = iree_hal_amd_gpu_profile_commands_create(&record, host_allocator,
-                                                      &buffer->program.profile);
+    status = iree_hal_amd_gpu_profile_commands_create(
+        &record, host_allocator, &buffer->program->profile);
   }
   if (iree_status_is_ok(status) &&
       !(mode & IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED)) {
@@ -138,7 +165,7 @@ iree_status_t iree_hal_amd_gpu_aql_command_buffer_create(
 
 iree_hal_amd_gpu_aql_command_program_t*
 iree_hal_amd_gpu_aql_command_buffer_program(iree_hal_command_buffer_t* base) {
-  return &((iree_hal_amd_gpu_aql_command_buffer_t*)base)->program;
+  return ((iree_hal_amd_gpu_aql_command_buffer_t*)base)->program;
 }
 
 // Appends complete native packets without splitting an indirect pair. The
@@ -146,7 +173,7 @@ iree_hal_amd_gpu_aql_command_buffer_program(iree_hal_command_buffer_t* base) {
 static iree_status_t iree_hal_amd_gpu_aql_command_packets(
     iree_hal_amd_gpu_aql_command_buffer_t* buffer, uint32_t count,
     uint32_t* out_offset, iree_hal_amd_gpu_aql_packet_t** out_packets) {
-  iree_hal_amd_gpu_aql_command_program_t* program = &buffer->program;
+  iree_hal_amd_gpu_aql_command_program_t* program = buffer->program;
   if (!program->block_count ||
       program->blocks[program->block_count - 1].packet_count + count >
           buffer->maximum_packet_count) {
@@ -214,34 +241,34 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "resident command/data placement exceeds 4 GiB");
   }
-  buffer->program.value_count = 1 + buffer->inputs.count;
+  buffer->program->value_count = 1 + buffer->inputs.count;
   if (length) {
     const uint32_t fixup_count =
         iree_hal_amd_gpu_recording_fixup_count(&buffer->recording);
     // Bound host publication to one native dispatch, eight cache lines of
     // packet/private data, and sixteen replacement stores. Larger recordings
     // keep resident instances and native parallel fixup/materialization.
-    if (buffer->program.block_count == 1 &&
-        buffer->program.blocks[0].packet_count == 1 &&
-        buffer->program.dispatch_count == 1 && length <= 512 &&
+    if (buffer->program->block_count == 1 &&
+        buffer->program->blocks[0].packet_count == 1 &&
+        buffer->program->dispatch_count == 1 && length <= 512 &&
         fixup_count <= 16) {
       const uint32_t fixup_offset = (uint32_t)iree_align_uint64(length, 16);
       IREE_RETURN_IF_ERROR(iree_allocator_malloc(
           buffer->host_allocator,
-          sizeof(*buffer->program.host_template) + fixup_offset +
+          sizeof(*buffer->program->host_template) + fixup_offset +
               fixup_count * sizeof(iree_hal_amd_gpu_fixup_t),
-          (void**)&buffer->program.host_template));
-      *buffer->program.host_template = (iree_hal_amd_gpu_aql_host_template_t){
+          (void**)&buffer->program->host_template));
+      *buffer->program->host_template = (iree_hal_amd_gpu_aql_host_template_t){
           .byte_length = (uint32_t)length,
           .alignment = buffer->recording.alignment,
           .fixup_count = fixup_count,
           .fixup_offset = fixup_offset,
       };
-      uint8_t* contents = (void*)(buffer->program.host_template + 1);
+      uint8_t* contents = (void*)(buffer->program->host_template + 1);
       iree_hal_amd_gpu_recording_write(&buffer->recording, contents,
                                        (void*)(contents + fixup_offset));
     } else {
-      iree_hal_amd_gpu_program_t* program = &buffer->program.resident;
+      iree_hal_amd_gpu_program_t* program = &buffer->program->resident;
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_initialize(
           &buffer->pool->storage, buffer->recording.alignment, (uint32_t)length,
           fixup_count, program));
@@ -284,7 +311,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_buffer_barrier(
   }
   buffer->pending_barrier =
       iree_hal_amd_gpu_aql_barrier_join(buffer->pending_barrier, prepared);
-  ++buffer->program.operation_count;
+  ++buffer->program->operation_count;
   return iree_ok_status();
 }
 
@@ -435,23 +462,23 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
     target->words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
   }
   iree_hal_amd_gpu_aql_program_block_t* block =
-      &buffer->program.blocks[buffer->program.block_count - 1];
-  if (buffer->program.profile) {
+      &buffer->program->blocks[buffer->program->block_count - 1];
+  if (buffer->program->profile) {
     iree_hal_amd_gpu_profile_dispatch_t capture;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_executable_profile_dispatch(
         executable, token, &geometry, flags, &capture));
     capture.event.flags |= IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_COMMAND_BUFFER;
     capture.event.command_buffer_id =
         iree_hal_command_buffer_profile_id(&buffer->base);
-    capture.event.command_index = buffer->program.operation_count;
+    capture.event.command_index = buffer->program->operation_count;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_commands_append(
-        buffer->program.profile, capture));
+        buffer->program->profile, capture));
     // Private template operand, replaced before a native header is published.
     target->words[14] = block->dispatches.count + 1;
   }
   ++block->dispatches.count;
-  ++buffer->program.dispatch_count;
-  ++buffer->program.operation_count;
+  ++buffer->program->dispatch_count;
+  ++buffer->program->operation_count;
   return iree_ok_status();
 }
 
@@ -541,7 +568,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_transfer(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
       buffer, offset + 40, 0, argument_offset,
       IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
-  ++buffer->program.operation_count;
+  ++buffer->program->operation_count;
   return iree_ok_status();
 }
 
@@ -597,7 +624,7 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_initialize(
   iree_hal_amd_gpu_aql_command_buffer_t* buffer = (void*)base;
   *out_invocation = (iree_hal_amd_gpu_aql_command_invocation_t){
       .command_buffer = base,
-      .program = &buffer->program,
+      .program = buffer->program,
       .bindings = storage,
       .borrow_bindings =
           (flags & IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME) !=

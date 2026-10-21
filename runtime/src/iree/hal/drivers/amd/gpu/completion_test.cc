@@ -456,7 +456,7 @@ TEST_F(CompletionTest, CallerRetiresWhileWorkerParks) {
   };
   auto source = Source(callback);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 1, &source, 0, {}, {}, iree_allocator_system(), &completion_));
+      &context_, 1, &source, 0, {}, iree_allocator_system(), &completion_));
   event_.AwaitWaitCount(1);
   EXPECT_TRUE(iree_hal_amd_gpu_completion_try_drain(&completion_));
   EXPECT_EQ(retired, 1u);
@@ -490,7 +490,7 @@ TEST_F(CompletionTest, ActiveObservationProtectsBorrowedHintFromCallerDrain) {
   };
   auto source = Source(callback);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 1, &source, IREE_DURATION_INFINITE, {}, {},
+      &context_, 1, &source, IREE_DURATION_INFINITE, {},
       iree_allocator_system(), &completion_));
   armed.acquire();
   // The worker owns the hint until observation ends. A caller cannot retire
@@ -518,25 +518,23 @@ TEST_F(CompletionTest, StopJoinsCallerDrainBeforeOwnerExit) {
     return false;
   };
   auto source = Source(callback);
-  const iree_hal_amd_gpu_completion_exit_callback_t exit_callback = {
-      [](void* data) { static_cast<std::atomic<bool>*>(data)->store(true); },
-      &exited,
-  };
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 1, &source, 0, exit_callback, {}, iree_allocator_system(),
-      &completion_));
+      &context_, 1, &source, 0, {}, iree_allocator_system(), &completion_));
   event_.AwaitWaitCount(1);
   std::thread caller([&] {
     EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
   });
   entered.acquire();
   EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
-  EXPECT_TRUE(amdf_status_is_ok(
-      iree_hal_amd_gpu_completion_request_stop(&completion_)));
-  EXPECT_FALSE(exited.load());
+  std::thread owner([&] {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+    exited.store(true, std::memory_order_release);
+  });
+  event_.AwaitSignalCount(1);
+  EXPECT_FALSE(exited.load(std::memory_order_acquire));
   finish.release();
   caller.join();
-  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  owner.join();
   EXPECT_TRUE(exited.load());
   EXPECT_EQ(calls, 2u);
 }

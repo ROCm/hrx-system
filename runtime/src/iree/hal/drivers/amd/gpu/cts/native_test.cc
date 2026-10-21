@@ -1139,6 +1139,48 @@ TEST_F(GpuNativeTest, FailedQueueConstructionReleasesItsOwners) {
   EXPECT_EQ(allocator_.live_count.load(), 0u);
 }
 
+struct CompletionPause {
+  // Borrowed timeline owning timepoint enrollment.
+  iree_async_semaphore_t* semaphore;
+  // Stack callback storage, joined before leaving this scope.
+  iree_async_semaphore_timepoint_t timepoint = {};
+  // Callback entry, observed before submitting the native dependency chain.
+  std::binary_semaphore entered{0};
+  // Releases the callback after the test establishes its pending-work state.
+  std::binary_semaphore proceed{0};
+  // Joins the callback's final stack access.
+  std::binary_semaphore finished{0};
+  // Successful enrollment still requiring cancellation or callback joining.
+  bool enrolled = false;
+  iree_status_t Arm(uint64_t value) {
+    timepoint = {
+        .callback =
+            [](void* user_data, iree_async_semaphore_timepoint_t*,
+               iree_status_t status) {
+              auto* pause = static_cast<CompletionPause*>(user_data);
+              IREE_EXPECT_OK(status);
+              pause->entered.release();
+              pause->proceed.acquire();
+              pause->finished.release();
+            },
+        .user_data = this,
+    };
+    IREE_RETURN_IF_ERROR(
+        iree_async_semaphore_acquire_timepoint(semaphore, value, &timepoint));
+    enrolled = true;
+    return iree_ok_status();
+  }
+  void Join() {
+    if (enrolled &&
+        !iree_async_semaphore_cancel_timepoint(semaphore, &timepoint)) {
+      proceed.release();
+      finished.acquire();
+    }
+    enrolled = false;
+  }
+  ~CompletionPause() { Join(); }
+};
+
 TEST_F(GpuNativeTest, NativeConsumerPreservesProducerRetirementFailure) {
   const void* native_domain = context_;
   Create();
@@ -1158,44 +1200,9 @@ TEST_F(GpuNativeTest, NativeConsumerPreservesProducerRetirementFailure) {
   // A public completion callback holds the device's single completion owner.
   // Native submission remains live, so both operations below can reach the
   // hardware before any host observer retires the producer.
-  struct CompletionPause {
-    // Borrowed timeline owning timepoint enrollment.
-    iree_async_semaphore_t* semaphore;
-    // Stack callback storage, joined before leaving this scope.
-    iree_async_semaphore_timepoint_t timepoint = {};
-    // Callback entry, observed before submitting the native dependency chain.
-    std::binary_semaphore entered{0};
-    // Releases the callback after the producer's public timeline fails.
-    std::binary_semaphore proceed{0};
-    // Joins the callback's final stack access.
-    std::binary_semaphore finished{0};
-    // Successful enrollment still requiring cancellation or callback joining.
-    bool enrolled = false;
-    void Join() {
-      if (enrolled &&
-          !iree_async_semaphore_cancel_timepoint(semaphore, &timepoint)) {
-        proceed.release();
-        finished.acquire();
-      }
-      enrolled = false;
-    }
-    ~CompletionPause() { Join(); }
-  } pause{reinterpret_cast<iree_async_semaphore_t*>(paused_handle)};
-  pause.timepoint = {
-      .callback =
-          [](void* user_data, iree_async_semaphore_timepoint_t*,
-             iree_status_t status) {
-            auto* pause = static_cast<CompletionPause*>(user_data);
-            IREE_EXPECT_OK(status);
-            pause->entered.release();
-            pause->proceed.acquire();
-            pause->finished.release();
-          },
-      .user_data = &pause,
-  };
-  IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(pause.semaphore, one,
-                                                        &pause.timepoint));
-  pause.enrolled = true;
+  CompletionPause pause{
+      reinterpret_cast<iree_async_semaphore_t*>(paused_handle)};
+  IREE_ASSERT_OK(pause.Arm(one));
   IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {},
                                         {1, &paused_handle, &one}, nullptr, 0));
   pause.entered.acquire();
@@ -1407,6 +1414,77 @@ TEST_P(GpuNativeRecordingProgressTest,
                                          {1, &semaphores_[2], &two},
                                          IREE_ARRAYSIZE(buffers), buffers));
   Wait(semaphores_[2], two);
+}
+
+TEST_P(GpuNativeRecordingProgressTest,
+       RecordedResourcesRetireWhileUnusedCloneAllocationIsHeld) {
+  using iree::hal::cts::Ref;
+  const auto request = iree_hal_make_pool_reservation_request(4096, 4);
+  uint64_t one = 1;
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], {},
+                                       {1, &semaphores_[0], &one}, pool_, 1,
+                                       &request, output.out()));
+  Wait(semaphores_[0]);
+  Ref<iree_hal_command_buffer_t> recording;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  const uint32_t pattern = 0x1234CAFE;
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      recording, iree_hal_make_buffer_ref(output, 0, 16), &pattern,
+      sizeof(pattern), 0));
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+
+  CompletionPause pause{
+      reinterpret_cast<iree_async_semaphore_t*>(semaphores_[3])};
+  IREE_ASSERT_OK(pause.Arm(one));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queues_[0], {}, {1, &semaphores_[3], &one}, nullptr, 0));
+  pause.entered.acquire();
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      queues_[0], {}, {1, &semaphores_[1], &one}, recording, {}, 0));
+  {
+    // The first invocation owns the initial instance until host retirement.
+    // An independent queue requests a clone; returned capacity must let it
+    // finish while that unnecessary native allocation remains blocked.
+    iree::hal::amd::gpu::cts::NativeMemoryGate::Hold hold(&memory_gate_);
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queues_[1], {}, {1, &semaphores_[2], &one}, recording, {}, 0));
+    hold.WaitEntered();
+    recording.reset();
+    pause.Join();
+    Wait(semaphores_[1]);
+    Wait(semaphores_[2]);
+    EXPECT_EQ(iree_atomic_ref_count_load(&output.get()->resource.ref_count), 1);
+  }
+  std::array<uint32_t, 4> observed = {};
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = output,
+              .target = observed.data(),
+              .length = sizeof(observed),
+          },
+  };
+  uint64_t two = 2;
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[1], {1, &semaphores_[2], &one},
+                                         {1, &semaphores_[2], &two}, 1,
+                                         &download, nullptr));
+  Wait(semaphores_[2], two);
+  for (uint32_t value : observed) {
+    EXPECT_EQ(value, pattern);
+  }
+  // The original recording and both invocations have gone. The unused clone
+  // and its final program reference are joined by ordinary device teardown.
 }
 
 INSTANTIATE_TEST_SUITE_P(

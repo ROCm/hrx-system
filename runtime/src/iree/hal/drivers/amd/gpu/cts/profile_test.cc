@@ -243,12 +243,19 @@ TEST_P(GpuNativeDispatchProfileTest, DirectSamplesSurviveExecutableRelease) {
   Ref<iree_hal_executable_t> executable;
   iree_hal_executable_function_t function;
   ASSERT_NO_FATAL_FAILURE(Load(executable, function));
-  const iree_hal_amd_gpu_pm4_function_t* native_function = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_pm4(executable, function,
-                                                        &native_function));
-  const uint64_t entry_address =
-      (uint64_t{native_function->launch.program[0]} << 8) |
-      (uint64_t{native_function->launch.program[1]} << 40);
+  uint64_t launch_address = 0;
+  if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+    const iree_hal_amd_gpu_aql_function_t* native_function = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_aql_for_queue(
+        executable, function, 0, &native_function));
+    launch_address = native_function->kernel_object;
+  } else {
+    const iree_hal_amd_gpu_pm4_function_t* native_function = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_pm4(executable, function,
+                                                          &native_function));
+    launch_address = (uint64_t{native_function->launch.program[0]} << 8) |
+                     (uint64_t{native_function->launch.program[1]} << 40);
+  }
   Ref<iree_hal_semaphore_t> done;
   CreateSemaphore(done.out());
   auto* timeline = done.get();
@@ -291,7 +298,8 @@ TEST_P(GpuNativeDispatchProfileTest, DirectSamplesSurviveExecutableRelease) {
                         artifact.data.size()),
             0);
   // Offline attribution uses only the emitted image and placement. It must
-  // recover the actual native program address even after executable release.
+  // recover the native launch address even after executable release: the
+  // descriptor for AQL and the instruction entry for PM4.
   auto* source = iree::hal::amd::gpu::testing::ByteSequence::Create(
       iree_make_const_byte_span(artifact.data.data(), artifact.data.size()), 0);
   iree_hal_amd_gpu_image_t image = {};
@@ -300,9 +308,14 @@ TEST_P(GpuNativeDispatchProfileTest, DirectSamplesSurviveExecutableRelease) {
   iree_byte_sequence_release(source);
   IREE_ASSERT_OK(status);
   EXPECT_EQ(load.load_size, image.byte_length);
+  const auto& kernel = image.kernels[function.value];
+  const uint64_t launch_offset =
+      command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+          ? kernel.descriptor_offset
+          : kernel.entry_offset;
   EXPECT_EQ(static_cast<uint64_t>(load.load_delta) + image.virtual_base +
-                image.kernels[function.value].entry_offset,
-            entry_address);
+                launch_offset,
+            launch_address);
   iree_hal_amd_gpu_image_deinitialize(&image);
   for (const auto& event : sink_.dispatch_events) {
     EXPECT_GT(event.start_tick, 0u);
