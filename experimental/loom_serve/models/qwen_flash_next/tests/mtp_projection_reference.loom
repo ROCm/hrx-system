@@ -1,0 +1,101 @@
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+// Two sparse permutations have different signed coefficients. The serialized
+// matrix is otherwise zero, including the unused block scales. This fixture
+// distinguishes matrix halves, physical row stride, stream stride, and token
+// stride without a dense host matrix multiplication in the test runner.
+func.def @projection_fixture(%weight: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c7 = index.constant 7 : index
+  %c17 = index.constant 17 : index
+  %c32 = index.constant 32 : index
+  %c33 = index.constant 33 : index
+  %width = index.constant 2560 : index
+  %row_bytes = index.constant 5440 : offset
+  %half_bytes = index.constant 2720 : offset
+  %block_bytes = index.constant 34 : offset
+  %code_bytes = index.constant 2 : offset
+  %byte = index.constant 1 : offset
+  %embedding_scale = scalar.constant 0.015625 : f16
+  %hidden_scale = scalar.constant 0.0078125 : f16
+  %embedding_code = scalar.constant 37 : i8
+  %hidden_code = scalar.constant -53 : i8
+  scf.for %row = [%c0 to %width step %c1] {
+    %embedding_index = index.madd %row, %c3, %c17 : index
+    %hidden_index = index.madd %row, %c7, %c33 : index
+    %embedding_column = index.rem %embedding_index, %width : index
+    %hidden_column = index.rem %hidden_index, %width : index
+    %row_origin = index.scale %row, %row_bytes : index, offset -> offset
+    scf.for %half = [%c0 to %c2 step %c1] {
+      %first = index.cmp eq, %half, %c0 : index
+      %column = scf.select %first, %embedding_column, %hidden_column : index
+      %scale = scf.select %first, %embedding_scale, %hidden_scale : f16
+      %code = scf.select %first, %embedding_code, %hidden_code : i8
+      %half_delta = index.scale %half, %half_bytes : index, offset -> offset
+      %half_origin = index.add %row_origin, %half_delta : offset
+      %block = index.div %column, %c32 : index
+      %within = index.rem %column, %c32 : index
+      %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+      %block_origin = index.add %half_origin, %block_delta : offset
+      %payload = index.add %block_origin, %code_bytes : offset
+      %code_delta = index.scale %within, %byte : index, offset -> offset
+      %code_origin = index.add %payload, %code_delta : offset
+      %header = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+      %codes = buffer.view %weight[%code_origin] : buffer -> view<1xi8>
+      view.store %scale, %header[0] : f16, view<1xf16>
+      view.store %code, %codes[0] : i8, view<1xi8>
+    }
+  }
+  func.return
+}
+
+// Analytic sparse products independently establish the BF16 publications at
+// both linear outputs and at the final addition, not a single fused dot.
+func.def @fusion_reference(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[0] : view<1xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %capacity = config.get @flash_next.token_count : index
+  %count = index.assume %count_value [range(%count_value, 0, %capacity)] : index
+  %embeddings = buffer.view %embedding[%origin] : buffer -> view<[%capacity]x2560xbf16>
+  %hiddens = buffer.view %hidden[%origin] : buffer -> view<[%capacity]x4x2560xbf16>
+  %outputs = buffer.view %output[%origin] : buffer -> view<[%capacity]x4x2560xbf16>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c7 = index.constant 7 : index
+  %c17 = index.constant 17 : index
+  %c33 = index.constant 33 : index
+  %width = index.constant 2560 : index
+  %embedding_coefficient = scalar.constant 0.578125 : f64
+  %hidden_coefficient = scalar.constant -0.4140625 : f64
+  scf.for %token = [%c0 to %count step %c1] {
+    scf.for %row = [%c0 to %width step %c1] {
+      %e_index = index.madd %row, %c3, %c17 : index
+      %h_index = index.madd %row, %c7, %c33 : index
+      %e_column = index.rem %e_index, %width : index
+      %h_column = index.rem %h_index, %width : index
+      %e_packed = view.load %embeddings[%token, %e_column] : view<[%capacity]x2560xbf16> -> bf16
+      %e_value = scalar.extf %e_packed : bf16 to f64
+      %e_product = scalar.mulf %e_value, %embedding_coefficient : f64
+      %e_rounded = scalar.fptrunc %e_product : f64 to bf16
+      %e = scalar.extf %e_rounded : bf16 to f64
+      scf.for %stream = [%c0 to %c4 step %c1] {
+        %h_packed = view.load %hiddens[%token, %stream, %h_column] : view<[%capacity]x4x2560xbf16> -> bf16
+        %h_value = scalar.extf %h_packed : bf16 to f64
+        %h_product = scalar.mulf %h_value, %hidden_coefficient : f64
+        %h_rounded = scalar.fptrunc %h_product : f64 to bf16
+        %h = scalar.extf %h_rounded : bf16 to f64
+        %sum = scalar.addf %e, %h : f64
+        %rounded = scalar.fptrunc %sum : f64 to bf16
+        view.store %rounded, %outputs[%token, %stream, %row] : bf16, view<[%capacity]x4x2560xbf16>
+      }
+    }
+  }
+  func.return
+}

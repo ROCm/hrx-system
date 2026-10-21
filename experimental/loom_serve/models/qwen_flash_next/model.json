@@ -62,6 +62,7 @@
       "../qwen/kernels/qwen38/accept.loom",
       "../qwen/kernels/qwen38/inputs.loom",
       "kernels/mtp.loom",
+      "kernels/mtp_matrix.loom",
       "kernels/mtp_state.loom",
       "programs/mtp.loom",
       "propose.loom",

@@ -386,12 +386,31 @@ loom_test(
 
 loom_test(
     name = "mtp_test",
-    srcs = ["tests/mtp.loom"],
+    srcs = [
+        "tests/mtp.loom",
+        "tests/mtp_projection_reference.loom",
+    ],
     benchmark_smoke = False,
     configs = {"flash_next.token_count": "2"},
     execution_profiles = [
         RDNA_HARDWARE_PROFILE,
         RDNA_ACCESS_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
+    name = "mtp_matrix_test",
+    srcs = [
+        "tests/mtp_projection.loom",
+        "tests/mtp_projection_reference.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {"flash_next.token_count": "133"},
+    execution_profiles = [
+        RDNA_HARDWARE_PROFILE,
+        RDNA_ACCESS_PROFILE,
+        RDNA_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )

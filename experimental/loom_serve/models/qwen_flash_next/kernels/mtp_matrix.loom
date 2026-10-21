@@ -1,0 +1,129 @@
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
+
+template.decl @flash_next.matrix_store_fragment(%remaining_rows: index, %outputs: index, %fragment_row: index, %result_column: index, %result: vector<8xf32>, %output_view: view<[%remaining_rows]x[%outputs]xbf16>)
+
+amdgpu.target<gfx11-generic> @flash_next_mtp_matrix_wave32 {subgroup_size = 32}
+
+// The two projections share the original interleaved Q8 rows. Explicit physical
+// stride and half origin avoid repacking or duplicating the predictor weights.
+template.decl @flash_next.mtp_project(%is_hidden: i1, %epoch: buffer, %input: buffer, %weight: buffer, %embedding: buffer, %output: buffer)
+
+template.def<@flash_next.mtp_project> device @flash_next_mtp_project(%is_hidden: i1, %epoch: buffer, %input: buffer, %weight: buffer, %embedding: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %token_end = func.call @flash_next_token_count(%epoch, %tokens) : (buffer, index) -> (index)
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %width = index.constant 2560 : index
+  %streams = scf.select %is_hidden, %c4, %c1 : index
+  %capacity = index.mul %tokens, %streams : index
+  %end = index.mul %token_end, %streams : index
+  %group = kernel.workgroup.id<x> : index
+  %batch = kernel.workgroup.id<y> : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %first = index.mul %batch, %c128 : index
+  %active = index.cmp ult, %first, %end : index
+  scf.if %active {
+    %channel_base = index.mul %group, %c128 : index
+    %origin = index.constant 0 : offset
+    %half_origin = index.constant 2720 : offset
+    %row_bytes = index.constant 5440 : offset
+    %weight_origin = scf.select %is_hidden, %half_origin, %origin : offset
+    %split_scales = scalar.constant false : i1
+    // Eight waves cover a 128x128 output panel. Every K32 scale remains F32,
+    // with exact BF16 codes and BF16 activations in the matrix instructions.
+    %tile = template.apply<@flash_next.q8_contract>(%capacity, %width, %width, %c1, %c128, %c128, %c4, %c2, %c2, %c8, %first, %end, %channel_base, %split_scales, %row_bytes, %weight_origin, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, offset, offset, buffer, buffer) -> (vector<[%c8]x8xf32>)
+    %wave_column_group = index.rem %wave, %c2 : index
+    %wave_row_group = index.div %wave, %c2 : index
+    %wave_channel = index.mul %wave_column_group, %c64 : index
+    %wave_token = index.mul %wave_row_group, %c32 : index
+    %remaining = index.sub %end, %first : index
+    %output_row_bytes = index.constant 5120 : offset
+    %tile_origin = index.scale %first, %output_row_bytes : index, offset -> offset
+    %output_view = buffer.view %output[%tile_origin] : buffer -> view<[%remaining]x[%width]xbf16>
+    %embedding_view = buffer.view %embedding[%origin] : buffer -> view<[%tokens]x2560xbf16>
+    %last_token = index.sub %tokens, %c1 : index
+    %lane_column = index.rem %lane, %c16 : index
+    %lane_row = index.div %lane, %c16 : index
+    scf.for %ordinal = [%c0 to %c8 step %c1] unroll schedule(linear) {
+      %row_fragment = index.div %ordinal, %c4 : index
+      %column_fragment = index.rem %ordinal, %c4 : index
+      %fragment_row = index.madd %row_fragment, %c16, %wave_token : index
+      %fragment_column = index.madd %column_fragment, %c16, %wave_channel : index
+      %result_column = index.add %channel_base, %fragment_column : index
+      %result = vector.extract %tile[%ordinal] : vector<[%c8]x8xf32> -> vector<8xf32>
+      scf.if %is_hidden {
+        // Preserve the separately rounded hidden dot before adding the shared
+        // embedding projection. The four-stream residual is published once.
+        %packed = vector.fptrunc %result : vector<8xf32> to vector<8xbf16>
+        %column = index.add %result_column, %lane_column : index
+        scf.for %element = [%c0 to %c8 step %c1] unroll schedule(linear) {
+          %within_row = index.madd %element, %c2, %lane_row : index
+          %local_row = index.add %fragment_row, %within_row : index
+          %live = index.cmp ult, %local_row, %remaining : index
+          scf.if %live {
+            %row = index.add %first, %local_row : index
+            %token_value = index.div %row, %c4 : index
+            // The live row is below 4 * token_end, and token_end <= tokens.
+            %token = index.assume %token_value [range(%token_value, 0, %last_token)] : index
+            %embedding_packed = view.load %embedding_view[%token, %column] : view<[%tokens]x2560xbf16> -> bf16
+            %hidden_packed = vector.extract %packed[%element] : vector<8xbf16> -> bf16
+            %embedding_value = scalar.extf %embedding_packed : bf16 to f32
+            %hidden_value = scalar.extf %hidden_packed : bf16 to f32
+            %sum = scalar.addf %embedding_value, %hidden_value : f32
+            %value = scalar.fptrunc %sum : f32 to bf16
+            view.store %value, %output_view[%local_row, %column] : bf16, view<[%remaining]x[%width]xbf16>
+          }
+        }
+      } else {
+        template.apply<@flash_next.matrix_store_fragment>(%remaining, %width, %fragment_row, %result_column, %result, %output_view) : (index, index, index, index, vector<8xf32>, view<[%remaining]x[%width]xbf16>)
+      }
+    }
+  }
+  template.return
+}
+
+kernel.def target(@flash_next_mtp_matrix_wave32) @flash_next_mtp_embedding_matrix() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %c127 = index.constant 127 : index
+  %c128 = index.constant 128 : index
+  %groups = index.constant 20 : index
+  %threads = index.constant 256 : index
+  %rounded = index.add %tokens, %c127 : index
+  %batches = index.div %rounded, %c128 : index
+  kernel.launch.config workgroups(%groups, %batches, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %is_hidden = scalar.constant false : i1
+  template.apply<@flash_next.mtp_project>(%is_hidden, %epoch, %input, %weight, %input, %output) : (i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@flash_next_mtp_matrix_wave32) @flash_next_mtp_hidden_matrix() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c127 = index.constant 127 : index
+  %c128 = index.constant 128 : index
+  %groups = index.constant 20 : index
+  %threads = index.constant 256 : index
+  %rows = index.mul %tokens, %c4 : index
+  %rounded = index.add %rows, %c127 : index
+  %batches = index.div %rounded, %c128 : index
+  kernel.launch.config workgroups(%groups, %batches, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %input: buffer, %weight: buffer, %embedding: buffer, %output: buffer) {
+  %is_hidden = scalar.constant true : i1
+  template.apply<@flash_next.mtp_project>(%is_hidden, %epoch, %input, %weight, %embedding, %output) : (i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
