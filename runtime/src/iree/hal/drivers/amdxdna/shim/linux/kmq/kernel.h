@@ -17,6 +17,10 @@ void initialize_npu_elf_data(ert_npu_preempt_data* data,
                              uint64_t instruction_buffer,
                              uint32_t instruction_buffer_size);
 
+// Returns whether |opcode| references an instruction BO that must be retained
+// in the EXEC_CMD dependency list for the lifetime of the firmware command.
+bool kernel_opcode_requires_instruction_bo_dependency(uint32_t opcode);
+
 struct kernel {
   std::unique_ptr<bo> m_exec_buf_bo;
   ert_start_kernel_cmd* m_cmd_pkt = nullptr;
