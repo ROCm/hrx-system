@@ -23,6 +23,7 @@
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
+#include "loom/codegen/low/allocation/write_interference.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/ir/ir.h"
@@ -80,6 +81,35 @@ typedef struct loom_low_allocation_search_context_t {
   // encoded as its fixed-value index plus one. Zero means none encountered.
   uint32_t retained_fixed_value_index_plus_one;
 } loom_low_allocation_search_context_t;
+
+// Complete physical-location query independent of an SSA liveness interval.
+// The caller owns lifetime and identity construction; the common search owns
+// physical candidate enumeration, conflicts, packing, and residency policy.
+typedef struct loom_low_allocation_search_query_t {
+  // Unpublished assignment candidate with an exact physical lifetime.
+  // |location_base| is ignored. Class and location shape must agree with the
+  // searched capacity. |value_id| may be invalid for a value outside the
+  // function's SSA domain.
+  loom_low_allocation_assignment_t candidate;
+  // Original SSA ordinal used by replay and semantic placement policy, or
+  // INVALID for a compiler-planned value outside the function's SSA domain.
+  loom_value_ordinal_t semantic_value_ordinal;
+  // Canonical retained-write storage identity, or INVALID when the active
+  // target has no retained-write rule for this value.
+  loom_low_allocation_storage_origin_t storage_origin;
+  // Assignment lookup over the retained-write storage-origin domain. Ignored
+  // when |storage_origin| is invalid.
+  loom_low_allocation_write_assignment_map_t write_assignments;
+  // Required base-unit alignment. Must be a positive power of two.
+  uint32_t alignment;
+  // Exclusive scalar frontier below which candidates pack from high to low.
+  uint32_t scalar_packing_frontier;
+  // Optional explicit-register domain preferences for this value.
+  loom_low_allocation_physical_domain_row_t physical_domain;
+  // Whether assigning this value may retire eligible producer storage leases.
+  // Compiler-planned helper values leave this false.
+  bool allow_storage_lease_release;
+} loom_low_allocation_search_query_t;
 
 // Reusable spill-search arrays owned by one interval-assignment attempt. Start
 // zero-initialized; storage grows in the assignment scratch arena and is
@@ -154,6 +184,15 @@ bool loom_low_allocation_search_location_conflicts(
 bool loom_low_allocation_search_find_free_location(
     loom_low_allocation_search_context_t* context,
     const loom_liveness_interval_t* interval,
+    loom_low_allocation_class_capacity_t capacity, uint32_t* out_base);
+
+// Finds a concrete location for a prepared assignment-shaped lifetime under
+// |capacity|. The query may name no SSA value; retained-write interference uses
+// its explicit storage origin and all other physical checks consume its exact
+// lifetime. The returned location is provisional and is not published.
+bool loom_low_allocation_search_find_physical_location(
+    loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_search_query_t* query,
     loom_low_allocation_class_capacity_t capacity, uint32_t* out_base);
 
 // Enumerates each aligned linear base in [0, last_base] exactly once, with

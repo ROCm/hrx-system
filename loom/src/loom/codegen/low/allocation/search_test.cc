@@ -391,7 +391,8 @@ struct StorageLeaseSearchOptions {
 
 uint32_t FindFreeLocationWithStorageLease(
     loom_module_t* module, iree_arena_allocator_t* arena,
-    const StorageLeaseSearchOptions& options) {
+    const StorageLeaseSearchOptions& options,
+    bool use_anonymous_lifetime = false) {
   const loom_value_id_t candidate_value = DefineModuleValue(module);
   const loom_value_id_t leased_value = DefineModuleValue(module);
   loom_module_value_ordinal_scratch_acquire(module);
@@ -551,8 +552,22 @@ uint32_t FindFreeLocationWithStorageLease(
   context.storage_leases = &storage_leases;
 
   uint32_t location_base = UINT32_MAX;
-  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
-      &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+  if (use_anonymous_lifetime) {
+    const loom_low_allocation_search_query_t query = {
+        .candidate = Assignment(LOOM_VALUE_ID_INVALID, intervals[0].start_point,
+                                intervals[0].end_point, value_class,
+                                /*location_base=*/0, intervals[0].unit_count,
+                                unit_values[0].unit_point_start),
+        .semantic_value_ordinal = LOOM_VALUE_ORDINAL_INVALID,
+        .storage_origin = LOOM_LOW_ALLOCATION_STORAGE_ORIGIN_INVALID,
+        .alignment = 1,
+    };
+    EXPECT_TRUE(loom_low_allocation_search_find_physical_location(
+        &context, &query, Capacity(/*max_units=*/8), &location_base));
+  } else {
+    EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+        &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+  }
 
   loom_module_value_ordinal_scratch_clear(module, candidate_value);
   loom_module_value_ordinal_scratch_clear(module, leased_value);
@@ -955,6 +970,15 @@ TEST_F(LowAllocationSearchTest, KeepsReleaseFreeLocationWithoutResidencyModel) {
   loom_module_t* module = AllocateModule();
   EXPECT_EQ(FindFreeLocationWithStorageLease(module, &arena_,
                                              StorageLeaseSearchOptions{}),
+            1u);
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest, SearchesAnonymousLifetimeWithoutSsaIdentity) {
+  loom_module_t* module = AllocateModule();
+  EXPECT_EQ(FindFreeLocationWithStorageLease(module, &arena_,
+                                             StorageLeaseSearchOptions{},
+                                             /*use_anonymous_lifetime=*/true),
             1u);
   loom_module_free(module);
 }

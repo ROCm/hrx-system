@@ -298,7 +298,7 @@ static bool loom_low_allocation_storage_lease_instance_conflicts(
 static uint32_t loom_low_allocation_storage_identity_unit_start(
     const loom_low_allocation_storage_lease_state_t* state,
     loom_value_id_t value_id) {
-  if (state->identity_origins == NULL) {
+  if (state->identity_origins == NULL || value_id == LOOM_VALUE_ID_INVALID) {
     return UINT32_MAX;
   }
   const loom_value_ordinal_t value_ordinal =

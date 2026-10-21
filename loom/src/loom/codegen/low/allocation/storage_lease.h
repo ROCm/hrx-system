@@ -124,7 +124,8 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
 
 // Returns true when |candidate| conflicts with materialized storage leases
 // under |policy|. Per-unit demand excludes unmaterialized storage; complete
-// candidate storage segments additionally exclude lifetime holes.
+// candidate storage segments additionally exclude lifetime holes. A candidate
+// with an invalid value ID has no structural-content identity to preserve.
 bool loom_low_allocation_storage_lease_state_conflicts(
     const loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,
@@ -148,7 +149,8 @@ bool loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
 // and is never summarized. An explicit segment equal to the candidate's full
 // interval is continuous. Self-root scalar candidates can use the summary;
 // forwarded identities, lifetime holes, refined units, tuples, and explicit
-// registers retain the exact conflict path.
+// registers retain the exact conflict path. Anonymous candidates have no
+// forwarded identity and may use the summary when their other facts qualify.
 bool loom_low_allocation_storage_lease_state_can_order_candidate(
     const loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,
