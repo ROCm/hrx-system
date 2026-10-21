@@ -1,0 +1,44 @@
+func.decl @qwen38_output_projection_q6k_rows(%rows: index, %input: buffer, %weight: buffer, %output: buffer)
+
+amdgpu.target<gfx9-4-generic> @qwen38_output_projection_cdna_wave64 {subgroup_size = 64}
+
+kernel.def target(@qwen38_output_projection_cdna_wave64) @qwen38_output_projection_q6k_m8_cdna() {
+  %groups = index.constant 248320 : index
+  %threads = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = index.constant 8 : index
+  func.call @qwen38_output_projection_q6k_rows(%rows, %input, %weight, %output) : (index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qwen38_output_projection_cdna_wave64) @qwen38_output_projection_q6k_m8_prefix_cdna() {
+  %groups = index.constant 248320 : index
+  %threads = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%row_begin: index, %control: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %metadata = buffer.assume.memory_space<constant> %control : buffer
+  %header = buffer.view %metadata[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[0] : view<1xi32> -> i32
+  %count = index.cast %count_word : i32 to index
+  %active = index.cmp ult, %row_begin, %count : index
+  scf.if %active {
+    %rows = index.constant 8 : index
+    func.call @qwen38_output_projection_q6k_rows(%rows, %input, %weight, %output) : (index, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
+kernel.def target(@qwen38_output_projection_cdna_wave64) @qwen38_output_projection_q6k_m32_cdna() {
+  %groups = index.constant 248320 : index
+  %threads = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = index.constant 32 : index
+  func.call @qwen38_output_projection_q6k_rows(%rows, %input, %weight, %output) : (index, buffer, buffer, buffer)
+  kernel.return
+}

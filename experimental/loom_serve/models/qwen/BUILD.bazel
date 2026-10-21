@@ -130,6 +130,25 @@ loom_test(
     ],
 )
 
+loom_test(
+    name = "selection_cdna_test",
+    srcs = [
+        "kernels/qwen38/greedy_argmax.loom",
+        "kernels/qwen38/greedy_argmax_cdna.loom",
+        "kernels/qwen38/layer_decode.loom",
+        "kernels/qwen38/layer_decode_cdna.loom",
+        "tests/selection_cdna.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {"qwen38.greedy_argmax.output_capacity": "248320"},
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    variants = {
+        "normalization": {"case": "@qwen38_rmsnorm_f32_decode_known_case_cdna"},
+        "rows": {"case": "@qwen38_greedy_argmax_rows_nontrivial_winner_case_cdna"},
+        "tiled": {"case": "@qwen38_greedy_argmax_cross_tile_tie_case_cdna"},
+    },
+)
+
 loom_library(
     name = "projection_kernels",
     srcs = [
@@ -376,6 +395,7 @@ loom_test(
     name = "output_projection_test",
     srcs = [
         "kernels/qwen38/output_projection.loom",
+        "kernels/qwen38/output_projection_cdna.loom",
         "tests/output_projection.loom",
         "//experimental/loom_serve/motifs/ggml:library",
     ],

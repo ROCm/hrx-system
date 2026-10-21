@@ -6,7 +6,7 @@ func.decl @ggml_q6k_q8_1_x4_block_lane(%weight: buffer, %weight_row_byte_base: o
 
 amdgpu.target<gfx11-generic> @qwen38_output_projection_wave64 {subgroup_size = 64}
 
-func.def inline @qwen38_output_projection_q6k_rows(%rows: index, %input: buffer, %weight: buffer, %output: buffer) {
+func.def public inline @qwen38_output_projection_q6k_rows(%rows: index, %input: buffer, %weight: buffer, %output: buffer) {
   %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
   %channel0 = kernel.workgroup.id<x> : index
   %channel = index.assume %channel0 [range(%channel0, 0, 248319)] : index

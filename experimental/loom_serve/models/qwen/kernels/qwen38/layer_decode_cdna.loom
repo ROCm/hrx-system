@@ -1,0 +1,34 @@
+template.decl @qwen38.rmsnorm_f32.row(%input_row_count: index, %input_row: index, %output_origin: offset, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+amdgpu.target<gfx9-4-generic> @qwen38_layer_cdna_wave64 {subgroup_size = 64}
+
+kernel.def target(@qwen38_layer_cdna_wave64) @qwen38_rmsnorm_f32_decode_cdna() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  template.apply<@qwen38.rmsnorm_f32.row>(%c1, %c0, %origin, %epsilon, %input, %weight, %output) : (index, index, offset, f32, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qwen38_layer_cdna_wave64) @qwen38_rmsnorm_f32_prefill_last_cdna() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%control: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c0_offset = index.constant 0 : offset
+  %c512 = index.constant 512 : index
+  %control_view = buffer.view %control[%c0_offset] : buffer -> view<2xi32>
+  %token_count_i32 = view.load %control_view[%c0] : view<2xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %last_token0 = index.sub %token_count, %c1 : index
+  %last_token = index.assume %last_token0 [range(%last_token0, 0, 511)] : index
+  template.apply<@qwen38.rmsnorm_f32.row>(%c512, %last_token, %c0_offset, %epsilon, %input, %weight, %output) : (index, index, offset, f32, buffer, buffer, buffer)
+  kernel.return
+}

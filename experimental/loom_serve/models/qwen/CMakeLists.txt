@@ -329,6 +329,98 @@ loom_execution_test(
 )
 endif()
 
+loom_test_module(
+  NAME
+    selection_cdna_test_module
+  SRCS
+    "kernels/qwen38/greedy_argmax.loom"
+    "kernels/qwen38/greedy_argmax_cdna.loom"
+    "kernels/qwen38/layer_decode.loom"
+    "kernels/qwen38/layer_decode_cdna.loom"
+    "tests/selection_cdna.loom"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    selection_cdna_test_normalization_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::selection_cdna_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.greedy_argmax.output_capacity=248320"
+    "--case=@qwen38_rmsnorm_f32_decode_known_case_cdna"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    selection_cdna_test_rows_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::selection_cdna_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.greedy_argmax.output_capacity=248320"
+    "--case=@qwen38_greedy_argmax_rows_nontrivial_winner_case_cdna"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    selection_cdna_test_tiled_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::selection_cdna_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.greedy_argmax.output_capacity=248320"
+    "--case=@qwen38_greedy_argmax_cross_tile_tie_case_cdna"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
 loom_module(
   NAME
     projection_kernels
@@ -1351,6 +1443,7 @@ loom_test_module(
     output_projection_test_module
   SRCS
     "kernels/qwen38/output_projection.loom"
+    "kernels/qwen38/output_projection_cdna.loom"
     "tests/output_projection.loom"
     "iree::experimental::loom_serve::motifs::ggml::library"
 )
