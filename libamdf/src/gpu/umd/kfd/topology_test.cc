@@ -185,6 +185,53 @@ TEST_F(KfdTopologyTest, NativeGcIdentityDoesNotUseCompilerTargetAliases) {
   amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
 }
 
+TEST_F(KfdTopologyTest, ScalarReservationFollowsNativeTrapPolicy) {
+  const auto parameters = directory_ / "module/amdgpu/parameters";
+  std::filesystem::create_directories(parameters);
+  for (uint32_t target :
+       {90010u, 90400u, 90401u, 90402u, 90500u, 110000u, 120000u, 120500u}) {
+    SCOPED_TRACE(target);
+    WriteProperties("", 0, target);
+    for (uint32_t enabled : {0u, 1u}) {
+      SCOPED_TRACE(enabled);
+      WriteAttribute(parameters / "cwsr_enable",
+                     std::to_string(enabled) + "\n");
+      amdf_gpu_kfd_topology_t topology = {};
+      ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                    &endpoint_, amdf_allocator_system(), &topology),
+                AMDF_STATUS_OK);
+      const amdf_queue_format_features_t expected =
+          target >= 100000 ? 0
+          : enabled        ? AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16
+                           : AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0;
+      EXPECT_EQ(topology.aql_scalar_register_features, expected);
+      amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+    }
+  }
+}
+
+TEST_F(KfdTopologyTest, MissingTrapPolicyDoesNotGuessAReservation) {
+  WriteProperties("");
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                &endpoint_, amdf_allocator_system(), &topology),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(topology.aql_scalar_register_features, 0u);
+  amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+}
+
+TEST_F(KfdTopologyTest, MalformedTrapPolicyDoesNotPublishTopology) {
+  WriteProperties("");
+  const auto parameters = directory_ / "module/amdgpu/parameters";
+  std::filesystem::create_directories(parameters);
+  WriteAttribute(parameters / "cwsr_enable", "invalid\n");
+  amdf_gpu_kfd_topology_t topology = {.gpu_id = 73};
+  EXPECT_EQ(amdf_gpu_kfd_topology_initialize(
+                &endpoint_, amdf_allocator_system(), &topology),
+            amdf_linux_error(EPROTO));
+  EXPECT_EQ(topology.gpu_id, 73u);
+}
+
 TEST_F(KfdTopologyTest, PartialGcDiscoveryDoesNotPublishTopology) {
   WriteProperties("");
   const auto gc =

@@ -141,6 +141,28 @@ TEST(KfdTargetUserQueueTest, CdnaDoesNotAdvertisePm4) {
   }
 }
 
+TEST(KfdTargetUserQueueTest, AqlPreservesQualifiedScalarReservations) {
+  const amdf_queue_format_features_t cases[] = {
+      0, AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16,
+      AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0};
+  for (amdf_queue_format_features_t features : cases) {
+    auto topology = MakeTopology();
+    topology.properties.gfx_ip = {9, 4, 2};
+    topology.properties.compute.wavefront_size = 64;
+    topology.aql_scalar_register_features = features;
+    amdf_gpu_kfd_user_queue_plans_t plans;
+    amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64,
+                                                    &plans);
+    ASSERT_EQ(plans.count, 2u);
+    EXPECT_EQ(plans.values[0].family.command_type,
+              AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+    EXPECT_EQ(plans.values[0].family.format_features &
+                  (AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16 |
+                   AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0),
+              features);
+  }
+}
+
 TEST(KfdTargetUserQueueTest, Pm4TrapRequirementsFollowNativeGcIdentity) {
   struct Case {
     // Compiler target reported by KFD, distinct from native GC revision.

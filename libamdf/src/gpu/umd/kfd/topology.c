@@ -76,6 +76,37 @@ static amdf_status_t amdf_gpu_kfd_read_number(int directory, const char* name,
   return AMDF_STATUS_OK;
 }
 
+// KFD installs the CWSR trap in the process context, independently of the
+// compiler descriptor. Its read-only module parameter determines the extra
+// SGPR reservation on the CDNA devices admitted by our compute queue plans.
+static amdf_status_t amdf_gpu_kfd_read_scalar_register_features(
+    const amdf_platform_endpoint_t* endpoint,
+    amdf_gpu_kfd_topology_t* topology) {
+  const amdf_gpu_endpoint_properties_t* properties = &topology->properties;
+  if (properties->gfx_ip.major != 9 ||
+      !((properties->gfx_ip.minor == 0 && properties->gfx_ip.stepping == 10) ||
+        properties->gfx_ip.minor == 4 || properties->gfx_ip.minor == 5)) {
+    return AMDF_STATUS_OK;
+  }
+  uint32_t enabled = 0;
+  const amdf_status_t status = amdf_gpu_kfd_read_number(
+      endpoint->instance->sysfs_descriptor,
+      "module/amdgpu/parameters/cwsr_enable", &enabled);
+  if (status == amdf_linux_error(ENOENT) ||
+      status == amdf_linux_error(EACCES)) {
+    // A restricted sysfs namespace does not remove native queue support.
+    // It only prevents an exact answer about this optional context fact.
+    return AMDF_STATUS_OK;
+  }
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  topology->aql_scalar_register_features =
+      enabled ? AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16
+              : AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0;
+  return AMDF_STATUS_OK;
+}
+
 // KFD topology properties are decimal name/value records. Baseline endpoint
 // fields are mandatory, including fields for which zero is meaningful. Compute
 // storage and SDMA groups are independently optional on older kernels, but each
@@ -601,6 +632,9 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
   }
   if (amdf_status_is_ok(status) && found) {
     status = amdf_gpu_kfd_read_memory(endpoint, &topology);
+  }
+  if (amdf_status_is_ok(status) && found) {
+    status = amdf_gpu_kfd_read_scalar_register_features(endpoint, &topology);
   }
   uint32_t final_generation = 0;
   if (amdf_status_is_ok(status)) {

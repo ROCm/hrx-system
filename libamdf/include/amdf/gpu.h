@@ -480,7 +480,7 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// observes command-processor progress and does not complete shader work.
 #define AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1 1u
 
-/// Optional native AQL operations reported in `format_features`.
+/// Native AQL operations and context facts reported in `format_features`.
 enum amdf_gpu_aql_format_feature_bits_e {
   /// AMD vendor format 2 BARRIER_VALUE waits until (signal_value & mask)
   /// satisfies the signed 64-bit HSA comparison against its reference value.
@@ -495,6 +495,17 @@ enum amdf_gpu_aql_format_feature_bits_e {
   /// Supports caller servicing of scratch-growth requests and explicit idle
   /// scratch detachment.
   AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE = UINT64_C(1) << 6,
+  /// The native dispatch context reserves 16 additional SGPRs per wave for
+  /// its trap handler, after rounding the descriptor's scalar allocation.
+  /// This is independent of the compiler descriptor's reserved trap bit.
+  /// Mutually exclusive with SGPR_TRAP_RESERVE_0; neither bit means unknown.
+  /// These facts describe the library-managed context, without external
+  /// replacement of its trap handler. RDNA scalar capacity is not occupancy
+  /// limited, so these bits need not be reported there.
+  AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16 = UINT64_C(1) << 7,
+  /// The native dispatch context has no per-wave trap SGPR reservation.
+  /// Absence of SGPR_TRAP_RESERVE_16 alone does not imply this fact.
+  AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0 = UINT64_C(1) << 8,
 };
 
 /// Scratch backing borrowed by one directly published compute queue.

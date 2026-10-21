@@ -62,6 +62,8 @@ typedef struct amdf_gpu_kfd_topology_t {
   } vram;
   // Number of native compute queues exposed by this KFD node.
   uint32_t compute_queue_count;
+  // Qualified AQL scalar trap-reservation feature, or zero when unknown.
+  amdf_queue_format_features_t aql_scalar_register_features;
   // Native SDMA engines and exact packet-ABI identity.
   struct {
     // Number of ordinary SDMA engines exposed by KFD.

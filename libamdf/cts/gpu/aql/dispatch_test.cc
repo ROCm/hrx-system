@@ -28,6 +28,20 @@ void CheckDeviceLocalIngressPair(const amdf_memory_pair_info_t& pair) {
 }
 
 TEST_F(AqlDispatchTest, CoherentSystemPayloadChangesAcrossEpochs) {
+  const auto scalar_reservation =
+      family_.format_features &
+      (AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16 |
+       AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0);
+  ASSERT_NE(scalar_reservation,
+            AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16 |
+                AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0);
+  RecordProperty(
+      "scalar_trap_reservation",
+      scalar_reservation == AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16
+          ? "16"
+      : scalar_reservation == AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0
+          ? "0"
+          : "unknown");
   const auto* kernel_product =
       kernels::transform::kKernels.Find(gpu_endpoint_info_);
   ASSERT_NE(kernel_product, nullptr)
