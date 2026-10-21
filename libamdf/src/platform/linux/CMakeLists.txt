@@ -283,6 +283,8 @@ iree_cc_test(
     endpoint_metadata_test
   SRCS
     "endpoint_metadata_test.cc"
+  LINKOPTS
+    "-Wl,--wrap=open"
   DEPS
     ::endpoint
     ::file

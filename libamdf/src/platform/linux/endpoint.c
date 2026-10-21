@@ -420,7 +420,10 @@ static amdf_status_t amdf_linux_qualify_device_file(
 
 static amdf_status_t amdf_linux_open_device_file(
     const amdf_endpoint_info_t* info, const char* path, int* out_descriptor) {
-  int descriptor = open(path, O_RDWR | O_CLOEXEC);
+  int descriptor;
+  do {
+    descriptor = open(path, O_RDWR | O_CLOEXEC);
+  } while (descriptor < 0 && errno == EINTR);
   if (descriptor < 0) {
     return amdf_linux_error(errno);
   }

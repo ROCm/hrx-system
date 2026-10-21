@@ -228,6 +228,7 @@ amdf_cc_test(
 amdf_cc_test(
     name = "endpoint_metadata_test",
     srcs = ["endpoint_metadata_test.cc"],
+    linkopts = ["-Wl,--wrap=open"],
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":endpoint",

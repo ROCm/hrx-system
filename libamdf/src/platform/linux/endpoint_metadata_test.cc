@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 
+#include <cstdarg>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -18,6 +19,20 @@
 #include "libamdf/src/platform/linux/file.h"
 
 namespace {
+
+struct DeviceOpenState {
+  // Synthetic device node intercepted by the open dependency.
+  const char* path = nullptr;
+  // Interrupted attempts remaining before the terminal dependency result.
+  uint32_t interruptions = 0;
+  // Number of attempts at opening the synthetic device node.
+  uint32_t attempts = 0;
+  // Terminal error, or zero to use the real nonexistent-node result.
+  int error = 0;
+};
+
+// Borrowed only during the synchronous endpoint activation under test.
+DeviceOpenState* device_open = nullptr;
 
 // Sysfs is the dependency fixture; endpoint enumeration/open are the production
 // implementation. There is deliberately no corresponding execution device
@@ -130,6 +145,36 @@ TEST_P(LinuxEndpointMetadataTest, StaleIdentityDoesNotPublishMetadata) {
       amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND));
   EXPECT_EQ(endpoint_, nullptr);
   EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
+}
+
+TEST_P(LinuxEndpointMetadataTest, InterruptedOpenPreservesTerminalFailure) {
+  amdf_endpoint_summary_t summary = {};
+  uint32_t count = 0;
+  ASSERT_EQ(amdf_platform_endpoint_enumerate(&instance_, 1, &summary, &count),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(count, 1u);
+  amdf_endpoint_info_t info;
+  ASSERT_EQ(
+      amdf_platform_endpoint_open(&instance_, &summary.id, &endpoint_, &info),
+      AMDF_STATUS_OK);
+  for (const int terminal_error : {0, EACCES}) {
+    DeviceOpenState state;
+    state.path = GetParam() == AMDF_ENGINE_KIND_XDNA
+                     ? "/dev/accel/accel987654321"
+                     : "/dev/dri/renderD987654321";
+    state.interruptions = 2;
+    state.error = terminal_error;
+    device_open = &state;
+    int descriptor = 73;
+    const amdf_status_t status =
+        amdf_linux_endpoint_open_file(endpoint_, &descriptor);
+    device_open = nullptr;
+    EXPECT_EQ(status,
+              amdf_linux_error(terminal_error ? terminal_error : ENOENT));
+    EXPECT_EQ(state.attempts, 3u);
+    EXPECT_EQ(state.interruptions, 0u);
+    EXPECT_EQ(descriptor, 73);
+  }
 }
 
 TEST_P(LinuxEndpointMetadataTest, ActivationRevalidatesTheEndpointIdentity) {
@@ -263,3 +308,29 @@ INSTANTIATE_TEST_SUITE_P(EngineKinds, LinuxEndpointMetadataTest,
                                            AMDF_ENGINE_KIND_XDNA));
 
 }  // namespace
+
+extern "C" int __real_open(const char* path, int flags, ...);
+
+extern "C" int __wrap_open(const char* path, int flags, ...) {
+  if (device_open && std::strcmp(path, device_open->path) == 0) {
+    EXPECT_EQ(flags, O_RDWR | O_CLOEXEC);
+    ++device_open->attempts;
+    if (device_open->interruptions) {
+      --device_open->interruptions;
+      errno = EINTR;
+      return -1;
+    }
+    if (device_open->error) {
+      errno = device_open->error;
+      return -1;
+    }
+  }
+  mode_t mode = 0;
+  if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) {
+    va_list arguments;
+    va_start(arguments, flags);
+    mode = va_arg(arguments, mode_t);
+    va_end(arguments);
+  }
+  return __real_open(path, flags, mode);
+}
