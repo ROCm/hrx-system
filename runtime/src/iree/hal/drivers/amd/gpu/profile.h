@@ -115,8 +115,8 @@ typedef struct iree_hal_amd_gpu_profile_operation_t {
 } iree_hal_amd_gpu_profile_operation_t;
 
 // Begins the requested capture and emits device/queue metadata. Unsupported
-// families and filters fail before starting a sink session. An empty request
-// returns NULL. The sink remains retained until end.
+// families fail before starting a sink session. An empty request returns NULL.
+// The filter pattern is copied and the sink remains retained until end.
 iree_status_t iree_hal_amd_gpu_profile_begin(
     const iree_hal_device_profiling_options_t* options, uint64_t session_id,
     uint32_t queue_count, uint64_t timestamp_frequency_hz,
@@ -127,6 +127,22 @@ bool iree_hal_amd_gpu_profile_captures_dispatches(
     const iree_hal_amd_gpu_profile_t* profile);
 bool iree_hal_amd_gpu_profile_timestamps_dispatches(
     const iree_hal_amd_gpu_profile_t* profile);
+
+// Selects an entire recording using predicates known without visiting its
+// commands. Individual command/function predicates are evaluated at retirement
+// using retained metadata; the native sample layout stays unchanged. False
+// suppresses capture and its metadata requirement for the whole invocation.
+bool iree_hal_amd_gpu_profile_captures_commands(
+    const iree_hal_amd_gpu_profile_t* profile, uint32_t queue_ordinal,
+    uint64_t command_buffer_id);
+
+// Selects dispatch artifacts using all active predicates. Direct calls use
+// command_buffer_id=0 and cannot match a command-index predicate. Names are
+// borrowed for this call; no allocation or executable lookup is performed.
+bool iree_hal_amd_gpu_profile_captures_dispatch(
+    const iree_hal_amd_gpu_profile_t* profile, uint32_t queue_ordinal,
+    uint64_t command_buffer_id, uint32_t command_index,
+    iree_string_view_t function_name);
 
 // Called before returning invocation argument-ring credit or captured resource
 // references. Copies completed samples and immutable attribution to bounded

@@ -478,6 +478,127 @@ TEST_F(GpuProfileTest, DispatchClockMustBeEstablishedBeforeBeginning) {
   EXPECT_EQ(profile_, nullptr);
 }
 
+TEST_F(GpuProfileTest, EveryFilterPredicateCombinesAndOwnsItsPattern) {
+  options_.data_families = IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;
+  constexpr uint32_t kPattern =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN;
+  constexpr uint32_t kCommandBuffer =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_COMMAND_BUFFER_ID;
+  constexpr uint32_t kCommand =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_COMMAND_INDEX;
+  constexpr uint32_t kDevice =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_PHYSICAL_DEVICE_ORDINAL;
+  constexpr uint32_t kQueue =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_QUEUE_ORDINAL;
+  for (uint32_t flags = 0; flags < 32; ++flags) {
+    SCOPED_TRACE(flags);
+    std::string pattern = "sec*";
+    options_.capture_filter = {
+        .flags = flags,
+        .executable_function_pattern =
+            iree_make_string_view(pattern.data(), pattern.size()),
+        .command_buffer_id = 51,
+        .command_index = 7,
+        .physical_device_ordinal = 0,
+        .queue_ordinal = 1,
+    };
+    ASSERT_NO_FATAL_FAILURE(Begin(100000000));
+    pattern.assign("gone");
+    EXPECT_TRUE(iree_hal_amd_gpu_profile_captures_dispatch(profile_, 1, 51, 7,
+                                                           IREE_SV("second")));
+    EXPECT_EQ(iree_hal_amd_gpu_profile_captures_dispatch(profile_, 1, 51, 7,
+                                                         IREE_SV("first")),
+              !(flags & kPattern));
+    EXPECT_EQ(iree_hal_amd_gpu_profile_captures_dispatch(profile_, 1, 52, 7,
+                                                         IREE_SV("second")),
+              !(flags & kCommandBuffer));
+    EXPECT_EQ(iree_hal_amd_gpu_profile_captures_dispatch(profile_, 1, 51, 8,
+                                                         IREE_SV("second")),
+              !(flags & kCommand));
+    EXPECT_EQ(iree_hal_amd_gpu_profile_captures_dispatch(profile_, 0, 51, 7,
+                                                         IREE_SV("second")),
+              !(flags & kQueue));
+    EXPECT_EQ(iree_hal_amd_gpu_profile_captures_dispatch(profile_, 1, 0, 7,
+                                                         IREE_SV("second")),
+              !(flags & (kCommandBuffer | kCommand)));
+    EXPECT_TRUE(iree_hal_amd_gpu_profile_captures_commands(profile_, 1, 51));
+    EXPECT_EQ(iree_hal_amd_gpu_profile_captures_commands(profile_, 0, 52),
+              !(flags & (kQueue | kCommandBuffer)));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_profile_end(profile_));
+    profile_ = nullptr;
+    options_.capture_filter.physical_device_ordinal = 1;
+    options_.capture_filter.executable_function_pattern = IREE_SV("sec*");
+    ASSERT_NO_FATAL_FAILURE(Begin(100000000));
+    EXPECT_EQ(iree_hal_amd_gpu_profile_captures_dispatch(profile_, 1, 51, 7,
+                                                         IREE_SV("second")),
+              !(flags & kDevice));
+    EXPECT_EQ(iree_hal_amd_gpu_profile_captures_commands(profile_, 1, 51),
+              !(flags & kDevice));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_profile_end(profile_));
+    profile_ = nullptr;
+  }
+}
+
+TEST_F(GpuProfileTest, ExcludedCommandsUseNoRingCreditOrExecutableLifetime) {
+  options_.data_families = IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;
+  options_.capture_filter = {
+      .flags = IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN,
+      .executable_function_pattern = IREE_SV("second"),
+  };
+  ASSERT_NO_FATAL_FAILURE(Begin(100000000));
+  ReflectionExecutable executable;
+  iree_hal_amd_gpu_profile_executable_t* metadata = nullptr;
+  IREE_ASSERT_OK(executable.Capture(&metadata));
+  iree_hal_executable_release(&executable.base);
+  ASSERT_TRUE(executable.destroyed);
+  auto record = iree_hal_profile_command_buffer_record_default();
+  record.command_buffer_id = 51;
+  iree_hal_amd_gpu_profile_commands_t* commands = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_commands_create(
+      &record, iree_allocator_system(), &commands));
+  for (uint32_t i = 0; i < 2; ++i) {
+    iree_hal_amd_gpu_profile_dispatch_t dispatch = {
+        .executable = metadata,
+        .event = iree_hal_profile_dispatch_event_default(),
+    };
+    dispatch.event.executable_id =
+        iree_hal_amd_gpu_profile_executable_id(metadata);
+    dispatch.event.command_buffer_id = 51;
+    dispatch.event.command_index = i + 3;
+    dispatch.event.function_ordinal = i;
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_profile_commands_append(commands, dispatch));
+  }
+  iree_hal_amd_gpu_profile_executable_release(metadata);
+  iree_hal_amd_gpu_profile_sample_t samples[] = {{111, 222}, {333, 444}};
+  iree_hal_amd_gpu_profile_operation_t operation;
+  iree_hal_amd_gpu_profile_operation_initialize(
+      profile_, 0, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE, 0, 1, 2,
+      &operation);
+  operation.commands = commands;
+  operation.completion.samples = samples;
+  operation.completion.sample_stride = sizeof(samples[0]);
+  operation.completion.count = 2;
+  for (uint32_t i = 0; i < 4096; ++i) {
+    iree_hal_amd_gpu_profile_operation_complete(profile_, &operation,
+                                                &operation.completion);
+  }
+  operation.completion.count = 1;
+  iree_hal_amd_gpu_profile_operation_complete(profile_, &operation,
+                                              &operation.completion);
+  iree_hal_amd_gpu_profile_commands_release(commands);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  EXPECT_EQ(sink_.dropped, 0u);
+  ASSERT_EQ(sink_.dispatches.size(), 4096u);
+  for (const auto& event : sink_.dispatches) {
+    EXPECT_EQ(event.function_ordinal, 1u);
+    EXPECT_EQ(event.command_index, 4u);
+    EXPECT_EQ(event.start_tick, 333u);
+    EXPECT_EQ(event.end_tick, 444u);
+  }
+  EXPECT_TRUE(*executable.image_destroyed);
+}
+
 TEST_F(GpuProfileTest, CompletedSamplesAndMetadataOutliveTheirOriginalOwners) {
   options_.data_families = IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;
   ASSERT_NO_FATAL_FAILURE(Begin(100000000));

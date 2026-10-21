@@ -22,6 +22,8 @@ struct iree_hal_amd_gpu_profile_executable_t {
   iree_hal_profile_executable_record_t record;
   // Packed function records and names, owned by this allocation.
   iree_const_byte_span_t functions;
+  // Dense function-name views into functions, indexed by function ordinal.
+  iree_string_view_t* function_names;
   // Retained original host artifact, without executable or native ownership.
   iree_byte_sequence_t* source;
   // Shared image identity followed by the original artifact bytes at emission.
@@ -97,18 +99,16 @@ iree_status_t iree_hal_amd_gpu_profile_executable_create(
                                 "GPU profile metadata size overflows");
     }
   }
-  iree_host_size_t size = 0;
-  iree_host_size_t load_bytes = 0;
-  if (iree_status_is_ok(status) &&
-      (!iree_host_size_checked_mul(
-           load_count,
-           sizeof(iree_hal_profile_executable_code_object_load_record_t),
-           &load_bytes) ||
-       !iree_host_size_checked_add(
-           sizeof(iree_hal_amd_gpu_profile_executable_t), load_bytes, &size) ||
-       !iree_host_size_checked_add(size, function_bytes, &size))) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "GPU profile metadata size overflows");
+  iree_host_size_t size = 0, loads_offset = 0, names_offset = 0;
+  iree_host_size_t functions_offset = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_amd_gpu_profile_executable_t), &size,
+        IREE_STRUCT_FIELD(load_count,
+                          iree_hal_profile_executable_code_object_load_record_t,
+                          &loads_offset),
+        IREE_STRUCT_FIELD(function_count, iree_string_view_t, &names_offset),
+        IREE_STRUCT_FIELD(function_bytes, uint8_t, &functions_offset));
   }
   iree_hal_amd_gpu_profile_executable_t* metadata = NULL;
   if (iree_status_is_ok(status)) {
@@ -134,8 +134,11 @@ iree_status_t iree_hal_amd_gpu_profile_executable_create(
     metadata->code_object.executable_id = metadata->record.executable_id;
     metadata->code_object.code_object_id = metadata->record.executable_id;
     metadata->code_object.data_length = image_bytes.data_length;
-    metadata->loads = iree_make_const_byte_span(metadata + 1, load_bytes);
-    uint8_t* cursor = (void*)(metadata + 1);
+    metadata->loads = iree_make_const_byte_span(
+        (uint8_t*)metadata + loads_offset,
+        load_count *
+            sizeof(iree_hal_profile_executable_code_object_load_record_t));
+    uint8_t* cursor = (uint8_t*)metadata + loads_offset;
     for (uint32_t i = 0; i < load_count; ++i) {
       iree_hal_profile_executable_code_object_load_record_t load =
           iree_hal_profile_executable_code_object_load_record_default();
@@ -147,7 +150,9 @@ iree_status_t iree_hal_amd_gpu_profile_executable_create(
       memcpy(cursor, &load, sizeof(load));
       cursor += sizeof(load);
     }
+    cursor = (uint8_t*)metadata + functions_offset;
     metadata->functions = iree_make_const_byte_span(cursor, function_bytes);
+    metadata->function_names = (void*)((uint8_t*)metadata + names_offset);
     for (iree_host_size_t i = 0;
          i < function_count && iree_status_is_ok(status); ++i) {
       iree_hal_executable_function_info_t info;
@@ -172,6 +177,8 @@ iree_status_t iree_hal_amd_gpu_profile_executable_create(
       if (info.name.size) {
         memcpy(cursor + sizeof(record), info.name.data, info.name.size);
       }
+      metadata->function_names[i] = iree_make_string_view(
+          (const char*)cursor + sizeof(record), info.name.size);
       cursor += record.record_length;
     }
   }
@@ -290,6 +297,8 @@ struct iree_hal_amd_gpu_profile_t {
   uint32_t queue_count;
   // Admitted immutable families; controls capture and stream emission.
   iree_hal_device_profiling_data_families_t families;
+  // Immutable predicates; the optional pattern lives in trailing storage.
+  iree_hal_profile_capture_filter_t filter;
   // Inline queue streams, indexed directly by physical queue ordinal.
   iree_hal_amd_gpu_profile_stream_t* streams;
 };
@@ -446,11 +455,10 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
         "unsupported GPU profiling data families 0x%" PRIx64,
         families & ~supported);
   }
-  if (!iree_hal_profile_capture_filter_is_default(&options->capture_filter) ||
-      options->counter_set_count) {
+  if (options->counter_set_count) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "GPU queue profiling does not support filters or counters");
+        "GPU queue profiling does not support hardware counters");
   }
   if ((families & IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS) &&
       !timestamp_frequency_hz) {
@@ -470,7 +478,14 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
           ? record_count
           : 0;
   iree_host_size_t size = 0, streams_offset = 0, records_offset = 0;
-  iree_host_size_t dispatches_offset = 0, metadata_offset = 0;
+  iree_host_size_t dispatches_offset = 0, metadata_offset = 0,
+                   pattern_offset = 0;
+  const iree_string_view_t pattern =
+      iree_any_bit_set(
+          options->capture_filter.flags,
+          IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN)
+          ? options->capture_filter.executable_function_pattern
+          : iree_string_view_empty();
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_gpu_profile_t), &size,
       IREE_STRUCT_FIELD(queue_count, iree_hal_amd_gpu_profile_stream_t,
@@ -480,7 +495,8 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
       IREE_STRUCT_FIELD(dispatch_count, iree_hal_profile_dispatch_event_t,
                         &dispatches_offset),
       IREE_STRUCT_FIELD(dispatch_count, iree_hal_amd_gpu_profile_metadata_t,
-                        &metadata_offset)));
+                        &metadata_offset),
+      IREE_STRUCT_FIELD(pattern.size, char, &pattern_offset)));
   iree_hal_amd_gpu_profile_t* profile = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, size, (void**)&profile));
@@ -489,6 +505,14 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
   iree_hal_profile_sink_retain(profile->sink);
   profile->queue_count = queue_count;
   profile->families = families;
+  profile->filter = options->capture_filter;
+  profile->filter.executable_function_pattern = iree_string_view_empty();
+  if (pattern.size) {
+    char* target = (char*)profile + pattern_offset;
+    memcpy(target, pattern.data, pattern.size);
+    profile->filter.executable_function_pattern =
+        iree_make_string_view(target, pattern.size);
+  }
   profile->streams = (void*)((uint8_t*)profile + streams_offset);
   profile->metadata = iree_hal_profile_chunk_metadata_default();
   profile->metadata.name = IREE_SV("amd-gpu");
@@ -687,6 +711,40 @@ bool iree_hal_amd_gpu_profile_timestamps_dispatches(
          (profile->families & IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS);
 }
 
+bool iree_hal_amd_gpu_profile_captures_commands(
+    const iree_hal_amd_gpu_profile_t* profile, uint32_t queue_ordinal,
+    uint64_t command_buffer_id) {
+  if (!iree_hal_amd_gpu_profile_captures_dispatches(profile)) {
+    return false;
+  }
+  const iree_hal_profile_capture_filter_t* filter = &profile->filter;
+  return (!(filter->flags &
+            IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_COMMAND_BUFFER_ID) ||
+          filter->command_buffer_id == command_buffer_id) &&
+         (!(filter->flags &
+            IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_PHYSICAL_DEVICE_ORDINAL) ||
+          filter->physical_device_ordinal == 0) &&
+         (!(filter->flags &
+            IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_QUEUE_ORDINAL) ||
+          filter->queue_ordinal == queue_ordinal);
+}
+
+bool iree_hal_amd_gpu_profile_captures_dispatch(
+    const iree_hal_amd_gpu_profile_t* profile, uint32_t queue_ordinal,
+    uint64_t command_buffer_id, uint32_t command_index,
+    iree_string_view_t function_name) {
+  if (!iree_hal_amd_gpu_profile_captures_dispatches(profile)) {
+    return false;
+  }
+  const iree_hal_profile_capture_filter_t* filter = &profile->filter;
+  return iree_hal_profile_capture_filter_matches_location(
+             filter, command_buffer_id, command_index, 0, queue_ordinal) &&
+         (!(filter->flags &
+            IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN) ||
+          iree_string_view_match_pattern(function_name,
+                                         filter->executable_function_pattern));
+}
+
 void iree_hal_amd_gpu_profile_operation_complete(
     iree_hal_amd_gpu_profile_t* profile,
     const iree_hal_amd_gpu_profile_operation_t* operation,
@@ -700,15 +758,31 @@ void iree_hal_amd_gpu_profile_operation_complete(
   // copies its sample before invocation storage can return to the producer.
   iree_slim_mutex_lock(&stream->mutex);
   for (uint32_t i = 0; i < completion->count; ++i) {
+    const iree_hal_amd_gpu_profile_dispatch_t* dispatch =
+        operation->commands
+            ? &operation->commands->dispatches[completion->first + i]
+            : &operation->dispatch;
+    // Direct dispatch selection precedes sample reservation. Recorded commands
+    // retain one native sample layout and select during this existing walk.
+    if (operation->commands && profile->filter.flags) {
+      const iree_string_view_t name =
+          (profile->filter.flags &
+           IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN)
+              ? dispatch->executable
+                    ->function_names[dispatch->event.function_ordinal]
+              : iree_string_view_empty();
+      if (!iree_hal_amd_gpu_profile_captures_dispatch(
+              profile, operation->event.queue_ordinal,
+              dispatch->event.command_buffer_id, dispatch->event.command_index,
+              name)) {
+        continue;
+      }
+    }
     uint64_t position = 0, event_id = 0;
     if (!iree_hal_profile_event_ring_try_append(&stream->dispatches, &position,
                                                 &event_id)) {
       continue;
     }
-    const iree_hal_amd_gpu_profile_dispatch_t* dispatch =
-        operation->commands
-            ? &operation->commands->dispatches[completion->first + i]
-            : &operation->dispatch;
     iree_hal_profile_dispatch_event_t* event =
         iree_hal_profile_event_ring_record_at(&stream->dispatches, position);
     *event = dispatch->event;

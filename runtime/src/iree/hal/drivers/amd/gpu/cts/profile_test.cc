@@ -333,6 +333,154 @@ TEST_P(GpuNativeDispatchProfileTest, DirectSamplesSurviveExecutableRelease) {
 }
 
 TEST_P(GpuNativeDispatchProfileTest,
+       CaptureFiltersPreserveDirectAndResidentWork) {
+  Ref<iree_hal_executable_t> executable;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(Load(executable, function));
+  std::array<Ref<iree_hal_command_buffer_t>, 2> recordings;
+  for (auto& recording : recordings) {
+    ASSERT_NO_FATAL_FAILURE(
+        Record(executable, function,
+               IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA,
+               recording.out()));
+  }
+  Ref<iree_hal_command_buffer_t> unprofiled;
+  ASSERT_NO_FATAL_FAILURE(Record(executable, function, 0, unprofiled.out()));
+  const uint64_t first_id = iree_hal_command_buffer_profile_id(recordings[0]);
+  const uint64_t second_id = iree_hal_command_buffer_profile_id(recordings[1]);
+  ASSERT_NE(first_id, second_id);
+  ASSERT_NE(first_id, 0u);
+  ASSERT_NE(second_id, 0u);
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t value = 0;
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  auto reference = iree_hal_make_buffer_ref(output, 0, 4);
+  iree_hal_buffer_binding_t binding = {.buffer = output, .length = 4};
+  constexpr uint32_t kPattern =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN;
+  constexpr uint32_t kCommandBuffer =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_COMMAND_BUFFER_ID;
+  constexpr uint32_t kCommand =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_COMMAND_INDEX;
+  constexpr uint32_t kDevice =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_PHYSICAL_DEVICE_ORDINAL;
+  constexpr uint32_t kQueue =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_QUEUE_ORDINAL;
+  struct Case {
+    // Existing public filter, applied to one complete session.
+    iree_hal_profile_capture_filter_t filter;
+    // Selected direct dispatches from the two queues.
+    uint32_t direct_count;
+    // Selected command indices in queue-stream emission order.
+    std::vector<uint32_t> command_indices;
+  };
+  const Case cases[] = {
+      {{}, 2, {1, 3, 1, 3}},
+      {{.flags = kQueue, .queue_ordinal = 1}, 1, {1, 3}},
+      {{.flags = kDevice, .physical_device_ordinal = 1}, 0, {}},
+      {{
+           .flags = kPattern,
+           .executable_function_pattern = IREE_SV("image_acc*"),
+       },
+       2,
+       {1, 3, 1, 3}},
+      {{.flags = kPattern, .executable_function_pattern = IREE_SV("absent_*")},
+       0,
+       {}},
+      {{.flags = kCommandBuffer, .command_buffer_id = first_id}, 0, {1, 3}},
+      {{.flags = kCommand, .command_index = 3}, 0, {3, 3}},
+      {{
+           .flags = kPattern | kCommandBuffer | kCommand | kDevice | kQueue,
+           .executable_function_pattern = IREE_SV("image_acc*"),
+           .command_buffer_id = second_id,
+           .command_index = 3,
+           .physical_device_ordinal = 0,
+           .queue_ordinal = 1,
+       },
+       0,
+       {3}},
+  };
+  ASSERT_NO_FATAL_FAILURE(End());
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.filter.flags);
+    iree::hal::cts::TestProfileSink sink;
+    iree::hal::cts::TestProfileSinkInitialize(&sink);
+    sink.expected_function_ordinal = (uint32_t)function.value;
+    iree::hal::cts::DeviceProfilingScope capture(device_);
+    const iree_hal_device_profiling_options_t options = {
+        .data_families = Families(),
+        .sink = iree::hal::cts::TestProfileSinkAsBase(&sink),
+        .capture_filter = test.filter,
+    };
+    IREE_ASSERT_OK(capture.Begin(&options));
+    uint32_t zero = 0;
+    uint64_t previous = value++;
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        queues_[0], {previous ? 1u : 0u, &timeline, &previous},
+        {1, &timeline, &value}, output, 0, 4, &zero, 4, nullptr, 0));
+    const uint32_t increment = 1;
+    for (size_t i = 0; i < queues_.size(); ++i) {
+      previous = value++;
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          queues_[i], {1, &timeline, &previous}, {1, &timeline, &value},
+          executable, function, config,
+          iree_make_const_byte_span(&increment, sizeof(increment)),
+          {1, &reference}, nullptr, 0));
+    }
+    ASSERT_NO_FATAL_FAILURE(Wait(done, value));
+    IREE_ASSERT_OK(iree_hal_device_profiling_flush(device_));
+    EXPECT_EQ(sink.dispatch_events.size(), test.direct_count);
+    sink.expected_dispatch_flags =
+        IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_COMMAND_BUFFER;
+    sink.expected_dispatch_command_indices.assign(test.direct_count,
+                                                  UINT32_MAX);
+    sink.expected_dispatch_command_indices.insert(
+        sink.expected_dispatch_command_indices.end(),
+        test.command_indices.begin(), test.command_indices.end());
+    for (size_t i = 0; i < recordings.size(); ++i) {
+      previous = value++;
+      IREE_ASSERT_OK(iree_hal_queue_execute(
+          queues_[i], {1, &timeline, &previous}, {1, &timeline, &value},
+          recordings[i], {1, &binding}, 0));
+    }
+    const bool excludes_unprofiled = (test.filter.flags & kCommandBuffer) != 0;
+    if (excludes_unprofiled) {
+      // Exclusion is known from invocation identity, so this recording needs
+      // neither retained profile metadata nor native sample storage.
+      previous = value++;
+      IREE_ASSERT_OK(iree_hal_queue_execute(
+          queues_[0], {1, &timeline, &previous}, {1, &timeline, &value},
+          unprofiled, {1, &binding}, 0));
+    }
+    uint32_t observed = 0;
+    previous = value++;
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queues_[0], {1, &timeline, &previous}, {1, &timeline, &value}, output,
+        0, &observed, sizeof(observed), nullptr));
+    ASSERT_NO_FATAL_FAILURE(Wait(done, value));
+    EXPECT_EQ(observed, excludes_unprofiled ? 11u : 8u);
+    IREE_ASSERT_OK(capture.End());
+    EXPECT_EQ(sink.dispatch_events.size(),
+              test.direct_count + test.command_indices.size());
+    EXPECT_EQ(sink.queue_events.size(), excludes_unprofiled ? 7u : 6u);
+    EXPECT_EQ(sink.begin_count, 1);
+    EXPECT_EQ(sink.end_count, 1);
+    for (const auto& event : sink.dispatch_events) {
+      EXPECT_GT(event.start_tick, 0u);
+      EXPECT_GE(event.end_tick, event.start_tick);
+    }
+  }
+}
+
+TEST_P(GpuNativeDispatchProfileTest,
        ResidentTransferExitJoinsBeforePublishingSamples) {
   Ref<iree_hal_buffer_t> output;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(

@@ -2246,7 +2246,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
         queue->profile, queue->options.queue_ordinal,
         IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH, waits.count, signals.count,
         1, operation);
-    if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile) &&
+    if (iree_hal_amd_gpu_profile_captures_dispatch(
+            queue->profile, queue->options.queue_ordinal, 0, 0,
+            function->base.metadata->reflection_name) &&
         (iree_hal_dispatch_uses_indirect_parameters(flags) ||
          (dispatch.geometry.workgroup_count[0] &&
           dispatch.geometry.workgroup_count[1] &&
@@ -2634,8 +2636,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_execute(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_execute(
       &queue->captures, queue->profile != NULL, waits, signals, command_buffer,
       bindings, &queue->options.barriers, flags, &submission));
-  if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile) &&
-      submission->execute.program->dispatch_count &&
+  const bool capture =
+      queue->profile && iree_hal_amd_gpu_profile_captures_commands(
+                            queue->profile, queue->options.queue_ordinal,
+                            iree_hal_command_buffer_profile_id(command_buffer));
+  if (capture && submission->execute.program->dispatch_count &&
       !submission->execute.program->profile) {
     iree_hal_amd_gpu_pm4_submission_release(submission);
     return iree_make_status(
@@ -2652,7 +2657,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_execute(
         operation);
     operation->event.command_buffer_id =
         iree_hal_command_buffer_profile_id(command_buffer);
-    if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile)) {
+    if (capture) {
       operation->commands = submission->execute.program->profile;
       operation->completion.count =
           iree_hal_amd_gpu_profile_commands_count(operation->commands);

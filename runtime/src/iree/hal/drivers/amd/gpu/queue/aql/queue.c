@@ -1883,7 +1883,9 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_dispatch(
         queue->profile, queue->options.queue_ordinal,
         IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH, waits.count, signals.count,
         1, &operation);
-    if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile) &&
+    if (iree_hal_amd_gpu_profile_captures_dispatch(
+            queue->profile, queue->options.queue_ordinal, 0, 0,
+            function->base.metadata->reflection_name) &&
         (iree_hal_dispatch_uses_indirect_parameters(flags) ||
          (geometry.workgroup_count[0] && geometry.workgroup_count[1] &&
           geometry.workgroup_count[2]))) {
@@ -2166,8 +2168,11 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_execute(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_check_acceptance(queue));
   const iree_hal_amd_gpu_aql_command_program_t* program =
       iree_hal_amd_gpu_aql_command_buffer_program(command_buffer);
-  if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile) &&
-      program->dispatch_count && !program->profile) {
+  const bool capture =
+      queue->profile && iree_hal_amd_gpu_profile_captures_commands(
+                            queue->profile, queue->options.queue_ordinal,
+                            iree_hal_command_buffer_profile_id(command_buffer));
+  if (capture && program->dispatch_count && !program->profile) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "dispatch capture requires command buffer profile metadata");
@@ -2180,7 +2185,7 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_execute(
         program->operation_count, &operation);
     operation.event.command_buffer_id =
         iree_hal_command_buffer_profile_id(command_buffer);
-    if (iree_hal_amd_gpu_profile_captures_dispatches(queue->profile)) {
+    if (capture) {
       operation.commands = program->profile;
       operation.completion.count = program->dispatch_count;
       operation.completion.sample_stride =
