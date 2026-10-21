@@ -22,6 +22,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
+#include "iree/hal/drivers/amd/gpu/queue/backing.h"
 #include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
@@ -90,8 +91,16 @@ typedef struct iree_hal_amd_gpu_device_t {
   iree_hal_queue_family_t family;
   // Number of fully constructed queues in the inline array.
   uint32_t queue_count;
-  // Owned queue references. Every queue joins before any signal backing frees.
+  // Owned provisioned queue references; the parent joins native ownership.
   iree_hal_queue_t** queues;
+  // Native signal capacity outlives individual producer queues and their
+  // callback records. Other queues and host waiters independently retain cells.
+  struct {
+    // Aligned host caches, with native backing proportional to actual demand.
+    iree_hal_amd_gpu_signal_cache_t* values;
+    // Initialized caches requiring final reader join and native release.
+    uint32_t count;
+  } signals;
   // Provisioned queue sources, optional feedback, and a final shutdown
   // observer.
   iree_hal_amd_gpu_completion_source_t* sources;
@@ -577,6 +586,13 @@ static bool iree_hal_amd_gpu_device_release_children(
     iree_hal_queue_release(device->queues[i]);
     device->queues[i] = NULL;
   }
+  for (uint32_t i = 0; i < device->signals.count; ++i) {
+    iree_hal_amd_gpu_signal_cache_deinitialize(device->context,
+                                               &device->signals.values[i]);
+  }
+  iree_allocator_free_aligned(device->host_allocator, device->signals.values);
+  device->signals.values = NULL;
+  device->signals.count = 0;
   if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
     iree_hal_amd_gpu_aql_program_pool_deinitialize(&device->programs.aql);
   } else {
@@ -936,6 +952,19 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   iree_status_t status = iree_hal_amd_gpu_target_identity_parse_processor(
       iree_make_cstring_view(device->processor_name), &device->target);
   if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_aligned(
+        host_allocator, options->queue_count * sizeof(*device->signals.values),
+        iree_alignof(iree_hal_amd_gpu_signal_cache_t), 0,
+        (void**)&device->signals.values);
+    if (iree_status_is_ok(status)) {
+      for (uint32_t i = 0; i < options->queue_count; ++i) {
+        iree_hal_amd_gpu_signal_cache_initialize(&device->publication, i,
+                                                 &device->signals.values[i]);
+      }
+      device->signals.count = options->queue_count;
+    }
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_target_identity_resolve_physical_target(
         context->target_info.asic_revision, &device->target);
   }
@@ -1068,10 +1097,12 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   for (uint32_t i = 0; i < options->queue_count && iree_status_is_ok(status);
        ++i) {
     queue_options.queue_ordinal = i;
+    queue_options.signals = &device->signals.values[i];
     if (aql) {
       const iree_hal_amd_gpu_aql_queue_options_t aql_options = {
           .family_ordinal = family_ordinal,
           .queue_ordinal = i,
+          .signals = queue_options.signals,
           .command_byte_capacity = queue_options.command_byte_capacity,
           .memory = queue_options.memory,
           .scratch_memory = queue_options.scratch_memory,

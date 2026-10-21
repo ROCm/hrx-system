@@ -128,8 +128,6 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   iree_host_size_t pending_size;
   // Typed native acquisition and coalesced waiting captures.
   iree_hal_amd_gpu_pm4_growth_context_t growth;
-  // Constant-time available cells from every completed native signal block.
-  iree_hal_amd_gpu_signal_pool_t signals;
   // Coalesced explicit trim request, consumed under publication ownership.
   struct {
     // Stable typed record; only the first requester links it into the FIFO.
@@ -181,8 +179,6 @@ struct iree_hal_amd_gpu_pm4_queue_t {
     iree_hal_amd_gpu_argument_storage_t* retired_arguments;
     // Constant-time append boundary; NULL when no generation awaits retirement.
     iree_hal_amd_gpu_argument_storage_t* retired_arguments_tail;
-    // All attached signal backings, visited only by cold trim and shutdown.
-    iree_hal_amd_gpu_signal_storage_t* signal_storage;
     // Accepted native publication count, release-published for completion.
     iree_atomic_int64_t count;
     // Next native dispatch ID, independent of publication chunk boundaries.
@@ -312,11 +308,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_prepare_signals(
     iree_hal_amd_gpu_pm4_queue_t* queue) {
   iree_hal_amd_gpu_signal_storage_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_signal_storage_allocate(
-      queue->context, &queue->signals, queue->options.memory,
+      queue->context, &queue->options.signals->pool, queue->options.memory,
       queue->options.retirement_capacity, queue->producer.frontier.count,
       queue->host_allocator, &storage));
-  storage->next = queue->producer.signal_storage;
-  queue->producer.signal_storage = storage;
+  storage->next = queue->options.signals->storage;
+  queue->options.signals->storage = storage;
   return iree_ok_status();
 }
 
@@ -347,19 +343,7 @@ static void iree_hal_amd_gpu_pm4_trim_storage(
       (uint64_t)iree_atomic_load(&queue->completed.count,
                                  iree_memory_order_acquire),
       &queue->producer.scratch);
-  iree_hal_amd_gpu_signal_storage_t** link = &queue->producer.signal_storage;
-  while (*link) {
-    iree_hal_amd_gpu_signal_storage_t* storage = *link;
-    // Keep one provisioned block. Detachment joins the last reader and removes
-    // unused capacity from acquisition before its native release is submitted.
-    if (storage != queue->producer.signal_storage &&
-        iree_hal_amd_gpu_signal_block_try_deinitialize(&storage->block)) {
-      *link = storage->next;
-      iree_hal_amd_gpu_signal_storage_free(queue->context, storage);
-    } else {
-      link = &storage->next;
-    }
-  }
+  iree_hal_amd_gpu_signal_cache_trim(queue->context, 1, queue->options.signals);
 }
 
 typedef enum iree_hal_amd_gpu_pm4_publication_result_e {
@@ -629,8 +613,8 @@ iree_hal_amd_gpu_pm4_publish_transfer(
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
   }
   if (native_signal) {
-    submission->signal =
-        iree_hal_amd_gpu_signal_pool_try_acquire(&queue->signals, 0);
+    submission->signal = iree_hal_amd_gpu_signal_pool_try_acquire(
+        &queue->options.signals->pool, 0);
     if (!submission->signal) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
     }
@@ -739,8 +723,8 @@ iree_hal_amd_gpu_pm4_publish_execute(
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
   }
   if (native_signal) {
-    submission->signal =
-        iree_hal_amd_gpu_signal_pool_try_acquire(&queue->signals, 0);
+    submission->signal = iree_hal_amd_gpu_signal_pool_try_acquire(
+        &queue->options.signals->pool, 0);
     if (!submission->signal) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
     }
@@ -1017,7 +1001,8 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
   }
   iree_hal_amd_gpu_signal_t* signal = NULL;
   if (native_signal) {
-    signal = iree_hal_amd_gpu_signal_pool_try_acquire(&queue->signals, 0);
+    signal = iree_hal_amd_gpu_signal_pool_try_acquire(
+        &queue->options.signals->pool, 0);
     if (!signal) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
     }
@@ -1163,8 +1148,8 @@ iree_hal_amd_gpu_pm4_publish_control(
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
   }
   if (native_signal) {
-    submission->signal =
-        iree_hal_amd_gpu_signal_pool_try_acquire(&queue->signals, 0);
+    submission->signal = iree_hal_amd_gpu_signal_pool_try_acquire(
+        &queue->options.signals->pool, 0);
     if (!submission->signal) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
     }
@@ -1557,8 +1542,8 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
             &queue->producer.scratch);
       }
       if (result.signals) {
-        result.signals->next = queue->producer.signal_storage;
-        queue->producer.signal_storage = result.signals;
+        result.signals->next = queue->options.signals->storage;
+        queue->options.signals->storage = result.signals;
       }
       if (result.first) {
         iree_hal_amd_gpu_publisher_enqueue_batch(&queue->publisher,
@@ -1715,6 +1700,9 @@ static void iree_hal_amd_gpu_pm4_submit(
 
 static bool iree_hal_amd_gpu_pm4_progress(void* user_data) {
   iree_hal_amd_gpu_pm4_queue_t* queue = user_data;
+  if (iree_hal_amd_gpu_signal_cache_take_ready(queue->options.signals)) {
+    iree_hal_amd_gpu_pm4_growth_signals_available(&queue->growth);
+  }
   bool more = false;
   if (iree_hal_amd_gpu_publisher_acquire_service(&queue->publisher)) {
     const uint64_t completed = (uint64_t)iree_atomic_load(
@@ -2379,11 +2367,9 @@ static amdf_status_t iree_hal_amd_gpu_pm4_cleanup(
   queue->kernel = NULL;
   iree_hal_amd_gpu_pm4_scratch_trim(queue->context, UINT64_MAX,
                                     &queue->producer.scratch);
-  while (queue->producer.signal_storage) {
-    iree_hal_amd_gpu_signal_storage_t* storage = queue->producer.signal_storage;
-    queue->producer.signal_storage = storage->next;
-    iree_hal_amd_gpu_signal_storage_free(queue->context, storage);
-  }
+  iree_atomic_store(&queue->options.signals->waiting, 0,
+                    iree_memory_order_release);
+  iree_hal_amd_gpu_signal_cache_trim(queue->context, 0, queue->options.signals);
   iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   if (arguments) {
     arguments->next = queue->producer.retired_arguments;
@@ -2415,7 +2401,6 @@ static void iree_hal_amd_gpu_pm4_queue_destroy(iree_hal_queue_t* base) {
   IREE_ASSERT(!queue->storage.queue && !queue->kernel && !queue->control.handle,
               "parent must join native ownership before final queue release");
   iree_hal_amd_gpu_publisher_deinitialize(&queue->publisher);
-  iree_hal_amd_gpu_signal_pool_deinitialize(&queue->signals);
   iree_hal_amd_gpu_host_wait_set_deinitialize(&queue->pending.waits);
   iree_slim_mutex_deinitialize(&queue->pending.completion_mutex);
   iree_async_semaphore_wait_context_deinitialize(&queue->wait_context);
@@ -2530,11 +2515,6 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
   queue->producer.scratch.profile = options->scratch_profile;
   queue->pending_size = pending_size;
   queue->trim.entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRIM;
-  iree_hal_amd_gpu_signal_pool_initialize(
-      (iree_hal_amd_gpu_signal_pool_notification_t){
-          .fn = iree_hal_amd_gpu_pm4_growth_signals_available,
-          .user_data = &queue->growth},
-      &queue->signals);
   queue->host_executor = (iree_hal_amd_gpu_host_call_executor_t){
       .queue = &queue->base,
       .context = context,
@@ -2590,7 +2570,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .queue_ordinal = options->queue_ordinal,
       .queue_count = queue_count,
       .signal_capacity = options->retirement_capacity,
-      .signal_pool = &queue->signals,
+      .signal_cache = options->signals,
       .reuse.entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_REUSE_SIGNALS,
   };
   iree_hal_amd_gpu_capture_pool_initialize(options->capture_block_size,

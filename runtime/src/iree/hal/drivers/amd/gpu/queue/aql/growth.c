@@ -114,7 +114,8 @@ static void iree_hal_amd_gpu_aql_growth_program_available(void* user_data) {
 
 void iree_hal_amd_gpu_aql_growth_signals_available(void* user_data) {
   iree_hal_amd_gpu_aql_growth_context_t* context = user_data;
-  if (iree_atomic_load(&context->reuse.waiting, iree_memory_order_acquire) &&
+  if (iree_atomic_load(&context->signal_cache->waiting,
+                       iree_memory_order_acquire) &&
       !iree_atomic_exchange(&context->reuse.pending, 1,
                             iree_memory_order_acq_rel)) {
     iree_hal_amd_gpu_aql_growth_enqueue(context, &context->reuse.entry);
@@ -123,10 +124,12 @@ void iree_hal_amd_gpu_aql_growth_signals_available(void* user_data) {
 
 static void iree_hal_amd_gpu_aql_growth_await_signals(
     iree_hal_amd_gpu_aql_growth_context_t* context) {
-  iree_atomic_store(&context->reuse.waiting, 1, iree_memory_order_release);
+  iree_atomic_store(&context->signal_cache->waiting, 1,
+                    iree_memory_order_release);
   // Either last release observes enrollment, or this recheck observes cells
   // returned between the acquisition miss and enrollment.
-  if (iree_hal_amd_gpu_signal_pool_has_available(context->signal_pool)) {
+  if (iree_hal_amd_gpu_signal_pool_has_available(
+          &context->signal_cache->pool)) {
     iree_hal_amd_gpu_aql_growth_signals_available(context);
   }
 }
@@ -260,10 +263,12 @@ iree_status_t iree_hal_amd_gpu_aql_growth_end(
       break;
     case IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS:
       context->signals = NULL;
-      iree_atomic_store(&context->reuse.waiting, 0, iree_memory_order_release);
+      iree_atomic_store(&context->signal_cache->waiting, 0,
+                        iree_memory_order_release);
       if (iree_status_is_ok(status)) {
         status = iree_hal_amd_gpu_aql_signal_storage_initialize(
-            context->context, context->signal_pool, growth->backing.signals);
+            context->context, &context->signal_cache->pool,
+            growth->backing.signals);
       }
       if (iree_status_is_ok(status)) {
         out_result->signals = growth->backing.signals;
@@ -286,8 +291,10 @@ iree_status_t iree_hal_amd_gpu_aql_growth_end(
 void iree_hal_amd_gpu_aql_growth_reuse_signals(
     iree_hal_amd_gpu_aql_growth_context_t* context) {
   iree_atomic_store(&context->reuse.pending, 0, iree_memory_order_release);
-  if (iree_hal_amd_gpu_signal_pool_has_available(context->signal_pool)) {
-    iree_atomic_store(&context->reuse.waiting, 0, iree_memory_order_release);
+  if (iree_hal_amd_gpu_signal_pool_has_available(
+          &context->signal_cache->pool)) {
+    iree_atomic_store(&context->signal_cache->waiting, 0,
+                      iree_memory_order_release);
     if (!context->signals) {
       return;
     }

@@ -37,7 +37,7 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
   // Number of native descriptors in each acquired block.
   uint32_t signal_capacity;
   // Existing native cells can satisfy demand while acquisition is pending.
-  iree_hal_amd_gpu_signal_pool_t* signal_pool;
+  iree_hal_amd_gpu_signal_cache_t* signal_cache;
   // Coalesced argument acquisition or NULL.
   iree_hal_amd_gpu_aql_growth_t* arguments;
   // Coalesced signal acquisition or NULL.
@@ -50,8 +50,6 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
     iree_hal_amd_gpu_aql_entry_t entry;
     // One while the hint is queued or being consumed.
     iree_atomic_int32_t pending;
-    // One while signal demand is parked.
-    iree_atomic_int32_t waiting;
   } reuse;
 } iree_hal_amd_gpu_aql_growth_context_t;
 
@@ -85,7 +83,9 @@ iree_status_t iree_hal_amd_gpu_aql_growth_end(
     iree_hal_amd_gpu_aql_entry_t* entry, uint64_t argument_begin,
     iree_hal_amd_gpu_aql_growth_result_t* out_result);
 
-// Last-reader notification; enqueues a hint only while demand is enrolled.
+// Called with a live queue borrow by its publisher or service source.
+// Enqueues a typed hint only while demand is enrolled; native signal returns
+// notify the device-owned cache without reaching this queue state.
 void iree_hal_amd_gpu_aql_growth_signals_available(void* user_data);
 
 // Requeues the parked cohort immediately when already-owned cells return.

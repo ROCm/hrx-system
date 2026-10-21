@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/program.h"
+#include "iree/hal/drivers/amd/gpu/queue/backing.h"
 #include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
 
@@ -26,6 +27,8 @@ typedef struct iree_hal_amd_gpu_aql_queue_options_t {
   uint32_t family_ordinal;
   // Source index in the device's immutable queue array.
   uint32_t queue_ordinal;
+  // Device-owned native cells and return wake target, live beyond this queue.
+  iree_hal_amd_gpu_signal_cache_t* signals;
   // Power-of-two native packet storage extent in bytes.
   uint64_t command_byte_capacity;
   // Borrowed coherent host-readable/writable control and argument policy.
@@ -111,9 +114,11 @@ void iree_hal_amd_gpu_aql_queue_close(iree_hal_queue_t* queue);
 // After external callers join, proves all accepted host/native uses retired.
 bool iree_hal_amd_gpu_aql_queue_is_idle(iree_hal_queue_t* queue);
 
-// Cold native tail/mapping/queue teardown after every peer queue is idle and
-// service/completion sources and native callbacks have joined. Failure keeps
-// unproven native users and backing alive; the parent preserves the context.
+// Cold native tail/mapping/queue teardown after this queue is idle and its
+// service/completion sources and native callbacks have joined. Signal readers
+// may remain on other queues; their device-owned backing stays live. Failure
+// keeps unproven native users and backing alive; the parent preserves the
+// context.
 amdf_status_t iree_hal_amd_gpu_aql_queue_shutdown(iree_hal_queue_t* queue);
 
 #ifdef __cplusplus

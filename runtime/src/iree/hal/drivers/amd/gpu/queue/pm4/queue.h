@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
+#include "iree/hal/drivers/amd/gpu/queue/backing.h"
 #include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
@@ -30,6 +31,8 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   uint32_t family_ordinal;
   // Stable ordinal in the parent's provisioned queue array.
   uint32_t queue_ordinal;
+  // Device-owned native cells and return wake target, live beyond this queue.
+  iree_hal_amd_gpu_signal_cache_t* signals;
   // One admitted USER or KERNEL publication mode.
   amdf_queue_publication_modes_t publication_mode;
   // Power-of-two command storage capacity in bytes.
@@ -131,13 +134,13 @@ void iree_hal_amd_gpu_pm4_queue_close(iree_hal_queue_t* queue);
 // prove consumption of the final notification/padding tail.
 bool iree_hal_amd_gpu_pm4_queue_is_idle(iree_hal_queue_t* queue);
 
-// Joins the final native notification tail after every queue in this domain is
-// idle, native acquisition callbacks have joined, and both publication and
-// completion owners have made their final accesses. Peer consumers may retain
-// this queue's signal backing until their own retirement. Cold native cleanup
+// Joins the final native notification tail after this queue is idle, its native
+// acquisition callbacks have joined, and publication/completion sources have
+// made their final accesses. Peer consumers may retain device-owned signal
+// backing until their own retirement. Cold native cleanup
 // runs on the caller; backing releases use the allocation domain. Failure
-// preserves the
-// queue/context graph and must be handled by the parent without freeing it.
+// preserves the queue/context graph and must be handled by the parent without
+// freeing it.
 amdf_status_t iree_hal_amd_gpu_pm4_queue_shutdown(iree_hal_queue_t* queue);
 
 #ifdef __cplusplus

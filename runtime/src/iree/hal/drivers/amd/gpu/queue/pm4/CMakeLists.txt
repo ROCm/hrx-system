@@ -502,6 +502,7 @@ iree_cc_test(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::publication
+    iree::hal::drivers::amd::gpu::queue::backing
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::program
     iree::hal::drivers::amd::gpu::queue::publisher
@@ -710,6 +711,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::gpu::queue::allocation
+    iree::hal::drivers::amd::gpu::queue::backing
     iree::hal::drivers::amd::gpu::queue::buffer
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::control

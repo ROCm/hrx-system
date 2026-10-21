@@ -8,6 +8,10 @@
 
 #include "iree/hal/drivers/amd/status.h"
 
+static_assert(sizeof(iree_hal_amd_gpu_signal_cache_t) <=
+                  3 * iree_hardware_destructive_interference_size,
+              "signal capacity and stable wake ownership fit in three lines");
+
 iree_status_t iree_hal_amd_gpu_backing_query_address(
     const iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_fabric_memory_t* memory, uint64_t* out_address) {
@@ -136,4 +140,48 @@ void iree_hal_amd_gpu_signal_storage_free(
       (iree_hal_amd_fabric_memory_release_callback_t){
           .fn = iree_hal_amd_gpu_signal_storage_released, .user_data = storage},
       &storage->release);
+}
+
+static void iree_hal_amd_gpu_signal_cache_available(void* user_data) {
+  iree_hal_amd_gpu_signal_cache_t* cache = user_data;
+  if (iree_atomic_load(&cache->waiting, iree_memory_order_acquire) &&
+      !iree_atomic_exchange(&cache->ready, 1, iree_memory_order_acq_rel)) {
+    iree_hal_amd_gpu_publication_notify(cache->publication,
+                                        cache->source_ordinal);
+  }
+}
+
+void iree_hal_amd_gpu_signal_cache_initialize(
+    iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal,
+    iree_hal_amd_gpu_signal_cache_t* out_cache) {
+  *out_cache = (iree_hal_amd_gpu_signal_cache_t){
+      .publication = publication, .source_ordinal = source_ordinal};
+  iree_hal_amd_gpu_signal_pool_initialize(
+      (iree_hal_amd_gpu_signal_pool_notification_t){
+          .fn = iree_hal_amd_gpu_signal_cache_available,
+          .user_data = out_cache},
+      &out_cache->pool);
+}
+
+void iree_hal_amd_gpu_signal_cache_trim(
+    iree_hal_amd_gpu_context_t* context, uint32_t minimum_block_count,
+    iree_hal_amd_gpu_signal_cache_t* cache) {
+  iree_hal_amd_gpu_signal_storage_t** link = &cache->storage;
+  while (*link && cache->pool.block_count > minimum_block_count) {
+    iree_hal_amd_gpu_signal_storage_t* storage = *link;
+    if (iree_hal_amd_gpu_signal_block_try_deinitialize(&storage->block)) {
+      *link = storage->next;
+      iree_hal_amd_gpu_signal_storage_free(context, storage);
+    } else {
+      link = &storage->next;
+    }
+  }
+}
+
+void iree_hal_amd_gpu_signal_cache_deinitialize(
+    iree_hal_amd_gpu_context_t* context,
+    iree_hal_amd_gpu_signal_cache_t* cache) {
+  iree_atomic_store(&cache->waiting, 0, iree_memory_order_release);
+  iree_hal_amd_gpu_signal_cache_trim(context, 0, cache);
+  iree_hal_amd_gpu_signal_pool_deinitialize(&cache->pool);
 }

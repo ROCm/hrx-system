@@ -13,6 +13,8 @@
 #include <vector>
 
 #include "iree/hal/device.h"
+#include "iree/hal/drivers/amd/gpu/queue/backing.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/backing.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 #include "iree/testing/gtest.h"
@@ -132,8 +134,7 @@ class GrowthTest : public ::testing::Test {
     iree_hal_amd_gpu_capture_pool_initialize(4096, iree_allocator_system(),
                                              &captures_);
     iree_hal_amd_gpu_publisher_initialize(&publisher_);
-    iree_hal_amd_gpu_signal_pool_initialize(
-        {iree_hal_amd_gpu_pm4_growth_signals_available, &growth_}, &signals_);
+    iree_hal_amd_gpu_signal_cache_initialize(&publication_, 0, &signals_);
     growth_.context = &context_;
     growth_.memory = &memory_;
     growth_.scratch_memory = &scratch_memory_;
@@ -144,7 +145,7 @@ class GrowthTest : public ::testing::Test {
     growth_.queue_ordinal = 0;
     growth_.queue_count = 3;
     growth_.signal_capacity = 8;
-    growth_.signal_pool = &signals_;
+    growth_.signal_cache = &signals_;
     growth_.reuse.entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_REUSE_SIGNALS;
     source_ = {
         .publish =
@@ -165,7 +166,7 @@ class GrowthTest : public ::testing::Test {
     EXPECT_EQ(growth_.scratch, nullptr);
     EXPECT_EQ(
         iree_atomic_load(&growth_.pending_count, iree_memory_order_acquire), 0);
-    iree_hal_amd_gpu_signal_pool_deinitialize(&signals_);
+    iree_hal_amd_gpu_signal_cache_deinitialize(&context_, &signals_);
     EXPECT_TRUE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
     iree_hal_amd_gpu_publisher_deinitialize(&publisher_);
     iree_hal_amd_gpu_capture_pool_deinitialize(&captures_);
@@ -230,6 +231,9 @@ class GrowthTest : public ::testing::Test {
   }
 
   bool Publish() {
+    if (iree_hal_amd_gpu_signal_cache_take_ready(&signals_)) {
+      iree_hal_amd_gpu_pm4_growth_signals_available(&growth_);
+    }
     if (!iree_hal_amd_gpu_publisher_acquire_service(&publisher_)) {
       return false;
     }
@@ -255,7 +259,7 @@ class GrowthTest : public ::testing::Test {
           if (result.signals) {
             EXPECT_EQ(result.signals->block.queue_count, 3u);
             auto* signal =
-                iree_hal_amd_gpu_signal_pool_try_acquire(&signals_, 0);
+                iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
             EXPECT_NE(signal, nullptr);
             iree_hal_amd_gpu_signal_release(signal);
             iree_hal_amd_gpu_signal_storage_free(&context_, result.signals);
@@ -302,7 +306,8 @@ class GrowthTest : public ::testing::Test {
           }
         }
         if (require_signals_) {
-          auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_, 0);
+          auto* signal =
+              iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
           EXPECT_EQ(signal, expected_signal_);
           iree_hal_amd_gpu_signal_release(signal);
         }
@@ -321,12 +326,12 @@ class GrowthTest : public ::testing::Test {
     uint64_t frontier[3] = {};
     iree_hal_amd_gpu_signal_t metadata = {};
     iree_hal_amd_gpu_signal_block_t block;
-    iree_hal_amd_gpu_signal_block_initialize(&signals_, this, &value, 0x1000, 8,
-                                             0, &metadata, 1, 3, frontier,
-                                             &block);
-    auto* held = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_, 0);
+    iree_hal_amd_gpu_signal_block_initialize(&signals_.pool, this, &value,
+                                             0x1000, 8, 0, &metadata, 1, 3,
+                                             frontier, &block);
+    auto* held = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
     ASSERT_NE(held, nullptr);
-    EXPECT_FALSE(iree_hal_amd_gpu_signal_pool_has_available(&signals_));
+    EXPECT_FALSE(iree_hal_amd_gpu_signal_pool_has_available(&signals_.pool));
     expected_signal_ = held;
     require_signals_ = true;
     hold_ = true;
@@ -383,7 +388,7 @@ class GrowthTest : public ::testing::Test {
   // Exact cold acquisition state under test.
   iree_hal_amd_gpu_pm4_growth_context_t growth_ = {};
   // Signal cells across all completed native backing blocks.
-  iree_hal_amd_gpu_signal_pool_t signals_ = {};
+  iree_hal_amd_gpu_signal_cache_t signals_ = {};
   // Device deferred publication owner.
   iree_hal_amd_gpu_publication_t publication_ = {};
   // Stable source borrowed by publication_.
@@ -782,6 +787,79 @@ TEST_F(GrowthTest, ReturnedSignalResumesParkedWorkWhileAllocationIsHeld) {
   ReuseDuringGrowth(false, false);
 }
 
+TEST_F(GrowthTest, SignalBackingSurvivesProducerAndSourceRemoval) {
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_signal_storage_allocate(
+      &context_, &signals_.pool, &memory_, 8, 3, iree_allocator_system(),
+      &signals_.storage));
+  auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
+  ASSERT_NE(signal, nullptr);
+  const uint64_t producer_frontier[3] = {7, 11, 13};
+  iree_hal_amd_gpu_signal_publish_frontier(signal, producer_frontier);
+  iree_hal_amd_gpu_signal_retain(signal);  // Independent consumer.
+  *signal->host_value = 1;
+  iree_hal_amd_gpu_signal_retire(signal, IREE_STATUS_OK);
+  iree_hal_amd_gpu_signal_release(signal);  // Producer is finished.
+
+  JoinPublication();
+  const iree_hal_amd_gpu_publication_source_t vacant = {};
+  iree_hal_amd_gpu_publication_set_sources(&publication_, 1, &vacant);
+  iree_hal_amd_gpu_signal_cache_trim(&context_, 0, &signals_);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_, 1u);
+  EXPECT_EQ(signals_.pool.block_count, 1u);
+  EXPECT_EQ(*signal->host_value, 1u);
+  uint64_t consumer_frontier[3] = {};
+  iree_hal_amd_gpu_signal_join_frontier(signal, consumer_frontier);
+  EXPECT_EQ(consumer_frontier[0], 7u);
+  EXPECT_EQ(consumer_frontier[1], 11u);
+  EXPECT_EQ(consumer_frontier[2], 13u);
+
+  // A late capacity hint may still target the removed ordinal. Its owner is
+  // the device cache; no callback reaches the removed producer's state.
+  iree_atomic_store(&signals_.waiting, 1, iree_memory_order_release);
+  std::thread consumer([&] { iree_hal_amd_gpu_signal_release(signal); });
+  consumer.join();
+  EXPECT_TRUE(iree_hal_amd_gpu_signal_cache_take_ready(&signals_));
+  EXPECT_FALSE(iree_hal_amd_gpu_signal_cache_take_ready(&signals_));
+  iree_hal_amd_gpu_signal_cache_trim(&context_, 0, &signals_);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_, 0u);
+  EXPECT_EQ(signals_.storage, nullptr);
+  iree_atomic_store(&signals_.waiting, 0, iree_memory_order_release);
+  iree_hal_amd_gpu_publication_set_sources(&publication_, 1, &source_);
+}
+
+TEST_F(GrowthTest, SignalCacheTrimPreservesReadersAndRequestedCapacity) {
+  for (uint32_t i = 0; i < 3; ++i) {
+    iree_hal_amd_gpu_signal_storage_t* storage = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_signal_storage_allocate(
+        &context_, &signals_.pool, &memory_, 1, 3, iree_allocator_system(),
+        &storage));
+    storage->next = signals_.storage;
+    signals_.storage = storage;
+  }
+  auto* first = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
+  auto* second = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  iree_hal_amd_gpu_signal_cache_trim(&context_, 1, &signals_);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_, 2u);
+  EXPECT_EQ(signals_.pool.block_count, 2u);
+
+  iree_hal_amd_gpu_signal_release(first);
+  iree_hal_amd_gpu_signal_release(second);
+  // Returning capacity without enrolled demand produces no worker turn.
+  EXPECT_FALSE(iree_hal_amd_gpu_signal_cache_take_ready(&signals_));
+  iree_hal_amd_gpu_signal_cache_trim(&context_, 1, &signals_);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_, 1u);
+  EXPECT_EQ(signals_.pool.block_count, 1u);
+  auto* reused = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
+  ASSERT_NE(reused, nullptr);
+  iree_hal_amd_gpu_signal_release(reused);
+}
+
 TEST_F(GrowthTest, ReturnedSignalClosesMissBeforeEnrollmentRace) {
   ReuseDuringGrowth(false, true);
 }
@@ -799,12 +877,13 @@ TEST_F(GrowthTest, CapacityReturnRacesNativeCompletionWithoutDuplicatingWork) {
   uint64_t frontier[3] = {};
   iree_hal_amd_gpu_signal_t metadata = {};
   iree_hal_amd_gpu_signal_block_t block;
-  iree_hal_amd_gpu_signal_block_initialize(
-      &signals_, this, &value, 0x1000, 8, 0, &metadata, 1, 3, frontier, &block);
+  iree_hal_amd_gpu_signal_block_initialize(&signals_.pool, this, &value, 0x1000,
+                                           8, 0, &metadata, 1, 3, frontier,
+                                           &block);
   constexpr uint32_t kIterations = 128;
   constexpr uint32_t kCohortSize = 4;
   for (uint32_t i = 0; i < kIterations; ++i) {
-    auto* held = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_, 0);
+    auto* held = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
     ASSERT_NE(held, nullptr);
     hold_ = true;
     for (uint32_t j = 0; j < kCohortSize; ++j) {

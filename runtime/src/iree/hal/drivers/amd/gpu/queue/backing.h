@@ -9,6 +9,7 @@
 
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
+#include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/signal.h"
 
 #ifdef __cplusplus
@@ -42,7 +43,7 @@ typedef struct iree_hal_amd_gpu_signal_storage_t {
   struct iree_hal_amd_gpu_signal_storage_t* next;
   // Native cells and coherent CPU mapping.
   iree_hal_amd_fabric_memory_t memory;
-  // Finite extent attached to the queue's available signal pool.
+  // Finite extent attached to the publisher's available signal pool.
   iree_hal_amd_gpu_signal_block_t block;
   // Number of native cells and corresponding host signal records.
   uint32_t capacity;
@@ -57,6 +58,54 @@ typedef struct iree_hal_amd_gpu_signal_storage_t {
   // Host allocator owning this metadata through native release completion.
   iree_allocator_t host_allocator;
 } iree_hal_amd_gpu_signal_storage_t;
+
+// Device-owned native signal capacity borrowed by one queue publisher. Native
+// readers may outlive that queue; neither their cells nor their return wake
+// target belongs to the queue body. The device joins readers before final
+// deinitialization. Acquisition, attachment, and trim remain publisher-owned.
+typedef struct iree_hal_amd_gpu_signal_cache_t {
+  // Available cells and independently retained native readers.
+  iree_hal_amd_gpu_signal_pool_t pool;
+  // Native blocks, including blocks still borrowed by other queues.
+  iree_hal_amd_gpu_signal_storage_t* storage;
+  // Stable device publication owner, live through all return callbacks.
+  iree_hal_amd_gpu_publication_t* publication;
+  // Stable source ordinal; a vacant source discards stale readiness hints.
+  uint32_t source_ordinal;
+  // One while the current queue has enrolled demand for returned capacity.
+  iree_atomic_int32_t waiting;
+  // Coalesced return hint, consumed only by the source's deferred publisher.
+  iree_atomic_int32_t ready;
+} iree_hal_amd_gpu_signal_cache_t;
+
+// Initializes host bookkeeping without allocating native storage. The device
+// supplies the stable wake target; no return callback borrows a queue body.
+void iree_hal_amd_gpu_signal_cache_initialize(
+    iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal,
+    iree_hal_amd_gpu_signal_cache_t* out_cache);
+
+// Consumes an actual capacity-return hint before reserving publication. An
+// enrolled but still empty cache does not request another worker turn.
+static inline bool iree_hal_amd_gpu_signal_cache_take_ready(
+    iree_hal_amd_gpu_signal_cache_t* cache) {
+  return iree_atomic_load(&cache->ready, iree_memory_order_acquire) &&
+         iree_atomic_exchange(&cache->ready, 0, iree_memory_order_acq_rel);
+}
+
+// Releases unused blocks while retaining at least minimum_block_count blocks.
+// Called by the exclusive publisher, or the cold owner after joining it.
+// Native readers keep their blocks attached; release uses embedded descriptors
+// and never waits or performs native calls on this caller.
+void iree_hal_amd_gpu_signal_cache_trim(iree_hal_amd_gpu_context_t* context,
+                                        uint32_t minimum_block_count,
+                                        iree_hal_amd_gpu_signal_cache_t* cache);
+
+// The caller joins all readers before this call. Transfers native blocks to
+// the context's release owner and deinitializes host bookkeeping. The context
+// separately joins those native releases before its own destruction.
+void iree_hal_amd_gpu_signal_cache_deinitialize(
+    iree_hal_amd_gpu_context_t* context,
+    iree_hal_amd_gpu_signal_cache_t* cache);
 
 // Queries the GPU address of an acquired coherent write-back mapping. The
 // admitted allocation policy already proves coherence; this validates the
