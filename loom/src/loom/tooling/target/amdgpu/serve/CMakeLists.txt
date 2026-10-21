@@ -145,12 +145,12 @@ loom_cc_test(
 )
 endif()
 
-if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
-    test_device_rdna
+    test_device_gpu
   SRCS
-    "test_device_rdna.c"
+    "test_device_gpu.c"
   DEPS
     iree::base
     iree::hal
@@ -207,10 +207,10 @@ loom_cc_test(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(LOOM_TARGET_ARCH_VM AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
-    rdna_control_test
+    gpu_control_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/control_test.cc"
   DATA
@@ -218,7 +218,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/control/kernels.loom"
   DEPS
     ::test_compiler
-    ::test_device_rdna
+    ::test_device_gpu
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -279,14 +279,14 @@ loom_cc_test(
 )
 endif()
 
-if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
-    rdna_device_group_test
+    gpu_device_group_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/device/device_group_test.cc"
   DEPS
-    ::test_device_rdna
+    ::test_device_gpu
     iree::base
     iree::hal
     iree::testing::gtest
@@ -696,10 +696,10 @@ loom_cc_test(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(LOOM_TARGET_ARCH_VM AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
-    rdna_source_text_service_test
+    gpu_source_text_service_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
@@ -709,8 +709,9 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/weights.loom"
   DEPS
     ::test_compiler
-    ::test_device_rdna
+    ::test_device_gpu
     iree::testing::gtest_main
+    loom::serve::service::text::elastic_storage_tests
     loom::serve::service::text::source_execution_tests
   ENV
     "LOOM_SERVE_TEST_MODEL_SOURCE={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
@@ -824,10 +825,10 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
-    rdna_source_text_media_test
+    gpu_source_text_media_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/config.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/control.loom"
@@ -849,7 +850,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/weights.loom"
   DEPS
     ::test_compiler
-    ::test_device_rdna
+    ::test_device_gpu
     iree::testing::gtest_main
     loom::serve::service::text::source_media_tests
   ENV
@@ -895,10 +896,10 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
-    rdna_native_text_service_test
+    gpu_native_text_service_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
@@ -908,7 +909,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/weights.loom"
   DEPS
     ::test_compiler
-    ::test_device_rdna
+    ::test_device_gpu
     iree::testing::gtest_main
     loom::serve::service::text::native_service_tests
   ENV
@@ -1477,14 +1478,14 @@ loom_cc_test(
 )
 endif()
 
-if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
-    rdna_retirement_test
+    gpu_retirement_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/execution/retirement_test.cc"
   DEPS
-    ::test_device_rdna
+    ::test_device_gpu
     iree::base
     iree::base::threading
     iree::hal
@@ -1570,10 +1571,10 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
-    rdna_weights_test
+    gpu_weights_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/bank_test.cc"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/weights_packing_test.cc"
@@ -1591,7 +1592,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/testdata/executables/prepare.loom"
   DEPS
     ::test_compiler
-    ::test_device_rdna
+    ::test_device_gpu
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -1623,7 +1624,7 @@ loom_cc_test(
     loom::serve::testing::native_allocator
   ARGS
     "--weight_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/stages.loom}}"
-    "--weight_device_uri=rdna:?feedback"
+    "--weight_device_uri=amdgpu2:?feedback"
     "--executable_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/testdata/executables/prepare.loom}}"
   LABELS
     "iree-run-requirement=libamdf.resource.amd_gpu"
@@ -1654,12 +1655,12 @@ loom_cc_test(
 )
 endif()
 
-if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
-    rdna_memory_test
+    gpu_memory_test
   DEPS
-    ::test_device_rdna
+    ::test_device_gpu
     iree::testing::gtest_main
     loom::serve::runtime::storage::memory_tests
   LABELS
@@ -1702,14 +1703,14 @@ loom_cc_test(
 )
 endif()
 
-if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
-    rdna_relocation_test
+    gpu_relocation_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/storage/relocation_test.cc"
   DEPS
-    ::test_device_rdna
+    ::test_device_gpu
     iree::base
     iree::hal
     iree::testing::gtest
@@ -1763,14 +1764,14 @@ loom_cc_test(
 )
 endif()
 
-if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
-    rdna_snapshot_test
+    gpu_snapshot_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/storage/snapshot_test.cc"
   DEPS
-    ::test_device_rdna
+    ::test_device_gpu
     iree::async
     iree::async::util::proactor_pool
     iree::base

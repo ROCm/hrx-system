@@ -26,8 +26,8 @@ class NativeAllocator {
       : allocator_(allocator) {}
   ~NativeAllocator() { AwaitReleased(); }
   iree_allocator_t allocator() { return {this, Control}; }
-  // Public owners must be released before this join. XDNA can retire its
-  // observer and final device storage asynchronously after the last release.
+  // Public owners must be released before this join. Device destruction joins
+  // its workers before returning, so no native borrower can outlive this owner.
   void AwaitReleased() {
     std::unique_lock<std::mutex> lock(mutex_);
     condition_.wait(

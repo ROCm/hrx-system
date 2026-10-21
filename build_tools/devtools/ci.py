@@ -367,7 +367,7 @@ def rdna_device_compiler_options() -> tuple[str, ...]:
 def rdna_windows_weights_step(options: tuple[str, ...], config: str | None) -> CiStep:
     return bazel_test_step(
         "Test RDNA weight streaming",
-        (ci_config.RDNA_WEIGHTS_TARGET,),
+        (ci_config.AMD_GPU_WEIGHTS_TARGET,),
         config=config,
         available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
         test_env=amd_test_env(),

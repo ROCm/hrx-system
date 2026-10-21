@@ -213,10 +213,10 @@ RDNA_BAZEL_TARGETS = (
     "//loom/src/loom/tooling/target/amdgpu/serve/...",
     "//loom/src/loom/tooling/target/amdgpu/test:rdna_hal_tests_execute_rdna_hardware_test",
 )
-RDNA_WEIGHTS_TARGET = "//loom/src/loom/tooling/target/amdgpu/serve:rdna_weights_test"
+AMD_GPU_WEIGHTS_TARGET = "//loom/src/loom/tooling/target/amdgpu/serve:gpu_weights_test"
 # The complete weights suite exercises shader assertions. Windows runs its
 # streaming cases separately without requesting the unavailable feedback service.
-RDNA_WINDOWS_BAZEL_TARGETS = RDNA_BAZEL_TARGETS + ("-" + RDNA_WEIGHTS_TARGET,)
+RDNA_WINDOWS_BAZEL_TARGETS = RDNA_BAZEL_TARGETS + ("-" + AMD_GPU_WEIGHTS_TARGET,)
 RDNA_BAZEL_OPTIONS = (
     "--//runtime/src/iree/hal/drivers/amd/gpu:targets=gfx11-generic,gfx12-generic",
     "--//loom/config/target/amdgpu:targets=gfx110X-all,gfx115X-all,gfx120X-all,gfx11-generic,gfx12-generic",

@@ -10,8 +10,8 @@
 const loom_serve_test_device_t* loom_serve_test_device(void) {
   static const loom_serve_test_device_t device = {
       .driver_register = iree_hal_amd_driver_module_register,
-      .driver_name = IREE_SVL("rdna"),
-      .device_uri = IREE_SVL("rdna"),
+      .driver_name = IREE_SVL("amdgpu2"),
+      .device_uri = IREE_SVL("amdgpu2"),
       .service_backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
   };
   return &device;

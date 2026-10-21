@@ -155,29 +155,31 @@ _SERVING_DEVICES = [
     (
         "",
         ":test_device",
+        "amdgpu",
         ["//runtime/config/hal:driver_amdgpu"],
         _ROCR_TEST_TAGS,
     ),
     (
-        "rdna_",
-        ":test_device_rdna",
+        "gpu_",
+        ":test_device_gpu",
+        "amdgpu2",
         [
             "//runtime/config/hal:driver_amd",
             "//libamdf/config:enabled_setting",
-            "//libamdf/config/family:rdna",
+            "//libamdf/config/family:gpu",
         ],
         ["iree-run-requirement=libamdf.resource.amd_gpu"],
     ),
 ]
 
 loom_cc_library(
-    name = "test_device_rdna",
+    name = "test_device_gpu",
     testonly = True,
-    srcs = ["test_device_rdna.c"],
+    srcs = ["test_device_gpu.c"],
     target_compatible_with = loom_config_compatible_with([
         "//runtime/config/hal:driver_amd",
         "//libamdf/config:enabled_setting",
-        "//libamdf/config/family:rdna",
+        "//libamdf/config/family:gpu",
     ]),
     deps = [
         "//loom/src/loom/serve/testing:device",
@@ -228,7 +230,7 @@ loom_cc_library(
             "//runtime/src/iree/vm/bytecode:module",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 [
@@ -251,7 +253,7 @@ loom_cc_library(
             "//runtime/src/iree/testing:gtest_main",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 loom_py_test(
@@ -490,11 +492,12 @@ loom_cc_test(
         deps = [
             ":test_compiler",
             device,
+            "//loom/src/loom/serve/service/text:elastic_storage_tests",
             "//loom/src/loom/serve/service/text:source_execution_tests",
             "//runtime/src/iree/testing:gtest_main",
-        ] + (["//loom/src/loom/serve/service/text:elastic_storage_tests"] if not prefix else []),
+        ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 [
@@ -547,7 +550,7 @@ loom_cc_test(
             "//runtime/src/iree/testing:gtest_main",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 [
@@ -572,7 +575,7 @@ loom_cc_test(
             "//runtime/src/iree/testing:gtest_main",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 [
@@ -1008,7 +1011,7 @@ loom_cc_binary(
             "//runtime/src/iree/testing:gtest_main",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 [
@@ -1024,7 +1027,7 @@ loom_cc_binary(
         ],
         args = [
             "--weight_sources=$(rootpath //loom/src/loom/serve/runtime/parameter:testdata/weights/stages.loom)",
-            "--weight_device_uri=" + ("rdna" if prefix else "amdgpu") + ":?feedback",
+            "--weight_device_uri=" + device_uri + ":?feedback",
             "--executable_sources=$(rootpath //loom/src/loom/serve/service:testdata/executables/prepare.loom)",
         ],
         data = [
@@ -1075,7 +1078,7 @@ loom_cc_binary(
             "//runtime/src/iree/vm",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 [
@@ -1090,7 +1093,7 @@ loom_cc_binary(
             "//runtime/src/iree/testing:gtest_main",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 [
@@ -1115,7 +1118,7 @@ loom_cc_binary(
             "//runtime/src/iree/testing:gtest_main",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
 
 [
@@ -1142,5 +1145,5 @@ loom_cc_binary(
             "//runtime/src/iree/testing:gtest_main",
         ],
     )
-    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
 ]
