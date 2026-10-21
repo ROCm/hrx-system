@@ -23,6 +23,12 @@ loom_library(
     visibility = ["//visibility:public"],
 )
 
+loom_library(
+    name = "matrix_fragments",
+    srcs = ["matrix.loom"],
+    visibility = ["//visibility:public"],
+)
+
 loom_test(
     name = "layer_gather_test",
     srcs = [

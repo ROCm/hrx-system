@@ -36,6 +36,16 @@ loom_module(
   STRICT_DEPS
 )
 
+loom_module(
+  NAME
+    matrix_fragments
+  SRCS
+    "matrix.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
 loom_test_module(
   NAME
     layer_gather_test_module

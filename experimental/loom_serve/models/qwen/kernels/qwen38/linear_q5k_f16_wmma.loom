@@ -1,5 +1,7 @@
 template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
 
+template.decl @tensor.matrix.f16_16x16x16.operand_elements() -> (index)
+
 template.decl @qwen38.dense_q5k_f16_wmma.x128.body(%token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer)
 
 template.decl @qwen38.dense_q5k_f16_wmma.x128.direct.body(%token_count_data: buffer, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %workitem0: index, %subgroup0: index, %input: buffer, %weight: buffer, %output: buffer)
@@ -101,6 +103,7 @@ func.def inline @qwen38_q5k_f16_vector4(%weight: buffer, %row_byte_base: offset,
 // The four-wave schedule keeps one 64-token activation tile resident while
 // decoding each 64-channel weight tile exactly once.
 template.def<@qwen38.dense_q5k_f16_wmma.x64.body> device @qwen38_dense_q5k_f16_wmma_x64_body(%weight_channels: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %operand_elements = template.apply<@tensor.matrix.f16_16x16x16.operand_elements>() : () -> (index)
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
   %bounded_input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
   %bounded_output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
@@ -199,15 +202,15 @@ template.def<@qwen38.dense_q5k_f16_wmma.x64.body> device @qwen38_dense_q5k_f16_w
       }
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
       %next00, %next01, %next10, %next11 = scf.for %k_half = [%c0 to %c32 step %c16](%half_acc00 = %acc00 : vector<4xf32>, %half_acc01 = %acc01 : vector<4xf32>, %half_acc10 = %acc10 : vector<4xf32>, %half_acc11 = %acc11 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) unroll {
-        %lhs0 = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<64x40xf16> -> vector<16xf16>
-        %rhs0 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %c0] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
-        %rhs1 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %c16] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
-        %rhs2 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %c32] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
-        %rhs3 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %c48] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
-        %half_next00 = vector.mma %lhs0, %rhs0, %half_acc00 : vector<16xf16>, vector<16xf16>, vector<4xf32>
-        %half_next01 = vector.mma %lhs0, %rhs1, %half_acc01 : vector<16xf16>, vector<16xf16>, vector<4xf32>
-        %half_next10 = vector.mma %lhs0, %rhs2, %half_acc10 : vector<16xf16>, vector<16xf16>, vector<4xf32>
-        %half_next11 = vector.mma %lhs0, %rhs3, %half_acc11 : vector<16xf16>, vector<16xf16>, vector<4xf32>
+        %lhs0 = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<64x40xf16> -> vector<[%operand_elements]xf16>
+        %rhs0 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %c0] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<[%operand_elements]xf16>
+        %rhs1 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %c16] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<[%operand_elements]xf16>
+        %rhs2 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %c32] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<[%operand_elements]xf16>
+        %rhs3 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %c48] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<[%operand_elements]xf16>
+        %half_next00 = vector.mma %lhs0, %rhs0, %half_acc00 : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
+        %half_next01 = vector.mma %lhs0, %rhs1, %half_acc01 : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
+        %half_next10 = vector.mma %lhs0, %rhs2, %half_acc10 : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
+        %half_next11 = vector.mma %lhs0, %rhs3, %half_acc11 : vector<[%operand_elements]xf16>, vector<[%operand_elements]xf16>, vector<4xf32>
         scf.yield %half_next00, %half_next01, %half_next10, %half_next11 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
       }
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)

@@ -1,0 +1,59 @@
+// CDNA reuses the same decoded panels, weight order, and publication path as
+// the wave64 WMMA schedule. The shared matrix provider selects MFMA operands.
+template.decl @qwen38.dense_q5k_f16_wmma.x64.body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %channel_tile: index, %token_tile: index, %input: buffer, %weight: buffer, %output: buffer)
+
+amdgpu.target<gfx9-4-generic> @qwen38_dense_cdna_wave64 {subgroup_size = 64}
+
+kernel.def target(@qwen38_dense_cdna_wave64) @qwen38_linear_q5k_f16_mfma(%token_count0: index, %input_size0: index, %output_size0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
+  %one = index.constant 1 : index
+  %padding = index.constant 63 : index
+  %tile = index.constant 64 : index
+  %waves = index.constant 4 : index
+  %width = target.subgroup.size : index
+  %threads = index.mul %waves, %width : index
+  %padded_outputs = index.add %output_size, %padding : index
+  %channel_tiles = index.div %padded_outputs, %tile : index
+  %padded_tokens = index.add %token_count, %padding : index
+  %token_tiles = index.div %padded_tokens, %tile : index
+  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%token_count_data: buffer, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %token_count_view = buffer.view %token_count_data[%origin] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %token_count_view[0] : view<1xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  template.apply<@qwen38.dense_q5k_f16_wmma.x64.body>(%weight_channels, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qwen38_dense_cdna_wave64) @qwen38_linear_q5k_f16_mfma_channel8(%token_count0: index, %input_size0: index, %output_size0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
+  %one = index.constant 1 : index
+  %padding = index.constant 63 : index
+  %tile = index.constant 64 : index
+  %waves = index.constant 4 : index
+  %width = target.subgroup.size : index
+  %threads = index.mul %waves, %width : index
+  %padded_outputs = index.add %output_size, %padding : index
+  %channel_tiles = index.div %padded_outputs, %tile : index
+  %padded_tokens = index.add %token_count, %padding : index
+  %token_tiles = index.div %padded_tokens, %tile : index
+  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%token_count_data: buffer, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 8 : index
+  %origin = index.constant 0 : offset
+  %token_count_view = buffer.view %token_count_data[%origin] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %token_count_view[0] : view<1xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  template.apply<@qwen38.dense_q5k_f16_wmma.x64.body>(%weight_channels, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}

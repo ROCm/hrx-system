@@ -1,0 +1,18 @@
+// Payload sizes for a native 16x16x16 F16 matrix contraction. Wave width alone
+// does not determine operand storage: RDNA WMMA replicates operands across
+// lanes, whereas CDNA MFMA distributes the same logical tile without replicas.
+template.decl @tensor.matrix.f16_16x16x16.operand_elements() -> (index)
+
+amdgpu.target<gfx11-generic> @tensor_matrix_rdna3
+
+amdgpu.target<gfx9-4-generic> @tensor_matrix_cdna3
+
+template.def<@tensor.matrix.f16_16x16x16.operand_elements> target(@tensor_matrix_rdna3) @tensor_matrix_f16_16x16x16_rdna3_operand_elements() -> (index) {
+  %elements = index.constant 16 : index
+  template.return %elements : index
+}
+
+template.def<@tensor.matrix.f16_16x16x16.operand_elements> target(@tensor_matrix_cdna3) @tensor_matrix_f16_16x16x16_cdna3_operand_elements() -> (index) {
+  %elements = index.constant 4 : index
+  template.return %elements : index
+}

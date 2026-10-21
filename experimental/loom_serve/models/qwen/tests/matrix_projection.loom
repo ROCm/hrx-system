@@ -1,0 +1,164 @@
+// Shared projection schedules preserve every GGUF bit and round operands to
+// F16. The independent byte decoder and F64 dot product establish the oracle.
+func.decl @qwen_cohort_reference_q5(%weight: buffer, %block_origin: offset, %element: index) -> (f64, f64)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma(%tokens: index, %inputs: index, %outputs: index) launch(%token_count_data: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_channel8(%tokens: index, %inputs: index, %outputs: index) launch(%token_count_data: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def @q5_projection_headers(%inputs: index, %outputs: index, %weight: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %block_width = index.constant 256 : index
+  %block_bytes = index.constant 176 : offset
+  %blocks = index.div %inputs, %block_width : index
+  %count = index.mul %blocks, %outputs : index
+  %scale = scalar.constant 0.015625 : f16
+  %minimum = scalar.constant 0.0078125 : f16
+  scf.for %block = [%zero to %count step %one] {
+    %origin = index.scale %block, %block_bytes : index, offset -> offset
+    %header = buffer.view %weight[%origin] : buffer -> view<2xf16>
+    view.store %scale, %header[0] : f16, view<2xf16>
+    view.store %minimum, %header[1] : f16, view<2xf16>
+  }
+  func.return
+}
+
+// The independent GGUF byte decoder is shared with the existing cohort oracle.
+// Matrix operands round to F16, followed by a sequential F64 dot product.
+func.def @q5_projection_expected(%token_count_data: buffer, %inputs: index, %outputs: index, %weight_channels: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %block_width = index.constant 256 : index
+  %block_bytes = index.constant 176 : offset
+  %blocks = index.div %inputs, %block_width : index
+  %zero_float = scalar.constant 0.0 : f64
+  %token_count_view = buffer.view %token_count_data[%origin] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %token_count_view[0] : view<1xi32> -> i32
+  %tokens = index.cast %token_count_i32 : i32 to index
+  %activations = buffer.view %input[%origin] : buffer -> view<[%tokens]x[%inputs]xf32>
+  %results = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%outputs]xf32>
+  scf.for %token = [%zero to %tokens step %one] {
+    scf.for %channel = [%zero to %outputs step %one] {
+      %sum = scf.for %element = [%zero to %inputs step %one](%accumulator = %zero_float : f64) -> (f64) {
+        %block = index.div %element, %block_width : index
+        %within = index.rem %element, %block_width : index
+        %channel_group = index.div %channel, %weight_channels : index
+        %channel_within_group = index.rem %channel, %weight_channels : index
+        %group_block = index.madd %channel_group, %blocks, %block : index
+        %block_index = index.madd %group_block, %weight_channels, %channel_within_group : index
+        %block_origin = index.scale %block_index, %block_bytes : index, offset -> offset
+        %positive, %minimum = func.call @qwen_cohort_reference_q5(%weight, %block_origin, %within) : (buffer, offset, index) -> (f64, f64)
+        %weight_value = scalar.subf %positive, %minimum : f64
+        %weight_half = scalar.fptrunc %weight_value : f64 to f16
+        %weight_double = scalar.extf %weight_half : f16 to f64
+        %input_value = view.load %activations[%token, %element] : view<[%tokens]x[%inputs]xf32> -> f32
+        %input_half = scalar.fptrunc %input_value : f32 to f16
+        %input_double = scalar.extf %input_half : f16 to f64
+        %product = scalar.mulf %weight_double, %input_double : f64
+        %next = scalar.addf %accumulator, %product : f64
+        scf.yield %next : f64
+      }
+      %rounded = scalar.fptrunc %sum : f64 to f32
+      view.store %rounded, %results[%token, %channel] : f32, view<[%tokens]x[%outputs]xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @q5_projection_mfma_check {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %tokens = check.literal value(17) : index
+    %token_count_data = check.generate.fill value(17) : tensor<1xi32>
+    %inputs = check.literal value(512) : index
+    %outputs = check.literal value(72) : index
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<17x512xf32>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to 127) : tensor<72x2x176xi8>
+    check.generate<@q5_projection_headers>(%inputs, %outputs, %weight) : (index, index, tensor<72x2x176xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<17x72xf32>
+    check.compare<@qwen38_linear_q5k_f16_mfma, @q5_projection_wmma_expected>[%tokens, %inputs, %outputs](%token_count_data, %inputs, %outputs, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<17x512xf32>, tensor<72x2x176xi8>, tensor<17x72xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0005) rtol(0.00003) nan(different) : tensor<17x72xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @q5_projection_mfma_channel8_check {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %tokens = check.literal value(17) : index
+    %token_count_data = check.generate.fill value(17) : tensor<1xi32>
+    %inputs = check.literal value(512) : index
+    %outputs = check.literal value(72) : index
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<17x512xf32>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to 127) : tensor<72x2x176xi8>
+    check.generate<@q5_projection_headers>(%inputs, %outputs, %weight) : (index, index, tensor<72x2x176xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<17x72xf32>
+    check.compare<@qwen38_linear_q5k_f16_mfma_channel8, @q5_projection_wmma_channel8_expected>[%tokens, %inputs, %outputs](%token_count_data, %inputs, %outputs, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<17x512xf32>, tensor<72x2x176xi8>, tensor<17x72xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0005) rtol(0.00003) nan(different) : tensor<17x72xf32>
+    }
+  }
+  check.return
+}
+
+kernel.decl @qwen38_linear_q5k_f16_wmma(%tokens: index, %inputs: index, %outputs: index) launch(%token_count_data: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def @q5_projection_wmma_expected(%token_count_data: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 1 : index
+  func.call @q5_projection_expected(%token_count_data, %inputs, %outputs, %weight_channels, %input, %weight, %output) : (buffer, index, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @q5_projection_wmma_check {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %tokens = check.literal value(17) : index
+    %token_count_data = check.generate.fill value(17) : tensor<1xi32>
+    %inputs = check.literal value(512) : index
+    %outputs = check.literal value(72) : index
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<17x512xf32>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to 127) : tensor<72x2x176xi8>
+    check.generate<@q5_projection_headers>(%inputs, %outputs, %weight) : (index, index, tensor<72x2x176xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<17x72xf32>
+    check.compare<@qwen38_linear_q5k_f16_wmma, @q5_projection_wmma_expected>[%tokens, %inputs, %outputs](%token_count_data, %inputs, %outputs, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<17x512xf32>, tensor<72x2x176xi8>, tensor<17x72xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0005) rtol(0.00003) nan(different) : tensor<17x72xf32>
+    }
+  }
+  check.return
+}
+
+kernel.decl @qwen38_linear_q5k_f16_wmma_channel8(%tokens: index, %inputs: index, %outputs: index) launch(%token_count_data: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def @q5_projection_wmma_channel8_expected(%token_count_data: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 8 : index
+  func.call @q5_projection_expected(%token_count_data, %inputs, %outputs, %weight_channels, %input, %weight, %output) : (buffer, index, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @q5_projection_wmma_channel8_check {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %tokens = check.literal value(17) : index
+    %token_count_data = check.generate.fill value(17) : tensor<1xi32>
+    %inputs = check.literal value(512) : index
+    %outputs = check.literal value(72) : index
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<17x512xf32>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to 127) : tensor<72x2x176xi8>
+    check.generate<@q5_projection_headers>(%inputs, %outputs, %weight) : (index, index, tensor<72x2x176xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<17x72xf32>
+    check.compare<@qwen38_linear_q5k_f16_wmma_channel8, @q5_projection_wmma_channel8_expected>[%tokens, %inputs, %outputs](%token_count_data, %inputs, %outputs, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<17x512xf32>, tensor<72x2x176xi8>, tensor<17x72xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0005) rtol(0.00003) nan(different) : tensor<17x72xf32>
+    }
+  }
+  check.return
+}
