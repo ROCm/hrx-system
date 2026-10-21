@@ -4,6 +4,8 @@ kernel.decl @flash_next_mtp_embedding() launch(%span: buffer, %token_ids: buffer
 
 kernel.decl @flash_next_mtp_normalize() launch(%width_value: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
+kernel.decl @flash_next_mtp_normalize_warm() launch(%epoch: buffer, %mapping: buffer, %origins: buffer, %restored: buffer, %target: buffer, %weight: buffer, %output: buffer)
+
 kernel.decl @flash_next_mtp_fuse() launch(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @flash_next_mtp_embedding_matrix() launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
@@ -33,26 +35,46 @@ command.program.def @flash_next_mtp_project() launch(%parameters: buffer, %epoch
   command.return
 }
 
-// The sidecar stores only predictor-specific parameters. Embedding and output
-// tables are byte-identical to the target's tensors and share its parameter bank.
-command.program.def public @flash_next_mtp_input() launch(%parameters: buffer, %target_parameters: buffer, %epoch: buffer, %ids: buffer, %hidden: buffer, %residual: buffer) {
+// Both input owners share embedding lookup, normalization, and projection.
+// The embedding table is byte-identical to the target's and shares its bank.
+command.program.def @flash_next_mtp_embed_project() launch(%parameters: buffer, %target_parameters: buffer, %epoch: buffer, %ids: buffer, %normalized_hidden: buffer, %residual: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %embedding_stride = index.constant 5120 : offset
-  %hidden_stride = index.constant 20480 : offset
   %embedding_bytes = index.scale %tokens, %embedding_stride : index, offset -> offset
-  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
   %embedding = buffer.alloca<global> align(256) %embedding_bytes : buffer
   %normalized_embedding = buffer.alloca<global> align(256) %embedding_bytes : buffer
-  %normalized_hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %embedding_weight = command.parameter %target_parameters, "token_embd.weight" : view<675430400xi8>
   %embedding_norm = command.parameter %parameters, "blk.48.nextn.enorm.weight" : view<2560xf32>
-  %hidden_norm = command.parameter %parameters, "blk.48.nextn.hnorm.weight" : view<10240xf32>
   %embedding_width = index.constant 2560 : index
-  %hidden_width = index.constant 10240 : index
   kernel.launch @flash_next_mtp_embedding(%epoch, %ids, %embedding_weight, %embedding) : (buffer, buffer, view<675430400xi8>, buffer)
   kernel.launch @flash_next_mtp_normalize(%embedding_width, %epoch, %embedding, %embedding_norm, %normalized_embedding) : (index, buffer, buffer, view<2560xf32>, buffer)
-  kernel.launch @flash_next_mtp_normalize(%hidden_width, %epoch, %hidden, %hidden_norm, %normalized_hidden) : (index, buffer, buffer, view<10240xf32>, buffer)
   command.program.launch @flash_next_mtp_project(%parameters, %epoch, %normalized_embedding, %normalized_hidden, %residual) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// Recursive proposals own a contiguous private hidden plane.
+command.program.def public @flash_next_mtp_input() launch(%parameters: buffer, %target_parameters: buffer, %epoch: buffer, %ids: buffer, %hidden: buffer, %residual: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %hidden_stride = index.constant 20480 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %normalized_hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %hidden_norm = command.parameter %parameters, "blk.48.nextn.hnorm.weight" : view<10240xf32>
+  %hidden_width = index.constant 10240 : index
+  kernel.launch @flash_next_mtp_normalize(%hidden_width, %epoch, %hidden, %hidden_norm, %normalized_hidden) : (index, buffer, buffer, view<10240xf32>, buffer)
+  command.program.launch @flash_next_mtp_embed_project(%parameters, %target_parameters, %epoch, %ids, %normalized_hidden, %residual) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// Catch-up binds immutable target rows and restored first-row carry separately.
+// Normalization finishes reading carry before projection overwrites residual.
+command.program.def @flash_next_mtp_warm_input() launch(%parameters: buffer, %target_parameters: buffer, %epoch: buffer, %mapping: buffer, %origins: buffer, %ids: buffer, %target: buffer, %residual: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %hidden_stride = index.constant 20480 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %normalized_hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %hidden_norm = command.parameter %parameters, "blk.48.nextn.hnorm.weight" : view<10240xf32>
+  kernel.launch @flash_next_mtp_normalize_warm(%epoch, %mapping, %origins, %residual, %target, %hidden_norm, %normalized_hidden) : (buffer, buffer, buffer, buffer, buffer, view<10240xf32>, buffer)
+  command.program.launch @flash_next_mtp_embed_project(%parameters, %target_parameters, %epoch, %ids, %normalized_hidden, %residual) : (buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -64,7 +86,7 @@ kernel.decl @flash_next_mtp_compact() launch(%accepted: buffer, %compact: buffer
 
 kernel.decl @flash_next_mtp_restore() launch(%epoch: buffer, %carry: buffer, %cache: buffer, %hidden: buffer)
 
-kernel.decl @flash_next_mtp_shift() launch(%epoch: buffer, %origins: buffer, %target: buffer, %target_tokens: buffer, %hidden: buffer, %tokens: buffer)
+kernel.decl @flash_next_mtp_ids() launch(%epoch: buffer, %origins: buffer, %target_tokens: buffer, %tokens: buffer)
 
 kernel.decl @flash_next_mtp_commit() launch(%epoch: buffer, %origins: buffer, %target: buffer, %cache: buffer, %carry: buffer)
 
@@ -94,17 +116,16 @@ command.program.def public @flash_next_mtp_warm() launch(%input_parameters: buff
   %origin_bytes = index.constant 64 : offset
   %epoch = buffer.alloca<global> align(16) %epoch_bytes : buffer
   %origins = buffer.alloca<global> align(16) %origin_bytes : buffer
-  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %mixed = buffer.alloca<global> align(256) %mixed_bytes : buffer
   %injection = buffer.alloca<global> align(256) %mapping_bytes : buffer
   %mapping = buffer.alloca<global> align(16) %mapping_bytes : buffer
   %ids = buffer.alloca<global> align(16) %id_bytes : buffer
   kernel.launch @flash_next_mtp_compact(%accepted, %epoch, %origins) : (buffer, buffer, buffer)
-  kernel.launch @flash_next_mtp_restore(%epoch, %carry, %cache, %hidden) : (buffer, buffer, buffer, buffer)
-  kernel.launch @flash_next_mtp_shift(%epoch, %origins, %target_hidden, %target_tokens, %hidden, %ids) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_mtp_restore(%epoch, %carry, %cache, %residual) : (buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_mtp_ids(%epoch, %origins, %target_tokens, %ids) : (buffer, buffer, buffer, buffer)
   kernel.launch @flash_next_map_tokens(%epoch, %mapping) : (buffer, buffer)
-  command.program.launch @flash_next_mtp_input(%input_parameters, %embedding_parameters, %epoch, %ids, %hidden, %residual) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_mtp_warm_input(%input_parameters, %embedding_parameters, %epoch, %mapping, %origins, %ids, %target_hidden, %residual) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   %layer = index.constant 48 : index
   %key_origin = index.constant 0 : offset
   %tail_origin = index.constant 0 : offset
@@ -112,7 +133,9 @@ command.program.def public @flash_next_mtp_warm() launch(%input_parameters: buff
   %value_origin = index.scale %pool, %main_stride : index, offset -> offset
   %index_origin = index.add %value_origin, %value_origin : offset
   command.program.launch @flash_next_hc_attn[%layer](%mixer_parameters, %epoch, %residual, %injection, %mixed) : [index](buffer, buffer, buffer, buffer, buffer)
-  command.program.launch @flash_next_qsa_append[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%append_parameters, %epoch, %mapping, %rows, %mixed, %cache, %hidden) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  // Warm stages specialize verification_width to zero, erasing capture. The
+  // residual supplies that unused binding without reserving a capture plane.
+  command.program.launch @flash_next_qsa_append[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%append_parameters, %epoch, %mapping, %rows, %mixed, %cache, %residual) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @flash_next_mtp_commit(%epoch, %origins, %target_hidden, %cache, %carry) : (buffer, buffer, buffer, buffer, buffer)
   command.return
 }

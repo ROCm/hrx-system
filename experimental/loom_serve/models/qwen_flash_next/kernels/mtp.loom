@@ -6,8 +6,53 @@ func.decl @flash_next_q8_dot(%width: index, %input_origin: offset, %weight_origi
 
 amdgpu.target<gfx11-generic> @flash_next_mtp_wave32 {subgroup_size = 32}
 
+func.decl @flash_next_token_binding(%mapping: buffer, %token: index) -> (index, index, index, index)
+
 // The predictor normalizes the entire four-stream hidden row together. Its
 // embedding has an independent 2560-wide norm. GGUF already folded 1+gamma.
+// Both input owners share this arithmetic and reduction; source rows can differ
+// from the compact destination rows.
+template.decl @flash_next.mtp_normalize_row(%width: index, %tokens: index, %token: index, %source_token: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@flash_next.mtp_normalize_row> device @flash_next_mtp_normalize_row(%width: index, %tokens: index, %token: index, %source_token: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %thread = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %c8 = index.constant 8 : index
+  %c0 = index.constant 0 : index
+  %stride = index.constant 128 : index
+  %packets = index.div %width, %c8 : index
+  %inputs = buffer.view %input[%origin] : buffer -> view<[%tokens]x[%packets]x8xbf16>
+  %weights = buffer.view %weight[%origin] : buffer -> view<[%packets]x8xf32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%packets]x8xbf16>
+  %initial_sum = scalar.constant 0.0 : f32
+  %initial = vector.constant 0.0 : vector<8xf32>
+  %parts = scf.for %packet = [%thread to %packets step %stride](%prior = %initial : vector<8xf32>) -> (vector<8xf32>) {
+    %packed = vector.load %inputs[%source_token, %packet, %c0] : view<[%tokens]x[%packets]x8xbf16> -> vector<8xbf16>
+    %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+    %next = vector.fmaf %values, %values, %prior : vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  %partial = vector.reduce<addf> %parts, %initial_sum : vector<8xf32>, f32
+  %sum = kernel.workgroup.reduce<addf> %partial : f32
+  %width_word = index.cast %width : index to i32
+  %width_float = scalar.uitofp %width_word : i32 to f32
+  %mean = scalar.divf %sum, %width_float : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  %biased = scalar.addf %mean, %epsilon : f32
+  %inverse = scalar.rsqrtf<afn> %biased : f32
+  %inverse_vector = vector.splat %inverse : vector<8xf32>
+  scf.for %packet = [%thread to %packets step %stride] {
+    %packed = vector.load %inputs[%source_token, %packet, %c0] : view<[%tokens]x[%packets]x8xbf16> -> vector<8xbf16>
+    %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+    %gamma = vector.load %weights[%packet, %c0] : view<[%packets]x8xf32> -> vector<8xf32>
+    %unit = vector.mulf %values, %inverse_vector : vector<8xf32>
+    %scaled = vector.mulf %unit, %gamma : vector<8xf32>
+    %rounded = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+    vector.store %rounded, %outputs[%token, %packet, %c0] : vector<8xbf16>, view<[%tokens]x[%packets]x8xbf16>
+  }
+  template.return
+}
+
 kernel.def @flash_next_mtp_normalize() {
   %tokens = config.get @flash_next.token_count : index
   %threads = index.constant 128 : index
@@ -20,41 +65,48 @@ kernel.def @flash_next_mtp_normalize() {
   %count = func.call @flash_next_token_count(%epoch, %tokens) : (buffer, index) -> (index)
   %active = index.cmp ult, %token, %count : index
   scf.if %active {
-    %thread = kernel.workitem.id<x> : index
+    template.apply<@flash_next.mtp_normalize_row>(%width, %tokens, %token, %token, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
+// First rows read restored carry; subsequent rows bind the accepted target
+// prefix directly, so rejected rows never become predictor input.
+kernel.def @flash_next_mtp_normalize_warm() {
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %mapping: buffer, %origins: buffer, %restored: buffer, %target: buffer, %weight: buffer, %output: buffer) {
+  %width = index.constant 10240 : index
+  %tokens = config.get @flash_next.token_count : index
+  %token = kernel.workgroup.id<x> : index
+  %count = func.call @flash_next_token_count(%epoch, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
     %origin = index.constant 0 : offset
-    %c8 = index.constant 8 : index
-    %c0 = index.constant 0 : index
-    %stride = index.constant 128 : index
-    %packets = index.div %width, %c8 : index
-    %inputs = buffer.view %input[%origin] : buffer -> view<[%tokens]x[%packets]x8xbf16>
-    %weights = buffer.view %weight[%origin] : buffer -> view<[%packets]x8xf32>
-    %outputs = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%packets]x8xbf16>
-    %initial_sum = scalar.constant 0.0 : f32
-    %initial = vector.constant 0.0 : vector<8xf32>
-    %parts = scf.for %packet = [%thread to %packets step %stride](%prior = %initial : vector<8xf32>) -> (vector<8xf32>) {
-      %packed = vector.load %inputs[%token, %packet, %c0] : view<[%tokens]x[%packets]x8xbf16> -> vector<8xbf16>
-      %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
-      %next = vector.fmaf %values, %values, %prior : vector<8xf32>
-      scf.yield %next : vector<8xf32>
+    // The mapping owns the compact token. Origins are keyed by resident row,
+    // so rejection holes and a different compact order do not change ownership.
+    %position, %row, %begin, %first_position = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %first = index.cmp eq, %token, %begin : index
+    %source_token = scf.if %first -> (index) {
+      scf.yield %begin : index
+    } else {
+      %relative_value = index.sub %token, %begin : index
+      %relative = index.assume %relative_value [range(%relative_value, 1, 32767), lt(%relative_value, %tokens)] : index
+      %c1 = index.constant 1 : index
+      %prior = index.sub %relative, %c1 : index
+      %source_origins = buffer.view %origins[%origin] : buffer -> view<16xi32>
+      %source_begin_word = view.load %source_origins[%row] : view<16xi32> -> i32
+      %source_begin = index.cast %source_begin_word : i32 to index
+      %source_value = index.add %source_begin, %prior : index
+      %source = index.assume %source_value [range(%source_value, 0, 32767), lt(%source_value, %tokens)] : index
+      scf.yield %source : index
     }
-    %partial = vector.reduce<addf> %parts, %initial_sum : vector<8xf32>, f32
-    %sum = kernel.workgroup.reduce<addf> %partial : f32
-    %width_word = index.cast %width : index to i32
-    %width_float = scalar.uitofp %width_word : i32 to f32
-    %mean = scalar.divf %sum, %width_float : f32
-    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
-    %biased = scalar.addf %mean, %epsilon : f32
-    %inverse = scalar.rsqrtf<afn> %biased : f32
-    %inverse_vector = vector.splat %inverse : vector<8xf32>
-    scf.for %packet = [%thread to %packets step %stride] {
-      %packed = vector.load %inputs[%token, %packet, %c0] : view<[%tokens]x[%packets]x8xbf16> -> vector<8xbf16>
-      %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
-      %gamma = vector.load %weights[%packet, %c0] : view<[%packets]x8xf32> -> vector<8xf32>
-      %unit = vector.mulf %values, %inverse_vector : vector<8xf32>
-      %scaled = vector.mulf %unit, %gamma : vector<8xf32>
-      %rounded = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
-      vector.store %rounded, %outputs[%token, %packet, %c0] : vector<8xbf16>, view<[%tokens]x[%packets]x8xbf16>
-    }
+    // Restore publishes first rows, including explicit fresh zeros. All other
+    // input rows remain in the immutable target plane; no hidden copy is needed.
+    %input = scf.select %first, %restored, %target : buffer
+    template.apply<@flash_next.mtp_normalize_row>(%width, %tokens, %token, %source_token, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
   }
   kernel.return
 }

@@ -1,5 +1,7 @@
 kernel.decl @flash_next_mtp_normalize() launch(%width_value: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
+kernel.decl @flash_next_mtp_normalize_warm() launch(%epoch: buffer, %mapping: buffer, %origins: buffer, %restored: buffer, %target: buffer, %weight: buffer, %output: buffer)
+
 kernel.decl @flash_next_mtp_fuse() launch(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer)
 
 // Different stream magnitudes make a per-stream hidden RMS visibly incorrect.
@@ -99,6 +101,70 @@ check.scenario public @predictor_normalization configure[2](%configuration: inde
     %output = check.generate.fill value(-17.0) : tensor<2x10240xbf16>
     check.compare<@flash_next_mtp_normalize, @normalize_reference>(%width, %epoch, %input, %gamma, %output) : (index, tensor<1xi32>, tensor<2x10240xbf16>, tensor<10240xf32>, tensor<2x10240xbf16>) -> () {
       check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<2x10240xbf16>
+    }
+  }
+  check.return
+}
+
+// A retained span belongs to resident row seven. Its first input is old carry;
+// the next input is target row zero. Other origins retain an invalid index.
+func.def @warm_normalization_fixture(%count: index, %epoch: buffer, %mapping: buffer, %origins: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<1xi32>
+  %rows = buffer.view %mapping[%origin] : buffer -> view<2x4xi32>
+  %sources = buffer.view %origins[%origin] : buffer -> view<16xi32>
+  %count_word = index.cast %count : index to i32
+  %c0_i32 = scalar.constant 0 : i32
+  %owner = scalar.constant 7 : i32
+  %position = scalar.constant 32 : i32
+  %next_position = scalar.constant 33 : i32
+  view.store %count_word, %header[0] : i32, view<1xi32>
+  view.store %c0_i32, %sources[7] : i32, view<16xi32>
+  view.store %position, %rows[0, 0] : i32, view<2x4xi32>
+  view.store %owner, %rows[0, 1] : i32, view<2x4xi32>
+  view.store %c0_i32, %rows[0, 2] : i32, view<2x4xi32>
+  view.store %position, %rows[0, 3] : i32, view<2x4xi32>
+  view.store %next_position, %rows[1, 0] : i32, view<2x4xi32>
+  view.store %owner, %rows[1, 1] : i32, view<2x4xi32>
+  view.store %c0_i32, %rows[1, 2] : i32, view<2x4xi32>
+  view.store %position, %rows[1, 3] : i32, view<2x4xi32>
+  func.return
+}
+
+// The oracle assembles the two known source rows without using the token map,
+// then applies the independent F64 normalization shared with contiguous inputs.
+func.def @warm_normalization_reference(%epoch: buffer, %mapping: buffer, %origins: buffer, %restored: buffer, %target: buffer, %gamma: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %row_bytes = index.constant 20480 : offset
+  %bytes = index.constant 40960 : offset
+  %width = index.constant 10240 : index
+  %assembled = buffer.alloca<private> align(16) %bytes : buffer
+  buffer.copy %restored[%origin], %assembled[%origin], %row_bytes
+  buffer.copy %target[%origin], %assembled[%row_bytes], %row_bytes
+  func.call @normalize_reference(%width, %epoch, %assembled, %gamma, %output) : (index, buffer, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @warm_normalization_binding {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %target_seed = check.literal value(419) : i64
+    %gamma_seed = check.literal value(421) : i64
+    %epoch = check.generate.fill value(0) : tensor<1xi32>
+    %mapping = check.generate.fill value(-7) : tensor<2x4xi32>
+    %origins = check.generate.fill value(-7) : tensor<16xi32>
+    %restored = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<2x10240xbf16>
+    %target = check.generate.random.uniform seed(%target_seed) range(-2.0 to 2.0) : tensor<2x10240xbf16>
+    %gamma = check.generate.random.uniform seed(%gamma_seed) range(0.5 to 1.5) : tensor<10240xf32>
+    %output = check.generate.fill value(-17.0) : tensor<2x10240xbf16>
+    check.generate<@warm_normalization_fixture>(%trial, %epoch, %mapping, %origins) : (index, tensor<1xi32>, tensor<2x4xi32>, tensor<16xi32>) -> ()
+    check.compare<@flash_next_mtp_normalize_warm, @warm_normalization_reference>(%epoch, %mapping, %origins, %restored, %target, %gamma, %output) : (tensor<1xi32>, tensor<2x4xi32>, tensor<16xi32>, tensor<2x10240xbf16>, tensor<2x10240xbf16>, tensor<10240xf32>, tensor<2x10240xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<2x10240xbf16>
+      check.expect.bitwise actual(%restored) expected(%restored) : tensor<2x10240xbf16>
+      check.expect.bitwise actual(%target) expected(%target) : tensor<2x10240xbf16>
+      check.expect.bitwise actual(%mapping) expected(%mapping) : tensor<2x4xi32>
+      check.expect.bitwise actual(%origins) expected(%origins) : tensor<16xi32>
+      check.expect.bitwise actual(%epoch) expected(%epoch) : tensor<1xi32>
     }
   }
   check.return
