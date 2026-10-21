@@ -145,6 +145,63 @@ class BazelProfileSummaryTest(unittest.TestCase):
             console = bazel_profile_summary.render_console(summary, "Test example")
             self.assertIn("10.250s process, 12.500s action", console)
 
+    def test_retains_instant_critical_path_components(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile_path = Path(directory) / "instant.profile.gz"
+            self.write_profile(
+                profile_path,
+                [
+                    {
+                        "cat": "critical path component",
+                        "name": "action 'Writing script header-cmd.bat'",
+                        "ph": "i",
+                        "ts": 415978,
+                        "pid": 1,
+                        "args": {"tid": 70},
+                        "tid": 0,
+                    },
+                    {
+                        "cat": "critical path component",
+                        "name": "action 'Testing //example:queue_test'",
+                        "ph": "X",
+                        "ts": 416000,
+                        "dur": 100000,
+                    },
+                ],
+            )
+            summary = bazel_profile_summary.summarize(profile_path)
+            self.assertEqual(
+                summary.critical_path,
+                (
+                    bazel_profile_summary.ActionTiming(
+                        name="action 'Writing script header-cmd.bat'",
+                        duration_seconds=0.0,
+                        mnemonic=None,
+                    ),
+                    bazel_profile_summary.ActionTiming(
+                        name="action 'Testing //example:queue_test'",
+                        duration_seconds=0.1,
+                        mnemonic=None,
+                    ),
+                ),
+            )
+            self.assertIn(
+                "Writing script header-cmd.bat",
+                bazel_profile_summary.render_markdown(summary, "Native queues"),
+            )
+
+    def test_complete_critical_path_components_require_a_duration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile_path = Path(directory) / "malformed.profile.gz"
+            self.write_profile(
+                profile_path,
+                [{"cat": "critical path component", "ph": "X", "ts": 0}],
+            )
+            with self.assertRaisesRegex(
+                bazel_profile_summary.BazelProfileSummaryError, "no numeric dur"
+            ):
+                bazel_profile_summary.summarize(profile_path)
+
     def test_retains_slow_action_when_process_timing_is_unavailable(self):
         with tempfile.TemporaryDirectory() as directory:
             profile_path = Path(directory) / "test-example.profile.gz"

@@ -322,12 +322,15 @@ def summarize(profile_path: Path) -> BazelProfileSummary:
     for event in events:
         if event.get("cat") != "critical path component":
             continue
+        # Bazel emits zero-duration critical-path components as instant events.
+        # They retain their position and name without a duration field.
+        duration = 0.0 if event.get("ph") == "i" else _event_number(event, "dur")
         critical_path.append(
             (
                 _event_number(event, "ts"),
                 ActionTiming(
                     name=_event_name(event, "<unnamed critical-path component>"),
-                    duration_seconds=_seconds(_event_number(event, "dur")),
+                    duration_seconds=_seconds(duration),
                     mnemonic=None,
                 ),
             )
