@@ -400,10 +400,21 @@ def target_patterns_select_project(targets: list[str], project: str) -> bool:
 
 
 def clang_tidy_configuration_args(targets: list[str]) -> list[str]:
-    """Enables the selected projects' source coverage for static analysis."""
+    """Selects optional C/C++ families needed for static-analysis coverage."""
     args = []
-    if target_patterns_select_project(targets, "libamdf"):
-        args.append("--//libamdf/config:enabled=true")
+    selects_runtime = target_patterns_select_project(targets, "runtime")
+    if selects_runtime:
+        args.append(
+            f"{bazel_configure.NATIVE_DRIVER_FLAG}="
+            + ",".join(bazel_configure.ALL_DRIVERS)
+        )
+    selects_libamdf = target_patterns_select_project(targets, "libamdf")
+    if selects_runtime or selects_libamdf:
+        args.append(f"{bazel_configure.NATIVE_AMDF_ENABLED_FLAG}=true")
+        args.append(
+            f"{bazel_configure.NATIVE_AMDF_FAMILIES_FLAG}="
+            + ",".join(bazel_configure.AMDF_FAMILIES)
+        )
     if target_patterns_select_project(targets, "loom"):
         args.append(
             f"{bazel_configure.NATIVE_LOOM_TARGET_FLAG}="

@@ -781,7 +781,17 @@ class CliTest(unittest.TestCase):
         self.assertIn("//runtime/src/iree/tokenizer:all", description)
         self.assertNotIn("build_tools/lefthook/presubmit.py", description)
         self.assertNotIn("--keep_going", description)
-        self.assertNotIn("--//libamdf/config:enabled=", description)
+        self.assertIn(
+            f"{bazel_configure.NATIVE_DRIVER_FLAG}="
+            + ",".join(bazel_configure.ALL_DRIVERS),
+            description,
+        )
+        self.assertIn(f"{bazel_configure.NATIVE_AMDF_ENABLED_FLAG}=true", description)
+        self.assertIn(
+            f"{bazel_configure.NATIVE_AMDF_FAMILIES_FLAG}="
+            + ",".join(bazel_configure.AMDF_FAMILIES),
+            description,
+        )
 
     def test_bazel_clang_tidy_ci_target_keeps_going(self):
         args = cli.parse_arguments(
@@ -818,16 +828,16 @@ class CliTest(unittest.TestCase):
             (["//libamdf/cts:*", "-//libamdf/cts:all"], True),
             (["//...", "-//libamdf/...", "//libamdf/src:allocator"], True),
             (["-//libamdf/...", "//..."], True),
-            (["//runtime/..."], False),
+            (["//runtime/..."], True),
             (["//:all"], False),
             ([":all"], False),
             (["//libamdf_tools:helper"], False),
             (["@external//libamdf/..."], False),
             (["@@external+//..."], False),
-            (["//runtime/...", "-//libamdf/..."], False),
-            (["//...", "-//libamdf/..."], False),
-            (["//...:all", "-//libamdf/...:all"], False),
-            (["@@//...", "-@hrx//libamdf/...:all-targets"], False),
+            (["//runtime/...", "-//libamdf/..."], True),
+            (["//...", "-//libamdf/..."], True),
+            (["//...:all", "-//libamdf/...:all"], True),
+            (["@@//...", "-@hrx//libamdf/...:all-targets"], True),
             (["//libamdf/src:allocator", "-//libamdf/src:allocator"], False),
             (["//libamdf/src:all", "-//libamdf/src:all"], False),
             (["//libamdf/src:all", "-//libamdf/src/..."], False),
@@ -835,14 +845,45 @@ class CliTest(unittest.TestCase):
         )
         for targets, enabled in cases:
             with self.subTest(targets=targets):
-                args = cli.parse_arguments(["bazel", "clang-tidy", "--", *targets])
-
-                description = normalized_plan_description(args.handler(args))
-
+                command = self.planned_argv(["bazel", "clang-tidy", "--", *targets])
+                self.assertEqual("--//libamdf/config:enabled=true" in command, enabled)
+                self.assertNotIn("--//libamdf/config:enabled=false", command)
+                family_flags = [
+                    arg.removeprefix(bazel_configure.NATIVE_AMDF_FAMILIES_FLAG + "=")
+                    for arg in command
+                    if arg.startswith(bazel_configure.NATIVE_AMDF_FAMILIES_FLAG + "=")
+                ]
                 self.assertEqual(
-                    "--//libamdf/config:enabled=true" in description, enabled
+                    family_flags,
+                    [",".join(bazel_configure.AMDF_FAMILIES)] if enabled else [],
                 )
-                self.assertNotIn("--//libamdf/config:enabled=false", description)
+
+    def test_bazel_clang_tidy_scopes_complete_runtime_driver_configuration(self):
+        cases = (
+            (["//runtime/src/iree/hal/drivers/amd/gpu/cts:driver_test"], True),
+            (["//runtime/..."], True),
+            (["//..."], True),
+            (["//runtime/...", "-//runtime/..."], False),
+            (["//loom/..."], False),
+            (["//libamdf/..."], False),
+        )
+        for targets, enabled in cases:
+            with self.subTest(targets=targets):
+                command = self.planned_argv(["bazel", "clang-tidy", "--", *targets])
+                driver_flags = [
+                    arg.removeprefix(bazel_configure.NATIVE_DRIVER_FLAG + "=")
+                    for arg in command
+                    if arg.startswith(bazel_configure.NATIVE_DRIVER_FLAG + "=")
+                ]
+                self.assertEqual(
+                    driver_flags,
+                    [",".join(bazel_configure.ALL_DRIVERS)] if enabled else [],
+                )
+                self.assertEqual(
+                    f"{bazel_configure.NATIVE_AMDF_ENABLED_FLAG}=true" in command,
+                    enabled or targets == ["//libamdf/..."],
+                )
+                self.assertEqual(command[command.index("--") + 1 :], targets)
 
     def test_bazel_clang_tidy_scopes_loom_enablement(self):
         cases = (

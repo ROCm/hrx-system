@@ -21,6 +21,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from build_tools.bazel import configure as bazel_configure
+
 PRESUBMIT_PATH = Path(__file__).with_name("presubmit.py")
 PRESUBMIT_SPEC = importlib.util.spec_from_file_location("presubmit", PRESUBMIT_PATH)
 if PRESUBMIT_SPEC is None or PRESUBMIT_SPEC.loader is None:
@@ -61,6 +63,8 @@ class PresubmitTest(unittest.TestCase):
             "build_tools/clang_tidy/iree/IreeTidyModule.cc",
             "runtime/src/iree/base/BUILD.bazel",
             "runtime/src/iree/base/status.c",
+            "runtime/src/iree/hal/drivers/amd/gpu/cts/BUILD.bazel",
+            "runtime/src/iree/hal/drivers/amd/gpu/cts/driver_test.cc",
         }
         for relative_path in fixture_paths:
             path = repository_root / relative_path
@@ -1392,6 +1396,48 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("//consumer/package:smoke_test", command)
         self.assertNotIn("//build_tools/bazel/test:all", command)
 
+    def test_clang_tidy_enables_every_driver_for_resolved_runtime_owner(self):
+        source_path = "runtime/src/iree/hal/drivers/amd/gpu/cts/driver_test.cc"
+        with (
+            mock.patch.object(presubmit.sys, "platform", "linux"),
+            mock.patch.object(
+                presubmit, "clang_tidy_llvm_available", return_value=True
+            ),
+            mock.patch.object(
+                presubmit,
+                "query_compiling_targets_for_sources",
+                return_value=["//runtime/src/iree/hal/drivers/amd/gpu/cts:driver_test"],
+            ),
+            mock.patch.object(
+                presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            self.assertTrue(
+                presubmit.run_clang_tidy(
+                    input_scope([source_path]),
+                    profile="paranoid",
+                    lane="bazel",
+                    verbose=False,
+                )
+            )
+
+        command = run_command.call_args.args[0]
+        self.assertIn(
+            f"{bazel_configure.NATIVE_DRIVER_FLAG}="
+            + ",".join(bazel_configure.ALL_DRIVERS),
+            command,
+        )
+        self.assertIn(f"{bazel_configure.NATIVE_AMDF_ENABLED_FLAG}=true", command)
+        self.assertIn(
+            f"{bazel_configure.NATIVE_AMDF_FAMILIES_FLAG}="
+            + ",".join(bazel_configure.AMDF_FAMILIES),
+            command,
+        )
+        self.assertEqual(
+            command[-1],
+            "//runtime/src/iree/hal/drivers/amd/gpu/cts:driver_test",
+        )
+
     def test_libamdf_clang_tidy_routes_and_enables_optional_package(self):
         source_path = "libamdf/src/allocator.c"
         header_path = "libamdf/src/allocator.h"
@@ -1439,14 +1485,24 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("--//libamdf/config:enabled=true", command)
         self.assertEqual(command[-1], "//libamdf/src:allocator")
 
-    def test_clang_tidy_runtime_fix_preserves_configured_libamdf_enablement(self):
+    def test_clang_tidy_runtime_fix_enables_complete_driver_configuration(self):
         command = presubmit.clang_tidy_bazel_command(
             ["//runtime/src/iree/base:all"],
             emit_fixes=True,
             local_outputs=True,
         )
 
-        self.assertNotIn("--//libamdf/config:enabled=true", command)
+        self.assertIn(
+            f"{bazel_configure.NATIVE_DRIVER_FLAG}="
+            + ",".join(bazel_configure.ALL_DRIVERS),
+            command,
+        )
+        self.assertIn("--//libamdf/config:enabled=true", command)
+        self.assertIn(
+            f"{bazel_configure.NATIVE_AMDF_FAMILIES_FLAG}="
+            + ",".join(bazel_configure.AMDF_FAMILIES),
+            command,
+        )
         self.assertNotIn("--//libamdf/config:enabled=false", command)
         self.assertIn("--aspects_parameters=emit_fixes=true", command)
 
