@@ -21,8 +21,6 @@ config.decl @ggml.linear_q5k_q8_1_x4.token_capacity : %value: index where [range
 
 config.decl @ggml.linear_q5k_q8_1_x4.output_capacity : %value: index where [range(%value, 1, 262144)]
 
-amdgpu.target<gfx11-generic> @ggml_q5k_gfx11_wave32 {subgroup_size = 32}
-
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count_argument: index, %input_size_argument: index, %input: buffer, %output: buffer)
 
 // Decodes one 16-value half of a Q5_K scale group and its two physical scales.
@@ -307,7 +305,7 @@ template.def<@ggml.q5k.q8_1_x4.single.body> device @ggml_q5k_q8_1_x4_single_body
   template.return
 }
 
-kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4") @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def export("ggml_linear_q5k_q8_1_x4") @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %subgroup_size = target.subgroup.size : index
@@ -327,7 +325,7 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4") @ggm
 }
 
 // Eight-channel block order retains the same Q8 activation and reduction math.
-kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_channel8") @ggml_linear_q5k_q8_1_x4_channel8(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def export("ggml_linear_q5k_q8_1_x4_channel8") @ggml_linear_q5k_q8_1_x4_channel8(%token_count: index, %input_size: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 8, 262144), multiple_of(%output_size, 8)] : index
   %subgroup_size = target.subgroup.size : index
@@ -423,7 +421,7 @@ template.def<@ggml.q5k.q8_1_x4.four.body> device @ggml_q5k_q8_1_x4_four_body(%to
   template.return
 }
 
-kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @ggml_linear_q5k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def export("ggml_linear_q5k_q8_1_x4_m4") @ggml_linear_q5k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %subgroup_size = target.subgroup.size : index
@@ -443,7 +441,7 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @
 }
 
 // Eight-channel block order retains the same Q8 activation and reduction math.
-kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4_channel8") @ggml_linear_q5k_q8_1_x4_m4_channel8(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def export("ggml_linear_q5k_q8_1_x4_m4_channel8") @ggml_linear_q5k_q8_1_x4_m4_channel8(%token_count: index, %input_size: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 8, 262144), multiple_of(%output_size, 8)] : index
   %subgroup_size = target.subgroup.size : index

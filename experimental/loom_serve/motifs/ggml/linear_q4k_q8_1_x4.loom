@@ -18,8 +18,6 @@ config.decl @ggml.linear_q4k_q8_1_x4.token_capacity : %value: index where [range
 
 config.decl @ggml.linear_q4k_q8_1_x4.output_capacity : %value: index where [range(%value, 1, 262144)]
 
-amdgpu.target<gfx11-generic> @ggml_q4k_gfx11_wave32 {subgroup_size = 32}
-
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count_argument: index, %input_size_argument: index, %input: buffer, %output: buffer)
 
 func.decl @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %q4_half: index) -> (vector<16xi8>, f32, f32)
@@ -99,7 +97,7 @@ func.def inline @ggml_q4k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
 
 // Dense raw-layout projection. One subgroup owns one output channel while the
 // 256-thread workgroup exposes enough independent rows to saturate decode.
-kernel.def target(@ggml_q4k_gfx11_wave32) export("ggml_linear_q4k_q8_1_x4") @ggml_linear_q4k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def export("ggml_linear_q4k_q8_1_x4") @ggml_linear_q4k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %subgroup_size = target.subgroup.size : index

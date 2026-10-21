@@ -1,12 +1,10 @@
 template.decl @qwen38.rmsnorm_f32.row(%input_row_count: index, %input_row: index, %output_origin: offset, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 
-amdgpu.target<gfx11-generic> @qwen38_output_spans_gfx11_wave32 {subgroup_size = 32}
-
 // The epoch producer records selected packed rows while constructing spans.
 // Consumers need no inverse search through the span table. Every padded head
 // row is zeroed here, so the fixed four-row projection groups never read stale
 // activations when output cardinality changes or a chunk requests no output.
-kernel.def target(@qwen38_output_spans_gfx11_wave32) export("qwen38_output_normalize_spans") @qwen38_output_normalize_spans(%output_capacity: index) {
+kernel.def export("qwen38_output_normalize_spans") @qwen38_output_normalize_spans(%output_capacity: index) {
   %outputs = index.assume %output_capacity [range(%output_capacity, 1, 128)] : index
   %c1 = index.constant 1 : index
   %threads = index.constant 256 : index
