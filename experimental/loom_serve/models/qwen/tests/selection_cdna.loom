@@ -1,0 +1,51 @@
+kernel.decl @qwen38_rmsnorm_f32_decode_cdna() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_greedy_argmax_rows_f32_cdna(%rows: index, %outputs: index) launch(%rows: index, %outputs: index, %logits: buffer, %token_ids: buffer)
+
+kernel.decl @qwen38_greedy_argmax_f32_cdna(%outputs: index) launch(%outputs: index, %logits: buffer, %token_id: buffer)
+
+kernel.decl @qwen38_greedy_argmax_partial_rows_f32_cdna(%rows: index, %stride: index, %outputs: index) launch(%rows: index, %stride: index, %outputs: index, %logits: buffer, %partial_logits: buffer, %partial_ids: buffer)
+
+kernel.decl @qwen38_greedy_argmax_reduce_rows_f32_cdna(%rows: index, %outputs: index) launch(%rows: index, %outputs: index, %partial_logits: buffer, %partial_ids: buffer, %token_ids: buffer)
+
+check.case public @qwen38_rmsnorm_f32_decode_known_case_cdna {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %epsilon = check.literal value(9.9999999999999995e-07) : f32
+  %input = check.generate.fill value(2.0) : tensor<5120xf32>
+  %weight = check.generate.fill value(0.5) : tensor<5120xf32>
+  %output = check.generate.fill value(0.0) : tensor<5120xf32>
+  %expected = check.generate.fill value(0.49999993999999998) : tensor<5120xf32>
+  kernel.launch @qwen38_rmsnorm_f32_decode_cdna(%epsilon, %input, %weight, %output) : (f32, tensor<5120xf32>, tensor<5120xf32>, tensor<5120xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<5120xf32>
+  check.return
+}
+
+check.case public @qwen38_greedy_argmax_rows_nontrivial_winner_case_cdna {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %token_count = check.literal value(3) : index
+  %output_size = check.literal value(1009) : index
+  %logits = check.generate.iota offset(0.0) step(1.0) period(1009) : tensor<3x1009xf32>
+  %token_ids = check.generate.fill value(-1) : tensor<3xi32>
+  %expected = check.generate.fill value(1008) : tensor<3xi32>
+  kernel.launch @qwen38_greedy_argmax_rows_f32_cdna[%token_count, %output_size](%token_count, %output_size, %logits, %token_ids) : [index, index](index, index, tensor<3x1009xf32>, tensor<3xi32>)
+  check.expect.equal actual(%token_ids) expected(%expected) : tensor<3xi32>
+  check.return
+}
+
+check.case public @qwen38_greedy_argmax_cross_tile_tie_case_cdna {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %token_count = check.literal value(1) : index
+  %output_size = check.literal value(8201) : index
+  %logits = check.generate.iota offset(0.0) step(1.0) period(4096) : tensor<8201xf32>
+  %token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %parallel_token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %partial_logits = check.generate.fill value(0.0) : tensor<3xf32>
+  %partial_token_ids = check.generate.fill value(-1) : tensor<3xi32>
+  %expected = check.generate.fill value(4095) : tensor<1xi32>
+  kernel.launch @qwen38_greedy_argmax_f32_cdna[%output_size](%output_size, %logits, %token_id) : [index](index, tensor<8201xf32>, tensor<1xi32>)
+  kernel.launch @qwen38_greedy_argmax_partial_rows_f32_cdna[%token_count, %output_size, %output_size](%token_count, %output_size, %output_size, %logits, %partial_logits, %partial_token_ids) : [index, index, index](index, index, index, tensor<8201xf32>, tensor<3xf32>, tensor<3xi32>)
+  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32_cdna[%token_count, %output_size](%token_count, %output_size, %partial_logits, %partial_token_ids, %parallel_token_id) : [index, index](index, index, tensor<3xf32>, tensor<3xi32>, tensor<1xi32>)
+  check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
+  check.expect.equal actual(%parallel_token_id) expected(%expected) : tensor<1xi32>
+  check.return
+}
