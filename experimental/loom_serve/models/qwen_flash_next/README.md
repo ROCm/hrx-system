@@ -296,6 +296,14 @@ the final BF16 store. No global gate tensor or decoded weight bank is allocated.
 The separate four-row injection retains its original F32 or Q8 arithmetic;
 smaller epochs and selected output-head rows retain packed dot products.
 
+MTP catch-up also uses the shared Q8 contraction at capacities of at least 128.
+The original projection rows contain adjacent embedding and hidden halves;
+explicit row stride and byte origin select each half without copying weights.
+The embedding projection is computed once per token and shared by its four
+hidden streams. Each projection rounds independently to BF16 before their final
+addition. Small speculative cohorts retain the original wave reduction, which
+avoids a temporary embedding result and underfilled matrix dispatches.
+
 Expert projections group routes by their selected expert. One GPU workgroup
 builds a histogram, scans record offsets, and scatters original
 `token * 10 + slot` identities into records. Each record carries its expert,
@@ -306,8 +314,8 @@ record width and contraction schedule:
 | --- | --- |
 | 1–4 | Direct per-route projections. |
 | 5–255 | Four-route records and packed dot products. |
-| 256–4,095 | 64-route records and matrix contractions. |
-| 4,096–32,768 | 128-route records and matrix contractions. |
+| 256–2,047 | 64-route records and matrix contractions. |
+| 2,048–32,768 | 128-route records and matrix contractions. |
 
 A finite pool of workgroups visits live records and output features. Gate/up
 and down reuse the same table, and the final combination accumulates the

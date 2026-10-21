@@ -6,6 +6,33 @@ kernel.decl @flash_next_mtp_normalize() launch(%width_value: index, %epoch: buff
 
 kernel.decl @flash_next_mtp_fuse() launch(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer)
 
+kernel.decl @flash_next_mtp_embedding_matrix() launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @flash_next_mtp_hidden_matrix() launch(%epoch: buffer, %input: buffer, %weight: buffer, %embedding: buffer, %output: buffer)
+
+// Each projection rounds independently before the final BF16 addition. Batched
+// cohorts reuse input and weight panels through the shared Q8 matrix core;
+// small cohorts retain the wave reduction without an intermediate allocation.
+// At most sixteen resident rows with four verification tokens fit within 64.
+// Their accepted prefix can be much smaller, so all steady-state speculative
+// cohorts keep the small path; matrix publication starts at prompt capacity 128.
+command.program.def @flash_next_mtp_project() launch(%parameters: buffer, %epoch: buffer, %embedding: buffer, %hidden: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "blk.48.nextn.eh_proj.weight" : view<2560x160x34xi8>
+  %tokens = config.get @flash_next.token_count : index
+  %matrix_threshold = index.constant 128 : index
+  %matrix = index.cmp uge, %tokens, %matrix_threshold : index
+  scf.if %matrix {
+    %stride = index.constant 5120 : offset
+    %bytes = index.scale %tokens, %stride : index, offset -> offset
+    %projected_embedding = buffer.alloca<global> align(256) %bytes : buffer
+    kernel.launch @flash_next_mtp_embedding_matrix(%epoch, %embedding, %weight, %projected_embedding) : (buffer, buffer, view<2560x160x34xi8>, buffer)
+    kernel.launch @flash_next_mtp_hidden_matrix(%epoch, %hidden, %weight, %projected_embedding, %output) : (buffer, buffer, view<2560x160x34xi8>, buffer, buffer)
+  } else {
+    kernel.launch @flash_next_mtp_fuse(%epoch, %embedding, %hidden, %weight, %output) : (buffer, buffer, buffer, view<2560x160x34xi8>, buffer)
+  }
+  command.return
+}
+
 // The sidecar stores only predictor-specific parameters. Embedding and output
 // tables are byte-identical to the target's tensors and share its parameter bank.
 command.program.def public @flash_next_mtp_input() launch(%parameters: buffer, %target_parameters: buffer, %epoch: buffer, %ids: buffer, %hidden: buffer, %residual: buffer) {
@@ -20,13 +47,12 @@ command.program.def public @flash_next_mtp_input() launch(%parameters: buffer, %
   %embedding_weight = command.parameter %target_parameters, "token_embd.weight" : view<675430400xi8>
   %embedding_norm = command.parameter %parameters, "blk.48.nextn.enorm.weight" : view<2560xf32>
   %hidden_norm = command.parameter %parameters, "blk.48.nextn.hnorm.weight" : view<10240xf32>
-  %projection = command.parameter %parameters, "blk.48.nextn.eh_proj.weight" : view<2560x160x34xi8>
   %embedding_width = index.constant 2560 : index
   %hidden_width = index.constant 10240 : index
   kernel.launch @flash_next_mtp_embedding(%epoch, %ids, %embedding_weight, %embedding) : (buffer, buffer, view<675430400xi8>, buffer)
   kernel.launch @flash_next_mtp_normalize(%embedding_width, %epoch, %embedding, %embedding_norm, %normalized_embedding) : (index, buffer, buffer, view<2560xf32>, buffer)
   kernel.launch @flash_next_mtp_normalize(%hidden_width, %epoch, %hidden, %hidden_norm, %normalized_hidden) : (index, buffer, buffer, view<10240xf32>, buffer)
-  kernel.launch @flash_next_mtp_fuse(%epoch, %normalized_embedding, %normalized_hidden, %projection, %residual) : (buffer, buffer, buffer, view<2560x160x34xi8>, buffer)
+  command.program.launch @flash_next_mtp_project(%parameters, %epoch, %normalized_embedding, %normalized_hidden, %residual) : (buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 

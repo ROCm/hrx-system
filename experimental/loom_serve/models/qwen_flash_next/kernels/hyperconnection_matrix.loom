@@ -4,7 +4,7 @@ amdgpu.target<gfx11-generic> @flash_next_hc_matrix_wave32 {subgroup_size = 32}
 
 func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
-template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
+template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
 
 template.decl @flash_next.matrix_store_fragment(%remaining_rows: index, %outputs: index, %fragment_row: index, %result_column: index, %result: vector<8xf32>, %output_view: view<[%remaining_rows]x[%outputs]xbf16>)
 
@@ -47,8 +47,11 @@ func.def inline @hc_matrix_up_body(%span_arg: buffer, %normalized: buffer, %inpu
     %fragment_count = index.constant 8 : index
     %row_fragments = index.constant 2 : index
     %accumulator_zero = vector.constant 0.0 : vector<8xf32>
+    %block_bytes = index.constant 34 : offset
+    %blocks = index.div %rank, %c32 : index
+    %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
     %split_scales = scalar.constant false : i1
-    %result_tile = template.apply<@flash_next.q8_contract>(%capacity, %rank, %hidden, %c4, %tile, %tile, %c4, %c2, %c1, %fragment_count, %first, %end, %channel_base, %split_scales, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
+    %result_tile = template.apply<@flash_next.q8_contract>(%capacity, %rank, %hidden, %c4, %tile, %tile, %c4, %c2, %c1, %fragment_count, %first, %end, %channel_base, %split_scales, %row_bytes, %origin, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, offset, offset, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
     %lane_column = index.rem %lane, %c16 : index
     %lane_row = index.div %lane, %c16 : index
     %quarter = vector.constant 0.25 : vector<8xf32>

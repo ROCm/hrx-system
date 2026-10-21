@@ -3222,6 +3222,7 @@ loom_test_module(
     mtp_test_module
   SRCS
     "tests/mtp.loom"
+    "tests/mtp_projection_reference.loom"
   LIBRARIES
     "::residual_programs"
 )
@@ -3276,6 +3277,104 @@ loom_execution_test(
     "iree-run-requirement=libamdf.resource.amd_gpu"
     "runtime-resource=amd-gpu"
     "loom-execution-profile=rdna_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    mtp_matrix_test_module
+  SRCS
+    "tests/mtp_projection.loom"
+    "tests/mtp_projection_reference.loom"
+  LIBRARIES
+    "::residual_programs"
+)
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    mtp_matrix_test_execute_rdna_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::mtp_matrix_test_module"
+  RUNNER_ARGS
+    "--device=rdna"
+    "--config=flash_next.token_count=133"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=rdna_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    mtp_matrix_test_execute_rdna_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::mtp_matrix_test_module"
+  RUNNER_ARGS
+    "--device=rdna"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=133"
+  LABELS
+    "notsan"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=rdna_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    mtp_matrix_test_execute_rdna_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::mtp_matrix_test_module"
+  RUNNER_ARGS
+    "--device=rdna://?tsan_report_policy=report-only"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--config=flash_next.token_count=133"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=rdna_tsan"
     "loom-target-family=amdgpu"
     "loom-target-class=gpu"
     "loom-executor=hardware"

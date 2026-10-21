@@ -10,10 +10,13 @@
 // Per-stream panel widths are multiples of 16; streams=1 gives dense rows.
 // split_scales selects four-channel groups with contiguous F16 scale and I8
 // code planes; otherwise weights retain interleaved GGUF Q8 blocks. Callers
-// specialize this storage choice before cooperative loop scheduling.
-template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
+// specialize this storage choice before cooperative loop scheduling. row_bytes
+// is the physical byte stride of an interleaved row or one quarter of a prepared
+// four-channel group. weight_origin selects a submatrix within that storage.
+// A larger physical stride lets adjacent projections share the original bank.
+template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
 
-template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>) {
+template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>) {
   %origin = index.constant 0 : offset
   %workitem = kernel.workitem.id<x> : index
   %wave = kernel.subgroup.id : index
@@ -47,7 +50,6 @@ template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: 
   %scale_bytes = index.constant 2 : offset
   %stage_row_bytes = index.constant 80 : offset
   %metadata_row_bytes = index.constant 4 : offset
-  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
   %weight_stage_bytes = index.scale %tile_columns, %stage_row_bytes : index, offset -> offset
   %input_stage_bytes = index.scale %tile_rows, %stage_row_bytes : index, offset -> offset
   %metadata_bytes = index.scale %tile_columns, %metadata_row_bytes : index, offset -> offset
@@ -102,12 +104,12 @@ template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: 
         %block_origin, %payload = scf.if %split_scales -> (offset, offset) {
           %channel_group = index.div %safe_channel, %c4 : index
           %within_group = index.rem %safe_channel, %c4 : index
-          %group_block_bytes = index.constant 136 : offset
           %group_scale_bytes = index.constant 8 : offset
           %code_row_bytes = index.constant 32 : offset
-          %group_bytes = index.scale %blocks, %group_block_bytes : index, offset -> offset
+          %group_bytes = index.scale %c4, %row_bytes : index, offset -> offset
           %code_plane_bytes = index.scale %blocks, %group_scale_bytes : index, offset -> offset
-          %group_origin = index.scale %channel_group, %group_bytes : index, offset -> offset
+          %group_delta = index.scale %channel_group, %group_bytes : index, offset -> offset
+          %group_origin = index.add %weight_origin, %group_delta : offset
           %code_plane = index.add %group_origin, %code_plane_bytes : offset
           %block_row = index.madd %block, %c4, %within_group : index
           %scale_delta = index.scale %block_row, %scale_bytes : index, offset -> offset
@@ -116,7 +118,8 @@ template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: 
           %code_origin = index.add %code_plane, %code_delta : offset
           scf.yield %scale_origin, %code_origin : offset, offset
         } else {
-          %row_origin = index.scale %safe_channel, %row_bytes : index, offset -> offset
+          %row_delta = index.scale %safe_channel, %row_bytes : index, offset -> offset
+          %row_origin = index.add %weight_origin, %row_delta : offset
           %scale_origin = index.add %row_origin, %block_delta : offset
           %code_origin = index.add %scale_origin, %scale_bytes : offset
           scf.yield %scale_origin, %code_origin : offset, offset
@@ -239,8 +242,12 @@ template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, 
     %output_row_bytes = index.scale %outputs, %element_bytes : index, offset -> offset
     %tile_byte_offset = index.scale %first, %output_row_bytes : index, offset -> offset
     %output_view = buffer.view %output[%tile_byte_offset] : buffer -> view<[%remaining_rows]x[%outputs]xbf16>
+    %block_width = index.constant 32 : index
+    %block_bytes = index.constant 34 : offset
+    %blocks = index.div %inputs, %block_width : index
+    %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
     %split_scales = scalar.constant false : i1
-    %result_tile = template.apply<@flash_next.q8_contract>(%capacity, %inputs, %outputs, %c1, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %fragment_count, %first, %end, %channel_base, %split_scales, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
+    %result_tile = template.apply<@flash_next.q8_contract>(%capacity, %inputs, %outputs, %c1, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %fragment_count, %first, %end, %channel_base, %split_scales, %row_bytes, %origin, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, offset, offset, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
     scf.for %ordinal = [%c0 to %fragment_count step %c1] unroll schedule(linear) {
       %row_fragment = index.div %ordinal, %column_fragments : index
       %column_fragment = index.rem %ordinal, %column_fragments : index

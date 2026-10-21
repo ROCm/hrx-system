@@ -1,0 +1,78 @@
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+func.decl @projection_fixture(%weight: buffer)
+
+func.decl @fusion_reference(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @flash_next_mtp_embedding_matrix() launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @flash_next_mtp_hidden_matrix() launch(%epoch: buffer, %input: buffer, %weight: buffer, %embedding: buffer, %output: buffer)
+
+command.program.def @matrix_projection() launch(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %stride = index.constant 5120 : offset
+  %bytes = index.scale %capacity, %stride : index, offset -> offset
+  %projected_embedding = buffer.alloca<global> align(256) %bytes : buffer
+  kernel.launch @flash_next_mtp_embedding_matrix(%epoch, %embedding, %weight, %projected_embedding) : (buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_mtp_hidden_matrix(%epoch, %hidden, %weight, %projected_embedding, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// One specialization exercises empty, single-row, small, aligned, and ragged
+// cohorts. The same oracle also covers the small wave path in mtp.loom.
+func.def @projection_geometry(%trial: index) -> (index, index) {
+  %capacity = config.get @flash_next.token_count : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %tile = index.constant 128 : index
+  %ragged = index.sub %capacity, %c2 : index
+  %small = index.min %capacity, %c4 : index
+  %aligned = index.min %capacity, %tile : index
+  %empty_trial = index.cmp eq, %trial, %c0 : index
+  %single_trial = index.cmp eq, %trial, %c1 : index
+  %small_trial = index.cmp eq, %trial, %c2 : index
+  %aligned_trial = index.cmp eq, %trial, %c3 : index
+  %large = scf.select %aligned_trial, %aligned, %ragged : index
+  %nontrivial = scf.select %small_trial, %small, %large : index
+  %nonempty = scf.select %single_trial, %c1, %nontrivial : index
+  %count = scf.select %empty_trial, %c0, %nonempty : index
+  func.return %capacity, %count : index, index
+}
+
+func.def @projection_epoch(%count: index, %epoch: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %word = index.cast %count : index to i32
+  view.store %word, %header[0] : i32, view<3xi32>
+  func.return
+}
+
+check.scenario public @predictor_projection {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[5](%trial: index, %entropy: check.entropy) {
+    %capacity, %count = check.generate<@projection_geometry>(%trial) : (index) -> (index, index)
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %epoch = check.generate.fill value(0) : tensor<3xi32>
+    check.generate<@projection_epoch>(%count, %epoch) : (index, tensor<3xi32>) -> ()
+    %embedding = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<[%capacity]x2560xbf16>
+    %hidden = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<[%capacity]x10240xbf16>
+    %weight = check.generate.fill value(0) : tensor<13926400xi8>
+    check.generate<@projection_fixture>(%weight) : (tensor<13926400xi8>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<[%capacity]x4x2560xbf16>
+    check.compare<@matrix_projection, @fusion_reference>(%epoch, %embedding, %hidden, %weight, %output) : (tensor<3xi32>, tensor<[%capacity]x2560xbf16>, tensor<[%capacity]x10240xbf16>, tensor<13926400xi8>, tensor<[%capacity]x4x2560xbf16>) -> () {
+      // Native grouped dots can move an exact BF16 midpoint by an F32 ULP.
+      // One BF16 step bounds the final publication. The absolute term covers
+      // cancellation between the two independently rounded projections;
+      // their smaller magnitude is bounded by the 37/64 embedding factor.
+      check.expect.close actual(%output) expected(%output) atol(0.0078125) rtol(0.0078125) nan(different) : tensor<[%capacity]x4x2560xbf16>
+      check.expect.bitwise actual(%embedding) expected(%embedding) : tensor<[%capacity]x2560xbf16>
+      check.expect.bitwise actual(%hidden) expected(%hidden) : tensor<[%capacity]x10240xbf16>
+      check.expect.bitwise actual(%weight) expected(%weight) : tensor<13926400xi8>
+      check.expect.bitwise actual(%epoch) expected(%epoch) : tensor<3xi32>
+    }
+  }
+  check.return
+}
