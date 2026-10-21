@@ -286,7 +286,7 @@ static iree_status_t loom_aie2p_native_config_descriptors(
     for (unsigned j = 0; j < word_count; ++j) {
       values[j + 1] = sequence->words[i][j];
     }
-    if (completion_release) {
+    if (completion_release && i + 1 == sequence->descriptor_count) {
       values[layout->lock_word + 1] |= completion_release;
     }
     IREE_RETURN_IF_ERROR(loom_aie2p_native_config_op(
@@ -414,8 +414,8 @@ static iree_status_t loom_aie2p_native_config_bindings(
       const loom_symbolic_expr_t* offset =
           &transfer->external_view->begin_byte_offset;
       const bool external_dynamic = transfer->shim_descriptor->address_dynamic;
-      if (!external_dynamic &&
-          transfer->shim_descriptor->last_transfer != transfer) {
+      if (!external_dynamic && transfer->shim_descriptor->last_transfer !=
+                                   transfer->task->first_transfer) {
         continue;
       }
       const uint64_t begin = worker->repetition.count
@@ -442,8 +442,14 @@ static iree_status_t loom_aie2p_native_config_bindings(
       // with the same binding and offset.
       // Dynamic offsets load a relocated base through the worker's aperture;
       // configuration writes use the memory owner's allocation address space.
-      for (uint16_t j = 0;
-           j < transfer->shim_descriptor->sequence.descriptor_count; ++j) {
+      const bool autonomous =
+          worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_DMA;
+      const uint16_t first_descriptor =
+          autonomous ? 0 : (uint16_t)transfer->descriptor_ordinal;
+      const uint16_t descriptor_count =
+          autonomous ? transfer->shim_descriptor->sequence.descriptor_count : 1;
+      for (uint16_t j = first_descriptor;
+           j < first_descriptor + descriptor_count; ++j) {
         const uint16_t descriptor =
             transfer->shim_descriptor->sequence.descriptor + j;
         const uint64_t address =
@@ -509,8 +515,8 @@ static iree_status_t loom_aie2p_native_config_bindings(
 
 static iree_status_t loom_aie2p_native_config_submit(
     loom_aie2p_native_configuration_t* config,
-    const loom_aie2p_native_transfer_t* transfer) {
-  const loom_aie2p_native_dma_path_t* path = transfer->local_descriptor->path;
+    const loom_aie2p_native_transfer_task_t* task) {
+  const loom_aie2p_native_dma_path_t* path = task->path;
   const loom_xdna_register_field_id_t local_queue =
       path->local->memory_layout->directions[path->ingress ? 1 : 0].start;
   const loom_xdna_register_field_id_t shim_queue =
@@ -518,9 +524,9 @@ static iree_status_t loom_aie2p_native_config_submit(
           ? LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_START_BD_ID
           : LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_TASK_QUEUE_START_BD_ID;
   uint32_t local_task = loom_xdna_register_field_encode_admitted(
-      local_queue, transfer->local_descriptor->sequence.descriptor);
+      local_queue, task->local_descriptor->sequence.descriptor);
   uint32_t shim_task = loom_xdna_register_field_encode_admitted(
-      shim_queue, transfer->shim_descriptor->sequence.descriptor);
+      shim_queue, task->shim_descriptor->sequence.descriptor);
   if (!path->ingress) {
     shim_task |= loom_xdna_register_field_encode_admitted(
         LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_TASK_QUEUE_ENABLE_TOKEN_ISSUE,
@@ -555,8 +561,8 @@ static iree_status_t loom_aie2p_native_config_queue_sequence(
 
 static iree_status_t loom_aie2p_native_config_submit_ingress(
     loom_aie2p_native_configuration_t* config,
-    const loom_aie2p_native_transfer_t* transfer) {
-  const loom_aie2p_native_dma_path_t* path = transfer->local_descriptor->path;
+    const loom_aie2p_native_transfer_task_t* task) {
+  const loom_aie2p_native_dma_path_t* path = task->path;
   const uint16_t local_engine = path->local_engine;
   const uint64_t local_address = loom_xdna_register_field_address_admitted(
       config->context->family, path->local->memory_layout->directions[1].start,
@@ -567,9 +573,9 @@ static iree_status_t loom_aie2p_native_config_submit_ingress(
       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_START_BD_ID,
       path->shim->coordinate, &shim_engine);
   IREE_RETURN_IF_ERROR(loom_aie2p_native_config_queue_sequence(
-      config, local_address, &transfer->local_descriptor->sequence));
+      config, local_address, &task->local_descriptor->sequence));
   return loom_aie2p_native_config_queue_sequence(
-      config, shim_address, &transfer->shim_descriptor->sequence);
+      config, shim_address, &task->shim_descriptor->sequence);
 }
 
 static iree_status_t loom_aie2p_native_config_submit_distribution_endpoint(
@@ -629,19 +635,21 @@ static iree_status_t loom_aie2p_native_config_communicate(
   const loom_pipeline_worker_t* source = &realization->workers[worker_index];
   const loom_aie2p_native_worker_t* worker = &context->workers[worker_index];
   const loom_aie2p_native_transfer_t* issue = worker->transfers;
-  const loom_aie2p_native_transfer_t* complete = worker->transfers;
+  const loom_aie2p_native_transfer_task_t* complete = worker->transfer_tasks;
   for (iree_host_size_t i = 0; i < source->transport.count; ++i) {
     const loom_pipeline_transport_step_t* step = &source->transport.steps[i];
     switch (step->kind) {
       case LOOM_PIPELINE_TRANSPORT_STEP_TRANSFER: {
-        IREE_RETURN_IF_ERROR(loom_aie2p_native_config_submit(config, issue));
+        if (issue == issue->task->last_transfer) {
+          IREE_RETURN_IF_ERROR(
+              loom_aie2p_native_config_submit(config, issue->task));
+        }
         issue = issue->next;
         break;
       }
       case LOOM_PIPELINE_TRANSPORT_STEP_WAIT:
-        while (complete && complete->completion == step->op) {
-          const loom_aie2p_native_dma_path_t* path =
-              complete->local_descriptor->path;
+        while (complete && complete->first_transfer->completion == step->op) {
+          const loom_aie2p_native_dma_path_t* path = complete->path;
           if (path->ingress) {
             IREE_RETURN_IF_ERROR(loom_aie2p_native_config_register(
                 config, path->local->coordinate,
@@ -890,8 +898,8 @@ iree_status_t loom_aie2p_native_emit_configuration(
       }
     }
     if (worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_DMA) {
-      IREE_RETURN_IF_ERROR(
-          loom_aie2p_native_config_submit_ingress(&config, worker->transfers));
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_config_submit_ingress(
+          &config, worker->transfer_tasks));
     }
   }
   for (iree_host_size_t i = 0; i < realization->resources.strand_count; ++i) {

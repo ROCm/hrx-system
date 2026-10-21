@@ -120,6 +120,13 @@ loom_test(
 )
 
 loom_test(
+    name = "grouped_dma_execution_test",
+    srcs = ["test/grouped_dma.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
+)
+
+loom_test(
     name = "hardware_loop_execution_test",
     srcs = ["test/hardware_loop.loom"],
     benchmark_smoke = False,

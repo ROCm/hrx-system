@@ -23,6 +23,10 @@ typedef struct loom_aie2p_native_queue_t {
   uint8_t capacity;
   // Block whose straight-line issue interval is being admitted.
   const loom_block_t* block;
+  // Authored group currently accumulating one physical task on this path.
+  const loom_kernel_async_group_t* group;
+  // Task accumulating members from group, or NULL before its first member.
+  loom_aie2p_native_transfer_task_t* task;
 } loom_aie2p_native_queue_t;
 
 // SRAM channels of equal parity share one of two 24-descriptor banks.
@@ -110,40 +114,92 @@ static bool loom_aie2p_native_transfer_retired(
          transfer->completion->block_ordinal <= issue->block_ordinal;
 }
 
-// Each endpoint has its own immutable geometry and latest transfer. A local
-// descriptor also remains unavailable while another geometry uses its credit.
-// The search is bounded by the worker's physical local and shim descriptors.
+static void loom_aie2p_native_task_descriptor_words(
+    const loom_aie2p_native_transfer_task_t* task,
+    const loom_aie2p_native_dma_descriptor_t* descriptor,
+    const loom_aie2p_native_transfer_t* transfer, uint32_t out_words[8]) {
+  memcpy(out_words,
+         descriptor->shim ? transfer->shim_words : transfer->local_words,
+         sizeof(transfer->local_words));
+  if (transfer->descriptor_ordinal + 1 == task->transfer_count) {
+    return;
+  }
+  const loom_aie2p_native_memory_layout_t* layout =
+      descriptor->shim ? NULL : task->path->local->memory_layout;
+  const uint8_t word = layout ? layout->chain.word : 7;
+  const loom_xdna_register_field_id_t next =
+      layout ? layout->chain.next
+             : LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_NEXT_BD;
+  const loom_xdna_register_field_id_t enable =
+      layout ? layout->chain.enable
+             : LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_USE_NEXT_BD;
+  out_words[word] |= loom_xdna_register_field_encode_admitted(
+                         next, descriptor->sequence.descriptor +
+                                   transfer->descriptor_ordinal + 1) |
+                     loom_xdna_register_field_encode_admitted(enable, 1);
+}
+
+static bool loom_aie2p_native_task_descriptor_matches(
+    const loom_aie2p_native_transfer_task_t* task,
+    const loom_aie2p_native_dma_descriptor_t* descriptor) {
+  if (descriptor->sequence.descriptor_count != task->transfer_count) {
+    return false;
+  }
+  for (const loom_aie2p_native_transfer_t* transfer = task->first_transfer;
+       transfer; transfer = transfer->task_next) {
+    uint32_t words[8];
+    loom_aie2p_native_task_descriptor_words(task, descriptor, transfer, words);
+    if (memcmp(descriptor->sequence.words[transfer->descriptor_ordinal], words,
+               sizeof(words)) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool loom_aie2p_native_task_external_address_differs(
+    const loom_aie2p_native_transfer_task_t* task,
+    const loom_aie2p_native_transfer_t* previous) {
+  const loom_aie2p_native_transfer_t* transfer = task->first_transfer;
+  for (; transfer && previous;
+       transfer = transfer->task_next, previous = previous->task_next) {
+    if (transfer->binding != previous->binding ||
+        transfer->external_view->begin_byte_offset.constant !=
+            previous->external_view->begin_byte_offset.constant) {
+      return true;
+    }
+  }
+  return transfer || previous;
+}
+
+// Each task endpoint has an immutable descriptor sequence and latest retained
+// completion. Local and shim sequences can be reused independently.
 static loom_aie2p_native_dma_descriptor_t*
 loom_aie2p_native_reusable_descriptor(
     const loom_aie2p_native_worker_t* worker,
-    const loom_aie2p_native_transfer_t* transfer,
-    const loom_aie2p_native_dma_descriptor_t* descriptor) {
+    const loom_aie2p_native_transfer_task_t* task, bool shim) {
   if (worker->execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
     // Autonomous descriptors retain iteration state. Configuration-only waits
     // observe completion credits without consuming them for a subsequent use.
     return NULL;
   }
-  const loom_op_t* issue = transfer->source->request.op;
+  const loom_op_t* issue = task->first_transfer->source->request.op;
   for (loom_aie2p_native_dma_descriptor_t* candidate = worker->descriptors;
        candidate; candidate = candidate->next) {
     const loom_aie2p_native_transfer_t* previous = candidate->last_transfer;
-    if (candidate->shim != descriptor->shim ||
-        candidate->path != descriptor->path ||
+    if (candidate->shim != shim || candidate->path != task->path ||
         !loom_aie2p_native_transfer_retired(previous, issue) ||
         (candidate->completion &&
          !loom_aie2p_native_transfer_retired(
              candidate->completion->last_transfer, issue)) ||
-        memcmp(candidate->sequence.words[0], descriptor->sequence.words[0],
-               sizeof(descriptor->sequence.words[0])) != 0) {
+        !loom_aie2p_native_task_descriptor_matches(task, candidate)) {
       continue;
     }
-    if (descriptor->shim) {
+    if (shim) {
       candidate->address_dynamic |=
-          descriptor->address_dynamic ||
-          transfer->binding != previous->binding ||
-          transfer->external_view->begin_byte_offset.constant !=
-              previous->external_view->begin_byte_offset.constant;
-    } else if (candidate->address_dynamic != descriptor->address_dynamic) {
+          task->shim_address_dynamic ||
+          loom_aie2p_native_task_external_address_differs(task, previous);
+    } else if (candidate->address_dynamic != task->local_address_dynamic) {
       continue;
     }
     return candidate;
@@ -169,6 +225,176 @@ loom_aie2p_native_reusable_completion(const loom_aie2p_native_worker_t* worker,
     }
   }
   return NULL;
+}
+
+static iree_status_t loom_aie2p_native_select_sequence(
+    loom_aie2p_native_context_t* context, loom_aie2p_native_tile_t* tile,
+    uint8_t engine, loom_xdna_dma_direction_t direction, uint32_t repetitions,
+    uint32_t capacity, uint32_t byte_offset, uint32_t byte_stride,
+    const uint32_t template_words[8],
+    loom_aie2p_native_dma_sequence_t* out_sequence,
+    iree_string_view_t* out_reason, bool* out_valid);
+
+static iree_status_t loom_aie2p_native_allocate_task_descriptor(
+    loom_aie2p_native_context_t* context, loom_aie2p_native_worker_t* worker,
+    loom_aie2p_native_transfer_task_t* task, bool shim,
+    loom_aie2p_native_dma_descriptor_t*** descriptor_tail,
+    loom_aie2p_native_dma_completion_t*** completion_tail,
+    loom_aie2p_native_dma_descriptor_t** out_descriptor) {
+  loom_aie2p_native_tile_t* tile = shim ? task->path->shim : task->path->local;
+  const uint8_t engine =
+      shim ? task->path->shim_engine : task->path->local_engine;
+  uint16_t descriptor_base, descriptor_count;
+  uint16_t* next_descriptor = loom_aie2p_native_descriptor_bank(
+      tile, engine, &descriptor_base, &descriptor_count);
+  if (task->transfer_count > descriptor_count - *next_descriptor) {
+    return loom_aie2p_native_reject(
+        context, task->first_transfer->source->request.op,
+        shim ? IREE_SV("available native shim descriptors for one async group")
+             : IREE_SV("available native descriptors in the DMA channel's bank "
+                       "for one async group"));
+  }
+  const iree_host_size_t words_bytes =
+      task->transfer_count * sizeof(uint32_t[8]);
+  loom_aie2p_native_dma_descriptor_t* descriptor;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
+                                           sizeof(*descriptor) + words_bytes,
+                                           (void**)&descriptor));
+  *descriptor = (loom_aie2p_native_dma_descriptor_t){
+      .path = task->path,
+      .sequence =
+          {
+              .descriptor = descriptor_base + *next_descriptor,
+              .descriptor_count = (uint16_t)task->transfer_count,
+              .words = (uint32_t (*)[8])(descriptor + 1),
+          },
+      .shim = shim,
+      .address_dynamic =
+          shim ? task->shim_address_dynamic : task->local_address_dynamic,
+  };
+  *next_descriptor += (uint16_t)task->transfer_count;
+  for (const loom_aie2p_native_transfer_t* transfer = task->first_transfer;
+       transfer; transfer = transfer->task_next) {
+    loom_aie2p_native_task_descriptor_words(
+        task, descriptor, transfer,
+        descriptor->sequence.words[transfer->descriptor_ordinal]);
+  }
+  if (!shim && task->path->ingress) {
+    descriptor->completion = loom_aie2p_native_reusable_completion(
+        worker, tile, task->first_transfer->source->request.op);
+    if (!descriptor->completion) {
+      if (tile->next_lock == tile->facts->lock_count) {
+        return loom_aie2p_native_reject(
+            context, task->first_transfer->source->request.op,
+            IREE_SV("an available native ingress completion semaphore"));
+      }
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          context->pass->arena, sizeof(*descriptor->completion),
+          (void**)&descriptor->completion));
+      *descriptor->completion = (loom_aie2p_native_dma_completion_t){
+          .tile = tile, .lock = tile->next_lock++};
+      if (worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
+        const loom_aie2p_native_channel_t* channel =
+            task->first_transfer->local_channel;
+        const uint32_t channel_index = (uint32_t)(channel - context->channels);
+        const loom_aie2p_native_channel_access_t* access =
+            &worker->channels.accesses[worker->channels.indices[channel_index]];
+        descriptor->completion->selector =
+            access->window->lock_selector_base + descriptor->completion->lock;
+      }
+      **completion_tail = descriptor->completion;
+      *completion_tail = &descriptor->completion->next;
+    }
+  }
+  **descriptor_tail = descriptor;
+  *descriptor_tail = &descriptor->next;
+  *out_descriptor = descriptor;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_native_select_task_descriptors(
+    loom_aie2p_native_context_t* context, loom_aie2p_native_worker_t* worker,
+    loom_aie2p_native_transfer_task_t* task, bool autonomous,
+    loom_aie2p_native_dma_descriptor_t*** descriptor_tail,
+    loom_aie2p_native_dma_completion_t*** completion_tail, bool* out_valid) {
+  *out_valid = false;
+  if (autonomous) {
+    // Autonomous repetition currently admits one source transfer and builds its
+    // finite ring program through the dedicated sequence planner.
+    const loom_aie2p_native_transfer_t* transfer = task->first_transfer;
+    for (unsigned endpoint = 0; endpoint < 2; ++endpoint) {
+      const bool shim = endpoint != 0;
+      loom_aie2p_native_tile_t* tile =
+          shim ? task->path->shim : task->path->local;
+      loom_aie2p_native_dma_descriptor_t* descriptor;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          context->pass->arena, sizeof(*descriptor), (void**)&descriptor));
+      *descriptor = (loom_aie2p_native_dma_descriptor_t){.path = task->path,
+                                                         .shim = shim};
+      iree_string_view_t reason;
+      bool valid;
+      if (shim) {
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
+            context, tile, task->path->shim_engine,
+            LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
+            worker->repetition.shim_repetitions, 1, 0, 0, transfer->shim_words,
+            &descriptor->sequence, &reason, &valid));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
+            context, tile, task->path->local_engine,
+            LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, worker->repetition.count,
+            transfer->local_channel->source->capacity,
+            transfer->local_channel->byte_offset +
+                (uint32_t)transfer->local_view->projection_byte_offset.constant,
+            transfer->local_channel->byte_stride, transfer->local_words,
+            &descriptor->sequence, &reason, &valid));
+      }
+      if (!valid) {
+        return loom_aie2p_native_reject(
+            context, task->first_transfer->source->request.op, reason);
+      }
+      **descriptor_tail = descriptor;
+      *descriptor_tail = &descriptor->next;
+      if (shim) {
+        task->shim_descriptor = descriptor;
+      } else {
+        task->local_descriptor = descriptor;
+      }
+    }
+  } else {
+    task->local_descriptor =
+        loom_aie2p_native_reusable_descriptor(worker, task, false);
+    if (!task->local_descriptor) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_allocate_task_descriptor(
+          context, worker, task, false, descriptor_tail, completion_tail,
+          &task->local_descriptor));
+      if (!task->local_descriptor) {
+        return iree_ok_status();
+      }
+    }
+    task->shim_descriptor =
+        loom_aie2p_native_reusable_descriptor(worker, task, true);
+    if (!task->shim_descriptor) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_allocate_task_descriptor(
+          context, worker, task, true, descriptor_tail, completion_tail,
+          &task->shim_descriptor));
+      if (!task->shim_descriptor) {
+        return iree_ok_status();
+      }
+    }
+  }
+  task->local_descriptor->last_transfer = task->first_transfer;
+  task->shim_descriptor->last_transfer = task->first_transfer;
+  if (task->local_descriptor->completion) {
+    task->local_descriptor->completion->last_transfer = task->first_transfer;
+  }
+  for (loom_aie2p_native_transfer_t* transfer = task->first_transfer; transfer;
+       transfer = transfer->task_next) {
+    transfer->local_descriptor = task->local_descriptor;
+    transfer->shim_descriptor = task->shim_descriptor;
+  }
+  *out_valid = true;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_native_select_sequence(
@@ -221,6 +447,7 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
   bool has_egress = false;
   iree_host_size_t transport_step = 0;
   loom_aie2p_native_transfer_t** tail = &worker->transfers;
+  loom_aie2p_native_transfer_task_t** task_tail = &worker->transfer_tasks;
   loom_aie2p_native_dma_descriptor_t** descriptor_tail = &worker->descriptors;
   loom_aie2p_native_dma_completion_t** completion_tail =
       &worker->dma_completions;
@@ -395,64 +622,79 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       if (queue->block != stream->block) {
         queue->count = 0;
         queue->block = stream->block;
+        queue->group = NULL;
+        queue->task = NULL;
       }
-      uint8_t pending = 0;
-      for (uint8_t k = 0; k < queue->count; ++k) {
-        if (queue->completions[k]->block_ordinal > request->op->block_ordinal) {
-          queue->completions[pending++] = queue->completions[k];
+      const loom_kernel_async_group_t* group =
+          &stream->groups[transfer->group_index];
+      if (queue->group != group) {
+        uint8_t pending = 0;
+        for (uint8_t k = 0; k < queue->count; ++k) {
+          if (queue->completions[k]->block_ordinal >
+              request->op->block_ordinal) {
+            queue->completions[pending++] = queue->completions[k];
+          }
         }
+        queue->count = pending;
+        if (pending == queue->capacity) {
+          return loom_aie2p_native_reject(
+              context, request->op,
+              IREE_SV(
+                  "DMA group retirement before the native task queues fill"));
+        }
+        queue->completions[queue->count++] = group->completion;
+        loom_aie2p_native_transfer_task_t* task;
+        IREE_RETURN_IF_ERROR(
+            iree_arena_allocate(arena, sizeof(*task), (void**)&task));
+        *task = (loom_aie2p_native_transfer_task_t){.path = queue->path};
+        *task_tail = task;
+        task_tail = &task->next;
+        queue->group = group;
+        queue->task = task;
       }
-      queue->count = pending;
-      if (pending == queue->capacity) {
-        return loom_aie2p_native_reject(
-            context, request->op,
-            IREE_SV("DMA group retirement before the native task queues fill"));
-      }
-      const loom_op_t* completion =
-          stream->groups[transfer->group_index].completion;
-      queue->completions[queue->count++] = completion;
       loom_aie2p_native_transfer_t* selected;
       IREE_RETURN_IF_ERROR(
           iree_arena_allocate(arena, sizeof(*selected), (void**)&selected));
       *selected = (loom_aie2p_native_transfer_t){
+          .task = queue->task,
           .source = transfer,
-          .completion = completion,
+          .completion = group->completion,
           .binding = loom_value_def_index(root),
           .external_view = external_view,
           .local_view = local_view,
           .local_channel = local_channel,
           .local_record = payload_record.value_id,
-          .record_dynamic = record_dynamic};
+          .record_dynamic = record_dynamic,
+          .descriptor_ordinal = queue->task->transfer_count++};
       *tail = selected;
       tail = &selected->next;
-      uint32_t local_words[1][8] = {{0}};
-      uint32_t shim_words[1][8] = {{0}};
-      loom_aie2p_native_dma_descriptor_t descriptors[2] = {
-          {.path = queue->path,
-           .sequence = {.descriptor_count = 1, .words = local_words},
-           .address_dynamic =
-               !autonomous &&
-               (record_dynamic || !loom_symbolic_expr_is_constant(
-                                      &local_view->projection_byte_offset))},
-          {.path = queue->path,
-           .sequence = {.descriptor_count = 1, .words = shim_words},
-           .shim = true,
-           .address_dynamic =
-               !autonomous && !loom_symbolic_expr_is_constant(
-                                  &external_view->begin_byte_offset)}};
+      if (queue->task->last_transfer) {
+        queue->task->last_transfer->task_next = selected;
+      } else {
+        queue->task->first_transfer = selected;
+      }
+      queue->task->last_transfer = selected;
+      queue->task->local_address_dynamic |=
+          !autonomous &&
+          (record_dynamic || !loom_symbolic_expr_is_constant(
+                                 &local_view->projection_byte_offset));
+      queue->task->shim_address_dynamic |=
+          !autonomous &&
+          !loom_symbolic_expr_is_constant(&external_view->begin_byte_offset);
       iree_string_view_t reason;
       if (autonomous) {
-        memcpy(shim_words[0], worker->repetition.shim_words,
-               sizeof(shim_words[0]));
+        memcpy(selected->shim_words, worker->repetition.shim_words,
+               sizeof(selected->shim_words));
       }
-      if ((!autonomous && !loom_aie2p_native_descriptor(
-                              context, source, external, &shim->facts->dma,
-                              (uint32_t)request->transferred_byte_count,
-                              shim->facts->kind, shim_words[0], &reason)) ||
+      if ((!autonomous &&
+           !loom_aie2p_native_descriptor(
+               context, source, external, &shim->facts->dma,
+               (uint32_t)request->transferred_byte_count, shim->facts->kind,
+               selected->shim_words, &reason)) ||
           !loom_aie2p_native_descriptor(
               context, source, local, &local_tile->facts->dma,
               (uint32_t)request->transferred_byte_count,
-              local_tile->facts->kind, local_words[0], &reason)) {
+              local_tile->facts->kind, selected->local_words, &reason)) {
         return loom_aie2p_native_reject(context, request->op, reason);
       }
       // A fixed slot and projection need no per-issue address patch. Reuse
@@ -462,14 +704,14 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
         const uint32_t address =
             local_channel->byte_offset +
             (uint32_t)local_view->projection_byte_offset.constant;
-        local_words[0][layout->address_word] |=
+        selected->local_words[layout->address_word] |=
             loom_xdna_register_field_encode_admitted(
                 layout->address,
                 (layout->local_address_base + address) >>
                     local_tile->facts->dma.address_encoding_shift);
       }
       if (autonomous) {
-        local_words[0][layout->lock_word] |=
+        selected->local_words[layout->lock_word] |=
             loom_xdna_register_field_encode_admitted(
                 layout->locks.acquire_id,
                 layout->local_lock_base + local_channel->free_lock) |
@@ -492,10 +734,11 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
                            : NULL;
         if (!ingress && preceding && loom_channel_acquire_isa(preceding) &&
             transport_step + 1 < source->transport.count &&
-            source->transport.steps[transport_step + 1].op == completion &&
+            source->transport.steps[transport_step + 1].op ==
+                group->completion &&
             loom_op_const_results(preceding)[0] == payload_record.value_id) {
           selected->admission = preceding;
-          local_words[0][layout->lock_word] |=
+          selected->local_words[layout->lock_word] |=
               loom_xdna_register_field_encode_admitted(
                   layout->locks.acquire_id,
                   layout->local_lock_base + local_channel->ready_lock) |
@@ -503,103 +746,6 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
                   layout->locks.acquire_value, -1) |
               loom_xdna_register_field_encode_admitted(
                   layout->locks.acquire_enable, 1);
-        }
-      }
-      for (unsigned endpoint = 0; endpoint < IREE_ARRAYSIZE(descriptors);
-           ++endpoint) {
-        loom_aie2p_native_dma_descriptor_t* descriptor = &descriptors[endpoint];
-        loom_aie2p_native_dma_descriptor_t** selected_descriptor =
-            descriptor->shim ? &selected->shim_descriptor
-                             : &selected->local_descriptor;
-        *selected_descriptor =
-            loom_aie2p_native_reusable_descriptor(worker, selected, descriptor);
-        if (!*selected_descriptor) {
-          if (autonomous) {
-            bool valid;
-            if (descriptor->shim) {
-              IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
-                  context, shim, queue->path->shim_engine,
-                  LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
-                  worker->repetition.shim_repetitions, 1, 0, 0, shim_words[0],
-                  &descriptor->sequence, &reason, &valid));
-            } else {
-              IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
-                  context, local_tile, queue->path->local_engine,
-                  LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-                  worker->repetition.count, local_channel->source->capacity,
-                  local_channel->byte_offset +
-                      (uint32_t)local_view->projection_byte_offset.constant,
-                  local_channel->byte_stride, local_words[0],
-                  &descriptor->sequence, &reason, &valid));
-            }
-            if (!valid) {
-              return loom_aie2p_native_reject(context, request->op, reason);
-            }
-          } else {
-            uint16_t descriptor_base, descriptor_count;
-            uint16_t* next_descriptor = loom_aie2p_native_descriptor_bank(
-                descriptor->shim ? shim : local_tile,
-                descriptor->shim ? queue->path->shim_engine
-                                 : queue->path->local_engine,
-                &descriptor_base, &descriptor_count);
-            if (*next_descriptor == descriptor_count) {
-              return loom_aie2p_native_reject(
-                  context, request->op,
-                  descriptor->shim
-                      ? IREE_SV("an available native shim descriptor")
-                      : IREE_SV("an available descriptor in the DMA channel's "
-                                "bank"));
-            }
-            descriptor->sequence.descriptor =
-                descriptor_base + (*next_descriptor)++;
-          }
-          if (!descriptor->shim && ingress && !autonomous) {
-            descriptor->completion = loom_aie2p_native_reusable_completion(
-                worker, local_tile, request->op);
-            if (!descriptor->completion) {
-              if (local_tile->next_lock == local_tile->facts->lock_count) {
-                return loom_aie2p_native_reject(
-                    context, request->op,
-                    IREE_SV(
-                        "an available native ingress completion semaphore"));
-              }
-              IREE_RETURN_IF_ERROR(
-                  iree_arena_allocate(arena, sizeof(*descriptor->completion),
-                                      (void**)&descriptor->completion));
-              *descriptor->completion = (loom_aie2p_native_dma_completion_t){
-                  .tile = local_tile, .lock = local_tile->next_lock++};
-              if (!configuration) {
-                const uint32_t channel_index =
-                    (uint32_t)(local_channel - context->channels);
-                const loom_aie2p_native_channel_access_t* access =
-                    &worker->channels
-                         .accesses[worker->channels.indices[channel_index]];
-                descriptor->completion->selector =
-                    access->window->lock_selector_base +
-                    descriptor->completion->lock;
-              }
-              *completion_tail = descriptor->completion;
-              completion_tail = &descriptor->completion->next;
-            }
-          }
-          const iree_host_size_t template_bytes =
-              autonomous ? 0 : sizeof(descriptor->sequence.words[0]);
-          IREE_RETURN_IF_ERROR(
-              iree_arena_allocate(arena, sizeof(*descriptor) + template_bytes,
-                                  (void**)selected_descriptor));
-          **selected_descriptor = *descriptor;
-          if (!autonomous) {
-            (*selected_descriptor)->sequence.words =
-                (uint32_t (*)[8])(*selected_descriptor + 1);
-            memcpy((*selected_descriptor)->sequence.words,
-                   descriptor->sequence.words, template_bytes);
-          }
-          *descriptor_tail = *selected_descriptor;
-          descriptor_tail = &(*selected_descriptor)->next;
-        }
-        (*selected_descriptor)->last_transfer = selected;
-        if ((*selected_descriptor)->completion) {
-          (*selected_descriptor)->completion->last_transfer = selected;
         }
       }
       loom_aie2p_native_binding_t* binding =
@@ -611,6 +757,26 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
           iree_max(binding->byte_alignment, external->root_minimum_alignment);
       binding->access |= ingress ? LOOM_AIE2P_ARRAY_BINDING_ACCESS_READ
                                  : LOOM_AIE2P_ARRAY_BINDING_ACCESS_WRITE;
+      const bool group_end =
+          j + 1 == stream->transfer_count ||
+          stream->transfers[j + 1].group_index != transfer->group_index;
+      if (group_end) {
+        for (iree_host_size_t k = 0; k < tile_count * 2; ++k) {
+          loom_aie2p_native_queue_t* group_queue = &queues[k];
+          if (group_queue->group != group) {
+            continue;
+          }
+          bool task_valid;
+          IREE_RETURN_IF_ERROR(loom_aie2p_native_select_task_descriptors(
+              context, worker, group_queue->task, autonomous, &descriptor_tail,
+              &completion_tail, &task_valid));
+          if (!task_valid) {
+            return iree_ok_status();
+          }
+          group_queue->group = NULL;
+          group_queue->task = NULL;
+        }
+      }
     }
   }
   // Sharing can turn an initially fixed address into a per-issue patch. Assign

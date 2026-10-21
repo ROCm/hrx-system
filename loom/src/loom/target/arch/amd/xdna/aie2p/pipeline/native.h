@@ -178,9 +178,16 @@ typedef struct loom_aie2p_native_dma_descriptor_t {
   bool address_dynamic;
 } loom_aie2p_native_dma_descriptor_t;
 
+typedef struct loom_aie2p_native_transfer_task_t
+    loom_aie2p_native_transfer_task_t;
+
 typedef struct loom_aie2p_native_transfer_t {
   // Next transfer in the worker's retained issue order.
   struct loom_aie2p_native_transfer_t* next;
+  // Next segment in the same physical task.
+  struct loom_aie2p_native_transfer_t* task_next;
+  // Physical task selected for this transfer's compatible group partition.
+  loom_aie2p_native_transfer_task_t* task;
   // Canonical admitted copy request and its group index.
   const loom_kernel_async_transfer_t* source;
   // Wait that retires this transfer's group.
@@ -208,11 +215,40 @@ typedef struct loom_aie2p_native_transfer_t {
   loom_value_id_t local_record;
   // This transfer's endpoint can select more than the initial physical slot.
   bool record_dynamic;
-  // Selected ordinary helper that submits both endpoint descriptors.
-  loom_symbol_ref_t submit;
-  // Selected ordinary helper that observes endpoint completion.
-  loom_symbol_ref_t wait;
+  // Ordinal of this segment in both endpoint descriptor chains.
+  iree_host_size_t descriptor_ordinal;
+  // Immutable local descriptor words before physical chain links are assigned.
+  uint32_t local_words[8];
+  // Immutable shim descriptor words before physical chain links are assigned.
+  uint32_t shim_words[8];
 } loom_aie2p_native_transfer_t;
+
+// One physical task for a compatible partition of an authored async group.
+// Both endpoint chains preserve member order and complete as one unit.
+struct loom_aie2p_native_transfer_task_t {
+  // Next task in the worker's retained issue order.
+  loom_aie2p_native_transfer_task_t* next;
+  // First transfer in this task's descriptor order.
+  loom_aie2p_native_transfer_t* first_transfer;
+  // Last transfer, retained while selection appends compatible members.
+  loom_aie2p_native_transfer_t* last_transfer;
+  // Number of descriptors in each endpoint chain.
+  iree_host_size_t transfer_count;
+  // Shared engine pair and physical route for every member.
+  loom_aie2p_native_dma_path_t* path;
+  // Local endpoint descriptor chain and ingress completion credit.
+  loom_aie2p_native_dma_descriptor_t* local_descriptor;
+  // External endpoint descriptor chain.
+  loom_aie2p_native_dma_descriptor_t* shim_descriptor;
+  // Every local descriptor address is patched at each issue.
+  bool local_address_dynamic;
+  // Every shim descriptor address is patched at each issue.
+  bool shim_address_dynamic;
+  // Selected ordinary helper that submits both endpoint chains.
+  loom_symbol_ref_t submit;
+  // Selected ordinary helper that observes task completion.
+  loom_symbol_ref_t wait;
+};
 
 // One on-chip DMA endpoint in an on-die channel distribution.
 typedef struct loom_aie2p_native_distribution_endpoint_t {
@@ -288,6 +324,8 @@ typedef struct loom_aie2p_native_worker_t {
   } channels;
   // First selected borrowed DMA operation.
   loom_aie2p_native_transfer_t* transfers;
+  // Physical tasks in first-member selection order.
+  loom_aie2p_native_transfer_task_t* transfer_tasks;
   // Physical local/shim endpoints in their first-use initialization order.
   loom_aie2p_native_dma_descriptor_t* descriptors;
   // Physical arrival credits shared independently of descriptor geometry.

@@ -1,0 +1,315 @@
+// A memory-tile join and a rotating compute-tile ring exercise the two native
+// grouped-DMA issue modes. Replay replaces every caller binding while retaining
+// the resident descriptor chains.
+
+aie2p.target<array> @npu
+
+pipeline.def<kernel> public retain target(@npu) @memory_tile_join() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
+  %sram = pipeline.memory<workgroup>[0, 1] : pool
+  %compute0 = pipeline.memory<workgroup>[0, 2] : pool
+  %compute1 = pipeline.memory<workgroup>[0, 3] : pool
+  %compute2 = pipeline.memory<workgroup>[0, 4] : pool
+  %compute3 = pipeline.memory<workgroup>[0, 5] : pool
+  %offset0 = index.constant 0 : offset
+  %offset1 = index.constant 32 : offset
+  %offset2 = index.constant 64 : offset
+  %offset3 = index.constant 96 : offset
+  %segment_bytes = index.constant 32 : offset
+  %joined_bytes = index.constant 128 : offset
+  %capacity = index.constant 1 : index
+  %source0_storage = buffer.alloca<workgroup> pool(%compute0) align(64) %segment_bytes : buffer
+  %source0_slots = buffer.view %source0_storage[%offset0] : buffer -> view<1x8xi32>
+  %source0 = channel.bind<fifo> %source0_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  %source1_storage = buffer.alloca<workgroup> pool(%compute1) align(64) %segment_bytes : buffer
+  %source1_slots = buffer.view %source1_storage[%offset0] : buffer -> view<1x8xi32>
+  %source1 = channel.bind<fifo> %source1_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  %source2_storage = buffer.alloca<workgroup> pool(%compute2) align(64) %segment_bytes : buffer
+  %source2_slots = buffer.view %source2_storage[%offset0] : buffer -> view<1x8xi32>
+  %source2 = channel.bind<fifo> %source2_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  %source3_storage = buffer.alloca<workgroup> pool(%compute3) align(64) %segment_bytes : buffer
+  %source3_slots = buffer.view %source3_storage[%offset0] : buffer -> view<1x8xi32>
+  %source3 = channel.bind<fifo> %source3_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  %joined_storage = buffer.alloca<workgroup> pool(%sram) align(64) %joined_bytes : buffer
+  %joined0_slots = buffer.view %joined_storage[%offset0] : buffer -> view<1x8xi32>
+  %joined0 = channel.bind<fifo> %joined0_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  %joined1_slots = buffer.view %joined_storage[%offset1] : buffer -> view<1x8xi32>
+  %joined1 = channel.bind<fifo> %joined1_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  %joined2_slots = buffer.view %joined_storage[%offset2] : buffer -> view<1x8xi32>
+  %joined2 = channel.bind<fifo> %joined2_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  %joined3_slots = buffer.view %joined_storage[%offset3] : buffer -> view<1x8xi32>
+  %joined3 = channel.bind<fifo> %joined3_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %write, %destination = channel.reserve %source0 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    %value = scalar.constant 10 : i32
+    %values = vector.splat %value : vector<8xi32>
+    vector.store %values, %destination[0] : vector<8xi32>, view<8xi32>
+    channel.publish %write : write<tile<8xi32>>
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %write, %destination = channel.reserve %source1 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    %value = scalar.constant 20 : i32
+    %values = vector.splat %value : vector<8xi32>
+    vector.store %values, %destination[0] : vector<8xi32>, view<8xi32>
+    channel.publish %write : write<tile<8xi32>>
+  }
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    %write, %destination = channel.reserve %source2 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    %value = scalar.constant 30 : i32
+    %values = vector.splat %value : vector<8xi32>
+    vector.store %values, %destination[0] : vector<8xi32>, view<8xi32>
+    channel.publish %write : write<tile<8xi32>>
+  }
+  pipeline.strand workers([0, 5], [1, 1], [1, 1]) {
+    %write, %destination = channel.reserve %source3 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    %value = scalar.constant 40 : i32
+    %values = vector.splat %value : vector<8xi32>
+    vector.store %values, %destination[0] : vector<8xi32>, view<8xi32>
+    channel.publish %write : write<tile<8xi32>>
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %read, %source_view = channel.acquire %source0 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %write, %destination_view = channel.reserve %joined0 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    channel.copy %read -> %write : read<tile<8xi32>>, write<tile<8xi32>>
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %read, %source_view = channel.acquire %source1 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %write, %destination_view = channel.reserve %joined1 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    channel.copy %read -> %write : read<tile<8xi32>>, write<tile<8xi32>>
+  }
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    %read, %source_view = channel.acquire %source2 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %write, %destination_view = channel.reserve %joined2 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    channel.copy %read -> %write : read<tile<8xi32>>, write<tile<8xi32>>
+  }
+  pipeline.strand workers([0, 5], [1, 1], [1, 1]) {
+    %read, %source_view = channel.acquire %source3 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %write, %destination_view = channel.reserve %joined3 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    channel.copy %read -> %write : read<tile<8xi32>>, write<tile<8xi32>>
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %read0, %source_view0 = channel.acquire %joined0 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %read1, %source_view1 = channel.acquire %joined1 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %read2, %source_view2 = channel.acquire %joined2 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %read3, %source_view3 = channel.acquire %joined3 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %output0 = buffer.view %output[%offset0] : buffer -> view<8xi32>
+    %output1 = buffer.view %output[%offset1] : buffer -> view<8xi32>
+    %output2 = buffer.view %output[%offset2] : buffer -> view<8xi32>
+    %output3 = buffer.view %output[%offset3] : buffer -> view<8xi32>
+    %copy0 = kernel.async.copy %source_view0 to %output0 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi32> to view<8xi32> -> kernel.async.token
+    %copy1 = kernel.async.copy %source_view1 to %output1 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi32> to view<8xi32> -> kernel.async.token
+    %copy2 = kernel.async.copy %source_view2 to %output2 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi32> to view<8xi32> -> kernel.async.token
+    %copy3 = kernel.async.copy %source_view3 to %output3 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi32> to view<8xi32> -> kernel.async.token
+    %group = kernel.async.group %copy0, %copy1, %copy2, %copy3 : kernel.async.token, kernel.async.token, kernel.async.token, kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read0 : read<tile<8xi32>>
+    channel.release %read1 : read<tile<8xi32>>
+    channel.release %read2 : read<tile<8xi32>>
+    channel.release %read3 : read<tile<8xi32>>
+  }
+}
+
+pipeline.def<kernel> public retain target(@npu) @grouped_ring_copy() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %offset0 = index.constant 0 : offset
+  %offset1 = index.constant 64 : offset
+  %offset2 = index.constant 128 : offset
+  %offset3 = index.constant 192 : offset
+  %storage_bytes = index.constant 256 : offset
+  %capacity = index.constant 2 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %slots0 = buffer.view %storage[%offset0] : buffer -> view<2x8xi32>
+  %records0 = channel.bind<fifo> %slots0, %capacity : view<2x8xi32>, index -> channel<tile<8xi32>>
+  %slots1 = buffer.view %storage[%offset1] : buffer -> view<2x8xi32>
+  %records1 = channel.bind<fifo> %slots1, %capacity : view<2x8xi32>, index -> channel<tile<8xi32>>
+  %slots2 = buffer.view %storage[%offset2] : buffer -> view<2x8xi32>
+  %records2 = channel.bind<fifo> %slots2, %capacity : view<2x8xi32>, index -> channel<tile<8xi32>>
+  %slots3 = buffer.view %storage[%offset3] : buffer -> view<2x8xi32>
+  %records3 = channel.bind<fifo> %slots3, %capacity : view<2x8xi32>, index -> channel<tile<8xi32>>
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %begin = index.constant 0 : index
+    %end = index.constant 3 : index
+    %step = index.constant 1 : index
+    %record_bytes = index.constant 128 : index
+    %segment1_bytes = index.constant 32 : index
+    %segment2_bytes = index.constant 64 : index
+    %segment3_bytes = index.constant 96 : index
+    scf.for %record = [%begin to %end step %step] {
+      %record0_index = index.mul %record, %record_bytes : index
+      %record1_index = index.add %record0_index, %segment1_bytes : index
+      %record2_index = index.add %record0_index, %segment2_bytes : index
+      %record3_index = index.add %record0_index, %segment3_bytes : index
+      %record0_offset = index.cast %record0_index : index to offset
+      %record1_offset = index.cast %record1_index : index to offset
+      %record2_offset = index.cast %record2_index : index to offset
+      %record3_offset = index.cast %record3_index : index to offset
+      %input0 = buffer.view %input[%record0_offset] : buffer -> view<8xi32>
+      %input1 = buffer.view %input[%record1_offset] : buffer -> view<8xi32>
+      %input2 = buffer.view %input[%record2_offset] : buffer -> view<8xi32>
+      %input3 = buffer.view %input[%record3_offset] : buffer -> view<8xi32>
+      %write0, %destination0 = channel.reserve %records0 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+      %write1, %destination1 = channel.reserve %records1 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+      %write2, %destination2 = channel.reserve %records2 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+      %write3, %destination3 = channel.reserve %records3 : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+      %ingress0 = kernel.async.copy %input0 to %destination0 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<8xi32> to view<8xi32> -> kernel.async.token
+      %ingress1 = kernel.async.copy %input1 to %destination1 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<8xi32> to view<8xi32> -> kernel.async.token
+      %ingress2 = kernel.async.copy %input2 to %destination2 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<8xi32> to view<8xi32> -> kernel.async.token
+      %ingress3 = kernel.async.copy %input3 to %destination3 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<8xi32> to view<8xi32> -> kernel.async.token
+      %ingress_group = kernel.async.group %ingress0, %ingress1, %ingress2, %ingress3 : kernel.async.token, kernel.async.token, kernel.async.token, kernel.async.token -> kernel.async.group
+      kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+      channel.publish %write0 : write<tile<8xi32>>
+      channel.publish %write1 : write<tile<8xi32>>
+      channel.publish %write2 : write<tile<8xi32>>
+      channel.publish %write3 : write<tile<8xi32>>
+      %read0, %source0 = channel.acquire %records0 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+      %read1, %source1 = channel.acquire %records1 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+      %read2, %source2 = channel.acquire %records2 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+      %read3, %source3 = channel.acquire %records3 : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+      %output0 = buffer.view %output[%record0_offset] : buffer -> view<8xi32>
+      %output1 = buffer.view %output[%record1_offset] : buffer -> view<8xi32>
+      %output2 = buffer.view %output[%record2_offset] : buffer -> view<8xi32>
+      %output3 = buffer.view %output[%record3_offset] : buffer -> view<8xi32>
+      %egress0 = kernel.async.copy %source0 to %output0 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi32> to view<8xi32> -> kernel.async.token
+      %egress1 = kernel.async.copy %source1 to %output1 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi32> to view<8xi32> -> kernel.async.token
+      %egress2 = kernel.async.copy %source2 to %output2 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi32> to view<8xi32> -> kernel.async.token
+      %egress3 = kernel.async.copy %source3 to %output3 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi32> to view<8xi32> -> kernel.async.token
+      %egress_group = kernel.async.group %egress0, %egress1, %egress2, %egress3 : kernel.async.token, kernel.async.token, kernel.async.token, kernel.async.token -> kernel.async.group
+      kernel.async.wait %egress_group {newer_groups = 0} : kernel.async.group
+      channel.release %read0 : read<tile<8xi32>>
+      channel.release %read1 : read<tile<8xi32>>
+      channel.release %read2 : read<tile<8xi32>>
+      channel.release %read3 : read<tile<8xi32>>
+    }
+  }
+}
+
+pipeline.def<kernel> public retain target(@npu) @mixed_path_ingress() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %local_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %neighbor_memory = pipeline.memory<workgroup>[0, 4] : pool
+  %offset0 = index.constant 0 : offset
+  %offset1 = index.constant 32 : offset
+  %storage_bytes = index.constant 32 : offset
+  %capacity = index.constant 1 : index
+  %local_storage = buffer.alloca<workgroup> pool(%local_memory) align(64) %storage_bytes : buffer
+  %local_slots = buffer.view %local_storage[%offset0] : buffer -> view<1x8xi32>
+  %local_records = channel.bind<fifo> %local_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  %neighbor_storage = buffer.alloca<workgroup> pool(%neighbor_memory) align(64) %storage_bytes : buffer
+  %neighbor_slots = buffer.view %neighbor_storage[%offset0] : buffer -> view<1x8xi32>
+  %neighbor_records = channel.bind<fifo> %neighbor_slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %input0 = buffer.view %input[%offset0] : buffer -> view<8xi32>
+    %input1 = buffer.view %input[%offset1] : buffer -> view<8xi32>
+    %local_write, %local_destination = channel.reserve %local_records : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    %neighbor_write, %neighbor_destination = channel.reserve %neighbor_records : channel<tile<8xi32>> -> (write<tile<8xi32>>, view<8xi32>)
+    %local_copy = kernel.async.copy %input0 to %local_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<8xi32> to view<8xi32> -> kernel.async.token
+    %neighbor_copy = kernel.async.copy %input1 to %neighbor_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<8xi32> to view<8xi32> -> kernel.async.token
+    %ingress_group = kernel.async.group %local_copy, %neighbor_copy : kernel.async.token, kernel.async.token -> kernel.async.group
+    kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+    channel.publish %local_write : write<tile<8xi32>>
+    channel.publish %neighbor_write : write<tile<8xi32>>
+    %local_read, %local_source = channel.acquire<mutable> %local_records : channel<tile<8xi32>> -> (read<tile<8xi32>, mutable>, view<8xi32>)
+    %neighbor_read, %neighbor_source = channel.acquire %neighbor_records : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %local_values = vector.load %local_source[0] : view<8xi32> -> vector<8xi32>
+    %neighbor_values = vector.load %neighbor_source[0] : view<8xi32> -> vector<8xi32>
+    %sum = vector.addi %local_values, %neighbor_values : vector<8xi32>
+    vector.store %sum, %local_source[0] : vector<8xi32>, view<8xi32>
+    %external_output = buffer.view %output[%offset0] : buffer -> view<8xi32>
+    %egress = kernel.async.copy %local_source to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi32> to view<8xi32> -> kernel.async.token
+    %egress_group = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %egress_group {newer_groups = 0} : kernel.async.group
+    channel.release %local_read : read<tile<8xi32>, mutable>
+    channel.release %neighbor_read : read<tile<8xi32>>
+  }
+}
+
+func.def @memory_tile_join_reference(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<32xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %c1 = index.constant 1 : index
+  %step = index.constant 8 : index
+  %c10 = scalar.constant 10 : i32
+  scf.for %segment = [%begin to %end step %c1] {
+    %ordinal = index.add %segment, %c1 : index
+    %ordinal_i32 = index.cast %ordinal : index to i32
+    %value = scalar.muli %ordinal_i32, %c10 : i32
+    %values = vector.splat %value : vector<8xi32>
+    %position = index.mul %segment, %step : index
+    vector.store %values, %destination[%position] : vector<8xi32>, view<32xi32>
+  }
+  func.return
+}
+
+func.def @copy_96_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<96xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<96xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 96 : index
+  %step = index.constant 8 : index
+  scf.for %position = [%begin to %end step %step] {
+    %values = vector.load %source[%position] : view<96xi32> -> vector<8xi32>
+    vector.store %values, %destination[%position] : vector<8xi32>, view<96xi32>
+  }
+  func.return
+}
+
+func.def @mixed_path_reference(%input: buffer, %output: buffer) {
+  %offset0 = index.constant 0 : offset
+  %offset1 = index.constant 32 : offset
+  %source0 = buffer.view %input[%offset0] : buffer -> view<8xi32>
+  %source1 = buffer.view %input[%offset1] : buffer -> view<8xi32>
+  %destination = buffer.view %output[%offset0] : buffer -> view<8xi32>
+  %values0 = vector.load %source0[0] : view<8xi32> -> vector<8xi32>
+  %values1 = vector.load %source1[0] : view<8xi32> -> vector<8xi32>
+  %sum = vector.addi %values0, %values1 : vector<8xi32>
+  vector.store %sum, %destination[0] : vector<8xi32>, view<8xi32>
+  func.return
+}
+
+check.scenario public @memory_tile_join_replay {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %output_owner = check.generate.random.uniform seed(%seed) range(-400000 to -300000) : tensor<64xi32>
+    %output = check.tensor.view %output_owner offset(64) : tensor<64xi32> -> tensor<32xi32>
+    check.compare<@memory_tile_join, @memory_tile_join_reference>(%output) : (tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%output_owner) expected(%output_owner) : tensor<64xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @grouped_ring_replay {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_owner = check.generate.random.uniform seed(%seed) range(-2000000000 to 2000000000) : tensor<128xi32>
+    %output_owner = check.generate.random.uniform seed(%seed) range(-400000 to -300000) : tensor<128xi32>
+    %input = check.tensor.view %input_owner offset(64) : tensor<128xi32> -> tensor<96xi32>
+    %output = check.tensor.view %output_owner offset(64) : tensor<128xi32> -> tensor<96xi32>
+    check.compare<@grouped_ring_copy, @copy_96_reference>(%input, %output) : (tensor<96xi32>, tensor<96xi32>) -> () {
+      check.expect.bitwise actual(%input_owner) expected(%input_owner) : tensor<128xi32>
+      check.expect.bitwise actual(%output_owner) expected(%output_owner) : tensor<128xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @mixed_path_replay {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_owner = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<48xi32>
+    %output_owner = check.generate.random.uniform seed(%seed) range(-400000 to -300000) : tensor<40xi32>
+    %input = check.tensor.view %input_owner offset(64) : tensor<48xi32> -> tensor<16xi32>
+    %output = check.tensor.view %output_owner offset(64) : tensor<40xi32> -> tensor<8xi32>
+    check.compare<@mixed_path_ingress, @mixed_path_reference>(%input, %output) : (tensor<16xi32>, tensor<8xi32>) -> () {
+      check.expect.bitwise actual(%input_owner) expected(%input_owner) : tensor<48xi32>
+      check.expect.bitwise actual(%output_owner) expected(%output_owner) : tensor<40xi32>
+    }
+  }
+  check.return
+}
