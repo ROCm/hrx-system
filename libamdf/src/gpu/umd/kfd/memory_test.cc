@@ -1031,9 +1031,11 @@ TEST(LinuxGpuMemoryProfileTest, SystemSignalsPreserveIndependentSdmaPolicy) {
   ASSERT_EQ(endpoint.queue_family_count, 3u);
   const auto profile = QueryProfile(&device, 1);
   EXPECT_EQ(profile.atomic_operations_32,
-            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE));
+            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+             AMDF_ATOMIC_OPERATION_ADD));
   EXPECT_EQ(profile.atomic_operations_64,
-            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE));
+            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+             AMDF_ATOMIC_OPERATION_ADD));
   amdf_memory_site_query_t query = {
       .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
       .flags = profile.guaranteed_flags,
@@ -1089,9 +1091,11 @@ TEST(LinuxGpuMemoryProfileTest, SystemSignalsDoNotRequireSdma) {
   ASSERT_EQ(endpoint.queue_family_count, 2u);
   const auto profile = QueryProfile(&device, 1);
   EXPECT_EQ(profile.atomic_operations_32,
-            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE));
+            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+             AMDF_ATOMIC_OPERATION_ADD));
   EXPECT_EQ(profile.atomic_operations_64,
-            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE));
+            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+             AMDF_ATOMIC_OPERATION_ADD));
   const amdf_memory_site_query_t query = {
       .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
       .flags = profile.guaranteed_flags,
@@ -1122,9 +1126,11 @@ TEST(LinuxGpuMemoryProfileTest, SystemGroupSignalsRemainConsumerSpecific) {
   ASSERT_TRUE(unqualified_profile.construction.query_access(
       &unqualified_profile, &qualified_profile, &projected));
   EXPECT_EQ(projected.atomic_operations_32,
-            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE));
+            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+             AMDF_ATOMIC_OPERATION_ADD));
   EXPECT_EQ(projected.atomic_operations_64,
-            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE));
+            (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+             AMDF_ATOMIC_OPERATION_ADD));
 
   unqualified.topology.memory_features = AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
   const auto local = QueryProfile(&unqualified, 2);
@@ -1332,12 +1338,12 @@ TEST(LinuxGpuMemoryProfileTest, LegacySdmaPreservesHostAperturePublication) {
   }
 }
 
-TEST(LinuxGpuMemoryProfileTest, SystemSignalsRequireNativeMappingAndCpuRoutes) {
+TEST(LinuxGpuMemoryProfileTest, SystemAtomicsRequireNativeMappingAndCpuRoutes) {
   const struct {
     // Native GC identity, independent of the compiler target spelling.
     amdf_gpu_kfd_ip_version_t gc;
-    // Whether owned coherent SYSTEM backing supports CP stores and wait loads.
-    bool supports_signals;
+    // Whether owned control backing supports CP stores, waits, and ADD.
+    bool supports_atomics;
   } cases[] = {
       {{.major = 9, .minor = 0, .revision = 10, .exact = true}, true},
       {{.major = 9, .minor = 4, .revision = 1, .exact = true}, true},
@@ -1378,16 +1384,18 @@ TEST(LinuxGpuMemoryProfileTest, SystemSignalsRequireNativeMappingAndCpuRoutes) {
       for (uint32_t ordinal = 0; ordinal < 4; ++ordinal) {
         SCOPED_TRACE(ordinal);
         const auto profile = QueryProfile(&device, ordinal);
-        const bool native_mapping = ordinal == 1 && test_case.supports_signals;
+        const bool native_mapping = ordinal == 1 && test_case.supports_atomics;
         EXPECT_EQ(
             profile.atomic_operations_32,
             native_mapping && (widths & 1) != 0
-                ? (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE)
+                ? (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+                   AMDF_ATOMIC_OPERATION_ADD)
                 : 0u);
         EXPECT_EQ(
             profile.atomic_operations_64,
             native_mapping && (widths & 2) != 0
-                ? (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE)
+                ? (AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE |
+                   AMDF_ATOMIC_OPERATION_ADD)
                 : 0u);
       }
     }

@@ -62,6 +62,29 @@ size_t CopyData(uint32_t* words, uint64_t source_address,
   return 6;
 }
 
+static size_t AtomicAdd(uint32_t* words, uint64_t target_address,
+                        uint64_t value, uint32_t operation) {
+  words[0] = 0xc0071e00u;
+  // TC opcode, single pass, LRU policy, and no compare/loop operand.
+  words[1] = operation;
+  words[2] = static_cast<uint32_t>(target_address);
+  words[3] = static_cast<uint32_t>(target_address >> 32);
+  words[4] = static_cast<uint32_t>(value);
+  words[5] = static_cast<uint32_t>(value >> 32);
+  words[6] = 0;
+  words[7] = 0;
+  words[8] = 0;
+  return 9;
+}
+
+size_t AtomicAdd32(uint32_t* words, uint64_t target_address, uint32_t value) {
+  return AtomicAdd(words, target_address, value, 0x0f);
+}
+
+size_t AtomicAdd64(uint32_t* words, uint64_t target_address, uint64_t value) {
+  return AtomicAdd(words, target_address, value, 0x2f);
+}
+
 size_t CopyGpuClock64(uint32_t* words, uint64_t target_address,
                       CopyDataPolicy policy) {
   words[0] = (3u << 30) | (4u << 16) | (0x40u << 8);

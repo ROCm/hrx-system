@@ -273,6 +273,25 @@ TEST(Pm4EncodingTest, ConfirmedStoresPreserveWidthsAndOperands) {
   }
 }
 
+TEST(Pm4EncodingTest, AtomicAddsPreserveWidthsAndOperands) {
+  std::array<uint32_t, 20> words;
+  words.fill(0x24681357);
+  ASSERT_EQ(pm4::AtomicAdd32(words.data() + 1, UINT64_C(0x000012345678903c),
+                             0xfedcba98),
+            9u);
+  ASSERT_EQ(pm4::AtomicAdd64(words.data() + 10, UINT64_C(0x00003456789abff8),
+                             UINT64_C(0x13579bdf2468ace0)),
+            9u);
+  // PAL's integer ADD_RTN opcodes with single-pass execution and LRU policy.
+  const std::array<uint32_t, 18> expected = {
+      0xc0071e00, 0x0f, 0x5678903c, 0x1234, 0xfedcba98, 0,          0, 0, 0,
+      0xc0071e00, 0x2f, 0x789abff8, 0x3456, 0x2468ace0, 0x13579bdf, 0, 0, 0,
+  };
+  ExpectWords(words.data() + 1, expected);
+  EXPECT_EQ(words.front(), 0x24681357u);
+  EXPECT_EQ(words.back(), 0x24681357u);
+}
+
 TEST(Pm4EncodingTest, ComputeBindingPreservesNativeContextRegisters) {
   std::array<uint32_t, 27> words = {};
   words.back() = 0x24681357;

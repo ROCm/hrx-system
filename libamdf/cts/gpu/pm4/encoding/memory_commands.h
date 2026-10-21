@@ -55,6 +55,14 @@ size_t WaitMemory64(uint32_t* words, uint64_t address, uint64_t value,
 size_t StoreImmediate(uint32_t* words, uint64_t target_address, uint64_t value,
                       CopyDataWidth width);
 
+// Encodes one single-pass ATOMIC_MEM ADD_RTN into nine caller-owned DWORDs
+// and returns nine. The naturally aligned target has separately qualified ADD
+// semantics and participant reach. RTN orders the operation before following CP
+// commands; the returned value is discarded. No payload cache work is
+// performed.
+size_t AtomicAdd32(uint32_t* words, uint64_t target_address, uint32_t value);
+size_t AtomicAdd64(uint32_t* words, uint64_t target_address, uint64_t value);
+
 // Encodes one confirmed TC/L2-to-TC/L2 copy into six caller-owned DWORDs and
 // returns six. Both addresses are aligned to four bytes for k32Bit and eight
 // bytes for k64Bit. The k32Bit result width does not bound native source reads;

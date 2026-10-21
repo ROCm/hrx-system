@@ -30,6 +30,7 @@ iree_cc_library(
   NAME
     gpu_extension_cases
   SRCS
+    "atomic_test.cc"
     "event_test.cc"
     "gpu_extension_test.cc"
     "user_queue_test.cc"
@@ -37,7 +38,9 @@ iree_cc_library(
     ::gpu_device_fixture
     amdf::headers
     iree::third_party::google_test
+    libamdf::cts::gpu::aql::publication
     libamdf::cts::gpu::pm4::encoding::commands
+    libamdf::cts::gpu::pm4::encoding::memory_commands
     libamdf::cts::gpu::sdma::encoding::commands
     libamdf::cts::gpu::util::command_fixture
     libamdf::cts::util::device_cache

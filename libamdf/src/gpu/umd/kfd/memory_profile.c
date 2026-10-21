@@ -223,7 +223,7 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
   };
   // Owned GTT uses CPU-cached TTM pages with snooped GPU PTEs. Host coherence
   // is independent of GPU MTYPE: payloads retain GPU caches while control
-  // backing requests KFD COHERENT (MTYPE_UC on GMC11).
+  // backing requests KFD UNCACHED.
   const bool control_system =
       memory_profile_ordinal == AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL;
   uint32_t ordinal = AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_COUNT;
@@ -274,18 +274,21 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
     // Control allocations request UC on GMC9/11/12. GC12.0 additionally routes
     // CP atomics through MALL. Native CPU route widths supply the independent
     // AtomicOps requirement; the uncached mapping alone does not establish it.
-    // Wait comparisons remain an independent queue capability.
+    // PCIe supports integer ADD, unlike raw SUB/AND/OR/XOR. Wait comparisons
+    // remain an independent queue capability.
     const amdf_gpu_kfd_ip_version_t* gc = &topology->gc_ip;
     if (control_system && gc->exact &&
         (gc->major == 9 || gc->major == 11 ||
          (gc->major == 12 && gc->minor == 0 && gc->revision <= 1))) {
       if (topology->host_atomics.supports_32) {
-        profile.atomic_operations_32 =
-            AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE;
+        profile.atomic_operations_32 = AMDF_ATOMIC_OPERATION_WAIT |
+                                       AMDF_ATOMIC_OPERATION_STORE |
+                                       AMDF_ATOMIC_OPERATION_ADD;
       }
       if (topology->host_atomics.supports_64) {
-        profile.atomic_operations_64 =
-            AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE;
+        profile.atomic_operations_64 = AMDF_ATOMIC_OPERATION_WAIT |
+                                       AMDF_ATOMIC_OPERATION_STORE |
+                                       AMDF_ATOMIC_OPERATION_ADD;
       }
     }
     profile.visibility.describe_site =
