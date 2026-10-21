@@ -148,14 +148,17 @@ iree_status_t iree_hal_amd_gpu_aql_growth_begin(
     case IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS:
       pending = context->signals;
       break;
-    case IREE_HAL_AMD_GPU_AQL_ENTRY_PROGRAM:
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_PROGRAM: {
       program = &submission->execute.program->resident;
-      if (program->queues[context->queue_ordinal].growth) {
+      iree_hal_amd_gpu_program_growth_t* growth =
+          iree_hal_amd_gpu_program_pending_growth(program,
+                                                  context->queue_ordinal);
+      if (growth) {
         pending =
-            iree_containerof(program->queues[context->queue_ordinal].growth,
-                             iree_hal_amd_gpu_aql_growth_t, program);
+            iree_containerof(growth, iree_hal_amd_gpu_aql_growth_t, program);
       }
       break;
+    }
     default:
       IREE_BUILTIN_UNREACHABLE();
   }

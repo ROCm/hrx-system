@@ -35,11 +35,11 @@ typedef struct iree_hal_amd_gpu_program_pool_t {
   iree_hal_amd_fabric_memory_options_t upload;
   // Device-local storage, including qualified shared DRAM on unified devices.
   iree_hal_amd_fabric_memory_options_t resident;
-  // Protects registered-program membership during explicit trim and removal.
+  // Protects registered programs and queue membership during cold changes.
   iree_slim_mutex_t registry_mutex;
   // Registered programs, protected by registry_mutex.
   iree_hal_amd_gpu_program_t* head;
-  // Immutable number of provisioned queues in this native domain.
+  // Installed native-domain coordinate extent, protected by registry_mutex.
   uint32_t queue_count;
 } iree_hal_amd_gpu_program_pool_t;
 
@@ -52,6 +52,15 @@ iree_status_t iree_hal_amd_gpu_program_pool_initialize(
 void iree_hal_amd_gpu_program_pool_trim(iree_hal_amd_gpu_program_pool_t* pool);
 void iree_hal_amd_gpu_program_pool_deinitialize(
     iree_hal_amd_gpu_program_pool_t* pool);
+
+// Extends publisher metadata before a new native queue becomes usable. Existing
+// recordings keep their native placements and invocation leases. Host
+// allocation happens outside each program's metadata lock; no native allocation
+// is needed. Partial failure leaves existing queues usable and can be retried.
+// Sealing a concurrent recording reconciles this extent under the same registry
+// lock.
+iree_status_t iree_hal_amd_gpu_program_pool_reserve_queues(
+    iree_hal_amd_gpu_program_pool_t* pool, uint32_t queue_count);
 
 // One independently writable native program placement. Pool ownership keeps
 // the backing alive; invocation leases cover every native command/data reader.
@@ -89,7 +98,8 @@ typedef struct iree_hal_amd_gpu_program_upload_t
 typedef struct iree_hal_amd_gpu_program_queue_t {
   // Preferred physical instance for direct steady-state FIFO reuse.
   iree_hal_amd_gpu_program_instance_t* preferred;
-  // Coalesced native acquisition, accessed only by this queue's publisher.
+  // Coalesced native acquisition, installed/removed by this queue's publisher
+  // under the program mutex so cold table replacement can preserve it.
   iree_hal_amd_gpu_program_growth_t* growth;
   // Availability epoch observed by this publisher's most recent miss.
   uint64_t observed_epoch;
@@ -129,7 +139,10 @@ struct iree_hal_amd_gpu_program_t {
   uint32_t capacity;
   // Growable pointer table; NULL entries are unallocated or explicitly trimmed.
   iree_hal_amd_gpu_program_instance_t** instances;
-  // Stable directly indexed publisher state and initial metadata allocation.
+  // Installed publisher coordinate extent, protected by mutex.
+  uint32_t queue_count;
+  // Directly indexed publisher state and combined metadata allocation. Cold
+  // queue growth may replace it under mutex; native instances stay fixed.
   iree_hal_amd_gpu_program_queue_t* queues;
   // Resident command/private-data extent copied into new instances.
   uint32_t byte_length;
@@ -173,7 +186,7 @@ iree_hal_amd_gpu_program_source_t iree_hal_amd_gpu_program_source(
 // Reserves an idle or causally reusable instance exclusively until acceptance
 // or rejection. Frontier includes the exact native waits to be emitted before
 // this invocation, plus the queue's published FIFO prefix. It contains capacity
-// publication epochs indexed by the device's immutable queue ordinals, so
+// publication epochs indexed by the device's stable queue coordinates, so
 // dominance of the last writer is a single indexed comparison.
 // NULL requests cold growth; it never waits for completion or allocates. The
 // caller retains its lease across native publication retries and releases it
@@ -183,7 +196,7 @@ iree_hal_amd_gpu_program_instance_t* iree_hal_amd_gpu_program_try_acquire(
     const uint64_t* frontier);
 
 // Caller-owned native acquisition, borrowed until completion. The queue uses
-// queues[queue_ordinal].growth to coalesce its captures behind one request.
+// program_pending_growth to coalesce its captures behind one request.
 // No per-invocation state or resource ownership is added to the native ring.
 struct iree_hal_amd_gpu_program_growth_t {
   // Borrowed program retained independently of any waiting invocations.
@@ -207,6 +220,12 @@ struct iree_hal_amd_gpu_program_growth_t {
   // Embedded native request and context lifetime join.
   iree_hal_amd_gpu_memory_acquire_t acquire;
 };
+
+// Returns the exact publisher's pending request. The caller owns that
+// publisher, which alone can complete or replace the request. The metadata lock
+// protects only the indexed lookup against cold queue-table replacement.
+iree_hal_amd_gpu_program_growth_t* iree_hal_amd_gpu_program_pending_growth(
+    iree_hal_amd_gpu_program_t* program, uint32_t queue_ordinal);
 
 // Reserves an instance and starts native acquisition without waiting. The
 // requesting queue has no pending growth or unpublished instance reservation.

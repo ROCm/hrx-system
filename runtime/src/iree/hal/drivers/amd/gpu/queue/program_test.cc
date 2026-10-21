@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 
 #include <atomic>
+#include <barrier>
 #include <cstring>
 #include <future>
 #include <semaphore>
@@ -384,6 +385,102 @@ TEST_P(ProgramLifetimeTest, LastReleaseReturnsBeforeHeldNativeFree) {
   EXPECT_NE(release_thread_, allocation_thread_);
 }
 
+TEST_P(ProgramLifetimeTest, AcquiredQueueReusesExistingResidentRecording) {
+  iree_hal_amd_gpu_program_t program = {};
+  ASSERT_NO_FATAL_FAILURE(Record(&program));
+  uint64_t frontier[4] = {};
+  auto* initial = iree_hal_amd_gpu_program_try_acquire(&program, 0, frontier);
+  ASSERT_NE(initial, nullptr);
+  iree_hal_amd_gpu_program_publish(&program, initial, 0, 7);
+  const auto source = iree_hal_amd_gpu_program_source(&program);
+  const uint32_t allocations = allocate_count_;
+
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 4));
+  EXPECT_EQ(allocate_count_, allocations);
+  EXPECT_EQ(program.queue_count, 4u);
+  EXPECT_EQ(program.initial, initial);
+  EXPECT_EQ(iree_hal_amd_gpu_program_source(&program).address, source.address);
+  EXPECT_EQ(iree_hal_amd_gpu_program_try_acquire(&program, 3, frontier),
+            nullptr);
+  frontier[0] = 7;
+  auto* consumer = iree_hal_amd_gpu_program_try_acquire(&program, 3, frontier);
+  EXPECT_EQ(consumer, initial);
+  iree_hal_amd_gpu_program_publish(&program, consumer, 3, 1);
+  iree_hal_amd_gpu_program_release(&program, consumer);
+  iree_hal_amd_gpu_program_release(&program, initial);
+  iree_hal_amd_gpu_program_deinitialize(&program);
+}
+
+TEST_P(ProgramLifetimeTest, RecordingReconcilesQueuesAcquiredBeforeSeal) {
+  iree_hal_amd_gpu_program_t program = {};
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_program_initialize(&pool_, 256, 4096, 16, &program));
+  const uint32_t allocations = allocate_count_;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 8));
+  EXPECT_EQ(program.queue_count, 3u);
+  memset(program.contents.data, 0x5a, program.contents.data_length);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_seal(&program));
+  EXPECT_EQ(program.queue_count, 8u);
+  EXPECT_EQ(allocate_count_, allocations);
+  uint64_t frontier[8] = {};
+  auto* instance = iree_hal_amd_gpu_program_try_acquire(&program, 7, frontier);
+  EXPECT_EQ(instance, program.initial);
+  iree_hal_amd_gpu_program_cancel(&program, instance);
+  iree_hal_amd_gpu_program_deinitialize(&program);
+}
+
+TEST_P(ProgramLifetimeTest, QueueGrowthFailureLeavesExistingPublishersUsable) {
+  iree_hal_amd_gpu_program_t program = {};
+  ASSERT_NO_FATAL_FAILURE(Record(&program));
+  const auto allocator = pool_.host_allocator;
+  pool_.host_allocator = iree_allocator_null();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 8));
+  pool_.host_allocator = allocator;
+  EXPECT_EQ(program.queue_count, 3u);
+  uint64_t frontier[8] = {};
+  auto* instance = iree_hal_amd_gpu_program_try_acquire(&program, 2, frontier);
+  EXPECT_EQ(instance, program.initial);
+  iree_hal_amd_gpu_program_publish(&program, instance, 2, 1);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 8));
+  EXPECT_EQ(program.queue_count, 8u);
+  frontier[2] = 1;
+  auto* consumer = iree_hal_amd_gpu_program_try_acquire(&program, 7, frontier);
+  EXPECT_EQ(consumer, instance);
+  iree_hal_amd_gpu_program_cancel(&program, consumer);
+  iree_hal_amd_gpu_program_release(&program, instance);
+  iree_hal_amd_gpu_program_deinitialize(&program);
+}
+
+TEST_P(ProgramLifetimeTest, QueueGrowthPreservesConcurrentInvocationLeases) {
+  iree_hal_amd_gpu_program_t program = {};
+  ASSERT_NO_FATAL_FAILURE(Record(&program));
+  const uint32_t allocations = allocate_count_;
+  std::barrier<> begin(2);
+  std::thread publisher([&] {
+    uint64_t frontier[256] = {};
+    for (uint32_t width = 4; width <= 256; width *= 2) {
+      begin.arrive_and_wait();
+      for (uint32_t epoch = 1; epoch <= 256; ++epoch) {
+        auto* instance =
+            iree_hal_amd_gpu_program_try_acquire(&program, 0, frontier);
+        EXPECT_EQ(instance, program.initial);
+        iree_hal_amd_gpu_program_publish(&program, instance, 0, epoch);
+        iree_hal_amd_gpu_program_release(&program, instance);
+      }
+    }
+  });
+  for (uint32_t width = 4; width <= 256; width *= 2) {
+    begin.arrive_and_wait();
+    IREE_EXPECT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, width));
+  }
+  publisher.join();
+  EXPECT_EQ(allocate_count_, allocations);
+  EXPECT_EQ(program.queue_count, 256u);
+  iree_hal_amd_gpu_program_deinitialize(&program);
+}
+
 TEST_P(ProgramLifetimeTest, RetiredInstanceNotifiesWhileCloneAllocationIsHeld) {
   ReuseWhileGrowing(false, false);
 }
@@ -516,6 +613,9 @@ TEST_P(ProgramLifetimeTest, PendingClonesHaveDistinctTrimProtectedSlots) {
       &program, 2, Completion(&second_completed), &second));
   EXPECT_EQ(program.queues[1].growth, &first);
   EXPECT_EQ(program.queues[2].growth, &second);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 8));
+  EXPECT_EQ(iree_hal_amd_gpu_program_pending_growth(&program, 1), &first);
+  EXPECT_EQ(iree_hal_amd_gpu_program_pending_growth(&program, 2), &second);
   EXPECT_NE(first.instance, second.instance);
   EXPECT_NE(first.instance->ordinal, second.instance->ordinal);
   iree_hal_amd_gpu_program_pool_trim(&pool_);
@@ -614,6 +714,12 @@ TEST_P(ProgramLifetimeTest, CancelledBorrowCanRequireMoreInstancesThanQueues) {
   EXPECT_EQ(program.initial, first);
   EXPECT_EQ(iree_hal_amd_gpu_program_source(&program).address, source.address);
   iree_hal_amd_gpu_program_publish(&program, fourth, 2, 1);
+
+  // Queue growth also preserves a previously expanded instance pointer table.
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 8));
+  EXPECT_EQ(program.instances[fourth->ordinal], fourth);
+  EXPECT_EQ(program.initial, first);
+  EXPECT_EQ(iree_hal_amd_gpu_program_source(&program).address, source.address);
 
   // Every actual publication still owns a lease; cancellation consumed only
   // the unpublished borrow. Trim then returns all independent spare backing.

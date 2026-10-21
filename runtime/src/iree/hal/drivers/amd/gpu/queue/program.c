@@ -37,6 +37,79 @@ iree_status_t iree_hal_amd_gpu_program_pool_initialize(
   return iree_ok_status();
 }
 
+// The registry owner serializes cold queue growth. Instance-table growth can
+// still race the host allocation, so prepare a replacement outside the hot
+// metadata mutex and install only while it covers the latest instance extent.
+static iree_status_t iree_hal_amd_gpu_program_reserve_queues(
+    iree_hal_amd_gpu_program_t* program, uint32_t queue_count) {
+  const iree_allocator_t allocator = program->pool->host_allocator;
+  iree_status_t status = iree_ok_status();
+  bool complete = false;
+  while (!complete && iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&program->mutex);
+    complete = queue_count <= program->queue_count;
+    const uint32_t capacity = program->capacity;
+    iree_slim_mutex_unlock(&program->mutex);
+    if (complete) {
+      break;
+    }
+    iree_host_size_t total_size = 0, instances_offset = 0;
+    status = IREE_STRUCT_LAYOUT(
+        0, &total_size,
+        IREE_STRUCT_FIELD(queue_count, iree_hal_amd_gpu_program_queue_t, NULL),
+        IREE_STRUCT_FIELD(capacity, iree_hal_amd_gpu_program_instance_t*,
+                          &instances_offset));
+    iree_hal_amd_gpu_program_queue_t* proposal = NULL;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(allocator, total_size, (void**)&proposal);
+    }
+    iree_hal_amd_gpu_program_queue_t* replaced_queues = NULL;
+    iree_hal_amd_gpu_program_instance_t** replaced_instances = NULL;
+    if (iree_status_is_ok(status)) {
+      iree_hal_amd_gpu_program_instance_t** instances =
+          (void*)((uint8_t*)proposal + instances_offset);
+      iree_slim_mutex_lock(&program->mutex);
+      if (capacity == program->capacity) {
+        memcpy(proposal, program->queues,
+               program->queue_count * sizeof(*proposal));
+        for (uint32_t i = program->queue_count; i < queue_count; ++i) {
+          proposal[i].preferred = program->initial;
+        }
+        memcpy(instances, program->instances, capacity * sizeof(*instances));
+        replaced_queues = program->queues;
+        if (program->instances !=
+            (void*)(program->queues + program->queue_count)) {
+          replaced_instances = program->instances;
+        }
+        program->queue_count = queue_count;
+        program->queues = proposal;
+        program->instances = instances;
+        proposal = NULL;
+        complete = true;
+      }
+      iree_slim_mutex_unlock(&program->mutex);
+    }
+    iree_allocator_free(allocator, proposal);
+    iree_allocator_free(allocator, replaced_instances);
+    iree_allocator_free(allocator, replaced_queues);
+  }
+  return status;
+}
+
+iree_status_t iree_hal_amd_gpu_program_pool_reserve_queues(
+    iree_hal_amd_gpu_program_pool_t* pool, uint32_t queue_count) {
+  iree_slim_mutex_lock(&pool->registry_mutex);
+  pool->queue_count = iree_max(pool->queue_count, queue_count);
+  iree_status_t status = iree_ok_status();
+  for (iree_hal_amd_gpu_program_t* program = pool->head;
+       program && iree_status_is_ok(status); program = program->next) {
+    status =
+        iree_hal_amd_gpu_program_reserve_queues(program, pool->queue_count);
+  }
+  iree_slim_mutex_unlock(&pool->registry_mutex);
+  return status;
+}
+
 void iree_hal_amd_gpu_program_pool_trim(iree_hal_amd_gpu_program_pool_t* pool) {
   iree_slim_mutex_lock(&pool->registry_mutex);
   for (iree_hal_amd_gpu_program_t* program = pool->head; program;
@@ -139,9 +212,13 @@ iree_status_t iree_hal_amd_gpu_program_initialize(
     iree_hal_amd_gpu_program_pool_t* pool, uint32_t alignment,
     uint32_t byte_length, uint32_t fixup_count,
     iree_hal_amd_gpu_program_t* out_program) {
+  iree_slim_mutex_lock(&pool->registry_mutex);
+  const uint32_t queue_count = pool->queue_count;
+  iree_slim_mutex_unlock(&pool->registry_mutex);
   *out_program = (iree_hal_amd_gpu_program_t){
       .pool = pool,
-      .capacity = pool->queue_count,
+      .capacity = queue_count,
+      .queue_count = queue_count,
       .byte_length = byte_length,
       .alignment = alignment,
       .fixup_count = fixup_count,
@@ -150,10 +227,10 @@ iree_status_t iree_hal_amd_gpu_program_initialize(
   iree_slim_mutex_initialize(&out_program->mutex);
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       pool->host_allocator,
-      pool->queue_count *
+      queue_count *
           (sizeof(*out_program->queues) + sizeof(*out_program->instances)),
       (void**)&out_program->queues));
-  out_program->instances = (void*)(out_program->queues + pool->queue_count);
+  out_program->instances = (void*)(out_program->queues + queue_count);
   const uint64_t allocation_length =
       out_program->fixup_offset +
       (uint64_t)fixup_count * sizeof(iree_hal_amd_gpu_fixup_t);
@@ -179,7 +256,7 @@ iree_status_t iree_hal_amd_gpu_program_initialize(
             &out_program->upload_address),
         "query resident program upload address"));
   }
-  for (uint32_t i = 0; i < pool->queue_count; ++i) {
+  for (uint32_t i = 0; i < queue_count; ++i) {
     out_program->queues[i].preferred = initial;
   }
   return iree_ok_status();
@@ -202,13 +279,17 @@ iree_status_t iree_hal_amd_gpu_program_seal(
     iree_atomic_store(&program->source_ready, 1, iree_memory_order_release);
   }
   iree_slim_mutex_lock(&program->pool->registry_mutex);
-  program->next = program->pool->head;
-  if (program->next) {
-    program->next->previous = program;
+  iree_status_t status = iree_hal_amd_gpu_program_reserve_queues(
+      program, program->pool->queue_count);
+  if (iree_status_is_ok(status)) {
+    program->next = program->pool->head;
+    if (program->next) {
+      program->next->previous = program;
+    }
+    program->pool->head = program;
   }
-  program->pool->head = program;
   iree_slim_mutex_unlock(&program->pool->registry_mutex);
-  return iree_ok_status();
+  return status;
 }
 
 iree_hal_amd_gpu_program_source_t iree_hal_amd_gpu_program_source(
@@ -270,7 +351,7 @@ iree_hal_amd_gpu_program_instance_t* iree_hal_amd_gpu_program_try_acquire(
 
 // Pending reservations and cancellation can leave several live instances with
 // the same last writer. The queue count is a useful initial size, not a bound
-// on physical overlap. Per-queue metadata never moves when this table grows.
+// on physical overlap. Per-queue metadata never moves for instance-only growth.
 static iree_status_t iree_hal_amd_gpu_program_reserve_instance(
     iree_hal_amd_gpu_program_t* program,
     iree_hal_amd_gpu_program_instance_t* instance, bool* out_reserved) {
@@ -301,7 +382,10 @@ static iree_status_t iree_hal_amd_gpu_program_reserve_instance(
           proposal_capacity > program->capacity) {
         memcpy(proposal, program->instances,
                program->capacity * sizeof(*proposal));
-        replaced = program->instances;
+        if (program->instances !=
+            (void*)(program->queues + program->queue_count)) {
+          replaced = program->instances;
+        }
         program->instances = proposal;
         program->capacity = proposal_capacity;
         proposal = NULL;
@@ -317,10 +401,7 @@ static iree_status_t iree_hal_amd_gpu_program_reserve_instance(
       }
     }
     iree_slim_mutex_unlock(&program->mutex);
-    if (replaced &&
-        replaced != (void*)(program->queues + program->pool->queue_count)) {
-      iree_allocator_free(allocator, replaced);
-    }
+    iree_allocator_free(allocator, replaced);
     if (!complete) {
       iree_allocator_free(allocator, proposal);
       proposal = NULL;
@@ -337,6 +418,15 @@ static iree_status_t iree_hal_amd_gpu_program_reserve_instance(
   }
   iree_allocator_free(allocator, proposal);
   return status;
+}
+
+iree_hal_amd_gpu_program_growth_t* iree_hal_amd_gpu_program_pending_growth(
+    iree_hal_amd_gpu_program_t* program, uint32_t queue_ordinal) {
+  iree_slim_mutex_lock(&program->mutex);
+  iree_hal_amd_gpu_program_growth_t* pending =
+      program->queues[queue_ordinal].growth;
+  iree_slim_mutex_unlock(&program->mutex);
+  return pending;
 }
 
 iree_status_t iree_hal_amd_gpu_program_grow_begin(
@@ -364,7 +454,9 @@ iree_status_t iree_hal_amd_gpu_program_grow_begin(
   };
   operation->options.host_access = 0;
   operation->options.required_flags &= ~AMDF_MEMORY_FLAG_HOST_VISIBLE;
+  iree_slim_mutex_lock(&program->mutex);
   program->queues[queue_ordinal].growth = operation;
+  iree_slim_mutex_unlock(&program->mutex);
   if (!instance) {
     callback.fn(callback.user_data, iree_ok_status());
     return iree_ok_status();
@@ -441,7 +533,6 @@ iree_status_t iree_hal_amd_gpu_program_grow_end(
     iree_hal_amd_gpu_program_growth_t* operation, iree_status_t status) {
   iree_hal_amd_gpu_program_t* program = operation->program;
   iree_hal_amd_gpu_program_instance_t* instance = operation->instance;
-  program->queues[operation->queue_ordinal].growth = NULL;
   if (instance && iree_status_is_ok(status)) {
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
         program->pool->context->api->memory_query_address(
@@ -450,6 +541,7 @@ iree_status_t iree_hal_amd_gpu_program_grow_end(
         "query resident program address");
   }
   iree_slim_mutex_lock(&program->mutex);
+  program->queues[operation->queue_ordinal].growth = NULL;
   iree_hal_amd_gpu_program_unlink_wait(operation);
   if (instance && iree_status_is_ok(status)) {
     instance->reserved = false;
@@ -518,7 +610,7 @@ void iree_hal_amd_gpu_program_trim(iree_hal_amd_gpu_program_t* program) {
     iree_hal_amd_gpu_program_instance_t* instance = program->instances[i];
     if (instance && !instance->use_count && !instance->reserved) {
       program->instances[i] = NULL;
-      for (uint32_t q = 0; q < program->pool->queue_count; ++q) {
+      for (uint32_t q = 0; q < program->queue_count; ++q) {
         if (program->queues[q].preferred == instance) {
           program->queues[q].preferred = program->initial;
         }
@@ -567,8 +659,7 @@ void iree_hal_amd_gpu_program_deinitialize(
     for (uint32_t i = 0; i < program->capacity; ++i) {
       iree_hal_amd_gpu_program_instance_free(program, program->instances[i]);
     }
-    if (program->instances !=
-        (void*)(program->queues + program->pool->queue_count)) {
+    if (program->instances != (void*)(program->queues + program->queue_count)) {
       iree_allocator_free(program->pool->host_allocator, program->instances);
     }
     iree_allocator_free(program->pool->host_allocator, program->queues);
