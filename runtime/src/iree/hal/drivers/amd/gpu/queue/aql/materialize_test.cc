@@ -63,6 +63,14 @@ TEST_P(MaterializeProgramTest, EmbeddedInstructionsAndDescriptorMatchSource) {
                 : sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t));
   EXPECT_EQ(metadata.private_segment_fixed_size, 0u);
   EXPECT_EQ(metadata.group_segment_fixed_size, 0u);
+  ASSERT_TRUE(metadata.has_required_workgroup_size);
+  const auto packet = iree_hal_amd_gpu_aql_materialize_packet(0, 0, 0);
+  const uint32_t workgroup_size[] = {packet.words[1] & 0xFFFFu,
+                                     packet.words[1] >> 16, packet.words[2]};
+  for (size_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(workgroup_size[i], metadata.required_workgroup_size[i]);
+    EXPECT_EQ(packet.words[3 + i], workgroup_size[i]);
+  }
   ASSERT_EQ(metadata.argument_count, profiling ? 9u : 7u);
   for (size_t i = 0; i < 4; ++i) {
     EXPECT_EQ(metadata.arguments[i].offset, i * 8);

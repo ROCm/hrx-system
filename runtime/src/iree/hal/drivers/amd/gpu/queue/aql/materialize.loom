@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// One wave copies a resident packet block into exclusively reserved ring slots.
+// One workgroup copies a resident packet block into exclusively reserved ring slots.
 // The first header stays INVALID until every body and successor header is
 // visible. An INVALID template is an indirect target whose preceding dispatch
 // publishes its counts; the pair always belongs to the same block.
 kernel.def export("materialize") @materialize() {
   %one = index.constant 1 : index
-  %width = index.constant 32 : index
+  %width = index.constant 1024 : index
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
 } launch(%ring: buffer, %packets: buffer, %ring_address: i64, %packet_address: i64, %ring_mask: i32, %first: i32, %packet_count: i32) {
   %profiled = scalar.constant false : i1
@@ -21,7 +21,7 @@ kernel.def export("materialize") @materialize() {
 
 kernel.def export("materialize_profile") @materialize_profile() {
   %one = index.constant 1 : index
-  %width = index.constant 32 : index
+  %width = index.constant 1024 : index
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
 } launch(%ring: buffer, %packets: buffer, %ring_address: i64, %packet_address: i64, %ring_mask: i32, %first: i32, %packet_count: i32, %signals: buffer, %signal_address: i64) {
   %profiled = scalar.constant true : i1
@@ -39,7 +39,7 @@ func.def inline @materialize_block(%ring: buffer, %packets: buffer, %ring_addres
   %four32 = scalar.constant 4 : i32
   %six32 = scalar.constant 6 : i32
   %mask32 = scalar.constant 15 : i32
-  %width = index.constant 32 : index
+  %width = index.constant 1024 : index
   %word_size = index.constant 4 : offset
   %count32 = scalar.shli %packet_count, %four32 : i32
   %word_count = index.cast %count32 : i32 to index
@@ -127,7 +127,7 @@ func.def inline @materialize_block(%ring: buffer, %packets: buffer, %ring_addres
       view.store %target_address, %target[0] : i64, view<1xi64>
     }
   }
-  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  kernel.barrier<global> scope(workgroup) ordering(release)
   %leader = index.cmp eq, %lane, %zero : index
   scf.if %leader {
     %first_source = buffer.view %packets[%origin] : buffer -> view<1xi32>

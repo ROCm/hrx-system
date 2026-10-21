@@ -23,7 +23,8 @@ using iree::hal::amd::gpu::cts::GpuNativeTest;
 // Exercises resident native bytes against the real command processor. Public
 // recording/admission owns separate tests; no host packet replay supplies the
 // device-produced range here.
-class AqlProgramTest : public GpuNativeTest {
+class AqlProgramTest : public GpuNativeTest,
+                       public ::testing::WithParamInterface<uint32_t> {
  protected:
   amdf_queue_command_type_t command_type() const override {
     return AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
@@ -40,8 +41,8 @@ class AqlProgramTest : public GpuNativeTest {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_program_pool_initialize(
         context_, options_.queue_family_ordinal, 1, iree_allocator_system(),
         &pool_));
-    ASSERT_NO_FATAL_FAILURE(
-        PublishCode(options_.queue_family_ordinal, &pool_.code, &pool_.code_upload));
+    ASSERT_NO_FATAL_FAILURE(PublishCode(options_.queue_family_ordinal,
+                                        &pool_.code, &pool_.code_upload));
     EXPECT_NE(pool_.code.info.flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL, 0u);
     // Exercise the actual first-copy path even on large-BAR machines. This is
     // the same local allocation policy with no host mapping requested.
@@ -64,7 +65,7 @@ class AqlProgramTest : public GpuNativeTest {
         .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
         .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
                                  AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
-        .ring_byte_length = 4096,
+        .ring_byte_length = GetParam() * 64,
     };
     amdf_user_queue_mapping_info_t host, device;
     IREE_ASSERT_OK(iree_hal_amd_gpu_user_queue_initialize(
@@ -100,7 +101,7 @@ class AqlProgramTest : public GpuNativeTest {
     iree_hal_amd_gpu_aql_program_pool_deinitialize(&pool_);
     if (control_.handle) {
       iree_hal_amd_fabric_memory_deinitialize(context_->api,
-                                               context_->event_sink, &control_);
+                                              context_->event_sink, &control_);
     }
     GpuNativeTest::TearDown();
   }
@@ -161,15 +162,15 @@ class AqlProgramTest : public GpuNativeTest {
   bool pending_ = false;
 };
 
-TEST_F(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
-  constexpr uint32_t kOutputs = 97;
-  constexpr uint32_t kPacketCount = 1 + kOutputs + kOutputs / 3;
-  constexpr uint32_t kDataOffset = kPacketCount * 64;
+TEST_P(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
+  const uint32_t output_count = ring_.capacity == 64 ? 97 : 769;
+  const uint32_t packet_count = 1 + output_count + output_count / 3;
+  const uint32_t data_offset = packet_count * 64;
   std::vector<iree_hal_amd_gpu_aql_packet_t> packets;
   std::vector<uint8_t> data;
   std::vector<iree_hal_amd_gpu_fixup_t> fixups;
   auto append_data = [&](const auto& value) {
-    const uint32_t offset = kDataOffset + static_cast<uint32_t>(data.size());
+    const uint32_t offset = data_offset + static_cast<uint32_t>(data.size());
     const auto* bytes = reinterpret_cast<const uint8_t*>(&value);
     data.insert(data.end(), bytes, bytes + sizeof(value));
     return offset;
@@ -196,7 +197,7 @@ TEST_F(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
   append_dispatch(
       Dispatch(pool_.blit, 0, 1, IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT),
       counts_offset);
-  for (uint32_t i = 0; i < kOutputs; ++i) {
+  for (uint32_t i = 0; i < output_count; ++i) {
     const iree_hal_amd_gpu_blit_arguments_t fill = {.length = 4, .fill = 1};
     const uint32_t arguments = append_data(fill);
     pointer(arguments + 8, 1, i * 4);
@@ -217,25 +218,26 @@ TEST_F(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
     }
     append_dispatch(target, arguments);
   }
-  ASSERT_EQ(packets.size(), kPacketCount);
+  ASSERT_EQ(packets.size(), packet_count);
   IREE_ASSERT_OK(iree_hal_amd_gpu_program_initialize(
-      &pool_.storage, 64, kDataOffset + static_cast<uint32_t>(data.size()),
+      &pool_.storage, 64, data_offset + static_cast<uint32_t>(data.size()),
       static_cast<uint32_t>(fixups.size()), &program_));
-  std::memcpy(program_.contents.data, packets.data(), kDataOffset);
-  std::memcpy(program_.contents.data + kDataOffset, data.data(), data.size());
+  std::memcpy(program_.contents.data, packets.data(), data_offset);
+  std::memcpy(program_.contents.data + data_offset, data.data(), data.size());
   std::memcpy(program_.contents.data + program_.fixup_offset, fixups.data(),
               fixups.size() * sizeof(fixups[0]));
   IREE_ASSERT_OK(iree_hal_amd_gpu_program_seal(&program_));
 
   uint64_t epoch = 0;
-  for (uint32_t maximum : {2u, 7u, 31u, 60u}) {
+  for (uint32_t maximum :
+       {2u, 7u, ring_.capacity / 2 - 1, ring_.capacity - 4}) {
     SCOPED_TRACE(maximum);
     // Recorder-owned boundaries are frozen before publication. Neither
     // submission nor the materializer discovers them from the native ring.
     std::vector<uint32_t> blocks;
-    for (uint32_t offset = 0; offset < kPacketCount;) {
-      uint32_t count = std::min(maximum, kPacketCount - offset);
-      if (offset + count < kPacketCount &&
+    for (uint32_t offset = 0; offset < packet_count;) {
+      uint32_t count = std::min(maximum, packet_count - offset);
+      if (offset + count < packet_count &&
           packets[offset + count].words[0] ==
               IREE_HAL_AMD_GPU_AQL_HEADER_INVALID) {
         --count;
@@ -250,7 +252,7 @@ TEST_F(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
     const uint64_t values[] = {instance_->address, control_address_ + 4096,
                                1000 + epoch * 100, epoch & 1};
     std::memcpy(control_.contents.data + 256, values, sizeof(values));
-    std::memset(control_.contents.data + 4096, 0xA5, kOutputs * 4);
+    std::memset(control_.contents.data + 4096, 0xA5, output_count * 4);
     const iree_hal_amd_gpu_blit_arguments_t copy = {
         .source = source.address,
         .target = instance_->address,
@@ -322,7 +324,7 @@ TEST_F(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
     instance_ = nullptr;
     const auto* output =
         reinterpret_cast<const uint32_t*>(control_.contents.data + 4096);
-    for (uint32_t i = 0; i < kOutputs; ++i) {
+    for (uint32_t i = 0; i < output_count; ++i) {
       EXPECT_EQ(output[i], i % 3 == 1 && values[3] == 0
                                ? 0xA5A5A5A5u
                                : static_cast<uint32_t>(values[2] + i))
@@ -330,10 +332,10 @@ TEST_F(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
     }
     iree_hal_amd_gpu_program_pool_trim(&pool_.storage);
   }
-  EXPECT_GT(ring_.reserved, ring_.capacity * 8);
+  EXPECT_GT(ring_.reserved, ring_.capacity * 4);
 }
 
-TEST_F(AqlProgramTest, TaggedCompletionsCaptureAndElideAcrossRingWrap) {
+TEST_P(AqlProgramTest, TaggedCompletionsCaptureAndElideAcrossRingWrap) {
   constexpr uint32_t kHeader = IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
                                IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
                                IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
@@ -387,7 +389,8 @@ TEST_F(AqlProgramTest, TaggedCompletionsCaptureAndElideAcrossRingWrap) {
         context_->gpu->user_queue_set_dispatch_timestamps(queue_.queue,
                                                           enabled),
         "configure native dispatch timestamps"));
-    for (uint32_t iteration = 0; iteration < 17; ++iteration) {
+    const uint32_t iteration_count = ring_.capacity / (kPacketCount + 2) + 2;
+    for (uint32_t iteration = 0; iteration < iteration_count; ++iteration) {
       SCOPED_TRACE(iteration);
       std::memset(control_.contents.data + 1984, 0xA5, (kSampleCount + 2) * 64);
       std::memset(control_.contents.data + 4096, 0, kSampleCount * 4);
@@ -451,5 +454,8 @@ TEST_F(AqlProgramTest, TaggedCompletionsCaptureAndElideAcrossRingWrap) {
   }
   EXPECT_GT(ring_.reserved, ring_.capacity * 4);
 }
+
+INSTANTIATE_TEST_SUITE_P(NativeRings, AqlProgramTest,
+                         ::testing::Values(64u, 1024u));
 
 }  // namespace

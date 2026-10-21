@@ -60,17 +60,18 @@ static_assert(sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t) ==
                   64,
               "profiling materialization arguments occupy one cache line");
 
-// Returns relocation-free instructions and descriptor facts. One wave copies
-// a complete block, then publishes its first header with SYSTEM release. The
-// ring is write-only; indirect pointer preparation reads resident templates.
+// Returns relocation-free instructions and descriptor facts. One workgroup
+// copies a complete block, joins its global writes, then publishes its first
+// header with SYSTEM release. The ring is write-only; indirect pointer
+// preparation reads resident templates.
 // profiling selects the instrumented template ABI and its extended arguments.
 iree_status_t iree_hal_amd_gpu_aql_materialize_program_query(
     iree_hal_amd_gpu_gfxip_version_t gfxip, bool profiling,
     iree_const_byte_span_t* out_code,
     iree_hal_amd_gpu_image_kernel_t* out_kernel);
 
-// Encodes one wave. The caller resolves ordering/cache scopes in header and
-// owns both the argument upload and resident instance through native use.
+// Encodes one workgroup. The caller resolves ordering/cache scopes in header
+// and owns both the argument upload and resident instance through native use.
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_materialize_packet(
     uint64_t kernel_object, uint64_t arguments, uint32_t header);
 
