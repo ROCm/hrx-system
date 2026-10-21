@@ -87,10 +87,12 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
   iree_hal_amd_gpu_aql_wait_t* waits;
   // Native reader count, or UINT32_MAX before dependency admission.
   uint32_t native_wait_count;
+  // First rejection or execution error, preserved through all native pieces.
+  iree_atomic_int32_t failure_code;
   // Native ordering and cache effects before the payload.
-  uint32_t before;
+  uint16_t before;
   // Native ordering and cache effects after the payload.
-  uint32_t after;
+  uint16_t after;
   // Queue acceptance owns a host count until publication or rejection.
   bool has_host_owner;
   // Optional profile operation occupies the immediately trailing storage.
@@ -108,8 +110,6 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
     struct {
       // Pending suffix and nonterminal native pieces independently own capture.
       iree_atomic_ref_count_t ref_count;
-      // First failure; a rejected suffix waits for accepted host uses to join.
-      iree_atomic_int32_t failure;
       // Captured addresses/bytes and publisher-owned unpublished suffix.
       iree_hal_amd_gpu_transfer_t capture;
       // Optional file owner, notified early on failure and finally at
@@ -173,7 +173,12 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
     const iree_hal_transfer_operation_t* operations, uint32_t before,
     uint32_t after, iree_hal_amd_gpu_aql_submission_t** out_submission);
 
-// Records the first transfer failure and notifies its optional file owner.
+// Records rejection without reporting completion. Accepted native pieces keep
+// their references; the last release drops payloads before failing signals.
+void iree_hal_amd_gpu_aql_submission_reject(
+    iree_hal_amd_gpu_aql_submission_t* submission, iree_status_code_t code);
+
+// Records the first execution failure and notifies its optional file owner.
 // Borrows status. Notification does not end captured native or host uses.
 void iree_hal_amd_gpu_aql_submission_fail(
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t status);

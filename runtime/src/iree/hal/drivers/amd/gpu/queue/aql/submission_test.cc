@@ -152,6 +152,76 @@ TEST_P(AqlSubmissionTest, DependencyReadersJoinProducerHostRetirement) {
   iree_hal_amd_gpu_signal_pool_deinitialize(&signals);
 }
 
+TEST_P(AqlSubmissionTest, RejectionReleasesPayloadBeforeFailingPublicSignals) {
+  iree_async_proactor_t* proactor = nullptr;
+  IREE_ASSERT_OK(
+      iree_async_proactor_create_platform(iree_async_proactor_options_default(),
+                                          iree_allocator_system(), &proactor));
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
+      proactor, nullptr, 0, 2, iree_allocator_system(), &semaphore));
+  const iree_hal_queue_family_t family = {};
+  const iree_hal_executable_vtable_t vtable = {.destroy = Executable::Destroy};
+  Executable executable;
+  iree_hal_executable_initialize(&family, &vtable, &executable.base);
+  const iree_hal_amd_gpu_aql_function_t function = {};
+  struct Payload {
+    // Public failure must remain unpublished while payload release runs.
+    iree_hal_semaphore_t* semaphore;
+    // Observes the actual resource release callback.
+    bool destroyed = false;
+  } payload{semaphore};
+  std::array<uint8_t, 8> bytes = {};
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      {}, IREE_HAL_MEMORY_TYPE_HOST_LOCAL, IREE_HAL_MEMORY_ACCESS_ALL,
+      IREE_HAL_BUFFER_USAGE_STORAGE, bytes.size(),
+      iree_make_byte_span(bytes.data(), bytes.size()),
+      {[](void* user_data, iree_hal_buffer_t*) {
+         auto* payload = static_cast<Payload*>(user_data);
+         uint64_t value = UINT64_MAX;
+         IREE_EXPECT_OK(iree_hal_semaphore_query(payload->semaphore, &value));
+         EXPECT_EQ(value, 0u);
+         payload->destroyed = true;
+       },
+       &payload},
+      iree_allocator_system(), &buffer));
+  const auto reference = iree_hal_make_buffer_ref(buffer, 0, bytes.size());
+  const iree_hal_amd_gpu_aql_dispatch_request_t request = {
+      .executable = &executable.base,
+      .function = &function,
+      .bindings = {1, &reference},
+  };
+  uint64_t one = 1;
+  iree_alignas(8) uint8_t inline_storage[496];
+  iree_hal_amd_gpu_aql_submission_t* capture = nullptr;
+  if (GetParam()) {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_retirement(
+        &pool_, iree_make_byte_span(inline_storage, sizeof(inline_storage)),
+        nullptr, &request, 0, nullptr, 0, {1, &semaphore, &one}, &capture));
+    EXPECT_EQ(capture->pool, nullptr);
+  } else {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_capture(
+        &pool_, nullptr, &request, {}, {1, &semaphore, &one}, 0, 0, &capture));
+  }
+  iree_hal_executable_release(&executable.base);
+  iree_hal_buffer_release(buffer);
+  iree_hal_amd_gpu_aql_submission_reject(capture, IREE_STATUS_ABORTED);
+  iree_hal_amd_gpu_aql_submission_reject(capture, IREE_STATUS_CANCELLED);
+  uint64_t value = UINT64_MAX;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &value));
+  EXPECT_EQ(value, 0u);
+  EXPECT_FALSE(payload.destroyed);
+  EXPECT_FALSE(executable.destroyed);
+  iree_hal_amd_gpu_aql_submission_release(capture);
+  EXPECT_TRUE(payload.destroyed);
+  EXPECT_TRUE(executable.destroyed);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_hal_semaphore_query(semaphore, &value));
+  iree_hal_semaphore_release(semaphore);
+  iree_async_proactor_release(proactor);
+}
+
 TEST_P(AqlSubmissionTest, OptionalProfileSharesInlineAndPooledCapture) {
   const iree_hal_amd_gpu_aql_dispatch_request_t barrier = {};
   iree_alignas(8) uint8_t inline_storage[1024];
@@ -264,8 +334,7 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
   // One accepted native piece retains the capture while a later, unpublished
   // suffix still owns its initial reference.
   iree_atomic_ref_count_inc(&submission->transfer.ref_count);
-  iree_atomic_store(&submission->transfer.failure, IREE_STATUS_UNAVAILABLE,
-                    iree_memory_order_release);
+  iree_hal_amd_gpu_aql_submission_reject(submission, IREE_STATUS_UNAVAILABLE);
   iree_hal_amd_gpu_aql_submission_release(submission);
   EXPECT_FALSE(buffer.destroyed);
   EXPECT_FALSE(completion.retired);

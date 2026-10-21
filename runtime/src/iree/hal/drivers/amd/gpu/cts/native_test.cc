@@ -1487,6 +1487,62 @@ TEST_P(GpuNativeRecordingProgressTest,
   // and its final program reference are joined by ordinary device teardown.
 }
 
+TEST_P(GpuNativeRecordingProgressTest,
+       RejectedInvocationReleasesResourcesBeforeFailureNotification) {
+  using iree::hal::cts::Ref;
+  const auto request = iree_hal_make_pool_reservation_request(4096, 4);
+  uint64_t one = 1;
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], {},
+                                       {1, &semaphores_[0], &one}, pool_, 1,
+                                       &request, output.out()));
+  Wait(semaphores_[0]);
+  Ref<iree_hal_command_buffer_t> recording;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  const uint32_t pattern = 0x1234CAFE;
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      recording, iree_hal_make_buffer_ref(output, 0, 16), &pattern,
+      sizeof(pattern), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  struct Completion {
+    // The caller retains this buffer through the notification observation.
+    iree_hal_buffer_t* buffer;
+    // Payload ownership observed exactly when public failure becomes visible.
+    int32_t references = 0;
+    // Terminal result, published with the observation through finished.
+    iree_status_code_t code = IREE_STATUS_OK;
+    // Joins the callback's last access to this stack state.
+    std::binary_semaphore finished{0};
+  } completion{output};
+  iree_async_semaphore_timepoint_t timepoint = {
+      .callback =
+          [](void* user_data, iree_async_semaphore_timepoint_t*,
+             iree_status_t status) {
+            auto* completion = static_cast<Completion*>(user_data);
+            completion->references = iree_atomic_ref_count_load(
+                &completion->buffer->resource.ref_count);
+            completion->code = iree_status_consume_code(status);
+            completion->finished.release();
+          },
+      .user_data = &completion,
+  };
+  IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
+      reinterpret_cast<iree_async_semaphore_t*>(semaphores_[2]), one,
+      &timepoint));
+  IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &semaphores_[1], &one},
+                                        {1, &semaphores_[2], &one}, recording,
+                                        {}, 0));
+  recording.reset();
+  iree_hal_semaphore_fail(semaphores_[1],
+                          iree_status_from_code(IREE_STATUS_ABORTED));
+  completion.finished.acquire();
+  EXPECT_EQ(completion.code, IREE_STATUS_ABORTED);
+  EXPECT_EQ(completion.references, 1);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     LocalPublication, GpuNativeRecordingProgressTest,
     ::testing::Values(std::pair{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, false},

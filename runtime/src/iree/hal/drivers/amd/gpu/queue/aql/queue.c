@@ -248,19 +248,13 @@ static void iree_hal_amd_gpu_aql_abandon(
   iree_hal_amd_gpu_profile_operation_record(
       queue->profile, iree_hal_amd_gpu_aql_submission_profile(submission),
       false, 0);
-  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
-    // A prior piece can still be copying into borrowed host memory. Its last
-    // retirement reference, not this rejected suffix, reports completion.
-    iree_hal_amd_gpu_context_report_status(
-        queue->context, queue->base.queue_family->device, status);
-    int32_t expected = IREE_STATUS_OK;
-    iree_atomic_compare_exchange_strong(
-        &submission->transfer.failure, &expected, iree_status_code(status),
-        iree_memory_order_relaxed, iree_memory_order_relaxed);
-    iree_status_free(status);
-  } else {
-    iree_hal_amd_gpu_aql_fail_submission(queue, submission, status);
-  }
+  iree_hal_amd_gpu_context_report_status(
+      queue->context, queue->base.queue_family->device, status);
+  // Accepted prefixes retain the capture independently. The last release
+  // returns their payloads before publishing this rejection to the caller.
+  iree_hal_amd_gpu_aql_submission_reject(submission, iree_status_code(status));
+  iree_status_free(status);
+  submission->has_host_owner = false;
   iree_hal_amd_gpu_aql_submission_release(submission);
   if (host_owner) {
     iree_atomic_fetch_sub(&queue->pending.host_owners, 1,

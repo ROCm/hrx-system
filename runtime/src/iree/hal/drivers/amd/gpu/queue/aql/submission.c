@@ -281,15 +281,21 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
   return status;
 }
 
+void iree_hal_amd_gpu_aql_submission_reject(
+    iree_hal_amd_gpu_aql_submission_t* submission, iree_status_code_t code) {
+  int32_t expected = IREE_STATUS_OK;
+  iree_atomic_compare_exchange_strong(&submission->failure_code, &expected,
+                                      code, iree_memory_order_relaxed,
+                                      iree_memory_order_relaxed);
+}
+
 void iree_hal_amd_gpu_aql_submission_fail(
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t status) {
-  if (submission->entry.kind != IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
-    return;
-  }
   int32_t expected = IREE_STATUS_OK;
   if (iree_atomic_compare_exchange_strong(
-          &submission->transfer.failure, &expected, iree_status_code(status),
+          &submission->failure_code, &expected, iree_status_code(status),
           iree_memory_order_relaxed, iree_memory_order_relaxed) &&
+      submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
       submission->transfer.callback.fn) {
     submission->transfer.callback.fn(submission->transfer.callback.user_data,
                                      iree_status_clone(status), NULL, false);
@@ -358,13 +364,11 @@ void iree_hal_amd_gpu_aql_submission_release_payload(
 static void iree_hal_amd_gpu_aql_submission_destroy(
     iree_hal_amd_gpu_aql_submission_t* submission) {
   iree_hal_amd_gpu_aql_submission_release_payload(submission);
-  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
-    const iree_status_code_t failure = (iree_status_code_t)iree_atomic_load(
-        &submission->transfer.failure, iree_memory_order_acquire);
-    if (failure != IREE_STATUS_OK) {
-      iree_hal_semaphore_list_fail(submission->signals,
-                                   iree_status_from_code(failure));
-    }
+  const iree_status_code_t failure = (iree_status_code_t)iree_atomic_load(
+      &submission->failure_code, iree_memory_order_relaxed);
+  if (failure != IREE_STATUS_OK) {
+    iree_hal_semaphore_list_fail(submission->signals,
+                                 iree_status_from_code(failure));
   }
   for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
     iree_hal_amd_gpu_signal_release(submission->waits[i].signal);
@@ -386,7 +390,7 @@ static void iree_hal_amd_gpu_aql_submission_retire_transfer(
       submission->transfer.callback;
   const iree_async_single_frontier_t frontier = submission->transfer.frontier;
   const iree_status_code_t failure = (iree_status_code_t)iree_atomic_load(
-      &submission->transfer.failure, iree_memory_order_relaxed);
+      &submission->failure_code, iree_memory_order_relaxed);
   iree_hal_amd_gpu_aql_submission_destroy(submission);
   // The file owner may release the device and capture pool from its callback.
   // End every submission and pool access before returning those borrows.
