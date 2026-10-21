@@ -337,7 +337,9 @@ loom_module(
     "kernels/qwen38/layer_prefill.loom"
     "kernels/qwen38/linear_q4k_f16_wmma.loom"
     "kernels/qwen38/linear_q5k_f16_mfma.loom"
+    "kernels/qwen38/linear_q5k_f16_mfma_split_k.loom"
     "kernels/qwen38/linear_q5k_f16_wmma.loom"
+    "kernels/qwen38/linear_q5k_f16_wmma_split_k.loom"
     "kernels/qwen38/linear_q5k_f16_wmma_wave32.loom"
     "kernels/qwen38/linear_q6k_f16_mfma.loom"
     "kernels/qwen38/linear_q6k_f16_wmma.loom"
@@ -368,6 +370,7 @@ loom_test_module(
   SRCS
     "tests/linear_cohort_oracle.loom"
     "tests/matrix_projection.loom"
+    "tests/narrow_matrix_projection.loom"
     "tests/signed_matrix_projection.loom"
   LIBRARIES
     "::projection_kernels"
@@ -2495,8 +2498,11 @@ loom_test_module(
   SRCS
     "kernels/qwen38/attention_common.loom"
     "kernels/qwen38/attention_spans_split.loom"
+    "kernels/qwen38/attention_spans_split_mfma.loom"
     "kernels/qwen38/spans.loom"
     "tests/attention_spans_split.loom"
+  LIBRARIES
+    "iree::experimental::loom_serve::motifs::tensor::matrix_fragments"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
