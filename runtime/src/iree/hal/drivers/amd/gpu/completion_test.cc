@@ -588,6 +588,9 @@ TEST_F(CompletionTest, NativeWaitFailureReachesEverySourceAndStops) {
   event_.SetWaitStatus(failure);
   delivered.acquire();
   EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  // A new cold source owner sees failure even if it missed the terminal round.
+  iree_hal_amd_gpu_completion_set_sources(&completion_, 0, nullptr);
+  EXPECT_EQ(iree_hal_amd_gpu_completion_query_status(&completion_), failure);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
   EXPECT_EQ(failures, (std::array<uint32_t, 2>{1, 1}));
   EXPECT_EQ(reports_, (std::vector<uint64_t>{failure}));

@@ -41,7 +41,7 @@ static void iree_hal_amd_gpu_aql_scratch_acquired(void* user_data,
   iree_hal_amd_gpu_aql_scratch_t* scratch = user_data;
   iree_hal_amd_gpu_aql_growth_context_t* growth = scratch->growth;
   iree_hal_amd_gpu_publication_t* publication = growth->publication;
-  const uint32_t ordinal = growth->queue_ordinal;
+  const uint32_t ordinal = growth->source_ordinal;
   iree_atomic_fetch_add(&growth->pending_count, 1, iree_memory_order_relaxed);
   scratch->status = status;
   iree_atomic_store(&scratch->phase, IREE_HAL_AMD_GPU_AQL_SCRATCH_READY,

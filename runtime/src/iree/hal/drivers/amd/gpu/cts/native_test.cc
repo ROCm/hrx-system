@@ -1152,47 +1152,7 @@ TEST_F(GpuNativeTest, FailedQueueConstructionReleasesItsOwners) {
   EXPECT_EQ(allocator_.live_count.load(), 0u);
 }
 
-struct CompletionPause {
-  // Borrowed timeline owning timepoint enrollment.
-  iree_async_semaphore_t* semaphore;
-  // Stack callback storage, joined before leaving this scope.
-  iree_async_semaphore_timepoint_t timepoint = {};
-  // Callback entry, observed before submitting the native dependency chain.
-  std::binary_semaphore entered{0};
-  // Releases the callback after the test establishes its pending-work state.
-  std::binary_semaphore proceed{0};
-  // Joins the callback's final stack access.
-  std::binary_semaphore finished{0};
-  // Successful enrollment still requiring cancellation or callback joining.
-  bool enrolled = false;
-  iree_status_t Arm(uint64_t value) {
-    timepoint = {
-        .callback =
-            [](void* user_data, iree_async_semaphore_timepoint_t*,
-               iree_status_t status) {
-              auto* pause = static_cast<CompletionPause*>(user_data);
-              IREE_EXPECT_OK(status);
-              pause->entered.release();
-              pause->proceed.acquire();
-              pause->finished.release();
-            },
-        .user_data = this,
-    };
-    IREE_RETURN_IF_ERROR(
-        iree_async_semaphore_acquire_timepoint(semaphore, value, &timepoint));
-    enrolled = true;
-    return iree_ok_status();
-  }
-  void Join() {
-    if (enrolled &&
-        !iree_async_semaphore_cancel_timepoint(semaphore, &timepoint)) {
-      proceed.release();
-      finished.acquire();
-    }
-    enrolled = false;
-  }
-  ~CompletionPause() { Join(); }
-};
+using iree::hal::amd::gpu::cts::CompletionPause;
 
 TEST_F(GpuNativeTest, NativeConsumerPreservesProducerRetirementFailure) {
   const void* native_domain = context_;

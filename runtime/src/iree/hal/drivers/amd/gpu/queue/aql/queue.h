@@ -25,8 +25,12 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_aql_queue_options_t {
   // Native family selected by the device.
   uint32_t family_ordinal;
-  // Source index in the device's immutable queue array.
+  // Stable native frontier coordinate owned by the device.
   uint32_t queue_ordinal;
+  // Stable service source, independent of the native frontier coordinate.
+  uint32_t source_ordinal;
+  // Last completed epoch from an earlier owner of this coordinate.
+  uint64_t initial_epoch;
   // Installed native coordinate extent, including previously used slots.
   uint32_t queue_count;
   // Device-owned native cells and return wake target, live beyond this queue.
@@ -91,7 +95,9 @@ iree_status_t iree_hal_amd_gpu_aql_queue_set_profile(
 // Accepted native work retains its resources until actual completion.
 void iree_hal_amd_gpu_aql_queue_notify_failure(iree_hal_queue_t* queue);
 
-iree_status_t iree_hal_amd_gpu_aql_queue_assign_frontier(
+// Borrows a device-registered completion axis until queue destruction. The
+// device retains the coordinate across replacement; NULL clears the borrow.
+void iree_hal_amd_gpu_aql_queue_assign_frontier(
     iree_hal_queue_t* queue, iree_async_frontier_tracker_t* tracker,
     iree_async_axis_t axis);
 
@@ -117,6 +123,17 @@ amdf_status_t iree_hal_amd_gpu_aql_queue_trim_scratch(iree_hal_queue_t* queue);
 iree_status_t iree_hal_amd_gpu_aql_queue_reserve_frontiers(
     iree_hal_queue_t* queue, uint32_t queue_count,
     iree_notification_t* notification);
+
+// Arms synchronous final-release ownership after both worker sources are live.
+// The callback joins accepted work and native ownership before returning true;
+// false preserves this queue when native quiescence cannot be proven.
+void iree_hal_amd_gpu_aql_queue_set_release(iree_hal_queue_t* queue,
+                                            bool (*release)(void*,
+                                                            iree_hal_queue_t*),
+                                            void* user_data);
+
+// Completed coordinate after accepted work and callback tails have joined.
+uint64_t iree_hal_amd_gpu_aql_queue_completed_epoch(iree_hal_queue_t* queue);
 
 // Closes public acceptance; accepted dependencies keep their normal meaning.
 void iree_hal_amd_gpu_aql_queue_close(iree_hal_queue_t* queue);

@@ -20,6 +20,7 @@
 #include "iree/hal/drivers/amd/gpu/code.h"
 #include "iree/hal/drivers/amd/gpu/device.h"
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 
 namespace iree::hal::amd::gpu::cts {
 
@@ -142,6 +143,49 @@ class NativeMemoryGate {
   std::unordered_map<amdf_memory_t*, uint64_t> allocations_;
   // Observed live/peak payload and native operation counts.
   MemoryUsage usage_;
+};
+
+// Holds the real completion callback boundary while native work progresses.
+struct CompletionPause {
+  // Borrowed timeline owning timepoint enrollment.
+  iree_async_semaphore_t* semaphore;
+  // Stack callback storage, joined before leaving this scope.
+  iree_async_semaphore_timepoint_t timepoint = {};
+  // Callback entry, observed before submitting the native dependency chain.
+  std::binary_semaphore entered{0};
+  // Releases the callback after the test establishes its pending-work state.
+  std::binary_semaphore proceed{0};
+  // Joins the callback's final stack access.
+  std::binary_semaphore finished{0};
+  // Successful enrollment still requiring cancellation or callback joining.
+  bool enrolled = false;
+  iree_status_t Arm(uint64_t value) {
+    timepoint = {
+        .callback =
+            [](void* user_data, iree_async_semaphore_timepoint_t*,
+               iree_status_t status) {
+              auto* pause = static_cast<CompletionPause*>(user_data);
+              IREE_EXPECT_OK(status);
+              pause->entered.release();
+              pause->proceed.acquire();
+              pause->finished.release();
+            },
+        .user_data = this,
+    };
+    IREE_RETURN_IF_ERROR(
+        iree_async_semaphore_acquire_timepoint(semaphore, value, &timepoint));
+    enrolled = true;
+    return iree_ok_status();
+  }
+  void Join() {
+    if (enrolled &&
+        !iree_async_semaphore_cancel_timepoint(semaphore, &timepoint)) {
+      proceed.release();
+      finished.acquire();
+    }
+    enrolled = false;
+  }
+  ~CompletionPause() { Join(); }
 };
 
 class GpuNativeTest : public ::testing::Test {

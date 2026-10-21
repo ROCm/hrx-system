@@ -84,7 +84,7 @@ void iree_hal_amd_gpu_aql_growth_enqueue(
     iree_hal_amd_gpu_aql_growth_context_t* context,
     iree_hal_amd_gpu_aql_entry_t* entry) {
   iree_hal_amd_gpu_publication_enqueue(context->publication,
-                                       context->queue_ordinal,
+                                       context->source_ordinal,
                                        context->publisher, &entry->publication);
 }
 
@@ -92,7 +92,7 @@ static void iree_hal_amd_gpu_aql_growth_completed(void* user_data,
                                                   iree_status_t status) {
   iree_hal_amd_gpu_aql_growth_t* growth = user_data;
   iree_hal_amd_gpu_publication_t* publication = growth->context->publication;
-  const uint32_t ordinal = growth->context->queue_ordinal;
+  const uint32_t ordinal = growth->context->source_ordinal;
   // Consumption may finish before enqueue's final publisher access. Keep the
   // existing acquisition owner live through that tail, independently of the
   // result transferred to the consumer.

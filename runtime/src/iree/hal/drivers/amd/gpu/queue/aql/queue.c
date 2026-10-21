@@ -87,11 +87,18 @@ struct iree_hal_amd_gpu_aql_queue_t {
   iree_hal_amd_gpu_context_t* context;
   // Immutable construction policies.
   iree_hal_amd_gpu_aql_queue_options_t options;
+  // Optional device membership join, armed only after successful construction.
+  struct {
+    // Synchronously joins this queue before its host wrapper is freed.
+    bool (*fn)(void* user_data, iree_hal_queue_t* queue);
+    // Borrowed device-owned slot, live through final device destruction.
+    void* user_data;
+  } release;
   // Native queue and independently mapped host/device operands.
   iree_hal_amd_gpu_user_queue_t storage;
-  // Group-owned completion facts, retained until final queue cleanup.
+  // Device-owned completion facts, borrowed until final queue cleanup.
   struct {
-    // Retained tracker or NULL before group assignment.
+    // Borrowed tracker or NULL before group assignment.
     iree_async_frontier_tracker_t* tracker;
     // Exact queue completion axis.
     iree_async_axis_t axis;
@@ -1564,7 +1571,7 @@ static void iree_hal_amd_gpu_aql_enqueue(
     }
     if (iree_hal_amd_gpu_publisher_handoff(&queue->publisher, NULL)) {
       iree_hal_amd_gpu_publication_notify(queue->options.publication,
-                                          queue->options.queue_ordinal);
+                                          queue->options.source_ordinal);
     }
     iree_hal_amd_gpu_aql_wake_terminal(queue);
   }
@@ -1835,7 +1842,7 @@ static iree_status_t iree_hal_amd_gpu_aql_submit_dispatch(
   if (publishing) {
     if (iree_hal_amd_gpu_publisher_handoff(&queue->publisher, NULL)) {
       iree_hal_amd_gpu_publication_notify(queue->options.publication,
-                                          queue->options.queue_ordinal);
+                                          queue->options.source_ordinal);
     }
     iree_hal_amd_gpu_aql_wake_terminal(queue);
   }
@@ -1946,7 +1953,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_reserve_frontiers(
       .request = {.queue_count = queue_count, .notification = notification},
   };
   iree_hal_amd_gpu_publication_enqueue(
-      queue->options.publication, queue->options.queue_ordinal,
+      queue->options.publication, queue->options.source_ordinal,
       &queue->publisher, &request.entry.publication);
   return iree_hal_amd_gpu_frontier_request_await(&request.request);
 }
@@ -2006,7 +2013,7 @@ amdf_status_t iree_hal_amd_gpu_aql_queue_trim_scratch(iree_hal_queue_t* base) {
   }
   if (iree_hal_amd_gpu_publisher_handoff(&queue->publisher, NULL)) {
     iree_hal_amd_gpu_publication_notify(queue->options.publication,
-                                        queue->options.queue_ordinal);
+                                        queue->options.source_ordinal);
   }
   iree_hal_amd_gpu_aql_wake_terminal(queue);
   return status;
@@ -2043,35 +2050,34 @@ amdf_status_t iree_hal_amd_gpu_aql_queue_shutdown(iree_hal_queue_t* base) {
   return AMDF_STATUS_OK;
 }
 
-static void iree_hal_amd_gpu_aql_clear_frontier(
-    iree_hal_amd_gpu_aql_queue_t* queue) {
-  if (queue->frontier.tracker) {
-    iree_async_frontier_tracker_retire_axis(
-        queue->frontier.tracker, queue->frontier.axis,
-        iree_status_from_code(IREE_STATUS_CANCELLED));
-    iree_async_frontier_tracker_release(queue->frontier.tracker);
-  }
-  queue->frontier.tracker = NULL;
-  queue->frontier.axis = 0;
-}
-
-iree_status_t iree_hal_amd_gpu_aql_queue_assign_frontier(
+void iree_hal_amd_gpu_aql_queue_assign_frontier(
     iree_hal_queue_t* base, iree_async_frontier_tracker_t* tracker,
     iree_async_axis_t axis) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
-  if (tracker) {
-    IREE_RETURN_IF_ERROR(
-        iree_async_frontier_tracker_register_axis(tracker, axis, NULL));
-    iree_async_frontier_tracker_retain(tracker);
-  }
-  iree_hal_amd_gpu_aql_clear_frontier(queue);
   queue->frontier.tracker = tracker;
   queue->frontier.axis = axis;
-  return iree_ok_status();
+}
+
+void iree_hal_amd_gpu_aql_queue_set_release(iree_hal_queue_t* base,
+                                            bool (*release)(void*,
+                                                            iree_hal_queue_t*),
+                                            void* user_data) {
+  iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
+  queue->release.fn = release;
+  queue->release.user_data = user_data;
+}
+
+uint64_t iree_hal_amd_gpu_aql_queue_completed_epoch(iree_hal_queue_t* base) {
+  iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
+  return (uint64_t)iree_atomic_load(&queue->completed.count,
+                                    iree_memory_order_acquire);
 }
 
 static void iree_hal_amd_gpu_aql_queue_destroy(iree_hal_queue_t* base) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
+  if (queue->release.fn && !queue->release.fn(queue->release.user_data, base)) {
+    return;
+  }
   IREE_ASSERT(!queue->storage.queue,
               "parent must join native ownership before final queue release");
   iree_hal_amd_gpu_publisher_deinitialize(&queue->publisher);
@@ -2079,7 +2085,6 @@ static void iree_hal_amd_gpu_aql_queue_destroy(iree_hal_queue_t* base) {
   iree_slim_mutex_deinitialize(&queue->pending.completion_mutex);
   iree_async_semaphore_wait_context_deinitialize(&queue->wait_context);
   iree_hal_amd_gpu_capture_pool_deinitialize(&queue->captures);
-  iree_hal_amd_gpu_aql_clear_frontier(queue);
   uint64_t* frontier = queue->producer.frontier;
   if (frontier != (void*)(queue->issued + queue->options.retirement_capacity)) {
     iree_allocator_free(queue->host_allocator, frontier);
@@ -2186,7 +2191,7 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_flush(iree_hal_queue_t* base) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_check_acceptance(queue));
   iree_hal_amd_gpu_publication_notify(queue->options.publication,
-                                      queue->options.queue_ordinal);
+                                      queue->options.source_ordinal);
   return iree_ok_status();
 }
 
@@ -2483,11 +2488,16 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
   queue->context = context;
   queue->storage.context = context;
   queue->options = *options;
+  iree_atomic_store(&queue->producer.count, options->initial_epoch,
+                    iree_memory_order_relaxed);
+  iree_atomic_store(&queue->completed.count, options->initial_epoch,
+                    iree_memory_order_relaxed);
   queue->pending_size = pending_size;
   queue->issued = (void*)(queue + 1);
   queue->producer.queue_count = queue_count;
   queue->producer.frontier =
       (void*)(queue->issued + options->retirement_capacity);
+  queue->producer.frontier[options->queue_ordinal] = options->initial_epoch;
   iree_hal_queue_execution_resource_ordinal_t* ordinals =
       (void*)(queue->producer.frontier + 2 * queue_count);
   iree_hal_queue_params_t achieved = *params;
@@ -2512,6 +2522,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       .publisher = &queue->publisher,
       .publication = options->publication,
       .queue_ordinal = options->queue_ordinal,
+      .source_ordinal = options->source_ordinal,
       .queue_count = queue_count,
       .signal_capacity = options->retirement_capacity,
       .signal_cache = options->signals,
@@ -2586,10 +2597,14 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
     }
   }
   if (iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_signal_storage_t* signals = NULL;
     status = iree_hal_amd_gpu_aql_signal_storage_allocate(
         context, &queue->options.signals->pool, options->memory,
-        options->retirement_capacity, queue_count, host_allocator,
-        &queue->options.signals->storage);
+        options->retirement_capacity, queue_count, host_allocator, &signals);
+    if (iree_status_is_ok(status)) {
+      signals->next = queue->options.signals->storage;
+      queue->options.signals->storage = signals;
+    }
   }
   if (iree_status_is_ok(status)) {
     *out_queue = &queue->base;

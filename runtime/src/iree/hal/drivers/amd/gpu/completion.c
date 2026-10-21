@@ -133,6 +133,7 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
         iree_status_free(host_wait_status);
       }
       iree_slim_mutex_lock(&completion->drain_mutex);
+      completion->failure = status;
       iree_hal_amd_gpu_completion_drain(completion, status);
       iree_slim_mutex_unlock(&completion->drain_mutex);
       break;
@@ -193,6 +194,14 @@ void iree_hal_amd_gpu_completion_set_sources(
                         ~IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES,
                         iree_memory_order_release);
   iree_slim_mutex_unlock(&completion->drain_mutex);
+}
+
+amdf_status_t iree_hal_amd_gpu_completion_query_status(
+    iree_hal_amd_gpu_completion_t* completion) {
+  iree_slim_mutex_lock(&completion->drain_mutex);
+  const amdf_status_t status = completion->failure;
+  iree_slim_mutex_unlock(&completion->drain_mutex);
+  return status;
 }
 
 amdf_status_t iree_hal_amd_gpu_completion_request_stop(

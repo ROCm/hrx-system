@@ -30,8 +30,10 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
   iree_hal_amd_gpu_publisher_t* publisher;
   // Existing device service owner.
   iree_hal_amd_gpu_publication_t* publication;
-  // Queue's provisioned service source index.
+  // Queue's stable native causal coordinate.
   uint32_t queue_ordinal;
+  // Exact deferred service source, independent of the vector coordinate.
+  uint32_t source_ordinal;
   // Installed native frontier width, updated only by the exact publisher.
   uint32_t queue_count;
   // Number of native descriptors in each acquired block.

@@ -499,6 +499,30 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    membership
+  HDRS
+    "membership.h"
+  SRCS
+    "membership.c"
+  DEPS
+    ::backing
+    ::program
+    amdf::headers
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amd::gpu::completion
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::publication
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     backing
   HDRS
     "backing.h"

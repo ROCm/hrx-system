@@ -73,6 +73,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::aql::queue
     iree::hal::drivers::amd::gpu::queue::backing
     iree::hal::drivers::amd::gpu::queue::file_staging
+    iree::hal::drivers::amd::gpu::queue::membership
     iree::hal::drivers::amd::gpu::queue::memory_mapping
     iree::hal::drivers::amd::gpu::queue::pm4::barrier
     iree::hal::drivers::amd::gpu::queue::pm4::command_buffer

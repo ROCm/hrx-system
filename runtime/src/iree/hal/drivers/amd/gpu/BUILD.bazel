@@ -82,6 +82,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:allocation",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:backing",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:file_staging",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:membership",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:memory_mapping",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",

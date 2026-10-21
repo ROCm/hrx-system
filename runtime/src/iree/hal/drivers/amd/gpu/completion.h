@@ -97,6 +97,9 @@ typedef struct iree_hal_amd_gpu_completion_t {
   iree_atomic_int32_t state;
   // Serializes source retirement and every borrowed wait-hint observation.
   iree_slim_mutex_t drain_mutex;
+  // Terminal native observation failure, protected by drain_mutex. A source
+  // installed after the final failure round must not await another callback.
+  amdf_status_t failure;
 } iree_hal_amd_gpu_completion_t;
 
 // Attempts one bounded source round without waiting for another observer.
@@ -131,6 +134,12 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
 void iree_hal_amd_gpu_completion_set_sources(
     iree_hal_amd_gpu_completion_t* completion, iree_host_size_t source_count,
     iree_hal_amd_gpu_completion_source_t* sources);
+
+// Cold membership check after installing a source. Either the source receives
+// a later native failure or this returns the failure already delivered before
+// installation. Ordinary retirement and submission do not call this function.
+amdf_status_t iree_hal_amd_gpu_completion_query_status(
+    iree_hal_amd_gpu_completion_t* completion);
 
 // Requests exit after the current source round and wakes a parked worker.
 // Called only after accepted work and producers have joined. This does not
