@@ -69,9 +69,15 @@ iree_status_t iree_async_file_query_direct_requirements(
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "filesystem has no usable direct I/O alignment");
   }
+  // Fixed io_uring buffers reach direct I/O as page-bounded BVEC segments.
+  // Aligning the first byte to the transfer unit keeps every segment boundary
+  // legal instead of admitting a raw pointer geometry that READ_FIXED or
+  // WRITE_FIXED may reject after registration.
   *out_requirements = (iree_async_file_requirements_t){
-      .read = {memory_alignment, read_alignment, read_alignment},
-      .write = {memory_alignment, write_alignment, write_alignment},
+      .read = {iree_max(memory_alignment, read_alignment), read_alignment,
+               read_alignment},
+      .write = {iree_max(memory_alignment, write_alignment), write_alignment,
+                write_alignment},
   };
   return iree_ok_status();
 }
