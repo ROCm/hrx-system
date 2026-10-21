@@ -63,6 +63,10 @@ iree_status_t iree_hal_replay_recorder_create_virtual_buffer(
         .host_access = scope->host.access,
         .host_mapping_modes = scope->host.modes,
         .host_cacheability = scope->host.cacheability,
+        .host_atomic_device_scope_32 = scope->host.atomics.device_scope_32,
+        .host_atomic_device_scope_64 = scope->host.atomics.device_scope_64,
+        .host_atomic_system_scope_32 = scope->host.atomics.system_scope_32,
+        .host_atomic_system_scope_64 = scope->host.atomics.system_scope_64,
     };
     const iree_const_byte_span_t operation_iovecs[] = {
         iree_make_const_byte_span(&payload, sizeof(payload)),

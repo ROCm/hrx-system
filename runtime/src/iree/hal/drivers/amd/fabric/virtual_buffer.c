@@ -459,7 +459,8 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_prepare(
   *out_plan = (iree_hal_amd_fabric_reservation_plan_t){0};
   const iree_hal_amd_fabric_memory_backend_t* owner =
       (const iree_hal_amd_fabric_memory_backend_t*)base;
-  if (!owner->native.instance ||
+  if (!iree_hal_atomic_operation_capabilities_is_empty(scope.host.atomics) ||
+      !owner->native.instance ||
       scope.family_count >= IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE - 1 ||
       (scope.host.access &&
        scope.host.cacheability != IREE_HAL_HOST_CACHEABILITY_UNKNOWN &&
@@ -546,10 +547,11 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_prepare(
       const iree_hal_memory_backend_t* participant =
           iree_hal_device_memory_backend(
               iree_hal_queue_family_device(requested->family));
-      const iree_hal_atomic_operation_capabilities_t no_atomics = {0};
       if (!participant || requested->requirements ||
-          !iree_hal_atomic_operation_capabilities_support(
-              no_atomics, requested->atomic_operations)) {
+          !iree_hal_atomic_operation_capabilities_is_empty(
+              requested->atomics.queue) ||
+          !iree_hal_atomic_operation_capabilities_is_empty(
+              requested->atomics.program)) {
         supported = false;
         break;
       }

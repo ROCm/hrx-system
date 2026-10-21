@@ -179,6 +179,10 @@ TEST_F(ReplayRecorderVirtualBufferTest,
 
   iree_hal_pool_family_access_t family;
   auto scope = Scope(&family);
+  family.atomics.queue.device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  family.atomics.program.device_scope_32 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
+  scope.host.atomics.system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
   iree_hal_virtual_buffer_capabilities_t capabilities;
   IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
       group_, scope, iree_allocator_system(), &capabilities));
@@ -321,6 +325,48 @@ TEST_F(ReplayRecorderVirtualBufferTest,
   iree_hal_semaphore_release(gate);
   iree_hal_file_release(file);
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder_));
+
+  // Construction records preserve independent host, queue, and program
+  // contracts.
+  const auto recording = Recording();
+  iree_hal_replay_file_header_t header;
+  iree_host_size_t record_offset = 0;
+  IREE_ASSERT_OK(
+      iree_hal_replay_file_parse_header(recording, &header, &record_offset));
+  unsigned pool_count = 0, reservation_count = 0;
+  while (record_offset < header.file_length) {
+    iree_hal_replay_file_record_t record;
+    IREE_ASSERT_OK(iree_hal_replay_file_parse_record(recording, record_offset,
+                                                     &record, &record_offset));
+    iree_host_size_t family_offset = 0;
+    if (record.header.payload_type ==
+        IREE_HAL_REPLAY_PAYLOAD_TYPE_POOL_CREATE_SLAB) {
+      iree_hal_replay_pool_create_slab_payload_t payload;
+      memcpy(&payload, record.payload.data, sizeof(payload));
+      EXPECT_EQ(payload.host_atomic_system_scope_32,
+                IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT);
+      family_offset = sizeof(payload);
+      ++pool_count;
+    } else if (record.header.payload_type ==
+               IREE_HAL_REPLAY_PAYLOAD_TYPE_VIRTUAL_BUFFER_CREATE) {
+      iree_hal_replay_virtual_buffer_create_payload_t payload;
+      memcpy(&payload, record.payload.data, sizeof(payload));
+      EXPECT_EQ(payload.host_atomic_system_scope_32,
+                IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT);
+      family_offset = sizeof(payload);
+      ++reservation_count;
+    }
+    if (family_offset) {
+      iree_hal_replay_pool_family_access_payload_t payload;
+      memcpy(&payload, record.payload.data + family_offset, sizeof(payload));
+      EXPECT_EQ(payload.queue_atomic_device_scope_32,
+                IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+      EXPECT_EQ(payload.program_atomic_device_scope_32,
+                IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD);
+    }
+  }
+  EXPECT_EQ(pool_count, 1u);
+  EXPECT_EQ(reservation_count, 2u);
 
   std::array<uint32_t, 16> expected = {};
   expected[0] = expected[2] = expected[3] = first_pattern;

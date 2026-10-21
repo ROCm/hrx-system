@@ -28,7 +28,15 @@ class TransitionTableSet {
         contracts_[i]->scopes[scope_id].interfaces =
             1u << IREE_HAL_BUFFER_INTERFACE_HOST;
         contracts_[i]->scopes[scope_id].usage = IREE_HAL_BUFFER_USAGE_STORAGE;
+        const iree_hal_atomic_operation_capabilities_t operations = {
+            .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+            .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+                               IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+        };
+        iree_hal_memory_scope_access_set_atomic_operations(
+            &contracts_[i]->scopes[scope_id], operations);
       }
+      iree_hal_memory_contract_finalize_atomic_operations(contracts_[i]);
       IREE_CHECK_OK(iree_hal_memory_contract_initialize_transitions(
           contracts_[i], QueryRangedPair, nullptr));
       tables_[i] = {contracts_[i]};
@@ -42,6 +50,10 @@ class TransitionTableSet {
     for (iree_hal_memory_contract_t* contract : contracts_) {
       iree_hal_memory_contract_release(contract);
     }
+  }
+
+  iree_hal_memory_contract_t* contract(iree_host_size_t index) const {
+    return contracts_[index];
   }
 
   iree_hal_memory_transition_table_t table(iree_host_size_t index) const {
@@ -206,5 +218,32 @@ static void BM_PreparePairChecked(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_PreparePairChecked);
+
+// Public buffer queries across independent pools, including the precomputed
+// wildcard. Completion and allocation are outside the timed recording path.
+static void BM_QueryAtomicOperations(benchmark::State& state) {
+  TransitionTableSet table_set;
+  std::array<iree_hal_buffer_t, TransitionTableSet::kTableCount> buffers = {};
+  const iree_host_size_t count = state.range(0);
+  const auto scope = table_set.scope(state.range(1));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    buffers[i].memory.contract = table_set.contract(i);
+  }
+  for (auto _ : state) {
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      const auto operations =
+          iree_hal_buffer_query_atomic_operations(&buffers[i], scope);
+      benchmark::DoNotOptimize(operations);
+    }
+  }
+  state.SetItemsProcessed(state.iterations() * count);
+}
+BENCHMARK(BM_QueryAtomicOperations)
+    ->ArgNames({"buffers", "scope"})
+    ->Args({1, 2})
+    ->Args({2, 2})
+    ->Args({4, 2})
+    ->Args({6, 2})
+    ->Args({6, IREE_HAL_MEMORY_SCOPE_ANY});
 
 }  // namespace

@@ -619,10 +619,10 @@ static std::vector<uint8_t> MakeFullFileAtomicReplayStorage(
       .interfaces = 0,
       .requirements = 0,
       .reserved0 = 0,
-      .atomic_device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
-      .atomic_device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
-      .atomic_system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
-      .atomic_system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .queue_atomic_device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .queue_atomic_device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .queue_atomic_system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .queue_atomic_system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
   };
   AppendSerializedReplayRecord(
       writer,
@@ -992,12 +992,15 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
         .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
         .interfaces = 0,
         .requirements = 0,
-        .atomic_operations =
+        .atomics =
             {
-                .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
-                .device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
-                .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
-                .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+                .queue =
+                    {
+                        .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+                        .device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+                        .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+                        .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+                    },
             },
     };
     const iree_hal_pool_scope_t pool_scope = {

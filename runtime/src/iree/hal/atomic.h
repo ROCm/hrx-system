@@ -210,6 +210,41 @@ typedef struct iree_hal_atomic_operation_capabilities_t {
   iree_hal_atomic_operation_flags_t system_scope_64;
 } iree_hal_atomic_operation_capabilities_t;
 
+// Returns true when no operations are advertised or required.
+static inline bool iree_hal_atomic_operation_capabilities_is_empty(
+    iree_hal_atomic_operation_capabilities_t value) {
+  return !(value.device_scope_32 | value.device_scope_64 |
+           value.system_scope_32 | value.system_scope_64);
+}
+
+// Returns operations supported by both the backing and the executing site.
+static inline iree_hal_atomic_operation_capabilities_t
+iree_hal_atomic_operation_capabilities_intersect(
+    iree_hal_atomic_operation_capabilities_t lhs,
+    iree_hal_atomic_operation_capabilities_t rhs) {
+  const iree_hal_atomic_operation_capabilities_t result = {
+      lhs.device_scope_32 & rhs.device_scope_32,
+      lhs.device_scope_64 & rhs.device_scope_64,
+      lhs.system_scope_32 & rhs.system_scope_32,
+      lhs.system_scope_64 & rhs.system_scope_64,
+  };
+  return result;
+}
+
+// Combines requirements for operations used at either site.
+static inline iree_hal_atomic_operation_capabilities_t
+iree_hal_atomic_operation_capabilities_union(
+    iree_hal_atomic_operation_capabilities_t lhs,
+    iree_hal_atomic_operation_capabilities_t rhs) {
+  const iree_hal_atomic_operation_capabilities_t result = {
+      lhs.device_scope_32 | rhs.device_scope_32,
+      lhs.device_scope_64 | rhs.device_scope_64,
+      lhs.system_scope_32 | rhs.system_scope_32,
+      lhs.system_scope_64 | rhs.system_scope_64,
+  };
+  return result;
+}
+
 // Returns true when every operation in |required| is present in the matching
 // width and coherence-domain cell of |available|.
 static inline bool iree_hal_atomic_operation_capabilities_support(

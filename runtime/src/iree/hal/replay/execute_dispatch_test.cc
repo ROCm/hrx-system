@@ -83,7 +83,7 @@ class ReplayDispatchTest : public ::testing::Test {
                  IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
         .interfaces = 0,
         .requirements = 0,
-        .atomic_operations = {},
+        .atomics = {.queue = {}},
     };
     const iree_hal_pool_scope_t pool_scope = {
         .family_count = 1,

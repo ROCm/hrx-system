@@ -419,14 +419,15 @@ static iree_status_t iree_hal_webgpu_slab_pool_query_owner(
                               << IREE_HAL_BUFFER_INTERFACE_WEBGPU_BUFFER;
   iree_hal_buffer_usage_t usage = IREE_HAL_BUFFER_USAGE_NONE;
   iree_hal_queue_family_affinity_t families = 0;
-  const iree_hal_atomic_operation_capabilities_t atomic_operations = {0};
   for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
     const iree_hal_pool_family_access_t* access = &scope.families[i];
     if (iree_hal_device_memory_backend(
             iree_hal_queue_family_device(access->family)) != &backend->base ||
         (access->interfaces & ~interfaces) || access->requirements ||
-        !iree_hal_atomic_operation_capabilities_support(
-            atomic_operations, access->atomic_operations)) {
+        !iree_hal_atomic_operation_capabilities_is_empty(
+            access->atomics.queue) ||
+        !iree_hal_atomic_operation_capabilities_is_empty(
+            access->atomics.program)) {
       return iree_ok_status();
     }
     usage |= access->usage;

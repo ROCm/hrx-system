@@ -222,17 +222,50 @@ TEST_P(TaskSlabPoolTest, QualifiesRequiredAtomicCapabilities) {
       iree_hal_atomic_operation_capabilities_for_host(
           IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
           IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD);
-  families_[1].atomic_operations = required;
+  families_[1].atomics.queue = required;
+  families_[1].atomics.program = required;
   Ref<iree_hal_pool_t> source;
   IREE_ASSERT_OK(CreateSource(source.out()));
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(source, &capabilities);
   EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
       capabilities.atomic_operations, required));
+
+  iree_hal_tlsf_pool_options_t child_options = {};
+  child_options.tlsf_options.range_length = 4096;
+  child_options.tlsf_options.alignment = IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT;
+  child_options.tlsf_options.frontier_capacity = 4;
+  Ref<iree_hal_pool_t> child;
+  IREE_ASSERT_OK(iree_hal_tlsf_pool_create(
+      source, &child_options, iree_allocator_system(), child.out()));
+  Ref<iree_hal_buffer_t> buffer, view;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      child, iree_hal_make_pool_reservation_request(64, 8),
+      iree_infinite_timeout(), buffer.out()));
+  IREE_ASSERT_OK(iree_hal_buffer_subspan(buffer, 8, 8, iree_allocator_system(),
+                                         view.out()));
+  for (auto kind : {IREE_HAL_MEMORY_SITE_QUEUE, IREE_HAL_MEMORY_SITE_PROGRAM}) {
+    iree_hal_memory_scope_t site;
+    IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+        group_, {kind, families_[1].family}, &site));
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+        iree_hal_pool_query_atomic_operations(source, site), required));
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+        iree_hal_pool_query_atomic_operations(child, site), required));
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+        iree_hal_buffer_query_atomic_operations(buffer, site), required));
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+        iree_hal_buffer_query_atomic_operations(view, site), required));
+  }
+  iree_hal_memory_scope_t host;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_HOST, nullptr}, &host));
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_buffer_query_atomic_operations(view, host)));
 }
 
 TEST_P(TaskSlabPoolTest, RejectsInvalidAtomicRequirements) {
-  families_[0].atomic_operations.device_scope_32 = UINT32_C(1) << 31;
+  families_[0].atomics.queue.device_scope_32 = UINT32_C(1) << 31;
   Ref<iree_hal_pool_t> source;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         CreateSource(source.out()));

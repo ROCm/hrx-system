@@ -383,6 +383,13 @@ static iree_status_t iree_hal_memory_mapping_validate(
     const uint32_t end = mapping->scope.id ? begin + 1 : contract->scope_count;
     for (uint32_t id = begin; id < end; ++id) {
       if (contract->scopes[id].interfaces &&
+          !iree_all_bits_set(source->scopes[id].atomic_operations,
+                             contract->scopes[id].atomic_operations)) {
+        return iree_make_status(
+            IREE_STATUS_PERMISSION_DENIED,
+            "source lacks target atomic guarantees at scope %u", id);
+      }
+      if (contract->scopes[id].interfaces &&
           source->scopes[id]
                   .bindings[IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE] ==
               IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {

@@ -278,6 +278,13 @@ static iree_status_t iree_hal_replay_executor_virtual_buffer_create(
               .modes = (iree_hal_mapping_mode_t)payload.host_mapping_modes,
               .cacheability =
                   (iree_hal_host_cacheability_t)payload.host_cacheability,
+              .atomics =
+                  {
+                      .device_scope_32 = payload.host_atomic_device_scope_32,
+                      .device_scope_64 = payload.host_atomic_device_scope_64,
+                      .system_scope_32 = payload.host_atomic_system_scope_32,
+                      .system_scope_64 = payload.host_atomic_system_scope_64,
+                  },
           },
   };
   const iree_hal_virtual_buffer_options_t options = {

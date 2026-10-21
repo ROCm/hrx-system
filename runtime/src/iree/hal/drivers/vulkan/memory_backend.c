@@ -300,7 +300,17 @@ static iree_status_t iree_hal_vulkan_slab_pool_query_owner(
         (access->interfaces & ~((uint64_t)interfaces)) ||
         access->requirements ||
         !iree_hal_atomic_operation_capabilities_support(
-            atomic_operations, access->atomic_operations)) {
+            iree_hal_memory_site_filter_atomic_operations(
+                (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_QUEUE,
+                                         access->family},
+                atomic_operations),
+            access->atomics.queue) ||
+        !iree_hal_atomic_operation_capabilities_support(
+            iree_hal_memory_site_filter_atomic_operations(
+                (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
+                                         access->family},
+                atomic_operations),
+            access->atomics.program)) {
       // HOST_COHERENT alone does not establish automatic device visibility.
       // This native owner does not enable device_coherent_memory, so neither
       // full host/device coherence nor an uncached device route is available.
@@ -421,6 +431,15 @@ static iree_status_t iree_hal_vulkan_slab_pool_query_owner(
         !iree_hal_vulkan_memory_supports_host_access(flags, scope.host)) {
       continue;
     }
+    const iree_hal_atomic_operation_capabilities_t host_atomics =
+        (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)
+            ? iree_hal_atomic_operation_capabilities_for_host(
+                  IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL)
+            : (iree_hal_atomic_operation_capabilities_t){0};
+    if (!iree_hal_atomic_operation_capabilities_support(host_atomics,
+                                                        scope.host.atomics)) {
+      continue;
+    }
     // External host storage already has backing. An owned-allocation candidate
     // cannot impose its physical placement on imports admitted by the same
     // pool; the actual pointer's native memory type is resolved at attachment.
@@ -520,11 +539,23 @@ static iree_status_t iree_hal_vulkan_slab_pool_query_owner(
                 .recommended_granularity = mapping_granularity,
             };
       }
+      if (host.access) {
+        iree_hal_memory_scope_access_set_atomic_operations(&contract->scopes[1],
+                                                           host_atomics);
+      }
       for (iree_host_size_t j = 0; j < scope.family_count; ++j) {
         const uint32_t queue_scope_id =
             scope.families[j].family->memory.queue_scope_id;
         for (uint32_t id = queue_scope_id; id <= queue_scope_id + 1; ++id) {
           iree_hal_memory_scope_access_t* access = &contract->scopes[id];
+          iree_hal_memory_scope_access_set_atomic_operations(
+              access,
+              iree_hal_memory_site_filter_atomic_operations(
+                  (iree_hal_memory_site_t){id == queue_scope_id
+                                               ? IREE_HAL_MEMORY_SITE_QUEUE
+                                               : IREE_HAL_MEMORY_SITE_PROGRAM,
+                                           scope.families[j].family},
+                  atomic_operations));
           access->usage = scope.families[j].usage;
           access->interfaces = interfaces;
           access->bindings[IREE_HAL_BUFFER_INTERFACE_VULKAN_BUFFER] =
@@ -539,6 +570,8 @@ static iree_status_t iree_hal_vulkan_slab_pool_query_owner(
           }
         }
       }
+      iree_hal_memory_contract_finalize_atomic_operations(contract);
+      plan->base.info.host = contract->host;
       status = callback.fn(callback.user_data, &plan->base);
     } else {
       iree_hal_vulkan_slab_pool_plan_destroy(&plan->base);

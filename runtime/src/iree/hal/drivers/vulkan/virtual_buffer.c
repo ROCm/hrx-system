@@ -133,7 +133,17 @@ static void iree_hal_vulkan_virtual_buffer_prepare(
         (access->interfaces & ~((uint64_t)plan->interfaces)) ||
         access->requirements ||
         !iree_hal_atomic_operation_capabilities_support(
-            atomic_operations, access->atomic_operations)) {
+            iree_hal_memory_site_filter_atomic_operations(
+                (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_QUEUE,
+                                         access->family},
+                atomic_operations),
+            access->atomics.queue) ||
+        !iree_hal_atomic_operation_capabilities_support(
+            iree_hal_memory_site_filter_atomic_operations(
+                (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
+                                         access->family},
+                atomic_operations),
+            access->atomics.program)) {
       return;
     }
     const iree_hal_vulkan_queue_t* queue =
@@ -283,9 +293,14 @@ iree_status_t iree_hal_vulkan_virtual_buffer_create(
             IREE_HAL_VULKAN_BUFFER_BINDING_DEVICE_ADDRESS;
       }
       contract->scopes[id + 1] = *site;
+      iree_hal_memory_scope_access_set_atomic_operations(site,
+                                                         family->atomics.queue);
+      iree_hal_memory_scope_access_set_atomic_operations(
+          &contract->scopes[id + 1], family->atomics.program);
       reservation->projections[id] = 0;
       reservation->projections[id + 1] = 0;
     }
+    iree_hal_memory_contract_finalize_atomic_operations(contract);
     contract->allowed_access =
         iree_hal_buffer_usage_access(contract->allowed_usage);
     reservation->backing = (iree_hal_buffer_backing_facts_t){

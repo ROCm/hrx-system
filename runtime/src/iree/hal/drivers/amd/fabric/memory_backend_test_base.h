@@ -916,7 +916,7 @@ class MemoryBackendTest : public ::testing::Test {
     accesses[1].family = families_[0];
     accesses[1].usage = usage;
     accesses[1].interfaces = interfaces;
-    accesses[1].atomic_operations = atomics;
+    accesses[1].atomics.queue = atomics;
     accesses[2].family = iree_hal_device_queue_family(cpu_device_, 0);
     accesses[2].usage = cpu_usage;
     accesses[2].interfaces = cpu_interfaces;

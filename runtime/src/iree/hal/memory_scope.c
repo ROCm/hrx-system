@@ -15,14 +15,16 @@ iree_hal_pool_host_access_validate(iree_hal_pool_host_access_t host) {
   if (iree_any_bit_set(host.access, ~IREE_HAL_MEMORY_ACCESS_ALL) ||
       iree_any_bit_set(host.modes, ~(IREE_HAL_MAPPING_MODE_SCOPED |
                                      IREE_HAL_MAPPING_MODE_PERSISTENT)) ||
-      (uint32_t)host.cacheability > IREE_HAL_HOST_CACHEABILITY_UNCACHED) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "invalid host access, mapping mode, or cacheability");
+      (uint32_t)host.cacheability > IREE_HAL_HOST_CACHEABILITY_UNCACHED ||
+      !iree_hal_atomic_operation_capabilities_are_valid(host.atomics)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid host access, mapping mode, cacheability, "
+                            "or atomic operations");
   }
   if ((!host.access != !host.modes) ||
       (!host.access &&
-       host.cacheability != IREE_HAL_HOST_CACHEABILITY_UNKNOWN)) {
+       (host.cacheability != IREE_HAL_HOST_CACHEABILITY_UNKNOWN ||
+        !iree_hal_atomic_operation_capabilities_is_empty(host.atomics)))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "host permissions and mapping modes must be specified together");
@@ -58,7 +60,9 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_scope_validate(
                          ~(IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST |
                            IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED)) ||
         !iree_hal_atomic_operation_capabilities_are_valid(
-            access->atomic_operations)) {
+            access->atomics.queue) ||
+        !iree_hal_atomic_operation_capabilities_are_valid(
+            access->atomics.program)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid family access flags");
     }
@@ -157,14 +161,13 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_contract_create(
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_memory_contract_t), &total_size,
       IREE_STRUCT_FIELD_FAM(cell_count, uint64_t),
-      IREE_STRUCT_FIELD_ALIGNED(scope_count, iree_hal_memory_scope_access_t,
-                                iree_alignof(iree_hal_memory_scope_access_t),
+      IREE_STRUCT_FIELD_ALIGNED(scope_count, iree_hal_memory_scope_access_t, 32,
                                 &scopes_offset),
       IREE_STRUCT_FIELD(binding_layout->binding_count, uint16_t,
                         &types_offset)));
   iree_hal_memory_contract_t* contract = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total_size, (void**)&contract));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
+      host_allocator, total_size, 32, scopes_offset, (void**)&contract));
   iree_atomic_ref_count_init(&contract->ref_count);
   contract->host_allocator = host_allocator;
   contract->domain = domain;
@@ -203,8 +206,90 @@ IREE_API_EXPORT void iree_hal_memory_contract_release(
     iree_hal_memory_contract_t* contract) {
   if (contract && iree_atomic_ref_count_dec(&contract->ref_count) == 1) {
     iree_allocator_free(contract->host_allocator, contract->transition_details);
-    iree_allocator_free(contract->host_allocator, contract);
+    iree_allocator_free_aligned(contract->host_allocator, contract);
   }
+}
+
+static_assert(IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL <= UINT8_MAX,
+              "prepared atomic operation masks must fit in one byte");
+
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_memory_site_filter_atomic_operations(
+    iree_hal_memory_site_t site,
+    iree_hal_atomic_operation_capabilities_t backing_operations) {
+  if (site.kind == IREE_HAL_MEMORY_SITE_HOST) {
+    return backing_operations;
+  }
+  const iree_hal_queue_family_spec_t* family =
+      iree_hal_queue_family_spec(site.family);
+  if (site.kind == IREE_HAL_MEMORY_SITE_QUEUE) {
+    return iree_hal_atomic_operation_capabilities_intersect(
+        backing_operations, family->atomic_capabilities.operations);
+  }
+  return iree_any_bit_set(family->role_flags,
+                          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)
+             ? backing_operations
+             : (iree_hal_atomic_operation_capabilities_t){0};
+}
+
+IREE_API_EXPORT void iree_hal_memory_scope_access_set_atomic_operations(
+    iree_hal_memory_scope_access_t* access,
+    iree_hal_atomic_operation_capabilities_t operations) {
+  access->atomic_operations =
+      operations.device_scope_32 | (operations.device_scope_64 << 8) |
+      (operations.system_scope_32 << 16) | (operations.system_scope_64 << 24);
+}
+
+static iree_hal_atomic_operation_capabilities_t
+iree_hal_memory_scope_unpack_atomic_operations(uint32_t packed) {
+  return (iree_hal_atomic_operation_capabilities_t){
+      .device_scope_32 = packed & 0xFFu,
+      .device_scope_64 = (packed >> 8) & 0xFFu,
+      .system_scope_32 = (packed >> 16) & 0xFFu,
+      .system_scope_64 = packed >> 24,
+  };
+}
+
+IREE_API_EXPORT void iree_hal_memory_contract_finalize_atomic_operations(
+    iree_hal_memory_contract_t* contract) {
+  uint32_t common = UINT32_MAX;
+  bool any = false;
+  for (uint32_t id = 1; id < contract->scope_count; ++id) {
+    if (id == 1 ? contract->host.access != 0
+                : contract->scopes[id].interfaces != 0) {
+      common &= contract->scopes[id].atomic_operations;
+      any = true;
+    }
+  }
+  contract->scopes[IREE_HAL_MEMORY_SCOPE_ANY].atomic_operations =
+      any ? common : 0;
+  contract->host.atomics = iree_hal_memory_scope_unpack_atomic_operations(
+      contract->host.access ? contract->scopes[1].atomic_operations : 0);
+}
+
+static iree_hal_atomic_operation_capabilities_t
+iree_hal_memory_contract_query_atomic_operations(
+    const iree_hal_memory_contract_t* contract, iree_hal_memory_scope_t scope) {
+  if (!contract || scope.domain != contract->domain ||
+      scope.id >= contract->scope_count) {
+    return (iree_hal_atomic_operation_capabilities_t){0};
+  }
+  return iree_hal_memory_scope_unpack_atomic_operations(
+      contract->scopes[scope.id].atomic_operations);
+}
+
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_pool_query_atomic_operations(const iree_hal_pool_t* pool,
+                                      iree_hal_memory_scope_t scope) {
+  return iree_hal_memory_contract_query_atomic_operations(pool->memory_contract,
+                                                          scope);
+}
+
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_buffer_query_atomic_operations(const iree_hal_buffer_t* buffer,
+                                        iree_hal_memory_scope_t scope) {
+  return iree_hal_memory_contract_query_atomic_operations(
+      buffer->memory.contract, scope);
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_pool_resolve_binding(

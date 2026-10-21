@@ -1646,7 +1646,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAllocaFromChildPool) {
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
       /*interfaces=*/0,
       /*requirements=*/0,
-      /*atomic_operations=*/{},
+      /*atomics=*/{},
   };
   const iree_hal_pool_scope_t scope = {
       /*family_count=*/1,
@@ -1763,7 +1763,7 @@ TEST(ReplayExecuteTest, ExecutesPoolAllocationImportAndTrimRecords) {
       IREE_HAL_BUFFER_USAGE_TRANSFER,
       /*interfaces=*/0,
       /*requirements=*/0,
-      /*atomic_operations=*/{},
+      /*atomics=*/{},
   };
   const iree_hal_pool_scope_t scope = {
       /*family_count=*/1,

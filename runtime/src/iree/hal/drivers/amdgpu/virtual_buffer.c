@@ -236,7 +236,6 @@ static iree_status_t iree_hal_amdgpu_virtual_buffer_prepare(
       !iree_hal_allocator_supports_virtual_memory(backend->allocator)) {
     return iree_ok_status();
   }
-  const iree_hal_atomic_operation_capabilities_t no_atomics = {0};
   iree_hal_buffer_usage_t usage = 0;
   for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
     const iree_hal_pool_family_access_t* access = &scope.families[i];
@@ -244,8 +243,10 @@ static iree_status_t iree_hal_amdgpu_virtual_buffer_prepare(
         access->requirements ||
         (access->interfaces &
          ~(UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS)) ||
-        !iree_hal_atomic_operation_capabilities_support(
-            no_atomics, access->atomic_operations)) {
+        !iree_hal_atomic_operation_capabilities_is_empty(
+            access->atomics.queue) ||
+        !iree_hal_atomic_operation_capabilities_is_empty(
+            access->atomics.program)) {
       return iree_ok_status();
     }
     *out_affinity |= UINT64_C(1) << access->family->ordinal;

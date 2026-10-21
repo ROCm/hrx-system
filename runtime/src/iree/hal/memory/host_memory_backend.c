@@ -185,11 +185,24 @@ static iree_status_t iree_hal_host_slab_pool_query(
   iree_hal_slab_provider_query_properties(
       mapping_source ? owner->mapping_provider : owner->slab_provider,
       &properties);
+  if (!iree_hal_atomic_operation_capabilities_support(
+          properties.atomic_operations, scope.host.atomics)) {
+    return iree_ok_status();
+  }
   iree_hal_buffer_usage_t usage = 0;
   for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
     if (!iree_hal_atomic_operation_capabilities_support(
-            properties.atomic_operations,
-            scope.families[i].atomic_operations)) {
+            iree_hal_memory_site_filter_atomic_operations(
+                (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_QUEUE,
+                                         scope.families[i].family},
+                properties.atomic_operations),
+            scope.families[i].atomics.queue) ||
+        !iree_hal_atomic_operation_capabilities_support(
+            iree_hal_memory_site_filter_atomic_operations(
+                (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
+                                         scope.families[i].family},
+                properties.atomic_operations),
+            scope.families[i].atomics.program)) {
       return iree_ok_status();
     }
     usage |= scope.families[i].usage;
@@ -258,6 +271,8 @@ static iree_status_t iree_hal_host_slab_pool_query(
         iree_hal_buffer_usage_access(usage) | host.access;
     contract->allowed_usage = usage;
     if (host.access) {
+      iree_hal_memory_scope_access_set_atomic_operations(
+          &contract->scopes[1], properties.atomic_operations);
       contract->scopes[1].interfaces = 1u << IREE_HAL_BUFFER_INTERFACE_HOST;
       contract->scopes[1].bindings[IREE_HAL_BUFFER_INTERFACE_HOST] = 0;
       if (mapping_source) {
@@ -271,6 +286,14 @@ static iree_status_t iree_hal_host_slab_pool_query(
       const uint32_t queue_scope_id =
           scope.families[i].family->memory.queue_scope_id;
       for (uint32_t id = queue_scope_id; id <= queue_scope_id + 1; ++id) {
+        iree_hal_memory_scope_access_set_atomic_operations(
+            &contract->scopes[id],
+            iree_hal_memory_site_filter_atomic_operations(
+                (iree_hal_memory_site_t){id == queue_scope_id
+                                             ? IREE_HAL_MEMORY_SITE_QUEUE
+                                             : IREE_HAL_MEMORY_SITE_PROGRAM,
+                                         scope.families[i].family},
+                properties.atomic_operations));
         contract->scopes[id].usage = scope.families[i].usage;
         contract->scopes[id].interfaces = 1u << IREE_HAL_BUFFER_INTERFACE_HOST;
         contract->scopes[id].bindings[IREE_HAL_BUFFER_INTERFACE_HOST] = 0;
@@ -287,6 +310,8 @@ static iree_status_t iree_hal_host_slab_pool_query(
             .bindings[IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE] = 1;
       }
     }
+    iree_hal_memory_contract_finalize_atomic_operations(contract);
+    plan->base.info.host = contract->host;
     status = iree_hal_memory_contract_initialize_transitions(
         contract, iree_hal_host_memory_query_pair,
         mapping_source ? plan : NULL);

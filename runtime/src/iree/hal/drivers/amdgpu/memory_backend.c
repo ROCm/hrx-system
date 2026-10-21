@@ -405,6 +405,17 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
   if (!iree_all_bits_set(exposed_supported_usage, usage)) {
     return iree_ok_status();
   }
+  const iree_hal_atomic_operation_capabilities_t host_atomics =
+      iree_all_bits_set(
+          exposed_memory_type,
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_CACHED)
+          ? iree_hal_atomic_operation_capabilities_for_host(
+                IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL)
+          : (iree_hal_atomic_operation_capabilities_t){0};
+  if (!iree_hal_atomic_operation_capabilities_support(host_atomics,
+                                                      scope.host.atomics)) {
+    return iree_ok_status();
+  }
   iree_hal_pool_host_access_t host = scope.host;
   if (iree_hal_amdgpu_memory_supports_host_access(exposed_memory_type,
                                                   options->preferences.host)) {
@@ -565,13 +576,38 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
     }
   }
   if (iree_status_is_ok(status) && supported) {
-    const iree_hal_atomic_operation_capabilities_t atomic_operations =
-        options->imports.class_count
-            ? (iree_hal_atomic_operation_capabilities_t){0}
-            : iree_hal_amdgpu_atomic_memory_expand_capabilities(cells);
+    iree_hal_atomic_operation_capabilities_t atomic_operations =
+        iree_hal_amdgpu_atomic_memory_expand_capabilities(cells);
+    if (options->imports.class_count) {
+      // Imported pointers carry their own native memory facts. Capture the
+      // requested guarantee here; attachment validates every imported slab
+      // against it before the pool publishes a buffer with this contract.
+      iree_hal_atomic_operation_capabilities_t required = {0};
+      for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
+        required = iree_hal_atomic_operation_capabilities_union(
+            required, scope.families[i].atomics.queue);
+        required = iree_hal_atomic_operation_capabilities_union(
+            required, scope.families[i].atomics.program);
+      }
+      atomic_operations =
+          options->owned.mode == IREE_HAL_SLAB_POOL_OWNED_ENABLED
+              ? iree_hal_atomic_operation_capabilities_intersect(
+                    atomic_operations, required)
+              : required;
+    }
     for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
       if (!iree_hal_atomic_operation_capabilities_support(
-              atomic_operations, scope.families[i].atomic_operations)) {
+              iree_hal_memory_site_filter_atomic_operations(
+                  (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_QUEUE,
+                                           scope.families[i].family},
+                  atomic_operations),
+              scope.families[i].atomics.queue) ||
+          !iree_hal_atomic_operation_capabilities_support(
+              iree_hal_memory_site_filter_atomic_operations(
+                  (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
+                                           scope.families[i].family},
+                  atomic_operations),
+              scope.families[i].atomics.program)) {
         supported = false;
         break;
       }
@@ -604,6 +640,8 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
     contract->allowed_usage =
         usage | iree_hal_amdgpu_memory_mapping_usage(host);
     if (host.access) {
+      iree_hal_memory_scope_access_set_atomic_operations(&contract->scopes[1],
+                                                         host_atomics);
       contract->scopes[1].interfaces = 1u << IREE_HAL_BUFFER_INTERFACE_HOST;
       contract->scopes[1].bindings[IREE_HAL_BUFFER_INTERFACE_HOST] =
           IREE_HAL_AMDGPU_BUFFER_BINDING_HOST;
@@ -612,6 +650,14 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
       const uint32_t queue_scope_id =
           scope.families[i].family->memory.queue_scope_id;
       for (uint32_t id = queue_scope_id; id <= queue_scope_id + 1; ++id) {
+        iree_hal_memory_scope_access_set_atomic_operations(
+            &contract->scopes[id],
+            iree_hal_memory_site_filter_atomic_operations(
+                (iree_hal_memory_site_t){id == queue_scope_id
+                                             ? IREE_HAL_MEMORY_SITE_QUEUE
+                                             : IREE_HAL_MEMORY_SITE_PROGRAM,
+                                         scope.families[i].family},
+                plan->provider_options.exposed.atomic_operations));
         contract->scopes[id].usage = scope.families[i].usage;
         contract->scopes[id].interfaces = interfaces;
         contract->scopes[id]
@@ -628,6 +674,8 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
         }
       }
     }
+    iree_hal_memory_contract_finalize_atomic_operations(contract);
+    plan->base.info.host = contract->host;
     status = callback.fn(callback.user_data, &plan->base);
   } else {
     iree_hal_amdgpu_slab_pool_plan_destroy(&plan->base);

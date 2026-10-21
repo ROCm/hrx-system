@@ -482,10 +482,18 @@ void iree_hal_replay_recorder_pool_capture_families(
         .usage = access->usage,
         .interfaces = access->interfaces,
         .requirements = access->requirements,
-        .atomic_device_scope_32 = access->atomic_operations.device_scope_32,
-        .atomic_device_scope_64 = access->atomic_operations.device_scope_64,
-        .atomic_system_scope_32 = access->atomic_operations.system_scope_32,
-        .atomic_system_scope_64 = access->atomic_operations.system_scope_64,
+        .queue_atomic_device_scope_32 = access->atomics.queue.device_scope_32,
+        .queue_atomic_device_scope_64 = access->atomics.queue.device_scope_64,
+        .queue_atomic_system_scope_32 = access->atomics.queue.system_scope_32,
+        .queue_atomic_system_scope_64 = access->atomics.queue.system_scope_64,
+        .program_atomic_device_scope_32 =
+            access->atomics.program.device_scope_32,
+        .program_atomic_device_scope_64 =
+            access->atomics.program.device_scope_64,
+        .program_atomic_system_scope_32 =
+            access->atomics.program.system_scope_32,
+        .program_atomic_system_scope_64 =
+            access->atomics.program.system_scope_64,
     };
   }
 }
@@ -631,9 +639,21 @@ iree_status_t iree_hal_replay_recorder_create_slab_pool(
       .host_access = scope->host.access,
       .host_mapping_modes = scope->host.modes,
       .host_cacheability = scope->host.cacheability,
+      .host_atomic_device_scope_32 = scope->host.atomics.device_scope_32,
+      .host_atomic_device_scope_64 = scope->host.atomics.device_scope_64,
+      .host_atomic_system_scope_32 = scope->host.atomics.system_scope_32,
+      .host_atomic_system_scope_64 = scope->host.atomics.system_scope_64,
       .preferred_host_access = options->preferences.host.access,
       .preferred_host_mapping_modes = options->preferences.host.modes,
       .preferred_host_cacheability = options->preferences.host.cacheability,
+      .preferred_host_atomic_device_scope_32 =
+          options->preferences.host.atomics.device_scope_32,
+      .preferred_host_atomic_device_scope_64 =
+          options->preferences.host.atomics.device_scope_64,
+      .preferred_host_atomic_system_scope_32 =
+          options->preferences.host.atomics.system_scope_32,
+      .preferred_host_atomic_system_scope_64 =
+          options->preferences.host.atomics.system_scope_64,
   };
   if (pending_record.recorder) {
     const iree_const_byte_span_t operation_iovecs[] = {

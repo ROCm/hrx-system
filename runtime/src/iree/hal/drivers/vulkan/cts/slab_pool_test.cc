@@ -226,6 +226,19 @@ TEST_P(VulkanSlabPoolTest, CapturesExactFamiliesWithoutAllocatingBacking) {
       iree_hal_memory_scope_t scope;
       IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(device_group_,
                                                                 site, &scope));
+      const auto operations =
+          iree_hal_pool_query_atomic_operations(source, scope);
+      if (i != 0) {
+        EXPECT_TRUE(
+            iree_hal_atomic_operation_capabilities_is_empty(operations));
+      } else if (kind == IREE_HAL_MEMORY_SITE_QUEUE) {
+        const auto expected = iree_hal_queue_family_spec(all_families[i].family)
+                                  ->atomic_capabilities.operations;
+        EXPECT_EQ(operations.device_scope_32, expected.device_scope_32);
+        EXPECT_EQ(operations.device_scope_64, expected.device_scope_64);
+        EXPECT_EQ(operations.system_scope_32, 0u);
+        EXPECT_EQ(operations.system_scope_64, 0u);
+      }
       for (auto interface : {IREE_HAL_BUFFER_INTERFACE_VULKAN_BUFFER,
                              IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS}) {
         iree_hal_buffer_native_binding_slot_t slot;

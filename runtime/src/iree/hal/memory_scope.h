@@ -88,9 +88,14 @@ typedef struct iree_hal_pool_family_access_t {
   iree_hal_buffer_interfaces_t interfaces;
   // Hard access properties qualified together with every other participant.
   iree_hal_pool_access_requirements_t requirements;
-  // Atomic operations required at this family, partitioned by access width and
-  // coherence domain. Zero cells do not require atomic access.
-  iree_hal_atomic_operation_capabilities_t atomic_operations;
+  // Atomic operations required at each execution site. Zero requires nothing
+  // and does not prohibit the implementation from supporting more operations.
+  struct {
+    // Queue commands, including atomic commands recorded in command buffers.
+    iree_hal_atomic_operation_capabilities_t queue;
+    // Operations issued by executable programs on this family.
+    iree_hal_atomic_operation_capabilities_t program;
+  } atomics;
 } iree_hal_pool_family_access_t;
 
 typedef struct iree_hal_pool_host_access_t {
@@ -100,6 +105,8 @@ typedef struct iree_hal_pool_host_access_t {
   iree_hal_mapping_mode_t modes;
   // Required mapping class; UNKNOWN permits the backend to choose.
   iree_hal_host_cacheability_t cacheability;
+  // Required atomic operations through the public application host mapping.
+  iree_hal_atomic_operation_capabilities_t atomics;
 } iree_hal_pool_host_access_t;
 
 // Complete simultaneous execution and host access. Arrays are borrowed only
@@ -131,6 +138,23 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_resolve_binding(
 // Returns captured public host access without traversing parent pools/topology.
 IREE_API_EXPORT iree_hal_pool_host_access_t
 iree_hal_pool_query_host_access(const iree_hal_pool_t* pool);
+
+// Returns the immutable backing and execution guarantee for an exact site.
+// ANY returns the intersection over admitted sites. Foreign, invalid, excluded,
+// and unqualified sites return zero. Queries perform no native discovery.
+// These operations alone do not establish mutual atomicity with another site;
+// that requires the corresponding memory-pair atomic reach and ordering.
+// A missing guarantee does not replace backend target validation: a native
+// target may support more than its general-purpose import pool can promise.
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_pool_query_atomic_operations(const iree_hal_pool_t* pool,
+                                      iree_hal_memory_scope_t scope);
+
+// Returns the owning pool's guarantee, also inherited by buffer subranges.
+// Unscoped buffers return zero; allocation-specific upgrades are not inferred.
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_buffer_query_atomic_operations(const iree_hal_buffer_t* buffer,
+                                        iree_hal_memory_scope_t scope);
 
 typedef uint32_t iree_hal_pool_mapping_flags_t;
 enum iree_hal_pool_mapping_flag_bits_e {
@@ -182,7 +206,27 @@ typedef struct iree_hal_memory_scope_access_t {
   uint32_t interfaces;
   // Prepared slot per native interface, or NATIVE_BINDING_INDEX_NONE.
   uint16_t bindings[IREE_HAL_BUFFER_INTERFACE_COUNT];
+  // Four byte-sized operation masks, in device32/device64/system32/system64
+  // order. Written only during construction by the setter below.
+  uint32_t atomic_operations;
 } iree_hal_memory_scope_access_t;
+static_assert(sizeof(iree_hal_memory_scope_access_t) == 32,
+              "two prepared memory sites must fit in one cache line");
+
+// Captures qualified operations at one site during contract construction.
+// The operations are trusted backend facts, already qualified against storage
+// and the executor. Finalize the contract after populating all admitted sites.
+IREE_API_EXPORT void iree_hal_memory_scope_access_set_atomic_operations(
+    iree_hal_memory_scope_access_t* access,
+    iree_hal_atomic_operation_capabilities_t operations);
+
+// Restricts qualified backing operations to the site's execution capabilities.
+// PROGRAM backing operations must already reflect the native shader contract;
+// the filter only excludes families that cannot execute programs.
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_memory_site_filter_atomic_operations(
+    iree_hal_memory_site_t site,
+    iree_hal_atomic_operation_capabilities_t backing_operations);
 
 // Shared cold metadata retained by pools; buffers borrow it from their owner.
 // No topology or parent-chain pointer is retained. Construction initializes all
@@ -235,6 +279,11 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_contract_create(
 IREE_API_EXPORT void iree_hal_memory_contract_retain(
     iree_hal_memory_contract_t* contract);
 IREE_API_EXPORT void iree_hal_memory_contract_release(
+    iree_hal_memory_contract_t* contract);
+
+// Captures the wildcard intersection and achieved public host operations.
+// Called once after populating site facts and before publishing the contract.
+IREE_API_EXPORT void iree_hal_memory_contract_finalize_atomic_operations(
     iree_hal_memory_contract_t* contract);
 
 // Validates a public request against one already-qualified exact family. Zero

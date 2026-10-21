@@ -864,6 +864,8 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
         .host_coherent = host_coherent,
         .complete = true,
     };
+    iree_hal_memory_contract_finalize_atomic_operations(contract);
+    plan->base.info.host = contract->host;
     status = iree_hal_memory_contract_initialize_transitions(
         contract, iree_hal_amd_fabric_memory_query_transition,
         &transition_query);
@@ -1059,7 +1061,8 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
   (void)self;
   if ((scope.host.access &&
        scope.host.cacheability != IREE_HAL_HOST_CACHEABILITY_UNKNOWN) ||
-      scope.family_count >= UINT32_MAX) {
+      scope.family_count >= UINT32_MAX ||
+      !iree_hal_atomic_operation_capabilities_is_empty(scope.host.atomics)) {
     return iree_ok_status();
   }
 
@@ -1159,10 +1162,11 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
           iree_hal_device_memory_backend(device);
       // Published native buffers carry no atomic operation capabilities. A
       // construction request must not promise more than those buffers expose.
-      const iree_hal_atomic_operation_capabilities_t atomic_operations = {0};
       if (!base ||
-          !iree_hal_atomic_operation_capabilities_support(
-              atomic_operations, requested->atomic_operations) ||
+          !iree_hal_atomic_operation_capabilities_is_empty(
+              requested->atomics.queue) ||
+          !iree_hal_atomic_operation_capabilities_is_empty(
+              requested->atomics.program) ||
           iree_any_bit_set(requested->requirements,
                            IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED)) {
         supported = false;

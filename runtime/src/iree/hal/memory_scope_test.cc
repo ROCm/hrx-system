@@ -8,6 +8,7 @@
 
 #include "iree/hal/command_buffer.h"
 #include "iree/hal/device.h"
+#include "iree/hal/pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -57,6 +58,131 @@ class MemoryScopeTest : public ::testing::Test {
   // Owns the actual contract allocation, including its matrix and cold facts.
   iree_hal_memory_contract_t* contract_ = nullptr;
 };
+
+TEST_F(MemoryScopeTest, CapturesIndependentAtomicSitesAndWildcardIntersection) {
+  const iree_hal_atomic_operation_capabilities_t host = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+      .device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD,
+      .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR,
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+  };
+  for (uint32_t id = 1; id < 6; ++id) {
+    iree_hal_memory_scope_access_set_atomic_operations(&contract_->scopes[id],
+                                                       host);
+  }
+  const iree_hal_atomic_operation_capabilities_t program = {
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+  };
+  iree_hal_memory_scope_access_set_atomic_operations(&contract_->scopes[3],
+                                                     program);
+  iree_hal_memory_contract_finalize_atomic_operations(contract_);
+  iree_hal_pool_t pool = {.memory_contract = contract_};
+  iree_hal_buffer_t buffer = {};
+  buffer.memory.contract = contract_;
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(contract_->scopes) % 32, 0u);
+  EXPECT_EQ(
+      iree_hal_pool_query_atomic_operations(&pool, scope(1)).device_scope_32,
+      host.device_scope_32);
+  EXPECT_EQ(iree_hal_buffer_query_atomic_operations(&buffer, scope(2))
+                .device_scope_64,
+            host.device_scope_64);
+  EXPECT_EQ(iree_hal_buffer_query_atomic_operations(&buffer, scope(2))
+                .system_scope_32,
+            host.system_scope_32);
+  EXPECT_EQ(
+      iree_hal_pool_query_atomic_operations(&pool, scope(3)).device_scope_32,
+      0u);
+  auto common = iree_hal_pool_query_atomic_operations(&pool, scope(0));
+  EXPECT_EQ(common.device_scope_32, 0u);
+  EXPECT_EQ(common.device_scope_64, 0u);
+  EXPECT_EQ(common.system_scope_32, 0u);
+  EXPECT_EQ(common.system_scope_64, program.system_scope_64);
+  EXPECT_EQ(iree_hal_pool_query_host_access(&pool).atomics.system_scope_32,
+            host.system_scope_32);
+
+  // An ordinary NPU consumer contributes zero without erasing CPU/GPU facts.
+  iree_hal_memory_scope_access_set_atomic_operations(&contract_->scopes[4], {});
+  iree_hal_memory_contract_finalize_atomic_operations(contract_);
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_pool_query_atomic_operations(&pool, scope(0))));
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_buffer_query_atomic_operations(&buffer, scope(4))));
+  EXPECT_EQ(iree_hal_buffer_query_atomic_operations(&buffer, scope(2))
+                .system_scope_64,
+            host.system_scope_64);
+  for (auto invalid :
+       {scope(6), scope(7), scope(8), scope(IREE_HAL_MEMORY_SCOPE_INVALID),
+        iree_hal_memory_scope_t{&pool, 2}}) {
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+        iree_hal_buffer_query_atomic_operations(&buffer, invalid)));
+  }
+  buffer.memory.contract = nullptr;
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_buffer_query_atomic_operations(&buffer, scope(2))));
+}
+
+TEST_F(MemoryScopeTest, PreservesEveryOperationInEveryWidthAndDomain) {
+  iree_hal_buffer_t buffer = {};
+  buffer.memory.contract = contract_;
+  for (auto cell :
+       {&iree_hal_atomic_operation_capabilities_t::device_scope_32,
+        &iree_hal_atomic_operation_capabilities_t::device_scope_64,
+        &iree_hal_atomic_operation_capabilities_t::system_scope_32,
+        &iree_hal_atomic_operation_capabilities_t::system_scope_64}) {
+    for (uint32_t operations = 0;
+         operations <= IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL; ++operations) {
+      iree_hal_atomic_operation_capabilities_t expected = {};
+      expected.*cell = operations;
+      iree_hal_memory_scope_access_set_atomic_operations(&contract_->scopes[2],
+                                                         expected);
+      const auto actual =
+          iree_hal_buffer_query_atomic_operations(&buffer, scope(2));
+      EXPECT_EQ(actual.device_scope_32, expected.device_scope_32);
+      EXPECT_EQ(actual.device_scope_64, expected.device_scope_64);
+      EXPECT_EQ(actual.system_scope_32, expected.system_scope_32);
+      EXPECT_EQ(actual.system_scope_64, expected.system_scope_64);
+    }
+  }
+}
+
+TEST(MemoryScopeHostAccessTest, RejectsAtomicRequirementsWithoutHostAccess) {
+  iree_hal_pool_host_access_t host = {};
+  host.atomics.system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_pool_host_access_validate(host));
+  host.access = IREE_HAL_MEMORY_ACCESS_WRITE;
+  host.modes = IREE_HAL_MAPPING_MODE_SCOPED;
+  IREE_EXPECT_OK(iree_hal_pool_host_access_validate(host));
+  host.atomics.device_scope_64 = UINT32_C(1) << 31;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_pool_host_access_validate(host));
+}
+
+TEST(MemoryScopeAtomicTest, FiltersExecutionSitesIndependently) {
+  iree_hal_queue_family_spec_t spec = {
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+  };
+  spec.atomic_capabilities.operations.device_scope_32 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  const iree_hal_queue_family_t family = {.spec = &spec};
+  const iree_hal_atomic_operation_capabilities_t backing = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
+                         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD,
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
+  };
+  auto queue = iree_hal_memory_site_filter_atomic_operations(
+      {IREE_HAL_MEMORY_SITE_QUEUE, &family}, backing);
+  EXPECT_EQ(queue.device_scope_32, IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_EQ(queue.system_scope_64, 0u);
+  auto program = iree_hal_memory_site_filter_atomic_operations(
+      {IREE_HAL_MEMORY_SITE_PROGRAM, &family}, backing);
+  EXPECT_EQ(program.device_scope_32, backing.device_scope_32);
+  EXPECT_EQ(program.system_scope_64, backing.system_scope_64);
+  spec.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_memory_site_filter_atomic_operations(
+          {IREE_HAL_MEMORY_SITE_PROGRAM, &family}, backing)));
+}
 
 TEST(MemoryTransitionRecipeTest, ValidatesEffectsAndQueueOperationShape) {
   iree_hal_memory_transition_recipe_info_t operation = {

@@ -52,8 +52,7 @@ iree_status_t CreateAtomicTestPool(iree_hal_device_group_t* device_group,
                                    iree_hal_pool_t** out_pool);
 
 // Constructs an import-only host-pointer pool for testing target validation.
-// The imported backing supplies its exact atomic facts at runtime, so this
-// source deliberately admits storage without requiring atomics at construction.
+// Import admission requires the same atomic operations as the owned test pool.
 iree_status_t CreateAtomicTestHostImportPool(
     iree_hal_device_group_t* device_group,
     const AtomicTestConfiguration& configuration, iree_hal_pool_t** out_pool);

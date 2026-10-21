@@ -43,7 +43,7 @@ static iree_status_t CreateHostImportPool(
       .usage = usage,
       .interfaces = 0,
       .requirements = 0,
-      .atomic_operations = atomic_operations,
+      .atomics = {.queue = atomic_operations},
   };
   const iree_hal_pool_scope_t scope = {
       .family_count = 1,
@@ -234,9 +234,12 @@ TEST_P(TaskBufferAccessTest, ExecutionOnlyNestedViews) {
       .usage = usage,
       .interfaces = 0,
       .requirements = 0,
-      .atomic_operations =
+      .atomics =
           {
-              .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+              .queue =
+                  {
+                      .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+                  },
           },
   };
   const iree_hal_pool_scope_t scope = {

@@ -108,7 +108,7 @@ bool SelectAtomicTestConfiguration(iree_hal_device_t* device,
     out_configuration->family_access.family = iree_hal_device_queue_family(
         device, out_configuration->queue_family_ordinal);
     out_configuration->family_access.usage = requirements.buffer_usage;
-    out_configuration->family_access.atomic_operations = required_atomics;
+    out_configuration->family_access.atomics.queue = required_atomics;
     out_configuration->min_alignment =
         iree_hal_atomic_width_byte_count(requirements.width);
     return true;
@@ -133,11 +133,9 @@ iree_status_t CreateAtomicTestPool(iree_hal_device_group_t* device_group,
 iree_status_t CreateAtomicTestHostImportPool(
     iree_hal_device_group_t* device_group,
     const AtomicTestConfiguration& configuration, iree_hal_pool_t** out_pool) {
-  iree_hal_pool_family_access_t family_access = configuration.family_access;
-  family_access.atomic_operations = {};
   const iree_hal_pool_scope_t scope = {
       .family_count = 1,
-      .families = &family_access,
+      .families = &configuration.family_access,
   };
   const iree_hal_pool_import_class_t import_class = {
       .storage_class = iree_hal_make_external_storage_class(

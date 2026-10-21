@@ -90,17 +90,11 @@ static iree_status_t iree_hal_heap_pool_query_memory_pair(
 
 static iree_status_t iree_hal_heap_pool_validate_host_access(
     iree_hal_pool_host_access_t host_access) {
+  IREE_RETURN_IF_ERROR(iree_hal_pool_host_access_validate(host_access));
   if (!host_access.access || !host_access.modes) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "heap pool requires explicit host access and mapping modes");
-  }
-  if (iree_any_bit_set(host_access.access, ~IREE_HAL_MEMORY_ACCESS_ALL) ||
-      iree_any_bit_set(
-          host_access.modes,
-          ~(IREE_HAL_MAPPING_MODE_SCOPED | IREE_HAL_MAPPING_MODE_PERSISTENT))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "heap pool host access is invalid");
   }
   if (host_access.cacheability != IREE_HAL_HOST_CACHEABILITY_UNKNOWN &&
       host_access.cacheability != IREE_HAL_HOST_CACHEABILITY_WRITE_BACK) {
@@ -448,6 +442,14 @@ IREE_API_EXPORT iree_status_t iree_hal_heap_pool_create(
   IREE_ASSERT_ARGUMENT(out_pool);
   *out_pool = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_heap_pool_validate_host_access(host_access));
+  const iree_hal_atomic_operation_capabilities_t atomics =
+      iree_hal_atomic_operation_capabilities_for_host(
+          IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  if (!iree_hal_atomic_operation_capabilities_support(atomics,
+                                                      host_access.atomics)) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "host atomic operations are not lock-free");
+  }
   host_access.cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK;
 
   iree_hal_heap_pool_t* pool = NULL;
@@ -484,6 +486,9 @@ IREE_API_EXPORT iree_status_t iree_hal_heap_pool_create(
     contract->scopes[1].interfaces = UINT32_C(1)
                                      << IREE_HAL_BUFFER_INTERFACE_HOST;
     contract->scopes[1].bindings[IREE_HAL_BUFFER_INTERFACE_HOST] = 0;
+    iree_hal_memory_scope_access_set_atomic_operations(&contract->scopes[1],
+                                                       atomics);
+    iree_hal_memory_contract_finalize_atomic_operations(contract);
     status = iree_hal_memory_contract_initialize_transitions(
         contract, iree_hal_heap_pool_query_memory_pair, NULL);
   }

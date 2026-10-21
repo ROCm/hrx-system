@@ -97,13 +97,28 @@ iree_status_t iree_hal_replay_executor_pool_decode_families(
           .interfaces = (iree_hal_buffer_interfaces_t)family_payload.interfaces,
           .requirements =
               (iree_hal_pool_access_requirements_t)family_payload.requirements,
-          .atomic_operations =
-              {
-                  .device_scope_32 = family_payload.atomic_device_scope_32,
-                  .device_scope_64 = family_payload.atomic_device_scope_64,
-                  .system_scope_32 = family_payload.atomic_system_scope_32,
-                  .system_scope_64 = family_payload.atomic_system_scope_64,
-              },
+          .atomics = {.queue =
+                          {
+                              .device_scope_32 =
+                                  family_payload.queue_atomic_device_scope_32,
+                              .device_scope_64 =
+                                  family_payload.queue_atomic_device_scope_64,
+                              .system_scope_32 =
+                                  family_payload.queue_atomic_system_scope_32,
+                              .system_scope_64 =
+                                  family_payload.queue_atomic_system_scope_64,
+                          },
+                      .program =
+                          {
+                              .device_scope_32 =
+                                  family_payload.program_atomic_device_scope_32,
+                              .device_scope_64 =
+                                  family_payload.program_atomic_device_scope_64,
+                              .system_scope_32 =
+                                  family_payload.program_atomic_system_scope_32,
+                              .system_scope_64 =
+                                  family_payload.program_atomic_system_scope_64,
+                          }},
       };
     }
   }
@@ -266,6 +281,13 @@ static iree_status_t iree_hal_replay_executor_pool_create_slab(
                 .modes = (iree_hal_mapping_mode_t)payload.host_mapping_modes,
                 .cacheability =
                     (iree_hal_host_cacheability_t)payload.host_cacheability,
+                .atomics =
+                    {
+                        .device_scope_32 = payload.host_atomic_device_scope_32,
+                        .device_scope_64 = payload.host_atomic_device_scope_64,
+                        .system_scope_32 = payload.host_atomic_system_scope_32,
+                        .system_scope_64 = payload.host_atomic_system_scope_64,
+                    },
             },
     };
     iree_hal_slab_pool_options_t options;
@@ -286,6 +308,17 @@ static iree_status_t iree_hal_replay_executor_pool_create_slab(
         .modes = (iree_hal_mapping_mode_t)payload.preferred_host_mapping_modes,
         .cacheability =
             (iree_hal_host_cacheability_t)payload.preferred_host_cacheability,
+        .atomics =
+            {
+                .device_scope_32 =
+                    payload.preferred_host_atomic_device_scope_32,
+                .device_scope_64 =
+                    payload.preferred_host_atomic_device_scope_64,
+                .system_scope_32 =
+                    payload.preferred_host_atomic_system_scope_32,
+                .system_scope_64 =
+                    payload.preferred_host_atomic_system_scope_64,
+            },
     };
     options.trace_name =
         iree_make_string_view((const char*)trace_name_data, trace_name_length);

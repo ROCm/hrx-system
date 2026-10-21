@@ -115,7 +115,7 @@ static iree_status_t CreateTestPool(
       .usage = family_usage,
       .interfaces = 0,
       .requirements = 0,
-      .atomic_operations = atomic_operations,
+      .atomics = {.queue = atomic_operations},
   };
   const iree_hal_memory_access_t host_access =
       host_mapping_modes
