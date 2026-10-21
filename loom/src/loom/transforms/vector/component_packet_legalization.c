@@ -65,6 +65,8 @@ typedef struct loom_vector_component_record_t {
   bool packet_terminal_owned;
   // True when the result escapes the selected component.
   bool escapes;
+  // True when the operation only aliases the row-major shape of its operand.
+  bool shape_alias;
 } loom_vector_component_record_t;
 
 typedef struct loom_vector_component_producer_closure_t {
@@ -176,6 +178,41 @@ static loom_type_t loom_vector_component_packet_type(loom_type_t source_type,
       loom_type_rank(source_type) == 1 ? source_type.encoding_id : 0);
 }
 
+static uint32_t loom_vector_component_expansion_op_limit(
+    const loom_target_vector_packet_policy_t* policy) {
+  return policy->maximum_component_expansion_op_count != 0
+             ? policy->maximum_component_expansion_op_count
+             : LOOM_VECTOR_COMPONENT_PACKET_OP_LIMIT;
+}
+
+// A bitcast that only changes static vector shape is a row-major alias of the
+// same lanes. It can participate in a packet component without interpreting
+// or regrouping any element bits.
+static bool loom_vector_component_is_shape_alias(const loom_module_t* module,
+                                                 const loom_op_t* op) {
+  if (!loom_vector_bitcast_isa(op)) {
+    return false;
+  }
+  const loom_type_t source_type =
+      loom_module_value_type(module, loom_vector_bitcast_input(op));
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_vector_bitcast_result(op));
+  uint32_t source_lane_count = 0;
+  uint32_t result_lane_count = 0;
+  if (loom_type_element_type(source_type) !=
+          loom_type_element_type(result_type) ||
+      !loom_vector_component_static_lane_count(source_type,
+                                               &source_lane_count) ||
+      !loom_vector_component_static_lane_count(result_type,
+                                               &result_lane_count) ||
+      source_lane_count != result_lane_count) {
+    return false;
+  }
+  return loom_type_equal(
+      loom_vector_component_packet_type(source_type, source_lane_count),
+      loom_vector_component_packet_type(result_type, result_lane_count));
+}
+
 // Describes the complete shape-preserving family without naming operation
 // kinds. The decomposable trait establishes one result and per-lane semantics;
 // this routine establishes the row-major packet interval shared by its static
@@ -186,8 +223,9 @@ static bool loom_vector_component_describe(const loom_module_t* module,
   *out_lane_count = 0;
   if (op->result_count != 1 || op->region_count != 0 ||
       op->successor_count != 0 ||
-      !iree_all_bits_set(loom_op_effective_traits(module, op),
-                         LOOM_TRAIT_DECOMPOSABLE)) {
+      (!iree_all_bits_set(loom_op_effective_traits(module, op),
+                          LOOM_TRAIT_DECOMPOSABLE) &&
+       !loom_vector_component_is_shape_alias(module, op))) {
     return false;
   }
   uint32_t lane_count = 0;
@@ -330,6 +368,8 @@ static iree_status_t loom_vector_component_classify_op(
       .previous_member_index = LOOM_VECTOR_COMPONENT_INDEX_INVALID,
       .packet = LOOM_VALUE_ID_INVALID,
       .lane_count = lane_count,
+      .shape_alias =
+          loom_vector_component_is_shape_alias(plan->context->module, op),
   };
   IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
       plan->context, op, &record->authored_query_result));
@@ -1157,10 +1197,23 @@ static iree_status_t loom_vector_component_select(
     iree_host_size_t expanded_op_count = 0;
     if (!iree_host_size_checked_mul(component->member_count, packet_count,
                                     &expanded_op_count) ||
-        expanded_op_count > LOOM_VECTOR_COMPONENT_PACKET_OP_LIMIT) {
+        expanded_op_count > loom_vector_component_expansion_op_limit(policy)) {
       continue;
     }
-    if (packet_lane_count <= component->packet_lane_count) {
+    const bool candidate_has_tail =
+        component->lane_count % packet_lane_count != 0;
+    const bool selected_has_tail =
+        component->packet_lane_count != 0 &&
+        component->lane_count % component->packet_lane_count != 0;
+    const bool is_better_candidate =
+        component->packet_count == 0 ||
+        packet_count < component->packet_count ||
+        (packet_count == component->packet_count && selected_has_tail &&
+         !candidate_has_tail) ||
+        (packet_count == component->packet_count &&
+         selected_has_tail == candidate_has_tail &&
+         packet_lane_count > component->packet_lane_count);
+    if (!is_better_candidate) {
       continue;
     }
     component->packet_lane_count = packet_lane_count;
@@ -1850,32 +1903,38 @@ static iree_status_t loom_vector_component_materialize(
         }
       }
 
-      // Allocation links the operation at the insertion point. Resolve and
-      // materialize every operand first so each packet definition dominates
-      // the cloned consumer in the block order.
-      loom_op_t* packet_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
-          builder, source_op->kind, source_op->operand_count,
-          source_op->result_count, /*region_count=*/0,
-          /*tied_result_count=*/0, source_op->attribute_count,
-          source_op->location, &packet_op));
-      packet_op->instance_flags = source_op->instance_flags;
-      if (source_op->operand_count != 0) {
-        memcpy(loom_op_operands(packet_op), packet_operands,
-               source_op->operand_count * sizeof(*packet_operands));
+      // Resolve and materialize every operand before linking a cloned packet
+      // operation so each definition dominates its consumer. Row-major shape
+      // aliases have identical packet types and forward the packet SSA value.
+      if (record->shape_alias) {
+        IREE_ASSERT_EQ(source_op->operand_count, 1u);
+        record->packet = packet_operands[0];
+      } else {
+        loom_op_t* packet_op = NULL;
+        IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+            builder, source_op->kind, source_op->operand_count,
+            source_op->result_count, /*region_count=*/0,
+            /*tied_result_count=*/0, source_op->attribute_count,
+            source_op->location, &packet_op));
+        packet_op->instance_flags = source_op->instance_flags;
+        if (source_op->operand_count != 0) {
+          memcpy(loom_op_operands(packet_op), packet_operands,
+                 source_op->operand_count * sizeof(*packet_operands));
+        }
+        if (source_op->attribute_count != 0) {
+          memcpy(loom_op_attrs(packet_op), loom_op_const_attrs(source_op),
+                 source_op->attribute_count * sizeof(loom_attribute_t));
+        }
+        const loom_type_t source_result_type = loom_module_value_type(
+            plan->context->module, loom_op_const_results(source_op)[0]);
+        const loom_type_t packet_result_type =
+            loom_vector_component_packet_type(source_result_type,
+                                              packet_lane_count);
+        IREE_RETURN_IF_ERROR(loom_builder_define_value(
+            builder, packet_result_type, &record->packet));
+        loom_op_results(packet_op)[0] = record->packet;
+        IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, packet_op));
       }
-      if (source_op->attribute_count != 0) {
-        memcpy(loom_op_attrs(packet_op), loom_op_const_attrs(source_op),
-               source_op->attribute_count * sizeof(loom_attribute_t));
-      }
-      const loom_type_t source_result_type = loom_module_value_type(
-          plan->context->module, loom_op_const_results(source_op)[0]);
-      const loom_type_t packet_result_type = loom_vector_component_packet_type(
-          source_result_type, packet_lane_count);
-      IREE_RETURN_IF_ERROR(loom_builder_define_value(
-          builder, packet_result_type, &record->packet));
-      loom_op_results(packet_op)[0] = record->packet;
-      IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, packet_op));
       if (record->escapes) {
         escape_packets[escape_index * component->packet_count + packet_index] =
             record->packet;

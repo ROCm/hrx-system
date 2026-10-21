@@ -23,6 +23,12 @@
 // aggregate types from expanding without limit.
 #define LOOM_VECTOR_PACKET_DYNAMIC_WINDOW_OP_LIMIT 384u
 
+static bool loom_vector_packet_private_staging_allowed(
+    const loom_target_vector_packet_policy_t* policy) {
+  return !iree_any_bit_set(
+      policy->flags, LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_NO_PRIVATE_STAGING);
+}
+
 static bool loom_vector_packet_dynamic_window_expansion_is_bounded(
     const loom_vector_packetization_t* packetization,
     loom_value_id_t dynamic_offset,
@@ -926,6 +932,9 @@ iree_status_t loom_vector_packet_legalize_dynamic_slice(
           &result_shape, consumers, consumer_branches, consumer_count,
           consumer_branch_count, consumer_materializer, out_rewritten);
     }
+    if (!loom_vector_packet_private_staging_allowed(policy)) {
+      return iree_ok_status();
+    }
     return loom_vector_packet_legalize_dynamic_snapshot(
         &packetization, op, window.dynamic_offset, &source_shape, &result_shape,
         consumers, consumer_branches, consumer_count, consumer_branch_count,
@@ -1035,7 +1044,8 @@ iree_status_t loom_vector_packet_legalize_table_lookup(
       return iree_ok_status();
     }
     if (loom_vector_packet_shared_snapshot_requires_staging(&packetization,
-                                                            &shape, op)) {
+                                                            &shape, op) &&
+        loom_vector_packet_private_staging_allowed(policy)) {
       IREE_RETURN_IF_ERROR(loom_vector_packet_canonicalize_snapshots(
           &packetization, &shape, /*dynamic_windows_only=*/false));
       *out_rewritten = true;
@@ -1481,6 +1491,16 @@ iree_status_t loom_vector_packet_legalize_store(
   const bool has_vector_packet_components =
       loom_vector_packet_partition_has_vector_packets(context->module,
                                                       source_partition);
+  const bool require_computed_packets = iree_all_bits_set(
+      policy->flags,
+      LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_STORE_COMPUTED_PACKETS_ONLY);
+  const bool partition_has_computed_packets =
+      iree_all_bits_set(source_partition.flags,
+                        LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_COMPUTED_PACKETS);
+  if (require_computed_packets && has_vector_packet_components &&
+      !partition_has_computed_packets) {
+    return iree_ok_status();
+  }
   loom_vector_packet_shape_t shape = {0};
   const bool requires_packet_shape = loom_vector_packet_shape_from_type(
       context, policy, store_footprint.vector_type, &shape);
@@ -1527,6 +1547,10 @@ iree_status_t loom_vector_packet_legalize_store(
   bool producer_selected = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(
       &packetization, store_footprint.value, &shape, &producer_selected));
+  if (require_computed_packets && !has_vector_packet_components &&
+      (!producer_selected || !packetization.contains_vector_computation)) {
+    return iree_ok_status();
+  }
   if (producer_selected) {
     IREE_RETURN_IF_ERROR(
         loom_vector_packet_classify_memory_loads(&packetization, op,
@@ -1587,7 +1611,8 @@ iree_status_t loom_vector_packet_legalize_store(
     return iree_ok_status();
   }
   if (loom_vector_packet_shared_snapshot_requires_staging(&packetization,
-                                                          &shape, op)) {
+                                                          &shape, op) &&
+      loom_vector_packet_private_staging_allowed(policy)) {
     IREE_RETURN_IF_ERROR(loom_vector_packet_canonicalize_snapshots(
         &packetization, &shape, /*dynamic_windows_only=*/false));
     *out_rewritten = true;
@@ -1637,6 +1662,9 @@ iree_status_t loom_vector_packet_legalize_store(
     return iree_ok_status();
   }
   if (has_snapshots) {
+    if (!loom_vector_packet_private_staging_allowed(policy)) {
+      return iree_ok_status();
+    }
     IREE_RETURN_IF_ERROR(loom_vector_packet_canonicalize_snapshots(
         &packetization, &shape, /*dynamic_windows_only=*/false));
     *out_rewritten = true;
@@ -1646,6 +1674,9 @@ iree_status_t loom_vector_packet_legalize_store(
     return iree_ok_status();
   }
   if (!can_interleave) {
+    if (!loom_vector_packet_private_staging_allowed(policy)) {
+      return iree_ok_status();
+    }
     IREE_RETURN_IF_ERROR(loom_vector_packet_staged_store(
         &packetization, &store_footprint, &shape, store_cache_policy, op));
     IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, op));
@@ -1863,7 +1894,8 @@ iree_status_t loom_vector_packet_legalize_reduce(
     return iree_ok_status();
   }
   if (loom_vector_packet_shared_snapshot_requires_staging(&packetization,
-                                                          &shape, op)) {
+                                                          &shape, op) &&
+      loom_vector_packet_private_staging_allowed(policy)) {
     IREE_RETURN_IF_ERROR(loom_vector_packet_canonicalize_snapshots(
         &packetization, &shape, /*dynamic_windows_only=*/false));
     *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
@@ -1897,6 +1929,9 @@ iree_status_t loom_vector_packet_legalize_reduce(
     return iree_ok_status();
   }
   if (has_snapshots) {
+    if (!loom_vector_packet_private_staging_allowed(policy)) {
+      return iree_ok_status();
+    }
     IREE_RETURN_IF_ERROR(loom_vector_packet_canonicalize_snapshots(
         &packetization, &shape, /*dynamic_windows_only=*/false));
     *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;

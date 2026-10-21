@@ -1,0 +1,125 @@
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
+
+// A multidimensional nine-lane graph selects three-lane packets without
+// rebuilding and immediately flattening aggregate vector shapes.
+func.def @partial_predicate_packets(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %mask_view = buffer.view %input[%base] : buffer -> view<3x3xi8>
+  %result_view = buffer.view %output[%base] : buffer -> view<3x3xi8>
+  %mask_bytes = vector.load %mask_view[0, 0] : view<3x3xi8> -> vector<3x3xi8>
+  %c0 = vector.constant 0 : vector<3x3xi8>
+  %c1 = vector.constant 1 : vector<3x3xi8>
+  %mask = vector.cmpi ne, %mask_bytes, %c0 : vector<3x3xi8> -> vector<3x3xi1>
+  %bytes = vector.select %mask, %c1, %c0 : vector<3x3xi8>
+  vector.store %bytes, %result_view[0, 0] : vector<3x3xi8>, view<3x3xi8>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @partial_predicate_packets(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %98 = OpConstant.offset64 0
+  %99 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %98
+  %100 = OpLoad.storage_buffer.i8 %99
+  %101 = OpConstant.offset64 1
+  %102 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %101
+  %103 = OpLoad.storage_buffer.i8 %102
+  %104 = OpConstant.offset64 2
+  %105 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %104
+  %106 = OpLoad.storage_buffer.i8 %105
+  %107 = OpConstant.offset64 3
+  %108 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %107
+  %109 = OpLoad.storage_buffer.i8 %108
+  %110 = OpConstant.offset64 4
+  %111 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %110
+  %112 = OpLoad.storage_buffer.i8 %111
+  %113 = OpConstant.offset64 5
+  %114 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %113
+  %115 = OpLoad.storage_buffer.i8 %114
+  %116 = OpConstant.offset64 6
+  %117 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %116
+  %118 = OpLoad.storage_buffer.i8 %117
+  %119 = OpConstant.offset64 7
+  %120 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %119
+  %121 = OpLoad.storage_buffer.i8 %120
+  %122 = OpConstant.offset64 8
+  %123 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %122
+  %124 = OpLoad.storage_buffer.i8 %123
+  %125 = OpCompositeConstruct.v3i8 %100, %103, %106
+  %126 = OpConstant.i8 0
+  %127 = OpCompositeConstruct.v3i8 %126, %126, %126
+  %128 = OpINotEqual.v3i8 %125, %127
+  %129 = OpConstant.i8 1
+  %130 = OpCompositeConstruct.v3i8 %129, %129, %129
+  %131 = OpSelect.v3i8 %128, %130, %127
+  %132 = OpCompositeConstruct.v3i8 %109, %112, %115
+  %133 = OpINotEqual.v3i8 %132, %127
+  %134 = OpSelect.v3i8 %133, %130, %127
+  %135 = OpCompositeConstruct.v3i8 %118, %121, %124
+  %136 = OpINotEqual.v3i8 %135, %127
+  %137 = OpSelect.v3i8 %136, %130, %127
+  %138 = OpCompositeExtract.v3i8.i8 %131, 0
+  %139 = OpCompositeExtract.v3i8.i8 %131, 1
+  %140 = OpCompositeExtract.v3i8.i8 %131, 2
+  %142 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %98
+  OpStore.storage_buffer.i8 %142, %138
+  %144 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %101
+  OpStore.storage_buffer.i8 %144, %139
+  %146 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %104
+  OpStore.storage_buffer.i8 %146, %140
+  %147 = OpCompositeExtract.v3i8.i8 %134, 0
+  %148 = OpCompositeExtract.v3i8.i8 %134, 1
+  %149 = OpCompositeExtract.v3i8.i8 %134, 2
+  %151 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %107
+  OpStore.storage_buffer.i8 %151, %147
+  %153 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %110
+  OpStore.storage_buffer.i8 %153, %148
+  %155 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %113
+  OpStore.storage_buffer.i8 %155, %149
+  %156 = OpCompositeExtract.v3i8.i8 %137, 0
+  %157 = OpCompositeExtract.v3i8.i8 %137, 1
+  %158 = OpCompositeExtract.v3i8.i8 %137, 2
+  %160 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %116
+  OpStore.storage_buffer.i8 %160, %156
+  %162 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %119
+  OpStore.storage_buffer.i8 %162, %157
+  %164 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %122
+  OpStore.storage_buffer.i8 %164, %158
+  return
+}
+
+// ====
+// RUN: with-checks compile-report target=spirv:vulkan1.3+bda+extended-types target-legalize{mode=eager},canonicalize,dce,target-legalize{mode=final},canonicalize,dce,source-to-low,low-dce
+
+// The five-operation, 64-lane graph requires 80 four-lane packet operations.
+// Its final source-to-Low report guards the component budget and terminal
+// store handoff without checking in the much larger exact scalar memory
+// lowering already exercised by the execution corpus.
+func.def @wide_predicate_packets(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %true_base = index.constant 64 : offset
+  %false_base = index.constant 128 : offset
+  %mask_view = buffer.view %input[%base] : buffer -> view<64xi8>
+  %true_view = buffer.view %input[%true_base] : buffer -> view<64xi8>
+  %false_view = buffer.view %input[%false_base] : buffer -> view<64xi8>
+  %result_view = buffer.view %output[%base] : buffer -> view<64xi8>
+  %mask_bytes = vector.load %mask_view[0] : view<64xi8> -> vector<64xi8>
+  %true_bytes = vector.load %true_view[0] : view<64xi8> -> vector<64xi8>
+  %false_bytes = vector.load %false_view[0] : view<64xi8> -> vector<64xi8>
+  %c0 = vector.constant 0 : vector<64xi8>
+  %c1 = vector.constant 1 : vector<64xi8>
+  %mask = vector.cmpi ne, %mask_bytes, %c0 : vector<64xi8> -> vector<64xi1>
+  %true_value = vector.cmpi ne, %true_bytes, %c0 : vector<64xi8> -> vector<64xi1>
+  %false_value = vector.cmpi ne, %false_bytes, %c0 : vector<64xi8> -> vector<64xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<64xi1>
+  %bytes = vector.select %selected, %c1, %c0 : vector<64xi8>
+  vector.store %bytes, %result_view[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+// ----
+CHECK-COUNT-48: COMPILE-REPORT: source_low[*] function=wide_predicate_packets source_op=vector.cmpi selection=rule descriptor_key=spirv.op_i_not_equal.v4i8 descriptor_semantic_tag=spirv.op_i_not_equal.v4i8 *
+CHECK-COUNT-16: COMPILE-REPORT: source_low[*] function=wide_predicate_packets source_op=vector.select selection=rule descriptor_key=spirv.op_select.v4bool descriptor_semantic_tag=spirv.op_select.v4bool *
+CHECK-COUNT-16: COMPILE-REPORT: source_low[*] function=wide_predicate_packets source_op=vector.select selection=rule descriptor_key=spirv.op_select.v4i8 descriptor_semantic_tag=spirv.op_select.v4i8 *
+CHECK-NOT: COMPILE-REPORT: source_low[*] function=wide_predicate_packets * descriptor_key=spirv.op_i_not_equal.i8 *
+CHECK-NOT: COMPILE-REPORT: source_low[*] function=wide_predicate_packets * descriptor_key=spirv.op_select.bool *
+CHECK-NOT: COMPILE-REPORT: source_low[*] function=wide_predicate_packets * descriptor_key=spirv.op_select.i8 *

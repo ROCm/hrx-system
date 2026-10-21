@@ -52,6 +52,7 @@ static iree_status_t loom_vector_packet_legalize_partition_insert(
   uint32_t scalar_run_count = 0;
   uint32_t lane_offset = 0;
   bool previous_component_was_scalar = false;
+  bool inserts_into_vector_component = false;
   for (uint32_t i = 0; i < partition.count; ++i) {
     const loom_value_fact_vector_partition_component_t component =
         partition.components[i];
@@ -78,6 +79,10 @@ static iree_status_t loom_vector_packet_legalize_partition_insert(
         return iree_ok_status();
       }
       ++aggregate_count;
+      inserts_into_vector_component |=
+          has_dynamic_index ||
+          (has_static_index && static_index >= lane_offset &&
+           static_index - lane_offset < component.lane_count);
     }
     if (has_dynamic_index) {
       const uint8_t component_operation_count =
@@ -202,6 +207,10 @@ static iree_status_t loom_vector_packet_legalize_partition_insert(
           .components = replacement_components,
           .count = partition.count,
           .lane_count = partition.lane_count,
+          .flags = partition.flags |
+                   (inserts_into_vector_component
+                        ? LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_COMPUTED_PACKETS
+                        : LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_NONE),
       },
       /*inout_changed=*/NULL));
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(

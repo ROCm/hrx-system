@@ -144,9 +144,13 @@ static const loom_target_vector_packet_policy_t kSpirvVectorPacketPolicy = {
     .flags = LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_WINDOW_REPLAY |
              LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS |
              LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_SNAPSHOT_SELECTION |
-             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_BOUNDARY_PROJECTION,
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_BOUNDARY_PROJECTION |
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_STORE_COMPUTED_PACKETS_ONLY |
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_NO_PRIVATE_STAGING |
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_REPLAY_REQUIRES_CONTRACT,
     .structural_lane_limits = kSpirvVectorPacketStructuralLaneLimits,
     .maximum_unpacketized_bit_count = 256u,
+    .maximum_component_expansion_op_count = 128u,
     .native_bit_count_count = IREE_ARRAYSIZE(kSpirvVectorPacketBitCounts),
     .native_lane_count_count = IREE_ARRAYSIZE(kSpirvVectorPacketLaneCounts),
     .structural_lane_limit_count =

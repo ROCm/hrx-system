@@ -264,20 +264,21 @@ static iree_status_t loom_spirv_legalize_vector_store(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set) ||
-      context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
-    return iree_ok_status();
-  }
-
-  const loom_type_t value_type =
-      loom_module_value_type(context->module, loom_vector_store_value(op));
-  if (!loom_spirv_type_has_ordinary_vector_carrier(value_type)) {
+  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
     return iree_ok_status();
   }
 
   bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_store_captured_to_scalar_rewrite_op(
-      context->pass, context->rewriter, op, &rewritten));
+  IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_store(
+      context, op, context->vector_packet_policy, &rewritten));
+  if (!rewritten && context->mode == LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
+    const loom_type_t value_type =
+        loom_module_value_type(context->module, loom_vector_store_value(op));
+    if (loom_spirv_type_has_ordinary_vector_carrier(value_type)) {
+      IREE_RETURN_IF_ERROR(loom_vector_store_captured_to_scalar_rewrite_op(
+          context->pass, context->rewriter, op, &rewritten));
+    }
+  }
   if (rewritten) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   }

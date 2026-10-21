@@ -102,6 +102,17 @@ typedef enum loom_target_vector_packet_policy_flag_bits_e {
   // Selects fact-bounded dynamic windows directly from retained SSA packet
   // snapshots instead of reifying those snapshots in private memory.
   LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_SNAPSHOT_SELECTION = 1u << 3,
+  // Restricts store packetization to producer graphs or exact partitions that
+  // preserve vector computation. Scalar-memory targets use this to terminate
+  // packetized computation without regrouping pure load and copy graphs.
+  LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_STORE_COMPUTED_PACKETS_ONLY = 1u << 4,
+  // Keeps packet snapshots in SSA. Rewrites that require temporary private
+  // storage remain with their target fallback instead.
+  LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_NO_PRIVATE_STAGING = 1u << 5,
+  // Clones decomposable packet operations only when the projected operation
+  // has a native target contract. Targets with later packet legalization can
+  // leave this unset and consume the cloned operation there.
+  LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_REPLAY_REQUIRES_CONTRACT = 1u << 6,
 } loom_target_vector_packet_policy_flag_bits_t;
 typedef uint8_t loom_target_vector_packet_policy_flags_t;
 
@@ -122,6 +133,9 @@ typedef struct loom_target_vector_packet_policy_t {
   // Largest payload in bits that remains owned by ordinary structural
   // lowering instead of packet legalization.
   uint16_t maximum_unpacketized_bit_count;
+  // Maximum number of packet operations materialized for one static
+  // decomposable component. Zero uses the shared conservative limit.
+  uint16_t maximum_component_expansion_op_count;
   // Number of entries in |native_bit_counts|.
   uint8_t native_bit_count_count;
   // Number of entries in |native_lane_counts|, at most

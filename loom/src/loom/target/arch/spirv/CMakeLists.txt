@@ -620,6 +620,7 @@ loom_check_test_suite(
     "test/source_low/packed_memory_alignment.loom-test"
     "test/source_low/predicate_truncation.loom-test"
     "test/source_low/predicate_truncation_diagnostics.loom-test"
+    "test/source_low/predicate_vector_packets.loom-test"
     "test/source_low/scalar_float_conversion.loom-test"
     "test/source_low/semantic_assertions.loom-test"
     "test/source_low/source_low.loom-test"

@@ -54,12 +54,12 @@ func.def target(@target) @insert_dynamic(%input: buffer, %output: buffer, %value
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<5xi64>
   %destination = buffer.view %output[%base] : buffer -> view<5xi64>
-  %26 = view.load %source[0] : view<5xi64> -> i64
-  %27 = view.load %source[1] : view<5xi64> -> i64
-  %28 = view.load %source[2] : view<5xi64> -> i64
-  %29 = view.load %source[3] : view<5xi64> -> i64
-  %30 = view.load %source[4] : view<5xi64> -> i64
-  %values = vector.from_elements %26, %27, %28, %29, %30 : vector<5xi64>
+  %27 = view.load %source[0] : view<5xi64> -> i64
+  %28 = view.load %source[1] : view<5xi64> -> i64
+  %29 = view.load %source[2] : view<5xi64> -> i64
+  %30 = view.load %source[3] : view<5xi64> -> i64
+  %31 = view.load %source[4] : view<5xi64> -> i64
+  %values = vector.from_elements %27, %28, %29, %30, %31 : vector<5xi64>
   %9 = index.constant 0 : index
   %10 = index.constant 4 : index
   %11 = index.cmp ult, %position, %10 : index
@@ -69,10 +69,11 @@ func.def target(@target) @insert_dynamic(%input: buffer, %output: buffer, %value
   %18 = vector.insert %value into %16[%17] : i64, vector<4xi64>
   %19 = scf.select %11, %18, %16 : vector<4xi64>
   %20 = vector.slice %values[4] : vector<5xi64> -> vector<1xi64>
-  %34 = vector.insert %value into %20[0] : i64, vector<1xi64>
-  %24 = scf.select %14, %34, %20 : vector<1xi64>
-  %result = vector.concat<0> %19, %24 : vector<4xi64>, vector<1xi64> -> vector<5xi64>
-  vector.store %result, %destination[0] : vector<5xi64>, view<5xi64>
+  %35 = vector.insert %value into %20[0] : i64, vector<1xi64>
+  %24 = scf.select %14, %35, %20 : vector<1xi64>
+  vector.store %19, %destination[0] : vector<4xi64>, view<5xi64>
+  %26 = vector.extract %24[0] : vector<1xi64> -> i64
+  view.store %26, %destination[4] : i64, view<5xi64>
   func.return
 }
 
@@ -168,53 +169,46 @@ func.def target(@target) @insert_dynamic(%input: buffer, %output: buffer, %value
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @insert_dynamic(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %value: reg<spirv.id : i64>, %position: reg<spirv.id : index>) where [range(%position, 0, 4)] asm {
-  %56 = OpConstant.offset64 0
+  %47 = OpConstant.offset64 0
+  %48 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %47
+  %49 = OpLoad.storage_buffer.i64 %48
+  %50 = OpConstant.offset64 8
+  %51 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %50
+  %52 = OpLoad.storage_buffer.i64 %51
+  %53 = OpConstant.offset64 16
+  %54 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %53
+  %55 = OpLoad.storage_buffer.i64 %54
+  %56 = OpConstant.offset64 24
   %57 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %56
   %58 = OpLoad.storage_buffer.i64 %57
-  %59 = OpConstant.offset64 8
+  %59 = OpConstant.offset64 32
   %60 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %59
   %61 = OpLoad.storage_buffer.i64 %60
-  %62 = OpConstant.offset64 16
-  %63 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %62
-  %64 = OpLoad.storage_buffer.i64 %63
-  %65 = OpConstant.offset64 24
-  %66 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %65
-  %67 = OpLoad.storage_buffer.i64 %66
-  %68 = OpConstant.offset64 32
-  %69 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %68
-  %70 = OpLoad.storage_buffer.i64 %69
-  %71 = OpConstant.i32 0 : reg<spirv.id : index>
-  %72 = OpConstant.i32 4 : reg<spirv.id : index>
-  %73 = OpBitcast.i32.u32 %position
-  %74 = OpBitcast.i32.u32 %72
-  %75 = OpULessThan.u32 %73, %74
-  %78 = OpUGreaterThanEqual.u32 %73, %74
-  %79 = OpSelect %75, %position, %71 : reg<spirv.id : index>
-  %80 = OpIEqual %71, %79
-  %81 = OpSelect.i64 %80, %value, %58
-  %82 = OpSelect.i64 %75, %81, %58
-  %83 = OpConstant.i32 1 : reg<spirv.id : index>
-  %84 = OpIEqual %83, %79
-  %85 = OpSelect.i64 %84, %value, %61
-  %86 = OpSelect.i64 %75, %85, %61
-  %87 = OpConstant.i32 2 : reg<spirv.id : index>
-  %88 = OpIEqual %87, %79
-  %89 = OpSelect.i64 %88, %value, %64
-  %90 = OpSelect.i64 %75, %89, %64
-  %91 = OpConstant.i32 3 : reg<spirv.id : index>
-  %92 = OpIEqual %91, %79
-  %93 = OpSelect.i64 %92, %value, %67
-  %94 = OpSelect.i64 %75, %93, %67
-  %95 = OpSelect.i64 %78, %value, %70
-  %97 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %56
-  OpStore.storage_buffer.i64 %97, %82
-  %99 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %59
-  OpStore.storage_buffer.i64 %99, %86
-  %101 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %62
-  OpStore.storage_buffer.i64 %101, %90
-  %103 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %65
-  OpStore.storage_buffer.i64 %103, %94
-  %105 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %68
-  OpStore.storage_buffer.i64 %105, %95
+  %62 = OpConstant.i32 0 : reg<spirv.id : index>
+  %63 = OpConstant.i32 4 : reg<spirv.id : index>
+  %64 = OpBitcast.i32.u32 %position
+  %65 = OpBitcast.i32.u32 %63
+  %66 = OpULessThan.u32 %64, %65
+  %69 = OpUGreaterThanEqual.u32 %64, %65
+  %70 = OpCompositeConstruct.v4i64 %49, %52, %55, %58
+  %71 = OpSelect %66, %position, %62 : reg<spirv.id : index>
+  %72 = OpVectorInsertDynamic.i64.v4i64 %70, %value, %71
+  %73 = OpCompositeConstruct.v4bool %66, %66, %66, %66
+  %74 = OpSelect.v4i64 %73, %72, %70
+  %75 = OpSelect.i64 %69, %value, %61
+  %76 = OpCompositeExtract.v4i64.i64 %74, 0
+  %77 = OpCompositeExtract.v4i64.i64 %74, 1
+  %78 = OpCompositeExtract.v4i64.i64 %74, 2
+  %79 = OpCompositeExtract.v4i64.i64 %74, 3
+  %81 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %47
+  OpStore.storage_buffer.i64 %81, %76
+  %83 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %50
+  OpStore.storage_buffer.i64 %83, %77
+  %85 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %53
+  OpStore.storage_buffer.i64 %85, %78
+  %87 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %56
+  OpStore.storage_buffer.i64 %87, %79
+  %89 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %59
+  OpStore.storage_buffer.i64 %89, %75
   return
 }

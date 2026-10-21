@@ -123,6 +123,8 @@ typedef struct loom_vector_packetization_t {
   uint32_t value_count;
   // Number of allocated value entries.
   uint32_t value_capacity;
+  // Whether selection retained a decomposable producer operation.
+  bool contains_vector_computation;
 } loom_vector_packetization_t;
 
 int32_t loom_vector_packet_element_bit_count(

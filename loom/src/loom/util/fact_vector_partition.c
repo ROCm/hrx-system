@@ -313,6 +313,7 @@ iree_status_t loom_value_fact_table_define_vector_partition(
       previous.regular_lane_count == partition.regular_lane_count &&
       previous.snapshot_count == partition.snapshot_count &&
       previous.snapshot_lane_count == partition.snapshot_lane_count &&
+      previous.flags == partition.flags &&
       loom_value_fact_vector_partition_components_equal(
           previous.components, partition.components, partition.count) &&
       loom_value_fact_vector_partition_components_equal(
@@ -353,6 +354,7 @@ iree_status_t loom_value_fact_table_define_vector_partition(
       .regular_lane_count = partition.regular_lane_count,
       .snapshot_count = partition.snapshot_count,
       .snapshot_lane_count = partition.snapshot_lane_count,
+      .flags = partition.flags,
   };
   storage->available_views =
       (partition.count ? LOOM_VECTOR_PARTITION_EXACT : 0) |

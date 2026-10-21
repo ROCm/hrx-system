@@ -36,6 +36,14 @@ typedef struct loom_value_fact_vector_partition_component_t {
   uint32_t lane_count;
 } loom_value_fact_vector_partition_component_t;
 
+typedef enum loom_value_fact_vector_partition_flag_bits_e {
+  LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_NONE = 0u,
+  // Consuming the exact vector components preserves packetized computation
+  // instead of only regrouping structural or memory values.
+  LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_COMPUTED_PACKETS = 1u << 0,
+} loom_value_fact_vector_partition_flag_bits_t;
+typedef uint8_t loom_value_fact_vector_partition_flags_t;
+
 // Exact component tuple and regular packet snapshot retained by the
 // fact table. The two views may use different component widths: reductions
 // consume exact leaves while packet materialization consumes the coarsest
@@ -58,6 +66,8 @@ typedef struct loom_value_fact_vector_partition_t {
   // Logical lane count of every snapshot component except an optionally
   // shorter last component. Zero means no regular snapshot is available.
   uint32_t snapshot_lane_count;
+  // Semantic properties established by the partition producer.
+  loom_value_fact_vector_partition_flags_t flags;
 } loom_value_fact_vector_partition_t;
 
 // Returns true when every exact component is a vector with the same lane

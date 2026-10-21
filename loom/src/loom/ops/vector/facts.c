@@ -26,6 +26,7 @@
 #include "loom/ops/encoding/hadamard.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/index/cast.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/compare.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/ops/vector/ops.h"
@@ -2631,6 +2632,8 @@ static iree_status_t loom_vector_concat_define_partition_fact(
   iree_host_size_t component_count = 0;
   bool expand_nested_partitions = true;
   bool direct_partition_is_regular = true;
+  loom_value_fact_vector_partition_flags_t partition_flags =
+      LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_NONE;
   uint32_t direct_regular_lane_count = 0;
   uint64_t partition_lane_count = 0;
   for (iree_host_size_t i = 0; i < inputs.count; ++i) {
@@ -2651,9 +2654,22 @@ static iree_status_t loom_vector_concat_define_partition_fact(
                 input_lane_count != direct_regular_lane_count)) {
       direct_partition_is_regular = false;
     }
+    const loom_value_fact_vector_partition_t input_partition =
+        loom_value_fact_table_query_vector_partition(context->table, input);
+    if (input_partition.lane_count == input_lane_count) {
+      partition_flags |= input_partition.flags;
+    }
+    const loom_value_t* input_value = loom_module_value(module, input);
+    if (!loom_value_is_block_arg(input_value)) {
+      const loom_op_t* input_op = loom_value_def_op(input_value);
+      if (input_op != NULL &&
+          iree_all_bits_set(loom_op_effective_traits(module, input_op),
+                            LOOM_TRAIT_DECOMPOSABLE)) {
+        partition_flags |=
+            LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_COMPUTED_PACKETS;
+      }
+    }
     if (expand_nested_partitions) {
-      const loom_value_fact_vector_partition_t input_partition =
-          loom_value_fact_table_query_vector_partition(context->table, input);
       const iree_host_size_t input_component_count =
           input_partition.count != 0 &&
                   input_partition.lane_count == input_lane_count
@@ -2775,6 +2791,7 @@ static iree_status_t loom_vector_concat_define_partition_fact(
           .regular_lane_count = regular_lane_count,
           .snapshot_count = snapshot_count,
           .snapshot_lane_count = snapshot_lane_count,
+          .flags = partition_flags,
       });
 }
 
@@ -4538,6 +4555,12 @@ iree_status_t loom_vector_bitcast_facts(loom_fact_context_t* context,
       return iree_ok_status();
     }
     return loom_vector_make_unknown_facts(result_facts);
+  }
+  if (source_element_type == result_element_type && context != NULL &&
+      context->table != NULL) {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_forward_vector_partition(
+        context->table, loom_vector_bitcast_input(op),
+        loom_vector_bitcast_result(op), context->result_facts_changed));
   }
 
   loom_value_facts_t uniform_element = {0};

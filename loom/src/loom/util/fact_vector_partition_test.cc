@@ -51,9 +51,12 @@ class FactVectorPartitionTest : public ::testing::Test {
 TEST_F(FactVectorPartitionTest, PartitionsOwnComponentsAndTrackScope) {
   loom_value_fact_vector_partition_component_t components[] = {
       {1, 16}, {2, 16}, {3, 8}};
+  auto regular_partition = MakeRegularPartition(components, 3, 40, 16);
+  regular_partition.flags =
+      LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_COMPUTED_PACKETS;
   bool changed = false;
   IREE_ASSERT_OK(loom_value_fact_table_define_vector_partition(
-      &table_, 7, MakeRegularPartition(components, 3, 40, 16), &changed));
+      &table_, 7, regular_partition, &changed));
   EXPECT_TRUE(changed);
   const auto first = loom_value_fact_table_query_vector_partition(&table_, 7);
   ASSERT_EQ(first.count, 3u);
@@ -63,6 +66,8 @@ TEST_F(FactVectorPartitionTest, PartitionsOwnComponentsAndTrackScope) {
   EXPECT_EQ(first.snapshot_components, first.components);
   EXPECT_EQ(first.snapshot_count, 3u);
   EXPECT_EQ(first.snapshot_lane_count, 16u);
+  EXPECT_EQ(first.flags,
+            LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_COMPUTED_PACKETS);
   EXPECT_EQ(first.components[0].value, 1u);
   EXPECT_EQ(first.components[2].value, 3u);
   EXPECT_EQ(first.components[2].lane_count, 8u);
@@ -70,7 +75,7 @@ TEST_F(FactVectorPartitionTest, PartitionsOwnComponentsAndTrackScope) {
   const auto bytes = arena_.used_allocation_size;
   changed = false;
   IREE_ASSERT_OK(loom_value_fact_table_define_vector_partition(
-      &table_, 7, MakeRegularPartition(components, 3, 40, 16), &changed));
+      &table_, 7, regular_partition, &changed));
   EXPECT_FALSE(changed);
   EXPECT_EQ(loom_value_fact_table_query_vector_partition(&table_, 7).components,
             first.components);

@@ -72,118 +72,128 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %count_input = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %54 = OpConstant.offset64 0
-  %55 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %54
-  %56 = OpLoad.storage_buffer.i64 %55
-  %57 = OpConstant.offset64 8
-  %58 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %57
-  %59 = OpLoad.storage_buffer.i64 %58
-  %60 = OpConstant.offset64 16
-  %61 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %60
-  %62 = OpLoad.storage_buffer.i64 %61
-  %63 = OpConstant.offset64 24
-  %64 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %63
-  %65 = OpLoad.storage_buffer.i64 %64
-  %66 = OpConstant.offset64 32
-  %67 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %66
-  %68 = OpLoad.storage_buffer.i64 %67
-  %69 = OpConstant.offset64 40
-  %70 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %69
-  %71 = OpLoad.storage_buffer.i64 %70
-  %72 = OpConstant.offset64 48
-  %73 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %72
-  %74 = OpLoad.storage_buffer.i64 %73
-  %76 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %54
-  %77 = OpLoad.storage_buffer.i64 %76
-  %79 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %57
-  %80 = OpLoad.storage_buffer.i64 %79
-  %82 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %60
+  %68 = OpConstant.offset64 0
+  %69 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %68
+  %70 = OpLoad.storage_buffer.i64 %69
+  %71 = OpConstant.offset64 8
+  %72 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %71
+  %73 = OpLoad.storage_buffer.i64 %72
+  %74 = OpConstant.offset64 16
+  %75 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %74
+  %76 = OpLoad.storage_buffer.i64 %75
+  %77 = OpConstant.offset64 24
+  %78 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %77
+  %79 = OpLoad.storage_buffer.i64 %78
+  %80 = OpCompositeConstruct.v4i64 %70, %73, %76, %79
+  %81 = OpConstant.offset64 32
+  %82 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %81
   %83 = OpLoad.storage_buffer.i64 %82
-  %85 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %63
+  %84 = OpConstant.offset64 40
+  %85 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %84
   %86 = OpLoad.storage_buffer.i64 %85
-  %88 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %66
+  %87 = OpConstant.offset64 48
+  %88 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %87
   %89 = OpLoad.storage_buffer.i64 %88
-  %91 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %69
-  %92 = OpLoad.storage_buffer.i64 %91
-  %94 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %72
-  %95 = OpLoad.storage_buffer.i64 %94
-  %96 = OpShiftLeftLogical.i64 %56, %77
-  %97 = OpShiftLeftLogical.i64 %59, %80
-  %98 = OpShiftLeftLogical.i64 %62, %83
-  %99 = OpShiftLeftLogical.i64 %65, %86
-  %100 = OpShiftLeftLogical.i64 %68, %89
-  %101 = OpShiftLeftLogical.i64 %71, %92
-  %102 = OpShiftLeftLogical.i64 %74, %95
-  %104 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %54
-  OpStore.storage_buffer.i64 %104, %96
-  %106 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %57
-  OpStore.storage_buffer.i64 %106, %97
-  %108 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %60
-  OpStore.storage_buffer.i64 %108, %98
-  %110 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %63
-  OpStore.storage_buffer.i64 %110, %99
-  %112 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %66
-  OpStore.storage_buffer.i64 %112, %100
-  %114 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %69
-  OpStore.storage_buffer.i64 %114, %101
-  %116 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %72
-  OpStore.storage_buffer.i64 %116, %102
-  %117 = OpShiftRightLogical.i64 %56, %77
-  %118 = OpShiftRightLogical.i64 %59, %80
-  %119 = OpShiftRightLogical.i64 %62, %83
-  %120 = OpShiftRightLogical.i64 %65, %86
-  %121 = OpShiftRightLogical.i64 %68, %89
-  %122 = OpShiftRightLogical.i64 %71, %92
-  %123 = OpShiftRightLogical.i64 %74, %95
-  %124 = OpConstant.offset64 56
-  %125 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %124
-  OpStore.storage_buffer.i64 %125, %117
-  %126 = OpConstant.offset64 64
-  %127 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %126
-  OpStore.storage_buffer.i64 %127, %118
-  %128 = OpConstant.offset64 72
-  %129 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %128
-  OpStore.storage_buffer.i64 %129, %119
-  %130 = OpConstant.offset64 80
-  %131 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %130
-  OpStore.storage_buffer.i64 %131, %120
-  %132 = OpConstant.offset64 88
-  %133 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %132
-  OpStore.storage_buffer.i64 %133, %121
-  %134 = OpConstant.offset64 96
-  %135 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %134
-  OpStore.storage_buffer.i64 %135, %122
-  %136 = OpConstant.offset64 104
-  %137 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %136
-  OpStore.storage_buffer.i64 %137, %123
-  %138 = OpShiftRightArithmetic.i64 %56, %77
-  %139 = OpShiftRightArithmetic.i64 %59, %80
-  %140 = OpShiftRightArithmetic.i64 %62, %83
-  %141 = OpShiftRightArithmetic.i64 %65, %86
-  %142 = OpShiftRightArithmetic.i64 %68, %89
-  %143 = OpShiftRightArithmetic.i64 %71, %92
-  %144 = OpShiftRightArithmetic.i64 %74, %95
-  %145 = OpConstant.offset64 112
-  %146 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %145
-  OpStore.storage_buffer.i64 %146, %138
-  %147 = OpConstant.offset64 120
-  %148 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %147
-  OpStore.storage_buffer.i64 %148, %139
-  %149 = OpConstant.offset64 128
-  %150 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %149
-  OpStore.storage_buffer.i64 %150, %140
-  %151 = OpConstant.offset64 136
-  %152 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %151
-  OpStore.storage_buffer.i64 %152, %141
-  %153 = OpConstant.offset64 144
-  %154 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %153
-  OpStore.storage_buffer.i64 %154, %142
-  %155 = OpConstant.offset64 152
-  %156 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %155
-  OpStore.storage_buffer.i64 %156, %143
-  %157 = OpConstant.offset64 160
-  %158 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %157
-  OpStore.storage_buffer.i64 %158, %144
+  %90 = OpCompositeConstruct.v3i64 %83, %86, %89
+  %92 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %68
+  %93 = OpLoad.storage_buffer.i64 %92
+  %95 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %71
+  %96 = OpLoad.storage_buffer.i64 %95
+  %98 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %74
+  %99 = OpLoad.storage_buffer.i64 %98
+  %101 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %77
+  %102 = OpLoad.storage_buffer.i64 %101
+  %103 = OpCompositeConstruct.v4i64 %93, %96, %99, %102
+  %105 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %81
+  %106 = OpLoad.storage_buffer.i64 %105
+  %108 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %84
+  %109 = OpLoad.storage_buffer.i64 %108
+  %111 = OpPtrAccessChain.storage_buffer.i64.byte_offset %count_input, %87
+  %112 = OpLoad.storage_buffer.i64 %111
+  %113 = OpCompositeConstruct.v3i64 %106, %109, %112
+  %114 = OpShiftLeftLogical.v4i64 %80, %103
+  %115 = OpCompositeExtract.v4i64.i64 %114, 0
+  %116 = OpCompositeExtract.v4i64.i64 %114, 1
+  %117 = OpCompositeExtract.v4i64.i64 %114, 2
+  %118 = OpCompositeExtract.v4i64.i64 %114, 3
+  %120 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %68
+  OpStore.storage_buffer.i64 %120, %115
+  %122 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %71
+  OpStore.storage_buffer.i64 %122, %116
+  %124 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %74
+  OpStore.storage_buffer.i64 %124, %117
+  %126 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %77
+  OpStore.storage_buffer.i64 %126, %118
+  %127 = OpShiftLeftLogical.v3i64 %90, %113
+  %128 = OpCompositeExtract.v3i64.i64 %127, 0
+  %129 = OpCompositeExtract.v3i64.i64 %127, 1
+  %130 = OpCompositeExtract.v3i64.i64 %127, 2
+  %132 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %81
+  OpStore.storage_buffer.i64 %132, %128
+  %134 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %84
+  OpStore.storage_buffer.i64 %134, %129
+  %136 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %87
+  OpStore.storage_buffer.i64 %136, %130
+  %137 = OpShiftRightLogical.v4i64 %80, %103
+  %138 = OpCompositeExtract.v4i64.i64 %137, 0
+  %139 = OpCompositeExtract.v4i64.i64 %137, 1
+  %140 = OpCompositeExtract.v4i64.i64 %137, 2
+  %141 = OpCompositeExtract.v4i64.i64 %137, 3
+  %142 = OpConstant.offset64 56
+  %143 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %142
+  OpStore.storage_buffer.i64 %143, %138
+  %144 = OpConstant.offset64 64
+  %145 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %144
+  OpStore.storage_buffer.i64 %145, %139
+  %146 = OpConstant.offset64 72
+  %147 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %146
+  OpStore.storage_buffer.i64 %147, %140
+  %148 = OpConstant.offset64 80
+  %149 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %148
+  OpStore.storage_buffer.i64 %149, %141
+  %150 = OpShiftRightLogical.v3i64 %90, %113
+  %151 = OpCompositeExtract.v3i64.i64 %150, 0
+  %152 = OpCompositeExtract.v3i64.i64 %150, 1
+  %153 = OpCompositeExtract.v3i64.i64 %150, 2
+  %154 = OpConstant.offset64 88
+  %155 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %154
+  OpStore.storage_buffer.i64 %155, %151
+  %156 = OpConstant.offset64 96
+  %157 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %156
+  OpStore.storage_buffer.i64 %157, %152
+  %158 = OpConstant.offset64 104
+  %159 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %158
+  OpStore.storage_buffer.i64 %159, %153
+  %160 = OpShiftRightArithmetic.v4i64 %80, %103
+  %161 = OpCompositeExtract.v4i64.i64 %160, 0
+  %162 = OpCompositeExtract.v4i64.i64 %160, 1
+  %163 = OpCompositeExtract.v4i64.i64 %160, 2
+  %164 = OpCompositeExtract.v4i64.i64 %160, 3
+  %165 = OpConstant.offset64 112
+  %166 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %165
+  OpStore.storage_buffer.i64 %166, %161
+  %167 = OpConstant.offset64 120
+  %168 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %167
+  OpStore.storage_buffer.i64 %168, %162
+  %169 = OpConstant.offset64 128
+  %170 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %169
+  OpStore.storage_buffer.i64 %170, %163
+  %171 = OpConstant.offset64 136
+  %172 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %171
+  OpStore.storage_buffer.i64 %172, %164
+  %173 = OpShiftRightArithmetic.v3i64 %90, %113
+  %174 = OpCompositeExtract.v3i64.i64 %173, 0
+  %175 = OpCompositeExtract.v3i64.i64 %173, 1
+  %176 = OpCompositeExtract.v3i64.i64 %173, 2
+  %177 = OpConstant.offset64 144
+  %178 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %177
+  OpStore.storage_buffer.i64 %178, %174
+  %179 = OpConstant.offset64 152
+  %180 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %179
+  OpStore.storage_buffer.i64 %180, %175
+  %181 = OpConstant.offset64 160
+  %182 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %181
+  OpStore.storage_buffer.i64 %182, %176
   return
 }
 
