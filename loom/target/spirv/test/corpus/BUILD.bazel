@@ -159,7 +159,6 @@ _SCENARIO_EXCLUDES = {
 
 _ALL_PROFILE_XFAILS = {
     # These static profiles do not promise exact floating comparison controls.
-    "control/branch/uniform_predicate.loom:@uniform_boolean_selection": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_2": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_3": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_then_depth_2": "TARGET/003",
@@ -286,7 +285,6 @@ _ALL_PROFILE_XFAILS = {
     "numeric/integer/wide/address_comparison.loom:@mixed_width_index_comparisons": "SPIRV/026",
     "numeric/predicate/extract.loom:@predicate_extract": "TARGET/003",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma": "TARGET/001",
-    "numeric/vector/integer_widening.loom:@partial_widening": "TARGET/003",
 }
 
 _EXTENDED_TYPES_XFAILS = {
@@ -598,6 +596,13 @@ _SPIRV_EXECUTION_ALLOWED_FAILURES = {
     "memory/storage/word.loom:@copy_word_volatile_bits": "TARGET/003",
     "numeric/conversion/integer_floating.loom:@wide_floating_integer_values": "TARGET/003",
     "numeric/conversion/narrow_arithmetic.loom:@arithmetic_bf16_values": "EXPECT/003",
+    # Unannotated floating operations use the device's native denormal and
+    # exceptional-value environment. These directed boundary scenarios may
+    # therefore differ from the reference while their ordinary-value scenarios
+    # remain strict.
+    "numeric/float/comparison.loom:@scalar_float_comparison_sources": "EXPECT/002",
+    "numeric/float/inverse_hyperbolic.loom:@inverse_f32_boundaries": "EXPECT/003",
+    "numeric/float/inverse_hyperbolic_narrow.loom:@inverse_bf16_values": "TARGET/003,EXPECT/003",
     "numeric/float/narrow_reduction.loom:@narrow_reduction_normal_values": "TARGET/003",
     "numeric/float/narrow_reduction.loom:@narrow_reduction_subnormal_values": "TARGET/003,EXPECT/002",
     "numeric/float/reciprocal.loom:@double_reciprocal_scalar_values": "EXPECT/002",
@@ -608,7 +613,9 @@ _SPIRV_EXECUTION_ALLOWED_FAILURES = {
     "numeric/float/scalar_float64.loom:@scalar_float64_special_values": "EXPECT/002",
     "numeric/vector/conversion.loom:@wide_bfloat_values": "TARGET/003",
     "numeric/vector/f32.loom:@vector_bf16_origin_scale_values": "TARGET/003,EXPECT/002",
-    "numeric/vector/float_comparison.loom:@vector_float_comparison_bf16_values": "TARGET/003",
+    "numeric/vector/float_comparison.loom:@vector_float_comparison_bf16_values": "TARGET/003,EXPECT/002",
+    "numeric/vector/float_comparison.loom:@vector_float_comparison_constant_sources": "EXPECT/002",
+    "numeric/vector/float_comparison.loom:@vector_float_comparison_f32_values": "EXPECT/002",
     "numeric/vector/packed/selection.loom:@packed_word_selects": "TARGET/003",
 }
 

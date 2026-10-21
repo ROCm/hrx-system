@@ -184,7 +184,7 @@ typedef enum loom_scalar_cmpi_predicate_e {
   LOOM_SCALAR_CMPI_PREDICATE_COUNT_ = 10,
 } loom_scalar_cmpi_predicate_t;
 
-// IEEE 754 ordered and unordered floating-point predicates.
+// IEEE 754 ordered and unordered floating-point predicates evaluated in the target's native floating-point environment.
 typedef enum loom_scalar_cmpf_predicate_e {
   LOOM_SCALAR_CMPF_PREDICATE_OEQ = 0,
   LOOM_SCALAR_CMPF_PREDICATE_OGT = 1,
@@ -1472,7 +1472,7 @@ iree_status_t loom_scalar_cmpi_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_CMPF: Floating-point comparison.
+// LOOM_OP_SCALAR_CMPF: Floating-point comparison in the target's native floating-point environment. Optional fast-math flags grant additional source permissions.
 // %result = scalar.cmpf olt, %lhs, %rhs : f32
 LOOM_DEFINE_ISA(loom_scalar_cmpf_isa, LOOM_OP_SCALAR_CMPF)
 LOOM_DEFINE_OPERAND(loom_scalar_cmpf_lhs, 0)

@@ -47,6 +47,7 @@ from loom.target.arch.spirv.ordinary_vector_conversion import (
 from loom.target.arch.spirv.ordinary_vector_float import (
     ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
+    ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
@@ -63,6 +64,7 @@ from loom.target.arch.spirv.scalar_alu import (
     INTEGER_BITWISE_BINARY_OPERATIONS,
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
     OFFSET64_COMPARE_PREDICATES,
+    ORDERED_CLAMP_COMPARE_PREDICATES,
     SCALAR_ALU_TYPES,
     SIGNED_INTEGER_BINARY_OPERATIONS,
     SIGNED_INTEGER_COMPARE_PREDICATES,
@@ -435,6 +437,7 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
         *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
+        *ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
         *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
         *INTEGER_BIT_COUNT_INSTRUCTIONS,
         *ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
@@ -505,24 +508,31 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
 
     compare_rows = (
         *(
-            (predicate, scalar)
+            (predicate, scalar, None)
             for scalar in SIGNED_INTEGER_SCALAR_ALU_TYPES
             for predicate in SIGNED_INTEGER_COMPARE_PREDICATES
         ),
         *(
-            (predicate, scalar)
+            (predicate, scalar, None)
             for scalar in UNSIGNED_INTEGER_SCALAR_ALU_TYPES
             for predicate in UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES
         ),
         *(
-            (predicate, compare_type.scalar)
-            for compare_type in FLOAT_COMPARE_TYPES
+            (predicate, scalar, None)
+            for scalar in FLOAT_COMPARE_TYPES
             for predicate in FLOAT_COMPARE_PREDICATES
         ),
+        *(
+            (predicate, scalar, "preserve")
+            for scalar in FLOAT_COMPARE_TYPES
+            for predicate in ORDERED_CLAMP_COMPARE_PREDICATES
+        ),
     )
-    for predicate, scalar in compare_rows:
+    for predicate, scalar, variant in compare_rows:
+        variant_suffix = f".{variant}" if variant else ""
         add_scalar_recipe(
-            f"spirv.op_{predicate.descriptor_suffix}.{scalar.suffix}", "i1"
+            f"spirv.op_{predicate.descriptor_suffix}{variant_suffix}.{scalar.suffix}",
+            "i1",
         )
     for predicate in OFFSET64_COMPARE_PREDICATES:
         add_scalar_recipe(f"spirv.op_{predicate.descriptor_suffix}.offset64", "i1")

@@ -17,6 +17,8 @@ from loom.target.arch.spirv.scalar_alu import (
     FLOAT_COMPARE_PREDICATES,
     FLOAT_COMPARE_TYPES,
     FLOAT_SCALAR_ALU_TYPES,
+    ORDERED_CLAMP_COMPARE_PREDICATES,
+    float_preservation_feature_atoms,
 )
 
 _FLOAT_SUFFIXES = frozenset(scalar.suffix for scalar in FLOAT_SCALAR_ALU_TYPES)
@@ -62,10 +64,29 @@ ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS = tuple(
         ),
         operand_names=("lhs", "rhs"),
         operand_types=(value_type, value_type),
-        feature_atoms=compare_type.control_feature_atoms,
     )
-    for compare_type in FLOAT_COMPARE_TYPES
+    for scalar in FLOAT_COMPARE_TYPES
     for value_type in ORDINARY_VECTOR_TYPES
-    if value_type.component_type.suffix == compare_type.scalar.suffix
+    if value_type.component_type.suffix == scalar.suffix
     for predicate in FLOAT_COMPARE_PREDICATES
+)
+
+ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS = tuple(
+    OrdinaryVectorInstruction(
+        key=(f"spirv.op_{predicate.descriptor_suffix}.preserve.{value_type.suffix}"),
+        mnemonic=f"{predicate.mnemonic}.preserve.{value_type.suffix}",
+        opcode=predicate.opcode,
+        packet_form="LOOM_SPIRV_PACKET_FORM_COMPARE_SAME_TYPE",
+        result_type=OrdinaryVectorType(
+            BOOLEAN_ORDINARY_VECTOR_COMPONENT_TYPE,
+            value_type.lane_count,
+        ),
+        operand_names=("lhs", "rhs"),
+        operand_types=(value_type, value_type),
+        feature_atoms=float_preservation_feature_atoms(scalar),
+    )
+    for scalar in FLOAT_COMPARE_TYPES
+    for value_type in ORDINARY_VECTOR_TYPES
+    if value_type.component_type.suffix == scalar.suffix
+    for predicate in ORDERED_CLAMP_COMPARE_PREDICATES
 )

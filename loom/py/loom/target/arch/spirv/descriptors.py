@@ -76,6 +76,7 @@ from loom.target.arch.spirv.ordinary_vector_conversion import (
 from loom.target.arch.spirv.ordinary_vector_float import (
     ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
+    ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
@@ -93,6 +94,7 @@ from loom.target.arch.spirv.scalar_alu import (
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
     OFFSET64_ALU_TYPE,
     OFFSET64_COMPARE_PREDICATES,
+    ORDERED_CLAMP_COMPARE_PREDICATES,
     SCALAR_SELECT_TYPES,
     SIGNED_INTEGER_BINARY_OPERATIONS,
     SIGNED_INTEGER_COMPARE_PREDICATES,
@@ -105,6 +107,7 @@ from loom.target.arch.spirv.scalar_alu import (
     IntegerAluTypePair,
     ScalarAluType,
     ScalarBinaryOperation,
+    float_preservation_feature_bits,
 )
 from loom.target.arch.spirv.scalar_constant import (
     BFLOAT16_CONSTANT_TYPE,
@@ -380,12 +383,16 @@ def _compare_descriptor(
     scalar: ScalarAluType,
     feature_bits: int,
     operands: tuple[Operand, Operand, Operand],
+    variant: str | None = None,
 ) -> Descriptor:
     suffix = scalar.suffix
-    key = f"spirv.op_{predicate.descriptor_suffix}.{suffix}"
-    mnemonic = (
-        predicate.mnemonic if suffix == "i32" else f"{predicate.mnemonic}.{suffix}"
-    )
+    descriptor_suffix = predicate.descriptor_suffix
+    mnemonic = predicate.mnemonic
+    if variant:
+        descriptor_suffix = f"{descriptor_suffix}.{variant}"
+        mnemonic = f"{mnemonic}.{variant}"
+    key = f"spirv.op_{descriptor_suffix}.{suffix}"
+    mnemonic = mnemonic if suffix == "i32" else f"{mnemonic}.{suffix}"
     return Descriptor(
         key=key,
         mnemonic=mnemonic,
@@ -1696,18 +1703,33 @@ def _compare_descriptors() -> tuple[Descriptor, ...]:
         ]
     )
     descriptors.extend(
+        _compare_descriptor(
+            predicate,
+            scalar=scalar,
+            feature_bits=float_preservation_feature_bits(scalar),
+            operands=(
+                _id_result(),
+                _id_operand("lhs"),
+                _id_operand("rhs"),
+            ),
+            variant="preserve",
+        )
+        for scalar in FLOAT_COMPARE_TYPES
+        for predicate in ORDERED_CLAMP_COMPARE_PREDICATES
+    )
+    descriptors.extend(
         [
             _compare_descriptor(
                 predicate,
-                scalar=compare_type.scalar,
-                feature_bits=compare_type.feature_bits,
+                scalar=scalar,
+                feature_bits=scalar.feature_bits,
                 operands=(
                     _id_result(),
                     _id_operand("lhs"),
                     _id_operand("rhs"),
                 ),
             )
-            for compare_type in FLOAT_COMPARE_TYPES
+            for scalar in FLOAT_COMPARE_TYPES
             for predicate in FLOAT_COMPARE_PREDICATES
         ]
     )
@@ -1954,6 +1976,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
                 *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
                 *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
                 *ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
+                *ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
             )
         ),
         *(

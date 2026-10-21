@@ -62,6 +62,7 @@ from loom.target.arch.spirv.ordinary_vector_conversion import (
 from loom.target.arch.spirv.ordinary_vector_float import (
     ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
+    ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
@@ -75,8 +76,10 @@ from loom.target.arch.spirv.scalar_alu import (
     FLOAT_COMPARE_TYPES,
     INTEGER_BITWISE_BINARY_OPERATIONS,
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
+    ORDERED_CLAMP_COMPARE_PREDICATES,
     SIGNED_INTEGER_COMPARE_PREDICATES,
     UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES,
+    float_preservation_feature_bits,
 )
 from loom.target.arch.spirv.scalar_constant import FLOAT_CONSTANT_TYPES
 from loom.target.arch.spirv.scalar_memory import (
@@ -578,9 +581,8 @@ def test_generation_emits_complete_integer_boolean_packet_matrix() -> None:
             select_descriptor = _descriptor(select_descriptor_key)
             assert select_descriptor.feature_mask_words == expected_feature_mask
 
-    for compare_type in FLOAT_COMPARE_TYPES:
-        scalar = compare_type.scalar
-        expected_feature_mask = (compare_type.feature_bits,)
+    for scalar in FLOAT_COMPARE_TYPES:
+        expected_feature_mask = (scalar.feature_bits,) if scalar.feature_bits else ()
         for predicate in FLOAT_COMPARE_PREDICATES:
             descriptor_key = f"spirv.op_{predicate.descriptor_suffix}.{scalar.suffix}"
             compare_row = _packet_row(descriptor_key)
@@ -588,6 +590,15 @@ def test_generation_emits_complete_integer_boolean_packet_matrix() -> None:
             assert sum(scalar.scalar_enum in value_type for value_type in _packet_value_types(compare_row)) == 2
             descriptor = _descriptor(descriptor_key)
             assert descriptor.feature_mask_words == expected_feature_mask
+
+        preserving_feature_mask = (float_preservation_feature_bits(scalar),)
+        for predicate in ORDERED_CLAMP_COMPARE_PREDICATES:
+            descriptor_key = f"spirv.op_{predicate.descriptor_suffix}.preserve.{scalar.suffix}"
+            compare_row = _packet_row(descriptor_key)
+            assert compare_row.opcode == predicate.opcode
+            assert sum(scalar.scalar_enum in value_type for value_type in _packet_value_types(compare_row)) == 2
+            descriptor = _descriptor(descriptor_key)
+            assert descriptor.feature_mask_words == preserving_feature_mask
 
     bool_select_row = _packet_row("spirv.op_select.bool")
     assert sum("LOOM_SPIRV_VALUE_CLASS_BOOL" in value_type for value_type in _packet_value_types(bool_select_row)) == 4
@@ -832,6 +843,9 @@ def test_floating_packets_preserve_operation_rounding() -> None:
 def test_generation_emits_complete_ordinary_vector_float_comparisons() -> None:
     assert len(ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS) == 126
     _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS)
+
+    assert len(ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS) == 18
+    _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS)
 
 
 def test_vector_scale_rows_keep_the_scalar_operand_type() -> None:

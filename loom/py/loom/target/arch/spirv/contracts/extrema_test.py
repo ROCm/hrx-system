@@ -148,8 +148,8 @@ def test_ordered_clamp_retains_short_core_comparisons_with_required_controls() -
     for rule in rules:
         assert _mode(rule) == "ordered"
         assert len(rule.emit) == 4
-        assert "f_ord_less_than" in rule.emit[0].descriptor.key
-        assert "f_ord_greater_than" in rule.emit[2].descriptor.key
+        assert "f_ord_less_than.preserve" in rule.emit[0].descriptor.key
+        assert "f_ord_greater_than.preserve" in rule.emit[2].descriptor.key
         element = _pattern(rule).elements[0]
         required = feature_bits_value(
             (

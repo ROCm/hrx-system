@@ -199,7 +199,7 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 983547543582}
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2}
 
 func.def target(@target) @float_comparison(%lhs0: f32, %lhs1: f32, %rhs0: f32, %rhs1: f32, %count: index) -> (f32) {
   %begin = index.constant 0 : index

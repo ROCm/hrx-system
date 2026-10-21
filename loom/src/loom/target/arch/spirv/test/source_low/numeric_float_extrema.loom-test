@@ -92,3 +92,23 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @vector
   %minimum_lane = OpCompositeExtract.v2f32.f32 %minimum, 0
   return %minimum_lane
 }
+
+// ====
+
+// Ordered clamp can use native comparisons when the environment preserves the
+// f32 inputs that distinguish its source semantics.
+spirv.target<vulkan1_3> @target {contract_feature_bits = 279172874242}
+
+func.def target(@target) @preserving_ordered_clamp(%value: f32, %lower: f32, %upper: f32) -> (f32) {
+  %result = scalar.clampf<ordered> %value, %lower, %upper : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @preserving_ordered_clamp(%value: reg<spirv.id : f32>, %lower: reg<spirv.id : f32>, %upper: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+  %9 = OpFOrdLessThan.preserve.f32 %value, %lower : reg<spirv.id>
+  %10 = OpSelect.f32 %9, %lower, %value : reg<spirv.id>
+  %11 = OpFOrdGreaterThan.preserve.f32 %10, %upper : reg<spirv.id>
+  %result = OpSelect.f32 %11, %upper, %10
+  return %result
+}

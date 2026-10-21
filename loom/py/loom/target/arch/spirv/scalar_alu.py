@@ -69,16 +69,6 @@ class ComparePredicate:
     opcode: str
 
 
-@dataclass(frozen=True, slots=True)
-class FloatCompareType:
-    scalar: ScalarAluType
-    control_feature_atoms: tuple[str, ...]
-
-    @property
-    def feature_bits(self) -> int:
-        return self.scalar.feature_bits | feature_bits_value(self.control_feature_atoms)
-
-
 INTEGER_SCALAR_ALU_TYPE_PAIRS = (
     IntegerAluTypePair(
         source_type="i8",
@@ -171,33 +161,28 @@ FLOAT_SCALAR_ALU_TYPES = (
     ),
 )
 
-# SPIR-V otherwise permits implementations to flush subnormal operands and to
-# assume that NaNs, infinities, and signed zero are absent. A strict cmpf needs
-# both controls for the operand width so its ordered and unordered predicates
-# retain Loom's IEEE semantics.
-FLOAT_COMPARE_TYPES = (
-    FloatCompareType(
-        scalar=FLOAT_SCALAR_ALU_TYPES[0],
-        control_feature_atoms=(
-            "float16_64_denorm_preserve",
-            "float16_signed_zero_inf_nan_preserve",
+# Comparisons use the target's native floating-point environment. The ordinary
+# cmpf family therefore requires only the operand type's features.
+FLOAT_COMPARE_TYPES = FLOAT_SCALAR_ALU_TYPES
+
+
+def float_preservation_feature_atoms(scalar: ScalarAluType) -> tuple[str, str]:
+    bit_width = int(scalar.source_type.removeprefix("f"))
+    return (
+        (
+            "float32_denorm_preserve"
+            if bit_width == 32
+            else "float16_64_denorm_preserve"
         ),
-    ),
-    FloatCompareType(
-        scalar=FLOAT_SCALAR_ALU_TYPES[1],
-        control_feature_atoms=(
-            "float32_denorm_preserve",
-            "float32_signed_zero_inf_nan_preserve",
-        ),
-    ),
-    FloatCompareType(
-        scalar=FLOAT_SCALAR_ALU_TYPES[2],
-        control_feature_atoms=(
-            "float16_64_denorm_preserve",
-            "float64_signed_zero_inf_nan_preserve",
-        ),
-    ),
-)
+        f"float{bit_width}_signed_zero_inf_nan_preserve",
+    )
+
+
+def float_preservation_feature_bits(scalar: ScalarAluType) -> int:
+    return scalar.feature_bits | feature_bits_value(
+        float_preservation_feature_atoms(scalar)
+    )
+
 
 BFLOAT16_SCALAR_TYPE = ScalarAluType(
     source_type="bf16",
@@ -456,4 +441,10 @@ FLOAT_COMPARE_PREDICATES = (
         "LOOM_SPIRV_OP_F_UNORD_NOT_EQUAL",
     ),
     ComparePredicate("uno", "unordered", "OpUnordered", "LOOM_SPIRV_OP_UNORDERED"),
+)
+
+ORDERED_CLAMP_COMPARE_PREDICATES = tuple(
+    predicate
+    for predicate in FLOAT_COMPARE_PREDICATES
+    if predicate.source_predicate in ("olt", "ogt")
 )

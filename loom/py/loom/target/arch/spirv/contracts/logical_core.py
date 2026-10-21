@@ -1315,10 +1315,10 @@ def _compare_rules() -> tuple[DescriptorRule, ...]:
         _compare_rule(
             scalar_comparison.scalar_cmpf,
             predicate,
-            _numeric_type_pattern(compare_type.scalar),
-            f"spirv.op_{predicate.descriptor_suffix}.{compare_type.scalar.suffix}",
+            _numeric_type_pattern(scalar),
+            f"spirv.op_{predicate.descriptor_suffix}.{scalar.suffix}",
         )
-        for compare_type in FLOAT_COMPARE_TYPES
+        for scalar in FLOAT_COMPARE_TYPES
         for predicate in FLOAT_COMPARE_PREDICATES
     )
     return tuple(rules)

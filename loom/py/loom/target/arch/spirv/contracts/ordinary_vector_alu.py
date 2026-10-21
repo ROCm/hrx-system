@@ -455,11 +455,11 @@ def _float_compare_rules() -> tuple[DescriptorRule, ...]:
         _direct_compare_rule(
             vector.vector_cmpf,
             predicate,
-            compare_type.scalar.source_type,
-            _FLOAT_COMPONENT_BY_SUFFIX[compare_type.scalar.suffix],
+            scalar.source_type,
+            _FLOAT_COMPONENT_BY_SUFFIX[scalar.suffix],
             lane_count,
         )
-        for compare_type in FLOAT_COMPARE_TYPES
+        for scalar in FLOAT_COMPARE_TYPES
         for lane_count in _LANE_COUNTS
         for predicate in FLOAT_COMPARE_PREDICATES
     )

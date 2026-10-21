@@ -2605,7 +2605,9 @@ vector_cmpf = Op(
     "vector.cmpf",
     group=vector_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Lanewise floating-point comparison producing an i1 mask vector. The predicate attribute uses the scalar.cmpf ordered/unordered predicate names and applies independently to each lane."),
+    doc=(
+        "Lanewise floating-point comparison producing an i1 mask vector in the target's native floating-point environment. The predicate attribute uses the scalar.cmpf ordered/unordered predicate names and applies independently to each lane; optional fast-math flags grant additional source permissions."
+    ),
     operands=[
         Operand("lhs", VECTOR),
         Operand("rhs", VECTOR),

@@ -247,7 +247,7 @@ typedef enum loom_vector_cmpi_predicate_e {
   LOOM_VECTOR_CMPI_PREDICATE_COUNT_ = 10,
 } loom_vector_cmpi_predicate_t;
 
-// IEEE 754 ordered and unordered floating-point predicates.
+// IEEE 754 ordered and unordered floating-point predicates evaluated in the target's native floating-point environment.
 typedef enum loom_vector_cmpf_predicate_e {
   LOOM_VECTOR_CMPF_PREDICATE_OEQ = 0,
   LOOM_VECTOR_CMPF_PREDICATE_OGT = 1,
@@ -1425,7 +1425,7 @@ iree_status_t loom_vector_cmpi_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_CMPF: Lanewise floating-point comparison producing an i1 mask vector. The predicate attribute uses the scalar.cmpf ordered/unordered predicate names and applies independently to each lane.
+// LOOM_OP_VECTOR_CMPF: Lanewise floating-point comparison producing an i1 mask vector in the target's native floating-point environment. The predicate attribute uses the scalar.cmpf ordered/unordered predicate names and applies independently to each lane; optional fast-math flags grant additional source permissions.
 // %m = vector.cmpf olt, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
 LOOM_DEFINE_ISA(loom_vector_cmpf_isa, LOOM_OP_VECTOR_CMPF)
 LOOM_DEFINE_OPERAND(loom_vector_cmpf_lhs, 0)

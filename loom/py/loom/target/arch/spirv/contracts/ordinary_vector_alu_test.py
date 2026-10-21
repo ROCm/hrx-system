@@ -20,6 +20,7 @@ from loom.target.arch.spirv.ordinary_vector import (
 )
 from loom.target.arch.spirv.ordinary_vector_float import (
     ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
+    ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
     ORDINARY_VECTOR_INTEGER_COMPONENT_TYPE_PAIRS,
@@ -29,10 +30,12 @@ from loom.target.arch.spirv.scalar_alu import (
     FLOAT_COMPARE_PREDICATES,
     FLOAT_COMPARE_TYPES,
     INTEGER_BITWISE_BINARY_OPERATIONS,
+    ORDERED_CLAMP_COMPARE_PREDICATES,
     SIGNED_INTEGER_BINARY_OPERATIONS,
     SIGNED_INTEGER_COMPARE_PREDICATES,
     UNSIGNED_INTEGER_BINARY_OPERATIONS,
     UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES,
+    float_preservation_feature_atoms,
 )
 from loom.target.contracts import (
     DescriptorResultType,
@@ -353,18 +356,18 @@ def test_comparison_rules_cover_types_lanes_predicates_and_views() -> None:
                     f"{_suffix(component_pair.unsigned.suffix, lane_count)}"
                 )
                 unsigned_keys.add(key)
-    for compare_type in FLOAT_COMPARE_TYPES:
+    for scalar in FLOAT_COMPARE_TYPES:
         for lane_count in _LANE_COUNTS:
             for predicate in FLOAT_COMPARE_PREDICATES:
                 key = (
                     vector.vector_cmpf.name,
-                    compare_type.scalar.source_type,
+                    scalar.source_type,
                     lane_count,
                     predicate.source_predicate,
                 )
                 expected[key] = (
                     f"spirv.op_{predicate.descriptor_suffix}."
-                    f"{_suffix(compare_type.scalar.suffix, lane_count)}"
+                    f"{_suffix(scalar.suffix, lane_count)}"
                 )
 
     assert actual.keys() == expected.keys()
@@ -400,29 +403,30 @@ def test_comparison_rules_cover_types_lanes_predicates_and_views() -> None:
         )
 
 
-def test_float_comparison_descriptors_cover_native_shapes_and_controls() -> None:
+def test_float_comparison_descriptors_cover_native_shapes_and_type_features() -> None:
     actual = {
         instruction.key: instruction
         for instruction in ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS
     }
     expected = {
-        (
-            f"spirv.op_{predicate.descriptor_suffix}."
-            f"v{lane_count}{compare_type.scalar.suffix}"
-        ): (compare_type, predicate, lane_count)
-        for compare_type in FLOAT_COMPARE_TYPES
+        (f"spirv.op_{predicate.descriptor_suffix}.v{lane_count}{scalar.suffix}"): (
+            scalar,
+            predicate,
+            lane_count,
+        )
+        for scalar in FLOAT_COMPARE_TYPES
         for lane_count in (2, 3, 4)
         for predicate in FLOAT_COMPARE_PREDICATES
     }
     assert len(actual) == len(expected) == 126
     assert actual.keys() == expected.keys()
-    for key, (compare_type, predicate, lane_count) in expected.items():
+    for key, (scalar, predicate, lane_count) in expected.items():
         instruction = actual[key]
         operand_type = OrdinaryVectorType(
             next(
                 component
                 for component in ORDINARY_VECTOR_COMPONENT_TYPES
-                if component.suffix == compare_type.scalar.suffix
+                if component.suffix == scalar.suffix
             ),
             lane_count,
         )
@@ -434,8 +438,47 @@ def test_float_comparison_descriptors_cover_native_shapes_and_controls() -> None
         assert instruction.result_type == OrdinaryVectorType(
             BOOLEAN_ORDINARY_VECTOR_COMPONENT_TYPE, lane_count
         )
-        assert instruction.feature_atoms == compare_type.control_feature_atoms
-        assert instruction.feature_bits == compare_type.feature_bits
+        assert instruction.feature_atoms == ()
+        assert instruction.feature_bits == scalar.feature_bits
+
+
+def test_ordered_clamp_compare_descriptors_require_preservation_controls() -> None:
+    actual = {
+        instruction.key: instruction
+        for instruction in ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS
+    }
+    expected = {
+        (
+            f"spirv.op_{predicate.descriptor_suffix}.preserve."
+            f"v{lane_count}{scalar.suffix}"
+        ): (scalar, predicate, lane_count)
+        for scalar in FLOAT_COMPARE_TYPES
+        for lane_count in (2, 3, 4)
+        for predicate in ORDERED_CLAMP_COMPARE_PREDICATES
+    }
+    assert len(actual) == len(expected) == 18
+    assert actual.keys() == expected.keys()
+    for key, (scalar, predicate, lane_count) in expected.items():
+        instruction = actual[key]
+        operand_type = OrdinaryVectorType(
+            next(
+                component
+                for component in ORDINARY_VECTOR_COMPONENT_TYPES
+                if component.suffix == scalar.suffix
+            ),
+            lane_count,
+        )
+        assert instruction.mnemonic == (
+            f"{predicate.mnemonic}.preserve.{operand_type.suffix}"
+        )
+        assert instruction.opcode == predicate.opcode
+        assert instruction.packet_form == "LOOM_SPIRV_PACKET_FORM_COMPARE_SAME_TYPE"
+        assert instruction.operand_names == ("lhs", "rhs")
+        assert instruction.operand_types == (operand_type, operand_type)
+        assert instruction.result_type == OrdinaryVectorType(
+            BOOLEAN_ORDINARY_VECTOR_COMPONENT_TYPE, lane_count
+        )
+        assert instruction.feature_atoms == float_preservation_feature_atoms(scalar)
 
 
 def test_select_rules_cover_every_public_component_and_shape() -> None:

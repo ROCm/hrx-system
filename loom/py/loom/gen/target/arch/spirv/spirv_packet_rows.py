@@ -75,6 +75,7 @@ from loom.target.arch.spirv.ordinary_vector_conversion import (  # noqa: E402
 from loom.target.arch.spirv.ordinary_vector_float import (  # noqa: E402
     ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
+    ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (  # noqa: E402
@@ -91,6 +92,7 @@ from loom.target.arch.spirv.scalar_alu import (  # noqa: E402
     INTEGER_BITWISE_BINARY_OPERATIONS,
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
     OFFSET64_COMPARE_PREDICATES,
+    ORDERED_CLAMP_COMPARE_PREDICATES,
     SCALAR_SELECT_TYPES,
     SIGNED_INTEGER_BINARY_OPERATIONS,
     SIGNED_INTEGER_COMPARE_PREDICATES,
@@ -934,6 +936,7 @@ def _ordinary_vector_rows() -> list[_PacketRow]:
             *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
             *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
             *ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
+            *ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
             *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
             *INTEGER_BIT_COUNT_INSTRUCTIONS,
             *ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
@@ -1115,17 +1118,33 @@ def _compare_rows() -> list[_PacketRow]:
     rows.extend(
         [
             _PacketRow(
-                f"spirv.op_{predicate.descriptor_suffix}.{compare_type.scalar.suffix}",
+                f"spirv.op_{predicate.descriptor_suffix}.{scalar.suffix}",
                 opcode=predicate.opcode,
                 form="LOOM_SPIRV_PACKET_FORM_COMPARE_SAME_TYPE",
                 result_type=bool_value,
                 operand_types=(
-                    _alu_scalar_value(compare_type.scalar),
-                    _alu_scalar_value(compare_type.scalar),
+                    _alu_scalar_value(scalar),
+                    _alu_scalar_value(scalar),
                 ),
             )
-            for compare_type in FLOAT_COMPARE_TYPES
+            for scalar in FLOAT_COMPARE_TYPES
             for predicate in FLOAT_COMPARE_PREDICATES
+        ]
+    )
+    rows.extend(
+        [
+            _PacketRow(
+                f"spirv.op_{predicate.descriptor_suffix}.preserve.{scalar.suffix}",
+                opcode=predicate.opcode,
+                form="LOOM_SPIRV_PACKET_FORM_COMPARE_SAME_TYPE",
+                result_type=bool_value,
+                operand_types=(
+                    _alu_scalar_value(scalar),
+                    _alu_scalar_value(scalar),
+                ),
+            )
+            for scalar in FLOAT_COMPARE_TYPES
+            for predicate in ORDERED_CLAMP_COMPARE_PREDICATES
         ]
     )
     rows.extend(

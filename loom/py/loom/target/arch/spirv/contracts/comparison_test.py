@@ -8,7 +8,6 @@ from loom.dialect.scalar import comparison as scalar_comparison
 from loom.target.arch.spirv.contracts.logical_core import (
     SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT,
 )
-from loom.target.arch.spirv.features import feature_bits_value
 from loom.target.arch.spirv.scalar_alu import (
     FLOAT_COMPARE_PREDICATES,
     FLOAT_COMPARE_TYPES,
@@ -98,30 +97,15 @@ def test_float_predicates_match_the_complete_spirv_core_family() -> None:
     )
 
 
-def test_float_comparisons_require_exact_input_controls() -> None:
-    expected_control_features = {
-        "f16": (
-            "float16_64_denorm_preserve",
-            "float16_signed_zero_inf_nan_preserve",
-        ),
-        "f32": (
-            "float32_denorm_preserve",
-            "float32_signed_zero_inf_nan_preserve",
-        ),
-        "f64": (
-            "float16_64_denorm_preserve",
-            "float64_signed_zero_inf_nan_preserve",
-        ),
+def test_float_comparisons_require_only_operand_type_features() -> None:
+    expected_type_features = {
+        "f16": ("float16",),
+        "f32": (),
+        "f64": ("float64",),
     }
     assert {
-        compare_type.scalar.source_type: compare_type.control_feature_atoms
-        for compare_type in FLOAT_COMPARE_TYPES
-    } == expected_control_features
-    for compare_type in FLOAT_COMPARE_TYPES:
-        assert compare_type.feature_bits == (
-            compare_type.scalar.feature_bits
-            | feature_bits_value(compare_type.control_feature_atoms)
-        )
+        scalar.source_type: scalar.feature_atoms for scalar in FLOAT_COMPARE_TYPES
+    } == expected_type_features
 
 
 def test_scalar_float_comparison_contract_covers_every_type_and_predicate() -> None:
@@ -163,10 +147,10 @@ def test_scalar_float_comparison_contract_covers_every_type_and_predicate() -> N
         assert rule.emit[0].results == {"dst": ValueRef.result("result")}
 
     expected = {
-        (compare_type.scalar.source_type, predicate.source_predicate): (
-            f"spirv.op_{predicate.descriptor_suffix}.{compare_type.scalar.suffix}"
+        (scalar.source_type, predicate.source_predicate): (
+            f"spirv.op_{predicate.descriptor_suffix}.{scalar.suffix}"
         )
-        for compare_type in FLOAT_COMPARE_TYPES
+        for scalar in FLOAT_COMPARE_TYPES
         for predicate in FLOAT_COMPARE_PREDICATES
     }
     assert actual.keys() == expected.keys()

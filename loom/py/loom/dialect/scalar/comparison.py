@@ -73,7 +73,7 @@ CmpFPredicate = EnumDef(
         EnumCase("une", 12, doc="Unordered or not equal."),
         EnumCase("uno", 13, doc="Unordered (either is NaN)."),
     ],
-    doc="IEEE 754 ordered and unordered floating-point predicates.",
+    doc=("IEEE 754 ordered and unordered floating-point predicates evaluated in the target's native floating-point environment."),
 )
 
 # ============================================================================
@@ -99,7 +99,7 @@ scalar_cmpf = comparison_op(
     phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     predicates=CmpFPredicate,
-    doc="Floating-point comparison.",
+    doc=("Floating-point comparison in the target's native floating-point environment. Optional fast-math flags grant additional source permissions."),
     flags=("fastmath", FastMathFlags),
     canonicalize="loom_scalar_cmpf_canonicalize",
     facts="loom_scalar_cmpf_facts",

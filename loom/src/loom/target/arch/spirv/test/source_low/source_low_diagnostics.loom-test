@@ -75,18 +75,6 @@ func.def target(@target) @unsigned_i16_conversion_requires_target_features(%lhs:
 
 // ====
 
-// A comparison without explicit floating-point controls could flush subnormal
-// operands or assume that NaNs and infinities are absent.
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @float_comparison_requires_ieee_controls(%lhs: f32, %rhs: f32) -> (i1) {
-  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_f_ord_less_than.f32", constraint_key="descriptor_available"}
-  %result = scalar.cmpf olt, %lhs, %rhs : f32
-  func.return %result : i1
-}
-
-// ====
-
 spirv.target<vulkan1_3> @target
 
 func.def target(@target) @unsupported_semantic_math(%input: f32) -> (f32) {

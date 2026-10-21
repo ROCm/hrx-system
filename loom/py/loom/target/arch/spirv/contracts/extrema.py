@@ -129,19 +129,24 @@ def _native_ordered_clamp_rule(element: str, source_lanes: int) -> DescriptorRul
     value = ValueRef.operand("value")
     lower = ValueRef.operand("lower")
     upper = ValueRef.operand("upper")
-    below = recipe.emit(f"f_ord_less_than.{suffix}", {"lhs": value, "rhs": lower})
+    below = recipe.emit(
+        f"f_ord_less_than.preserve.{suffix}", {"lhs": value, "rhs": lower}
+    )
     bounded = recipe.emit(
         f"select.{suffix}",
         {"condition": below, "true_value": lower, "false_value": value},
     )
-    above = recipe.emit(f"f_ord_greater_than.{suffix}", {"lhs": bounded, "rhs": upper})
+    above = recipe.emit(
+        f"f_ord_greater_than.preserve.{suffix}",
+        {"lhs": bounded, "rhs": upper},
+    )
     recipe.emit(
         f"select.{suffix}",
         {"condition": above, "true_value": upper, "false_value": bounded},
         result=ValueRef.result("result"),
     )
-    # Core comparisons honor DenormPreserve and SignedZeroInfNanPreserve. Their
-    # descriptors already require both controls for this width.
+    # The private preserve variants demand DenormPreserve and
+    # SignedZeroInfNanPreserve. Ordinary cmpf retains native target semantics.
     return DescriptorRule(
         source_op=scalar.scalar_clampf if source_lanes == 0 else vector.vector_clampf,
         descriptor=recipe.emits[-1].descriptor,

@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 983547543582}
+spirv.target<vulkan1_3> @target {contract_feature_bits = 26}
 
 func.def target(@target) @scalar_float_comparisons(%lhs: f32, %rhs: f32, %half_lhs: f16, %half_rhs: f16, %double_lhs: f64, %double_rhs: f64) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
   %oeq = scalar.cmpf oeq, %lhs, %rhs : f32
