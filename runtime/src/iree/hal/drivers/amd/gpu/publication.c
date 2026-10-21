@@ -129,6 +129,19 @@ void iree_hal_amd_gpu_publication_notify(
   }
 }
 
+void iree_hal_amd_gpu_publication_enqueue(
+    iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal,
+    iree_hal_amd_gpu_publisher_t* publisher,
+    iree_hal_amd_gpu_publication_entry_t* entry) {
+  if (iree_hal_amd_gpu_publisher_enqueue(publisher, entry)) {
+    iree_hal_amd_gpu_publication_entry_t* ready =
+        iree_hal_amd_gpu_publisher_next(publisher);
+    if (iree_hal_amd_gpu_publisher_handoff(publisher, ready)) {
+      iree_hal_amd_gpu_publication_notify(publication, source_ordinal);
+    }
+  }
+}
+
 void iree_hal_amd_gpu_publication_deinitialize(
     iree_hal_amd_gpu_publication_t* publication) {
   if (!publication->thread) {

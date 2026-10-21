@@ -10,6 +10,7 @@
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/thread.h"
+#include "iree/hal/drivers/amd/gpu/queue/publisher.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -98,6 +99,17 @@ void iree_hal_amd_gpu_publication_set_sources(
 // The caller keeps publication and its queue alive through this final access.
 void iree_hal_amd_gpu_publication_notify(
     iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal);
+
+// Transfers a completed native result to its queue's existing typed FIFO.
+// The caller keeps the publisher alive through enqueue, independently of the
+// entry: another owner can consume the entry before enqueue returns. After the
+// final handoff, the wake accesses only device-owned values passed by value.
+// A producer that acquires the publisher reserves a service turn instead of
+// executing queue work on the native allocation callback thread.
+void iree_hal_amd_gpu_publication_enqueue(
+    iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal,
+    iree_hal_amd_gpu_publisher_t* publisher,
+    iree_hal_amd_gpu_publication_entry_t* entry);
 
 // Joins the final source access after accepted work and external notification
 // producers have joined. It neither waits for GPU work nor cancels it. Called

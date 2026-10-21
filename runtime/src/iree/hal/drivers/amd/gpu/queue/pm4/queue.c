@@ -1724,8 +1724,10 @@ static bool iree_hal_amd_gpu_pm4_progress(void* user_data) {
       capacity = result == IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
     }
     more = iree_hal_amd_gpu_pm4_handoff(queue, current, capacity, completed);
-    iree_hal_amd_gpu_pm4_wake_shutdown(queue);
   }
+  // A completed native callback can return its final queue borrow after the
+  // consumer drained its result. That hint must still wake shutdown.
+  iree_hal_amd_gpu_pm4_wake_shutdown(queue);
   iree_status_t failure = iree_hal_amd_gpu_pm4_check_failure(queue);
   if (!iree_status_is_ok(failure)) {
     iree_hal_amd_gpu_host_wait_set_cancel(&queue->pending.waits);

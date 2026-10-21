@@ -17,11 +17,10 @@ enum {
 };
 
 static void iree_hal_amd_gpu_aql_scratch_wake(
-    iree_hal_amd_gpu_aql_scratch_t* scratch) {
-  const amdf_status_t status =
-      iree_hal_amd_gpu_context_signal(scratch->growth->context);
+    iree_hal_amd_gpu_context_t* context) {
+  const amdf_status_t status = iree_hal_amd_gpu_context_signal(context);
   if (!amdf_status_is_ok(status)) {
-    iree_hal_amd_gpu_context_report(scratch->growth->context, status,
+    iree_hal_amd_gpu_context_report(context, status,
                                     "AQL scratch service wake");
   }
 }
@@ -40,10 +39,18 @@ void iree_hal_amd_gpu_aql_scratch_initialize(
 static void iree_hal_amd_gpu_aql_scratch_acquired(void* user_data,
                                                   iree_status_t status) {
   iree_hal_amd_gpu_aql_scratch_t* scratch = user_data;
+  iree_hal_amd_gpu_aql_growth_context_t* growth = scratch->growth;
+  iree_hal_amd_gpu_publication_t* publication = growth->publication;
+  const uint32_t ordinal = growth->queue_ordinal;
+  iree_atomic_fetch_add(&growth->pending_count, 1, iree_memory_order_relaxed);
   scratch->status = status;
   iree_atomic_store(&scratch->phase, IREE_HAL_AMD_GPU_AQL_SCRATCH_READY,
                     iree_memory_order_release);
-  iree_hal_amd_gpu_aql_growth_enqueue(scratch->growth, &scratch->entry);
+  iree_hal_amd_gpu_aql_growth_enqueue(growth, &scratch->entry);
+  // Resumption can precede enqueue's final publisher access. This last queue
+  // access joins that callback even if scratch has already returned to IDLE.
+  iree_atomic_fetch_sub(&growth->pending_count, 1, iree_memory_order_release);
+  iree_hal_amd_gpu_publication_notify(publication, ordinal);
 }
 
 static void iree_hal_amd_gpu_aql_scratch_acquire(void* user_data) {
@@ -113,7 +120,7 @@ iree_status_t iree_hal_amd_gpu_aql_scratch_resume(
   // Firmware can request a larger allocation immediately after resume, before
   // IDLE becomes visible to completion. Recheck after transferring ownership so
   // that an event observed during READY cannot lose that next request.
-  iree_hal_amd_gpu_aql_scratch_wake(scratch);
+  iree_hal_amd_gpu_aql_scratch_wake(scratch->growth->context);
   return status;
 }
 
@@ -128,9 +135,11 @@ bool iree_hal_amd_gpu_aql_scratch_is_pending(
 
 static void iree_hal_amd_gpu_aql_scratch_released(void* user_data) {
   iree_hal_amd_gpu_aql_scratch_t* scratch = user_data;
+  iree_hal_amd_gpu_context_t* context = scratch->growth->context;
+  // IDLE ends this callback's queue borrow. Only the device wake may follow.
   iree_atomic_store(&scratch->phase, IREE_HAL_AMD_GPU_AQL_SCRATCH_IDLE,
                     iree_memory_order_release);
-  iree_hal_amd_gpu_aql_scratch_wake(scratch);
+  iree_hal_amd_gpu_aql_scratch_wake(context);
 }
 
 amdf_status_t iree_hal_amd_gpu_aql_scratch_trim(

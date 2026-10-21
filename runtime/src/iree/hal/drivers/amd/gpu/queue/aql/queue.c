@@ -1554,8 +1554,10 @@ static bool iree_hal_amd_gpu_aql_progress(void* user_data) {
       iree_hal_amd_gpu_aql_process_entry(queue, entry);
     }
     more = iree_hal_amd_gpu_publisher_handoff(&queue->publisher, NULL);
-    iree_hal_amd_gpu_aql_wake_terminal(queue);
   }
+  // A native callback can return its final queue borrow after its result was
+  // consumed. Its last readiness hint still needs to wake terminal observers.
+  iree_hal_amd_gpu_aql_wake_terminal(queue);
   return more;
 }
 

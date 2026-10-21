@@ -21,6 +21,7 @@ iree_cc_library(
     iree::base::internal
     iree::base::threading
     iree::base::threading::thread
+    iree::hal::drivers::amd::gpu::queue::publisher
   PUBLIC
 )
 

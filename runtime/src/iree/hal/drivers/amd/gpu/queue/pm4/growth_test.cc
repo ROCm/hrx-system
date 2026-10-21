@@ -200,9 +200,19 @@ class GrowthTest : public ::testing::Test {
   }
 
   void JoinPublication() {
-    // Producers have joined before this cold ownership check. The consumer
-    // posts only after its final handoff, not merely after a capture retires.
+    // Only the ready FIFO is joined here. Reuse tests deliberately keep a
+    // native allocation blocked while that FIFO progresses independently.
     while (!iree_hal_amd_gpu_publisher_is_idle(&publisher_)) {
+      idle_.acquire();
+    }
+  }
+
+  void JoinQueue() {
+    // Native result ownership includes callback tails, independently of other
+    // requests still executing in the device's allocation domain.
+    while (
+        iree_atomic_load(&growth_.pending_count, iree_memory_order_acquire) ||
+        !iree_hal_amd_gpu_publisher_is_idle(&publisher_)) {
       idle_.acquire();
     }
   }
@@ -235,6 +245,7 @@ class GrowthTest : public ::testing::Test {
       iree_hal_amd_gpu_pm4_growth_signals_available(&growth_);
     }
     if (!iree_hal_amd_gpu_publisher_acquire_service(&publisher_)) {
+      idle_.release();
       return false;
     }
     auto* link = iree_hal_amd_gpu_publisher_next(&publisher_);
@@ -917,17 +928,45 @@ TEST_F(GrowthTest, NativeCompletionRacesPublisherHandoffAndCaptureReuse) {
     Park(i % 2 ? IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS
                : IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS);
     consumed_.acquire();
-    // Capture release precedes the consumer's final FIFO handoff. The next
-    // caller waits for ownership, without assuming the completion token joins
-    // the entire deferred publisher. This is cold fixture synchronization.
-    iree_hal_amd_gpu_context_join_memory(&context_);
-    iree_hal_amd_gpu_publication_deinitialize(&publication_);
-    IREE_ASSERT_OK(iree_hal_amd_gpu_publication_initialize(
-        1, &source_, {}, iree_allocator_system(), &publication_));
+    JoinQueue();
+    iree_hal_amd_gpu_publication_set_sources(&publication_, 0, nullptr);
+    iree_hal_amd_gpu_publication_set_sources(&publication_, 1, &source_);
   }
   EXPECT_EQ(completed_, 128u);
   EXPECT_EQ(allocations_, 128u);
   EXPECT_EQ(failed_, 0u);
+}
+
+TEST_F(GrowthTest, QueueJoinDoesNotDrainUnrelatedNativeAllocation) {
+  Park(IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS);
+  consumed_.acquire();
+  JoinQueue();
+
+  // Another queue's slow backing request owns the native allocation thread.
+  // The completed queue can still join its exact source and callback borrows.
+  hold_ = true;
+  const iree_hal_amd_fabric_memory_request_t request = {
+      .options = &memory_,
+      .byte_length = 4096,
+      .alignment = 8,
+  };
+  iree_hal_amd_fabric_memory_t memory = {};
+  iree_hal_amd_gpu_memory_acquire_t acquire;
+  iree_hal_amd_gpu_context_acquire_memory(
+      &context_, 1, &request, &memory,
+      {.fn = [](void*, iree_status_t status) { IREE_EXPECT_OK(status); }},
+      &acquire);
+  entered_.acquire();
+  JoinQueue();
+  iree_hal_amd_gpu_publication_set_sources(&publication_, 0, nullptr);
+  EXPECT_EQ(iree_atomic_load(&growth_.pending_count, iree_memory_order_acquire),
+            0);
+  EXPECT_EQ(completed_, 1u);
+  resume_.release();
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  iree_hal_amd_fabric_memory_deinitialize(context_.api, context_.event_sink,
+                                          &memory);
+  iree_hal_amd_gpu_publication_set_sources(&publication_, 1, &source_);
 }
 
 }  // namespace

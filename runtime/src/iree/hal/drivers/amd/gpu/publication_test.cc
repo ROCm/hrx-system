@@ -320,4 +320,63 @@ TEST(PublicationTest, ConcurrentCallersAndDeferredPublisherRetireEveryEntry) {
   EXPECT_EQ(queue.consumed, kThreadCount * kEntryCount);
 }
 
+TEST(PublicationTest, NativeResultReleasesQueueBeforeCallbackThreadJoins) {
+  struct Queue {
+    // Native result publication and final ownership boundary under test.
+    iree_hal_amd_gpu_publisher_t publisher;
+    // Last result required for this queue to become idle.
+    iree_hal_amd_gpu_publication_entry_t entry = {};
+  };
+  struct Source {
+    // Queue lifetime ends when its last result is consumed.
+    std::unique_ptr<Queue> queue;
+    // The enclosing cold owner can remove this now-empty source.
+    std::binary_semaphore retired{0};
+  };
+  iree_hal_amd_gpu_publication_t publication;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_publication_initialize(
+      0, nullptr, {}, iree_allocator_system(), &publication));
+  for (uint32_t i = 0; i < 256; ++i) {
+    Source source{std::make_unique<Queue>()};
+    iree_hal_amd_gpu_publisher_initialize(&source.queue->publisher);
+    const iree_hal_amd_gpu_publication_source_t binding = {
+        .publish =
+            [](void* user_data) {
+              auto* source = static_cast<Source*>(user_data);
+              if (!source->queue || !iree_hal_amd_gpu_publisher_acquire_service(
+                                        &source->queue->publisher)) {
+                return false;
+              }
+              EXPECT_EQ(
+                  iree_hal_amd_gpu_publisher_next(&source->queue->publisher),
+                  &source->queue->entry);
+              EXPECT_FALSE(iree_hal_amd_gpu_publisher_handoff(
+                  &source->queue->publisher, nullptr));
+              iree_hal_amd_gpu_publisher_deinitialize(
+                  &source->queue->publisher);
+              source->queue.reset();
+              source->retired.release();
+              return false;
+            },
+        .user_data = &source,
+    };
+    iree_hal_amd_gpu_publication_set_sources(&publication, 1, &binding);
+    std::binary_semaphore native_tail{0};
+    auto* queue = source.queue.get();
+    std::thread callback([&, queue] {
+      iree_hal_amd_gpu_publication_enqueue(&publication, 0, &queue->publisher,
+                                           &queue->entry);
+      // Native callback bookkeeping may continue after queue retirement. It
+      // borrows only the device; queue release need not drain that thread.
+      native_tail.acquire();
+    });
+    source.retired.acquire();
+    iree_hal_amd_gpu_publication_set_sources(&publication, 0, nullptr);
+    EXPECT_EQ(source.queue, nullptr);
+    native_tail.release();
+    callback.join();
+  }
+  iree_hal_amd_gpu_publication_deinitialize(&publication);
+}
+
 }  // namespace
