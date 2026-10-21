@@ -772,6 +772,9 @@ enum iree_hal_profile_queue_event_type_e {
 
   // Batched buffer transfers submitted as one queue operation.
   IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER = 16u,
+
+  // Device clock capture submitted through a queue operation.
+  IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TIMESTAMP = 17u,
 };
 
 // Bitfield specifying properties of one queue event record.

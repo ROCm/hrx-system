@@ -263,7 +263,7 @@ iree_status_t iree_hal_amd_gpu_device_query_support(const amdf_api_t* api,
 
 static iree_status_t iree_hal_amd_gpu_device_build_spec(
     iree_hal_amd_gpu_device_t* device, iree_string_view_t display_name,
-    uint32_t queue_count,
+    uint32_t family_ordinal, uint32_t queue_count,
     const iree_hal_amd_fabric_asan_options_t* asan_options) {
   const iree_hal_physical_device_spec_t physical = {
       .identity = {.display_name = display_name, .vendor_id = 0x1002},
@@ -280,12 +280,26 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .physical_device_count = 1,
       .physical_devices = &physical,
   };
+  amdf_observation_clock_info_t clock = {0};
+  if (device->context->gpu->extension_version >= AMDF_GPU_EXTENSION_VERSION_2) {
+    const amdf_status_t status =
+        device->context->gpu->device_query_queue_clock_info(
+            device->context->device, family_ordinal, &clock);
+    if (status != amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+      IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+          status, "device_query_queue_clock_info"));
+    }
+  }
   const iree_hal_queue_priority_t priority = IREE_HAL_QUEUE_PRIORITY_NORMAL;
   const iree_hal_queue_family_spec_t family = {
       .name = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                   ? IREE_SV("aql")
                   : IREE_SV("pm4"),
       .provisioned_queue_count = queue_count,
+      // COPY_DATA captures the 64-bit CP clock; the native query supplies its
+      // platform-specific rate. Zero rate leaves timestamp capture unavailable.
+      .timestamp_valid_bits = clock.frequency_hz ? 64 : 0,
+      .timestamp_frequency_hz = clock.frequency_hz,
       .priority_count = 1,
       .priorities = &priority,
       .physical_device_affinity = 1,
@@ -903,7 +917,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_device_build_spec(
-        device, display_name, options->queue_count,
+        device, display_name, family_ordinal, options->queue_count,
         asan_enabled ? &options->asan.memory : NULL);
   }
   if (iree_status_is_ok(status)) {

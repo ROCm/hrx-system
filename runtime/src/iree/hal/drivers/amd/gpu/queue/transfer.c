@@ -81,36 +81,6 @@ iree_status_t iree_hal_amd_gpu_transfer_measure(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amd_gpu_transfer_qualify(
-    const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
-    iree_hal_buffer_t* buffer, iree_device_size_t offset,
-    iree_hal_amd_gpu_transfer_address_t* out_address) {
-  const iree_hal_memory_contract_t* contract = buffer->memory.contract;
-  // Family/domain membership is established by public transfer validation.
-  // Legacy buffers can satisfy that check without a native binding contract.
-  if (!contract) {
-    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
-                            "transfer buffer has no native binding contract");
-  }
-  const uint16_t index =
-      contract
-          ->scopes[family->memory.queue_scope_id +
-                   (site - IREE_HAL_MEMORY_SITE_QUEUE)]
-          .bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS];
-  if (index == IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {
-    return iree_make_status(
-        IREE_STATUS_PERMISSION_DENIED,
-        "GPU address access is not prepared for this queue");
-  }
-  *out_address = (iree_hal_amd_gpu_transfer_address_t){
-      .device = {.buffer = buffer,
-                 .offset = offset,
-                 .slot = {.index = index,
-                          .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS}},
-  };
-  return iree_ok_status();
-}
-
 iree_status_t iree_hal_amd_gpu_transfer_initialize(
     const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
     uint32_t maximum_staging_capacity, iree_host_size_t count,
@@ -174,12 +144,12 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
         break;
     }
     if (source_buffer) {
-      status = iree_hal_amd_gpu_transfer_qualify(
-          family, site, source_buffer, source_offset, &operation.source);
+      status = iree_hal_amd_gpu_buffer_reference_initialize(
+          family, site, source_buffer, source_offset, &operation.source.device);
     }
     if (iree_status_is_ok(status) && target_buffer) {
-      status = iree_hal_amd_gpu_transfer_qualify(
-          family, site, target_buffer, target_offset, &operation.target);
+      status = iree_hal_amd_gpu_buffer_reference_initialize(
+          family, site, target_buffer, target_offset, &operation.target.device);
     }
     if (iree_status_is_ok(status)) {
       iree_hal_buffer_retain(source_buffer);
@@ -209,17 +179,4 @@ void iree_hal_amd_gpu_transfer_deinitialize(
       iree_hal_buffer_release(operation->target.device.buffer);
     }
   }
-}
-
-iree_status_t iree_hal_amd_gpu_transfer_resolve(
-    const iree_hal_amd_gpu_transfer_address_t* address, uint64_t* out_address) {
-  const uint64_t base = iree_hal_buffer_native_binding(address->device.buffer,
-                                                       address->device.slot)
-                            .device_address;
-  if (!base) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "transfer buffer has no committed GPU address");
-  }
-  *out_address = base + address->device.offset;
-  return iree_ok_status();
 }

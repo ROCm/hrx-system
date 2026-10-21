@@ -791,6 +791,22 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_timestamp(
                          "unsupported timestamp flags: 0x%016" PRIx64, flags));
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_range(target_buffer, target_offset,
+                                         sizeof(uint64_t)));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
+                                    iree_hal_buffer_validate_family_usage(
+                                        target_buffer, queue->queue_family,
+                                        IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_access(
+              iree_hal_buffer_allowed_access(target_buffer),
+              IREE_HAL_MEMORY_ACCESS_WRITE));
+  if ((iree_hal_buffer_byte_offset(target_buffer) + target_offset) & 7u) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "timestamp target must be 8-byte aligned"));
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_queue_validate_barriers(queue, barriers));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));

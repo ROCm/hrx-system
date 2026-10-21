@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/aql/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/transfer.h"
+#include "iree/hal/drivers/amd/gpu/queue/buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/publisher.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
@@ -51,6 +52,7 @@ typedef enum iree_hal_amd_gpu_aql_entry_kind_e {
   IREE_HAL_AMD_GPU_AQL_ENTRY_SUBMISSION,
   IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE,
   IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_TIMESTAMP,
   IREE_HAL_AMD_GPU_AQL_ENTRY_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_ENTRY_REUSE_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS,
@@ -96,6 +98,8 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
   // Retained HAL signal timelines and copied values in inline storage.
   iree_hal_semaphore_list_t signals;
   union {
+    // Retained timestamp target with a prequalified native address slot.
+    iree_hal_amd_gpu_buffer_reference_t timestamp;
     // Captured direct launch and retained payload resources.
     iree_hal_amd_gpu_aql_dispatch_request_t dispatch;
     // Shared ownership across independently retiring native packet chunks.
@@ -146,6 +150,17 @@ iree_status_t iree_hal_amd_gpu_aql_submission_execute(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_queue_execute_flags_t flags,
+    iree_hal_amd_gpu_aql_submission_t** out_submission);
+
+// Captures a validated timestamp target and its dependency edges. Native
+// address resolution waits for admission; the buffer is retained through
+// terminal retirement. Failure retains nothing.
+iree_status_t iree_hal_amd_gpu_aql_submission_timestamp(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
+    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
+    iree_device_size_t offset, uint32_t before, uint32_t after,
     iree_hal_amd_gpu_aql_submission_t** out_submission);
 
 // Captures the entire transfer transaction before any native operation runs.

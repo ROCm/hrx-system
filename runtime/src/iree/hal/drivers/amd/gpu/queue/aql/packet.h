@@ -74,7 +74,15 @@ iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_packet_barrier(
 // fits the 48-bit address and positive 20-bit word count. The completion signal
 // joins every participating XCC before the caller reuses the immutable IB.
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_packet_indirect_buffer(
-    uint64_t address, uint32_t word_count, uint64_t completion_signal);
+    uint32_t header, uint64_t address, uint32_t word_count,
+    uint64_t completion_signal);
+
+// Restricts a positive, at-most-14-bit DWORD body to virtual XCC0. Returns
+// the body start after the two-DWORD PRED_EXEC prefix, or words unchanged on
+// a single-XCC device. The enclosing AQL completion still joins every XCC.
+uint32_t* iree_hal_amd_gpu_aql_emit_single_executor(uint32_t* words,
+                                                    uint32_t xcc_count,
+                                                    uint32_t body_word_count);
 
 // Native AMD USER signal. The descriptor, not its value field, is named by
 // dispatch completions and barrier dependencies. Host ownership lives

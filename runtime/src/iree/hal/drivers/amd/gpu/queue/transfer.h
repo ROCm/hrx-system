@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_TRANSFER_H_
 
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amd/gpu/queue/buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,14 +18,7 @@ extern "C" {
 // addresses are read only after dependencies permit queue-ordered commitment.
 typedef union iree_hal_amd_gpu_transfer_address_t {
   // Retained buffer and its already-qualified queue access.
-  struct {
-    // Owned HAL buffer, independent of the caller's reference.
-    iree_hal_buffer_t* buffer;
-    // Byte offset relative to the buffer's logical beginning.
-    iree_device_size_t offset;
-    // Direct index into the buffer's immutable native binding layout.
-    iree_hal_buffer_native_binding_slot_t slot;
-  } device;
+  iree_hal_amd_gpu_buffer_reference_t device;
   // Captured update bytes or borrowed upload/download storage.
   void* host;
 } iree_hal_amd_gpu_transfer_address_t;
@@ -116,11 +110,6 @@ void iree_hal_amd_gpu_transfer_deinitialize(
 void iree_hal_amd_gpu_transfer_profile(
     const iree_hal_amd_gpu_transfer_t* transfer,
     iree_hal_profile_queue_event_t* event);
-
-// Resolves a previously qualified device binding after its allocation waits.
-// A pending allocation without a committed native address is a real failure.
-iree_status_t iree_hal_amd_gpu_transfer_resolve(
-    const iree_hal_amd_gpu_transfer_address_t* address, uint64_t* out_address);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -895,6 +895,7 @@ iree_cc_test(
     "dispatch_test.cc"
     "native_test.cc"
     "protocol_test.cc"
+    "timestamp_test.cc"
   DEPS
     ::test_device
     amdf::amdf_static

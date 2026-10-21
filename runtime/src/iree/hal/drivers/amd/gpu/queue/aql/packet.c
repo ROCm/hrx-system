@@ -45,10 +45,22 @@ iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_packet_barrier(
 }
 
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_packet_indirect_buffer(
-    uint64_t address, uint32_t word_count, uint64_t completion_signal) {
+    uint32_t header, uint64_t address, uint32_t word_count,
+    uint64_t completion_signal) {
   return (iree_hal_amd_gpu_aql_packet_t){
-      .words = {1u << 16, UINT32_C(0xc0023f00), (uint32_t)address,
+      .words = {(1u << 16) | header, UINT32_C(0xc0023f00), (uint32_t)address,
                 (uint32_t)(address >> 32), (1u << 23) | word_count, 10, 0, 0, 0,
                 0, 0, 0, 0, 0, (uint32_t)completion_signal,
                 (uint32_t)(completion_signal >> 32)}};
+}
+
+uint32_t* iree_hal_amd_gpu_aql_emit_single_executor(uint32_t* words,
+                                                    uint32_t xcc_count,
+                                                    uint32_t body_word_count) {
+  if (xcc_count > 1) {
+    words[0] = UINT32_C(0xc0002300);
+    words[1] = UINT32_C(0x01000000) | body_word_count;
+    words += 2;
+  }
+  return words;
 }

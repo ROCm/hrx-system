@@ -11,6 +11,7 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amd/gpu/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
+#include "iree/hal/drivers/amd/gpu/queue/buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_call.h"
@@ -1125,6 +1126,68 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
       argument_end, (iree_hal_amd_gpu_download_t){0}, true);
 }
 
+static iree_hal_amd_gpu_pm4_publication_result_t
+iree_hal_amd_gpu_pm4_publish_timestamp(
+    iree_hal_amd_gpu_pm4_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
+  uint64_t target = 0;
+  iree_status_t status = iree_hal_amd_gpu_buffer_reference_resolve(
+      &submission->timestamp, &target);
+  if (iree_status_is_ok(status) && (target & 7u)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "timestamp GPU address must be 8-byte aligned");
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
+  }
+  iree_hal_amd_gpu_pm4_barrier_t before = submission->before;
+  iree_hal_amd_gpu_pm4_barrier_t after = submission->after;
+  // Every earlier publication joins its own DMA before leaving the CP.
+  before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+  after.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+  bool native_signal = false;
+  for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
+    native_signal |=
+        iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i]);
+  }
+  const uint32_t body_words =
+      submission->native_wait_count * 7 + 6 +
+      iree_hal_amd_gpu_pm4_barrier_word_count(before) +
+      iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
+      (native_signal ? 8 : 0) + 14 + (queue->kernel ? 0 : 8);
+  iree_hal_amd_gpu_pm4_ring_t candidate = queue->producer.ring;
+  iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
+  if (!iree_hal_amd_gpu_pm4_ring_try_reserve(
+          &candidate,
+          (uint64_t)iree_atomic_load(&queue->completed.words,
+                                     iree_memory_order_acquire),
+          body_words, &reservation)) {
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
+  }
+  if (native_signal) {
+    submission->signal =
+        iree_hal_amd_gpu_signal_pool_try_acquire(&queue->signals, 0);
+    if (!submission->signal) {
+      return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
+    }
+  }
+  queue->producer.ring.reserved_words = candidate.reserved_words;
+  uint32_t* words = reservation.words;
+  for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
+    if (submission->waits[i].signal) {
+      words = iree_hal_amd_gpu_pm4_emit_wait32(
+          words, submission->waits[i].signal->device_address, 1, UINT32_MAX,
+          IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
+    }
+  }
+  words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
+  words = iree_hal_amd_gpu_pm4_emit_clock(words, target);
+  return iree_hal_amd_gpu_pm4_publish_commit(
+      queue, submission, position, &reservation, body_words, 0, words, after,
+      queue->producer.arguments->end, (iree_hal_amd_gpu_download_t){0}, true);
+}
+
 // Publishes an owned capture. Immediate retirement may free it before return.
 static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
     iree_hal_amd_gpu_pm4_queue_t* queue,
@@ -1172,6 +1235,9 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
   }
   if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
     return iree_hal_amd_gpu_pm4_publish_execute(queue, submission, position);
+  }
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TIMESTAMP) {
+    return iree_hal_amd_gpu_pm4_publish_timestamp(queue, submission, position);
   }
   const bool indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(submission->dispatch.flags);
@@ -2661,12 +2727,29 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_atomic_rmw(
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_queue_timestamp(
-    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
     iree_device_size_t offset, const iree_hal_queue_barriers_t* barriers,
     iree_hal_timestamp_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 public timestamp is not admitted");
+  iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
+  if (!base->queue_family->spec->timestamp_frequency_hz) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "queue family has no timestamp clock rate");
+  }
+  iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_timestamp(
+      &queue->captures, queue->profile != NULL, base->queue_family, waits,
+      signals, target, offset, &queue->options.barriers, barriers,
+      &submission));
+  if (queue->profile) {
+    iree_hal_amd_gpu_profile_operation_initialize(
+        queue->profile, queue->options.queue_ordinal,
+        IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TIMESTAMP, waits.count, signals.count,
+        1, iree_hal_amd_gpu_pm4_submission_profile(submission));
+  }
+  iree_hal_amd_gpu_pm4_submit(queue, submission);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_queue_flush(iree_hal_queue_t* base) {

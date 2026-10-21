@@ -368,6 +368,7 @@ iree_cc_library(
     iree::base
     iree::hal
     iree::hal::drivers::amd::gpu::queue::blit
+    iree::hal::drivers::amd::gpu::queue::buffer
     iree::hal::drivers::amd::gpu::queue::transfer
   PUBLIC
 )
@@ -628,6 +629,7 @@ iree_cc_library(
     ::transfer
     iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::profile
+    iree::hal::drivers::amd::gpu::queue::buffer
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::gpu::queue::semaphore
@@ -731,11 +733,13 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::gpu::queue::allocation
+    iree::hal::drivers::amd::gpu::queue::buffer
     iree::hal::drivers::amd::gpu::queue::file_staging
     iree::hal::drivers::amd::gpu::queue::file_transfer
     iree::hal::drivers::amd::gpu::queue::host_call
     iree::hal::drivers::amd::gpu::queue::host_wait
     iree::hal::drivers::amd::gpu::queue::memory_mapping
+    iree::hal::drivers::amd::gpu::queue::pm4::commands
     iree::hal::drivers::amd::gpu::queue::transfer
     iree::hal::drivers::amd::gpu::queue::user_queue
     iree::hal::drivers::amd::status

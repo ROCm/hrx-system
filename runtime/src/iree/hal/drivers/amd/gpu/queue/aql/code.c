@@ -103,7 +103,7 @@ iree_status_t iree_hal_amd_gpu_aql_code_allocate(
     word_count = 8;
   }
   code->packet = iree_hal_amd_gpu_aql_packet_indirect_buffer(
-      address + sizeof(*signal), word_count, address);
+      0, address + sizeof(*signal), word_count, address);
   const amdf_gpu_user_queue_create_info_t queue_create = {
       .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
       .structure_size = sizeof(queue_create),

@@ -225,7 +225,7 @@ TEST(ProfileQueueQueryTest, RejectsMatchedEventWithoutQueueMetadata) {
   iree_profile_model_deinitialize(&model);
 }
 
-TEST(ProfileQueueQueryTest, SelectsMemoryMapAndTransferBatchesByName) {
+TEST(ProfileQueueQueryTest, SelectsMemoryOperationsAndTimestampsByName) {
   std::vector<uint8_t> metadata;
   auto queue = iree_hal_profile_queue_record_default();
   queue.stream_id = 1;
@@ -245,15 +245,18 @@ TEST(ProfileQueueQueryTest, SelectsMemoryMapAndTransferBatchesByName) {
   event.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER;
   event.event_id = 2;
   AppendPlainRecord(&payload, event);
+  event.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TIMESTAMP;
+  event.event_id = 3;
+  AppendPlainRecord(&payload, event);
   auto chunk = MakeQueueEventsChunk(payload);
 
-  const char* names[] = {"map", "transfer"};
+  const char* names[] = {"map", "transfer", "timestamp"};
   for (size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
     iree_profile_queue_event_query_t query;
     iree_profile_queue_event_query_initialize(iree_allocator_system(), &query);
     IREE_ASSERT_OK(iree_profile_queue_event_query_process_record(
         &query, &model, &chunk, iree_make_cstring_view(names[i]), -1));
-    EXPECT_EQ(query.total_queue_event_count, 2u);
+    EXPECT_EQ(query.total_queue_event_count, 3u);
     EXPECT_EQ(query.queue_event_count, 1u);
     if (query.queue_event_count == 1) {
       EXPECT_EQ(query.queue_events[0].record.event_id, i + 1);

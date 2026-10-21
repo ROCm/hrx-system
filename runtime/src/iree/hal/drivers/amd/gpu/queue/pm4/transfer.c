@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/pm4/transfer.h"
 
+#include "iree/hal/drivers/amd/gpu/queue/buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/drivers/amd/gpu/queue/transfer.h"
 
@@ -84,15 +85,15 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
     };
     if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY ||
         operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
-      status = iree_hal_amd_gpu_transfer_resolve(&operation->source,
-                                                 &span.source_address);
+      status = iree_hal_amd_gpu_buffer_reference_resolve(
+          &operation->source.device, &span.source_address);
     } else {
       span.source_bytes = operation->source.host;
     }
     if (iree_status_is_ok(status) &&
         operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
-      status = iree_hal_amd_gpu_transfer_resolve(&operation->target,
-                                                 &span.target_address);
+      status = iree_hal_amd_gpu_buffer_reference_resolve(
+          &operation->target.device, &span.target_address);
     }
     if (iree_status_is_ok(status)) {
       uint8_t* data =

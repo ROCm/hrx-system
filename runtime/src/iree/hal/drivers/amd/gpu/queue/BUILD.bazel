@@ -18,10 +18,21 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "buffer",
+    srcs = ["buffer.c"],
+    hdrs = ["buffer.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "transfer",
     srcs = ["transfer.c"],
     hdrs = ["transfer.h"],
     deps = [
+        ":buffer",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],

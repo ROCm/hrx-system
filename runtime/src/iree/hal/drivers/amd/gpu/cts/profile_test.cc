@@ -953,6 +953,29 @@ TEST_P(GpuNativeProfileTest,
             1u);
 }
 
+TEST_P(GpuNativeProfileTest, TimestampIsOnePublicEventWithoutInternalDispatch) {
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(8, 8),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_timestamp(queues_[0], {}, {1, &timeline, &one},
+                                          output, 0, nullptr, 0));
+  output.reset();
+  ASSERT_NO_FATAL_FAILURE(Wait(done, one));
+  ASSERT_NO_FATAL_FAILURE(End());
+  ASSERT_EQ(sink_.queue_events.size(), 1u);
+  const auto& event = sink_.queue_events.front();
+  EXPECT_EQ(event.type, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TIMESTAMP);
+  EXPECT_EQ(event.operation_count, 1u);
+  EXPECT_EQ(event.wait_count, 0u);
+  EXPECT_EQ(event.signal_count, 1u);
+  EXPECT_TRUE(sink_.dispatch_events.empty());
+}
+
 TEST_P(GpuNativeProfileTest, MappingBatchIsOnePublicEvent) {
   const iree_hal_pool_family_access_t access = {
       .family = iree_hal_queue_family(queues_[0]),

@@ -77,13 +77,41 @@ TEST(PacketTest, SignalMatchesFirmwareAbiWithoutHostPayload) {
 
 TEST(PacketTest, VendorIndirectBufferCarriesNativeCompletion) {
   const auto packet = iree_hal_amd_gpu_aql_packet_indirect_buffer(
-      UINT64_C(0x123456789a40), 7, UINT64_C(0x456789abc000));
+      0, UINT64_C(0x123456789a40), 7, UINT64_C(0x456789abc000));
   const std::array<uint32_t, 16> expected = {
       0x00010000, 0xc0023f00, 0x56789a40, 0x00001234, 0x00800007, 0x0000000a,
       0,          0,          0,          0,          0,          0,
       0,          0,          0x89abc000, 0x00004567,
   };
   EXPECT_EQ(std::memcmp(packet.words, expected.data(), sizeof(packet)), 0);
+}
+
+TEST(PacketTest, VendorIndirectBufferPreservesRequestedScopes) {
+  const auto packet = iree_hal_amd_gpu_aql_packet_indirect_buffer(
+      IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+          IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+          IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT,
+      UINT64_C(0x123456789a40), 6, UINT64_C(0x456789abc000));
+  const std::array<uint32_t, 16> expected = {
+      0x00010d00, 0xc0023f00, 0x56789a40, 0x00001234, 0x00800006, 0x0000000a,
+      0,          0,          0,          0,          0,          0,
+      0,          0,          0x89abc000, 0x00004567,
+  };
+  EXPECT_EQ(std::memcmp(packet.words, expected.data(), sizeof(packet)), 0);
+}
+
+TEST(PacketTest, SingleExecutorPrefixRestrictsOnlyMultiXccBodies) {
+  std::array<uint32_t, 3> words = {0xa5a5a5a5, 0xa5a5a5a5, 0xa5a5a5a5};
+  EXPECT_EQ(iree_hal_amd_gpu_aql_emit_single_executor(words.data(), 1, 6),
+            words.data());
+  EXPECT_EQ(words,
+            (std::array<uint32_t, 3>{0xa5a5a5a5, 0xa5a5a5a5, 0xa5a5a5a5}));
+  for (uint32_t count : {2, 4, 8}) {
+    EXPECT_EQ(iree_hal_amd_gpu_aql_emit_single_executor(words.data(), count, 6),
+              words.data() + 2);
+    EXPECT_EQ(words,
+              (std::array<uint32_t, 3>{0xc0002300, 0x01000006, 0xa5a5a5a5}));
+  }
 }
 
 }  // namespace

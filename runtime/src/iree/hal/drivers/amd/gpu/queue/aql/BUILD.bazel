@@ -102,6 +102,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
     ],
 )
@@ -334,6 +335,7 @@ iree_runtime_cc_library(
         ":transfer",
         "//runtime/src/iree/hal/drivers/amd/gpu:completion",
         "//runtime/src/iree/hal/drivers/amd/gpu:profile",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:capture_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
@@ -436,6 +438,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu:profile",
         "//runtime/src/iree/hal/drivers/amd/gpu:publication",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:allocation",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:file_staging",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:file_transfer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:host_call",
@@ -443,6 +446,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:memory_mapping",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:commands",
     ],
 )
 

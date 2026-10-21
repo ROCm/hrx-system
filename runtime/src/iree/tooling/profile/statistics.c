@@ -115,6 +115,8 @@ static const char* iree_profile_statistics_queue_event_type_name(
       return "map";
     case IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER:
       return "transfer";
+    case IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TIMESTAMP:
+      return "timestamp";
     default:
       return "unknown";
   }

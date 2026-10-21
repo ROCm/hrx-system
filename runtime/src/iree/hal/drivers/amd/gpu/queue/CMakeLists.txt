@@ -11,12 +11,26 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    buffer
+  HDRS
+    "buffer.h"
+  SRCS
+    "buffer.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     transfer
   HDRS
     "transfer.h"
   SRCS
     "transfer.c"
   DEPS
+    ::buffer
     iree::base
     iree::hal
   PUBLIC

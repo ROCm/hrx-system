@@ -929,7 +929,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_atomic_rmw(
 // A 64-bit tick is written into |target_buffer| at |target_offset| after every
 // wait timepoint is reached, and the signal timepoints are published after the
 // write completes. The target must be naturally aligned and permit an 8-byte
-// device write.
+// device write with TRANSFER_TARGET usage.
 //
 // The tick belongs to the timestamp domain published by |queue|'s family.
 // Ticks captured by queues in that family are comparable. HAL exposes no

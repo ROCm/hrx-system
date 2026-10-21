@@ -6,6 +6,8 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/aql/transfer.h"
 
+#include "iree/hal/drivers/amd/gpu/queue/buffer.h"
+
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_transfer_packet(
     uint64_t kernel, uint64_t arguments, uint64_t length, uint32_t header) {
   const uint32_t groups =
@@ -55,13 +57,13 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
       }
     }
     if (copy || download) {
-      status = iree_hal_amd_gpu_transfer_resolve(&operation->source,
-                                                 &arguments.source);
+      status = iree_hal_amd_gpu_buffer_reference_resolve(
+          &operation->source.device, &arguments.source);
       arguments.source += offset;
     }
     if (!download && iree_status_is_ok(status)) {
-      status = iree_hal_amd_gpu_transfer_resolve(&operation->target,
-                                                 &arguments.target);
+      status = iree_hal_amd_gpu_buffer_reference_resolve(
+          &operation->target.device, &arguments.target);
       arguments.target += offset;
     }
     if (iree_status_is_ok(status)) {

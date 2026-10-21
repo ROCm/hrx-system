@@ -394,6 +394,7 @@ iree_runtime_cc_test(
         "dispatch_test.cc",
         "native_test.cc",
         "protocol_test.cc",
+        "timestamp_test.cc",
     ],
     target_compatible_with = select({
         "//runtime/config/hal:driver_amd": [],
