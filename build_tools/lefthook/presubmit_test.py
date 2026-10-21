@@ -1274,6 +1274,14 @@ class PresubmitTest(unittest.TestCase):
             "//build_tools/bazel/test:all",
         )
 
+    def test_bazel_source_label_for_path_preserves_package_relative_path(self):
+        self.assertEqual(
+            presubmit.bazel_source_label_for_path(
+                "build_tools/bazel/test/cc_benchmark_smoke_test_fixture.c"
+            ),
+            "//build_tools/bazel/test:cc_benchmark_smoke_test_fixture.c",
+        )
+
     def test_clang_tidy_skips_on_windows(self):
         output = io.StringIO()
         with (
@@ -1336,7 +1344,7 @@ class PresubmitTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("[fail] clang-tidy", output.getvalue())
 
-    def test_clang_tidy_runs_bazel_package_for_candidate_file(self):
+    def test_clang_tidy_runs_cross_package_compiling_owner_for_source(self):
         with (
             mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.object(
@@ -1345,6 +1353,11 @@ class PresubmitTest(unittest.TestCase):
             mock.patch.object(
                 presubmit, "clang_tidy_llvm_available", return_value=True
             ),
+            mock.patch.object(
+                presubmit,
+                "query_compiling_targets_for_sources",
+                return_value=["//consumer/package:smoke_test"],
+            ) as owner_query,
             mock.patch.object(
                 presubmit, "run_command", return_value=True
             ) as run_command,
@@ -1359,14 +1372,25 @@ class PresubmitTest(unittest.TestCase):
             )
 
         self.assertTrue(ok)
+        owner_query.assert_called_once_with(
+            "bazel",
+            source_labels={
+                "//build_tools/bazel/test:cc_benchmark_smoke_test_fixture.c"
+            },
+            target_patterns=presubmit.CLANG_TIDY_OWNER_TARGET_PATTERNS,
+            cwd=presubmit.REPO_ROOT,
+            env=None,
+        )
         command = run_command.call_args.args[0]
         self.assertNotIn("--keep_going", command)
+        self.assertIn("--skip_incompatible_explicit_targets", command)
         self.assertNotIn("--//libamdf/config:enabled=true", command)
         self.assertNotIn("--//libamdf/config:enabled=false", command)
         self.assertIn(
             f"--output_groups={presubmit.CLANG_TIDY_LOCAL_OUTPUT_GROUP}", command
         )
-        self.assertIn("//build_tools/bazel/test:all", command)
+        self.assertIn("//consumer/package:smoke_test", command)
+        self.assertNotIn("//build_tools/bazel/test:all", command)
 
     def test_libamdf_clang_tidy_routes_and_enables_optional_package(self):
         source_path = "libamdf/src/allocator.c"
@@ -1386,6 +1410,11 @@ class PresubmitTest(unittest.TestCase):
                 mock.patch.object(presubmit.sys, "platform", "linux"),
                 mock.patch.object(
                     presubmit, "clang_tidy_llvm_available", return_value=True
+                ),
+                mock.patch.object(
+                    presubmit,
+                    "query_compiling_targets_for_sources",
+                    return_value=["//libamdf/src:allocator"],
                 ),
                 mock.patch.object(
                     presubmit, "run_command", return_value=True
@@ -1408,7 +1437,7 @@ class PresubmitTest(unittest.TestCase):
 
         command = run_command.call_args.args[0]
         self.assertIn("--//libamdf/config:enabled=true", command)
-        self.assertEqual(command[-1], "//libamdf/src:all")
+        self.assertEqual(command[-1], "//libamdf/src:allocator")
 
     def test_clang_tidy_runtime_fix_preserves_configured_libamdf_enablement(self):
         command = presubmit.clang_tidy_bazel_command(
@@ -1421,7 +1450,7 @@ class PresubmitTest(unittest.TestCase):
         self.assertNotIn("--//libamdf/config:enabled=false", command)
         self.assertIn("--aspects_parameters=emit_fixes=true", command)
 
-    def test_clang_tidy_ci_runs_bazel_packages_keep_going(self):
+    def test_clang_tidy_ci_runs_compiling_targets_keep_going(self):
         with (
             mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.object(
@@ -1429,6 +1458,11 @@ class PresubmitTest(unittest.TestCase):
             ),
             mock.patch.object(
                 presubmit, "clang_tidy_llvm_available", return_value=True
+            ),
+            mock.patch.object(
+                presubmit,
+                "query_compiling_targets_for_sources",
+                return_value=["//consumer/package:smoke_test"],
             ),
             mock.patch.object(
                 presubmit, "run_command", return_value=True
@@ -1449,7 +1483,38 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(
             f"--output_groups={presubmit.CLANG_TIDY_LOCAL_OUTPUT_GROUP}", command
         )
-        self.assertIn("//build_tools/bazel/test:all", command)
+        self.assertIn("//consumer/package:smoke_test", command)
+
+    def test_clang_tidy_fails_when_compiling_owner_query_fails(self):
+        output = io.StringIO()
+        with (
+            contextlib.redirect_stdout(output),
+            mock.patch.object(presubmit.sys, "platform", "linux"),
+            mock.patch.object(
+                presubmit, "CLANG_TIDY_PATH_PREFIXES", ("build_tools/bazel/test/",)
+            ),
+            mock.patch.object(
+                presubmit, "clang_tidy_llvm_available", return_value=True
+            ),
+            mock.patch.object(
+                presubmit,
+                "query_compiling_targets_for_sources",
+                side_effect=presubmit.BazelSourceOwnerQueryError("query failed"),
+            ),
+            mock.patch.object(presubmit, "run_command") as run_command,
+        ):
+            ok = presubmit.run_clang_tidy(
+                input_scope(
+                    ["build_tools/bazel/test/cc_benchmark_smoke_test_fixture.c"]
+                ),
+                profile="paranoid",
+                lane="bazel",
+                verbose=False,
+            )
+
+        self.assertFalse(ok)
+        run_command.assert_not_called()
+        self.assertIn("query failed", output.getvalue())
 
     def test_clang_tidy_base_implementation_scope_stays_bounded(self):
         inputs = input_scope(

@@ -39,7 +39,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from build_tools.devtools import project_presubmit
-from build_tools.devtools.bazel import clang_tidy_configuration_args
+from build_tools.devtools.bazel import (
+    BazelSourceOwnerQueryError,
+    clang_tidy_configuration_args,
+    query_compiling_targets_for_sources,
+)
 from build_tools.devtools.source_lock import (
     NonEmptyTrackedFileSnapshot,
     source_mutation_lock,
@@ -129,6 +133,12 @@ CLANG_TIDY_LOCAL_OUTPUT_GROUP = "iree_clang_tidy_local_reports"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
 CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES + ("loom/binding/c/",)
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
+CLANG_TIDY_OWNER_TARGET_PATTERNS = (
+    "//runtime/...",
+    "//loom/...",
+    "//libamdf/...",
+    "//libhrx/...",
+)
 CLANG_TIDY_CONFIG = REPO_ROOT / "build_tools/clang_tidy/clang_tidy_config.yaml"
 CLANG_TIDY_CMAKE_BUILD_DIR = REPO_ROOT / ".tmp" / "iree-clang-tidy-plugin"
 CLANG_TIDY_FIXES_ROOT = "iree-clang-tidy-fixes"
@@ -1273,6 +1283,20 @@ def bazel_package_target_for_path(path: str) -> str | None:
     return None
 
 
+def bazel_source_label_for_path(path: str) -> str | None:
+    source_path = REPO_ROOT / path
+    current = source_path.parent
+    while current != current.parent:
+        if (current / "BUILD.bazel").is_file() or (current / "BUILD").is_file():
+            package = current.relative_to(REPO_ROOT).as_posix()
+            source_name = source_path.relative_to(current).as_posix()
+            return f"//{package}:{source_name}" if package else f"//:{source_name}"
+        if current == REPO_ROOT:
+            break
+        current = current.parent
+    return None
+
+
 def semgrep_jobs() -> int:
     configured_jobs = os.environ.get("IREE_SEMGREP_JOBS")
     if configured_jobs:
@@ -1897,6 +1921,7 @@ def clang_tidy_bazel_command(
         )
     command += [
         CLANG_TIDY_REPO_ENV,
+        "--skip_incompatible_explicit_targets",
         *clang_tidy_configuration_args(targets),
         *project_presubmit.bazel_config_args(),
         f"--aspects={CLANG_TIDY_ASPECT}",
@@ -2459,7 +2484,7 @@ def run_clang_tidy_cmake(
 def run_clang_tidy_bazel_fix(
     *,
     candidate_files: list[str],
-    package_targets: list[str],
+    analysis_targets: list[str],
     profile: str,
     verbose: bool,
     local_outputs: bool,
@@ -2480,7 +2505,7 @@ def run_clang_tidy_bazel_fix(
     try:
         ok = run_command(
             clang_tidy_bazel_command(
-                package_targets,
+                analysis_targets,
                 keep_going=True,
                 build_events_path=build_events_path,
                 emit_fixes=True,
@@ -2514,7 +2539,7 @@ def run_clang_tidy_bazel_fix(
             return (
                 run_command(
                     clang_tidy_bazel_command(
-                        package_targets,
+                        analysis_targets,
                         keep_going=profile == "ci",
                         local_outputs=local_outputs,
                     ),
@@ -2538,7 +2563,7 @@ def run_clang_tidy_bazel_fix(
 
         return run_command(
             clang_tidy_bazel_command(
-                package_targets,
+                analysis_targets,
                 keep_going=profile == "ci",
                 local_outputs=local_outputs,
             ),
@@ -2614,22 +2639,68 @@ def run_clang_tidy(
             and ok
         )
 
-    package_targets = unique_paths(
-        [
-            target
-            for target in (
-                bazel_package_target_for_path(path) for path in candidate_files
+    if clang_tidy_uses_full_scope(inputs):
+        analysis_targets = unique_paths(
+            [
+                target
+                for target in (
+                    bazel_package_target_for_path(path) for path in candidate_files
+                )
+                if target is not None
+            ]
+        )
+    else:
+        translation_unit_labels = {
+            label
+            for label in (
+                bazel_source_label_for_path(path)
+                for path in candidate_files
+                if Path(path).suffix in CLANG_TIDY_TRANSLATION_UNIT_EXTENSIONS
             )
-            if target is not None
-        ]
-    )
-    if package_targets:
+            if label is not None
+        }
+        owner_query_start = time.monotonic()
+        if translation_unit_labels:
+            print("[run] Resolve clang-tidy compiling targets")
+            sys.stdout.flush()
+        try:
+            analysis_targets = query_compiling_targets_for_sources(
+                "bazel",
+                source_labels=translation_unit_labels,
+                target_patterns=CLANG_TIDY_OWNER_TARGET_PATTERNS,
+                cwd=REPO_ROOT,
+                env=None,
+            )
+        except (BazelSourceOwnerQueryError, ValueError) as exc:
+            print(f"[fail] clang-tidy: {exc}")
+            return False
+        if translation_unit_labels:
+            print(
+                "[ok] Resolve clang-tidy compiling targets "
+                f"({format_duration(time.monotonic() - owner_query_start)}, "
+                f"{len(analysis_targets)} target(s))"
+            )
+        analysis_targets = unique_paths(
+            [
+                *analysis_targets,
+                *[
+                    target
+                    for target in (
+                        bazel_package_target_for_path(path)
+                        for path in candidate_files
+                        if Path(path).suffix in CLANG_TIDY_HEADER_EXTENSIONS
+                    )
+                    if target is not None
+                ],
+            ]
+        )
+    if analysis_targets:
         local_outputs = True
         if fix:
             ok = (
                 run_clang_tidy_bazel_fix(
                     candidate_files=candidate_files,
-                    package_targets=package_targets,
+                    analysis_targets=analysis_targets,
                     profile=profile,
                     verbose=verbose,
                     local_outputs=local_outputs,
@@ -2640,7 +2711,7 @@ def run_clang_tidy(
             ok = (
                 run_command(
                     clang_tidy_bazel_command(
-                        package_targets,
+                        analysis_targets,
                         keep_going=profile == "ci",
                         local_outputs=local_outputs,
                     ),
@@ -2650,7 +2721,7 @@ def run_clang_tidy(
                 and ok
             )
     elif candidate_files:
-        ok = skip_step("clang-tidy", "no owning Bazel packages for inputs") and ok
+        ok = skip_step("clang-tidy", "no compiling Bazel targets for inputs") and ok
     return ok
 
 

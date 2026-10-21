@@ -24,6 +24,84 @@ from build_tools.devtools import bazel as bazel_dev
 
 
 class BazelTest(unittest.TestCase):
+    def test_source_owner_query_follows_filegroups_and_aliases(self):
+        queries = []
+
+        def run_query(command, **_kwargs):
+            query_path = Path(
+                next(arg for arg in command if arg.startswith("--query_file=")).split(
+                    "=", 1
+                )[1]
+            )
+            queries.append(query_path.read_text(encoding="utf-8"))
+            if len(queries) == 1:
+                output = (
+                    "cc_library rule //consumer:direct_owner\n"
+                    "filegroup rule //source:forwarded_sources\n"
+                    "alias rule //source:source_alias\n"
+                )
+            else:
+                output = (
+                    "cc_test rule //consumer:filegroup_owner\n"
+                    "cc_binary rule //consumer:alias_owner\n"
+                    "filegroup rule //source:forwarded_sources\n"
+                )
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+        with mock.patch.object(bazel_dev, "run_captured", side_effect=run_query):
+            owners = bazel_dev.query_compiling_targets_for_sources(
+                "bazel",
+                source_labels={"//source:exported_test.cc"},
+                target_patterns=("//runtime/...", "//loom/..."),
+                cwd=Path("/repo"),
+                env=None,
+            )
+
+        self.assertEqual(
+            owners,
+            [
+                "//consumer:alias_owner",
+                "//consumer:direct_owner",
+                "//consumer:filegroup_owner",
+            ],
+        )
+        self.assertEqual(len(queries), 2)
+        self.assertIn("let universe = //runtime/... + //loom/... in", queries[0])
+        self.assertIn("//source:exported_test[.]cc(?![A-Za-z0-9_./:+-])", queries[0])
+        self.assertIn("//source:forwarded_sources", queries[1])
+        self.assertIn("//source:source_alias", queries[1])
+
+    def test_source_owner_query_rejects_query_failure(self):
+        with (
+            mock.patch.object(
+                bazel_dev,
+                "run_captured",
+                return_value=subprocess.CompletedProcess(
+                    [], 7, stdout="", stderr="broken package\n"
+                ),
+            ),
+            self.assertRaisesRegex(
+                bazel_dev.BazelSourceOwnerQueryError, "broken package"
+            ),
+        ):
+            bazel_dev.query_compiling_targets_for_sources(
+                "bazel",
+                source_labels={"//source:subject.c"},
+                target_patterns=("//runtime/...",),
+                cwd=Path("/repo"),
+                env=None,
+            )
+
+    def test_source_owner_query_rejects_unsupported_labels(self):
+        with self.assertRaisesRegex(ValueError, "unsupported main-workspace"):
+            bazel_dev.query_compiling_targets_for_sources(
+                "bazel",
+                source_labels={"@other//source:subject.c"},
+                target_patterns=("//runtime/...",),
+                cwd=Path("/repo"),
+                env=None,
+            )
+
     def test_try_dependency_finds_generated_header_before_build(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
