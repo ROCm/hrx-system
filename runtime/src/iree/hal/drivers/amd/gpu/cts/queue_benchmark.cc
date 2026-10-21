@@ -34,6 +34,7 @@ enum class Barriers { kDefault, kExplicitEmpty };
 enum class Timing { kSubmit, kCompletion, kSampledSubmit };
 enum class Capture { kNone, kMetadata, kActive };
 enum class Completion { kBarrier, kSubmission };
+enum class AtomicOperation { kWait, kStore, kAdd };
 
 // KFD's process VM belongs to this fabric throughout the benchmark process.
 // Rows still join and release their devices, queues, and execution storage.
@@ -123,8 +124,10 @@ class NativeQueue {
   }
 
   bool Initialize(benchmark::State& state, size_t producer_count = 1,
-                  size_t buffer_length = 2 * sizeof(uint32_t)) {
-    iree::Status status = InitializeDevice(producer_count, buffer_length);
+                  size_t buffer_length = 2 * sizeof(uint32_t),
+                  iree_hal_atomic_operation_flags_t atomic_operations = 0) {
+    iree::Status status =
+        InitializeDevice(producer_count, buffer_length, atomic_operations);
     if (!status.ok()) {
       state.SkipWithError(status.ToString().c_str());
       return false;
@@ -137,7 +140,9 @@ class NativeQueue {
     return true;
   }
 
-  iree_status_t InitializeDevice(size_t producer_count, size_t buffer_length) {
+  iree_status_t InitializeDevice(
+      size_t producer_count, size_t buffer_length,
+      iree_hal_atomic_operation_flags_t atomic_operations) {
     lanes_.resize(producer_count);
     static ProcessFabric shared;
     IREE_RETURN_IF_ERROR(iree_status_clone(shared.status));
@@ -216,6 +221,7 @@ class NativeQueue {
         .family = family,
         .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
         .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+        .atomics = {.queue = {.system_scope_32 = atomic_operations}},
     };
     const iree_hal_pool_scope_t scope = {
         .family_count = 1,
@@ -619,6 +625,53 @@ class NativeQueue {
     return iree_ok_status();
   }
 
+  // One explicit semaphore edge per scalar command, matching direct dispatch.
+  // The wait observes an already-published value and never needs a CPU
+  // producer.
+  iree_status_t Atomic(AtomicOperation operation, Barriers barriers) {
+    auto& lane = lanes_[0];
+    uint64_t before = lane.epoch, after = before + 1;
+    const iree_hal_semaphore_list_t waits = {before ? 1u : 0u, &lane.timeline,
+                                             &before};
+    const iree_hal_semaphore_list_t signals = {1, &lane.timeline, &after};
+    const iree_hal_barrier_list_t empty = {};
+    const iree_hal_queue_barriers_t explicit_empty = {&empty, &empty};
+    const auto* memory_barriers =
+        barriers == Barriers::kDefault ? nullptr : &explicit_empty;
+    if (operation == AtomicOperation::kWait) {
+      const iree_hal_atomic_wait_params_t params = {
+          .value = lane.expected,
+          .mask = UINT32_MAX,
+          .flags = IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
+          .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      };
+      IREE_RETURN_IF_ERROR(iree_hal_queue_atomic_wait(
+          queue_, waits, signals, lane.output, 0, params, memory_barriers));
+    } else if (operation == AtomicOperation::kStore) {
+      const iree_hal_atomic_store_params_t params = {
+          .value = lane.expected + 1,
+          .flags = IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
+      };
+      IREE_RETURN_IF_ERROR(iree_hal_queue_atomic_store(
+          queue_, waits, signals, lane.output, 0, params, memory_barriers));
+      ++lane.expected;
+    } else {
+      const iree_hal_atomic_rmw_params_t params = {
+          .operand = 1,
+          .flags = IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
+          .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+      };
+      IREE_RETURN_IF_ERROR(iree_hal_queue_atomic_rmw(
+          queue_, waits, signals, lane.output, 0, params, memory_barriers));
+      ++lane.expected;
+    }
+    lane.epoch = after;
+    return iree_ok_status();
+  }
+
   // Readback and numerical checks run after the measured completion boundary.
   iree_status_t CheckTimestamps(std::vector<uint64_t>& ticks,
                                 uint64_t* last_tick) {
@@ -963,6 +1016,75 @@ TIMESTAMP_CASE(AqlCompletion, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, kCompletion,
 TIMESTAMP_CASE(AqlActiveCompletion, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
                kCompletion, IREE_ASYNC_WAIT_FLAG_ACTIVE);
 #undef TIMESTAMP_CASE
+
+// Scope preparation and output checks stay outside timing. Submit rows exclude
+// the final completion wait; completion rows include that exact public signal.
+static void BM_Atomic(benchmark::State& state,
+                      amdf_queue_command_type_t command_type,
+                      AtomicOperation operation, Barriers barriers,
+                      Timing timing) {
+  const size_t count = state.range(0);
+  const auto required =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
+      (operation == AtomicOperation::kWait ? IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT
+       : operation == AtomicOperation::kAdd
+           ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD
+           : 0);
+  NativeQueue queue(command_type);
+  if (!queue.Initialize(state, 1, sizeof(uint32_t), required)) {
+    return;
+  }
+  IREE_CHECK_OK(queue.Atomic(AtomicOperation::kStore, Barriers::kDefault));
+  IREE_CHECK_OK(queue.Wait(0, IREE_ASYNC_WAIT_FLAG_NONE));
+  for (int warmup = 0; warmup < 2; ++warmup) {
+    for (size_t i = 0; i < count; ++i) {
+      IREE_CHECK_OK(queue.Atomic(operation, barriers));
+    }
+    IREE_CHECK_OK(queue.Wait(0, IREE_ASYNC_WAIT_FLAG_NONE));
+    IREE_CHECK_OK(queue.CheckOutput(0));
+  }
+  const uint64_t allocations_before = queue.allocation_count();
+  for (auto _ : state) {
+    for (size_t i = 0; i < count; ++i) {
+      IREE_CHECK_OK(queue.Atomic(operation, barriers));
+    }
+    if (timing == Timing::kSubmit) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.Wait(0, IREE_ASYNC_WAIT_FLAG_NONE));
+    if (timing == Timing::kCompletion) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.CheckOutput(0));
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations() * count);
+  state.counters["host_allocations"] =
+      queue.allocation_count() - allocations_before;
+}
+
+#define ATOMIC_CASE(name, command_type, operation, barriers, timing)           \
+  BENCHMARK_CAPTURE(BM_Atomic, name, command_type, AtomicOperation::operation, \
+                    Barriers::barriers, Timing::timing)                        \
+      ->Arg(1)                                                                 \
+      ->Arg(1000)                                                              \
+      ->Iterations(200)                                                        \
+      ->UseRealTime()
+#define ATOMIC_OPERATION_CASES(prefix, command_type, name, operation)         \
+  ATOMIC_CASE(prefix##name##DefaultSubmit, command_type, operation, kDefault, \
+              kSubmit);                                                       \
+  ATOMIC_CASE(prefix##name##EmptySubmit, command_type, operation,             \
+              kExplicitEmpty, kSubmit);                                       \
+  ATOMIC_CASE(prefix##name##DefaultCompletion, command_type, operation,       \
+              kDefault, kCompletion)
+ATOMIC_OPERATION_CASES(Pm4, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, Wait, kWait);
+ATOMIC_OPERATION_CASES(Pm4, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, Store, kStore);
+ATOMIC_OPERATION_CASES(Pm4, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, Add, kAdd);
+ATOMIC_OPERATION_CASES(Aql, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, Wait, kWait);
+ATOMIC_OPERATION_CASES(Aql, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, Store, kStore);
+ATOMIC_OPERATION_CASES(Aql, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, Add, kAdd);
+#undef ATOMIC_OPERATION_CASES
+#undef ATOMIC_CASE
 
 static void BM_AqlChain(
     benchmark::State& state, bool empty, Timing timing,
