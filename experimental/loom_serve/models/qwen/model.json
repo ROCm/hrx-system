@@ -31,6 +31,7 @@
       "../../motifs/ggml/selection.loom",
       "../../motifs/tensor/grouped_convolution.loom",
       "../../motifs/tensor/matrix.loom",
+      "../../motifs/tensor/rmsnorm.loom",
       "../../motifs/tensor/topk.loom",
       "../../motifs/tensor/random.loom",
       "../../motifs/tensor/sampling.loom",

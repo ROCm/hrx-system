@@ -146,6 +146,7 @@ loom_test(
         "rows": {"case": "@qwen38_greedy_argmax_rows_nontrivial_winner_case_cdna"},
         "tiled": {"case": "@qwen38_greedy_argmax_cross_tile_tie_case_cdna"},
     },
+    deps = ["//experimental/loom_serve/motifs/tensor:rmsnorm"],
 )
 
 loom_library(
@@ -165,7 +166,36 @@ loom_library(
         "kernels/qwen38/linear_split_k.loom",
         "//experimental/loom_serve/motifs/ggml:library",
     ],
-    deps = ["//experimental/loom_serve/motifs/tensor:matrix_fragments"],
+    deps = [
+        "//experimental/loom_serve/motifs/tensor:matrix_fragments",
+        "//experimental/loom_serve/motifs/tensor:rmsnorm",
+    ],
+)
+
+loom_library(
+    name = "rmsnorm_kernels",
+    srcs = [
+        "kernels/qwen38/layer_decode.loom",
+        "kernels/qwen38/layer_prefill.loom",
+        "kernels/qwen38/mtp_prepare.loom",
+        "kernels/qwen38/spans.loom",
+    ],
+    deps = ["//experimental/loom_serve/motifs/tensor:rmsnorm"],
+)
+
+loom_test(
+    name = "rmsnorm_test",
+    srcs = ["tests/rmsnorm.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        SPIRV_VULKAN_HARDWARE_PROFILE,
+    ],
+    deps = [
+        ":rmsnorm_kernels",
+        "//experimental/loom_serve/motifs/tensor:rmsnorm",
+    ],
 )
 
 loom_library(
@@ -586,7 +616,10 @@ loom_test(
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
     ],
-    deps = [":input_records"],
+    deps = [
+        ":input_records",
+        "//experimental/loom_serve/motifs/tensor:rmsnorm",
+    ],
 )
 
 loom_library(

@@ -29,6 +29,12 @@ loom_library(
     visibility = ["//visibility:public"],
 )
 
+loom_library(
+    name = "rmsnorm",
+    srcs = ["rmsnorm.loom"],
+    visibility = ["//visibility:public"],
+)
+
 loom_test(
     name = "layer_gather_test",
     srcs = [

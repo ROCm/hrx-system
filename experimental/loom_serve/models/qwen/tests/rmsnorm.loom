@@ -1,0 +1,268 @@
+kernel.decl @qwen38_rmsnorm_f32_prefill(%row_capacity: index) launch(%rows: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_rmsnorm_f16_prefill(%row_capacity: index) launch(%rows: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_mtp_rmsnorm_concat_embedding_f32_prefill(%row_capacity: index) launch(%rows: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_mtp_rmsnorm_concat_hidden_f32_prefill(%row_capacity: index) launch(%rows: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @normalization.rms_row_f32(%width: index, %threads: index, %input_origin: offset, %output_origin: offset, %output_f16: i1, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+// Sequential F64 reduction is independent of the device's vector packets and
+// workgroup tree. Newton refinement removes the F32 reciprocal-square-root
+// seed's error before computing the F64 reference result.
+func.def @rms_reference(%rows: index, %width: index, %stride: index, %column_offset: index, %half: i1, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %origin = index.constant 0 : offset
+  %zero_float = scalar.constant 0.0 : f64
+  %width_i32 = index.cast %width : index to i32
+  %width_float = scalar.uitofp %width_i32 : i32 to f64
+  %epsilon64 = scalar.extf %epsilon : f32 to f64
+  %inputs = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]xf32>
+  %weights = buffer.view %weight[%origin] : buffer -> view<[%width]xf32>
+  scf.for %row = [%zero to %rows step %one] {
+    %sum = scf.for %column = [%zero to %width step %one](%accumulator = %zero_float : f64) -> (f64) {
+      %value = view.load %inputs[%row, %column] : view<[%rows]x[%width]xf32> -> f32
+      %wide = scalar.extf %value : f32 to f64
+      %square = scalar.mulf %wide, %wide : f64
+      %next = scalar.addf %accumulator, %square : f64
+      scf.yield %next : f64
+    }
+    %mean = scalar.divf %sum, %width_float : f64
+    %biased = scalar.addf %mean, %epsilon64 : f64
+    %seed_input = scalar.fptrunc %biased : f64 to f32
+    %seed = scalar.rsqrtf<afn> %seed_input : f32
+    %seed64 = scalar.extf %seed : f32 to f64
+    %one_half = scalar.constant 0.5 : f64
+    %three_halves = scalar.constant 1.5 : f64
+    %half_input = scalar.mulf %biased, %one_half : f64
+    %inverse = scf.for %iteration = [%zero to %three step %one](%prior = %seed64 : f64) -> (f64) {
+      %square = scalar.mulf %prior, %prior : f64
+      %product = scalar.mulf %half_input, %square : f64
+      %correction = scalar.subf %three_halves, %product : f64
+      %next = scalar.mulf %prior, %correction : f64
+      scf.yield %next : f64
+    }
+    scf.for %column = [%zero to %width step %one] {
+      %value = view.load %inputs[%row, %column] : view<[%rows]x[%width]xf32> -> f32
+      %scale = view.load %weights[%column] : view<[%width]xf32> -> f32
+      %wide = scalar.extf %value : f32 to f64
+      %scale64 = scalar.extf %scale : f32 to f64
+      %normalized = scalar.mulf %wide, %inverse : f64
+      %result64 = scalar.mulf %normalized, %scale64 : f64
+      %result = scalar.fptrunc %result64 : f64 to f32
+      %destination = index.add %column_offset, %column : index
+      scf.if %half {
+        %outputs = buffer.view %output[%origin] : buffer -> view<[%rows]x[%stride]xf16>
+        %rounded = scalar.fptrunc %result : f32 to f16
+        view.store %rounded, %outputs[%row, %destination] : f16, view<[%rows]x[%stride]xf16>
+      } else {
+        %outputs = buffer.view %output[%origin] : buffer -> view<[%rows]x[%stride]xf32>
+        view.store %result, %outputs[%row, %destination] : f32, view<[%rows]x[%stride]xf32>
+      }
+    }
+  }
+  func.return
+}
+
+func.def @prefill_reference(%rows: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %width = index.constant 5120 : index
+  %stride = index.constant 5120 : index
+  %column = index.constant 0 : index
+  %half = scalar.constant 0 : i1
+  func.call @rms_reference(%rows, %width, %stride, %column, %half, %epsilon, %input, %weight, %output) : (index, index, index, index, i1, f32, buffer, buffer, buffer)
+  func.return
+}
+
+func.def @prefill_half_reference(%rows: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %width = index.constant 5120 : index
+  %stride = index.constant 5120 : index
+  %column = index.constant 0 : index
+  %half = scalar.constant 1 : i1
+  func.call @rms_reference(%rows, %width, %stride, %column, %half, %epsilon, %input, %weight, %output) : (index, index, index, index, i1, f32, buffer, buffer, buffer)
+  func.return
+}
+
+func.def @mtp_embedding_reference(%rows: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %width = index.constant 5120 : index
+  %stride = index.constant 10240 : index
+  %column = index.constant 0 : index
+  %half = scalar.constant 0 : i1
+  func.call @rms_reference(%rows, %width, %stride, %column, %half, %epsilon, %input, %weight, %output) : (index, index, index, index, i1, f32, buffer, buffer, buffer)
+  func.return
+}
+
+func.def @mtp_hidden_reference(%rows: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %width = index.constant 5120 : index
+  %stride = index.constant 10240 : index
+  %column = index.constant 5120 : index
+  %half = scalar.constant 0 : i1
+  func.call @rms_reference(%rows, %width, %stride, %column, %half, %epsilon, %input, %weight, %output) : (index, index, index, index, i1, f32, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @decode_row {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(1) : index
+    %epsilon = check.literal value(9.9999999999999995e-07) : f32
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<1x5120xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-2.0 to 2.0) : tensor<5120xf32>
+    %output = check.generate.fill value(-99.0) : tensor<1x5120xf32>
+    check.compare<@qwen38_rmsnorm_f32_prefill, @prefill_reference>[%rows](%rows, %epsilon, %input, %weight, %output) : [index](index, f32, tensor<1x5120xf32>, tensor<5120xf32>, tensor<1x5120xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(different) : tensor<1x5120xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @nonuniform_rows {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(3) : index
+    %epsilon = check.literal value(9.9999999999999995e-07) : f32
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<3x5120xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-2.0 to 2.0) : tensor<5120xf32>
+    %output = check.generate.fill value(-99.0) : tensor<3x5120xf32>
+    check.compare<@qwen38_rmsnorm_f32_prefill, @prefill_reference>[%rows](%rows, %epsilon, %input, %weight, %output) : [index](index, f32, tensor<3x5120xf32>, tensor<5120xf32>, tensor<3x5120xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(different) : tensor<3x5120xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @cohort_rows {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(16) : index
+    %epsilon = check.literal value(9.9999999999999995e-07) : f32
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<16x5120xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-2.0 to 2.0) : tensor<5120xf32>
+    %output = check.generate.fill value(-99.0) : tensor<16x5120xf32>
+    check.compare<@qwen38_rmsnorm_f32_prefill, @prefill_reference>[%rows](%rows, %epsilon, %input, %weight, %output) : [index](index, f32, tensor<16x5120xf32>, tensor<5120xf32>, tensor<16x5120xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(different) : tensor<16x5120xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @full_prefill {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(512) : index
+    %epsilon = check.literal value(9.9999999999999995e-07) : f32
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<512x5120xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-2.0 to 2.0) : tensor<5120xf32>
+    %output = check.generate.fill value(-99.0) : tensor<512x5120xf32>
+    check.compare<@qwen38_rmsnorm_f32_prefill, @prefill_reference>[%rows](%rows, %epsilon, %input, %weight, %output) : [index](index, f32, tensor<512x5120xf32>, tensor<5120xf32>, tensor<512x5120xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(different) : tensor<512x5120xf32>
+    }
+  }
+  check.return
+}
+
+// F32 arithmetic may put an exact midpoint on either side of the final F16
+// rounding boundary. One F16 ULP is the storage contract; F32 comparisons above
+// retain their 1e-6 bound, and the uniform primitive case remains bit-exact.
+check.scenario public @half_output {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(3) : index
+    %epsilon = check.literal value(9.9999999999999995e-07) : f32
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<3x5120xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-2.0 to 2.0) : tensor<5120xf32>
+    %output = check.generate.fill value(-99.0) : tensor<3x5120xf16>
+    check.compare<@qwen38_rmsnorm_f16_prefill, @prefill_half_reference>[%rows](%rows, %epsilon, %input, %weight, %output) : [index](index, f32, tensor<3x5120xf32>, tensor<5120xf32>, tensor<3x5120xf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(0.0009765625) nan(different) : tensor<3x5120xf16>
+    }
+  }
+  check.return
+}
+
+check.scenario public @mtp_embedding_rows {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(3) : index
+    %epsilon = check.literal value(9.9999999999999995e-07) : f32
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<3x5120xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-2.0 to 2.0) : tensor<5120xf32>
+    %output = check.generate.fill value(-99.0) : tensor<3x10240xf32>
+    check.compare<@qwen38_mtp_rmsnorm_concat_embedding_f32_prefill, @mtp_embedding_reference>[%rows](%rows, %epsilon, %input, %weight, %output) : [index](index, f32, tensor<3x5120xf32>, tensor<5120xf32>, tensor<3x10240xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(different) : tensor<3x10240xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @mtp_hidden_rows {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(3) : index
+    %epsilon = check.literal value(9.9999999999999995e-07) : f32
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<3x5120xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-2.0 to 2.0) : tensor<5120xf32>
+    %output = check.generate.fill value(-99.0) : tensor<3x10240xf32>
+    check.compare<@qwen38_mtp_rmsnorm_concat_hidden_f32_prefill, @mtp_hidden_reference>[%rows](%rows, %epsilon, %input, %weight, %output) : [index](index, f32, tensor<3x5120xf32>, tensor<5120xf32>, tensor<3x10240xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(different) : tensor<3x10240xf32>
+    }
+  }
+  check.return
+}
+
+// A different width and workgroup size exercise the shared motif's bank shape.
+kernel.def @small_row() {
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %width = index.constant 1024 : index
+  %threads = index.constant 128 : index
+  %origin = index.constant 0 : offset
+  %half = scalar.constant 0 : i1
+  template.apply<@normalization.rms_row_f32>(%width, %threads, %origin, %origin, %half, %epsilon, %input, %weight, %output) : (index, index, offset, offset, i1, f32, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @small_row_reference(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %rows = index.constant 1 : index
+  %width = index.constant 1024 : index
+  %column = index.constant 0 : index
+  %half = scalar.constant 0 : i1
+  func.call @rms_reference(%rows, %width, %width, %column, %half, %epsilon, %input, %weight, %output) : (index, index, index, index, i1, f32, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @small_width {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %epsilon = check.literal value(9.9999999999999995e-07) : f32
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1.0000000000000001e-05 to 1.0000000000000001e-05) : tensor<1024xf32>
+    %weight = check.generate.iota offset(-1.0) step(0.00390625) period(512) : tensor<1024xf32>
+    %output = check.generate.fill value(-99.0) : tensor<1024xf32>
+    check.compare<@small_row, @small_row_reference>(%epsilon, %input, %weight, %output) : (f32, tensor<1024xf32>, tensor<1024xf32>, tensor<1024xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(different) : tensor<1024xf32>
+    }
+  }
+  check.return
+}
+
+check.case public @zero_decode_row {
+  %epsilon = check.literal value(9.9999999999999995e-07) : f32
+  %input = check.generate.fill value(0.0) : tensor<5120xf32>
+  %weight = check.generate.iota offset(-1.0) step(0.00390625) period(512) : tensor<5120xf32>
+  %output = check.generate.fill value(-99.0) : tensor<5120xf32>
+  kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %input, %weight, %output) : (f32, tensor<5120xf32>, tensor<5120xf32>, tensor<5120xf32>)
+  check.expect.close actual(%output) expected(%input) atol(0.0) rtol(0.0) nan(different) : tensor<5120xf32>
+  check.return
+}

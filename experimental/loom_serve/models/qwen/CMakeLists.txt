@@ -337,6 +337,8 @@ loom_test_module(
     "kernels/qwen38/greedy_argmax_cdna.loom"
     "kernels/qwen38/layer_decode.loom"
     "tests/selection_cdna.loom"
+  LIBRARIES
+    "iree::experimental::loom_serve::motifs::tensor::rmsnorm"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -439,10 +441,114 @@ loom_module(
     "iree::experimental::loom_serve::motifs::ggml::library"
   LIBRARIES
     "iree::experimental::loom_serve::motifs::tensor::matrix_fragments"
+    "iree::experimental::loom_serve::motifs::tensor::rmsnorm"
   MODE merge
   OUTPUT_FORMAT bc
   STRICT_DEPS
 )
+
+loom_module(
+  NAME
+    rmsnorm_kernels
+  SRCS
+    "kernels/qwen38/layer_decode.loom"
+    "kernels/qwen38/layer_prefill.loom"
+    "kernels/qwen38/mtp_prepare.loom"
+    "kernels/qwen38/spans.loom"
+  LIBRARIES
+    "iree::experimental::loom_serve::motifs::tensor::rmsnorm"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
+loom_test_module(
+  NAME
+    rmsnorm_test_module
+  SRCS
+    "tests/rmsnorm.loom"
+  LIBRARIES
+    "::rmsnorm_kernels"
+    "iree::experimental::loom_serve::motifs::tensor::rmsnorm"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    rmsnorm_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::rmsnorm_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    rmsnorm_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::rmsnorm_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+loom_execution_test(
+  NAME
+    rmsnorm_test_execute_spirv_vulkan_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::rmsnorm_test_module"
+  RUNNER_ARGS
+    "--device=vulkan"
+    "--vulkan_validation_layers=false"
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+    "iree-build-requirement=loom.emit.spirv"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.vulkan"
+    "iree-run-requirement=vulkan.resource.device"
+    "runtime-resource=vulkan-device"
+    "loom-execution-profile=spirv_vulkan_hardware"
+    "loom-target-family=spirv"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
 
 loom_module(
   NAME
@@ -2241,6 +2347,7 @@ loom_test_module(
     "tests/mtp_proposal.loom"
   LIBRARIES
     "::input_records"
+    "iree::experimental::loom_serve::motifs::tensor::rmsnorm"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)

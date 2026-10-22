@@ -1,0 +1,58 @@
+template.decl @normalization.rms_row_f32(%width: index, %threads: index, %input_origin: offset, %output_origin: offset, %output_f16: i1, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+// One workgroup normalizes one F32 row with F32 weights. Width and thread count
+// specialize the retained register bank; width is a positive multiple of four
+// times the thread count. The caller supplies nonoverlapping buffers and row
+// origins aligned for four-element accesses. Output may round once to F16.
+// Retaining each input packet across the reduction removes the second input
+// read without adding shared-memory staging or another dispatch.
+template.def<@normalization.rms_row_f32> device @normalization_rms_row_f32(%width: index, %threads: index, %input_origin: offset, %output_origin: offset, %output_f16: i1, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %thread_value = kernel.workitem.id<x> : index
+  %thread = index.assume %thread_value [ge(%thread_value, 0), lt(%thread_value, %threads)] : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %elements_per_packet = index.mul %threads, %four : index
+  %packets = index.div %width, %elements_per_packet : index
+  %origin = index.constant 0 : offset
+  %zero_float = scalar.constant 0.0 : f32
+  %empty = vector.constant 0.0 : vector<[%packets]x4xf32>
+  %zero_sum = vector.constant 0.0 : vector<4xf32>
+  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  %inputs = buffer.view %input_noalias[%input_origin] : buffer -> view<[%width]xf32>
+  %weights = buffer.view %weight_noalias[%origin] : buffer -> view<[%width]xf32>
+  %values, %sums = scf.for %packet = [%zero to %packets step %one](%bank = %empty : vector<[%packets]x4xf32>, %accumulator = %zero_sum : vector<4xf32>) -> (vector<[%packets]x4xf32>, vector<4xf32>) unroll {
+    %ordinal = index.madd %packet, %threads, %thread : index
+    %element = index.mul %ordinal, %four : index
+    %value = vector.load %inputs[%element] : view<[%width]xf32> -> vector<4xf32>
+    %next_bank = vector.insert %value into %bank[%packet] : vector<4xf32>, vector<[%packets]x4xf32>
+    %squares = vector.mulf<reassoc|nnan|ninf|nsz|contract> %value, %value : vector<4xf32>
+    %next_sum = vector.addf<reassoc|nnan|ninf|nsz> %accumulator, %squares : vector<4xf32>
+    scf.yield %next_bank, %next_sum : vector<[%packets]x4xf32>, vector<4xf32>
+  }
+  %thread_sum = vector.reduce<addf> %sums, %zero_float : vector<4xf32>, f32
+  %sum = kernel.workgroup.reduce<addf> %thread_sum : f32
+  %width_i32 = index.cast %width : index to i32
+  %width_float = scalar.uitofp %width_i32 : i32 to f32
+  %mean = scalar.divf<nnan|ninf|nsz|arcp> %sum, %width_float : f32
+  %biased_mean = scalar.addf<nnan|ninf|nsz> %mean, %epsilon : f32
+  %inverse = scalar.rsqrtf<nnan|ninf|nsz|afn> %biased_mean : f32
+  %inverse_vector = vector.splat %inverse : vector<4xf32>
+  scf.for %packet = [%zero to %packets step %one] unroll {
+    %ordinal = index.madd %packet, %threads, %thread : index
+    %element = index.mul %ordinal, %four : index
+    %value = vector.extract %values[%packet] : vector<[%packets]x4xf32> -> vector<4xf32>
+    %scale = vector.load %weights[%element] : view<[%width]xf32> -> vector<4xf32>
+    %normalized = vector.mulf<nnan|ninf|nsz> %value, %inverse_vector : vector<4xf32>
+    %result = vector.mulf<nnan|ninf|nsz> %normalized, %scale : vector<4xf32>
+    scf.if %output_f16 {
+      %outputs = buffer.view %output_noalias[%output_origin] : buffer -> view<[%width]xf16>
+      %rounded = vector.fptrunc %result : vector<4xf32> to vector<4xf16>
+      vector.store %rounded, %outputs[%element] : vector<4xf16>, view<[%width]xf16>
+    } else {
+      %outputs = buffer.view %output_noalias[%output_origin] : buffer -> view<[%width]xf32>
+      vector.store %result, %outputs[%element] : vector<4xf32>, view<[%width]xf32>
+    }
+  }
+  template.return
+}

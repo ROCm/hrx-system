@@ -46,6 +46,16 @@ loom_module(
   STRICT_DEPS
 )
 
+loom_module(
+  NAME
+    rmsnorm
+  SRCS
+    "rmsnorm.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
 loom_test_module(
   NAME
     layer_gather_test_module
