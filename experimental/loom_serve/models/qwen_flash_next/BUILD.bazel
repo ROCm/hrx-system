@@ -8,15 +8,15 @@ load("@rules_python//python:defs.bzl", "py_binary")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
 load(
     "//loom/target/amdgpu:execution_profiles.bzl",
-    "RDNA_HARDWARE_PROFILE",
-    "RDNA_TSAN_PROFILE",
-    "rdna_execution_profile",
+    "AMD_GPU_HARDWARE_PROFILE",
+    "AMD_GPU_TSAN_PROFILE",
+    "amd_gpu_execution_profile",
 )
 
 package(default_visibility = ["//visibility:private"])
 
-RDNA_ACCESS_PROFILE = rdna_execution_profile(
-    name = "rdna_access",
+AMD_GPU_ACCESS_PROFILE = amd_gpu_execution_profile(
+    name = "amd_gpu_access",
     runner_args = ["--sanitizer=access"],
     tags = ["notsan"],
 )
@@ -73,9 +73,9 @@ loom_library(
             "qsa.query_tile": "4",
         },
         execution_profiles = [
-            RDNA_HARDWARE_PROFILE,
-            RDNA_ACCESS_PROFILE,
-        ] + ([RDNA_TSAN_PROFILE] if name in [
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
+        ] + ([AMD_GPU_TSAN_PROFILE] if name in [
             "attention",
             "attention_cache",
         ] else []),
@@ -101,9 +101,9 @@ loom_test(
         "flash_next.token_count": "8",
     },
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -120,9 +120,9 @@ loom_test(
         "qsa.query_tile": "13",
     },
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -133,8 +133,8 @@ loom_test(
     benchmark_smoke = False,
     configs = {"flash_next.token_count": "19"},
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
     ],
     deps = [
         ":q8_reference",
@@ -149,9 +149,9 @@ loom_test(
         benchmark_smoke = False,
         configs = {"flash_next.token_count": str(capacity)},
         execution_profiles = [
-            RDNA_HARDWARE_PROFILE,
-            RDNA_ACCESS_PROFILE,
-            RDNA_TSAN_PROFILE,
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
+            AMD_GPU_TSAN_PROFILE,
         ],
         deps = [":residual_programs"],
     )
@@ -182,9 +182,9 @@ loom_library(
         benchmark_smoke = False,
         configs = {"flash_next.token_count": str(capacity)},
         execution_profiles = [
-            RDNA_HARDWARE_PROFILE,
-            RDNA_ACCESS_PROFILE,
-            RDNA_TSAN_PROFILE,
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
+            AMD_GPU_TSAN_PROFILE,
         ],
         deps = [":residual_programs"],
     )
@@ -214,9 +214,9 @@ loom_library(
             "q8_test.wave_rows": str(wave_rows),
         },
         execution_profiles = [
-            RDNA_HARDWARE_PROFILE,
-            RDNA_ACCESS_PROFILE,
-            RDNA_TSAN_PROFILE,
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
+            AMD_GPU_TSAN_PROFILE,
         ],
         deps = [
             ":q8_matrix",
@@ -241,9 +241,9 @@ loom_library(
         benchmark_smoke = False,
         configs = {"flash_next.token_count": str(capacity)},
         execution_profiles = [
-            RDNA_HARDWARE_PROFILE,
-            RDNA_ACCESS_PROFILE,
-            RDNA_TSAN_PROFILE,
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
+            AMD_GPU_TSAN_PROFILE,
         ],
         deps = [
             ":q8_reference",
@@ -264,8 +264,8 @@ loom_library(
         benchmark_smoke = False,
         configs = {"flash_next.token_count": str(capacity)},
         execution_profiles = [
-            RDNA_HARDWARE_PROFILE,
-            RDNA_ACCESS_PROFILE,
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
         ],
         deps = [
             ":q8_reference",
@@ -285,8 +285,8 @@ loom_test(
     benchmark_smoke = False,
     configs = {"flash_next.token_count": "5"},
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -301,9 +301,9 @@ loom_test(
         "flash_next.verification_width": "8",
     },
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -314,9 +314,9 @@ loom_test(
     benchmark_smoke = False,
     configs = {"flash_next.token_count": "131"},
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -332,9 +332,9 @@ loom_test(
     benchmark_smoke = False,
     configs = {"flash_next.token_count": "67"},
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
     deps = [
         ":quantized_reference",
@@ -355,9 +355,9 @@ loom_test(
             "flash_next.token_count": str(rows + 3),
         },
         execution_profiles = [
-            RDNA_HARDWARE_PROFILE,
-            RDNA_ACCESS_PROFILE,
-            RDNA_TSAN_PROFILE,
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
+            AMD_GPU_TSAN_PROFILE,
         ],
         deps = [
             ":quantized_reference",
@@ -375,8 +375,8 @@ loom_test(
     srcs = ["tests/quantized.loom"],
     benchmark_smoke = False,
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
     ],
     deps = [
         ":quantized_reference",
@@ -396,9 +396,9 @@ loom_test(
         "flash_next.token_count": "2",
     },
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -412,9 +412,9 @@ loom_test(
     benchmark_smoke = False,
     configs = {"flash_next.token_count": "133"},
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -425,8 +425,8 @@ loom_test(
     benchmark_smoke = False,
     configs = {"flash_next.token_count": "3"},
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -441,8 +441,8 @@ loom_test(
         "flash_next.verification_width": "4",
     },
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -456,9 +456,9 @@ loom_test(
         "flash_next.token_count": "16",
     },
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
-        RDNA_TSAN_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
@@ -475,8 +475,8 @@ loom_test(
         "flash_next.verification_width": "4",
     },
     execution_profiles = [
-        RDNA_HARDWARE_PROFILE,
-        RDNA_ACCESS_PROFILE,
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
     ],
     deps = [":residual_programs"],
 )
