@@ -1,0 +1,78 @@
+template.decl @ggml.qk.unsigned_q8_1_dot(%codes: vector<16xi8>, %scale: f32, %minimum: f32, %values: vector<16xi8>, %d: f32, %s: f32) -> (f32)
+
+// Every nonnegative seven-bit code paired with every signed activation byte.
+// This includes both K-quant code domains and the signed activation extremes.
+kernel.def @qk_dot_domain() {
+  %one = index.constant 1 : index
+  %groups = index.constant 256 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%codes: buffer, %values: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %threads = index.constant 128 : index
+  %value_count = index.constant 256 : index
+  %row = index.madd %group, %threads, %thread : index
+  %code_index = index.div %row, %value_count : index
+  %value_index = index.rem %row, %value_count : index
+  %code_view = buffer.view %codes[%origin] : buffer -> view<128xi8>
+  %value_view = buffer.view %values[%origin] : buffer -> view<256xi8>
+  %output_view = buffer.view %output[%origin] : buffer -> view<32768xf32>
+  %code = view.load %code_view[%code_index] : view<128xi8> -> i8
+  %value = view.load %value_view[%value_index] : view<256xi8> -> i8
+  %code_vector = vector.splat %code : vector<16xi8>
+  %value_vector = vector.splat %value : vector<16xi8>
+  %value_float = scalar.sitofp %value : i8 to f32
+  %scale = scalar.constant 0.125 : f32
+  %minimum = scalar.constant 0.03125 : f32
+  %d = scalar.constant 0.25 : f32
+  %sum_scale = scalar.constant 8.0 : f32
+  %s = scalar.mulf %sum_scale, %value_float : f32
+  %dot = template.apply<@ggml.qk.unsigned_q8_1_dot>(%code_vector, %scale, %minimum, %value_vector, %d, %s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+  view.store %dot, %output_view[%row] : f32, view<32768xf32>
+  kernel.return
+}
+
+// Algebraic scalar oracle: 16 * code * value * 0.125 * 0.25, minus
+// half the block minimum correction 0.03125 * (32 * value * 0.25).
+func.def @qk_dot_domain_reference(%codes: buffer, %values: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %code_count = index.constant 128 : index
+  %value_count = index.constant 256 : index
+  %code_view = buffer.view %codes[%origin] : buffer -> view<128xi8>
+  %value_view = buffer.view %values[%origin] : buffer -> view<256xi8>
+  %output_view = buffer.view %output[%origin] : buffer -> view<32768xf32>
+  %half = scalar.constant 0.5 : f32
+  %eighth = scalar.constant 0.125 : f32
+  scf.for %code_index = [%zero to %code_count step %one] {
+    %code = view.load %code_view[%code_index] : view<128xi8> -> i8
+    %code_float = scalar.uitofp %code : i8 to f32
+    %scaled_code = scalar.mulf %code_float, %half : f32
+    scf.for %value_index = [%zero to %value_count step %one] {
+      %value = view.load %value_view[%value_index] : view<256xi8> -> i8
+      %value_float = scalar.sitofp %value : i8 to f32
+      %product = scalar.mulf %scaled_code, %value_float : f32
+      %correction = scalar.mulf %eighth, %value_float : f32
+      %result = scalar.subf %product, %correction : f32
+      %row = index.madd %code_index, %value_count, %value_index : index
+      view.store %result, %output_view[%row] : f32, view<32768xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @qk_dot_domain_check {
+  check.requires<hal.amdgpu.target> {targets = ["gfx9-4-generic", "gfx11-generic"]}
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %codes = check.generate.iota offset(0) step(1) : tensor<128xi8>
+    %values = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %output = check.generate.fill value(-99.0) : tensor<32768xf32>
+    check.compare<@qk_dot_domain, @qk_dot_domain_reference>(%codes, %values, %output) : (tensor<128xi8>, tensor<256xi8>, tensor<32768xf32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<32768xf32>
+    }
+  }
+  check.return
+}
