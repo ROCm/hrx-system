@@ -344,8 +344,8 @@ static iree_status_t iree_hal_amdxdna_record_direct_command(
   }
   if (completion_batch) {
     if (!iree_status_is_ok(status)) {
-      iree_hal_amdxdna_completion_batch_record_error(completion_batch,
-                                                     iree_status_clone(status));
+      iree_hal_amdxdna_completion_batch_record_command_error(
+          completion_batch, iree_status_clone(status));
       iree_status_ignore(status);
     }
     if (command_buffer) {
@@ -621,8 +621,8 @@ static iree_status_t iree_hal_amdxdna_queue_execute_apply(
   }
   if (completion_batch) {
     if (!iree_status_is_ok(status)) {
-      iree_hal_amdxdna_completion_batch_record_error(completion_batch,
-                                                     iree_status_clone(status));
+      iree_hal_amdxdna_completion_batch_record_command_error(
+          completion_batch, iree_status_clone(status));
       iree_status_ignore(status);
     }
     if (direct_command_buffer) {
@@ -637,9 +637,15 @@ static iree_status_t iree_hal_amdxdna_queue_execute_apply(
 }
 
 static iree_status_t iree_hal_amdxdna_queue_execute_submit_error_batch(
-    iree_hal_amdxdna_queue_execute_op_t* op, iree_status_t status) {
+    iree_hal_amdxdna_queue_execute_op_t* op, iree_status_t status,
+    bool command_scoped) {
   if (!op || !op->completion_batch) return status;
-  iree_hal_amdxdna_completion_batch_record_error(op->completion_batch, status);
+  if (command_scoped) {
+    iree_hal_amdxdna_completion_batch_record_command_error(op->completion_batch,
+                                                           status);
+  } else {
+    iree_hal_amdxdna_completion_batch_record_error(op->completion_batch, status);
+  }
   iree_status_t submit_status =
       iree_hal_amdxdna_completion_batch_submit(op->completion_batch);
   op->completion_batch = NULL;
@@ -649,7 +655,8 @@ static iree_status_t iree_hal_amdxdna_queue_execute_submit_error_batch(
 static iree_status_t iree_hal_amdxdna_queue_execute_wait_failure_fn(
     void* user_data, iree_status_t status) {
   return iree_hal_amdxdna_queue_execute_submit_error_batch(
-      (iree_hal_amdxdna_queue_execute_op_t*)user_data, status);
+      (iree_hal_amdxdna_queue_execute_op_t*)user_data, status,
+      /*command_scoped=*/false);
 }
 
 static iree_status_t iree_hal_amdxdna_queue_execute_op_fn(void* user_data) {
@@ -667,7 +674,8 @@ static iree_status_t iree_hal_amdxdna_queue_execute_op_fn(void* user_data) {
   }
   bool completion_submitted = false;
   if (!iree_status_is_ok(status)) {
-    status = iree_hal_amdxdna_queue_execute_submit_error_batch(op, status);
+    status = iree_hal_amdxdna_queue_execute_submit_error_batch(
+        op, status, /*command_scoped=*/true);
     completion_submitted = true;
   }
   if (iree_status_is_ok(status)) {
@@ -750,7 +758,7 @@ static iree_status_t iree_hal_amdxdna_device_queue_execute(
         } else if (op->completion_batch) {
           iree_status_t enqueue_status = status;
           iree_status_ignore(iree_hal_amdxdna_queue_execute_submit_error_batch(
-              op, iree_status_clone(status)));
+              op, iree_status_clone(status), /*command_scoped=*/true));
           status = enqueue_status;
         }
       }
@@ -1359,9 +1367,15 @@ iree_hal_amdxdna_queue_dispatch_op_retain(
 static void iree_hal_amdxdna_queue_dispatch_op_cleanup(void* user_data);
 
 static iree_status_t iree_hal_amdxdna_queue_dispatch_submit_error_batch(
-    iree_hal_amdxdna_queue_dispatch_op_t* op, iree_status_t status) {
+    iree_hal_amdxdna_queue_dispatch_op_t* op, iree_status_t status,
+    bool command_scoped) {
   if (!op || !op->completion_batch) return status;
-  iree_hal_amdxdna_completion_batch_record_error(op->completion_batch, status);
+  if (command_scoped) {
+    iree_hal_amdxdna_completion_batch_record_command_error(op->completion_batch,
+                                                           status);
+  } else {
+    iree_hal_amdxdna_completion_batch_record_error(op->completion_batch, status);
+  }
   iree_status_t submit_status =
       iree_hal_amdxdna_completion_batch_submit(op->completion_batch);
   op->completion_batch = NULL;
@@ -1371,7 +1385,8 @@ static iree_status_t iree_hal_amdxdna_queue_dispatch_submit_error_batch(
 static iree_status_t iree_hal_amdxdna_queue_dispatch_wait_failure_fn(
     void* user_data, iree_status_t status) {
   return iree_hal_amdxdna_queue_dispatch_submit_error_batch(
-      (iree_hal_amdxdna_queue_dispatch_op_t*)user_data, status);
+      (iree_hal_amdxdna_queue_dispatch_op_t*)user_data, status,
+      /*command_scoped=*/false);
 }
 
 static iree_status_t iree_hal_amdxdna_apply_dispatch_plan(
@@ -1412,7 +1427,8 @@ static iree_status_t iree_hal_amdxdna_queue_dispatch_op_fn(void* user_data) {
   }
   bool completion_submitted = false;
   if (!iree_status_is_ok(status)) {
-    status = iree_hal_amdxdna_queue_dispatch_submit_error_batch(op, status);
+    status = iree_hal_amdxdna_queue_dispatch_submit_error_batch(
+        op, status, /*command_scoped=*/true);
     completion_submitted = true;
   }
   if (iree_status_is_ok(status)) {
@@ -1603,7 +1619,7 @@ static iree_status_t iree_hal_amdxdna_device_queue_dispatch(
         op = NULL;  // async queue owns op.
       } else if (op->completion_batch) {
         iree_status_t enqueue_status = status;
-        iree_hal_amdxdna_completion_batch_record_error(
+        iree_hal_amdxdna_completion_batch_record_command_error(
             op->completion_batch, iree_status_clone(status));
         iree_status_ignore(
             iree_hal_amdxdna_completion_batch_submit(op->completion_batch));

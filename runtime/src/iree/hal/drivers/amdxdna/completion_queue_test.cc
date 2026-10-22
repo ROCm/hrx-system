@@ -289,6 +289,50 @@ TEST(CompletionQueueTest, PublishedEmptyBatchFailsAfterRecordedError) {
   iree_async_proactor_release(proactor);
 }
 
+// A command that fails while it is being built must surface on this timeline
+// point without failing the semaphore. A failed semaphore rejects every later
+// wait, including the next request's buffer allocation.
+TEST(CompletionQueueTest, CommandBuildErrorDoesNotFailLaterWaits) {
+  iree_async_proactor_t* proactor = CreateProactor();
+  iree_hal_semaphore_t* semaphore = CreateSemaphore(proactor, 0);
+  iree_hal_semaphore_t* semaphores[] = {semaphore};
+  uint64_t values[] = {1};
+
+  iree_hal_amdxdna_completion_queue_t* queue = nullptr;
+  IREE_CHECK_OK(iree_hal_amdxdna_completion_queue_create(
+      iree_allocator_system(), &queue));
+  iree_hal_amdxdna_completion_batch_t* batch = nullptr;
+  IREE_CHECK_OK(iree_hal_amdxdna_completion_batch_create(
+      queue, MakeSemaphoreList(semaphores, values, IREE_ARRAYSIZE(semaphores)),
+      &batch));
+  iree_hal_amdxdna_completion_batch_publish_signals(batch);
+  iree_hal_amdxdna_completion_batch_record_command_error(
+      batch, iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "amdxdna native BO allocation failed"));
+
+  iree_status_t status = iree_hal_amdxdna_completion_batch_submit(batch);
+  EXPECT_TRUE(iree_status_is_deferred(status));
+  iree_status_ignore(status);
+
+  status = iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
+                                   IREE_ASYNC_WAIT_FLAG_NONE);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_RESOURCE_EXHAUSTED);
+  iree_status_free(status);
+
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &value));
+  EXPECT_EQ(value, 1ull);
+
+  status = iree_hal_semaphore_wait(semaphore, 2, iree_immediate_timeout(),
+                                   IREE_ASYNC_WAIT_FLAG_NONE);
+  EXPECT_TRUE(iree_status_is_deadline_exceeded(status));
+  iree_status_free(status);
+
+  iree_hal_amdxdna_completion_queue_destroy(queue);
+  iree_hal_semaphore_release(semaphore);
+  iree_async_proactor_release(proactor);
+}
+
 TEST(CompletionQueueTest, WorkerOwnedBatchWakesMultipleWaitersOnce) {
   iree_async_proactor_t* proactor = CreateProactor();
   iree_hal_semaphore_t* semaphore = CreateSemaphore(proactor, 0);

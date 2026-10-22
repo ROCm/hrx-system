@@ -50,12 +50,12 @@ int import_fd_checked(pid_t pid, int ehdl, int* out_fd) {
 #endif
 }
 
-// Device memory heap needs to be within one 64MB page. The maximum size is
-// 64MB. The native backend publishes this allocation-domain budget so retained
-// command code and context images can be bounded without a KMD free-space
-// query. KMQ (AIE2P) allocates the heap on open; UMQ/AIE4 does not — XRT's
-// pdev_umq::on_first_open is a no-op and the 2.26 driver rejects DEV_HEAP.
-const size_t dev_mem_size = (64 << 20);
+// The committed KMQ heap starts as one 64 MiB DEV_HEAP chunk (AIE2_DEVM_SIZE).
+// NPU4's driver allows that heap to grow to 512 MiB (AIE2_DEVM_MAX_SIZE). A
+// DEV BO that does not fit the committed chunks returns EAGAIN, and XRT's
+// shim adds another 64 MiB chunk and retries. UMQ/AIE4 has no DEV heap.
+constexpr size_t kDevHeapChunkBytes = 64ull << 20;
+constexpr size_t kDevHeapMaxBytes = 512ull << 20;
 
 std::mutex shared_pdev_mutex;
 std::map<std::filesystem::path, std::weak_ptr<shim_xdna::pdev>> shared_pdevs;
@@ -225,13 +225,35 @@ int pdev::open_device(const std::filesystem::path& device_path) {
     SHIM_DEBUG("UMQ/AIE4 device: skipping DEV_HEAP");
     return 0;
   }
-  int err =
-      bo::create(*this, dev_mem_size, AMDXDNA_BO_DEV_HEAP, &m_dev_heap_bo);
+  // Reserve a contiguous VA so later chunks can be MAP_FIXED immediately
+  // after this one. The kernel rejects a heap whose chunk UVAs are not
+  // contiguous (EINVAL from amdxdna_init_dev_bo).
+  const size_t reserve_span = kDevHeapMaxBytes + kDevHeapChunkBytes;
+  void* raw = ::mmap(nullptr, reserve_span, PROT_NONE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (raw == MAP_FAILED) {
+    int map_err = errno;
+    ::close(m_dev_fd);
+    m_dev_fd = -1;
+    return map_err;
+  }
+  const uintptr_t aligned =
+      (reinterpret_cast<uintptr_t>(raw) + kDevHeapChunkBytes - 1) &
+      ~(static_cast<uintptr_t>(kDevHeapChunkBytes) - 1);
+  m_heap_raw = raw;
+  m_heap_raw_size = reserve_span;
+  m_heap_base = reinterpret_cast<void*>(aligned);
+  int err = bo::create_fixed(*this, kDevHeapChunkBytes, AMDXDNA_BO_DEV_HEAP,
+                             m_heap_base, &m_dev_heap_bo);
   if (err) {
+    ::munmap(m_heap_raw, m_heap_raw_size);
+    m_heap_raw = nullptr;
+    m_heap_base = nullptr;
     ::close(m_dev_fd);
     m_dev_fd = -1;
     return err;
   }
+  m_heap_committed = kDevHeapChunkBytes;
   SHIM_DEBUG("Created KMQ pcidev");
   return 0;
 }
@@ -241,7 +263,14 @@ int pdev::init_errno() const { return m_init_errno; }
 pdev::~pdev() {
   SHIM_DEBUG("Destroying KMQ pcidev");
   const std::lock_guard<std::mutex> lock(m_lock);
+  m_dev_heap_chunks.clear();
   m_dev_heap_bo.reset();
+  if (m_heap_raw != nullptr) {
+    ::munmap(m_heap_raw, m_heap_raw_size);
+    m_heap_raw = nullptr;
+    m_heap_base = nullptr;
+    m_heap_committed = 0;
+  }
   if (m_dev_fd >= 0) ::close(m_dev_fd);
   SHIM_DEBUG("Device closed, fd=%d", m_dev_fd);
   SHIM_DEBUG("Destroyed KMQ pcidev");
@@ -484,8 +513,37 @@ int device::create_hw_context(const std::vector<uint8_t>& pdi,
   return 0;
 }
 
+int pdev::expand_dev_heap() {
+  if (m_is_aie4 || m_heap_base == nullptr) return EAGAIN;
+  if (m_heap_committed + kDevHeapChunkBytes > kDevHeapMaxBytes) return ENOSPC;
+  void* at = static_cast<char*>(m_heap_base) + m_heap_committed;
+  std::unique_ptr<bo> chunk;
+  int err = bo::create_fixed(*this, kDevHeapChunkBytes, AMDXDNA_BO_DEV_HEAP, at,
+                             &chunk);
+  if (err) return err;
+  m_dev_heap_chunks.push_back(std::move(chunk));
+  m_heap_committed += kDevHeapChunkBytes;
+  SHIM_DEBUG("Expanded DEV heap to %zu bytes", m_heap_committed);
+  return 0;
+}
+
 int device::alloc_bo(uint32_t ctx_id, size_t size, shim_amdxdna_bo_flags flags,
                      std::unique_ptr<bo>* out_bo) {
+  const uint32_t kind = static_cast<uint32_t>(flags.boflags) << 24;
+  const bool dev_bo =
+      kind == AMDXDNA_BO_FLAGS_CACHEABLE && !m_pdev->is_aie4();
+  const std::lock_guard<std::mutex> lock(m_pdev->m_lock);
+  // A single DEV BO larger than one 64 MiB chunk cannot fit the initial
+  // committed heap. Grow by one chunk and retry until it lands or the 512
+  // MiB ceiling is reached. A smaller BO that merely fills the committed
+  // heap stays EAGAIN, so the advertised 64 MiB shared-code budget remains
+  // a hard cap on live instruction buffers.
+  for (int attempt = 0; attempt < 8; ++attempt) {
+    int err = bo::create(*m_pdev, ctx_id, size, flags, out_bo);
+    if (err != EAGAIN || !dev_bo || size <= kDevHeapChunkBytes) return err;
+    int grow = m_pdev->expand_dev_heap();
+    if (grow) return err;
+  }
   return bo::create(*m_pdev, ctx_id, size, flags, out_bo);
 }
 

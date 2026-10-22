@@ -76,7 +76,7 @@ struct bo {
   uint32_t m_owner_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
 
   bo(const pdev& p, uint32_t ctx_id, size_t size, shim_amdxdna_bo_flags flags,
-     amdxdna_bo_type type);
+     amdxdna_bo_type type, void* fixed_map = nullptr);
   bo(const pdev& p, uint32_t ctx_id, size_t size, shim_amdxdna_bo_flags flags);
   bo(const pdev& p, uint32_t ctx_id, size_t size, uint32_t flags);
   bo(const pdev& p, int ehdl);
@@ -96,6 +96,10 @@ struct bo {
                     std::unique_ptr<bo>* out_bo);
   static int create(const pdev& p, size_t size, amdxdna_bo_type type,
                     std::unique_ptr<bo>* out_bo);
+  // DEV_HEAP chunk mapped at a caller-reserved address so successive chunks
+  // have contiguous user VAs.
+  static int create_fixed(const pdev& p, size_t size, amdxdna_bo_type type,
+                          void* fixed_map, std::unique_ptr<bo>* out_bo);
   static int create_imported(const pdev& p, int ehdl,
                              std::unique_ptr<bo>* out_bo);
   int sync(direction, size_t size, size_t offset);

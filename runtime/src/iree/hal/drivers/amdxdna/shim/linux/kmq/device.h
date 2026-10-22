@@ -36,15 +36,26 @@ struct pdev {
   mutable std::mutex m_lock;
   mutable int m_dev_fd = -1;
   mutable std::unique_ptr<bo> m_dev_heap_bo;
+  // Extra 64 MiB DEV_HEAP chunks after the first. XRT grows the committed
+  // heap this way when a DEV BO does not fit (driver returns EAGAIN) up to
+  // the 512 MiB NPU4 maximum. Chunks are mapped contiguously so the kernel's
+  // heap UVA check accepts them.
+  mutable std::vector<std::unique_ptr<bo>> m_dev_heap_chunks;
+  void* m_heap_raw = nullptr;
+  size_t m_heap_raw_size = 0;
+  void* m_heap_base = nullptr;
+  size_t m_heap_committed = 0;
   int m_init_errno = 0;
   bool m_is_aie4 = false;
-  // Live bytes suballocated from the 64 MiB DEV heap (AMDXDNA_BO_DEV), rounded
-  // to the driver's 32 KiB allocation quantum (dev_mem_buf_shift=15) so it mirrors
-  // real drm_mm address-space consumption. Maintained by bo alloc/free so the HAL
-  // sees the driver's real heap occupancy -- HAL instruction BOs plus shim-internal
-  // PDI/command BOs -- and can trim retained caches before the heap fills. Excludes
-  // the 64 MiB DEV_HEAP container BO and non-heap SHMEM/CMD BOs. UMQ/AIE4 has no
-  // DEV heap, so this stays zero there.
+  // Live bytes suballocated from the committed DEV heap (AMDXDNA_BO_DEV),
+  // rounded to the driver's 32 KiB allocation quantum (dev_mem_buf_shift=15).
+  // The committed heap starts as one 64 MiB chunk and grows, when one DEV BO
+  // is larger than that chunk, in 64 MiB steps up to the driver maximum.
+  // Maintained by bo alloc/free so the
+  // HAL sees real drm_mm occupancy -- HAL instruction BOs plus shim-internal
+  // PDI/command BOs -- and can trim retained caches before the heap fills.
+  // Excludes the DEV_HEAP container chunks and non-heap SHMEM/CMD BOs.
+  // UMQ/AIE4 has no DEV heap, so this stays zero there.
   mutable std::atomic<uint64_t> m_dev_heap_used_bytes{0};
 
   pdev();
@@ -53,6 +64,9 @@ struct pdev {
 
   int init_errno() const;
   bool is_aie4() const { return m_is_aie4; }
+  // Add one 64 MiB DEV_HEAP chunk. Caller holds m_lock. Returns 0, or ENOSPC
+  // when the committed heap is already at the 512 MiB driver maximum.
+  int expand_dev_heap();
   int open_device(const std::filesystem::path& device_path);
   // Returns 0 on success or the failing errno for recoverable ioctl failures.
   int try_ioctl(unsigned long cmd, void* arg) const;
@@ -62,9 +76,10 @@ struct pdev {
 
 struct device {
   enum class access_mode : uint8_t { exclusive = 0, shared = 1 };
-  // The KMD permits one process-wide 64 MiB DEV heap. Share its owning device
-  // handle across HAL device instances instead of attempting one heap per
-  // instance.
+  // One process-wide DEV heap, shared across HAL device instances. The
+  // committed heap starts at one 64 MiB chunk and the shim grows it when a
+  // single DEV BO is larger than that chunk. The 64 MiB figure kept by the
+  // HAL is the retained-cache budget, not that maximum.
   std::shared_ptr<pdev> m_pdev;
   uint32_t n_rows;
   uint32_t n_cols;
@@ -85,7 +100,7 @@ struct device {
 
   const pdev& get_pdev() const;
 
-  // Live occupancy of the 64 MiB DEV heap, rounded to the driver's 32 KiB
+  // Live occupancy of the committed DEV heap, rounded to the driver's 32 KiB
   // allocation quantum so it matches the real drm_mm footprint the heap allocator
   // enforces, letting callers bound retained command code/context images against
   // measured pressure regardless of BO size mix.

@@ -53,6 +53,9 @@ struct iree_hal_amdxdna_completion_batch_t {
   iree_atomic_int32_t submitted;
   bool cleanups_ran;
   bool native_signals_published;
+  // Set when |status| was recorded while building this command. The device
+  // has not retired it, so finish() must not fail the timeline semaphore.
+  bool command_error;
   iree_hal_command_buffer_t* retained_command_buffer;
   iree_hal_amdxdna_completion_item_t* item_head;
   iree_hal_amdxdna_completion_item_t** item_tail_link;
@@ -317,8 +320,13 @@ static void iree_hal_amdxdna_completion_batch_finish(
       iree_hal_amdxdna_completion_queue_advance_frontier(batch->queue);
     }
   }
+  // |command_error| covers every status recorded while building this
+  // command, before the device retires it. ERT 5/6/8 cover a command the
+  // scheduler finished. Anything else, including NORESPONSE and queue
+  // shutdown, fails the semaphore.
   if (!iree_status_is_ok(status) &&
-      iree_hal_amdxdna_status_is_command_completion(status)) {
+      (batch->command_error ||
+       iree_hal_amdxdna_status_is_command_completion(status))) {
     // Advance the timeline and hand the command status to the host waiter
     // of this point. Do not fail the semaphore: a failed IREE semaphore
     // rejects every later wait, including buffer allocation.
@@ -563,6 +571,16 @@ void iree_hal_amdxdna_completion_batch_record_error(
   } else {
     iree_status_ignore(status);
   }
+}
+
+void iree_hal_amdxdna_completion_batch_record_command_error(
+    iree_hal_amdxdna_completion_batch_t* batch, iree_status_t status) {
+  if (!batch || iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    return;
+  }
+  if (iree_status_is_ok(batch->status)) batch->command_error = true;
+  iree_hal_amdxdna_completion_batch_record_error(batch, status);
 }
 
 bool iree_hal_amdxdna_completion_batch_has_work(

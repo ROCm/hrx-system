@@ -130,13 +130,15 @@ constexpr uint32_t kSharedCodeMemoryBytes = 64u * 1024u * 1024u;
 // *and* a fresh hardware context can be constructed without tripping the device
 // heap's ENOSPC limit.
 //
-// The heap is a real 64 MiB hardware aperture (AIE2_DEVM_SIZE = SZ_64M at
-// dev_mem_base 0x4000000), sub-allocated by the driver with best-fit drm_mm at a
+// The committed heap starts as one 64 MiB chunk (AIE2_DEVM_SIZE = SZ_64M at
+// dev_mem_base 0x4000000). The driver mm spans up to 512 MiB
+// (AIE2_DEVM_MAX_SIZE); the shim commits further 64 MiB chunks when a DEV BO
+// returns EAGAIN. Sub-allocated by the driver with best-fit drm_mm at a
 // 32 KiB alignment quantum (dev_mem_buf_shift=15 on this NPU4/Strix part). Every
-// AMDXDNA_BO_DEV therefore consumes roundup(size, 32 KiB) of heap address space,
-// so the aperture holds exactly 2048 32 KiB slots. live_dev_heap_bytes() now
-// charges that true 32 KiB quantum, so it is an exact, BO-mix-independent mirror
-// of the driver's drm_mm occupancy (the earlier 4 KiB tally undercounted and was
+// AMDXDNA_BO_DEV therefore consumes roundup(size, 32 KiB) of heap address space.
+// The initial chunk holds 2048 32 KiB slots. live_dev_heap_bytes() charges that
+// true 32 KiB quantum, so it is an exact, BO-mix-independent mirror of the
+// driver's drm_mm occupancy (the earlier 4 KiB tally undercounted and was
 // mix-dependent, which is why the historical reserve had to be inflated to
 // 34 MiB). With exact accounting the reserve is a principled margin, not a fudge:
 //   - 8 MiB  for a context-create + command-build burst (its transient PDI and
@@ -145,8 +147,12 @@ constexpr uint32_t kSharedCodeMemoryBytes = 64u * 1024u * 1024u;
 //   - 8 MiB  best-fit fragmentation / large-BO contiguity headroom (an on-device
 //     fragmentation probe showed scattered frees can cap a single contiguous
 //     alloc even with tens of MiB nominally free).
-// Reserving 16 MiB keeps retained real occupancy <= 48 MiB, i.e. >=16 MiB below
-// the hard 64 MiB ceiling, and the chain cache self-trims idle entries against
+// Reserving 16 MiB keeps retained real occupancy <= 48 MiB of the initial
+// 64 MiB chunk. A single DEV BO larger than the committed heap does not stop
+// here: the shim catches the driver's EAGAIN and commits another 64 MiB
+// chunk, up to 512 MiB, which is how a ~76 MiB instruction buffer is allocated.
+// This 64 MiB figure stays the retained-cache budget. The chain cache
+// self-trims idle entries against
 // this reserve so a new build's first-try allocation succeeds. This is the
 // proactive alternative to the old "allocation failed, drop idle caches and
 // retry" recovery, which we deliberately avoid (it can leave the NPU wedged).

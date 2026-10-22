@@ -92,6 +92,13 @@ iree_status_t iree_hal_amdxdna_completion_batch_add_cleanup(
 void iree_hal_amdxdna_completion_batch_record_error(
     iree_hal_amdxdna_completion_batch_t* batch, iree_status_t status);
 
+// Records an error from constructing this command, before the device has
+// retired it. finish() hands that status to the waiter of this timeline point
+// and still signals, so a later wait is not rejected. Queue shutdown and a
+// failed prior semaphore use record_error and fail the semaphore.
+void iree_hal_amdxdna_completion_batch_record_command_error(
+    iree_hal_amdxdna_completion_batch_t* batch, iree_status_t status);
+
 bool iree_hal_amdxdna_completion_batch_has_work(
     const iree_hal_amdxdna_completion_batch_t* batch);
 

@@ -392,7 +392,7 @@ void bo::free_bo() {
 }
 
 bo::bo(const pdev& pdev, uint32_t ctx_id, size_t size,
-       shim_amdxdna_bo_flags flags, amdxdna_bo_type type)
+       shim_amdxdna_bo_flags flags, amdxdna_bo_type type, void* fixed_map)
     : m_pdev(pdev),
       m_aligned_size(size),
       m_flags(flags),
@@ -406,7 +406,7 @@ bo::bo(const pdev& pdev, uint32_t ctx_id, size_t size,
 
   size_t align = 0;
 
-  if (m_type == AMDXDNA_BO_DEV_HEAP)
+  if (fixed_map == nullptr && m_type == AMDXDNA_BO_DEV_HEAP)
     align = 64 * 1024 * 1024;  // Device mem heap must align at 64MB boundary.
 
   uint32_t boh = AMDXDNA_INVALID_BO_HANDLE;
@@ -423,8 +423,26 @@ bo::bo(const pdev& pdev, uint32_t ctx_id, size_t size,
   m_drm_bo = std::make_unique<drm_bo>(*this, bo_info);
   charge_dev_heap(*this);
 
-  m_init_errno = mmap_bo(align);
-  if (m_init_errno) return;
+  if (fixed_map != nullptr) {
+    void* mapped = nullptr;
+    m_init_errno = map_drm_bo(m_pdev, fixed_map, m_aligned_size,
+                              PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                              m_drm_bo->m_map_offset, &mapped);
+    if (m_init_errno) return;
+    if (mapped != fixed_map) {
+      m_init_errno = EINVAL;
+      return;
+    }
+    m_aligned = mapped;
+    amdxdna_drm_get_bo_info after = {};
+    if (get_drm_bo_info(m_pdev, m_drm_bo->m_handle, &after) == 0) {
+      m_drm_bo->m_xdna_addr = after.xdna_addr;
+      m_drm_bo->m_vaddr = after.vaddr;
+    }
+  } else {
+    m_init_errno = mmap_bo(align);
+    if (m_init_errno) return;
+  }
 
   // Newly allocated buffer may contain dirty pages. If used as output buffer,
   // the data in cacheline will be flushed onto memory and pollute the output
@@ -517,6 +535,18 @@ int bo::create(const pdev& p, size_t size, amdxdna_bo_type type,
                std::unique_ptr<bo>* out_bo) {
   out_bo->reset();
   std::unique_ptr<bo> new_bo = std::make_unique<bo>(p, size, type);
+  int err = new_bo->init_errno();
+  if (err) return err;
+  *out_bo = std::move(new_bo);
+  return 0;
+}
+
+int bo::create_fixed(const pdev& p, size_t size, amdxdna_bo_type type,
+                     void* fixed_map, std::unique_ptr<bo>* out_bo) {
+  out_bo->reset();
+  std::unique_ptr<bo> new_bo = std::make_unique<bo>(
+      p, AMDXDNA_INVALID_CTX_HANDLE, size, shim_amdxdna_bo_flags{}, type,
+      fixed_map);
   int err = new_bo->init_errno();
   if (err) return err;
   *out_bo = std::move(new_bo);
