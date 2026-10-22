@@ -9,6 +9,21 @@ amdgpu.target<gfx9-4-generic> @qwen38_dispatch_cdna
 
 template.decl @qwen38.prefill.projection_schedule(%tokens: index) -> (index)
 
+template.decl @qwen38.prefill.integer_ffn(%tokens: index) -> (i1)
+
+template.def<@qwen38.prefill.integer_ffn> target(@qwen38_dispatch_rdna) @qwen38_prefill_integer_ffn_rdna(%tokens: index) -> (i1) {
+  %enabled = scalar.constant false : i1
+  template.return %enabled : i1
+}
+
+// Wide CDNA epochs amortize one Q8 activation panel across both FFN weights.
+// Smaller cohorts retain their existing floating-point or integer recipes.
+template.def<@qwen38.prefill.integer_ffn> target(@qwen38_dispatch_cdna) @qwen38_prefill_integer_ffn_cdna(%tokens: index) -> (i1) {
+  %wide = index.constant 512 : index
+  %enabled = index.cmp uge, %tokens, %wide : index
+  template.return %enabled : i1
+}
+
 template.def<@qwen38.prefill.projection_schedule> target(@qwen38_dispatch_rdna) @qwen38_prefill_projection_schedule_rdna(%tokens: index) -> (index) {
   template.return %tokens : index
 }
