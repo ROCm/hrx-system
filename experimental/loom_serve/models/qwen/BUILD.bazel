@@ -175,6 +175,23 @@ loom_library(
 )
 
 loom_test(
+    name = "integer_projection_test",
+    srcs = [
+        "kernels/qwen38/linear_integer.loom",
+        "tests/integer_projection.loom",
+        "tests/linear_cohort_oracle.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    variants = {
+        "canonical": {"case": "@integer_projection_canonical_check"},
+        "channel8": {"case": "@integer_projection_channel8_check"},
+        "long": {"case": "@integer_projection_long_check"},
+    },
+    deps = ["//experimental/loom_serve/motifs/ggml:library"],
+)
+
+loom_test(
     name = "command_projection_test",
     srcs = [
         "kernels/qwen38/attention_decode.loom",
