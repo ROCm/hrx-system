@@ -1,3 +1,5 @@
+target.decl @qwen38_execution
+
 kernel.decl @qwen38_gdn_conv_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %qkv: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer)
 
 kernel.decl @qwen38_gdn_recurrent_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
@@ -7,7 +9,7 @@ kernel.decl @qwen38_gdn_recurrent_spans(%span_capacity: index) launch(%epoch: bu
 // traversal or copies the full recurrent state. Known spans are absent from
 // replay, having published in the target traversal. Scratch and captured rows
 // retain original_span*verification_width placement after descriptor compaction.
-command.program.def public @qwen38_gdn_commit_layer(%span_capacity: index, %width: index, %layer: index, %ordinal: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) where [range(%span_capacity, 1, 16), range(%width, 1, 8), range(%layer, 0, 63), range(%ordinal, 0, 47)] {
+command.program.def public target(@qwen38_execution) @qwen38_gdn_commit_layer(%span_capacity: index, %width: index, %layer: index, %ordinal: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) where [range(%span_capacity, 1, 16), range(%width, 1, 8), range(%layer, 0, 63), range(%ordinal, 0, 47)] {
   %transition_bytes = index.constant 41344 : offset
   %qkv_row_bytes = index.constant 40960 : offset
   %gate_row_bytes = index.constant 192 : offset
@@ -51,7 +53,7 @@ command.program.def public @qwen38_gdn_commit_layer(%span_capacity: index, %widt
   command.return
 }
 
-command.program.def public @qwen38_gdn_commit(%span_capacity: index, %width: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) where [range(%span_capacity, 1, 16), range(%width, 1, 8)] {
+command.program.def public target(@qwen38_execution) @qwen38_gdn_commit(%span_capacity: index, %width: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) where [range(%span_capacity, 1, 16), range(%width, 1, 8)] {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index

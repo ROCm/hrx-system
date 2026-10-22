@@ -1,3 +1,5 @@
+target.decl @qwen38_execution
+
 config.decl @runner.qwen38.mixed_inputs : %value: index where [range(%value, 0, 1)]
 
 config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%value, 1, 512)]
@@ -19,7 +21,7 @@ kernel.decl @qwen38_output_normalize_spans(%output_capacity: index) launch(%epoc
 // placement nor changing cardinality moves retained state. Only requested
 // final span rows reach the vocabulary head. The caller consumes output_count
 // IDs; output padding and head grouping are internal to this fixed schedule.
-command.program.def public @qwen38_epoch() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %output_tokens: buffer) {
+command.program.def public target(@qwen38_execution) @qwen38_epoch() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %output_tokens: buffer) {
   %tokens = config.get @runner.qwen38.prefill_token_count : index
   %mixed_inputs = config.get @runner.qwen38.mixed_inputs : index
   %spans = config.get @runner.qwen38.span_capacity : index

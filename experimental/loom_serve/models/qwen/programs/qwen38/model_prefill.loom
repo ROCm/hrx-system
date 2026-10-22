@@ -1,3 +1,5 @@
+target.decl @qwen38_execution
+
 // Qwen3.8-27B base-model prefill body.
 //
 // Four schedule-specialized command programs cover every prompt length through
@@ -32,7 +34,7 @@ kernel.decl @qwen38_capture_feature(%tokens: index) launch(%feature: index, %con
 // The draft consumes post-residual outputs from layers 5, 19, 33, 47 and 61.
 // Layer selection is static program structure; the JIT removes all other taps
 // and removes the entire path when feature capture is disabled.
-command.program.def @qwen38_capture_layer(%tokens: index, %enabled: index, %layer: index) launch(%control: buffer, %residual: buffer) where [range(%tokens, 1, 512), range(%enabled, 0, 1), range(%layer, 0, 63)] {
+command.program.def target(@qwen38_execution) @qwen38_capture_layer(%tokens: index, %enabled: index, %layer: index) launch(%control: buffer, %residual: buffer) where [range(%tokens, 1, 512), range(%enabled, 0, 1), range(%layer, 0, 63)] {
   %c0 = index.constant 0 : index
   %c1_2 = index.constant 1 : index
   %c2_2 = index.constant 2 : index
@@ -70,7 +72,7 @@ command.program.def @qwen38_capture_layer(%tokens: index, %enabled: index, %laye
 // span_capacity zero, control describes one causal span and rows is unused.
 // Otherwise control is an epoch and rows supplies stable resident origins.
 // Dense math and layer order are identical; only stateful dispatches change.
-command.program.def public @qwen38_text_prefill_body_impl(%token_count: index, %schedule_token_count: index, %verification_depth: index, %span_capacity: index, %capture_features: index, %mixed_inputs: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %transition_capture: buffer, %rows: buffer, %input_tokens: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%verification_depth, 0, 8), range(%span_capacity, 0, 64), range(%capture_features, 0, 1), range(%mixed_inputs, 0, 1)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_body_impl(%token_count: index, %schedule_token_count: index, %verification_depth: index, %span_capacity: index, %capture_features: index, %mixed_inputs: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %transition_capture: buffer, %rows: buffer, %input_tokens: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%verification_depth, 0, 8), range(%span_capacity, 0, 64), range(%capture_features, 0, 1), range(%mixed_inputs, 0, 1)] {
   %group_begin = index.constant 0 : index
   %group_end = index.constant 16 : index
   %group_step = index.constant 1 : index
@@ -110,7 +112,7 @@ command.program.def public @qwen38_text_prefill_body_impl(%token_count: index, %
 // Ordinary prefill specializes transition capture away. The small semantic
 // allocation keeps the internal body ABI uniform and is removed with its only
 // uses before command-program allocation planning.
-command.program.def public @qwen38_text_prefill_body(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 1, 512)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_body(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 1, 512)] {
   %verification_depth = index.constant 0 : index
   %transition_bytes = index.constant 165376 : offset
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
@@ -123,7 +125,7 @@ command.program.def public @qwen38_text_prefill_body(%token_count: index) launch
 // Schedule roots keep kernel selection static while retaining dynamic indirect
 // workgroup counts within each reusable command buffer. The caller selects the
 // narrowest schedule covering its runtime token count.
-command.program.def public @qwen38_text_prefill_body_schedule_c64t32(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 1, 32)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_body_schedule_c64t32(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 1, 32)] {
   %schedule_token_count = index.constant 32 : index
   %verification_depth = index.constant 0 : index
   %transition_bytes = index.constant 165376 : offset
@@ -134,7 +136,7 @@ command.program.def public @qwen38_text_prefill_body_schedule_c64t32(%token_coun
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_body_schedule_x64(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 1, 64)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_body_schedule_x64(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 1, 64)] {
   %schedule_token_count = index.constant 64 : index
   %verification_depth = index.constant 0 : index
   %transition_bytes = index.constant 165376 : offset
@@ -145,7 +147,7 @@ command.program.def public @qwen38_text_prefill_body_schedule_x64(%token_count: 
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_body_schedule_x128(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 65, 480)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_body_schedule_x128(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 65, 480)] {
   %schedule_token_count = index.constant 128 : index
   %verification_depth = index.constant 0 : index
   %transition_bytes = index.constant 165376 : offset
@@ -156,7 +158,7 @@ command.program.def public @qwen38_text_prefill_body_schedule_x128(%token_count:
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_body_schedule_c128(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 481, 512)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_body_schedule_c128(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 481, 512)] {
   %schedule_token_count = index.constant 512 : index
   %verification_depth = index.constant 0 : index
   %transition_bytes = index.constant 165376 : offset
@@ -169,7 +171,7 @@ command.program.def public @qwen38_text_prefill_body_schedule_c128(%token_count:
 
 // Embeds one prompt span, advances every base-model layer, and publishes the
 // first greedy continuation token plus the final normalized hidden row.
-command.program.def @qwen38_text_prefill_transition(%token_count: index, %schedule_token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512)] {
+command.program.def target(@qwen38_execution) @qwen38_text_prefill_transition(%token_count: index, %schedule_token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512)] {
   %verification_depth = index.constant 0 : index
   %transition_bytes = index.constant 165376 : offset
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
@@ -188,7 +190,7 @@ command.program.def @qwen38_text_prefill_transition(%token_count: index, %schedu
 // prefill control ABI. The same materialized root can be replayed for every
 // complete 512-token chunk while persistent GDN and attention state carry
 // across executions.
-command.program.def public @qwen38_text_prefill_chunk(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_ids: buffer) where [range(%token_count, 1, 512)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_chunk(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_ids: buffer) where [range(%token_count, 1, 512)] {
   %schedule_token_count = index.constant 512 : index
   %verification_depth = index.constant 0 : index
   %transition_bytes = index.constant 165376 : offset
@@ -205,7 +207,7 @@ command.program.def public @qwen38_text_prefill_chunk(%token_count: index) launc
 // Advances one complete target and MTP prompt chunk without sampling. The
 // target and MTP caches, recurrent state, and normalized-hidden carry become
 // the exact inputs to the following chunk or final prefill program.
-command.program.def public @qwen38_text_prefill_mtp_chunk(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_mtp_chunk(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512)] {
   %token_capacity = index.constant 512 : index
   %schedule_token_count = index.constant 512 : index
   %verification_depth = index.constant 0 : index
@@ -243,7 +245,7 @@ command.program.def public @qwen38_text_prefill_mtp_chunk(%token_count: index) l
 
 // Prefills one token span and hands its persistent state directly to ordinary
 // decode while keeping the normalized hidden row internal.
-command.program.def public @qwen38_text_prefill_greedy(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_greedy(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512)] {
   %hidden_bytes = index.constant 20480 : offset
   %normalized_hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
   command.program.launch @qwen38_text_prefill_transition[%token_count, %token_count](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
@@ -253,35 +255,35 @@ command.program.def public @qwen38_text_prefill_greedy(%token_count: index) laun
 // Prefills one token span while exposing the final normalized target hidden row
 // consumed by the first NextN/MTP proposal step. Schedule wrappers fix the
 // algorithm family while token count remains an issue-time launch input.
-command.program.def @qwen38_text_prefill_greedy_with_hidden_impl(%token_count: index, %schedule_token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512)] {
+command.program.def target(@qwen38_execution) @qwen38_text_prefill_greedy_with_hidden_impl(%token_count: index, %schedule_token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512)] {
   command.program.launch @qwen38_text_prefill_transition[%token_count, %schedule_token_count](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_greedy_with_hidden(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_greedy_with_hidden(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512)] {
   command.program.launch @qwen38_text_prefill_greedy_with_hidden_impl[%token_count, %token_count](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_greedy_with_hidden_schedule_c64t32(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 32)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_greedy_with_hidden_schedule_c64t32(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 32)] {
   %schedule_token_count = index.constant 32 : index
   command.program.launch @qwen38_text_prefill_greedy_with_hidden_impl[%token_count, %schedule_token_count](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_greedy_with_hidden_schedule_x64(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 64)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_greedy_with_hidden_schedule_x64(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 64)] {
   %schedule_token_count = index.constant 64 : index
   command.program.launch @qwen38_text_prefill_greedy_with_hidden_impl[%token_count, %schedule_token_count](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_greedy_with_hidden_schedule_x128(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 65, 480)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_greedy_with_hidden_schedule_x128(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 65, 480)] {
   %schedule_token_count = index.constant 128 : index
   command.program.launch @qwen38_text_prefill_greedy_with_hidden_impl[%token_count, %schedule_token_count](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_greedy_with_hidden_schedule_c128(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 481, 512)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_greedy_with_hidden_schedule_c128(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 481, 512)] {
   %schedule_token_count = index.constant 512 : index
   command.program.launch @qwen38_text_prefill_greedy_with_hidden_impl[%token_count, %schedule_token_count](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
@@ -290,7 +292,7 @@ command.program.def public @qwen38_text_prefill_greedy_with_hidden_schedule_c128
 // Prefills the target model, catches the stored MTP block up over the same
 // prompt, and publishes the first target token and normalized hidden carry.
 // The target and MTP caches are independent issue-time resources.
-command.program.def @qwen38_text_prefill_mtp_greedy_impl(%token_count: index, %schedule_token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512)] {
+command.program.def target(@qwen38_execution) @qwen38_text_prefill_mtp_greedy_impl(%token_count: index, %schedule_token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512)] {
   %token_capacity = index.constant 512 : index
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
   %hidden_capacity_bytes = index.constant 10485760 : offset
@@ -317,30 +319,30 @@ command.program.def @qwen38_text_prefill_mtp_greedy_impl(%token_count: index, %s
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_mtp_greedy(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_mtp_greedy(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512)] {
   command.program.launch @qwen38_text_prefill_mtp_greedy_impl[%token_count, %token_count](%target_parameters, %embedding_parameters, %mtp_input_parameters, %mtp_layer_parameters, %residual, %control, %gdn_state, %attention_cache, %mtp_attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_mtp_greedy_schedule_c64t32(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 32)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_mtp_greedy_schedule_c64t32(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 32)] {
   %schedule_token_count = index.constant 32 : index
   command.program.launch @qwen38_text_prefill_mtp_greedy_impl[%token_count, %schedule_token_count](%target_parameters, %embedding_parameters, %mtp_input_parameters, %mtp_layer_parameters, %residual, %control, %gdn_state, %attention_cache, %mtp_attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_mtp_greedy_schedule_x64(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 64)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_mtp_greedy_schedule_x64(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 64)] {
   %schedule_token_count = index.constant 64 : index
   command.program.launch @qwen38_text_prefill_mtp_greedy_impl[%token_count, %schedule_token_count](%target_parameters, %embedding_parameters, %mtp_input_parameters, %mtp_layer_parameters, %residual, %control, %gdn_state, %attention_cache, %mtp_attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_mtp_greedy_schedule_x128(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 65, 480)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_mtp_greedy_schedule_x128(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 65, 480)] {
   %schedule_token_count = index.constant 128 : index
   command.program.launch @qwen38_text_prefill_mtp_greedy_impl[%token_count, %schedule_token_count](%target_parameters, %embedding_parameters, %mtp_input_parameters, %mtp_layer_parameters, %residual, %control, %gdn_state, %attention_cache, %mtp_attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_text_prefill_mtp_greedy_schedule_c128(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 481, 512)] {
+command.program.def public target(@qwen38_execution) @qwen38_text_prefill_mtp_greedy_schedule_c128(%token_count: index) launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 481, 512)] {
   %schedule_token_count = index.constant 512 : index
   command.program.launch @qwen38_text_prefill_mtp_greedy_impl[%token_count, %schedule_token_count](%target_parameters, %embedding_parameters, %mtp_input_parameters, %mtp_layer_parameters, %residual, %control, %gdn_state, %attention_cache, %mtp_attention_cache, %normalized_hidden, %token_ids, %progress) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return

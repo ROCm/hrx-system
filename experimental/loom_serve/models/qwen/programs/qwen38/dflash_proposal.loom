@@ -1,3 +1,5 @@
+target.decl @qwen38_execution
+
 config.decl @runner.qwen38.span_capacity : %value: index where [range(%value, 1, 64)]
 
 command.program.decl @qwen38_output_projection_logits_prefix(%tokens: index) launch(%parameters: buffer, %control: buffer, %normalized: buffer, %logits: buffer)
@@ -25,7 +27,7 @@ kernel.decl @qwen38_linear_q4k_f16_wmma_x128(%tokens: index, %inputs: index, %ou
 // The target vocabulary head supplies unary candidates; the small draft
 // projection and codebooks supply transition scores. Both parameter roots are
 // borrowed, so embeddings and vocabulary weights remain shared with the target.
-command.program.def public @qwen38_dflash_candidates(%spans: index) launch(%target_parameters: buffer, %draft_parameters: buffer, %control: buffer, %anchors: buffer, %normalized: buffer, %proposals: buffer) where [range(%spans, 1, 64)] {
+command.program.def public target(@qwen38_execution) @qwen38_dflash_candidates(%spans: index) launch(%target_parameters: buffer, %draft_parameters: buffer, %control: buffer, %anchors: buffer, %normalized: buffer, %proposals: buffer) where [range(%spans, 1, 64)] {
   %c7 = index.constant 7 : index
   %rows = index.mul %spans, %c7 : index
   %hidden_size = index.constant 5120 : index
@@ -65,7 +67,7 @@ command.program.def public @qwen38_dflash_candidates(%spans: index) launch(%targ
 
 // The only persistent mutation is the reserved target input suffix. Every
 // draft activation, private block K/V, and selector intermediate is transient.
-command.program.def public @qwen38_dflash_propose() launch(%embedding_parameters: buffer, %head_parameters: buffer, %draft_parameters: buffer, %context_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer) {
+command.program.def public target(@qwen38_execution) @qwen38_dflash_propose() launch(%embedding_parameters: buffer, %head_parameters: buffer, %draft_parameters: buffer, %context_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer) {
   %spans = config.get @runner.qwen38.span_capacity : index
   %c8 = index.constant 8 : index
   %c7 = index.constant 7 : index

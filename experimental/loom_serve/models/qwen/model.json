@@ -93,6 +93,7 @@
       "programs/qwen38/gdn_layer_prefill.loom",
       "programs/qwen38/model_decode.loom",
       "programs/qwen38/model_prefill.loom",
+      "programs/qwen38/native_dispatch.loom",
       "programs/qwen38/output_head_decode.loom",
       "kernels/qwen38/vision_attention.loom",
       "kernels/qwen38/vision_ffn.loom",

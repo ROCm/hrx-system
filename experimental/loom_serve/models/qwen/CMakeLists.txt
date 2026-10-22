@@ -457,6 +457,57 @@ loom_module(
 
 loom_test_module(
   NAME
+    command_projection_test_module
+  SRCS
+    "kernels/qwen38/attention_decode.loom"
+    "kernels/qwen38/attention_decode_mfma.loom"
+    "kernels/qwen38/attention_decode_split.loom"
+    "kernels/qwen38/attention_spans.loom"
+    "kernels/qwen38/attention_spans_mfma.loom"
+    "kernels/qwen38/attention_spans_split.loom"
+    "kernels/qwen38/attention_spans_split_mfma.loom"
+    "kernels/qwen38/greedy_argmax.loom"
+    "kernels/qwen38/greedy_argmax_cdna.loom"
+    "kernels/qwen38/output_projection.loom"
+    "kernels/qwen38/output_projection_cdna.loom"
+    "programs/qwen38/native_dispatch.loom"
+    "tests/command_projection.loom"
+    "tests/linear_cohort_oracle.loom"
+    "tests/matrix_projection.loom"
+  LIBRARIES
+    "::attention_matrix_kernels"
+    "::projection_kernels"
+    "iree::experimental::loom_serve::motifs::tensor::matrix_fragments"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    command_projection_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::command_projection_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--case=@command_projection_check"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
     matrix_projection_test_module
   SRCS
     "tests/linear_cohort_oracle.loom"

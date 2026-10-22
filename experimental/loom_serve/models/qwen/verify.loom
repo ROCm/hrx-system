@@ -1,3 +1,5 @@
+target.decl @qwen38_execution
+
 config.decl @runner.qwen38.mixed_inputs : %value: index where [range(%value, 0, 1)]
 
 config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%value, 1, 512)]
@@ -25,7 +27,7 @@ kernel.decl @qwen38_accept_spans() launch(%width: index, %token_capacity: index,
 // may write beyond the accepted frontier; those entries remain unreachable.
 // Device acceptance produces both the compact recurrent replay and the exact
 // committed target-hidden/token pairing consumed by the following draft warm.
-command.program.def public @qwen38_verify() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %committed: buffer, %results: buffer) {
+command.program.def public target(@qwen38_execution) @qwen38_verify() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %committed: buffer, %results: buffer) {
   %tokens = config.get @runner.qwen38.prefill_token_count : index
   %mixed_inputs = config.get @runner.qwen38.mixed_inputs : index
   %spans = config.get @runner.qwen38.span_capacity : index

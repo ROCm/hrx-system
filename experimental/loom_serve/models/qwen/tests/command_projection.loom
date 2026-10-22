@@ -1,0 +1,42 @@
+target.decl @qwen38_execution
+
+command.program.decl @qwen38_dispatch_linear_q5k_f16(%tokens: index, %inputs: index, %outputs: index, %input_size: index, %output_size: index) launch(%count: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+// Parameter views cross the target-selected command boundary without changing
+// their range. Both native providers use the same independent GGUF oracle.
+command.program.def public target(@qwen38_execution) @selected_projection(%tokens: index, %inputs: index, %outputs: index) launch(%count: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<25344xi8>
+  command.program.launch @qwen38_dispatch_linear_q5k_f16[%tokens, %inputs, %outputs, %inputs, %outputs](%count, %input, %weight_view, %output) : [index, index, index, index, index](buffer, buffer, view<25344xi8>, buffer)
+  command.return
+}
+
+func.decl @q5_projection_headers(%inputs: index, %outputs: index, %weight: buffer)
+func.decl @q5_projection_expected(%count: buffer, %inputs: index, %outputs: index, %weight_channels: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def @selected_projection_expected(%count: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %inputs = index.constant 512 : index
+  %outputs = index.constant 72 : index
+  %weight_channels = index.constant 1 : index
+  func.call @q5_projection_expected(%count, %inputs, %outputs, %weight_channels, %input, %weight, %output) : (buffer, index, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @command_projection_check {
+  %tokens = check.literal value(17) : index
+  %inputs = check.literal value(512) : index
+  %outputs = check.literal value(72) : index
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.generate.fill value(17) : tensor<1xi32>
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<17x512xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<72x2x176xi8>
+    check.generate<@q5_projection_headers>(%inputs, %outputs, %weight) : (index, index, tensor<72x2x176xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<17x72xf32>
+    check.compare<@selected_projection, @selected_projection_expected>[%tokens, %inputs, %outputs](%count, %input, %weight, %output) : [index, index, index](tensor<1xi32>, tensor<17x512xf32>, tensor<72x2x176xi8>, tensor<17x72xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0005) rtol(0.00003) nan(different) : tensor<17x72xf32>
+    }
+  }
+  check.return
+}
