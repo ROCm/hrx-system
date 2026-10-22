@@ -132,9 +132,7 @@ command.program.def public target(@qwen38_execution) @qwen38_attention_layer_pre
   %isolated = index.cmp eq, %span_capacity, %c0 : index
   %isolated_verification = scalar.andi %verifying, %isolated : i1
   %uses_spans = index.cmp ne, %span_capacity, %c0 : index
-  %four_tokens = index.cmp eq, %token_count, %c4 : index
-  %eight_tokens = index.cmp eq, %token_count, %c8 : index
-  %narrow_tokens = scalar.ori %four_tokens, %eight_tokens : i1
+  %narrow_tokens = index.cmp ule, %token_count, %c8 : index
   %narrow_spans = scalar.andi %narrow_tokens, %uses_spans : i1
   %uses_cohort = scalar.ori %isolated_verification, %narrow_spans : i1
   %cohort_rows = scf.select %isolated_verification, %c4, %token_count : index

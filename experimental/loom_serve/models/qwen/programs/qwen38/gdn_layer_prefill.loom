@@ -121,7 +121,7 @@ kernel.decl @qwen38_gdn_capture_spans(%span_capacity: index, %width: index) laun
 // Verification width is zero for ordinary prefill. Dense projection selection
 // is independent of state publication:
 // four-token packed epochs and isolated verification retain the four-row
-// recipe; eight-token packed epochs share an eight-row weight traversal.
+// recipe; other narrow packed epochs share their useful row-bank traversal.
 command.program.def public target(@qwen38_execution) @qwen38_gdn_layer_prefill(%token_count: index, %requested_schedule_token_count: index, %layer: index, %gdn_ordinal: index, %verification_depth: index, %span_capacity: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %token_count_data: buffer, %transition_capture: buffer, %rows: buffer) where [range(%token_count, 1, 512), range(%requested_schedule_token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47), range(%verification_depth, 0, 8), range(%span_capacity, 0, 64)] {
   %schedule_token_count = template.apply<@qwen38.prefill.projection_schedule>(%requested_schedule_token_count) : (index) -> (index)
   %token_capacity = index.constant 512 : index
@@ -143,9 +143,7 @@ command.program.def public target(@qwen38_execution) @qwen38_gdn_layer_prefill(%
   %isolated = index.cmp eq, %span_capacity, %c0 : index
   %isolated_verification = scalar.andi %verifying, %isolated : i1
   %uses_spans = index.cmp ne, %span_capacity, %c0 : index
-  %four_tokens = index.cmp eq, %token_count, %c4 : index
-  %eight_tokens = index.cmp eq, %token_count, %c8 : index
-  %narrow_tokens = scalar.ori %four_tokens, %eight_tokens : i1
+  %narrow_tokens = index.cmp ule, %token_count, %c8 : index
   %narrow_spans = scalar.andi %narrow_tokens, %uses_spans : i1
   %uses_cohort = scalar.ori %isolated_verification, %narrow_spans : i1
   %cohort_rows = scf.select %isolated_verification, %c4, %token_count : index

@@ -20,7 +20,7 @@ kernel.decl @qwen38_output_normalize_spans(%output_capacity: index) launch(%epoc
 // same resident arena and immutable span/row tables; neither packed activation
 // placement nor changing cardinality moves retained state. Only requested
 // final span rows reach the vocabulary head. The caller consumes output_count
-// IDs; output padding and head grouping are internal to this fixed schedule.
+// IDs; the vocabulary head specializes for the selected span capacity.
 command.program.def public target(@qwen38_execution) @qwen38_epoch() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %output_tokens: buffer) {
   %tokens = config.get @runner.qwen38.prefill_token_count : index
   %mixed_inputs = config.get @runner.qwen38.mixed_inputs : index
@@ -28,13 +28,8 @@ command.program.def public target(@qwen38_execution) @qwen38_epoch() launch(%par
   %capture_value = config.get @runner.qwen38.capture_features : index
   %capture = index.assume %capture_value [range(%capture_value, 0, 1)] : index
   %c0 = index.constant 0 : index
-  %c3 = index.constant 3 : index
-  %c4 = index.constant 4 : index
-  %padded_spans = index.add %spans, %c3 : index
-  %groups = index.div %padded_spans, %c4 : index
-  %outputs = index.mul %groups, %c4 : index
   %hidden_row_bytes = index.constant 20480 : offset
-  %hidden_bytes = index.scale %outputs, %hidden_row_bytes : index, offset -> offset
+  %hidden_bytes = index.scale %spans, %hidden_row_bytes : index, offset -> offset
   %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %embedding = command.parameter %parameters, "token_embd.weight" : view<874086400xi8>
   kernel.launch @qwen38_input_embedding_f32[%tokens](%mixed_inputs, %input_tokens, %embedding, %residual) : [index](index, buffer, view<874086400xi8>, buffer)
@@ -42,8 +37,8 @@ command.program.def public target(@qwen38_execution) @qwen38_epoch() launch(%par
   command.program.launch @qwen38_text_prefill_body_impl[%tokens, %tokens, %c0, %spans, %capture, %mixed_inputs](%parameters, %residual, %epoch, %state, %state, %normalized, %rows, %input_tokens) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
   %norm_weight = command.parameter %parameters, "output_norm.weight" : view<5120xf32>
-  kernel.launch @qwen38_output_normalize_spans[%outputs](%epoch, %epsilon, %residual, %norm_weight, %normalized) : [index](buffer, f32, buffer, view<5120xf32>, buffer)
+  kernel.launch @qwen38_output_normalize_spans[%spans](%epoch, %epsilon, %residual, %norm_weight, %normalized) : [index](buffer, f32, buffer, view<5120xf32>, buffer)
   %origin = index.constant 0 : offset
-  command.program.launch @qwen38_output_projection_sampled[%outputs](%parameters, %epoch, %normalized, %output_tokens) : [index](buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_output_projection_sampled[%spans](%parameters, %epoch, %normalized, %output_tokens) : [index](buffer, buffer, buffer, buffer)
   command.return
 }
