@@ -968,24 +968,6 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(f"BuildDirectory: '{presubmit.REPO_ROOT}'", normalized)
         self.assertNotIn(f"'{remote_path}'", normalized)
 
-    def test_clang_tidy_fix_paths_filter_to_selected_translation_units(self):
-        fix_paths = [
-            Path(
-                "label.runtime_src_iree_base_status_c.clang_tidy_fixes.yaml",
-            ),
-            Path(
-                "label.runtime_src_iree_base_allocator_c.clang_tidy_fixes.yaml",
-            ),
-        ]
-
-        self.assertEqual(
-            presubmit.clang_tidy_fix_paths_for_files(
-                fix_paths,
-                ["runtime/src/iree/base/status.c"],
-            ),
-            [fix_paths[0]],
-        )
-
     def test_cmake_clang_tidy_candidates_are_translation_units(self):
         with mock.patch.object(
             presubmit, "CLANG_TIDY_PATH_PREFIXES", ("runtime/src/iree/",)
@@ -1393,6 +1375,11 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(
             f"--output_groups={presubmit.CLANG_TIDY_LOCAL_OUTPUT_GROUP}", command
         )
+        self.assertIn(
+            f"{presubmit.CLANG_TIDY_SELECTED_FILES_FLAG}="
+            '["build_tools/bazel/test/cc_benchmark_smoke_test_fixture.c"]',
+            command,
+        )
         self.assertIn("//consumer/package:smoke_test", command)
         self.assertNotIn("//build_tools/bazel/test:all", command)
 
@@ -1587,7 +1574,7 @@ class PresubmitTest(unittest.TestCase):
             ["runtime/src/iree/base/status.c"],
         )
 
-    def test_clang_tidy_base_header_scope_escalates_to_full(self):
+    def test_clang_tidy_base_header_scope_uses_bazel_graph(self):
         inputs = input_scope(
             ["runtime/src/iree/base/status.h"],
             mode="base",
@@ -1600,6 +1587,10 @@ class PresubmitTest(unittest.TestCase):
 
         self.assertEqual(
             presubmit.clang_tidy_analysis_paths(inputs),
+            ["runtime/src/iree/base/status.h"],
+        )
+        self.assertEqual(
+            presubmit.cmake_clang_tidy_analysis_paths(inputs),
             [
                 "runtime/src/iree/base/status.c",
                 "runtime/src/iree/base/status.h",
@@ -1607,7 +1598,7 @@ class PresubmitTest(unittest.TestCase):
             ],
         )
 
-    def test_clang_tidy_base_inl_scope_escalates_to_full(self):
+    def test_clang_tidy_base_inl_scope_uses_bazel_graph(self):
         inputs = input_scope(
             ["runtime/src/iree/base/table.inl"],
             mode="base",
@@ -1619,10 +1610,50 @@ class PresubmitTest(unittest.TestCase):
 
         self.assertEqual(
             presubmit.clang_tidy_analysis_paths(inputs),
-            [
-                "runtime/src/iree/base/status.c",
-                "runtime/src/iree/base/table.inl",
-            ],
+            ["runtime/src/iree/base/table.inl"],
+        )
+        self.assertEqual(
+            presubmit.cmake_clang_tidy_analysis_paths(inputs),
+            ["runtime/src/iree/base/status.c", "runtime/src/iree/base/table.inl"],
+        )
+
+    def test_clang_tidy_header_selects_configured_compile_graph(self):
+        header_path = "runtime/src/iree/base/status.h"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            header = root / header_path
+            header.parent.mkdir(parents=True)
+            header.write_text("", encoding="utf-8")
+            with (
+                mock.patch.object(presubmit, "REPO_ROOT", root),
+                mock.patch.object(presubmit.sys, "platform", "linux"),
+                mock.patch.object(
+                    presubmit, "clang_tidy_llvm_available", return_value=True
+                ),
+                mock.patch.object(
+                    presubmit, "query_compiling_targets_for_sources"
+                ) as owner_query,
+                mock.patch.object(
+                    presubmit, "run_command", return_value=True
+                ) as run_command,
+            ):
+                ok = presubmit.run_clang_tidy(
+                    input_scope([header_path]),
+                    profile="ci",
+                    lane="bazel",
+                    verbose=False,
+                )
+
+        self.assertTrue(ok)
+        owner_query.assert_not_called()
+        command = run_command.call_args.args[0]
+        self.assertEqual(
+            command[command.index("--") + 1 :],
+            list(presubmit.CLANG_TIDY_OWNER_TARGET_PATTERNS),
+        )
+        self.assertIn(
+            f'{presubmit.CLANG_TIDY_SELECTED_FILES_FLAG}=["{header_path}"]',
+            command,
         )
 
     def test_clang_tidy_base_infra_scope_escalates_and_runs_plugin_tests(self):

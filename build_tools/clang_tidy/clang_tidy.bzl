@@ -6,6 +6,7 @@
 
 """Bazel actions for running IREE clang-tidy checks."""
 
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load(
     "@iree_clang_tidy_llvm//:config.bzl",
     "CLANG_TIDY_CLANG_RESOURCE_DIR",
@@ -292,6 +293,30 @@ def _run_recursion_summary_action(ctx, target, cc_toolchain, feature_configurati
     )
     return report, summary
 
+def _selected_clang_tidy_sources(target, ctx):
+    sources = iree_cc_source_files(ctx)
+    encoded_files = ctx.attr._selected_files[BuildSettingInfo].value
+    if not encoded_files:
+        return sources
+
+    selected_files = {
+        path: None
+        for path in json.decode(encoded_files)
+    }
+    if not selected_files:
+        return []
+    selected_header = any([
+        header.path in selected_files or header.short_path in selected_files
+        for header in target[CcInfo].compilation_context.headers.to_list()
+    ])
+    if selected_header:
+        return sources
+    return [
+        source
+        for source in sources
+        if source.path in selected_files or source.short_path in selected_files
+    ]
+
 def _collect_clang_tidy_aspect_impl(target, ctx):
     transitive_fixes = []
     transitive_reports = []
@@ -317,21 +342,23 @@ def _collect_clang_tidy_aspect_impl(target, ctx):
     local_fixes = []
     local_reports = []
     if CcInfo in target:
-        cc_toolchain = find_cc_toolchain(ctx)
-        feature_configuration = iree_cc_feature_configuration(ctx, cc_toolchain)
-        resource_overlay = _clang_resource_overlay(ctx, cc_toolchain, "clang-tidy")
-        for source in iree_cc_source_files(ctx):
-            report, fixes = _run_clang_tidy_action(
-                ctx,
-                target,
-                cc_toolchain,
-                feature_configuration,
-                source,
-                resource_overlay,
-            )
-            local_reports.append(report)
-            if fixes:
-                local_fixes.append(fixes)
+        selected_sources = _selected_clang_tidy_sources(target, ctx)
+        if selected_sources:
+            cc_toolchain = find_cc_toolchain(ctx)
+            feature_configuration = iree_cc_feature_configuration(ctx, cc_toolchain)
+            resource_overlay = _clang_resource_overlay(ctx, cc_toolchain, "clang-tidy")
+            for source in selected_sources:
+                report, fixes = _run_clang_tidy_action(
+                    ctx,
+                    target,
+                    cc_toolchain,
+                    feature_configuration,
+                    source,
+                    resource_overlay,
+                )
+                local_reports.append(report)
+                if fixes:
+                    local_fixes.append(fixes)
 
     fixes = depset(local_fixes, transitive = transitive_fixes)
     reports = depset(local_reports, transitive = transitive_reports)
@@ -392,6 +419,10 @@ collect_clang_tidy_aspect = aspect(
             cfg = "exec",
             default = Label("//build_tools/clang_tidy:run_clang_tidy_action"),
             executable = True,
+        ),
+        "_selected_files": attr.label(
+            default = Label("//build_tools/clang_tidy:selected_files"),
+            doc = "Changed source and header paths restricting emitted actions.",
         ),
         "_warnings_as_errors": attr.string(
             default = "*",

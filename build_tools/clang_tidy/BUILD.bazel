@@ -4,12 +4,14 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_COPTS", "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH")
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 load("//build_tools/bazel:cc_opts.bzl", "cc_opts")
 load(":clang_tidy.bzl", "iree_clang_tidy", "iree_recursion_analysis")
+load(":test/aspect_selection_test.bzl", "clang_tidy_aspect_selection_test_suite")
 load(":test/clang_tidy_test.bzl", "clang_tidy_test_plugin")
 
 package(default_visibility = ["//visibility:public"])
@@ -21,6 +23,12 @@ exports_files([
     "clang_tidy.bzl",
     "llvm_repo.bzl",
 ])
+
+string_flag(
+    name = "selected_files",
+    build_setting_default = "",
+    visibility = ["//visibility:private"],
+)
 
 filegroup(
     name = "plugin_sources",
@@ -384,6 +392,7 @@ test_suite(
     tests = [
         ":action_runner_test",
         ":aggregate_recursion_summaries_test",
+        ":aspect_selection_tests",
         ":designated_initializer_check_test",
         ":extent_checks_test",
         ":lifecycle_checks_test",
@@ -404,6 +413,7 @@ cc_library(
         "test/action_smoke.c",
         "test/action_smoke.cc",
     ],
+    hdrs = ["test/action_smoke.h"],
     cxxopts = _CXX_OPTIONS.cxxopts,
     features = _CXX_OPTIONS.features + ["layering_check"],
     tags = ["manual"],
@@ -414,4 +424,9 @@ iree_clang_tidy(
     testonly = True,
     tags = ["manual"],
     targets = [":action_smoke_subject"],
+)
+
+clang_tidy_aspect_selection_test_suite(
+    name = "aspect_selection_tests",
+    target = ":action_smoke",
 )

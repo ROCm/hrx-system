@@ -133,6 +133,7 @@ CLANG_TIDY_LOCAL_OUTPUT_GROUP = "iree_clang_tidy_local_reports"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
 CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES + ("loom/binding/c/",)
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
+CLANG_TIDY_SELECTED_FILES_FLAG = "--//build_tools/clang_tidy:selected_files"
 CLANG_TIDY_OWNER_TARGET_PATTERNS = (
     "//runtime/...",
     "//loom/...",
@@ -1142,11 +1143,7 @@ def is_bazel_graph_file(path: str) -> bool:
 def is_clang_tidy_full_scope_trigger(path: str) -> bool:
     if is_bazel_graph_file(path):
         return True
-    if any(path.startswith(prefix) for prefix in CLANG_TIDY_FULL_SCOPE_PREFIXES):
-        return True
-    return path.startswith(CLANG_TIDY_PATH_PREFIXES) and (
-        Path(path).suffix in CLANG_TIDY_HEADER_EXTENSIONS
-    )
+    return any(path.startswith(prefix) for prefix in CLANG_TIDY_FULL_SCOPE_PREFIXES)
 
 
 def clang_tidy_uses_full_scope(inputs: PresubmitInputs) -> bool:
@@ -1159,6 +1156,16 @@ def clang_tidy_analysis_paths(inputs: PresubmitInputs) -> list[str]:
     if clang_tidy_uses_full_scope(inputs):
         return inputs.all_paths()
     return inputs.selected_paths
+
+
+def cmake_clang_tidy_analysis_paths(inputs: PresubmitInputs) -> list[str]:
+    if inputs.mode == "base" and any(
+        is_clang_tidy_candidate_file(path)
+        and Path(path).suffix in CLANG_TIDY_HEADER_EXTENSIONS
+        for path in inputs.changed_paths
+    ):
+        return inputs.all_paths()
+    return clang_tidy_analysis_paths(inputs)
 
 
 def is_executable_path(path: str) -> bool:
@@ -1903,6 +1910,7 @@ def clang_tidy_bazel_command(
     build_events_path: Path | None = None,
     emit_fixes: bool = False,
     local_outputs: bool = False,
+    selected_files: list[str] | None = None,
 ) -> list[str]:
     command = [
         "bazel",
@@ -1929,6 +1937,9 @@ def clang_tidy_bazel_command(
     ]
     if emit_fixes:
         command.append("--aspects_parameters=emit_fixes=true")
+    if selected_files is not None:
+        encoded_files = json.dumps(unique_paths(selected_files), separators=(",", ":"))
+        command.append(f"{CLANG_TIDY_SELECTED_FILES_FLAG}={encoded_files}")
     if build_events_path is not None:
         command += [
             f"--build_event_json_file={build_events_path}",
@@ -2254,32 +2265,6 @@ def prepare_clang_tidy_replacements_dir(
     return replacements_dir
 
 
-def clang_tidy_sanitize_artifact_path(path: str) -> str:
-    result = path
-    for old, new in (
-        ("/", "_"),
-        ("\\", "_"),
-        (":", "_"),
-        ("+", "_"),
-        ("-", "_"),
-        (".", "_"),
-    ):
-        result = result.replace(old, new)
-    return result
-
-
-def clang_tidy_fix_paths_for_files(
-    fix_paths: list[Path], candidate_files: list[str]
-) -> list[Path]:
-    selected_suffixes = tuple(
-        f".{clang_tidy_sanitize_artifact_path(path)}.clang_tidy_fixes.yaml"
-        for path in candidate_files
-    )
-    return [
-        fix_path for fix_path in fix_paths if fix_path.name.endswith(selected_suffixes)
-    ]
-
-
 def clang_apply_replacements_command(
     clang_apply_replacements: str, replacements_dir: Path
 ) -> list[str]:
@@ -2295,7 +2280,7 @@ def clang_apply_replacements_command(
 def run_clang_tidy_cmake(
     inputs: PresubmitInputs, profile: str, verbose: bool, fix: bool = False
 ) -> bool:
-    paths = clang_tidy_analysis_paths(inputs)
+    paths = cmake_clang_tidy_analysis_paths(inputs)
     candidate_files = cmake_clang_tidy_candidate_files(paths)
     infra_files = existing_files(
         [path for path in inputs.changed_paths if is_clang_tidy_infra_file(path)]
@@ -2483,11 +2468,11 @@ def run_clang_tidy_cmake(
 
 def run_clang_tidy_bazel_fix(
     *,
-    candidate_files: list[str],
     analysis_targets: list[str],
     profile: str,
     verbose: bool,
     local_outputs: bool,
+    selected_files: list[str] | None,
 ) -> bool:
     clang_apply_replacements = clang_tidy_apply_replacements_tool()
     if not clang_apply_replacements:
@@ -2510,6 +2495,7 @@ def run_clang_tidy_bazel_fix(
                 build_events_path=build_events_path,
                 emit_fixes=True,
                 local_outputs=local_outputs,
+                selected_files=selected_files,
             ),
             "clang-tidy Bazel fix export",
             verbose,
@@ -2527,28 +2513,6 @@ def run_clang_tidy_bazel_fix(
         if not fix_paths:
             print("[fail] clang-tidy: Bazel produced no replacement artifacts.")
             return False
-        fix_paths = clang_tidy_fix_paths_for_files(fix_paths, candidate_files)
-        if not fix_paths:
-            ok = (
-                skip_step(
-                    "clang-tidy apply fixes",
-                    "no replacement artifacts for selected translation units",
-                )
-                and ok
-            )
-            return (
-                run_command(
-                    clang_tidy_bazel_command(
-                        analysis_targets,
-                        keep_going=profile == "ci",
-                        local_outputs=local_outputs,
-                    ),
-                    "clang-tidy Bazel actions after fixes",
-                    verbose,
-                )
-                and ok
-            )
-
         replacements_dir = prepare_clang_tidy_replacements_dir(scratch_dir, fix_paths)
         ok = run_command(
             clang_apply_replacements_command(
@@ -2566,6 +2530,7 @@ def run_clang_tidy_bazel_fix(
                 analysis_targets,
                 keep_going=profile == "ci",
                 local_outputs=local_outputs,
+                selected_files=selected_files,
             ),
             "clang-tidy Bazel actions after fixes",
             verbose,
@@ -2639,7 +2604,9 @@ def run_clang_tidy(
             and ok
         )
 
-    if clang_tidy_uses_full_scope(inputs):
+    full_scope = clang_tidy_uses_full_scope(inputs)
+    selected_files = None if full_scope else candidate_files
+    if full_scope:
         analysis_targets = unique_paths(
             [
                 target
@@ -2649,6 +2616,10 @@ def run_clang_tidy(
                 if target is not None
             ]
         )
+    elif any(
+        Path(path).suffix in CLANG_TIDY_HEADER_EXTENSIONS for path in candidate_files
+    ):
+        analysis_targets = list(CLANG_TIDY_OWNER_TARGET_PATTERNS)
     else:
         translation_unit_labels = {
             label
@@ -2699,11 +2670,11 @@ def run_clang_tidy(
         if fix:
             ok = (
                 run_clang_tidy_bazel_fix(
-                    candidate_files=candidate_files,
                     analysis_targets=analysis_targets,
                     profile=profile,
                     verbose=verbose,
                     local_outputs=local_outputs,
+                    selected_files=selected_files,
                 )
                 and ok
             )
@@ -2714,6 +2685,7 @@ def run_clang_tidy(
                         analysis_targets,
                         keep_going=profile == "ci",
                         local_outputs=local_outputs,
+                        selected_files=selected_files,
                     ),
                     "clang-tidy Bazel actions",
                     verbose,
