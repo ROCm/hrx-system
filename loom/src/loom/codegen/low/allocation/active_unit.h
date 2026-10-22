@@ -105,9 +105,9 @@ iree_status_t loom_low_allocation_active_unit_index_initialize_occupancy(
 
 // Advances definite unit occupancy through the monotone acquisition point.
 // Points beyond the calendar drain all remaining reservations.
-// Activation and retirement consume each indexed lifetime span once. Scalar
-// sparse ranges retain their next segment; aggregate sparse ranges stay on the
-// exact query path instead of expanding a unit-by-segment product.
+// Activation and retirement consume each indexed unit's lifetime spans once.
+// Sparse ranges retain their next segment in reusable events within the fixed
+// location window; event storage does not grow with the number of spans.
 void loom_low_allocation_active_unit_index_advance(
     loom_low_allocation_active_unit_index_t* index,
     const loom_low_allocation_assignment_t* assignments, uint32_t point);

@@ -41,7 +41,7 @@ typedef struct loom_low_allocation_active_occupancy_entry_t {
   uint32_t point;
   // End after a pending activation, or zero while occupancy is active.
   uint32_t next_point;
-  // Next sparse segment for a scalar owner, or UINT32_MAX after its last span.
+  // Next sparse segment for this unit, or UINT32_MAX after its last span.
   uint32_t next_segment;
   // Next activation or retirement at the same point.
   uint32_t next;
@@ -51,8 +51,9 @@ typedef struct loom_low_allocation_active_occupancy_entry_t {
 
 // The dense window proves conflicts at the acquisition point. Counts preserve
 // tied owners; each unit has one calendar event for activation or retirement.
-// Sparse scalars consume each segment once. Sparse aggregates stay on the exact
-// query path, avoiding the product of segment count and aggregate width.
+// Each indexed unit consumes its sparse segments monotonically. The fixed
+// location window bounds work for wide aggregates without expanding storage
+// by the product of segment count and aggregate width.
 struct loom_low_allocation_active_occupancy_t {
   // Borrowed lifetime facts; assignments are removed before those facts change.
   const loom_low_allocation_unit_liveness_t* unit_liveness;
@@ -262,15 +263,21 @@ void loom_low_allocation_active_unit_index_advance(
       const loom_low_allocation_active_occupancy_entry_t entry =
           *loom_low_allocation_active_occupancy_entry(index, entry_index);
       loom_low_allocation_active_occupancy_remove(index, entry_index);
-      if (entry.next_point != 0) {
+      if (entry.next_point > point) {
         loom_low_allocation_active_occupancy_schedule(
             index, entry_index, entry.slot, entry.next_point, 0,
             entry.next_segment);
       } else if (entry.next_segment != UINT32_MAX) {
+        const loom_low_allocation_active_unit_entry_t* unit_entry =
+            &index->entries[entry_index];
+        const loom_low_allocation_assignment_t* assignment =
+            &assignments[unit_entry->assignment_index];
+        // Only the requested point is observable. Seek past intervening spans
+        // instead of replaying their activation and retirement events.
         loom_low_allocation_active_occupancy_insert(
-            index, entry_index,
-            &assignments[index->entries[entry_index].assignment_index], 0,
-            entry.next_segment, entry.point);
+            index, entry_index, assignment,
+            unit_entry->location - assignment->location_base,
+            entry.next_segment, point);
       }
     }
   }
@@ -291,9 +298,7 @@ static void loom_low_allocation_active_occupancy_insert(
   const uint32_t location = assignment->location_base + unit;
   if (assignment->location_kind !=
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
-      location >= word_count * 64u ||
-      (assignment->liveness_segments.count > 1 &&
-       assignment->location_count != 1)) {
+      location >= word_count * 64u) {
     return;
   }
   const loom_low_allocation_unit_liveness_t* liveness =
@@ -310,9 +315,9 @@ static void loom_low_allocation_active_occupancy_insert(
     if (segment_cursor < segment_end &&
         liveness->storage_segments.entries[segment_cursor].end_point <=
             first_point) {
-      // A relocated assignment can re-enter after a long sparse prefix. Seek
-      // directly instead of replaying its history; calendar transitions retain
-      // the next segment and normally need no seek.
+      // Reinsertion or advancement can skip a long sparse prefix. Seek directly
+      // instead of replaying its history; adjacent calendar transitions retain
+      // the next segment and need no seek.
       uint32_t count = segment_end - segment_cursor;
       while (count != 0) {
         const uint32_t half = count / 2;

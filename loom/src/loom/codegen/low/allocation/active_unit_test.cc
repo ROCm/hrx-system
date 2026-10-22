@@ -7,7 +7,6 @@
 #include "loom/codegen/low/allocation/active_unit.h"
 
 #include <array>
-#include <initializer_list>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -706,7 +705,7 @@ class LowAllocationActiveOccupancyTest : public ::testing::Test {
     loom_low_allocation_active_unit_index_advance(&index_, assignments_, point);
   }
   void ExpectProjection(const loom_low_allocation_assignment_t& candidate,
-                        std::initializer_list<uint32_t> locations) {
+                        const std::vector<uint32_t>& locations) {
     std::array<uint64_t, LOOM_LOW_ALLOCATION_ACTIVE_CONFLICT_WORD_COUNT>
         actual{};
     auto expected = actual;
@@ -835,7 +834,7 @@ TEST_F(LowAllocationActiveOccupancyTest,
       Insert(0);
     }
     if (point < 3 || (point >= 5 && point < 7) || (point >= 9 && point < 12)) {
-      ExpectProjection(candidate, {64, 70});
+      ExpectProjection(candidate, {64, 65, 66, 70});
     } else {
       ExpectProjection(candidate, {70});
     }
@@ -854,6 +853,63 @@ TEST_F(LowAllocationActiveOccupancyTest,
   // them; the lifetime is already exhausted and cannot publish a stale bit.
   Insert(0);
   ExpectProjection(candidate, {70});
+}
+
+TEST_F(LowAllocationActiveOccupancyTest,
+       RetainsSparseAggregateUnitLifetimesWithinTheWindow) {
+  const loom_low_reg_class_t classes[] = {{.allocatable_count = 512}};
+  const auto descriptors = DescriptorSet(classes, IREE_ARRAYSIZE(classes));
+  const loom_liveness_segment_t segments[] = {{1, 3}, {5, 7}, {9, 12}};
+  // Distinct starts, ends, and an empty unit span must survive every segment
+  // transition. Widths cross bitmap words and the bounded occupancy window;
+  // advancement skips unobserved spans and lands inside later spans.
+  constexpr uint32_t kStarts[] = {1, 6, 10, 6};
+  constexpr uint32_t kEnds[] = {6, 12, 11, 6};
+  for (uint32_t width : {1u, 2u, 4u, 63u, 64u, 65u, 193u, 257u}) {
+    SCOPED_TRACE(width);
+    std::vector<uint32_t> starts(width + 1);
+    std::vector<uint32_t> ends(width + 1, 20);
+    for (uint32_t unit = 0; unit < width; ++unit) {
+      starts[unit] = kStarts[unit % 4];
+      ends[unit] = kEnds[unit % 4];
+    }
+    loom_low_allocation_unit_liveness_t liveness = {
+        .start_points = starts.data(),
+        .end_points = ends.data(),
+        .point_count = ends.size(),
+    };
+    liveness.storage_segments.entries = segments;
+    auto assignment = Assignment(1, 0, 1, 12, 63, width, 0);
+    assignment.flags = LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
+    assignment.liveness_segments = {0, IREE_ARRAYSIZE(segments)};
+    IREE_ASSERT_OK(Initialize(&descriptors, &liveness, &assignment, 1,
+                              iree_max(32u, width), 21));
+    const auto initialized_bytes = arena_.used_allocation_size;
+    Insert(0);
+    auto candidate = Assignment(2, 0, 1, 20, 0, 1, width);
+    for (uint32_t point : {1u, 2u, 6u, 8u, 10u, 12u}) {
+      SCOPED_TRACE(point);
+      candidate.start_point = point;
+      Advance(point);
+      if (point == 6 || point == 8) {
+        Remove(0);
+        Insert(0);
+      }
+      std::vector<uint32_t> expected;
+      const bool in_segment =
+          point < 3 || (point >= 5 && point < 7) || (point >= 9 && point < 12);
+      for (uint32_t unit = 0; unit < width && 63 + unit < 256; ++unit) {
+        if (in_segment && starts[unit] <= point && point < ends[unit]) {
+          expected.push_back(63 + unit);
+        }
+      }
+      ExpectProjection(candidate, expected);
+    }
+    Remove(0);
+    Insert(0);
+    ExpectProjection(candidate, {});
+    EXPECT_EQ(arena_.used_allocation_size, initialized_bytes);
+  }
 }
 
 TEST_F(LowAllocationActiveOccupancyTest,
