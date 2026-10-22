@@ -51,7 +51,7 @@ After building the [supported server](../../README.md#build-and-load):
 
 ```sh
 bazel-bin/loom/src/loom/tools/loom-serve/loom-serve \
-  --device=amdgpu --listen=127.0.0.1:8080 \
+  --device=rdna --listen=127.0.0.1:8080 \
   --model=/tmp/flash-next-deployment.json
 
 # From another terminal:
@@ -371,6 +371,27 @@ Both dot and matrix consumers preserve the original packed weights, BF16
 activations, and publication boundaries. Their accumulation order differs;
 independent F64 references check the original-value numerical contract instead
 of requiring identical rounding between schedules.
+
+## Exact sparse attention selection
+
+Each query scores completed four-token blocks, then selects at most 512 logical
+block IDs. Selection preserves the original score ordering, resolves equal
+scores by earliest logical position, and publishes IDs in ascending order.
+The attention consumer resolves those IDs through the retained page map.
+
+For longer histories, a 4,096-bin histogram narrows the threshold. A sample
+places the first window, but every causal score is counted; a clipped winning
+bin triggers a complete-range histogram. Up to 4,096 candidate keys stay in
+LDS while eight-bit refinements find the exact threshold. Larger candidate
+sets stream the original row. Scratch remains bounded independently of context
+length, and selection introduces no score approximation.
+
+Each lane then consumes 32 consecutive scores and forms selection masks.
+Workgroup scans assign disjoint output intervals, including the earliest
+threshold ties. IDs go directly to the existing output buffer, without an
+intermediate global mask, CPU readback, or separate compaction dispatch.
+Narrow cohorts use 1,024-thread workgroups; wider cohorts use 256 threads.
+Histories with no more than 512 completed blocks keep the direct-ID path.
 
 ## Qualification
 

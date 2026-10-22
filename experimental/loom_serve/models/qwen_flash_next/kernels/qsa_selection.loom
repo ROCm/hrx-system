@@ -91,118 +91,428 @@ kernel.def target(@qsa_selection_wave32) @qsa_score_blocks() {
   kernel.return
 }
 
-// Positive F32 score bits preserve order. Find the exact Kth value, then
-// compact all greater scores and the earliest threshold ties in logical order.
+// A narrow cohort exposes few independent rows, so each row uses more waves.
+func.def pure inline @qsa_histogram_threads() -> (index) {
+  %tokens = config.get @flash_next.token_count : index
+  %limit = config.get @qsa.query_tile : index
+  %short = index.cmp ult, %tokens, %limit : index
+  %queries = scf.select %short, %tokens, %limit : index
+  %narrow_capacity = index.constant 4 : index
+  %narrow = index.cmp ule, %queries, %narrow_capacity : index
+  %small = index.constant 256 : index
+  %large = index.constant 1024 : index
+  %threads = scf.select %narrow, %large, %small : index
+  func.return %threads : index
+}
+
+// Full packets issue wide loads together; only the causal tail is masked.
+func.def inline @qsa_histogram_packet(%source: buffer, %origin: offset, %capacity: index, %begin: index, %complete: index) -> (vector<16xi32>) {
+  %packet_width = index.constant 16 : index
+  %end = index.add %begin, %packet_width : index
+  %full = index.cmp ule, %end, %complete : index
+  %view = buffer.view %source[%origin] : buffer -> view<[%capacity]xi32>
+  %empty = vector.constant 0 : vector<16xi32>
+  %result = scf.if %full -> (vector<16xi32>) {
+    %values = vector.load %view[%begin] : view<[%capacity]xi32> -> vector<16xi32>
+    scf.yield %values : vector<16xi32>
+  } else {
+    %active = index.cmp ult, %begin, %complete : index
+    %tail = scf.if %active -> (vector<16xi32>) {
+      %lane_step = scalar.constant 1 : i32
+      %start = index.cast %begin : index to i32
+      %bound = index.cast %complete : index to i32
+      %positions = vector.iota %start step %lane_step : vector<16xi32>
+      %bounds = vector.splat %bound : vector<16xi32>
+      %mask = vector.cmpi ult, %positions, %bounds : vector<16xi32> -> vector<16xi1>
+      %values = vector.load.mask %view[%begin], %mask, %empty : view<[%capacity]xi32>, vector<16xi1>, vector<16xi32>
+      scf.yield %values : vector<16xi32>
+    } else {
+      scf.yield %empty : vector<16xi32>
+    }
+    scf.yield %tail : vector<16xi32>
+  }
+  func.return %result : vector<16xi32>
+}
+
+// Each thread owns a descending interval of bins. Exactly one interval, then
+// one bin within it, contains the remaining rank and publishes the next state.
+func.def inline @qsa_histogram_rank(%histogram: buffer, %state: buffer, %bins: index, %threads: index, %wanted: i32) -> (i32, i32, i32) {
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %c0 = scalar.constant 0 : i32
+  %thread = kernel.workitem.id<x> : index
+  %quotient = index.div %bins, %threads : index
+  %empty_interval = index.cmp eq, %quotient, %c0_index : index
+  %width = scf.select %empty_interval, %c1_index, %quotient : index
+  %begin = index.mul %thread, %width : index
+  %owner = index.cmp ult, %begin, %bins : index
+  %view = buffer.view %histogram[%origin] : buffer -> view<[%bins]xi32>
+  %record = buffer.view %state[%origin] : buffer -> view<4xi32>
+  %first, %count = scf.if %owner -> (index, i32) {
+    %last = index.sub %bins, %c1_index : index
+    %first = index.sub %last, %begin : index
+    %sum = scf.for %item = [%c0_index to %width step %c1_index](%sum = %c0 : i32) -> (i32) unroll {
+      %bin = index.sub %first, %item : index
+      %value = view.load %view[%bin] : view<[%bins]xi32> -> i32
+      %next = scalar.addi %sum, %value : i32
+      scf.yield %next : i32
+    }
+    scf.yield %first, %sum : index, i32
+  } else {
+    scf.yield %c0_index, %c0 : index, i32
+  }
+  %before = kernel.workgroup.scan<addi> %count {direction = forward, mode = exclusive} : i32
+  %end = scalar.addi %before, %count : i32
+  %starts_before = scalar.cmpi ult, %before, %wanted : i32
+  %ends_after = scalar.cmpi uge, %end, %wanted : i32
+  %contains = scalar.andi %starts_before, %ends_after : i1
+  scf.if %contains {
+    %unused = scf.for %item = [%c0_index to %width step %c1_index](%prior = %before : i32) -> (i32) unroll {
+      %bin = index.sub %first, %item : index
+      %value = view.load %view[%bin] : view<[%bins]xi32> -> i32
+      %next = scalar.addi %prior, %value : i32
+      %left = scalar.cmpi ult, %prior, %wanted : i32
+      %right = scalar.cmpi uge, %next, %wanted : i32
+      %winner = scalar.andi %left, %right : i1
+      scf.if %winner {
+        %digit = index.cast %bin : index to i32
+        %remaining = scalar.subi %wanted, %prior : i32
+        view.store %digit, %record[0] : i32, view<4xi32>
+        view.store %remaining, %record[1] : i32, view<4xi32>
+        view.store %value, %record[2] : i32, view<4xi32>
+      }
+      scf.yield %next : i32
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %digit = view.load %record[0] : view<4xi32> -> i32
+  %remaining = view.load %record[1] : view<4xi32> -> i32
+  %threshold_count = view.load %record[2] : view<4xi32> -> i32
+  func.return %digit, %remaining, %threshold_count : i32, i32, i32
+}
+
+// A zero mask visits every key. Refinement visits only the selected prefix.
+// Clamping is needed by the sampled first window; full-range refinements have
+// no clipped candidates. Histogram reset and publication are workgroup-owned.
+func.def inline @qsa_histogram_build(%source: buffer, %origin: offset, %capacity: index, %complete: index, %histogram: buffer, %state: buffer, %bins: index, %threads: index, %prefix: i32, %prefix_mask: i32, %shift: i32, %base: i32, %wanted: i32) -> (i32, i32, i32) {
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %packet_width = index.constant 16 : index
+  %shared_origin = index.constant 0 : offset
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %thread = kernel.workitem.id<x> : index
+  %view = buffer.view %histogram[%shared_origin] : buffer -> view<[%bins]xi32>
+  scf.for %bin = [%thread to %bins step %threads] {
+    view.store %c0, %view[%bin] : i32, view<[%bins]xi32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %limit = index.cast %bins : index to i32
+  %last = scalar.subi %limit, %c1 : i32
+  %start = index.mul %thread, %packet_width : index
+  %step = index.mul %threads, %packet_width : index
+  scf.for %begin = [%start to %complete step %step] {
+    %values = func.call @qsa_histogram_packet(%source, %origin, %capacity, %begin, %complete) : (buffer, offset, index, index, index) -> (vector<16xi32>)
+    scf.for %item = [%c0_index to %packet_width step %c1_index] unroll {
+      %position = index.add %begin, %item : index
+      %valid = index.cmp ult, %position, %complete : index
+      %key = vector.extract %values[%item] : vector<16xi32> -> i32
+      %leading = scalar.andi %key, %prefix_mask : i32
+      %matches = scalar.cmpi eq, %leading, %prefix : i32
+      %visit = scalar.andi %valid, %matches : i1
+      scf.if %visit {
+        %upper = scalar.shrui %key, %shift : i32
+        %above_base = scalar.cmpi ugt, %upper, %base : i32
+        %difference = scalar.subi %upper, %base : i32
+        %nonnegative = scf.select %above_base, %difference, %c0 : i32
+        %digit = scalar.minui %nonnegative, %last : i32
+        %bin_value = index.cast %digit : i32 to index
+        %bin = index.assume %bin_value [ge(%bin_value, 0), lt(%bin_value, %bins)] : index
+        view.atomic.reduce<addi> %c1, %view[%bin] {ordering = relaxed, scope = workgroup} : i32, view<[%bins]xi32>
+      }
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %digit, %remaining, %count = func.call @qsa_histogram_rank(%histogram, %state, %bins, %threads, %wanted) : (buffer, buffer, index, index, i32) -> (i32, i32, i32)
+  func.return %digit, %remaining, %count : i32, i32, i32
+}
+
+// Only values are retained: candidate ordering never determines output order.
+func.def inline @qsa_histogram_candidates(%source: buffer, %origin: offset, %capacity: index, %complete: index, %candidates: buffer, %state: buffer, %threads: index, %prefix: i32, %mask: i32) {
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %packet_width = index.constant 16 : index
+  %shared_origin = index.constant 0 : offset
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %thread = kernel.workitem.id<x> : index
+  %view = buffer.view %candidates[%shared_origin] : buffer -> view<4096xi32>
+  %record = buffer.view %state[%shared_origin] : buffer -> view<4xi32>
+  %leader = index.cmp eq, %thread, %c0_index : index
+  scf.if %leader {
+    view.store %c0, %record[3] : i32, view<4xi32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %start = index.mul %thread, %packet_width : index
+  %step = index.mul %threads, %packet_width : index
+  scf.for %begin = [%start to %complete step %step] {
+    %values = func.call @qsa_histogram_packet(%source, %origin, %capacity, %begin, %complete) : (buffer, offset, index, index, index) -> (vector<16xi32>)
+    scf.for %item = [%c0_index to %packet_width step %c1_index] unroll {
+      %position = index.add %begin, %item : index
+      %valid = index.cmp ult, %position, %complete : index
+      %key = vector.extract %values[%item] : vector<16xi32> -> i32
+      %leading = scalar.andi %key, %mask : i32
+      %matches = scalar.cmpi eq, %leading, %prefix : i32
+      %visit = scalar.andi %valid, %matches : i1
+      scf.if %visit {
+        %slot_word = view.atomic.rmw<addi> %c1, %record[3] {ordering = relaxed, scope = workgroup} : i32, view<4xi32> -> i32
+        %slot_value = index.cast %slot_word : i32 to index
+        %slot = index.assume %slot_value [range(%slot_value, 0, 4095)] : index
+        view.store %key, %view[%slot] : i32, view<4096xi32>
+      }
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  func.return
+}
+
+// Sampling only places the first histogram window; every causal key is counted.
+// Clipped winning bins repeat over the full range. Refinement retains the
+// winning prefix and its remaining rank, using bounded LDS candidates when
+// they fit. A completely selected bin may stop at its prefix's lower bound:
+// every value above that bound and all ties at the bound belong in the output.
+func.def inline @qsa_histogram_threshold(%source: buffer, %origin: offset, %capacity: index, %complete: index, %threads: index) -> (i32, i32) {
+  %c0_index = index.constant 0 : index
+  %digit_width = index.constant 8 : index
+  %small_bins = index.constant 256 : index
+  %large_bins = index.constant 4096 : index
+  %shared_origin = index.constant 0 : offset
+  %candidate_bytes = index.constant 16384 : offset
+  %histogram_bytes = index.constant 1024 : offset
+  %state_bytes = index.constant 16 : offset
+  %candidates = buffer.alloca<workgroup> align(16) %candidate_bytes : buffer
+  %histogram = buffer.alloca<workgroup> align(16) %histogram_bytes : buffer
+  %state = buffer.alloca<workgroup> align(16) %state_bytes : buffer
+  %view = buffer.view %source[%origin] : buffer -> view<[%capacity]xi32>
+  %thread = kernel.workitem.id<x> : index
+  %c0 = scalar.constant 0 : i32
+  %all = scalar.constant -1 : i32
+  %wanted = scalar.constant 512 : i32
+  %window_half = scalar.constant 2047 : i32
+  %last_bin = scalar.constant 4095 : i32
+  %cache_limit = scalar.constant 4096 : i32
+  %fine = scalar.constant 14 : i32
+  %coarse = scalar.constant 20 : i32
+  %sample_active = index.cmp ult, %thread, %small_bins : index
+  %sample = scf.if %sample_active -> (i32) {
+    %key = view.load %view[%thread] : view<[%capacity]xi32> -> i32
+    scf.yield %key : i32
+  } else {
+    scf.yield %c0 : i32
+  }
+  %maximum = kernel.workgroup.reduce<maxui> %sample : i32
+  %windowed = index.cmp uge, %complete, %large_bins : index
+  %shift = scf.select %windowed, %fine, %coarse : i32
+  %upper = scalar.shrui %maximum, %shift : i32
+  %can_center = scalar.cmpi ugt, %upper, %window_half : i32
+  %centered = scalar.subi %upper, %window_half : i32
+  %base_value = scf.select %can_center, %centered, %c0 : i32
+  %base = scf.select %windowed, %base_value, %c0 : i32
+  %first_digit, %first_rank, %first_count = func.call @qsa_histogram_build(%source, %origin, %capacity, %complete, %candidates, %state, %large_bins, %threads, %c0, %c0, %shift, %base, %wanted) : (buffer, offset, index, index, buffer, buffer, index, index, i32, i32, i32, i32, i32) -> (i32, i32, i32)
+  %at_upper_edge = scalar.cmpi eq, %first_digit, %last_bin : i32
+  %at_lower_edge = scalar.cmpi eq, %first_digit, %c0 : i32
+  %lower_clips = scalar.cmpi ne, %base, %c0 : i32
+  %clipped_lower = scalar.andi %at_lower_edge, %lower_clips : i1
+  %clipped = scalar.ori %at_upper_edge, %clipped_lower : i1
+  %retry = scalar.andi %windowed, %clipped : i1
+  %prefix, %bits_word, %rank, %count = scf.if %retry -> (i32, i32, i32, i32) {
+    %digit, %remaining, %count = func.call @qsa_histogram_build(%source, %origin, %capacity, %complete, %candidates, %state, %large_bins, %threads, %c0, %c0, %coarse, %c0, %wanted) : (buffer, offset, index, index, buffer, buffer, index, index, i32, i32, i32, i32, i32) -> (i32, i32, i32)
+    %prefix = scalar.shli %digit, %coarse : i32
+    scf.yield %prefix, %coarse, %remaining, %count : i32, i32, i32, i32
+  } else {
+    %upper = scalar.addi %base, %first_digit : i32
+    %prefix = scalar.shli %upper, %shift : i32
+    scf.yield %prefix, %shift, %first_rank, %first_count : i32, i32, i32, i32
+  }
+  %fits = scalar.cmpi ule, %count, %cache_limit : i32
+  %needs_refinement = scalar.cmpi ne, %rank, %count : i32
+  %compact = scalar.andi %fits, %needs_refinement : i1
+  %prefix_mask = scalar.shli %all, %bits_word : i32
+  scf.if %compact {
+    func.call @qsa_histogram_candidates(%source, %origin, %capacity, %complete, %candidates, %state, %threads, %prefix, %prefix_mask) : (buffer, offset, index, index, buffer, buffer, index, i32, i32)
+  }
+  %count_value = index.cast %count : i32 to index
+  %candidate_count = index.assume %count_value [range(%count_value, 1, 65536)] : index
+  %bits_value = index.cast %bits_word : i32 to index
+  %bits = index.assume %bits_value [range(%bits_value, 14, 20)] : index
+  %unused_bits, %threshold, %remaining, %unused_count = scf.while(%before_bits = %bits : index, %before_prefix = %prefix : i32, %before_rank = %rank : i32, %before_count = %count : i32) -> (index, i32, i32, i32) {
+    %has_bits = index.cmp ugt, %before_bits, %c0_index : index
+    %partial = scalar.cmpi ne, %before_rank, %before_count : i32
+    %more = scalar.andi %has_bits, %partial : i1
+    scf.condition %more, %before_bits, %before_prefix, %before_rank, %before_count : i1, index, i32, i32, i32
+  } do(%old_bits: index, %prefix: i32, %current_rank: i32, %old_count: i32) {
+    %short_digit = index.cmp ult, %old_bits, %digit_width : index
+    %digit_bits = scf.select %short_digit, %old_bits, %digit_width : index
+    %next_bits = index.sub %old_bits, %digit_bits : index
+    %old_shift = index.cast %old_bits : index to i32
+    %next_shift = index.cast %next_bits : index to i32
+    %mask = scalar.shli %all, %old_shift : i32
+    %base = scalar.shrui %prefix, %next_shift : i32
+    %digit, %next_rank, %next_count = scf.if %compact -> (i32, i32, i32) {
+      %bounded_count = index.assume %candidate_count [range(%candidate_count, 1, 4096)] : index
+      %digit, %rank, %count = func.call @qsa_histogram_build(%candidates, %shared_origin, %large_bins, %bounded_count, %histogram, %state, %small_bins, %threads, %prefix, %mask, %next_shift, %base, %current_rank) : (buffer, offset, index, index, buffer, buffer, index, index, i32, i32, i32, i32, i32) -> (i32, i32, i32)
+      scf.yield %digit, %rank, %count : i32, i32, i32
+    } else {
+      %digit, %rank, %count = func.call @qsa_histogram_build(%source, %origin, %capacity, %complete, %histogram, %state, %small_bins, %threads, %prefix, %mask, %next_shift, %base, %current_rank) : (buffer, offset, index, index, buffer, buffer, index, index, i32, i32, i32, i32, i32) -> (i32, i32, i32)
+      scf.yield %digit, %rank, %count : i32, i32, i32
+    }
+    %value = scalar.shli %digit, %next_shift : i32
+    %next_prefix = scalar.ori %prefix, %value : i32
+    scf.yield %next_bits, %next_prefix, %next_rank, %next_count : index, i32, i32, i32
+  }
+  func.return %threshold, %remaining : i32, i32
+}
+
+// Only the thread crossing the tie boundary needs to select a partial mask.
+func.def pure inline @qsa_first_set_bits(%mask: i32, %count: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %population = scalar.ctpopi %mask : i32
+  %all_fit = scalar.cmpi uge, %count, %population : i32
+  %result = scf.if %all_fit -> (i32) {
+    scf.yield %mask : i32
+  } else {
+    %unused_mask, %unused_count, %result = scf.while(%pending = %mask : i32, %remaining = %count : i32, %chosen = %c0 : i32) -> (i32, i32, i32) {
+      %more = scalar.cmpi ugt, %remaining, %c0 : i32
+      scf.condition %more, %pending, %remaining, %chosen : i1, i32, i32, i32
+    } do(%pending: i32, %remaining: i32, %chosen: i32) {
+      %bit = scalar.cttzi %pending : i32
+      %flag = scalar.shli %c1, %bit : i32
+      %next_chosen = scalar.ori %chosen, %flag : i32
+      %previous = scalar.subi %pending, %c1 : i32
+      %next_pending = scalar.andi %pending, %previous : i32
+      %next_remaining = scalar.subi %remaining, %c1 : i32
+      scf.yield %next_pending, %next_remaining, %next_chosen : i32, i32, i32
+    }
+    scf.yield %result : i32
+  }
+  func.return %result : i32
+}
+
+// Nonnegative F32 keys preserve score order. Histograms narrow the exact
+// top-512 threshold; final compaction preserves logical order and earliest
+// ties. Bounded LDS candidates replace repeated full-row threshold scans.
 kernel.def target(@qsa_selection_wave32) @qsa_select_blocks() {
   %tokens = config.get @flash_next.token_count : index
-  %tile_limit = config.get @qsa.query_tile : index
-  %short = index.cmp ult, %tokens, %tile_limit : index
-  %query_capacity = scf.select %short, %tokens, %tile_limit : index
-  %threads = index.constant 256 : index
-  %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%query_capacity, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+  %limit = config.get @qsa.query_tile : index
+  %short = index.cmp ult, %tokens, %limit : index
+  %queries = scf.select %short, %tokens, %limit : index
+  %threads = func.call pure @qsa_histogram_threads() : () -> (index)
+  %c1_index = index.constant 1 : index
+  kernel.launch.config workgroups(%queries, %c1_index, %c1_index) workgroup_size(%threads, %c1_index, %c1_index) : index
 } launch(%query_begin_arg: index, %span: buffer, %mapping: buffer, %scores: buffer, %selected: buffer) {
   %tokens = config.get @flash_next.token_count : index
-  %tile_limit = config.get @qsa.query_tile : index
-  %short = index.cmp ult, %tokens, %tile_limit : index
-  %query_capacity = scf.select %short, %tokens, %tile_limit : index
   %capacity = config.get @flash_next.context_capacity : index
+  %threads = func.call pure @qsa_histogram_threads() : () -> (index)
   %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
   %query_begin = index.assume %query_begin_arg [range(%query_begin_arg, 0, %tokens)] : index
   %row = kernel.workgroup.id<x> : index
   %token = index.add %query_begin, %row : index
   %active = index.cmp ult, %token, %end : index
   scf.if %active {
-    %thread = kernel.workitem.id<x> : index
     %c0_index = index.constant 0 : index
     %c1_index = index.constant 1 : index
-    %c4 = index.constant 4 : index
-    %threads = index.constant 256 : index
+    %block_width = index.constant 4 : index
+    %packet_width = index.constant 16 : index
+    %chunk_width = index.constant 32 : index
     %budget = index.constant 512 : index
-    %bits = index.constant 31 : index
-    %position, %resident_row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
-    %visible = index.add %position, %c1_index : index
-    %complete_value = index.div %visible, %c4 : index
-    %capacity_blocks = index.div %capacity, %c4 : index
-    %complete = index.assume %complete_value [range(%complete_value, 0, %capacity_blocks)] : index
-    %block_capacity = index.div %capacity, %c4 : index
     %origin = index.constant 0 : offset
-    %score_view = buffer.view %scores[%origin] : buffer -> view<[%query_capacity]x[%block_capacity]xf32>
-    %selected_view = buffer.view %selected[%origin] : buffer -> view<[%tokens]x512xi32>
+    %element_bytes = index.constant 4 : offset
     %c0 = scalar.constant 0 : i32
     %c1 = scalar.constant 1 : i32
-    %c30 = scalar.constant 30 : i32
-    %wanted = scalar.constant 512 : i32
+    %thread = kernel.workitem.id<x> : index
+    %position, %resident_row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %visible = index.add %position, %c1_index : index
+    %blocks = index.div %capacity, %block_width : index
+    %complete_value = index.div %visible, %block_width : index
+    %complete = index.assume %complete_value [range(%complete_value, 0, %blocks)] : index
+    %output = buffer.view %selected[%origin] : buffer -> view<[%tokens]x512xi32>
     %sparse = index.cmp ugt, %complete, %budget : index
     scf.if %sparse {
-      %threshold = scf.for %bit = [%c0_index to %bits step %c1_index](%prefix = %c0 : i32) -> (i32) {
-        %bit_i32 = index.cast %bit : index to i32
-        %shift = scalar.subi %c30, %bit_i32 : i32
-        %mask = scalar.shli %c1, %shift : i32
-        %trial = scalar.ori %prefix, %mask : i32
-        %local_count = scf.for %block = [%thread to %complete step %threads](%count = %c0 : i32) -> (i32) {
-          %score = view.load %score_view[%row, %block] : view<[%query_capacity]x[%block_capacity]xf32> -> f32
-          %key = scalar.bitcast %score : f32 to i32
-          %above = scalar.cmpi uge, %key, %trial : i32
-          %increment = scf.select %above, %c1, %c0 : i32
-          %next = scalar.addi %count, %increment : i32
-          scf.yield %next : i32
+      %row_elements = index.mul %row, %blocks : index
+      %score_origin = index.scale %row_elements, %element_bytes : index, offset -> offset
+      %threshold, %ties_needed = func.call @qsa_histogram_threshold(%scores, %score_origin, %blocks, %complete, %threads) : (buffer, offset, index, index, index) -> (i32, i32)
+      %chunk_size = index.mul %threads, %chunk_width : index
+      %thread_begin = index.mul %thread, %chunk_width : index
+      %unused_ties, %unused_selected = scf.for %chunk = [%c0_index to %complete step %chunk_size](%seen_ties = %c0 : i32, %seen_selected = %c0 : i32) -> (i32, i32) {
+        %first = index.add %chunk, %thread_begin : index
+        %second = index.add %first, %packet_width : index
+        %low = func.call @qsa_histogram_packet(%scores, %score_origin, %blocks, %first, %complete) : (buffer, offset, index, index, index) -> (vector<16xi32>)
+        %high = func.call @qsa_histogram_packet(%scores, %score_origin, %blocks, %second, %complete) : (buffer, offset, index, index, index) -> (vector<16xi32>)
+        %greater, %equal = scf.for %item = [%c0_index to %chunk_width step %c1_index](%greater = %c0 : i32, %equal = %c0 : i32) -> (i32, i32) unroll {
+          %low_half = index.cmp ult, %item, %packet_width : index
+          %key = scf.if %low_half -> (i32) {
+            %key = vector.extract %low[%item] : vector<16xi32> -> i32
+            scf.yield %key : i32
+          } else {
+            %position = index.sub %item, %packet_width : index
+            %key = vector.extract %high[%position] : vector<16xi32> -> i32
+            scf.yield %key : i32
+          }
+          %position = index.add %first, %item : index
+          %valid = index.cmp ult, %position, %complete : index
+          %above = scalar.cmpi ugt, %key, %threshold : i32
+          %same = scalar.cmpi eq, %key, %threshold : i32
+          %chosen_above = scalar.andi %valid, %above : i1
+          %chosen_equal = scalar.andi %valid, %same : i1
+          %shift = index.cast %item : index to i32
+          %bit = scalar.shli %c1, %shift : i32
+          %above_bit = scf.select %chosen_above, %bit, %c0 : i32
+          %equal_bit = scf.select %chosen_equal, %bit, %c0 : i32
+          %next_greater = scalar.ori %greater, %above_bit : i32
+          %next_equal = scalar.ori %equal, %equal_bit : i32
+          scf.yield %next_greater, %next_equal : i32, i32
         }
-        %count = kernel.workgroup.reduce<addi> %local_count : i32
-        %enough = scalar.cmpi uge, %count, %wanted : i32
-        %next = scf.select %enough, %trial, %prefix : i32
-        scf.yield %next : i32
-      }
-      %local_greater = scf.for %block = [%thread to %complete step %threads](%count = %c0 : i32) -> (i32) {
-        %score = view.load %score_view[%row, %block] : view<[%query_capacity]x[%block_capacity]xf32> -> f32
-        %key = scalar.bitcast %score : f32 to i32
-        %above = scalar.cmpi ugt, %key, %threshold : i32
-        %increment = scf.select %above, %c1, %c0 : i32
-        %next = scalar.addi %count, %increment : i32
-        scf.yield %next : i32
-      }
-      %greater_count = kernel.workgroup.reduce<addi> %local_greater : i32
-      %ties_needed = scalar.subi %wanted, %greater_count : i32
-      %unused_ties, %unused_selected = scf.for %chunk = [%c0_index to %complete step %threads](%seen_ties = %c0 : i32, %seen_selected = %c0 : i32) -> (i32, i32) {
-        %block = index.add %chunk, %thread : index
-        %valid = index.cmp ult, %block, %complete : index
-        %is_greater, %is_equal = scf.if %valid -> (i1, i1) {
-          %score = view.load %score_view[%row, %block] : view<[%query_capacity]x[%block_capacity]xf32> -> f32
-          %key = scalar.bitcast %score : f32 to i32
-          %greater = scalar.cmpi ugt, %key, %threshold : i32
-          %equal = scalar.cmpi eq, %key, %threshold : i32
-          scf.yield %greater, %equal : i1, i1
-        } else {
-          %no = scalar.constant false : i1
-          scf.yield %no, %no : i1, i1
+        %equal_count = scalar.ctpopi %equal : i32
+        %equal_prefix = kernel.workgroup.scan<addi> %equal_count {direction = forward, mode = exclusive} : i32
+        %equal_before = scalar.addi %seen_ties, %equal_prefix : i32
+        %remaining = scalar.subi %ties_needed, %equal_before : i32
+        %nonnegative = scalar.maxsi %remaining, %c0 : i32
+        %allowed = scalar.minui %nonnegative, %equal_count : i32
+        %chosen_ties = func.call pure @qsa_first_set_bits(%equal, %allowed) : (i32, i32) -> (i32)
+        %chosen = scalar.ori %greater, %chosen_ties : i32
+        %chosen_count = scalar.ctpopi %chosen : i32
+        %chosen_prefix = kernel.workgroup.scan<addi> %chosen_count {direction = forward, mode = exclusive} : i32
+        %slot_begin = scalar.addi %seen_selected, %chosen_prefix : i32
+        %unused_mask, %unused_slot = scf.while(%pending = %chosen : i32, %slot_before = %slot_begin : i32) -> (i32, i32) {
+          %more = scalar.cmpi ne, %pending, %c0 : i32
+          scf.condition %more, %pending, %slot_before : i1, i32, i32
+        } do(%pending: i32, %slot_word: i32) {
+          %bit_word = scalar.cttzi %pending : i32
+          %bit_value = index.cast %bit_word : i32 to index
+          %bit = index.assume %bit_value [range(%bit_value, 0, 31)] : index
+          %position = index.add %first, %bit : index
+          %id = index.cast %position : index to i32
+          %slot_value = index.cast %slot_word : i32 to index
+          %slot = index.assume %slot_value [range(%slot_value, 0, 511)] : index
+          view.store %id, %output[%token, %slot] : i32, view<[%tokens]x512xi32>
+          %previous = scalar.subi %pending, %c1 : i32
+          %next_pending = scalar.andi %pending, %previous : i32
+          %next_slot = scalar.addi %slot_word, %c1 : i32
+          scf.yield %next_pending, %next_slot : i32, i32
         }
-        %equal_flag = scf.select %is_equal, %c1, %c0 : i32
-        %equal_prefix = kernel.workgroup.scan<addi> %equal_flag {direction = forward, mode = inclusive} : i32
-        %equal_rank = scalar.addi %seen_ties, %equal_prefix : i32
-        %tie_fits = scalar.cmpi ule, %equal_rank, %ties_needed : i32
-        %chosen_tie = scalar.andi %is_equal, %tie_fits : i1
-        %chosen = scalar.ori %is_greater, %chosen_tie : i1
-        %chosen_flag = scf.select %chosen, %c1, %c0 : i32
-        %chosen_prefix = kernel.workgroup.scan<addi> %chosen_flag {direction = forward, mode = inclusive} : i32
-        %chosen_rank = scalar.addi %seen_selected, %chosen_prefix : i32
-        scf.if %chosen {
-          %rank_i32 = scalar.subi %chosen_rank, %c1 : i32
-          %rank_value = index.cast %rank_i32 : i32 to index
-          %rank = index.assume %rank_value [range(%rank_value, 0, 511)] : index
-          %id = index.cast %block : index to i32
-          view.store %id, %selected_view[%token, %rank] : i32, view<[%tokens]x512xi32>
-        }
-        %equal_count = kernel.workgroup.reduce<addi> %equal_flag : i32
-        %chosen_count = kernel.workgroup.reduce<addi> %chosen_flag : i32
-        %next_ties = scalar.addi %seen_ties, %equal_count : i32
-        %next_selected = scalar.addi %seen_selected, %chosen_count : i32
+        %chunk_ties = kernel.workgroup.reduce<addi> %equal_count : i32
+        %chunk_selected = kernel.workgroup.reduce<addi> %chosen_count : i32
+        %next_ties = scalar.addi %seen_ties, %chunk_ties : i32
+        %next_selected = scalar.addi %seen_selected, %chunk_selected : i32
         scf.yield %next_ties, %next_selected : i32, i32
       }
     } else {
-      %dense_count = index.assume %complete [range(%complete, 0, 512)] : index
-      scf.for %slot = [%thread to %dense_count step %threads] {
-        %result = index.cast %slot : index to i32
-        view.store %result, %selected_view[%token, %slot] : i32, view<[%tokens]x512xi32>
+      %count = index.assume %complete [range(%complete, 0, 512)] : index
+      scf.for %slot = [%thread to %count step %threads] {
+        %id = index.cast %slot : index to i32
+        view.store %id, %output[%token, %slot] : i32, view<[%tokens]x512xi32>
       }
     }
   }

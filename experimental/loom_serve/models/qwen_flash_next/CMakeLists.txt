@@ -496,6 +496,156 @@ endif()
 
 loom_test_module(
   NAME
+    selection_long_narrow_test_module
+  SRCS
+    "tests/selection_long.loom"
+  LIBRARIES
+    "::residual_programs"
+)
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    selection_long_narrow_test_execute_amd_gpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::selection_long_narrow_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--config=flash_next.context_capacity=262144"
+    "--config=flash_next.pool_capacity=262144"
+    "--config=flash_next.span_capacity=16"
+    "--config=flash_next.token_count=32"
+    "--config=qsa.query_tile=4"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    selection_long_narrow_test_execute_amd_gpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::selection_long_narrow_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--sanitizer=access"
+    "--config=flash_next.context_capacity=262144"
+    "--config=flash_next.pool_capacity=262144"
+    "--config=flash_next.span_capacity=16"
+    "--config=flash_next.token_count=32"
+    "--config=qsa.query_tile=4"
+  LABELS
+    "notsan"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    selection_long_wide_test_module
+  SRCS
+    "tests/selection_long.loom"
+  LIBRARIES
+    "::residual_programs"
+)
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    selection_long_wide_test_execute_amd_gpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::selection_long_wide_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--config=flash_next.context_capacity=262144"
+    "--config=flash_next.pool_capacity=262144"
+    "--config=flash_next.span_capacity=16"
+    "--config=flash_next.token_count=32"
+    "--config=qsa.query_tile=13"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    selection_long_wide_test_execute_amd_gpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::selection_long_wide_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--sanitizer=access"
+    "--config=flash_next.context_capacity=262144"
+    "--config=flash_next.pool_capacity=262144"
+    "--config=flash_next.span_capacity=16"
+    "--config=flash_next.token_count=32"
+    "--config=qsa.query_tile=13"
+  LABELS
+    "notsan"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
     attention_cohorts_test_module
   SRCS
     "tests/attention_cohorts.loom"

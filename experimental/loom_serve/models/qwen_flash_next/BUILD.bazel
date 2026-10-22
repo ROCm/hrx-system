@@ -90,6 +90,30 @@ loom_library(
     ]
 ]
 
+[
+    loom_test(
+        name = "selection_long_" + name + "_test",
+        srcs = ["tests/selection_long.loom"],
+        benchmark_smoke = False,
+        configs = {
+            "flash_next.context_capacity": "262144",
+            "flash_next.pool_capacity": "262144",
+            "flash_next.span_capacity": "16",
+            "flash_next.token_count": "32",
+            "qsa.query_tile": query_count,
+        },
+        execution_profiles = [
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
+        ],
+        deps = [":residual_programs"],
+    )
+    for name, query_count in [
+        ("narrow", "4"),
+        ("wide", "13"),
+    ]
+]
+
 loom_test(
     name = "attention_cohorts_test",
     srcs = ["tests/attention_cohorts.loom"],

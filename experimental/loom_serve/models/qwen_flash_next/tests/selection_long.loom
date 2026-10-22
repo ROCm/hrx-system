@@ -1,0 +1,136 @@
+kernel.decl @qsa_select_blocks() launch(%query_begin: index, %epoch: buffer, %mapping: buffer, %scores: buffer, %selected: buffer)
+
+// These distributions have closed-form winners, independent of the selector's
+// threshold algorithm. Three active rows begin inside a larger packed epoch;
+// unused score rows, causal tails, and output rows retain their sentinels.
+func.def @long_selection_fixture(%trial: index, %epoch: buffer, %mapping: buffer, %scores: buffer, %expected: buffer) {
+  %origin = index.constant 0 : offset
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %c2_index = index.constant 2 : index
+  %c3_index = index.constant 3 : index
+  %c4_index = index.constant 4 : index
+  %c5_index = index.constant 5 : index
+  %samples = index.constant 256 : index
+  %budget = index.constant 512 : index
+  %blocks = index.constant 65536 : index
+  %period = index.constant 97 : index
+  %highest = index.constant 96 : index
+  %active_end = scalar.constant 6 : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %shift = scalar.constant 14 : i32
+  %largest_finite = scalar.constant 2139095039 : i32
+  %unit = scalar.constant 1065353216 : i32
+  %multiplier = scalar.constant 4051 : i32
+  %bias = scalar.constant 17 : i32
+  %mask = scalar.constant 65535 : i32
+  %last_ranks = scalar.constant 65024 : i32
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %map = buffer.view %mapping[%origin] : buffer -> view<32x4xi32>
+  %values = buffer.view %scores[%origin] : buffer -> view<13x65536xi32>
+  %output = buffer.view %expected[%origin] : buffer -> view<32x512xi32>
+  view.store %active_end, %header[0] : i32, view<3xi32>
+  %subnormal = index.cmp eq, %trial, %c0_index : index
+  %upper_clipped = index.cmp eq, %trial, %c1_index : index
+  %lower_clipped = index.cmp eq, %trial, %c2_index : index
+  %all_equal = index.cmp eq, %trial, %c3_index : index
+  %concentrated = index.cmp eq, %trial, %c4_index : index
+  %periodic = index.cmp eq, %trial, %c5_index : index
+  scf.for %row = [%c0_index to %c3_index step %c1_index] {
+    %token = index.add %row, %c3_index : index
+    %ragged = index.sub %blocks, %row : index
+    %complete = scf.select %subnormal, %ragged, %blocks : index
+    %visible = index.mul %complete, %c4_index : index
+    %position = index.sub %visible, %c1_index : index
+    %position_word = index.cast %position : index to i32
+    view.store %position_word, %map[%token, 0] : i32, view<32x4xi32>
+    view.store %c0_i32, %map[%token, 1] : i32, view<32x4xi32>
+    view.store %c0_i32, %map[%token, 2] : i32, view<32x4xi32>
+    view.store %c0_i32, %map[%token, 3] : i32, view<32x4xi32>
+    %tail_begin = index.sub %complete, %budget : index
+    %last_half = index.sub %complete, %samples : index
+    %tie_end = index.mul %budget, %period : index
+    %unused = scf.for %block = [%c0_index to %complete step %c1_index](%cursor = %c0_index : index) -> (index) {
+      %word = index.cast %block : index to i32
+      %wide = scalar.shli %word, %shift : i32
+      %sample = index.cmp ult, %block, %samples : index
+      %low_window = scf.select %sample, %largest_finite, %word : i32
+      %product = scalar.muli %word, %multiplier : i32
+      %shifted = scalar.addi %product, %bias : i32
+      %rank = scalar.andi %shifted, %mask : i32
+      %cluster = scalar.addi %unit, %rank : i32
+      %remainder = index.rem %block, %period : index
+      %remainder_word = index.cast %remainder : index to i32
+      %spread_key = scf.select %upper_clipped, %wide, %word : i32
+      %clipped_key = scf.select %lower_clipped, %low_window, %spread_key : i32
+      %equal_key = scf.select %all_equal, %c0_i32, %clipped_key : i32
+      %concentrated_key = scf.select %concentrated, %cluster, %equal_key : i32
+      %key = scf.select %periodic, %remainder_word, %concentrated_key : i32
+      view.store %key, %values[%row, %block] : i32, view<13x65536xi32>
+
+      // Increasing keys select the last 512 IDs. A clipped low window selects
+      // 256 large samples and the last 256 ordinary keys. Multiplication by an
+      // odd number permutes all 16-bit ranks, so exactly 512 are >= 65024.
+      %tail = index.cmp uge, %block, %tail_begin : index
+      %last = index.cmp uge, %block, %last_half : index
+      %split = scalar.ori %sample, %last : i1
+      %first = index.cmp ult, %block, %budget : index
+      %top_rank = scalar.cmpi uge, %rank, %last_ranks : i32
+      %maximal = index.cmp eq, %remainder, %highest : index
+      %early_tie = index.cmp ult, %block, %tie_end : index
+      %tie = scalar.andi %maximal, %early_tie : i1
+      %clipped_choice = scf.select %lower_clipped, %split, %tail : i1
+      %equal_choice = scf.select %all_equal, %first, %clipped_choice : i1
+      %concentrated_choice = scf.select %concentrated, %top_rank, %equal_choice : i1
+      %chosen = scf.select %periodic, %tie, %concentrated_choice : i1
+      %next = scf.if %chosen -> (index) {
+        %slot = index.assume %cursor [range(%cursor, 0, 511)] : index
+        view.store %word, %output[%token, %slot] : i32, view<32x512xi32>
+        %next = index.add %cursor, %c1_index : index
+        scf.yield %next : index
+      } else {
+        scf.yield %cursor : index
+      }
+      scf.yield %next : index
+    }
+  }
+  func.return
+}
+
+command.program.def @long_selection(%query_begin: index) launch(%epoch: buffer, %mapping: buffer, %scores: buffer, %expected: buffer, %selected: buffer) {
+  kernel.launch @qsa_select_blocks(%query_begin, %epoch, %mapping, %scores, %selected) : (index, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// The target ignores the closed-form answer; the oracle publishes it into the
+// same output argument so the comparison also observes inactive storage.
+func.def @long_selection_reference(%epoch: buffer, %mapping: buffer, %scores: buffer, %expected: buffer, %selected: buffer) {
+  %origin = index.constant 0 : offset
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %count = index.constant 16384 : index
+  %input = buffer.view %expected[%origin] : buffer -> view<16384xi32>
+  %output = buffer.view %selected[%origin] : buffer -> view<16384xi32>
+  scf.for %element = [%c0_index to %count step %c1_index] {
+    %value = view.load %input[%element] : view<16384xi32> -> i32
+    view.store %value, %output[%element] : i32, view<16384xi32>
+  }
+  func.return
+}
+
+check.scenario public @long_sparse_selection {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %query_begin = check.literal value(3) : index
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %epoch = check.generate.fill value(0) : tensor<3xi32>
+    %mapping = check.generate.fill value(-99) : tensor<32x4xi32>
+    %scores = check.generate.fill value(2139095040) : tensor<13x65536xi32>
+    %expected = check.generate.fill value(-99) : tensor<32x512xi32>
+    check.generate<@long_selection_fixture>(%trial, %epoch, %mapping, %scores, %expected) : (index, tensor<3xi32>, tensor<32x4xi32>, tensor<13x65536xi32>, tensor<32x512xi32>) -> ()
+    %selected = check.generate.fill value(-99) : tensor<32x512xi32>
+    check.compare<@long_selection, @long_selection_reference>[%query_begin](%epoch, %mapping, %scores, %expected, %selected) : [index](tensor<3xi32>, tensor<32x4xi32>, tensor<13x65536xi32>, tensor<32x512xi32>, tensor<32x512xi32>) -> () {
+      check.expect.bitwise actual(%selected) expected(%selected) : tensor<32x512xi32>
+    }
+  }
+  check.return
+}
