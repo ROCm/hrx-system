@@ -270,9 +270,12 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
         request->module, function, requirements.direct_callees, &options,
         request->scratch_arena, &compiled, worker);
     if (report_ptr) {
-      status = iree_status_join(status,
-                                loom_target_compile_report_record_entry_report(
-                                    request->compile_report, report_ptr));
+      iree_status_t report_status =
+          compiled ? loom_target_compile_report_record_entry_report(
+                         request->compile_report, report_ptr)
+                   : loom_target_compile_report_merge_evidence(
+                         request->compile_report, report_ptr);
+      status = iree_status_join(status, report_status);
       loom_target_compile_report_deinitialize(report_ptr);
     }
     IREE_RETURN_IF_ERROR(status, "while compiling worker '@%.*s'",

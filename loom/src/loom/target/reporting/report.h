@@ -2295,9 +2295,16 @@ void loom_target_compile_report_record_workload(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_workload_t* workload);
 
-// Records one emitted artifact entry and copies its detailed pressure and spill
-// rows into |report|. String views remain borrowed from |entry_report|'s
+// Merges summary and detail evidence from |source_report| without recording an
+// emitted artifact entry. String views remain borrowed from |source_report|'s
 // original owners.
+iree_status_t loom_target_compile_report_merge_evidence(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_t* source_report);
+
+// Records one emitted artifact entry and merges its summary and detail evidence
+// into |report|. String views remain borrowed from |entry_report|'s original
+// owners.
 iree_status_t loom_target_compile_report_record_entry_report(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_t* entry_report);

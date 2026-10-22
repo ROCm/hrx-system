@@ -295,6 +295,40 @@ TEST_F(SelectionSummaryTest, MergingOwnsIndexAfterEntryStorageIsReleased) {
   }
 }
 
+TEST_F(SelectionSummaryTest, EvidenceMergeDoesNotRecordAnArtifactEntry) {
+  loom_target_compile_report_t source;
+  loom_target_compile_report_initialize(&source, iree_allocator_system());
+  source.function_name = IREE_SVL("failed_helper");
+  auto selection = MakeSelection();
+  selection.source_op_name = IREE_SVL("scalar.mulf");
+  selection.plan_key = IREE_SVL("exact_binary32");
+  selection.emitted_low_op_count = 163;
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_source_low_row(&source, &selection));
+  const loom_target_compile_report_allocation_failure_row_t failure = {
+      .function_name = source.function_name,
+      .register_class = IREE_SVL("aie2p.edj"),
+      .failure_code = IREE_SVL("unspillable-register-exhausted"),
+      .budget_units = 8,
+      .peak_live_units = 9,
+  };
+  IREE_ASSERT_OK(loom_target_compile_report_record_allocation_failure_row(
+      &source, &failure));
+
+  IREE_ASSERT_OK(loom_target_compile_report_merge_evidence(&report_, &source));
+  loom_target_compile_report_deinitialize(&source);
+
+  EXPECT_EQ(report_.entry_rows.count, 0u);
+  EXPECT_FALSE(iree_any_bit_set(report_.detail_flags,
+                                LOOM_TARGET_COMPILE_REPORT_DETAIL_ENTRIES));
+  EXPECT_EQ(report_.allocation_failure_rows.count, 1u);
+  const auto summaries = Summaries(report_);
+  ASSERT_EQ(summaries.size(), 1u);
+  EXPECT_EQ(summaries[0]->maximum_emitted_low_op_count, 163u);
+  EXPECT_TRUE(iree_string_view_equal(summaries[0]->plan_key,
+                                     IREE_SV("exact_binary32")));
+}
+
 TEST_F(SelectionSummaryTest, ArenaResetAndDisabledStorage) {
   auto row = MakeSelection();
   for (int repetition = 0; repetition < 2; ++repetition) {

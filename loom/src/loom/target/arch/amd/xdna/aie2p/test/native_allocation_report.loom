@@ -1,5 +1,5 @@
 // Native reports outlive each worker's scheduling and allocation scratch.
-// The rejected entry compiles one worker before exhausting another worker's
+// The rejected artifact compiles one worker before exhausting another worker's
 // address-index bank. The accepted entry isolates the same successful worker
 // for a report-enabled versus report-disabled artifact comparison.
 aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}

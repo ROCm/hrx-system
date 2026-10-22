@@ -1,0 +1,49 @@
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+// Nine loop-carried address indices exceed the eight-register hardware bank.
+// Rotating the values keeps each carrier live without unrelated memory work.
+low.func.def noinline target<amd.xdna.aie2p.core> @exhaust_indices(%iterations: reg<aie2p.er>) asm {
+  %step = mov.short 1
+  %offset0 = mov.static-byte-offset 64
+  %index0 = mov.address-index %offset0
+  %offset1 = mov.static-byte-offset 128
+  %index1 = mov.address-index %offset1
+  %offset2 = mov.static-byte-offset 192
+  %index2 = mov.address-index %offset2
+  %offset3 = mov.static-byte-offset 256
+  %index3 = mov.address-index %offset3
+  %offset4 = mov.static-byte-offset 320
+  %index4 = mov.address-index %offset4
+  %offset5 = mov.static-byte-offset 384
+  %index5 = mov.address-index %offset5
+  %offset6 = mov.static-byte-offset 448
+  %index6 = mov.address-index %offset6
+  %offset7 = mov.static-byte-offset 512
+  %index7 = mov.address-index %offset7
+  %offset8 = mov.static-byte-offset 576
+  %index8 = mov.address-index %offset8
+  low.br ^loop(%iterations: reg<aie2p.er>, %index0: reg<aie2p.edj>, %index1: reg<aie2p.edj>, %index2: reg<aie2p.edj>, %index3: reg<aie2p.edj>, %index4: reg<aie2p.edj>, %index5: reg<aie2p.edj>, %index6: reg<aie2p.edj>, %index7: reg<aie2p.edj>, %index8: reg<aie2p.edj>)
+^loop(%remaining: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>):
+  %next = sub %remaining, %step
+  low.cond_br %next, ^repeat, ^done : reg<aie2p.er>
+^repeat:
+  low.br ^loop(%next: reg<aie2p.er>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>, %carried0: reg<aie2p.edj>)
+^done:
+  return
+}
+
+// The source worker retains a large lowering before its direct helper rejects.
+// Report consumers must still receive that source-level expansion evidence.
+pipeline.def<kernel> public retain target(@device) @failed_helper_report() run() {
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %begin = index.constant 1 : index
+    %end = index.constant 3 : index
+    %step = index.constant 1 : index
+    scf.for %index = [%begin to %end step %step] {
+      %integer = index.cast %index : index to i32
+      %value = scalar.sitofp %integer : i32 to f32
+      %product = scalar.mulf %value, %value : f32
+      low.invoke @exhaust_indices(%product) : (f32)
+    }
+  }
+}

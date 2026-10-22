@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "failed helpers retain parseable source expansion evidence",
+      "steps": [
+        {
+          "name": "compile-rejected-helper",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/failed_helper_report.loom",
+              "--root=@failed_helper_report",
+              "--format=xdna",
+              "--output={tmp}/failed-helper.xdna",
+              "--compile-report=details",
+              "--compile-report-output={tmp}/failed-helper.json"
+            ]
+          },
+          "exit": 1,
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "BACKEND/005",
+                "aie2p.edj",
+                "budget 8",
+                "peak 9",
+                "unspillable-register-exhausted"
+              ]
+            }
+          },
+          "files": [
+            {"path": "{tmp}/failed-helper.xdna", "exists": false},
+            {
+              "path": "{tmp}/failed-helper.json",
+              "contains": {
+                "unordered": [
+                  "\"entries\":{\"count\":0,\"rows\":[]}",
+                  "\"source_op\":\"scalar.mulf\"",
+                  "\"plan_key\":\"exact_binary32\"",
+                  "\"maximum_emitted_low_op_count\":163",
+                  "\"allocation_failure_rows\":{\"count\":1"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "show-retained-expansion",
+          "run": {
+            "tool": "loom-compile-report",
+            "args": ["show", "{tmp}/failed-helper.json"]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "WARNING: __pipeline_worker_0 scalar.mulf: up to 163 Low operations per source operation via exact_binary32",
+                "entries: none"
+              ]
+            }
+          }
+        },
+        {
+          "name": "suggest-retained-expansion",
+          "run": {
+            "tool": "loom-compile-report",
+            "args": [
+              "suggest",
+              "{tmp}/failed-helper.json",
+              "--format=json"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"id\":\"lowering.reduce_expansion\"",
+                "\"provider\":\"source\"",
+                "\"status\":\"available\"",
+                "\"target_unavailable_reason\":\"compile_status_not_ok\""
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

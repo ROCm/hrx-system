@@ -949,6 +949,24 @@ iree_execution_test_suite(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND AMDF_BUILD)
+iree_execution_test_suite(
+  NAME
+    failed_helper_report_test
+  MANIFESTS
+    "test/failed_helper_report.test.json"
+  TOOLS
+    "loom-compile=loom::tools::loom-compile"
+    "loom-compile-report=loom::py::loom::tools::loom-compile-report"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/failed_helper_report.loom"
+  LABELS
+    "hostonly"
+  TIMEOUT
+    60
+)
+endif()
+
 if(LOOM_TARGET_ARCH_XDNA)
 loom_check_test_suite(
   NAME

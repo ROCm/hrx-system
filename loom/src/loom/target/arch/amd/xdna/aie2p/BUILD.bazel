@@ -780,6 +780,19 @@ iree_execution_test_suite(
     },
 )
 
+iree_execution_test_suite(
+    name = "failed_helper_report_test",
+    size = "small",
+    data = ["test/failed_helper_report.loom"],
+    manifests = ["test/failed_helper_report.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
+    tools = {
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+        "loom-compile-report": "//loom/py/loom/tools:loom-compile-report",
+    },
+)
+
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [

@@ -778,7 +778,7 @@ static void loom_target_compile_report_merge_target_resources(
   }
 }
 
-static void loom_target_compile_report_merge_entry_summary(
+static void loom_target_compile_report_merge_evidence_summary(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_t* entry_report) {
   const bool first_entry = report->entry_rows.count == 0;
@@ -806,7 +806,7 @@ static void loom_target_compile_report_merge_entry_summary(
       entry_report->source_low_emitted_op_count != 0 ||
       entry_report->source_low_memory_summary.packet_count != 0;
   report->detail_flags |=
-      entry_report->detail_flags | LOOM_TARGET_COMPILE_REPORT_DETAIL_ENTRIES;
+      entry_report->detail_flags & ~LOOM_TARGET_COMPILE_REPORT_DETAIL_ENTRIES;
   report->source_low_unkeyed_maximum_emitted_op_count =
       iree_max(report->source_low_unkeyed_maximum_emitted_op_count,
                entry_report->source_low_unkeyed_maximum_emitted_op_count);
@@ -1304,16 +1304,10 @@ loom_target_compile_report_record_source_low_selection_summary_row(
   return iree_ok_status();
 }
 
-iree_status_t loom_target_compile_report_record_entry_report(
+iree_status_t loom_target_compile_report_merge_evidence(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_t* entry_report) {
-  loom_target_compile_report_entry_t entry =
-      loom_target_compile_report_entry_from_report(entry_report);
-  memcpy(entry.move_causes, entry_report->move_causes,
-         sizeof(entry.move_causes));
-  loom_target_compile_report_merge_entry_summary(report, entry_report);
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append(
-      &report->entry_rows, sizeof(entry), report->allocator, &entry));
+  loom_target_compile_report_merge_evidence_summary(report, entry_report);
   IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append_all(
       &report->residency_constraint_rows,
       &entry_report->residency_constraint_rows,
@@ -1463,6 +1457,21 @@ iree_status_t loom_target_compile_report_record_entry_report(
         sizeof(loom_target_compile_report_target_capability_row_t),
         report->allocator));
   }
+  return iree_ok_status();
+}
+
+iree_status_t loom_target_compile_report_record_entry_report(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_t* entry_report) {
+  loom_target_compile_report_entry_t entry =
+      loom_target_compile_report_entry_from_report(entry_report);
+  memcpy(entry.move_causes, entry_report->move_causes,
+         sizeof(entry.move_causes));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_merge_evidence(report, entry_report));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append(
+      &report->entry_rows, sizeof(entry), report->allocator, &entry));
+  report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_ENTRIES;
   return iree_ok_status();
 }
 

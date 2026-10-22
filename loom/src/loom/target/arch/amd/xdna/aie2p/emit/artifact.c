@@ -470,9 +470,12 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
         &worker_compile_options, request->scratch_arena, &program_compiled,
         contribution);
     if (worker_report_ptr != NULL) {
-      status = iree_status_join(
-          status, loom_target_compile_report_record_entry_report(
-                      request->compile_report, worker_report_ptr));
+      iree_status_t report_status =
+          program_compiled ? loom_target_compile_report_record_entry_report(
+                                 request->compile_report, worker_report_ptr)
+                           : loom_target_compile_report_merge_evidence(
+                                 request->compile_report, worker_report_ptr);
+      status = iree_status_join(status, report_status);
       loom_target_compile_report_deinitialize(worker_report_ptr);
     }
     IREE_RETURN_IF_ERROR(status);

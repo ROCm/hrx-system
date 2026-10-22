@@ -276,6 +276,15 @@ static iree_status_t loom_aie2p_program_compile_impl(
     bindings_by_symbol[symbol_id] = helper;
     IREE_RETURN_IF_ERROR(loom_aie2p_program_prepare_abi(
         module, helper->function_op, scratch_arena, helper));
+    loom_target_compile_report_t helper_report;
+    loom_target_compile_report_t* helper_report_ptr = NULL;
+    if (entry_options->compile_report != NULL) {
+      loom_target_compile_report_initialize(
+          &helper_report, entry_options->compile_report->allocator);
+      helper_report.requested_detail_flags =
+          entry_options->compile_report->requested_detail_flags;
+      helper_report_ptr = &helper_report;
+    }
     const loom_aie2p_leaf_compile_options_t helper_options = {
         .function_target_facts = entry_options->function_target_facts,
         .descriptor_registry = entry_options->descriptor_registry,
@@ -287,11 +296,21 @@ static iree_status_t loom_aie2p_program_compile_impl(
         .allocation_reserved_range_count =
             LOOM_AIE2P_PROGRAM_HELPER_RESERVATION_COUNT,
         .diagnostic_emitter = entry_options->diagnostic_emitter,
+        .compile_report = helper_report_ptr,
     };
     bool helper_compiled = false;
-    IREE_RETURN_IF_ERROR(loom_aie2p_leaf_compile(
-        module, helper->function_op, &helper_options, arena, &helper_compiled,
-        &helper->contribution));
+    iree_status_t status =
+        loom_aie2p_leaf_compile(module, helper->function_op, &helper_options,
+                                arena, &helper_compiled, &helper->contribution);
+    if (helper_report_ptr != NULL) {
+      if (!helper_compiled) {
+        status = iree_status_join(
+            status, loom_target_compile_report_merge_evidence(
+                        entry_options->compile_report, helper_report_ptr));
+      }
+      loom_target_compile_report_deinitialize(helper_report_ptr);
+    }
+    IREE_RETURN_IF_ERROR(status);
     if (!helper_compiled) {
       return iree_ok_status();
     }
