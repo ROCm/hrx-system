@@ -22,9 +22,9 @@ func.def target(@target) @unsupported_scalar_pow_math(%base: f32, %exponent: f32
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @unsupported_vector_tanh_math(%input: vector<4xf32>) -> (vector<4xf32>) {
-  // ERROR@+1: LOWERING/036 {op_name="vector.tanhf", phase_name="legalize-math", policy_name="spirv-math", math_op="tanhf", lane_domain="vector", element_type="f32", constraint_key="math.op.native_arithmetic"}
-  %result = vector.tanhf<afn> %input : vector<4xf32>
+func.def target(@target) @activation_erf_requires_exact_fma(%input: vector<4xf32>) -> (vector<4xf32>) {
+  // ERROR@+1: LOWERING/036 {op_name="vector.geluf", phase_name="legalize-math", policy_name="spirv-math", math_op="geluf.erf", lane_domain="vector", element_type="f32", constraint_key="math.activation.exact_fma"}
+  %result = vector.geluf<erf, afn> %input : vector<4xf32>
   func.return %result : vector<4xf32>
 }
 
@@ -77,9 +77,19 @@ func.def target(@target) @unsigned_i16_conversion_requires_target_features(%lhs:
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @unsupported_semantic_math(%input: f32) -> (f32) {
-  // ERROR@+1: LOWERING/036 {op_name="scalar.logisticf", phase_name="legalize-math", policy_name="spirv-math", math_op="logisticf", lane_domain="scalar", element_type="f32", constraint_key="math.op.native_arithmetic"}
-  %result = scalar.logisticf %input : f32
+func.def target(@target) @activation_f64_requires_precision_preserving_recipe(%input: f64) -> (f64) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.siluf", phase_name="legalize-math", policy_name="spirv-math", math_op="siluf", lane_domain="scalar", element_type="f64", constraint_key="math.activation.f32_evaluation"}
+  %result = scalar.siluf<afn> %input : f64
+  func.return %result : f64
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @tanh_requires_approximation_permission(%input: f32) -> (f32) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.tanhf", phase_name="legalize-math", policy_name="spirv-math", math_op="tanhf", lane_domain="scalar", element_type="f32", constraint_key="math.activation.afn"}
+  %result = scalar.tanhf %input : f32
   func.return %result : f32
 }
 

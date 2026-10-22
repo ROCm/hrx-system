@@ -9,6 +9,10 @@
 #include <stddef.h>
 
 #define LOOM_SPIRV_MATH_CONSTRAINTS(_)                                       \
+  _(ACTIVATION_AFN, activation_afn, "math.activation.afn")                   \
+  _(ACTIVATION_EXACT_FMA, activation_exact_fma, "math.activation.exact_fma") \
+  _(ACTIVATION_F32_EVALUATION, activation_f32_evaluation,                    \
+    "math.activation.f32_evaluation")                                        \
   _(ELEMENT_F16_F32_F64, element_f16_f32_f64, "math.element.f16_f32_f64")    \
   _(INVERSE_HYPERBOLIC_AFN, inverse_hyperbolic_afn,                          \
     "math.inverse_hyperbolic.afn")                                           \
@@ -17,6 +21,17 @@
   _(OP_NATIVE_ARITHMETIC, op_native_arithmetic, "math.op.native_arithmetic") \
   _(RECIPE_INVERSE_HYPERBOLIC_F32, recipe_inverse_hyperbolic_f32,            \
     "math.recipe.inverse_hyperbolic_f32")                                    \
+  _(RECIPE_GELU_LOGISTIC_F32, recipe_gelu_logistic_f32,                      \
+    "math.recipe.gelu_logistic_f32")                                         \
+  _(RECIPE_GELU_TANH_F32, recipe_gelu_tanh_f32, "math.recipe.gelu_tanh_f32") \
+  _(RECIPE_LOGISTIC_EXP2_F32, recipe_logistic_exp2_f32,                      \
+    "math.recipe.logistic_exp2_f32")                                         \
+  _(RECIPE_SILU_LOGISTIC_F32, recipe_silu_logistic_f32,                      \
+    "math.recipe.silu_logistic_f32")                                         \
+  _(RECIPE_SOFTPLUS_EXP2_F32, recipe_softplus_exp2_f32,                      \
+    "math.recipe.softplus_exp2_f32")                                         \
+  _(RECIPE_TANH_LOGISTIC_F32, recipe_tanh_logistic_f32,                      \
+    "math.recipe.tanh_logistic_f32")                                         \
   _(RECIPE_TRIGONOMETRIC_F32, recipe_trigonometric_f32,                      \
     "math.recipe.trigonometric_f32")                                         \
   _(RECIPE_WIDEN_F32_ROUND, recipe_widen_f32_round,                          \
@@ -86,6 +101,17 @@ static const loom_target_math_evaluation_t kSpirvMathEvaluations[] = {
             .accumulator_element_type = LOOM_SCALAR_TYPE_F32,
         },
 };
+
+#define LOOM_SPIRV_MATH_ACTIVATION_OPS(_)          \
+  _(LOGISTICF, LOGISTIC_EXP2_F32, NONE, NONE)      \
+  _(SILUF, SILU_LOGISTIC_F32, NONE, NONE)          \
+  _(SOFTPLUSF, SOFTPLUS_EXP2_F32, NONE, NONE)      \
+  _(GELUF_TANH, GELU_TANH_F32, NONE, NONE)         \
+  _(GELUF_LOGISTIC, GELU_LOGISTIC_F32, NONE, NONE) \
+  _(TANHF, TANH_LOGISTIC_F32, AFN, ACTIVATION_AFN)
+
+#define LOOM_SPIRV_MATH_ACTIVATION_RECIPE_FASTMATH \
+  (LOOM_TARGET_MATH_FASTMATH_FLAG_AFN | LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP)
 
 #define LOOM_SPIRV_MATH_DIRECT_RULE(element_types_, required_fastmath_flags_, \
                                     recipe_, evaluation_, constraint_,        \
@@ -202,6 +228,19 @@ static const loom_target_math_policy_direct_rule_t
         LOOM_SPIRV_MATH_INVERSE_RULE(ACOSHF),
         LOOM_SPIRV_MATH_INVERSE_RULE(ATANHF),
 #undef LOOM_SPIRV_MATH_INVERSE_RULE
+#define LOOM_SPIRV_MATH_ACTIVATION_DIRECT_RULE(                       \
+    op_, recipe_, required_fastmath_, permission_constraint_)         \
+  [LOOM_TARGET_MATH_OP_##op_] = LOOM_TARGET_MATH_POLICY_DIRECT_RULE(  \
+      LOOM_SCALAR_TYPE_SET_F32, LOOM_TARGET_MATH_LANE_DOMAIN_SET_ALL, \
+      LOOM_TARGET_MATH_FASTMATH_FLAG_##required_fastmath_,            \
+      LOOM_TARGET_MATH_RECIPE_##recipe_,                              \
+      LOOM_SPIRV_MATH_ACTIVATION_RECIPE_FASTMATH,                     \
+      LOOM_TARGET_MATH_FASTMATH_FLAG_NONE,                            \
+      LOOM_SPIRV_MATH_EVALUATION_SOURCE_F32,                          \
+      LOOM_SPIRV_MATH_CONSTRAINT_RECIPE_##recipe_,                    \
+      LOOM_SPIRV_MATH_CONSTRAINT_##permission_constraint_),
+        LOOM_SPIRV_MATH_ACTIVATION_OPS(LOOM_SPIRV_MATH_ACTIVATION_DIRECT_RULE)
+#undef LOOM_SPIRV_MATH_ACTIVATION_DIRECT_RULE
 };
 
 #undef LOOM_SPIRV_MATH_DIRECT_RULE
@@ -219,7 +258,12 @@ enum loom_spirv_math_rule_e {
   LOOM_SPIRV_MATH_RULE_DIV_NARROW,
   LOOM_SPIRV_MATH_RULE_INVERSE_NARROW,
   LOOM_SPIRV_MATH_RULE_TRIGONOMETRIC_NARROW,
-  LOOM_SPIRV_MATH_RULE_COUNT_,
+#define LOOM_SPIRV_MATH_ACTIVATION_RULE_ENUM(op_, recipe_, required_fastmath_, \
+                                             permission_constraint_)           \
+  LOOM_SPIRV_MATH_RULE_ACTIVATION_##op_,
+  LOOM_SPIRV_MATH_ACTIVATION_OPS(LOOM_SPIRV_MATH_ACTIVATION_RULE_ENUM)
+#undef LOOM_SPIRV_MATH_ACTIVATION_RULE_ENUM
+      LOOM_SPIRV_MATH_RULE_COUNT_,
 };
 
 static const loom_target_math_policy_rule_t
@@ -266,6 +310,21 @@ static const loom_target_math_policy_rule_t
                 .permission_constraint =
                     LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN,
             },
+#define LOOM_SPIRV_MATH_ACTIVATION_RULE(op_, recipe_, required_fastmath_,  \
+                                        permission_constraint_)            \
+  [LOOM_SPIRV_MATH_RULE_ACTIVATION_##op_] = {                              \
+      .match = LOOM_SPIRV_MATH_MATCH(                                      \
+          LOOM_SCALAR_TYPE_SET_FLOAT_LE16,                                 \
+          LOOM_TARGET_MATH_FASTMATH_FLAG_##required_fastmath_),            \
+      .recipe = LOOM_TARGET_MATH_RECIPE_##recipe_,                         \
+      .recipe_fastmath_flags = LOOM_SPIRV_MATH_ACTIVATION_RECIPE_FASTMATH, \
+      .evaluation = LOOM_SPIRV_MATH_EVALUATION_WIDENED_F32,                \
+      .decision_constraint = LOOM_SPIRV_MATH_CONSTRAINT_RECIPE_##recipe_,  \
+      .permission_constraint =                                             \
+          LOOM_SPIRV_MATH_CONSTRAINT_##permission_constraint_,             \
+  },
+        LOOM_SPIRV_MATH_ACTIVATION_OPS(LOOM_SPIRV_MATH_ACTIVATION_RULE)
+#undef LOOM_SPIRV_MATH_ACTIVATION_RULE
 };
 
 #undef LOOM_SPIRV_MATH_MATCH
@@ -279,6 +338,10 @@ static const loom_target_math_policy_rule_t
 
 static const loom_target_math_policy_rule_span_t
     kSpirvMathOperationSpans[LOOM_TARGET_MATH_OP_COUNT] = {
+        [LOOM_TARGET_MATH_OP_ERFF] = LOOM_SPIRV_MATH_SPAN(
+            0, 0, LOOM_SPIRV_MATH_CONSTRAINT_ACTIVATION_EXACT_FMA),
+        [LOOM_TARGET_MATH_OP_GELUF_ERF] = LOOM_SPIRV_MATH_SPAN(
+            0, 0, LOOM_SPIRV_MATH_CONSTRAINT_ACTIVATION_EXACT_FMA),
         [LOOM_TARGET_MATH_OP_ADDF] = LOOM_SPIRV_MATH_SPAN(
             LOOM_SPIRV_MATH_RULE_ARITHMETIC_BF16, 1,
             LOOM_SPIRV_MATH_CONSTRAINT_ELEMENT_F16_F32_F64),
@@ -320,9 +383,18 @@ static const loom_target_math_policy_rule_span_t
         LOOM_SPIRV_MATH_INVERSE_SPAN(ACOSHF),
         LOOM_SPIRV_MATH_INVERSE_SPAN(ATANHF),
 #undef LOOM_SPIRV_MATH_INVERSE_SPAN
+#define LOOM_SPIRV_MATH_ACTIVATION_SPAN(op_, recipe_, required_fastmath_, \
+                                        permission_constraint_)           \
+  [LOOM_TARGET_MATH_OP_##op_] = LOOM_SPIRV_MATH_SPAN(                     \
+      LOOM_SPIRV_MATH_RULE_ACTIVATION_##op_, 1,                           \
+      LOOM_SPIRV_MATH_CONSTRAINT_ACTIVATION_F32_EVALUATION),
+        LOOM_SPIRV_MATH_ACTIVATION_OPS(LOOM_SPIRV_MATH_ACTIVATION_SPAN)
+#undef LOOM_SPIRV_MATH_ACTIVATION_SPAN
 };
 
 #undef LOOM_SPIRV_MATH_SPAN
+#undef LOOM_SPIRV_MATH_ACTIVATION_RECIPE_FASTMATH
+#undef LOOM_SPIRV_MATH_ACTIVATION_OPS
 
 static const loom_target_math_policy_table_t kSpirvMathPolicyTable = {
     .operation_spans = kSpirvMathOperationSpans,

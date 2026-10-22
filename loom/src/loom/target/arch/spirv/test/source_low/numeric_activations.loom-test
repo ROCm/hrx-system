@@ -1,0 +1,104 @@
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low
+
+func.def @vector_activation_family(%input: f32) -> (f32, f32, f32, f32, f32, f32) {
+  %values = vector.splat %input : vector<4xf32>
+  %logistic_values = vector.logisticf %values : vector<4xf32>
+  %silu_values = vector.siluf %values : vector<4xf32>
+  %softplus_values = vector.softplusf %values : vector<4xf32>
+  %gelu_tanh_values = vector.geluf<tanh> %values : vector<4xf32>
+  %gelu_logistic_values = vector.geluf<logistic> %values {scale = 1.702} : vector<4xf32>
+  %tanh_values = vector.tanhf<afn> %values : vector<4xf32>
+  %logistic = vector.extract %logistic_values[3] : vector<4xf32> -> f32
+  %silu = vector.extract %silu_values[3] : vector<4xf32> -> f32
+  %softplus = vector.extract %softplus_values[3] : vector<4xf32> -> f32
+  %gelu_tanh = vector.extract %gelu_tanh_values[3] : vector<4xf32> -> f32
+  %gelu_logistic = vector.extract %gelu_logistic_values[3] : vector<4xf32> -> f32
+  %tanh = vector.extract %tanh_values[3] : vector<4xf32> -> f32
+  func.return %logistic, %silu, %softplus, %gelu_tanh, %gelu_logistic, %tanh : f32, f32, f32, f32, f32, f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @vector_activation_family(%input: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>) asm {
+  %values = OpCompositeConstruct.v4f32 %input, %input, %input, %input
+  %113 = OpConstant.f32 3216550459
+  %114 = OpCompositeConstruct.v4f32 %113, %113, %113, %113
+  %115 = OpConstant.f32 1065353216
+  %116 = OpCompositeConstruct.v4f32 %115, %115, %115, %115
+  %117 = OpVectorTimesScalar.v4f32 %114, %input
+  %118 = OpExtInst.GLSL.std.450.Exp2.v4f32 %117
+  %119 = OpFAdd.v4f32 %116, %118
+  %logistic_values = OpFDiv.v4f32 %116, %119
+  %silu_values = OpVectorTimesScalar.v4f32 %logistic_values, %input
+  %126 = OpConstant.f32 1060205080
+  %127 = OpCompositeConstruct.v4f32 %126, %126, %126, %126
+  %128 = OpConstant.f32 0
+  %129 = OpCompositeConstruct.v4f32 %128, %128, %128, %128
+  %130 = OpConstant.f32 1065353217
+  %131 = OpCompositeConstruct.v4f32 %130, %130, %130, %130
+  %132 = OpBitcast.v4f32.v4i32 %values
+  %133 = OpConstant.i32 2147483647
+  %134 = OpCompositeConstruct.v4i32 %133, %133, %133, %133
+  %135 = OpBitwiseAnd.v4i32 %132, %134
+  %136 = OpBitcast.v4i32.v4f32 %135
+  %137 = OpFMul.v4f32 %136, %114
+  %138 = OpExtInst.GLSL.std.450.Exp2.v4f32 %137
+  %139 = OpFAdd.v4f32 %116, %138
+  %140 = OpFSub.v4f32 %139, %116
+  %141 = OpFOrdGreaterThanEqual.v4f32 %139, %131
+  %142 = OpSelect.v4f32 %141, %140, %116
+  %143 = OpFDiv.v4f32 %138, %142
+  %144 = OpExtInst.GLSL.std.450.Log2.v4f32 %139
+  %145 = OpFMul.v4f32 %144, %127
+  %146 = OpFMul.v4f32 %145, %143
+  %147 = OpSelect.v4f32 %141, %146, %138
+  %148 = OpFOrdGreaterThanEqual.v4f32 %values, %129
+  %149 = OpSelect.v4f32 %148, %values, %129
+  %softplus_values = OpFAdd.v4f32 %149, %147
+  %151 = OpConstant.f32 1056964608
+  %152 = OpCompositeConstruct.v4f32 %151, %151, %151, %151
+  %153 = OpConstant.f32 1027024659
+  %154 = OpCompositeConstruct.v4f32 %153, %153, %153, %153
+  %155 = OpConstant.f32 1061962282
+  %156 = OpCompositeConstruct.v4f32 %155, %155, %155, %155
+  %157 = OpVectorTimesScalar.v4f32 %values, %input
+  %158 = OpVectorTimesScalar.v4f32 %157, %input
+  %159 = OpFMul.v4f32 %154, %158
+  %160 = OpFAdd.v4f32 %values, %159
+  %161 = OpFMul.v4f32 %156, %160
+  %162 = OpConstant.f32 3212836864
+  %163 = OpCompositeConstruct.v4f32 %162, %162, %162, %162
+  %164 = OpConstant.f32 1073741824
+  %165 = OpCompositeConstruct.v4f32 %164, %164, %164, %164
+  %166 = OpFMul.v4f32 %161, %165
+  %167 = OpFMul.v4f32 %166, %114
+  %168 = OpExtInst.GLSL.std.450.Exp2.v4f32 %167
+  %169 = OpFAdd.v4f32 %116, %168
+  %170 = OpFDiv.v4f32 %116, %169
+  %171 = OpFMul.v4f32 %170, %165
+  %172 = OpFAdd.v4f32 %171, %163
+  %173 = OpFAdd.v4f32 %116, %172
+  %174 = OpVectorTimesScalar.v4f32 %152, %input
+  %gelu_tanh_values = OpFMul.v4f32 %174, %173
+  %176 = OpConstant.f32 1071242019
+  %177 = OpCompositeConstruct.v4f32 %176, %176, %176, %176
+  %178 = OpVectorTimesScalar.v4f32 %177, %input
+  %179 = OpFMul.v4f32 %178, %114
+  %180 = OpExtInst.GLSL.std.450.Exp2.v4f32 %179
+  %181 = OpFAdd.v4f32 %116, %180
+  %182 = OpFDiv.v4f32 %116, %181
+  %gelu_logistic_values = OpVectorTimesScalar.v4f32 %182, %input
+  %184 = OpVectorTimesScalar.v4f32 %165, %input
+  %185 = OpFMul.v4f32 %184, %114
+  %186 = OpExtInst.GLSL.std.450.Exp2.v4f32 %185
+  %187 = OpFAdd.v4f32 %116, %186
+  %188 = OpFDiv.v4f32 %116, %187
+  %189 = OpFMul.v4f32 %188, %165
+  %tanh_values = OpFAdd.v4f32 %189, %163
+  %logistic = OpCompositeExtract.v4f32.f32 %logistic_values, 3
+  %silu = OpCompositeExtract.v4f32.f32 %silu_values, 3
+  %softplus = OpCompositeExtract.v4f32.f32 %softplus_values, 3
+  %gelu_tanh = OpCompositeExtract.v4f32.f32 %gelu_tanh_values, 3
+  %gelu_logistic = OpCompositeExtract.v4f32.f32 %gelu_logistic_values, 3
+  %tanh = OpCompositeExtract.v4f32.f32 %tanh_values, 3
+  return %logistic, %silu, %softplus, %gelu_tanh, %gelu_logistic, %tanh
+}

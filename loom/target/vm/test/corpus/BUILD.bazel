@@ -147,6 +147,7 @@ loom_corpus_build(
             "numeric/conversion/float8_schema_conversion.loom:@float8_schema_conversion": "TARGET/031",
             "numeric/float/activations.loom:@activation_f32x8_observations": "LOWERING/036",
             "numeric/float/activations.loom:@activation_observations": "LOWERING/036",
+            "numeric/float/activations.loom:@activation_portable_observations": "LOWERING/036",
             "numeric/float/activations.loom:@softplus_fast_observations": "LOWERING/036",
             "numeric/float/activations.loom:@softplus_observations": "LOWERING/036",
             "numeric/float/roots.loom:@root_f64_boundary_observations": "LOWERING/036",

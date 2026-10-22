@@ -82,20 +82,13 @@ func.def inline @activation_erf_reference(%input: f32) -> (f32) {
   func.return %result : f32
 }
 
-func.def inline @activation_reference(%input: f32) -> (f32, f32, f32, f32, f32) {
+func.def inline @activation_portable_reference(%input: f32) -> (f32, f32, f32, f32) {
   %half = scalar.constant 0.5 : f32
   %c1 = scalar.constant 1.0 : f32
-  %inverse_sqrt_two = scalar.constant 0.70710678118654757 : f32
   %sqrt_two_over_pi = scalar.constant 0.79788456080286541 : f32
   %cubic_coefficient = scalar.constant 0.044714999999999998 : f32
   %logistic_scale = scalar.constant 1.702 : f32
-
-  %erf_input = scalar.mulf %input, %inverse_sqrt_two : f32
-  %erf = func.call @activation_erf_reference(%erf_input) : (f32) -> (f32)
-  %one_plus_erf = scalar.addf %c1, %erf : f32
   %half_input = scalar.mulf %half, %input : f32
-  %gelu_erf = scalar.mulf %half_input, %one_plus_erf : f32
-
   %squared = scalar.mulf %input, %input : f32
   %cubed = scalar.mulf %squared, %input : f32
   %cubic_term = scalar.mulf %cubic_coefficient, %cubed : f32
@@ -110,6 +103,19 @@ func.def inline @activation_reference(%input: f32) -> (f32, f32, f32, f32, f32) 
   %gelu_logistic = scalar.mulf %input, %gelu_logistic_factor : f32
   %logistic = func.call @activation_logistic_reference(%input) : (f32) -> (f32)
   %silu = scalar.mulf %input, %logistic : f32
+  func.return %gelu_tanh, %gelu_logistic, %logistic, %silu : f32, f32, f32, f32
+}
+
+func.def inline @activation_reference(%input: f32) -> (f32, f32, f32, f32, f32) {
+  %half = scalar.constant 0.5 : f32
+  %c1 = scalar.constant 1.0 : f32
+  %inverse_sqrt_two = scalar.constant 0.70710678118654757 : f32
+  %erf_input = scalar.mulf %input, %inverse_sqrt_two : f32
+  %erf = func.call @activation_erf_reference(%erf_input) : (f32) -> (f32)
+  %one_plus_erf = scalar.addf %c1, %erf : f32
+  %half_input = scalar.mulf %half, %input : f32
+  %gelu_erf = scalar.mulf %half_input, %one_plus_erf : f32
+  %gelu_tanh, %gelu_logistic, %logistic, %silu = func.call @activation_portable_reference(%input) : (f32) -> (f32, f32, f32, f32)
   func.return %gelu_erf, %gelu_tanh, %gelu_logistic, %logistic, %silu : f32, f32, f32, f32, f32
 }
 
@@ -340,6 +346,106 @@ func.def inline @activation_f32x8_observations_oracle(%input: buffer, %output: b
     view.store %tanh, %output_view[%tanh_position] : f32, view<56xf32>
   }
   func.return
+}
+
+// Keeps the activation operations that do not require exact FMA independently
+// executable on targets with a smaller arithmetic basis.
+func.def inline @activation_portable_observations(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<8xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<54xf32>
+  %scalar_input = view.load %input_view[0] : view<8xf32> -> f32
+  %values = vector.load %input_view[0] : view<8xf32> -> vector<8xf32>
+
+  %scalar_gelu_tanh = scalar.geluf<tanh, afn> %scalar_input : f32
+  %scalar_gelu_logistic = scalar.geluf<logistic> %scalar_input {scale = 1.702} : f32
+  %scalar_logistic = scalar.logisticf %scalar_input : f32
+  %scalar_silu = scalar.siluf %scalar_input : f32
+  %scalar_softplus = scalar.softplusf %scalar_input : f32
+  %scalar_tanh = scalar.tanhf<afn> %scalar_input : f32
+  view.store %scalar_gelu_tanh, %output_view[0] : f32, view<54xf32>
+  view.store %scalar_gelu_logistic, %output_view[1] : f32, view<54xf32>
+  view.store %scalar_logistic, %output_view[2] : f32, view<54xf32>
+  view.store %scalar_silu, %output_view[3] : f32, view<54xf32>
+  view.store %scalar_softplus, %output_view[4] : f32, view<54xf32>
+  view.store %scalar_tanh, %output_view[5] : f32, view<54xf32>
+
+  %gelu_tanh = vector.geluf<tanh, afn> %values : vector<8xf32>
+  %gelu_logistic = vector.geluf<logistic> %values {scale = 1.702} : vector<8xf32>
+  %logistic = vector.logisticf %values : vector<8xf32>
+  %silu = vector.siluf %values : vector<8xf32>
+  %softplus = vector.softplusf %values : vector<8xf32>
+  %tanh = vector.tanhf<afn> %values : vector<8xf32>
+  vector.store %gelu_tanh, %output_view[6] : vector<8xf32>, view<54xf32>
+  vector.store %gelu_logistic, %output_view[14] : vector<8xf32>, view<54xf32>
+  vector.store %logistic, %output_view[22] : vector<8xf32>, view<54xf32>
+  vector.store %silu, %output_view[30] : vector<8xf32>, view<54xf32>
+  vector.store %softplus, %output_view[38] : vector<8xf32>, view<54xf32>
+  vector.store %tanh, %output_view[46] : vector<8xf32>, view<54xf32>
+  func.return
+}
+
+func.def inline @activation_portable_observations_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<8xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<54xf32>
+  %scalar_input = view.load %input_view[0] : view<8xf32> -> f32
+  %scalar_gelu_tanh, %scalar_gelu_logistic, %scalar_logistic, %scalar_silu = func.call @activation_portable_reference(%scalar_input) : (f32) -> (f32, f32, f32, f32)
+  %scalar_softplus = func.call @softplus_reference(%scalar_input) : (f32) -> (f32)
+  %scalar_tanh = func.call @activation_tanh_reference(%scalar_input) : (f32) -> (f32)
+  view.store %scalar_gelu_tanh, %output_view[0] : f32, view<54xf32>
+  view.store %scalar_gelu_logistic, %output_view[1] : f32, view<54xf32>
+  view.store %scalar_logistic, %output_view[2] : f32, view<54xf32>
+  view.store %scalar_silu, %output_view[3] : f32, view<54xf32>
+  view.store %scalar_softplus, %output_view[4] : f32, view<54xf32>
+  view.store %scalar_tanh, %output_view[5] : f32, view<54xf32>
+
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %gelu_tanh_base = index.constant 6 : index
+  %gelu_logistic_base = index.constant 14 : index
+  %logistic_base = index.constant 22 : index
+  %silu_base = index.constant 30 : index
+  %softplus_base = index.constant 38 : index
+  %tanh_base = index.constant 46 : index
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %input_view[%i] : view<8xf32> -> f32
+    %gelu_tanh, %gelu_logistic, %logistic, %silu = func.call @activation_portable_reference(%value) : (f32) -> (f32, f32, f32, f32)
+    %softplus = func.call @softplus_reference(%value) : (f32) -> (f32)
+    %tanh = func.call @activation_tanh_reference(%value) : (f32) -> (f32)
+    %gelu_tanh_position = index.add %gelu_tanh_base, %i : index
+    %gelu_logistic_position = index.add %gelu_logistic_base, %i : index
+    %logistic_position = index.add %logistic_base, %i : index
+    %silu_position = index.add %silu_base, %i : index
+    %softplus_position = index.add %softplus_base, %i : index
+    %tanh_position = index.add %tanh_base, %i : index
+    view.store %gelu_tanh, %output_view[%gelu_tanh_position] : f32, view<54xf32>
+    view.store %gelu_logistic, %output_view[%gelu_logistic_position] : f32, view<54xf32>
+    view.store %logistic, %output_view[%logistic_position] : f32, view<54xf32>
+    view.store %silu, %output_view[%silu_position] : f32, view<54xf32>
+    view.store %softplus, %output_view[%softplus_position] : f32, view<54xf32>
+    view.store %tanh, %output_view[%tanh_position] : f32, view<54xf32>
+  }
+  func.return
+}
+
+check.scenario @activation_portable_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-8.0) step(2.0) : tensor<8xf32>
+    %output = check.generate.fill value(0.0) : tensor<54xf32>
+    check.compare<@activation_portable_observations, @activation_portable_observations_oracle>(%input, %output) : (tensor<8xf32>, tensor<54xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.02) rtol(0.01) nan(same) : tensor<54xf32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1.75) step(0.5) : tensor<8xf32>
+    %output = check.generate.fill value(0.0) : tensor<54xf32>
+    check.compare<@activation_portable_observations, @activation_portable_observations_oracle>(%input, %output) : (tensor<8xf32>, tensor<54xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.02) rtol(0.01) nan(same) : tensor<54xf32>
+    }
+  }
+  check.return
 }
 
 // The core activation family is independently selectable by targets whose
