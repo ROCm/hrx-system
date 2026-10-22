@@ -37,6 +37,8 @@ loom_value_set_id_t loom_value_fact_table_select_dependencies_begin(
 // Publishes the transitive select-condition summary for each result of |op|.
 // Operand summaries, scalar Boolean selector roles, and predicate-list value
 // references on fact identities contribute to the canonical result set.
+// Loop/CFG block arguments are expression leaves, so numeric feedback does not
+// change these structural summaries during an immutable solve.
 // Summary changes set |inout_changed| when non-NULL without clearing an
 // existing change.
 iree_status_t loom_value_fact_table_propagate_select_dependencies(

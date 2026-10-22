@@ -356,6 +356,10 @@ struct loom_value_fact_table_t {
     loom_value_fact_select_dependency_page_t** pages;
     // Allocated page pointer count, or zero before the first publication.
     iree_host_size_t page_capacity;
+    // The current numeric solve is replaying a completed structural traversal.
+    // Nested solves inherit this state; each solver restores its caller's
+    // state.
+    bool replaying;
   } select_dependencies;
 
   // Exact predicate-bearing identities awaiting path-local fact transport.

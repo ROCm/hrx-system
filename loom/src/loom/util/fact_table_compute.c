@@ -949,7 +949,7 @@ static iree_status_t loom_value_fact_table_seed_cfg_recurrences(
 
 // A component's inputs are stable before its solve. Only its feedback needs
 // iteration; definitions in predecessor and successor components do not.
-static iree_status_t loom_value_fact_table_solve_cfg_component(
+static iree_status_t loom_value_fact_table_iterate_cfg_component(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_value_fact_cfg_region_t* region, const loom_scc_t* component,
     iree_arena_allocator_t* scratch_arena,
@@ -978,6 +978,10 @@ static iree_status_t loom_value_fact_table_solve_cfg_component(
       IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_cfg_block_tree(
           table, module, region->graph.blocks[block_index].block, &changed));
     }
+    // Component members are in reverse postorder, so dominating SSA inputs
+    // have published their selector roots before use. Backedge equations
+    // change numeric facts, not this structural dependency graph.
+    table->select_dependencies.replaying = true;
     if (!changed) {
       converged = true;
       break;
@@ -1019,6 +1023,18 @@ static iree_status_t loom_value_fact_table_solve_cfg_component(
     }
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_value_fact_table_solve_cfg_component(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_value_fact_cfg_region_t* region, const loom_scc_t* component,
+    iree_arena_allocator_t* scratch_arena,
+    const loom_value_fact_cfg_saved_values_t* restart_values) {
+  const bool was_replaying = table->select_dependencies.replaying;
+  iree_status_t status = loom_value_fact_table_iterate_cfg_component(
+      table, module, region, component, scratch_arena, restart_values);
+  table->select_dependencies.replaying = was_replaying;
+  return status;
 }
 
 iree_status_t loom_value_fact_table_recompute_cfg_component(
@@ -1351,8 +1367,10 @@ static iree_status_t loom_value_fact_table_compute_scoped_op(
     *out_changed = false;
   }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_propagate_select_dependencies(
-      table, module, op, vtable, out_changed));
+  if (!table->select_dependencies.replaying) {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_propagate_select_dependencies(
+        table, module, op, vtable, out_changed));
+  }
   if (vtable && (vtable->loop_like || vtable->region_branch)) {
     iree_status_t status =
         vtable->loop_like ? loom_value_fact_table_compute_loop_like_summary(

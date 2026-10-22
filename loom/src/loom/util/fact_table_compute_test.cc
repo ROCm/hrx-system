@@ -89,6 +89,13 @@ class FactTableComputeTest : public ::testing::Test {
                     : std::vector<loom_op_t*>();
   }
 
+  void ExpectSelector(loom_value_id_t value, loom_value_id_t selector) {
+    loom_value_set_cursor_t cursor;
+    loom_value_fact_table_select_dependencies_begin(&table_, value, &cursor);
+    EXPECT_EQ(loom_value_set_cursor_next(&cursor), selector);
+    EXPECT_EQ(loom_value_set_cursor_next(&cursor), LOOM_VALUE_ID_INVALID);
+  }
+
   iree_arena_block_pool_t pool_;
   iree_arena_allocator_t arena_;
   loom_context_t context_;
@@ -423,6 +430,7 @@ TEST_P(FactTableLoopScratchTest, FailedSolvesReleaseWorkingTuples) {
     failure_index_ = failure;
     iree_status_t status =
         loom_value_fact_table_compute_op(&table_, module_, loop);
+    EXPECT_FALSE(table_.select_dependencies.replaying);
     // Returning scratch to the pool is sufficient; trimming exposes any
     // backing still stranded in a failed solve's arena.
     iree_arena_block_pool_trim(&transient_pool_);
@@ -440,6 +448,58 @@ TEST_P(FactTableLoopScratchTest, FailedSolvesReleaseWorkingTuples) {
     iree_arena_block_pool_trim(&transient_pool_);
     EXPECT_EQ(live_allocation_count_, live_allocations);
     EXPECT_EQ(transient_arena_.used_allocation_size, used_bytes);
+  }
+}
+
+TEST_P(FactTableLoopScratchTest, NestedSolvesRefreshStructuralDependencies) {
+  loom_op_t* outer = BuildLoop(GetParam(), carried_, /*nested=*/true);
+  loom_region_t* outer_body =
+      loom_loop_like_body(loom_loop_like_cast(module_, outer));
+  loom_op_t* inner = loom_region_entry_block(outer_body)->first_op;
+  loom_region_t* inner_body =
+      loom_loop_like_body(loom_loop_like_cast(module_, inner));
+  loom_region_t* condition = loom_scf_while_before(GetParam() ? outer : inner);
+
+  // Rotating distinct lane facts requires numerical convergence; the selector
+  // dependencies are already complete after the first traversal.
+  loom_op_t* yield = loom_region_entry_block(inner_body)->last_op;
+  const auto first = loom_op_const_operands(yield)[0];
+  const auto second = loom_op_const_operands(yield)[1];
+  IREE_ASSERT_OK(loom_op_set_operand(module_, yield, 0, second));
+  IREE_ASSERT_OK(loom_op_set_operand(module_, yield, 1, first));
+  const auto replacement = DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
+  loom_region_t* regions[] = {condition, inner_body, outer_body};
+  loom_op_t* selections[IREE_ARRAYSIZE(regions)] = {};
+  for (unsigned i = 0; i < IREE_ARRAYSIZE(regions); ++i) {
+    loom_builder_set_before(&builder_,
+                            loom_region_entry_block(regions[i])->last_op);
+    IREE_ASSERT_OK(
+        loom_scf_select_build(&builder_, condition_, inputs_[0], inputs_[1],
+                              type_, LOOM_LOCATION_UNKNOWN, &selections[i]));
+  }
+
+  for (unsigned scope = 0; scope < 2; ++scope) {
+    for (const auto selector : {condition_, replacement}) {
+      for (auto* select : selections) {
+        IREE_ASSERT_OK(loom_op_set_operand(module_, select, 0, selector));
+      }
+      IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, outer));
+      for (auto* select : selections) {
+        ExpectSelector(loom_scf_select_result(select), selector);
+        const auto facts = loom_value_fact_table_lookup(
+            &table_, loom_scf_select_result(select));
+        EXPECT_EQ(facts.range_lo, 2);
+        EXPECT_EQ(facts.range_hi, 16);
+        bool changed = true;
+        IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(
+            &table_, module_, select, &changed));
+        EXPECT_FALSE(changed);
+      }
+    }
+    loom_value_fact_table_clear_scope(&table_);
+    iree_arena_reset(&transient_arena_);
+    SeedInputs();
+    SeedCarriedFacts();
   }
 }
 
@@ -1448,6 +1508,49 @@ TEST_P(FactTableCfgRecomputeTest, FirstSnapshotFailurePreservesAllFacts) {
 
 TEST_P(FactTableCfgRecomputeTest, LaterSnapshotFailurePreservesUnsavedFacts) {
   CheckAllocationFailure(1);
+}
+
+TEST_P(FactTableCfgRecomputeTest, StructuralEditsPublishWithUnchangedNumbers) {
+  ASSERT_NO_FATAL_FAILURE(BuildCycle(2));
+  loom_builder_set_before(&builder_,
+                          structure_->graph.blocks[0].block->last_op);
+  const auto i1 = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+  loom_op_t* conditions[2] = {};
+  for (unsigned i = 0; i < IREE_ARRAYSIZE(conditions); ++i) {
+    IREE_ASSERT_OK(loom_scalar_constant_build(&builder_, loom_attr_i64(i), i1,
+                                              LOOM_LOCATION_UNKNOWN,
+                                              &conditions[i]));
+    IREE_ASSERT_OK(
+        loom_value_fact_table_compute_op(&table_, module_, conditions[i]));
+  }
+  loom_builder_set_before(
+      &builder_, structure_->graph.blocks[component_->nodes[0]].block->last_op);
+  const auto initial = loom_index_constant_result(initial_);
+  loom_op_t* select = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(
+      &builder_, loom_scalar_constant_result(conditions[0]), initial, initial,
+      type_, LOOM_LOCATION_UNKNOWN, &select));
+  const auto selected = loom_scf_select_result(select);
+  loom_op_t* add = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder_, selected,
+                                      loom_index_constant_result(step_), type_,
+                                      LOOM_LOCATION_UNKNOWN, &add));
+  const auto sum = loom_index_add_result(add);
+  IREE_ASSERT_OK(Recompute());
+  ExpectSelector(sum, loom_scalar_constant_result(conditions[0]));
+
+  changed_.clear();
+  const auto replacement = loom_scalar_constant_result(conditions[1]);
+  IREE_ASSERT_OK(loom_op_set_operand(module_, select, 0, replacement));
+  IREE_ASSERT_OK(Recompute());
+  EXPECT_EQ(changed_, std::vector<loom_value_id_t>({selected, sum}));
+  ExpectSelector(selected, replacement);
+  ExpectSelector(sum, replacement);
+  ExpectExact(selected, 5);
+  ExpectExact(sum, 6);
+  changed_.clear();
+  IREE_ASSERT_OK(Recompute());
+  EXPECT_TRUE(changed_.empty());
 }
 
 INSTANTIATE_TEST_SUITE_P(PoolSizes, FactTableCfgRecomputeTest,

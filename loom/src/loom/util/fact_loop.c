@@ -601,6 +601,9 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
     IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region_tree(
         table, module, body, loop.op));
     loom_op_t* yield = loom_value_fact_region_terminator(body);
+    // SSA selector dependencies are complete after one body traversal. Only
+    // numeric equations change during backedge widening and exact replay.
+    table->select_dependencies.replaying = true;
     loom_value_fact_table_collect_terminator_operands(
         table, yield, /*operand_offset=*/0, yielded_facts, count);
 
@@ -950,6 +953,9 @@ static iree_status_t loom_value_fact_table_compute_condition_loop_summary(
     IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region_tree(
         table, module, body, loop.op));
     loom_op_t* yield = loom_value_fact_region_terminator(body);
+    // Both regions have published their structural dependencies. Their
+    // numerical state may still require another condition/body evaluation.
+    table->select_dependencies.replaying = true;
     loom_value_fact_table_collect_terminator_operands(
         table, yield, /*operand_offset=*/0, yielded_facts, header_count);
 
@@ -1066,12 +1072,16 @@ iree_status_t loom_value_fact_table_compute_loop_like_summary(
     // the fact scope's lifetime.
     iree_arena_allocator_t scratch_arena;
     iree_arena_initialize(table->transient_arena->block_pool, &scratch_arena);
+    // An enclosing solve can already be replaying this entire subtree. Restore
+    // that state on failure as well as success so later edits refresh roots.
+    const bool was_replaying = table->select_dependencies.replaying;
     iree_status_t status =
         loom_loop_like_condition_region(loop)
             ? loom_value_fact_table_compute_condition_loop_summary(
                   table, module, loop, &scratch_arena, out_changed)
             : loom_value_fact_table_compute_counted_loop_summary(
                   table, module, loop, &scratch_arena, out_changed);
+    table->select_dependencies.replaying = was_replaying;
     iree_arena_deinitialize(&scratch_arena);
     return status;
   }

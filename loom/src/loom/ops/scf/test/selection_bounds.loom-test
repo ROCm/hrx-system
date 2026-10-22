@@ -154,3 +154,43 @@ func.def @signed_boolean_arm(%input: i1) -> (i64, i64) {
   %maximum = scalar.constant 1 : i64
   func.return %minimum, %maximum : i64, i64
 }
+
+// ====
+// RUN: pass canonicalize,dce
+
+// The selector graph is unchanged during exact replay, but the carried range
+// grows on every execution. Body observations cover all three executions.
+func.def @selection_during_exact_replay(%increment: i1) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 3 : index
+  %result = scf.for %iv = [%begin to %end step %step](%state = %begin : index) -> (index) {
+    %next = index.add %state, %step : index
+    %selected = scf.select %increment, %next, %begin : index
+    %body_minimum = test.fact_range_lo %selected : index -> i64
+    %body_maximum = test.fact_range_hi %selected : index -> i64
+    test.use %body_minimum, %body_maximum : i64, i64
+    scf.yield %selected : index
+  }
+  %minimum = test.fact_range_lo %result : index -> i64
+  %maximum = test.fact_range_hi %result : index -> i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ----
+func.def @selection_during_exact_replay(%increment: i1) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 3 : index
+  %result = scf.for %iv = [%begin to %end step %step](%state = %begin : index) -> (index) {
+    %next = index.add %state, %step : index
+    %selected = scf.select %increment, %next, %begin : index
+    %body_minimum = scalar.constant 0 : i64
+    %body_maximum = scalar.constant 3 : i64
+    test.use %body_minimum, %body_maximum : i64, i64
+    scf.yield %selected : index
+  }
+  %minimum = scalar.constant 0 : i64
+  %maximum = scalar.constant 3 : i64
+  func.return %minimum, %maximum : i64, i64
+}
