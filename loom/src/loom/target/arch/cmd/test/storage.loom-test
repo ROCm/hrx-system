@@ -77,6 +77,120 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // ====
 
+// A retired tail can be extended when the next allocation is larger. The
+// 80-byte buffer starts at zero instead of leaving 64 free bytes behind it.
+// RUN: emit command-program @extend_retired_tail
+
+kernel.entry.decl @consume(%storage: buffer)
+
+command.program.def public @extend_retired_tail() launch() {
+  %workgroup_count = index.constant 1 : index
+  %small_bytes = index.constant 64 : offset
+  %large_bytes = index.constant 80 : offset
+  %small = buffer.alloca<global> align(16) %small_bytes : buffer
+  kernel.dispatch @consume[%workgroup_count](%small) : [index](buffer)
+  %large = buffer.alloca<global> align(16) %large_bytes : buffer
+  kernel.dispatch @consume[%workgroup_count](%large) : [index](buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @extend_retired_tail() asm {
+  %6 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %7 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %8 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %9 = cmd.constant.u64 0
+  %10 = cmd.constant.u64 64
+  %11 = cmd.constant.u64 80
+  %12 = cmd.constant.u32 1
+  cmd.dispatch.direct<%7, %8>[%12, %12, %12](%6, %9, %10)
+  cmd.dispatch.direct.barrier<%7, %8>[%12, %12, %12](%6, %9, %11)
+  return
+}
+
+// ====
+
+// A later use keeps the first buffer live across the second dispatch. Tail
+// extension must preserve their distinct ranges throughout that overlap.
+// RUN: emit command-program @retain_live_tail
+
+kernel.entry.decl @consume(%storage: buffer)
+
+command.program.def public @retain_live_tail() launch() {
+  %workgroup_count = index.constant 1 : index
+  %small_bytes = index.constant 64 : offset
+  %large_bytes = index.constant 80 : offset
+  %small = buffer.alloca<global> align(16) %small_bytes : buffer
+  kernel.dispatch @consume[%workgroup_count](%small) : [index](buffer)
+  %large = buffer.alloca<global> align(16) %large_bytes : buffer
+  kernel.dispatch @consume[%workgroup_count](%large) : [index](buffer)
+  kernel.dispatch @consume[%workgroup_count](%small) : [index](buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @retain_live_tail() asm {
+  %6 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %7 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %8 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %9 = cmd.constant.u64 0
+  %10 = cmd.constant.u64 64
+  %11 = cmd.constant.u64 80
+  %12 = cmd.constant.u32 1
+  cmd.dispatch.direct<%7, %8>[%12, %12, %12](%6, %9, %10)
+  cmd.dispatch.direct.barrier<%7, %8>[%12, %12, %12](%6, %10, %11)
+  cmd.dispatch.direct.barrier<%7, %8>[%12, %12, %12](%6, %9, %10)
+  return
+}
+
+// ====
+
+// The live prefix occupies bytes [0, 24). Extending the retired [24, 80) tail
+// aligns the large buffer to 64, and returns [24, 64) for the concurrent peer.
+// RUN: emit command-program @reuse_tail_alignment_padding
+
+kernel.entry.decl @consume(%storage: buffer)
+
+command.program.def public @reuse_tail_alignment_padding() launch() {
+  %workgroup_count = index.constant 1 : index
+  %prefix_bytes = index.constant 24 : offset
+  %retired_bytes = index.constant 56 : offset
+  %large_bytes = index.constant 96 : offset
+  %peer_bytes = index.constant 32 : offset
+  %prefix = buffer.alloca<global> align(16) %prefix_bytes : buffer
+  %retired = buffer.alloca<global> align(8) %retired_bytes : buffer
+  kernel.dispatch @consume[%workgroup_count](%retired) : [index](buffer)
+  %large = buffer.alloca<global> align(64) %large_bytes : buffer
+  %peer = buffer.alloca<global> align(8) %peer_bytes : buffer
+  command.concurrent {
+    kernel.dispatch @consume[%workgroup_count](%large) : [index](buffer)
+    kernel.dispatch @consume[%workgroup_count](%peer) : [index](buffer)
+  }
+  kernel.dispatch @consume[%workgroup_count](%prefix) : [index](buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @reuse_tail_alignment_padding() asm {
+  %10 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %11 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %12 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %13 = cmd.constant.u64 0
+  %14 = cmd.constant.u64 24
+  %15 = cmd.constant.u64 56
+  %16 = cmd.constant.u64 64
+  %17 = cmd.constant.u64 96
+  %18 = cmd.constant.u64 32
+  %19 = cmd.constant.u32 1
+  cmd.dispatch.direct<%11, %12>[%19, %19, %19](%10, %14, %15)
+  cmd.dispatch.direct.barrier<%11, %12>[%19, %19, %19](%10, %16, %17)
+  cmd.dispatch.direct<%11, %12>[%19, %19, %19](%10, %14, %18)
+  cmd.dispatch.direct.barrier<%11, %12>[%19, %19, %19](%10, %13, %14)
+  return
+}
+
+// ====
+
 // RUN: emit command-program @parameterized
 
 kernel.def @combine() {

@@ -449,17 +449,27 @@ static iree_status_t loom_cmd_transient_pack_allocations(
     if (!loom_cmd_transient_allocate_free_range(
             free_ranges, &free_range_count, allocation->byte_length,
             allocation->base_alignment, &byte_offset)) {
-      if (!loom_cmd_transient_align_offset(build->placement_cursor,
-                                           allocation->base_alignment,
-                                           &byte_offset) ||
+      // A free tail can contribute to an allocation larger than any existing
+      // hole. Extend from its start instead of stranding it below the cursor.
+      uint64_t append_offset = build->placement_cursor;
+      if (free_range_count != 0) {
+        const loom_cmd_transient_free_range_t tail =
+            free_ranges[free_range_count - 1];
+        if (tail.byte_offset + tail.byte_length == append_offset) {
+          append_offset = tail.byte_offset;
+          --free_range_count;
+        }
+      }
+      if (!loom_cmd_transient_align_offset(
+              append_offset, allocation->base_alignment, &byte_offset) ||
           allocation->byte_length > UINT64_MAX - byte_offset) {
         return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "command transient slab exceeds 64-bit "
                                 "offsets");
       }
-      loom_cmd_transient_insert_free_range(
-          free_ranges, &free_range_count, build->placement_cursor,
-          byte_offset - build->placement_cursor);
+      loom_cmd_transient_insert_free_range(free_ranges, &free_range_count,
+                                           append_offset,
+                                           byte_offset - append_offset);
       build->placement_cursor = byte_offset + allocation->byte_length;
     }
     allocation->byte_offset = byte_offset;
