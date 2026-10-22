@@ -62,7 +62,15 @@ static amdf_status_t amdf_xdna_device_query_memory_reservation_profile(
   return status;
 }
 
+static void amdf_xdna_device_query_base_info(const amdf_device_t* base_device,
+                                             amdf_device_info_t* out_info) {
+  const amdf_xdna_device_t* device = (const amdf_xdna_device_t*)base_device;
+  out_info->id = device->info.id;
+  out_info->reset_epoch = device->info.reset_epoch;
+}
+
 static const amdf_device_vtable_t amdf_xdna_device_vtable = {
+    .query_info = amdf_xdna_device_query_base_info,
     .query_memory_reservation_profile =
         amdf_xdna_device_query_memory_reservation_profile,
     .query_memory_profile = amdf_xdna_device_query_memory_profile,
@@ -95,8 +103,10 @@ amdf_xdna_device_create(amdf_endpoint_t* endpoint,
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  status = amdf_device_initialize(&device->base, &amdf_xdna_device_vtable,
-                                  endpoint, AMDF_ENGINE_KIND_XDNA);
+  status = amdf_device_initialize(
+      &device->base, &amdf_xdna_device_vtable, endpoint, AMDF_EXTENSION_XDNA,
+      amdf_endpoint_get_cached_info(endpoint)->queue_family_count,
+      amdf_endpoint_get_queue_families(endpoint));
   if (amdf_status_is_ok(status) && !amdf_xdna_device_profile_initialize(
                                        amdf_endpoint_get_cached_info(endpoint),
                                        &device->info, &device->profile)) {
@@ -139,7 +149,7 @@ amdf_xdna_device_create(amdf_endpoint_t* endpoint,
 
 amdf_status_t AMDF_CALL amdf_xdna_device_query_info(
     amdf_device_t* device, amdf_xdna_device_info_t* out_info) {
-  if (!amdf_device_is_engine(device, AMDF_ENGINE_KIND_XDNA)) {
+  if (!amdf_device_is_extension(device, AMDF_EXTENSION_XDNA)) {
     return device == NULL
                ? amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT)
                : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);

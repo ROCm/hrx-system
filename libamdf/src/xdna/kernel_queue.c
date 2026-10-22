@@ -11,7 +11,6 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/atomics.h"
 #include "libamdf/src/device.h"
-#include "libamdf/src/endpoint.h"
 #include "libamdf/src/kernel_queue.h"
 #include "libamdf/src/memory.h"
 #include "libamdf/src/platform/wait.h"
@@ -234,8 +233,8 @@ amdf_status_t AMDF_CALL amdf_xdna_kernel_queue_create(
       .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
       .structure_size = sizeof(family_info),
   };
-  status = amdf_endpoint_query_queue_family_info(
-      device->endpoint, create_info->queue_family_ordinal, &family_info);
+  status = amdf_device_query_queue_family_info(
+      device, create_info->queue_family_ordinal, &family_info);
   if (!amdf_status_is_ok(status)) {
     return status;
   }

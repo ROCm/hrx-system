@@ -7,7 +7,6 @@
 #include "libamdf/src/gpu/clock.h"
 
 #include "libamdf/src/device.h"
-#include "libamdf/src/endpoint.h"
 #include "libamdf/src/gpu/device.h"
 #include "libamdf/src/gpu/umd/clock.h"
 
@@ -17,15 +16,15 @@ static amdf_status_t amdf_gpu_clock_query_family(
   if (device == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  if (!amdf_device_is_engine(device, AMDF_ENGINE_KIND_GPU)) {
+  if (!amdf_device_is_extension(device, AMDF_EXTENSION_GPU)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   amdf_queue_family_info_t family = {
       .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
       .structure_size = sizeof(family),
   };
-  const amdf_status_t status = amdf_endpoint_query_queue_family_info(
-      device->endpoint, queue_family_ordinal, &family);
+  const amdf_status_t status = amdf_device_query_queue_family_info(
+      device, queue_family_ordinal, &family);
   if (!amdf_status_is_ok(status)) {
     return status;
   }

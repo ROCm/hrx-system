@@ -15,7 +15,7 @@ amdf_status_t AMDF_CALL amdf_xdna_device_query_timer_clock_info(
   if (device == NULL || out_info == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  if (!amdf_device_is_engine(device, AMDF_ENGINE_KIND_XDNA)) {
+  if (!amdf_device_is_extension(device, AMDF_EXTENSION_XDNA)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   return amdf_xdna_umd_query_timer_clock_info(amdf_xdna_device_get_umd(device),

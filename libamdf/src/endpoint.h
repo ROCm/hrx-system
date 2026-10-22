@@ -28,6 +28,10 @@ void amdf_endpoint_set_queue_families(
     amdf_endpoint_t* endpoint, uint32_t queue_family_count,
     const amdf_queue_family_info_t* queue_families);
 
+// Returns immutable passive families borrowed for the endpoint's lifetime.
+const amdf_queue_family_info_t* amdf_endpoint_get_queue_families(
+    const amdf_endpoint_t* endpoint);
+
 // Returns the embedded local descriptor after its storage has been qualified.
 amdf_memory_scope_t* amdf_endpoint_local_memory_scope(
     amdf_endpoint_t* endpoint);

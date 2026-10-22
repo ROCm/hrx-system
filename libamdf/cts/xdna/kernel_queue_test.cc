@@ -217,20 +217,20 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
   }
 
   uint32_t QueryKernelQueueFamily() {
-    amdf_endpoint_info_t endpoint_info = {
-        .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-        .structure_size = sizeof(endpoint_info),
+    amdf_device_info_t device_info = {
+        .type = AMDF_STRUCTURE_TYPE_DEVICE_INFO,
+        .structure_size = sizeof(device_info),
     };
-    EXPECT_TRUE(amdf_status_is_ok(
-        api_->endpoint_query_info(endpoint_, &endpoint_info)));
-    for (uint32_t ordinal = 0; ordinal < endpoint_info.queue_family_count;
+    EXPECT_TRUE(
+        amdf_status_is_ok(api_->device_query_info(device_, &device_info)));
+    for (uint32_t ordinal = 0; ordinal < device_info.queue_family_count;
          ++ordinal) {
       amdf_queue_family_info_t family_info = {
           .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
           .structure_size = sizeof(family_info),
       };
-      EXPECT_TRUE(amdf_status_is_ok(api_->endpoint_query_queue_family_info(
-          endpoint_, ordinal, &family_info)));
+      EXPECT_TRUE(amdf_status_is_ok(api_->device_query_queue_family_info(
+          device_, ordinal, &family_info)));
       if (family_info.command_type == AMDF_QUEUE_COMMAND_TYPE_XDNA &&
           (family_info.publication_modes &
            AMDF_QUEUE_PUBLICATION_MODE_KERNEL) != 0) {

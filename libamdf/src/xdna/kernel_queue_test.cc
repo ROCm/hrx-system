@@ -114,6 +114,8 @@ namespace {
 struct Device {
   // Production generic device base consumed by queue creation.
   amdf_device_t base = {};
+  // Immutable execution family exposed by this activation.
+  amdf_queue_family_info_t family = {};
   // Immutable identity and instruction contract returned by the device.
   amdf_xdna_device_info_t info = {};
   // Cached profile consumed by production input validation.
@@ -136,7 +138,17 @@ struct Context {
 class XdnaKernelQueueTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    device.base.engine_kind = AMDF_ENGINE_KIND_XDNA;
+    device.base.extension_id = AMDF_EXTENSION_XDNA;
+    device.family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(device.family),
+        .command_type = AMDF_QUEUE_COMMAND_TYPE_XDNA,
+        .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+        .format_version = AMDF_XDNA_QUEUE_FORMAT_VERSION_1,
+        .roles = AMDF_QUEUE_ROLE_COMPUTE,
+    };
+    device.base.queue_family_count = 1;
+    device.base.queue_families = &device.family;
     device.base.host_allocator = amdf_allocator_system();
     amdf_child_tracker_initialize(&device.base.children);
     device.info.reset_epoch = 1;
@@ -983,15 +995,6 @@ amdf_instance_t* amdf_endpoint_get_instance(const amdf_endpoint_t*) {
 }
 amdf_allocator_t amdf_endpoint_host_allocator(const amdf_endpoint_t*) {
   return amdf_allocator_system();
-}
-amdf_status_t AMDF_CALL amdf_endpoint_query_queue_family_info(
-    amdf_endpoint_t*, uint32_t ordinal, amdf_queue_family_info_t* out_info) {
-  out_info->ordinal = ordinal;
-  out_info->command_type = AMDF_QUEUE_COMMAND_TYPE_XDNA;
-  out_info->publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL;
-  out_info->format_version = AMDF_XDNA_QUEUE_FORMAT_VERSION_1;
-  out_info->roles = AMDF_QUEUE_ROLE_COMPUTE;
-  return AMDF_STATUS_OK;
 }
 const amdf_xdna_device_info_t* amdf_xdna_device_get_info(
     const amdf_device_t* device) {

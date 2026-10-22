@@ -183,7 +183,7 @@ typedef struct amdf_queue_metadata_format_t {
   uint32_t reserved;
 } amdf_queue_metadata_format_t;
 
-/// Immutable properties of one endpoint-local native queue family.
+/// Immutable properties of one native execution family.
 ///
 /// A family identifies a command representation and every mechanism its later
 /// constructors can actually create. Command types, versions, and encoding
@@ -197,7 +197,7 @@ typedef struct amdf_queue_family_info_t {
   uint32_t structure_size;
   /// Optional output extension chain. No extensions are defined in ABI v1.
   void* next;
-  /// Dense ordinal accepted by later queue creation operations.
+  /// Dense ordinal within the device or passive endpoint being queried.
   uint32_t ordinal;
   /// Native command representation accepted by queues in this family.
   amdf_queue_command_type_t command_type;
@@ -270,7 +270,7 @@ typedef struct amdf_user_queue_info_t {
   amdf_queue_id_t queue_id;
   /// Device reset epoch in which this queue remains valid.
   uint64_t reset_epoch;
-  /// Endpoint-local family selected when the queue was created.
+  /// Device-local family selected when the queue was created.
   uint32_t queue_family_ordinal;
   /// Native command representation accepted by the queue.
   amdf_queue_command_type_t command_type;
@@ -393,7 +393,7 @@ typedef struct amdf_kernel_queue_info_t {
   amdf_device_id_t device_id;
   /// Device reset epoch in which this queue remains valid.
   uint64_t reset_epoch;
-  /// Endpoint-local family selected when the queue was created.
+  /// Device-local family selected when the queue was created.
   uint32_t queue_family_ordinal;
   /// Native command representation accepted by the queue.
   amdf_queue_command_type_t command_type;

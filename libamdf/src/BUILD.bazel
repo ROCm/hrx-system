@@ -134,6 +134,7 @@ amdf_cc_library(
         ":endpoint",
         ":instance",
         ":memory_profile",
+        ":structure",
         "//libamdf/src/platform",
         "//libamdf/src/platform:native_instance",
     ],

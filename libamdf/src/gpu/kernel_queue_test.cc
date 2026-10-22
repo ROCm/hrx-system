@@ -78,20 +78,27 @@ struct Device {
   amdf_gpu_device_info_t info = {};
   // Native dependency controlled independently of shared queue state.
   amdf_gpu_umd_device_t native;
-  // Command representation advertised by the endpoint dependency.
-  amdf_queue_command_type_t command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
+  // Immutable family exposed by this activated device.
+  amdf_queue_family_info_t family = {};
 };
 
 class GpuKernelQueueTest
     : public ::testing::TestWithParam<amdf_queue_command_type_t> {
  protected:
   void SetUp() override {
-    device.base.engine_kind = AMDF_ENGINE_KIND_GPU;
+    device.base.extension_id = AMDF_EXTENSION_GPU;
     device.base.host_allocator = amdf_allocator_system();
     device.base.endpoint = reinterpret_cast<amdf_endpoint_t*>(&device);
     amdf_child_tracker_initialize(&device.base.children);
     device.info.reset_epoch = 1;
-    device.command_type = GetParam();
+    device.family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(device.family),
+        .command_type = GetParam(),
+        .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+    };
+    device.base.queue_family_count = 1;
+    device.base.queue_families = &device.family;
     ASSERT_EQ(
         amdf_memory_resource_allocate(amdf_allocator_system(), 1, 0, &memory),
         AMDF_STATUS_OK);
@@ -713,14 +720,6 @@ amdf_instance_t* amdf_endpoint_get_instance(const amdf_endpoint_t*) {
 }
 amdf_allocator_t amdf_endpoint_host_allocator(const amdf_endpoint_t*) {
   return amdf_allocator_system();
-}
-amdf_status_t AMDF_CALL amdf_endpoint_query_queue_family_info(
-    amdf_endpoint_t* endpoint, uint32_t ordinal,
-    amdf_queue_family_info_t* out_info) {
-  out_info->ordinal = ordinal;
-  out_info->command_type = reinterpret_cast<Device*>(endpoint)->command_type;
-  out_info->publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL;
-  return AMDF_STATUS_OK;
 }
 const amdf_gpu_device_info_t* amdf_gpu_device_get_info(
     const amdf_device_t* device) {

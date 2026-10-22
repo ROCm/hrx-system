@@ -84,7 +84,7 @@ void GpuNativeTest::PublishCode(uint32_t compute_family_ordinal,
   }
   uint32_t family = UINT32_MAX;
   amdf_queue_publication_modes_t mode = 0;
-  for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
+  for (uint32_t i = 0; i < context_->queue_family_count; ++i) {
     const auto modes =
         iree_hal_amd_gpu_sdma_queue_publication_modes(&context_->families[i]);
     if (modes) {
@@ -547,7 +547,7 @@ void GpuNativeTest::SetUp() {
   iree_hal_amd_gpu_device_options_initialize(&options_);
   options_.queue_count = 2;
   if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
-    for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
+    for (uint32_t i = 0; i < context_->queue_family_count; ++i) {
       if (iree_hal_amd_gpu_aql_queue_publication_modes(
               &context_->families[i])) {
         options_.queue_family_ordinal = i;

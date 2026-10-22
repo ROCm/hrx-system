@@ -724,11 +724,11 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 TEST_F(GpuDeviceFixture, RejectsOutOfRangeFamilyWithoutPublishingQueue) {
-  amdf_endpoint_info_t info = {
-      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+  amdf_device_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_DEVICE_INFO,
       .structure_size = sizeof(info),
   };
-  ASSERT_EQ(api_->endpoint_query_info(endpoint_, &info), AMDF_STATUS_OK);
+  ASSERT_EQ(api_->device_query_info(device_, &info), AMDF_STATUS_OK);
   amdf_gpu_kernel_queue_create_info_t create_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
       .structure_size = sizeof(create_info),

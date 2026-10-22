@@ -994,7 +994,7 @@ typedef struct amdf_memory_profile_site_t {
     struct {
       /// Index into the query's accesses array.
       uint32_t access_ordinal;
-      /// Exact queue family of that device's endpoint.
+      /// Exact queue family of the activated device named by access_ordinal.
       uint32_t queue_family_ordinal;
     } device;
     /// Required host read and write permissions.

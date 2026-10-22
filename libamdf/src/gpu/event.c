@@ -38,7 +38,7 @@ amdf_status_t AMDF_CALL amdf_gpu_event_create(
   if (create_info->reserved != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  if (!amdf_device_is_engine(device, AMDF_ENGINE_KIND_GPU)) {
+  if (!amdf_device_is_extension(device, AMDF_EXTENSION_GPU)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   const amdf_gpu_device_info_t* device_info = amdf_gpu_device_get_info(device);

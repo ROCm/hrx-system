@@ -640,7 +640,7 @@ typedef struct amdf_gpu_user_queue_create_info_t {
   /// Optional input extension chain. Accepts
   /// `amdf_gpu_aql_scratch_service_info_t`.
   const void* next;
-  /// Endpoint-local PM4, SDMA, or AQL family supporting user publication.
+  /// Device-local PM4, SDMA, or AQL family supporting user publication.
   uint32_t queue_family_ordinal;
   /// Requested scheduling priority.
   amdf_queue_priority_t priority;
@@ -695,7 +695,7 @@ typedef struct amdf_gpu_kernel_queue_create_info_t {
   uint32_t structure_size;
   /// Optional input extension chain. No extensions are currently defined.
   const void* next;
-  /// Endpoint-local PM4 or SDMA family supporting kernel publication.
+  /// Device-local PM4 or SDMA family supporting kernel publication.
   uint32_t queue_family_ordinal;
   /// Maximum accepted submissions that may remain unretired, or zero for
   /// AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT. This admission

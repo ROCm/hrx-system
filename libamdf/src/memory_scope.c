@@ -999,8 +999,8 @@ static amdf_status_t amdf_memory_profile_describe_site(
         .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
         .structure_size = sizeof(family),
     };
-    const amdf_status_t status = amdf_endpoint_query_queue_family_info(
-        query->accesses[ordinal].device->endpoint,
+    const amdf_status_t status = amdf_device_query_queue_family_info(
+        query->accesses[ordinal].device,
         site->value.device.queue_family_ordinal, &family);
     if (!amdf_status_is_ok(status)) {
       return status;

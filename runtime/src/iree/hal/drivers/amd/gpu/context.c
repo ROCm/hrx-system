@@ -261,25 +261,6 @@ static iree_status_t iree_hal_amd_gpu_context_open(
       context->gpu->endpoint_query_info(context->endpoint,
                                         &context->target_info),
       "gpu.endpoint_query_info"));
-  if (context->endpoint_info.queue_family_count) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
-        context->host_allocator, context->endpoint_info.queue_family_count,
-        sizeof(*context->families), (void**)&context->families));
-  }
-  iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < context->endpoint_info.queue_family_count &&
-                       iree_status_is_ok(status);
-       ++i) {
-    context->families[i] = (amdf_queue_family_info_t){
-        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
-        .structure_size = sizeof(context->families[i]),
-    };
-    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-        context->api->endpoint_query_queue_family_info(context->endpoint, i,
-                                                       &context->families[i]),
-        "endpoint_query_queue_family_info");
-  }
-  IREE_RETURN_IF_ERROR(status);
   const amdf_gpu_device_create_info_t device_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO,
       .structure_size = sizeof(device_info),
@@ -295,6 +276,33 @@ static iree_status_t iree_hal_amd_gpu_context_open(
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       context->gpu->device_query_info(context->device, &context->device_info),
       "gpu.device_query_info"));
+
+  amdf_device_info_t base_info = {
+      .type = AMDF_STRUCTURE_TYPE_DEVICE_INFO,
+      .structure_size = sizeof(base_info),
+  };
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      context->api->device_query_info(context->device, &base_info),
+      "device_query_info"));
+  context->queue_family_count = base_info.queue_family_count;
+  if (context->queue_family_count) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
+        context->host_allocator, context->queue_family_count,
+        sizeof(*context->families), (void**)&context->families));
+  }
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0;
+       i < context->queue_family_count && iree_status_is_ok(status); ++i) {
+    context->families[i] = (amdf_queue_family_info_t){
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(context->families[i]),
+    };
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        context->api->device_query_queue_family_info(context->device, i,
+                                                     &context->families[i]),
+        "device_query_queue_family_info");
+  }
+  IREE_RETURN_IF_ERROR(status);
 
   // Count-only enumeration may report BUFFER_TOO_SMALL for a nonempty set.
   amdf_status_t count_status = context->api->device_enumerate_memory_scopes(

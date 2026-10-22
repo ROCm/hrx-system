@@ -190,6 +190,11 @@ amdf_status_t AMDF_CALL amdf_endpoint_query_info(
   return AMDF_STATUS_OK;
 }
 
+const amdf_queue_family_info_t* amdf_endpoint_get_queue_families(
+    const amdf_endpoint_t* endpoint) {
+  return endpoint->queue_families.values;
+}
+
 amdf_status_t AMDF_CALL amdf_endpoint_query_queue_family_info(
     amdf_endpoint_t* endpoint, uint32_t queue_family_ordinal,
     amdf_queue_family_info_t* out_info) {

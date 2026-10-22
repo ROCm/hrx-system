@@ -11,7 +11,6 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/atomics.h"
 #include "libamdf/src/device.h"
-#include "libamdf/src/endpoint.h"
 #include "libamdf/src/gpu/device.h"
 #include "libamdf/src/gpu/memory_reservation.h"
 #include "libamdf/src/gpu/umd/kernel_queue.h"
@@ -213,7 +212,7 @@ amdf_status_t AMDF_CALL amdf_gpu_kernel_queue_create(
   if (out_queue == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  if (!amdf_device_is_engine(device, AMDF_ENGINE_KIND_GPU)) {
+  if (!amdf_device_is_extension(device, AMDF_EXTENSION_GPU)) {
     return device == NULL
                ? amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT)
                : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
@@ -229,8 +228,8 @@ amdf_status_t AMDF_CALL amdf_gpu_kernel_queue_create(
       .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
       .structure_size = sizeof(family_info),
   };
-  status = amdf_endpoint_query_queue_family_info(
-      device->endpoint, create_info->queue_family_ordinal, &family_info);
+  status = amdf_device_query_queue_family_info(
+      device, create_info->queue_family_ordinal, &family_info);
   if (!amdf_status_is_ok(status)) {
     return status;
   }

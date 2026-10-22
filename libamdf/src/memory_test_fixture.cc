@@ -291,7 +291,7 @@ void InitializeFakeDevice(uint64_t identity, amdf_instance_t* instance,
   out_device->base.host_allocator = instance->host_allocator;
   out_device->base.vtable = &kFakeDeviceVtable;
   out_device->base.provider_instance = instance;
-  out_device->base.engine_kind = AMDF_ENGINE_KIND_GPU;
+  out_device->base.extension_id = AMDF_EXTENSION_GPU;
   amdf_child_tracker_initialize(&out_device->base.children);
   out_device->request.device = &out_device->base;
   out_device->request.requirements.access =

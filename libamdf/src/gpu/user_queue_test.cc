@@ -124,7 +124,9 @@ class GpuUserQueueTest : public ::testing::Test {
                                uint64_t reset_epoch, FakeNativeState* state) {
     device->base.host_allocator = amdf_allocator_system();
     device->base.endpoint = reinterpret_cast<amdf_endpoint_t*>(uintptr_t{1});
-    device->base.engine_kind = AMDF_ENGINE_KIND_GPU;
+    device->base.extension_id = AMDF_EXTENSION_GPU;
+    device->base.queue_family_count = 1;
+    device->base.queue_families = &current_family;
     amdf_child_tracker_initialize(&device->base.children);
     device->umd.state = state;
     device->info.type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO;
@@ -225,6 +227,16 @@ TEST_F(GpuUserQueueTest, DeviceProducerDoesNotRunHostPublication) {
   EXPECT_EQ(amdf_user_queue_mapping_flush(mapping_),
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   EXPECT_EQ(consumer_state_.flush_count, 0u);
+}
+
+TEST_F(GpuUserQueueTest, RejectsAnotherExtensionBeforeNativeCreation) {
+  const auto create = MakeCreateInfo();
+  // The endpoint and family stay unchanged; the live implementation differs.
+  consumer_.base.extension_id = AMDF_EXTENSION_XDNA;
+  EXPECT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  EXPECT_EQ(consumer_state_.create_call_count, 0u);
+  EXPECT_EQ(queue_, nullptr);
 }
 
 TEST_F(GpuUserQueueTest, RequiresAdvertisedPlacementAndReportsAchievement) {
@@ -685,15 +697,6 @@ TEST_F(GpuUserQueueTest, ValidatesTheSelectedScratchAccess) {
 }  // namespace
 
 extern "C" {
-
-amdf_status_t AMDF_CALL amdf_endpoint_query_queue_family_info(
-    amdf_endpoint_t*, uint32_t ordinal, amdf_queue_family_info_t* out_info) {
-  if (ordinal != current_family.ordinal) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-  }
-  *out_info = current_family;
-  return AMDF_STATUS_OK;
-}
 
 amdf_status_t amdf_endpoint_register_device(amdf_endpoint_t*) {
   return AMDF_STATUS_OK;

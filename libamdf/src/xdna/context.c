@@ -33,7 +33,7 @@ struct amdf_xdna_context_t {
 
 static amdf_status_t amdf_xdna_context_validate_create_info(
     amdf_device_t* device, const amdf_xdna_context_create_info_t* create_info) {
-  if (!amdf_device_is_engine(device, AMDF_ENGINE_KIND_XDNA)) {
+  if (!amdf_device_is_extension(device, AMDF_EXTENSION_XDNA)) {
     return device == NULL
                ? amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT)
                : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);

@@ -39,7 +39,7 @@ amdf_status_t AMDF_CALL amdf_xdna_context_query_firmware_trace_info(
 
 amdf_status_t AMDF_CALL amdf_xdna_device_query_firmware_trace_info(
     amdf_device_t* device, amdf_xdna_firmware_trace_info_t* out_info) {
-  if (!amdf_device_is_engine(device, AMDF_ENGINE_KIND_XDNA)) {
+  if (!amdf_device_is_extension(device, AMDF_EXTENSION_XDNA)) {
     return amdf_make_api_status(device == NULL
                                     ? AMDF_STATUS_CODE_INVALID_ARGUMENT
                                     : AMDF_STATUS_CODE_UNSUPPORTED);
@@ -70,7 +70,7 @@ amdf_status_t AMDF_CALL amdf_xdna_device_query_firmware_trace_info(
 amdf_status_t AMDF_CALL amdf_xdna_device_configure_firmware_trace(
     amdf_device_t* device, uint32_t enabled,
     amdf_xdna_firmware_trace_categories_t categories) {
-  if (!amdf_device_is_engine(device, AMDF_ENGINE_KIND_XDNA)) {
+  if (!amdf_device_is_extension(device, AMDF_EXTENSION_XDNA)) {
     return amdf_make_api_status(device == NULL
                                     ? AMDF_STATUS_CODE_INVALID_ARGUMENT
                                     : AMDF_STATUS_CODE_UNSUPPORTED);
@@ -86,7 +86,7 @@ amdf_status_t AMDF_CALL amdf_xdna_device_read_firmware_trace(
     amdf_device_t* device, uint32_t format_version, uint64_t position,
     void* buffer, uint32_t buffer_byte_length,
     amdf_observation_read_result_t* out_result) {
-  if (!amdf_device_is_engine(device, AMDF_ENGINE_KIND_XDNA)) {
+  if (!amdf_device_is_extension(device, AMDF_EXTENSION_XDNA)) {
     return amdf_make_api_status(device == NULL
                                     ? AMDF_STATUS_CODE_INVALID_ARGUMENT
                                     : AMDF_STATUS_CODE_UNSUPPORTED);

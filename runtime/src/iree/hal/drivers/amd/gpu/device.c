@@ -928,7 +928,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                 AMDF_GPU_ARCHITECTURE_CDNA
             ? AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
             : AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
-    for (uint32_t i = 0; i < context->endpoint_info.queue_family_count; ++i) {
+    for (uint32_t i = 0; i < context->queue_family_count; ++i) {
       if (!iree_hal_amd_gpu_device_compute_publication_modes(
               &context->families[i])) {
         continue;
@@ -946,8 +946,8 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                               "GPU has no supported compute family");
     }
   }
-  if (family_ordinal >= context->endpoint_info.queue_family_count ||
-      !options->queue_count || options->queue_count > 256) {
+  if (family_ordinal >= context->queue_family_count || !options->queue_count ||
+      options->queue_count > 256) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "GPU provisioning requires an advertised family "
                             "and 1 to 256 queues");
@@ -964,7 +964,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   }
   uint32_t transfer_family = UINT32_MAX;
   amdf_queue_publication_modes_t transfer_publication_mode = 0;
-  for (uint32_t i = 0; i < context->endpoint_info.queue_family_count; ++i) {
+  for (uint32_t i = 0; i < context->queue_family_count; ++i) {
     transfer_publication_mode = iree_hal_amd_gpu_device_select_publication(
         iree_hal_amd_gpu_sdma_queue_publication_modes(&context->families[i]));
     if (transfer_publication_mode) {

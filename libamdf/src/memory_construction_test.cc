@@ -782,7 +782,7 @@ TEST_F(MemoryConstructionTest,
         device.profile.external_memory_support_count = 0;
         device.profile.supported_flags &= ~AMDF_MEMORY_FLAG_SHAREABLE;
         if (grouped ? i == 0 : i != 0) {
-          device.base.engine_kind = AMDF_ENGINE_KIND_XDNA;
+          device.base.extension_id = AMDF_EXTENSION_XDNA;
           device.profile.address_kinds = UINT64_C(1)
                                          << AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE;
         }
@@ -852,7 +852,7 @@ TEST_F(MemoryConstructionTest,
       // Independently registering another GPU cannot establish one common GPU
       // pointer. Reject that joint contract before any native preparation.
       devices[1].profile.address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
-      devices[1].base.engine_kind = AMDF_ENGINE_KIND_GPU;
+      devices[1].base.extension_id = AMDF_EXTENSION_GPU;
       memory = sentinel;
       EXPECT_EQ(amdf_status_code(amdf_memory_create(
                     &instance_.system_memory_scope, &info, &memory, nullptr)),
@@ -1181,7 +1181,7 @@ TEST_F(MemoryHostBackingTest, RegistrationsBorrowOnePrivateHostOwner) {
           devices[i].profile.construction = {QueryGroupAccess, devices};
         } else if (i == 1) {
           // XDNA has independent address/registration ownership alongside GPU.
-          devices[i].base.engine_kind = AMDF_ENGINE_KIND_XDNA;
+          devices[i].base.extension_id = AMDF_EXTENSION_XDNA;
           devices[i].profile.address_kinds =
               UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE;
         }
@@ -1304,7 +1304,7 @@ TEST_F(MemoryHostBackingTest, FailedRegistrationRollsBackWithoutPublication) {
     amdf_memory_device_access_t accesses[2];
     for (uint32_t i = 0; i < 2; ++i) {
       InitializeRegistration(i + 1, &devices[i]);
-      devices[i].base.engine_kind = AMDF_ENGINE_KIND_XDNA;
+      devices[i].base.extension_id = AMDF_EXTENSION_XDNA;
       devices[i].profile.address_kinds = UINT64_C(1)
                                          << AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE;
       devices[i].observe_release = [](FakeDevice* device) {

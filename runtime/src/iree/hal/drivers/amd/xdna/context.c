@@ -136,23 +136,23 @@ static iree_status_t iree_hal_amd_xdna_context_open(
       "xdna.device_query_info"));
   context->target.instruction_alignment =
       context->device_info.instruction.address_alignment;
-  amdf_endpoint_info_t endpoint_info = {
-      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-      .structure_size = sizeof(endpoint_info),
+  amdf_device_info_t base_info = {
+      .type = AMDF_STRUCTURE_TYPE_DEVICE_INFO,
+      .structure_size = sizeof(base_info),
   };
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
-      context->api->endpoint_query_info(context->endpoint, &endpoint_info),
-      "endpoint_query_info"));
+      context->api->device_query_info(context->device, &base_info),
+      "device_query_info"));
   context->queue_family_ordinal = UINT32_MAX;
-  for (uint32_t i = 0; i < endpoint_info.queue_family_count; ++i) {
+  for (uint32_t i = 0; i < base_info.queue_family_count; ++i) {
     amdf_queue_family_info_t family = {
         .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
         .structure_size = sizeof(family),
     };
     IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
-        context->api->endpoint_query_queue_family_info(context->endpoint, i,
-                                                       &family),
-        "endpoint_query_queue_family_info"));
+        context->api->device_query_queue_family_info(context->device, i,
+                                                     &family),
+        "device_query_queue_family_info"));
     if (family.command_type == AMDF_QUEUE_COMMAND_TYPE_XDNA &&
         iree_any_bit_set(family.publication_modes,
                          AMDF_QUEUE_PUBLICATION_MODE_KERNEL)) {

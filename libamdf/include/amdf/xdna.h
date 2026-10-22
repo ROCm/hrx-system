@@ -312,7 +312,7 @@ typedef struct amdf_xdna_kernel_queue_create_info_t {
   uint32_t structure_size;
   /// Optional input extension chain. No extensions are currently defined.
   const void* next;
-  /// Endpoint-local XDNA family supporting kernel publication.
+  /// Device-local XDNA family supporting kernel publication.
   uint32_t queue_family_ordinal;
   /// Maximum accepted submissions that may remain unretired, or zero for
   /// AMDF_XDNA_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT. Native

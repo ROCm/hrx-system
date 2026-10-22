@@ -112,8 +112,11 @@ typedef uint32_t amdf_abi_version_t;
 /// Adds native host queue publication and per-placement requirements.
 #define AMDF_ABI_VERSION_14 ((amdf_abi_version_t)14)
 
+/// Activated device identity and device-local execution families.
+#define AMDF_ABI_VERSION_15 ((amdf_abi_version_t)15)
+
 /// Latest ABI version implemented by these headers.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_14
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_15
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"
@@ -256,6 +259,8 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_ACCESS_INFO = 24,
   /// Host CPU locality captured while opening an endpoint.
   AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY = 25,
+  /// An `amdf_device_info_t` output structure.
+  AMDF_STRUCTURE_TYPE_DEVICE_INFO = 26,
 };
 
 /// Identifier of an optional API table compiled into the providing library.

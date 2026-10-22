@@ -18,6 +18,8 @@ extern "C" {
 struct amdf_memory_reservation_profile_t;
 
 typedef struct amdf_device_vtable_t {
+  // Fills identity and reset epoch from immutable activation state.
+  void (*query_info)(const amdf_device_t* device, amdf_device_info_t* out_info);
   // Reads live-domain reservation limits without native work or allocation.
   amdf_status_t (*query_memory_reservation_profile)(
       amdf_device_t* device, uint32_t address_domain_ordinal,
@@ -54,25 +56,39 @@ struct amdf_device_t {
   amdf_endpoint_t* endpoint;
   // Provider instance defining the scope of provider-local identities.
   amdf_instance_t* provider_instance;
-  // Exact engine family implementing this device.
-  amdf_engine_kind_t engine_kind;
+  // Extension implementing this activation, independent of physical engine.
+  amdf_extension_id_t extension_id;
+  // Number of immutable execution-family records borrowed below.
+  uint32_t queue_family_count;
+  // Device-local families borrowed until device deinitialization.
+  const amdf_queue_family_info_t* queue_families;
   // Number of queues, queue mappings, events, and contexts borrowing this
   // device. Memory dependencies are caller preconditions and are not counted.
   amdf_child_tracker_t children;
 };
 
 // Initializes an unpublished device base and borrows its endpoint.
-amdf_status_t amdf_device_initialize(amdf_device_t* device,
-                                     const amdf_device_vtable_t* vtable,
-                                     amdf_endpoint_t* endpoint,
-                                     amdf_engine_kind_t engine_kind);
+amdf_status_t amdf_device_initialize(
+    amdf_device_t* device, const amdf_device_vtable_t* vtable,
+    amdf_endpoint_t* endpoint, amdf_extension_id_t extension_id,
+    uint32_t queue_family_count,
+    const amdf_queue_family_info_t* queue_families);
 
 // Releases the endpoint borrow held by an unpublished or torn-down device.
 void amdf_device_deinitialize(amdf_device_t* device);
 
-// Returns true when a device is implemented by `expected_engine_kind`.
-bool amdf_device_is_engine(const amdf_device_t* device,
-                           amdf_engine_kind_t expected_engine_kind);
+// Returns true when a device was activated by `expected_extension_id`.
+bool amdf_device_is_extension(const amdf_device_t* device,
+                              amdf_extension_id_t expected_extension_id);
+
+// Copies immutable identity and execution-family facts of a live activation.
+amdf_status_t AMDF_CALL amdf_device_query_info(amdf_device_t* device,
+                                               amdf_device_info_t* out_info);
+
+// Copies one immutable family of the exact activated device.
+amdf_status_t AMDF_CALL amdf_device_query_queue_family_info(
+    amdf_device_t* device, uint32_t queue_family_ordinal,
+    amdf_queue_family_info_t* out_info);
 
 // Returns true when both devices share one provider-instance identity scope.
 bool amdf_device_shares_provider_instance(const amdf_device_t* lhs,

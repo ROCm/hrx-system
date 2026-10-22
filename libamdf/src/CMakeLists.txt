@@ -194,6 +194,7 @@ iree_cc_library(
     ::endpoint
     ::instance
     ::memory_profile
+    ::structure
     amdf::headers
     libamdf::src::platform
     libamdf::src::platform::native_instance

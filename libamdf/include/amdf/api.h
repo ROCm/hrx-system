@@ -8,6 +8,7 @@
 #define AMDF_API_H_
 
 #include "amdf/base.h"
+#include "amdf/device.h"
 #include "amdf/memory.h"
 #include "amdf/memory_reservation.h"
 #include "amdf/queue.h"
@@ -119,6 +120,9 @@ typedef struct amdf_api_t {
   ///
   /// Records describe expected implemented services. Explicit native device
   /// creation validates the installed driver before making them usable.
+  /// GPU and XDNA activation preserve their passive family ordering; other
+  /// extensions may expose different families. device_query_queue_family_info
+  /// describes the exact activated service used for execution.
   /// `queue_family_ordinal` must be less than the endpoint's reported family
   /// count. The operation is thread-safe and performs no system call,
   /// allocation, device initialization, queue creation, retry, sleep, or
@@ -841,6 +845,23 @@ typedef struct amdf_api_t {
       amdf_kernel_queue_t* queue, amdf_memory_reservation_t* reservation,
       uint32_t access_ordinal, uint32_t update_count,
       const amdf_memory_mapping_update_t* updates, uint64_t* out_submission);
+
+  /// Copies immutable identity and execution-family facts for a live device.
+  /// This thread-safe query performs no allocation, locking, system call or
+  /// lazy initialization. The device must remain alive throughout the call.
+  /// Failure leaves out_info unchanged.
+  amdf_status_t(AMDF_CALL* device_query_info)(amdf_device_t* device,
+                                              amdf_device_info_t* out_info);
+
+  /// Copies one immutable family of this exact activated device. Its ordinal
+  /// is used in queue creation and memory-site queries against this device.
+  /// Passive endpoint families do not establish another extension's services.
+  /// An ordinal outside device_query_info's count returns OUT_OF_RANGE.
+  /// This thread-safe query performs no allocation, locking, system call or
+  /// lazy initialization. Failure leaves out_info unchanged.
+  amdf_status_t(AMDF_CALL* device_query_queue_family_info)(
+      amdf_device_t* device, uint32_t queue_family_ordinal,
+      amdf_queue_family_info_t* out_info);
 } amdf_api_t;
 
 /// Function type used to acquire the immutable API table.

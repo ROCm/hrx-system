@@ -10,7 +10,6 @@
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/device.h"
-#include "libamdf/src/endpoint.h"
 #include "libamdf/src/gpu/device.h"
 #include "libamdf/src/gpu/umd/memory.h"
 #include "libamdf/src/host_mapping.h"
@@ -58,8 +57,8 @@ static amdf_status_t amdf_gpu_memory_describe_site(
       .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
       .structure_size = sizeof(queue_family_info),
   };
-  const amdf_status_t status = amdf_endpoint_query_queue_family_info(
-      access->device->endpoint, queue_family_ordinal, &queue_family_info);
+  const amdf_status_t status = amdf_device_query_queue_family_info(
+      access->device, queue_family_ordinal, &queue_family_info);
   if (!amdf_status_is_ok(status)) {
     return status;
   }

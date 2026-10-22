@@ -80,7 +80,8 @@ amdf_status_t AMDF_CALL QueryEndpoint(amdf_endpoint_t* endpoint,
     return status;
   }
   EXPECT_EQ(out_info->type, AMDF_STRUCTURE_TYPE_ENDPOINT_INFO);
-  out_info->queue_family_count = state->family_count;
+  // Passive discovery is not the live execution-family authority.
+  out_info->queue_family_count = 0;
   return AMDF_STATUS_OK;
 }
 
@@ -97,13 +98,14 @@ amdf_status_t AMDF_CALL QueryTarget(amdf_endpoint_t* endpoint,
   return AMDF_STATUS_OK;
 }
 
-amdf_status_t AMDF_CALL QueryFamily(amdf_endpoint_t* endpoint, uint32_t ordinal,
+amdf_status_t AMDF_CALL QueryFamily(amdf_device_t* device, uint32_t ordinal,
                                     amdf_queue_family_info_t* out_info) {
-  auto* state = reinterpret_cast<NativeState*>(endpoint);
+  auto* state = reinterpret_cast<NativeState*>(device);
   amdf_status_t status = state->NextCall();
   if (!amdf_status_is_ok(status)) {
     return status;
   }
+  EXPECT_TRUE(state->device_live);
   EXPECT_EQ(out_info->type, AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO);
   out_info->ordinal = ordinal;
   out_info->command_type = ordinal == 1 ? AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
@@ -139,6 +141,19 @@ amdf_status_t AMDF_CALL QueryDevice(amdf_device_t* device,
   EXPECT_EQ(out_info->type, AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO);
   out_info->reset_epoch = 91;
   out_info->features = AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS;
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t AMDF_CALL QueryBaseDevice(amdf_device_t* device,
+                                        amdf_device_info_t* out_info) {
+  auto* state = reinterpret_cast<NativeState*>(device);
+  amdf_status_t status = state->NextCall();
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  EXPECT_TRUE(state->device_live);
+  EXPECT_EQ(out_info->type, AMDF_STRUCTURE_TYPE_DEVICE_INFO);
+  out_info->queue_family_count = state->family_count;
   return AMDF_STATUS_OK;
 }
 
@@ -257,7 +272,8 @@ class ContextTest : public ::testing::Test {
     api_.query_extension = QueryExtension;
     api_.endpoint_open = OpenEndpoint;
     api_.endpoint_query_info = QueryEndpoint;
-    api_.endpoint_query_queue_family_info = QueryFamily;
+    api_.device_query_queue_family_info = QueryFamily;
+    api_.device_query_info = QueryBaseDevice;
     api_.endpoint_close = CloseEndpoint;
     api_.device_destroy = DestroyDevice;
     api_.device_enumerate_memory_scopes = EnumerateScopes;
@@ -374,7 +390,7 @@ TEST_F(ContextTest, CapturesFamiliesIndependentlyOfIsa) {
     EXPECT_EQ(context->device_info.reset_epoch, 91u);
     EXPECT_EQ(context->event_info.mailbox_address, 0x10000u);
     EXPECT_EQ(context->event_info.trigger_data, 73u);
-    ASSERT_EQ(context->endpoint_info.queue_family_count, 3u);
+    ASSERT_EQ(context->queue_family_count, 3u);
     EXPECT_EQ(context->families[0].command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
     EXPECT_EQ(context->families[1].command_type,
@@ -410,7 +426,7 @@ TEST_F(ContextTest, NoQueueFamiliesPreservesNativeMemoryContext) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_context_allocate(
       fabric_, &id, {}, iree_allocator_system(), &context));
   ASSERT_NE(context, nullptr);
-  EXPECT_EQ(context->endpoint_info.queue_family_count, 0u);
+  EXPECT_EQ(context->queue_family_count, 0u);
   EXPECT_EQ(context->families, nullptr);
   EXPECT_EQ(context->memory_scope_count, 2u);
   EXPECT_TRUE(native_.device_live);

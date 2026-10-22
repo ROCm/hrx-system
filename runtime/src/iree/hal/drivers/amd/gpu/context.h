@@ -49,7 +49,7 @@ typedef struct iree_hal_amd_gpu_context_t {
   iree_async_event_native_t kernel_event;
   // Borrowed native destination dominated by kernel_event.
   amdf_native_event_t kernel_notification;
-  // Physical identity and native family count captured at opening.
+  // Physical identity captured at endpoint opening.
   amdf_endpoint_info_t endpoint_info;
   // Compiler identity and compute geometry, independent of queue protocol.
   amdf_gpu_endpoint_info_t target_info;
@@ -57,8 +57,10 @@ typedef struct iree_hal_amd_gpu_context_t {
   amdf_gpu_device_info_t device_info;
   // Immutable producer operands; event return remains only a wake hint.
   amdf_gpu_event_info_t event_info;
-  // Owned facts in native ordinal order, with endpoint_info.queue_family_count
-  // entries. HAL family admission may select a strict subset of these.
+  // Number of immutable execution families on the activated device.
+  uint32_t queue_family_count;
+  // Owned facts in device-local ordinal order, with queue_family_count entries.
+  // HAL family admission may select a strict subset of these.
   amdf_queue_family_info_t* families;
   // Number of physical-local storage scopes, excluding fabric's system scope.
   uint32_t memory_scope_count;

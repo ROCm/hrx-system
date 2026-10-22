@@ -432,6 +432,28 @@ TEST_F(GpuEndpointTest, MaterializesProgramIndependentDevice) {
   ASSERT_TRUE(amdf_status_is_ok(gpu_api_->device_query_info(device_, &info)));
   EXPECT_NE(info.id.words[0] | info.id.words[1], 0u);
   EXPECT_EQ(info.reset_epoch, 1u);
+  amdf_device_info_t base_info = {
+      .type = AMDF_STRUCTURE_TYPE_DEVICE_INFO,
+      .structure_size = sizeof(base_info),
+  };
+  ASSERT_EQ(api_->device_query_info(device_, &base_info), AMDF_STATUS_OK);
+  EXPECT_EQ(base_info.id.words[0], info.id.words[0]);
+  EXPECT_EQ(base_info.id.words[1], info.id.words[1]);
+  EXPECT_EQ(base_info.reset_epoch, info.reset_epoch);
+  EXPECT_EQ(base_info.extension_id, AMDF_EXTENSION_GPU);
+  EXPECT_GT(base_info.queue_family_count, 0u);
+  for (uint32_t ordinal = 0; ordinal < base_info.queue_family_count;
+       ++ordinal) {
+    amdf_queue_family_info_t family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(family),
+    };
+    ASSERT_EQ(api_->device_query_queue_family_info(device_, ordinal, &family),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(family.ordinal, ordinal);
+    EXPECT_NE(family.command_type, AMDF_QUEUE_COMMAND_TYPE_UNKNOWN);
+  }
+
   amdf_gpu_device_info_t second_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
       .structure_size = sizeof(second_info),
@@ -502,6 +524,30 @@ TEST_F(GpuEndpointTest, RejectsMalformedDeviceInfoWithoutMutation) {
   EXPECT_EQ(amdf_status_code(gpu_api_->device_query_info(device_, &info)),
             AMDF_STATUS_CODE_UNSUPPORTED);
   EXPECT_EQ(info.reset_epoch, UINT64_MAX);
+
+  amdf_device_info_t base_info = {
+      .structure_size = sizeof(base_info),
+      .reset_epoch = UINT64_MAX,
+  };
+  EXPECT_EQ(amdf_status_code(api_->device_query_info(device_, &base_info)),
+            AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  EXPECT_EQ(base_info.reset_epoch, UINT64_MAX);
+  base_info.type = AMDF_STRUCTURE_TYPE_DEVICE_INFO;
+  base_info.next = &base_info;
+  EXPECT_EQ(amdf_status_code(api_->device_query_info(device_, &base_info)),
+            AMDF_STATUS_CODE_UNSUPPORTED);
+  EXPECT_EQ(base_info.reset_epoch, UINT64_MAX);
+  base_info.next = nullptr;
+  ASSERT_EQ(api_->device_query_info(device_, &base_info), AMDF_STATUS_OK);
+  amdf_queue_family_info_t family = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+      .structure_size = sizeof(family),
+      .ordinal = UINT32_MAX,
+  };
+  EXPECT_EQ(amdf_status_code(api_->device_query_queue_family_info(
+                device_, base_info.queue_family_count, &family)),
+            AMDF_STATUS_CODE_OUT_OF_RANGE);
+  EXPECT_EQ(family.ordinal, UINT32_MAX);
 }
 
 TEST_F(GpuEndpointTest, CreatesReclaimableDevicesFromOneEndpoint) {

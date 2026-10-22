@@ -21,7 +21,7 @@
 
 static const amdf_api_t amdf_api_v14 = {
     .structure_size = sizeof(amdf_api_t),
-    .abi_version = AMDF_ABI_VERSION_14,
+    .abi_version = AMDF_ABI_VERSION_15,
     .instance_create = amdf_instance_create,
     .instance_destroy = amdf_instance_destroy,
     .endpoint_enumerate = amdf_endpoint_enumerate,
@@ -75,6 +75,8 @@ static const amdf_api_t amdf_api_v14 = {
     .memory_reservation_detach = amdf_memory_reservation_detach,
     .memory_reservation_destroy = amdf_memory_reservation_destroy,
     .kernel_queue_update_memory = amdf_kernel_queue_update_memory,
+    .device_query_info = amdf_device_query_info,
+    .device_query_queue_family_info = amdf_device_query_queue_family_info,
 };
 
 amdf_status_t AMDF_CALL amdf_query_api(amdf_abi_version_t minimum_version,
@@ -86,8 +88,8 @@ amdf_status_t AMDF_CALL amdf_query_api(amdf_abi_version_t minimum_version,
   if (minimum_version > maximum_version) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  if (minimum_version > AMDF_ABI_VERSION_14 ||
-      maximum_version < AMDF_ABI_VERSION_14) {
+  if (minimum_version > AMDF_ABI_VERSION_15 ||
+      maximum_version < AMDF_ABI_VERSION_15) {
     return amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH);
   }
   *out_api = &amdf_api_v14;
