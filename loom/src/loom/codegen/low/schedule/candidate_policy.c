@@ -58,12 +58,6 @@ static bool loom_low_schedule_candidate_opens_other_register_debt(
   return false;
 }
 
-typedef enum loom_low_schedule_candidate_compare_mode_e {
-  LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT = 0,
-  LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF = 1,
-  LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION = 2,
-} loom_low_schedule_candidate_compare_mode_t;
-
 enum loom_low_schedule_recovery_policy_flag_bits_e {
   LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REJECT_PRESSURE_DEBT = 1u << 0,
   LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REQUIRE_PRESSURE_PROGRESS = 1u << 1,
@@ -429,16 +423,13 @@ static bool loom_low_schedule_candidate_score_less(
   // Candidates advancing active completions in the same full unspillable
   // domain compete for the same physical storage. Issue ready progress in that
   // domain while an older candidate is stalled; source order cannot make room
-  // sooner by leaving the machine idle. Lowered spill helper chains retain
-  // their demand order so setup cannot run ahead of its transfer.
-  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
-      compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
-      !iree_any_bit_set(state->options->flags,
-                        LOOM_LOW_SCHEDULE_FLAG_HAS_LOWERED_SPILL_TRAFFIC) &&
-      lhs->active_unspillable_completion_domain_id != UINT16_MAX &&
-      lhs->active_unspillable_completion_domain_id ==
-          rhs->active_unspillable_completion_domain_id &&
-      lhs->effective_stall_cycles != rhs->effective_stall_cycles) {
+  // sooner by leaving the machine idle. During aggregate packing recovery, a
+  // structural storage handoff can be the path that closes a fragmented bank,
+  // so leave that comparison to the physical completion policy below. Lowered
+  // spill helper chains retain their demand order so setup cannot run ahead of
+  // its transfer.
+  if (loom_low_schedule_candidate_policy_uses_ready_progress_order(
+          state, compare_mode, lhs, rhs)) {
     return lhs->effective_stall_cycles < rhs->effective_stall_cycles;
   }
   // Under pressure, an unspillable path with the same risk and no greater

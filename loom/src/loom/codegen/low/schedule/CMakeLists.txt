@@ -269,6 +269,40 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    candidate_policy_test
+  SRCS
+    "candidate_policy.h"
+    "candidate_policy_test.cc"
+    "context.h"
+    "pressure.h"
+    "pressure_alias.h"
+    "ready_policy.h"
+    "setup_order.h"
+    "storage_lifetime.h"
+    "storage_relation_index.h"
+    "target_pressure.h"
+  DEPS
+    ::dependency_index
+    ::ready_frontier
+    ::resource_calendar
+    ::schedule
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::liveness
+    loom::codegen::low::function
+    loom::codegen::low::memory_access
+    loom::codegen::low::representation_binding
+    loom::codegen::low::storage_relation
+    loom::codegen::low::target_binding
+    loom::ir
+    loom::util::cfg_graph
+    loom::util::segmented_storage
+)
+
+loom_cc_test(
+  NAME
     memory_completion_test
   SRCS
     "context.h"

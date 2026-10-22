@@ -24,6 +24,41 @@ typedef struct loom_low_schedule_candidate_policy_t {
   loom_low_schedule_register_debt_word_t* nominee_register_debts;
 } loom_low_schedule_candidate_policy_t;
 
+// Physical-pressure context used to rank a bounded set of ready candidates.
+typedef enum loom_low_schedule_candidate_compare_mode_e {
+  // No active physical-pressure recovery requirement.
+  LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT = 0,
+  // Prefer work that relieves active register pressure.
+  LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF = 1,
+  // Preserve a selected aggregate register-packing completion.
+  LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION = 2,
+} loom_low_schedule_candidate_compare_mode_t;
+
+// Returns true when issue readiness should order two candidates advancing the
+// same active unspillable completion. A storage handoff participating in
+// aggregate packing recovery must reach the physical completion policy first;
+// issuing its ready peer can fragment the bank the handoff is closing.
+static inline bool loom_low_schedule_candidate_policy_uses_ready_progress_order(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_candidate_compare_mode_t compare_mode,
+    const loom_low_schedule_candidate_score_t* lhs,
+    const loom_low_schedule_candidate_score_t* rhs) {
+  return state->options->strategy ==
+             LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
+         compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
+         (compare_mode !=
+              LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION ||
+          !iree_any_bit_set(
+              lhs->flags | rhs->flags,
+              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE)) &&
+         !iree_any_bit_set(state->options->flags,
+                           LOOM_LOW_SCHEDULE_FLAG_HAS_LOWERED_SPILL_TRAFFIC) &&
+         lhs->active_unspillable_completion_domain_id != UINT16_MAX &&
+         lhs->active_unspillable_completion_domain_id ==
+             rhs->active_unspillable_completion_domain_id &&
+         lhs->effective_stall_cycles != rhs->effective_stall_cycles;
+}
+
 // Allocates bounded score storage when the strategy uses pressure scoring.
 iree_status_t loom_low_schedule_candidate_policy_initialize(
     const loom_low_schedule_build_state_t* state,
