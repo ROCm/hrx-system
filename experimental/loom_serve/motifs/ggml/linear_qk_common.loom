@@ -67,11 +67,14 @@ template.def<@ggml.qk.scale_min> device @ggml_qk_scale_min(%weight: buffer, %blo
 // Contracts one 16-value unsigned K-quant half-group with Q8_1. Paired lanes
 // use the same minimum and each apply half the Q8_1 block sum; their subgroup
 // reduction therefore applies the 32-value minimum correction exactly once.
+// Codes must fit in nonnegative signed i8, as Q4_K and Q5_K do. Signed dots
+// preserve every code bit and avoid mixed-sign emulation on targets that only
+// have native signed integer contractions.
 template.def<@ggml.qk.unsigned_q8_1_dot> device @ggml_qk_unsigned_q8_1_dot(%quantized_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32) {
   %c0_i32 = scalar.constant 0 : i32
   %c0_i32v = vector.constant 0 : vector<4xi32>
   %c0_5_f32 = scalar.constant 0.5 : f32
-  %partial_dots = vector.dot4i<u8s8> %quantized_values, %q8_values, %c0_i32v : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  %partial_dots = vector.dot4i<s8s8> %quantized_values, %q8_values, %c0_i32v : vector<16xi8>, vector<16xi8>, vector<4xi32>
   %quantized_sum = vector.reduce<addi> %partial_dots, %c0_i32 : vector<4xi32>, i32
   %quantized_sum_f32 = scalar.sitofp %quantized_sum : i32 to f32
   %scaled_dot0 = scalar.mulf<reassoc|nnan|ninf|nsz> %q8_d, %d_scale : f32

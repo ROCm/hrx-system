@@ -50,10 +50,25 @@ loom_test(
 )
 
 loom_test(
+    name = "qk_dot_test",
+    srcs = [
+        "linear_qk_common.loom",
+        "tests/qk_dot.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "narrow_projection_test",
     srcs = [":library"],
     benchmark_smoke = False,
     configs = {
+        "ggml.linear_q4k_q8_1_x4.output_capacity": "65",
+        "ggml.linear_q4k_q8_1_x4.token_capacity": "4",
         "ggml.linear_q5k_q8_1_x4.output_capacity": "65",
         "ggml.linear_q5k_q8_1_x4.token_capacity": "4",
         "ggml.linear_q6k_f32_decode.output_capacity": "9",
@@ -66,7 +81,9 @@ loom_test(
         AMDGPU_ACCESS_PROFILE,
     ],
     variants = {
+        "q4_q8": {"case": "@ggml_linear_q4k_q8_1_x4_differential_case"},
         "q5_q8": {"case": "@ggml_linear_q5k_q8_1_x4_m4_differential_case"},
+        "q5_q8_single": {"case": "@ggml_linear_q5k_q8_1_x4_differential_case"},
         "q6_f32": {"case": "@ggml_linear_q6k_f32_decode_m4_nonzero_tail_case"},
         "q6_q8": {"case": "@ggml_linear_q6k_q8_1_x4_m4_wave64_block4_differential_case"},
         "q6_q8_single": {"case": "@ggml_linear_q6k_q8_1_x4_wave64_block4_nonzero_tail_case"},
