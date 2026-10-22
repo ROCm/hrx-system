@@ -60,13 +60,13 @@ amdf_status_t amdf_gpu_wddm_wkmi_adapter_create_allocations(
     uint32_t allocation_handle_capacity, D3DKMT_HANDLE* out_allocation_handles,
     D3DKMT_HANDLE* out_resource, uint32_t* out_allocation_count);
 
-// Prepares a typed shared buffer in the caller's initially zero native slots.
+// Prepares typed shared backing in the caller's initially zero native slots.
 // Acquired handles remain with the caller even when a later step fails.
-amdf_status_t amdf_gpu_wddm_wkmi_adapter_prepare_buffer_import(
+amdf_status_t amdf_gpu_wddm_wkmi_adapter_prepare_memory_import(
     const amdf_gpu_wddm_wkmi_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_buffer_import_info_t* import_info,
+    const amdf_wkmi_bridge_gpu_memory_import_info_t* import_info,
     D3DKMT_HANDLE* resource_handle, D3DKMT_HANDLE* allocation_handle,
-    uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length);
+    uint64_t* out_native_byte_length, uint64_t* out_logical_byte_length);
 
 // Creates one native GPU kernel queue through pinned WKMI.
 amdf_status_t amdf_gpu_wddm_wkmi_adapter_create_kernel_queue(

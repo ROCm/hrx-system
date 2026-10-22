@@ -52,8 +52,8 @@ amdf_windows_sidecar_library(
     "dxcore_loader_compatibility.cc"
     "kernel_queue.cc"
     "kernel_queue.h"
-    "shared_buffer.cc"
-    "shared_buffer.h"
+    "shared_memory.cc"
+    "shared_memory.h"
   LINKOPTS
     "gdi32.lib"
   DEPS

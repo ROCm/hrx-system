@@ -52,8 +52,11 @@ extern "C" {
 // GPU property layout containing target identity and queue services.
 #define AMDF_WKMI_BRIDGE_ABI_VERSION_10 10u
 
+// Typed import distinguishes committed buffers from explicit shared heaps.
+#define AMDF_WKMI_BRIDGE_ABI_VERSION_11 11u
+
 // Most recent private bridge ABI version described by this header.
-#define AMDF_WKMI_BRIDGE_ABI_VERSION_LATEST AMDF_WKMI_BRIDGE_ABI_VERSION_10
+#define AMDF_WKMI_BRIDGE_ABI_VERSION_LATEST AMDF_WKMI_BRIDGE_ABI_VERSION_11
 
 // Result of one bridge operation.
 typedef uint32_t amdf_wkmi_bridge_result_t;
@@ -244,17 +247,17 @@ _Static_assert(sizeof(amdf_wkmi_bridge_gpu_kernel_queue_info_t) == 48,
                "WKMI queue info ABI must remain stable");
 #endif
 
-// Native input for a same-adapter committed D3D12 buffer import.
-typedef struct amdf_wkmi_bridge_gpu_buffer_import_info_t {
+// Native input for same-adapter D3D12 backing import.
+typedef struct amdf_wkmi_bridge_gpu_memory_import_info_t {
   // Live logical KMT device that receives the imported allocation.
   uint32_t device_handle;
-  // Reserved for compatible growth and always zero.
-  uint32_t reserved;
+  // D3D12_RESOURCE or D3D12_HEAP, qualified by the public import profile.
+  amdf_external_memory_type_t external_memory_type;
   // Exact DXGI adapter LUID, low word first.
   uint64_t adapter_luid;
-  // Borrowed owning NT handle for the complete committed resource.
+  // Borrowed NT handle for the complete committed buffer or explicit heap.
   void* shared_handle;
-} amdf_wkmi_bridge_gpu_buffer_import_info_t;
+} amdf_wkmi_bridge_gpu_memory_import_info_t;
 
 // Immutable entry-point table for the negotiated private bridge ABI.
 typedef struct amdf_wkmi_bridge_api_t {
@@ -344,11 +347,11 @@ typedef struct amdf_wkmi_bridge_api_t {
   // published only on success. The input handle is borrowed and never closed.
   // This operation reports portable libamdf statuses, preserving HRESULT,
   // Win32 and NTSTATUS failures without conflating their numeric codes.
-  amdf_status_t(AMDF_WKMI_BRIDGE_CALL* gpu_buffer_prepare_import)(
+  amdf_status_t(AMDF_WKMI_BRIDGE_CALL* gpu_memory_prepare_import)(
       amdf_wkmi_bridge_gpu_adapter_t* adapter,
-      const amdf_wkmi_bridge_gpu_buffer_import_info_t* import_info,
+      const amdf_wkmi_bridge_gpu_memory_import_info_t* import_info,
       uint32_t* resource_handle, uint32_t* allocation_handle,
-      uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length);
+      uint64_t* out_native_byte_length, uint64_t* out_logical_byte_length);
 
   // Queries the native calibration tuple for the admitted queue scheduler.
   // Other results preserve the output; out_native_status receives NTSTATUS

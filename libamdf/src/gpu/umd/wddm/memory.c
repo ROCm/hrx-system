@@ -35,6 +35,8 @@ struct amdf_gpu_umd_memory_t {
   D3DKMT_HANDLE resource;
   // Independent same-access NT reference used for exact-format re-export.
   HANDLE shared_handle;
+  // Exact representation of shared_handle, or NONE for native allocations.
+  amdf_external_memory_type_t external_memory_type;
   // Capacity of trailing `allocation_handles` storage.
   uint32_t allocation_capacity;
   // Number of live native handles in `allocation_handles`.
@@ -460,6 +462,7 @@ amdf_status_t amdf_gpu_umd_memory_prepare_import(
   }
   memory->device = device;
   memory->allocation_capacity = 1;
+  memory->external_memory_type = external_memory->type;
   memory->flags = profile->guaranteed_flags | import_info->required_flags;
   memory->device_access = import_info->device_access;
   *memory_state = memory;
@@ -469,22 +472,23 @@ amdf_status_t amdf_gpu_umd_memory_prepare_import(
                        DUPLICATE_SAME_ACCESS)) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }
-  const amdf_wkmi_bridge_gpu_buffer_import_info_t native_import = {
+  const amdf_wkmi_bridge_gpu_memory_import_info_t native_import = {
       .device_handle = device->device,
+      .external_memory_type = external_memory->type,
       .adapter_luid = device->adapter_luid,
       .shared_handle = memory->shared_handle,
   };
-  uint64_t buffer_byte_length = 0;
-  status = amdf_gpu_wddm_wkmi_adapter_prepare_buffer_import(
+  uint64_t logical_byte_length = 0;
+  status = amdf_gpu_wddm_wkmi_adapter_prepare_memory_import(
       &device->wkmi_adapter, &native_import, &memory->resource,
       &memory->allocation_handles[0], &memory->byte_length,
-      &buffer_byte_length);
+      &logical_byte_length);
   memory->allocation_count = memory->allocation_handles[0] != 0 ? 1 : 0;
   memory->maximum_native_allocation_byte_length = memory->byte_length;
   if (amdf_status_is_ok(status) &&
-      (external_memory->source_byte_offset > buffer_byte_length ||
+      (external_memory->source_byte_offset > logical_byte_length ||
        external_memory->byte_length >
-           buffer_byte_length - external_memory->source_byte_offset ||
+           logical_byte_length - external_memory->source_byte_offset ||
        memory->byte_length > profile->import.maximum_byte_length)) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
@@ -539,7 +543,9 @@ static void AMDF_CALL amdf_windows_gpu_memory_release_handle(
 amdf_status_t amdf_gpu_umd_memory_export(
     amdf_gpu_umd_memory_t* memory, const amdf_memory_export_info_t* export_info,
     amdf_external_memory_t* out_value) {
-  (void)export_info;
+  if (export_info->external_memory_type != memory->external_memory_type) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
   HANDLE exported = NULL;
   if (!DuplicateHandle(GetCurrentProcess(), memory->shared_handle,
                        GetCurrentProcess(), &exported, 0, FALSE,

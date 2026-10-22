@@ -24,7 +24,7 @@ static bool amdf_memory_is_power_of_two(uint64_t value) {
 static bool amdf_external_memory_type_is_valid(
     amdf_external_memory_type_t type) {
   return type >= AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD &&
-         type <= AMDF_EXTERNAL_MEMORY_TYPE_DEVICE_ADDRESS;
+         type <= AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP;
 }
 
 static amdf_status_t amdf_external_memory_validate(
@@ -48,6 +48,7 @@ static amdf_status_t amdf_external_memory_validate(
       }
       break;
     case AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE:
+    case AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP:
       if (value->payload.native_handle == NULL ||
           amdf_external_memory_provenance_is_valid(&value->provenance)) {
         return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);

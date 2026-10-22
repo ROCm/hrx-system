@@ -115,8 +115,11 @@ typedef uint32_t amdf_abi_version_t;
 /// Activated device identity and device-local execution families.
 #define AMDF_ABI_VERSION_15 ((amdf_abi_version_t)15)
 
+/// Typed shared D3D12 heaps and the expanded external-memory support array.
+#define AMDF_ABI_VERSION_16 ((amdf_abi_version_t)16)
+
 /// Latest ABI version implemented by these headers.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_15
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_16
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"

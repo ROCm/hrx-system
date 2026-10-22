@@ -34,7 +34,9 @@ constexpr uint64_t kSourceOffset = 4096;
 constexpr uint64_t kDestinationOffset = 8192;
 constexpr uint32_t kWordCount = 128;
 
-class D3D12MemoryInteropTest : public GpuDeviceFixture {
+class D3D12MemoryInteropTest
+    : public GpuDeviceFixture,
+      public ::testing::WithParamInterface<amdf_external_memory_type_t> {
  protected:
   void SetUp() override {
     GpuDeviceFixture::SetUp();
@@ -76,7 +78,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
 
   amdf_external_memory_t Transport() const {
     amdf_external_memory_t value = {};
-    value.type = AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE;
+    value.type = GetParam();
     value.payload.native_handle = shared_;
     value.source_byte_offset = kSourceOffset;
     value.byte_length = kDestinationOffset + kWordCount * 4 - kSourceOffset;
@@ -86,7 +88,8 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
   static void AMDF_CALL ReleaseSource(void* user_data,
                                       amdf_external_memory_type_t type,
                                       amdf_external_memory_payload_t payload) {
-    EXPECT_EQ(type, AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE);
+    EXPECT_TRUE(type == AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE ||
+                type == AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP);
     EXPECT_TRUE(CloseHandle(payload.native_handle));
     ++*static_cast<uint32_t*>(user_data);
   }
@@ -132,22 +135,14 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
       shared_ = nullptr;
     }
     buffer_.Reset();
+    heap_.Reset();
     d3d_.Reset();
     adapter_.Reset();
     factory_.Reset();
     GpuDeviceFixture::TearDown();
   }
 
-  void CreateSharedBuffer() {
-    if (shared_ != nullptr) {
-      ASSERT_TRUE(CloseHandle(shared_));
-      shared_ = nullptr;
-    }
-    buffer_.Reset();
-    D3D12_HEAP_PROPERTIES heap = {};
-    heap.Type = D3D12_HEAP_TYPE_DEFAULT;
-    heap.CreationNodeMask = 1;
-    heap.VisibleNodeMask = 1;
+  static D3D12_RESOURCE_DESC BufferDescription() {
     D3D12_RESOURCE_DESC buffer = {};
     buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
     buffer.Width = kByteLength;
@@ -156,11 +151,44 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     buffer.MipLevels = 1;
     buffer.SampleDesc.Count = 1;
     buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    ASSERT_TRUE(SUCCEEDED(d3d_->CreateCommittedResource(
-        &heap, D3D12_HEAP_FLAG_SHARED, &buffer, D3D12_RESOURCE_STATE_COMMON,
-        nullptr, IID_PPV_ARGS(&buffer_))));
-    ASSERT_TRUE(SUCCEEDED(d3d_->CreateSharedHandle(
-        buffer_.Get(), nullptr, GENERIC_ALL, nullptr, &shared_)));
+    return buffer;
+  }
+
+  void CreatePlacedBuffer() {
+    const auto buffer = BufferDescription();
+    ASSERT_TRUE(SUCCEEDED(d3d_->CreatePlacedResource(
+        heap_.Get(), 0, &buffer, D3D12_RESOURCE_STATE_COMMON, nullptr,
+        IID_PPV_ARGS(&buffer_))));
+  }
+
+  void CreateSharedBuffer() {
+    if (shared_ != nullptr) {
+      ASSERT_TRUE(CloseHandle(shared_));
+      shared_ = nullptr;
+    }
+    buffer_.Reset();
+    heap_.Reset();
+    D3D12_HEAP_PROPERTIES properties = {};
+    properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+    properties.CreationNodeMask = 1;
+    properties.VisibleNodeMask = 1;
+    if (GetParam() == AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP) {
+      D3D12_HEAP_DESC heap = {};
+      heap.SizeInBytes = kByteLength;
+      heap.Properties = properties;
+      heap.Flags = D3D12_HEAP_FLAG_SHARED;
+      ASSERT_TRUE(SUCCEEDED(d3d_->CreateHeap(&heap, IID_PPV_ARGS(&heap_))));
+      ASSERT_NO_FATAL_FAILURE(CreatePlacedBuffer());
+    } else {
+      const auto buffer = BufferDescription();
+      ASSERT_TRUE(SUCCEEDED(d3d_->CreateCommittedResource(
+          &properties, D3D12_HEAP_FLAG_SHARED, &buffer,
+          D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_))));
+    }
+    ID3D12DeviceChild* owner =
+        heap_ ? static_cast<ID3D12DeviceChild*>(heap_.Get()) : buffer_.Get();
+    ASSERT_TRUE(SUCCEEDED(d3d_->CreateSharedHandle(owner, nullptr, GENERIC_ALL,
+                                                   nullptr, &shared_)));
   }
 
   void OpenSharedBuffer(uint64_t source_byte_offset = kSourceOffset,
@@ -200,6 +228,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     ComPtr<ID3D12Device> device = d3d_;
     ComPtr<ID3D12Resource> source_owner = source;
     ComPtr<ID3D12Resource> destination_owner = destination;
+    ComPtr<ID3D12Heap> heap_owner = heap_;
     ComPtr<ID3D12CommandQueue> queue;
     D3D12_COMMAND_QUEUE_DESC queue_info = {};
     queue_info.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -212,6 +241,12 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     ASSERT_TRUE(SUCCEEDED(d3d_->CreateCommandList(
         0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr,
         IID_PPV_ARGS(&commands))));
+    if (heap_) {
+      D3D12_RESOURCE_BARRIER activation = {};
+      activation.Type = D3D12_RESOURCE_BARRIER_TYPE_ALIASING;
+      activation.Aliasing.pResourceAfter = buffer_.Get();
+      commands->ResourceBarrier(1, &activation);
+    }
     D3D12_RESOURCE_BARRIER barrier = {};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition.pResource = buffer_.Get();
@@ -251,6 +286,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
       fence.Detach();
       source_owner.Detach();
       destination_owner.Detach();
+      heap_owner.Detach();
       device.Detach();
       FAIL() << "D3D12 retirement unproven; retaining submitted owners: "
              << operation << " returned " << std::hex << status;
@@ -343,7 +379,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     query.access_count = import_info_.access_count;
     query.accesses = import_info_.accesses;
     query.required_flags = import_info_.required_flags;
-    query.external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE;
+    query.external_memory_type = GetParam();
     query.producer.kind = AMDF_MEMORY_SITE_KIND_DEVICE;
     query.producer.value.device.queue_family_ordinal = family_ordinal;
     query.consumer = query.producer;
@@ -419,10 +455,11 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
   void ReexportAndDetach() {
     // Drop the original API resource before producing the return transport.
     buffer_.Reset();
+    heap_.Reset();
     amdf_memory_export_info_t export_info = {};
     export_info.type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO;
     export_info.structure_size = sizeof(export_info);
-    export_info.external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE;
+    export_info.external_memory_type = GetParam();
     export_info.byte_length =
         kDestinationOffset + kWordCount * 4 - kSourceOffset;
     amdf_external_memory_t exported = {};
@@ -431,10 +468,18 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     ASSERT_EQ(exported.source_byte_offset, kSourceOffset);
     ASSERT_EQ(exported.byte_length, export_info.byte_length);
     ASSERT_NO_FATAL_FAILURE(DestroyImportedStorage());
-    const HRESULT opened = d3d_->OpenSharedHandle(
-        exported.payload.native_handle, IID_PPV_ARGS(&buffer_));
+    const HRESULT opened =
+        GetParam() == AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP
+            ? d3d_->OpenSharedHandle(exported.payload.native_handle,
+                                     IID_PPV_ARGS(&heap_))
+            : d3d_->OpenSharedHandle(exported.payload.native_handle,
+                                     IID_PPV_ARGS(&buffer_));
     api_->external_memory_release(&exported);
     ASSERT_TRUE(SUCCEEDED(opened)) << std::hex << opened;
+    if (heap_) {
+      ASSERT_EQ(heap_->GetDesc().SizeInBytes, kByteLength);
+      ASSERT_NO_FATAL_FAILURE(CreatePlacedBuffer());
+    }
     const auto description = buffer_->GetDesc();
     ASSERT_EQ(description.Dimension, D3D12_RESOURCE_DIMENSION_BUFFER);
     ASSERT_EQ(description.Width, kByteLength);
@@ -651,8 +696,10 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
   ComPtr<IDXGIAdapter1> adapter_;
   // Foreign device owning the resource and verification queues.
   ComPtr<ID3D12Device> d3d_;
-  // Shared committed buffer used for generation and verification.
+  // Shared committed or placed buffer used for generation and verification.
   ComPtr<ID3D12Resource> buffer_;
+  // Explicit backing owner for the placed-buffer transport.
+  ComPtr<ID3D12Heap> heap_;
   // Source sharing handle until consumed by import or fixture teardown.
   HANDLE shared_ = nullptr;
   // Prepared native address translated to resource-relative byte zero.
@@ -731,25 +778,26 @@ class D3D12Pm4MemoryInteropTest : public D3D12MemoryInteropTest {
   uint32_t family_ordinal_ = UINT32_MAX;
 };
 
-TEST_F(D3D12Pm4MemoryInteropTest, ForeignNativeForeignRoundTrip) {
+TEST_P(D3D12Pm4MemoryInteropTest, ForeignNativeForeignRoundTrip) {
   RunRoundTrip(family_ordinal_);
 }
 
-TEST_F(D3D12Pm4MemoryInteropTest, ReplacesImportedSlicesOnAnExistingQueue) {
+TEST_P(D3D12Pm4MemoryInteropTest, ReplacesImportedSlicesOnAnExistingQueue) {
   RunMappingReplacement(family_ordinal_, MappingPublication::kHostCompleted);
 }
 
-TEST_F(D3D12Pm4MemoryInteropTest, QueueOrdersImportedSliceReplacement) {
+TEST_P(D3D12Pm4MemoryInteropTest, QueueOrdersImportedSliceReplacement) {
   RunMappingReplacement(family_ordinal_, MappingPublication::kQueueOrdered);
 }
 
-TEST_F(D3D12MemoryInteropTest, ImportOwnsBackingAfterSourceRelease) {
+TEST_P(D3D12MemoryInteropTest, ImportOwnsBackingAfterSourceRelease) {
   ASSERT_NO_FATAL_FAILURE(CreateSharedBuffer());
   ASSERT_NO_FATAL_FAILURE(OpenSharedBuffer());
   buffer_.Reset();
+  heap_.Reset();
 }
 
-TEST_F(D3D12MemoryInteropTest, RejectsPhysicalPaddingOutsideLogicalBuffer) {
+TEST_P(D3D12MemoryInteropTest, RejectsPhysicalPaddingOutsideLogicalBuffer) {
   amdf_external_memory_t source = Transport();
   source.source_byte_offset = kByteLength - 1;
   source.byte_length = 2;
@@ -757,14 +805,14 @@ TEST_F(D3D12MemoryInteropTest, RejectsPhysicalPaddingOutsideLogicalBuffer) {
   ASSERT_NO_FATAL_FAILURE(OpenSharedBuffer());
 }
 
-TEST_F(D3D12MemoryInteropTest, RejectsUnsupportedHostVisibility) {
+TEST_P(D3D12MemoryInteropTest, RejectsUnsupportedHostVisibility) {
   import_info_.required_flags |= AMDF_MEMORY_FLAG_HOST_VISIBLE;
   ASSERT_NO_FATAL_FAILURE(ExpectRejected(Transport()));
   import_info_.required_flags &= ~AMDF_MEMORY_FLAG_HOST_VISIBLE;
   ASSERT_NO_FATAL_FAILURE(OpenSharedBuffer());
 }
 
-TEST_F(D3D12MemoryInteropTest, RejectsIncompatiblePayloads) {
+TEST_P(D3D12MemoryInteropTest, RejectsIncompatiblePayloads) {
   amdf_external_memory_t source = Transport();
   HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   ASSERT_NE(event, nullptr);
@@ -772,21 +820,17 @@ TEST_F(D3D12MemoryInteropTest, RejectsIncompatiblePayloads) {
   ExpectRejected(source);
   EXPECT_TRUE(CloseHandle(event));
 
-  D3D12_HEAP_DESC heap_info = {};
-  heap_info.SizeInBytes = kByteLength;
-  heap_info.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
-  heap_info.Properties.CreationNodeMask = 1;
-  heap_info.Properties.VisibleNodeMask = 1;
-  heap_info.Flags = D3D12_HEAP_FLAG_SHARED;
-  ComPtr<ID3D12Heap> heap;
-  ASSERT_TRUE(SUCCEEDED(d3d_->CreateHeap(&heap_info, IID_PPV_ARGS(&heap))));
-  HANDLE shared_heap = nullptr;
-  ASSERT_TRUE(SUCCEEDED(d3d_->CreateSharedHandle(
-      heap.Get(), nullptr, GENERIC_ALL, nullptr, &shared_heap)));
-  source.payload.native_handle = shared_heap;
-  ExpectRejected(source);
-  EXPECT_TRUE(CloseHandle(shared_heap));
+  source = Transport();
+  source.type = GetParam() == AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP
+                    ? AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE
+                    : AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP;
+  ASSERT_NO_FATAL_FAILURE(ExpectRejected(source));
+  source = Transport();
 
+  D3D12_HEAP_PROPERTIES properties = {};
+  properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+  properties.CreationNodeMask = 1;
+  properties.VisibleNodeMask = 1;
   D3D12_RESOURCE_DESC description = {};
   description.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   description.Width = 32;
@@ -798,7 +842,7 @@ TEST_F(D3D12MemoryInteropTest, RejectsIncompatiblePayloads) {
   description.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
   ComPtr<ID3D12Resource> texture;
   ASSERT_TRUE(SUCCEEDED(d3d_->CreateCommittedResource(
-      &heap_info.Properties, D3D12_HEAP_FLAG_SHARED, &description,
+      &properties, D3D12_HEAP_FLAG_SHARED, &description,
       D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&texture))));
   HANDLE shared_texture = nullptr;
   ASSERT_TRUE(SUCCEEDED(d3d_->CreateSharedHandle(
@@ -809,7 +853,7 @@ TEST_F(D3D12MemoryInteropTest, RejectsIncompatiblePayloads) {
   ASSERT_NO_FATAL_FAILURE(OpenSharedBuffer());
 }
 
-TEST_F(D3D12MemoryInteropTest, PreservesUnalignedLogicalRangeOnReexport) {
+TEST_P(D3D12MemoryInteropTest, PreservesUnalignedLogicalRangeOnReexport) {
   amdf_external_memory_t source = Transport();
   source.source_byte_offset = 13;
   source.byte_length = 117;
@@ -826,15 +870,40 @@ TEST_F(D3D12MemoryInteropTest, PreservesUnalignedLogicalRangeOnReexport) {
   amdf_memory_export_info_t export_info = {};
   export_info.type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO;
   export_info.structure_size = sizeof(export_info);
-  export_info.external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE;
+  export_info.external_memory_type =
+      GetParam() == AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP
+          ? AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE
+          : AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP;
   export_info.byte_offset = 7;
   export_info.byte_length = 19;
   amdf_external_memory_t exported = {};
+  EXPECT_EQ(api_->memory_export(imported_memory_, &export_info, &exported),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  const amdf_external_memory_t empty = {};
+  EXPECT_EQ(std::memcmp(&exported, &empty, sizeof(exported)), 0);
+  export_info.external_memory_type = GetParam();
   ASSERT_EQ(api_->memory_export(imported_memory_, &export_info, &exported),
             AMDF_STATUS_OK);
   EXPECT_EQ(exported.source_byte_offset, 20u);
   EXPECT_EQ(exported.byte_length, 19u);
   api_->external_memory_release(&exported);
 }
+
+const char* TransportName(
+    const ::testing::TestParamInfo<amdf_external_memory_type_t>& info) {
+  return info.param == AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP ? "SharedHeap"
+                                                            : "CommittedBuffer";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Transport, D3D12MemoryInteropTest,
+    ::testing::Values(AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE,
+                      AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP),
+    TransportName);
+INSTANTIATE_TEST_SUITE_P(
+    Transport, D3D12Pm4MemoryInteropTest,
+    ::testing::Values(AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE,
+                      AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP),
+    TransportName);
 
 }  // namespace

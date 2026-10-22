@@ -204,7 +204,7 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
     profile.device_address.minimum_alignment = 1;
     profile.import = allocation;
     profile.import.minimum_alignment = 1;
-    profile.external_memory_support_count = 1;
+    profile.external_memory_support_count = 2;
     profile.external_memory_support[0] = (amdf_external_memory_support_t){
         .type = AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE,
         .flags = AMDF_EXTERNAL_MEMORY_SUPPORT_FLAG_IMPORT |
@@ -215,6 +215,9 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
         .byte_length_alignment = 1,
         .maximum_byte_length = maximum_byte_length,
     };
+    profile.external_memory_support[1] = profile.external_memory_support[0];
+    profile.external_memory_support[1].type =
+        AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP;
   }
   *out_profile = profile;
   return AMDF_STATUS_OK;

@@ -119,15 +119,15 @@ amdf_status_t amdf_gpu_wddm_wkmi_adapter_create_allocations(
   return amdf_gpu_wddm_wkmi_make_status(result, native_status);
 }
 
-amdf_status_t amdf_gpu_wddm_wkmi_adapter_prepare_buffer_import(
+amdf_status_t amdf_gpu_wddm_wkmi_adapter_prepare_memory_import(
     const amdf_gpu_wddm_wkmi_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_buffer_import_info_t* import_info,
+    const amdf_wkmi_bridge_gpu_memory_import_info_t* import_info,
     D3DKMT_HANDLE* resource_handle, D3DKMT_HANDLE* allocation_handle,
-    uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length) {
-  return adapter->api->gpu_buffer_prepare_import(
+    uint64_t* out_native_byte_length, uint64_t* out_logical_byte_length) {
+  return adapter->api->gpu_memory_prepare_import(
       adapter->native, import_info, (uint32_t*)resource_handle,
       (uint32_t*)allocation_handle, out_native_byte_length,
-      out_buffer_byte_length);
+      out_logical_byte_length);
 }
 
 amdf_status_t amdf_gpu_wddm_wkmi_adapter_create_kernel_queue(

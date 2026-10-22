@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/wddm/wkmi/shared_buffer.h"
+#include "libamdf/src/gpu/umd/wddm/wkmi/shared_memory.h"
 
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -22,10 +22,10 @@ amdf_status_t HresultStatus(HRESULT result) {
                                               static_cast<uint32_t>(result));
 }
 
-amdf_status_t QueryBufferWithModules(HMODULE dxgi_module, HMODULE d3d12_module,
-                                     uint64_t adapter_luid,
-                                     HANDLE shared_handle,
-                                     uint64_t* out_byte_length) {
+amdf_status_t QueryMemoryWithModules(
+    HMODULE dxgi_module, HMODULE d3d12_module, uint64_t adapter_luid,
+    HANDLE shared_handle, amdf_external_memory_type_t external_memory_type,
+    uint64_t* out_byte_length) {
   using CreateFactory = HRESULT(WINAPI*)(REFIID, void**);
   const auto create_factory = reinterpret_cast<CreateFactory>(
       GetProcAddress(dxgi_module, "CreateDXGIFactory1"));
@@ -55,33 +55,50 @@ amdf_status_t QueryBufferWithModules(HMODULE dxgi_module, HMODULE d3d12_module,
   if (FAILED(result)) {
     return HresultStatus(result);
   }
-  Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-  result = device->OpenSharedHandle(shared_handle, IID_PPV_ARGS(&resource));
-  if (FAILED(result)) {
-    return HresultStatus(result);
-  }
-  const D3D12_RESOURCE_DESC description = resource->GetDesc();
-  D3D12_HEAP_PROPERTIES heap = {};
+  D3D12_HEAP_PROPERTIES properties = {};
   D3D12_HEAP_FLAGS flags = D3D12_HEAP_FLAG_NONE;
-  result = resource->GetHeapProperties(&heap, &flags);
-  if (FAILED(result)) {
-    return HresultStatus(result);
+  uint64_t byte_length = 0;
+  if (external_memory_type == AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP) {
+    Microsoft::WRL::ComPtr<ID3D12Heap> heap;
+    result = device->OpenSharedHandle(shared_handle, IID_PPV_ARGS(&heap));
+    if (FAILED(result)) {
+      return HresultStatus(result);
+    }
+    const D3D12_HEAP_DESC description = heap->GetDesc();
+    properties = description.Properties;
+    flags = description.Flags;
+    byte_length = description.SizeInBytes;
+  } else {
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+    result = device->OpenSharedHandle(shared_handle, IID_PPV_ARGS(&resource));
+    if (FAILED(result)) {
+      return HresultStatus(result);
+    }
+    const D3D12_RESOURCE_DESC description = resource->GetDesc();
+    if (description.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER ||
+        description.Layout != D3D12_TEXTURE_LAYOUT_ROW_MAJOR) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+    result = resource->GetHeapProperties(&properties, &flags);
+    if (FAILED(result)) {
+      return HresultStatus(result);
+    }
+    byte_length = description.Width;
   }
-  if (description.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER ||
-      description.Layout != D3D12_TEXTURE_LAYOUT_ROW_MAJOR ||
-      description.Width == 0 || heap.Type != D3D12_HEAP_TYPE_DEFAULT ||
+  if (byte_length == 0 || properties.Type != D3D12_HEAP_TYPE_DEFAULT ||
       (flags & D3D12_HEAP_FLAG_SHARED) == 0 ||
       (flags & (D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER |
                 D3D12_HEAP_FLAG_HARDWARE_PROTECTED)) != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  *out_byte_length = description.Width;
+  *out_byte_length = byte_length;
   return AMDF_STATUS_OK;
 }
 
 // Typed admission is cold and owns its temporary API modules and objects.
 // Native execution retains only KMT memory state, never a D3D12 device.
-amdf_status_t QueryBuffer(uint64_t adapter_luid, HANDLE shared_handle,
+amdf_status_t QueryMemory(uint64_t adapter_luid, HANDLE shared_handle,
+                          amdf_external_memory_type_t external_memory_type,
                           uint64_t* out_byte_length) {
   HMODULE dxgi_module =
       LoadLibraryExW(L"dxgi.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -94,8 +111,9 @@ amdf_status_t QueryBuffer(uint64_t adapter_luid, HANDLE shared_handle,
   amdf_status_t status =
       d3d12_module == nullptr
           ? amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError())
-          : QueryBufferWithModules(dxgi_module, d3d12_module, adapter_luid,
-                                   shared_handle, &byte_length);
+          : QueryMemoryWithModules(dxgi_module, d3d12_module, adapter_luid,
+                                   shared_handle, external_memory_type,
+                                   &byte_length);
   if (d3d12_module != nullptr && !FreeLibrary(d3d12_module)) {
     status = amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }
@@ -108,14 +126,15 @@ amdf_status_t QueryBuffer(uint64_t adapter_luid, HANDLE shared_handle,
   return status;
 }
 
-amdf_status_t PrepareBuffer(
+amdf_status_t PrepareMemory(
     amdf_wkmi_bridge_gpu_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_buffer_import_info_t& import_info,
+    const amdf_wkmi_bridge_gpu_memory_import_info_t& import_info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
-    uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length) {
-  uint64_t buffer_byte_length = 0;
-  amdf_status_t status = QueryBuffer(
-      import_info.adapter_luid, import_info.shared_handle, &buffer_byte_length);
+    uint64_t* out_native_byte_length, uint64_t* out_logical_byte_length) {
+  uint64_t logical_byte_length = 0;
+  amdf_status_t status =
+      QueryMemory(import_info.adapter_luid, import_info.shared_handle,
+                  import_info.external_memory_type, &logical_byte_length);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -181,27 +200,27 @@ amdf_status_t PrepareBuffer(
   if (!layout.valid ||
       (layout.swizzle_mode != 0 && layout.swizzle_mode != 32) ||
       layout.tile_swizzle != 0 || layout.compression_mode != 0 ||
-      native_byte_length < buffer_byte_length ||
+      native_byte_length < logical_byte_length ||
       (native_byte_length & 4095) != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   *out_native_byte_length = native_byte_length;
-  *out_buffer_byte_length = buffer_byte_length;
+  *out_logical_byte_length = logical_byte_length;
   return AMDF_STATUS_OK;
 }
 
 }  // namespace
 
-amdf_status_t AMDF_WKMI_BRIDGE_CALL GpuBufferPrepareImport(
+amdf_status_t AMDF_WKMI_BRIDGE_CALL GpuMemoryPrepareImport(
     amdf_wkmi_bridge_gpu_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_buffer_import_info_t* import_info,
+    const amdf_wkmi_bridge_gpu_memory_import_info_t* import_info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length,
-    uint64_t* out_buffer_byte_length) noexcept {
+    uint64_t* out_logical_byte_length) noexcept {
   try {
-    return PrepareBuffer(adapter, *import_info, resource_handle,
+    return PrepareMemory(adapter, *import_info, resource_handle,
                          allocation_handle, out_native_byte_length,
-                         out_buffer_byte_length);
+                         out_logical_byte_length);
   } catch (const std::bad_alloc&) {
     return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   } catch (...) {

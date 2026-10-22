@@ -133,14 +133,16 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeCreateAllocation(
   return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
 }
 
-amdf_status_t AMDF_WKMI_BRIDGE_CALL FakePrepareBufferImport(
+amdf_status_t AMDF_WKMI_BRIDGE_CALL FakePrepareMemoryImport(
     amdf_wkmi_bridge_gpu_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_buffer_import_info_t* info,
+    const amdf_wkmi_bridge_gpu_memory_import_info_t* info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
-    uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length) {
+    uint64_t* out_native_byte_length, uint64_t* out_logical_byte_length) {
   auto* state = reinterpret_cast<FakeMemoryState*>(adapter);
   state->operations.push_back(Operation::kImport);
   EXPECT_EQ(info->device_handle, 0x10u);
+  EXPECT_EQ(info->external_memory_type,
+            AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE);
   EXPECT_EQ(*resource_handle, 0u);
   EXPECT_EQ(*allocation_handle, 0u);
   state->imported_handle = info->shared_handle;
@@ -150,7 +152,7 @@ amdf_status_t AMDF_WKMI_BRIDGE_CALL FakePrepareBufferImport(
     return state->import_status;
   }
   *out_native_byte_length = 65536;
-  *out_buffer_byte_length = 16384;
+  *out_logical_byte_length = 16384;
   return AMDF_STATUS_OK;
 }
 
@@ -261,7 +263,7 @@ class WindowsGpuMemoryTest : public ::testing::Test {
     current_state = &state_;
     bridge_.gpu_allocation_query_layout = FakeQueryAllocationLayout;
     bridge_.gpu_allocation_create = FakeCreateAllocation;
-    bridge_.gpu_buffer_prepare_import = FakePrepareBufferImport;
+    bridge_.gpu_memory_prepare_import = FakePrepareMemoryImport;
     kmt_.create_allocation = FakeUnexpectedCreateAllocation;
     kmt_.destroy_allocation = FakeDestroyAllocation;
     kmt_.reserve_gpu_virtual_address = FakeReserveGpuVirtualAddress;
@@ -1021,10 +1023,12 @@ TEST_F(WindowsGpuMemoryTest, ImportedRangeAndIndependentExportOwnership) {
             AMDF_STATUS_OK);
   EXPECT_EQ(profile_.roles,
             AMDF_MEMORY_PROFILE_ROLE_IMPORT | AMDF_MEMORY_PROFILE_ROLE_EXPORT);
-  EXPECT_EQ(profile_.external_memory_support_count, 1u);
+  EXPECT_EQ(profile_.external_memory_support_count, 2u);
   EXPECT_EQ(profile_.external_memory_support[0].type,
             AMDF_EXTERNAL_MEMORY_TYPE_D3D12_RESOURCE);
   EXPECT_EQ(profile_.external_memory_support[0].source_offset_alignment, 1u);
+  EXPECT_EQ(profile_.external_memory_support[1].type,
+            AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP);
   const amdf_memory_native_import_info_t info = {
       .device_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
       .required_flags = AMDF_MEMORY_FLAG_SHAREABLE,

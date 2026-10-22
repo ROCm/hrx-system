@@ -220,10 +220,21 @@ enum amdf_external_memory_type_e {
   AMDF_EXTERNAL_MEMORY_TYPE_HOST_POINTER = 4,
   /// Device virtual address with a caller-defined lifetime lease.
   AMDF_EXTERNAL_MEMORY_TYPE_DEVICE_ADDRESS = 5,
+  /// Owning NT handle to an explicit shared D3D12 DEFAULT heap.
+  /// The Windows GPU import profile accepts a same-adapter heap backed by one
+  /// uncompressed linear native allocation, without cross-adapter or hardware
+  /// protection flags. Logical offsets refer to heap bytes, excluding native
+  /// allocation padding. Placed resources retain their own identities, layouts,
+  /// and last-use lifetimes; importing the heap establishes no image layout.
+  /// The caller orders resource/alias transitions and completes foreign work
+  /// before native use, then completes native work and its cache release before
+  /// foreign use. Import/export neither wait nor change resource state.
+  /// Re-export preserves the heap representation, not a placed resource handle.
+  AMDF_EXTERNAL_MEMORY_TYPE_D3D12_HEAP = 6,
 };
 
 /// Number of external-memory types.
-#define AMDF_EXTERNAL_MEMORY_TYPE_COUNT 5u
+#define AMDF_EXTERNAL_MEMORY_TYPE_COUNT 6u
 
 /// Opaque identity of the exact native interpretation of a transport payload.
 ///
