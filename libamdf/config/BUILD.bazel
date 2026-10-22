@@ -13,6 +13,16 @@ bool_flag(
     build_setting_default = True,
 )
 
+bool_flag(
+    name = "media",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "media_setting",
+    flag_values = {":media": "true"},
+)
+
 SUPPORTED_FAMILIES = [
     "rdna",
     "cdna",

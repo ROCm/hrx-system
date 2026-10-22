@@ -5,6 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "amdf/amdf.h"
+#include "amdf/media.h"
+#include "amdf/media/gfx11.h"
+#include "amdf/media/h264.h"
 
 int main(void) {
   const amdf_api_t* api = 0;

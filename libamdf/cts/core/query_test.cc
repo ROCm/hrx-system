@@ -169,6 +169,32 @@ TEST(QueryExtensionTest, RejectsUnknownExtensionWithoutPublishingOutput) {
   EXPECT_EQ(extension_api, sentinel);
 }
 
+TEST(QueryExtensionTest, DistinguishesExcludedExtensionsFromVersionMismatch) {
+  const amdf_api_t* api = nullptr;
+  ASSERT_TRUE(amdf_status_is_ok(amdf_cts_provider_query_api()(
+      AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api)));
+  const amdf_extension_id_t extensions[] = {
+      AMDF_EXTENSION_GPU, AMDF_EXTENSION_XDNA, AMDF_EXTENSION_OBSERVATION,
+      AMDF_EXTENSION_MEDIA};
+  const void* const sentinel = reinterpret_cast<const void*>(uintptr_t{1});
+  for (auto id : extensions) {
+    const void* extension = sentinel;
+    const auto availability =
+        api->query_extension(id, 1, UINT32_MAX, &extension);
+    const bool present = amdf_status_is_ok(availability);
+    if (!present) {
+      ASSERT_EQ(availability,
+                amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+      EXPECT_EQ(extension, sentinel);
+    }
+    extension = sentinel;
+    EXPECT_EQ(api->query_extension(id, UINT32_MAX, UINT32_MAX, &extension),
+              amdf_make_api_status(present ? AMDF_STATUS_CODE_VERSION_MISMATCH
+                                           : AMDF_STATUS_CODE_UNSUPPORTED));
+    EXPECT_EQ(extension, sentinel);
+  }
+}
+
 TEST(StatusTest, PreservesDomainAndCode) {
   const amdf_status_t status =
       amdf_make_status(AMDF_STATUS_DOMAIN_FIRMWARE, 0xFEDCBA98u);

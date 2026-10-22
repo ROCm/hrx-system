@@ -30,6 +30,8 @@ enum amdf_queue_command_type_e {
   AMDF_QUEUE_COMMAND_TYPE_XDNA = 4,
   /// Gfx1250 AQL metadata dispatch and barrier packets.
   AMDF_QUEUE_COMMAND_TYPE_GPU_AQL_METADATA = 5,
+  /// Typed native recordings prepared through the media extension.
+  AMDF_QUEUE_COMMAND_TYPE_MEDIA = 6,
 };
 
 /// Encoding features within a command format and version.
@@ -62,6 +64,8 @@ enum amdf_queue_role_bits_e {
   AMDF_QUEUE_ROLE_CACHE_CONTROL = UINT64_C(1) << 3,
   /// Executes virtual-address mapping operations.
   AMDF_QUEUE_ROLE_VIRTUAL_MEMORY = UINT64_C(1) << 4,
+  /// Executes codec operations described by the media extension.
+  AMDF_QUEUE_ROLE_MEDIA = UINT64_C(1) << 5,
 };
 
 /// Reservation protocol used by a directly published queue.
@@ -417,8 +421,9 @@ typedef struct amdf_kernel_queue_status_t {
   uint32_t structure_size;
   /// Optional output extension chain. No extensions are currently defined.
   void* next;
-  /// Greatest accepted submission whose checked retirement, including
-  /// command-result inspection, is complete.
+  /// Greatest accepted submission whose checked retirement, including native
+  /// execution-status inspection, is complete. Extension-specific outcomes
+  /// such as codec rejection are separate from safe resource retirement.
   /// Native fence completion alone does not advance this frontier.
   uint64_t retired_submission;
   /// Current queue lifecycle state.

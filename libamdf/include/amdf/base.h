@@ -282,6 +282,8 @@ enum amdf_extension_id_e {
   AMDF_EXTENSION_GPU = 2,
   /// Portable timing and observation services, independent of device families.
   AMDF_EXTENSION_OBSERVATION = 3,
+  /// Typed media preparation and native kernel-queue services.
+  AMDF_EXTENSION_MEDIA = 4,
 };
 
 /// Common prefix of every extensible input structure.

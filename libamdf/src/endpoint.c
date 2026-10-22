@@ -22,8 +22,8 @@ struct amdf_endpoint_t {
   amdf_platform_endpoint_t* platform;
   // Immutable properties cached while opening the platform endpoint.
   amdf_endpoint_info_t info;
-  // Complete immutable metadata allocation owned after provider qualification.
-  void* engine_profile;
+  // Complete immutable metadata allocation beginning with public engine facts.
+  amdf_output_structure_t* engine_profile;
   // Cached result of the engine-profile qualification attempt.
   amdf_status_t engine_profile_status;
   // Whether an engine extension resolved `engine_profile_status`.
@@ -118,11 +118,16 @@ amdf_instance_t* amdf_endpoint_get_instance(const amdf_endpoint_t* endpoint) {
 }
 
 void amdf_endpoint_store_engine_profile(amdf_endpoint_t* endpoint,
-                                        void* profile) {
+                                        amdf_output_structure_t* profile) {
   amdf_assert(!endpoint->engine_profile_resolved);
   endpoint->engine_profile = profile;
   endpoint->engine_profile_status = AMDF_STATUS_OK;
   endpoint->engine_profile_resolved = true;
+}
+
+const amdf_output_structure_t* amdf_endpoint_get_cached_engine_info(
+    const amdf_endpoint_t* endpoint) {
+  return endpoint->engine_profile;
 }
 
 void amdf_endpoint_store_engine_profile_error(amdf_endpoint_t* endpoint,

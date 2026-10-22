@@ -62,9 +62,16 @@ amdf_allocator_t amdf_endpoint_host_allocator(const amdf_endpoint_t* endpoint);
 amdf_instance_t* amdf_endpoint_get_instance(const amdf_endpoint_t* endpoint);
 
 // Adopts one complete immutable profile allocated with the endpoint allocator.
-// Its full metadata extent belongs to this one allocation, freed on close.
+// Its first member is the engine's public information structure, permitting
+// consumers to read retained target facts without a private family dependency.
+// The full metadata extent belongs to this allocation, freed on close.
 void amdf_endpoint_store_engine_profile(amdf_endpoint_t* endpoint,
-                                        void* profile);
+                                        amdf_output_structure_t* profile);
+
+// Borrows the public prefix of qualified engine metadata, or NULL when no
+// profile was established. This reads retained facts without native work.
+const amdf_output_structure_t* amdf_endpoint_get_cached_engine_info(
+    const amdf_endpoint_t* endpoint);
 
 // Caches a terminal engine-profile qualification failure.
 void amdf_endpoint_store_engine_profile_error(amdf_endpoint_t* endpoint,

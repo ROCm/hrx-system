@@ -15,6 +15,10 @@
 #include "libamdf/src/gpu/extension.h"
 #endif  // AMDF_HAVE_GPU
 
+#if defined(AMDF_HAVE_MEDIA)
+#include "libamdf/src/media/extension.h"
+#endif  // AMDF_HAVE_MEDIA
+
 #if defined(AMDF_HAVE_XDNA)
 #include "libamdf/src/xdna/device_profile.h"
 #include "libamdf/src/xdna/extension.h"
@@ -60,6 +64,11 @@ amdf_status_t AMDF_CALL amdf_extension_query(amdf_extension_id_t extension_id,
       return amdf_gpu_extension_query(minimum_version, maximum_version,
                                       out_extension_api);
 #endif  // AMDF_HAVE_GPU
+#if defined(AMDF_HAVE_MEDIA)
+    case AMDF_EXTENSION_MEDIA:
+      return amdf_media_extension_query(minimum_version, maximum_version,
+                                        out_extension_api);
+#endif  // AMDF_HAVE_MEDIA
 #if defined(AMDF_HAVE_XDNA)
     case AMDF_EXTENSION_XDNA:
       return amdf_xdna_extension_query(minimum_version, maximum_version,

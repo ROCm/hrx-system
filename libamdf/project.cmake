@@ -14,6 +14,7 @@ option(AMDF_BUILD
 option(AMDF_FAMILY_RDNA "Admit RDNA implementation packages." ON)
 option(AMDF_FAMILY_CDNA "Admit CDNA implementation packages." ON)
 option(AMDF_FAMILY_XDNA "Admit XDNA implementation packages." ON)
+option(AMDF_MEDIA "Admit the optional native media extension." OFF)
 
 set(AMDF_VERSION "0.1.0")
 

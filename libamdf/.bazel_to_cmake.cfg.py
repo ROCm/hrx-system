@@ -13,6 +13,8 @@ from loom_binary import LoomBinaryBuildFileFunctions
 
 _AMDF_CONFIG_CMAKE_OPTIONS = {
     "//libamdf/config:enabled_setting": "AMDF_BUILD",
+    "//libamdf/config:media_setting": "AMDF_MEDIA",
+    "//libamdf/config/provider:media": 'AMDF_MEDIA AND CMAKE_SYSTEM_NAME STREQUAL "Windows"',
     "//libamdf/config/family:cdna": "AMDF_FAMILY_CDNA",
     "//libamdf/config/family:gpu": "AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA",
     "//libamdf/config/family:rdna": "AMDF_FAMILY_RDNA",

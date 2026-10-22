@@ -18,6 +18,9 @@
 #include "libamdf/src/gpu/user_queue.h"
 #include "libamdf/src/structure.h"
 
+_Static_assert(offsetof(amdf_gpu_endpoint_profile_t, info) == 0,
+               "engine profiles begin with their public target information");
+
 static amdf_status_t AMDF_CALL amdf_gpu_endpoint_query_info(
     amdf_endpoint_t* endpoint, amdf_gpu_endpoint_info_t* out_info) {
   if (endpoint == NULL) {
@@ -84,7 +87,8 @@ void amdf_gpu_extension_initialize_endpoint(amdf_endpoint_t* endpoint) {
   if (!amdf_status_is_ok(status)) {
     amdf_endpoint_store_engine_profile_error(endpoint, status);
   } else {
-    amdf_endpoint_store_engine_profile(endpoint, profile);
+    amdf_endpoint_store_engine_profile(
+        endpoint, (amdf_output_structure_t*)&profile->info);
   }
 }
 

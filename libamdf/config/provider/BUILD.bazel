@@ -14,6 +14,14 @@ config_setting(
 )
 
 selects.config_setting_group(
+    name = "media",
+    match_all = [
+        ":windows",
+        "//libamdf/config:media_setting",
+    ],
+)
+
+selects.config_setting_group(
     name = "wddm",
     match_all = [
         ":windows",

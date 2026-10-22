@@ -26,6 +26,9 @@ amdf_cc_library(
     }) + select({
         "//libamdf/config/family:xdna": ["AMDF_HAVE_XDNA=1"],
         "//conditions:default": [],
+    }) + select({
+        "//libamdf/config/provider:media": ["AMDF_HAVE_MEDIA=1"],
+        "//conditions:default": [],
     }),
     target_compatible_with = select({
         "@platforms//os:linux": [],
@@ -62,6 +65,12 @@ amdf_cc_library(
             "//libamdf/src/xdna",
             "//libamdf/src/xdna:device_profile",
             "//libamdf/src/xdna:extension",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//libamdf/config/provider:media": [
+            "//libamdf/src/media:extension",
+            "//libamdf/src/media/d3d12",
         ],
         "//conditions:default": [],
     }),
