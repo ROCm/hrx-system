@@ -2742,8 +2742,10 @@ loom_test_module(
     "kernels/qwen38/attention_decode_mfma.loom"
     "kernels/qwen38/attention_decode_split.loom"
     "kernels/qwen38/attention_prefill.loom"
+    "kernels/qwen38/spans.loom"
     "tests/decode_attention_matrix.loom"
   LIBRARIES
+    "::input_records"
     "iree::experimental::loom_serve::motifs::tensor::matrix_fragments"
 )
 

@@ -712,6 +712,7 @@ loom_test(
         "kernels/qwen38/attention_decode_mfma.loom",
         "kernels/qwen38/attention_decode_split.loom",
         "kernels/qwen38/attention_prefill.loom",
+        "kernels/qwen38/spans.loom",
         "tests/decode_attention_matrix.loom",
     ],
     benchmark_smoke = False,
@@ -726,7 +727,10 @@ loom_test(
         "wmma": {"case": "@qwen38_attention_decode_split_differential_case"},
         "wmma_m4": {"case": "@qwen38_attention_decode_split_m4_differential_case"},
     },
-    deps = ["//experimental/loom_serve/motifs/tensor:matrix_fragments"],
+    deps = [
+        ":input_records",
+        "//experimental/loom_serve/motifs/tensor:matrix_fragments",
+    ],
 )
 
 loom_test(
