@@ -208,7 +208,7 @@ node 2 <- 0
 // ====
 
 // Call purity does not promise preservation of architectural configuration.
-// RUN: emit low-schedule-query @pure_call_boundary kind=state strategy=resource-stall consumer=2
+// RUN: emit low-schedule-query @pure_call_boundary kind=state strategy=resource-stall consumer=2 timing=0:2
 test.target<low_core> @target
 
 low.func.decl pure target<test.low.core>(@target) @helper()
@@ -222,6 +222,26 @@ low.func.def target<test.low.core>(@target) @pure_call_boundary(%value: reg<test
 
 // ----
 node 2 <- 0
+timing 0 -> 2: separation=0 source=structural quality=unknown
+
+// ====
+
+// A target event pair remains authoritative for retained commutative updates.
+// RUN: emit low-schedule-query @modeled_commutative_update_timing kind=state strategy=resource-stall consumer=2 timing=0:2
+test.target<low_core> @target
+
+low.func.decl pure target<test.low.core>(@target) @helper()
+
+low.func.def target<test.low.core>(@target) @modeled_commutative_update_timing(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.schedule_state.update.i32 %value
+  low.func.call pure @helper() : ()
+  %second = test.schedule_state.update.i32 %value
+  return %first, %second
+}
+
+// ----
+node 2 <- 0
+timing 0 -> 2: separation=1 source=event-pair quality=exact
 
 // ====
 

@@ -1807,16 +1807,9 @@ def _event_separations() -> tuple[EventSeparation, ...]:
                     ModelQuality.EXACT,
                 )
             )
-    result.extend(
-        EventSeparation(
-            _register_event_name("sticky_update", *producer),
-            _register_event_name("sticky_update", *consumer),
-            0,
-            ModelQuality.EXACT,
-        )
-        for producer in _STICKY_UPDATE_ENDPOINTS
-        for consumer in _STICKY_UPDATE_ENDPOINTS
-    )
+    # Sticky updates accumulate commutatively. Leaving their mutual relation
+    # absent lets final physical issue order independent updates by readiness;
+    # the relations above still fence every ordinary observation or replacement.
     for producer in _MEMORY_ENDPOINTS:
         producer_itinerary = Itinerary(
             name="memory_producer",

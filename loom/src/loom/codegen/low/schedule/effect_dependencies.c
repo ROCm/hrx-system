@@ -38,6 +38,7 @@ loom_low_schedule_effect_endpoint(uint16_t effect_ordinal,
       .attachment_index = effect_ordinal,
       .timing_event_id = timing_event_id,
       .attachment_kind = LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_EFFECT,
+      .is_commutative_state_update = false,
   };
 }
 
@@ -47,6 +48,7 @@ loom_low_schedule_boundary_event_endpoint(uint16_t timing_event_id) {
       .attachment_index = LOOM_LOW_ID_NONE,
       .timing_event_id = timing_event_id,
       .attachment_kind = LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_NONE,
+      .is_commutative_state_update = false,
   };
 }
 

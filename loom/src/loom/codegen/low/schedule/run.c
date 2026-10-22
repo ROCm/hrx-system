@@ -107,6 +107,7 @@ static iree_status_t loom_low_schedule_initialize_value_records(
                         .timing_event_id = LOOM_LOW_TIMING_EVENT_NONE,
                         .attachment_kind =
                             LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_NONE,
+                        .is_commutative_state_update = false,
                     },
             },
         .register_class_id = LOOM_LOW_REG_CLASS_NONE,

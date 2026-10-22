@@ -850,19 +850,16 @@ def test_physical_register_events_preserve_signed_observation_times() -> None:
     )
 
 
-def test_sticky_status_updates_share_issue_cycles_and_preserve_observation() -> None:
+def test_sticky_status_updates_commute_and_preserve_observation() -> None:
     separations = {
         (row.producer_event, row.consumer_event): row.minimum_issue_separation_cycles
         for row in AIE2P_CORE_DESCRIPTOR_SET.event_separations
     }
     for producer, consumer in product(_STICKY_UPDATE_ENDPOINTS, repeat=2):
         assert (
-            separations[
-                _register_event_name("sticky_update", *producer),
-                _register_event_name("sticky_update", *consumer),
-            ]
-            == 0
-        )
+            _register_event_name("sticky_update", *producer),
+            _register_event_name("sticky_update", *consumer),
+        ) not in separations
 
     for sticky, regular in product(_STICKY_UPDATE_ENDPOINTS, _REGISTER_ENDPOINTS):
         sticky_cycle, sticky_bypass = sticky

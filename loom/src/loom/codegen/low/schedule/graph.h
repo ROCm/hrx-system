@@ -22,6 +22,7 @@ loom_low_schedule_dependency_endpoint_none(void) {
       .attachment_index = LOOM_LOW_ID_NONE,
       .timing_event_id = LOOM_LOW_TIMING_EVENT_NONE,
       .attachment_kind = LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_NONE,
+      .is_commutative_state_update = false,
   };
 }
 

@@ -41,6 +41,7 @@ loom_low_schedule_dependency_operand_endpoint(uint16_t operand_index,
       .attachment_index = operand_index,
       .timing_event_id = timing_event_id,
       .attachment_kind = LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_OPERAND,
+      .is_commutative_state_update = false,
   };
 }
 
@@ -54,6 +55,17 @@ static loom_low_schedule_state_access_t loom_low_schedule_state_access_none(
 
 static loom_low_schedule_state_access_t loom_low_schedule_state_access(
     uint32_t node_index, loom_low_schedule_dependency_endpoint_t endpoint) {
+  return (loom_low_schedule_state_access_t){
+      .node_index = node_index,
+      .endpoint = endpoint,
+  };
+}
+
+static loom_low_schedule_state_access_t loom_low_schedule_state_write_access(
+    uint32_t node_index, loom_low_schedule_dependency_endpoint_t endpoint,
+    const loom_low_operand_t* operand) {
+  endpoint.is_commutative_state_update = iree_any_bit_set(
+      operand->flags, LOOM_LOW_OPERAND_FLAG_COMMUTATIVE_STATE_UPDATE);
   return (loom_low_schedule_state_access_t){
       .node_index = node_index,
       .endpoint = endpoint,
@@ -321,6 +333,17 @@ loom_low_schedule_resolve_dependency_timing(
             event_separation->minimum_issue_separation_cycles,
         .model_quality = event_separation->model_quality,
         .separation_source = LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
+    };
+  }
+  // A retained order between commutative updates carries no produced value.
+  // Target event pairs still take precedence when the hardware requires a
+  // separation; otherwise target resources own their issue capacity.
+  if (producer_endpoint.is_commutative_state_update &&
+      consumer_endpoint.is_commutative_state_update) {
+    return (loom_low_schedule_dependency_timing_t){
+        .minimum_issue_separation_cycles = 0,
+        .model_quality = LOOM_LOW_MODEL_QUALITY_UNKNOWN,
+        .separation_source = LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_STRUCTURAL,
     };
   }
   const loom_low_schedule_class_t* schedule_class =
@@ -1331,9 +1354,11 @@ static iree_status_t loom_low_schedule_note_descriptor_state_accesses(
         loom_low_schedule_state_operand_reg_class_id(descriptor_set, operand);
     IREE_RETURN_IF_ERROR(loom_low_schedule_note_state_write(
         state,
-        loom_low_schedule_state_access(
-            node_index, loom_low_schedule_dependency_operand_endpoint(
-                            i, operand->write_event_id)),
+        loom_low_schedule_state_write_access(
+            node_index,
+            loom_low_schedule_dependency_operand_endpoint(
+                i, operand->write_event_id),
+            operand),
         reg_class_id));
   }
   return iree_ok_status();
@@ -1464,9 +1489,11 @@ static void loom_low_schedule_index_state_value_clobbers(
       }
       if (iree_any_bit_set(state_flags, LOOM_LOW_OPERAND_FLAG_STATE_WRITE)) {
         state->state_first_writes[reg_class_id] =
-            loom_low_schedule_state_access(
-                node_index, loom_low_schedule_dependency_operand_endpoint(
-                                operand_index, operand->write_event_id));
+            loom_low_schedule_state_write_access(
+                node_index,
+                loom_low_schedule_dependency_operand_endpoint(
+                    operand_index, operand->write_event_id),
+                operand);
       }
     }
   }

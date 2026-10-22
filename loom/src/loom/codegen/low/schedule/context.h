@@ -45,6 +45,8 @@ typedef struct loom_low_schedule_dependency_endpoint_t {
   uint16_t timing_event_id;
   // Kind of descriptor attachment named by attachment_index.
   loom_low_schedule_dependency_attachment_kind_t attachment_kind;
+  // Whether the endpoint is a commutative implicit state update.
+  bool is_commutative_state_update;
 } loom_low_schedule_dependency_endpoint_t;
 
 typedef struct loom_low_schedule_state_access_t {
