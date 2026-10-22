@@ -43,7 +43,7 @@ After building the [supported server](../../README.md#build-and-load):
 
 ```sh
 bazel-bin/loom/src/loom/tools/loom-serve/loom-serve \
-  --device=amdgpu --listen=127.0.0.1:8080 \
+  --device=rdna --listen=127.0.0.1:8080 \
   --model=/tmp/qwen-deployment.json
 
 # From another terminal:
