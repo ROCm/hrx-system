@@ -734,6 +734,17 @@ static inline bool loom_value_facts_is_unknown(loom_value_facts_t facts) {
 // Comparison
 //===----------------------------------------------------------------------===//
 
+// Proves an unsigned ordered comparison (ULT, ULE, UGT, or UGE) from integer
+// intervals in a common |bit_count| carrier (1..64). Each interval fits either
+// the signed or unsigned carrier domain; the two operands may use different
+// representations. Intervals crossing zero cover both unsigned extrema.
+// Returns false when both Boolean outcomes remain possible.
+bool loom_value_facts_unsigned_comparison_result(uint8_t predicate_kind,
+                                                 uint8_t bit_count,
+                                                 const loom_value_facts_t* lhs,
+                                                 const loom_value_facts_t* rhs,
+                                                 bool* out_result);
+
 // Equality check for propagation damping. 32-byte memcmp.
 static inline bool loom_value_facts_equal(loom_value_facts_t a,
                                           loom_value_facts_t b) {

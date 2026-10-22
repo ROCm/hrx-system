@@ -149,29 +149,16 @@ static bool loom_index_signed_cmp_facts_result(
   }
 }
 
-static bool loom_index_unsigned_cmp_facts_result(
-    uint8_t predicate, const loom_value_facts_t* lhs_facts,
-    const loom_value_facts_t* rhs_facts, bool* out_result) {
-  if (!loom_value_facts_is_non_negative(*lhs_facts) ||
-      !loom_value_facts_is_non_negative(*rhs_facts)) {
-    return false;
+// Mathematical ranges outside the carrier cannot establish a particular bit
+// pattern. Keep the full carrier domain so width-independent endpoint proofs
+// remain available without inferring how an out-of-range source was narrowed.
+static loom_value_facts_t loom_index_unsigned_comparison_facts(
+    loom_value_facts_t facts, uint8_t bit_count) {
+  if (loom_value_facts_fit_signed_bit_count(facts, bit_count) ||
+      loom_value_facts_fit_unsigned_bit_count(facts, bit_count)) {
+    return facts;
   }
-  switch ((loom_index_cmp_predicate_t)predicate) {
-    case LOOM_INDEX_CMP_PREDICATE_ULT:
-      return loom_index_signed_cmp_facts_result(
-          LOOM_INDEX_CMP_PREDICATE_SLT, lhs_facts, rhs_facts, out_result);
-    case LOOM_INDEX_CMP_PREDICATE_ULE:
-      return loom_index_signed_cmp_facts_result(
-          LOOM_INDEX_CMP_PREDICATE_SLE, lhs_facts, rhs_facts, out_result);
-    case LOOM_INDEX_CMP_PREDICATE_UGT:
-      return loom_index_signed_cmp_facts_result(
-          LOOM_INDEX_CMP_PREDICATE_SGT, lhs_facts, rhs_facts, out_result);
-    case LOOM_INDEX_CMP_PREDICATE_UGE:
-      return loom_index_signed_cmp_facts_result(
-          LOOM_INDEX_CMP_PREDICATE_SGE, lhs_facts, rhs_facts, out_result);
-    default:
-      return false;
-  }
+  return loom_value_facts_make_signed_bit_count_range(bit_count);
 }
 
 bool loom_index_cmp_result_from_facts(const loom_fact_context_t* context,
@@ -180,12 +167,55 @@ bool loom_index_cmp_result_from_facts(const loom_fact_context_t* context,
                                       const loom_value_facts_t* lhs_facts,
                                       const loom_value_facts_t* rhs_facts,
                                       bool* out_result) {
-  if (!loom_index_cmp_facts_fit_target_carrier(
-          context, operand_scalar_type, predicate, lhs_facts, rhs_facts)) {
+  uint8_t predicate_kind;
+  switch ((loom_index_cmp_predicate_t)predicate) {
+    case LOOM_INDEX_CMP_PREDICATE_ULT:
+      predicate_kind = LOOM_PREDICATE_ULT;
+      break;
+    case LOOM_INDEX_CMP_PREDICATE_ULE:
+      predicate_kind = LOOM_PREDICATE_ULE;
+      break;
+    case LOOM_INDEX_CMP_PREDICATE_UGT:
+      predicate_kind = LOOM_PREDICATE_UGT;
+      break;
+    case LOOM_INDEX_CMP_PREDICATE_UGE:
+      predicate_kind = LOOM_PREDICATE_UGE;
+      break;
+    default:
+      return loom_index_cmp_facts_fit_target_carrier(
+                 context, operand_scalar_type, predicate, lhs_facts,
+                 rhs_facts) &&
+             loom_index_signed_cmp_facts_result(predicate, lhs_facts, rhs_facts,
+                                                out_result);
+  }
+  int32_t bit_count =
+      loom_index_target_carrier_bitwidth(context, operand_scalar_type);
+  if (bit_count < 0 || loom_value_facts_is_float(*lhs_facts) ||
+      loom_value_facts_is_float(*rhs_facts)) {
     return false;
   }
-  return loom_index_signed_cmp_facts_result(predicate, lhs_facts, rhs_facts,
-                                            out_result) ||
-         loom_index_unsigned_cmp_facts_result(predicate, lhs_facts, rhs_facts,
-                                              out_result);
+  loom_value_facts_t lhs = *lhs_facts;
+  loom_value_facts_t rhs = *rhs_facts;
+  if (bit_count == 0) {
+    // Nonnegative source intervals retain mathematical ordering. Once signed
+    // bit patterns participate, only zero and all-ones are invariant under
+    // every carrier width; preserve those endpoints and widen other operands.
+    // In particular, -1 and UINT32_MAX alias in 32 bits but differ in 64 bits.
+    bit_count = 64;
+    if (lhs.range_lo < 0 || rhs.range_lo < 0) {
+      if (!loom_value_facts_is_exact(lhs) ||
+          (lhs.range_lo != 0 && lhs.range_lo != -1)) {
+        lhs = loom_value_facts_unknown();
+      }
+      if (!loom_value_facts_is_exact(rhs) ||
+          (rhs.range_lo != 0 && rhs.range_lo != -1)) {
+        rhs = loom_value_facts_unknown();
+      }
+    }
+  } else {
+    lhs = loom_index_unsigned_comparison_facts(lhs, (uint8_t)bit_count);
+    rhs = loom_index_unsigned_comparison_facts(rhs, (uint8_t)bit_count);
+  }
+  return loom_value_facts_unsigned_comparison_result(
+      predicate_kind, (uint8_t)bit_count, &lhs, &rhs, out_result);
 }

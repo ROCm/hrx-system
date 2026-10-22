@@ -113,5 +113,40 @@ TEST(ScalarCompareTest, UnsignedRangesMatchEnumeratedIntegerValues) {
   }
 }
 
+TEST(ScalarCompareTest, UnsignedEndpointsAcrossScalarWidths) {
+  for (auto type :
+       {LOOM_SCALAR_TYPE_I1, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16,
+        LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I64}) {
+    int64_t minimum = 0;
+    int64_t maximum = 0;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(type, &minimum, &maximum));
+    const auto range = loom_value_facts_make(minimum, maximum, 1);
+    const auto zero = loom_value_facts_exact_i64(0);
+    const auto all_ones =
+        loom_value_facts_exact_i64(type == LOOM_SCALAR_TYPE_I1 ? 1 : -1);
+    const struct {
+      // Operand interval on the left side of the comparison.
+      loom_value_facts_t lhs;
+      // Operand interval on the right side of the comparison.
+      loom_value_facts_t rhs;
+      // Unsigned comparison predicate.
+      uint8_t predicate;
+      // Proven Boolean result.
+      bool expected;
+    } cases[] = {{range, zero, LOOM_SCALAR_CMPI_PREDICATE_ULT, false},
+                 {range, zero, LOOM_SCALAR_CMPI_PREDICATE_UGE, true},
+                 {range, all_ones, LOOM_SCALAR_CMPI_PREDICATE_UGT, false},
+                 {range, all_ones, LOOM_SCALAR_CMPI_PREDICATE_ULE, true},
+                 {zero, range, LOOM_SCALAR_CMPI_PREDICATE_ULE, true},
+                 {all_ones, range, LOOM_SCALAR_CMPI_PREDICATE_ULT, false}};
+    for (const auto& test : cases) {
+      bool result = false;
+      ASSERT_TRUE(loom_scalar_cmpi_result_from_facts(
+          type, test.predicate, &test.lhs, &test.rhs, &result));
+      EXPECT_EQ(result, test.expected);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace loom

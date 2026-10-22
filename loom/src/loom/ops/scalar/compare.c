@@ -150,73 +150,29 @@ static bool loom_scalar_signed_cmpi_facts_result(
 }
 
 static bool loom_scalar_unsigned_cmpi_facts_result(
-    uint8_t predicate, const loom_value_facts_t* lhs_facts,
-    const loom_value_facts_t* rhs_facts, bool* out_result) {
-  if (predicate < LOOM_SCALAR_CMPI_PREDICATE_ULT ||
-      predicate > LOOM_SCALAR_CMPI_PREDICATE_UGE ||
-      loom_value_facts_is_float(*lhs_facts) ||
-      loom_value_facts_is_float(*rhs_facts)) {
-    return false;
-  }
-  // Casting sign-extended values to uint64_t preserves unsigned order for
-  // operands of the same width. A signed interval crossing zero wraps in that
-  // order, so its unsigned extrema are zero and the all-ones value.
-  uint64_t lhs_lo = (uint64_t)lhs_facts->range_lo;
-  uint64_t lhs_hi = (uint64_t)lhs_facts->range_hi;
-  if (lhs_lo > lhs_hi) {
-    lhs_lo = 0;
-    lhs_hi = UINT64_MAX;
-  }
-  uint64_t rhs_lo = (uint64_t)rhs_facts->range_lo;
-  uint64_t rhs_hi = (uint64_t)rhs_facts->range_hi;
-  if (rhs_lo > rhs_hi) {
-    rhs_lo = 0;
-    rhs_hi = UINT64_MAX;
-  }
+    loom_scalar_type_t type, uint8_t predicate,
+    const loom_value_facts_t* lhs_facts, const loom_value_facts_t* rhs_facts,
+    bool* out_result) {
+  uint8_t predicate_kind;
   switch ((loom_scalar_cmpi_predicate_t)predicate) {
     case LOOM_SCALAR_CMPI_PREDICATE_ULT:
-      if (lhs_hi < rhs_lo) {
-        *out_result = true;
-        return true;
-      }
-      if (lhs_lo >= rhs_hi) {
-        *out_result = false;
-        return true;
-      }
-      return false;
+      predicate_kind = LOOM_PREDICATE_ULT;
+      break;
     case LOOM_SCALAR_CMPI_PREDICATE_ULE:
-      if (lhs_hi <= rhs_lo) {
-        *out_result = true;
-        return true;
-      }
-      if (lhs_lo > rhs_hi) {
-        *out_result = false;
-        return true;
-      }
-      return false;
+      predicate_kind = LOOM_PREDICATE_ULE;
+      break;
     case LOOM_SCALAR_CMPI_PREDICATE_UGT:
-      if (lhs_lo > rhs_hi) {
-        *out_result = true;
-        return true;
-      }
-      if (lhs_hi <= rhs_lo) {
-        *out_result = false;
-        return true;
-      }
-      return false;
+      predicate_kind = LOOM_PREDICATE_UGT;
+      break;
     case LOOM_SCALAR_CMPI_PREDICATE_UGE:
-      if (lhs_lo >= rhs_hi) {
-        *out_result = true;
-        return true;
-      }
-      if (lhs_hi < rhs_lo) {
-        *out_result = false;
-        return true;
-      }
-      return false;
+      predicate_kind = LOOM_PREDICATE_UGE;
+      break;
     default:
       return false;
   }
+  return loom_value_facts_unsigned_comparison_result(
+      predicate_kind, (uint8_t)loom_scalar_type_bitwidth(type), lhs_facts,
+      rhs_facts, out_result);
 }
 
 bool loom_scalar_cmpi_result_from_facts(loom_scalar_type_t type,
@@ -227,8 +183,8 @@ bool loom_scalar_cmpi_result_from_facts(loom_scalar_type_t type,
   predicate = loom_scalar_cmpi_range_predicate(type, predicate);
   return loom_scalar_signed_cmpi_facts_result(predicate, lhs_facts, rhs_facts,
                                               out_result) ||
-         loom_scalar_unsigned_cmpi_facts_result(predicate, lhs_facts, rhs_facts,
-                                                out_result);
+         loom_scalar_unsigned_cmpi_facts_result(type, predicate, lhs_facts,
+                                                rhs_facts, out_result);
 }
 
 bool loom_scalar_cmpf_constant_result(uint8_t predicate, loom_value_id_t lhs,

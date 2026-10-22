@@ -36,7 +36,10 @@ bool loom_index_cmp_facts_fit_target_carrier(
     const loom_value_facts_t* rhs_facts);
 
 // Proves the comparison result from two operand fact summaries interpreted in
-// the target carrier view required by |predicate|.
+// the target carrier view required by |predicate|. Unsigned ordering accepts
+// either signed or unsigned representations of that carrier. Ranges outside
+// it contribute only the full carrier domain, retaining universal endpoint
+// proofs without treating mathematical overflow as a particular bit pattern.
 bool loom_index_cmp_result_from_facts(const loom_fact_context_t* context,
                                       loom_scalar_type_t operand_scalar_type,
                                       uint8_t predicate,

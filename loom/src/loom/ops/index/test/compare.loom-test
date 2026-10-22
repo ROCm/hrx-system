@@ -1,0 +1,156 @@
+// RUN: pass canonicalize
+
+// Equality needs a common carrier view: -1 and UINT32_MAX are distinct in the
+// source fact envelope but alias the same 32-bit payload. Symbolic signed
+// relations likewise remain target-width constrained when direct interval
+// facts are inconclusive.
+test.target<quirky> @target32
+
+test.target<low_core> @target64
+
+func.def target(@target32) @target_carrier_equality_32() -> (i1) {
+  %cn1 = index.constant -1 : index
+  %unsigned_max = index.constant 4294967295 : index
+  %comparison = index.cmp eq, %cn1, %unsigned_max : index
+  func.return %comparison : i1
+}
+
+func.def target(@target64) @target_carrier_equality_64() -> (i1) {
+  %cn1 = index.constant -1 : index
+  %unsigned_max = index.constant 4294967295 : index
+  %comparison = index.cmp eq, %cn1, %unsigned_max : index
+  func.return %comparison : i1
+}
+
+func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %lhs = index.add %x, %c1 : index
+  %rhs = index.add %x, %c2 : index
+  %comparison = index.cmp slt, %lhs, %rhs : index
+  func.return %comparison : i1
+}
+
+func.def target(@target64) @target_carrier_symbolic_compare_64(%x: index) -> (i1) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %lhs = index.add %x, %c1 : index
+  %rhs = index.add %x, %c2 : index
+  %comparison = index.cmp slt, %lhs, %rhs : index
+  func.return %comparison : i1
+}
+
+// ----
+test.target<quirky> @target32
+
+test.target<low_core> @target64
+
+func.def target(@target32) @target_carrier_equality_32() -> (i1) {
+  %cn1 = index.constant -1 : index
+  %unsigned_max = index.constant 4294967295 : index
+  %comparison = index.cmp eq, %cn1, %unsigned_max : index
+  func.return %comparison : i1
+}
+
+func.def target(@target64) @target_carrier_equality_64() -> (i1) {
+  %comparison = scalar.constant false : i1
+  func.return %comparison : i1
+}
+
+func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %lhs = index.add %x, %c1 : index
+  %rhs = index.add %x, %c2 : index
+  %comparison = index.cmp slt, %lhs, %rhs : index
+  func.return %comparison : i1
+}
+
+func.def target(@target64) @target_carrier_symbolic_compare_64(%x: index) -> (i1) {
+  %comparison = scalar.constant true : i1
+  func.return %comparison : i1
+}
+
+// ====
+
+// Unknown coordinates still obey unsigned endpoint identities. The selected
+// carrier may be narrower than the mathematical range retained by analysis.
+test.target<quirky> @target32
+
+func.def target(@target32) @unsigned_endpoints(%coordinate: index) -> (i1, i1, i1, i1) {
+  %c0 = index.constant 0 : index
+  %unsigned_maximum = index.constant -1 : index
+  %below_zero = index.cmp ult, %coordinate, %c0 : index
+  %above_zero = index.cmp uge, %coordinate, %c0 : index
+  %above_maximum = index.cmp ugt, %coordinate, %unsigned_maximum : index
+  %below_maximum = index.cmp ule, %coordinate, %unsigned_maximum : index
+  func.return %below_zero, %above_zero, %above_maximum, %below_maximum : i1, i1, i1, i1
+}
+
+// ----
+test.target<quirky> @target32
+
+func.def target(@target32) @unsigned_endpoints(%coordinate: index) -> (i1, i1, i1, i1) {
+  %below_zero = scalar.constant false : i1
+  %above_zero = scalar.constant true : i1
+  %above_maximum = scalar.constant false : i1
+  %below_maximum = scalar.constant true : i1
+  func.return %below_zero, %above_zero, %above_maximum, %below_maximum : i1, i1, i1, i1
+}
+
+// ====
+
+// A negative signed interval lies above every nonnegative interval in unsigned
+// carrier order; ranges crossing zero retain both possible outcomes.
+test.target<low_core> @target64
+
+func.def target(@target64) @signed_ranges_in_unsigned_order(%left: index, %right: index) -> (i1, i1) {
+  %negative = index.assume %left [range(%left, -7, -2)] : index
+  %positive = index.assume %right [range(%right, 0, 10)] : index
+  %crossing = index.assume %left [range(%left, -7, 7)] : index
+  %ordered = index.cmp ugt, %negative, %positive : index
+  %unknown = index.cmp ule, %crossing, %positive : index
+  func.return %ordered, %unknown : i1, i1
+}
+
+// ----
+test.target<low_core> @target64
+
+func.def target(@target64) @signed_ranges_in_unsigned_order(%left: index, %right: index) -> (i1, i1) {
+  %positive = index.assume %right [range(%right, 0, 10)] : index
+  %crossing = index.assume %left [range(%left, -7, 7)] : index
+  %ordered = scalar.constant true : i1
+  %unknown = index.cmp ule, %crossing, %positive : index
+  func.return %ordered, %unknown : i1, i1
+}
+
+// ====
+
+// RUN: pass canonicalize,scf-to-cfg,canonicalize,vector-memory-footprint
+
+func.def @carried_bound(%data: buffer, %begin: index, %count: index) {
+  %end = index.constant 0 : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %cursor_step = index.constant 1 : index
+  %items = buffer.view %data[%origin] : buffer -> view<[%end]xi32>
+  %final = scf.for %i = [%c0 to %count step %cursor_step](%cursor = %begin : index) -> (index) {
+    %available = index.cmp ult, %cursor, %end : index
+    %next = scf.if %available -> (index) {
+      %bounded = index.assume %cursor [range(%cursor, 0, 1023), lt(%cursor, %end)] : index
+      %value = view.load %items[%bounded] : view<[%end]xi32> -> i32
+      view.store %value, %items[%bounded] : i32, view<[%end]xi32>
+      %next = index.add %cursor, %cursor_step : index
+      scf.yield %next : index
+    } else {
+      scf.yield %cursor : index
+    }
+    scf.yield %next : index
+  }
+  func.return
+}
+
+// ----
+func.def @carried_bound(%data: buffer, %begin: index, %count: index) {
+  func.return
+}

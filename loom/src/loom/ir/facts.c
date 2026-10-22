@@ -729,8 +729,53 @@ void loom_value_facts_refine_divisible_range(loom_value_facts_t* facts) {
 }
 
 //===----------------------------------------------------------------------===//
-// Predicate application
+// Comparison and predicate application
 //===----------------------------------------------------------------------===//
+
+bool loom_value_facts_unsigned_comparison_result(uint8_t predicate_kind,
+                                                 uint8_t bit_count,
+                                                 const loom_value_facts_t* lhs,
+                                                 const loom_value_facts_t* rhs,
+                                                 bool* out_result) {
+  if (loom_value_facts_is_float(*lhs) || loom_value_facts_is_float(*rhs)) {
+    return false;
+  }
+  switch ((loom_predicate_kind_t)predicate_kind) {
+    case LOOM_PREDICATE_UGT:
+    case LOOM_PREDICATE_UGE: {
+      const loom_value_facts_t* temporary = lhs;
+      lhs = rhs;
+      rhs = temporary;
+      break;
+    }
+    case LOOM_PREDICATE_ULT:
+    case LOOM_PREDICATE_ULE:
+      break;
+    default:
+      return false;
+  }
+  // Interpret both signed and unsigned fact ranges in the carrier's bit
+  // pattern order. A signed interval crossing zero includes both extrema.
+  const uint64_t mask =
+      bit_count == 64 ? UINT64_MAX : (UINT64_C(1) << bit_count) - 1;
+  const bool lhs_crosses_zero = lhs->range_lo < 0 && lhs->range_hi >= 0;
+  const bool rhs_crosses_zero = rhs->range_lo < 0 && rhs->range_hi >= 0;
+  const uint64_t lhs_lo = lhs_crosses_zero ? 0 : (uint64_t)lhs->range_lo & mask;
+  const uint64_t lhs_hi =
+      lhs_crosses_zero ? mask : (uint64_t)lhs->range_hi & mask;
+  const uint64_t rhs_lo = rhs_crosses_zero ? 0 : (uint64_t)rhs->range_lo & mask;
+  const uint64_t rhs_hi =
+      rhs_crosses_zero ? mask : (uint64_t)rhs->range_hi & mask;
+  const bool strict = predicate_kind == LOOM_PREDICATE_ULT ||
+                      predicate_kind == LOOM_PREDICATE_UGT;
+  const bool always_true = strict ? lhs_hi < rhs_lo : lhs_hi <= rhs_lo;
+  const bool always_false = strict ? lhs_lo >= rhs_hi : lhs_lo > rhs_hi;
+  if (!always_true && !always_false) {
+    return false;
+  }
+  *out_result = always_true;
+  return true;
+}
 
 static bool loom_value_facts_predicate_const_arg(
     const loom_predicate_t* predicate, uint8_t index, int64_t* out_value) {

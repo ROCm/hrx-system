@@ -4,7 +4,7 @@ amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 // The inner join selects a lane-varying memory result and forwards its block
 // argument directly into the outer join. Both joins must retain the VGPR
-// carrier even though one incoming edge is statically unreachable.
+// carrier while choosing between current input and the three-entry history.
 kernel.def target(@target) @nested_memory_load_carrier() {
   %count = index.constant 64 : index
   %c1 = index.constant 1 : index
@@ -25,18 +25,19 @@ kernel.def target(@target) @nested_memory_load_carrier() {
   %position_value = index.cast %position32 : i32 to index
   %position = index.assume %position_value [range(%position_value, 0, 1048575)] : index
   %begin_value = index.cast %begin32 : i32 to index
-  %begin = index.assume %begin_value [range(%begin_value, 0, 63)] : index
+  %latest_begin = index.add %row, %c3 : index
+  %begin = index.assume %begin_value [range(%begin_value, 0, 63), le(%begin_value, %latest_begin)] : index
   %relative = index.sub %row, %begin : index
   %absolute = index.add %position, %relative : index
-  %exists = index.cmp uge, %absolute, %c0 : index
+  %exists = index.cmp sge, %absolute, %c0 : index
   %raw = scf.if %exists -> (i32) {
-    %current = index.cmp uge, %relative, %c0 : index
+    %current = index.cmp sge, %relative, %c0 : index
     %selected = scf.if %current -> (i32) {
       %source = index.assume %row [range(%row, 0, 63)] : index
       %value = view.load %input_view[%source] : view<64xi32> -> i32
       scf.yield %value : i32
     } else {
-      %bounded = index.assume %relative [ge(%relative, 0), lt(%relative, 0)] : index
+      %bounded = index.assume %relative [range(%relative, -3, -1)] : index
       %padded = index.add %bounded, %c3 : index
       %source = index.assume %padded [range(%padded, 0, 2)] : index
       %value = view.load %tail_view[%source] : view<3xi32> -> i32
@@ -57,64 +58,64 @@ kernel.def target(@target) @nested_memory_load_carrier() {
 
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 4, resource_count = 4, resource_offsets = [0, 8, 16, 24], resource_parameter_indices = [0, 1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(64, 1, 1) @nested_memory_load_carrier() asm {
-  %source$45 = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %source$46 = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %metadata_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %input_view = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %tail_view = resource<hal_binding> {extent = 12, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %c3 = s_mov_b32 3
-  %51 = v_mov_b32 0
-  %52 = s_lshl_b32_rhs_inline %source$45, 2
-  %53 = slice %metadata_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %54 = slice %metadata_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %55 = s_mov_b32 0
-  %56, %57 = s_add_co_u32 %53, %52
-  %58, %59 = s_addc_u32 %54, %55, %57
-  %60 = concat(%56, %58) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %position = global_load_b32_saddr %51, %60 {offset = 256}
-  %63 = s_lshl_b32_rhs_inline %source$45, 2
-  %67, %68 = s_add_co_u32 %53, %63
-  %69, %70 = s_addc_u32 %54, %55, %68
-  %71 = concat(%67, %69) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %begin = global_load_b32_saddr %51, %71
-  %bounded = v_sub_nc_u32 %source$45, %begin
+  %52 = v_mov_b32 0
+  %53 = s_lshl_b32_rhs_inline %source$46, 2
+  %54 = slice %metadata_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %55 = slice %metadata_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = s_mov_b32 0
+  %57, %58 = s_add_co_u32 %54, %53
+  %59, %60 = s_addc_u32 %55, %56, %58
+  %61 = concat(%57, %59) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %position = global_load_b32_saddr %52, %61 {offset = 256}
+  %64 = s_lshl_b32_rhs_inline %source$46, 2
+  %68, %69 = s_add_co_u32 %54, %64
+  %70, %71 = s_addc_u32 %55, %56, %69
+  %72 = concat(%68, %70) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %begin = global_load_b32_saddr %52, %72
+  %bounded = v_sub_nc_u32 %source$46, %begin
   %absolute = v_add_u32 %position, %bounded
-  %exists = v_cmp_ge_u32_src1_inline %absolute {rhs = 0}
-  %76 = s_mov_b64_exec_read
-  %77, %78 = s_and_b64_scc %exists, %76
-  low.cond_br %78, ^_bb1, ^_bb5 : reg<amdgpu.scc>
+  %exists = v_cmp_ge_i32_src1_inline %absolute {rhs = 0}
+  %77 = s_mov_b64_exec_read
+  %78, %79 = s_and_b64_scc %exists, %77
+  low.cond_br %79, ^_bb1, ^_bb5 : reg<amdgpu.scc>
 ^_bb1:
-  %current = v_cmp_ge_u32_src1_inline %bounded {rhs = 0}
-  %81, %82 = s_and_b64_scc %current, %76
-  low.cond_br %82, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %current = v_cmp_ge_i32_src1_inline %bounded {rhs = 0}
+  %82, %83 = s_and_b64_scc %current, %77
+  low.cond_br %83, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %84 = s_lshl_b32_rhs_inline %source$45, 2
-  %85 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %86 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %88, %89 = s_add_co_u32 %85, %84
-  %90, %91 = s_addc_u32 %86, %55, %89
-  %92 = concat(%88, %90) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value$93 = global_load_b32_saddr %51, %92
-  low.br ^_bb4(%value$93: reg<amdgpu.vgpr>)
+  %85 = s_lshl_b32_rhs_inline %source$46, 2
+  %86 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %87 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %89, %90 = s_add_co_u32 %86, %85
+  %91, %92 = s_addc_u32 %87, %56, %90
+  %93 = concat(%89, %91) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value$94 = global_load_b32_saddr %52, %93
+  low.br ^_bb4(%value$94: reg<amdgpu.vgpr>)
 ^_bb3:
-  %source$94 = v_add_u32 %c3, %bounded
-  %95 = v_lshlrev_b32_src0_inline %source$94, 2
-  %value$96 = global_load_b32_saddr %95, %tail_view
-  low.br ^_bb4(%value$96: reg<amdgpu.vgpr>)
+  %source$95 = v_add_u32 %c3, %bounded
+  %96 = v_lshlrev_b32_src0_inline %source$95, 2
+  %value$97 = global_load_b32_saddr %96, %tail_view
+  low.br ^_bb4(%value$97: reg<amdgpu.vgpr>)
 ^_bb4(%selected: reg<amdgpu.vgpr>):
   low.br ^_bb6(%selected: reg<amdgpu.vgpr>)
 ^_bb5:
-  low.br ^_bb6(%51: reg<amdgpu.vgpr>)
+  low.br ^_bb6(%52: reg<amdgpu.vgpr>)
 ^_bb6(%raw: reg<amdgpu.vgpr>):
-  %100 = v_mov_b32 17
-  %narrow = v_mul_lo_u32 %raw, %100
-  %103 = s_lshl_b32_rhs_inline %source$45, 2
-  %104 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %105 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %107, %108 = s_add_co_u32 %104, %103
-  %109, %110 = s_addc_u32 %105, %55, %108
-  %111 = concat(%107, %109) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  global_store_b32_saddr %51, %narrow, %111
+  %101 = v_mov_b32 17
+  %narrow = v_mul_lo_u32 %raw, %101
+  %104 = s_lshl_b32_rhs_inline %source$46, 2
+  %105 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %106 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %108, %109 = s_add_co_u32 %105, %104
+  %110, %111 = s_addc_u32 %106, %56, %109
+  %112 = concat(%108, %110) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr %52, %narrow, %112
   return
 }
 
@@ -125,7 +126,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 // Access instrumentation adds control edges around each memory operation. The
-// original nested joins must still agree on their lane-varying carrier.
+// original nested joins must still agree on their lane-varying carrier. Only
+// those two carrier classes matter here; the native case owns operand wiring.
 kernel.def target(@target) @instrumented_nested_memory_load_carrier() {
   %count = index.constant 64 : index
   %c1 = index.constant 1 : index
@@ -146,18 +148,19 @@ kernel.def target(@target) @instrumented_nested_memory_load_carrier() {
   %position_value = index.cast %position32 : i32 to index
   %position = index.assume %position_value [range(%position_value, 0, 1048575)] : index
   %begin_value = index.cast %begin32 : i32 to index
-  %begin = index.assume %begin_value [range(%begin_value, 0, 63)] : index
+  %latest_begin = index.add %row, %c3 : index
+  %begin = index.assume %begin_value [range(%begin_value, 0, 63), le(%begin_value, %latest_begin)] : index
   %relative = index.sub %row, %begin : index
   %absolute = index.add %position, %relative : index
-  %exists = index.cmp uge, %absolute, %c0 : index
+  %exists = index.cmp sge, %absolute, %c0 : index
   %raw = scf.if %exists -> (i32) {
-    %current = index.cmp uge, %relative, %c0 : index
+    %current = index.cmp sge, %relative, %c0 : index
     %selected = scf.if %current -> (i32) {
       %source = index.assume %row [range(%row, 0, 63)] : index
       %value = view.load %input_view[%source] : view<64xi32> -> i32
       scf.yield %value : i32
     } else {
-      %bounded = index.assume %relative [ge(%relative, 0), lt(%relative, 0)] : index
+      %bounded = index.assume %relative [range(%relative, -3, -1)] : index
       %padded = index.add %bounded, %c3 : index
       %source = index.assume %padded [range(%padded, 0, 2)] : index
       %value = view.load %tail_view[%source] : view<3xi32> -> i32
@@ -177,7 +180,5 @@ kernel.def target(@target) @instrumented_nested_memory_load_carrier() {
 }
 
 // ----
-CHECK: low.kernel.def *@instrumented_nested_memory_load_carrier() asm {
 CHECK: ^*(%selected: reg<amdgpu.vgpr>):
-CHECK: low.br ^*(%selected: reg<amdgpu.vgpr>)
 CHECK: ^*(%raw: reg<amdgpu.vgpr>):
