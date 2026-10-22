@@ -1,0 +1,183 @@
+// Split projections use the ordinary decoded-F16 numerical contract. The VM
+// oracle decodes GGUF independently and accumulates the products in F64.
+func.decl @qwen_cohort_reference_q6(%weight: buffer, %row_origin: offset, %element: index) -> (f64)
+func.decl @q5_projection_headers(%inputs: index, %outputs: index, %weight: buffer)
+func.decl @q5_projection_wmma_expected(%count: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+func.decl @q5_projection_wmma_channel8_expected(%count: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_split_reduce(%partitions: index, %tokens: index, %outputs: index) launch(%partitions: index, %count: buffer, %outputs: index, %partials: buffer, %output: buffer)
+
+func.def @q6_split_projection_headers(%inputs: index, %outputs: index, %weight: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %block_width = index.constant 256 : index
+  %block_bytes = index.constant 210 : offset
+  %scale_offset = index.constant 208 : offset
+  %blocks = index.div %inputs, %block_width : index
+  %count = index.mul %blocks, %outputs : index
+  %scale = scalar.constant 0.0009765625 : f16
+  scf.for %block = [%zero to %count step %one] {
+    %block_origin = index.scale %block, %block_bytes : index, offset -> offset
+    %origin = index.add %block_origin, %scale_offset : offset
+    %header = buffer.view %weight[%origin] : buffer -> view<1xf16>
+    view.store %scale, %header[0] : f16, view<1xf16>
+  }
+  func.return
+}
+
+func.def @q6_split_projection_expected(%count: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %block_width = index.constant 256 : index
+  %block_bytes = index.constant 210 : offset
+  %blocks = index.div %inputs, %block_width : index
+  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+  %zero_float = scalar.constant 0.0 : f64
+  %count_view = buffer.view %count[%origin] : buffer -> view<1xi32>
+  %count_i32 = view.load %count_view[0] : view<1xi32> -> i32
+  %tokens = index.cast %count_i32 : i32 to index
+  %activations = buffer.view %input[%origin] : buffer -> view<[%tokens]x[%inputs]xf32>
+  %results = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%outputs]xf32>
+  scf.for %token = [%zero to %tokens step %one] {
+    scf.for %channel = [%zero to %outputs step %one] {
+      %row_origin = index.scale %channel, %row_bytes : index, offset -> offset
+      %sum = scf.for %element = [%zero to %inputs step %one](%accumulator = %zero_float : f64) -> (f64) {
+        %weight_value = func.call @qwen_cohort_reference_q6(%weight, %row_origin, %element) : (buffer, offset, index) -> (f64)
+        %weight_half = scalar.fptrunc %weight_value : f64 to f16
+        %weight_double = scalar.extf %weight_half : f16 to f64
+        %input_value = view.load %activations[%token, %element] : view<[%tokens]x[%inputs]xf32> -> f32
+        %input_half = scalar.fptrunc %input_value : f32 to f16
+        %input_double = scalar.extf %input_half : f16 to f64
+        %product = scalar.mulf %weight_double, %input_double : f64
+        %next = scalar.addf %accumulator, %product : f64
+        scf.yield %next : f64
+      }
+      %rounded = scalar.fptrunc %sum : f64 to f32
+      view.store %rounded, %results[%token, %channel] : f32, view<[%tokens]x[%outputs]xf32>
+    }
+  }
+  func.return
+}
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_split(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%partitions: index, %count: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %partials: buffer)
+
+command.program.def public @split_q5_projection(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%count: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %element_bytes = index.constant 4 : offset
+  %plane_elements = index.mul %tokens, %outputs : index
+  %partial_elements = index.mul %partitions, %plane_elements : index
+  %partial_bytes = index.scale %partial_elements, %element_bytes : index, offset -> offset
+  %partials = buffer.alloca<global> align(256) %partial_bytes : buffer
+  kernel.launch @qwen38_linear_q5k_f16_mfma_split[%partitions, %tokens, %inputs, %outputs](%partitions, %count, %inputs, %outputs, %input, %weight, %partials) : [index, index, index, index](index, buffer, index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_linear_split_reduce[%partitions, %tokens, %outputs](%partitions, %count, %outputs, %partials, %output) : [index, index, index](index, buffer, index, buffer, buffer)
+  command.return
+}
+
+func.def @split_q5_expected(%count: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %inputs = index.constant 1792 : index
+  %outputs = index.constant 5 : index
+  func.call @q5_projection_wmma_expected(%count, %inputs, %outputs, %input, %weight, %output) : (buffer, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @split_q5_projection_check {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %partitions = check.literal value(8) : index
+  %tokens = check.literal value(128) : index
+  %inputs = check.literal value(1792) : index
+  %outputs = check.literal value(5) : index
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %count = check.generate.fill value(65) : tensor<1xi32>
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<128x1792xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<5x7x176xi8>
+    check.generate<@q5_projection_headers>(%inputs, %outputs, %weight) : (index, index, tensor<5x7x176xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<128x5xf32>
+    check.compare<@split_q5_projection, @split_q5_expected>[%partitions, %tokens, %inputs, %outputs](%count, %input, %weight, %output) : [index, index, index, index](tensor<1xi32>, tensor<128x1792xf32>, tensor<5x7x176xi8>, tensor<128x5xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0005) rtol(0.00003) nan(different) : tensor<128x5xf32>
+    }
+  }
+  check.return
+}
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_split_channel8(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%partitions: index, %count: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %partials: buffer)
+
+command.program.def public @split_q5_channel8_projection(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%count: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %element_bytes = index.constant 4 : offset
+  %plane_elements = index.mul %tokens, %outputs : index
+  %partial_elements = index.mul %partitions, %plane_elements : index
+  %partial_bytes = index.scale %partial_elements, %element_bytes : index, offset -> offset
+  %partials = buffer.alloca<global> align(256) %partial_bytes : buffer
+  kernel.launch @qwen38_linear_q5k_f16_mfma_split_channel8[%partitions, %tokens, %inputs, %outputs](%partitions, %count, %inputs, %outputs, %input, %weight, %partials) : [index, index, index, index](index, buffer, index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_linear_split_reduce[%partitions, %tokens, %outputs](%partitions, %count, %outputs, %partials, %output) : [index, index, index](index, buffer, index, buffer, buffer)
+  command.return
+}
+
+func.def @split_q5_channel8_expected(%count: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %inputs = index.constant 1792 : index
+  %outputs = index.constant 72 : index
+  func.call @q5_projection_wmma_channel8_expected(%count, %inputs, %outputs, %input, %weight, %output) : (buffer, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @split_q5_channel8_projection_check {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %partitions = check.literal value(4) : index
+  %tokens = check.literal value(4) : index
+  %inputs = check.literal value(1792) : index
+  %outputs = check.literal value(72) : index
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %count = check.generate.fill value(3) : tensor<1xi32>
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<4x1792xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<72x7x176xi8>
+    check.generate<@q5_projection_headers>(%inputs, %outputs, %weight) : (index, index, tensor<72x7x176xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<4x72xf32>
+    check.compare<@split_q5_channel8_projection, @split_q5_channel8_expected>[%partitions, %tokens, %inputs, %outputs](%count, %input, %weight, %output) : [index, index, index, index](tensor<1xi32>, tensor<4x1792xf32>, tensor<72x7x176xi8>, tensor<4x72xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0005) rtol(0.00003) nan(different) : tensor<4x72xf32>
+    }
+  }
+  check.return
+}
+
+kernel.decl @qwen38_linear_q6k_f16_mfma_split(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%partitions: index, %count: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %partials: buffer)
+
+command.program.def public @split_q6_projection(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%count: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %element_bytes = index.constant 4 : offset
+  %plane_elements = index.mul %tokens, %outputs : index
+  %partial_elements = index.mul %partitions, %plane_elements : index
+  %partial_bytes = index.scale %partial_elements, %element_bytes : index, offset -> offset
+  %partials = buffer.alloca<global> align(256) %partial_bytes : buffer
+  kernel.launch @qwen38_linear_q6k_f16_mfma_split[%partitions, %tokens, %inputs, %outputs](%partitions, %count, %inputs, %outputs, %input, %weight, %partials) : [index, index, index, index](index, buffer, index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_linear_split_reduce[%partitions, %tokens, %outputs](%partitions, %count, %outputs, %partials, %output) : [index, index, index](index, buffer, index, buffer, buffer)
+  command.return
+}
+
+func.def @split_q6_expected(%count: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %inputs = index.constant 1792 : index
+  %outputs = index.constant 65 : index
+  func.call @q6_split_projection_expected(%count, %inputs, %outputs, %input, %weight, %output) : (buffer, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @split_q6_projection_check {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %partitions = check.literal value(8) : index
+  %tokens = check.literal value(4) : index
+  %inputs = check.literal value(1792) : index
+  %outputs = check.literal value(65) : index
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %count = check.generate.fill value(3) : tensor<1xi32>
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<4x1792xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<65x7x210xi8>
+    check.generate<@q6_split_projection_headers>(%inputs, %outputs, %weight) : (index, index, tensor<65x7x210xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<4x65xf32>
+    check.compare<@split_q6_projection, @split_q6_expected>[%partitions, %tokens, %inputs, %outputs](%count, %input, %weight, %output) : [index, index, index, index](tensor<1xi32>, tensor<4x1792xf32>, tensor<65x7x210xi8>, tensor<4x65xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0005) rtol(0.00003) nan(different) : tensor<4x65xf32>
+    }
+  }
+  check.return
+}

@@ -435,6 +435,7 @@ loom_module(
     "kernels/qwen38/linear_q6k_f16_mfma.loom"
     "kernels/qwen38/linear_q6k_f16_wmma.loom"
     "kernels/qwen38/linear_q6k_f16_wmma_metadata.loom"
+    "kernels/qwen38/linear_split_k.loom"
     "iree::experimental::loom_serve::motifs::ggml::library"
   LIBRARIES
     "iree::experimental::loom_serve::motifs::tensor::matrix_fragments"
@@ -514,6 +515,7 @@ loom_test_module(
     "tests/matrix_projection.loom"
     "tests/narrow_matrix_projection.loom"
     "tests/signed_matrix_projection.loom"
+    "tests/split_matrix_projection.loom"
   LIBRARIES
     "::projection_kernels"
 )

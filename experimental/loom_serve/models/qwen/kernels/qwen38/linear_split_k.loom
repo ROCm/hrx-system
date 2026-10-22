@@ -1,0 +1,174 @@
+// Split reductions keep complete 64-token weight reuse while distributing
+// long contractions across the device. Each partition writes one F32 plane;
+// the following reduction publishes the original token-major result layout.
+amdgpu.target<gfx9-4-generic> @qwen38_split_cdna {subgroup_size = 64}
+
+template.decl @qwen38.dense_q5k_f16_wmma.x64.range(%weight_channels: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %block_begin: index, %block_end: index, %output_origin: offset, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dense_q6k_f16_wmma.range(%weight_format: index, %weight_macro_block_byte_count: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %block_begin: index, %block_end: index, %output_origin: offset, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dense.split_k.range(%partitions: index, %tokens: index, %inputs: index, %outputs: index) -> (index, index, offset)
+
+// Integer partition boundaries cover every quantization block exactly once,
+// including uneven divisions and empty ranges in small contractions.
+template.def<@qwen38.dense.split_k.range> device @qwen38_dense_split_k_range(%partitions0: index, %tokens: index, %inputs0: index, %outputs: index) -> (index, index, offset) {
+  %partitions = index.assume %partitions0 [range(%partitions0, 1, 16)] : index
+  %inputs = index.assume %inputs0 [range(%inputs0, 256, 32768), multiple_of(%inputs0, 256)] : index
+  %partition = kernel.workgroup.id<z> : index
+  %one = index.constant 1 : index
+  %block_width = index.constant 256 : index
+  %next_partition = index.add %partition, %one : index
+  %block_count = index.div %inputs, %block_width : index
+  %begin_scaled = index.mul %partition, %block_count : index
+  %end_scaled = index.mul %next_partition, %block_count : index
+  %block_begin = index.div %begin_scaled, %partitions : index
+  %block_end = index.div %end_scaled, %partitions : index
+  %output_elements = index.mul %tokens, %outputs : index
+  %partial_elements = index.mul %partition, %output_elements : index
+  %element_bytes = index.constant 4 : offset
+  %output_origin = index.scale %partial_elements, %element_bytes : index, offset -> offset
+  template.return %block_begin, %block_end, %output_origin : index, index, offset
+}
+
+kernel.def target(@qwen38_split_cdna) @qwen38_linear_q5k_f16_mfma_split(%partitions0: index, %token_count0: index, %input_size0: index, %output_size0: index) {
+  %partitions = index.assume %partitions0 [range(%partitions0, 1, 16)] : index
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
+  %one = index.constant 1 : index
+  %padding = index.constant 63 : index
+  %tile = index.constant 64 : index
+  %waves = index.constant 4 : index
+  %width = target.subgroup.size : index
+  %threads = index.mul %waves, %width : index
+  %padded_outputs = index.add %output_size, %padding : index
+  %channel_tiles = index.div %padded_outputs, %tile : index
+  %padded_tokens = index.add %token_count, %padding : index
+  %token_tiles = index.div %padded_tokens, %tile : index
+  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %partitions) workgroup_size(%threads, %one, %one) : index
+} launch(%partitions0: index, %token_count_data: buffer, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %token_count_view = buffer.view %token_count_data[%origin] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %token_count_view[0] : view<1xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %block_begin, %block_end, %output_origin = template.apply<@qwen38.dense.split_k.range>(%partitions0, %token_count, %input_size, %output_size) : (index, index, index, index) -> (index, index, offset)
+  template.apply<@qwen38.dense_q5k_f16_wmma.x64.range>(%weight_channels, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %block_begin, %block_end, %output_origin, %input, %weight, %output) : (index, index, index, index, index, index, index, index, offset, buffer, buffer, buffer)
+  kernel.return
+}
+
+
+kernel.def target(@qwen38_split_cdna) @qwen38_linear_q5k_f16_mfma_split_channel8(%partitions0: index, %token_count0: index, %input_size0: index, %output_size0: index) {
+  %partitions = index.assume %partitions0 [range(%partitions0, 1, 16)] : index
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
+  %one = index.constant 1 : index
+  %padding = index.constant 63 : index
+  %tile = index.constant 64 : index
+  %waves = index.constant 4 : index
+  %width = target.subgroup.size : index
+  %threads = index.mul %waves, %width : index
+  %padded_outputs = index.add %output_size, %padding : index
+  %channel_tiles = index.div %padded_outputs, %tile : index
+  %padded_tokens = index.add %token_count, %padding : index
+  %token_tiles = index.div %padded_tokens, %tile : index
+  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %partitions) workgroup_size(%threads, %one, %one) : index
+} launch(%partitions0: index, %token_count_data: buffer, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 8 : index
+  %origin = index.constant 0 : offset
+  %token_count_view = buffer.view %token_count_data[%origin] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %token_count_view[0] : view<1xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %block_begin, %block_end, %output_origin = template.apply<@qwen38.dense.split_k.range>(%partitions0, %token_count, %input_size, %output_size) : (index, index, index, index) -> (index, index, offset)
+  template.apply<@qwen38.dense_q5k_f16_wmma.x64.range>(%weight_channels, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %block_begin, %block_end, %output_origin, %input, %weight, %output) : (index, index, index, index, index, index, index, index, offset, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qwen38_split_cdna) @qwen38_linear_q6k_f16_mfma_split(%partitions0: index, %token_count0: index, %input_size0: index, %output_size0: index) {
+  %partitions = index.assume %partitions0 [range(%partitions0, 1, 16)] : index
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
+  %c1 = index.constant 1 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %wave_count = index.constant 4 : index
+  %wave_width = target.subgroup.size : index
+  %c256 = index.mul %wave_count, %wave_width : index
+  %padded_output_size = index.add %output_size, %c63 : index
+  %output_tiles = index.div %padded_output_size, %c64 : index
+  %padded_token_count = index.add %token_count, %c63 : index
+  %token_tiles = index.div %padded_token_count, %c64 : index
+  kernel.launch.config workgroups(%output_tiles, %token_tiles, %partitions) workgroup_size(%c256, %c1, %c1) : index
+} launch(%partitions0: index, %token_count_data: buffer, %input_size0: index, %output_size0: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c4 = index.constant 4 : index
+  %c6 = index.constant 6 : index
+  %c64 = index.constant 64 : index
+  %c210 = index.constant 210 : index
+  %wave_count = index.constant 4 : index
+  %wave_width = target.subgroup.size : index
+  %c256 = index.mul %wave_count, %wave_width : index
+  %token_count_view = buffer.view %token_count_data[%c0_offset] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %token_count_view[%c0] : view<1xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %block_begin, %block_end, %output_origin = template.apply<@qwen38.dense.split_k.range>(%partitions0, %token_count, %input_size, %output_size) : (index, index, index, index) -> (index, index, offset)
+  template.apply<@qwen38.dense_q6k_f16_wmma.range>(%c6, %c210, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c64, %c4, %c256, %c4, %workitem, %subgroup, %lane, %block_begin, %block_end, %output_origin, %input, %weight, %output) : (index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, offset, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qwen38_split_cdna) @qwen38_linear_split_reduce(%partitions: index, %tokens: index, %outputs: index) {
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  %tile = index.constant 256 : index
+  %padding = index.constant 255 : index
+  %elements = index.mul %tokens, %outputs : index
+  %padded = index.add %elements, %padding : index
+  %groups = index.div %padded, %tile : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%partitions0: index, %control: buffer, %outputs0: index, %partials: buffer, %output: buffer) {
+  %partitions = index.assume %partitions0 [range(%partitions0, 1, 16)] : index
+  %outputs = index.assume %outputs0 [range(%outputs0, 1, 32768)] : index
+  %origin = index.constant 0 : offset
+  %count_view = buffer.view %control[%origin] : buffer -> view<1xi32>
+  %count_i32 = view.load %count_view[0] : view<1xi32> -> i32
+  %count0 = index.cast %count_i32 : i32 to index
+  %count = index.assume %count0 [range(%count0, 1, 512)] : index
+  %elements = index.mul %count, %outputs : index
+  %input_view = buffer.view %partials[%origin] : buffer -> view<[%partitions]x[%elements]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %tile = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %tile, %lane : index
+  %active = index.cmp ult, %element, %elements : index
+  scf.if %active {
+    %bounded_element = index.assume %element [lt(%element, %elements)] : index
+    %zeros = scalar.constant 0.0 : f32
+    %sum = scf.for %partition = [%zero to %partitions step %one](%accumulator = %zeros : f32) -> (f32) {
+      %values = view.load %input_view[%partition, %bounded_element] : view<[%partitions]x[%elements]xf32> -> f32
+      %next = scalar.addf %accumulator, %values : f32
+      scf.yield %next : f32
+    }
+    view.store %sum, %output_view[%bounded_element] : f32, view<[%elements]xf32>
+  }
+  kernel.return
+}
