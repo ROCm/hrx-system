@@ -68,6 +68,34 @@ that suffix requires replay; byte-identical history remains reusable.
 Tool definitions and tool-result turns use the chat endpoint;
 the source policy formats and parses the model's XML tool-call protocol.
 
+### CDNA text deployment
+
+The same source catalog selects RDNA WMMA or CDNA MFMA kernels from the
+execution device. Model control, weight preparation, and cache layout stay
+shared. The CDNA text path currently covers prefill buckets through 64 tokens;
+larger buckets and the vision projector still reference RDNA-specific kernels.
+Use this text-only configuration for an MI300 deployment:
+
+```sh
+jq --arg directory "$PWD/experimental/loom_serve/models/qwen" \
+   --arg weights "$qwen_weights" --arg tokenizer "$qwen_tokenizer" \
+   '.base_directory = $directory | del(.definition.image) |
+    .definition += {
+      weights: $weights, tokenizer: $tokenizer,
+      rows: 4, context_capacity: 2048, pool_capacity: 4096,
+      prefill_capacity: 64, draft_depth: 0
+    }' experimental/loom_serve/models/qwen/model.json \
+   > /tmp/qwen-cdna-deployment.json
+
+bazel-bin/loom/src/loom/tools/loom-serve/loom-serve \
+  --device=cdna --listen=127.0.0.1:8080 \
+  --model=/tmp/qwen-cdna-deployment.json
+```
+
+This is the initial text-serving configuration, not an MI300 throughput-tuned
+schedule. It uses ordinary decode without speculative drafts. The larger RDNA
+prefill and image schedules remain available through the original deployment.
+
 ## Image chat
 
 Send images at their original size. The projector applies orientation, composites

@@ -1,3 +1,5 @@
+target.decl @qwen38_execution
+
 // DFlash2 block transforms. Committed context and transient proposal K/V have
 // separate ownership: running a block never publishes its keys into the pool.
 config.decl @runner.qwen38.span_capacity : %value: index where [range(%value, 1, 64)]
@@ -10,7 +12,7 @@ kernel.decl @qwen38_linear_q4k_f16_wmma_x64(%tokens: index, %inputs: index, %out
 
 kernel.decl @qwen38_linear_q4k_f16_wmma_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @qwen38_linear_q6k_f16_wmma_x64(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @qwen38_dispatch_linear_q6k_f16_x64(%dispatch_tokens: index, %dispatch_inputs: index, %dispatch_outputs: index, %inputs_argument: index, %outputs_argument: index) launch(%control: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
 
@@ -30,7 +32,7 @@ kernel.decl @qwen38_dflash_context_prepare(%tokens: index, %spans: index) launch
 
 kernel.decl @qwen38_dflash_attention(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %block_cache: buffer, %context: buffer, %output: buffer)
 
-command.program.def @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: index, %layer_origin: offset) launch(%parameters: buffer, %context_parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %residual: buffer) where [range(%tokens, 1, 512), range(%spans, 1, 64), range(%layer, 0, 4)] {
+command.program.def target(@qwen38_execution) @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: index, %layer_origin: offset) launch(%parameters: buffer, %context_parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %residual: buffer) where [range(%tokens, 1, 512), range(%spans, 1, 64), range(%layer, 0, 4)] {
   %c65 = index.constant 65 : index
   %narrow = index.cmp ult, %tokens, %c65 : index
   %hidden = index.constant 5120 : index
@@ -111,7 +113,7 @@ command.program.def @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: 
     }
     scf.if %q6 {
       scf.if %narrow {
-        kernel.launch @qwen38_linear_q6k_f16_wmma_x64[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %convolved, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
+        command.program.launch @qwen38_dispatch_linear_q6k_f16_x64[%tokens, %hidden, %keys, %hidden, %keys](%epoch, %convolved, %value_weight, %value) : [index, index, index, index, index](buffer, buffer, view<[%value_bytes]xi8>, buffer)
       } else {
         kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_x128[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %convolved, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
       }
@@ -157,7 +159,7 @@ command.program.def @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: 
   kernel.launch @qwen38_swiglu_f32_prefill[%tokens](%tokens, %gate, %up, %activated) : [index](index, buffer, buffer, buffer)
   scf.if %q6 {
     scf.if %narrow {
-      kernel.launch @qwen38_linear_q6k_f16_wmma_x64[%tokens, %intermediate, %hidden](%epoch, %intermediate, %hidden, %activated, %down_weight, %projected) : [index, index, index](buffer, index, index, buffer, view<[%down_bytes]xi8>, buffer)
+      command.program.launch @qwen38_dispatch_linear_q6k_f16_x64[%tokens, %intermediate, %hidden, %intermediate, %hidden](%epoch, %activated, %down_weight, %projected) : [index, index, index, index, index](buffer, buffer, view<[%down_bytes]xi8>, buffer)
     } else {
       kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_x128[%tokens, %intermediate, %hidden](%epoch, %intermediate, %hidden, %activated, %down_weight, %projected) : [index, index, index](buffer, index, index, buffer, view<[%down_bytes]xi8>, buffer)
     }
@@ -174,7 +176,7 @@ command.program.def @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: 
 
 // The embedding is private proposal storage, updated in place across layers.
 // Output normalization remains separate from that residual stream.
-command.program.def public @qwen38_dflash_transform() launch(%parameters: buffer, %context_parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %embedding: buffer, %normalized: buffer) {
+command.program.def public target(@qwen38_execution) @qwen38_dflash_transform() launch(%parameters: buffer, %context_parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %embedding: buffer, %normalized: buffer) {
   %spans = config.get @runner.qwen38.span_capacity : index
   %c8 = index.constant 8 : index
   %tokens = index.mul %spans, %c8 : index

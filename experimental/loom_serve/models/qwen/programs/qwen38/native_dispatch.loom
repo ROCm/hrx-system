@@ -1,0 +1,386 @@
+// Homogeneous deployment target supplied by the command-product request.
+// Buffer command boundaries adapt parameter views before target-selected
+// launch providers select their native kernel leaves. Scalar launch arguments
+// are command specialization values; only buffers are rebound at issue time.
+target.decl @qwen38_execution
+
+amdgpu.target<gfx11-generic> @qwen38_dispatch_rdna
+amdgpu.target<gfx9-4-generic> @qwen38_dispatch_cdna
+
+kernel.decl @qwen38_attention_decode_split_wmma_partial() launch(%token_count: index, %token_ordinal: index, %control_position_index: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer)
+
+kernel.decl @qwen38_attention_decode_split_mfma_partial() launch(%token_count: index, %token_ordinal: index, %control_position_index: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer)
+
+template.decl @qwen38.dispatch.attention.decode.split.partial(%token_count: index, %token_ordinal: index, %control_position_index: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer)
+
+template.def<@qwen38.dispatch.attention.decode.split.partial> target(@qwen38_dispatch_rdna) @qwen38_dispatch_attention_decode_split_partial_rdna(%token_count: index, %token_ordinal: index, %control_position_index: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer) {
+  kernel.launch @qwen38_attention_decode_split_wmma_partial(%token_count, %token_ordinal, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.attention.decode.split.partial> target(@qwen38_dispatch_cdna) @qwen38_dispatch_attention_decode_split_partial_cdna(%token_count: index, %token_ordinal: index, %control_position_index: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer) {
+  kernel.launch @qwen38_attention_decode_split_mfma_partial(%token_count, %token_ordinal, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_attention_decode_split_partial(%token_count: index, %token_ordinal: index, %control_position_index: index) launch(%control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer) {
+  template.apply<@qwen38.dispatch.attention.decode.split.partial>(%token_count, %token_ordinal, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_linear_q5k_f16_wmma(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.linear.q5k.f16(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.linear.q5k.f16> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q5k_f16_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_wmma[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.linear.q5k.f16> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q5k_f16_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_mfma[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q5k_f16(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%token_count_data: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.linear.q5k.f16>(%dispatch_token_count, %dispatch_input_size, %dispatch_output_size, %token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : (index, index, index, buffer, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_linear_q5k_f16_wmma_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.linear.q5k.f16.channel8(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.linear.q5k.f16.channel8> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q5k_f16_channel8_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_wmma_channel8[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.linear.q5k.f16.channel8> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q5k_f16_channel8_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_mfma_channel8[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q5k_f16_channel8(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%token_count_data: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.linear.q5k.f16.channel8>(%dispatch_token_count, %dispatch_input_size, %dispatch_output_size, %token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : (index, index, index, buffer, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_linear_q5k_f16_wmma_c64t32_f32acc(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_c64t32_f32acc(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.linear.q5k.f16.c64t32.f32acc(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.linear.q5k.f16.c64t32.f32acc> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.linear.q5k.f16.c64t32.f32acc> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_mfma_c64t32_f32acc[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%token_count_data: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.linear.q5k.f16.c64t32.f32acc>(%dispatch_token_count, %dispatch_input_size, %dispatch_output_size, %token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : (index, index, index, buffer, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_c64t32_f32acc_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.linear.q5k.f16.c64t32.f32acc.channel8(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.linear.q5k.f16.c64t32.f32acc.channel8> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc_channel8_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_channel8[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.linear.q5k.f16.c64t32.f32acc.channel8> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc_channel8_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_mfma_c64t32_f32acc_channel8[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc_channel8(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%token_count_data: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.linear.q5k.f16.c64t32.f32acc.channel8>(%dispatch_token_count, %dispatch_input_size, %dispatch_output_size, %token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : (index, index, index, buffer, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_linear_q6k_f16_wmma_x64(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_mfma_x64(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.linear.q6k.f16.x64(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.linear.q6k.f16.x64> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q6k_f16_x64_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q6k_f16_wmma_x64[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%control, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.linear.q6k.f16.x64> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q6k_f16_x64_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q6k_f16_mfma_x64[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%control, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q6k_f16_x64(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%control: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.linear.q6k.f16.x64>(%dispatch_token_count, %dispatch_input_size, %dispatch_output_size, %control, %input_size_data, %output_size_data, %input, %weight, %output) : (index, index, index, buffer, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_linear_q6k_f16_wmma_c64t32_f32acc(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_mfma_c64t32_f32acc(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.linear.q6k.f16.c64t32.f32acc(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.linear.q6k.f16.c64t32.f32acc> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q6k_f16_c64t32_f32acc_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q6k_f16_wmma_c64t32_f32acc[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%control, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.linear.q6k.f16.c64t32.f32acc> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q6k_f16_c64t32_f32acc_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q6k_f16_mfma_c64t32_f32acc[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%control, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q6k_f16_c64t32_f32acc(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%control: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.linear.q6k.f16.c64t32.f32acc>(%dispatch_token_count, %dispatch_input_size, %dispatch_output_size, %control, %input_size_data, %output_size_data, %input, %weight, %output) : (index, index, index, buffer, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_linear_q6k_f16_wmma_c64t32_f32acc_residual(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %residual: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_mfma_c64t32_f32acc_residual(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %residual: buffer)
+
+template.decl @qwen38.dispatch.linear.q6k.f16.c64t32.f32acc.residual(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %residual: buffer)
+
+template.def<@qwen38.dispatch.linear.q6k.f16.c64t32.f32acc.residual> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q6k_f16_c64t32_f32acc_residual_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %residual: buffer) {
+  kernel.launch @qwen38_linear_q6k_f16_wmma_c64t32_f32acc_residual[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %residual) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.linear.q6k.f16.c64t32.f32acc.residual> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q6k_f16_c64t32_f32acc_residual_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %residual: buffer) {
+  kernel.launch @qwen38_linear_q6k_f16_mfma_c64t32_f32acc_residual[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %residual) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q6k_f16_c64t32_f32acc_residual(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%token_count_data: buffer, %input: buffer, %weight: buffer, %residual: buffer) {
+  template.apply<@qwen38.dispatch.linear.q6k.f16.c64t32.f32acc.residual>(%dispatch_token_count, %dispatch_input_size, %dispatch_output_size, %token_count_data, %input_size_data, %output_size_data, %input, %weight, %residual) : (index, index, index, buffer, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_linear_q8_0_f16_wmma_x128(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q8_0_f16_mfma_x128(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.linear.q8.0.f16.x128(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.linear.q8.0.f16.x128> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q8_0_f16_x128_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q8_0_f16_wmma_x128[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%control, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.linear.q8.0.f16.x128> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q8_0_f16_x128_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_linear_q8_0_f16_mfma_x128[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%control, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q8_0_f16_x128(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%control: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.linear.q8.0.f16.x128>(%dispatch_token_count, %dispatch_input_size, %dispatch_output_size, %control, %input_size_data, %output_size_data, %input, %weight, %output) : (index, index, index, buffer, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_attention_prefill_f16_wmma(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
+
+kernel.decl @qwen38_attention_prefill_f16_mfma(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.attention.prefill.f16(%dispatch_token_count: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.attention.prefill.f16> target(@qwen38_dispatch_rdna) @qwen38_dispatch_attention_prefill_f16_rdna(%dispatch_token_count: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%dispatch_token_count](%control, %query, %gate, %key_cache, %value_cache, %output) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.attention.prefill.f16> target(@qwen38_dispatch_cdna) @qwen38_dispatch_attention_prefill_f16_cdna(%dispatch_token_count: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
+  kernel.launch @qwen38_attention_prefill_f16_mfma[%dispatch_token_count](%control, %query, %gate, %key_cache, %value_cache, %output) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_attention_prefill_f16(%dispatch_token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.attention.prefill.f16>(%dispatch_token_count, %control, %query, %gate, %key_cache, %value_cache, %output) : (index, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_attention_spans_f16_wmma(%token_capacity: index, %span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer)
+
+kernel.decl @qwen38_attention_spans_f16_mfma(%token_capacity: index, %span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.attention.spans.f16(%dispatch_token_capacity: index, %dispatch_span_capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.attention.spans.f16> target(@qwen38_dispatch_rdna) @qwen38_dispatch_attention_spans_f16_rdna(%dispatch_token_capacity: index, %dispatch_span_capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer) {
+  kernel.launch @qwen38_attention_spans_f16_wmma[%dispatch_token_capacity, %dispatch_span_capacity](%epoch, %rows, %layer_origin, %query, %gate, %state, %output) : [index, index](buffer, buffer, offset, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.attention.spans.f16> target(@qwen38_dispatch_cdna) @qwen38_dispatch_attention_spans_f16_cdna(%dispatch_token_capacity: index, %dispatch_span_capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer) {
+  kernel.launch @qwen38_attention_spans_f16_mfma[%dispatch_token_capacity, %dispatch_span_capacity](%epoch, %rows, %layer_origin, %query, %gate, %state, %output) : [index, index](buffer, buffer, offset, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_attention_spans_f16(%dispatch_token_capacity: index, %dispatch_span_capacity: index, %layer_origin: offset) launch(%epoch: buffer, %rows: buffer, %query: buffer, %gate: buffer, %state: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.attention.spans.f16>(%dispatch_token_capacity, %dispatch_span_capacity, %epoch, %rows, %layer_origin, %query, %gate, %state, %output) : (index, index, buffer, buffer, offset, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_attention_spans_split_partial(%token_capacity: index, %span_capacity: index) launch(%token_capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %state: buffer, %partials: buffer)
+
+kernel.decl @qwen38_attention_spans_split_mfma_partial(%token_capacity: index, %span_capacity: index) launch(%token_capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %state: buffer, %partials: buffer)
+
+template.decl @qwen38.dispatch.attention.spans.split.partial(%dispatch_token_capacity: index, %dispatch_span_capacity: index, %token_capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %state: buffer, %partials: buffer)
+
+template.def<@qwen38.dispatch.attention.spans.split.partial> target(@qwen38_dispatch_rdna) @qwen38_dispatch_attention_spans_split_partial_rdna(%dispatch_token_capacity: index, %dispatch_span_capacity: index, %token_capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %state: buffer, %partials: buffer) {
+  kernel.launch @qwen38_attention_spans_split_partial[%dispatch_token_capacity, %dispatch_span_capacity](%token_capacity, %epoch, %rows, %layer_origin, %query, %state, %partials) : [index, index](index, buffer, buffer, offset, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.attention.spans.split.partial> target(@qwen38_dispatch_cdna) @qwen38_dispatch_attention_spans_split_partial_cdna(%dispatch_token_capacity: index, %dispatch_span_capacity: index, %token_capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %state: buffer, %partials: buffer) {
+  kernel.launch @qwen38_attention_spans_split_mfma_partial[%dispatch_token_capacity, %dispatch_span_capacity](%token_capacity, %epoch, %rows, %layer_origin, %query, %state, %partials) : [index, index](index, buffer, buffer, offset, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_attention_spans_split_partial(%dispatch_token_capacity: index, %dispatch_span_capacity: index, %token_capacity: index, %layer_origin: offset) launch(%epoch: buffer, %rows: buffer, %query: buffer, %state: buffer, %partials: buffer) {
+  template.apply<@qwen38.dispatch.attention.spans.split.partial>(%dispatch_token_capacity, %dispatch_span_capacity, %token_capacity, %epoch, %rows, %layer_origin, %query, %state, %partials) : (index, index, index, buffer, buffer, offset, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_linear_q5k_f16_wmma_alpha_split_k(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %partials: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_mfma_alpha_split_k(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %partials: buffer)
+
+template.decl @qwen38.dispatch.linear.q5k.f16.alpha.split.k(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %partials: buffer)
+
+template.def<@qwen38.dispatch.linear.q5k.f16.alpha.split.k> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q5k_f16_alpha_split_k_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %partials: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_wmma_alpha_split_k[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %partials) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.linear.q5k.f16.alpha.split.k> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q5k_f16_alpha_split_k_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %partials: buffer) {
+  kernel.launch @qwen38_linear_q5k_f16_mfma_alpha_split_k[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %partials) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q5k_f16_alpha_split_k(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%token_count_data: buffer, %input: buffer, %weight: buffer, %partials: buffer) {
+  template.apply<@qwen38.dispatch.linear.q5k.f16.alpha.split.k>(%dispatch_token_count, %dispatch_input_size, %dispatch_output_size, %token_count_data, %input_size_data, %output_size_data, %input, %weight, %partials) : (index, index, index, buffer, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_output_projection_q6k_m8() launch(%input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_output_projection_q6k_m8_cdna() launch(%input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.output.projection.q6k.m8(%input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.output.projection.q6k.m8> target(@qwen38_dispatch_rdna) @qwen38_dispatch_output_projection_q6k_m8_rdna(%input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_output_projection_q6k_m8(%input, %weight, %output) : (buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.output.projection.q6k.m8> target(@qwen38_dispatch_cdna) @qwen38_dispatch_output_projection_q6k_m8_cdna(%input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_output_projection_q6k_m8_cdna(%input, %weight, %output) : (buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_output_projection_q6k_m8() launch(%input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.output.projection.q6k.m8>(%input, %weight, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_output_projection_q6k_m8_prefix() launch(%row_begin: index, %control: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_output_projection_q6k_m8_prefix_cdna() launch(%row_begin: index, %control: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.output.projection.q6k.m8.prefix(%row_begin: index, %control: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.output.projection.q6k.m8.prefix> target(@qwen38_dispatch_rdna) @qwen38_dispatch_output_projection_q6k_m8_prefix_rdna(%row_begin: index, %control: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_output_projection_q6k_m8_prefix(%row_begin, %control, %input, %weight, %output) : (index, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.output.projection.q6k.m8.prefix> target(@qwen38_dispatch_cdna) @qwen38_dispatch_output_projection_q6k_m8_prefix_cdna(%row_begin: index, %control: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_output_projection_q6k_m8_prefix_cdna(%row_begin, %control, %input, %weight, %output) : (index, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_output_projection_q6k_m8_prefix(%row_begin: index) launch(%control: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.output.projection.q6k.m8.prefix>(%row_begin, %control, %input, %weight, %output) : (index, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_output_projection_q6k_m32() launch(%input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_output_projection_q6k_m32_cdna() launch(%input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @qwen38.dispatch.output.projection.q6k.m32(%input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@qwen38.dispatch.output.projection.q6k.m32> target(@qwen38_dispatch_rdna) @qwen38_dispatch_output_projection_q6k_m32_rdna(%input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_output_projection_q6k_m32(%input, %weight, %output) : (buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.output.projection.q6k.m32> target(@qwen38_dispatch_cdna) @qwen38_dispatch_output_projection_q6k_m32_cdna(%input: buffer, %weight: buffer, %output: buffer) {
+  kernel.launch @qwen38_output_projection_q6k_m32_cdna(%input, %weight, %output) : (buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_output_projection_q6k_m32() launch(%input: buffer, %weight: buffer, %output: buffer) {
+  template.apply<@qwen38.dispatch.output.projection.q6k.m32>(%input, %weight, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_greedy_argmax_partial_rows_f32(%token_count: index, %logit_stride: index, %output_size: index) launch(%token_count_argument: index, %logit_stride_argument: index, %output_size_argument: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
+
+kernel.decl @qwen38_greedy_argmax_partial_rows_f32_cdna(%token_count: index, %logit_stride: index, %output_size: index) launch(%token_count_argument: index, %logit_stride_argument: index, %output_size_argument: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
+
+template.decl @qwen38.dispatch.greedy.argmax.partial.rows.f32(%dispatch_token_count: index, %dispatch_logit_stride: index, %dispatch_output_size: index, %token_count_argument: index, %logit_stride_argument: index, %output_size_argument: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
+
+template.def<@qwen38.dispatch.greedy.argmax.partial.rows.f32> target(@qwen38_dispatch_rdna) @qwen38_dispatch_greedy_argmax_partial_rows_f32_rdna(%dispatch_token_count: index, %dispatch_logit_stride: index, %dispatch_output_size: index, %token_count_argument: index, %logit_stride_argument: index, %output_size_argument: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer) {
+  kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%dispatch_token_count, %dispatch_logit_stride, %dispatch_output_size](%token_count_argument, %logit_stride_argument, %output_size_argument, %logits, %partial_logits, %partial_token_ids) : [index, index, index](index, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.greedy.argmax.partial.rows.f32> target(@qwen38_dispatch_cdna) @qwen38_dispatch_greedy_argmax_partial_rows_f32_cdna(%dispatch_token_count: index, %dispatch_logit_stride: index, %dispatch_output_size: index, %token_count_argument: index, %logit_stride_argument: index, %output_size_argument: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer) {
+  kernel.launch @qwen38_greedy_argmax_partial_rows_f32_cdna[%dispatch_token_count, %dispatch_logit_stride, %dispatch_output_size](%token_count_argument, %logit_stride_argument, %output_size_argument, %logits, %partial_logits, %partial_token_ids) : [index, index, index](index, index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_greedy_argmax_partial_rows_f32(%dispatch_token_count: index, %dispatch_logit_stride: index, %dispatch_output_size: index, %token_count_argument: index, %logit_stride_argument: index, %output_size_argument: index) launch(%logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer) {
+  template.apply<@qwen38.dispatch.greedy.argmax.partial.rows.f32>(%dispatch_token_count, %dispatch_logit_stride, %dispatch_output_size, %token_count_argument, %logit_stride_argument, %output_size_argument, %logits, %partial_logits, %partial_token_ids) : (index, index, index, index, index, index, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.decl @qwen38_greedy_argmax_reduce_rows_f32(%token_count: index, %output_size: index) launch(%token_count_argument: index, %output_size_argument: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer)
+
+kernel.decl @qwen38_greedy_argmax_reduce_rows_f32_cdna(%token_count: index, %output_size: index) launch(%token_count_argument: index, %output_size_argument: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer)
+
+template.decl @qwen38.dispatch.greedy.argmax.reduce.rows.f32(%dispatch_token_count: index, %dispatch_output_size: index, %token_count_argument: index, %output_size_argument: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer)
+
+template.def<@qwen38.dispatch.greedy.argmax.reduce.rows.f32> target(@qwen38_dispatch_rdna) @qwen38_dispatch_greedy_argmax_reduce_rows_f32_rdna(%dispatch_token_count: index, %dispatch_output_size: index, %token_count_argument: index, %output_size_argument: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer) {
+  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%dispatch_token_count, %dispatch_output_size](%token_count_argument, %output_size_argument, %partial_logits, %partial_token_ids, %token_ids) : [index, index](index, index, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@qwen38.dispatch.greedy.argmax.reduce.rows.f32> target(@qwen38_dispatch_cdna) @qwen38_dispatch_greedy_argmax_reduce_rows_f32_cdna(%dispatch_token_count: index, %dispatch_output_size: index, %token_count_argument: index, %output_size_argument: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer) {
+  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32_cdna[%dispatch_token_count, %dispatch_output_size](%token_count_argument, %output_size_argument, %partial_logits, %partial_token_ids, %token_ids) : [index, index](index, index, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public target(@qwen38_execution) @qwen38_dispatch_greedy_argmax_reduce_rows_f32(%dispatch_token_count: index, %dispatch_output_size: index, %token_count_argument: index, %output_size_argument: index) launch(%partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer) {
+  template.apply<@qwen38.dispatch.greedy.argmax.reduce.rows.f32>(%dispatch_token_count, %dispatch_output_size, %token_count_argument, %output_size_argument, %partial_logits, %partial_token_ids, %token_ids) : (index, index, index, index, buffer, buffer, buffer)
+  command.return
+}

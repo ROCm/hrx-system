@@ -1,3 +1,5 @@
+target.decl @qwen38_execution
+
 // Exact Qwen3.8-27B Gated DeltaNet decode layer.
 //
 // The program consumes the model's native UD-Q5_K_XL parameters, updates the
@@ -32,7 +34,7 @@ kernel.decl @qwen38_gdn_norm_gate_decode() launch(%rms_epsilon: f32, %raw_output
 // Advances one GDN layer. The parameter root is immutable and fixed during
 // command-buffer materialization. The residual and persistent state roots are
 // rebound for each sequence at issue time.
-command.program.def public @qwen38_gdn_layer_decode(%layer: index, %gdn_ordinal: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer) where [range(%layer, 0, 63), range(%gdn_ordinal, 0, 47)] {
+command.program.def public target(@qwen38_execution) @qwen38_gdn_layer_decode(%layer: index, %gdn_ordinal: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer) where [range(%layer, 0, 63), range(%gdn_ordinal, 0, 47)] {
   %token_count = index.constant 1 : index
   %hidden_size = index.constant 5120 : index
   %qkv_size = index.constant 10240 : index
@@ -133,7 +135,7 @@ command.program.def public @qwen38_gdn_layer_decode(%layer: index, %gdn_ordinal:
 }
 
 // Concrete first-layer root used by the initial production vertical slice.
-command.program.def public @qwen38_gdn_layer0_decode() launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer) {
+command.program.def public target(@qwen38_execution) @qwen38_gdn_layer0_decode() launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer) {
   %layer = index.constant 0 : index
   %gdn_ordinal = index.constant 0 : index
   command.program.launch @qwen38_gdn_layer_decode[%layer, %gdn_ordinal](%parameters, %residual, %gdn_state) : [index, index](buffer, buffer, buffer)

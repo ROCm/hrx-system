@@ -1,3 +1,5 @@
+target.decl @qwen38_execution
+
 config.decl @runner.qwen38.mixed_inputs : %value: index where [range(%value, 0, 1)]
 
 config.decl @runner.qwen38.verification_width : index
@@ -12,11 +14,11 @@ command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %sched
 
 command.program.decl @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 512)]
 
-kernel.decl @qwen38_linear_q8_0_f16_wmma_x128(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @qwen38_dispatch_linear_q8_0_f16_x128(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%control: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @qwen38_linear_q6k_f16_wmma_x64(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @qwen38_dispatch_linear_q6k_f16_x64(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%control: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @qwen38_linear_q6k_f16_wmma_c64t32_f32acc(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @qwen38_dispatch_linear_q6k_f16_c64t32_f32acc(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %input_size_data: index, %output_size_data: index) launch(%control: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_x128(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
@@ -45,7 +47,7 @@ kernel.decl @qwen38_mtp_proposal_advance(%round: index) launch(%round_value: ind
 // output and feed-forward results have no consumer during catch-up. Separate
 // parameter roots bind views of the proposal block's existing weight storage.
 // Carry publication cannot race readers of the preceding committed hidden row.
-command.program.def public @qwen38_mtp_warm() launch(%embedding_parameters: buffer, %input_parameters: buffer, %attention_norm_parameters: buffer, %key_parameters: buffer, %key_norm_parameters: buffer, %value_parameters: buffer, %norm_parameters: buffer, %target_residual: buffer, %epoch: buffer, %rows: buffer, %cache: buffer, %carry: buffer, %input_tokens: buffer) {
+command.program.def public target(@qwen38_execution) @qwen38_mtp_warm() launch(%embedding_parameters: buffer, %input_parameters: buffer, %attention_norm_parameters: buffer, %key_parameters: buffer, %key_norm_parameters: buffer, %value_parameters: buffer, %norm_parameters: buffer, %target_residual: buffer, %epoch: buffer, %rows: buffer, %cache: buffer, %carry: buffer, %input_tokens: buffer) {
   %tokens = config.get @runner.qwen38.prefill_token_count : index
   %mixed_inputs = config.get @runner.qwen38.mixed_inputs : index
   %spans = config.get @runner.qwen38.span_capacity : index
@@ -101,7 +103,7 @@ command.program.def public @qwen38_mtp_warm() launch(%embedding_parameters: buff
     kernel.launch @qwen38_mtp_rmsnorm_concat_embedding_f32_prefill[%tokens](%capacity, %epsilon, %embedding, %embedding_norm, %concat) : [index](index, f32, buffer, view<5120xf32>, buffer)
     kernel.launch @qwen38_mtp_rmsnorm_concat_hidden_f32_prefill[%tokens](%capacity, %epsilon, %shifted, %hidden_norm, %concat) : [index](index, f32, buffer, view<5120xf32>, buffer)
   }
-  kernel.launch @qwen38_linear_q8_0_f16_wmma_x128[%tokens, %concat_size, %hidden_size](%epoch, %concat_size, %hidden_size, %concat, %embedding_hidden_weight, %residual) : [index, index, index](buffer, index, index, buffer, view<55705600xi8>, buffer)
+  command.program.launch @qwen38_dispatch_linear_q8_0_f16_x128[%tokens, %concat_size, %hidden_size, %concat_size, %hidden_size](%epoch, %concat, %embedding_hidden_weight, %residual) : [index, index, index, index, index](buffer, buffer, view<55705600xi8>, buffer)
   %attention_normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %key_projection = buffer.alloca<global> align(256) %key_value_bytes : buffer
   %value_projection = buffer.alloca<global> align(256) %key_value_bytes : buffer
@@ -109,21 +111,21 @@ command.program.def public @qwen38_mtp_warm() launch(%embedding_parameters: buff
   command.concurrent {
     scf.if %uses_narrow {
       scf.if %uses_thirty_two {
-        kernel.launch @qwen38_linear_q6k_f16_wmma_c64t32_f32acc[%thirty_two_tokens, %hidden_size, %key_value_size](%epoch, %hidden_size, %key_value_size, %attention_normalized, %key_weight, %key_projection) : [index, index, index](buffer, index, index, buffer, view<4300800xi8>, buffer)
+        command.program.launch @qwen38_dispatch_linear_q6k_f16_c64t32_f32acc[%thirty_two_tokens, %hidden_size, %key_value_size, %hidden_size, %key_value_size](%epoch, %attention_normalized, %key_weight, %key_projection) : [index, index, index, index, index](buffer, buffer, view<4300800xi8>, buffer)
       } else {
-        kernel.launch @qwen38_linear_q6k_f16_wmma_x64[%narrow_tokens, %hidden_size, %key_value_size](%epoch, %hidden_size, %key_value_size, %attention_normalized, %key_weight, %key_projection) : [index, index, index](buffer, index, index, buffer, view<4300800xi8>, buffer)
+        command.program.launch @qwen38_dispatch_linear_q6k_f16_x64[%narrow_tokens, %hidden_size, %key_value_size, %hidden_size, %key_value_size](%epoch, %attention_normalized, %key_weight, %key_projection) : [index, index, index, index, index](buffer, buffer, view<4300800xi8>, buffer)
       }
     } else {
       kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_x128[%wide_tokens, %hidden_size, %key_value_size](%epoch, %hidden_size, %key_value_size, %attention_normalized, %key_weight, %key_projection) : [index, index, index](buffer, index, index, buffer, view<4300800xi8>, buffer)
     }
-    kernel.launch @qwen38_linear_q8_0_f16_wmma_x128[%tokens, %hidden_size, %key_value_size](%epoch, %hidden_size, %key_value_size, %attention_normalized, %value_weight, %value_projection) : [index, index, index](buffer, index, index, buffer, view<5570560xi8>, buffer)
+    command.program.launch @qwen38_dispatch_linear_q8_0_f16_x128[%tokens, %hidden_size, %key_value_size, %hidden_size, %key_value_size](%epoch, %attention_normalized, %value_weight, %value_projection) : [index, index, index, index, index](buffer, buffer, view<5570560xi8>, buffer)
   }
   %cache_origin = index.constant 0 : offset
   kernel.launch @qwen38_attention_kv_prepare_spans[%tokens, %spans](%mixed_inputs, %epoch, %rows, %cache_origin, %epsilon, %key_projection, %value_projection, %key_norm_weight, %cache, %input_tokens) : [index, index](index, buffer, buffer, offset, f32, buffer, buffer, view<256xf32>, buffer, buffer)
   command.return
 }
 
-command.program.def @qwen38_mtp_draft() launch(%embedding_parameters: buffer, %input_parameters: buffer, %layer_parameters: buffer, %head_parameters: buffer, %output_parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %cache: buffer, %hidden: buffer, %input_tokens: buffer, %output_tokens: buffer) {
+command.program.def target(@qwen38_execution) @qwen38_mtp_draft() launch(%embedding_parameters: buffer, %input_parameters: buffer, %layer_parameters: buffer, %head_parameters: buffer, %output_parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %cache: buffer, %hidden: buffer, %input_tokens: buffer, %output_tokens: buffer) {
   %tokens = config.get @runner.qwen38.prefill_token_count : index
   %spans = config.get @runner.qwen38.span_capacity : index
   %capacity = index.constant 512 : index
@@ -154,7 +156,7 @@ command.program.def @qwen38_mtp_draft() launch(%embedding_parameters: buffer, %i
     kernel.launch @qwen38_mtp_rmsnorm_concat_embedding_f32_prefill[%tokens](%capacity, %epsilon, %embedding, %embedding_norm, %concat) : [index](index, f32, buffer, view<5120xf32>, buffer)
     kernel.launch @qwen38_mtp_rmsnorm_concat_hidden_f32_prefill[%tokens](%capacity, %epsilon, %hidden, %hidden_norm, %concat) : [index](index, f32, buffer, view<5120xf32>, buffer)
   }
-  kernel.launch @qwen38_linear_q8_0_f16_wmma_x128[%tokens, %concat_size, %hidden_size](%epoch, %concat_size, %hidden_size, %concat, %embedding_hidden_weight, %residual) : [index, index, index](buffer, index, index, buffer, view<55705600xi8>, buffer)
+  command.program.launch @qwen38_dispatch_linear_q8_0_f16_x128[%tokens, %concat_size, %hidden_size, %concat_size, %hidden_size](%epoch, %concat, %embedding_hidden_weight, %residual) : [index, index, index, index, index](buffer, buffer, view<55705600xi8>, buffer)
   command.program.launch @qwen38_attention_layer_prefill[%tokens, %tokens, %layer, %c0, %c0, %spans, %c0](%layer_parameters, %residual, %cache, %epoch, %attention, %rows, %input_tokens) : [index, index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_rmsnorm_f32_prefill[%tokens](%capacity, %epsilon, %residual, %head_norm, %hidden) : [index](index, f32, buffer, view<5120xf32>, buffer)
   %origin = index.constant 0 : offset
@@ -166,7 +168,7 @@ command.program.def @qwen38_mtp_draft() launch(%embedding_parameters: buffer, %i
 // carry through target verification. The transient allocator shares the same
 // residency workspace as the target; no per-round queue transfer or host wait
 // is needed. Only spans requesting generated candidates enter the draft batch.
-command.program.def public @qwen38_mtp_propose() launch(%embedding_parameters: buffer, %input_parameters: buffer, %layer_parameters: buffer, %head_parameters: buffer, %output_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer, %carry: buffer) {
+command.program.def public target(@qwen38_execution) @qwen38_mtp_propose() launch(%embedding_parameters: buffer, %input_parameters: buffer, %layer_parameters: buffer, %head_parameters: buffer, %output_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer, %carry: buffer) {
   %spans = config.get @runner.qwen38.span_capacity : index
   %control_bytes = index.constant 1548 : offset
   %token_capacity = index.constant 512 : index
