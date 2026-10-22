@@ -72,8 +72,11 @@ the source policy formats and parses the model's XML tool-call protocol.
 
 The same source catalog selects RDNA WMMA or CDNA MFMA kernels from the
 execution device. Model control, weight preparation, and cache layout stay
-shared. The CDNA text path currently covers prefill buckets through 64 tokens;
-larger buckets and the vision projector still reference RDNA-specific kernels.
+shared. The CDNA text path supports packed epochs through 512 tokens. Its
+projection schedule uses 64-token tiles within larger epochs and partitions
+long Q5_K/Q6_K reductions across the device. Partial results use command-private
+workspace; the prepared weight format and retained session state are unchanged.
+The vision projector still uses RDNA-specific kernels.
 Use this text-only configuration for an MI300 deployment:
 
 ```sh
@@ -82,8 +85,8 @@ jq --arg directory "$PWD/experimental/loom_serve/models/qwen" \
    '.base_directory = $directory | del(.definition.image) |
     .definition += {
       weights: $weights, tokenizer: $tokenizer,
-      rows: 4, context_capacity: 2048, pool_capacity: 4096,
-      prefill_capacity: 64, draft_depth: 0
+      rows: 4, context_capacity: 4096, pool_capacity: 32768,
+      prefill_capacity: 512, draft_depth: 0
     }' experimental/loom_serve/models/qwen/model.json \
    > /tmp/qwen-cdna-deployment.json
 
@@ -92,9 +95,10 @@ bazel-bin/loom/src/loom/tools/loom-serve/loom-serve \
   --model=/tmp/qwen-cdna-deployment.json
 ```
 
-This is the initial text-serving configuration, not an MI300 throughput-tuned
-schedule. It uses ordinary decode without speculative drafts. The larger RDNA
-prefill and image schedules remain available through the original deployment.
+This configuration uses ordinary decode without speculative drafts. Choose a
+smaller `prefill_capacity` when shorter epoch latency matters more than bulk
+prompt throughput. The RDNA prefill and image schedules remain available
+through the original deployment.
 
 ## Image chat
 

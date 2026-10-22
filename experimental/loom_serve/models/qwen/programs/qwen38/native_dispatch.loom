@@ -7,6 +7,21 @@ target.decl @qwen38_execution
 amdgpu.target<gfx11-generic> @qwen38_dispatch_rdna
 amdgpu.target<gfx9-4-generic> @qwen38_dispatch_cdna
 
+template.decl @qwen38.prefill.projection_schedule(%tokens: index) -> (index)
+
+template.def<@qwen38.prefill.projection_schedule> target(@qwen38_dispatch_rdna) @qwen38_prefill_projection_schedule_rdna(%tokens: index) -> (index) {
+  template.return %tokens : index
+}
+
+// Dispatch capacity and the native panel recipe are independent: several
+// CDNA token tiles can share the current layer's packed weights in cache.
+template.def<@qwen38.prefill.projection_schedule> target(@qwen38_dispatch_cdna) @qwen38_prefill_projection_schedule_cdna(%tokens: index) -> (index) {
+  %tile = index.constant 64 : index
+  %wide = index.cmp ugt, %tokens, %tile : index
+  %schedule = scf.select %wide, %tile, %tokens : index
+  template.return %schedule : index
+}
+
 // Split storage is private to the command, so its lifetime ends immediately
 // after reduction and can alias other non-overlapping command temporaries.
 kernel.decl @qwen38_linear_q5k_f16_mfma_split(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%partitions: index, %control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %partials: buffer)
