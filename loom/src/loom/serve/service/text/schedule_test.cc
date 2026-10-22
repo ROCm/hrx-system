@@ -39,7 +39,7 @@ TEST(TextScheduleTest, DefaultCatalogCoversTheCapacityFamily) {
       ASSERT_LE(count, LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY);
       EXPECT_EQ(shapes[count].token_capacity, 0);
       EXPECT_EQ(shapes[count].span_capacity, 0);
-      EXPECT_EQ(shapes[0].token_capacity, iree_min(4, tokens));
+      EXPECT_EQ(shapes[0].token_capacity, 1);
       EXPECT_EQ(shapes[0].span_capacity, 1);
       EXPECT_EQ(shapes[count - 1].token_capacity, tokens);
       if (rows <= tokens) {
@@ -70,7 +70,7 @@ TEST(TextScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
   loom_serve_packing_shape_t shapes[LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY];
   const iree_host_size_t shape_count =
       loom_serve_text_default_shapes(16, 512, shapes);
-  ASSERT_EQ(shape_count, 37);
+  ASSERT_EQ(shape_count, 40);
   loom_serve_packed_span_t spans[16], scratch[16];
   for (iree_host_size_t active = 1; active <= 16; ++active) {
     for (iree_host_size_t minimum = 1; minimum <= 8; ++minimum) {
@@ -85,7 +85,7 @@ TEST(TextScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
       ASSERT_EQ(loom_serve_pack_shapes(16, ready, shape_count, shapes, 512,
                                        &cursor, spans, scratch, &shape),
                 active);
-      iree_host_size_t expected_tokens = 4;
+      iree_host_size_t expected_tokens = 1;
       while (expected_tokens < active * minimum) {
         expected_tokens *= 2;
       }
