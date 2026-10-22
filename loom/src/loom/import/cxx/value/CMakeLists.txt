@@ -372,6 +372,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::third_party::cxx_parser
+    loom::import::cxx::source::error
     loom::import::cxx::source::locations
     loom::ops::vector
   LABELS
@@ -397,6 +398,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::third_party::cxx_parser
+    loom::import::cxx::source::error
     loom::import::cxx::source::locations
     loom::ir
     loom::ops::vector

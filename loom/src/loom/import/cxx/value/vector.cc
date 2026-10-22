@@ -19,6 +19,16 @@
 #include "loom/ops/vector/ops.h"
 
 namespace loom::cxx_import {
+namespace {
+
+int64_t bit_count(loom_type_t type) {
+  auto count = loom_type_kind(type) == LOOM_TYPE_VECTOR
+                   ? loom_type_dim_static_size_at(type, 0)
+                   : 1;
+  return count * loom_scalar_type_bitwidth(loom_type_element_type(type));
+}
+
+}  // namespace
 
 loom_value_id_t Vectors::convert(loom_value_id_t value,
                                  const cxx::Type* input_type,
@@ -41,13 +51,13 @@ loom_value_id_t Vectors::convert(loom_value_id_t value,
     check(loom_vector_splat_build(&builder_, value, output,
                                   locations_.get(owner), &op));
   } else if (loom_type_kind(input) == LOOM_TYPE_VECTOR &&
-             unit_.control()->memoryLayout()->sizeOf(input_type) ==
-                 unit_.control()->memoryLayout()->sizeOf(output_type)) {
+             bit_count(input) == bit_count(output)) {
     check(loom_vector_bitcast_build(&builder_, value, input, output,
                                     locations_.get(owner), &op));
   } else {
-    diagnostics_.reject(unit_, owner,
-                        "vector reinterpretation requires equal object sizes");
+    diagnostics_.reject(
+        unit_, owner,
+        "vector reinterpretation requires equal value bit widths");
   }
   return loom_op_results(op)[0];
 }

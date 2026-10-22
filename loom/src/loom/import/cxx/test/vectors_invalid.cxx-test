@@ -1,13 +1,7 @@
 // RUN: verify
 // Unsupported vector forms diagnose at source admission.
 typedef bool V __attribute__((ext_vector_type(16)));
-// ERROR@+1: LOWERING/059 "vectors require non-boolean scalar lanes without object padding"
-V f(V x) { return x; }
-
-// ====
-// Unsupported vector forms diagnose at source admission.
-typedef float V __attribute__((ext_vector_type(3)));
-// ERROR@+1: LOWERING/059 "vectors require non-boolean scalar lanes without object padding"
+// ERROR@+1: LOWERING/059 "vectors require non-boolean scalar lanes"
 V f(V x) { return x; }
 
 // ====
@@ -52,6 +46,12 @@ using Int4 = int __attribute__((vector_size(16)));
 using Float4 = float __attribute__((vector_size(16)));
 // ERROR@+1: PARSE/036 "constexpr variable must be initialized"
 constexpr Int4 bits = (Int4)Float4{1.0f, 2.0f, 3.0f, 4.0f};
+
+// ====
+using Half3 = _Float16 __attribute__((ext_vector_type(3)));
+using Bytes8 = unsigned char __attribute__((ext_vector_type(8)));
+// ERROR@+1: LOWERING/059 "vector reinterpretation requires equal value bit widths"
+Bytes8 invalid(Half3 value) { return (Bytes8)value; }
 
 // ====
 #include <loomcxx/vector.h>

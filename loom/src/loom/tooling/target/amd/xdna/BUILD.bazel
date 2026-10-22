@@ -278,3 +278,11 @@ loom_test(
     execution_profiles = [XDNA_HARDWARE_PROFILE],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
+
+loom_test(
+    name = "padded_vectors_execution_test",
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
+    module = "//loom/src/loom/import/cxx/test:padded_vectors_module",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)

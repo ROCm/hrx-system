@@ -171,6 +171,26 @@ const cxx::VectorType* Types::native_vector(const cxx::Type* type) {
   return cxx::type_cast<cxx::VectorType>(unqualified(type));
 }
 
+bool Types::has_vector_object_padding(const cxx::Type* type, cxx::AST* owner) {
+  auto* vector = native_vector(type);
+  if (!vector) {
+    return false;
+  }
+  auto* layout = unit_.control()->memoryLayout();
+  auto object_bytes = layout->sizeOf(type);
+  auto lane_bytes = layout->sizeOf(vector->elementType());
+  if (!vector->elementCount() || !object_bytes || !lane_bytes || !*lane_bytes ||
+      vector->elementCount() > UINT64_MAX / *lane_bytes) {
+    diagnostics_.reject(unit_, owner, "vector has unknown object layout");
+  }
+  auto value_bytes = vector->elementCount() * *lane_bytes;
+  if (*object_bytes < value_bytes) {
+    diagnostics_.reject(unit_, owner,
+                        "vector object cannot contain its logical lanes");
+  }
+  return *object_bytes > value_bytes;
+}
+
 loom_memory_access_flags_t Types::memory_access_flags(const cxx::Type* input) {
   return unit_.typeTraits().is_volatile(input)
              ? LOOM_MEMORY_ACCESS_FLAG_VOLATILE
@@ -708,6 +728,11 @@ const TensorPartition* Types::tensor(const cxx::ClassType* input,
   auto projected_element = get(element, owner);
   auto element_kind = loom_type_kind(projected_element);
   auto* source_vector = native_vector(element);
+  if (source_vector && has_vector_object_padding(element, owner)) {
+    diagnostics_.reject(unit_, owner,
+                        "tensor elements require vectors without object "
+                        "padding");
+  }
   auto* lane_type = source_vector ? source_vector->elementType() : element;
   auto bytes = unit_.control()->memoryLayout()->sizeOf(element);
   if ((element_kind != LOOM_TYPE_SCALAR && element_kind != LOOM_TYPE_VECTOR) ||
@@ -927,18 +952,16 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
     case cxx::TypeKind::kVector: {
       auto* source = native_vector(input);
       auto element = get(source->elementType(), ast);
-      auto* layout = unit_.control()->memoryLayout();
-      auto bytes = layout->sizeOf(source);
-      auto element_bytes = layout->sizeOf(source->elementType());
       if (loom_type_kind(element) != LOOM_TYPE_SCALAR ||
           loom_type_element_type(element) == LOOM_SCALAR_TYPE_I1 ||
           !source->elementCount() ||
-          source->elementCount() > LOOM_DIM_MAX_STATIC_SIZE || !bytes ||
-          !element_bytes || *bytes != source->elementCount() * *element_bytes) {
-        diagnostics_.reject(
-            unit_, ast,
-            "vectors require non-boolean scalar lanes without object padding");
+          source->elementCount() > LOOM_DIM_MAX_STATIC_SIZE) {
+        diagnostics_.reject(unit_, ast,
+                            "vectors require non-boolean scalar lanes");
       }
+      // Logical SSA shape is independent of the source object's tail padding.
+      // Storage admission and pointer arithmetic retain the complete footprint.
+      has_vector_object_padding(input, ast);
       return loom_type_shaped_1d(LOOM_TYPE_VECTOR,
                                  loom_type_element_type(element),
                                  source->elementCount(), 0);

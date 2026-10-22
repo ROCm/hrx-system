@@ -72,6 +72,7 @@ _MODULES = [
     "packed_float8_conversion",
     "packed_group_dot",
     "packed_memory",
+    "padded_vectors",
     "pointer_origins",
     "pointer_walk",
     "record_memory",

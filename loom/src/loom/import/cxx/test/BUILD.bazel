@@ -146,6 +146,7 @@ loom_check_test_suite(
         "opaque_pointers_invalid.cxx-test",
         "packed_group_dot.cxx-test",
         "packed_memory.cxx-test",
+        "padded_vectors.cxx-test",
         "paged_online_softmax_loop_f32.cxx-test",
         "parameter_alignment.cxx-test",
         "parameter_alignment_invalid.cxx-test",
@@ -284,6 +285,7 @@ _AUTHORED_HOST_SOURCES = [
     "enum_values",
     "increment_values",
     "integer_functions",
+    "padded_vectors",
     "record_values",
     "schedule_values",
     "shaped_intrinsics",
@@ -703,6 +705,7 @@ loom_test_module(
 ]
 
 _AUTHORED_CXX_KERNEL_SOURCES = [
+    "padded_vectors",
     "scheduled_sum",
     "vector_initializers",
 ]

@@ -76,6 +76,6 @@ unsigned missing_kernel(unsigned value) {
 #include <loomcxx/kernel.h>
 using Packed = bool __attribute__((ext_vector_type(4)));
 [[loom::force_inline]] Packed packed_boolean(Packed value) {
-  // ERROR@+1: LOWERING/059 "vectors require non-boolean scalar lanes without object padding"
+  // ERROR@+1: LOWERING/059 "vectors require non-boolean scalar lanes"
   return loom::kernel::subgroup::shuffle_up(value, 1, 32).value;
 }

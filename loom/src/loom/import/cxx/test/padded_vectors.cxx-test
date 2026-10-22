@@ -1,0 +1,111 @@
+// RUN: roundtrip
+using Half3 = _Float16 __attribute__((ext_vector_type(3)));
+using BFloat3 = __bf16 __attribute__((ext_vector_type(3)));
+
+static_assert(sizeof(Half3) == 8);
+static_assert(sizeof(BFloat3) == 8);
+
+struct BFloatRecord {
+  unsigned before;
+  BFloat3 value;
+  unsigned after;
+};
+static_assert(sizeof(BFloatRecord) == 24);
+static_assert(__builtin_offsetof(BFloatRecord, value) == 8);
+
+static Half3 adjust(Half3 value) {
+  return value + Half3{1.0f, 2.0f, 3.0f};
+}
+
+BFloat3 convert(Half3 value) {
+  return __builtin_convertvector(value, BFloat3);
+}
+
+BFloat3 reinterpret_bits(Half3 value) {
+  return __builtin_bit_cast(BFloat3, value);
+}
+
+BFloat3 record_value(BFloatRecord* records) {
+  return records[1].value;
+}
+
+Half3 update(Half3* values) {
+  Half3 result = adjust(values[0]);
+  values[1] = result;
+  return values[1];
+}
+
+// ----
+func.def public @convert(%value: vector<3xf16>) -> (vector<3xbf16>) {
+  %2 = vector.extf %value : vector<3xf16> to vector<3xf32>
+  %3 = vector.fptrunc %2 : vector<3xf32> to vector<3xbf16>
+  func.return %3 : vector<3xbf16>
+}
+
+func.def public @reinterpret_bits(%value: vector<3xf16>) -> (vector<3xbf16>) {
+  %6 = vector.bitcast %value : vector<3xf16> to vector<3xbf16>
+  func.return %6 : vector<3xbf16>
+}
+
+func.def public @record_value(%records: buffer, %records_byte_offset: offset) -> (vector<3xbf16>) {
+  %10 = scalar.constant 1 : i32
+  %11 = scalar.extsi %10 : i32 to i64
+  %12 = scalar.constant 24 : i64
+  %13 = scalar.muli %11, %12 : i64
+  %14 = index.cast %records_byte_offset : offset to i64
+  %15 = scalar.addi %14, %13 : i64
+  %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
+  %17 = index.cast %16 : i64 to offset
+  %18 = index.constant 8 : offset
+  %19 = index.add %17, %18 : offset
+  %20 = buffer.view %records[%19] : buffer -> view<3xbf16>
+  %value = vector.load %20[0] : view<3xbf16> -> vector<3xbf16>
+  func.return %value : vector<3xbf16>
+}
+
+func.def public @update(%values: buffer, %values_byte_offset: offset) -> (vector<3xf16>) {
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.extsi %25 : i32 to i64
+  %27 = scalar.constant 8 : i64
+  %28 = scalar.muli %26, %27 : i64
+  %29 = index.cast %values_byte_offset : offset to i64
+  %30 = scalar.addi %29, %28 : i64
+  %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
+  %32 = index.cast %31 : i64 to offset
+  %33 = buffer.view %values[%32] : buffer -> view<3xf16>
+  %34 = vector.load %33[0] : view<3xf16> -> vector<3xf16>
+  %result = func.call pure @adjust(%34) : (vector<3xf16>) -> (vector<3xf16>)
+  %36 = scalar.constant 1 : i32
+  %37 = scalar.extsi %36 : i32 to i64
+  %38 = scalar.constant 8 : i64
+  %39 = scalar.muli %37, %38 : i64
+  %40 = index.cast %values_byte_offset : offset to i64
+  %41 = scalar.addi %40, %39 : i64
+  %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
+  %43 = index.cast %42 : i64 to offset
+  %44 = buffer.view %values[%43] : buffer -> view<3xf16>
+  vector.store %result, %44[0] : vector<3xf16>, view<3xf16>
+  %45 = scalar.constant 1 : i32
+  %46 = scalar.extsi %45 : i32 to i64
+  %47 = scalar.constant 8 : i64
+  %48 = scalar.muli %46, %47 : i64
+  %49 = index.cast %values_byte_offset : offset to i64
+  %50 = scalar.addi %49, %48 : i64
+  %51 = scalar.assume %50 [range(%50, 0, 9223372036854775807)] : i64
+  %52 = index.cast %51 : i64 to offset
+  %53 = buffer.view %values[%52] : buffer -> view<3xf16>
+  %54 = vector.load %53[0] : view<3xf16> -> vector<3xf16>
+  func.return %54 : vector<3xf16>
+}
+
+func.def @adjust(%value: vector<3xf16>) -> (vector<3xf16>) {
+  %57 = scalar.constant 1.0 : f32
+  %58 = scalar.fptrunc %57 : f32 to f16
+  %59 = scalar.constant 2.0 : f32
+  %60 = scalar.fptrunc %59 : f32 to f16
+  %61 = scalar.constant 3.0 : f32
+  %62 = scalar.fptrunc %61 : f32 to f16
+  %63 = vector.from_elements %58, %60, %62 : vector<3xf16>
+  %64 = vector.addf %value, %63 : vector<3xf16>
+  func.return %64 : vector<3xf16>
+}

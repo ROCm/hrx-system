@@ -183,6 +183,48 @@ TEST_F(StorageTest, AggregateArraysRetainByteFootprints) {
   }
 }
 
+TEST_F(StorageTest, PaddedVectorArraysStrideByObjectsAndAccessLogicalLanes) {
+  Locations locations(source_.unit(), source_.diagnostics(), module_);
+  Scalars scalars(source_.unit(), source_.diagnostics(), types_, locations,
+                  builder_);
+  Storage storage(source_.unit(), source_.diagnostics(), types_, scalars,
+                  locations, builder_);
+  auto* control = source_.unit().control();
+  auto* owner = source_.unit().ast();
+  const struct {
+    const cxx::Type* lane;
+    loom_scalar_type_t element;
+  } cases[] = {
+      {control->getFloat16Type(), LOOM_SCALAR_TYPE_F16},
+      {control->getBFloat16Type(), LOOM_SCALAR_TYPE_BF16},
+  };
+  for (const auto& test : cases) {
+    auto* vector = control->getVectorType(test.lane, 3, cxx::VectorKind::kExt);
+    auto* array = control->getBoundedArrayType(vector, 2);
+    auto allocation =
+        storage.allocate(array, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+    auto* alloca = producer(allocation.pointer.root);
+    EXPECT_EQ(loom_attr_as_i64(loom_index_constant_value(
+                  producer(loom_buffer_alloca_byte_length(alloca)))),
+              16);
+    EXPECT_TRUE(loom_type_equal(
+        loom_module_value_type(module_, allocation.view),
+        loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I8, 16, 0)));
+
+    auto object = storage.element(
+        storage.project(allocation.pointer, array, owner), array, 1, owner);
+    auto* object_offset = producer(object.pointer.byte_offset);
+    ASSERT_TRUE(loom_index_add_isa(object_offset));
+    EXPECT_EQ(loom_attr_as_i64(loom_index_constant_value(
+                  producer(loom_op_operands(object_offset)[1]))),
+              8);
+    auto access = storage.dereference(object, vector, owner);
+    EXPECT_TRUE(loom_type_equal(
+        loom_module_value_type(module_, access.view),
+        loom_type_shaped_1d(LOOM_TYPE_VIEW, test.element, 3, 0)));
+  }
+}
+
 TEST_F(StorageTest, ArrayAliasesRetainTheirElementTypeAndInteriorOrigin) {
   Locations locations(source_.unit(), source_.diagnostics(), module_);
   Scalars scalars(source_.unit(), source_.diagnostics(), types_, locations,

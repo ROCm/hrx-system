@@ -41,7 +41,7 @@ using F3 = float __attribute__((ext_vector_type(3)));
 LOOM_CHECK_SCENARIO(padded_vector_tensor) {
   loom::check::trial<1>(
       [](loom::check::ordinal trial, loom::check::entropy entropy) {
-        // ERROR@+1: LOWERING/059 "vectors require non-boolean scalar lanes without object padding"
+        // ERROR@+1: LOWERING/059 "tensor elements require vectors without object padding"
         const auto output = loom::check::fill<2, F3>(0.0f);
       });
 }

@@ -314,6 +314,11 @@ class Types {
   // Returns the resolved native C++ vector representation, or null for a
   // scalar or class-backed semantic vector.
   const cxx::VectorType* native_vector(const cxx::Type* type);
+  // Returns whether a native vector's source object contains trailing bytes
+  // outside its logical lanes. Unknown or inconsistent source layouts reject
+  // at owner. Value operations never observe these bytes; storage_size()
+  // retains them for allocation and address arithmetic.
+  bool has_vector_object_padding(const cxx::Type* type, cxx::AST* owner);
   bool is_unsigned(const cxx::Type* type);
   bool is_float(const cxx::Type* type);
   // Returns the native address domain represented by a source class, or

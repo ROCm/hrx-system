@@ -6,6 +6,7 @@
 
 #include "loom/import/cxx/value/vector.h"
 
+#include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/value/builder_test.h"
 #include "loom/ops/vector/ops.h"
 
@@ -62,6 +63,28 @@ TEST_F(VectorsTest, VectorConversionsReinterpretBitsInsteadOfNumericLanes) {
                       control->getIntType(), input, owner);
   auto converted = vectors.convert(value, input, output, owner);
   EXPECT_TRUE(loom_vector_bitcast_isa(producer(converted)));
+}
+
+TEST_F(VectorsTest, VectorReinterpretationUsesLogicalValueBits) {
+  Locations locations(source_.unit(), source_.diagnostics(), module_);
+  Scalars scalars(source_.unit(), source_.diagnostics(), types_, locations,
+                  builder_);
+  Vectors vectors(source_.unit(), source_.diagnostics(), types_, scalars,
+                  locations, builder_);
+  auto* control = source_.unit().control();
+  auto* owner = source_.unit().ast();
+  auto* padded = control->getVectorType(control->getFloat16Type(), 3,
+                                        cxx::VectorKind::kExt);
+  auto* words = control->getVectorType(control->getUnsignedShortIntType(), 3,
+                                       cxx::VectorKind::kExt);
+  auto* bits = control->getVectorType(control->getUnsignedCharType(), 8,
+                                      cxx::VectorKind::kExt);
+  auto value =
+      vectors.convert(scalars.integer(0, LOOM_SCALAR_TYPE_I16),
+                      control->getUnsignedShortIntType(), padded, owner);
+  auto converted = vectors.convert(value, padded, words, owner);
+  EXPECT_TRUE(loom_vector_bitcast_isa(producer(converted)));
+  EXPECT_THROW(vectors.convert(value, padded, bits, owner), SourceRejected);
 }
 
 }  // namespace

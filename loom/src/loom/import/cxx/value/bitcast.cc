@@ -13,7 +13,6 @@
 namespace loom::cxx_import {
 namespace {
 
-// Types admits only fixed rank-one source vectors without object padding.
 int64_t bit_count(loom_type_t type) {
   auto count = loom_type_kind(type) == LOOM_TYPE_VECTOR
                    ? loom_type_dim_static_size_at(type, 0)
@@ -35,8 +34,10 @@ BitCast::BitCast(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                          "bit_cast requires scalar or vector values");
     }
   }
-  // Source object sizes alone are insufficient: bool occupies a byte in C++
-  // but is represented by one predicate bit in High.
+  // Source object sizes alone are insufficient: padded vectors carry fewer
+  // value bits than their footprint, and bool occupies a byte in C++ but is
+  // represented by one predicate bit in High. Equal value widths preserve all
+  // observable bits while leaving destination padding unspecified.
   if (bit_count(input_) != bit_count(output_)) {
     diagnostics.reject(unit, owner,
                        "bit_cast requires equal value bit widths; bool has a "

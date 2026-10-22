@@ -6,6 +6,7 @@
 
 #include "loom/import/cxx/value/bitcast.h"
 
+#include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/value/builder_test.h"
 #include "loom/ops/vector/ops.h"
 
@@ -56,6 +57,16 @@ TEST_F(BitCastTest, IdenticalRepresentationsReuseTheOriginalValue) {
                source_.unit().ast());
   auto input = scalars.integer(-1, LOOM_SCALAR_TYPE_I32);
   EXPECT_EQ(cast.build(builder_, input, LOOM_LOCATION_UNKNOWN), input);
+}
+
+TEST_F(BitCastTest, PaddedVectorObjectBytesRemainOutsideSSAValues) {
+  auto* control = source_.unit().control();
+  auto* padded = control->getVectorType(control->getFloat16Type(), 3,
+                                        cxx::VectorKind::kExt);
+  EXPECT_THROW(
+      BitCast(source_.unit(), source_.diagnostics(), types_, padded,
+              control->getUnsignedLongLongIntType(), source_.unit().ast()),
+      SourceRejected);
 }
 
 }  // namespace

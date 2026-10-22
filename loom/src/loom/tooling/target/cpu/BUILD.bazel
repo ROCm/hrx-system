@@ -107,7 +107,7 @@ iree_executable_test(
     ]) + ["@platforms//cpu:x86_64"],
 )
 
-# Addressable C++ locals preserve independent storage across native calls.
+# C++ object storage preserves source layout across native calls and kernels.
 [
     loom_test(
         name = name + "_test",
@@ -121,6 +121,7 @@ iree_executable_test(
     for name in [
         "array_records",
         "call_lifetimes",
+        "padded_vectors",
     ]
 ]
 

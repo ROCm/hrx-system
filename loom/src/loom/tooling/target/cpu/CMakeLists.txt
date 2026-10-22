@@ -113,6 +113,30 @@ if(LOOM_IMPORT_CXX AND IREE_ARCH STREQUAL "x86_64")
 if(LOOM_TARGET_ARCH_X86 AND LOOM_TARGET_ARCH_VM AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF)
 loom_execution_test(
   NAME
+    padded_vectors_test_execute_x86_task_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "loom::import::cxx::test::padded_vectors_module"
+  RUNNER_ARGS
+    "--device=task"
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.task"
+    "iree-build-requirement=runtime.hal.executable_loader.embedded_elf"
+    "loom-execution-profile=x86_task_hardware"
+    "loom-target-family=x86"
+    "loom-target-class=cpu"
+    "loom-executor=hardware"
+)
+endif()
+endif()
+
+if(LOOM_IMPORT_CXX AND IREE_ARCH STREQUAL "x86_64")
+if(LOOM_TARGET_ARCH_X86 AND LOOM_TARGET_ARCH_VM AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF)
+loom_execution_test(
+  NAME
     integer_intrinsics_test_execute_x86_task_hardware_test
   CORRECTNESS_ONLY
   MODULE

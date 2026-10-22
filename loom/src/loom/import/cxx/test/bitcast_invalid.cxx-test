@@ -23,6 +23,11 @@ using Bytes4 = unsigned char __attribute__((ext_vector_type(4)));
 unsigned short entry(Bytes4 value) { return __builtin_bit_cast(unsigned short, value); }
 
 // ====
+using Half3 = _Float16 __attribute__((ext_vector_type(3)));
+// ERROR@+1: LOWERING/059 "bit_cast requires equal value bit widths"
+unsigned long long entry(Half3 value) { return __builtin_bit_cast(unsigned long long, value); }
+
+// ====
 // Pointer values retain storage identity, not raw address bits.
 // ERROR@+1: LOWERING/059 "bit_cast requires scalar or vector values"
 unsigned long long entry(const unsigned* value) { return __builtin_bit_cast(unsigned long long, value); }

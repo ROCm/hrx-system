@@ -143,6 +143,7 @@ loom_test(
         "borrowed_storage",
         "packed_byte_arithmetic",
         "packed_float8_conversion",
+        "padded_vectors",
         "pointer_origins",
         "subgroup_shuffles",
         "vector_lookup",

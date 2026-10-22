@@ -934,7 +934,7 @@ TEST(TypesTest, BooleanObjectsHaveByteLayoutAndPredicateValues) {
   }
 }
 
-TEST(TypesTest, VectorProjectionKeepsLaneShapeAndRejectsPackedBoolAndPadding) {
+TEST(TypesTest, VectorProjectionSeparatesLogicalLanesFromObjectLayout) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
   Source source(IREE_SV("int entry();"), IREE_SV("vectors.cpp"), options);
@@ -952,10 +952,44 @@ TEST(TypesTest, VectorProjectionKeepsLaneShapeAndRejectsPackedBoolAndPadding) {
                                                 cxx::VectorKind::kExt),
                          owner),
                SourceRejected);
-  EXPECT_THROW(types.get(control->getVectorType(control->getFloatType(), 3,
-                                                cxx::VectorKind::kExt),
-                         owner),
-               SourceRejected);
+  const struct {
+    const cxx::Type* lane;
+    loom_scalar_type_t element;
+    int64_t lane_bytes;
+  } cases[] = {
+      {control->getSignedCharType(), LOOM_SCALAR_TYPE_I8, 1},
+      {control->getUnsignedCharType(), LOOM_SCALAR_TYPE_I8, 1},
+      {control->getShortIntType(), LOOM_SCALAR_TYPE_I16, 2},
+      {control->getUnsignedShortIntType(), LOOM_SCALAR_TYPE_I16, 2},
+      {control->getIntType(), LOOM_SCALAR_TYPE_I32, 4},
+      {control->getUnsignedIntType(), LOOM_SCALAR_TYPE_I32, 4},
+      {control->getLongLongIntType(), LOOM_SCALAR_TYPE_I64, 8},
+      {control->getUnsignedLongLongIntType(), LOOM_SCALAR_TYPE_I64, 8},
+      {control->getFloat8E4M3FNType(), LOOM_SCALAR_TYPE_F8E4M3, 1},
+      {control->getFloat8E5M2Type(), LOOM_SCALAR_TYPE_F8E5M2, 1},
+      {control->getFloat16Type(), LOOM_SCALAR_TYPE_F16, 2},
+      {control->getBFloat16Type(), LOOM_SCALAR_TYPE_BF16, 2},
+      {control->getFloatType(), LOOM_SCALAR_TYPE_F32, 4},
+      {control->getDoubleType(), LOOM_SCALAR_TYPE_F64, 8},
+  };
+  const uint64_t lane_counts[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16};
+  for (const auto& test : cases) {
+    for (auto lane_count : lane_counts) {
+      uint64_t object_lane_count = 1;
+      while (object_lane_count < lane_count) {
+        object_lane_count *= 2;
+      }
+      auto* ext =
+          control->getVectorType(test.lane, lane_count, cxx::VectorKind::kExt);
+      EXPECT_TRUE(loom_type_equal(
+          types.get(ext, owner),
+          loom_type_shaped_1d(LOOM_TYPE_VECTOR, test.element, lane_count, 0)));
+      EXPECT_EQ(types.storage_size(ext, owner),
+                test.lane_bytes * object_lane_count);
+      EXPECT_EQ(types.has_vector_object_padding(ext, owner),
+                lane_count != object_lane_count);
+    }
+  }
 }
 
 TEST(TypesTest, MutationUsesTheObjectQualifierInsteadOfItsPointee) {

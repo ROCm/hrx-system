@@ -40,3 +40,13 @@ loom_test(
         "//loom/config/import:cxx",
     ]),
 )
+
+loom_test(
+    name = "cxx_padded_vectors_test",
+    case = "padded_vectors_functions",
+    execution_profiles = [WASM_HOSTED_PROFILE],
+    module = "//loom/src/loom/import/cxx/test:padded_vectors_module",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+    ]),
+)
