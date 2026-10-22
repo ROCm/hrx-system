@@ -7,6 +7,13 @@ target.decl @qwen38_execution
 amdgpu.target<gfx11-generic> @qwen38_dispatch_rdna
 amdgpu.target<gfx9-4-generic> @qwen38_dispatch_cdna
 
+// Split storage is private to the command, so its lifetime ends immediately
+// after reduction and can alias other non-overlapping command temporaries.
+kernel.decl @qwen38_linear_q5k_f16_mfma_split(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%partitions: index, %control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %partials: buffer)
+kernel.decl @qwen38_linear_q5k_f16_mfma_split_channel8(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%partitions: index, %control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %partials: buffer)
+kernel.decl @qwen38_linear_q6k_f16_mfma_split(%partitions: index, %tokens: index, %inputs: index, %outputs: index) launch(%partitions: index, %control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %partials: buffer)
+kernel.decl @qwen38_linear_split_reduce(%partitions: index, %tokens: index, %outputs: index) launch(%partitions: index, %control: buffer, %outputs: index, %partials: buffer, %output: buffer)
+
 kernel.decl @qwen38_attention_decode_split_wmma_partial() launch(%token_count: index, %token_ordinal: index, %control_position_index: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer)
 
 kernel.decl @qwen38_attention_decode_split_mfma_partial() launch(%token_count: index, %token_ordinal: index, %control_position_index: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer)
@@ -30,8 +37,6 @@ command.program.def public target(@qwen38_execution) @qwen38_dispatch_attention_
 
 kernel.decl @qwen38_linear_q5k_f16_wmma(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @qwen38_linear_q5k_f16_mfma(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
-
 template.decl @qwen38.dispatch.linear.q5k.f16(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
 template.def<@qwen38.dispatch.linear.q5k.f16> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q5k_f16_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
@@ -40,7 +45,14 @@ template.def<@qwen38.dispatch.linear.q5k.f16> target(@qwen38_dispatch_rdna) @qwe
 }
 
 template.def<@qwen38.dispatch.linear.q5k.f16> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q5k_f16_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
-  kernel.launch @qwen38_linear_q5k_f16_mfma[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  %partitions = index.constant 8 : index
+  %element_bytes = index.constant 4 : offset
+  %output_elements = index.mul %dispatch_token_count, %output_size_data : index
+  %partial_elements = index.mul %partitions, %output_elements : index
+  %partial_bytes = index.scale %partial_elements, %element_bytes : index, offset -> offset
+  %partials = buffer.alloca<global> align(256) %partial_bytes : buffer
+  kernel.launch @qwen38_linear_q5k_f16_mfma_split[%partitions, %dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%partitions, %token_count_data, %input_size_data, %output_size_data, %input, %weight, %partials) : [index, index, index, index](index, buffer, index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_linear_split_reduce[%partitions, %dispatch_token_count, %dispatch_output_size](%partitions, %token_count_data, %output_size_data, %partials, %output) : [index, index, index](index, buffer, index, buffer, buffer)
   template.return
 }
 
@@ -51,8 +63,6 @@ command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q5k
 
 kernel.decl @qwen38_linear_q5k_f16_wmma_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @qwen38_linear_q5k_f16_mfma_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
-
 template.decl @qwen38.dispatch.linear.q5k.f16.channel8(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
 template.def<@qwen38.dispatch.linear.q5k.f16.channel8> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q5k_f16_channel8_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
@@ -61,7 +71,14 @@ template.def<@qwen38.dispatch.linear.q5k.f16.channel8> target(@qwen38_dispatch_r
 }
 
 template.def<@qwen38.dispatch.linear.q5k.f16.channel8> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q5k_f16_channel8_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
-  kernel.launch @qwen38_linear_q5k_f16_mfma_channel8[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%token_count_data, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  %partitions = index.constant 4 : index
+  %element_bytes = index.constant 4 : offset
+  %output_elements = index.mul %dispatch_token_count, %output_size_data : index
+  %partial_elements = index.mul %partitions, %output_elements : index
+  %partial_bytes = index.scale %partial_elements, %element_bytes : index, offset -> offset
+  %partials = buffer.alloca<global> align(256) %partial_bytes : buffer
+  kernel.launch @qwen38_linear_q5k_f16_mfma_split_channel8[%partitions, %dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%partitions, %token_count_data, %input_size_data, %output_size_data, %input, %weight, %partials) : [index, index, index, index](index, buffer, index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_linear_split_reduce[%partitions, %dispatch_token_count, %dispatch_output_size](%partitions, %token_count_data, %output_size_data, %partials, %output) : [index, index, index](index, buffer, index, buffer, buffer)
   template.return
 }
 
@@ -114,8 +131,6 @@ command.program.def public target(@qwen38_execution) @qwen38_dispatch_linear_q5k
 
 kernel.decl @qwen38_linear_q6k_f16_wmma_x64(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @qwen38_linear_q6k_f16_mfma_x64(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
-
 template.decl @qwen38.dispatch.linear.q6k.f16.x64(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
 template.def<@qwen38.dispatch.linear.q6k.f16.x64> target(@qwen38_dispatch_rdna) @qwen38_dispatch_linear_q6k_f16_x64_rdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
@@ -124,7 +139,14 @@ template.def<@qwen38.dispatch.linear.q6k.f16.x64> target(@qwen38_dispatch_rdna) 
 }
 
 template.def<@qwen38.dispatch.linear.q6k.f16.x64> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q6k_f16_x64_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
-  kernel.launch @qwen38_linear_q6k_f16_mfma_x64[%dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%control, %input_size_data, %output_size_data, %input, %weight, %output) : [index, index, index](buffer, index, index, buffer, buffer, buffer)
+  %partitions = index.constant 8 : index
+  %element_bytes = index.constant 4 : offset
+  %output_elements = index.mul %dispatch_token_count, %output_size_data : index
+  %partial_elements = index.mul %partitions, %output_elements : index
+  %partial_bytes = index.scale %partial_elements, %element_bytes : index, offset -> offset
+  %partials = buffer.alloca<global> align(256) %partial_bytes : buffer
+  kernel.launch @qwen38_linear_q6k_f16_mfma_split[%partitions, %dispatch_token_count, %dispatch_input_size, %dispatch_output_size](%partitions, %control, %input_size_data, %output_size_data, %input, %weight, %partials) : [index, index, index, index](index, buffer, index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_linear_split_reduce[%partitions, %dispatch_token_count, %dispatch_output_size](%partitions, %control, %output_size_data, %partials, %output) : [index, index, index](index, buffer, index, buffer, buffer)
   template.return
 }
 

@@ -130,6 +130,20 @@ template.def<@qwen38.dense.signed_weight_f16_vector4> @qwen38_dense_q8_0_f16_vec
 }
 
 template.def<@qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_body(%weight_format: index, %weight_macro_block_byte_count: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %block_width = index.constant 256 : index
+  %bounded_inputs = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
+  %end = index.div %bounded_inputs, %block_width : index
+  %origin = index.constant 0 : offset
+  template.apply<@qwen38.dense_q6k_f16_wmma.range>(%weight_format, %weight_macro_block_byte_count, %token_count, %input_size0, %output_size0, %channel_tile, %token_tile, %channel_tile_width, %token_tile_width, %channel_group_count, %workgroup_size, %subgroup_count, %workitem, %subgroup, %lane, %begin, %end, %origin, %input, %weight, %output) : (index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, offset, buffer, buffer, buffer)
+  template.return
+}
+
+template.decl @qwen38.dense_q6k_f16_wmma.range(%weight_format: index, %weight_macro_block_byte_count: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %block_begin: index, %block_end: index, %output_origin: offset, %input: buffer, %weight: buffer, %output: buffer)
+
+// A contiguous range of quantization blocks retains the same weight and token
+// panels as the full contraction. The output origin selects its partial plane.
+template.def<@qwen38.dense_q6k_f16_wmma.range> device @qwen38_dense_q6k_f16_wmma_body_range(%weight_format: index, %weight_macro_block_byte_count: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %block_begin: index, %block_end: index, %output_origin: offset, %input: buffer, %weight: buffer, %output: buffer) {
   %operand_elements = template.apply<@tensor.matrix.f16_16x16x16.operand_elements>() : () -> (index)
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
   %bounded_input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
@@ -164,7 +178,7 @@ template.def<@qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
   %weight_row_bytes = index.mul %quant_block_count, %weight_macro_block_byte_count : index
   %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
   %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x[%bounded_input_size]xf32>
-  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x[%bounded_output_size]xf32>
+  %output_view = buffer.view %output_noalias[%output_origin] : buffer -> view<[%bounded_token_count]x[%bounded_output_size]xf32>
   %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
   %activation_stage = buffer.alloca<workgroup> align(16) %activation_stage_bytes : buffer
   %result_stage = buffer.alloca<workgroup> align(16) %result_stage_bytes : buffer
@@ -191,7 +205,7 @@ template.def<@qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
   %init01 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<4xf32>
   %init10 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<4xf32>
   %init11 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<4xf32>
-  %result00, %result01, %result10, %result11 = scf.for %quant_block = [%c0 to %quant_block_count step %c1](%block_acc00 = %init00 : vector<4xf32>, %block_acc01 = %init01 : vector<4xf32>, %block_acc10 = %init10 : vector<4xf32>, %block_acc11 = %init11 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+  %result00, %result01, %result10, %result11 = scf.for %quant_block = [%block_begin to %block_end step %c1](%block_acc00 = %init00 : vector<4xf32>, %block_acc01 = %init01 : vector<4xf32>, %block_acc10 = %init10 : vector<4xf32>, %block_acc11 = %init11 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
     %block_result00, %block_result01, %block_result10, %block_result11 = scf.for %quant_group = [%c0 to %c8 step %c1](%acc00 = %block_acc00 : vector<4xf32>, %acc01 = %block_acc01 : vector<4xf32>, %acc10 = %block_acc10 : vector<4xf32>, %acc11 = %block_acc11 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
       %block_k_base = index.mul %quant_block, %c256 : index
       %group_k_add = index.mul %quant_group, %c32 : index
