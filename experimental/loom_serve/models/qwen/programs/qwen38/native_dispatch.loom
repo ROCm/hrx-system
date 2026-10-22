@@ -86,7 +86,12 @@ template.def<@qwen38.dispatch.linear.q5k.f16.channel8> target(@qwen38_dispatch_r
 }
 
 template.def<@qwen38.dispatch.linear.q5k.f16.channel8> target(@qwen38_dispatch_cdna) @qwen38_dispatch_linear_q5k_f16_channel8_cdna(%dispatch_token_count: index, %dispatch_input_size: index, %dispatch_output_size: index, %token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer) {
-  %partitions = index.constant 4 : index
+  // Wide epochs already expose enough token tiles to halve the partial planes.
+  %wide_tokens = index.constant 512 : index
+  %wide_partitions = index.constant 2 : index
+  %narrow_partitions = index.constant 4 : index
+  %wide = index.cmp uge, %dispatch_token_count, %wide_tokens : index
+  %partitions = scf.select %wide, %wide_partitions, %narrow_partitions : index
   %element_bytes = index.constant 4 : offset
   %output_elements = index.mul %dispatch_token_count, %output_size_data : index
   %partial_elements = index.mul %partitions, %output_elements : index

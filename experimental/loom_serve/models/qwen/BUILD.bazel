@@ -194,8 +194,11 @@ loom_test(
         "tests/matrix_projection.loom",
     ],
     benchmark_smoke = False,
-    case = "@command_projection_check",
     execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    variants = {
+        "canonical": {"case": "@command_projection_check"},
+        "channel8": {"case": "@command_channel8_projection_check"},
+    },
     deps = [
         ":attention_matrix_kernels",
         ":projection_kernels",
