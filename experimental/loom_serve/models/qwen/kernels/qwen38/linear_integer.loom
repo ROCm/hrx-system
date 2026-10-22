@@ -1,0 +1,35 @@
+template.decl @ggml.q5k_q8_1.matrix(%weight_channels: index, %tokens: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+amdgpu.target<gfx9-4-generic> @qwen38_integer_cdna {subgroup_size = 64}
+
+// Capacity specializes the launch; the epoch control supplies its live prefix.
+// Entire inactive 64-token tiles skip acquisition and matrix work together.
+kernel.def target(@qwen38_integer_cdna) @qwen38_linear_q5k_q8_1_matrix(%weight_channels: index, %token_capacity0: index, %inputs: index, %outputs0: index) {
+  %token_capacity = index.assume %token_capacity0 [range(%token_capacity0, 0, 512)] : index
+  %outputs = index.assume %outputs0 [range(%outputs0, 1, 32768)] : index
+  %one = index.constant 1 : index
+  %token_tile = index.constant 64 : index
+  %channel_tile = index.constant 128 : index
+  %token_padding = index.constant 63 : index
+  %channel_padding = index.constant 127 : index
+  %threads = index.constant 512 : index
+  %padded_tokens = index.add %token_capacity, %token_padding : index
+  %padded_channels = index.add %outputs, %channel_padding : index
+  %token_groups = index.div %padded_tokens, %token_tile : index
+  %channel_groups = index.div %padded_channels, %channel_tile : index
+  kernel.launch.config workgroups(%channel_groups, %token_groups, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%weight_channels: index, %control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %control_view = buffer.view %control[%origin] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %control_view[0] : view<1xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %tile_width = index.constant 64 : index
+  %first_token = index.mul %token_tile, %tile_width : index
+  %active = index.cmp ult, %first_token, %token_count : index
+  scf.if %active {
+    template.apply<@ggml.q5k_q8_1.matrix>(%weight_channels, %token_count, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  }
+  kernel.return
+}

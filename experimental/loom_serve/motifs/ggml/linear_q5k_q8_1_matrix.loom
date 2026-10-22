@@ -1,0 +1,258 @@
+template.decl @ggml.q5k_q8_1.matrix(%weight_channels0: index, %token_count0: index, %input_size0: index, %output_size0: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+
+template.decl @ggml.q8_1_x4.block(%input: buffer, %row: offset, %block: index) -> (vector<32xi8>, f32, f32)
+
+amdgpu.target<gfx9-4-generic> @ggml_q5k_matrix_cdna
+
+// Each 512-thread workgroup owns 128 channels by 64 tokens. A complete
+// 256-value Q5 block expands to signed I8 in LDS without losing its fifth bit;
+// every code is nonnegative. Its scales remain F32. Eight waves reuse that
+// panel across all tokens with native 16x16x32 integer contractions and F32
+// accumulation. Q8_1 activation metadata supplies the affine minimum term.
+//
+// Inputs use Q8_1 x4 packing. Weight channels are canonical (1) or grouped
+// into complete channel blocks (8); the caller supplies that physical layout.
+// Inputs and outputs are disjoint. Inactive token/channel tails zero-fill
+// staging and suppress stores. The caller skips wholly inactive token tiles.
+// Workgroup x/y select channel/token tiles, and z is unused.
+//
+// Four F32 result fragments per wave survive between panels. Stage pitches
+// include eight-byte bank padding; all six LDS arrays occupy 61.5 KiB, reused
+// after the panel retirement barrier. No expanded weights escape the kernel.
+template.def<@ggml.q5k_q8_1.matrix> target(@ggml_q5k_matrix_cdna) requires [#target.subgroup.size<64>] @ggml_q5k_q8_1_matrix_cdna(%weight_channels0: index, %token_count0: index, %input_size0: index, %output_size0: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
+  %weight_channels = index.assume %weight_channels0 [range(%weight_channels0, 1, 8)] : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %c256 = index.constant 256 : index
+  %c512 = index.constant 512 : index
+  %c1024 = index.constant 1024 : index
+  %block_bytes = index.constant 176 : offset
+  %group_bytes = index.constant 144 : offset
+  %byte16 = index.constant 16 : offset
+  %byte48 = index.constant 48 : offset
+  %weight_bytes = index.constant 33792 : offset
+  %input_bytes = index.constant 16896 : offset
+  %weight_metadata_bytes = index.constant 4096 : offset
+  %input_metadata_bytes = index.constant 2048 : offset
+  %workitem = kernel.workitem.id<x> : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %channel_base = index.mul %channel_tile, %c128 : index
+  %token_base = index.mul %token_tile, %c64 : index
+  %wave_channel_group = index.div %wave, %c2 : index
+  %wave_channel = index.mul %wave_channel_group, %c32 : index
+  %wave_token_group = index.rem %wave, %c2 : index
+  %wave_token = index.mul %wave_token_group, %c16 : index
+  %lane_row = index.rem %lane, %c16 : index
+  %lane_group = index.div %lane, %c16 : index
+  %lane_k = index.mul %lane_group, %c8 : index
+  %result_row = index.mul %lane_group, %c4 : index
+  %blocks = index.div %input_size, %c256 : index
+  %input_groups = index.div %input_size, %c128 : index
+  %input_row_bytes = index.scale %input_groups, %group_bytes : index, offset -> offset
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_bytes : buffer
+  %input_stage = buffer.alloca<workgroup> align(16) %input_bytes : buffer
+  %weight_scale_stage = buffer.alloca<workgroup> align(16) %weight_metadata_bytes : buffer
+  %weight_minimum_stage = buffer.alloca<workgroup> align(16) %weight_metadata_bytes : buffer
+  %input_scale_stage = buffer.alloca<workgroup> align(16) %input_metadata_bytes : buffer
+  %input_sum_stage = buffer.alloca<workgroup> align(16) %input_metadata_bytes : buffer
+  %weight_values = buffer.view %weight_stage[%origin] : buffer -> view<128x264xi8>
+  %input_values = buffer.view %input_stage[%origin] : buffer -> view<64x264xi8>
+  %weight_scales = buffer.view %weight_scale_stage[%origin] : buffer -> view<8x128xf32>
+  %weight_minima = buffer.view %weight_minimum_stage[%origin] : buffer -> view<8x128xf32>
+  %input_scales = buffer.view %input_scale_stage[%origin] : buffer -> view<8x64xf32>
+  %input_sums = buffer.view %input_sum_stage[%origin] : buffer -> view<8x64xf32>
+  %output_values = buffer.view %output[%origin] : buffer -> view<[%token_count]x[%output_size]xf32>
+  %zero = vector.constant 0.0 : vector<4xf32>
+  %zero_i = vector.constant 0 : vector<4xi32>
+  %init = vector.fragment<init> %zero_i shape [%c16, %c16] : vector<4xi32>
+  %schema = encoding.define #encoding.operand<element_format=i8, payload_elements=8, payload_registers=2> : encoding<schema>
+  %nibble_mask = scalar.constant 252645135 : i32
+  %byte_mask = scalar.constant 16843009 : i32
+  %nibble_shift = scalar.constant 4 : i32
+  %result0, %result1, %result2, %result3 = scf.for %block = [%c0 to %blocks step %c1](%sum0 = %zero : vector<4xf32>, %sum1 = %zero : vector<4xf32>, %sum2 = %zero : vector<4xf32>, %sum3 = %zero : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+    scf.for %task = [%workitem to %c1024 step %c512] unroll {
+      %row = index.div %task, %c8 : index
+      %packet = index.rem %task, %c8 : index
+      %channel = index.add %channel_base, %row : index
+      %valid = index.cmp ult, %channel, %output_size : index
+      scf.if %valid {
+        %channel_group = index.div %channel, %weight_channels : index
+        %channel_inner = index.rem %channel, %weight_channels : index
+        %block_group = index.madd %channel_group, %blocks, %block : index
+        %physical_block = index.madd %block_group, %weight_channels, %channel_inner : index
+        %weight_base = index.scale %physical_block, %block_bytes : index, offset -> offset
+        %high_base = index.add %weight_base, %byte16 : offset
+        %low_base = index.add %weight_base, %byte48 : offset
+        %high_view = buffer.view %weight[%high_base] : buffer -> view<8xi32>
+        %low_view = buffer.view %weight[%low_base] : buffer -> view<32xi32>
+        %high = view.load %high_view[%packet] : view<8xi32> -> i32
+        scf.for %pair = [%c0 to %c4 step %c1] unroll {
+          %low_index = index.madd %pair, %c8, %packet : index
+          %packed = view.load %low_view[%low_index] : view<32xi32> -> i32
+          %low0 = scalar.andi %packed, %nibble_mask : i32
+          %shifted = scalar.shrui %packed, %nibble_shift : i32
+          %low1 = scalar.andi %shifted, %nibble_mask : i32
+          %group0 = index.mul %pair, %c2 : index
+          %group1 = index.add %group0, %c1 : index
+          %shift0 = index.cast %group0 : index to i32
+          %shift1 = index.cast %group1 : index to i32
+          %high_shifted0 = scalar.shrui %high, %shift0 : i32
+          %high_shifted1 = scalar.shrui %high, %shift1 : i32
+          %high_bit0 = scalar.andi %high_shifted0, %byte_mask : i32
+          %high_bit1 = scalar.andi %high_shifted1, %byte_mask : i32
+          %high0 = scalar.shli %high_bit0, %nibble_shift : i32
+          %high1 = scalar.shli %high_bit1, %nibble_shift : i32
+          %code0 = scalar.ori %low0, %high0 : i32
+          %code1 = scalar.ori %low1, %high1 : i32
+          %word0 = vector.splat %code0 : vector<1xi32>
+          %word1 = vector.splat %code1 : vector<1xi32>
+          %bytes0 = vector.bitcast %word0 : vector<1xi32> to vector<4xi8>
+          %bytes1 = vector.bitcast %word1 : vector<1xi32> to vector<4xi8>
+          %packet_column = index.mul %packet, %c4 : index
+          %column0 = index.madd %group0, %c32, %packet_column : index
+          %column1 = index.add %column0, %c32 : index
+          vector.store %bytes0, %weight_values[%row, %column0] : vector<4xi8>, view<128x264xi8>
+          vector.store %bytes1, %weight_values[%row, %column1] : vector<4xi8>, view<128x264xi8>
+        }
+        %scale, %minimum = template.apply<@ggml.qk.scale_min>(%weight, %weight_base, %packet) : (buffer, offset, index) -> (f32, f32)
+        view.store %scale, %weight_scales[%packet, %row] : f32, view<8x128xf32>
+        view.store %minimum, %weight_minima[%packet, %row] : f32, view<8x128xf32>
+      } else {
+        %zero_bytes = vector.constant 0 : vector<32xi8>
+        %column = index.mul %packet, %c32 : index
+        vector.store %zero_bytes, %weight_values[%row, %column] : vector<32xi8>, view<128x264xi8>
+        %zero_float = scalar.constant 0.0 : f32
+        view.store %zero_float, %weight_scales[%packet, %row] : f32, view<8x128xf32>
+        view.store %zero_float, %weight_minima[%packet, %row] : f32, view<8x128xf32>
+      }
+    }
+    %input_row = index.div %workitem, %c8 : index
+    %input_group = index.rem %workitem, %c8 : index
+    %token = index.add %token_base, %input_row : index
+    %input_valid = index.cmp ult, %token, %token_count : index
+    %values, %scale, %sum = scf.if %input_valid -> (vector<32xi8>, f32, f32) {
+      %row_base = index.scale %token, %input_row_bytes : index, offset -> offset
+      %q8_block = index.madd %block, %c8, %input_group : index
+      %values, %scale, %sum = template.apply<@ggml.q8_1_x4.block>(%input, %row_base, %q8_block) : (buffer, offset, index) -> (vector<32xi8>, f32, f32)
+      scf.yield %values, %scale, %sum : vector<32xi8>, f32, f32
+    } else {
+      %zero_bytes = vector.constant 0 : vector<32xi8>
+      %zero_float = scalar.constant 0.0 : f32
+      scf.yield %zero_bytes, %zero_float, %zero_float : vector<32xi8>, f32, f32
+    }
+    %input_column = index.mul %input_group, %c32 : index
+    vector.store %values, %input_values[%input_row, %input_column] : vector<32xi8>, view<64x264xi8>
+    view.store %scale, %input_scales[%input_group, %input_row] : f32, view<8x64xf32>
+    view.store %sum, %input_sums[%input_group, %input_row] : f32, view<8x64xf32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %next0, %next1, %next2, %next3 = scf.for %group = [%c0 to %c8 step %c1](%acc0 = %sum0 : vector<4xf32>, %acc1 = %sum1 : vector<4xf32>, %acc2 = %sum2 : vector<4xf32>, %acc3 = %sum3 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) unroll schedule(linear) {
+      %fragment_k = index.madd %group, %c32, %lane_k : index
+      %weight_add0 = index.constant 0 : index
+      %weight_row0 = index.add %wave_channel, %weight_add0 : index
+      %weight_load_row0 = index.add %weight_row0, %lane_row : index
+      %weight_bytes0 = vector.load %weight_values[%weight_load_row0, %fragment_k] : view<128x264xi8> -> vector<8xi8>
+      %weight_packed0 = vector.bitcast %weight_bytes0 : vector<8xi8> to vector<2xi32>
+      %lhs0 = vector.fragment<lhs> %weight_packed0 shape [%c16, %c32] using {schema = %schema : encoding<schema>} : vector<2xi32>
+      %weight_result_row0 = index.add %weight_row0, %result_row : index
+      %weight_scale0 = vector.load %weight_scales[%group, %weight_result_row0] : view<8x128xf32> -> vector<4xf32>
+      %weight_minimum0 = vector.load %weight_minima[%group, %weight_result_row0] : view<8x128xf32> -> vector<4xf32>
+      %weight_add1 = index.constant 16 : index
+      %weight_row1 = index.add %wave_channel, %weight_add1 : index
+      %weight_load_row1 = index.add %weight_row1, %lane_row : index
+      %weight_bytes1 = vector.load %weight_values[%weight_load_row1, %fragment_k] : view<128x264xi8> -> vector<8xi8>
+      %weight_packed1 = vector.bitcast %weight_bytes1 : vector<8xi8> to vector<2xi32>
+      %lhs1 = vector.fragment<lhs> %weight_packed1 shape [%c16, %c32] using {schema = %schema : encoding<schema>} : vector<2xi32>
+      %weight_result_row1 = index.add %weight_row1, %result_row : index
+      %weight_scale1 = vector.load %weight_scales[%group, %weight_result_row1] : view<8x128xf32> -> vector<4xf32>
+      %weight_minimum1 = vector.load %weight_minima[%group, %weight_result_row1] : view<8x128xf32> -> vector<4xf32>
+      %input_add0 = index.constant 0 : index
+      %input_row0 = index.add %wave_token, %input_add0 : index
+      %input_load_row0 = index.add %input_row0, %lane_row : index
+      %input_bytes0 = vector.load %input_values[%input_load_row0, %fragment_k] : view<64x264xi8> -> vector<8xi8>
+      %input_packed0 = vector.bitcast %input_bytes0 : vector<8xi8> to vector<2xi32>
+      %rhs0 = vector.fragment<rhs> %input_packed0 shape [%c32, %c16] using {schema = %schema : encoding<schema>} : vector<2xi32>
+      %input_scale0 = view.load %input_scales[%group, %input_load_row0] : view<8x64xf32> -> f32
+      %input_sum0 = view.load %input_sums[%group, %input_load_row0] : view<8x64xf32> -> f32
+      %input_scale_vector0 = vector.splat %input_scale0 : vector<4xf32>
+      %input_sum_vector0 = vector.splat %input_sum0 : vector<4xf32>
+      %input_add1 = index.constant 32 : index
+      %input_row1 = index.add %wave_token, %input_add1 : index
+      %input_load_row1 = index.add %input_row1, %lane_row : index
+      %input_bytes1 = vector.load %input_values[%input_load_row1, %fragment_k] : view<64x264xi8> -> vector<8xi8>
+      %input_packed1 = vector.bitcast %input_bytes1 : vector<8xi8> to vector<2xi32>
+      %rhs1 = vector.fragment<rhs> %input_packed1 shape [%c32, %c16] using {schema = %schema : encoding<schema>} : vector<2xi32>
+      %input_scale1 = view.load %input_scales[%group, %input_load_row1] : view<8x64xf32> -> f32
+      %input_sum1 = view.load %input_sums[%group, %input_load_row1] : view<8x64xf32> -> f32
+      %input_scale_vector1 = vector.splat %input_scale1 : vector<4xf32>
+      %input_sum_vector1 = vector.splat %input_sum1 : vector<4xf32>
+      %dot0 = vector.mma %lhs0, %rhs0, %init : vector<2xi32>, vector<2xi32>, vector<4xi32>
+      %wide0 = vector.sitofp %dot0 : vector<4xi32> to vector<4xf32>
+      %factor0 = vector.mulf %weight_scale0, %input_scale_vector0 : vector<4xf32>
+      %correction0 = vector.mulf %weight_minimum0, %input_sum_vector0 : vector<4xf32>
+      %product0 = vector.mulf %wide0, %factor0 : vector<4xf32>
+      %term0 = vector.subf %product0, %correction0 : vector<4xf32>
+      %new0 = vector.addf %acc0, %term0 : vector<4xf32>
+      %dot1 = vector.mma %lhs0, %rhs1, %init : vector<2xi32>, vector<2xi32>, vector<4xi32>
+      %wide1 = vector.sitofp %dot1 : vector<4xi32> to vector<4xf32>
+      %factor1 = vector.mulf %weight_scale0, %input_scale_vector1 : vector<4xf32>
+      %correction1 = vector.mulf %weight_minimum0, %input_sum_vector1 : vector<4xf32>
+      %product1 = vector.mulf %wide1, %factor1 : vector<4xf32>
+      %term1 = vector.subf %product1, %correction1 : vector<4xf32>
+      %new1 = vector.addf %acc1, %term1 : vector<4xf32>
+      %dot2 = vector.mma %lhs1, %rhs0, %init : vector<2xi32>, vector<2xi32>, vector<4xi32>
+      %wide2 = vector.sitofp %dot2 : vector<4xi32> to vector<4xf32>
+      %factor2 = vector.mulf %weight_scale1, %input_scale_vector0 : vector<4xf32>
+      %correction2 = vector.mulf %weight_minimum1, %input_sum_vector0 : vector<4xf32>
+      %product2 = vector.mulf %wide2, %factor2 : vector<4xf32>
+      %term2 = vector.subf %product2, %correction2 : vector<4xf32>
+      %new2 = vector.addf %acc2, %term2 : vector<4xf32>
+      %dot3 = vector.mma %lhs1, %rhs1, %init : vector<2xi32>, vector<2xi32>, vector<4xi32>
+      %wide3 = vector.sitofp %dot3 : vector<4xi32> to vector<4xf32>
+      %factor3 = vector.mulf %weight_scale1, %input_scale_vector1 : vector<4xf32>
+      %correction3 = vector.mulf %weight_minimum1, %input_sum_vector1 : vector<4xf32>
+      %product3 = vector.mulf %wide3, %factor3 : vector<4xf32>
+      %term3 = vector.subf %product3, %correction3 : vector<4xf32>
+      %new3 = vector.addf %acc3, %term3 : vector<4xf32>
+      scf.yield %new0, %new1, %new2, %new3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next0, %next1, %next2, %next3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+  }
+  // MFMA results own four adjacent channels for one token. Publishing that
+  // native fragment directly preserves contiguous token-major output stores.
+  %wave_channel_base = index.add %channel_base, %wave_channel : index
+  %channel0 = index.add %wave_channel_base, %result_row : index
+  %channel1 = index.add %channel0, %c16 : index
+  %wave_token_base = index.add %token_base, %wave_token : index
+  %token0 = index.add %wave_token_base, %lane_row : index
+  %token1 = index.add %token0, %c32 : index
+  %channel_mask0 = vector.mask.range [%channel0 to %output_size step %c1] : index -> vector<4xi1>
+  %channel_mask1 = vector.mask.range [%channel1 to %output_size step %c1] : index -> vector<4xi1>
+  %valid_token0 = index.cmp ult, %token0, %token_count : index
+  %valid_token1 = index.cmp ult, %token1, %token_count : index
+  scf.if %valid_token0 {
+    vector.store.mask %result0, %output_values[%token0, %channel0], %channel_mask0 : vector<4xf32>, view<[%token_count]x[%output_size]xf32>, vector<4xi1>
+    vector.store.mask %result2, %output_values[%token0, %channel1], %channel_mask1 : vector<4xf32>, view<[%token_count]x[%output_size]xf32>, vector<4xi1>
+  }
+  scf.if %valid_token1 {
+    vector.store.mask %result1, %output_values[%token1, %channel0], %channel_mask0 : vector<4xf32>, view<[%token_count]x[%output_size]xf32>, vector<4xi1>
+    vector.store.mask %result3, %output_values[%token1, %channel1], %channel_mask1 : vector<4xf32>, view<[%token_count]x[%output_size]xf32>, vector<4xi1>
+  }
+  template.return
+}

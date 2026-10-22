@@ -1,0 +1,77 @@
+kernel.decl @qwen38_linear_q5k_q8_1_matrix(%channels: index, %capacity: index, %inputs: index, %outputs: index) launch(%channels: index, %control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.decl @qwen_cohort_reference(%rows: index, %kind: index, %channels: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def @qwen_integer_projection_oracle(%channels: index, %control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %control_view = buffer.view %control[%origin] : buffer -> view<1xi32>
+  %count_i32 = view.load %control_view[0] : view<1xi32> -> i32
+  %count = index.cast %count_i32 : i32 to index
+  %kind = index.constant 0 : index
+  func.call @qwen_cohort_reference(%count, %kind, %channels, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, index, buffer, buffer, buffer)
+  func.return
+}
+
+// Independent F64 GGUF decoding checks both physical layouts, K-block and
+// output-tile boundaries, and a live prefix smaller than the dispatch capacity.
+// Inactive output rows retain their sentinels; their input rows do not exist.
+
+check.scenario @integer_projection_canonical_check {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %channels = check.literal value(1) : index
+    %capacity = check.literal value(512) : index
+    %inputs = check.literal value(768) : index
+    %outputs = check.literal value(137) : index
+    %control = check.generate.fill value(17) : tensor<1xi32>
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed0) range(-128 to -65) : tensor<14688xi8>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to -65) : tensor<72336xi8>
+    %output = check.generate.fill value(-99.0) : tensor<513x137xf32>
+    check.compare<@qwen38_linear_q5k_q8_1_matrix, @qwen_integer_projection_oracle>[%channels, %capacity, %inputs, %outputs](%channels, %control, %inputs, %outputs, %input, %weight, %output) : [index, index, index, index](index, tensor<1xi32>, index, index, tensor<14688xi8>, tensor<72336xi8>, tensor<513x137xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0001) rtol(0.00002) nan(different) : tensor<513x137xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @integer_projection_channel8_check {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %channels = check.literal value(8) : index
+    %capacity = check.literal value(128) : index
+    %inputs = check.literal value(256) : index
+    %outputs = check.literal value(24) : index
+    %control = check.generate.fill value(65) : tensor<1xi32>
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed0) range(-128 to -65) : tensor<18720xi8>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to -65) : tensor<4224xi8>
+    %output = check.generate.fill value(-99.0) : tensor<129x24xf32>
+    check.compare<@qwen38_linear_q5k_q8_1_matrix, @qwen_integer_projection_oracle>[%channels, %capacity, %inputs, %outputs](%channels, %control, %inputs, %outputs, %input, %weight, %output) : [index, index, index, index](index, tensor<1xi32>, index, index, tensor<18720xi8>, tensor<4224xi8>, tensor<129x24xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0001) rtol(0.00002) nan(different) : tensor<129x24xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @integer_projection_long_check {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %channels = check.literal value(8) : index
+    %capacity = check.literal value(64) : index
+    %inputs = check.literal value(5120) : index
+    %outputs = check.literal value(136) : index
+    %control = check.generate.fill value(3) : tensor<1xi32>
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed0) range(-128 to -65) : tensor<17280xi8>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to -65) : tensor<478720xi8>
+    %output = check.generate.fill value(-99.0) : tensor<65x136xf32>
+    check.compare<@qwen38_linear_q5k_q8_1_matrix, @qwen_integer_projection_oracle>[%channels, %capacity, %inputs, %outputs](%channels, %control, %inputs, %outputs, %input, %weight, %output) : [index, index, index, index](index, tensor<1xi32>, index, index, tensor<17280xi8>, tensor<478720xi8>, tensor<65x136xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0001) rtol(0.00002) nan(different) : tensor<65x136xf32>
+    }
+  }
+  check.return
+}

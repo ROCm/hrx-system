@@ -458,6 +458,95 @@ loom_module(
 
 loom_test_module(
   NAME
+    integer_projection_test_module
+  SRCS
+    "kernels/qwen38/linear_integer.loom"
+    "tests/integer_projection.loom"
+    "tests/linear_cohort_oracle.loom"
+  LIBRARIES
+    "iree::experimental::loom_serve::motifs::ggml::library"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    integer_projection_test_canonical_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::integer_projection_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--case=@integer_projection_canonical_check"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    integer_projection_test_channel8_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::integer_projection_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--case=@integer_projection_channel8_check"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    integer_projection_test_long_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::integer_projection_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--case=@integer_projection_long_check"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
     command_projection_test_module
   SRCS
     "kernels/qwen38/attention_decode.loom"
