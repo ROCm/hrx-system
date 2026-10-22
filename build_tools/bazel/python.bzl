@@ -4,7 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Shared Python Bazel rules for IREE repositories."""
+"""Shared Python Bazel rules for IREE repositories.
+
+Executables use declared package initializers even when consumed as an external
+repository, where this repository's bazelrc does not apply. Synthetic initializers
+can turn source-layout directories into packages that shadow the Python modules.
+"""
 
 load(
     "@rules_python//python:defs.bzl",
@@ -21,6 +26,7 @@ def iree_py_library(**kwargs):
     _py_library(**kwargs)
 
 def iree_py_binary(**kwargs):
+    kwargs.setdefault("legacy_create_init", False)
     if "python_version" not in kwargs:
         kwargs["python_version"] = "3.12"
     _py_binary(**kwargs)
@@ -32,6 +38,7 @@ def iree_py_test(resource_group = None, **kwargs):
       resource_group: Local resource name used to serialize competing tests.
       **kwargs: Attributes forwarded to rules_python's py_test.
     """
+    kwargs.setdefault("legacy_create_init", False)
     if "python_version" not in kwargs:
         kwargs["python_version"] = "3.12"
     kwargs["deps"] = kwargs.get("deps", []) + [
