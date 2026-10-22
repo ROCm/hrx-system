@@ -115,7 +115,10 @@ template.def<@qwen38.dense_q5k_f16_wmma.x64.body> device @qwen38_dense_q5k_f16_w
 template.decl @qwen38.dense_q5k_f16_wmma.x64.range(%weight_channels: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %block_begin: index, %block_end: index, %output_origin: offset, %input: buffer, %weight: buffer, %output: buffer)
 
 // A contiguous range of quantization blocks retains the same weight and token
-// panels as the full contraction. The output origin selects its partial plane.
+// panels as the full contraction. Each 256-element block starts an independent
+// WMMA chain, and the block partials combine in F32. This bounds the matrix
+// recurrence while preserving the decoded-F16/F32 contraction contract. The
+// output origin selects the range's partial plane.
 template.def<@qwen38.dense_q5k_f16_wmma.x64.range> device @qwen38_dense_q5k_f16_wmma_x64_body_range(%weight_channels: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %block_begin: index, %block_end: index, %output_origin: offset, %input: buffer, %weight: buffer, %output: buffer) {
   %operand_elements = template.apply<@tensor.matrix.f16_16x16x16.operand_elements>() : () -> (index)
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
@@ -177,7 +180,7 @@ template.def<@qwen38.dense_q5k_f16_wmma.x64.range> device @qwen38_dense_q5k_f16_
   %init10 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<4xf32>
   %init11 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<4xf32>
   %result00, %result01, %result10, %result11 = scf.for %quant_block = [%block_begin to %block_end step %c1](%block_acc00 = %init00 : vector<4xf32>, %block_acc01 = %init01 : vector<4xf32>, %block_acc10 = %init10 : vector<4xf32>, %block_acc11 = %init11 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
-    %block_result00, %block_result01, %block_result10, %block_result11 = scf.for %quant_group = [%c0 to %c8 step %c1](%acc00 = %block_acc00 : vector<4xf32>, %acc01 = %block_acc01 : vector<4xf32>, %acc10 = %block_acc10 : vector<4xf32>, %acc11 = %block_acc11 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+    %block_result00, %block_result01, %block_result10, %block_result11 = scf.for %quant_group = [%c0 to %c8 step %c1](%acc00 = %init00 : vector<4xf32>, %acc01 = %init01 : vector<4xf32>, %acc10 = %init10 : vector<4xf32>, %acc11 = %init11 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
       %block_k_base = index.mul %quant_block, %c256 : index
       %group_k_add = index.mul %quant_group, %c32 : index
       %k_origin = index.add %block_k_base, %group_k_add : index
@@ -230,7 +233,11 @@ template.def<@qwen38.dense_q5k_f16_wmma.x64.range> device @qwen38_dense_q5k_f16_
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
       scf.yield %next00, %next01, %next10, %next11 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
     }
-    scf.yield %block_result00, %block_result01, %block_result10, %block_result11 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+    %combined00 = vector.addf %block_acc00, %block_result00 : vector<4xf32>
+    %combined01 = vector.addf %block_acc01, %block_result01 : vector<4xf32>
+    %combined10 = vector.addf %block_acc10, %block_result10 : vector<4xf32>
+    %combined11 = vector.addf %block_acc11, %block_result11 : vector<4xf32>
+    scf.yield %combined00, %combined01, %combined10, %combined11 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
   }
   // Matrix accumulators own [channel][token] fragments. Each wave transposes
   // one fragment through its private LDS slice so every lane publishes four

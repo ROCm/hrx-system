@@ -62,10 +62,10 @@ func.def @selected_channel8_projection_expected(%count: buffer, %input: buffer, 
   func.return
 }
 
-// Command specialization crosses the partition threshold while the live tail
-// and non-divisible K extent exercise reduction addressing and masked stores.
+// Target-selected 256- and 512-token commands cover the CDNA partition policy
+// and the RDNA full contraction. The uneven seven-block K extent and live tail
+// exercise reduction addressing and masked stores on both target families.
 check.scenario public @command_channel8_projection_check configure[2](%configuration: index, %configuration_entropy: check.entropy) {
-  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
   %inputs = check.literal value(1792) : index
   %outputs = check.literal value(72) : index
   check.trial[2](%trial: index, %entropy: check.entropy) {
