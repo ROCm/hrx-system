@@ -112,6 +112,23 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
 iree_cc_library(
   NAME
+    monitored_fence
+  HDRS
+    "monitored_fence.h"
+  SRCS
+    "monitored_fence.c"
+  DEPS
+    ::kmt_api
+    amdf::headers
+    libamdf::src::allocator
+    libamdf::src::kernel_queue
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
     host_reservation
   SRCS
     "host_reservation.c"

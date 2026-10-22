@@ -100,6 +100,7 @@ amdf_cc_library(
         "//libamdf/src/platform:native_event",
         "//libamdf/src/platform:wait",
         "//libamdf/src/platform/windows:kmt_api",
+        "//libamdf/src/platform/windows:monitored_fence",
         "//libamdf/src/platform/windows:native_event",
     ],
 )
@@ -143,6 +144,7 @@ amdf_cc_library(
         "//libamdf/src/gpu/umd/wddm/wkmi:adapter",
         "//libamdf/src/gpu/umd/wddm/wkmi:endpoint_properties",
         "//libamdf/src/platform/windows:endpoint",
+        "//libamdf/src/platform/windows:monitored_fence",
     ],
 )
 
@@ -258,6 +260,7 @@ amdf_cc_test(
         ":device_state",
         ":kernel_queue",
         "//libamdf/src:allocator",
+        "//libamdf/src:kernel_queue",
         "//libamdf/src:wait",
         "//libamdf/src/gpu/umd:kernel_queue",
         "//third_party:google_test",

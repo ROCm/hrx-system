@@ -101,6 +101,7 @@ amdf_cc_library(
     visibility = ["//libamdf/src/gpu:__subpackages__"],
     deps = [
         ":device",
+        "//libamdf/src:kernel_queue",
         "//libamdf/src:wait",
     ],
 )

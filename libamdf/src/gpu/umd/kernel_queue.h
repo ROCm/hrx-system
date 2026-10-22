@@ -11,6 +11,7 @@
 
 #include "amdf/amdf.h"
 #include "libamdf/src/gpu/umd/device.h"
+#include "libamdf/src/kernel_queue_dependency.h"
 #include "libamdf/src/wait.h"
 
 #ifdef __cplusplus
@@ -43,19 +44,37 @@ amdf_status_t amdf_gpu_umd_kernel_queue_request_notification(
 // including reusable native wait state. No first-submit or first-wait setup.
 amdf_status_t amdf_gpu_umd_kernel_queue_create(
     amdf_gpu_umd_device_t* device, amdf_queue_command_type_t command_type,
+    amdf_kernel_queue_capabilities_t required_capabilities,
     amdf_gpu_umd_kernel_queue_t** out_queue);
 
-// Publishes one immutable native command range with the supplied progress
-// point. Common code assigns successive points starting at one, excludes
-// UINT64_MAX, and exclusively owns publication. Rejection does not accept the
-// point. A fresh native queue starts at progress zero. This hot path takes no
+// Borrows the exportable native progress identity, or NULL when not
+// provisioned.
+const amdf_kernel_queue_native_progress_t*
+amdf_gpu_umd_kernel_queue_query_native_progress(
+    const amdf_gpu_umd_kernel_queue_t* queue);
+
+// Imports a compatible native producer into this queue's consumer domain.
+// Cold construction leaves out_native unchanged on failure.
+amdf_status_t amdf_gpu_umd_kernel_queue_create_native_dependency(
+    amdf_gpu_umd_kernel_queue_t* queue,
+    const amdf_kernel_queue_native_progress_t* progress,
+    amdf_kernel_queue_native_dependency_t** out_native);
+
+// Publishes native dependency waits followed by one immutable command range
+// with the supplied progress point. Common code assigns successive points
+// starting at one, excludes UINT64_MAX, and exclusively owns publication.
+// Rejection before any native operation leaves the point unaccepted. Reports
+// the accepted wait prefix even when a later wait or command is rejected.
+// A fresh native queue starts at progress zero. This hot path takes no
 // provider lock and performs no allocation, initialization, command parsing,
 // address lookup or native-submit retry. Native driver entry is permitted.
 // Failure after acceptance returns OK and latches terminal queue failure;
 // the assigned point remains live until independently checked retirement.
 amdf_status_t amdf_gpu_umd_kernel_queue_submit(
     amdf_gpu_umd_kernel_queue_t* queue, uint64_t command_buffer_address,
-    uint64_t command_buffer_byte_length, uint64_t submission);
+    uint64_t command_buffer_byte_length, uint64_t submission,
+    uint32_t wait_count, const amdf_kernel_queue_dependency_wait_t* waits,
+    uint32_t* out_accepted_wait_count);
 
 // Samples the native progress fence with device-to-host acquire semantics.
 // No locks, allocation, initialization, system calls or active polling.

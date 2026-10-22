@@ -78,6 +78,19 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "monitored_fence",
+    srcs = ["monitored_fence.c"],
+    hdrs = ["monitored_fence.h"],
+    target_compatible_with = WINDOWS_COMPATIBILITY,
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":kmt_api",
+        "//libamdf/src:allocator",
+        "//libamdf/src:kernel_queue",
+    ],
+)
+
+amdf_cc_library(
     name = "host_reservation",
     srcs = ["host_reservation.c"],
     linkopts = ["onecore.lib"],

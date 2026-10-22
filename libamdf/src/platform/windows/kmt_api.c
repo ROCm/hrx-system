@@ -53,6 +53,26 @@ static void amdf_kmt_resolve_procedures(amdf_kmt_api_t* api) {
   api->wait_on_hardware_queue =
       (PFND3DKMT_SUBMITWAITFORSYNCOBJECTSTOHWQUEUE)GetProcAddress(
           api->module, "D3DKMTSubmitWaitForSyncObjectsToHwQueue");
+  api->signal_on_hardware_queue =
+      (PFND3DKMT_SUBMITSIGNALSYNCOBJECTSTOHWQUEUE)GetProcAddress(
+          api->module, "D3DKMTSubmitSignalSyncObjectsToHwQueue");
+  api->wait_on_context =
+      (PFND3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU)GetProcAddress(
+          api->module, "D3DKMTWaitForSynchronizationObjectFromGpu");
+  api->signal_on_context =
+      (PFND3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU)GetProcAddress(
+          api->module, "D3DKMTSignalSynchronizationObjectFromGpu");
+  api->create_synchronization_object =
+      (PFND3DKMT_CREATESYNCHRONIZATIONOBJECT2)GetProcAddress(
+          api->module, "D3DKMTCreateSynchronizationObject2");
+  api->destroy_synchronization_object =
+      (PFND3DKMT_DESTROYSYNCHRONIZATIONOBJECT)GetProcAddress(
+          api->module, "D3DKMTDestroySynchronizationObject");
+  api->share_objects =
+      (PFND3DKMT_SHAREOBJECTS)GetProcAddress(api->module, "D3DKMTShareObjects");
+  api->open_synchronization_object =
+      (PFND3DKMT_OPENSYNCOBJECTFROMNTHANDLE2)GetProcAddress(
+          api->module, "D3DKMTOpenSyncObjectFromNtHandle2");
   api->make_resident =
       (PFND3DKMT_MAKERESIDENT)GetProcAddress(api->module, "D3DKMTMakeResident");
   api->lock = (PFND3DKMT_LOCK2)GetProcAddress(api->module, "D3DKMTLock2");

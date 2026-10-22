@@ -60,67 +60,18 @@ TEST(GpuExtensionTest, ReportsCompiledAvailabilityBeforeCreatingInstance) {
   EXPECT_NE(gpu_api->user_queue_set_dispatch_timestamps, nullptr);
 }
 
-TEST(GpuExtensionTest, NegotiatesOriginalTableExtent) {
+TEST(GpuExtensionTest, RejectsVersionsWithOlderQueueOperandLayouts) {
   const amdf_api_t* api = QueryApi();
   ASSERT_NE(api, nullptr);
-  const void* extension = nullptr;
-  ASSERT_EQ(
-      api->query_extension(AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_1,
-                           AMDF_GPU_EXTENSION_VERSION_1, &extension),
-      AMDF_STATUS_OK);
-  const auto* gpu = static_cast<const amdf_gpu_api_t*>(extension);
-  EXPECT_EQ(gpu->extension_version, AMDF_GPU_EXTENSION_VERSION_1);
-  EXPECT_EQ(gpu->structure_size,
-            offsetof(amdf_gpu_api_t, device_query_queue_clock_info));
-  EXPECT_NE(gpu->user_queue_create, nullptr);
-}
-
-TEST(GpuExtensionTest, PreservesVersionTwoTableBoundary) {
-  const amdf_api_t* api = QueryApi();
-  ASSERT_NE(api, nullptr);
-  const void* extension = nullptr;
-  ASSERT_EQ(
-      api->query_extension(AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_2,
-                           AMDF_GPU_EXTENSION_VERSION_2, &extension),
-      AMDF_STATUS_OK);
-  const auto* gpu = static_cast<const amdf_gpu_api_t*>(extension);
-  ASSERT_NE(gpu, nullptr);
-  EXPECT_EQ(gpu->extension_version, AMDF_GPU_EXTENSION_VERSION_2);
-  EXPECT_EQ(gpu->structure_size, offsetof(amdf_gpu_api_t, event_create));
-  EXPECT_NE(gpu->device_query_queue_clock_info, nullptr);
-  EXPECT_NE(gpu->device_query_clock_sample, nullptr);
-}
-
-TEST(GpuExtensionTest, PreservesVersionThreeTableBoundary) {
-  const amdf_api_t* api = QueryApi();
-  ASSERT_NE(api, nullptr);
-  const void* extension = nullptr;
-  ASSERT_EQ(
-      api->query_extension(AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_3,
-                           AMDF_GPU_EXTENSION_VERSION_3, &extension),
-      AMDF_STATUS_OK);
-  const auto* gpu = static_cast<const amdf_gpu_api_t*>(extension);
-  ASSERT_NE(gpu, nullptr);
-  EXPECT_EQ(gpu->extension_version, AMDF_GPU_EXTENSION_VERSION_3);
-  EXPECT_EQ(gpu->structure_size,
-            offsetof(amdf_gpu_api_t, user_queue_query_scratch));
-  EXPECT_NE(gpu->event_destroy, nullptr);
-}
-
-TEST(GpuExtensionTest, PreservesVersionFourTableBoundary) {
-  const amdf_api_t* api = QueryApi();
-  ASSERT_NE(api, nullptr);
-  const void* extension = nullptr;
-  ASSERT_EQ(
-      api->query_extension(AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_4,
-                           AMDF_GPU_EXTENSION_VERSION_4, &extension),
-      AMDF_STATUS_OK);
-  const auto* gpu = static_cast<const amdf_gpu_api_t*>(extension);
-  ASSERT_NE(gpu, nullptr);
-  EXPECT_EQ(gpu->extension_version, AMDF_GPU_EXTENSION_VERSION_4);
-  EXPECT_EQ(gpu->structure_size,
-            offsetof(amdf_gpu_api_t, user_queue_set_dispatch_timestamps));
-  EXPECT_NE(gpu->user_queue_trim_scratch, nullptr);
+  const void* sentinel = reinterpret_cast<const void*>(uintptr_t{1});
+  for (uint32_t version = AMDF_GPU_EXTENSION_VERSION_1;
+       version < AMDF_GPU_EXTENSION_VERSION_6; ++version) {
+    const void* extension = sentinel;
+    EXPECT_EQ(
+        api->query_extension(AMDF_EXTENSION_GPU, version, version, &extension),
+        amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
+    EXPECT_EQ(extension, sentinel);
+  }
 }
 
 TEST(GpuExtensionTest, RejectsNullClockDeviceWithoutPublishingOutput) {

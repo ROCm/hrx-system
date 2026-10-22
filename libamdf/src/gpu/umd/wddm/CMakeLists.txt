@@ -119,6 +119,7 @@ iree_cc_library(
     libamdf::src::platform::native_event
     libamdf::src::platform::wait
     libamdf::src::platform::windows::kmt_api
+    libamdf::src::platform::windows::monitored_fence
     libamdf::src::platform::windows::native_event
     libamdf::src::wait
   PUBLIC
@@ -182,6 +183,7 @@ iree_cc_library(
     libamdf::src::gpu::umd::wddm::wkmi::adapter
     libamdf::src::gpu::umd::wddm::wkmi::endpoint_properties
     libamdf::src::platform::windows::endpoint
+    libamdf::src::platform::windows::monitored_fence
   PUBLIC
 )
 endif()
@@ -333,6 +335,7 @@ iree_cc_test(
     iree::third_party::google_test_main
     libamdf::src::allocator
     libamdf::src::gpu::umd::kernel_queue
+    libamdf::src::kernel_queue
     libamdf::src::wait
   LABELS
     "iree-build-requirement=libamdf"

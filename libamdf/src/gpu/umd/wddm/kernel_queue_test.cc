@@ -13,6 +13,7 @@
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/wddm/device.h"
+#include "libamdf/src/kernel_queue_dependency.h"
 #include "libamdf/src/wait.h"
 
 namespace {
@@ -20,6 +21,24 @@ namespace {
 struct FakeQueueState {
   // Mapped completion storage owned by the native queue dependency.
   volatile uint64_t progress = 0;
+  // Exportable progress remains independent of command completion.
+  volatile uint64_t shared_progress = 0;
+  // Zero selects a software-scheduled native context.
+  D3DKMT_HANDLE hardware_queue = 0x40;
+  // Explicit shared-fence export failure selected before publication.
+  NTSTATUS share_status = STATUS_SUCCESS;
+  // Consumer import failure selected before publication.
+  NTSTATUS import_status = STATUS_SUCCESS;
+  // Result of publishing a dependency wait.
+  NTSTATUS dependency_wait_status = STATUS_SUCCESS;
+  // Result of publishing the interop retirement signal.
+  NTSTATUS shared_signal_status = STATUS_SUCCESS;
+  // Native synchronization references released by production cleanup.
+  std::vector<D3DKMT_HANDLE> destroyed_fences;
+  // Native dependency points accepted before command submission.
+  std::vector<uint64_t> dependency_waits;
+  // Retirement signals attempted after an accepted native prefix.
+  std::vector<uint64_t> shared_signals;
   // Native submission rejection selected by the test.
   NTSTATUS submit_status = STATUS_SUCCESS;
   // Native completion-signal result after command acceptance.
@@ -100,7 +119,7 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeCreateQueue(
   out_info->progress_fence_pointer = &state->progress;
   out_info->progress_fence_device_address = 0x10000;
   out_info->context_handle = 0x30;
-  out_info->queue_handle = 0x40;
+  out_info->queue_handle = state->hardware_queue;
   *out_native_status = 0;
   *out_queue = reinterpret_cast<amdf_wkmi_bridge_gpu_kernel_queue_t*>(state);
   return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
@@ -194,8 +213,9 @@ class WindowsGpuKernelQueueTest
     device_.wkmi_adapter.native =
         reinterpret_cast<amdf_wkmi_bridge_gpu_adapter_t*>(&state_);
     amdf_kmt_device_status_initialize(&device_.status);
-    ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &queue_),
-              AMDF_STATUS_OK);
+    ASSERT_EQ(
+        amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), 0, &queue_),
+        AMDF_STATUS_OK);
   }
 
   void TearDown() override {
@@ -215,7 +235,103 @@ class WindowsGpuKernelQueueTest
   }
 
   amdf_status_t Submit(uint64_t submission) {
-    return amdf_gpu_umd_kernel_queue_submit(queue_, 0x20000, 64, submission);
+    uint32_t accepted_wait_count = 0;
+    return amdf_gpu_umd_kernel_queue_submit(queue_, 0x20000, 64, submission, 0,
+                                            nullptr, &accepted_wait_count);
+  }
+
+  void EnableInterop(bool hardware_scheduling = true) {
+    ASSERT_EQ(amdf_gpu_umd_kernel_queue_destroy(queue_), AMDF_STATUS_OK);
+    queue_ = nullptr;
+    state_.progress = 0;
+    state_.shared_progress = 0;
+    state_.submitted_values.clear();
+    state_.dependency_waits.clear();
+    state_.shared_signals.clear();
+    state_.hardware_queue = hardware_scheduling ? 0x40 : 0;
+    kmt_.create_synchronization_object =
+        [](D3DKMT_CREATESYNCHRONIZATIONOBJECT2* create) -> NTSTATUS {
+      EXPECT_EQ(create->Info.Type, D3DDDI_MONITORED_FENCE);
+      EXPECT_TRUE(create->Info.Flags.Shared);
+      EXPECT_TRUE(create->Info.Flags.NtSecuritySharing);
+      create->hSyncObject = 0x50;
+      create->Info.MonitoredFence.FenceValueCPUVirtualAddress =
+          const_cast<uint64_t*>(&current_state->shared_progress);
+      return STATUS_SUCCESS;
+    };
+    kmt_.destroy_synchronization_object =
+        [](const D3DKMT_DESTROYSYNCHRONIZATIONOBJECT* destroy) -> NTSTATUS {
+      current_state->destroyed_fences.push_back(destroy->hSyncObject);
+      return STATUS_SUCCESS;
+    };
+    kmt_.share_objects = [](UINT, const D3DKMT_HANDLE*, POBJECT_ATTRIBUTES,
+                            DWORD, HANDLE* handle) -> NTSTATUS {
+      if (current_state->share_status == STATUS_SUCCESS) {
+        *handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        EXPECT_NE(*handle, nullptr);
+      }
+      return current_state->share_status;
+    };
+    kmt_.open_synchronization_object =
+        [](D3DKMT_OPENSYNCOBJECTFROMNTHANDLE2* open) -> NTSTATUS {
+      if (current_state->import_status == STATUS_SUCCESS) {
+        open->hSyncObject = 0x60;
+      }
+      return current_state->import_status;
+    };
+    kmt_.wait_on_hardware_queue =
+        [](const D3DKMT_SUBMITWAITFORSYNCOBJECTSTOHWQUEUE* wait) -> NTSTATUS {
+      EXPECT_EQ(wait->hHwQueue, 0x40u);
+      if (wait->ObjectHandleArray[0] == 0x20) {
+        current_state->ordering_point = wait->FenceValueArray[0];
+        return current_state->ordering_status;
+      }
+      EXPECT_EQ(wait->ObjectHandleArray[0], 0x60u);
+      if (current_state->dependency_wait_status == STATUS_SUCCESS) {
+        current_state->dependency_waits.push_back(wait->FenceValueArray[0]);
+      }
+      return current_state->dependency_wait_status;
+    };
+    kmt_.wait_on_context =
+        [](const D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU* wait) -> NTSTATUS {
+      EXPECT_EQ(wait->hContext, 0x30u);
+      EXPECT_EQ(wait->ObjectHandleArray[0], 0x60u);
+      if (current_state->dependency_wait_status == STATUS_SUCCESS) {
+        current_state->dependency_waits.push_back(
+            wait->MonitoredFenceValueArray[0]);
+      }
+      return current_state->dependency_wait_status;
+    };
+    kmt_.signal_on_hardware_queue =
+        [](const D3DKMT_SUBMITSIGNALSYNCOBJECTSTOHWQUEUE* signal) -> NTSTATUS {
+      EXPECT_EQ(signal->BroadcastHwQueueArray[0], 0x40u);
+      EXPECT_EQ(signal->ObjectHandleArray[0], 0x50u);
+      current_state->shared_signals.push_back(signal->FenceValueArray[0]);
+      return current_state->shared_signal_status;
+    };
+    kmt_.signal_on_context =
+        [](const D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU* signal)
+        -> NTSTATUS {
+      EXPECT_EQ(signal->hContext, 0x30u);
+      EXPECT_EQ(signal->ObjectHandleArray[0], 0x50u);
+      current_state->shared_signals.push_back(
+          signal->MonitoredFenceValueArray[0]);
+      return current_state->shared_signal_status;
+    };
+    ASSERT_EQ(
+        amdf_gpu_umd_kernel_queue_create(
+            &device_, GetParam(),
+            AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION, &queue_),
+        AMDF_STATUS_OK);
+  }
+
+  void ImportDependency(amdf_kernel_queue_dependency_t* dependency) {
+    const auto* progress =
+        amdf_gpu_umd_kernel_queue_query_native_progress(queue_);
+    ASSERT_NE(progress, nullptr);
+    ASSERT_EQ(amdf_gpu_umd_kernel_queue_create_native_dependency(
+                  queue_, progress, &dependency->native),
+              AMDF_STATUS_OK);
   }
 
   void CreateNotificationEvent() {
@@ -242,6 +358,118 @@ class WindowsGpuKernelQueueTest
   // Production UMD queue under test.
   amdf_gpu_umd_kernel_queue_t* queue_ = nullptr;
 };
+
+TEST_P(WindowsGpuKernelQueueTest, SharedRetirementCoversNativeDependencyUse) {
+  for (const bool hardware_scheduling : {true, false}) {
+    ASSERT_NO_FATAL_FAILURE(EnableInterop(hardware_scheduling));
+    amdf_kernel_queue_dependency_t dependency = {};
+    ASSERT_NO_FATAL_FAILURE(ImportDependency(&dependency));
+    const amdf_kernel_queue_dependency_wait_t wait = {&dependency, 9};
+    const uint32_t allocations = state_.allocation_count;
+    uint32_t accepted_wait_count = 0;
+    EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(queue_, 0x20000, 64, 1, 1, &wait,
+                                               &accepted_wait_count),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(accepted_wait_count, 1u);
+    EXPECT_EQ(state_.dependency_waits, (std::vector<uint64_t>{9}));
+    EXPECT_EQ(state_.shared_signals, (std::vector<uint64_t>{1}));
+    EXPECT_EQ(state_.allocation_count, allocations);
+    state_.progress = 1;
+    EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
+    state_.shared_progress = 1;
+    EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 1u);
+    EXPECT_EQ(dependency.native->destroy(dependency.native), AMDF_STATUS_OK);
+  }
+}
+
+TEST_P(WindowsGpuKernelQueueTest, NativeFailurePreservesTheAcceptedPrefix) {
+  const auto rejected = amdf_kmt_make_status(STATUS_NO_MEMORY);
+  for (const bool hardware_scheduling : {true, false}) {
+    for (uint32_t failed_operation = 0; failed_operation < 3;
+         ++failed_operation) {
+      SCOPED_TRACE(failed_operation);
+      ASSERT_NO_FATAL_FAILURE(EnableInterop(hardware_scheduling));
+      amdf_kernel_queue_dependency_t dependency = {};
+      ASSERT_NO_FATAL_FAILURE(ImportDependency(&dependency));
+      const amdf_kernel_queue_dependency_wait_t wait = {&dependency, 9};
+      state_.dependency_wait_status =
+          failed_operation == 0 ? STATUS_NO_MEMORY : STATUS_SUCCESS;
+      state_.submit_status =
+          failed_operation == 1 ? STATUS_NO_MEMORY : STATUS_SUCCESS;
+      state_.shared_signal_status =
+          failed_operation == 2 ? STATUS_NO_MEMORY : STATUS_SUCCESS;
+      uint32_t accepted_wait_count = UINT32_MAX;
+      EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(queue_, 0x20000, 64, 1, 1,
+                                                 &wait, &accepted_wait_count),
+                failed_operation == 0 ? rejected : AMDF_STATUS_OK);
+      EXPECT_EQ(accepted_wait_count, failed_operation == 0 ? 0u : 1u);
+      EXPECT_EQ(state_.submitted_values.size(),
+                failed_operation == 0 ? 0u : 1u);
+      EXPECT_EQ(state_.shared_signals.size(), failed_operation == 0 ? 0u : 1u);
+      EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_),
+                failed_operation == 0 ? AMDF_STATUS_OK : rejected);
+      // Command completion cannot retire an accepted wait or a failed later
+      // signal. Only the separately observed shared fence establishes it.
+      state_.progress = 1;
+      EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
+      if (failed_operation != 0) {
+        EXPECT_EQ(Submit(2), rejected);
+        EXPECT_EQ(state_.submitted_values.size(), 1u);
+      }
+      // The mock supplies quiescence before native-view destruction. No reset
+      // or publication failure is injected into physical hardware.
+      state_.shared_progress = 1;
+      EXPECT_EQ(dependency.native->destroy(dependency.native), AMDF_STATUS_OK);
+    }
+  }
+}
+
+TEST_P(WindowsGpuKernelQueueTest, MappingRetirementIncludesSharedSignal) {
+  ASSERT_NO_FATAL_FAILURE(EnableInterop());
+  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION operation = {};
+  bool mutation_started = false;
+  bool accepted = false;
+  ASSERT_EQ(amdf_gpu_wddm_kernel_queue_update_memory(
+                queue_, 1, &operation, 1, &mutation_started, &accepted),
+            AMDF_STATUS_OK);
+  EXPECT_TRUE(mutation_started);
+  EXPECT_TRUE(accepted);
+  EXPECT_EQ(state_.ordering_point, 1u);
+  EXPECT_EQ(state_.shared_signals, (std::vector<uint64_t>{1}));
+  state_.progress = 1;
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
+  state_.shared_progress = 1;
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 1u);
+}
+
+TEST_P(WindowsGpuKernelQueueTest,
+       FailedInteropConstructionRollsBackNativeOwners) {
+  ASSERT_NO_FATAL_FAILURE(EnableInterop());
+  state_.import_status = STATUS_NO_MEMORY;
+  auto* const progress =
+      amdf_gpu_umd_kernel_queue_query_native_progress(queue_);
+  auto* native = reinterpret_cast<amdf_kernel_queue_native_dependency_t*>(1);
+  const uint32_t live_allocations = state_.live_allocation_count;
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_create_native_dependency(queue_, progress,
+                                                               &native),
+            amdf_kmt_make_status(STATUS_NO_MEMORY));
+  EXPECT_EQ(native,
+            reinterpret_cast<amdf_kernel_queue_native_dependency_t*>(1));
+  EXPECT_EQ(state_.live_allocation_count, live_allocations);
+
+  state_.share_status = STATUS_NO_MEMORY;
+  auto* unpublished = reinterpret_cast<amdf_gpu_umd_kernel_queue_t*>(1);
+  const uint32_t native_releases = state_.destroy_count;
+  EXPECT_EQ(
+      amdf_gpu_umd_kernel_queue_create(
+          &device_, GetParam(),
+          AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION, &unpublished),
+      amdf_kmt_make_status(STATUS_NO_MEMORY));
+  EXPECT_EQ(unpublished, reinterpret_cast<amdf_gpu_umd_kernel_queue_t*>(1));
+  EXPECT_EQ(state_.destroyed_fences, (std::vector<D3DKMT_HANDLE>{0x50}));
+  EXPECT_EQ(state_.destroy_count, native_releases + 1);
+  EXPECT_EQ(state_.live_allocation_count, live_allocations);
+}
 
 TEST_P(WindowsGpuKernelQueueTest, NotificationUsesCallerEventAndStableFence) {
   ASSERT_NO_FATAL_FAILURE(CreateNotificationEvent());
@@ -460,7 +688,7 @@ TEST_P(WindowsGpuKernelQueueTest, RejectedCompletionPointCanBeSubmittedAgain) {
 
 TEST_P(WindowsGpuKernelQueueTest, FatalRejectionStopsAllQueuesOnDevice) {
   amdf_gpu_umd_kernel_queue_t* sibling = nullptr;
-  ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &sibling),
+  ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), 0, &sibling),
             AMDF_STATUS_OK);
   state_.submit_status = STATUS_DEVICE_REMOVED;
   constexpr uint64_t submission = 1;
@@ -468,7 +696,9 @@ TEST_P(WindowsGpuKernelQueueTest, FatalRejectionStopsAllQueuesOnDevice) {
   EXPECT_EQ(Submit(submission), lost);
   state_.submit_status = STATUS_SUCCESS;
   EXPECT_EQ(Submit(submission), lost);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(sibling, 0x20000, 64, submission),
+  uint32_t accepted_wait_count = 0;
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(sibling, 0x20000, 64, submission,
+                                             0, nullptr, &accepted_wait_count),
             lost);
   EXPECT_EQ(state_.submitted_values.size(), 1u);
   EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(sibling), lost);
@@ -512,9 +742,9 @@ TEST_P(WindowsGpuKernelQueueTest, SoftwareContextOmitsHardwareMappingOrdering) {
         return result;
       };
   amdf_gpu_umd_kernel_queue_t* software_queue = nullptr;
-  ASSERT_EQ(
-      amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &software_queue),
-      AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), 0,
+                                             &software_queue),
+            AMDF_STATUS_OK);
   EXPECT_EQ(amdf_gpu_umd_kernel_queue_mapping_capacity(software_queue), 0u);
   EXPECT_EQ(amdf_gpu_umd_kernel_queue_destroy(software_queue), AMDF_STATUS_OK);
   bridge_.gpu_kernel_queue_create = create;

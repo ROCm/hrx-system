@@ -548,7 +548,7 @@ TEST_F(WindowsGpuMemoryTest,
       };
   amdf_gpu_umd_kernel_queue_t* queue = nullptr;
   ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(
-                &device_, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, &queue),
+                &device_, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 0, &queue),
             AMDF_STATUS_OK);
   bool accepted = false;
   mutated = false;

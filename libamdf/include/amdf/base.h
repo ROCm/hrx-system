@@ -118,8 +118,11 @@ typedef uint32_t amdf_abi_version_t;
 /// Typed shared D3D12 heaps and the expanded external-memory support array.
 #define AMDF_ABI_VERSION_16 ((amdf_abi_version_t)16)
 
+/// Native dependencies between kernel-mediated queues.
+#define AMDF_ABI_VERSION_17 ((amdf_abi_version_t)17)
+
 /// Latest ABI version implemented by these headers.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_16
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_17
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"
@@ -264,6 +267,10 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY = 25,
   /// An `amdf_device_info_t` output structure.
   AMDF_STRUCTURE_TYPE_DEVICE_INFO = 26,
+  /// An `amdf_kernel_queue_dependency_create_info_t` input structure.
+  AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_DEPENDENCY_CREATE_INFO = 27,
+  /// An `amdf_kernel_queue_dependency_info_t` output structure.
+  AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_DEPENDENCY_INFO = 28,
 };
 
 /// Identifier of an optional API table compiled into the providing library.
@@ -323,6 +330,9 @@ typedef struct amdf_user_queue_mapping_t amdf_user_queue_mapping_t;
 
 /// Kernel-mediated publication and retirement of native commands.
 typedef struct amdf_kernel_queue_t amdf_kernel_queue_t;
+
+/// Native producer-progress view owned by one kernel-queue consumer.
+typedef struct amdf_kernel_queue_dependency_t amdf_kernel_queue_dependency_t;
 
 /// Allocates one uninitialized host-memory range.
 ///

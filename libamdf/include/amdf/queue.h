@@ -429,6 +429,59 @@ typedef struct amdf_kernel_queue_status_t {
   amdf_status_t terminal_status;
 } amdf_kernel_queue_status_t;
 
+/// Native mechanism selected for a kernel-queue dependency.
+typedef uint32_t amdf_kernel_queue_dependency_protocol_t;
+enum amdf_kernel_queue_dependency_protocol_e {
+  /// Accept any directly supported native protocol during construction.
+  AMDF_KERNEL_QUEUE_DEPENDENCY_PROTOCOL_ANY = 0,
+  /// KMT-created shared monitored fence, imported into the consumer domain.
+  /// Native completion orders execution; it does not report codec success or
+  /// establish successful retirement after device removal.
+  AMDF_KERNEL_QUEUE_DEPENDENCY_PROTOCOL_WINDOWS_MONITORED_FENCE = 1,
+};
+
+/// Requirements for a cold producer/consumer binding.
+typedef struct amdf_kernel_queue_dependency_create_info_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_DEPENDENCY_CREATE_INFO`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_kernel_queue_dependency_create_info_t)`.
+  uint32_t structure_size;
+  /// Optional input extension chain. No extensions are currently defined.
+  const void* next;
+  /// Required native mechanism, or ANY to select an interoperable mechanism.
+  amdf_kernel_queue_dependency_protocol_t required_protocol;
+  /// Reserved for compatible growth and must be zero.
+  uint32_t reserved;
+} amdf_kernel_queue_dependency_create_info_t;
+
+/// Immutable native mechanism and publication costs of one binding.
+typedef struct amdf_kernel_queue_dependency_info_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_DEPENDENCY_INFO`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_kernel_queue_dependency_info_t)`.
+  uint32_t structure_size;
+  /// Optional output extension chain. No extensions are currently defined.
+  void* next;
+  /// Exact native mechanism; never ANY for a live binding.
+  amdf_kernel_queue_dependency_protocol_t protocol;
+  /// Extra native signal operations per accepted producer submission. Shared
+  /// by every binding of this producer, rather than repeated per consumer.
+  uint32_t producer_signal_operation_count;
+  /// Native wait operations per dependency operand in a consumer submission.
+  uint32_t consumer_wait_operation_count;
+  /// Reserved for compatible growth and always zero.
+  uint32_t reserved;
+} amdf_kernel_queue_dependency_info_t;
+
+/// One borrowed native dependency operand, consumed during publication.
+typedef struct amdf_kernel_queue_dependency_wait_t {
+  /// Live binding whose consumer is the queue receiving this submission.
+  amdf_kernel_queue_dependency_t* dependency;
+  /// Nonzero, already-accepted point returned by the binding's producer.
+  /// Unaccepted future values are rejected before native publication.
+  uint64_t producer_submission;
+} amdf_kernel_queue_dependency_wait_t;
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

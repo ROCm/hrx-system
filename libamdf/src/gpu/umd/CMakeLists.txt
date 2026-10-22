@@ -134,6 +134,7 @@ iree_cc_library(
   DEPS
     ::device
     amdf::headers
+    libamdf::src::kernel_queue
     libamdf::src::wait
   PUBLIC
 )

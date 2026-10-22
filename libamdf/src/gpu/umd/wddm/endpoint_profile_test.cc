@@ -248,4 +248,44 @@ TEST_F(WindowsGpuEndpointProfileTest, DiscoveryDoesNotQueryMemory) {
   amdf_free(instance_.host_allocator, profile);
 }
 
+TEST_F(WindowsGpuEndpointProfileTest,
+       InteropAdmissionUsesTheSelectedScheduler) {
+  set_bridge_close_failures_(0);
+  instance_.kmt.create_synchronization_object = UnexpectedMemoryOperation;
+  instance_.kmt.destroy_synchronization_object = UnexpectedMemoryOperation;
+  instance_.kmt.open_synchronization_object = UnexpectedMemoryOperation;
+  instance_.kmt.share_objects = [](UINT, const D3DKMT_HANDLE*,
+                                   POBJECT_ATTRIBUTES, DWORD,
+                                   HANDLE*) -> NTSTATUS {
+    ADD_FAILURE() << "discovery must not export native synchronization objects";
+    return kFailure;
+  };
+  for (uint32_t schedulers = 0; schedulers < 4; ++schedulers) {
+    instance_.kmt.wait_on_hardware_queue = UnexpectedMemoryOperation;
+    instance_.kmt.wait_on_context = UnexpectedMemoryOperation;
+    instance_.kmt.signal_on_hardware_queue = nullptr;
+    instance_.kmt.signal_on_context = nullptr;
+    if ((schedulers & 1) != 0) {
+      instance_.kmt.signal_on_hardware_queue = UnexpectedMemoryOperation;
+    }
+    if ((schedulers & 2) != 0) {
+      instance_.kmt.signal_on_context = UnexpectedMemoryOperation;
+    }
+    amdf_gpu_endpoint_profile_t* profile = nullptr;
+    ASSERT_EQ(amdf_gpu_umd_create_endpoint_profile(
+                  endpoint_, instance_.host_allocator, &profile),
+              AMDF_STATUS_OK);
+    ASSERT_NE(profile, nullptr);
+    for (uint32_t i = 0; i < profile->queue_family_count; ++i) {
+      const auto& family = profile->queue_families[i];
+      const uint32_t required_scheduler =
+          family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 ? 1 : 2;
+      EXPECT_EQ((family.kernel_queue_capabilities &
+                 AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION) != 0,
+                (schedulers & required_scheduler) != 0);
+    }
+    amdf_free(instance_.host_allocator, profile);
+  }
+}
+
 }  // namespace

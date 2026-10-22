@@ -235,7 +235,7 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
                     "create persistent native SDMA context");
     } else {
       RequireStatus(amdf_gpu_umd_kernel_queue_create(
-                        device_, AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, &queue_),
+                        device_, AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, 0, &queue_),
                     "create persistent SDMA queue");
     }
     std::fprintf(stderr,
@@ -268,10 +268,11 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
               static_cast<uint32_t>(words.size_bytes()), ++progress_)),
           "execute prepared software-scheduled SDMA stream");
     } else {
-      RequireStatus(
-          amdf_gpu_umd_kernel_queue_submit(queue_, command_address_,
-                                           words.size_bytes(), ++progress_),
-          "submit prepared SDMA stream");
+      uint32_t accepted_wait_count = 0;
+      RequireStatus(amdf_gpu_umd_kernel_queue_submit(
+                        queue_, command_address_, words.size_bytes(),
+                        ++progress_, 0, nullptr, &accepted_wait_count),
+                    "submit prepared SDMA stream");
       const amdf_wait_deadline_t deadline = {UINT64_MAX, 0};
       RequireStatus(
           amdf_gpu_umd_kernel_queue_wait(queue_, progress_, &deadline),

@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <new>
 #include <thread>
 
 #include "gtest/gtest.h"
@@ -53,6 +54,15 @@ struct amdf_gpu_umd_kernel_queue_t {
   uint32_t notification_count = 0;
   // Registration result independent of accepted work and retirement.
   amdf_status_t notification_status = AMDF_STATUS_OK;
+  // Native synchronization provisioned only when requested during creation.
+  bool exportable_progress = false;
+  // Producer-owned identity consumed by the cold dependency import.
+  amdf_kernel_queue_native_progress_t native_progress = {
+      AMDF_KERNEL_QUEUE_DEPENDENCY_PROTOCOL_WINDOWS_MONITORED_FENCE, 1};
+  // Cold import result, before publishing any native binding owner.
+  amdf_status_t dependency_import_status = AMDF_STATUS_OK;
+  // Number of imported views released after checked consumer retirement.
+  uint32_t dependency_destroy_count = 0;
   // Native publication schedule controlled by the concurrency scenario.
   enum class PublicationPhase { kOpen, kPauseOnAccept, kWaiting, kResume };
   // Protects the test dependency's publication schedule, not the queue under
@@ -96,6 +106,9 @@ class GpuKernelQueueTest
         .structure_size = sizeof(device.family),
         .command_type = GetParam(),
         .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+        .kernel_queue_capabilities =
+            AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY |
+            AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION,
     };
     device.base.queue_family_count = 1;
     device.base.queue_families = &device.family;
@@ -117,6 +130,11 @@ class GpuKernelQueueTest
 
   void TearDown() override {
     device.native.queue.progress = device.native.queue.submitted;
+    if (dependency) {
+      Refresh();
+      EXPECT_EQ(amdf_kernel_queue_dependency_destroy(dependency),
+                AMDF_STATUS_OK);
+    }
     if (queue) {
       EXPECT_EQ(amdf_kernel_queue_destroy(queue), AMDF_STATUS_OK);
     }
@@ -136,7 +154,8 @@ class GpuKernelQueueTest
     return amdf_gpu_kernel_queue_submit(queue, &submit, out_submission);
   }
 
-  amdf_status_t CreateQueue(uint32_t capacity) {
+  amdf_status_t CreateQueue(uint32_t capacity,
+                            amdf_kernel_queue_capabilities_t capabilities = 0) {
     if (queue) {
       const auto status = amdf_kernel_queue_destroy(queue);
       if (!amdf_status_is_ok(status)) {
@@ -148,6 +167,7 @@ class GpuKernelQueueTest
         .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
         .structure_size = sizeof(create),
         .maximum_pending_submission_count = capacity,
+        .required_capabilities = capabilities,
     };
     return amdf_gpu_kernel_queue_create(&device.base, &create, &queue);
   }
@@ -190,11 +210,72 @@ class GpuKernelQueueTest
   amdf_gpu_kernel_command_t command = {};
   // Production queue under test.
   amdf_kernel_queue_t* queue = nullptr;
+  // Native binding owned until its last accepted consumer use retires.
+  amdf_kernel_queue_dependency_t* dependency = nullptr;
   // Borrowed reservation projection used to exercise common admission too.
   amdf_memory_reservation_t reservation = {};
   // Canonical projection stores native mutation failure without a registry.
   amdf_memory_reservation_access_state_t target = {};
 };
+
+TEST_P(GpuKernelQueueTest, NativeDependenciesTrackAcceptedUses) {
+  ASSERT_EQ(
+      CreateQueue(16, AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION),
+      AMDF_STATUS_OK);
+  const amdf_kernel_queue_dependency_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_DEPENDENCY_CREATE_INFO,
+      .structure_size = sizeof(create),
+  };
+  ASSERT_EQ(
+      amdf_kernel_queue_dependency_create(queue, queue, &create, &dependency),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_kernel_queue_destroy(queue),
+            amdf_make_api_status(AMDF_STATUS_CODE_BUSY));
+  amdf_kernel_queue_dependency_wait_t wait = {dependency, 1};
+  const amdf_gpu_kernel_queue_submission_info_t submit = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
+      .structure_size = sizeof(submit),
+      .command_count = 1,
+      .wait_count = 1,
+      .commands = &command,
+      .waits = &wait,
+  };
+  uint64_t point = UINT64_MAX;
+  EXPECT_EQ(amdf_gpu_kernel_queue_submit(queue, &submit, &point),
+            amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+  EXPECT_EQ(point, UINT64_MAX);
+  EXPECT_EQ(device.native.queue.submitted, 0u);
+  ASSERT_EQ(Submit(&wait.producer_submission), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_gpu_kernel_queue_submit(queue, &submit, &point),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_kernel_queue_dependency_destroy(dependency),
+            amdf_make_api_status(AMDF_STATUS_CODE_BUSY));
+  device.native.queue.progress = point;
+  EXPECT_EQ(Refresh().retired_submission, point);
+  ASSERT_EQ(amdf_kernel_queue_dependency_destroy(dependency), AMDF_STATUS_OK);
+  dependency = nullptr;
+  EXPECT_EQ(device.native.queue.dependency_destroy_count, 1u);
+}
+
+TEST_P(GpuKernelQueueTest, FailedNativeImportReleasesBothQueueBorrows) {
+  ASSERT_EQ(
+      CreateQueue(16, AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION),
+      AMDF_STATUS_OK);
+  const auto failure =
+      amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+  device.native.queue.dependency_import_status = failure;
+  const amdf_kernel_queue_dependency_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_DEPENDENCY_CREATE_INFO,
+      .structure_size = sizeof(create),
+  };
+  auto* sentinel =
+      reinterpret_cast<amdf_kernel_queue_dependency_t*>(uintptr_t{1});
+  auto* output = sentinel;
+  EXPECT_EQ(amdf_kernel_queue_dependency_create(queue, queue, &create, &output),
+            failure);
+  EXPECT_EQ(output, sentinel);
+  EXPECT_EQ(amdf_child_tracker_count(&queue->children), 0u);
+}
 
 TEST_P(GpuKernelQueueTest, CommandAlignmentIsCheckedBeforeNativeAdmission) {
   const uint64_t alignment =
@@ -701,7 +782,9 @@ amdf_status_t amdf_gpu_memory_reservation_update_on_queue(
     amdf_memory_reservation_t*, amdf_gpu_umd_kernel_queue_t* queue, uint32_t,
     uint32_t, const amdf_memory_mapping_update_t*, uint64_t submission,
     bool* mutation_started, bool* accepted) {
-  const auto status = amdf_gpu_umd_kernel_queue_submit(queue, 0, 0, submission);
+  uint32_t accepted_wait_count = 0;
+  const auto status = amdf_gpu_umd_kernel_queue_submit(
+      queue, 0, 0, submission, 0, nullptr, &accepted_wait_count);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -733,13 +816,54 @@ amdf_gpu_umd_device_t* amdf_gpu_device_get_umd(amdf_device_t* device) {
 }
 amdf_status_t amdf_gpu_umd_kernel_queue_create(
     amdf_gpu_umd_device_t* device, amdf_queue_command_type_t,
+    amdf_kernel_queue_capabilities_t capabilities,
     amdf_gpu_umd_kernel_queue_t** out_queue) {
+  device->queue.exportable_progress =
+      (capabilities & AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION) !=
+      0;
   *out_queue = &device->queue;
   return AMDF_STATUS_OK;
 }
+
+const amdf_kernel_queue_native_progress_t*
+amdf_gpu_umd_kernel_queue_query_native_progress(
+    const amdf_gpu_umd_kernel_queue_t* queue) {
+  return queue->exportable_progress ? &queue->native_progress : nullptr;
+}
+
+amdf_status_t amdf_gpu_umd_kernel_queue_create_native_dependency(
+    amdf_gpu_umd_kernel_queue_t* queue,
+    const amdf_kernel_queue_native_progress_t*,
+    amdf_kernel_queue_native_dependency_t** out_native) {
+  if (!amdf_status_is_ok(queue->dependency_import_status)) {
+    return queue->dependency_import_status;
+  }
+  struct NativeDependency {
+    // Native owner prefix consumed by production binding teardown.
+    amdf_kernel_queue_native_dependency_t base;
+    // Queue dependency whose released-view count proves cleanup ownership.
+    amdf_gpu_umd_kernel_queue_t* queue;
+  };
+  auto* native = new (std::nothrow) NativeDependency{};
+  if (native == nullptr) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+  }
+  native->base.destroy = [](amdf_kernel_queue_native_dependency_t* base) {
+    auto* dependency = reinterpret_cast<NativeDependency*>(base);
+    ++dependency->queue->dependency_destroy_count;
+    delete dependency;
+    return AMDF_STATUS_OK;
+  };
+  native->base.wait_operation_count = 1;
+  native->queue = queue;
+  *out_native = &native->base;
+  return AMDF_STATUS_OK;
+}
 amdf_status_t amdf_gpu_umd_kernel_queue_submit(
-    amdf_gpu_umd_kernel_queue_t* queue, uint64_t, uint64_t,
-    uint64_t submission) {
+    amdf_gpu_umd_kernel_queue_t* queue, uint64_t, uint64_t, uint64_t submission,
+    uint32_t wait_count, const amdf_kernel_queue_dependency_wait_t*,
+    uint32_t* out_accepted_wait_count) {
+  *out_accepted_wait_count = 0;
   if (!amdf_status_is_ok(queue->terminal_status)) {
     return queue->terminal_status;
   }
@@ -748,6 +872,7 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
   }
   EXPECT_EQ(submission, queue->submitted + 1);
   queue->submitted = submission;
+  *out_accepted_wait_count = wait_count;
   queue->terminal_status = queue->signal_status;
   using Phase = amdf_gpu_umd_kernel_queue_t::PublicationPhase;
   std::unique_lock<std::mutex> lock(queue->publication_mutex);

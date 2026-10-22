@@ -8,6 +8,8 @@
 #define AMDF_SRC_KERNEL_QUEUE_H_
 
 #include "amdf/amdf.h"
+#include "libamdf/src/child_tracker.h"
+#include "libamdf/src/kernel_queue_dependency.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,8 +18,8 @@ extern "C" {
 typedef struct amdf_kernel_queue_vtable_t {
   // Reads established retirement and cached terminal state without mutation,
   // native queries, locks, allocation or system calls.
-  amdf_status_t (*query_status)(amdf_kernel_queue_t* queue,
-                                amdf_kernel_queue_status_t* out_status);
+  void (*query_status)(amdf_kernel_queue_t* queue,
+                       amdf_kernel_queue_status_t* out_status);
   // Samples native progress and consumes available results without waiting
   // for another retirement owner. Reports observation errors separately from
   // the snapshot's cached terminal failure.
@@ -46,6 +48,18 @@ typedef struct amdf_kernel_queue_vtable_t {
                                  const amdf_memory_mapping_update_t* updates,
                                  bool* mutation_started,
                                  uint64_t* accepted_submission);
+  // Reads the greatest accepted point without native work. Required when
+  // EXTERNAL_SYNCHRONIZATION is enabled for this queue.
+  uint64_t (*query_last_submission)(const amdf_kernel_queue_t* queue);
+  // Borrows the immutable native progress identity provisioned at creation.
+  const amdf_kernel_queue_native_progress_t* (*query_native_progress)(
+      const amdf_kernel_queue_t* queue);
+  // Imports a supported producer protocol into this consumer's native domain.
+  // Cold and transactional: failure leaves out_native unchanged.
+  amdf_status_t (*create_native_dependency)(
+      amdf_kernel_queue_t* consumer,
+      const amdf_kernel_queue_native_progress_t* progress,
+      amdf_kernel_queue_native_dependency_t** out_native);
 } amdf_kernel_queue_vtable_t;
 
 struct amdf_kernel_queue_t {
@@ -57,6 +71,8 @@ struct amdf_kernel_queue_t {
   amdf_device_t* device;
   // Immutable properties established before publication.
   amdf_kernel_queue_info_t info;
+  // Cold dependency/session owners borrowing this queue.
+  amdf_child_tracker_t children;
 };
 
 // Initializes an unpublished queue base and borrows its device.

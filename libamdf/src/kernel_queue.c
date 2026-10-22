@@ -23,6 +23,7 @@ amdf_status_t amdf_kernel_queue_initialize(
   queue->vtable = vtable;
   queue->device = device;
   queue->info = *info;
+  amdf_child_tracker_initialize(&queue->children);
   return AMDF_STATUS_OK;
 }
 
@@ -66,10 +67,7 @@ amdf_status_t AMDF_CALL amdf_kernel_queue_query_status(
   amdf_kernel_queue_status_t value = {0};
   value.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
   value.structure_size = sizeof(value);
-  const amdf_status_t query_status = queue->vtable->query_status(queue, &value);
-  if (!amdf_status_is_ok(query_status)) {
-    return query_status;
-  }
+  queue->vtable->query_status(queue, &value);
   const uint32_t structure_size = out_status->structure_size;
   void* const next = out_status->next;
   *out_status = value;
@@ -148,6 +146,9 @@ amdf_status_t AMDF_CALL amdf_kernel_queue_wait(
 amdf_status_t AMDF_CALL amdf_kernel_queue_destroy(amdf_kernel_queue_t* queue) {
   if (queue == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if (amdf_child_tracker_count(&queue->children) != 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
   }
   const amdf_status_t status = queue->vtable->destroy_native(queue);
   if (status != amdf_make_api_status(AMDF_STATUS_CODE_BUSY)) {

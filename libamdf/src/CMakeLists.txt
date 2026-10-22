@@ -442,10 +442,14 @@ iree_cc_library(
     kernel_queue
   HDRS
     "kernel_queue.h"
+    "kernel_queue_dependency.h"
   SRCS
     "kernel_queue.c"
+    "kernel_queue_dependency.c"
   DEPS
     ::allocator
+    ::atomics
+    ::child_tracker
     ::device
     ::structure
     amdf::headers

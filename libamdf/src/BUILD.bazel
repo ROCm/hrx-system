@@ -316,11 +316,19 @@ amdf_cc_test(
 
 amdf_cc_library(
     name = "kernel_queue",
-    srcs = ["kernel_queue.c"],
-    hdrs = ["kernel_queue.h"],
+    srcs = [
+        "kernel_queue.c",
+        "kernel_queue_dependency.c",
+    ],
+    hdrs = [
+        "kernel_queue.h",
+        "kernel_queue_dependency.h",
+    ],
     visibility = ["//libamdf/src:__subpackages__"],
     deps = [
         ":allocator",
+        ":atomics",
+        ":child_tracker",
         ":device",
         ":structure",
     ],

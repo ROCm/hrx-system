@@ -69,6 +69,20 @@ typedef struct amdf_kmt_api_t {
   PFND3DKMT_UPDATEGPUVIRTUALADDRESS update_gpu_virtual_address;
   // Orders later hardware commands after a native monitored-fence point.
   PFND3DKMT_SUBMITWAITFORSYNCOBJECTSTOHWQUEUE wait_on_hardware_queue;
+  // Signals a monitored fence after previously accepted hardware-queue work.
+  PFND3DKMT_SUBMITSIGNALSYNCOBJECTSTOHWQUEUE signal_on_hardware_queue;
+  // Orders a software-scheduled context after a monitored-fence point.
+  PFND3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU wait_on_context;
+  // Signals a monitored fence after previously accepted context work.
+  PFND3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU signal_on_context;
+  // Creates a separately owned, optionally shareable monitored fence.
+  PFND3DKMT_CREATESYNCHRONIZATIONOBJECT2 create_synchronization_object;
+  // Releases a native synchronization-object reference.
+  PFND3DKMT_DESTROYSYNCHRONIZATIONOBJECT destroy_synchronization_object;
+  // Exports explicitly shareable native objects through an owning NT handle.
+  PFND3DKMT_SHAREOBJECTS share_objects;
+  // Imports an NT monitored-fence handle into an exact logical device.
+  PFND3DKMT_OPENSYNCOBJECTFROMNTHANDLE2 open_synchronization_object;
   // Establishes residency without forcing a device error on exhaustion.
   PFND3DKMT_MAKERESIDENT make_resident;
   // Locks one allocation for explicit host access.

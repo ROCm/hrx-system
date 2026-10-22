@@ -862,6 +862,32 @@ typedef struct amdf_api_t {
   amdf_status_t(AMDF_CALL* device_query_queue_family_info)(
       amdf_device_t* device, uint32_t queue_family_ordinal,
       amdf_queue_family_info_t* out_info);
+
+  /// Imports one producer's native progress mechanism into a consumer domain.
+  /// Both queues must have EXTERNAL_SYNCHRONIZATION enabled at construction.
+  /// The binding borrows both queues, which reject destruction while it exists.
+  /// Unsupported pairs fail without a host-wait or helper-dispatch fallback.
+  /// Cold construction may allocate and import native objects; failure leaves
+  /// out_dependency unchanged. Externally serialize with either queue's
+  /// teardown.
+  amdf_status_t(AMDF_CALL* kernel_queue_dependency_create)(
+      amdf_kernel_queue_t* producer, amdf_kernel_queue_t* consumer,
+      const amdf_kernel_queue_dependency_create_info_t* create_info,
+      amdf_kernel_queue_dependency_t** out_dependency);
+
+  /// Copies cached native mechanism and cost facts without allocation, locks,
+  /// driver calls or lazy initialization. Failure leaves out_info unchanged.
+  amdf_status_t(AMDF_CALL* kernel_queue_dependency_query_info)(
+      amdf_kernel_queue_dependency_t* dependency,
+      amdf_kernel_queue_dependency_info_t* out_info);
+
+  /// Releases a binding after its accepted consumer uses have retired. Uses
+  /// established checked retirement; refresh or wait on the consumer as needed.
+  /// API-domain BUSY leaves it live; every other result consumes it, including
+  /// native cleanup failure. This call never waits or cancels a queued wait.
+  /// Externally serialize against publication and other uses of this binding.
+  amdf_status_t(AMDF_CALL* kernel_queue_dependency_destroy)(
+      amdf_kernel_queue_dependency_t* dependency);
 } amdf_api_t;
 
 /// Function type used to acquire the immutable API table.

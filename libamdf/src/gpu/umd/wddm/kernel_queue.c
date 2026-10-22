@@ -11,6 +11,7 @@
 #include "libamdf/src/gpu/umd/wddm/device.h"
 #include "libamdf/src/platform/native_event.h"
 #include "libamdf/src/platform/wait.h"
+#include "libamdf/src/platform/windows/monitored_fence.h"
 #include "libamdf/src/wait.h"
 
 enum {
@@ -26,12 +27,14 @@ struct amdf_gpu_umd_kernel_queue_t {
   uint32_t command_buffer_alignment;
   // Maximum byte length accepted by one native submission.
   uint64_t maximum_command_buffer_byte_length;
-  // Monitored progress-fence object owned by `native`.
+  // Native command/mapping fence owned by the WKMI queue.
+  D3DKMT_HANDLE command_progress_fence;
+  // Retirement fence: shared progress when provisioned, otherwise native.
   D3DKMT_HANDLE progress_fence;
   // CPU-readable monotonic hardware-queue progress value.
   const volatile uint64_t* progress_fence_pointer;
-  // GPU-visible progress address retained for queue interoperability.
-  uint64_t progress_fence_device_address;
+  // Explicitly provisioned exportable progress, or zero for an ordinary queue.
+  amdf_windows_monitored_fence_t shared_progress;
   // Native execution context borrowed from the bridge queue.
   D3DKMT_HANDLE context;
   // Native hardware queue borrowed for ordering mapping completion.
@@ -49,6 +52,7 @@ struct amdf_gpu_umd_kernel_queue_t {
 
 amdf_status_t amdf_gpu_umd_kernel_queue_create(
     amdf_gpu_umd_device_t* device, amdf_queue_command_type_t command_type,
+    amdf_kernel_queue_capabilities_t required_capabilities,
     amdf_gpu_umd_kernel_queue_t** out_queue) {
   amdf_wkmi_bridge_gpu_queue_command_type_t native_command_type;
   switch (command_type) {
@@ -92,14 +96,44 @@ amdf_status_t amdf_gpu_umd_kernel_queue_create(
     queue->command_buffer_alignment = queue_info.command_buffer_alignment;
     queue->maximum_command_buffer_byte_length =
         queue_info.maximum_command_buffer_byte_length;
+    queue->command_progress_fence = queue_info.progress_fence_handle;
     queue->progress_fence = queue_info.progress_fence_handle;
     queue->context = queue_info.context_handle;
     queue->hardware_queue = queue_info.queue_handle;
     queue->progress_fence_pointer = queue_info.progress_fence_pointer;
-    queue->progress_fence_device_address =
-        queue_info.progress_fence_device_address;
+    if ((required_capabilities &
+         AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION) != 0) {
+      const bool native_ordering =
+          queue->hardware_queue != 0
+              ? device->kmt->wait_on_hardware_queue != NULL &&
+                    device->kmt->signal_on_hardware_queue != NULL
+              : device->kmt->wait_on_context != NULL &&
+                    device->kmt->signal_on_context != NULL;
+      if (!native_ordering ||
+          !amdf_windows_monitored_fence_is_supported(device->kmt)) {
+        status = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+      } else {
+        status = amdf_windows_monitored_fence_initialize(
+            device->kmt, device->device, device->adapter_luid,
+            &queue->shared_progress);
+      }
+      if (amdf_status_is_ok(status)) {
+        queue->progress_fence = queue->shared_progress.object;
+        queue->progress_fence_pointer = queue->shared_progress.pointer;
+      }
+    }
+  }
+  if (amdf_status_is_ok(status)) {
     *out_queue = queue;
   } else {
+    if (queue->native != NULL) {
+      const amdf_status_t cleanup_status =
+          amdf_gpu_wddm_wkmi_adapter_destroy_kernel_queue(&device->wkmi_adapter,
+                                                          queue->native);
+      if (!amdf_status_is_ok(cleanup_status)) {
+        status = cleanup_status;
+      }
+    }
     if (queue->wait_event != NULL && !CloseHandle(queue->wait_event)) {
       status = amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
     }
@@ -108,9 +142,71 @@ amdf_status_t amdf_gpu_umd_kernel_queue_create(
   return status;
 }
 
+const amdf_kernel_queue_native_progress_t*
+amdf_gpu_umd_kernel_queue_query_native_progress(
+    const amdf_gpu_umd_kernel_queue_t* queue) {
+  return queue->shared_progress.object != 0
+             ? &queue->shared_progress.progress.base
+             : NULL;
+}
+
+amdf_status_t amdf_gpu_umd_kernel_queue_create_native_dependency(
+    amdf_gpu_umd_kernel_queue_t* queue,
+    const amdf_kernel_queue_native_progress_t* progress,
+    amdf_kernel_queue_native_dependency_t** out_native) {
+  return amdf_windows_queue_dependency_create(
+      queue->device->host_allocator, queue->device->kmt, queue->device->device,
+      queue->device->adapter_luid, progress, out_native);
+}
+
+static amdf_status_t amdf_gpu_wddm_kernel_queue_signal_progress(
+    amdf_gpu_umd_kernel_queue_t* queue, uint64_t submission) {
+  if (queue->hardware_queue != 0) {
+    D3DKMT_SUBMITSIGNALSYNCOBJECTSTOHWQUEUE signal = {0};
+    signal.BroadcastHwQueueCount = 1;
+    signal.BroadcastHwQueueArray = &queue->hardware_queue;
+    signal.ObjectCount = 1;
+    signal.ObjectHandleArray = &queue->shared_progress.object;
+    signal.FenceValueArray = &submission;
+    return amdf_kmt_make_status(
+        queue->device->kmt->signal_on_hardware_queue(&signal));
+  }
+  D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU signal = {0};
+  signal.hContext = queue->context;
+  signal.ObjectCount = 1;
+  signal.ObjectHandleArray = &queue->shared_progress.object;
+  signal.MonitoredFenceValueArray = &submission;
+  return amdf_kmt_make_status(queue->device->kmt->signal_on_context(&signal));
+}
+
+static amdf_status_t amdf_gpu_wddm_kernel_queue_wait_dependency(
+    amdf_gpu_umd_kernel_queue_t* queue,
+    const amdf_kernel_queue_dependency_wait_t* operand) {
+  const amdf_windows_queue_dependency_t* dependency =
+      (const amdf_windows_queue_dependency_t*)operand->dependency->native;
+  if (queue->hardware_queue != 0) {
+    D3DKMT_SUBMITWAITFORSYNCOBJECTSTOHWQUEUE wait = {0};
+    wait.hHwQueue = queue->hardware_queue;
+    wait.ObjectCount = 1;
+    wait.ObjectHandleArray = &dependency->object;
+    wait.FenceValueArray = &operand->producer_submission;
+    return amdf_kmt_make_status(
+        queue->device->kmt->wait_on_hardware_queue(&wait));
+  }
+  D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU wait = {0};
+  wait.hContext = queue->context;
+  wait.ObjectCount = 1;
+  wait.ObjectHandleArray = &dependency->object;
+  wait.MonitoredFenceValueArray = &operand->producer_submission;
+  return amdf_kmt_make_status(queue->device->kmt->wait_on_context(&wait));
+}
+
 amdf_status_t amdf_gpu_umd_kernel_queue_submit(
     amdf_gpu_umd_kernel_queue_t* queue, uint64_t command_buffer_address,
-    uint64_t command_buffer_byte_length, uint64_t submission) {
+    uint64_t command_buffer_byte_length, uint64_t submission,
+    uint32_t wait_count, const amdf_kernel_queue_dependency_wait_t* waits,
+    uint32_t* out_accepted_wait_count) {
+  *out_accepted_wait_count = 0;
   const amdf_status_t terminal_status =
       amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
   if (!amdf_status_is_ok(terminal_status)) {
@@ -126,17 +222,36 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
   }
 
   MemoryBarrier();
-  bool accepted = false;
-  amdf_status_t status = amdf_gpu_wddm_wkmi_adapter_submit_kernel_queue(
-      &queue->device->wkmi_adapter, queue->native, command_buffer_address,
-      command_buffer_byte_length, submission, &accepted);
+  amdf_status_t status = AMDF_STATUS_OK;
+  for (uint32_t i = 0; i < wait_count && amdf_status_is_ok(status); ++i) {
+    status = amdf_gpu_wddm_kernel_queue_wait_dependency(queue, &waits[i]);
+    if (amdf_status_is_ok(status)) {
+      ++*out_accepted_wait_count;
+    }
+  }
+  bool command_accepted = false;
+  if (amdf_status_is_ok(status)) {
+    status = amdf_gpu_wddm_wkmi_adapter_submit_kernel_queue(
+        &queue->device->wkmi_adapter, queue->native, command_buffer_address,
+        command_buffer_byte_length, submission, &command_accepted);
+  }
+  const bool accepted = command_accepted || *out_accepted_wait_count != 0;
+  if (accepted && queue->shared_progress.object != 0) {
+    // Even a rejected later command leaves accepted waits live. This signal
+    // retires that exact prefix without pretending the command succeeded.
+    const amdf_status_t signal_status =
+        amdf_gpu_wddm_kernel_queue_signal_progress(queue, submission);
+    if (amdf_status_is_ok(status)) {
+      status = signal_status;
+    }
+  }
   if (!amdf_status_is_ok(status)) {
     status = amdf_kmt_device_status_observe_error(
         &queue->device->status, queue->device->kmt, queue->device->device,
         status);
     if (accepted) {
-      // The command is already live. Publish its point and surface the failed
-      // completion signal through queue status, never as retryable rejection.
+      // The accepted prefix remains live even when command or signal failed.
+      // Publish its point and report terminal failure through queue status.
       amdf_atomic_uint64_store_release(&queue->failure, status);
       return AMDF_STATUS_OK;
     }
@@ -175,7 +290,7 @@ amdf_status_t amdf_gpu_wddm_kernel_queue_update_memory(
   D3DKMT_UPDATEGPUVIRTUALADDRESS update = {0};
   update.hDevice = queue->device->device;
   update.hContext = queue->context;
-  update.hFenceObject = queue->progress_fence;
+  update.hFenceObject = queue->command_progress_fence;
   update.NumOperations = operation_count;
   update.Operations = operations;
   update.FenceValue = submission - 1;
@@ -191,10 +306,13 @@ amdf_status_t amdf_gpu_wddm_kernel_queue_update_memory(
   D3DKMT_SUBMITWAITFORSYNCOBJECTSTOHWQUEUE wait = {0};
   wait.hHwQueue = queue->hardware_queue;
   wait.ObjectCount = 1;
-  wait.ObjectHandleArray = &queue->progress_fence;
+  wait.ObjectHandleArray = &queue->command_progress_fence;
   wait.FenceValueArray = &submission;
   status =
       amdf_kmt_make_status(queue->device->kmt->wait_on_hardware_queue(&wait));
+  if (amdf_status_is_ok(status) && queue->shared_progress.object != 0) {
+    status = amdf_gpu_wddm_kernel_queue_signal_progress(queue, submission);
+  }
   if (!amdf_status_is_ok(status)) {
     status = amdf_kmt_device_status_observe_error(
         &queue->device->status, queue->device->kmt, queue->device->device,
@@ -370,6 +488,14 @@ amdf_status_t amdf_gpu_umd_kernel_queue_destroy(
     amdf_gpu_umd_kernel_queue_t* queue) {
   amdf_status_t status = amdf_gpu_wddm_wkmi_adapter_destroy_kernel_queue(
       &queue->device->wkmi_adapter, queue->native);
+  if (queue->shared_progress.object != 0) {
+    const amdf_status_t cleanup_status =
+        amdf_windows_monitored_fence_deinitialize(queue->device->kmt,
+                                                  &queue->shared_progress);
+    if (amdf_status_is_ok(status)) {
+      status = cleanup_status;
+    }
+  }
   // Accepted work is retired and no waiter borrows the event. Its release is
   // independent of native queue removal; preserve the first cleanup error.
   if (!CloseHandle(queue->wait_event) && amdf_status_is_ok(status)) {

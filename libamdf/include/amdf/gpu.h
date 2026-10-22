@@ -19,7 +19,7 @@ extern "C" {
 /// An explicitly owned native wake resource, independent of completion values.
 typedef struct amdf_gpu_event_t amdf_gpu_event_t;
 
-/// The first supported GPU extension version.
+/// The original GPU extension version.
 #define AMDF_GPU_EXTENSION_VERSION_1 1u
 
 /// First version exposing nominal queue-clock units and native clock samples.
@@ -34,8 +34,12 @@ typedef struct amdf_gpu_event_t amdf_gpu_event_t;
 /// Adds caller-quiesced control of native AQL dispatch timestamps.
 #define AMDF_GPU_EXTENSION_VERSION_5 5u
 
+/// Adds queue capability requirements and native dependency operands. Earlier
+/// versions use incompatible queue operand layouts and are not provided.
+#define AMDF_GPU_EXTENSION_VERSION_6 6u
+
 /// The most recent GPU extension version described by this header.
-#define AMDF_GPU_EXTENSION_VERSION_LATEST AMDF_GPU_EXTENSION_VERSION_5
+#define AMDF_GPU_EXTENSION_VERSION_LATEST AMDF_GPU_EXTENSION_VERSION_6
 
 /// An `amdf_gpu_endpoint_info_t` output structure.
 #define AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO \
@@ -701,6 +705,10 @@ typedef struct amdf_gpu_kernel_queue_create_info_t {
   /// AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT. This admission
   /// bound does not reserve native driver capacity or retain command memory.
   uint32_t maximum_pending_submission_count;
+  /// Required live capabilities. EXTERNAL_SYNCHRONIZATION provisions exportable
+  /// native progress before publication; unsupported requirements reject
+  /// creation.
+  amdf_kernel_queue_capabilities_t required_capabilities;
 } amdf_gpu_kernel_queue_create_info_t;
 
 /// One bounded kernel-mediated GPU submission.
@@ -713,11 +721,15 @@ typedef struct amdf_gpu_kernel_queue_submission_info_t {
   const void* next;
   /// Number of immutable descriptors in `commands`.
   uint32_t command_count;
-  /// Reserved for compatible growth and must be zero.
-  uint32_t reserved;
+  /// Number of native dependency operands in waits.
+  uint32_t wait_count;
   /// Borrowed descriptor array consumed before return. Each referenced memory
   /// attachment remains borrowed until the accepted submission retires.
   const amdf_gpu_kernel_command_t* commands;
+  /// Borrowed native waits, published before commands. Each binding remains
+  /// live until its accepted consumer use retires. No future points are
+  /// allowed.
+  const amdf_kernel_queue_dependency_wait_t* waits;
 } amdf_gpu_kernel_queue_submission_info_t;
 
 /// Native producer protocol returned by an event's immutable information.
@@ -847,15 +859,17 @@ typedef struct amdf_gpu_api_t {
   /// The caller keeps it live until the returned submission retires. It
   /// performs no allocation, command-byte access, native-format parsing,
   /// lowering, transcription, native submission retry, sleep, or host wait.
-  /// Native rejection leaves `out_submission` unchanged. Because command bytes
+  /// Rejection before any native operation leaves `out_submission` unchanged.
+  /// Dependencies are published before commands. Because command bytes
   /// are opaque, the caller keeps every indirectly referenced memory or native
   /// object live until the submission retires.
   /// Successful calls return increasing queue-local completion points. Callers
   /// use returned points without assuming a starting value or dense numbering.
   /// Success means acceptance, not successful execution. A native failure after
-  /// command acceptance returns OK and the accepted point, latches terminal
-  /// queue failure, and prevents subsequent publication. Observe both queue
-  /// status and checked retirement; failure never authorizes storage reuse.
+  /// any wait or command acceptance returns OK and the accepted prefix point,
+  /// latches terminal queue failure, and prevents subsequent publication.
+  /// Observe both queue status and checked retirement; failure never authorizes
+  /// storage reuse.
   /// A successful wait for one point covers all earlier accepted submissions
   /// on this queue, not independently scheduled work on other queues.
   ///

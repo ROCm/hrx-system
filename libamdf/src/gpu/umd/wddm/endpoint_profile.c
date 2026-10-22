@@ -12,6 +12,7 @@
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/endpoint_properties.h"
 #include "libamdf/src/platform/windows/endpoint.h"
+#include "libamdf/src/platform/windows/monitored_fence.h"
 
 amdf_status_t amdf_gpu_umd_create_endpoint_profile(
     amdf_platform_endpoint_t* platform_endpoint,
@@ -42,6 +43,18 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
       for (uint32_t i = 0; i < properties.queue_family_count; ++i) {
         amdf_gpu_queue_family_properties_t* family =
             &properties.queue_families[i];
+        const bool hardware_scheduling =
+            family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 ||
+            provider_properties.supports_sdma_hardware_queue != 0;
+        const bool native_ordering =
+            hardware_scheduling ? kmt->wait_on_hardware_queue != NULL &&
+                                      kmt->signal_on_hardware_queue != NULL
+                                : kmt->wait_on_context != NULL &&
+                                      kmt->signal_on_context != NULL;
+        if (native_ordering && amdf_windows_monitored_fence_is_supported(kmt)) {
+          family->kernel_queue_capabilities |=
+              AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION;
+        }
         if ((family->kernel_queue_capabilities &
              AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY) != 0) {
           if (kmt->update_gpu_virtual_address != NULL &&
