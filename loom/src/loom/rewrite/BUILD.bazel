@@ -155,6 +155,23 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "fact_summary_test",
+    srcs = ["fact_summary_test.cc"],
+    deps = [
+        ":rewriter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "fact_inputs_test",
     srcs = ["fact_inputs_test.cc"],
     deps = [

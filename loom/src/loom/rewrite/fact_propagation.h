@@ -108,8 +108,8 @@ iree_status_t loom_rewriter_update_successor_facts(loom_rewriter_t* rewriter,
 void loom_rewriter_invalidate_cfg_forwarding(loom_rewriter_t* rewriter,
                                              const loom_op_t* op);
 
-// Reconsiders enclosing rewrites after body edits. Only terminators publish
-// enclosing fact equations; ordinary values publish through indexed users.
+// Reconsiders enclosing rewrites after body edits. Terminators invalidate their
+// nearest summary owner; further fact dependencies follow indexed result users.
 iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
     loom_rewriter_t* rewriter, loom_op_t* op);
 

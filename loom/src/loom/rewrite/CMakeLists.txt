@@ -164,6 +164,24 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    fact_summary_test
+  SRCS
+    "fact_summary_test.cc"
+  DEPS
+    ::rewriter
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::op_defs
+    loom::ops::scf
+    loom::ops::test
+    loom::pass::value_facts
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
     fact_inputs_test
   SRCS
     "fact_inputs_test.cc"

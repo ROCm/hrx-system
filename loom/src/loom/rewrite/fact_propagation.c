@@ -858,14 +858,14 @@ void loom_rewriter_invalidate_cfg_forwarding(loom_rewriter_t* rewriter,
 }
 
 // Body edits can enable a parent rewrite without changing its value equations.
-// Facts reach enclosing summaries through terminators; ordinary intermediate
-// values publish through their indexed users instead of lexical containment.
+// A terminator changes its owning summary. Further fact dependencies flow
+// through that summary's indexed result users, not lexical containment.
 iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
     loom_rewriter_t* rewriter, loom_op_t* op) {
   if (!rewriter->worklist_chunk && !rewriter->fact_table) {
     return iree_ok_status();
   }
-  const bool changes_summary =
+  bool changes_summary =
       op && iree_any_bit_set(op->traits, LOOM_TRAIT_TERMINATOR);
   bool has_cfg_facts =
       rewriter->fact_table && rewriter->fact_table->regions.cfg_count;
@@ -890,12 +890,17 @@ iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
         // edits still queue the owner and refresh its nested execution facts.
         if (changes_summary &&
             (!vtable->region_branch || parent->result_count)) {
-          IREE_RETURN_IF_ERROR(
-              loom_rewriter_add_fact_user_to_worklist(rewriter, parent));
+          // Close semantic dependencies before solving so a containing summary
+          // can cover its children, even when their numeric facts stay equal.
+          IREE_RETURN_IF_ERROR(loom_rewriter_add_changed_fact_user(
+              rewriter, parent, LOOM_REWRITER_USER_CHANGE_FLAG_SEMANTIC));
         } else {
           IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, parent));
         }
       }
+      // The nearest owner consumes the terminator's equation. Ancestors still
+      // receive rewrite-policy notifications for structural patterns.
+      changes_summary = false;
     }
   }
   return iree_ok_status();
@@ -1092,6 +1097,14 @@ iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
   while (iree_status_is_ok(status) &&
          (pending->operation_head < pending->operations.count ||
           pending->summaries.count || pending->blocks.count)) {
+    if (pending->invalidations.count) {
+      // Publishing changed equations can expose another summary dependency.
+      // Finish its semantic closure before evaluating the next queued owner.
+      status = loom_rewriter_publish_fact_invalidations(rewriter);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+    }
     if (pending->blocks.count) {
       loom_rewriter_fact_entry_t* entry =
           pending->blocks.values[--pending->blocks.count];
