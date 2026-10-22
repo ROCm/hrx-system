@@ -2,6 +2,10 @@ target.decl @qwen38_execution
 
 template.decl @qwen38.prefill.projection_schedule(%tokens: index) -> (index)
 
+template.decl @qwen38.prefill.integer_ffn(%tokens: index) -> (i1)
+
+kernel.decl @qwen38_linear_q5k_q8_1_matrix(%channels: index, %capacity: index, %inputs: index, %outputs: index) launch(%channels: index, %control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
 // Qwen3.8-27B full-attention layer over a flat token matrix.
 //
 // The compile-time token count selects the grid; control[0] supplies the active
@@ -354,38 +358,50 @@ command.program.def public target(@qwen38_execution) @qwen38_attention_layer_pre
   %ffn_gate = buffer.alloca<global> align(256) %ffn_bytes : buffer
   %ffn_up = buffer.alloca<global> align(256) %ffn_bytes : buffer
   %swiglu = buffer.alloca<global> align(256) %swiglu_bytes : buffer
-  scf.if %uses_cohort {
-    %post_normalized_q8_row_bytes = index.constant 5760 : offset
-    %post_normalized_q8_bytes = index.scale %cohort_rows, %post_normalized_q8_row_bytes : index, offset -> offset
-    %post_normalized_q8 = buffer.alloca<global> align(256) %post_normalized_q8_bytes : buffer
-    kernel.launch @ggml_quantize_q8_1_x4_f32[%cohort_rows, %hidden_size](%cohort_rows, %hidden_size, %post_normalized, %post_normalized_q8) : [index, index](index, index, buffer, buffer)
+  %uses_integer_ffn = template.apply<@qwen38.prefill.integer_ffn>(%token_count) : (index) -> (i1)
+  scf.if %uses_integer_ffn {
+    %packed_row_bytes = index.constant 5760 : offset
+    %packed_bytes = index.scale %token_count, %packed_row_bytes : index, offset -> offset
+    %packed = buffer.alloca<global> align(256) %packed_bytes : buffer
+    kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %post_normalized, %packed) : [index, index](index, index, buffer, buffer)
     command.concurrent {
-      scf.if %four_row_cohort {
-        kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%cohort_rows, %hidden_size, %ffn_size](%cohort_rows, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
-      } else {
-        kernel.launch @qwen38_linear_q5k_q8_1_channel8_cohort[%hidden_size, %ffn_size](%hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index](index, index, buffer, view<61276160xi8>, buffer)
-      }
-      scf.if %four_row_cohort {
-        kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%cohort_rows, %hidden_size, %ffn_size](%cohort_rows, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
-      } else {
-        kernel.launch @qwen38_linear_q5k_q8_1_channel8_cohort[%hidden_size, %ffn_size](%hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index](index, index, buffer, view<61276160xi8>, buffer)
-      }
+      kernel.launch @qwen38_linear_q5k_q8_1_matrix[%c8, %token_count, %hidden_size, %ffn_size](%c8, %control, %hidden_size, %ffn_size, %packed, %ffn_gate_weight, %ffn_gate) : [index, index, index, index](index, buffer, index, index, buffer, view<61276160xi8>, buffer)
+      kernel.launch @qwen38_linear_q5k_q8_1_matrix[%c8, %token_count, %hidden_size, %ffn_size](%c8, %control, %hidden_size, %ffn_size, %packed, %ffn_up_weight, %ffn_up) : [index, index, index, index](index, buffer, index, index, buffer, view<61276160xi8>, buffer)
     }
   } else {
-    scf.if %uses_x64 {
-      scf.if %uses_c64t32 {
-        command.concurrent {
-          command.program.launch @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc_channel8[%c64t32_token_count, %hidden_size, %ffn_size, %hidden_size, %ffn_size](%control, %post_normalized, %ffn_gate_weight, %ffn_gate) : [index, index, index, index, index](buffer, buffer, view<61276160xi8>, buffer)
-          command.program.launch @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc_channel8[%c64t32_token_count, %hidden_size, %ffn_size, %hidden_size, %ffn_size](%control, %post_normalized, %ffn_up_weight, %ffn_up) : [index, index, index, index, index](buffer, buffer, view<61276160xi8>, buffer)
+    scf.if %uses_cohort {
+      %post_normalized_q8_row_bytes = index.constant 5760 : offset
+      %post_normalized_q8_bytes = index.scale %cohort_rows, %post_normalized_q8_row_bytes : index, offset -> offset
+      %post_normalized_q8 = buffer.alloca<global> align(256) %post_normalized_q8_bytes : buffer
+      kernel.launch @ggml_quantize_q8_1_x4_f32[%cohort_rows, %hidden_size](%cohort_rows, %hidden_size, %post_normalized, %post_normalized_q8) : [index, index](index, index, buffer, buffer)
+      command.concurrent {
+        scf.if %four_row_cohort {
+          kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%cohort_rows, %hidden_size, %ffn_size](%cohort_rows, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
+        } else {
+          kernel.launch @qwen38_linear_q5k_q8_1_channel8_cohort[%hidden_size, %ffn_size](%hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index](index, index, buffer, view<61276160xi8>, buffer)
         }
-      } else {
-        command.concurrent {
-          command.program.launch @qwen38_dispatch_linear_q5k_f16_channel8[%x64_token_count, %hidden_size, %ffn_size, %hidden_size, %ffn_size](%control, %post_normalized, %ffn_gate_weight, %ffn_gate) : [index, index, index, index, index](buffer, buffer, view<61276160xi8>, buffer)
-          command.program.launch @qwen38_dispatch_linear_q5k_f16_channel8[%x64_token_count, %hidden_size, %ffn_size, %hidden_size, %ffn_size](%control, %post_normalized, %ffn_up_weight, %ffn_up) : [index, index, index, index, index](buffer, buffer, view<61276160xi8>, buffer)
+        scf.if %four_row_cohort {
+          kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%cohort_rows, %hidden_size, %ffn_size](%cohort_rows, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
+        } else {
+          kernel.launch @qwen38_linear_q5k_q8_1_channel8_cohort[%hidden_size, %ffn_size](%hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index](index, index, buffer, view<61276160xi8>, buffer)
         }
       }
     } else {
-      kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%x128_token_count](%control, %post_normalized, %ffn_gate_weight, %ffn_up_weight, %swiglu) : [index](buffer, buffer, view<61276160xi8>, view<61276160xi8>, buffer)
+      scf.if %uses_x64 {
+        scf.if %uses_c64t32 {
+          command.concurrent {
+            command.program.launch @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc_channel8[%c64t32_token_count, %hidden_size, %ffn_size, %hidden_size, %ffn_size](%control, %post_normalized, %ffn_gate_weight, %ffn_gate) : [index, index, index, index, index](buffer, buffer, view<61276160xi8>, buffer)
+            command.program.launch @qwen38_dispatch_linear_q5k_f16_c64t32_f32acc_channel8[%c64t32_token_count, %hidden_size, %ffn_size, %hidden_size, %ffn_size](%control, %post_normalized, %ffn_up_weight, %ffn_up) : [index, index, index, index, index](buffer, buffer, view<61276160xi8>, buffer)
+          }
+        } else {
+          command.concurrent {
+            command.program.launch @qwen38_dispatch_linear_q5k_f16_channel8[%x64_token_count, %hidden_size, %ffn_size, %hidden_size, %ffn_size](%control, %post_normalized, %ffn_gate_weight, %ffn_gate) : [index, index, index, index, index](buffer, buffer, view<61276160xi8>, buffer)
+            command.program.launch @qwen38_dispatch_linear_q5k_f16_channel8[%x64_token_count, %hidden_size, %ffn_size, %hidden_size, %ffn_size](%control, %post_normalized, %ffn_up_weight, %ffn_up) : [index, index, index, index, index](buffer, buffer, view<61276160xi8>, buffer)
+          }
+        }
+      } else {
+        kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%x128_token_count](%control, %post_normalized, %ffn_gate_weight, %ffn_up_weight, %swiglu) : [index](buffer, buffer, view<61276160xi8>, view<61276160xi8>, buffer)
+      }
     }
   }
 
