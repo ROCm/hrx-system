@@ -1,0 +1,31 @@
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+// CDNA materializes and reuses register selectors for fixed index packing.
+
+func.def @byte_table_i32_indices_cdna(%table: vector<8xi8>, %input: vector<4xi32>) -> (vector<4xi8>) {
+  %mask = vector.constant 7 : vector<4xi32>
+  %indices = vector.andi %input, %mask : vector<4xi32>
+  %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<4xi32> -> vector<4xi8>
+  func.return %values : vector<4xi8>
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @byte_table_i32_indices_cdna(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+  %9 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = v_and_b32_lit %9, 7
+  %11 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = v_and_b32_lit %11, 7
+  %13 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = v_and_b32_lit %13, 7
+  %15 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = v_and_b32_lit %15, 7
+  %18 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = s_mov_b32 4
+  %25 = v_perm_b32 %10, %12, %24
+  %26 = v_perm_b32 %14, %16, %24
+  %27 = s_mov_b32 16778500
+  %28 = v_perm_b32 %25, %26, %27
+  %values = v_perm_b32 %19, %18, %28
+  return %values
+}

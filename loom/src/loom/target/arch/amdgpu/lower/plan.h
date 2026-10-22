@@ -21,6 +21,7 @@
 #include "loom/ir/ir.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/target/arch/amdgpu/lower/byte_permute.h"
 #include "loom/target/arch/amdgpu/lower/collective_plan.h"
 #include "loom/target/arch/amdgpu/lower/compare.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
@@ -65,22 +66,6 @@ typedef struct loom_amdgpu_constant_plan_t {
   // Boolean payload for i1 constants.
   bool i1_value;
 } loom_amdgpu_constant_plan_t;
-
-typedef uint8_t loom_amdgpu_byte_permute_kind_t;
-enum loom_amdgpu_byte_permute_kind_e {
-  LOOM_AMDGPU_BYTE_PERMUTE_KIND_NONE = 0,
-  LOOM_AMDGPU_BYTE_PERMUTE_KIND_LITERAL_SELECTOR = 1,
-  LOOM_AMDGPU_BYTE_PERMUTE_KIND_REGISTER_SELECTOR = 2,
-};
-
-typedef struct loom_amdgpu_byte_permute_plan_t {
-  // Representation selected for V_PERM_B32 byte selector operands.
-  loom_amdgpu_byte_permute_kind_t kind;
-  // Descriptor selected for each byte permutation packet.
-  loom_amdgpu_descriptor_ref_t descriptor_ref;
-} loom_amdgpu_byte_permute_plan_t;
-static_assert(sizeof(loom_amdgpu_byte_permute_plan_t) == 4,
-              "AMDGPU byte permutation plans must stay cache dense");
 
 typedef enum loom_amdgpu_fp8_encode_kind_e {
   LOOM_AMDGPU_FP8_ENCODE_KIND_NONE = 0,

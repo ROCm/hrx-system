@@ -598,6 +598,104 @@ check.scenario @computed_short_lookup_64_values {
   check.return
 }
 
+// The same bounded runtime bytes reach every integer selector carrier and each
+// packed byte value type. The 64-entry table exercises the deepest native tree,
+// while the 33-entry view reaches the last valid byte without selecting its
+// padded register bytes.
+kernel.def @lookup_byte_table_index_carriers() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%table: buffer, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %table_view = buffer.view %table[%base] : buffer -> view<64xi8>
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<28xi8>
+  %raw = vector.load %input_view[0] : view<4xi8> -> vector<4xi8>
+  %short_mask = vector.constant 32 : vector<4xi8>
+  %short_indices = vector.andi %raw, %short_mask : vector<4xi8>
+  %mask = vector.constant 63 : vector<4xi8>
+  %byte_indices = vector.andi %raw, %mask : vector<4xi8>
+  %half_indices = vector.extui %byte_indices : vector<4xi8> to vector<4xi16>
+  %word_indices = vector.extui %byte_indices : vector<4xi8> to vector<4xi32>
+  %wide_indices = vector.extui %byte_indices : vector<4xi8> to vector<4xi64>
+  %short_table = vector.load %table_view[0] : view<64xi8> -> vector<33xi8>
+  %full_table = vector.load %table_view[0] : view<64xi8> -> vector<64xi8>
+  %e4m3_table = vector.bitcast %full_table : vector<64xi8> to vector<64xf8E4M3>
+  %e5m2_table = vector.bitcast %full_table : vector<64xi8> to vector<64xf8E5M2>
+  %short_values = vector.table.lookup %short_table[%short_indices] : vector<33xi8>, vector<4xi8> -> vector<4xi8>
+  %byte_values = vector.table.lookup %full_table[%byte_indices] : vector<64xi8>, vector<4xi8> -> vector<4xi8>
+  %half_values = vector.table.lookup %full_table[%half_indices] : vector<64xi8>, vector<4xi16> -> vector<4xi8>
+  %word_values = vector.table.lookup %full_table[%word_indices] : vector<64xi8>, vector<4xi32> -> vector<4xi8>
+  %wide_values = vector.table.lookup %full_table[%wide_indices] : vector<64xi8>, vector<4xi64> -> vector<4xi8>
+  %e4m3_values = vector.table.lookup %e4m3_table[%byte_indices] : vector<64xf8E4M3>, vector<4xi8> -> vector<4xf8E4M3>
+  %e5m2_values = vector.table.lookup %e5m2_table[%byte_indices] : vector<64xf8E5M2>, vector<4xi8> -> vector<4xf8E5M2>
+  %e4m3_bits = vector.bitcast %e4m3_values : vector<4xf8E4M3> to vector<4xi8>
+  %e5m2_bits = vector.bitcast %e5m2_values : vector<4xf8E5M2> to vector<4xi8>
+  vector.store %short_values, %output_view[0] : vector<4xi8>, view<28xi8>
+  vector.store %byte_values, %output_view[4] : vector<4xi8>, view<28xi8>
+  vector.store %half_values, %output_view[8] : vector<4xi8>, view<28xi8>
+  vector.store %word_values, %output_view[12] : vector<4xi8>, view<28xi8>
+  vector.store %wide_values, %output_view[16] : vector<4xi8>, view<28xi8>
+  vector.store %e4m3_bits, %output_view[20] : vector<4xi8>, view<28xi8>
+  vector.store %e5m2_bits, %output_view[24] : vector<4xi8>, view<28xi8>
+  kernel.return
+}
+
+func.def @lookup_byte_table_index_carriers_oracle(%table: buffer, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %table_view = buffer.view %table[%base] : buffer -> view<64xi8>
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<28xi8>
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %short_mask = scalar.constant 32 : i8
+  %mask = scalar.constant 63 : i8
+  %o4 = index.constant 4 : index
+  %o8 = index.constant 8 : index
+  %o12 = index.constant 12 : index
+  %o16 = index.constant 16 : index
+  %o20 = index.constant 20 : index
+  %o24 = index.constant 24 : index
+  scf.for %position = [%begin to %end step %step] {
+    %raw = view.load %input_view[%position] : view<4xi8> -> i8
+    %short_index_bits = scalar.andi %raw, %short_mask : i8
+    %short_index = index.cast %short_index_bits : i8 to index
+    %short_value = view.load %table_view[%short_index] : view<64xi8> -> i8
+    view.store %short_value, %output_view[%position] : i8, view<28xi8>
+    %index_bits = scalar.andi %raw, %mask : i8
+    %index = index.cast %index_bits : i8 to index
+    %value = view.load %table_view[%index] : view<64xi8> -> i8
+    %byte_position = index.add %position, %o4 : index
+    %half_position = index.add %position, %o8 : index
+    %word_position = index.add %position, %o12 : index
+    %wide_position = index.add %position, %o16 : index
+    %e4m3_position = index.add %position, %o20 : index
+    %e5m2_position = index.add %position, %o24 : index
+    view.store %value, %output_view[%byte_position] : i8, view<28xi8>
+    view.store %value, %output_view[%half_position] : i8, view<28xi8>
+    view.store %value, %output_view[%word_position] : i8, view<28xi8>
+    view.store %value, %output_view[%wide_position] : i8, view<28xi8>
+    view.store %value, %output_view[%e4m3_position] : i8, view<28xi8>
+    view.store %value, %output_view[%e5m2_position] : i8, view<28xi8>
+  }
+  func.return
+}
+
+check.scenario @byte_table_index_carrier_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %table = check.generate.iota offset(-127) step(4) : tensor<64xi8>
+    %input = check.generate.iota offset(0) step(21) : tensor<4xi8>
+    %output = check.generate.fill value(91) : tensor<28xi8>
+    check.compare<@lookup_byte_table_index_carriers, @lookup_byte_table_index_carriers_oracle>(%table, %input, %output) : (tensor<64xi8>, tensor<4xi8>, tensor<28xi8>) -> () {
+      check.expect.bitwise actual(%table) expected(%table) : tensor<64xi8>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<4xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<28xi8>
+    }
+  }
+  check.return
+}
+
 // Predicate tables keep their packed representation while selecting both true
 // and false values at alternating runtime indices.
 func.def device inline @compute_lookup_predicates(%table_input: buffer, %index_input: buffer, %output: buffer) {

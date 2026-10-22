@@ -1,0 +1,39 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+// Packed byte lookup is bit-preserving across every byte-sized value type.
+
+func.def @byte_table_f8e4m3(%table: vector<8xf8E4M3>, %input: vector<4xi8>) -> (vector<4xf8E4M3>) {
+  %mask = vector.constant 7 : vector<4xi8>
+  %indices = vector.andi %input, %mask : vector<4xi8>
+  %values = vector.table.lookup %table[%indices] : vector<8xf8E4M3>, vector<4xi8> -> vector<4xf8E4M3>
+  func.return %values : vector<4xf8E4M3>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_f8e4m3(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %mask = v_mov_b32 117901063
+  %indices = v_and_b32 %input, %mask
+  %11 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %12 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %values = v_perm_b32 %12, %11, %indices
+  return %values
+}
+
+// ====
+
+func.def @byte_table_f8e5m2(%table: vector<8xf8E5M2>, %input: vector<4xi8>) -> (vector<4xf8E5M2>) {
+  %mask = vector.constant 7 : vector<4xi8>
+  %indices = vector.andi %input, %mask : vector<4xi8>
+  %values = vector.table.lookup %table[%indices] : vector<8xf8E5M2>, vector<4xi8> -> vector<4xf8E5M2>
+  func.return %values : vector<4xf8E5M2>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_f8e5m2(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %mask = v_mov_b32 117901063
+  %indices = v_and_b32 %input, %mask
+  %11 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %12 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %values = v_perm_b32 %12, %11, %indices
+  return %values
+}

@@ -23,6 +23,7 @@ enum {
   // read bytes from SRC0. These selectors preserve Loom's logical packed-i8
   // lane order: lane 0 in bits 0..7 and lane 3 in bits 24..31.
   LOOM_AMDGPU_I8_BITPACK_PAIR_SELECTOR = 0x00000004u,
+  LOOM_AMDGPU_I8_BITPACK_PARTIAL_MERGE_SELECTOR = 0x00000504u,
   LOOM_AMDGPU_I8_BITPACK_MERGE_SELECTOR = 0x01000504u,
   LOOM_AMDGPU_U4_BITUNPACK_LOW_SELECTOR = 0x05010400u,
   LOOM_AMDGPU_U4_BITUNPACK_HIGH_SELECTOR = 0x07030602u,
@@ -458,20 +459,43 @@ iree_status_t loom_amdgpu_pack_i8_lanes_with_permute(
     const loom_value_id_t* source_lanes, uint32_t source_lane_count,
     loom_type_t lane_type, loom_value_id_t* out_packed_registers) {
   IREE_ASSERT_NE(plan->kind, LOOM_AMDGPU_BYTE_PERMUTE_KIND_NONE);
-  IREE_ASSERT_EQ(source_lane_count % 4u, 0u);
+  IREE_ASSERT_NE(source_lane_count, 0u);
 
   loom_amdgpu_byte_permute_emitter_t emitter;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_byte_permute_emitter_initialize(context, plan, &emitter));
 
-  for (uint32_t register_index = 0; register_index < source_lane_count / 4u;
+  const uint32_t register_count = (source_lane_count + 3u) / 4u;
+  for (uint32_t register_index = 0; register_index < register_count;
        ++register_index) {
     const uint32_t lane_base = register_index * 4u;
+    const uint32_t remaining_lane_count = source_lane_count - lane_base;
+    const uint32_t register_lane_count =
+        remaining_lane_count < 4u ? remaining_lane_count : 4u;
+    if (register_lane_count == 1u) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32(
+          context, source_op, source_lanes[lane_base],
+          &out_packed_registers[register_index]));
+      continue;
+    }
+
     loom_value_id_t packed_low = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_byte_permute_emitter_emit(
         context, source_op, &emitter, source_lanes[lane_base],
         source_lanes[lane_base + 1], LOOM_AMDGPU_I8_BITPACK_PAIR_SELECTOR,
         lane_type, &packed_low));
+    if (register_lane_count == 2u) {
+      out_packed_registers[register_index] = packed_low;
+      continue;
+    }
+    if (register_lane_count == 3u) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_byte_permute_emitter_emit(
+          context, source_op, &emitter, packed_low, source_lanes[lane_base + 2],
+          LOOM_AMDGPU_I8_BITPACK_PARTIAL_MERGE_SELECTOR, lane_type,
+          &out_packed_registers[register_index]));
+      continue;
+    }
+
     loom_value_id_t packed_high = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_byte_permute_emitter_emit(
         context, source_op, &emitter, source_lanes[lane_base + 2],

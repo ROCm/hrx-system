@@ -1663,10 +1663,8 @@ static iree_string_view_t loom_amdgpu_table_lookup_plan_key(
       return plan->indices == LOOM_VALUE_ID_INVALID
                  ? IREE_SV("amdgpu.table_lookup.strategy.f32_static")
                  : IREE_SV("amdgpu.table_lookup.strategy.f32_ladder");
-    case LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_PACKED_I8_PERMUTE:
-      return IREE_SV("amdgpu.table_lookup.strategy.packed_i8_permute");
-    case LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_PACKED_I8_U4_PERMUTE:
-      return IREE_SV("amdgpu.table_lookup.strategy.packed_i8_u4_permute");
+    case LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_PACKED_BYTE_PERMUTE_TREE:
+      return IREE_SV("amdgpu.table_lookup.strategy.packed_byte_permute_tree");
     default:
       return iree_string_view_empty();
   }

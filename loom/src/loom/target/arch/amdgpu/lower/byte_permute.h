@@ -10,11 +10,28 @@
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_BYTE_PERMUTE_H_
 
 #include "loom/codegen/low/lower/lower.h"
-#include "loom/target/arch/amdgpu/lower/plan.h"
+#include "loom/target/arch/amdgpu/lower/kinds.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef uint8_t loom_amdgpu_byte_permute_kind_t;
+enum loom_amdgpu_byte_permute_kind_e {
+  LOOM_AMDGPU_BYTE_PERMUTE_KIND_NONE = 0,
+  LOOM_AMDGPU_BYTE_PERMUTE_KIND_LITERAL_SELECTOR = 1,
+  LOOM_AMDGPU_BYTE_PERMUTE_KIND_REGISTER_SELECTOR = 2,
+};
+
+typedef struct loom_amdgpu_byte_permute_plan_t {
+  // Representation selected for V_PERM_B32 byte selector operands.
+  loom_amdgpu_byte_permute_kind_t kind;
+  // Descriptor selected for each byte permutation packet.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+} loom_amdgpu_byte_permute_plan_t;
+static_assert(sizeof(loom_amdgpu_byte_permute_plan_t) == 4,
+              "AMDGPU byte permutation plans must stay cache dense");
 
 typedef struct loom_amdgpu_byte_permute_selector_cache_entry_t {
   // Byte selector payload represented by this cache entry.

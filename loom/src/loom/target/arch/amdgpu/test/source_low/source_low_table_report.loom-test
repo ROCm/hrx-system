@@ -45,7 +45,7 @@ COMPILE-REPORT: source_low[1] function=report_i8_table_lookup_permute source_op=
 COMPILE-REPORT: source_low[2] function=report_i8_table_lookup_permute source_op=scalar.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[3] function=report_i8_table_lookup_permute source_op=scalar.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_i8_table_lookup_permute source_op=vector.from_elements selection=plan emitted_ops=1
-COMPILE-REPORT: source_low[5] function=report_i8_table_lookup_permute source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_i8_permute emitted_ops=1
+COMPILE-REPORT: source_low[5] function=report_i8_table_lookup_permute source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=1
 COMPILE-REPORT: target_legalization[0] function=report_i8_table_lookup_permute source_op=vector.table.lookup mode=final policy=prefer-native action=deferred outcome=deferred contract=unhandled legalizer=amdgpu strategy=target bundle=target config=target scalarized=false source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=0 erased_ops=0
 
 // ====
@@ -63,7 +63,7 @@ COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- ex
 COMPILE-REPORT: source_low selected_ops=2 emitted_ops=18 rows=2 unkeyed_maximum_emitted_ops=7
 COMPILE-REPORT: target_legalization legal=0 rewritten=0 scalarized=0 target_rewritten=0 reference_rewritten=0 deferred=1 invalid_ir=0 unsupported=0 unhandled=0 rows=1 maximum_created_ops=0
 COMPILE-REPORT: source_low[0] function=report_i8_table_lookup_u4_permute source_op=vector.bitunpacku selection=plan emitted_ops=7
-COMPILE-REPORT: source_low[1] function=report_i8_table_lookup_u4_permute source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_i8_u4_permute emitted_ops=11
+COMPILE-REPORT: source_low[1] function=report_i8_table_lookup_u4_permute source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=11
 COMPILE-REPORT: target_legalization[0] function=report_i8_table_lookup_u4_permute source_op=vector.table.lookup mode=final policy=prefer-native action=deferred outcome=deferred contract=unhandled legalizer=amdgpu strategy=target bundle=target config=target scalarized=false source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=0 erased_ops=0
 
 // ====
@@ -79,8 +79,54 @@ func.def target(@target) @wide_u4_recipe(%table: vector<16xi8>, %input: vector<1
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] function=wide_u4_recipe source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_i8_u4_permute emitted_ops=37
+CHECK: COMPILE-REPORT: source_low[*] function=wide_u4_recipe source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=37
 CHECK: COMPILE-REPORT: target_legalization[*] function=wide_u4_recipe source_op=vector.table.lookup * action=deferred * created_ops=0 erased_ops=0
+CHECK-NOT: *strategy=reference*
+
+// ====
+
+// RUN: with-checks compile-report target-legalize{mode=final},dce,canonicalize,source-to-low,low-dce
+amdgpu.target<gfx11-generic> @target
+
+// Boundary cases keep every selector carrier and the maximum table extent on
+// the packed permutation path.
+func.def target(@target) @table64_byte(%table: vector<64xi8>, %input: vector<4xi8>) -> (vector<4xi8>) {
+  %mask = vector.constant 63 : vector<4xi8>
+  %indices = vector.andi %input, %mask : vector<4xi8>
+  %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %values : vector<4xi8>
+}
+
+func.def target(@target) @table64_half_max(%table: vector<64xi8>, %input: vector<32xi16>) -> (vector<32xi8>) {
+  %mask = vector.constant 63 : vector<32xi16>
+  %indices = vector.andi %input, %mask : vector<32xi16>
+  %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<32xi16> -> vector<32xi8>
+  func.return %values : vector<32xi8>
+}
+
+func.def target(@target) @table64_word_max(%table: vector<64xi8>, %input: vector<32xi32>) -> (vector<32xi8>) {
+  %mask = vector.constant 63 : vector<32xi32>
+  %indices = vector.andi %input, %mask : vector<32xi32>
+  %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<32xi32> -> vector<32xi8>
+  func.return %values : vector<32xi8>
+}
+
+func.def target(@target) @table64_wide_max(%table: vector<64xi8>, %input: vector<16xi64>) -> (vector<16xi8>) {
+  %mask = vector.constant 63 : vector<16xi64>
+  %indices = vector.andi %input, %mask : vector<16xi64>
+  %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<16xi64> -> vector<16xi8>
+  func.return %values : vector<16xi8>
+}
+
+// ----
+CHECK: COMPILE-REPORT: source_low[*] function=table64_byte source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=41
+CHECK: COMPILE-REPORT: source_low[*] function=table64_half_max source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=241
+CHECK: COMPILE-REPORT: source_low[*] function=table64_word_max source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=273
+CHECK: COMPILE-REPORT: source_low[*] function=table64_wide_max source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=145
+CHECK: COMPILE-REPORT: target_legalization[*] function=table64_byte source_op=vector.table.lookup * action=deferred * scalarized=false * created_ops=0 erased_ops=0
+CHECK: COMPILE-REPORT: target_legalization[*] function=table64_half_max source_op=vector.table.lookup * action=deferred * scalarized=false * created_ops=0 erased_ops=0
+CHECK: COMPILE-REPORT: target_legalization[*] function=table64_word_max source_op=vector.table.lookup * action=deferred * scalarized=false * created_ops=0 erased_ops=0
+CHECK: COMPILE-REPORT: target_legalization[*] function=table64_wide_max source_op=vector.table.lookup * action=deferred * scalarized=false * created_ops=0 erased_ops=0
 CHECK-NOT: *strategy=reference*
 
 // ====
@@ -96,7 +142,7 @@ func.def target(@target) @partial_u4_recipe(%table: vector<16xi8>, %input: vecto
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] function=partial_u4_recipe source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_i8_u4_permute emitted_ops=21
+CHECK: COMPILE-REPORT: source_low[*] function=partial_u4_recipe source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=21
 CHECK: COMPILE-REPORT: target_legalization[*] function=partial_u4_recipe source_op=vector.table.lookup * action=deferred * created_ops=0 erased_ops=0
 CHECK-NOT: *strategy=reference*
 
@@ -113,7 +159,7 @@ func.def target(@target) @maximum_u4_recipe(%table: vector<16xi8>, %input: vecto
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] function=maximum_u4_recipe source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_i8_u4_permute emitted_ops=133
+CHECK: COMPILE-REPORT: source_low[*] function=maximum_u4_recipe source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=133
 CHECK: COMPILE-REPORT: target_legalization[*] function=maximum_u4_recipe source_op=vector.table.lookup * action=deferred * created_ops=0 erased_ops=0
 CHECK-NOT: *strategy=reference*
 
@@ -130,7 +176,7 @@ func.def target(@target) @partial_u2_recipe(%table: vector<4xi8>, %input: vector
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] function=partial_u2_recipe source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_i8_permute emitted_ops=5
+CHECK: COMPILE-REPORT: source_low[*] function=partial_u2_recipe source_op=vector.table.lookup selection=plan plan_key=amdgpu.table_lookup.strategy.packed_byte_permute_tree emitted_ops=5
 CHECK: COMPILE-REPORT: target_legalization[*] function=partial_u2_recipe source_op=vector.table.lookup * action=deferred * created_ops=0 erased_ops=0
 CHECK-NOT: *strategy=reference*
 
@@ -147,7 +193,7 @@ func.def target(@target) @unproven_wide_indices(%table: vector<16xi8>, %indices:
 
 // ----
 CHECK: COMPILE-REPORT: target_legalization[*] function=unproven_wide_indices source_op=vector.table.lookup * action=rewritten outcome=reference-fallback * strategy=reference * erased_ops=1
-CHECK-NOT: *plan_key=amdgpu.table_lookup.strategy.packed_i8*
+CHECK-NOT: *plan_key=amdgpu.table_lookup.strategy.packed_byte*
 
 // ====
 
@@ -179,4 +225,4 @@ func.def target(@target) @insufficient_partial_index_bound(%table: vector<4xi8>,
 
 // ----
 CHECK: COMPILE-REPORT: target_legalization[*] function=insufficient_partial_index_bound source_op=vector.table.lookup * action=rewritten outcome=reference-fallback * strategy=reference * scalarized=true * created_ops=46 erased_ops=6
-CHECK-NOT: *plan_key=amdgpu.table_lookup.strategy.packed_i8*
+CHECK-NOT: *plan_key=amdgpu.table_lookup.strategy.packed_byte*

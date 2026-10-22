@@ -1,0 +1,139 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+// Exact contracts cover every native integer selector representation, partial
+// packed-i16 sources, and all tails of full-width selector packing.
+
+func.def @byte_table_i16_one_index(%table: vector<8xi8>, %input: vector<1xi16>) -> (vector<1xi8>) {
+  %mask = vector.constant 7 : vector<1xi16>
+  %indices = vector.andi %input, %mask : vector<1xi16>
+  %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<1xi16> -> vector<1xi8>
+  func.return %values : vector<1xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i16_one_index(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %mask = v_mov_b32 458759
+  %indices = v_and_b32 %input, %mask
+  %11 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %12 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = v_perm_b32_src2_lit %indices, %indices, 100925952
+  %values = v_perm_b32 %12, %11, %13
+  return %values
+}
+
+// ====
+
+func.def @byte_table_i16_indices(%table: vector<8xi8>, %input: vector<4xi16>) -> (vector<4xi8>) {
+  %mask = vector.constant 7 : vector<4xi16>
+  %indices = vector.andi %input, %mask : vector<4xi16>
+  %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<4xi16> -> vector<4xi8>
+  func.return %values : vector<4xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i16_indices(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %9 = v_mov_b32 458759
+  %12 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = v_and_b32 %12, %9
+  %15 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = v_and_b32 %15, %9
+  %19 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %23 = v_perm_b32_src2_lit %17, %14, 100925952
+  %values = v_perm_b32 %20, %19, %23
+  return %values
+}
+
+// ====
+
+func.def @byte_table_i32_one_index(%table: vector<8xi8>, %input: vector<1xi32>) -> (vector<1xi8>) {
+  %mask = vector.constant 7 : vector<1xi32>
+  %indices = vector.andi %input, %mask : vector<1xi32>
+  %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<1xi32> -> vector<1xi8>
+  func.return %values : vector<1xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i32_one_index(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %indices = v_and_b32_lit %input, 7
+  %10 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %values = v_perm_b32 %11, %10, %indices
+  return %values
+}
+
+// ====
+
+func.def @byte_table_i64_two_indices(%table: vector<8xi8>, %input: vector<2xi64>) -> (vector<2xi8>) {
+  %mask = vector.constant 7 : vector<2xi64>
+  %indices = vector.andi %input, %mask : vector<2xi64>
+  %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<2xi64> -> vector<2xi8>
+  func.return %values : vector<2xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i64_two_indices(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+  %9 = v_mov_b32 7
+  %14 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = v_and_b32 %14, %9
+  %20 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %22 = v_and_b32 %20, %9
+  %27 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %31 = v_perm_b32_src2_lit %16, %22, 4
+  %values = v_perm_b32 %28, %27, %31
+  return %values
+}
+
+// ====
+
+func.def @byte_table_i32_three_indices(%table: vector<8xi8>, %input: vector<3xi32>) -> (vector<3xi8>) {
+  %mask = vector.constant 7 : vector<3xi32>
+  %indices = vector.andi %input, %mask : vector<3xi32>
+  %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<3xi32> -> vector<3xi8>
+  func.return %values : vector<3xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i32_three_indices(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr>) asm {
+  %9 = slice %input[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %10 = v_and_b32_lit %9, 7
+  %11 = slice %input[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %12 = v_and_b32_lit %11, 7
+  %13 = slice %input[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %14 = v_and_b32_lit %13, 7
+  %16 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_perm_b32_src2_lit %10, %12, 4
+  %22 = v_perm_b32_src2_lit %21, %14, 1284
+  %values = v_perm_b32 %17, %16, %22
+  return %values
+}
+
+// ====
+
+func.def @byte_table_i32_four_indices(%table: vector<8xi8>, %input: vector<4xi32>) -> (vector<4xi8>) {
+  %mask = vector.constant 7 : vector<4xi32>
+  %indices = vector.andi %input, %mask : vector<4xi32>
+  %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<4xi32> -> vector<4xi8>
+  func.return %values : vector<4xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i32_four_indices(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+  %9 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = v_and_b32_lit %9, 7
+  %11 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = v_and_b32_lit %11, 7
+  %13 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = v_and_b32_lit %13, 7
+  %15 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = v_and_b32_lit %15, 7
+  %18 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = v_perm_b32_src2_lit %10, %12, 4
+  %25 = v_perm_b32_src2_lit %14, %16, 4
+  %26 = v_perm_b32_src2_lit %24, %25, 16778500
+  %values = v_perm_b32 %19, %18, %26
+  return %values
+}

@@ -10,6 +10,7 @@
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_TABLE_H_
 
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amdgpu/lower/byte_permute.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
 #include "loom/target/low_legality.h"
 
@@ -21,13 +22,14 @@ typedef enum loom_amdgpu_table_index_kind_e {
   LOOM_AMDGPU_TABLE_INDEX_KIND_NONE = 0,
   LOOM_AMDGPU_TABLE_INDEX_KIND_I32 = 1,
   LOOM_AMDGPU_TABLE_INDEX_KIND_PACKED_I8 = 2,
+  LOOM_AMDGPU_TABLE_INDEX_KIND_PACKED_I16 = 3,
+  LOOM_AMDGPU_TABLE_INDEX_KIND_I64 = 4,
 } loom_amdgpu_table_index_kind_t;
 
 typedef enum loom_amdgpu_table_lookup_strategy_e {
   LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_NONE = 0,
   LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_F32_LADDER = 1,
-  LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_PACKED_I8_PERMUTE = 2,
-  LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_PACKED_I8_U4_PERMUTE = 3,
+  LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_PACKED_BYTE_PERMUTE_TREE = 2,
 } loom_amdgpu_table_lookup_strategy_t;
 
 typedef struct loom_amdgpu_table_lookup_plan_t {
@@ -49,6 +51,8 @@ typedef struct loom_amdgpu_table_lookup_plan_t {
   loom_low_lower_resolved_descriptor_t select_src1_literal_descriptor;
   // Descriptor row selected for packed byte table permutation.
   loom_low_lower_resolved_descriptor_t permute_descriptor;
+  // Fixed-selector permutation form used to pack non-byte index lanes.
+  loom_amdgpu_byte_permute_plan_t index_pack_permute;
   // Selected index payload representation.
   loom_amdgpu_table_index_kind_t index_kind;
   // Static number of table lanes.
@@ -59,6 +63,8 @@ typedef struct loom_amdgpu_table_lookup_plan_t {
   uint32_t result_lane_count;
   // Number of 32-bit registers occupied by the index vector.
   uint32_t index_register_count;
+  // Number of 32-bit registers occupied by the result vector.
+  uint32_t result_register_count;
   // Table lanes selecting the literal form, in ascending payload order.
   uint32_t literal_lane_mask;
   // Packed literal bits for set lanes; NULL when all selects use registers.

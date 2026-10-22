@@ -341,6 +341,7 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "memory/packed/consumers.loom:@packed_short_lookup": "TARGET/003",
     "memory/packed/consumers.loom:@packed_signed_byte_lookup": "TARGET/003",
     "memory/packed/consumers.loom:@packed_snapshot_consumers": "TARGET/003",
+    "memory/packed/lookup_widths.loom:@lookup_byte_table_index_carriers": "TARGET/003",
     "memory/packed/lookup_widths.loom:@lookup_computed_1": "TARGET/003",
     "memory/packed/lookup_widths.loom:@lookup_computed_2": "TARGET/003",
     "memory/packed/lookup_widths.loom:@lookup_computed_3": "TARGET/003",

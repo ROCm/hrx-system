@@ -38,8 +38,8 @@ iree_status_t loom_amdgpu_pack_lane_bits_into_register(
     loom_value_id_t source_lane, uint32_t width, uint32_t bit_offset,
     loom_type_t lane_type, loom_value_id_t* inout_packed);
 
-// Packs complete groups of four 32-bit source lanes to i8 bytes using
-// the selected byte permutation plan.
+// Packs 32-bit source lanes to groups of four i8 bytes using the selected byte
+// permutation plan. A partial final register defines only its semantic bytes.
 iree_status_t loom_amdgpu_pack_i8_lanes_with_permute(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_byte_permute_plan_t* plan,
