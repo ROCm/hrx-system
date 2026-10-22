@@ -104,6 +104,22 @@ uint32_t loom_serve_weight_inputs_source_count(
   return inputs->source_count;
 }
 
+iree_status_t loom_serve_weight_inputs_validate_direct(
+    const loom_serve_weight_inputs_t* inputs, iree_string_view_t key,
+    iree_device_size_t byte_length) {
+  const iree_io_parameter_index_entry_t* entry = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_io_parameter_index_lookup(inputs->sources[0].index, key, &entry));
+  if (byte_length > entry->length) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "weight '%.*s' requires %" PRIu64
+        " bytes from checkpoint source zero, but its entry has %" PRIu64,
+        (int)key.size, key.data, (uint64_t)byte_length, entry->length);
+  }
+  return iree_ok_status();
+}
+
 const loom_serve_weight_input_t* loom_serve_weight_inputs_at(
     const loom_serve_weight_inputs_t* inputs, uint32_t ordinal) {
   return &inputs->values[ordinal];
@@ -189,8 +205,11 @@ static iree_status_t loom_serve_weight_inputs_capture(
   const int64_t alignment = (int64_t)iree_vm_call_value_argument_load(call, 3);
   if (offset < 0 || length <= 0 || (uint64_t)offset > entry->length ||
       (uint64_t)length > entry->length - (uint64_t)offset) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "weight input range exceeds checkpoint tensor");
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "weight '%.*s' input range offset %" PRId64 " length %" PRId64
+        " exceeds checkpoint tensor length %" PRIu64,
+        (int)entry->key.size, entry->key.data, offset, length, entry->length);
   }
   if (alignment <= 0 || (alignment & (alignment - 1)) ||
       module->recipe.byte_length > INT64_MAX - (uint64_t)(alignment - 1)) {

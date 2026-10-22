@@ -117,12 +117,15 @@ typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
 // The "weights" capability exposes source metadata and captures explicit input
 // ranges (see inputs.h). The standard "json" and "input" capabilities support
 // source-owned metadata interpretation and requirements. A preparer has no
-// fixed buffers or global scratch. It
-// binds final storage alone for in-place preparation, or final storage followed
-// by the captured input blob for out-of-place preparation. Each distinct
-// declaration is JITed once; activation prepares each tensor once using bounded
-// staging shared across tensors. The temporary VM policy is released before
-// JIT.
+// fixed buffers or global scratch. It binds final storage alone for in-place
+// preparation, or final storage followed by the captured input blob for
+// out-of-place preparation. Each distinct declaration is JITed once; activation
+// prepares each tensor once using bounded staging shared across tensors. The
+// temporary VM policy is released before JIT.
+//
+// Every explicit input range and implicit source-zero read must fit its indexed
+// checkpoint entry before preparation succeeds. This does not impose an
+// encoding or exact-size identity check.
 //
 // Success accepts exclusive access to weights until completion, which may run
 // before return. Independent compilations may share jit; policy evidence is

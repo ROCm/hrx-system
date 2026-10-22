@@ -35,6 +35,13 @@ iree_io_parameter_provider_t* loom_serve_weight_inputs_provider(
 uint32_t loom_serve_weight_inputs_source_count(
     const loom_serve_weight_inputs_t* inputs);
 
+// Checks an implicit source-zero read against the external checkpoint index
+// during preparation. A larger entry is valid; only the requested prefix is
+// read. Empty input recipes use this for unchanged or in-place prepared bytes.
+iree_status_t loom_serve_weight_inputs_validate_direct(
+    const loom_serve_weight_inputs_t* inputs, iree_string_view_t key,
+    iree_device_size_t byte_length);
+
 // One validated input range in a source-selected tensor transformation.
 typedef struct loom_serve_weight_input_t {
   // Canonical source key and metadata, borrowed from its immutable index.

@@ -240,6 +240,27 @@ TEST_F(WeightInputsTest, InvalidSourceKeysRangesAndAlignmentsRejectAtCapture) {
   }
 }
 
+TEST_F(WeightInputsTest, DirectReadsValidateSourceZeroWithoutCapturingStaging) {
+  for (const uint64_t length : {0u, 8u, 16u}) {
+    IREE_ASSERT_OK(loom_serve_weight_inputs_validate_direct(
+        inputs_, IREE_SV("same"), length));
+  }
+  iree::Status status(
+      loom_serve_weight_inputs_validate_direct(inputs_, IREE_SV("same"), 17));
+  EXPECT_THAT(status,
+              iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+  EXPECT_THAT(status.ToString(), ::testing::HasSubstr("weight 'same'"));
+  EXPECT_THAT(status.ToString(), ::testing::HasSubstr("requires 17 bytes"));
+  EXPECT_THAT(status.ToString(), ::testing::HasSubstr("entry has 16"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_serve_weight_inputs_validate_direct(
+                            inputs_, IREE_SV("same"), UINT64_MAX));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      loom_serve_weight_inputs_validate_direct(inputs_, IREE_SV("missing"), 8));
+  EXPECT_EQ(loom_serve_weight_inputs_staging_length(inputs_), 0u);
+}
+
 TEST_F(WeightInputsTest, AlignedExtentCannotOverflowTheAddressableRecipe) {
   loom_serve_weight_inputs_module_begin(module_);
   IREE_ASSERT_OK(Invoke(0, 0, 4, 4));

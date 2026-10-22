@@ -296,19 +296,22 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   }
 
   void WriteCheckpoint(const std::string& path, int32_t offset,
-                       size_t first_tensor = 0, size_t tensor_count = 4) {
-    // Actual safetensors input exercises file indexing and queued reads. Each
-    // tensor has eight distinct words; transformations are not idempotent.
-    const char* keys[] = {"a", "b", "raw", "d"};
+                       size_t first_tensor = 0, size_t tensor_count = 4,
+                       size_t element_count = 8) {
+    // Actual safetensors input exercises file indexing and queued reads.
+    // Distinct words make the preparation transformations non-idempotent.
+    const char* keys[] = {"a", "b", "raw", "d", "missing"};
+    const size_t byte_length = element_count * sizeof(int32_t);
     std::string header = "{";
     for (size_t i = 0; i < tensor_count; ++i) {
       if (i) {
         header += ",";
       }
       header += "\"" + std::string(keys[first_tensor + i]) +
-                "\":{\"dtype\":\"I32\",\"shape\":[8],\"data_offsets\":[" +
-                std::to_string(i * 32) + "," + std::to_string((i + 1) * 32) +
-                "]}";
+                "\":{\"dtype\":\"I32\",\"shape\":[" +
+                std::to_string(element_count) + "],\"data_offsets\":[" +
+                std::to_string(i * byte_length) + "," +
+                std::to_string((i + 1) * byte_length) + "]}";
     }
     header += "}";
     std::ofstream file(path, std::ios::binary);
@@ -318,7 +321,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     }
     file.write(header.data(), header.size());
     for (size_t i = 0; i < tensor_count; ++i) {
-      for (int element = 0; element < 8; ++element) {
+      for (size_t element = 0; element < element_count; ++element) {
         const int32_t value = offset + (first_tensor + i + 1) * 10 + element;
         file.write(reinterpret_cast<const char*>(&value), sizeof(value));
       }

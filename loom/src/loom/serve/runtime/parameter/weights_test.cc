@@ -363,6 +363,7 @@ TEST_P(WeightsTest, PolicySizeMismatchRejectsBeforeFileSubmission) {
 }
 
 TEST_P(WeightsTest, MissingPreparationRootFailsCompilation) {
+  WriteCheckpoint(path_.path(), 0, 4, 1);
   IREE_ASSERT_OK(Compile(0, "missing"));
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
 }
@@ -465,86 +466,50 @@ TEST_P(WeightsTest, MissingFileParameterFailsTheLoad) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
 }
 
-TEST_P(WeightsTest, LateMissingParameterRetiresEarlierAcceptedReads) {
-  // The provider accepts separate prepared read groups for a/b before looking
-  // up the absent third key. No preparation is submitted after that rejection.
+TEST_P(WeightsTest, LateMissingParameterRejectsBeforeAnyActivationWork) {
+  // A missing key after valid prepared tensors rejects the whole source plan,
+  // before preparer compilation, reads, or physical activation begin.
   IREE_ASSERT_OK(Compile(0, "partial"));
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
-  iree_hal_buffer_release(buffers_[0][0]);
-  buffers_[0][0] = nullptr;
-  loom_serve_weights_await_retirement(plans_[0]);
-  IREE_ASSERT_OK(loom_serve_weights_free(plans_[0]));
-  plans_[0] = nullptr;
-  if (GetParam()) {
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
-    const auto memory = loom_serve_memory_pool_statistics(pool_);
-    EXPECT_EQ(memory.committed_bytes, kSlabBytes);
-    EXPECT_EQ(memory.cached_bytes, kSlabBytes);
-  }
+  EXPECT_EQ(compilation_.commands, 1u);
+  const auto activity = loom_serve_weights_activity(plans_[0]);
+  EXPECT_EQ(activity.activations, 0u);
+  EXPECT_EQ(activity.read_bytes, 0u);
+  EXPECT_EQ(activity.prepared_bytes, 0u);
+  EXPECT_EQ(activity.groups, 0u);
+  IREE_ASSERT_OK(Compile(1, "target"));
+  const auto live_root = Root(1, 0);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &live_root, {path_.path()}));
+  Run(1, 70);
 }
 
-TEST_P(WeightsTest, RejectedActivationRetainsProtectionUntilActualRetirement) {
-  IREE_ASSERT_OK(Compile(0, "partial"));
-  const auto root = Root(0, 0);
-  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
-  IREE_ASSERT_OK(Register(0, 0, 1));
-  bool admitted = false;
-  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, loom_serve_residency_try_acquire(
-                                                   residencies_[0], &admitted));
-  EXPECT_FALSE(admitted);
-  // The rejection can precede earlier accepted file reads' final accesses.
-  // It preserves a terminal pin even though no invocation was admitted.
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
-  ExpectBacking(0, GetParam() ? kSlabBytes : 0);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        loom_serve_weights_await(plans_[0]));
-  iree_hal_buffer_release(buffers_[0][0]);
-  buffers_[0][0] = nullptr;
-  loom_serve_weights_await_retirement(plans_[0]);
-  loom_serve_residency_free(residencies_[0]);
-  residencies_[0] = nullptr;
-  loom_serve_residency_group_free(parameter_groups_[0]);
-  parameter_groups_[0] = nullptr;
-  IREE_ASSERT_OK(loom_serve_weights_free(plans_[0]));
-  plans_[0] = nullptr;
-  if (GetParam()) {
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
-    const auto memory = loom_serve_memory_pool_statistics(pool_);
-    EXPECT_EQ(memory.committed_bytes, kSlabBytes);
-    EXPECT_EQ(memory.cached_bytes, kSlabBytes);
+TEST_P(WeightsTest,
+       ShortDirectInputsRejectBeforeUnchangedOrInPlacePreparation) {
+  WriteCheckpoint(path_.path(), 0, 0, 4, 4);
+  WriteCheckpoint(adapter_path_.path(), 0, 0, 4, 16);
+  const char* roots[] = {"raw", "target"};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(roots); ++i) {
+    IREE_ASSERT_OK(Compile(i, roots[i]));
+    const auto root = Root(i, 0);
+    iree::Status status(CreateRoots(0, 1, &root, {path_.path()}));
+    EXPECT_THAT(status,
+                iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+    EXPECT_THAT(status.ToString(), ::testing::HasSubstr("requires 32 bytes"));
+    EXPECT_THAT(status.ToString(), ::testing::HasSubstr("entry has 16"));
+    EXPECT_EQ(compilation_.commands, i + 1);
+    const auto activity = loom_serve_weights_activity(plans_[i]);
+    EXPECT_EQ(activity.activations, 0u);
+    EXPECT_EQ(activity.read_bytes, 0u);
+    EXPECT_EQ(activity.prepared_bytes, 0u);
+    EXPECT_EQ(activity.groups, 0u);
   }
-}
-
-TEST_P(WeightsTest, SharedConsumersObserveFailureWithoutReplayingPartialLoad) {
-  IREE_ASSERT_OK(Compile(0, "partial"));
-  const auto root = Root(0, 0);
-  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
-  IREE_ASSERT_OK(
-      loom_serve_device_create_execution(device_owner_, &shared_execution_));
-  IREE_ASSERT_OK(Register(0, 0, 1));
-  IREE_ASSERT_OK(loom_serve_residency_allocate(
-      loom_serve_device_residency_cache(device_owner_), shared_execution_, 1,
-      &parameter_groups_[0], host_allocator_, &residencies_[1]));
-  {
-    loom_serve::testing::ScopedNativeHold hold(device_owner_);
-    IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                          loom_serve_residency_acquire(residencies_[0]));
-    if (pool_) {
-      hold.WaitEntered();
-      EXPECT_FALSE(loom_serve_weights_is_retired(plans_[0]));
-    }
-    const auto before = loom_serve_weights_activity(plans_[0]);
-    IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                          loom_serve_residency_acquire(residencies_[1]));
-    const auto after = loom_serve_weights_activity(plans_[0]);
-    EXPECT_EQ(after.activations, 0u);
-    EXPECT_EQ(after.read_bytes, before.read_bytes);
-    EXPECT_EQ(after.prepared_bytes, before.prepared_bytes);
-    EXPECT_EQ(after.groups, before.groups);
-    EXPECT_EQ(loom_serve_residency_snapshot(residencies_[0]).pin_count, 1u);
-    EXPECT_EQ(loom_serve_residency_snapshot(residencies_[1]).pin_count, 1u);
-    EXPECT_EQ(loom_serve_execution_frontier(shared_execution_).values[0], 0u);
-  }
+  // The invalid models leave their shared device, worker, and peer timeline
+  // usable. The valid peer reads only its requested prefix of each larger
+  // entry.
+  IREE_ASSERT_OK(Compile(2, "target"));
+  const auto live_root = Root(2, 0);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &live_root, {adapter_path_.path()}));
+  Run(2, 70);
 }
 
 TEST_P(WeightsTest, SharedWorkingSetsAdmitAtomicallyAndEvictOnlyIdleGroups) {
@@ -930,29 +895,6 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
   IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[1]));
   ASSERT_NO_FATAL_FAILURE(Run(2, 90));
   loom_serve_residency_release(residencies_[1]);
-}
-
-TEST_P(WeightsTest, RejectedWarmupKeepsAcceptedLoadsProtectedUntilRetirement) {
-  IREE_ASSERT_OK(Compile(0, "partial"));
-  const auto root = Root(0, 0);
-  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
-  IREE_ASSERT_OK(Register(0, 0, 1));
-  loom_serve_test_weight_activation_wake_t wake;
-  loom_serve_activation_t* activation = nullptr;
-  IREE_ASSERT_OK(loom_serve_activation_allocate(
-      residencies_[0],
-      loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
-      loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
-      &activation));
-  loom_serve_activation_phase_t phase;
-  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        loom_serve_activation_advance(activation, 0, &phase));
-  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
-  loom_serve_activation_free(activation);
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
-  ExpectBacking(0, GetParam() ? kSlabBytes : 0u);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        loom_serve_weights_await(plans_[0]));
 }
 
 TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {

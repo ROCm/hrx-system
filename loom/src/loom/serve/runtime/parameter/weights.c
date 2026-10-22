@@ -437,6 +437,11 @@ static iree_status_t loom_serve_weight_prepare_policy(
         weights->spans[i].parameter, host_allocator, &declaration,
         &weights->spans[i].inputs);
     job->span_preparers[i] = SIZE_MAX;
+    if (iree_status_is_ok(status) && !weights->spans[i].inputs.count) {
+      status = loom_serve_weight_inputs_validate_direct(
+          weights->inputs, weights->spans[i].parameter.key,
+          weights->spans[i].parameter.byte_length);
+    }
     if (iree_status_is_ok(status) && declaration) {
       iree_host_size_t p = 0;
       const uint32_t binding_count = weights->spans[i].inputs.count ? 2 : 1;
