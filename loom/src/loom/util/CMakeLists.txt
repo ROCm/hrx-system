@@ -548,6 +548,7 @@ loom_cc_test(
     loom::ops::scalar
     loom::ops::scf
     loom::ops::test
+    loom::ops::vector
 )
 
 loom_cc_library(

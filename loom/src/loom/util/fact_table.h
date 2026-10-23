@@ -199,6 +199,11 @@ struct loom_value_fact_table_t {
     iree_host_size_t word_count;
   } seeds;
 
+  // The current numeric solve is replaying a completed traversal without IR
+  // edits. Constant results and structural selector dependencies remain valid.
+  // Nested solves inherit this state; each solver restores its caller's state.
+  bool replaying;
+
   // Facts derived under path conditions require whole-scope invalidation after
   // edits. The incremental rewriter cannot maintain their guard dependencies.
   bool has_conditioned_results;
@@ -356,10 +361,6 @@ struct loom_value_fact_table_t {
     loom_value_fact_select_dependency_page_t** pages;
     // Allocated page pointer count, or zero before the first publication.
     iree_host_size_t page_capacity;
-    // The current numeric solve is replaying a completed structural traversal.
-    // Nested solves inherit this state; each solver restores its caller's
-    // state.
-    bool replaying;
   } select_dependencies;
 
   // Exact predicate-bearing identities awaiting path-local fact transport.

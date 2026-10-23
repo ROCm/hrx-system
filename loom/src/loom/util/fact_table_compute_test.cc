@@ -17,6 +17,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/util/fact_cfg.h"
 #include "loom/util/fact_induction.h"
 #include "loom/util/fact_table.h"
@@ -46,6 +47,9 @@ class FactTableComputeTest : public ::testing::Test {
     vtables = loom_test_dialect_vtables(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_TEST, vtables, static_cast<uint16_t>(count)));
+    vtables = loom_vector_dialect_vtables(&count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_VECTOR, vtables, static_cast<uint16_t>(count)));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("facts"), &pool_,
                                         nullptr, iree_allocator_system(),
@@ -419,6 +423,48 @@ TEST_P(FactTableLoopScratchTest, RepeatedSolvesReleaseWorkingTuples) {
   }
 }
 
+TEST_P(FactTableLoopScratchTest,
+       NestedConstantsRefreshAfterEditsAndScopeReset) {
+  loom_op_t* loop = BuildLoop(GetParam(), carried_, /*nested=*/true);
+  const auto outer = loom_loop_like_cast(module_, loop);
+  const auto inner = loom_loop_like_cast(
+      module_, loom_region_entry_block(loom_loop_like_body(outer))->first_op);
+  loom_op_t* yield =
+      loom_region_entry_block(loom_loop_like_body(inner))->last_op;
+  loom_builder_set_before(&builder_, yield);
+  loom_op_t* constant = nullptr;
+  IREE_ASSERT_OK(loom_vector_constant_build(&builder_, loom_attr_i64(7),
+                                            vector_type_, LOOM_LOCATION_UNKNOWN,
+                                            &constant));
+  const auto result = loom_vector_constant_result(constant);
+  IREE_ASSERT_OK(loom_op_set_operand(module_, yield, 0, result));
+
+  for (unsigned scope = 0; scope < 2; ++scope) {
+    for (int64_t value : {7, 11}) {
+      IREE_ASSERT_OK(loom_vector_constant_set_value(module_, constant,
+                                                    loom_attr_i64(value)));
+      IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
+      EXPECT_FALSE(table_.replaying);
+      const auto facts = loom_value_fact_table_lookup(&table_, result);
+      loom_value_fact_uniform_element_t uniform;
+      ASSERT_TRUE(loom_value_facts_query_uniform_element(&table_.context, facts,
+                                                         &uniform));
+      EXPECT_TRUE(loom_value_facts_is_exact(uniform.element));
+      EXPECT_EQ(uniform.element.range_lo, value);
+      const auto used_bytes = transient_arena_.used_allocation_size;
+      IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
+      EXPECT_TRUE(loom_value_facts_equal(
+          facts, loom_value_fact_table_lookup(&table_, result)));
+      EXPECT_EQ(transient_arena_.used_allocation_size, used_bytes);
+    }
+    loom_value_fact_table_clear_scope(&table_);
+    EXPECT_FALSE(loom_value_fact_table_has_entry(&table_, result));
+    iree_arena_reset(&transient_arena_);
+    SeedInputs();
+    SeedCarriedFacts();
+  }
+}
+
 TEST_P(FactTableLoopScratchTest, FailedSolvesReleaseWorkingTuples) {
   loom_op_t* loop = BuildLoop(GetParam(), carried_, /*nested=*/true);
   IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
@@ -430,7 +476,7 @@ TEST_P(FactTableLoopScratchTest, FailedSolvesReleaseWorkingTuples) {
     failure_index_ = failure;
     iree_status_t status =
         loom_value_fact_table_compute_op(&table_, module_, loop);
-    EXPECT_FALSE(table_.select_dependencies.replaying);
+    EXPECT_FALSE(table_.replaying);
     // Returning scratch to the pool is sufficient; trimming exposes any
     // backing still stranded in a failed solve's arena.
     iree_arena_block_pool_trim(&transient_pool_);
@@ -953,12 +999,19 @@ TEST_F(FactTableComputeTest, DependentResultsPublishOnlyFinalChanges) {
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         LOOM_LOCATION_UNKNOWN, &op));
     const loom_value_id_t* results = loom_op_const_results(op);
+    bool changed = false;
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&table_, module_,
+                                                               op, &changed));
+    EXPECT_TRUE(changed);
+    EXPECT_TRUE(loom_value_facts_is_unknown(
+        loom_value_fact_table_lookup(&table_, results[extent_index])));
+
+    // A new type use constrains a previously published unknown tuple.
     IREE_ASSERT_OK(loom_module_set_value_type(
         module_, results[tensor_index],
         loom_type_shaped_1d(LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32,
                             loom_dim_pack_dynamic(results[extent_index]), 0)));
 
-    bool changed = false;
     IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&table_, module_,
                                                                op, &changed));
     EXPECT_TRUE(changed);
