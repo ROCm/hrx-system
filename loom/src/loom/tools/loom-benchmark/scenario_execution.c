@@ -116,8 +116,6 @@ static iree_status_t loom_benchmark_scenario_ensure_profile(
 
   execution->materializer_options =
       options->case_execution_options->materializer;
-  execution->materializer_options.target_pool =
-      options->hal_context->execution.runtime.staging_pool;
   execution->materializer_options.staging_pool =
       options->hal_context->execution.runtime.staging_pool;
   execution->materializer_options.transfer_queue =

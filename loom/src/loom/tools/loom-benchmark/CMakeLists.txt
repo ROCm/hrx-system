@@ -81,6 +81,7 @@ loom_cc_library(
     iree::base::internal::path
     iree::base::tooling::flags
     iree::hal
+    iree::hal::memory::heap_pool
     iree::io::stream
     iree::tooling::device_flags
     iree::tooling::device_util

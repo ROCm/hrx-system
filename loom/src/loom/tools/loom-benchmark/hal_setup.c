@@ -25,8 +25,9 @@ static iree_status_t loom_benchmark_initialize_sequence_compile_context(
       &options->hal_context->execution);
 
   if (iree_status_is_ok(status)) {
-    context->execution_options.materializer.target_pool =
-        options->hal_context->execution.runtime.staging_pool;
+    // Keep correctness values in the caller's CPU heap. Sequence execution
+    // owns the upload/readback lifecycle; host-mappable GPU memory may be
+    // uncached for the reference and comparison paths.
     context->execution_options.materializer.staging_pool =
         options->hal_context->execution.runtime.staging_pool;
     context->execution_options.materializer.transfer_queue =
@@ -77,8 +78,8 @@ static iree_status_t loom_benchmark_initialize_single_compile_context(
         options->hal_context, options->compilation, kernel_launch,
         iree_string_view_empty(), &context->hal_provider);
     context->hal_provider_initialized = true;
-    context->execution_options.materializer.target_pool =
-        options->hal_context->execution.runtime.staging_pool;
+    // Preserve CPU-owned correctness values; timed dispatch inputs use the
+    // device pool selected separately below.
     context->execution_options.materializer.staging_pool =
         options->hal_context->execution.runtime.staging_pool;
     context->execution_options.materializer.transfer_queue =
