@@ -190,6 +190,13 @@ static bool loom_low_allocation_preference_is_structural(
            relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE));
 }
 
+static bool loom_low_allocation_preference_is_hard_register_ordinal(
+    const loom_low_placement_relation_t* relation) {
+  return relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL &&
+         iree_any_bit_set(relation->flags,
+                          LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD);
+}
+
 static const loom_low_allocation_assignment_t*
 loom_low_allocation_preference_structural_counterpart(
     const loom_low_allocation_preference_query_t* query,
@@ -211,17 +218,93 @@ loom_low_allocation_preference_structural_counterpart(
   return fixed ? &fixed->assignment : NULL;
 }
 
+// Projects the concrete source of a permitted defining copy into the copy
+// result's class. The source and result classes may encode the same physical
+// storage with different candidate orders or location representations.
+static bool loom_low_allocation_preference_hard_ordinal_copy_prediction(
+    const loom_low_allocation_preference_query_t* query,
+    const loom_low_placement_table_t* placement, loom_value_ordinal_t ordinal,
+    loom_low_allocation_assignment_t* out_prediction) {
+  ordinal = loom_low_allocation_preference_origin(placement, ordinal);
+  if (loom_low_allocation_preference_assignment(query->structural.assignments,
+                                                query->structural.constraints,
+                                                ordinal) != NULL) {
+    return false;
+  }
+  const loom_low_allocation_assignment_t* source =
+      loom_low_allocation_preference_copy_prediction(
+          placement, query->structural.assignments,
+          query->structural.constraints, ordinal);
+  if (source == NULL ||
+      source->location_kind != LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
+      source->location_count != 1) {
+    return false;
+  }
+  const loom_liveness_analysis_t* liveness =
+      query->structural.assignments->liveness;
+  const loom_liveness_interval_t* destination =
+      loom_liveness_interval_for_value_ordinal(liveness, ordinal);
+  if (destination->unit_count != 1) {
+    return false;
+  }
+  const uint16_t destination_class = destination->value_class.register_class_id;
+  uint32_t destination_location = 0;
+  if (!loom_low_allocation_storage_find_subrange_alias_location(
+          query->structural.constraints->target->descriptor_set,
+          destination_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          /*candidate_location_count=*/1, /*candidate_unit_start=*/0, source,
+          /*reference_unit_start=*/0, /*unit_count=*/1,
+          &destination_location)) {
+    return false;
+  }
+  *out_prediction = (loom_low_allocation_assignment_t){
+      .value_id = liveness->value_ids[ordinal],
+      .descriptor_reg_class_id = destination_class,
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = destination_location,
+      .location_count = 1,
+  };
+  return true;
+}
+
+static const loom_low_allocation_assignment_t*
+loom_low_allocation_preference_structural_scoring_counterpart(
+    const loom_low_allocation_preference_query_t* query,
+    const loom_low_placement_table_t* placement,
+    const loom_low_placement_relation_t* relation, loom_value_ordinal_t ordinal,
+    loom_low_allocation_assignment_t* out_prediction) {
+  if (loom_low_allocation_preference_is_structural(relation)) {
+    const loom_low_allocation_assignment_t* counterpart =
+        loom_low_allocation_preference_structural_counterpart(query, relation,
+                                                              ordinal);
+    if (counterpart != NULL) {
+      return counterpart;
+    }
+  }
+  if (loom_low_allocation_preference_is_hard_register_ordinal(relation) &&
+      loom_low_allocation_preference_hard_ordinal_copy_prediction(
+          query, placement, ordinal, out_prediction)) {
+    return out_prediction;
+  }
+  return NULL;
+}
+
 static bool loom_low_allocation_preference_structural_is_actionable(
     const loom_low_allocation_preference_query_t* query,
-    const loom_low_placement_relation_t* relation, uint32_t candidate_index) {
-  if (!loom_low_allocation_preference_is_structural(relation)) {
+    const loom_low_placement_table_t* placement,
+    const loom_low_placement_relation_t* relation, uint32_t candidate_index,
+    bool candidate_is_result) {
+  const bool is_structural =
+      loom_low_allocation_preference_is_structural(relation);
+  if (!is_structural &&
+      !loom_low_allocation_preference_is_hard_register_ordinal(relation)) {
     return false;
   }
   const loom_value_ordinal_t candidate =
       query->structural.candidates[candidate_index].ordinal;
-  const loom_value_ordinal_t counterpart = relation->result_ordinal == candidate
-                                               ? relation->source_ordinal
-                                               : relation->result_ordinal;
+  const loom_value_ordinal_t counterpart =
+      candidate_is_result ? relation->source_ordinal : relation->result_ordinal;
   const loom_liveness_analysis_t* liveness =
       query->structural.assignments->liveness;
   const uint16_t candidate_class =
@@ -230,16 +313,18 @@ static bool loom_low_allocation_preference_structural_is_actionable(
   uint16_t counterpart_class;
   if (counterpart ==
       query->structural.candidates[1 - candidate_index].ordinal) {
-    if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE) {
+    if (!is_structural ||
+        relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE) {
       return false;
     }
     counterpart_class =
         loom_liveness_interval_for_value_ordinal(liveness, counterpart)
             ->value_class.register_class_id;
   } else {
+    loom_low_allocation_assignment_t prediction;
     const loom_low_allocation_assignment_t* assigned =
-        loom_low_allocation_preference_structural_counterpart(query, relation,
-                                                              counterpart);
+        loom_low_allocation_preference_structural_scoring_counterpart(
+            query, placement, relation, counterpart, &prediction);
     if (assigned == NULL ||
         !loom_low_allocation_assignment_is_register_like(assigned)) {
       return false;
@@ -290,7 +375,8 @@ static void loom_low_allocation_preference_prepare_structural(
                     ->relation_indices_by_source_ordinal[sources.start + j -
                                                          results.count];
       if (loom_low_allocation_preference_structural_is_actionable(
-              query, &placement->relations[relation_index], i)) {
+              query, placement, &placement->relations[relation_index], i,
+              j < results.count)) {
         query->structural.placement = placement;
       }
     }
@@ -446,7 +532,10 @@ static uint32_t loom_low_allocation_preference_structural_penalty(
                                                          results.count];
       const loom_low_placement_relation_t* relation =
           &placement->relations[relation_index];
-      if (!loom_low_allocation_preference_is_structural(relation)) {
+      const bool is_structural =
+          loom_low_allocation_preference_is_structural(relation);
+      if (!is_structural &&
+          !loom_low_allocation_preference_is_hard_register_ordinal(relation)) {
         continue;
       }
       const loom_value_ordinal_t counterpart_ordinal =
@@ -459,15 +548,18 @@ static uint32_t loom_low_allocation_preference_structural_penalty(
           (j >= results.count && counterpart_ordinal == ordinal)) {
         continue;
       }
+      loom_low_allocation_assignment_t prediction;
       const loom_low_allocation_assignment_t* counterpart;
       if (counterpart_ordinal == query->structural.candidates[1 - i].ordinal) {
-        if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE) {
+        if (!is_structural ||
+            relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE) {
           continue;
         }
         counterpart = candidates[1 - i];
       } else {
-        counterpart = loom_low_allocation_preference_structural_counterpart(
-            query, relation, counterpart_ordinal);
+        counterpart =
+            loom_low_allocation_preference_structural_scoring_counterpart(
+                query, placement, relation, counterpart_ordinal, &prediction);
       }
       if (counterpart == NULL ||
           (relation->kind !=

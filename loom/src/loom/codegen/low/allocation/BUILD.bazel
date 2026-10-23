@@ -262,6 +262,7 @@ loom_cc_test(
     srcs = ["preference_test.cc"],
     deps = [
         ":preference",
+        "//loom/src/loom/target/test:descriptors",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
