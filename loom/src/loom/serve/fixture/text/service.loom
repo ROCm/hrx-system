@@ -193,16 +193,16 @@ func.def public @text_capture_epoch_v1(%state: buffer, %shape: i32, %count: i32,
   func.return %result_0 : buffer
 }
 
-func.decl @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32)
+func.decl @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64)
 
-func.def public @text_encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32) {
-  %result_0 = func.call @encode_epoch(%control_state, %plan, %inputs, %media_plan, %first_count, %next_count, %input_count, %first_media_count, %next_media_count, %first_packet_capacity, %next_packet_capacity, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32)
-  func.return %result_0 : i32
+func.def public @text_encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64) {
+  %count, %transfers, %transfer_begin, %transfer_length = func.call @encode_epoch(%control_state, %plan, %inputs, %media_plan, %first_count, %next_count, %input_count, %first_media_count, %next_media_count, %first_packet_capacity, %next_packet_capacity, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
+  func.return %count, %transfers, %transfer_begin, %transfer_length : i32, buffer, i64, i64
 }
 
-func.def public @text_encode_epoch_v1(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32) {
-  %result_0 = func.call @encode_epoch(%control_state, %plan, %inputs, %media_plan, %first_count, %next_count, %input_count, %first_media_count, %next_media_count, %first_packet_capacity, %next_packet_capacity, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32)
-  func.return %result_0 : i32
+func.def public @text_encode_epoch_v1(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64) {
+  %count, %transfers, %transfer_begin, %transfer_length = func.call @encode_epoch(%control_state, %plan, %inputs, %media_plan, %first_count, %next_count, %input_count, %first_media_count, %next_media_count, %first_packet_capacity, %next_packet_capacity, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
+  func.return %count, %transfers, %transfer_begin, %transfer_length : i32, buffer, i64, i64
 }
 
 func.decl @publish_epoch(%plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative_mask: i32, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer)
@@ -251,9 +251,9 @@ func.def public @sequence_epoch_v1(%control_state: buffer, %shape: i32, %propose
   func.return %result_0 : i64
 }
 
-func.def public @sequence_encode_epoch_v1(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32) {
-  %result_0 = func.call @encode_epoch(%control_state, %plan, %inputs, %media_plan, %first_count, %next_count, %input_count, %first_media_count, %next_media_count, %first_packet_capacity, %next_packet_capacity, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32)
-  func.return %result_0 : i32
+func.def public @sequence_encode_epoch_v1(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64) {
+  %count, %transfers, %transfer_begin, %transfer_length = func.call @encode_epoch(%control_state, %plan, %inputs, %media_plan, %first_count, %next_count, %input_count, %first_media_count, %next_media_count, %first_packet_capacity, %next_packet_capacity, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
+  func.return %count, %transfers, %transfer_begin, %transfer_length : i32, buffer, i64, i64
 }
 
 func.def public @sequence_publish_epoch_v1(%plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative_mask: i32, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {
