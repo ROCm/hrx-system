@@ -1,3 +1,5 @@
+kernel.decl @hc_matrix_down_half() launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
 kernel.decl @hc_matrix_down() launch(%span: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @hc_matrix_up() launch(%span: buffer, %normalized: buffer, %input: buffer, %weight: buffer, %output: buffer)
@@ -470,7 +472,13 @@ command.program.def @flash_next_hc(%injection_bytes: index, %q8_injection: i1, %
   %threshold = index.constant 128 : index
   %matrix = index.cmp uge, %tokens, %threshold : index
   scf.if %matrix {
-    kernel.launch @hc_matrix_down(%span, %normalized, %down_weight, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+    %half_threshold = index.constant 4096 : index
+    %use_half = index.cmp uge, %tokens, %half_threshold : index
+    scf.if %use_half {
+      kernel.launch @hc_matrix_down_half(%span, %normalized, %down_weight, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+    } else {
+      kernel.launch @hc_matrix_down(%span, %normalized, %down_weight, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+    }
     scf.if %q8_injection {
       kernel.launch @hc_inject_only_q8(%span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (buffer, buffer, view<3481600xi8>, view<[%injection_bytes]xi8>, buffer, buffer)
     } else {
@@ -513,5 +521,758 @@ command.program.def public @flash_next_hc_ffn(%layer: index) launch(%parameters:
   %injection_bytes = scf.select %q8_injection, %q8_bytes, %f32_bytes : index
   %injection_weight = command.parameter %parameters, "blk.{}.hc_ffn_inject.weight"[%layer] : view<[%injection_bytes]xi8>
   command.program.launch @flash_next_hc[%injection_bytes, %q8_injection, %gamma, %down_weight, %up_weight, %injection_weight](%span, %residual, %injection, %mixed) : [index, i1, view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>, view<[%injection_bytes]xi8>](buffer, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.def target(@flash_next_hc_wave32) @hc_combine_normalize() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %residual_arg: buffer, %projected_arg: buffer, %injection_arg: buffer, %gamma_arg: buffer, %output_arg: buffer, %normalized_arg: buffer) {
+  %span, %residual, %projected, %injection, %gamma, %output, %normalized = buffer.assume.noalias %span_arg, %residual_arg, %projected_arg, %injection_arg, %gamma_arg, %output_arg, %normalized_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %token = kernel.workgroup.id<x> : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %stream = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %origin = index.constant 0 : offset
+    %c8 = index.constant 8 : index
+    %stride = index.constant 256 : index
+    %width = index.constant 2560 : index
+    %first = index.mul %lane, %c8 : index
+    %input_view = buffer.view %residual[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %gamma_view = buffer.view %gamma[%origin] : buffer -> view<4x2560xf32>
+    %output_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %c0 = scalar.constant 0.0 : f32
+    %c0_vector = vector.constant 0.0 : vector<8xf32>
+    %projected_view = buffer.view %projected[%origin] : buffer -> view<[%tokens]x2560xbf16>
+    %injection_view = buffer.view %injection[%origin] : buffer -> view<[%tokens]x4xf32>
+    %residual_output = buffer.view %output[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %gate = view.load %injection_view[%token, %stream] : view<[%tokens]x4xf32> -> f32
+    %gates = vector.splat %gate : vector<8xf32>
+    %c0_index = index.constant 0 : index
+    %c1_index = index.constant 1 : index
+    %chunks = index.constant 10 : index
+    %initial = vector.constant 0.0 : vector<10x8xbf16>
+    // Preserve the published BF16 residual before computing its norm.
+    %partial, %retained = scf.for %chunk = [%c0_index to %chunks step %c1_index](%accumulator = %c0_vector : vector<8xf32>, %prior = %initial : vector<10x8xbf16>) -> (vector<8xf32>, vector<10x8xbf16>) unroll schedule(linear) {
+      %channel = index.madd %chunk, %stride, %first : index
+      %stored = vector.load %input_view[%token, %stream, %channel] : view<[%tokens]x4x2560xbf16> -> vector<8xbf16>
+      %branch = vector.load %projected_view[%token, %channel] : view<[%tokens]x2560xbf16> -> vector<8xbf16>
+      %old = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %branch_values = vector.extf %branch : vector<8xbf16> to vector<8xf32>
+      %combined = vector.fmaf %branch_values, %gates, %old : vector<8xf32>
+      %packed_residual = vector.fptrunc %combined : vector<8xf32> to vector<8xbf16>
+      vector.store %packed_residual, %residual_output[%token, %stream, %channel] : vector<8xbf16>, view<[%tokens]x4x2560xbf16>
+      %values = vector.extf %packed_residual : vector<8xbf16> to vector<8xf32>
+      %next = vector.fmaf %values, %values, %accumulator : vector<8xf32>
+      %retained_next = vector.insert %packed_residual into %prior[%chunk] : vector<8xbf16>, vector<10x8xbf16>
+      scf.yield %next, %retained_next : vector<8xf32>, vector<10x8xbf16>
+    }
+    %lane_sum = vector.reduce<addf> %partial, %c0 : vector<8xf32>, f32
+    %sum = kernel.subgroup.reduce<addf> %lane_sum : f32
+    %reciprocal_width = scalar.constant 0.00039062500000000002 : f32
+    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+    %mean = scalar.mulf %sum, %reciprocal_width : f32
+    %variance = scalar.addf %mean, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %variance : f32
+    %inverse_vector = vector.splat %inverse : vector<8xf32>
+    scf.for %chunk = [%c0_index to %chunks step %c1_index] unroll schedule(linear) {
+      %channel = index.madd %chunk, %stride, %first : index
+      %stored = vector.extract %retained[%chunk] : vector<10x8xbf16> -> vector<8xbf16>
+      %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %scales = vector.load %gamma_view[%stream, %channel] : view<4x2560xf32> -> vector<8xf32>
+      %unit = vector.mulf %values, %inverse_vector : vector<8xf32>
+      %scaled = vector.mulf %unit, %scales : vector<8xf32>
+      %packed = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+      vector.store %packed, %output_view[%token, %stream, %channel] : vector<8xbf16>, view<[%tokens]x4x2560xbf16>
+    }
+  }
+  kernel.return
+}
+
+command.program.def @flash_next_hc_normalized(%injection_bytes: index, %q8_injection: i1, %down_weight: view<3481600xi8>, %up_weight: view<3481600xi8>, %injection_weight: view<[%injection_bytes]xi8>) launch(%span: buffer, %normalized: buffer, %injection: buffer, %mixed: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %rank_row_bytes = index.constant 640 : offset
+  %rank_bytes = index.scale %tokens, %rank_row_bytes : index, offset -> offset
+  %lowrank = buffer.alloca<global> align(256) %rank_bytes : buffer
+  // Matrix reuse wins once a prepared epoch can populate a 128-row tile.
+  // The immutable live extent still guards partial and empty workgroups.
+  %threshold = index.constant 128 : index
+  %matrix = index.cmp uge, %tokens, %threshold : index
+  scf.if %matrix {
+    %half_threshold = index.constant 4096 : index
+    %use_half = index.cmp uge, %tokens, %half_threshold : index
+    scf.if %use_half {
+      kernel.launch @hc_matrix_down_half(%span, %normalized, %down_weight, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+    } else {
+      kernel.launch @hc_matrix_down(%span, %normalized, %down_weight, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+    }
+    scf.if %q8_injection {
+      kernel.launch @hc_inject_only_q8(%span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (buffer, buffer, view<3481600xi8>, view<[%injection_bytes]xi8>, buffer, buffer)
+    } else {
+      kernel.launch @hc_inject_only(%span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (buffer, buffer, view<3481600xi8>, view<[%injection_bytes]xi8>, buffer, buffer)
+    }
+    kernel.launch @hc_matrix_up(%span, %normalized, %lowrank, %up_weight, %mixed) : (buffer, buffer, buffer, view<3481600xi8>, buffer)
+  } else {
+    scf.if %q8_injection {
+      kernel.launch @hc_down_inject_q8(%span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (buffer, buffer, view<3481600xi8>, view<[%injection_bytes]xi8>, buffer, buffer)
+    } else {
+      kernel.launch @hc_down_inject(%span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (buffer, buffer, view<3481600xi8>, view<[%injection_bytes]xi8>, buffer, buffer)
+    }
+    kernel.launch @hc_up_mix(%span, %normalized, %lowrank, %up_weight, %mixed) : (buffer, buffer, buffer, view<3481600xi8>, buffer)
+  }
+  command.return
+}
+
+command.program.def public @flash_next_hc_ffn_normalized(%layer: index) launch(%parameters: buffer, %span: buffer, %normalized: buffer, %injection: buffer, %mixed: buffer) {
+  %down_weight = command.parameter %parameters, "blk.{}.hc_ffn_down.weight"[%layer] : view<3481600xi8>
+  %up_weight = command.parameter %parameters, "blk.{}.hc_ffn_up.weight"[%layer] : view<3481600xi8>
+  %predictor_layer = index.constant 48 : index
+  %q8_injection = index.cmp eq, %layer, %predictor_layer : index
+  %q8_bytes = index.constant 43520 : index
+  %f32_bytes = index.constant 163840 : index
+  %injection_bytes = scf.select %q8_injection, %q8_bytes, %f32_bytes : index
+  %injection_weight = command.parameter %parameters, "blk.{}.hc_ffn_inject.weight"[%layer] : view<[%injection_bytes]xi8>
+  command.program.launch @flash_next_hc_normalized[%injection_bytes, %q8_injection, %down_weight, %up_weight, %injection_weight](%span, %normalized, %injection, %mixed) : [index, i1, view<3481600xi8>, view<3481600xi8>, view<[%injection_bytes]xi8>](buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @flash_next_hc_attn_normalized(%layer: index) launch(%parameters: buffer, %span: buffer, %normalized: buffer, %injection: buffer, %mixed: buffer) {
+  %down_weight = command.parameter %parameters, "blk.{}.hc_attn_down.weight"[%layer] : view<3481600xi8>
+  %up_weight = command.parameter %parameters, "blk.{}.hc_attn_up.weight"[%layer] : view<3481600xi8>
+  %predictor_layer = index.constant 48 : index
+  %q8_injection = index.cmp eq, %layer, %predictor_layer : index
+  %q8_bytes = index.constant 43520 : index
+  %f32_bytes = index.constant 163840 : index
+  %injection_bytes = scf.select %q8_injection, %q8_bytes, %f32_bytes : index
+  %injection_weight = command.parameter %parameters, "blk.{}.hc_attn_inject.weight"[%layer] : view<[%injection_bytes]xi8>
+  command.program.launch @flash_next_hc_normalized[%injection_bytes, %q8_injection, %down_weight, %up_weight, %injection_weight](%span, %normalized, %injection, %mixed) : [index, i1, view<3481600xi8>, view<3481600xi8>, view<[%injection_bytes]xi8>](buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// One wave owns each input stream. Keep four independent vector dots on the
+// published BF16 values; only sixteen F32 partials cross the wave boundary.
+func.def inline @hc_injection_chunk(%stream: index, %channel: index, %packed: vector<8xbf16>, %weight: buffer, %partial: vector<4x8xf32>) -> (vector<4x8xf32>) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %outputs = index.constant 4 : index
+  %weights = buffer.view %weight[%origin] : buffer -> view<4x4x2560xf32>
+  %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+  %result = scf.for %row = [%zero to %outputs step %one](%current = %partial : vector<4x8xf32>) -> (vector<4x8xf32>) unroll schedule(linear) {
+    %prior = vector.extract %current[%row] : vector<4x8xf32> -> vector<8xf32>
+    %coefficient = vector.load %weights[%row, %stream, %channel] : view<4x4x2560xf32> -> vector<8xf32>
+    %next = vector.fmaf %values, %coefficient, %prior : vector<8xf32>
+    %updated = vector.insert %next into %current[%row] : vector<8xf32>, vector<4x8xf32>
+    scf.yield %updated : vector<4x8xf32>
+  }
+  func.return %result : vector<4x8xf32>
+}
+
+// The active-token guard is uniform for the whole workgroup. Each stream's
+// leader publishes all four output partials before every wave joins the barrier.
+func.def inline @hc_injection_publish(%token: index, %stream: index, %lane: index, %partial: vector<4x8xf32>, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %bytes = index.constant 64 : offset
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %exchange = buffer.view %storage[%origin] : buffer -> view<4x4xf32>
+  %scalar_zero = scalar.constant 0.0 : f32
+  %empty = vector.constant 0.0 : vector<4xf32>
+  %lane_sums = scf.for %row = [%zero to %four step %one](%current = %empty : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+    %vector_part = vector.extract %partial[%row] : vector<4x8xf32> -> vector<8xf32>
+    %sum = vector.reduce<addf> %vector_part, %scalar_zero : vector<8xf32>, f32
+    %updated = vector.insert %sum into %current[%row] : f32, vector<4xf32>
+    scf.yield %updated : vector<4xf32>
+  }
+  %wave_sums = kernel.subgroup.reduce<addf> %lane_sums : vector<4xf32>
+  %leader = index.cmp eq, %lane, %zero : index
+  scf.if %leader {
+    vector.store %wave_sums, %exchange[%stream, %zero] : vector<4xf32>, view<4x4xf32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.if %leader {
+    %a = view.load %exchange[%zero, %stream] : view<4x4xf32> -> f32
+    %b = view.load %exchange[%one, %stream] : view<4x4xf32> -> f32
+    %c = view.load %exchange[%two, %stream] : view<4x4xf32> -> f32
+    %d = view.load %exchange[%three, %stream] : view<4x4xf32> -> f32
+    %ab = scalar.addf %a, %b : f32
+    %cd = scalar.addf %c, %d : f32
+    %dot = scalar.addf %ab, %cd : f32
+    %quarter = scalar.constant 0.25 : f32
+    %scaled = scalar.mulf %dot, %quarter : f32
+    %negative = scalar.negf %scaled : f32
+    %exponential = scalar.expf<afn> %negative : f32
+    %scalar_one = scalar.constant 1.0 : f32
+    %scalar_two = scalar.constant 2.0 : f32
+    %denominator = scalar.addf %scalar_one, %exponential : f32
+    %gate = scalar.divf %scalar_two, %denominator : f32
+    %gates = buffer.view %output[%origin] : buffer -> view<[%capacity]x4xf32>
+    view.store %gate, %gates[%token, %stream] : f32, view<[%capacity]x4xf32>
+  }
+  func.return
+}
+kernel.def target(@flash_next_hc_wave32) @hc_normalize_inject() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %residual_arg: buffer, %gamma_arg: buffer, %normalized_arg: buffer, %next_weight_arg: buffer, %next_injection_arg: buffer) {
+  %span, %residual, %gamma, %normalized, %next_weight, %next_injection = buffer.assume.noalias %span_arg, %residual_arg, %gamma_arg, %normalized_arg, %next_weight_arg, %next_injection_arg : buffer, buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %token = kernel.workgroup.id<x> : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %stream = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %origin = index.constant 0 : offset
+    %c8 = index.constant 8 : index
+    %stride = index.constant 256 : index
+    %width = index.constant 2560 : index
+    %first = index.mul %lane, %c8 : index
+    %input_view = buffer.view %residual[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %gamma_view = buffer.view %gamma[%origin] : buffer -> view<4x2560xf32>
+    %output_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %c0 = scalar.constant 0.0 : f32
+    %c0_vector = vector.constant 0.0 : vector<8xf32>
+    %partial = scf.for %channel = [%first to %width step %stride](%accumulator = %c0_vector : vector<8xf32>) -> (vector<8xf32>) {
+      %stored = vector.load %input_view[%token, %stream, %channel] : view<[%tokens]x4x2560xbf16> -> vector<8xbf16>
+      %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %next = vector.fmaf %values, %values, %accumulator : vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    %lane_sum = vector.reduce<addf> %partial, %c0 : vector<8xf32>, f32
+    %sum = kernel.subgroup.reduce<addf> %lane_sum : f32
+    %reciprocal_width = scalar.constant 0.00039062500000000002 : f32
+    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+    %mean = scalar.mulf %sum, %reciprocal_width : f32
+    %variance = scalar.addf %mean, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %variance : f32
+    %inverse_vector = vector.splat %inverse : vector<8xf32>
+    %initial_dots = vector.constant 0.0 : vector<4x8xf32>
+    %dots = scf.for %channel = [%first to %width step %stride](%current_dots = %initial_dots : vector<4x8xf32>) -> (vector<4x8xf32>) {
+      %stored = vector.load %input_view[%token, %stream, %channel] : view<[%tokens]x4x2560xbf16> -> vector<8xbf16>
+      %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %scales = vector.load %gamma_view[%stream, %channel] : view<4x2560xf32> -> vector<8xf32>
+      %unit = vector.mulf %values, %inverse_vector : vector<8xf32>
+      %scaled = vector.mulf %unit, %scales : vector<8xf32>
+      %packed = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+      vector.store %packed, %output_view[%token, %stream, %channel] : vector<8xbf16>, view<[%tokens]x4x2560xbf16>
+      %next_dots = func.call @hc_injection_chunk(%stream, %channel, %packed, %next_weight, %current_dots) : (index, index, vector<8xbf16>, buffer, vector<4x8xf32>) -> (vector<4x8xf32>)
+      scf.yield %next_dots : vector<4x8xf32>
+    }
+    func.call @hc_injection_publish(%token, %stream, %lane, %dots, %next_injection) : (index, index, index, vector<4x8xf32>, buffer)
+  }
+  kernel.return
+}
+kernel.def target(@flash_next_hc_wave32) @hc_combine_normalize_inject() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %residual_arg: buffer, %projected_arg: buffer, %injection_arg: buffer, %gamma_arg: buffer, %output_arg: buffer, %normalized_arg: buffer, %next_weight_arg: buffer, %next_injection_arg: buffer) {
+  %span, %residual, %projected, %injection, %gamma, %output, %normalized, %next_weight, %next_injection = buffer.assume.noalias %span_arg, %residual_arg, %projected_arg, %injection_arg, %gamma_arg, %output_arg, %normalized_arg, %next_weight_arg, %next_injection_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %token = kernel.workgroup.id<x> : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %stream = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %origin = index.constant 0 : offset
+    %c8 = index.constant 8 : index
+    %stride = index.constant 256 : index
+    %width = index.constant 2560 : index
+    %first = index.mul %lane, %c8 : index
+    %input_view = buffer.view %residual[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %gamma_view = buffer.view %gamma[%origin] : buffer -> view<4x2560xf32>
+    %output_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %c0 = scalar.constant 0.0 : f32
+    %c0_vector = vector.constant 0.0 : vector<8xf32>
+    %projected_view = buffer.view %projected[%origin] : buffer -> view<[%tokens]x2560xbf16>
+    %injection_view = buffer.view %injection[%origin] : buffer -> view<[%tokens]x4xf32>
+    %residual_output = buffer.view %output[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %gate = view.load %injection_view[%token, %stream] : view<[%tokens]x4xf32> -> f32
+    %gates = vector.splat %gate : vector<8xf32>
+    %c0_index = index.constant 0 : index
+    %c1_index = index.constant 1 : index
+    %chunks = index.constant 10 : index
+    %initial = vector.constant 0.0 : vector<10x8xbf16>
+    // Preserve the published BF16 residual before computing its norm.
+    %partial, %retained = scf.for %chunk = [%c0_index to %chunks step %c1_index](%accumulator = %c0_vector : vector<8xf32>, %prior = %initial : vector<10x8xbf16>) -> (vector<8xf32>, vector<10x8xbf16>) unroll schedule(linear) {
+      %channel = index.madd %chunk, %stride, %first : index
+      %stored = vector.load %input_view[%token, %stream, %channel] : view<[%tokens]x4x2560xbf16> -> vector<8xbf16>
+      %branch = vector.load %projected_view[%token, %channel] : view<[%tokens]x2560xbf16> -> vector<8xbf16>
+      %old = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %branch_values = vector.extf %branch : vector<8xbf16> to vector<8xf32>
+      %combined = vector.fmaf %branch_values, %gates, %old : vector<8xf32>
+      %packed_residual = vector.fptrunc %combined : vector<8xf32> to vector<8xbf16>
+      vector.store %packed_residual, %residual_output[%token, %stream, %channel] : vector<8xbf16>, view<[%tokens]x4x2560xbf16>
+      %values = vector.extf %packed_residual : vector<8xbf16> to vector<8xf32>
+      %next = vector.fmaf %values, %values, %accumulator : vector<8xf32>
+      %retained_next = vector.insert %packed_residual into %prior[%chunk] : vector<8xbf16>, vector<10x8xbf16>
+      scf.yield %next, %retained_next : vector<8xf32>, vector<10x8xbf16>
+    }
+    %lane_sum = vector.reduce<addf> %partial, %c0 : vector<8xf32>, f32
+    %sum = kernel.subgroup.reduce<addf> %lane_sum : f32
+    %reciprocal_width = scalar.constant 0.00039062500000000002 : f32
+    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+    %mean = scalar.mulf %sum, %reciprocal_width : f32
+    %variance = scalar.addf %mean, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %variance : f32
+    %inverse_vector = vector.splat %inverse : vector<8xf32>
+    %initial_dots = vector.constant 0.0 : vector<4x8xf32>
+    %dots = scf.for %chunk = [%c0_index to %chunks step %c1_index](%current_dots = %initial_dots : vector<4x8xf32>) -> (vector<4x8xf32>) unroll schedule(linear) {
+      %channel = index.madd %chunk, %stride, %first : index
+      %stored = vector.extract %retained[%chunk] : vector<10x8xbf16> -> vector<8xbf16>
+      %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %scales = vector.load %gamma_view[%stream, %channel] : view<4x2560xf32> -> vector<8xf32>
+      %unit = vector.mulf %values, %inverse_vector : vector<8xf32>
+      %scaled = vector.mulf %unit, %scales : vector<8xf32>
+      %packed = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+      vector.store %packed, %output_view[%token, %stream, %channel] : vector<8xbf16>, view<[%tokens]x4x2560xbf16>
+      %next_dots = func.call @hc_injection_chunk(%stream, %channel, %packed, %next_weight, %current_dots) : (index, index, vector<8xbf16>, buffer, vector<4x8xf32>) -> (vector<4x8xf32>)
+      scf.yield %next_dots : vector<4x8xf32>
+    }
+    func.call @hc_injection_publish(%token, %stream, %lane, %dots, %next_injection) : (index, index, index, vector<4x8xf32>, buffer)
+  }
+  kernel.return
+}
+
+command.program.def public @flash_next_hc_mix_normalized(%down_weight: view<3481600xi8>, %up_weight: view<3481600xi8>) launch(%span: buffer, %normalized: buffer, %mixed: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %rank_row_bytes = index.constant 640 : offset
+  %rank_bytes = index.scale %tokens, %rank_row_bytes : index, offset -> offset
+  %lowrank = buffer.alloca<global> align(256) %rank_bytes : buffer
+  %half_threshold = index.constant 4096 : index
+  %use_half = index.cmp uge, %tokens, %half_threshold : index
+  scf.if %use_half {
+    kernel.launch @hc_matrix_down_half(%span, %normalized, %down_weight, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+  } else {
+    kernel.launch @hc_matrix_down(%span, %normalized, %down_weight, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+  }
+  kernel.launch @hc_matrix_up(%span, %normalized, %lowrank, %up_weight, %mixed) : (buffer, buffer, buffer, view<3481600xi8>, buffer)
+  command.return
+}
+
+amdgpu.target<gfx11-generic> @hc_int8_wave32 {subgroup_size = 32}
+
+func.def inline @hc_quantize_chunk(%token: index, %stream: index, %channel: index, %values: vector<8xbf16>, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c80 = index.constant 80 : index
+  %c320 = index.constant 320 : index
+  %exchange1 = scalar.constant 1 : i32
+  %exchange2 = scalar.constant 2 : i32
+  %width = scalar.constant 32 : i32
+  %zero = scalar.constant 0.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %divisor = scalar.constant 127.0 : f32
+  %minimum = scalar.constant 1.1754943508222875e-38 : f32
+  %wide = vector.extf %values : vector<8xbf16> to vector<8xf32>
+  %absolute = vector.absf %wide : vector<8xf32>
+  %local = vector.reduce<maxnumf> %absolute, %zero : vector<8xf32>, f32
+  %peer1, %valid1 = kernel.subgroup.shuffle<xor> %local, %exchange1, %width : f32, i32, i32
+  %pair = scalar.maxnumf %local, %peer1 : f32
+  %peer2, %valid2 = kernel.subgroup.shuffle<xor> %pair, %exchange2, %width : f32, i32, i32
+  %maximum = scalar.maxnumf %pair, %peer2 : f32
+  // Exact for every finite BF16 maximum, including subnormal intermediates.
+  %scale_reciprocal = scalar.constant 0.007874015718698502 : f32
+  %negative_divisor = scalar.constant -127.0 : f32
+  %estimate = scalar.mulf %maximum, %scale_reciprocal : f32
+  %remainder = scalar.fmaf %estimate, %negative_divisor, %maximum : f32
+  %unbounded_scale = scalar.fmaf %remainder, %scale_reciprocal, %estimate : f32
+  // A subnormal scale is represented as a zero block. The reciprocal's
+  // denominator is then one, so finite inputs cannot overflow conversion.
+  %normal = scalar.cmpf oge, %unbounded_scale, %minimum : f32
+  %scale = scf.select %normal, %unbounded_scale, %zero : f32
+  %denominator = scf.select %normal, %scale, %one : f32
+  %reciprocal = scalar.divf<arcp> %one, %denominator : f32
+  %inverse = scf.select %normal, %reciprocal, %zero : f32
+  %inverses = vector.splat %inverse : vector<8xf32>
+  %scaled = vector.mulf %wide, %inverses : vector<8xf32>
+  %rounded = vector.roundf %scaled : vector<8xf32>
+  %lowest = vector.constant -127.0 : vector<8xf32>
+  %highest = vector.constant 127.0 : vector<8xf32>
+  %bounded_low = vector.maxnumf %rounded, %lowest : vector<8xf32>
+  %bounded = vector.minnumf %bounded_low, %highest : vector<8xf32>
+  %codes = vector.fptosi %bounded : vector<8xf32> to vector<8xi8>
+  %token_tile = index.div %token, %c16 : index
+  %token_lane = index.rem %token, %c16 : index
+  %local_block = index.div %channel, %c32 : index
+  %block = index.madd %stream, %c80, %local_block : index
+  %record = index.madd %token_tile, %c320, %block : index
+  %record_bytes = index.constant 576 : offset
+  %origin = index.scale %record, %record_bytes : index, offset -> offset
+  %within = index.rem %channel, %c32 : index
+  %half = index.div %within, %c16 : index
+  %half_column = index.rem %within, %c16 : index
+  %half_size = index.constant 256 : index
+  %plane_base = index.mul %half, %half_size : index
+  %token_base = index.madd %token_lane, %c16, %plane_base : index
+  %position = index.add %token_base, %half_column : index
+  %code_view = buffer.view %output[%origin] : buffer -> view<512xi8>
+  vector.store %codes, %code_view[%position] : vector<8xi8>, view<512xi8>
+  %leader = index.cmp eq, %within, %c0 : index
+  scf.if %leader {
+    %scale_delta = index.constant 512 : offset
+    %scale_origin = index.add %origin, %scale_delta : offset
+    %scale_view = buffer.view %output[%scale_origin] : buffer -> view<16xf32>
+    view.store %scale, %scale_view[%token_lane] : f32, view<16xf32>
+  }
+  func.return
+}
+
+func.def inline @hc_int8_record(%input: buffer, %record_base: index, %first_block: index, %part: index, %half_position: index, %token_lane: index) -> (vector<4xi32>, f32) {
+  %c0 = index.constant 0 : index
+  %record_bytes = index.constant 576 : offset
+  %scale_delta = index.constant 512 : offset
+  %k_block = index.add %first_block, %part : index
+  %record = index.add %record_base, %k_block : index
+  %origin = index.scale %record, %record_bytes : index, offset -> offset
+  %scale_origin = index.add %origin, %scale_delta : offset
+  %code_view = buffer.view %input[%origin] : buffer -> view<32x4xi32>
+  %scale_view = buffer.view %input[%scale_origin] : buffer -> view<16xf32>
+  %codes = vector.load %code_view[%half_position, %c0] : view<32x4xi32> -> vector<4xi32>
+  %scale = view.load %scale_view[%token_lane] : view<16xf32> -> f32
+  func.return %codes, %scale : vector<4xi32>, f32
+}
+
+kernel.def target(@hc_int8_wave32) @hc_matrix_down_int8() {
+  %capacity = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %c128 = index.constant 128 : index
+  %rounding = index.constant 127 : index
+  %padded = index.add %capacity, %rounding : index
+  %panels = index.div %padded, %c128 : index
+  %groups = index.constant 5 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %panels, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %epoch, %input, %weight, %output = buffer.assume.noalias %epoch_arg, %input_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c80 = index.constant 80 : index
+  %c128 = index.constant 128 : index
+  %c320 = index.constant 320 : index
+  %batch = kernel.workgroup.id<y> : index
+  %first = index.mul %batch, %c128 : index
+  %end = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
+  %active = index.cmp ult, %first, %end : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %workitem = kernel.workitem.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %sub_lane = index.rem %lane, %c16 : index
+    %half_lane = index.div %lane, %c16 : index
+    %wave_feature = index.div %wave, %c4 : index
+    %wave_token = index.rem %wave, %c4 : index
+    %feature_base = index.mul %group, %c64 : index
+    %producer_row = index.div %workitem, %c4 : index
+    %producer_block = index.rem %workitem, %c4 : index
+    %weight_row = index.add %feature_base, %producer_row : index
+    %weight_tile = index.div %producer_row, %c16 : index
+    %weight_lane = index.rem %producer_row, %c16 : index
+    %weight_high_lane = index.add %weight_lane, %c16 : index
+    %weight_scale_half = index.rem %weight_lane, %c2 : index
+    %weight_scale_lane = index.div %weight_lane, %c2 : index
+    %weight_scale_position = index.madd %weight_scale_half, %c8, %weight_scale_lane : index
+    %input_local_token = index.madd %wave, %c16, %sub_lane : index
+    %input_token = index.add %first, %input_local_token : index
+    %input_live = index.cmp ult, %input_token, %end : index
+    %safe_token = scf.select %input_live, %input_token, %c0 : index
+    %input_token_tile = index.div %safe_token, %c16 : index
+    %input_token_lane = index.rem %safe_token, %c16 : index
+    %input_record_base = index.mul %input_token_tile, %c320 : index
+    %input_half_position = index.madd %half_lane, %c16, %input_token_lane : index
+    %origin = index.constant 0 : offset
+    %stage_bytes = index.constant 27648 : offset
+    %storage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+    %weight_scales_origin = index.constant 8192 : offset
+    %input_codes_origin = index.constant 9216 : offset
+    %input_scales_origin = index.constant 25600 : offset
+    %a = buffer.view %storage[%origin] : buffer -> view<4x4x32x4xi32>
+    %dw = buffer.view %storage[%weight_scales_origin] : buffer -> view<4x4x16xf32>
+    %b = buffer.view %storage[%input_codes_origin] : buffer -> view<4x8x32x4xi32>
+    %dx = buffer.view %storage[%input_scales_origin] : buffer -> view<4x8x16xf32>
+    %weight_row_bytes = index.constant 10880 : offset
+    %weight_origin = index.scale %weight_row, %weight_row_bytes : index, offset -> offset
+    %block_bytes = index.constant 34 : offset
+    %code_delta = index.constant 2 : offset
+    %initial = vector.constant 0.0 : vector<2x2x8xf32>
+    %integer_zero = vector.constant 0 : vector<8xi32>
+    %schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+    %integer_init = vector.fragment<init> %integer_zero shape [%c16, %c16] : vector<8xi32>
+    %result = scf.for %stage = [%c0 to %c80 step %c1](%accumulators = %initial : vector<2x2x8xf32>) -> (vector<2x2x8xf32>) pipeline(%c2) {
+      %first_block = index.mul %stage, %c4 : index
+      %block = index.add %first_block, %producer_block : index
+      %block_origin = index.scale %block, %block_bytes : index, offset -> offset
+      %scale_origin = index.add %weight_origin, %block_origin : offset
+      %codes_origin = index.add %scale_origin, %code_delta : offset
+      %code_view = buffer.view %weight[%codes_origin] : buffer -> view<32xi8>
+      %scale_view = buffer.view %weight[%scale_origin] : buffer -> view<1xf16>
+      %weight_codes = vector.load %code_view[%c0] : view<32xi8> -> vector<32xi8>
+      %weight_half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
+      %weight_scale = scalar.extf %weight_half_scale : f16 to f32
+      %weight_words = vector.bitcast %weight_codes : vector<32xi8> to vector<2x4xi32>
+      %weight_low = vector.extract %weight_words[%c0] : vector<2x4xi32> -> vector<4xi32>
+      %weight_high = vector.extract %weight_words[%c1] : vector<2x4xi32> -> vector<4xi32>
+      // Inactive tokens read token zero's initialized record. Matrix columns
+      // are independent, and the epilogue excludes these tokens entirely.
+      %codes0, %scale0 = func.call @hc_int8_record(%input, %input_record_base, %first_block, %c0, %input_half_position, %input_token_lane) : (buffer, index, index, index, index, index) -> (vector<4xi32>, f32)
+      %codes1, %scale1 = func.call @hc_int8_record(%input, %input_record_base, %first_block, %c1, %input_half_position, %input_token_lane) : (buffer, index, index, index, index, index) -> (vector<4xi32>, f32)
+      %codes2, %scale2 = func.call @hc_int8_record(%input, %input_record_base, %first_block, %c2, %input_half_position, %input_token_lane) : (buffer, index, index, index, index, index) -> (vector<4xi32>, f32)
+      %codes3, %scale3 = func.call @hc_int8_record(%input, %input_record_base, %first_block, %c3, %input_half_position, %input_token_lane) : (buffer, index, index, index, index, index) -> (vector<4xi32>, f32)
+      vector.store %weight_low, %a[%producer_block, %weight_tile, %weight_lane, %c0] : vector<4xi32>, view<4x4x32x4xi32>
+      vector.store %weight_high, %a[%producer_block, %weight_tile, %weight_high_lane, %c0] : vector<4xi32>, view<4x4x32x4xi32>
+      view.store %weight_scale, %dw[%producer_block, %weight_tile, %weight_scale_position] : f32, view<4x4x16xf32>
+      vector.store %codes0, %b[%c0, %wave, %lane, %c0] : vector<4xi32>, view<4x8x32x4xi32>
+      vector.store %codes1, %b[%c1, %wave, %lane, %c0] : vector<4xi32>, view<4x8x32x4xi32>
+      vector.store %codes2, %b[%c2, %wave, %lane, %c0] : vector<4xi32>, view<4x8x32x4xi32>
+      vector.store %codes3, %b[%c3, %wave, %lane, %c0] : vector<4xi32>, view<4x8x32x4xi32>
+      %leader = index.cmp ult, %lane, %c16 : index
+      scf.if %leader {
+        view.store %scale0, %dx[%c0, %wave, %lane] : f32, view<4x8x16xf32>
+        view.store %scale1, %dx[%c1, %wave, %lane] : f32, view<4x8x16xf32>
+        view.store %scale2, %dx[%c2, %wave, %lane] : f32, view<4x8x16xf32>
+        view.store %scale3, %dx[%c3, %wave, %lane] : f32, view<4x8x16xf32>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %next = scf.for %part = [%c0 to %c4 step %c1](%current = %accumulators : vector<2x2x8xf32>) -> (vector<2x2x8xf32>) {
+        %updated = scf.for %token_fragment = [%c0 to %c2 step %c1](%tile = %current : vector<2x2x8xf32>) -> (vector<2x2x8xf32>) unroll schedule(linear) {
+          %token_tile = index.madd %wave_token, %c2, %token_fragment : index
+          %high_lane = index.add %sub_lane, %c16 : index
+          %b0_data = vector.load %b[%part, %token_tile, %sub_lane, %c0] : view<4x8x32x4xi32> -> vector<4xi32>
+          %b1_data = vector.load %b[%part, %token_tile, %high_lane, %c0] : view<4x8x32x4xi32> -> vector<4xi32>
+          %b0 = vector.fragment<rhs> %b0_data shape [%c16, %c16] using {schema = %schema : encoding<schema>} : vector<4xi32>
+          %b1 = vector.fragment<rhs> %b1_data shape [%c16, %c16] using {schema = %schema : encoding<schema>} : vector<4xi32>
+          %activation_scale = view.load %dx[%part, %token_tile, %sub_lane] : view<4x8x16xf32> -> f32
+          %activation_scales = vector.splat %activation_scale : vector<8xf32>
+          %next_tile = scf.for %feature_fragment = [%c0 to %c2 step %c1](%values = %tile : vector<2x2x8xf32>) -> (vector<2x2x8xf32>) unroll schedule(linear) {
+            %feature_tile = index.madd %wave_feature, %c2, %feature_fragment : index
+            %a0_data = vector.load %a[%part, %feature_tile, %sub_lane, %c0] : view<4x4x32x4xi32> -> vector<4xi32>
+            %a1_data = vector.load %a[%part, %feature_tile, %high_lane, %c0] : view<4x4x32x4xi32> -> vector<4xi32>
+            %a0 = vector.fragment<lhs> %a0_data shape [%c16, %c16] using {schema = %schema : encoding<schema>} : vector<4xi32>
+            %a1 = vector.fragment<lhs> %a1_data shape [%c16, %c16] using {schema = %schema : encoding<schema>} : vector<4xi32>
+            %dot0 = vector.mma %a0, %b0, %integer_init : vector<4xi32>, vector<4xi32>, vector<8xi32>
+            %dot1 = vector.mma %a1, %b1, %dot0 : vector<4xi32>, vector<4xi32>, vector<8xi32>
+            %dot = vector.sitofp %dot1 : vector<8xi32> to vector<8xf32>
+            %scale_first = index.mul %half_lane, %c8 : index
+            %weight_scales = vector.load %dw[%part, %feature_tile, %scale_first] : view<4x4x16xf32> -> vector<8xf32>
+            %scaled = vector.mulf %dot, %activation_scales : vector<8xf32>
+            %old = vector.extract %values[%feature_fragment, %token_fragment] : vector<2x2x8xf32> -> vector<8xf32>
+            %contracted = vector.fmaf %scaled, %weight_scales, %old : vector<8xf32>
+            %next_values = vector.insert %contracted into %values[%feature_fragment, %token_fragment] : vector<8xf32>, vector<2x2x8xf32>
+            scf.yield %next_values : vector<2x2x8xf32>
+          }
+          scf.yield %next_tile : vector<2x2x8xf32>
+        }
+        scf.yield %updated : vector<2x2x8xf32>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      scf.yield %next : vector<2x2x8xf32>
+    }
+    // Each wave transposes a 16-token by 32-feature result through its own
+    // padded LDS region, then stores sixteen contiguous BF16 features/lane.
+    %transpose = buffer.view %storage[%origin] : buffer -> view<8x16x36xf32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x320xbf16>
+    %output_token_lane = index.div %lane, %c2 : index
+    %output_feature_half = index.rem %lane, %c2 : index
+    %output_feature_lane = index.mul %output_feature_half, %c16 : index
+    %wave_feature_base = index.madd %wave_feature, %c32, %feature_base : index
+    %output_feature = index.add %wave_feature_base, %output_feature_lane : index
+    %quarter = vector.constant 0.25 : vector<16xf32>
+    %one = vector.constant 1.0 : vector<16xf32>
+    scf.for %token_fragment = [%c0 to %c2 step %c1] unroll schedule(linear) {
+      scf.for %feature_fragment = [%c0 to %c2 step %c1] unroll schedule(linear) {
+        %values = vector.extract %result[%feature_fragment, %token_fragment] : vector<2x2x8xf32> -> vector<8xf32>
+        %feature_offset = index.mul %feature_fragment, %c16 : index
+        scf.for %element = [%c0 to %c8 step %c1] unroll schedule(linear) {
+          %within = index.madd %element, %c2, %half_lane : index
+          %feature = index.add %feature_offset, %within : index
+          %value = vector.extract %values[%element] : vector<8xf32> -> f32
+          view.store %value, %transpose[%wave, %sub_lane, %feature] : f32, view<8x16x36xf32>
+        }
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %token_tile = index.madd %wave_token, %c2, %token_fragment : index
+      %local_token = index.madd %token_tile, %c16, %output_token_lane : index
+      %token = index.add %first, %local_token : index
+      %live = index.cmp ult, %token, %end : index
+      scf.if %live {
+        %dot = vector.load %transpose[%wave, %output_token_lane, %output_feature_lane] : view<8x16x36xf32> -> vector<16xf32>
+        %scaled = vector.mulf %dot, %quarter : vector<16xf32>
+        %negative = vector.negf %scaled : vector<16xf32>
+        %exponential = vector.expf<afn> %negative : vector<16xf32>
+        %denominator = vector.addf %one, %exponential : vector<16xf32>
+        %activated = vector.divf<arcp> %scaled, %denominator : vector<16xf32>
+        %packed = vector.fptrunc %activated : vector<16xf32> to vector<16xbf16>
+        vector.store %packed, %output_view[%token, %output_feature] : vector<16xbf16>, view<[%capacity]x320xbf16>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@flash_next_hc_wave32) @hc_normalize_inject_int8() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %residual_arg: buffer, %gamma_arg: buffer, %normalized_arg: buffer, %next_weight_arg: buffer, %next_injection_arg: buffer, %quantized_arg: buffer) {
+  %span, %residual, %gamma, %normalized, %next_weight, %next_injection, %quantized = buffer.assume.noalias %span_arg, %residual_arg, %gamma_arg, %normalized_arg, %next_weight_arg, %next_injection_arg, %quantized_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %token = kernel.workgroup.id<x> : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %stream = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %origin = index.constant 0 : offset
+    %c8 = index.constant 8 : index
+    %stride = index.constant 256 : index
+    %width = index.constant 2560 : index
+    %first = index.mul %lane, %c8 : index
+    %input_view = buffer.view %residual[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %gamma_view = buffer.view %gamma[%origin] : buffer -> view<4x2560xf32>
+    %output_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %c0 = scalar.constant 0.0 : f32
+    %c0_vector = vector.constant 0.0 : vector<8xf32>
+    %partial = scf.for %channel = [%first to %width step %stride](%accumulator = %c0_vector : vector<8xf32>) -> (vector<8xf32>) {
+      %stored = vector.load %input_view[%token, %stream, %channel] : view<[%tokens]x4x2560xbf16> -> vector<8xbf16>
+      %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %next = vector.fmaf %values, %values, %accumulator : vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    %lane_sum = vector.reduce<addf> %partial, %c0 : vector<8xf32>, f32
+    %sum = kernel.subgroup.reduce<addf> %lane_sum : f32
+    %reciprocal_width = scalar.constant 0.00039062500000000002 : f32
+    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+    %mean = scalar.mulf %sum, %reciprocal_width : f32
+    %variance = scalar.addf %mean, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %variance : f32
+    %inverse_vector = vector.splat %inverse : vector<8xf32>
+    %initial_dots = vector.constant 0.0 : vector<4x8xf32>
+    %dots = scf.for %channel = [%first to %width step %stride](%current_dots = %initial_dots : vector<4x8xf32>) -> (vector<4x8xf32>) {
+      %stored = vector.load %input_view[%token, %stream, %channel] : view<[%tokens]x4x2560xbf16> -> vector<8xbf16>
+      %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %scales = vector.load %gamma_view[%stream, %channel] : view<4x2560xf32> -> vector<8xf32>
+      %unit = vector.mulf %values, %inverse_vector : vector<8xf32>
+      %scaled = vector.mulf %unit, %scales : vector<8xf32>
+      %packed = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+      vector.store %packed, %output_view[%token, %stream, %channel] : vector<8xbf16>, view<[%tokens]x4x2560xbf16>
+      func.call @hc_quantize_chunk(%token, %stream, %channel, %packed, %quantized) : (index, index, index, vector<8xbf16>, buffer)
+      %next_dots = func.call @hc_injection_chunk(%stream, %channel, %packed, %next_weight, %current_dots) : (index, index, vector<8xbf16>, buffer, vector<4x8xf32>) -> (vector<4x8xf32>)
+      scf.yield %next_dots : vector<4x8xf32>
+    }
+    func.call @hc_injection_publish(%token, %stream, %lane, %dots, %next_injection) : (index, index, index, vector<4x8xf32>, buffer)
+  }
+  kernel.return
+}
+
+kernel.def target(@flash_next_hc_wave32) @hc_combine_normalize_inject_int8() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %residual_arg: buffer, %projected_arg: buffer, %injection_arg: buffer, %gamma_arg: buffer, %output_arg: buffer, %normalized_arg: buffer, %next_weight_arg: buffer, %next_injection_arg: buffer, %quantized_arg: buffer) {
+  %span, %residual, %projected, %injection, %gamma, %output, %normalized, %next_weight, %next_injection, %quantized = buffer.assume.noalias %span_arg, %residual_arg, %projected_arg, %injection_arg, %gamma_arg, %output_arg, %normalized_arg, %next_weight_arg, %next_injection_arg, %quantized_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %token = kernel.workgroup.id<x> : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %stream = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %origin = index.constant 0 : offset
+    %c8 = index.constant 8 : index
+    %stride = index.constant 256 : index
+    %width = index.constant 2560 : index
+    %first = index.mul %lane, %c8 : index
+    %input_view = buffer.view %residual[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %gamma_view = buffer.view %gamma[%origin] : buffer -> view<4x2560xf32>
+    %output_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %c0 = scalar.constant 0.0 : f32
+    %c0_vector = vector.constant 0.0 : vector<8xf32>
+    %projected_view = buffer.view %projected[%origin] : buffer -> view<[%tokens]x2560xbf16>
+    %injection_view = buffer.view %injection[%origin] : buffer -> view<[%tokens]x4xf32>
+    %residual_output = buffer.view %output[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %gate = view.load %injection_view[%token, %stream] : view<[%tokens]x4xf32> -> f32
+    %gates = vector.splat %gate : vector<8xf32>
+    %c0_index = index.constant 0 : index
+    %c1_index = index.constant 1 : index
+    %chunks = index.constant 10 : index
+    %initial = vector.constant 0.0 : vector<10x8xbf16>
+    // Preserve the published BF16 residual before computing its norm.
+    %partial, %retained = scf.for %chunk = [%c0_index to %chunks step %c1_index](%accumulator = %c0_vector : vector<8xf32>, %prior = %initial : vector<10x8xbf16>) -> (vector<8xf32>, vector<10x8xbf16>) unroll schedule(linear) {
+      %channel = index.madd %chunk, %stride, %first : index
+      %stored = vector.load %input_view[%token, %stream, %channel] : view<[%tokens]x4x2560xbf16> -> vector<8xbf16>
+      %branch = vector.load %projected_view[%token, %channel] : view<[%tokens]x2560xbf16> -> vector<8xbf16>
+      %old = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %branch_values = vector.extf %branch : vector<8xbf16> to vector<8xf32>
+      %combined = vector.fmaf %branch_values, %gates, %old : vector<8xf32>
+      %packed_residual = vector.fptrunc %combined : vector<8xf32> to vector<8xbf16>
+      vector.store %packed_residual, %residual_output[%token, %stream, %channel] : vector<8xbf16>, view<[%tokens]x4x2560xbf16>
+      %values = vector.extf %packed_residual : vector<8xbf16> to vector<8xf32>
+      %next = vector.fmaf %values, %values, %accumulator : vector<8xf32>
+      %retained_next = vector.insert %packed_residual into %prior[%chunk] : vector<8xbf16>, vector<10x8xbf16>
+      scf.yield %next, %retained_next : vector<8xf32>, vector<10x8xbf16>
+    }
+    %lane_sum = vector.reduce<addf> %partial, %c0 : vector<8xf32>, f32
+    %sum = kernel.subgroup.reduce<addf> %lane_sum : f32
+    %reciprocal_width = scalar.constant 0.00039062500000000002 : f32
+    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+    %mean = scalar.mulf %sum, %reciprocal_width : f32
+    %variance = scalar.addf %mean, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %variance : f32
+    %inverse_vector = vector.splat %inverse : vector<8xf32>
+    %initial_dots = vector.constant 0.0 : vector<4x8xf32>
+    %dots = scf.for %chunk = [%c0_index to %chunks step %c1_index](%current_dots = %initial_dots : vector<4x8xf32>) -> (vector<4x8xf32>) unroll schedule(linear) {
+      %channel = index.madd %chunk, %stride, %first : index
+      %stored = vector.extract %retained[%chunk] : vector<10x8xbf16> -> vector<8xbf16>
+      %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %scales = vector.load %gamma_view[%stream, %channel] : view<4x2560xf32> -> vector<8xf32>
+      %unit = vector.mulf %values, %inverse_vector : vector<8xf32>
+      %scaled = vector.mulf %unit, %scales : vector<8xf32>
+      %packed = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+      vector.store %packed, %output_view[%token, %stream, %channel] : vector<8xbf16>, view<[%tokens]x4x2560xbf16>
+      func.call @hc_quantize_chunk(%token, %stream, %channel, %packed, %quantized) : (index, index, index, vector<8xbf16>, buffer)
+      %next_dots = func.call @hc_injection_chunk(%stream, %channel, %packed, %next_weight, %current_dots) : (index, index, vector<8xbf16>, buffer, vector<4x8xf32>) -> (vector<4x8xf32>)
+      scf.yield %next_dots : vector<4x8xf32>
+    }
+    func.call @hc_injection_publish(%token, %stream, %lane, %dots, %next_injection) : (index, index, index, vector<4x8xf32>, buffer)
+  }
+  kernel.return
+}
+
+command.program.def public @flash_next_hc_mix_quantized(%down_weight: view<3481600xi8>, %up_weight: view<3481600xi8>) launch(%span: buffer, %normalized: buffer, %quantized: buffer, %mixed: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %rank_row_bytes = index.constant 640 : offset
+  %rank_bytes = index.scale %tokens, %rank_row_bytes : index, offset -> offset
+  %lowrank = buffer.alloca<global> align(256) %rank_bytes : buffer
+  kernel.launch @hc_matrix_down_int8(%span, %quantized, %down_weight, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+  kernel.launch @hc_matrix_up(%span, %normalized, %lowrank, %up_weight, %mixed) : (buffer, buffer, buffer, view<3481600xi8>, buffer)
   command.return
 }

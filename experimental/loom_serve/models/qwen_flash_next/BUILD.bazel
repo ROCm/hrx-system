@@ -338,6 +338,18 @@ loom_library(
 ]
 
 loom_test(
+    name = "residual_fusion_test",
+    srcs = ["tests/residual_fusion.loom"],
+    benchmark_smoke = False,
+    configs = {"flash_next.token_count": "7"},
+    execution_profiles = [
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
     name = "gdn_test",
     srcs = ["tests/gdn.loom"],
     benchmark_smoke = False,

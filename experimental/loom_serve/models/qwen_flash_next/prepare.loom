@@ -1,3 +1,6 @@
+// flash_next_epoch_output_only
+global.rodata.def @output_only_root = bytes("666c6173685f6e6578745f65706f63685f6f75747075745f6f6e6c79")
+
 // The shared text owner supplies validated capacities and packed shape pairs.
 // This program declares the checkpoint's exact storage and stage catalog;
 // it neither discovers filenames nor transforms the original packed tensors.
@@ -431,7 +434,9 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %diagnostic = global.load @limits_error : buffer
   func.call @require(%condition, %diagnostic) : (i32, buffer)
   %draft_path = func.call @check_options(%options, %enabled) : (buffer, i1) -> (buffer)
-  %root = global.load @root : buffer
+  %full_root = global.load @root : buffer
+  %selected_root = global.load @output_only_root : buffer
+  %root = scf.select %enabled, %full_root, %selected_root : buffer
   %one_root = scalar.constant 1 : i32
   %two_roots = scalar.constant 2 : i32
   %three_roots = scalar.constant 3 : i32

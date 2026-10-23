@@ -1,3 +1,5 @@
+kernel.decl @hc_matrix_down_half() launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 kernel.decl @hc_down_inject() launch(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer)
@@ -12,7 +14,7 @@ kernel.decl @hc_matrix_up() launch(%epoch: buffer, %normalized: buffer, %lowrank
 
 func.decl @flash_next_q8_fixture(%count: index, %inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer)
 
-func.decl @flash_next_q8_reference_dot(%inputs: index, %token: index, %row: index, %input: buffer, %weight: buffer) -> (f64)
+func.decl @flash_next_q8_reference_dot_arithmetic(%half_coefficients: i1, %inputs: index, %token: index, %row: index, %input: buffer, %weight: buffer) -> (f64)
 
 // The existing Q8 fixture assigns finite scales and poisons inactive inputs.
 // All schedules use 133-row backing allocations. This covers the largest
@@ -38,7 +40,7 @@ kernel.def @down_reference() {
   %threads = index.constant 64 : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%requested: index, %input: buffer, %weight: buffer, %output: buffer, %injection: buffer) {
+} launch(%half_coefficients: i1, %requested: index, %input: buffer, %weight: buffer, %output: buffer, %injection: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %count = index.min %requested, %capacity : index
   %token = kernel.workgroup.id<y> : index
@@ -49,7 +51,7 @@ kernel.def @down_reference() {
     %threads = index.constant 64 : index
     %row = index.madd %group, %threads, %thread : index
     %width = index.constant 10240 : index
-    %dot = func.call @flash_next_q8_reference_dot(%width, %token, %row, %input, %weight) : (index, index, index, buffer, buffer) -> (f64)
+    %dot = func.call @flash_next_q8_reference_dot_arithmetic(%half_coefficients, %width, %token, %row, %input, %weight) : (i1, index, index, index, buffer, buffer) -> (f64)
     %quarter = scalar.constant 0.25 : f64
     %scaled = scalar.mulf %dot, %quarter : f64
     %value = scalar.fptrunc %scaled : f64 to f32
@@ -81,7 +83,7 @@ kernel.def @up_reference() {
   %threads = index.constant 64 : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%requested: index, %normalized: buffer, %lowrank: buffer, %weight: buffer, %output: buffer) {
+} launch(%half_coefficients: i1, %requested: index, %normalized: buffer, %lowrank: buffer, %weight: buffer, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %count = index.min %requested, %capacity : index
   %token = kernel.workgroup.id<y> : index
@@ -102,7 +104,7 @@ kernel.def @up_reference() {
     %unit = scalar.constant 1.0 : f32
     %sum = scf.for %stream = [%c0 to %streams step %c1](%prior = %initial : f64) -> (f64) {
       %row = index.madd %stream, %hidden, %feature : index
-      %dot = func.call @flash_next_q8_reference_dot(%rank, %token, %row, %lowrank, %weight) : (index, index, index, buffer, buffer) -> (f64)
+      %dot = func.call @flash_next_q8_reference_dot_arithmetic(%half_coefficients, %rank, %token, %row, %lowrank, %weight) : (i1, index, index, index, buffer, buffer) -> (f64)
       %value = scalar.fptrunc %dot : f64 to f32
       %negative = scalar.negf %value : f32
       %exponential = scalar.expf<afn> %negative : f32
@@ -130,6 +132,8 @@ kernel.def @up_reference() {
 check.case public @hyperconnection_publications {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %requested = check.param.choice values([0, 1, 4, 128, 131]) name("active") : index
+  %full = check.literal value(false) : i1
+  %half = check.literal value(true) : i1
   %width = check.literal value(10240) : index
   %rank = check.literal value(320) : index
   %seed = check.literal value(3187) : i64
@@ -146,7 +150,7 @@ check.case public @hyperconnection_publications {
   %injection_f32 = check.generate.fill value(-17.0) : tensor<133x4xf32>
   %injection_q8 = check.generate.fill value(-17.0) : tensor<133x4xf32>
   %injection_expected = check.generate.fill value(-17.0) : tensor<133x4xf32>
-  kernel.launch @down_reference(%requested, %normalized, %down, %lowrank_expected, %injection_expected) : (index, tensor<133x10240xbf16>, tensor<320x320x34xi8>, tensor<133x320xbf16>, tensor<133x4xf32>)
+  kernel.launch @down_reference(%full, %requested, %normalized, %down, %lowrank_expected, %injection_expected) : (i1, index, tensor<133x10240xbf16>, tensor<320x320x34xi8>, tensor<133x320xbf16>, tensor<133x4xf32>)
   kernel.launch @hc_down_inject(%epoch, %normalized, %down, %f32_weight, %lowrank_f32, %injection_f32) : (tensor<3xi32>, tensor<133x10240xbf16>, tensor<320x320x34xi8>, tensor<4x10240xf32>, tensor<133x320xbf16>, tensor<133x4xf32>)
   kernel.launch @hc_down_inject_q8(%epoch, %normalized, %down, %q8_weight, %lowrank_q8, %injection_q8) : (tensor<3xi32>, tensor<133x10240xbf16>, tensor<320x320x34xi8>, tensor<4x320x34xi8>, tensor<133x320xbf16>, tensor<133x4xf32>)
   kernel.launch @hc_matrix_down(%epoch, %normalized, %down, %lowrank_matrix) : (tensor<3xi32>, tensor<133x10240xbf16>, tensor<320x320x34xi8>, tensor<133x320xbf16>)
@@ -155,16 +159,23 @@ check.case public @hyperconnection_publications {
   check.expect.bitwise actual(%lowrank_q8) expected(%lowrank_f32) : tensor<133x320xbf16>
   check.expect.bitwise actual(%injection_f32) expected(%injection_expected) : tensor<133x4xf32>
   check.expect.bitwise actual(%injection_q8) expected(%injection_expected) : tensor<133x4xf32>
+  %lowrank_half = check.generate.fill value(-17.0) : tensor<133x320xbf16>
+  %lowrank_half_expected = check.generate.fill value(-17.0) : tensor<133x320xbf16>
+  kernel.launch @down_reference(%half, %requested, %normalized, %down, %lowrank_half_expected, %injection_expected) : (i1, index, tensor<133x10240xbf16>, tensor<320x320x34xi8>, tensor<133x320xbf16>, tensor<133x4xf32>)
+  kernel.launch @hc_matrix_down_half(%epoch, %normalized, %down, %lowrank_half) : (tensor<3xi32>, tensor<133x10240xbf16>, tensor<320x320x34xi8>, tensor<133x320xbf16>)
+  check.expect.close actual(%lowrank_half) expected(%lowrank_half_expected) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<133x320xbf16>
   %up = check.generate.random.uniform seed(%seed) range(-127 to 127) : tensor<10240x10x34xi8>
   %lowrank = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<133x320xbf16>
   kernel.launch @fixture(%requested, %rank, %width, %epoch, %lowrank, %up) : (index, index, index, tensor<3xi32>, tensor<133x320xbf16>, tensor<10240x10x34xi8>)
   %mixed = check.generate.fill value(-17.0) : tensor<133x2560xbf16>
   %mixed_matrix = check.generate.fill value(-17.0) : tensor<133x2560xbf16>
   %mixed_expected = check.generate.fill value(-17.0) : tensor<133x2560xbf16>
-  kernel.launch @up_reference(%requested, %normalized, %lowrank, %up, %mixed_expected) : (index, tensor<133x10240xbf16>, tensor<133x320xbf16>, tensor<10240x10x34xi8>, tensor<133x2560xbf16>)
+  kernel.launch @up_reference(%full, %requested, %normalized, %lowrank, %up, %mixed_expected) : (i1, index, tensor<133x10240xbf16>, tensor<133x320xbf16>, tensor<10240x10x34xi8>, tensor<133x2560xbf16>)
   kernel.launch @hc_up_mix(%epoch, %normalized, %lowrank, %up, %mixed) : (tensor<3xi32>, tensor<133x10240xbf16>, tensor<133x320xbf16>, tensor<10240x10x34xi8>, tensor<133x2560xbf16>)
   check.expect.close actual(%mixed) expected(%mixed_expected) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<133x2560xbf16>
+  %mixed_half_expected = check.generate.fill value(-17.0) : tensor<133x2560xbf16>
+  kernel.launch @up_reference(%half, %requested, %normalized, %lowrank, %up, %mixed_half_expected) : (i1, index, tensor<133x10240xbf16>, tensor<133x320xbf16>, tensor<10240x10x34xi8>, tensor<133x2560xbf16>)
   kernel.launch @hc_matrix_up(%epoch, %normalized, %lowrank, %up, %mixed_matrix) : (tensor<3xi32>, tensor<133x10240xbf16>, tensor<133x320xbf16>, tensor<10240x10x34xi8>, tensor<133x2560xbf16>)
-  check.expect.close actual(%mixed_matrix) expected(%mixed_expected) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<133x2560xbf16>
+  check.expect.close actual(%mixed_matrix) expected(%mixed_half_expected) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<133x2560xbf16>
   check.return
 }

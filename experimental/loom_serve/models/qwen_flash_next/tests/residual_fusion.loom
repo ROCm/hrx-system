@@ -1,0 +1,195 @@
+// Fused publication must preserve the residual/normalization boundary and
+// injection values of separate dispatches. Quantized panels are checked from
+// the published BF16 values with an independent scalar layout and arithmetic.
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+kernel.decl @hc_normalize() launch(%epoch: buffer, %residual: buffer, %gamma: buffer, %normalized: buffer)
+kernel.decl @hc_combine() launch(%epoch: buffer, %residual: buffer, %projected: buffer, %injection: buffer, %output: buffer)
+kernel.decl @hc_inject_only() launch(%epoch: buffer, %normalized: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer)
+kernel.decl @hc_normalize_inject() launch(%epoch: buffer, %residual: buffer, %gamma: buffer, %normalized: buffer, %weight: buffer, %injection: buffer)
+kernel.decl @hc_normalize_inject_int8() launch(%epoch: buffer, %residual: buffer, %gamma: buffer, %normalized: buffer, %weight: buffer, %injection: buffer, %quantized: buffer)
+kernel.decl @hc_combine_normalize_inject() launch(%epoch: buffer, %residual: buffer, %projected: buffer, %injection: buffer, %gamma: buffer, %output: buffer, %normalized: buffer, %weight: buffer, %next_injection: buffer)
+kernel.decl @hc_combine_normalize_inject_int8() launch(%epoch: buffer, %residual: buffer, %projected: buffer, %injection: buffer, %gamma: buffer, %output: buffer, %normalized: buffer, %weight: buffer, %next_injection: buffer, %quantized: buffer)
+
+kernel.def @initialize_epoch() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%count: i32, %epoch: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  view.store %count, %header[0] : i32, view<3xi32>
+  kernel.return
+}
+
+// Each scalar thread checks one 32-element block, including untouched rows.
+// RCP_F32 allows one ULP of reciprocal error. The F64 oracle bounds that
+// interval, then applies the following F32 multiply and integer rounding.
+// Half-integer ties can therefore admit two adjacent codes; scales are exact.
+kernel.def @quantization_errors() {
+  %blocks = index.constant 320 : index
+  %threads = index.constant 16 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%blocks, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%epoch: buffer, %input: buffer, %packed: buffer, %errors: buffer) {
+  %token = kernel.workitem.id<x> : index
+  %block = kernel.workgroup.id<x> : index
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %width = index.constant 32 : index
+  %half = index.constant 16 : index
+  %plane = index.constant 256 : index
+  %header = buffer.view %epoch[%origin] : buffer -> view<1xi32>
+  %word = view.load %header[0] : view<1xi32> -> i32
+  %count = index.cast %word : i32 to index
+  %live = index.cmp ult, %token, %count : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<7x320x32xbf16>
+  %record_bytes = index.constant 576 : offset
+  %record = index.scale %block, %record_bytes : index, offset -> offset
+  %scale_delta = index.constant 512 : offset
+  %scale_origin = index.add %record, %scale_delta : offset
+  %codes = buffer.view %packed[%record] : buffer -> view<512xi8>
+  %scales = buffer.view %packed[%scale_origin] : buffer -> view<16xi32>
+  %scale_bits = view.load %scales[%token] : view<16xi32> -> i32
+  %zero_word = scalar.constant 0 : i32
+  %one_word = scalar.constant 1 : i32
+  %zero_double = scalar.constant 0.0 : f64
+  %inverse_low, %inverse_high, %scale_error = scf.if %live -> (f64, f64, i32) {
+    %row = index.assume %token [range(%token, 0, 6)] : index
+    %initial = scalar.constant 0.0 : f32
+    %maximum = scf.for %element = [%zero to %width step %one](%prior = %initial : f32) -> (f32) {
+      %stored = view.load %input_view[%row, %block, %element] : view<7x320x32xbf16> -> bf16
+      %value = scalar.extf %stored : bf16 to f32
+      %absolute = scalar.absf %value : f32
+      %next = scalar.maxnumf %prior, %absolute : f32
+      scf.yield %next : f32
+    }
+    %divisor = scalar.constant 127.0 : f32
+    %minimum = scalar.constant 1.1754943508222875e-38 : f32
+    %unbounded = scalar.divf %maximum, %divisor : f32
+    %normal = scalar.cmpf oge, %unbounded, %minimum : f32
+    %scale = scf.select %normal, %unbounded, %initial : f32
+    %expected_bits = scalar.bitcast %scale : f32 to i32
+    %equal = scalar.cmpi eq, %scale_bits, %expected_bits : i32
+    %error = scf.select %equal, %zero_word, %one_word : i32
+    %unit = scalar.constant 1.0 : f32
+    %denominator = scf.select %normal, %scale, %unit : f32
+    %wide = scalar.extf %denominator : f32 to f64
+    %unit_double = scalar.constant 1.0 : f64
+    %inverse = scalar.divf %unit_double, %wide : f64
+    %inverse_bits = scalar.bitcast %inverse : f64 to i64
+    %exponent_mask = scalar.constant 9218868437227405312 : i64
+    %exponent_bits = scalar.andi %inverse_bits, %exponent_mask : i64
+    %power = scalar.bitcast %exponent_bits : i64 to f64
+    %fraction = scalar.constant 1.1920928955078125e-7 : f64
+    %ulp = scalar.mulf %power, %fraction : f64
+    %low_value = scalar.subf %inverse, %ulp : f64
+    %high_value = scalar.addf %inverse, %ulp : f64
+    %low = scf.select %normal, %low_value, %zero_double : f64
+    %high = scf.select %normal, %high_value, %zero_double : f64
+    scf.yield %low, %high, %error : f64, f64, i32
+  } else {
+    %untouched = scalar.constant -1414812757 : i32
+    %equal = scalar.cmpi eq, %scale_bits, %untouched : i32
+    %error = scf.select %equal, %zero_word, %one_word : i32
+    scf.yield %zero_double, %zero_double, %error : f64, f64, i32
+  }
+  %total = scf.for %element = [%zero to %width step %one](%prior = %scale_error : i32) -> (i32) {
+    %which_half = index.div %element, %half : index
+    %within = index.rem %element, %half : index
+    %token_base = index.madd %token, %half, %within : index
+    %position = index.madd %which_half, %plane, %token_base : index
+    %code = view.load %codes[%position] : view<512xi8> -> i8
+    %valid = scf.if %live -> (i1) {
+      %row = index.assume %token [range(%token, 0, 6)] : index
+      %stored = view.load %input_view[%row, %block, %element] : view<7x320x32xbf16> -> bf16
+      %value_float = scalar.extf %stored : bf16 to f32
+      %value = scalar.extf %value_float : f32 to f64
+      %product_a = scalar.mulf %value, %inverse_low : f64
+      %product_b = scalar.mulf %value, %inverse_high : f64
+      %lower = scalar.minnumf %product_a, %product_b : f64
+      %upper = scalar.maxnumf %product_a, %product_b : f64
+      %low_float = scalar.fptrunc %lower : f64 to f32
+      %high_float = scalar.fptrunc %upper : f64 to f32
+      %low_rounded = scalar.roundf %low_float : f32
+      %high_rounded = scalar.roundf %high_float : f32
+      %lowest = scalar.constant -127.0 : f32
+      %highest = scalar.constant 127.0 : f32
+      %low = scalar.maxnumf %low_rounded, %lowest : f32
+      %high = scalar.minnumf %high_rounded, %highest : f32
+      %actual = scalar.sitofp %code : i8 to f32
+      %above = scalar.cmpf oge, %actual, %low : f32
+      %below = scalar.cmpf ole, %actual, %high : f32
+      %inside = scalar.andi %above, %below : i1
+      scf.yield %inside : i1
+    } else {
+      %untouched = scalar.constant -85 : i8
+      %equal = scalar.cmpi eq, %code, %untouched : i8
+      scf.yield %equal : i1
+    }
+    %error = scf.select %valid, %zero_word, %one_word : i32
+    %next = scalar.addi %prior, %error : i32
+    scf.yield %next : i32
+  }
+  %output = buffer.view %errors[%origin] : buffer -> view<320x16xi32>
+  view.store %total, %output[%block, %token] : i32, view<320x16xi32>
+  kernel.return
+}
+
+check.case public @residual_publication {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %count = check.param.choice values([0, 1, 4, 7]) name("active") : i32
+  %seed = check.literal value(7321) : i64
+  %epoch = check.generate.fill value(0) : tensor<3xi32>
+  kernel.launch @initialize_epoch(%count, %epoch) : (i32, tensor<3xi32>)
+  %input = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<7x4x2560xbf16>
+  %projected = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<7x2560xbf16>
+  %injection = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<7x4xf32>
+  %gamma = check.generate.random.uniform seed(%seed) range(0.5 to 1.5) : tensor<4x2560xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(-0.01 to 0.01) : tensor<4x10240xf32>
+  %unused = check.generate.fill value(0) : tensor<1xi8>
+  %expected_residual = check.generate.fill value(-17.0) : tensor<7x4x2560xbf16>
+  kernel.launch @hc_combine(%epoch, %input, %projected, %injection, %expected_residual) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<7x2560xbf16>, tensor<7x4xf32>, tensor<7x4x2560xbf16>)
+  %no_errors = check.generate.fill value(0) : tensor<320x16xi32>
+  %expected_normalized_initial = check.generate.fill value(-17.0) : tensor<7x4x2560xbf16>
+  %expected_injection_initial = check.generate.fill value(-17.0) : tensor<7x4xf32>
+  kernel.launch @hc_normalize(%epoch, %input, %gamma, %expected_normalized_initial) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<4x2560xf32>, tensor<7x4x2560xbf16>)
+  kernel.launch @hc_inject_only(%epoch, %expected_normalized_initial, %unused, %weight, %unused, %expected_injection_initial) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<1xi8>, tensor<4x10240xf32>, tensor<1xi8>, tensor<7x4xf32>)
+  %normalized_initial = check.generate.fill value(-17.0) : tensor<7x4x2560xbf16>
+  %gates_initial = check.generate.fill value(-17.0) : tensor<7x4xf32>
+  kernel.launch @hc_normalize_inject(%epoch, %input, %gamma, %normalized_initial, %weight, %gates_initial) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<4x2560xf32>, tensor<7x4x2560xbf16>, tensor<4x10240xf32>, tensor<7x4xf32>)
+  check.expect.bitwise actual(%normalized_initial) expected(%expected_normalized_initial) : tensor<7x4x2560xbf16>
+  check.expect.close actual(%gates_initial) expected(%expected_injection_initial) atol(0.000002) rtol(0.000002) nan(different) : tensor<7x4xf32>
+  %normalized_initial_int8 = check.generate.fill value(-17.0) : tensor<7x4x2560xbf16>
+  %gates_initial_int8 = check.generate.fill value(-17.0) : tensor<7x4xf32>
+  %quantized_initial_int8 = check.generate.fill value(-85) : tensor<320x576xi8>
+  kernel.launch @hc_normalize_inject_int8(%epoch, %input, %gamma, %normalized_initial_int8, %weight, %gates_initial_int8, %quantized_initial_int8) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<4x2560xf32>, tensor<7x4x2560xbf16>, tensor<4x10240xf32>, tensor<7x4xf32>, tensor<320x576xi8>)
+  check.expect.bitwise actual(%normalized_initial_int8) expected(%expected_normalized_initial) : tensor<7x4x2560xbf16>
+  check.expect.close actual(%gates_initial_int8) expected(%expected_injection_initial) atol(0.000002) rtol(0.000002) nan(different) : tensor<7x4xf32>
+  %errors_initial_int8 = check.generate.fill value(-1) : tensor<320x16xi32>
+  kernel.launch @quantization_errors(%epoch, %normalized_initial_int8, %quantized_initial_int8, %errors_initial_int8) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<320x576xi8>, tensor<320x16xi32>)
+  check.expect.bitwise actual(%errors_initial_int8) expected(%no_errors) : tensor<320x16xi32>
+  %expected_normalized_combined = check.generate.fill value(-17.0) : tensor<7x4x2560xbf16>
+  %expected_injection_combined = check.generate.fill value(-17.0) : tensor<7x4xf32>
+  kernel.launch @hc_normalize(%epoch, %expected_residual, %gamma, %expected_normalized_combined) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<4x2560xf32>, tensor<7x4x2560xbf16>)
+  kernel.launch @hc_inject_only(%epoch, %expected_normalized_combined, %unused, %weight, %unused, %expected_injection_combined) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<1xi8>, tensor<4x10240xf32>, tensor<1xi8>, tensor<7x4xf32>)
+  %normalized_combined = check.generate.fill value(-17.0) : tensor<7x4x2560xbf16>
+  %gates_combined = check.generate.fill value(-17.0) : tensor<7x4xf32>
+  %residual_combined = check.generate.fill value(-17.0) : tensor<7x4x2560xbf16>
+  kernel.launch @hc_combine_normalize_inject(%epoch, %input, %projected, %injection, %gamma, %residual_combined, %normalized_combined, %weight, %gates_combined) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<7x2560xbf16>, tensor<7x4xf32>, tensor<4x2560xf32>, tensor<7x4x2560xbf16>, tensor<7x4x2560xbf16>, tensor<4x10240xf32>, tensor<7x4xf32>)
+  check.expect.bitwise actual(%normalized_combined) expected(%expected_normalized_combined) : tensor<7x4x2560xbf16>
+  check.expect.close actual(%gates_combined) expected(%expected_injection_combined) atol(0.000002) rtol(0.000002) nan(different) : tensor<7x4xf32>
+  check.expect.bitwise actual(%residual_combined) expected(%expected_residual) : tensor<7x4x2560xbf16>
+  %normalized_combined_int8 = check.generate.fill value(-17.0) : tensor<7x4x2560xbf16>
+  %gates_combined_int8 = check.generate.fill value(-17.0) : tensor<7x4xf32>
+  %quantized_combined_int8 = check.generate.fill value(-85) : tensor<320x576xi8>
+  %residual_combined_int8 = check.generate.fill value(-17.0) : tensor<7x4x2560xbf16>
+  kernel.launch @hc_combine_normalize_inject_int8(%epoch, %input, %projected, %injection, %gamma, %residual_combined_int8, %normalized_combined_int8, %weight, %gates_combined_int8, %quantized_combined_int8) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<7x2560xbf16>, tensor<7x4xf32>, tensor<4x2560xf32>, tensor<7x4x2560xbf16>, tensor<7x4x2560xbf16>, tensor<4x10240xf32>, tensor<7x4xf32>, tensor<320x576xi8>)
+  check.expect.bitwise actual(%normalized_combined_int8) expected(%expected_normalized_combined) : tensor<7x4x2560xbf16>
+  check.expect.close actual(%gates_combined_int8) expected(%expected_injection_combined) atol(0.000002) rtol(0.000002) nan(different) : tensor<7x4xf32>
+  check.expect.bitwise actual(%residual_combined_int8) expected(%expected_residual) : tensor<7x4x2560xbf16>
+  %errors_combined_int8 = check.generate.fill value(-1) : tensor<320x16xi32>
+  kernel.launch @quantization_errors(%epoch, %normalized_combined_int8, %quantized_combined_int8, %errors_combined_int8) : (tensor<3xi32>, tensor<7x4x2560xbf16>, tensor<320x576xi8>, tensor<320x16xi32>)
+  check.expect.bitwise actual(%errors_combined_int8) expected(%no_errors) : tensor<320x16xi32>
+  check.return
+}
