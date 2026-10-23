@@ -45,9 +45,11 @@
 #include "loom/transforms/math/legalize.h"
 #include "loom/transforms/ownership/ownership_lifetime.h"
 #include "loom/transforms/pipeline/outline.h"
+#include "loom/transforms/scf/lookup_to_select.h"
 #include "loom/transforms/scf/scf_pipeline.h"
 #include "loom/transforms/scf/scf_to_cfg.h"
 #include "loom/transforms/scf/scf_unroll.h"
+#include "loom/transforms/scf/switch_to_if.h"
 #include "loom/transforms/symbol/inline_callables.h"
 #include "loom/transforms/symbol/refine_boundaries.h"
 #include "loom/transforms/symbol/symbol_dce.h"
@@ -606,6 +608,16 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .key = IREE_SVL("sanitizer-materialize-assertions"),
         .info = loom_sanitizer_materialize_assertions_pass_info,
         .function_run = loom_sanitizer_materialize_assertions_run,
+    },
+    {
+        .key = IREE_SVL("scf-lookup-to-select"),
+        .info = loom_scf_lookup_to_select_pass_info,
+        .function_run = loom_scf_lookup_to_select_run,
+    },
+    {
+        .key = IREE_SVL("scf-switch-to-if"),
+        .info = loom_scf_switch_to_if_pass_info,
+        .function_run = loom_scf_switch_to_if_run,
     },
     {
         .key = IREE_SVL("scf-to-cfg"),
