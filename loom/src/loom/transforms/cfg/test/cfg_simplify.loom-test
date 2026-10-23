@@ -1002,15 +1002,18 @@ func.def @preserves_effectful_forward_block(%cond: i1, %buffer: buffer, %offset:
 
 // ====
 
-// A declaration argument's dependent type belongs to its declaration, so it
-// does not prevent removing a closed unreachable block set.
+// Nested block argument types belong to the closed unreachable block set and
+// do not prevent removing it.
 func.def @closed_signature_carrier() {
   cfg.br ^exit
 ^exit:
   func.return
 ^unused:
   %width = index.constant 16 : index
-  test.decl @nested_signature(%storage: group<[%width]>) -> (i32)
+  %storage = test.constant 0.0 : vector<[%width]xf32>
+  test.block_args %storage : vector<[%width]xf32> do(%local: vector<[%width]xf32>) {
+    test.yield
+  }
   cfg.br ^exit
 }
 

@@ -1,0 +1,30 @@
+// Symbol definitions belong to the flat module symbol table and cannot define
+// a lexical symbol scope inside another operation.
+// RUN: verify
+func.def @parent() {
+  // ERROR@+1: STRUCTURE/049 {op_name="func.def"}
+  func.def @child() {
+    func.return
+  }
+  func.return
+}
+
+// ====
+
+// Bodyless declarations have the same module-level identity contract.
+// RUN: verify
+func.def @declaration_parent() {
+  // ERROR@+1: STRUCTURE/049 {op_name="func.decl"}
+  func.decl @child()
+  func.return
+}
+
+// ====
+
+// The placement rule covers non-callable symbol families as well.
+// RUN: verify
+func.def @global_parent() {
+  // ERROR@+1: STRUCTURE/049 {op_name="global.constant"}
+  global.constant @child : i32
+  func.return
+}

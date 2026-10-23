@@ -205,16 +205,7 @@ static iree_status_t loom_link_index_validate_materialized_module(
                             "module name id %u is out of range",
                             (unsigned)module->name_id);
   }
-  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
-    const loom_symbol_t* symbol = &module->symbols.entries[i];
-    if (symbol->name_id >= module->strings.count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "source symbol %" PRIhsz
-                              " has out-of-range name id %u",
-                              i, (unsigned)symbol->name_id);
-    }
-  }
-  return iree_ok_status();
+  return loom_module_validate_symbol_definitions(module);
 }
 
 static iree_host_size_t loom_link_index_local_provider_ordinal(

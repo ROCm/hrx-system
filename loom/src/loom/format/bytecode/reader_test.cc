@@ -1992,6 +1992,12 @@ class ReaderTest : public ::testing::Test {
     return result;
   }
 
+  size_t FirstSymbolDefOpTableIndexOffset(const std::vector<uint8_t>& bytes) {
+    size_t offset = FirstSymbolFlagsOffset(bytes) + sizeof(uint16_t);
+    ReadUVarint(bytes, &offset);  // location_id
+    return offset;
+  }
+
   size_t FunctionRegionPayloadLengthOffset(const std::vector<uint8_t>& bytes,
                                            uint64_t symbol_index) {
     size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_SYMBOLS);
@@ -2309,6 +2315,16 @@ class ReaderTest : public ::testing::Test {
     SkipSourceTrivia(bytes, &offset);
     uint64_t operand_count = ReadUVarint(bytes, &offset);
     EXPECT_GE(operand_count, 1u);
+    return offset;
+  }
+
+  size_t FirstBodyOpTableIndexOffset(const std::vector<uint8_t>& bytes) {
+    uint64_t arg_count = 0;
+    size_t offset = RootBlockValueListOffset(bytes, &arg_count);
+    for (uint64_t i = 0; i < arg_count; ++i) {
+      ReadValueDefOffsets(bytes, &offset);
+    }
+    EXPECT_GE(ReadUVarint(bytes, &offset), 1u);  // op_count
     return offset;
   }
 
@@ -5233,6 +5249,58 @@ TEST_F(ReaderTest, RejectsInvalidBodyValueReference) {
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_016");
 
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSymbolDefinitionsInBodies) {
+  loom_module_t* module = CreateFunctionModule();
+  auto bytes = WriteModule(module);
+  const size_t symbol_op_offset = FirstSymbolDefOpTableIndexOffset(bytes);
+  const size_t body_op_offset = FirstBodyOpTableIndexOffset(bytes);
+  size_t symbol_op_end = symbol_op_offset;
+  size_t body_op_end = body_op_offset;
+  ReadUVarint(bytes, &symbol_op_end);
+  ReadUVarint(bytes, &body_op_end);
+  ASSERT_EQ(symbol_op_end - symbol_op_offset, body_op_end - body_op_offset);
+  std::copy(bytes.begin() + symbol_op_offset, bytes.begin() + symbol_op_end,
+            bytes.begin() + body_op_offset);
+
+  std::string failure_code;
+  const loom_bytecode_read_options_t options = {
+      .diagnostic_sink =
+          {
+              .fn = CaptureBodyFailureCode,
+              .user_data = &failure_code,
+          },
+  };
+  loom_bytecode_read_result_t result = {0};
+  loom_module_t* read_module = nullptr;
+  IREE_ASSERT_OK(loom_bytecode_read_module(
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result,
+      &read_module, iree_allocator_system()));
+  EXPECT_GT(result.error_count, 0u);
+  EXPECT_EQ(failure_code,
+            "symbol_definition_is_not_permitted_in_a_symbol_body");
+  EXPECT_EQ(read_module, nullptr);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  // Directory indexing stays lazy; decoding either body path must reject it.
+  result = ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  loom_module_t* selected_module = nullptr;
+  result = MaterializeModuleSymbols(bytes, &metadata, {0}, &selected_module,
+                                    &error_ids);
+  EXPECT_GT(result.error_count, 0u);
+  EXPECT_EQ(selected_module, nullptr);
+
+  loom_module_free(read_module);
+  loom_module_free(selected_module);
+  iree_arena_deinitialize(&metadata_arena);
   loom_module_free(module);
 }
 

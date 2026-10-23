@@ -769,10 +769,10 @@ enum loom_trait_bits_e {
   // lane intervals and cloned per interval without changing semantics. Element
   // types may differ between operands and the result.
   LOOM_TRAIT_DECOMPOSABLE = 1u << 7,
-  // Op defines a named symbol (function, global) rather than producing
-  // SSA values. The printer omits the LHS result list (%name =) for
-  // symbol-defining ops even when the op carries result values (which
-  // hold return type information for the printer's ResultTypeList).
+  // Op defines an unqualified identity in the flat module symbol table and is
+  // valid only as a direct child of the module body. The printer omits the LHS
+  // result list (%name =) even when the op carries result values, which hold
+  // return type information for the printer's ResultTypeList.
   LOOM_TRAIT_SYMBOL_DEFINE = 1u << 8,
   // Op reads a resource operand or ambient memory such as a global value slot.
   // Operand reads additionally carry LOOM_OPERAND_READS on their descriptors.

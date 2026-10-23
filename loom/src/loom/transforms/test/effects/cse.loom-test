@@ -315,46 +315,42 @@ func.def @moved_result_consumption_blocks_cse(%resource: pool) {
 // ====
 
 
-// Each nested function owns a separate CFG. Dominance-based reuse keeps
-// candidates within their function, including non-entry definitions.
+// Each function owns a separate CFG. Dominance-based reuse keeps candidates
+// within their function, including non-entry definitions.
 // RUN: pass cse
-func.def @independent_nested_cfgs() {
-  func.def @entry_definition(%row: i32) -> (i32) {
-    %row_bytes = test.addi %row, %row : i32
-    cfg.br ^finish
-  ^finish:
-    %result = test.addi %row, %row : i32
-    func.return %result : i32
-  }
-  func.def @later_definition(%column: i32) -> (i32) {
-    cfg.br ^define
-  ^define:
-    %column_bytes = test.addi %column, %column : i32
-    cfg.br ^finish
-  ^finish:
-    %result = test.addi %column, %column : i32
-    func.return %result : i32
-  }
-  func.return
+func.def @entry_definition(%row: i32) -> (i32) {
+  %row_bytes = test.addi %row, %row : i32
+  cfg.br ^finish
+^finish:
+  %result = test.addi %row, %row : i32
+  func.return %result : i32
+}
+
+func.def @later_definition(%column: i32) -> (i32) {
+  cfg.br ^define
+^define:
+  %column_bytes = test.addi %column, %column : i32
+  cfg.br ^finish
+^finish:
+  %result = test.addi %column, %column : i32
+  func.return %result : i32
 }
 
 // ----
-func.def @independent_nested_cfgs() {
-  func.def @entry_definition(%row: i32) -> (i32) {
-    %row_bytes = test.addi %row, %row : i32
-    cfg.br ^finish
-  ^finish:
-    func.return %row_bytes : i32
-  }
-  func.def @later_definition(%column: i32) -> (i32) {
-    cfg.br ^define
-  ^define:
-    %column_bytes = test.addi %column, %column : i32
-    cfg.br ^finish
-  ^finish:
-    func.return %column_bytes : i32
-  }
-  func.return
+func.def @entry_definition(%row: i32) -> (i32) {
+  %row_bytes = test.addi %row, %row : i32
+  cfg.br ^finish
+^finish:
+  func.return %row_bytes : i32
+}
+
+func.def @later_definition(%column: i32) -> (i32) {
+  cfg.br ^define
+^define:
+  %column_bytes = test.addi %column, %column : i32
+  cfg.br ^finish
+^finish:
+  func.return %column_bytes : i32
 }
 
 // ====

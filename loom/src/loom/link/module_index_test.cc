@@ -858,6 +858,49 @@ func.def public @from_text(%x: i32) -> (i32) {
             provider);
 }
 
+TEST_F(ModuleIndexTest, RejectsNestedSymbolsAtFlatPublicationBoundaries) {
+  const iree_string_view_t source = IREE_SV(R"(
+func.def @parent() {
+  func.def @child() {
+    func.return
+  }
+  func.return
+}
+)");
+  loom_module_t* module = Parse(source);
+  ASSERT_NE(module, nullptr);
+  const loom_link_module_index_add_options_t options = {
+      .provider_name = IREE_SV("nested"),
+      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+
+  IndexPtr materialized_index = CreateIndex();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_link_module_index_add_materialized(
+                            materialized_index.get(), module, &options,
+                            /*out_provider_ordinal=*/nullptr));
+  EXPECT_EQ(loom_link_module_index_provider_count(materialized_index.get()),
+            0u);
+
+  iree_io_stream_t* stream = nullptr;
+  IREE_ASSERT_OK(iree_io_vec_stream_create(
+      IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
+          IREE_IO_STREAM_MODE_RESIZABLE,
+      4096, iree_allocator_system(), &stream));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_bytecode_write_module(
+                            module, stream, /*options=*/nullptr, &block_pool_));
+  iree_io_stream_release(stream);
+
+  IndexPtr text_index = CreateIndex();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_link_module_index_add_text(
+                            text_index.get(), source, IREE_SV("nested.loom"),
+                            /*parse_options=*/nullptr, &options,
+                            /*out_provider_ordinal=*/nullptr));
+  EXPECT_EQ(loom_link_module_index_provider_count(text_index.get()), 0u);
+}
+
 TEST_F(ModuleIndexTest, DuplicatePrivateNamesRemainProviderLocal) {
   loom_module_t* first = Parse(IREE_SV(R"(
 func.def @helper(%x: i32) -> (i32) {

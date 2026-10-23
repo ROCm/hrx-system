@@ -77,6 +77,16 @@ static inline loom_block_t* loom_module_block(loom_module_t* module) {
   return loom_region_entry_block(module->body);
 }
 
+// Returns true when |op| is a direct child of |module|'s body. This checks
+// structural ownership rather than the cached parent_op link so that malformed
+// or partially constructed IR cannot appear module-scoped merely because its
+// ancestry link is absent.
+static inline bool loom_op_is_direct_module_child(const loom_module_t* module,
+                                                  const loom_op_t* op) {
+  return module && op && op->parent_block &&
+         op->parent_block->parent_region == module->body;
+}
+
 // Sets the type of a value by ID and replaces its active dependency ownership.
 // Failure leaves the value's type and active ownership unchanged.
 iree_status_t loom_module_set_value_type(loom_module_t* module,
@@ -635,6 +645,16 @@ uint16_t loom_module_find_symbol(const loom_module_t* module,
 iree_status_t loom_module_add_symbol(loom_module_t* module,
                                      loom_string_id_t name_id,
                                      uint16_t* out_symbol_id);
+
+// Validates the structural contract of the flat module symbol table.
+//
+// Every symbol name must reference the module string table and every linked
+// definition must be a direct child of the module body. Invalid IR remains
+// representable for diagnostics, but consumers that publish or index the flat
+// symbol table must call this before treating its entries as module-level
+// identities.
+iree_status_t loom_module_validate_symbol_definitions(
+    const loom_module_t* module);
 
 // Removes symbol-table tombstones and rewrites module-local symbol references.
 //

@@ -93,26 +93,9 @@ func.def @local_structured_capture() -> (i32) {
 
 // ====
 
-// Function definitions have the same isolation contract as other isolated ops.
-func.def @enclosing_function(%row: i32) {
-  func.def @capturing_function() -> (i32) {
-    // ERROR@+1: DOMINANCE/001 "row"
-    func.return %row : i32
-  }
-  test.use %row : i32
-  func.return
-}
-
-// ====
-
 // Signature-local arguments are visible both in dependent types and the body.
-// Exiting either scope restores the enclosing function's arguments.
-func.def @enclosing_signature(%row: i32) {
-  func.def @local_signature(%layout: encoding<layout>, %view: view<4xf32, %layout>) -> (view<4xf32, %layout>) {
-    func.return %view : view<4xf32, %layout>
-  }
-  test.use %row : i32
-  func.return
+func.def @local_signature(%layout: encoding<layout>, %view: view<4xf32, %layout>) -> (view<4xf32, %layout>) {
+  func.return %view : view<4xf32, %layout>
 }
 
 // ====
@@ -125,39 +108,6 @@ func.def @outer_layout(%layout: encoding<layout>) {
     %view = test.convert %seed : i32 -> view<4xf32, %layout>
     test.yield
   }
-  func.return
-}
-
-// ====
-
-// Function argument types cannot import an enclosing layout implicitly.
-func.def @outer_signature_layout(%layout: encoding<layout>) {
-  // ERROR@+1: ENCODING/004 "layout"
-  func.def @capturing_signature(%view: view<4xf32, %layout>) {
-    func.return
-  }
-  func.return
-}
-
-// ====
-
-// Return-type references are checked in the isolated signature scope even when
-// the body never returns a value carrying that type.
-func.def @outer_result_layout(%layout: encoding<layout>) {
-  // ERROR@+1: ENCODING/004 "layout"
-  func.def @capturing_result() -> (view<4xf32, %layout>) {
-    cfg.br ^loop
-  ^loop:
-    cfg.br ^loop
-  }
-  func.return
-}
-
-// ====
-
-// Declarations without the isolation trait preserve their signature policy.
-func.def @ordinary_declaration(%layout: encoding<layout>) {
-  func.decl @declared_view(%view: view<4xf32, %layout>)
   func.return
 }
 
@@ -182,8 +132,8 @@ func.def @dead_region_capture() {
 
 // ====
 
-// An isolated body in a reverse-layout CFG sees its own arguments; exiting it
-// restores the actual dominator definitions, not source-order siblings.
+// An isolated body in a reverse-layout CFG restores the actual dominator
+// definitions, not source-order siblings.
 // RUN: pass cse
 func.def @cfg_restoration(%row: i32) -> (i32) {
   cfg.br ^define
@@ -191,8 +141,10 @@ func.def @cfg_restoration(%row: i32) -> (i32) {
   %row_bytes = test.addi %row, %row : i32
   cfg.br ^use
 ^use:
-  func.def @cfg_nested(%local_row: i32) -> (i32) {
-    func.return %local_row : i32
+  test.isolated_region {
+    %local = test.constant 7 : i32
+    test.use %local : i32
+    test.yield
   }
   %local_bytes = test.addi %row, %row : i32
   func.return %local_bytes : i32
@@ -205,8 +157,10 @@ func.def @cfg_restoration(%row: i32) -> (i32) {
   %row_bytes = test.addi %row, %row : i32
   cfg.br ^use
 ^use:
-  func.def @cfg_nested(%local_row: i32) -> (i32) {
-    func.return %local_row : i32
+  test.isolated_region {
+    %local = test.constant 7 : i32
+    test.use %local : i32
+    test.yield
   }
   func.return %row_bytes : i32
 }

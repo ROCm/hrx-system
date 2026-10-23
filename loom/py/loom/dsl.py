@@ -1279,6 +1279,8 @@ ELEMENTWISE = Trait("Elementwise")
 # operands contribute the same lane interval and scalar operands are invariant
 # captures. The operation must be pure and have one vector result.
 DECOMPOSABLE = Trait("Decomposable")
+# Op defines an unqualified identity in the flat module symbol table and is
+# therefore valid only as a direct child of the module body.
 SYMBOL_DEFINE = Trait("SymbolDefine")
 # Op is valid only as a direct child of the module body. Module-owned operations
 # use this independently from SymbolDefine so they do not enter the symbol table

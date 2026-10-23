@@ -1023,6 +1023,29 @@ iree_status_t loom_module_add_symbol(loom_module_t* module,
   return iree_ok_status();
 }
 
+iree_status_t loom_module_validate_symbol_definitions(
+    const loom_module_t* module) {
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    const loom_symbol_t* symbol = &module->symbols.entries[i];
+    if (symbol->name_id >= module->strings.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "symbol %" PRIhsz " has out-of-range name id %u",
+                              i, (unsigned)symbol->name_id);
+    }
+    if (symbol->defining_op &&
+        !loom_op_is_direct_module_child(module, symbol->defining_op)) {
+      const iree_string_view_t name =
+          loom_string_table_get(&module->strings, symbol->name_id);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "symbol '@%.*s' is defined by an operation nested below the module "
+          "body",
+          (int)name.size, name.data);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_module_mark_symbol_references_in_attr(
     const loom_module_t* module, const loom_attribute_t* attr,
     uint8_t* referenced_symbols, uint8_t dict_depth) {
